@@ -197,10 +197,16 @@ config = ThreadConfig(priority=ThreadPriority.REALTIME)
   потоке, `False`. Решение и захват ключа — под одним локом.
 - Повторный вход (`submit` из `action` этого исполнителя): ключ ⊆ ключа текущей операции (при `serial=True` — любой)
   → на месте, как часть родителя; иначе обычная постановка. `action` не вправе ждать `reply` вложенной.
-- `should_reject` зовётся в `submit` и рабочим перед взятием операции, вне лока, без защёлки; исключение → `True`.
+- `should_reject` зовётся в `submit` и свободными рабочими на каждом пробуждении (раз в 0,1 с) при непустой очереди —
+  и когда ничего не исполнимо (ждущие за занятым ключом снимаются, не дожидаясь его); вне лока, без защёлки;
+  исключение → `True`. При `serial=True` единственный рабочий занят операцией — очередь снимется после неё.
 - `stop_event` воркера (`stop_all_workers`) → `request_stop()` всего исполнителя: очередь получает отказ, а не тишину.
-- Лок исполнителя не держится поверх `action`, `reply` и `should_reject`. Логи — stdlib `logging`,
-  логгер `multiprocess_framework.worker_module.keyed_executor.<name>` или переданный `log`.
+- `BaseException` в `action` (`SystemExit`, `KeyboardInterrupt`): `reply` ровно раз (`"<тип>: <текст>"`), исключение
+  идёт дальше, рабочий выходит и закрывает исполнитель — очередь получает `system_stopping`.
+- После `shutdown` имя исполнителя остаётся занятым в этом `WorkerManager` (STOPPED-воркеры остаются в реестре):
+  новый исполнитель на живом менеджере — с новым именем.
+- Лок исполнителя не держится поверх `action`, `reply` и `should_reject`. Логи — через `logger_module.get_std_logger`
+  (без LoggerManager — stdlib-логгер `multiprocess_framework.worker_module.keyed_executor.<name>`) или переданный `log`.
 
 **Usage.**
 

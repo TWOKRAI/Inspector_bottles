@@ -410,10 +410,12 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
                 key = frozenset({value})
 
             if reply is not None:
+                ran = [False]  # action стартовала → ответ её; иначе ответ — отказ исполнителя
 
                 def action() -> Any:
                     # Блок после диспетчеризации (лог, метрики, длительность) — ПОСЛЕ
                     # исполнения, на потоке исполнителя: метрика меряет исполнение, не подачу.
+                    ran[0] = True
                     t0 = time.perf_counter()
                     try:
                         res = self.dispatcher.dispatch(message, key_field="command", data_field="data")
@@ -422,8 +424,17 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
                     self._finish_command(command_name, res, time.perf_counter() - t0)
                     return res
 
+                def counted_reply(r: Any) -> None:
+                    # Отказ исполнителя (system_stopping / executor_busy) без исполнения action —
+                    # тоже исход команды: ошибка в логе и метрике errors, без длительности
+                    # (исполнения не было). Ревью р.1 п.3.
+                    if not ran[0]:
+                        error = r.get("error") if isinstance(r, dict) else r
+                        self._finish_command(command_name, {"status": "error", "reason": error}, None)
+                    reply(r)
+
                 action.__name__ = command_name
-                executor.submit(action, key, reply)
+                executor.submit(action, key, counted_reply)
                 return DEFERRED
 
             if command_name not in self._out_of_queue_warned:
@@ -438,8 +449,10 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         self._finish_command(command_name, result, time.perf_counter() - start_time)
         return result
 
-    def _finish_command(self, command_name: str, result: Any, duration: float) -> None:
-        """Блок после диспетчеризации: лог ошибки/успеха, метрики, длительность исполнения."""
+    def _finish_command(self, command_name: str, result: Any, duration: float | None) -> None:
+        """Блок после диспетчеризации: лог ошибки/успеха, метрики, длительность исполнения.
+
+        ``duration=None`` — исполнения не было (отказ исполнителя): длительность не пишется."""
         if isinstance(result, dict) and result.get("status") == "error":
             self._log_warning(
                 f"Command '{command_name}' failed: {result.get('reason') or result.get('error')}",
@@ -460,7 +473,8 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
                 )
             self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
 
-        self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
+        if duration is not None:
+            self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
 
     def set_log_success_enabled(self, enabled: bool) -> None:
         """Включить/выключить лог рутинного успеха команд (observability control plane).

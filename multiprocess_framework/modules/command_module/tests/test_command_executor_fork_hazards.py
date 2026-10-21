@@ -77,6 +77,11 @@ class StatsRec:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.timings: list[tuple[str, float, dict]] = []
+        self.metrics: list[tuple[str, dict]] = []
+
+    def record_metric(self, name: str, value: Any = 1, tags: dict | None = None, **kw: Any) -> None:
+        with self._lock:
+            self.metrics.append((name, dict(tags or {})))
 
     def record_timing(self, name: str, duration: float, tags: dict | None = None, **kw: Any) -> None:
         with self._lock:
@@ -362,6 +367,29 @@ def test_contract_deferred_with_reply_delivers_once_and_never_returns_deferred_w
         time.sleep(0.01)
     time.sleep(0.2)
     assert got == [{"success": True, "v": 3}]
+    # Без reply — результат обработчика, не DEFERRED (ревью р.1 п.6).
+    ret2, _ = run_bounded(lambda: cm.handle_command({"command": "c.once", "data": {"process_name": "p"}}))
+    assert ret2 is not DEFERRED
+    assert ret2 == {"success": True, "v": 3}
+
+
+def test_contract_executor_refusal_counts_as_command_error(make_executor):
+    """Отказ исполнителя — ошибка команды: WARNING и метрика errors, длительности нет (ревью р.1 п.3)."""
+    stats = StatsRec()
+    cm, log = make_cm("seg", stats=stats)
+    ex = make_executor("refm")
+    ex.request_stop()
+    assert cm.register_command("c.ref", lambda d: {"success": True}, executor=ex, key_from="process_name")
+    got: list[Any] = []
+    ret, _ = run_bounded(
+        lambda: cm.handle_command({"command": "c.ref", "data": {"process_name": "p"}}, reply=got.append)
+    )
+    assert ret is DEFERRED
+    assert got == [{"success": False, "error": "system_stopping"}]
+    assert ("command_manager.command.execution.errors", {"command": "c.ref"}) in stats.metrics
+    assert ("command_manager.command.execution.success", {"command": "c.ref"}) not in stats.metrics
+    assert stats.durations("c.ref") == []
+    assert [w for w in log.warnings() if "c.ref" in w and "system_stopping" in w]
 
 
 def test_contract_targets_all_orders_after_earlier_keyed_command(make_executor):

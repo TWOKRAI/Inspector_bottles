@@ -443,3 +443,54 @@ def test_contract_default_logger_name(make_executor, caplog):
         run_bounded(lambda: ex.submit(lambda: "o", A, rep.reply_for("o")))
     release.set()
     assert any(r.name == name and r.levelno == logging.WARNING for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Раунд 2 ревью: H8 (BaseException в action), H9 (should_reject при занятом ключе)
+# ---------------------------------------------------------------------------
+
+
+def test_h8_system_exit_in_action_replies_once_and_closes_executor(make_executor):
+    """H8: SystemExit в action — reply ровно раз; ждущая и последующие получают system_stopping."""
+    ex = make_executor("h8", max_workers=1)
+    rep = Replies()
+    go = threading.Event()
+
+    def die() -> Any:
+        go.wait(2.0)
+        raise SystemExit("h8")
+
+    run_bounded(lambda: ex.submit(die, A, rep.reply_for("die")))
+    run_bounded(lambda: ex.submit(lambda: "queued", A, rep.reply_for("queued")))
+    go.set()
+    assert rep.wait(["die", "queued"], 2.0), "после SystemExit ответы не пришли за 2 с"
+    stopped, _ = run_bounded(lambda: ex.join_until(time.monotonic() + 2.0), timeout=4.0)
+    assert stopped is True, "рабочий не вышел после SystemExit"
+    time.sleep(0.2)
+    assert rep.only("die") == [{"success": False, "error": "SystemExit: h8"}]
+    assert rep.only("queued") == [SYSTEM_STOPPING]
+    ret, _ = run_bounded(lambda: ex.submit(lambda: "later", A, rep.reply_for("later")))
+    assert ret is False
+    assert rep.only("later") == [SYSTEM_STOPPING]
+
+
+def test_h9_should_reject_drains_queue_while_key_is_busy(make_executor):
+    """H9: {a} исполняется 1 с, вторая {a} ждёт; should_reject=True на 0,2 с → вторая получила отказ ≤ 0,8 с.
+
+    Без защёлки: после сброса флага новая операция исполняется."""
+    flag = {"reject": False}
+    ex = make_executor("h9", should_reject=lambda: flag["reject"])
+    rep = Replies()
+    started = threading.Event()
+    run_bounded(lambda: ex.submit(lambda: (started.set(), threading.Event().wait(1.0))[1], A, rep.reply_for("long")))
+    assert started.wait(3.0)
+    t0 = time.perf_counter()
+    run_bounded(lambda: ex.submit(lambda: "second", A, rep.reply_for("second")))
+    flag["reject"] = True
+    threading.Event().wait(0.2)
+    flag["reject"] = False
+    assert rep.wait(["second"], max(0.0, 0.8 - (time.perf_counter() - t0))), "ждущая за занятым ключом не снята"
+    assert rep.only("second") == [SYSTEM_STOPPING]
+    run_bounded(lambda: ex.submit(lambda: "third", A, rep.reply_for("third")))
+    assert rep.wait(["long", "third"], 3.0)
+    assert rep.only("third") == ["third"], "после сброса флага исполнитель не принимает (защёлка)"

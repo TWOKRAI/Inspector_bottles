@@ -38,6 +38,7 @@ from collections import Counter, deque
 from collections.abc import Callable
 from typing import Any
 
+from ..logger_module import get_std_logger
 from .core.thread_config import ThreadConfig
 from .types import ExecutionMode, WorkerType
 
@@ -124,7 +125,11 @@ class KeyedExecutor:
         self._max_pending = max_pending
         self._serial = serial
         self._should_reject = should_reject
-        self._log = log or logging.getLogger(f"multiprocess_framework.worker_module.keyed_executor.{name}")
+        # Через logger_module (страж test_std_logger_guard): при поднятом LoggerManager — его каналы,
+        # без него — stdlib-логгер с точным именем ниже (его ловит caplog).
+        self._log = log or get_std_logger(
+            "worker", fallback_name=f"multiprocess_framework.worker_module.keyed_executor.{name}"
+        )
 
         self._cond = threading.Condition(threading.Lock())
         self._pending: deque[_Op] = deque()
@@ -294,20 +299,28 @@ class KeyedExecutor:
         try:
             while True:
                 with self._cond:
-                    while not (self._closed or stop_event.is_set() or self._has_runnable_locked()):
+                    if not (self._closed or stop_event.is_set() or self._has_runnable_locked()):
                         self._cond.wait(_WAIT_S)
                     if self._closed:
                         return
                     stopping = stop_event.is_set()
+                    has_pending = bool(self._pending)
+                    runnable = self._has_runnable_locked()
                 if stopping:
                     self.request_stop()
                     return
+                if not has_pending:
+                    continue
 
-                # should_reject — вне лока, перед взятием операции.
+                # should_reject — вне лока, на каждом пробуждении при непустой очереди (раз в _WAIT_S,
+                # даже если ничего не исполнимо: ждущие за занятым ключом снимаются, не дожидаясь его).
+                # Ревью р.1 п.2.
                 if self._reject_requested():
                     with self._cond:
                         dropped = self._drain_locked()
                     self._reject_all(dropped)
+                    continue
+                if not runnable:
                     continue
 
                 with self._cond:
@@ -322,8 +335,15 @@ class KeyedExecutor:
                         self._cond.notify_all()
         except Exception:  # noqa: BLE001 — рабочий не должен падать молча
             self._log.error("KeyedExecutor '%s': рабочий упал", self.name, exc_info=True)
-            self.request_stop()
         finally:
+            with self._cond:
+                abnormal = not self._closed
+            if abnormal:
+                # Рабочий ушёл не по закрытию (исключение, в том числе BaseException из action):
+                # закрыть исполнитель, иначе очередь осталась бы без ответа и без рабочего.
+                # До снятия счётчика живых: join_until == True гарантирует, что исполнитель закрыт.
+                self._log.error("KeyedExecutor '%s': рабочий вышел не по закрытию — исполнитель закрыт", self.name)
+                self.request_stop()
             with self._cond:
                 self._live_workers -= 1
                 self._cond.notify_all()
@@ -348,6 +368,14 @@ class KeyedExecutor:
         except Exception as exc:  # noqa: BLE001 — исключение операции превращается в отказ
             self._log.error("KeyedExecutor '%s': операция '%s' упала: %s", self.name, label, exc, exc_info=True)
             result = _refusal(f"{type(exc).__name__}: {exc}")
+        except BaseException as exc:
+            # SystemExit / KeyboardInterrupt / GeneratorExit: ответ всё равно ровно один,
+            # затем исключение идёт дальше (рабочий выходит, исполнитель закрывается —
+            # см. finally в _worker_loop). Ревью р.1 п.1.
+            self._local.op_key = saved
+            self._log.error("KeyedExecutor '%s': операция '%s' прервана %s", self.name, label, type(exc).__name__)
+            self._deliver(reply, _refusal(f"{type(exc).__name__}: {exc}"), label)
+            raise
         finally:
             self._local.op_key = saved
         self._deliver(reply, result, label)
