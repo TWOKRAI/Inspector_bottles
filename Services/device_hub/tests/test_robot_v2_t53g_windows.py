@@ -545,7 +545,8 @@ def test_q4_no_servo_after_stop_in_on_connect() -> None:
 
 def test_disconnect_during_on_connect_connect_false() -> None:
     """Уточнение 1: обычный ``disconnect`` посреди ``_run_on_connect`` -> ``connect()`` и ``is_connected`` False."""
-    drv, client = _make_driver(servo_tlm=0)
+    # TLM_SERVO уже 1: SERVO не нужен, отмены перед записью нет, до connect_finish доходит только его проверка _stopping
+    drv, client = _make_driver()
     barrier = _Barrier()
     client.transport.on_read = barrier.pause_if_t1
     obs = _observe(drv, client, barrier, "disconnect", stop=drv.disconnect)
