@@ -115,11 +115,15 @@ class RobotState:
     порядок проверок прежний, ввода-вывода под замком нет, замок листовой (под ним другие замки не берутся).
     Переход возвращает решение — драйвер действует вне замка. Под замком — только то, что было под ним раньше:
     ``run.wake.set()``, ``ev.is_set()``, часы ``clock``, ``time.monotonic()`` и ``budget()``
-    (``next_stop_attempt``, только попытка 2), ``connected()`` (``process_stop_plan``, ``admit_launch``) —
-    вызываемые, зовутся в той же ветке, что и раньше.
+    (``next_stop_attempt``, только попытка 2), ``connected()`` (``process_stop_plan``, ``admit_launch``,
+    ``disconnect_soft_plan``) — вызываемые, зовутся в той же ветке, что и раньше. Отступление от «правила 1:1»
+    (T5.3h): до T5.3h ``is_connected`` в решении о SOFT обычного ``disconnect`` звался вне замка состояния, теперь
+    ``disconnect_soft_plan`` зовёт ``connected()`` под ним, как ``process_stop_plan``.
 
     Готовность (``_ready``) и вехи ``connect`` (``_connecting``, ``_connect_linked``, ``_stop_linked``, T5.3g) —
-    поля состояния: ``connect`` и ``request_stop`` линеаризуются переходами. Геттер ``ready`` замок не берёт:
+    поля состояния: ``connect``, ``request_stop`` и обычный ``disconnect`` линеаризуются переходами
+    (``_stop_linked`` — снимок «связь была поднята» и для обычного ``disconnect``, T5.3h).
+    Геттер ``ready`` замок не берёт:
     ``is_connected`` зовётся под замком (``process_stop_plan``, ``admit_launch``), а замок — ``Lock``, не ``RLock``.
 
     Вне состояния: ``_values`` / ``_epoch`` (владелец ``_param_lock``), ``run.handle`` (под ``_jog_tx_lock``),
@@ -350,8 +354,11 @@ class RobotState:
                 # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
                 # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
                 self._latch_reset_locked()
-                # Точка линеаризации connect и request_stop (T5.3g): была ли связь поднята к первому стопу
-                self._stop_linked = self._connecting and self._connect_linked
+                # Точка линеаризации connect и request_stop (T5.3g): была ли связь поднята к первому стопу.
+                # Снимок монотонен в одном выключении (T5.3h): снимок обычного disconnect не обнуляется
+                self._stop_linked = (self._stopping and self._stop_linked) or (
+                    self._connecting and self._connect_linked
+                )
             self._shutdown = True
 
     def stop_unconfirmed(self) -> bool:
@@ -451,9 +458,44 @@ class RobotState:
         with self._lock:
             return self._latch_level >= level and not self._latch_failed
 
-    def disconnect_stop_plan(self, program_level: int) -> tuple[_JogRun | None, bool, bool, bool]:
-        """``_request_stop`` (под ``_jog_tx_lock``): останов, пометка jog. -> (jog, стоп jog, программа, задание)."""
+    def disconnect_soft_plan(self, connected: Callable[[], bool], link_up: Callable[[], bool]) -> bool:
+        """``_request_stop``: писать ли SOFT простому роботу (нет задания, jog и программы) обычного ``disconnect``.
+
+        ``link_up`` — транспорт подключён сейчас (без ``_ready``): простой робот посреди ``connect``, чья связь была
+        поднята к стоп-секции обычного ``disconnect`` (``_stop_linked``), получает SOFT (решение владельца
+        2026-10-21; до подъёма связи записи нет, правило 2026-10-19). Защёлка — как ``latch_covers``: такой уровень
+        уже записан в этом поколении и последняя запись не упала — записи нет.
+        """
         with self._lock:
+            linked = connected() or (self._stop_linked and link_up())
+            covered = self._latch_level >= STOP_LEVEL["SOFT"] and not self._latch_failed
+            return linked and not covered
+
+    def disconnect_owns_close(self) -> bool:
+        """Транспорт закрывает хвост обычного ``disconnect``, а не тик: ``disconnect`` решил «связь поднята».
+
+        Признак свежий: ``_stopping`` без ``_shutdown`` ставит только стоп-секция обычного ``disconnect``, в той же
+        секции она пишет ``_stop_linked``; ``connect_begin`` снимает ``_stopping``. При ``_shutdown`` тик закрывает
+        сокет сам (остаток ADR-DH-011).
+        """
+        with self._lock:
+            return self._stopping and not self._shutdown and self._stop_linked
+
+    def disconnect_stop_plan(
+        self, program_level: int, link_up: Callable[[], bool] | None = None
+    ) -> tuple[_JogRun | None, bool, bool, bool]:
+        """``_request_stop`` (под ``_jog_tx_lock``): останов, пометка jog. -> (jog, стоп jog, программа, задание).
+
+        Точка линеаризации ``connect`` и обычного ``disconnect`` (T5.3h): снимок ``_stop_linked`` — «связь была
+        поднята» — считается ДО ``_stopping = True`` (иначе читает свой же флаг) и только вне выключения процесса
+        (снимок ``request_stop`` не переписывается). Монотонен: уже взятый снимок не обнуляется. ``link_up`` —
+        транспорт подключён сейчас; зовётся под замком состояния и ``_jog_tx_lock``, замков не берёт.
+        """
+        with self._lock:
+            if not self._shutdown:
+                self._stop_linked = (self._stopping and self._stop_linked) or (
+                    self._connecting and self._connect_linked and link_up is not None and link_up()
+                )
             self._stopping = True
             self._stop_level = max(self._stop_level, program_level)
             run = self._jog

@@ -457,6 +457,8 @@ class _RobotDriverCore(BaseDeviceDriver):
         try:
             if self.is_connected:  # ручной connect() успел между проверкой выше и захватом замка
                 return True
+            if not self.desired_connected:  # «Отключить» пришло между проверкой выше и захватом замка (T5.3h)
+                return False
             now = self._clock()
             if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
                 return False
@@ -464,7 +466,10 @@ class _RobotDriverCore(BaseDeviceDriver):
             self._record_reconnect()
             connected = self._connect_locked()
             if not self.desired_connected:
-                self._close_after_disconnect()  # «Отключить» пришло во время подключения: сокет не оставляем
+                # «Отключить» пришло во время подключения: сокет не оставляем. Если обычный disconnect решил «связь
+                # поднята» — транспорт закрывает его хвост, после решения о SOFT (T5.3h)
+                if not self._state.disconnect_owns_close():
+                    self._close_after_disconnect()
                 return False
             if connected:
                 self.reset_reconnect()
