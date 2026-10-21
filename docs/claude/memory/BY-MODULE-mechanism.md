@@ -135,9 +135,10 @@
 - [feedback_yaml_safe_load_raises_more_than_yamlerror](feedback_yaml_safe_load_raises_more_than_yamlerror.md)
 - [project_metrics_freeze_s27](project_metrics_freeze_s27.md)
 
-## concurrency (27)
+## concurrency (28)
 
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
+- [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
 - [feedback_dedup_by_name_loses_content](feedback_dedup_by_name_loses_content.md)
 - [feedback_drop_oldest_reports_success](feedback_drop_oldest_reports_success.md)
 - [feedback_gc_finalizer_test_needs_gen0_pin](feedback_gc_finalizer_test_needs_gen0_pin.md)
@@ -812,7 +813,7 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (21)
+## windows-env (22)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
@@ -820,6 +821,7 @@
 - [feedback_always_project_venv](feedback_always_project_venv.md)
 - [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
+- [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
 - [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_platform_noop_counts_the_opposite](feedback_platform_noop_counts_the_opposite.md)
