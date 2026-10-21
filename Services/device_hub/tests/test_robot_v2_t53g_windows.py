@@ -44,6 +44,7 @@ _TEXT_STOPPING = "драйвер робота останавливается"
 _ENTER_S = 5.0  # T2 ждёт входа T1 в окно
 _RELEASE_S = 10.0  # T1 ждёт «пусти» не дольше
 _JOIN_S = 10.0  # дедлайн join потока T1
+_HANG_S = 5.0  # дедлайн request_stop и disconnect: зависание даёт красный за секунды
 _STOP_DEADLINE_S = 0.5  # срок request_stop: малый (эхо ждёт до срока)
 _SCOPE_BUDGET_S = 6.0
 _JOG = {"dir": 1, "spd": 20}
@@ -277,9 +278,9 @@ def _run_window(
         pytest.fail(f"{window}: окно недостижимо — барьер в T1 не сработал за {_ENTER_S} с; T1: {box}")
     # T2 под дедлайном: зависший драйвер (например, геттер берёт Lock) даёт красный тест, а не зависание
     if stop is None:
-        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _JOIN_S, "request_stop")
+        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _HANG_S, "request_stop")
     else:
-        _bounded(stop, _JOIN_S, "stop")
+        _bounded(stop, _HANG_S, "stop")
     # T2 отработал, пока T1 стоит в окне: иначе проба ничего не говорит
     if released_by_stop:
         inside = barrier.release.is_set() and not barrier.release_timed_out
@@ -329,7 +330,7 @@ def _capture(scenario: Callable[[], dict[str, Any]]) -> _Observed:
 
 
 def _teardown(drv: RobotDriverV2) -> None:
-    _bounded(drv.disconnect, _JOIN_S, "disconnect")
+    _bounded(drv.disconnect, _HANG_S, "disconnect")
 
 
 def _observe(
@@ -352,6 +353,31 @@ def _observe(
 def _caller_is_connect_locked() -> bool:
     # кадр 0 — этот, 1 — обёртка, 2 — вызывающий метод драйвера
     return sys._getframe(2).f_code.co_name == "_connect_locked"
+
+
+# --------------------------------------------------------------------------------------------------
+# Сторож быстроты: первый тест файла (ловушка "геттер ready берёт Lock" краснеет за секунды, а не за минуты)
+# --------------------------------------------------------------------------------------------------
+
+
+def test_request_stop_returns_quickly_on_connected_robot() -> None:
+    """Простой подключённый робот: ``request_stop`` возвращается за 1 с и пишет ровно один SOFT.
+
+    Зависание (например, геттер ``RobotState.ready`` под тем же ``Lock``, что держит ``process_stop_plan``) даёт
+    «не вернулся за 1.0 с» в первом же тесте; разборка теста тоже под коротким дедлайном.
+    """
+    drv, client = _make_driver()
+    cleanup_failure: AssertionError | None = None
+    try:
+        assert _bounded(drv.connect, _HANG_S, "connect") is True, "робот не подключился (настройка теста)"
+        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), 1.0, "request_stop")
+        assert client.soft_count() == 1, f"записей SOFT за request_stop {client.soft_count()}, хотим 1"
+    finally:
+        try:
+            _bounded(drv.disconnect, 1.0, "disconnect")
+        except AssertionError as exc:  # не затирает падение тела теста; без него - сам отказ
+            cleanup_failure = exc
+    assert cleanup_failure is None, f"разборка теста: {cleanup_failure}"
 
 
 # --------------------------------------------------------------------------------------------------
@@ -594,7 +620,7 @@ def test_failed_connect_then_request_stop_no_soft() -> None:
         result = _bounded(drv.connect, _JOIN_S, "connect")
         assert result is False, f"connect() вернул {result!r}, хотим False (настройка теста)"
         assert client.transport is not None and client.transport.is_connected, "сокет должен остаться открытым"
-        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _JOIN_S, "request_stop")
+        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _HANG_S, "request_stop")
         observed = {"levels": client.levels(), "stop_unconfirmed": drv.stop_unconfirmed}
     finally:
         _teardown(drv)
