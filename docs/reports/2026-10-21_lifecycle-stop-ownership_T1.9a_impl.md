@@ -104,3 +104,35 @@
 - `stop_all_workers` фреймворка ждёт рабочего, пока тот исполняет текущую операцию; операция, не опрашивающая
   событие, задержит выключение `WorkerManager` до его таймаута (5 с). Опрос события — дело `action` (1.9b D4).
 - `ADR-CMD-005` («async-расширение не планируется») не правил — уточнение записано в ADR-CMD-006.
+
+## Раунд 2 ревью
+
+Ревью р.1 (Sonnet) — CHANGES REQUESTED, 6 пунктов. Правки — коммит `3eb70c98f` до rebase, `510af2ead` после rebase
+на локальный `main` (без конфликтов). SHA ветки после rebase: `4abf942d0` (слепые тесты), `1ee00f9ea` (код),
+`be5a9b035` (ADR), `15ac6858d` / `d9c851b7c` (матрица инъекций, лид), `510af2ead` (правки р.1).
+
+| # | Замечание | Правка | Тест → итог |
+|---|---|---|---|
+| 1 | `_execute` / `_worker_loop` ловят только `Exception`: `SystemExit` в `action` — 0 ответов, рабочий потерян | `_execute`: `except BaseException` → `reply` ровно раз `"<тип>: <текст>"`, затем `raise`; `_worker_loop` `finally`: выход не по закрытию → `request_stop()` ДО снятия счётчика живых | `test_h8_system_exit_in_action_replies_once_and_closes_executor` — passed; на коде `8e7cf6a7a` — RED (`:466` «после SystemExit ответы не пришли за 2 с») |
+| 2 | `should_reject` не опрашивался, пока рабочий ждёт занятого ключа | рабочий на каждом пробуждении (`0,1 с`) при непустой очереди зовёт `should_reject` вне лока, даже если ничего не исполнимо; без защёлки | `test_h9_should_reject_drains_queue_while_key_is_busy` — passed; на `8e7cf6a7a` — RED (`:492` «ждущая за занятым ключом не снята») |
+| 3 | отказ исполнителя без метрики | CM оборачивает `reply`: если `action` не стартовала — `_finish_command` как ошибка (WARNING + `errors`), длительность не пишется (`duration=None`) | `test_contract_executor_refusal_counts_as_command_error` — passed; красный на старом коде не проверял запуском (метрики там не было по построению) |
+| 4 | имя занято после `shutdown` | строка в README `worker_module` и в ADR-WRK-005 | — (документ) |
+| 5 | страж логгера: голый `getLogger` в `keyed_executor.py:127` | `get_std_logger("worker", fallback_name="multiprocess_framework.worker_module.keyed_executor.<name>")`; WHITELIST не тронут | `logger_module/tests/test_std_logger_guard.py` — passed после rebase (до rebase оставался чужой хит `Services/robot_comm/gui/line_source.py:45`, на `main` исправлен); `test_contract_default_logger_name` — passed (имя stdlib-логгера то же) |
+| 6 | тест с «without_reply» в имени не звал без `reply` | добавлена точка: вызов без `reply` → dict обработчика, не `DEFERRED` | `test_contract_deferred_with_reply_delivers_once_and_never_returns_deferred_without_reply` — passed |
+
+Документы: README `worker_module` (`should_reject`, `BaseException`, имя после `shutdown`, логгер), ADR-WRK-005
+(те же пункты), ADR-CMD-006 (отказ как ошибка). `python -m scripts.sync` после rebase — изменений нет.
+
+Прогоны после rebase (cwd `multiprocess_framework/modules`, предпроверка импорта — путь внутри worktree):
+- light: 4 файла R/H + `logger_module/tests/test_std_logger_guard.py` — 112 passed, 2 skipped, exit 0.
+- medium: `worker_module/tests` — 98 passed; `command_module/tests` — 65 passed; `router_module/tests` — 724 passed.
+
+Матрица инъекций: якоря И7 и И10 в `scratchpad/inject_matrix.py` обновлены под правку п.3 (обёртка
+`counted_reply`); все 12 якорей найдены ровно один раз на `510af2ead`. `ROOT` скрипта лид перенаправил на worktree
+`keyed-exec-1.9a-inj` — там код до правок р.1: прогон матрицы на новом коде требует перевести то дерево на `510af2ead`.
+
+Открыто после р.2:
+- При `serial=True` (один рабочий) очередь по `should_reject` снимается только после текущей операции — рабочий занят.
+- Отказ через `counted_reply` после `BaseException` в `action` (`ran=True`) не проходит `_finish_command` — метрики
+  такого исхода нет.
+- Хук сообщений коммита — предупреждения (тема > 72, абзацы «KeyedExecutor:» / «CommandManager:» как трейлеры).
