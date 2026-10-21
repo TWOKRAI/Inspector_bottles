@@ -26,13 +26,13 @@ Stability: lite
 
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from collections.abc import Callable
 from typing import Any
 
 from multiprocess_framework.modules.frontend_module.bridge.remote_state_proxy import RemoteStateProxy
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient, SocketConnectionLost
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import REG
@@ -42,7 +42,7 @@ from Services.robot_comm.server.sim_core_v2 import _WS_PARAM_NAMES
 
 __all__ = ["LineRobotState", "LineLink", "LINE_STATE_PATH"]
 
-_log = logging.getLogger(__name__)
+_log = get_std_logger(__name__)
 
 #: путь снимка робота в общем мире линии (публикует ``robot_host``, ``robot_state_hz``)
 LINE_STATE_PATH = "sim.robot.state"
