@@ -2,7 +2,7 @@
 name: reference_idmvs_gev_reader_needs_encryption_key
 description: "IDMVS не показывает считыватель ID3000/ID5000 с Manufacturer=GEV при живой сети: пустой vplicense/encryption.key; CheckEnabledSerial NG, CheckDeviceRegion filtered; ForceIp без перезапуска питания зависает"
 module: [services/code_reader]
-mechanism: [live-stand, windows-env]
+mechanism: [live-stand, config]
 metadata:
   type: reference
 ---
