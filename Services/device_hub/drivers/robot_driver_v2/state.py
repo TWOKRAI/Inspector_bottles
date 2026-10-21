@@ -117,8 +117,12 @@ class RobotState:
     (``next_stop_attempt``, только попытка 2), ``connected()`` (``process_stop_plan``, ``admit_launch``) —
     вызываемые, зовутся в той же ветке, что и раньше.
 
-    Вне состояния: ``_ready`` драйвера (без замка), ``_values`` / ``_epoch`` (владелец ``_param_lock``),
-    ``run.handle`` (под ``_jog_tx_lock``), счётчики ``jobs_*``.
+    Готовность (``_ready``) и вехи ``connect`` (``_connecting``, ``_connect_linked``, ``_stop_linked``, T5.3g) —
+    поля состояния: ``connect`` и ``request_stop`` линеаризуются переходами. Геттер ``ready`` замок не берёт:
+    ``is_connected`` зовётся под замком (``process_stop_plan``, ``admit_launch``), а замок — ``Lock``, не ``RLock``.
+
+    Вне состояния: ``_values`` / ``_epoch`` (владелец ``_param_lock``), ``run.handle`` (под ``_jog_tx_lock``),
+    счётчики ``jobs_*``.
     """
 
     def __init__(self, *, clock: Callable[[], float], queue_maxlen: int) -> None:
@@ -143,6 +147,12 @@ class RobotState:
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._echo_checked: int | None = None  # значение, эхо которого уже проверено
         self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
+        # Готовность и вехи connect (T5.3g): последний connect() прошёл целиком; connect идёт; связь поднята;
+        # снимок «связь была поднята» на первом request_stop этого выключения
+        self._ready = False
+        self._connecting = False
+        self._connect_linked = False
+        self._stop_linked = False
         self._stop_unconfirmed_text: str | None = None  # текст для health; ставится вместе с флагом
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
@@ -241,10 +251,73 @@ class RobotState:
     def connect_reset(self) -> None:
         """``connect``: снять останов, уровень 0, сброс защёлки, снять «стоп не подтверждён» (текст остаётся)."""
         with self._lock:
-            self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
-            self._stop_level = 0
-            self._latch_reset_locked()
-            self._stop_unconfirmed = False
+            self._connect_reset_locked()
+
+    def _connect_reset_locked(self) -> None:
+        self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
+        self._stop_level = 0
+        self._latch_reset_locked()
+        self._stop_unconfirmed = False
+
+    # --- готовность и вехи connect (T5.3g): connect и request_stop линеаризуются секциями замка состояния ---
+
+    @property
+    def ready(self) -> bool:
+        """Последний ``connect()`` прошёл целиком. Без замка: ``is_connected`` зовётся под замком состояния."""
+        return self._ready
+
+    def set_ready(self, value: bool) -> None:
+        with self._lock:
+            self._ready = value
+
+    def connect_begin(self) -> tuple[str, bool]:
+        """``connect``: вход. -> (``"shutdown"`` | ``"busy"`` | ``"go"``, была ли готовность).
+
+        ``"go"``: сброс останова (как ``connect_reset``), готовность снята, ``connect`` идёт; связь поднята сразу,
+        если робот был готов (транспорт уже подключён). ``"shutdown"`` готовность не трогает.
+        """
+        with self._lock:
+            if self._shutdown:
+                return "shutdown", False
+            run = self._jog
+            if self._job_active or (run is not None and run.active) or self._program_active:
+                return "busy", False
+            self._connect_reset_locked()
+            was_ready = self._ready
+            self._ready = False
+            self._connecting = True
+            self._connect_linked = was_ready
+            return "go", was_ready
+
+    def connect_link_up(self) -> bool:
+        """``connect``: транспорт подключён. False — остановка уже пришла: связь не поднимается, ``connect`` False."""
+        with self._lock:
+            if self._stopping or self._shutdown:
+                return False
+            self._connect_linked = True
+            return True
+
+    def connect_restore(self, was_ready: bool) -> bool:
+        """``connect``: синхронизации не было, готовность как была. False — остановка пришла: готовность не вернуть."""
+        with self._lock:
+            if self._stopping or self._shutdown:
+                return False
+            self._ready = was_ready
+            return True
+
+    def connect_finish(self) -> bool:
+        """``connect``: всё прошло -> готов. False — остановка пришла: драйвер не готов."""
+        with self._lock:
+            if self._stopping or self._shutdown:
+                return False
+            self._ready = True
+            return True
+
+    def connect_end(self) -> None:
+        """``connect``: выход (любой исход)."""
+        with self._lock:
+            self._connecting = False
+            self._connect_linked = False
 
     def is_shutdown(self) -> bool:
         with self._lock:
@@ -274,6 +347,8 @@ class RobotState:
                 # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
                 # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
                 self._latch_reset_locked()
+                # Точка линеаризации connect и request_stop (T5.3g): была ли связь поднята к первому стопу
+                self._stop_linked = self._connecting and self._connect_linked
             self._shutdown = True
 
     def stop_unconfirmed(self) -> bool:
@@ -284,8 +359,14 @@ class RobotState:
         with self._lock:
             return self._stop_unconfirmed_text
 
-    def process_stop_plan(self, connected: Callable[[], bool]) -> tuple[int, _JogRun | None, bool]:
-        """``_process_stop``: пометки останова и jog, уровень записи (0 — записи нет). -> (уровень, jog, стоп jog)."""
+    def process_stop_plan(
+        self, connected: Callable[[], bool], link_up: Callable[[], bool] | None = None
+    ) -> tuple[int, _JogRun | None, bool]:
+        """``_process_stop``: пометки останова и jog, уровень записи (0 — записи нет). -> (уровень, jog, стоп jog).
+
+        ``link_up`` — транспорт подключён сейчас (без ``_ready``): простой робот посреди ``connect``, чья связь была
+        поднята к первому ``request_stop`` (``_stop_linked``), получает SOFT (решение владельца 2026-10-20).
+        """
         with self._lock:
             self._stopping = True
             self._stop_level = max(self._stop_level, STOP_LEVEL["HARD"])
@@ -301,7 +382,7 @@ class RobotState:
                 level = STOP_LEVEL["HARD"]
             elif stop_jog or jog_in_flight:
                 level = STOP_LEVEL["SOFT"]
-            elif connected():
+            elif connected() or (self._stop_linked and link_up is not None and link_up()):
                 level = STOP_LEVEL["SOFT"]  # решение владельца 2026-10-19: выключаемый робот получает стоп и в покое
             else:
                 level = 0  # простой и не подключён: писать некуда

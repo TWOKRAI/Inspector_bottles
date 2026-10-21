@@ -8,10 +8,13 @@
 тест падает с сообщением о недостижимости окна), зовёт ``request_stop``, проверяет, что T1 всё ещё стоит в окне,
 и ставит ``release``. T1 — daemon-поток, ``join`` с дедлайном.
 
-- W1: пауза после ``RobotState.is_shutdown()`` вернул False в ``_connect_locked`` (перед ``self._ready = True``).
-- W4: робот подключён до T1; пауза после ``RobotState.connect_check()`` вернул (False, False) в ``_connect_locked``
-  (перед ``connect_reset``); эхо стопа не приходит (фейк ``await_stop_echo`` бросает).
+- W1: пауза в ``_connect_locked`` ДО вызова ``RobotState.connect_finish()`` (после правки T5.3g окно — вход в переход).
+- W4: робот подключён до T1; пауза после того, как ``RobotState.connect_begin()`` вернул ``("go", True)`` в
+  ``_connect_locked``; эхо стопа не приходит (фейк ``await_stop_echo`` бросает).
 - WW: пауза внутри ``client.probe()`` (фейковый клиент).
+- Тесты автора T5.3g: W1' (T1 выходит из ``connect`` между секциями ``request_stop``), WW-c (готовый робот),
+  A3 (запись до связи), A4 (стоп после ``connect_finish``), Q4 (нет SERVO после стопа), disconnect посреди
+  ``on_connect``.
 
 Ожидаемые значения — решение владельца 2026-10-20: простой робот, которому ``request_stop`` пришёл посреди
 ``connect``, считается подключённым и получает один SOFT; «готов» после выключения — никогда. Прогнозы на main —
@@ -74,18 +77,27 @@ def _free_tlm() -> list[int]:
 
 
 class _FakeTransport:
-    def __init__(self) -> None:
-        self.is_connected = True
+    """Фейковый транспорт; крючки ``on_connect`` / ``on_disconnect`` / ``on_read`` — для барьера в потоке T1."""
+
+    def __init__(self, *, connected: bool = True, servo_tlm: int = 1) -> None:
+        self.is_connected = connected
         self.tlm = _free_tlm()
+        self.tlm[REG["TLM_SERVO"] - REG["TLM_PROTO_VER"]] = servo_tlm
+        self.on_connect: Callable[[], None] = lambda: None  # после is_connected = True (как device.py:103)
+        self.on_disconnect: Callable[[], None] = lambda: None  # до сброса is_connected
+        self.on_read: Callable[[], None] = lambda: None
 
     def connect(self) -> bool:
         self.is_connected = True
+        self.on_connect()
         return True
 
     def disconnect(self) -> None:
+        self.on_disconnect()
         self.is_connected = False
 
     def read_registers(self, _address: int, _count: int) -> list[int]:
+        self.on_read()
         return list(self.tlm)
 
 
@@ -100,9 +112,19 @@ class _FakeClient:
         self.stops: list[int] = []
         self.echo = True
         self.on_probe: Callable[[], None] = lambda: None
+        self.probes = 0
+        self.servo_calls: list[bool] = []
+        self.transport: _FakeTransport | None = None
 
     def probe(self) -> None:
+        self.probes += 1
         self.on_probe()
+
+    def servo(self, on: bool) -> None:
+        """SERVO: считает вызовы и ставит бит TLM_SERVO в фейковом транспорте."""
+        self.servo_calls.append(on)
+        if self.transport is not None:
+            self.transport.tlm[REG["TLM_SERVO"] - REG["TLM_PROTO_VER"]] = 1 if on else 0
 
     def sync_params(self, _values: Any, _epoch: int, *, cancelled: Any = None) -> None:
         pass
@@ -135,7 +157,7 @@ class _FakeClient:
             return list(self.stops)
 
 
-def _make_driver() -> tuple[RobotDriverV2, _FakeClient]:
+def _make_driver(*, connected: bool = True, servo_tlm: int = 1) -> tuple[RobotDriverV2, _FakeClient]:
     entry = DeviceEntry(
         id="rv2",
         name="rv2",
@@ -152,8 +174,10 @@ def _make_driver() -> tuple[RobotDriverV2, _FakeClient]:
         },
         params={},
     )
-    drv = RobotDriverV2(entry, None, transport=_FakeTransport(), publish=lambda _p, _v: None, spawn=_SCOPE.spawn)
+    transport = _FakeTransport(connected=connected, servo_tlm=servo_tlm)
+    drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=_SCOPE.spawn)
     client = _FakeClient()
+    client.transport = transport
     drv._client = client  # шов: клиент v2 без sim (как test_robot_driver_v2._fake_driver)
     return drv, client
 
@@ -201,8 +225,19 @@ class _Barrier:
         return True
 
 
-def _run_window(drv: RobotDriverV2, client: _FakeClient, barrier: _Barrier, window: str) -> dict[str, Any]:
-    """T1 — ``connect()`` до барьера; T2 — ``request_stop`` внутри окна; наблюдение после join T1."""
+def _run_window(
+    drv: RobotDriverV2,
+    client: _FakeClient,
+    barrier: _Barrier,
+    window: str,
+    *,
+    stop: Callable[[], None] | None = None,
+    released_by_stop: bool = False,
+) -> dict[str, Any]:
+    """T1 — ``connect()`` до барьера; T2 — ``stop`` (умолчание ``request_stop``) внутри окна; наблюдение после join T1.
+
+    ``released_by_stop`` — барьер отпускает сам ``stop`` (W1'): T1 уже вышел, проверка «T1 стоит в окне» не нужна.
+    """
     box: dict[str, Any] = {}
 
     def t1_body() -> None:
@@ -220,9 +255,15 @@ def _run_window(drv: RobotDriverV2, client: _FakeClient, barrier: _Barrier, wind
         barrier.release.set()
         t1.join(_JOIN_S)
         pytest.fail(f"{window}: окно недостижимо — барьер в T1 не сработал за {_ENTER_S} с; T1: {box}")
-    drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S)
+    if stop is None:
+        drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S)
+    else:
+        stop()
     # T2 отработал, пока T1 стоит в окне: иначе проба ничего не говорит
-    inside = t1.is_alive() and not barrier.release.is_set() and not barrier.release_timed_out
+    if released_by_stop:
+        inside = barrier.release.is_set() and not barrier.release_timed_out
+    else:
+        inside = t1.is_alive() and not barrier.release.is_set() and not barrier.release_timed_out
     soft_during_stop = client.soft_count() - soft_before
     stop_unconfirmed_after_stop = drv.stop_unconfirmed
     barrier.release.set()
@@ -235,6 +276,8 @@ def _run_window(drv: RobotDriverV2, client: _FakeClient, barrier: _Barrier, wind
         "is_connected": drv.is_connected,
         "soft_during_stop": soft_during_stop,
         "levels": client.levels(),
+        "probes": client.probes,
+        "servo_calls": list(client.servo_calls),
         "is_shutdown": drv.state.is_shutdown(),
         "stopping": view.stopping,
         "stop_unconfirmed_after_stop": stop_unconfirmed_after_stop,
@@ -268,13 +311,30 @@ def _teardown(drv: RobotDriverV2) -> None:
     _bounded(drv.disconnect, _JOIN_S, "disconnect")
 
 
+def _observe(
+    drv: RobotDriverV2,
+    client: _FakeClient,
+    barrier: _Barrier,
+    window: str,
+    *,
+    stop: Callable[[], None] | None = None,
+    released_by_stop: bool = False,
+) -> dict[str, Any]:
+    """Сценарий окна с уборкой для тестов автора без фикстуры: сбой пробы — FAILED теста."""
+    try:
+        return _run_window(drv, client, barrier, window, stop=stop, released_by_stop=released_by_stop)
+    finally:
+        barrier.release.set()
+        _teardown(drv)
+
+
 def _caller_is_connect_locked() -> bool:
     # кадр 0 — этот, 1 — обёртка, 2 — вызывающий метод драйвера
     return sys._getframe(2).f_code.co_name == "_connect_locked"
 
 
 # --------------------------------------------------------------------------------------------------
-# W1: после is_shutdown() == False, до self._ready = True
+# W1: вход в connect_finish (до перехода)
 # --------------------------------------------------------------------------------------------------
 
 
@@ -282,15 +342,14 @@ def _caller_is_connect_locked() -> bool:
 def w1(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     drv, client = _make_driver()
     barrier = _Barrier()
-    original = RobotState.is_shutdown
+    original = RobotState.connect_finish
 
-    def is_shutdown(self: RobotState) -> bool:
-        result = original(self)
-        if result is False and _caller_is_connect_locked():
+    def connect_finish(self: RobotState) -> bool:
+        if _caller_is_connect_locked():
             barrier.pause_if_t1()
-        return result
+        return original(self)
 
-    monkeypatch.setattr(RobotState, "is_shutdown", is_shutdown)
+    monkeypatch.setattr(RobotState, "connect_finish", connect_finish)
     try:
         yield _capture(lambda: _run_window(drv, client, barrier, "W1"))
     finally:
@@ -317,7 +376,7 @@ def test_w1_d_shutdown_latched(w1: dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# W4: робот подключён; после connect_check() == (False, False), до connect_reset()
+# W4: робот подключён; после того, как connect_begin() вернул ("go", True)
 # --------------------------------------------------------------------------------------------------
 
 
@@ -327,15 +386,15 @@ def w4(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     assert _bounded(drv.connect, _JOIN_S, "W4 предварительный connect") is True, "W4: робот не подключился до T1"
     client.echo = False  # запись стопа T2 остаётся без эха
     barrier = _Barrier()
-    original = RobotState.connect_check
+    original = RobotState.connect_begin
 
-    def connect_check(self: RobotState) -> tuple[bool, bool]:
+    def connect_begin(self: RobotState) -> tuple[str, bool]:
         result = original(self)
-        if result == (False, False) and _caller_is_connect_locked():
+        if result == ("go", True) and _caller_is_connect_locked():
             barrier.pause_if_t1()
         return result
 
-    monkeypatch.setattr(RobotState, "connect_check", connect_check)
+    monkeypatch.setattr(RobotState, "connect_begin", connect_begin)
     try:
 
         def scenario() -> dict[str, Any]:
@@ -395,3 +454,100 @@ def test_ww_a_one_soft_during_request_stop(ww: dict[str, Any]) -> None:
 
 def test_ww_b_connect_returns_false(ww: dict[str, Any]) -> None:
     assert ww["connect"] is False, f"WW-b: connect() вернул {ww['connect']!r}, хотим False; наблюдение: {ww}"
+
+
+# --------------------------------------------------------------------------------------------------
+# Тесты автора T5.3g: W1', WW-c, A3, A4, Q4, disconnect посреди on_connect
+# --------------------------------------------------------------------------------------------------
+
+
+def test_w1p_soft_when_connect_exits_between_stop_sections(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W1': T1 стоит в probe; T2 между ``request_stop_begin`` и ``process_stop_plan`` ждёт выхода T1 из connect."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    client.on_probe = barrier.pause_if_t1
+    original = RobotState.process_stop_plan
+
+    def process_stop_plan(self: RobotState, *args: Any, **kwargs: Any) -> Any:
+        if threading.current_thread() is not barrier.t1 and barrier.entered.is_set() and not barrier.release.is_set():
+            barrier.release.set()
+            assert barrier.t1 is not None
+            barrier.t1.join(_JOIN_S)  # T1 выходит из connect (отказ, connect_end) между секциями request_stop
+            assert not barrier.t1.is_alive(), "W1p: T1 не вышел из connect за дедлайн (находка, не таймаут теста)"
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(RobotState, "process_stop_plan", process_stop_plan)
+    obs = _observe(drv, client, barrier, "W1p", released_by_stop=True)
+    assert obs["soft_during_stop"] == 1, f"W1p: записей SOFT за request_stop {obs['soft_during_stop']}, хотим 1; {obs}"
+    assert obs["connect"] is False, f"W1p: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+
+
+def test_ww_c_ready_robot_connect_false() -> None:
+    """WW-c: робот подключён до T1, стоп внутри probe -> ``connect()`` False, ``is_connected`` False."""
+    drv, client = _make_driver()
+    assert _bounded(drv.connect, _JOIN_S, "WW-c предварительный connect") is True, "WW-c: робот не подключился до T1"
+    barrier = _Barrier()
+    client.on_probe = barrier.pause_if_t1
+    obs = _observe(drv, client, barrier, "WWc")
+    assert obs["connect"] is False, f"WW-c: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+    assert obs["is_connected"] is False, f"WW-c: is_connected={obs['is_connected']!r}, хотим False; {obs}"
+
+
+def test_a3_no_write_inside_transport_connect() -> None:
+    """A3: стоп внутри ``transport.connect()`` (флаг уже True, как device.py:103) -> записи нет, probe не зовётся."""
+    drv, client = _make_driver(connected=False)
+    barrier = _Barrier()
+    client.transport.on_connect = barrier.pause_if_t1
+    obs = _observe(drv, client, barrier, "A3-connect")
+    assert obs["levels"] == [], f"A3: записи STOP_REQ {obs['levels']}, хотим []; {obs}"
+    assert obs["stop_unconfirmed"] is False, f"A3: stop_unconfirmed={obs['stop_unconfirmed']!r}, хотим False; {obs}"
+    assert obs["connect"] is False, f"A3: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+    assert obs["probes"] == 0, f"A3: фейковый probe вызван {obs['probes']} раз, хотим 0 (инъекция 12); {obs}"
+
+
+def test_a3_no_write_while_closing_stale_socket() -> None:
+    """A3: робот не готов, транспорт «подключён»; стоп, пока connect закрывает старый сокет -> записи нет."""
+    drv, client = _make_driver(connected=True)
+    barrier = _Barrier()
+    client.transport.on_disconnect = barrier.pause_if_t1
+    obs = _observe(drv, client, barrier, "A3-stale")
+    assert obs["levels"] == [], f"A3: записи STOP_REQ {obs['levels']}, хотим []; {obs}"
+    assert obs["connect"] is False, f"A3: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+
+
+def test_a4_stop_after_connect_finish_one_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A4 (страж регресса): стоп после ``connect_finish`` -> ``connect()`` True, ровно 1 SOFT."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    original = RobotState.connect_finish
+
+    def connect_finish(self: RobotState) -> bool:
+        result = original(self)
+        if result is True and _caller_is_connect_locked():
+            barrier.pause_if_t1()
+        return result
+
+    monkeypatch.setattr(RobotState, "connect_finish", connect_finish)
+    obs = _observe(drv, client, barrier, "A4")
+    assert obs["connect"] is True, f"A4: connect() вернул {obs['connect']!r}, хотим True; {obs}"
+    assert obs["soft_during_stop"] == 1, f"A4: записей SOFT {obs['soft_during_stop']}, хотим 1; {obs}"
+
+
+def test_q4_no_servo_after_stop_in_on_connect() -> None:
+    """Q4: стоп посреди ``_run_on_connect`` (пауза в чтении TLM) -> SERVO не шлётся, ``connect()`` False."""
+    drv, client = _make_driver(servo_tlm=0)
+    barrier = _Barrier()
+    client.transport.on_read = barrier.pause_if_t1
+    obs = _observe(drv, client, barrier, "Q4")
+    assert obs["servo_calls"] == [], f"Q4: вызовы servo {obs['servo_calls']}, хотим []; {obs}"
+    assert obs["connect"] is False, f"Q4: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+
+
+def test_disconnect_during_on_connect_connect_false() -> None:
+    """Уточнение 1: обычный ``disconnect`` посреди ``_run_on_connect`` -> ``connect()`` и ``is_connected`` False."""
+    drv, client = _make_driver(servo_tlm=0)
+    barrier = _Barrier()
+    client.transport.on_read = barrier.pause_if_t1
+    obs = _observe(drv, client, barrier, "disconnect", stop=drv.disconnect)
+    assert obs["connect"] is False, f"disconnect: connect() вернул {obs['connect']!r}, хотим False; {obs}"
+    assert obs["is_connected"] is False, f"disconnect: is_connected={obs['is_connected']!r}, хотим False; {obs}"
