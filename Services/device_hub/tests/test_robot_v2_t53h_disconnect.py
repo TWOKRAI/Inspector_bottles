@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -22,6 +23,7 @@ from Services.device_hub.tests.test_robot_v2_t53g_windows import (
     _ENTER_S,
     _HANG_S,
     _JOIN_S,
+    _STOP_DEADLINE_S,
     _Barrier,
     _bounded,
     _caller_is_connect_locked,
@@ -252,12 +254,25 @@ def test_h9_connect_inside_disconnect_window(monkeypatch: pytest.MonkeyPatch) ->
 # --------------------------------------------------------------------------------------------------
 
 
-def _tick_window(drv: RobotDriverV2, client: _FakeClient, stop: Callable[[], None], window: str) -> dict[str, Any]:
-    """T1 — ``tick()`` (переподключение тика), пауза в ``probe``; T2 — ``stop``; наблюдение после join T1."""
+def _tick_window(
+    drv: RobotDriverV2,
+    client: _FakeClient,
+    stop: Callable[[], None],
+    window: str,
+    *,
+    barrier: _Barrier | None = None,
+    released_by_stop: bool = False,
+) -> dict[str, Any]:
+    """T1 — ``tick()`` (переподключение тика), пауза в ``probe`` (или в своей точке ``barrier``); T2 — ``stop``.
+
+    ``released_by_stop`` — барьер отпускает сам ``stop`` (T1 уже вышел). Наблюдение — после join T1, до уборки.
+    """
     drv.desired_connected = True
     drv.max_reconnect_attempts = 1
-    barrier = _Barrier()
+    if barrier is None:
+        barrier = _Barrier()
     client.on_probe = barrier.pause_if_t1
+    soft_before = client.soft_count()
     box: dict[str, Any] = {}
 
     def t1_body() -> None:
@@ -272,7 +287,10 @@ def _tick_window(drv: RobotDriverV2, client: _FakeClient, stop: Callable[[], Non
         t1.start()
         assert barrier.entered.wait(_ENTER_S), f"{window}: окно недостижимо — тик не дошёл до probe; {box}"
         _bounded(stop, _HANG_S, "stop")
-        inside = t1.is_alive() and not barrier.release_timed_out
+        if released_by_stop:
+            inside = barrier.release.is_set() and not barrier.release_timed_out
+        else:
+            inside = t1.is_alive() and not barrier.release_timed_out
         barrier.release.set()
         t1.join(_JOIN_S)
         assert not t1.is_alive(), f"{window}: tick() не вернулся за {_JOIN_S} с"
@@ -281,6 +299,11 @@ def _tick_window(drv: RobotDriverV2, client: _FakeClient, stop: Callable[[], Non
             "reconnect_exhausted": drv.reconnect_exhausted,
             "desired_connected": drv.desired_connected,
             "is_connected": drv.is_connected,
+            "soft": client.soft_count() - soft_before,
+            "levels": client.levels(),
+            "probes": client.probes,
+            "servo_calls": list(client.servo_calls),
+            "transport_open": client.transport.is_connected,
             **box,
         }
     finally:
@@ -307,3 +330,204 @@ def test_h10_b_direct_disconnect_counted_as_failed_reconnect() -> None:
     obs = _tick_window(drv, client, drv.disconnect, "H10b")
     observed = {k: obs[k] for k in ("reconnect_exhausted", "desired_connected", "is_connected")}
     assert observed == {"reconnect_exhausted": True, "desired_connected": False, "is_connected": False}, f"{obs}"
+
+
+# --------------------------------------------------------------------------------------------------
+# Итерация 2 (стадия 0): H13 — повторная проверка desired_connected; H14–H17 — три потока connect / disconnect /
+# request_stop. T3 — request_stop в своём daemon-потоке; если T2 держит _jog_tx_lock (обёртка disconnect_stop_plan),
+# T3 ждёт замок до срока и пишет без него (В1) — так порядок достижим.
+# --------------------------------------------------------------------------------------------------
+
+
+def _start_t3(drv: RobotDriverV2, window: str, box: dict[str, Any]) -> threading.Thread:
+    def body() -> None:
+        try:
+            drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S)
+        except BaseException as exc:  # noqa: BLE001 — наблюдение
+            box["t3_error"] = repr(exc)
+
+    t3 = threading.Thread(target=body, name=f"t53h-{window}-T3", daemon=True)
+    t3.start()
+    return t3
+
+
+def _is_t2(window: str) -> bool:
+    return threading.current_thread().name == f"t53g-{window}-T2"  # имя потока _bounded
+
+
+def _three_threads(
+    drv: RobotDriverV2, client: _FakeClient, barrier: _Barrier, window: str, box: dict[str, Any]
+) -> dict[str, Any]:
+    """T1 — ``connect()`` до барьера в probe; T2 — ``disconnect()`` (его обёртки ведут T1 и T3); SOFT всего."""
+    result: dict[str, Any] = {}
+
+    def t1_body() -> None:
+        try:
+            result["connect"] = drv.connect()
+        except BaseException as exc:  # noqa: BLE001 — наблюдение
+            result["connect"] = repr(exc)
+
+    t1 = threading.Thread(target=t1_body, name=f"t53h-{window}-T1-connect", daemon=True)
+    barrier.t1 = t1
+    soft_before = client.soft_count()
+    try:
+        t1.start()
+        assert barrier.entered.wait(_ENTER_S), f"{window}: окно недостижимо — T1 не дошёл до probe"
+        _bounded(drv.disconnect, _HANG_S, f"{window}-T2")
+        barrier.release.set()
+        t1.join(_JOIN_S)
+        assert not t1.is_alive(), f"{window}: connect() не вернулся за {_JOIN_S} с"
+        flags = [v for k, v in box.items() if k.endswith(("_before_d2", "_before_d3", "_begun", "_waited_d2"))]
+        return {
+            "soft": client.soft_count() - soft_before,
+            "connect": result.get("connect"),
+            "order_ok": bool(flags) and all(flags) and "t3_error" not in box,
+        }
+    finally:
+        barrier.release.set()
+        _teardown(drv)
+
+
+def test_h13_tick_rechecks_desired_after_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """П. 6 (I1): тик прошёл ``desired_connected`` и стоит; «Отключить» отработало целиком; тик не подключается."""
+    drv, client = _make_driver(connected=False, servo_tlm=0)
+    barrier = _Barrier()
+    original = RobotState.activity_alive
+
+    def activity_alive(self: RobotState) -> bool:
+        result = original(self)
+        barrier.pause_if_t1()  # пауза только в T1 (тик): между проверкой desired и захватом _param_lock
+        return result
+
+    monkeypatch.setattr(RobotState, "activity_alive", activity_alive)
+
+    def stop() -> None:
+        drv.desired_connected = False  # порядок плагина: desired до disconnect
+        drv.disconnect()
+
+    obs = _tick_window(drv, client, stop, "H13", barrier=barrier)
+    observed = {k: obs[k] for k in ("probes", "servo_calls", "levels")}
+    assert observed == {"probes": 0, "servo_calls": [], "levels": []}, f"H13: {observed}; {obs}"
+
+
+def test_h14_request_stop_snapshot_survives_disconnect_stop_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """П. 1: T1 в probe; T2 D1; T3 request_stop_begin; T1 выходит; T2 D2; T3 план; T2 D3 -> ровно 1 SOFT."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    client.on_probe = barrier.pause_if_t1
+    box: dict[str, Any] = {}
+    t3_begun = threading.Event()
+    d2_done = threading.Event()
+    holder: dict[str, threading.Thread] = {}
+    orig_rsb = RobotState.request_stop_begin
+    orig_db = RobotState.disconnect_begin
+    orig_dsp = RobotState.disconnect_stop_plan
+
+    def request_stop_begin(self: RobotState) -> None:
+        orig_rsb(self)
+        if threading.current_thread().name == "t53h-H14-T3":
+            t3_begun.set()
+            box["t3_waited_d2"] = d2_done.wait(_JOIN_S)  # план T3 — после D2
+
+    def disconnect_begin(self: RobotState) -> bool:
+        result = orig_db(self)
+        if _is_t2("H14"):
+            holder["t3"] = _start_t3(drv, "H14", box)
+            box["t3_begun"] = t3_begun.wait(_ENTER_S)
+            barrier.release.set()
+            assert barrier.t1 is not None
+            barrier.t1.join(_JOIN_S)
+            box["t1_exited_before_d2"] = not barrier.t1.is_alive()
+        return result
+
+    def disconnect_stop_plan(self: RobotState, *args: Any, **kwargs: Any) -> Any:
+        result = orig_dsp(self, *args, **kwargs)
+        if _is_t2("H14"):
+            d2_done.set()
+            holder["t3"].join(_JOIN_S)
+            box["t3_exited_before_d3"] = not holder["t3"].is_alive()
+        return result
+
+    monkeypatch.setattr(RobotState, "request_stop_begin", request_stop_begin)
+    monkeypatch.setattr(RobotState, "disconnect_begin", disconnect_begin)
+    monkeypatch.setattr(RobotState, "disconnect_stop_plan", disconnect_stop_plan)
+    obs = _three_threads(drv, client, barrier, "H14", box)
+    assert obs == {"soft": 1, "connect": False, "order_ok": True}, f"H14: {obs}; {box}"
+
+
+def test_h15_request_stop_between_disconnect_sections_keeps_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    """П. 2, второй случай: T1 в probe; T2 D2; T1 выходит; T3 request_stop целиком; T2 D3 -> ровно 1 SOFT."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    client.on_probe = barrier.pause_if_t1
+    box: dict[str, Any] = {}
+    orig_dsp = RobotState.disconnect_stop_plan
+
+    def disconnect_stop_plan(self: RobotState, *args: Any, **kwargs: Any) -> Any:
+        result = orig_dsp(self, *args, **kwargs)
+        if _is_t2("H15"):
+            barrier.release.set()
+            assert barrier.t1 is not None
+            barrier.t1.join(_JOIN_S)
+            box["t1_exited_before_d3"] = not barrier.t1.is_alive()
+            t3 = _start_t3(drv, "H15", box)
+            t3.join(_JOIN_S)
+            box["t3_exited_before_d3"] = not t3.is_alive()
+        return result
+
+    monkeypatch.setattr(RobotState, "disconnect_stop_plan", disconnect_stop_plan)
+    obs = _three_threads(drv, client, barrier, "H15", box)
+    assert obs == {"soft": 1, "connect": False, "order_ok": True}, f"H15: {obs}; {box}"
+
+
+def test_h16_tick_refused_by_disconnect_one_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """П. 2 (H5-tick): тик в probe; «Отключить» D1, D2; тик отказывает и выходит; D3 -> 1 SOFT; сокет закрыт."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    box: dict[str, Any] = {}
+    orig_dsp = RobotState.disconnect_stop_plan
+
+    def disconnect_stop_plan(self: RobotState, *args: Any, **kwargs: Any) -> Any:
+        result = orig_dsp(self, *args, **kwargs)
+        if threading.current_thread() is not barrier.t1 and barrier.entered.is_set() and not barrier.release.is_set():
+            barrier.release.set()
+            assert barrier.t1 is not None
+            barrier.t1.join(_JOIN_S)  # тик выходит из connect (отказ) и делает свой хвост до D3
+            box["tick_exited_before_d3"] = not barrier.t1.is_alive()
+        return result
+
+    monkeypatch.setattr(RobotState, "disconnect_stop_plan", disconnect_stop_plan)
+
+    def stop() -> None:
+        drv.desired_connected = False
+        drv.disconnect()
+
+    obs = _tick_window(drv, client, stop, "H16", barrier=barrier, released_by_stop=True)
+    observed = {"soft": obs["soft"], "transport_open": obs["transport_open"], **box}
+    assert observed == {"soft": 1, "transport_open": False, "tick_exited_before_d3": True}, f"H16: {obs}"
+
+
+def test_h17_request_stop_inside_disconnect_one_soft_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    """П. 3 (защёлка): робот подключён; T2 стоит после D2; T3 request_stop целиком; T2 D3 -> всего 1 SOFT."""
+    drv, client = _make_driver()
+    box: dict[str, Any] = {}
+    orig_dsp = RobotState.disconnect_stop_plan
+
+    def disconnect_stop_plan(self: RobotState, *args: Any, **kwargs: Any) -> Any:
+        result = orig_dsp(self, *args, **kwargs)
+        if _is_t2("H17"):
+            t3 = _start_t3(drv, "H17", box)
+            t3.join(_JOIN_S)
+            box["t3_exited_before_d3"] = not t3.is_alive()
+        return result
+
+    try:
+        assert _bounded(drv.connect, _JOIN_S, "H17 connect") is True, "H17: робот не подключился (настройка теста)"
+        monkeypatch.setattr(RobotState, "disconnect_stop_plan", disconnect_stop_plan)
+        soft_before = client.soft_count()
+        _bounded(drv.disconnect, _HANG_S, "H17-T2")
+        observed = {"soft": client.soft_count() - soft_before, **box}
+    finally:
+        monkeypatch.undo()
+        _teardown(drv)
+    assert observed == {"soft": 1, "t3_exited_before_d3": True}, f"H17: {observed}"
