@@ -336,17 +336,21 @@ class KeyedExecutor:
         except Exception:  # noqa: BLE001 — рабочий не должен падать молча
             self._log.error("KeyedExecutor '%s': рабочий упал", self.name, exc_info=True)
         finally:
-            with self._cond:
-                abnormal = not self._closed
-            if abnormal:
-                # Рабочий ушёл не по закрытию (исключение, в том числе BaseException из action):
-                # закрыть исполнитель, иначе очередь осталась бы без ответа и без рабочего.
-                # До снятия счётчика живых: join_until == True гарантирует, что исполнитель закрыт.
-                self._log.error("KeyedExecutor '%s': рабочий вышел не по закрытию — исполнитель закрыт", self.name)
-                self.request_stop()
-            with self._cond:
-                self._live_workers -= 1
-                self._cond.notify_all()
+            try:
+                with self._cond:
+                    abnormal = not self._closed
+                if abnormal:
+                    # Рабочий ушёл не по закрытию (исключение, в том числе BaseException из action):
+                    # закрыть исполнитель, иначе очередь осталась бы без ответа и без рабочего.
+                    # До снятия счётчика живых: join_until == True гарантирует, что исполнитель закрыт.
+                    self._log.error("KeyedExecutor '%s': рабочий вышел не по закрытию — исполнитель закрыт", self.name)
+                    self.request_stop()
+            finally:
+                # Счётчик живых снимается всегда, даже если reply ждущей бросил BaseException
+                # при снятии очереди (ревью р.2, мелочь А) — иначе join_until ждал бы до срока.
+                with self._cond:
+                    self._live_workers -= 1
+                    self._cond.notify_all()
 
     # ------------------------------------------------------------------
     # Исполнение и ответ (вне лока)

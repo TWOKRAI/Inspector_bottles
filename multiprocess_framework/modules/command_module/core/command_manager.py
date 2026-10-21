@@ -428,10 +428,14 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
                     # Отказ исполнителя (system_stopping / executor_busy) без исполнения action —
                     # тоже исход команды: ошибка в логе и метрике errors, без длительности
                     # (исполнения не было). Ревью р.1 п.3.
-                    if not ran[0]:
-                        error = r.get("error") if isinstance(r, dict) else r
-                        self._finish_command(command_name, {"status": "error", "reason": error}, None)
-                    reply(r)
+                    # reply — в finally: сбой учёта исхода не должен отнять у инициатора ответ
+                    # (ревью р.2, мелочь Б).
+                    try:
+                        if not ran[0]:
+                            error = r.get("error") if isinstance(r, dict) else r
+                            self._finish_command(command_name, {"status": "error", "reason": error}, None)
+                    finally:
+                        reply(r)
 
                 action.__name__ = command_name
                 executor.submit(action, key, counted_reply)
