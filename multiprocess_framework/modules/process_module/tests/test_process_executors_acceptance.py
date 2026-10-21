@@ -360,3 +360,16 @@ def test_h8_process_shutdown_from_executor_thread_returns_within_budget() -> Non
         f"elapsed={box.get('elapsed', float('nan')):.2f}"
     )
     assert "elapsed" in box
+
+
+def test_introspect_executors_without_manager_answers_empty() -> None:
+    """D6: ``executor_manager=None`` - ``introspect.executors`` отвечает пустым снимком, не падает."""
+    proc = make_process("pnone")
+    try:
+        proc.executor_manager = None
+        BuiltinCommands(proc).register()
+        res = proc.command_manager.handle_command({"command": "introspect.executors", "data": {}})
+        assert res == {"success": True, "process": "pnone", "executors": {}, "unavailable": []}, res
+    finally:
+        done, _, error, _ = call_bounded(proc.shutdown, 20.0)
+    assert done and error is None, repr(error)

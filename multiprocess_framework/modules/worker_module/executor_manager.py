@@ -279,6 +279,12 @@ class ExecutorManager(BaseManager, ObservableMixin):
     ) -> OrderedExecutor:
         check_scope_name(name)
         parsed = self._parse_spec(spec)
+        # Имена рабочих и потоков считаются ДО резерва и конструктора: сбой здесь не оставляет ни резерва,
+        # ни исполнителя без владельца.
+        workers = 1 if parsed.serial else parsed.max_workers
+        worker_names = tuple(f"keyed-{name}-{i}" for i in range(workers))
+        prefix = self._worker_manager.manager_name
+        thread_names = frozenset(f"{prefix}_{worker_name}" for worker_name in worker_names)
 
         reserved = _Entry(kind=_RESERVED)
         with self._lock:
@@ -302,10 +308,6 @@ class ExecutorManager(BaseManager, ObservableMixin):
             self._drop_reservation(name, reserved)
             raise
 
-        workers = 1 if parsed.serial else parsed.max_workers
-        worker_names = tuple(f"keyed-{name}-{i}" for i in range(workers))
-        prefix = self._worker_manager.manager_name
-        thread_names = frozenset(f"{prefix}_{worker_name}" for worker_name in worker_names)
         owned = _OwnedExecutor(executor, name, thread_names, self._log_warning)
 
         in_scope = False

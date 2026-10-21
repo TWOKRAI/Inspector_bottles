@@ -330,9 +330,10 @@ def test_h9_close_between_reservation_and_commit_refused_and_name_released(wm, m
     assert "y" not in mgr.names()
     assert mgr.get("y") is None
     assert wait_gone("h_keyed-y-", 2.0), alive_keyed("h_keyed-y-")
-    # Белый ящик: публичное чтение резерв не показывает (names/get его фильтруют), а закрытый менеджер
-    # на любое create отвечает RuntimeError до проверки имени - утечку резерва видно только в записях.
-    assert "y" not in mgr._entries, "резерв имени не снят на пути late"
+    # Резерв снят: имя свободно для register (закрытый менеджер create отвергает раньше проверки имени).
+    other = Registered()
+    mgr.register("y", other)
+    assert mgr.get("y") is other
 
 
 def test_h9_create_after_shutdown_without_scope_refused(wm):
@@ -346,3 +347,77 @@ def test_h9_create_after_shutdown_without_scope_refused(wm):
     assert "x" not in mgr.names()
     assert mgr.get("x") is None
     assert wait_gone("h_keyed-x-", 2.0), alive_keyed("h_keyed-x-")
+
+
+# ---------------------------------------------------------------------------
+# D6: describe() - литералы
+# ---------------------------------------------------------------------------
+
+
+def test_describe_literals_for_created_and_registered(wm):
+    """D6: ``unavailable``, поля созданного и зарегистрированного, воркеры."""
+    mgr = ExecutorManager("h_exec_d6", worker_manager=wm)
+    assert mgr.initialize() is True
+    mgr.create("io", {"max_workers": 2})
+    mgr.register("gate", Registered())
+
+    snapshot = mgr.describe()
+
+    assert snapshot["unavailable"] == ["pending_depth", "running_keys"]
+    assert snapshot["executors"]["gate"] == {"kind": "registered", "source": "code", "type": "Registered"}
+    io = snapshot["executors"]["io"]
+    for key, value in {
+        "kind": "keyed",
+        "source": "code",
+        "serial": False,
+        "max_workers": 2,
+        "max_pending": 64,
+        "owned": False,
+    }.items():
+        assert io[key] == value, (key, io)
+    assert sorted(io["workers"]) == ["keyed-io-0", "keyed-io-1"]
+    assert all(w["is_alive"] is True for w in io["workers"].values()), io["workers"]
+    bounded(mgr.shutdown, 10.0)
+
+
+def test_describe_removed_worker_is_absent(wm):
+    """D6: рабочий снят напрямую (в обход IPC-защиты) - ``{"is_alive": False, "status": "absent"}``."""
+    mgr = ExecutorManager("h_exec_absent", worker_manager=wm)
+    assert mgr.initialize() is True
+    mgr.create("io", {"max_workers": 2})
+
+    assert bounded(lambda: wm.remove_worker("keyed-io-1"), 10.0) is True
+
+    workers = mgr.describe()["executors"]["io"]["workers"]
+    assert workers["keyed-io-1"] == {"is_alive": False, "status": "absent"}
+    bounded(mgr.shutdown, 10.0)
+
+
+# ---------------------------------------------------------------------------
+# Сбой между резервом и владением
+# ---------------------------------------------------------------------------
+
+
+class _NoManagerName:
+    """``worker_manager`` без ``manager_name``: имена потоков посчитать нельзя."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+
+    def __getattr__(self, attr: str) -> Any:
+        if attr == "manager_name":
+            raise AttributeError(attr)
+        return getattr(self._real, attr)
+
+
+def test_failure_before_ownership_leaves_no_reservation_and_no_threads(wm):
+    """Исключение при подготовке создания: имя не занято, исполнитель без владельца не остался."""
+    mgr = ExecutorManager("h_exec_noname", worker_manager=_NoManagerName(wm))
+    assert mgr.initialize() is True
+
+    with pytest.raises(AttributeError):
+        mgr.create("io")
+    with pytest.raises(AttributeError):  # не "имя уже занято" (ValueError)
+        mgr.create("io")
+    assert mgr.names() == [] and mgr.get("io") is None
+    assert alive_keyed("h_keyed-io-") == [], alive_keyed("h_keyed-io-")
