@@ -195,7 +195,7 @@ class ProcessManagers:
             # Task 5.14: каноничное имя error-гнезда — "error" (совпадает с
             # ObservableMixin._track_error, которое пробует именно "error").
             process.register_manager("error", bundle.error, enabled=True)
-        if bundle.executors is not None:
+        if getattr(bundle, "executors", None) is not None:
             # Task 1.9m: условная, как у error — bundle, собранный вручную в тестах соседей, поля не имеет.
             process.register_manager("executors", bundle.executors, enabled=True)
 

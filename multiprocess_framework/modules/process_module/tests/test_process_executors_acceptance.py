@@ -428,3 +428,41 @@ def test_heir_registers_command_by_executor_name_during_initialize() -> None:
     finally:
         done, _, error, _ = call_bounded(proc.shutdown, 20.0)
     assert done and error is None, repr(error)
+
+
+# --- Совместимость register_all: bundle, собранный вручную без поля executors (C: окно 1.9m, 2026-10-21) ---
+
+
+class _RegisterOnlyProcess:
+    """Минимальный процесс для register_all: запоминает имена зарегистрированных менеджеров."""
+
+    def __init__(self) -> None:
+        self.registered: dict[str, Any] = {}
+
+    def register_manager(self, name: str, manager: Any, enabled: bool = True) -> None:
+        self.registered[name] = manager
+
+
+def test_register_all_accepts_bundle_without_executors_field() -> None:
+    """Bundle соседей (SimpleNamespace без ``executors``) — register_all не падает и слот не заводит."""
+    from types import SimpleNamespace
+
+    from multiprocess_framework.modules.process_module.managers.process_managers import ProcessManagers
+
+    bundle = SimpleNamespace(
+        worker=object(),
+        logger=object(),
+        router=object(),
+        command=object(),
+        stats=object(),
+        console=object(),
+        console_enabled=False,
+        error=None,
+        observation=object(),
+    )
+    process = _RegisterOnlyProcess()
+
+    ProcessManagers(process).register_all(bundle, process)
+
+    assert "executors" not in process.registered
+    assert "command" in process.registered
