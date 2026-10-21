@@ -27,6 +27,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -36,6 +37,7 @@ from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2, RobotStat
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.programs import Move, Point, Program
 
 _SOFT = 1  # STOP_LEVEL["SOFT"] протокола v2 (protocol-spec): литерал, не значение из кода драйвера
 _TEXT_STOPPING = "драйвер робота останавливается"
@@ -115,10 +117,26 @@ class _FakeClient:
         self.probes = 0
         self.servo_calls: list[bool] = []
         self.transport: _FakeTransport | None = None
+        self.jog_conts: list[tuple[int, int]] = []
+        self.run_started = threading.Event()
+        self.run_release = threading.Event()
 
     def probe(self) -> None:
         self.probes += 1
         self.on_probe()
+
+    def jog_cont(self, direction: int, speed: int) -> Any:
+        """JOG_CONT: пишет вызов в список, ``seq`` - его номер."""
+        self.jog_conts.append((direction, speed))
+        return SimpleNamespace(seq=len(self.jog_conts))
+
+    def jog_lease(self) -> None:
+        pass
+
+    def run_chunks(self, _scenario: Any, *, params: Any, on_progress: Any) -> None:
+        """Программа держит исполнитель, пока тест не поставит ``run_release``."""
+        self.run_started.set()
+        self.run_release.wait(_RELEASE_S)
 
     def servo(self, on: bool) -> None:
         """SERVO: считает вызовы и ставит бит TLM_SERVO в фейковом транспорте."""
@@ -157,7 +175,9 @@ class _FakeClient:
             return list(self.stops)
 
 
-def _make_driver(*, connected: bool = True, servo_tlm: int = 1) -> tuple[RobotDriverV2, _FakeClient]:
+def _make_driver(
+    *, connected: bool = True, servo_tlm: int = 1, clock: Callable[[], float] | None = None
+) -> tuple[RobotDriverV2, _FakeClient]:
     entry = DeviceEntry(
         id="rv2",
         name="rv2",
@@ -175,7 +195,7 @@ def _make_driver(*, connected: bool = True, servo_tlm: int = 1) -> tuple[RobotDr
         params={},
     )
     transport = _FakeTransport(connected=connected, servo_tlm=servo_tlm)
-    drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=_SCOPE.spawn)
+    drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=_SCOPE.spawn, clock=clock)
     client = _FakeClient()
     client.transport = transport
     drv._client = client  # шов: клиент v2 без sim (как test_robot_driver_v2._fake_driver)
@@ -255,10 +275,11 @@ def _run_window(
         barrier.release.set()
         t1.join(_JOIN_S)
         pytest.fail(f"{window}: окно недостижимо — барьер в T1 не сработал за {_ENTER_S} с; T1: {box}")
+    # T2 под дедлайном: зависший драйвер (например, геттер берёт Lock) даёт красный тест, а не зависание
     if stop is None:
-        drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S)
+        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _JOIN_S, "request_stop")
     else:
-        stop()
+        _bounded(stop, _JOIN_S, "stop")
     # T2 отработал, пока T1 стоит в окне: иначе проба ничего не говорит
     if released_by_stop:
         inside = barrier.release.is_set() and not barrier.release_timed_out
@@ -429,6 +450,12 @@ def test_w4_d_stop_unconfirmed_survives(w4: dict[str, Any]) -> None:
     )
 
 
+def test_w4_e_one_soft_during_request_stop(w4: dict[str, Any]) -> None:
+    assert w4["soft_during_stop"] == 1, (
+        f"W4-e: записей STOP_REQ SOFT за request_stop {w4['soft_during_stop']}, хотим 1; наблюдение: {w4}"
+    )
+
+
 # --------------------------------------------------------------------------------------------------
 # WW: внутри client.probe()
 # --------------------------------------------------------------------------------------------------
@@ -552,3 +579,72 @@ def test_disconnect_during_on_connect_connect_false() -> None:
     obs = _observe(drv, client, barrier, "disconnect", stop=drv.disconnect)
     assert obs["connect"] is False, f"disconnect: connect() вернул {obs['connect']!r}, хотим False; {obs}"
     assert obs["is_connected"] is False, f"disconnect: is_connected={obs['is_connected']!r}, хотим False; {obs}"
+
+
+def test_failed_connect_then_request_stop_no_soft() -> None:
+    """Инъекция 13: ``probe`` бросает не транспортную ошибку после ``connect_link_up`` -> ``connect()`` False;
+    затем ``request_stop`` не пишет (``connect_end`` снял пометки на выходе): неподключённый простой робот без SOFT."""
+    drv, client = _make_driver(connected=False)
+
+    def failing_probe() -> None:
+        raise RuntimeError("protocol mismatch (fake)")  # не транспортная ошибка: сокет остаётся открытым
+
+    client.on_probe = failing_probe
+    try:
+        result = _bounded(drv.connect, _JOIN_S, "connect")
+        assert result is False, f"connect() вернул {result!r}, хотим False (настройка теста)"
+        assert client.transport is not None and client.transport.is_connected, "сокет должен остаться открытым"
+        _bounded(lambda: drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S), _JOIN_S, "request_stop")
+        observed = {"levels": client.levels(), "stop_unconfirmed": drv.stop_unconfirmed}
+    finally:
+        _teardown(drv)
+    assert observed == {"levels": [], "stop_unconfirmed": False}, f"после неудачного connect: {observed}"
+
+
+def _frozen_clock() -> float:
+    """Часы стоят: окно удержания jog (0,2 с) не истекает, поводок не пишет свой стоп посреди теста."""
+    return 1000.0
+
+
+def test_a5_connect_during_jog_no_new_writes() -> None:
+    """A5: активный jog посреди ``connect`` -> ``connect()`` True, probe и записей нет, ``is_connected`` True."""
+    drv, client = _make_driver(clock=_frozen_clock)
+    try:
+        assert _bounded(drv.connect, _JOIN_S, "connect") is True, "робот не подключился (настройка теста)"
+        reply = _bounded(lambda: drv.call("jog_hold", dict(_JOG)), _JOIN_S, "jog_hold")
+        assert reply.get("status") == "ok", f"jog не запущен (настройка теста): {reply!r}"
+        probes = client.probes
+        result = _bounded(drv.connect, _JOIN_S, "connect во время jog")
+        observed = {
+            "connect": result,
+            "probes_added": client.probes - probes,
+            "levels": client.levels(),
+            "is_connected": drv.is_connected,
+        }
+    finally:
+        _teardown(drv)
+    assert observed == {"connect": True, "probes_added": 0, "levels": [], "is_connected": True}, f"A5 jog: {observed}"
+
+
+def test_a5_connect_during_program_no_new_writes() -> None:
+    """A5: активная программа посреди ``connect`` -> ``connect()`` True, probe и записей нет, ``is_connected`` True."""
+    drv, client = _make_driver()
+    program = Program(name="t53g", steps=(Move(point="a", kind="JOINT"),))
+    points = {"a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1)}
+    try:
+        assert _bounded(drv.connect, _JOIN_S, "connect") is True, "робот не подключился (настройка теста)"
+        started = _bounded(lambda: drv.start_program(program, points, None, name="t53g"), _JOIN_S, "start_program")
+        assert started.get("status") == "ok", f"программа не запущена (настройка теста): {started!r}"
+        assert client.run_started.wait(_ENTER_S), "достижимость: исполнитель не дошёл до run_chunks"
+        probes = client.probes
+        result = _bounded(drv.connect, _JOIN_S, "connect во время программы")
+        observed = {
+            "connect": result,
+            "probes_added": client.probes - probes,
+            "levels": client.levels(),
+            "is_connected": drv.is_connected,
+        }
+    finally:
+        client.run_release.set()
+        _teardown(drv)
+    assert observed == {"connect": True, "probes_added": 0, "levels": [], "is_connected": True}, f"A5 prog: {observed}"

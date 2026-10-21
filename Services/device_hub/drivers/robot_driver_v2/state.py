@@ -106,7 +106,8 @@ class RobotStateView:
 
 
 class RobotState:
-    """Состояние драйвера робота v2 (T5.3f f1): 23 поля и 4 поля текущего ``_JogRun`` под одним замком ``_lock``.
+    """Состояние драйвера робота v2 (T5.3f f1, T5.3g): 27 полей и 4 поля текущего ``_JogRun`` под замком ``_lock``;
+    в ``view()`` — 23 из 27 (без ``_ready``, ``_connecting``, ``_connect_linked``, ``_stop_linked``).
 
     Внутреннее, не SPI хаба: переходы зовёт только ``RobotDriverV2``; снаружи — ``view()``.
 
@@ -194,7 +195,7 @@ class RobotState:
     # --- снимок ---
 
     def view(self) -> RobotStateView:
-        """Замороженный снимок всех полей, снят одной секцией."""
+        """Замороженный снимок 23 полей (без ``_ready`` и вех ``connect``), снят одной секцией."""
         with self._lock:
             run = self._jog
             jog = None
@@ -238,8 +239,11 @@ class RobotState:
     def activity_alive(self) -> bool:
         """Жив поток поводка (``run.active``) или исполнитель (``program_active``)."""
         with self._lock:
-            run = self._jog
-            return (run is not None and run.active) or self._program_active
+            return self._activity_alive_locked()
+
+    def _activity_alive_locked(self) -> bool:
+        run = self._jog
+        return (run is not None and run.active) or self._program_active
 
     def connect_check(self) -> tuple[bool, bool]:
         """``connect``: (выключение, задание тика)."""
@@ -279,8 +283,7 @@ class RobotState:
         with self._lock:
             if self._shutdown:
                 return "shutdown", False
-            run = self._jog
-            if self._job_active or (run is not None and run.active) or self._program_active:
+            if self._job_active or self._activity_alive_locked():
                 return "busy", False
             self._connect_reset_locked()
             was_ready = self._ready

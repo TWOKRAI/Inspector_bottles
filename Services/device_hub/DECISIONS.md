@@ -283,7 +283,8 @@ Q7 — как делить файл:
 
 **Дата:** 2026-10-21
 **Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20)
-**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`; ADR-DH-009 и ADR-DH-010 не меняются.
+**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
+окна W1, W1′, W2, W4 закрыты); ADR-DH-009 (путь стопа) не меняется.
 
 ### Контекст
 
@@ -311,8 +312,9 @@ Q7 — как делить файл:
   `Services/modbus/core/device.py:103`, поэтому «связь поднята» — это переход после подключения транспорта (для
   готового до `connect` робота — сам `connect_begin`). Стоп раньше этой границы: записи нет, «стоп не подтверждён»
   не ставится, `connect()` False, `probe` не зовётся.
-- **Нет SERVO и DO после стопа.** `_run_on_connect` возвращает bool и проверяет `_sync_cancelled()` перед
-  `client.servo` и каждым `client.do_set`.
+- **Нет SERVO и DO после стопа — по возможности.** `_run_on_connect` возвращает bool и проверяет `_sync_cancelled()`
+  перед `client.servo` и каждым `client.do_set`. Окно «проверка -> запись» остаётся: закрыть его можно только
+  сериализацией с путём стопа — вне T5.3g.
 - **Обычный `disconnect` посреди `connect`** (`_stopping` без `_shutdown`) тоже отказывает `connect_finish` и
   `connect_restore`: `connect()` → False, `is_connected` False. Побочный эффект: в пути тика, если
   `desired_connected` остался True, отказ считается неудачным переподключением (`_note_reconnect_failed()`).
