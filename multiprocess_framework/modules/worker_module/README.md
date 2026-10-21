@@ -283,7 +283,7 @@ self.command_manager.register_command("camera.start", handler, executor="io", ke
 `send_command(<процесс>, "introspect.executors")`) возвращает `ExecutorManager.describe()`:
 `{"executors": {<имя>: {...}}, "unavailable": ["pending_depth", "running_keys"]}`. Созданный: `kind`, `source`
 (`config` / `code`), `serial`, `max_workers`, `max_pending`, `owned` (принят областью), `workers`
-(`{<имя воркера>: {"is_alive", "status"}}`; снятый воркер — `"absent"`). Зарегистрированный: `kind="registered"`,
+(`{<имя воркера>: {"is_alive", "status"}}`; снятый воркер — `"absent"`; при `serial=True` `max_workers` — значение спеки, реальных рабочих 1). Зарегистрированный: `kind="registered"`,
 `source="code"`, `type`. Глубины очереди и ключей в работе нет: у `KeyedExecutor` нет публичного чтения, ядро не правилось
 (`docs/claude/OPEN_QUESTIONS.md`).
 

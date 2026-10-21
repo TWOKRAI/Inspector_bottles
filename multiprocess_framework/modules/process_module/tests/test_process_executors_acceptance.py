@@ -373,3 +373,58 @@ def test_introspect_executors_without_manager_answers_empty() -> None:
     finally:
         done, _, error, _ = call_bounded(proc.shutdown, 20.0)
     assert done and error is None, repr(error)
+
+
+# ---------------------------------------------------------------------------
+# Шов «исполнитель из конфига -> команда по имени» в настоящем процессе
+# ---------------------------------------------------------------------------
+
+
+def test_real_process_command_by_executor_name_runs_on_executor_thread() -> None:
+    """Исполнитель из ``config["executors"]`` назван в ``register_command(executor="io")`` и исполняет команду."""
+    proc = make_process("pw1", {"config": {"executors": {"io": {"serial": True}}}})
+    seen: dict[str, Any] = {}
+    replied = threading.Event()
+
+    def handler(data=None, **kw) -> dict:
+        seen["thread"] = threading.current_thread().name
+        return {"success": True, "v": 3}
+
+    def reply(result: Any) -> None:
+        seen["reply"] = result
+        replied.set()
+
+    try:
+        assert proc.command_manager.register_command("x.cmd", handler, executor="io", key_from="k") is True
+
+        def call() -> Any:
+            return proc.command_manager.handle_command({"command": "x.cmd", "data": {"k": "a"}}, reply=reply)
+
+        done, _, error, _ = call_bounded(call, 10.0)
+        assert done and error is None, repr(error)
+        assert replied.wait(5.0), "reply не вызван"
+        assert seen["reply"] == {"success": True, "v": 3}, seen
+        assert seen["thread"] == "pw1_keyed-io-0", seen
+    finally:
+        done, _, error, _ = call_bounded(proc.shutdown, 20.0)
+    assert done and error is None, repr(error)
+
+
+class ProcessRegisteringByName(ProcessModule):
+    """Наследник называет исполнитель из конфига уже в ``_init_custom_managers``."""
+
+    def _init_custom_managers(self):
+        super()._init_custom_managers()
+        self.by_name_ok = self.command_manager.register_command(
+            "h.cmd", lambda data=None, **kw: {"success": True}, executor="io", targets="all"
+        )
+
+
+def test_heir_registers_command_by_executor_name_during_initialize() -> None:
+    """Исполнители из конфига есть до ``_init_custom_managers`` наследника: регистрация по имени проходит."""
+    proc = make_process("pw2", {"config": {"executors": {"io": {"serial": True}}}}, cls=ProcessRegisteringByName)
+    try:
+        assert proc.by_name_ok is True
+    finally:
+        done, _, error, _ = call_bounded(proc.shutdown, 20.0)
+    assert done and error is None, repr(error)

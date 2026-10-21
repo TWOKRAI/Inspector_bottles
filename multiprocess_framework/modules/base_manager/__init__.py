@@ -14,7 +14,7 @@ from .mixins.observable_mixin import ObservableMixin
 from .configs.base_manager_config import BaseManagerConfig
 from .types import ProcessStatus
 
-# Контракт владения (ADR-BM-008): только дверь и сторож корней.
+# Контракт владения (ADR-BM-008): дверь, сторож корней и правило имени записи (check_scope_name, ниже).
 # Классы Scope/Handle не экспортируются — снаружи аннотация IScope/IHandle.
 from .core.lifetime import _check_name as check_scope_name
 from .core.lifetime import open_scope, unclosed_roots

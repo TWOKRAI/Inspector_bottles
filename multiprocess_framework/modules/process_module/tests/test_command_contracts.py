@@ -76,6 +76,19 @@ class TestUnknownKeyDiagnostics:
         assert check is not None and not check.ok
         assert check.unexpected == ["verbose"]
 
+    def test_introspect_executors_is_no_params_contract(self):
+        """introspect.executors (Task 1.9m) объявлен контрактом без параметров."""
+        from multiprocess_framework.modules.process_module.commands.command_contracts import (
+            BUILTIN_COMMAND_CONTRACTS,
+            NoParams,
+        )
+
+        assert BUILTIN_COMMAND_CONTRACTS["introspect.executors"] is NoParams
+        r = _registry_with_builtins()
+        check = r.validate("introspect.executors", {"command": "introspect.executors", "data": {"x": 1}})
+        assert check is not None and not check.ok
+        assert check.unexpected == ["x"]
+
     def test_valid_payload_is_clean(self):
         r = _registry_with_builtins()
         msg = {"command": "wire.configure", "data": {"wire_key": "a→b", "role": "sender"}}
