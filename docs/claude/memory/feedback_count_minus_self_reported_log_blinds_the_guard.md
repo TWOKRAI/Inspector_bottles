@@ -1,7 +1,7 @@
 ---
 name: feedback-count-minus-self-reported-log-blinds-the-guard
 description: "Критерий «счёт минус строки лога» слепнет к регрессу, если регрессный путь сам пишет ту же строку; строка после охраняемого вызова лжёт о действии соседа / count minus log lines oracle, B1, lease stop"
-module: [device_hub]
+module: [services/device_hub]
 mechanism: [test-assertions, flaky-tests]
 metadata:
   type: feedback

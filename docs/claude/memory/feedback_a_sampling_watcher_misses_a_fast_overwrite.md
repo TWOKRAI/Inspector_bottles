@@ -1,8 +1,8 @@
 ---
 name: feedback-a-sampling-watcher-misses-a-fast-overwrite
 description: "Наблюдатель регистра опросом (1 мс) теряет промежуточную запись, если следующая ложится быстрее шага; assert по выборке нестабилен — считать записи в точке записи (журнал обмена, шов транспорта)"
-module: [device_hub]
-mechanism: [flaky-test, guards]
+module: [services/device_hub]
+mechanism: [flaky-tests, guards]
 metadata:
   type: feedback
 ---

@@ -1,8 +1,8 @@
 ---
 name: feedback_display_rescale_must_not_degrade_the_frame
-description: "Смена вкладки меняет высоту области дисплеев; после возврата статичный кадр (источник по триггеру) хуже качеством — ступеньки, блочность; владелец: так не должно быть, ресайз туда-обратно = исходная картинка"
+description: "Смена вкладки меняет высоту области дисплеев; после возврата статичный кадр (источник по триггеру) хуже качеством — ступеньки, блочность; владелец: так не должно быть, ресайз туда-обратно = исходная картинка / tab switch resize must keep the source frame quality"
 module: [prototype/frontend/widgets]
-mechanism: [display, live-stand]
+mechanism: [qt, live-stand]
 metadata:
   type: feedback
 ---

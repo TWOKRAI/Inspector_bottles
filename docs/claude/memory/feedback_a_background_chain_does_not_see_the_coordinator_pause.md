@@ -1,7 +1,7 @@
 ---
 name: feedback_a_background_chain_does_not_see_the_coordinator_pause
 description: "Фоновая цепочка агента (background chain, nohup script) не видит паузу координатора (coordinator pause): шаг читает machine.lock сам; classify до окна — по machine_gate_timed.txt"
-mechanism: [test-infra, process]
+mechanism: [test-infra, agents]
 metadata:
   type: feedback
 ---
