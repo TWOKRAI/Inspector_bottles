@@ -163,18 +163,18 @@
 - `multiprocess_framework/modules/process_manager_module/tests/test_modeless_collector_check.py` (новый; tester).
 
 **Acceptance criteria.** Все случаи B1–B8, B10, B11 — `check()` дважды: без `infer` и после `infer`; списки ошибок, отфильтрованные по подстроке ` без mode (ключи:`, одинаковые. Фикстуры — как в `test_infer_join_by_port.py:57–119` (свой реестр плагинов, снимать и восстанавливать). Команда приёмки: `pytest multiprocess_framework/modules/process_manager_module/tests/test_modeless_collector_check.py -q`.
-- [ ] **B0.** Существующих тестов, краснеющих от C-22: 0 (стадия 0: проба `check()` + C-22 по DESIGN, радиус плана + `recipes/tests`, 0 срабатываний). Любой красный существующий тест — стоп, вопрос лиду со списком (DESIGN 5).
-- [ ] **B1.** Процесс P, один join-источник (провод только в обязательный вход), typed `collector: {timeout_sec: 0.25}` → ровно одна ошибка C-22; в тексте `'P'`, `collector без mode`, `timeout_sec`, `join-источников: 1`, `mode: fanin`; подстроки `0.25` в тексте нет.
-- [ ] **B2.** Как B1, но секция в `extras` под ключом `collector` (B2a); затем под ключом `inspector` (B2b) → по одной ошибке; в B2b в тексте `inspector без mode`.
-- [ ] **B3.** Два join-источника, `collector: {timeout_sec: 0.25}` → ошибок C-22 нет; после `infer` `P.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame", "timeout_sec": 0.25}`.
-- [ ] **B4.** Один источник: `collector: {mode: fanin, timeout_sec: 0.25}` → нет ошибки; `collector: {mode: join, inputs: [frame], primary: frame}` → нет ошибки C-22.
-- [ ] **B5.** Один источник: без `collector` и с `collector: {}` → нет ошибки.
-- [ ] **B6.** Ноль источников (процесс без входящих проводов), `collector: {timeout_sec: 0.25}` → одна ошибка (после фильтра по преамбуле), `join-источников: 0`.
-- [ ] **B7.** Один источник: `collector: {mode: None, timeout_sec: 1}` и `{mode: "", timeout_sec: 1}` → по одной ошибке (как mode-less).
-- [ ] **B8.** Три процесса с joiner-плагином, у каждого ровно один join-источник: A — typed `collector: {timeout_sec: 0.25}`, B — typed `{mode: fanin, timeout_sec: 0.25}`, C — без секции → ровно одна ошибка C-22; в ней `'A'`, нет `'B'` и `'C'`.
-- [ ] **B9.** Все собираемые рецепты `multiprocess_prototype/recipes/*.yaml` (22 yaml минус `robot_demo`, C-18 = 21 на `ce9589882`) собираются, как на main: `multiprocess_prototype/backend/tests` зелёный, `git diff --stat` по `snapshots/` пуст.
-- [ ] **B10.** Typed `collector: {timeout_sec: 0.25}` + `metadata: {collector: {mode: join}}`, один источник → до и после infer ровно одна ошибка с `metadata.collector.mode=join` и ровно одна с ` без mode (ключи:`.
-- [ ] **B11.** `extras.collector = {1: "a", "x": 2}`, один источник → `check()` не бросает, ровно одна ошибка C-22 с `ключи: 1, x`.
+- [x] **B0.** Существующих тестов, краснеющих от C-22: 0 (стадия 0: проба `check()` + C-22 по DESIGN, радиус плана + `recipes/tests`, 0 срабатываний). Любой красный существующий тест — стоп, вопрос лиду со списком (DESIGN 5).
+- [x] **B1.** Процесс P, один join-источник (провод только в обязательный вход), typed `collector: {timeout_sec: 0.25}` → ровно одна ошибка C-22; в тексте `'P'`, `collector без mode`, `timeout_sec`, `join-источников: 1`, `mode: fanin`; подстроки `0.25` в тексте нет.
+- [x] **B2.** Как B1, но секция в `extras` под ключом `collector` (B2a); затем под ключом `inspector` (B2b) → по одной ошибке; в B2b в тексте `inspector без mode`.
+- [x] **B3.** Два join-источника, `collector: {timeout_sec: 0.25}` → ошибок C-22 нет; после `infer` `P.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame", "timeout_sec": 0.25}`.
+- [x] **B4.** Один источник: `collector: {mode: fanin, timeout_sec: 0.25}` → нет ошибки; `collector: {mode: join, inputs: [frame], primary: frame}` → нет ошибки C-22.
+- [x] **B5.** Один источник: без `collector` и с `collector: {}` → нет ошибки.
+- [x] **B6.** Ноль источников (процесс без входящих проводов), `collector: {timeout_sec: 0.25}` → одна ошибка (после фильтра по преамбуле), `join-источников: 0`.
+- [x] **B7.** Один источник: `collector: {mode: None, timeout_sec: 1}` и `{mode: "", timeout_sec: 1}` → по одной ошибке (как mode-less).
+- [x] **B8.** Три процесса с joiner-плагином, у каждого ровно один join-источник: A — typed `collector: {timeout_sec: 0.25}`, B — typed `{mode: fanin, timeout_sec: 0.25}`, C — без секции → ровно одна ошибка C-22; в ней `'A'`, нет `'B'` и `'C'`.
+- [x] **B9.** Все собираемые рецепты `multiprocess_prototype/recipes/*.yaml` (22 yaml минус `robot_demo`, C-18 = 21 на `ce9589882`) собираются, как на main: `multiprocess_prototype/backend/tests` зелёный, `git diff --stat` по `snapshots/` пуст.
+- [x] **B10.** Typed `collector: {timeout_sec: 0.25}` + `metadata: {collector: {mode: join}}`, один источник → до и после infer ровно одна ошибка с `metadata.collector.mode=join` и ровно одна с ` без mode (ключи:`.
+- [x] **B11.** `extras.collector = {1: "a", "x": 2}`, один источник → `check()` не бросает, ровно одна ошибка C-22 с `ключи: 1, x`.
 
 **REDS до правки src** (tester вслепую, worktree на коммите плана): B1, B2, B6, B7, B8, B10, B11 красные; B3, B4, B5, B9 зелёные.
 
