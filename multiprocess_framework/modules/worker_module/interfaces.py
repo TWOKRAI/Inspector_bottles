@@ -106,6 +106,8 @@ class IExecutorManager(IExecutorRegistry, Protocol):
         """Готовый объект по имени. Менеджер им НЕ владеет: не зовёт ``request_stop`` / ``join_until``.
 
         Pre: имя как у ``create``; у ``executor`` есть вызываемый ``submit``.
+        После закрытия менеджера ``register`` работает как раньше (запись принимается, ``RuntimeError`` нет):
+        владения нет, закрывать нечего; ``create`` же после закрытия — ``RuntimeError``.
         Raises:
             TypeError: нет ``submit``.
             ValueError: имя занято.
