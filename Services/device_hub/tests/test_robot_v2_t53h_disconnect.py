@@ -607,3 +607,63 @@ def test_h12_link_up_between_disconnect_sections_one_soft(monkeypatch: pytest.Mo
         probe_release.set()
     observed = {"soft": obs["soft_during_stop"], "connect": obs["connect"], "t1_in_probe": box.get("t1_in_probe")}
     assert observed == {"soft": 1, "connect": False, "t1_in_probe": True}, f"H12: {observed}; {obs}"
+
+
+# --------------------------------------------------------------------------------------------------
+# H19 — остаток ADR-DH-011: request_stop целиком после решения D3 (до D6) даёт второй SOFT
+# --------------------------------------------------------------------------------------------------
+
+
+def test_h19_request_stop_after_d3_decision_second_soft_residue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Фиксирует ИМЕНОВАННЫЙ ОСТАТОК, а не желаемое свойство: T1 в probe (связь поднята), T2 прошёл D3 (1 SOFT),
+    T3 целиком ``request_stop`` на входе D4 (до D6). ``request_stop_begin`` открывает новое поколение защёлки
+    (ADR-DH-009), снимок монотонен, а ``link_up()`` True до D6 -> второй SOFT, как у подключённого робота на main.
+    ``connect`` False, ``is_connected`` False, сокет закрыт хвостом ``disconnect``. 1 SOFT при любом порядке — отдельная
+    задача и решение владельца."""
+    drv, client = _make_driver()
+    barrier = _Barrier()
+    client.on_probe = barrier.pause_if_t1
+    box: dict[str, Any] = {}
+    t2_name = "t53g-H19-T2"
+    original = RobotState.threads_to_close
+
+    def threads_to_close(self: RobotState) -> Any:
+        if threading.current_thread().name == t2_name and "t3_done" not in box:
+
+            def body() -> None:
+                try:
+                    drv.request_stop(deadline=time.monotonic() + _STOP_DEADLINE_S)
+                except BaseException as exc:  # noqa: BLE001 — наблюдение: попадёт в отчёт
+                    box["t3_err"] = repr(exc)
+
+            t3 = threading.Thread(target=body, name="t53h-H19-T3", daemon=True)
+            t3.start()
+            t3.join(_JOIN_S)
+            box["t3_done"] = not t3.is_alive()
+        return original(self)
+
+    monkeypatch.setattr(RobotState, "threads_to_close", threads_to_close)
+    result: dict[str, Any] = {}
+
+    def t1_body() -> None:
+        result["connect"] = drv.connect()
+
+    t1 = threading.Thread(target=t1_body, name="t53h-H19-T1", daemon=True)
+    barrier.t1 = t1
+    try:
+        t1.start()
+        assert barrier.entered.wait(_ENTER_S), "H19: окно недостижимо — T1 не дошёл до probe"
+        soft_before = client.soft_count()
+        _bounded(drv.disconnect, _HANG_S, "H19-T2")
+        soft = client.soft_count() - soft_before
+        barrier.release.set()
+        t1.join(_JOIN_S)
+        assert not t1.is_alive(), "H19: connect() не вернулся после release"
+        observed = {"soft": soft, "connect": result.get("connect"), "is_connected": drv.is_connected}
+        assert box.get("t3_done") is True and "t3_err" not in box, f"H19: T3 не отработал: {box}"
+        assert observed == {"soft": 2, "connect": False, "is_connected": False}, f"H19: {observed}; {box}"
+        assert client.transport.is_connected is False, "H19: сокет не закрыт хвостом disconnect"
+    finally:
+        barrier.release.set()
+        monkeypatch.undo()
+        _teardown(drv)

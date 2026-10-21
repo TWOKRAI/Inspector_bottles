@@ -949,6 +949,7 @@ def test_s9_snapshot_reset_by_connect_and_taken_before_stopping() -> None:
     st.disconnect_stop_plan(1, link_up=_lu)
     st.connect_end()
     assert st.connect_begin() == ("go", False)
+    assert st.disconnect_owns_close() is False  # _stopping снят connect_begin: терм _stopping признака
     st.disconnect_stop_plan(1, link_up=_lu)
     assert st.disconnect_soft_plan(lambda: False, lambda: True) is False
     assert st.disconnect_owns_close() is False
