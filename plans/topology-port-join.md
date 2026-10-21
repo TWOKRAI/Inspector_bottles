@@ -1,6 +1,6 @@
-# topology-port-join — вход плагина объявляет участие в join отдельно от optional (C-16 + C-17)
+# topology-port-join — вход плагина объявляет участие в join отдельно от optional (C-16 + C-17 + C-22)
 
-**Статус:** активный · **Ветка:** `fix/c16-collector` · **Полоса:** Д (inspector-bottles-66)
+**Статус:** активный · **Ветка:** `fix/c16-collector` (C16.1, влита `09a925a4b`), `fix/c22-collector-modeless` (C22.1) · **Полоса:** Д (inspector-bottles-66)
 **Источник:** реестр `plans/queue/defects.md`, строки C-16 и C-17; расследование `docs/reports/2026-10-21_defects_C-16.md`.
 **Стадия 0:** reviewer (Opus), 2 итерации — 13 + 5 + 4 правки внесены дословно, стадия закрыта (2026-10-21).
 
@@ -118,4 +118,83 @@
 
 **Перед слиянием:** framework suite (heavy, окно у координатора), `scripts/validate.py`, радиус выше; ревью ветки на Opus.
 
-**Открыто (для владельца, не в этой задаче):** `collector: {timeout_sec}` без `mode` у процесса, где join не вывелся (например, удалили провод), молча даёт fanin с таймаутом.
+**Открыто (для владельца, не в этой задаче):** `collector: {timeout_sec}` без `mode` у процесса, где join не вывелся (например, удалили провод), молча даёт fanin с таймаутом. → **Решено владельцем, Task C22.1 ниже.**
+
+---
+
+## Фаза C-22 — `collector` без `mode` при невыведенном join (2026-10-21)
+
+**Источник:** `plans/queue/defects.md`, строка C-22; handoff `docs/handoffs/2026-10-21_lane-D-C16-C13.md`.
+**Стадия 0:** reviewer (Sonnet), итерации 1–2 — 15 правок внесены дословно, APPROVED (2026-10-21).
+
+**Решение владельца (2026-10-21, ~11:50, «да» на формулировку):** `collector` без `mode` = тонкая настройка выведенного join; join не выведен — ошибка `check()` с подсказкой; настройка fanin — только с явным `mode: fanin`. «Не забываем что рецепты у нас универсальная вещь» → правило во framework, действует для рецептов любого приложения.
+
+**Граница (координатор inspector-bottles-7f, 2026-10-21):** `multiprocess_framework/modules/process_manager_module/topology/blueprint.py`; раздел ADR-PMM-017 в `process_manager_module/DECISIONS.md`; `multiprocess_framework/modules/process_module/tests/test_blueprint_wire_collector.py`; новые тесты (Files). Рецепты — только если стадия 0 скажет, и сначала вопрос координатору (стадия 0: рецепты не нужны). Полоса Ф (1.9m) правит `process_module/{process_module.py, core/process_managers.py, types.py, process_launch_config.py}` и `builtin_commands.py` — не трогать. `multiprocess_prototype/backend/tests/test_recipes_join_contract.py` правит Р2 — не трогать.
+
+### Task C22.1 — громкая ошибка `check()` для `collector` без `mode` при невыведенном join
+
+**Level:** Middle (Sonnet) — правка ограничена, по образцу C-17
+**Assignee:** developer (Sonnet); стадия 0 — reviewer (Sonnet)
+**Goal:** рецепт, где `collector` без `mode` стоит у процесса без выведенного join, не проходит `check()`; тонкая настройка больше не теряется молча.
+**Module contract:** не требуется — нового публичного модуля и интерфейса нет; приватные `_explicit_collector` и `_modeless_collector_errors`; изменение поведения `check()` фиксирует ADR-PMM-017 п.8.
+
+**DESIGN:**
+1. **Общий helper явной секции.** `_explicit_collector(proc) -> tuple[str, dict]` (модульная функция рядом с `_legacy_metadata_section`, `blueprint.py:1063`): `(ключ, секция)`; ключ — `collector` (typed `proc.collector` или `extras.collector`) либо `inspector` (`extras.inspector`); порядок `proc.collector or extras.collector or extras.inspector`; секции нет или она не dict — `("", {})`. Обе точки (`infer` `:542–548`, `_metadata_join_errors` `:939–945`) перевести на helper; переменную `extras_bag` в `infer` оставить — она нужна в `:591` (`shadow_keys`). Process-level `inspector:` из рецепта к проверке уже typed `collector` (`_accept_legacy_collector_key`, `:241–246`; проверено: `ProcessConfig(inspector={'timeout_sec': 0.25}).collector == {'timeout_sec': 0.25}`, extras пуст), поэтому в тексте будет `collector`; `inspector` в тексте — только из `extras.inspector`.
+2. **Новая проверка `_modeless_collector_errors(self) -> list[str]`**, вызов в `check()` сразу после `_metadata_join_errors()`.
+   - `joining = self._joining_sources()` — один раз на вызов.
+   - Для каждого процесса: `key, explicit = _explicit_collector(proc)`. Ошибка, если `explicit` непуст, `explicit.get("mode")` ложно (нет ключа, `None`, `""` — так же, как escape-hatch в `infer`), и `len(joining.get(proc.process_name, {})) < 2`.
+   - Результат не зависит от `infer`: `infer` меняет секцию только при ≥ 2 источниках (тогда ставит `mode: join` → ошибки нет и до, и после); при < 2 секцию не трогает.
+   - Проверка живёт в `check()`, не в `check_structure()`: тот намеренно не зависит от PluginRegistry (`blueprint.py:743–771`), а `_joining_sources` зависит.
+   - Одна ошибка на процесс. Если у процесса сработал и C-17, обе ошибки остаются: они называют разные поля рецепта.
+   - Текст (ключ — из helper; ключи секции — `sorted(str(k) for k in секция)`, через `, `; значений нет):
+     `Процесс '<имя>': <ключ> без mode (ключи: <k1, k2>) — тонкая настройка выведенного join, но join не выведен (join-источников: <n>, нужно ≥ 2). Штатно: вход, участвующий в join, объявляет Port(join=True) и подключён проводом; настройка fanin — <ключ>: {mode: fanin, …}; иначе удали <ключ>`.
+   - Подсказку C-17 (`blueprint.py:953–954`) согласовать: конец строки заменить на `тонкая настройка — collector: {{timeout_sec: …}} без mode (только при ≥ 2 join-источниках, иначе C-22)`. Этот текст ни один тест не проверяет (`git grep -F "тонкая настройка — collector"` → только `blueprint.py:954`).
+3. **Docstring и FieldMeta.** Docstring `check()` (`:799–802`, сейчас пункты 1–4) — добавить пункты: «5. `metadata.<ключ>.mode=join` при невыведенном join — ошибка (C-17); 6. `collector` без mode при невыведенном join — ошибка (C-22)». Docstring `infer_missing_collectors`, абзац о явной секции (`:522–523`) — фраза: «Явный `collector` без `mode` — тонкая настройка: при ≥ 2 join-источниках применяется, при меньшем числе `check()` даёт ошибку (C-22).» FieldMeta `ProcessConfig.collector` (`:169–176`) — одна фраза о правиле.
+4. **ADR-PMM-017, п.8** (дата 2026-10-21, Refs этот план): правило владельца дословно; эффективный режим — тот же, что в п.7; `metadata` без `mode` (deprecated) правило НЕ задевает. Ссылка из п.7 на п.8 — одна строка.
+   - П.8 прямо называет частичную отмену отклонённой альтернативы «ошибка валидации вместо тихой деградации» для случая mode-less `collector` при < 2 join-источниках (по образцу п.7). Ссылка из этой альтернативы на п.8 — одна строка.
+   - В строку `**Refs:**` ADR добавить `plans/topology-port-join.md (п.8: C-22)`.
+   - В «Последствиях» п.8 — одна строка: рецепт вне репозитория с mode-less настройкой fanin при < 2 источниках перестаёт собираться; лечение — `mode: fanin` (подсказка в тексте ошибки).
+   - Затем `python -m scripts.sync`.
+5. **`test_blueprint_wire_collector.py`** — не менять, если ни один его тест не краснеет (стадия 0: `check()` там зовётся только в тесте C-17 без явного collector, `:653/:655`). Краснеет — стоп, вопрос лиду со списком тестов (полоса Ф держит остальную часть файла).
+
+**Files:**
+- `multiprocess_framework/modules/process_manager_module/topology/blueprint.py`;
+- `multiprocess_framework/modules/process_manager_module/DECISIONS.md` (только ADR-PMM-017) + выход `scripts.sync`;
+- `multiprocess_framework/modules/process_manager_module/tests/test_modeless_collector_check.py` (новый; tester).
+
+**Acceptance criteria.** Все случаи B1–B8, B10, B11 — `check()` дважды: без `infer` и после `infer`; списки ошибок, отфильтрованные по подстроке ` без mode (ключи:`, одинаковые. Фикстуры — как в `test_infer_join_by_port.py:57–119` (свой реестр плагинов, снимать и восстанавливать). Команда приёмки: `pytest multiprocess_framework/modules/process_manager_module/tests/test_modeless_collector_check.py -q`.
+- [ ] **B0.** Существующих тестов, краснеющих от C-22: 0 (стадия 0: проба `check()` + C-22 по DESIGN, радиус плана + `recipes/tests`, 0 срабатываний). Любой красный существующий тест — стоп, вопрос лиду со списком (DESIGN 5).
+- [ ] **B1.** Процесс P, один join-источник (провод только в обязательный вход), typed `collector: {timeout_sec: 0.25}` → ровно одна ошибка C-22; в тексте `'P'`, `collector без mode`, `timeout_sec`, `join-источников: 1`, `mode: fanin`; подстроки `0.25` в тексте нет.
+- [ ] **B2.** Как B1, но секция в `extras` под ключом `collector` (B2a); затем под ключом `inspector` (B2b) → по одной ошибке; в B2b в тексте `inspector без mode`.
+- [ ] **B3.** Два join-источника, `collector: {timeout_sec: 0.25}` → ошибок C-22 нет; после `infer` `P.collector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame", "timeout_sec": 0.25}`.
+- [ ] **B4.** Один источник: `collector: {mode: fanin, timeout_sec: 0.25}` → нет ошибки; `collector: {mode: join, inputs: [frame], primary: frame}` → нет ошибки C-22.
+- [ ] **B5.** Один источник: без `collector` и с `collector: {}` → нет ошибки.
+- [ ] **B6.** Ноль источников (процесс без входящих проводов), `collector: {timeout_sec: 0.25}` → одна ошибка (после фильтра по преамбуле), `join-источников: 0`.
+- [ ] **B7.** Один источник: `collector: {mode: None, timeout_sec: 1}` и `{mode: "", timeout_sec: 1}` → по одной ошибке (как mode-less).
+- [ ] **B8.** Три процесса с joiner-плагином, у каждого ровно один join-источник: A — typed `collector: {timeout_sec: 0.25}`, B — typed `{mode: fanin, timeout_sec: 0.25}`, C — без секции → ровно одна ошибка C-22; в ней `'A'`, нет `'B'` и `'C'`.
+- [ ] **B9.** Все собираемые рецепты `multiprocess_prototype/recipes/*.yaml` (22 yaml минус `robot_demo`, C-18 = 21 на `ce9589882`) собираются, как на main: `multiprocess_prototype/backend/tests` зелёный, `git diff --stat` по `snapshots/` пуст.
+- [ ] **B10.** Typed `collector: {timeout_sec: 0.25}` + `metadata: {collector: {mode: join}}`, один источник → до и после infer ровно одна ошибка с `metadata.collector.mode=join` и ровно одна с ` без mode (ключи:`.
+- [ ] **B11.** `extras.collector = {1: "a", "x": 2}`, один источник → `check()` не бросает, ровно одна ошибка C-22 с `ключи: 1, x`.
+
+**REDS до правки src** (tester вслепую, worktree на коммите плана): B1, B2, B6, B7, B8, B10, B11 красные; B3, B4, B5, B9 зелёные.
+
+**Break-injection лида (после реализации), предсказания:**
+- I1: убрать вызов `_modeless_collector_errors()` из `check()` → красные B1, B2, B6, B7, B8, B10, B11;
+- I2: в проверке читать `proc.collector.get("mode") != "join"` вместо `_joining_sources()` → красная половина «без infer» в B3;
+- I3: `"mode" in explicit` вместо `explicit.get("mode")` → красный B7 (оба варианта);
+- I4: только typed `proc.collector` (без `extras`) → красные B2, B11; B8 зелёный (A — typed);
+- I5: порог `< 1` вместо `< 2` → красные B1, B2, B7, B8, B10, B11; B6 зелёный;
+- I6: ключ в тексте захардкожен `collector` → красный B2b;
+- I7: убрать guard непустоты секции → красные B5 и B8 (и B1–B4, B6, B7, B10, B11 по счётчику ошибок: процессы-источники без секции получают ошибку).
+
+**Handoff:** reviewer стадии 0 (Sonnet) → tester (REDS вслепую) → developer → лид (инъекции) → reviewer (Sonnet).
+**Gate:** pytest радиуса + `sentrux check .` + `scripts/validate.py`.
+**Радиус pytest:** `process_manager_module/tests`, `process_module/tests/test_blueprint_wire_collector.py`, `process_module/tests/test_blueprint_extras.py`, `multiprocess_prototype/backend/tests`, `multiprocess_prototype/backend/topology/tests`, `multiprocess_prototype/backend/assembly/tests`, `multiprocess_prototype/recipes/tests`, `Plugins/_shared/fanin/tests`. `recipes/tests/test_letter_robot_sim_diff.py::test_sim_recipe_differs_only_in_camera_block` красный на main `ce9589882` до C-22 (реестр C-24), не регрессия.
+
+**Out of scope:** порог `≥ 2`, теги и вывод join (ADR-PMM-017 п.3–6); `metadata.collector/inspector` без `mode` (deprecated, уже предупреждение — вопрос владельцу в «Открыто»); `collector_registry.py`, `Plugins/_shared/fanin/**`; рецепты; GUI-сохранение.
+
+**Перед слиянием:** rebase на main, `validate.py` + `multiprocess_prototype/backend/tests` + framework suite (heavy, окно у координатора).
+
+**Открыто (для владельца):**
+- `metadata.collector/inspector` без `mode` у процесса без join тоже молча теряется (путь deprecated, в лог — предупреждение). Делать ли его ошибкой — не решено.
+- GUI-сохранение идёт через `validate_recipe_blueprint` → `check_structure()` (`recipes/save.py:149–180`), поэтому рецепт с нарушением C-22 сохранится и откажет только при сборке (`assembler.py:135`, `builder.py:249`). Обратная сторона пункта Out of scope «GUI-сохранение».
