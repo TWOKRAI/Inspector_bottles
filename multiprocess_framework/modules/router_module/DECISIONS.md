@@ -430,3 +430,23 @@ correlation-id ещё ждёт, `_resolve_pending` вызывается сраз
 **Reversible:** yes (удалить `pump_inbound` и охрану в `_poll_all_channels`; потребитель — `ProcessManagerProcess._stop_wait_idle`).
 **Refs:** `plans/lifecycle-stop-ownership.md` (Task 1.8), ADR-PMM-037, `tests/test_pump_inbound_acceptance.py`,
 `tests/test_pump_inbound_hazards.py`.
+
+## ADR-RTR-015: `reply` передаётся только команде с исполнителем (Task 1.9a)
+
+**Статус:** accepted (2026-10-21, Task 1.9a плана `lifecycle-stop-ownership`).
+
+**Контекст.** `CommandManager` отдаёт команду с исполнителем на чужой поток (ADR-CMD-006); ответ инициатору должен
+уйти ровно один раз — после исполнения, а не авто-ответом приёмного потока.
+
+**Решение.** Правка только в `RouterManager._dispatch_command`: если в `metadata` команды (уже прочитанной `info`) есть
+`executor`, роутер зовёт `cm.handle_command(processed, reply=reply)`, где `reply(r)` = `reply_to_request(processed, r,
+success=_result_is_success(r))` (тот же конверт, что у авто-ответа); результат `DEFERRED` → выход до авто-ответа.
+Иначе — прежний вызов `cm.handle_command(processed)`: подделки CM и `BaseCommandManager` без правок. Запасного пути
+`except TypeError` нет: `TypeError` изнутри обработчика исполнил бы его дважды. `DEFERRED` импортируется внутри ветки
+исполнителя (локальный импорт): правка не выходит за `_dispatch_command`, роутер без таких команд за импорт не платит.
+
+**Следствия.** Middleware приёма идёт до развилки (`_route_by_kind` → `_dispatch_command`): `receive_time` — это
+«снятие трубки», а не конец исполнения отложенной команды. Отказ исполнителя (`system_stopping` / `executor_busy`) и
+`key_missing` приходят инициатору одним ответом с `success=False`.
+
+**Reversible:** yes. **Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9a.md` (D4), ADR-CMD-006, ADR-WRK-005.

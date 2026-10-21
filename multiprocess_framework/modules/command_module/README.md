@@ -87,9 +87,27 @@ manager.shutdown()
 
 | Метод | Описание |
 |-------|----------|
-| `handle_command(message)` | Найти и вызвать обработчик. Вернуть результат или `{"status": "error", ...}`. |
+| `handle_command(message, *, reply=None)` | Найти и вызвать обработчик. Вернуть результат или `{"status": "error", ...}`. `reply` — только для команды с исполнителем (ниже). |
 
 **Обработка ошибок:** исключения внутри обработчика перехватываются `Dispatcher` → возвращается `{"status": "error", "reason": "..."}`.
+
+### Команды с исполнителем (Task 1.9a, ADR-CMD-006)
+
+`register_command(..., executor=None, key_from=None, targets=None)` — новые необязательные аргументы; умолчания
+прежние, команда без них синхронна, как всегда.
+
+- `executor` — `OrderedExecutor` (`worker_module`, например `KeyedExecutor`); с ним задаётся ровно одно из
+  `key_from="<поле data>"` (ключ `frozenset({data[поле]})`) или `targets="all"` (ключ `None` — «все ключи»).
+- Регистрация отклоняется (`False` + WARNING): `executor` не ровно с одним из `key_from`/`targets`; `targets` вне
+  `{None, "all"}`; `key_from`/`targets` без `executor`; `executor` при `metadata.manages_own_reply`.
+- Объект исполнителя хранится вне `metadata`; в `metadata` — только строки `executor` (имя), `key_from`, `targets`.
+- `handle_command(msg, reply=r)` для такой команды → `DEFERRED` (экспорт `command_module`), результат придёт в `r`
+  ровно один раз с потока исполнителя (или отказ `system_stopping` / `executor_busy`).
+- Без `reply` (консоль, тесты, вложенные вызовы) → исполнение на месте + один WARNING на имя «исполнено вне очереди
+  ключа». `DEFERRED` без `reply` не возвращается никогда.
+- Поля ключа нет / не непустая `str` → возврат `{"success": False, "error": "key_missing", "command": <имя>}` +
+  WARNING без значения поля; обработчик и `reply` не вызываются.
+- Роутер передаёт `reply` только командам с `metadata.executor` (ADR-RTR-015). `overwrite_command` снимает исполнителя.
 
 ### Запросы
 

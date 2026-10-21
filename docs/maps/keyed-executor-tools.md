@@ -7,6 +7,8 @@
 [`lifecycle-stop-ownership`](../../plans/lifecycle-stop-ownership.md), Task
 [1.9a](../../plans/lifecycle-stop-ownership/tasks/T1.9a.md) и [1.9b](../../plans/lifecycle-stop-ownership/tasks/T1.9b.md).
 
+**Ядро — `worker_module/keyed_executor.py`** (Task 1.9a, 2026-10-21; контракт — протокол `OrderedExecutor` в `worker_module/interfaces.py`, ADR-WRK-005).
+
 Первые пять колонок перенесены из таблицы CTO дословно. «Проверено» — менеджер сверил каждую ссылку `file:line` с деревом
 `37235a122` (код совпадает с `a5485097a`): по каждому номеру строки выведена сама строка (`sed -n`). Пути даны от
 `multiprocess_framework/modules/`.

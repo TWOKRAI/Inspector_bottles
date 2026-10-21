@@ -5,7 +5,7 @@ Command Module (Refactored) - Модуль управления командам
 """
 
 from .core.base_command_manager import BaseCommandManager
-from .core.command_manager import CommandManager
+from .core.command_manager import DEFERRED, CommandManager
 from .adapters.command_adapter import CommandAdapter
 from .interfaces import ICommandManager
 from .configs.command_manager_config import CommandManagerConfig
@@ -13,6 +13,8 @@ from .configs.command_manager_config import CommandManagerConfig
 __all__ = [
     # Основной менеджер
     "CommandManager",
+    # Сентинел отложенного ответа (Task 1.9a, ADR-CMD-006)
+    "DEFERRED",
     # Адаптер для процессов
     "CommandAdapter",
     # Интерфейсы
@@ -21,4 +23,3 @@ __all__ = [
     "BaseCommandManager",
     "CommandManagerConfig",
 ]
-

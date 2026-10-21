@@ -1353,11 +1353,31 @@ class RouterManager(ChannelRoutingManager):
         # CommandManager — владелец команд: исполняет (или возвращает error для
         # неизвестной команды). info нужен только для решения про авто-reply.
         info = cm.get_command_info(cmd_name) if cmd_name else None
+        # ADR-RTR-015 (Task 1.9a): reply передаётся ТОЛЬКО команде с исполнителем
+        # (metadata.executor) — подделки CM и BaseCommandManager зовутся по-старому.
+        # Запасного пути через except TypeError нет: TypeError изнутри обработчика исполнил бы его дважды.
+        deferred = bool(info and (info.get("metadata") or {}).get("executor"))
         try:
-            result = cm.handle_command(processed)
+            if deferred:
+
+                def reply(r: Any) -> None:
+                    try:
+                        self.reply_to_request(processed, r, success=_result_is_success(r))
+                    except Exception as exc:
+                        self._log_warning(f"reply_to_request '{cmd_name}': {exc}")
+
+                result = cm.handle_command(processed, reply=reply)
+            else:
+                result = cm.handle_command(processed)
         except Exception as exc:
             self._log_warning(f"command '{cmd_name}' handler error: {exc}")
             result = {"status": "error", "reason": str(exc)}
+
+        if deferred:
+            from ...command_module import DEFERRED
+
+            if result is DEFERRED:
+                return  # ответ уйдёт через reply ровно один раз — авто-ответа нет
 
         if not (info and (info.get("metadata") or {}).get("manages_own_reply")):
             try:
