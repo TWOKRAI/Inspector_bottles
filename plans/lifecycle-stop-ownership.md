@@ -20,7 +20,7 @@
   примитив `KeyedExecutor` и развилка в `CommandManager`, **1.9b** — PM первый потребитель); малые задачи рядом — **Task 1.10**
   (честный итог стопа `outcome`) и **Task 1.11** (окно стопа на ребёнка). Полоса Ф (сессия inspector-bottles-07). План
   закрытия окна GUI — отдельный, `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент; здесь только
-  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9b IN PROGRESS 2026-10-21 (шаг 0 → стадия 0); 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
+  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9b IN PROGRESS 2026-10-21 (стадия 0 р.1 CHANGES REQUESTED, правки внесены, ждёт р.2); 1.9c DRAFT 2026-10-21 — выделена из 1.9b стадией 0; 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
 
 ## Зачем — одной фразой
 
@@ -472,7 +472,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 - **Ловушка:** `2026-10-18_camera-device-service` Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`
   (Task 1.11 — тоже). Один писатель: перед стартом 1.11 координатор сверяет, начата ли их 1.7; если да — 1.11 ждёт её
   слияния или берёт `spawner.py` после неё. То же для `process_manager_process.py` и плана `gui-graceful-close`.
-- **Порядок и зависимости:** 1.9a → 1.9b → 1.10 → 1.11 → (полоса Services) сведение `ServiceHost._cmd_start` к
+- **Порядок и зависимости:** 1.9a → 1.9b → 1.10 → 1.11 → 1.9c → (полоса Services) сведение `ServiceHost._cmd_start` к
   `KeyedExecutor` (дубль №2 карты). 1.9b, 1.10, 1.11 — общие `process_manager_process.py`, `child_process_stop.py`,
   `process_registry.py`, параллельно не идут; 1.9a поведения PM не меняет. Правка корня PM из `gui-graceful-close` — после слияния 1.9b; с 1.10/1.11
   в одной волне не идёт (общий файл), очередь решает координатор. T4.x не ждёт ни одной из трёх (CTO D4).
@@ -495,10 +495,20 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 ### Task 1.9b — PM первый потребитель: стоп вне `message_processor`, отложенный ответ (конечное состояние L-9)
 
 **Статус:** DRAFT 2026-10-20 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
-**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — обёртка над исполнителем.
+**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — Task 1.9c.
 **Зависит от:** Task 1.9a; потребитель — план `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`)
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9b.md`](lifecycle-stop-ownership/tasks/T1.9b.md)
 **Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции, стенд) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.9c — `_run_when_child_ready` поверх `KeyedExecutor` (выделена из 1.9b стадией 0)
+
+**Статус:** DRAFT 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** ядро `_run_when_child_ready` — `KeyedExecutor` вместо daemon-потока на адресата (дубль №1 карты); семантика ADR-PMM-024 прежняя; стоп PM не ждёт ждущие действия гейта.
+**Зависит от:** Task 1.9b, Task 1.11. Причина выделения: D5 ломал тесты ADR-PMM-024 «без правок» и добавлял hazard `_WorkersStop` (стадия 0 1.9b, п.2–5).
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9c.md`](lifecycle-stop-ownership/tasks/T1.9c.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции) → `reviewer`
 **Files:** — раздел «Files» файла задачи
 **Acceptance:** — раздел «Acceptance» файла задачи
 
