@@ -247,3 +247,52 @@ def test_a6_split_worker_threads_are_scope_owned(monkeypatch):
     # reachability: каждый метод жизненного цикла реально вызван (фаза A: open/start, фаза B: кадры/stop/close)
     assert all(seen[m] for m in LIFECYCLE_METHODS), seen
     assert {m: [n for n in names if "/" not in n] for m, names in seen.items()} == {m: [] for m in LIFECYCLE_METHODS}
+
+
+# --------------------------------------------------------------------------
+# H. Гарантии правки, которые слепые тесты не держали (hazard-тесты автора)
+# --------------------------------------------------------------------------
+
+PROBE_ROOT = "code_reader.thread_split_probe"
+
+
+class _CaptureDied(BaseException):
+    """Не ``Exception``: ``timed()`` её не глотает, поэтому поток захвата падает до своего возврата узлов."""
+
+
+def test_h1_probe_scope_is_closed_after_main_returns(monkeypatch):
+    from multiprocess_framework.modules.base_manager import unclosed_roots
+
+    seen_during: list[str] = []
+    original_start = FakeNodeApi.start_grabbing
+
+    def start_grabbing(self, h):
+        seen_during.extend(r["path"] for r in unclosed_roots())
+        return original_start(self, h)
+
+    monkeypatch.setattr(FakeNodeApi, "start_grabbing", start_grabbing)
+    run = run_probe(monkeypatch, ["--mode", "split", "--seconds", "0.2"])
+    assert run.rc == 0, run.output[-3000:]
+    # reachability: во время прогона корень области существовал (иначе отсутствие после него ничего не доказывает)
+    assert PROBE_ROOT in seen_during, seen_during
+    assert [r["path"] for r in unclosed_roots() if r["path"] == PROBE_ROOT] == []
+
+
+def test_h2_fallback_restore_when_capture_thread_dies_before_restore(monkeypatch):
+    original_stop = FakeNodeApi.stop_grabbing
+    state = {"died": False}
+
+    def stop_grabbing(self, h):
+        if not state["died"]:
+            state["died"] = True
+            raise _CaptureDied("поток захвата погиб до собственного возврата узлов")
+        return original_stop(self, h)
+
+    monkeypatch.setattr(FakeNodeApi, "stop_grabbing", stop_grabbing)
+    run = run_probe(monkeypatch, ["--mode", "split", "--seconds", "0.2"])
+    # reachability: сбой реально случился в потоке захвата, до его возврата узлов
+    assert state["died"] is True
+    assert "ОШИБКА в потоке B-capture" in run.output, run.output[-3000:]
+    assert run.rc == 1, (run.rc, run.exc)
+    # аварийный возврат в главном потоке: запись 3 узла, затем возврат в обратном порядке и close
+    _assert_restored_and_closed(run)
