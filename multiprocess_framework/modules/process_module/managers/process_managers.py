@@ -33,9 +33,9 @@ class ProcessManagers:
         """Создать все менеджеры процесса и вернуть bundle.
 
         Порядок создания менеджеров определён зависимостями:
-        worker → logger → error → router(нужен logger) →
+        worker → logger → executors(нужны worker, logger) → error → router(нужен logger) →
         stats(нужен logger) → observation(нужен logger) →
-        command(нужен logger, stats) → console.
+        command(нужен logger, stats, executors) → console.
 
         Returns:
             ManagersBundle — контейнер созданных менеджеров.
@@ -44,6 +44,7 @@ class ProcessManagers:
 
         worker = self._create_worker_manager()
         logger = self._create_logger_manager(managers_config)
+        executors = self._create_executor_manager(worker, logger=logger)
         error = self._create_error_manager(managers_config)
         router = self._create_router_manager(managers_config, logger=logger)
         stats = self._create_stats_manager(managers_config, logger=logger)
@@ -60,6 +61,7 @@ class ProcessManagers:
             managers_config,
             logger=logger,
             stats=stats,
+            executors=executors,
         )
         console, console_enabled = self._create_console_manager(managers_config)
 
@@ -72,6 +74,7 @@ class ProcessManagers:
             console=console,
             error=error,
             observation=observation,
+            executors=executors,
             config_manager=self.process.config_manager,
             console_enabled=console_enabled,
         )
@@ -192,6 +195,9 @@ class ProcessManagers:
             # Task 5.14: каноничное имя error-гнезда — "error" (совпадает с
             # ObservableMixin._track_error, которое пробует именно "error").
             process.register_manager("error", bundle.error, enabled=True)
+        if bundle.executors is not None:
+            # Task 1.9m: условная, как у error — bundle, собранный вручную в тестах соседей, поля не имеет.
+            process.register_manager("executors", bundle.executors, enabled=True)
 
     def attach_adapters(self, bundle: ManagersBundle, process) -> None:
         """Создать адаптеры и привязать их к менеджерам.
@@ -255,6 +261,23 @@ class ProcessManagers:
         )
         worker.initialize()
         return worker
+
+    def _create_executor_manager(self, worker: Any, logger: Any) -> Any:
+        """Менеджер именованных исполнителей процесса (Task 1.9m, ADR-WRK-006).
+
+        Пустой: без исполнителей — ни потоков, ни строк лога; исполнители из конфига процесса
+        создаёт ``ProcessModule._apply_managers_bundle`` (``load_config``).
+        """
+        from ...worker_module.executor_manager import ExecutorManager
+
+        executors = ExecutorManager(
+            manager_name=f"executors_{self.process.name}",
+            worker_manager=worker,
+            process=self.process,
+            managers={"logger": logger},
+        )
+        executors.initialize()
+        return executors
 
     def _create_logger_manager(self, managers_config: Dict[str, Any]) -> Any:
         from ...logger_module import LoggerManager, LoggerManagerConfig
@@ -435,6 +458,7 @@ class ProcessManagers:
         managers_config: Dict[str, Any],
         logger: Any,
         stats: Any,
+        executors: Any | None = None,
     ) -> Any:
         from ...command_module import CommandManager
 
@@ -454,6 +478,7 @@ class ProcessManagers:
                 "log_success": command_config.get("log_success", False),
             },
             config_manager=self.process.config_manager,
+            executors=executors,
         )
         return command
 

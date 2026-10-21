@@ -7,6 +7,7 @@
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from .types import WorkerStatus, WorkerType
@@ -59,6 +60,79 @@ class OrderedExecutor(Protocol):
 
     def shutdown(self, deadline: float) -> bool:
         """``request_stop(); return join_until(deadline)``."""
+        ...
+
+
+@runtime_checkable
+class IExecutorRegistry(Protocol):
+    """Узкий вход для ``CommandManager``: исполнитель по имени (Task 1.9m, ADR-WRK-006)."""
+
+    def get(self, name: str) -> OrderedExecutor | None:
+        """Исполнитель по имени или ``None``. Не бросает."""
+        ...
+
+
+@runtime_checkable
+class IExecutorManager(IExecutorRegistry, Protocol):
+    """Менеджер именованных исполнителей процесса (Task 1.9m, ADR-WRK-006).
+
+    Реализация — ``executor_manager.ExecutorManager``.
+
+    Для владельцев: процессы, ProcessManager, ServiceHost. Имя исполнителя — по правилу имени записи
+    ``Scope`` (непустая ``str`` без ``/`` и без суффикса `` (self)``). Созданными менеджер владеет
+    (область менеджера, либо ``_on_shutdown`` без области); зарегистрированными — нет, только
+    маршрутизирует по имени.
+    """
+
+    def create(
+        self,
+        name: str,
+        spec: Mapping[str, Any] | None = None,
+        *,
+        should_reject: Callable[[], bool] | None = None,
+    ) -> OrderedExecutor:
+        """Создать ``KeyedExecutor`` по схеме ``ExecutorSpec`` (``None`` — умолчания).
+
+        Pre: имя верно и не занято; менеджер не закрыт.
+        Post: исполнитель создан, рабочие запущены, объект во владении менеджера; одна строка INFO.
+        Raises:
+            ValueError: занятое имя; неверный ``spec`` (текст: ``<loc>: <msg>`` через ``; `` без входных значений).
+            RuntimeError: менеджер закрыт (допустим ``ScopeClosedError``).
+        На любом провале резерв имени снят: ``name`` нет в ``names()``, ``get(name)`` — ``None``.
+        """
+        ...
+
+    def register(self, name: str, executor: OrderedExecutor) -> None:
+        """Готовый объект по имени. Менеджер им НЕ владеет: не зовёт ``request_stop`` / ``join_until``.
+
+        Pre: имя как у ``create``; у ``executor`` есть вызываемый ``submit``.
+        Raises:
+            TypeError: нет ``submit``.
+            ValueError: имя занято.
+        """
+        ...
+
+    def load_config(self, section: Mapping[str, Mapping[str, Any]] | None) -> list[str]:
+        """Создать исполнители из секции конфига процесса; своя попытка на запись.
+
+        Неверная запись — одна строка ERROR (имя + причина), запись пропущена, соседние создаются.
+        ``None`` / ``{}`` — ``[]`` без строк лога; секция не ``Mapping`` — одна строка ERROR, ``[]``.
+
+        Returns:
+            Имена созданных.
+        """
+        ...
+
+    def names(self) -> list[str]:
+        """Все имена (созданные и зарегистрированные) в порядке появления."""
+        ...
+
+    def describe(self) -> dict[str, Any]:
+        """Снимок для интроспекции: ``{"executors": {<имя>: {...}}, "unavailable": [...]}`` (Dict at Boundary)."""
+        ...
+
+    def is_executor_thread(self, name: str) -> bool:
+        """Текущий поток — рабочий СОЗДАННОГО исполнителя ``name``; для зарегистрированного/неизвестного — ``False``."""
         ...
 
 
@@ -367,4 +441,6 @@ __all__ = [
     "IWorkerLifecycle",
     "IWorkerManager",
     "OrderedExecutor",
+    "IExecutorRegistry",
+    "IExecutorManager",
 ]

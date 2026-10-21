@@ -95,5 +95,8 @@ class ManagersBundle:
     #: обязательное поле сломало бы каждую точку, собирающую bundle вручную, —
     #: а сборка про поле знает и всегда его заполняет.
     observation: Any | None = None
+    #: Менеджер именованных исполнителей (Task 1.9m). Дефолт ``None``: bundle, собранный вручную
+    #: в тестах соседей, поля не имеет; сборка заполняет его всегда.
+    executors: Any | None = None
     config_manager: Any | None = None
     console_enabled: bool = False

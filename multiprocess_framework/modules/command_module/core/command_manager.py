@@ -11,7 +11,7 @@ import time
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-    from ...worker_module.interfaces import OrderedExecutor
+    from ...worker_module.interfaces import IExecutorRegistry, OrderedExecutor
 
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...base_manager import BaseManager, ObservableMixin
@@ -84,6 +84,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         managers: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         config_manager: Optional[Any] = None,
+        executors: "IExecutorRegistry | None" = None,
         **kwargs,
     ):
         """
@@ -96,6 +97,9 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             managers: Словарь менеджеров {имя: менеджер} (logger, stats и т.д.)
             config: Конфигурация включения/выключения функций {имя: bool}
             config_manager: Менеджер конфигурации для динамического обновления
+            executors: Task 1.9m — реестр исполнителей по имени (``IExecutorRegistry``): им разрешается
+                строка в ``register_command(executor="<имя>")``. ``None`` — строковая форма отклоняется.
+                Через ``managers=`` не передаётся: тот словарь уходит в реестр наблюдателей миксина.
             **kwargs: Дополнительные параметры для BaseManager и ObservableMixin
         """
         # Инициализация BaseManager
@@ -134,6 +138,8 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         # утекать в карточки и через границу процессов). Имя команды →
         # (исполнитель, key_from, targets). В metadata — только строки.
         self._executors: dict[str, tuple[OrderedExecutor, str | None, str | None]] = {}
+        # Task 1.9m (ADR-CMD-007): источник исполнителей по имени (строка в ``executor=``).
+        self._executor_source = executors
         # Имена команд, о внеочередном исполнении которых (вызов без reply) уже
         # сказан WARNING: один на имя за жизнь менеджера.
         self._out_of_queue_warned: set[str] = set()
@@ -205,7 +211,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         efficiency: int = 0,
         tags: List[str] = None,
         strategy: Optional[DispatchStrategy] = None,
-        executor: "OrderedExecutor | None" = None,
+        executor: "OrderedExecutor | str | None" = None,
         key_from: str | None = None,
         targets: str | None = None,
         **kwargs,
@@ -223,7 +229,9 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             strategy (DispatchStrategy): Стратегия для регистрации (опционально)
             executor: Task 1.9a — исполнитель с порядком по ключу (``OrderedExecutor``).
                 ``None`` (умолчание) — команда синхронная, как всегда. С исполнителем команда,
-                пришедшая с ``reply``, исполняется на потоке исполнителя (ADR-CMD-006).
+                пришедшая с ``reply``, исполняется на потоке исполнителя (ADR-CMD-006). Строка — имя
+                исполнителя в реестре ``executors`` (Task 1.9m): разрешается при регистрации, неизвестное
+                имя, пустое имя или отсутствие реестра — отказ (``False`` + WARNING).
             key_from: имя поля ``data``, из которого берётся ключ: ``frozenset({data[key_from]})``.
             targets: ``"all"`` — ключ ``None`` («все ключи»). С ``executor`` задаётся ровно
                 один из ``key_from`` / ``targets``.
@@ -244,7 +252,13 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
         self._log_debug(f"Registering command: {command_name}", module=LOG_SOURCE)
         self._record_metric("command_manager.command.registration.attempts", tags={"command": command_name})
 
-        refusal = self._executor_refusal(executor, key_from, targets, metadata)
+        executor_name: str | None = None
+        refusal: str | None = None
+        if isinstance(executor, str):
+            executor_name = executor
+            executor, refusal = self._resolve_executor_name(executor_name)
+        if refusal is None:
+            refusal = self._executor_refusal(executor, key_from, targets, metadata)
         if refusal is not None:
             self._log_warning(
                 f"Command '{command_name}' не зарегистрирована: {refusal}",
@@ -256,7 +270,7 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             # Только строки: metadata отдаётся наружу по ссылке (get_handler_info,
             # introspect). Словарь вызывающего не мутируем — копия.
             metadata = dict(metadata or {})
-            metadata["executor"] = str(getattr(executor, "name", None) or type(executor).__name__)
+            metadata["executor"] = executor_name or str(getattr(executor, "name", None) or type(executor).__name__)
             if key_from is not None:
                 metadata["key_from"] = key_from
             if targets is not None:
@@ -282,6 +296,17 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             self._record_metric("command_manager.command.registration.failed", tags={"command": command_name})
 
         return result
+
+    def _resolve_executor_name(self, name: str) -> "tuple[OrderedExecutor | None, str | None]":
+        """Разрешить имя исполнителя через реестр (Task 1.9m): ``(объект, None)`` или ``(None, причина отказа)``."""
+        if not name:
+            return None, "пустое имя исполнителя"
+        if self._executor_source is None:
+            return None, f"исполнитель по имени '{name}' без менеджера исполнителей"
+        found = self._executor_source.get(name)
+        if found is None:
+            return None, f"исполнитель '{name}' не найден"
+        return found, None
 
     @staticmethod
     def _executor_refusal(

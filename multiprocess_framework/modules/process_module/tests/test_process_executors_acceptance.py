@@ -246,3 +246,117 @@ def test_zero_cost_without_executors_and_launch_config_shape() -> None:
     assert "executors" not in plain, plain
     with_executors = ProcessLaunchConfig(process_name="p", executors={"io": {"kind": "keyed"}}).build()[1]["config"]
     assert with_executors["executors"] == {"io": {"kind": "keyed"}}
+
+
+# ===========================================================================
+# Hazard-тесты автора Task 1.9m (H2, H4, H7, H8): настоящий ProcessModule
+# ===========================================================================
+
+
+def test_h2_inflight_reply_delivered_before_command_manager_shutdown() -> None:
+    """H2: ответ идущей операции доставлен до закрытия ``command_manager`` (флаг в подменённом ``shutdown``)."""
+    proc = make_process("ph2", {"config": {"executors": {"io": {"kind": "keyed", "serial": True}}}})
+    cm_closed = {"flag": False}
+    original_shutdown = proc.command_manager.shutdown
+
+    def marking_shutdown() -> bool:
+        cm_closed["flag"] = True
+        return original_shutdown()
+
+    proc.command_manager.shutdown = marking_shutdown
+    seen: dict[str, Any] = {}
+    replied = threading.Event()
+    started = threading.Event()
+
+    def op() -> dict:
+        started.set()
+        time.sleep(0.4)
+        return {"success": True}
+
+    def reply(result: Any) -> None:
+        seen["closed_at_reply"] = cm_closed["flag"]
+        seen["result"] = result
+        replied.set()
+
+    shutdown_thread: threading.Thread | None = None
+    try:
+        proc.executor_manager.get("io").submit(op, frozenset({"k"}), reply)
+        assert started.wait(5.0), "операция не началась"
+        shutdown_thread = threading.Thread(target=proc.shutdown, daemon=True, name="h2-shutdown")
+        shutdown_thread.start()
+        assert replied.wait(20.0), "reply идущей операции не вызван"
+    finally:
+        if shutdown_thread is not None:
+            shutdown_thread.join(30.0)
+        call_bounded(proc.shutdown, 30.0)
+    assert seen["result"] == {"success": True}, seen
+    assert seen["closed_at_reply"] is False, "ответ доставлен после закрытия command_manager"
+    assert cm_closed["flag"] is True, "подменённый shutdown command_manager не вызван - проверка пуста"
+
+
+def test_h4_start_all_workers_does_not_duplicate_executor_threads() -> None:
+    """H4: после ``run()``-образного ``start_all_workers()`` потоков исполнителя ровно ``max_workers``."""
+    proc = make_process("ph4", {"config": {"executors": {"io": {"kind": "keyed", "max_workers": 3}}}})
+    try:
+        assert len(keyed_threads("ph4")) == 3, [t.name for t in keyed_threads("ph4")]
+        proc.worker_manager.start_all_workers()
+        time.sleep(0.2)
+        names = sorted(t.name for t in keyed_threads("ph4"))
+        assert names == ["ph4_keyed-io-0", "ph4_keyed-io-1", "ph4_keyed-io-2"], names
+    finally:
+        done, _, error, _ = call_bounded(proc.shutdown, 20.0)
+    assert done and error is None, repr(error)
+
+
+def test_h7_executor_workers_are_protected_from_worker_commands() -> None:
+    """H7 (страж D9): ``worker.stop/remove/restart`` по IPC отказывают ``protected``; исполнитель живёт и исполняет."""
+    proc = make_process("ph7", {"config": {"executors": {"io": {"kind": "keyed", "max_workers": 2}}}})
+    try:
+        BuiltinCommands(proc).register()
+        for command in ("worker.stop", "worker.remove", "worker.restart"):
+            res = proc.command_manager.handle_command({"command": command, "data": {"worker_name": "keyed-io-0"}})
+            assert res == {"success": False, "reason": "protected", "worker_name": "keyed-io-0"}, (command, res)
+        assert "ph7_keyed-io-0" in {t.name for t in keyed_threads("ph7")}
+
+        replied = threading.Event()
+        box: dict[str, Any] = {}
+
+        def reply(result: Any) -> None:
+            box["result"] = result
+            replied.set()
+
+        proc.executor_manager.get("io").submit(lambda: {"success": True, "v": 1}, frozenset({"k"}), reply)
+        assert replied.wait(5.0), "reply не вызван"
+        assert box["result"] == {"success": True, "v": 1}, box
+    finally:
+        done, _, error, _ = call_bounded(proc.shutdown, 20.0)
+    assert done and error is None, repr(error)
+
+
+def test_h8_process_shutdown_from_executor_thread_returns_within_budget() -> None:
+    """H8 (факт C-23 б): операция ``io`` зовёт ``proc.shutdown()`` - вернулось к дедлайну; исход - в лог теста."""
+    proc = make_process("ph8", {"config": {"executors": {"io": {"kind": "keyed", "serial": True}}}})
+    deadline_s = float(proc.DEFAULT_STOP_BUDGET["work_s"]) + 0.5
+    box: dict[str, Any] = {}
+    replied = threading.Event()
+
+    def op() -> dict:
+        t0 = time.perf_counter()
+        try:
+            box["shutdown_result"] = proc.shutdown()
+        except BaseException as exc:  # noqa: BLE001 - факт по прогону
+            box["shutdown_error"] = repr(exc)
+        box["elapsed"] = time.perf_counter() - t0
+        return {"success": True}
+
+    try:
+        proc.executor_manager.get("io").submit(op, frozenset({"k"}), lambda r: replied.set())
+        assert replied.wait(deadline_s), f"proc.shutdown() с рабочего исполнителя не вернулся за {deadline_s:.1f} с"
+    finally:
+        call_bounded(proc.shutdown, 30.0)
+    # Факт по прогону: shutdown() с рабочего потока области возвращает False сразу (поток поддерева), отчёта нет.
+    print(
+        f"H8: shutdown_result={box.get('shutdown_result')!r} error={box.get('shutdown_error')!r} "
+        f"elapsed={box.get('elapsed', float('nan')):.2f}"
+    )
+    assert "elapsed" in box
