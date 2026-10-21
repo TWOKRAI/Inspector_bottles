@@ -7,8 +7,8 @@
 Сборка — тот же вход, что в ``test_build_characterization.py``:
 ``SystemBuilder.from_manifest(app, recipe).build()`` -> ``launcher._processes``.
 
-Исключён по имени: ``robot_demo`` — на main не собирается (SystemExit 1, C-18, полоса Р2),
-это не C-16. ``modbus_demo`` удалён (C-18, владелец 2026-10-21; замена — ``color_inspect``).
+Исключений нет: ``robot_demo`` собирается с C-18 (провод-заглушка снят, полоса Р2) и
+покрыт здесь как любой рецепт. ``modbus_demo`` удалён (C-18, владелец 2026-10-21; замена — ``color_inspect``).
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
 
-# На main не собираются (SystemExit 1) — не относятся к C-16.
-NOT_BUILDABLE_ON_MAIN = {"robot_demo"}
+# На main не собираются (SystemExit 1) — не относятся к C-16. Пусто с C-18.
+NOT_BUILDABLE_ON_MAIN: set[str] = set()
 
 ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 BUILDABLE_RECIPES = [r for r in ALL_RECIPES if r not in NOT_BUILDABLE_ON_MAIN]
@@ -75,6 +75,8 @@ def test_a4_recipe_set_reaches_the_known_recipes() -> None:
     assert len(BUILDABLE_RECIPES) > 0
     assert set(COLLECTORS_AFTER) <= set(BUILDABLE_RECIPES), set(COLLECTORS_AFTER) - set(BUILDABLE_RECIPES)
     assert not (NOT_BUILDABLE_ON_MAIN & set(BUILDABLE_RECIPES))
+    # C-18: robot_demo снова под сборкой — исключение не должно вернуться молча.
+    assert "robot_demo" in BUILDABLE_RECIPES
 
 
 @pytest.mark.parametrize("recipe", BUILDABLE_RECIPES)
