@@ -26,7 +26,7 @@ class StopMixin:
     """Миксин ``RobotDriverV2``: остановка плагина и процесса, защёлка стопа, проверка эха.
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
-    Поля и атрибуты базы: ``_cfg``, ``_client``, ``_jog_tx_lock``, ``_state``, ``entry``.
+    Поля и атрибуты базы: ``_cfg``, ``_client``, ``_jog_tx_lock``, ``_state``, ``_transport``, ``entry``.
     Методы соседей: ``_publish_error``, ``_record_err``, ``_stop_jog``, ``is_connected``.
     """
 
@@ -78,7 +78,10 @@ class StopMixin:
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
         # is_connected зовётся под замком состояния, в той же ветке, что и раньше (простой робот)
-        level, run, stop_jog = self._state.process_stop_plan(lambda: self.is_connected)
+        level, run, stop_jog = self._state.process_stop_plan(
+            lambda: self.is_connected,
+            link_up=lambda: self._transport is not None and bool(self._transport.is_connected),
+        )
         if not level or self._client is None:
             return  # простой неподключённый робот, стоп уже записан или нет клиента: записи нет
         jog_run = run if stop_jog else None

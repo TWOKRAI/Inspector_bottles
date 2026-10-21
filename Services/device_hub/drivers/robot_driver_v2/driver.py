@@ -159,7 +159,6 @@ class _RobotDriverCore(BaseDeviceDriver):
         self._servo_on, self._do_on_connect = self._parse_on_connect(params.get("on_connect"))
         self._hub_poll_s = float(params.get("poll_interval_s", _HUB_POLL_DEFAULT_S))
 
-        self._ready = False  # последний connect() прошёл целиком
         self._last_reconnect = 0.0
         self._last_resync = 0.0
 
@@ -252,6 +251,15 @@ class _RobotDriverCore(BaseDeviceDriver):
         return self._transport
 
     @property
+    def _ready(self) -> bool:
+        """Последний ``connect()`` прошёл целиком; хранит ``RobotState`` (T5.3g), чтение без замка."""
+        return self._state.ready
+
+    @_ready.setter
+    def _ready(self, value: bool) -> None:
+        self._state.set_ready(value)
+
+    @property
     def is_connected(self) -> bool:
         transport = self._transport
         return self._ready and transport is not None and bool(transport.is_connected)
@@ -290,61 +298,67 @@ class _RobotDriverCore(BaseDeviceDriver):
         Не идёт, пока жив поток поводка или исполнителя, и пока тик держит задание (T3.7 R9): иначе ``probe`` +
         ``sync_params`` посреди хода дали бы NAK ``E_BUSY`` на ``PARAM_SET`` и ``_ready = False``.
         """
-        shutdown, job_active = self._state.connect_check()
-        if shutdown:
+        decision, was_ready = self._state.connect_begin()
+        if decision == "shutdown":
             return False  # защёлка request_stop(): после остановки плагина драйвер не подключается (К1)
-        if job_active or self._activity_alive():
+        if decision == "busy":
             return self.is_connected
-        self._state.connect_reset()  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
-        was_ready = self._ready
-        self._ready = False
         try:
-            if self._transport is not None and self._transport.is_connected and not was_ready:
-                self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
-            if self._transport is None:
-                from Services.device_hub.transports import build_transport
+            try:
+                if self._transport is not None and self._transport.is_connected and not was_ready:
+                    self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
+                if self._transport is None:
+                    from Services.device_hub.transports import build_transport
 
-                self._transport = build_transport(self.entry, lambda _id: None)
-                self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
-            if self._client is None:
-                self._client = RobotClientV2(self._transport, self._cfg)
-            client = self._client
-            if not self._transport.is_connected and not self._transport.connect():
-                raise ConnectionError("транспорт не подключился")
-            client.probe()
-            if not self._sync_on_connect(client):
-                if self._sync_cancelled():
-                    return False  # стоп посреди подключения: драйвер не готов, метка не доверена
-                self._ready = was_ready  # посреди подключения появилась активность: синхронизации нет, всё как было
-                return self.is_connected
-            self._run_on_connect(client)
-        except _StoreIOError:  # диск хранилища: полный текст уже в логе, в last_error — константа без пути
-            self._record_err()
-            self._last_quality = "bad"
-            self._publish_error(TEXT_STORE_ERROR)
-            return False
-        except Exception as exc:
-            if self._sync_cancelled():  # «Отключить» / стоп посреди подключения — не ошибка обмена
-                logger.warning(f"робот {self.entry.id!r}: подключение прервано остановкой: {type(exc).__name__}: {exc}")
+                    self._transport = build_transport(self.entry, lambda _id: None)
+                    self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
+                if self._client is None:
+                    self._client = RobotClientV2(self._transport, self._cfg)
+                client = self._client
+                if not self._transport.is_connected and not self._transport.connect():
+                    raise ConnectionError("транспорт не подключился")
+                if not self._state.connect_link_up():
+                    return False  # остановка пришла до подъёма связи: пробы и записей нет
+                client.probe()
+                if not self._sync_on_connect(client):
+                    # Стоп посреди подключения: драйвер не готов, метка не доверена. Иначе посреди подключения
+                    # появилась активность: синхронизации нет, всё как было
+                    if not self._state.connect_restore(was_ready):
+                        return False
+                    return self.is_connected
+                if not self._run_on_connect(client):
+                    return False
+            except _StoreIOError:  # диск хранилища: полный текст уже в логе, в last_error — константа без пути
+                self._record_err()
                 self._last_quality = "bad"
+                self._publish_error(TEXT_STORE_ERROR)
                 return False
-            self._record_err()
-            self._last_quality = "bad"
-            logger.warning(f"робот {self.entry.id!r}: подключение не удалось: {type(exc).__name__}: {exc}")
-            self._publish_error(f"подключение к роботу не удалось: {type(exc).__name__}: {exc}")
-            return False
-        period = client.heartbeat_period_s
-        if period is not None and self._hub_poll_s > period:
-            self._publish_error(TEXT_WDG_INTERVAL)
-        shutdown = self._state.is_shutdown()
-        if shutdown:
-            return False  # подключение, начатое до request_stop(), не делает драйвер готовым
-        self._ready = True
-        self._last_quality = "good"
-        return True
+            except Exception as exc:
+                if self._sync_cancelled():  # «Отключить» / стоп посреди подключения — не ошибка обмена
+                    logger.warning(
+                        f"робот {self.entry.id!r}: подключение прервано остановкой: {type(exc).__name__}: {exc}"
+                    )
+                    self._last_quality = "bad"
+                    return False
+                self._record_err()
+                self._last_quality = "bad"
+                logger.warning(f"робот {self.entry.id!r}: подключение не удалось: {type(exc).__name__}: {exc}")
+                self._publish_error(f"подключение к роботу не удалось: {type(exc).__name__}: {exc}")
+                return False
+            period = client.heartbeat_period_s
+            if period is not None and self._hub_poll_s > period:
+                self._publish_error(TEXT_WDG_INTERVAL)
+            if not self._state.connect_finish():
+                return False  # остановка пришла до готовности: подключение не делает драйвер готовым
+            self._last_quality = "good"
+            return True
+        finally:
+            self._state.connect_end()
 
-    def _run_on_connect(self, client: RobotClientV2) -> None:
+    def _run_on_connect(self, client: RobotClientV2) -> bool:
         """SERVO и DO_SET — instant: без wait_done, подтверждение — чтением TLM с дедлайном (Л2).
+
+        False — остановка пришла посреди действий: SERVO и DO после стопа не шлются (T5.3g).
 
         Д5: действия идемпотентны — «обеспечить состояние». Сначала читается TLM; команда шлётся, только если
         состояние не равно цели. Так переподключение во время jog прошивки, который ещё дожидается срока поводка,
@@ -353,13 +367,18 @@ class _RobotDriverCore(BaseDeviceDriver):
         if self._servo_on is not None:
             want = 1 if self._servo_on else 0
             if _w(self._read_tlm(), "TLM_SERVO") != want:
+                if self._sync_cancelled():
+                    return False
                 client.servo(self._servo_on)
                 self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO")
         for ch, on in self._do_on_connect.items():
             bit = 1 << (ch - 1)
             if bool(_w(self._read_tlm(), "TLM_DO_MASK") & bit) != on:
+                if self._sync_cancelled():
+                    return False
                 client.do_set(ch, on)
                 self._await_tlm(lambda tlm, b=bit, o=on: bool(_w(tlm, "TLM_DO_MASK") & b) == o, f"DO{ch}")
+        return True
 
     def _await_tlm(self, pred: Callable[[list[int]], bool], what: str) -> None:
         deadline = self._clock() + _ON_CONNECT_DEADLINE_S

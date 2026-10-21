@@ -243,10 +243,11 @@ Q7 — как делить файл:
 
 | окно | суть | статус |
 |---|---|---|
-| W1 | `request_stop` посреди `connect`: `shutdown` уже True, `_ready` ещё False — простой робот «не подключён», SOFT не записан, затем `connect()` → True | не закрыто → T5.3g (робот посреди `connect` считается подключённым и получает SOFT) |
-| W2 | 6 записей `_ready` без замка | по замыслу, без задачи |
+| W1 | `request_stop` посреди `connect`: `shutdown` уже True, `_ready` ещё False — простой робот «не подключён», SOFT не записан, затем `connect()` → True | закрыто T5.3g (ADR-DH-011) |
+| W1′ | `connect` выходит между секциями `request_stop` (`request_stop_begin` → `process_stop_plan`): план видит «не подключён», 0 SOFT | закрыто T5.3g (ADR-DH-011, снимок `_stop_linked`) |
+| W2 | 6 записей `_ready` без замка | закрыто T5.3g (ADR-DH-011, `_ready` в `RobotState`) |
 | W3 | `run.handle` под `_jog_tx_lock`, чтение без него | по замыслу К4, не дефект |
-| W4 | `connect_reset` после `request_stop`: `shutdown` True при `stopping` False, «стоп не подтверждён» теряется | не закрыто → T5.3g |
+| W4 | `connect_reset` после `request_stop`: `shutdown` True при `stopping` False, «стоп не подтверждён» теряется | закрыто T5.3g (ADR-DH-011, `connect_begin`) |
 
 ### Последствия
 
@@ -276,4 +277,61 @@ Q7 — как делить файл:
 ### Связь
 
 - Related: ADR-DH-009 (путь стопа, не менялся), `plans/robot-protocol-v2/tasks/T5.3f.md`, `T5.3f.state-table.md`
-- Дальше: T5.3g (W1, W4), затем SPI хаба (`Protocol`, `OpSpec`) — снятие швов `_SEAMS`.
+- Дальше: T5.3g (W1, W4; сделано — ADR-DH-011), затем SPI хаба (`Protocol`, `OpSpec`) — снятие швов `_SEAMS`.
+
+## ADR-DH-011: `connect` и `request_stop` драйвера робота v2 линеаризуются переходами `RobotState`
+
+**Дата:** 2026-10-21
+**Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20)
+**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
+окна W1, W1′, W2, W4 закрыты); ADR-DH-009 (путь стопа) не меняется.
+
+### Контекст
+
+Проба окон барьером (`T5.3g.probe.md`) подтвердила W1, W4 и WW на коде T5.3f: простой робот, которому `request_stop`
+пришёл посреди `connect`, не получал SOFT, а `connect()` возвращал True и делал драйвер «готовым» после выключения;
+`connect_reset` после стопа снимал `stopping` и «стоп не подтверждён». Правило владельца 2026-10-20: простой робот
+посреди `connect` считается подключённым, получает один SOFT и никогда не «готов» после выключения; правило
+2026-10-19: неподключённый простой робот SOFT не получает.
+
+### Решение
+
+- **`_ready` живёт в `RobotState`.** На драйвере `_ready` — свойство: геттер читает `state.ready` без замка,
+  сеттер зовёт `state.set_ready` под замком. Замок состояния — `Lock`, не `RLock`, а `is_connected` зовётся под ним
+  (`process_stop_plan`, `admit_launch`), поэтому геттер замок не берёт (чтение bool атомарно, все записи под замком;
+  прецедент — `returns_done`). Записи `False` в `disconnect`, `_link_lost`, `_close_after_disconnect` идут через сеттер.
+- **Переходы `connect`.** `connect_begin` (решение `"shutdown"` / `"busy"` / `"go"` + сброс останова + `_ready = False`
+  + `_connecting`), `connect_link_up`, `connect_restore`, `connect_finish`, `connect_end`. `connect_link_up`,
+  `connect_restore` и `connect_finish` при `_stopping` или `_shutdown` отказывают, `connect()` возвращает False.
+  `connect_end` стоит в `finally` и снимает `_connecting` и `_connect_linked` на любом выходе.
+- **Точка линеаризации — `request_stop_begin`.** В той же секции, где ставится `_shutdown`, при первом вызове
+  запоминается `_stop_linked = _connecting and _connect_linked`. `process_stop_plan(connected, link_up)` берёт этот
+  снимок, а не живые флаги: `connect` мог выйти между секциями `request_stop` (W1′), снимок это переживает.
+  Дизъюнкт плана: `connected() or (_stop_linked and link_up())`; `link_up` — `transport.is_connected` без `_ready`.
+- **Граница A3 — `connect_link_up`.** У настоящего транспорта внутри `connect()` `is_connected` False до
+  `Services/modbus/core/device.py:103`, поэтому «связь поднята» — это переход после подключения транспорта (для
+  готового до `connect` робота — сам `connect_begin`). Стоп раньше этой границы: записи нет, «стоп не подтверждён»
+  не ставится, `connect()` False, `probe` не зовётся.
+- **Нет SERVO и DO после стопа — по возможности.** `_run_on_connect` возвращает bool и проверяет `_sync_cancelled()`
+  перед `client.servo` и каждым `client.do_set`. Окно «проверка -> запись» остаётся: закрыть его можно только
+  сериализацией с путём стопа — вне T5.3g.
+- **Обычный `disconnect` посреди `connect`** (`_stopping` без `_shutdown`) тоже отказывает `connect_finish` и
+  `connect_restore`: `connect()` → False, `is_connected` False. Побочный эффект: в пути тика, если
+  `desired_connected` остался True, отказ считается неудачным переподключением (`_note_reconnect_failed()`).
+  SOFT при обычном `disconnect` посреди `connect` вне T5.3g (`disconnect_stop_plan` смотрит только `is_connected`).
+
+### Отклонено
+
+Обратный вызов из перехода, который ставит `_ready` драйвера: код драйвера выполнялся бы под листовым замком, а W2
+остался бы открытым.
+
+### Последствия
+
+- Новых замков нет; порядок `_param_lock` → замок состояния сохранён (переходы зовутся из `connect` под `_param_lock`).
+  `connect_check`, `connect_reset`, `is_shutdown` остаются (контрактные тесты).
+- Окна W1, W1′, W2, W4 и WW закрыты. `request_stop` после `connect_finish` — по-прежнему 1 SOFT, `connect()` True.
+- Остаётся открытым: проба `issue_stop` в WW идёт без бюджета срока (на медленной живой связи до 3 чтений и 1 записи).
+
+### Связь
+
+- Related: ADR-DH-009 (путь стопа), ADR-DH-010 (состояние и окна), `plans/robot-protocol-v2/tasks/T5.3g.md`
