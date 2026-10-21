@@ -494,3 +494,37 @@ def test_h9_should_reject_drains_queue_while_key_is_busy(make_executor):
     run_bounded(lambda: ex.submit(lambda: "third", A, rep.reply_for("third")))
     assert rep.wait(["long", "third"], 3.0)
     assert rep.only("third") == ["third"], "после сброса флага исполнитель не принимает (защёлка)"
+
+
+class _ReplyBoom(BaseException):
+    """BaseException из reply ждущей операции (не Exception — _deliver её не ловит)."""
+
+
+def test_h10_base_exception_in_reply_during_drain_still_answers_every_waiting_op(make_executor):
+    """H10: 1 рабочий, SystemExit в action; ждущие q1 (reply бросает BaseException), q2 {a}, q3 {b}:
+    каждая ждущая — ровно один ответ, join_until(+1 с) → True (рабочий вышел, счётчик живых снят)."""
+    ex = make_executor("h10", max_workers=1)
+    rep = Replies()
+    go = threading.Event()
+    q1_calls: list[Any] = []
+
+    def die() -> Any:
+        go.wait(2.0)
+        raise SystemExit("h10")
+
+    def q1_reply(payload: Any) -> None:
+        q1_calls.append(payload)
+        raise _ReplyBoom("q1")
+
+    run_bounded(lambda: ex.submit(die, A, rep.reply_for("die")))
+    run_bounded(lambda: ex.submit(lambda: "q1", A, q1_reply))
+    run_bounded(lambda: ex.submit(lambda: "q2", A, rep.reply_for("q2")))
+    run_bounded(lambda: ex.submit(lambda: "q3", B, rep.reply_for("q3")))
+    go.set()
+    rep.wait(["die", "q2", "q3"], 2.0)
+    stopped, _ = run_bounded(lambda: ex.join_until(time.monotonic() + 1.0), timeout=3.0)
+    time.sleep(0.2)
+    got = {"die": len(rep.only("die")), "q1": len(q1_calls), "q2": len(rep.only("q2")), "q3": len(rep.only("q3"))}
+    assert got == {"die": 1, "q1": 1, "q2": 1, "q3": 1}, f"ответов по операциям: {got}"
+    assert rep.only("q2") == [SYSTEM_STOPPING] and rep.only("q3") == [SYSTEM_STOPPING]
+    assert stopped is True, "join_until не дождался рабочего — счётчик живых не снят"

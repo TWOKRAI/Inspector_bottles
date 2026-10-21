@@ -136,3 +136,24 @@
 - Отказ через `counted_reply` после `BaseException` в `action` (`ran=True`) не проходит `_finish_command` — метрики
   такого исхода нет.
 - Хук сообщений коммита — предупреждения (тема > 72, абзацы «KeyedExecutor:» / «CommandManager:» как трейлеры).
+
+## Ревью ветки
+
+Ревью ветки (Opus) — CHANGES REQUESTED, два блокера. База — `1996a8799` (коммит лида: счётчик живых в `finally`
+`_worker_loop`, `reply(r)` в `finally` внутри `counted_reply`).
+
+| # | Замечание | Правка | Тест |
+|---|---|---|---|
+| 1 | `_reject_all` останавливался на первой `BaseException` из `reply`: снятые записи после неё без ответа (наблюдалось die=1 q1=1 q2=0 q3=0) | отказ доставляется каждой записи; первая `BaseException` запоминается и пробрасывается после цикла; `Exception` — прежний `log.error` в `_deliver` | H10 |
+| 2 | тестов на `1996a8799` и п.1 не было | H10 `test_h10_base_exception_in_reply_during_drain_still_answers_every_waiting_op`; H11 `test_h11_refusal_reaches_initiator_even_if_outcome_accounting_fails` (сбой учёта моделируется подменой `_finish_command`: слоты stats/logger глотают сбои сами в `_call_manager`) | см. ниже |
+| 3 | ADR-WRK-005 | строка: «`reply` ровно раз» держится и при `BaseException` из `reply` во время снятия очереди | — |
+
+Доказательство красного (скрипт `scratchpad/redproof.py`: подмена файла → один тест → восстановление из копии):
+- H10 на текущем коде — passed; на `keyed_executor.py` из `6bae649f9` — RED (`:528` «ответов по операциям:
+  {'die': 1, 'q1': 1, 'q2': 0, 'q3': 0}»); только п.1 откатан — RED (то же); только счётчик живых из `1996a8799`
+  откатан (п.1 оставлен) — RED (`:530` «join_until не дождался рабочего — счётчик живых не снят»).
+- H11 на текущем коде — passed; только `finally` в `counted_reply` откатан — RED (`:523` «ответы инициатору: []»).
+
+Прогоны: light — 4 файла R/H + страж логгера: 114 passed, 2 skipped. medium `worker_module/tests` и
+`command_module/tests` — **exit 75, NO WINDOW** (гейт), не прогнаны. ruff — чисто; `scripts.sync` — без изменений
+индекса; `validate.py` — exit 0.

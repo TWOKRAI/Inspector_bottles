@@ -498,3 +498,26 @@ def test_contract_interface_handle_command_accepts_keyword_only_reply():
     params_cm = inspect.signature(CommandManager.handle_command).parameters
     assert params_cm["reply"].kind is inspect.Parameter.KEYWORD_ONLY
     assert params_cm["reply"].default is None
+
+
+def test_h11_refusal_reaches_initiator_even_if_outcome_accounting_fails(make_executor):
+    """H11: исполнитель закрыт, учёт исхода бросает → reply ровно один раз, system_stopping.
+
+    Слоты stats/logger сбои глотают сами (``_call_manager``), поэтому сбой учёта моделируется
+    подменой ``_finish_command`` на экземпляре — дефект в самом учёте (как в черновике ревьюера)."""
+    cm, _log = make_cm("seg")
+
+    def broken_accounting(*a: Any, **k: Any) -> None:
+        raise RuntimeError("accounting failed")
+
+    cm._finish_command = broken_accounting  # type: ignore[method-assign]
+    ex = make_executor("h11")
+    assert cm.register_command("c.h11", lambda d: {"success": True}, executor=ex, key_from="process_name")
+    ex.request_stop()
+    got: list[Any] = []
+    ret, _ = run_bounded(
+        lambda: cm.handle_command({"command": "c.h11", "data": {"process_name": "p"}}, reply=got.append)
+    )
+    time.sleep(0.1)
+    assert ret is DEFERRED
+    assert got == [{"success": False, "error": "system_stopping"}], f"ответы инициатору: {got!r}"

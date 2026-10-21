@@ -393,8 +393,24 @@ class KeyedExecutor:
             )
 
     def _reject_all(self, ops: list[_Op]) -> None:
+        """Отказ ``system_stopping`` КАЖДОЙ снятой записи — ровно раз, даже если чей-то ``reply`` бросил
+        ``BaseException``: записи уже вне очереди, другого ответа у них не будет. Первая ``BaseException``
+        пробрасывается после цикла (``Exception`` логирует ``_deliver``). Ревью ветки, п.1."""
+        first: BaseException | None = None
         for op in ops:
-            self._deliver(op.reply, _refusal(SYSTEM_STOPPING), op.label)
+            try:
+                self._deliver(op.reply, _refusal(SYSTEM_STOPPING), op.label)
+            except BaseException as exc:
+                self._log.error(
+                    "KeyedExecutor '%s': reply операции '%s' бросил %s при снятии очереди",
+                    self.name,
+                    op.label,
+                    type(exc).__name__,
+                )
+                if first is None:
+                    first = exc
+        if first is not None:
+            raise first
 
     def _reject_requested(self) -> bool:
         """``should_reject()`` вне лока; исключение в нём → ``log.error`` и ``True``."""
