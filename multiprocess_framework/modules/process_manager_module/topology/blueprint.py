@@ -172,7 +172,8 @@ class ProcessConfig(SchemaBase):
             "Коллектор",
             info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, ...}. "
             "До D4 ключ назывался 'inspector' — читается как алиас (см. _accept_legacy_"
-            "collector_key), пишется всегда каноничным именем.",
+            "collector_key), пишется всегда каноничным именем. Без mode — тонкая настройка "
+            "выведенного join: при < 2 join-источниках check() даёт ошибку (C-22).",
         ),
     ] = {}
 
@@ -521,6 +522,8 @@ class SystemBlueprint(SchemaBase):
 
         Явный ``collector`` (прямой typed-ключ ИЛИ ``extras``, в т.ч. легаси-имя) —
         приоритетнее и НЕ переопределяется: ручная настройка выигрывает у вывода из графа.
+        Явный ``collector`` без ``mode`` — тонкая настройка: при ≥ 2 join-источниках применяется,
+        при меньшем числе ``check()`` даёт ошибку (C-22).
 
         Мутирует ``self.processes`` IN PLACE. Вызывать ПОСЛЕ ``model_validate``
         (валидация уже сделала копию — мутация внутренней копии, не входа вызывающей
@@ -540,18 +543,13 @@ class SystemBlueprint(SchemaBase):
                 )
             # Явная секция корреляции: typed-поле приоритетнее extras (обе формы ключа).
             extras_bag = proc.extras or {}
-            explicit = (
-                proc.collector
-                or extras_bag.get(COLLECTOR_CONFIG_KEY)
-                or extras_bag.get(LEGACY_COLLECTOR_CONFIG_KEY)
-                or {}
-            )
+            _, explicit = _explicit_collector(proc)
             # Escape-hatch (вывод НЕ применяется) — только если конфиг задаёт mode.
             # Mode-less конфиг (напр. {timeout_sec: 5}) — НЕ escape-hatch, а тонкая
             # настройка: вывод mode/inputs/primary из wires всё равно срабатывает, а
             # прочие ключи подмешиваются поверх (иначе mode-less секция молча
             # отключала бы join — F2). Симметрично legacy metadata.
-            if isinstance(explicit, dict) and explicit.get("mode"):
+            if explicit.get("mode"):
                 continue
 
             sources = required_sources.get(proc.process_name, {})
@@ -800,6 +798,8 @@ class SystemBlueprint(SchemaBase):
         2. Цепочки плагинов внутри каждого процесса (auto-wiring)
         3. Wire-связи между процессами (совместимость портов)
         4. Все обязательные входы подключены
+        5. ``metadata.<ключ>.mode=join`` при невыведенном join — ошибка (C-17)
+        6. ``collector`` без mode при невыведенном join — ошибка (C-22)
 
         НЕ проверяет циклы графа wires — та проверка живёт только в
         :meth:`check_structure` (RS-5 Save/load-gate); межпроцессная обратная
@@ -910,6 +910,34 @@ class SystemBlueprint(SchemaBase):
                 errors.append(f"Вход '{addr}' ({port.dtype}) не подключен")
 
         errors.extend(self._metadata_join_errors())
+        errors.extend(self._modeless_collector_errors())
+        return errors
+
+    def _modeless_collector_errors(self) -> list[str]:
+        """C-22: явный ``collector`` без ``mode`` при невыведенном join (ADR-PMM-017 п.8).
+
+        Mode-less секция — тонкая настройка выведенного join (``timeout_sec`` и т.п.):
+        ``infer_missing_collectors`` применяет её только при ≥ 2 join-источниках. При меньшем
+        числе настройка молча давала бы fanin — вместо этого громкая ошибка. Результат не
+        зависит от того, вызывался ли ``infer``. Одна ошибка на процесс; значения секции в
+        текст не попадают (только ключи).
+        """
+        errors: list[str] = []
+        joining = self._joining_sources()
+        for proc in self.processes:
+            key, explicit = _explicit_collector(proc)
+            if not explicit or explicit.get("mode"):
+                continue
+            n_sources = len(joining.get(proc.process_name, {}))
+            if n_sources >= 2:
+                continue
+            keys = ", ".join(sorted(str(k) for k in explicit))
+            errors.append(
+                f"Процесс '{proc.process_name}': {key} без mode (ключи: {keys}) — тонкая настройка "
+                f"выведенного join, но join не выведен (join-источников: {n_sources}, нужно ≥ 2). "
+                f"Штатно: вход, участвующий в join, объявляет Port(join=True) и подключён проводом; "
+                f"настройка fanin — {key}: {{mode: fanin, …}}; иначе удали {key}"
+            )
         return errors
 
     def _metadata_join_errors(self) -> list[str]:
@@ -936,22 +964,17 @@ class SystemBlueprint(SchemaBase):
             )
             if key is None:
                 continue
-            extras_bag = proc.extras or {}
-            explicit = (
-                proc.collector
-                or extras_bag.get(COLLECTOR_CONFIG_KEY)
-                or extras_bag.get(LEGACY_COLLECTOR_CONFIG_KEY)
-                or {}
-            )
+            _, explicit = _explicit_collector(proc)
             n_sources = len(joining.get(proc.process_name, {}))
-            explicit_mode = explicit.get("mode") if isinstance(explicit, dict) else None
+            explicit_mode = explicit.get("mode")
             effective_mode = explicit_mode or ("join" if n_sources >= 2 else None)
             if effective_mode != "join":
                 errors.append(
                     f"Процесс '{proc.process_name}': metadata.{key}.mode=join, но join не применён "
                     f"(join-источников: {n_sources}, нужно ≥ 2, или явный collector задаёт иной mode). "
                     f"Штатно: удали metadata.{key}; вход, участвующий в join, объявляет Port(join=True); "
-                    f"тонкая настройка — collector: {{timeout_sec: …}} без mode"
+                    f"тонкая настройка — collector: {{timeout_sec: …}} без mode "
+                    f"(только при ≥ 2 join-источниках, иначе C-22)"
                 )
         return errors
 
@@ -1058,6 +1081,24 @@ def _find_cycle(edges: list[tuple[str, str]]) -> list[str] | None:
             if found is not None:
                 return found
     return None
+
+
+def _explicit_collector(proc: ProcessConfig) -> tuple[str, dict]:
+    """(ключ, секция) явного collector процесса; нет секции или она не dict — ``("", {})``.
+
+    Приоритет: typed ``proc.collector`` и ``extras.collector`` (ключ ``collector``), затем
+    легаси ``extras.inspector`` (ключ ``inspector``). Берётся первая непустая; не-dict → пусто.
+    """
+    if proc.collector:
+        explicit, key = proc.collector, COLLECTOR_CONFIG_KEY
+    else:
+        extras_bag = proc.extras or {}
+        explicit, key = extras_bag.get(COLLECTOR_CONFIG_KEY), COLLECTOR_CONFIG_KEY
+        if not explicit:
+            explicit, key = extras_bag.get(LEGACY_COLLECTOR_CONFIG_KEY), LEGACY_COLLECTOR_CONFIG_KEY
+    if isinstance(explicit, dict) and explicit:
+        return key, explicit
+    return "", {}
 
 
 def _legacy_metadata_section(proc: ProcessConfig) -> tuple[str, dict]:
