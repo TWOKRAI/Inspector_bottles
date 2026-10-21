@@ -9,13 +9,13 @@
 | Сессия | Полоса | Задача | Состояние ~10:00 |
 |---|---|---|---|
 | inspector-bottles-a9 | Р2 (робот v2, device_hub) | T5.3g — окна W1/W4/WW гонки connect ↔ request_stop | C-11 в main `a178e0b64`; проба воспроизвела W1/W4/WW (10/10 по прогнозу); слепой тестер написан (9 тестов), developer правит; ветка `feat/robot-v2-t53g` |
-| inspector-bottles-48 | Ф (фреймворк, L-9) | Task 1.9a — KeyedExecutor + развилка в CommandManager | реализация `8e7cf6a7a` (R 15/15, H 8/8, радиус medium зелёный); прогнозы инъекций закоммичены; в окне до ~10:06 |
+| inspector-bottles-48 | Ф (фреймворк, L-9) | Task 1.9a — KeyedExecutor + развилка в CommandManager | реализация `8e7cf6a7a` (R 15/15, H 8/8, радиус medium зелёный); прогнозы инъекций закоммичены; в окне до ~10:15 (продлено: suite 18 мин); suite 2 failed — голый getLogger в keyed_executor.py:127 (её, чинит) и C-20 |
 | inspector-bottles-66 | Д (дефекты) | C-13 → C-16/C-17 | C-13 (`fix/c13-validate` 9e4623b95) готов, ждёт «да» владельца; C-16 (`fix/c16-collector` e5819bd88) реализован, ревью ветки Opus идёт, нужно окно |
 | claude-seed-b7 | — | не проект | простаивает; владелец может закрыть |
 
 ## Очередь окон (machine.lock)
 
-1. Ф — heavy до ~10:06: robot_comm → база → инъекции A/B → framework suite → validate → backend/tests.
+1. Ф — heavy до ~10:15 (продлено): robot_comm → база → инъекции A/B → framework suite → validate → backend/tests.
 2. Р2 — heavy (timed medium device_hub) ~25 мин по «готов» (уже прислала): тестер + прогон правки developer.
 3. Д — heavy ~20 мин: framework suite + backend/tests + validate на C-16.
 Окно на машине одно (gate). Timed device_hub рядом с framework suite не пускать — тайминги.
@@ -47,12 +47,13 @@
 - `9c8e4e6a4` — C-17 (громкий отказ при потерянном join) — вместе с C-16 у Д.
 - `aad763838` — C-11 закрыт; ORDER строка 2 → T5.3g.
 - `e7a215a05` — C-18: `modbus_demo` и `robot_demo` не собираются (провода); полоса не назначена.
+- `4e5aee80f` — C-20: тайминговый `test_t45b_plugin_ms_excludes_pre_hook_time` красный во вложенном прогоне framework suite; полоса не назначена.
 - `f99a24b82` — C-19: `test_build_characterization[phone_sketch]` зависит от порядка файлов в pytest-процессе; полоса не назначена.
 
 ## Ждут ответа владельца
 
 1. «да» на слияние C-13 (вкладка Д).
-2. Кто берёт C-18 (предложение: robot_demo — Р2 после T5.3g; modbus_demo — заморозить, если заброшен) и C-19.
+2. Кто берёт C-20, C-18 (предложение: robot_demo — Р2 после T5.3g; modbus_demo — заморозить, если заброшен) и C-19.
 3. Разрешить ли Д запуск стенда для наблюдения C-16 (запуск `run.py --headless` отклонил классификатор auto mode;
    разрешение — во вкладке Д, не через координатора).
 4. Правило «перед слиянием: validate.py + multiprocess_prototype/backend/tests + framework suite» — уже стоит в трёх стартовых промптах; закрепить ли.
