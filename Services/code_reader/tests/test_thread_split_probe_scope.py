@@ -296,3 +296,42 @@ def test_h2_fallback_restore_when_capture_thread_dies_before_restore(monkeypatch
     assert run.rc == 1, (run.rc, run.exc)
     # аварийный возврат в главном потоке: запись 3 узла, затем возврат в обратном порядке и close
     _assert_restored_and_closed(run)
+
+
+def test_h3_keyboard_interrupt_inside_scope_close_still_restores_and_closes(monkeypatch):
+    from Services.code_reader.tools import thread_split_probe
+
+    original_stop = FakeNodeApi.stop_grabbing
+    state = {"died": False, "interrupted": False}
+
+    def stop_grabbing(self, h):
+        if not state["died"]:
+            state["died"] = True
+            raise _CaptureDied("поток захвата погиб до собственного возврата узлов")
+        return original_stop(self, h)
+
+    monkeypatch.setattr(FakeNodeApi, "stop_grabbing", stop_grabbing)
+
+    class InterruptedScope:
+        """Настоящая область; Ctrl+C, ждавший в close, приходит по возврату из него."""
+
+        def __init__(self, real) -> None:
+            self.real = real
+
+        def spawn(self, *a, **kw):
+            return self.real.spawn(*a, **kw)
+
+        def close(self, *a, **kw):
+            self.real.close(*a, **kw)
+            state["interrupted"] = True
+            raise KeyboardInterrupt
+
+    real_open_scope = thread_split_probe.open_scope
+    monkeypatch.setattr(thread_split_probe, "open_scope", lambda *a, **kw: InterruptedScope(real_open_scope(*a, **kw)))
+    run = run_probe(monkeypatch, ["--mode", "split", "--seconds", "0.2"])
+    # reachability: поток захвата погиб, а Ctrl+C в close реально пришёл
+    assert state["died"] is True
+    assert state["interrupted"] is True
+    assert run.rc == 1, (run.rc, run.exc)
+    # аварийный возврат и close выполнены, хотя finish() прервали внутри scope.close()
+    _assert_restored_and_closed(run)

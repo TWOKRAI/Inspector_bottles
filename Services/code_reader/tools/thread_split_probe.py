@@ -43,9 +43,10 @@ PARENT = {M: None, S: M, P: S}
 # узел -> (тип: e=enum, i=int; значение режима). ТОЛЬКО эти три узла разрешено писать (UserSetSave -- никогда).
 NODES = {M: ("e", "On"), S: ("e", "SelfTrigger"), P: ("i", 40)}
 NETER = 0x80020206
-# Бюджет закрытия области потоков: возврат режимов = несколько записей SDK + close; ограничен,
-# в отличие от прежнего не-daemon потока, который при зависшем вызове SDK держал процесс бесконечно.
-_SCOPE_BUDGET_S = 60.0
+# Бюджет закрытия области потоков: finish() уже ждал каждый поток по done до 30 с, поток, живой после этого,
+# завис -- close его только собирает. Итого граница ожидания около 30 с + бюджет (прежний не-daemon поток
+# при зависшем вызове SDK держал процесс бесконечно).
+_SCOPE_BUDGET_S = 5.0
 
 
 def code_of(exc: BaseException) -> str:
@@ -364,8 +365,10 @@ class Probe:
                     done.wait(0.2)
                 except KeyboardInterrupt:
                     self.abort.set()
-        report = self.scope.close()
-        if report.survivors or not report.complete:
+        print(f"жду закрытия области потоков до {_SCOPE_BUDGET_S:g} с", flush=True)
+        # _step: Ctrl+C, пришедший в ожидании внутри close, не должен пропустить возврат узлов и сводку
+        report = self._step(self.scope.close)
+        if report is not None and (report.survivors or not report.complete):
             left = ", ".join(report.survivors)
             print(f"Поток зонда не завершился за бюджет {_SCOPE_BUDGET_S:g} с: {left}", flush=True)
         self._step(self.cleanup)
