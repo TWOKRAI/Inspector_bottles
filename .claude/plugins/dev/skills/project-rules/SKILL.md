@@ -47,7 +47,7 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
 ## 5. Subagents and scope
 
 - Default output: a report, no commit, no push.
-- Spawning an agent: `model` explicitly as a tier alias (reviewer/teamlead `opus`, developer/tester
+- Spawning an agent: `model` explicitly as a tier alias (teamlead `opus`, reviewer by class — `.claude/CLAUDE.md` «Model by class», developer/tester
   `sonnet`, cto `fable`, junior/docs-writer/Explore/web-researcher `haiku`), `run_in_background: false`
   for reviewer/tester, and its prompt says: do not commit, do not push. Only for a sizeable independent
   track, never to verify your own work.
