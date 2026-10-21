@@ -2,7 +2,7 @@
 name: project_code_reader_selftrigger_period_sets_the_fps
 description: "ID3013: 3 кадра/с в свободном режиме = период собственного триггера 300 мс; TriggerSource=SelfTrigger (9) + TriggerSelfTriggerPeriod (мин 32 мс) даёт до ~25-30 кадров/с; камера 1 при том же периоде даёт только ~4,7 кадра/с"
 module: [services/code_reader]
-mechanism: [live-stand, observability]
+mechanism: [live-stand, config]
 metadata:
   type: project
 ---

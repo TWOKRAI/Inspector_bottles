@@ -2,7 +2,7 @@
 name: feedback_qpixmap_and_qimage_smooth_scale_differ
 description: "Эталон теста масштабирования из QImage RGB888 не равен QPixmap.scaled (внутри RGB32): расхождение до 11 без всякого ресайза; эталон считать из того же вида, в каком кадр получает виджет"
 module: [prototype/frontend/widgets]
-mechanism: [display, test-reference]
+mechanism: [qt, test-assertions]
 metadata:
   type: feedback
 ---

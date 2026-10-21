@@ -1,8 +1,8 @@
 ---
 name: feedback-windows-realpath-returns-extended-prefix-during-concurrent-mkdir
 description: "На Windows `Path.resolve()`/`os.path.realpath` отдаёт путь с префиксом `\\?\`, пока соседний поток создаёт каталог; сравнение resolved-путей для проверки «не вышел из каталога» ложно отказывает на валидном ключе"
-module: [robot_comm]
-mechanism: [race, windows]
+module: [services/robot_comm]
+mechanism: [concurrency, windows-env]
 metadata:
   type: feedback
 ---

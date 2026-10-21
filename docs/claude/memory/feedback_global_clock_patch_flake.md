@@ -1,7 +1,7 @@
 ---
 name: feedback-global-clock-patch-flake
 description: "Глобальный patch(time.monotonic) с конечным side_effect = флейк (flaky) от чужих потоков; часы (clock) делать зависимостью объекта; шов, что гоняется с окном драйвера по реальным часам, — тест времени, даже если ждёт событие"
-module: [state_store_module, device_hub]
+module: [state_store_module, services/device_hub]
 mechanism: [flaky-tests, test-infra]
 metadata:
   node_type: memory

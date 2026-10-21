@@ -1,7 +1,7 @@
 ---
 name: feedback-snapshot-of-a-sim-record-races-its-ticker
 description: "Снимок записей sim (core.ticks()) сразу после остановки пульса не содержит последний шаг: тикер sim — свой поток, под нагрузкой отстаёт; граница по «последнему изменению» сдвигается / sim ticker snapshot race, heartbeat watchdog flaky under CPU load"
-module: [device_hub]
+module: [services/device_hub]
 mechanism: [flaky-tests, test-infra, concurrency]
 metadata:
   type: feedback

@@ -1,8 +1,8 @@
 ---
 name: feedback_a_recipe_test_must_run_the_same_check_as_the_launcher
 description: "Тест рецепта звал validate_recipe_blueprint и был зелёным, а загрузчик (SystemBlueprint.check) отклонил рецепт: текстовый shape порта → провод несовместим, входы не подключены; владелец ждал долгий запуск стенда зря; остановка TaskStop не гасит процессы стенда"
-module: [prototype/recipes, overlay_draw, code_reader]
-mechanism: [live-stand, recipe-validation]
+module: [prototype/recipes, plugins/render, services/code_reader]
+mechanism: [live-stand, test-assertions]
 metadata:
   type: feedback
 ---

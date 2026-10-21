@@ -1,8 +1,8 @@
 ---
 name: feedback_a_source_frame_shape_must_not_crash_the_display
 description: "Серый кадр источника (image/gray) убил процесс gui без трейсбека (0xC0000005); image_panel/on_frame читал любой кадр как 3-канальный BGR; нативное падение не видно в логах — нужен faulthandler; кадр не шёл на дисплей, пока рецепт не перезагрузили"
-module: [prototype/frontend, code_reader]
-mechanism: [live-stand, display, observability]
+module: [prototype/frontend, services/code_reader]
+mechanism: [live-stand, qt, error-handling]
 metadata:
   type: feedback
 ---
