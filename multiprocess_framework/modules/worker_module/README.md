@@ -226,6 +226,74 @@ ex.shutdown(time.monotonic() + 2.0)                            # очередь 
 
 ---
 
+## ExecutorManager — именованные исполнители процесса (Task 1.9m, ADR-WRK-006)
+
+**Stability:** lite. Контракт — протоколы `IExecutorRegistry` / `IExecutorManager` (`interfaces.py`), реализация —
+`executor_manager.ExecutorManager(BaseManager, ObservableMixin)`. Экспорта из `worker_module/__init__.py` нет
+(как у `KeyedExecutor`): `from ...worker_module.executor_manager import ExecutorManager, ExecutorSpec`.
+
+**Purpose.** Один сотрудник процесса, который создаёт `KeyedExecutor` из конфига или по вызову кода, принимает готовые
+объекты `OrderedExecutor` по имени, отдаёт их `CommandManager` (`register_command(executor="io")`), владеет созданными и
+показывает их в интроспекции. Не только ProcessManager: любой процесс на фреймворке получает такого же помощника.
+
+**Как подключить.**
+- *Из конфига процесса* — ключ `executors` в `proc_dict["config"]` (в `ProcessLaunchConfig` — поле `executors`; пустое
+  значение из `proc_dict` снимается). `ProcessModule` вызывает `load_config` при сборке менеджеров, до любой регистрации
+  команд. На запись — своя попытка: неверная запись даёт одну строку ERROR и пропускается, соседние создаются.
+  Схема записи `ExecutorSpec`: `kind="keyed"`, `serial=False`, `max_workers=4` (≥ 1), `max_pending=64` (≥ 1);
+  лишний ключ — отказ записи (`extra="forbid"`), а не тихий исполнитель с умолчаниями.
+- *Из кода* — `create(name, spec=None, *, should_reject=None)` (`should_reject` — код, в конфиг не кладётся) или
+  `register(name, executor)` для готового объекта (адаптеры-политики). Менеджер процесса лежит в
+  `process.executor_manager` (слот `executors` в `ManagersBundle`; `None`, если bundle собран вручную).
+
+```python
+# конфиг процесса (ProcessLaunchConfig.executors / proc_dict["config"]["executors"])
+executors = {"io": {"kind": "keyed", "max_workers": 8, "max_pending": 32}}
+
+# из кода: после super().initialize(), до регистрации команд, которые назовут исполнитель
+ex = self.executor_manager.create("lifecycle", {"serial": True}, should_reject=self._stopping)
+self.executor_manager.register("submit-adapter", my_adapter)       # владелец остаётся у вызывающего
+self.command_manager.register_command("camera.start", handler, executor="io", key_from="camera")
+```
+
+**Public API.**
+
+| Член | Контракт |
+|---|---|
+| `get(name) -> OrderedExecutor \| None` | Объект по имени; не бросает. Это весь `IExecutorRegistry`. |
+| `create(name, spec=None, *, should_reject=None)` | Имя занято → `ValueError`; неверный `spec` → `ValueError` (`<loc>: <msg>` через `; `, без входных значений); после закрытия → `RuntimeError` (допустим `ScopeClosedError`). На любом провале имя не остаётся занятым. Одна строка INFO на созданный. |
+| `register(name, executor)` | Нет вызываемого `submit` → `TypeError`; имя занято → `ValueError`. Только маршрутизация по имени. |
+| `load_config(section) -> list[str]` | Имена созданных. `None` / `{}` → `[]`, ни строки лога; не `Mapping` → одна строка ERROR, `[]`. |
+| `names()` / `is_executor_thread(name)` | Все имена в порядке появления / текущий поток — рабочий **созданного** `name` (точное имя потока; для зарегистрированного и неизвестного — `False`). |
+| `describe()` | Снимок для интроспекции (ниже). |
+
+Имя — по правилу имени записи `Scope`: непустая `str`, без `/`, без суффикса ` (self)`.
+
+**Владение и остановка.**
+- *Созданные* менеджер отдаёт своей области (`scope.own(..., kind="executor")`); в `ProcessModule` это область
+  `executor_manager-scope` внутри сегмента `work`, запись `executors` стоит сразу после `plugins`. Исполнители
+  закрываются общим сроком области: сначала `request_stop` (очередь получает `system_stopping`), затем `join_until`.
+  Закрытие со своего рабочего потока ждать не станет: WARNING и `False` сразу. Без области (менеджер вне `ProcessModule`)
+  созданные лежат в `_unowned` и закрываются в `shutdown()` менеджера общим сроком 2,0 с.
+- *Зарегистрированные* менеджер не закрывает (ни `request_stop`, ни `join_until`, даже если объект `Stoppable`): владелец
+  остаётся у регистрирующего. `register` после закрытия менеджера принимается; `create` — нет.
+- Процесс без исполнителей платит ноль: ни потоков, ни строк лога (объект менеджера, пустая область и одна запись в `work`).
+
+**Интроспекция.** Команда `introspect.executors` (процесс отвечает за себя; через backend_ctl —
+`send_command(<процесс>, "introspect.executors")`) возвращает `ExecutorManager.describe()`:
+`{"executors": {<имя>: {...}}, "unavailable": ["pending_depth", "running_keys"]}`. Созданный: `kind`, `source`
+(`config` / `code`), `serial`, `max_workers`, `max_pending`, `owned` (принят областью), `workers`
+(`{<имя воркера>: {"is_alive", "status"}}`; снятый воркер — `"absent"`; при `serial=True` `max_workers` — значение спеки, реальных рабочих 1). Зарегистрированный: `kind="registered"`,
+`source="code"`, `type`. Глубины очереди и ключей в работе нет: у `KeyedExecutor` нет публичного чтения, ядро не правилось
+(`docs/claude/OPEN_QUESTIONS.md`).
+
+**Boundaries.** `worker_module` о `command_module` не знает: `CommandManager` видит только `IExecutorRegistry` под
+`TYPE_CHECKING`. Рабочие исполнителя — SYSTEM-воркеры, `worker.stop/remove/...` по IPC отвечают `protected`. Тесты:
+`tests/test_executor_manager_acceptance.py`, `tests/test_executor_manager_hazards.py`; проводка процесса —
+`process_module/tests/test_process_executors_acceptance.py`.
+
+---
+
 ## ThreadConfig — Конфигурация потока
 
 ### Основные параметры

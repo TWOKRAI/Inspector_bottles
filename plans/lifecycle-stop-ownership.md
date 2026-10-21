@@ -20,7 +20,7 @@
   примитив `KeyedExecutor` и развилка в `CommandManager`, **1.9b** — PM первый потребитель); малые задачи рядом — **Task 1.10**
   (честный итог стопа `outcome`) и **Task 1.11** (окно стопа на ребёнка). Полоса Ф (сессия inspector-bottles-07). План
   закрытия окна GUI — отдельный, `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент; здесь только
-  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9b–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
+  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9m DONE 2026-10-21 — `ExecutorManager` (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9m.md`); 1.9b IN PROGRESS 2026-10-21 (стадия 0 р.1 CHANGES REQUESTED, правки внесены, р.2 — после 1.9m); 1.9c DRAFT 2026-10-21 — выделена из 1.9b стадией 0; 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
 
 ## Зачем — одной фразой
 
@@ -472,7 +472,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 - **Ловушка:** `2026-10-18_camera-device-service` Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`
   (Task 1.11 — тоже). Один писатель: перед стартом 1.11 координатор сверяет, начата ли их 1.7; если да — 1.11 ждёт её
   слияния или берёт `spawner.py` после неё. То же для `process_manager_process.py` и плана `gui-graceful-close`.
-- **Порядок и зависимости:** 1.9a → 1.9b → 1.10 → 1.11 → (полоса Services) сведение `ServiceHost._cmd_start` к
+- **Порядок и зависимости:** 1.9a → 1.9m → 1.9b → 1.10 → 1.11 → 1.9c → (полоса Services) сведение `ServiceHost._cmd_start` к
   `KeyedExecutor` (дубль №2 карты). 1.9b, 1.10, 1.11 — общие `process_manager_process.py`, `child_process_stop.py`,
   `process_registry.py`, параллельно не идут; 1.9a поведения PM не меняет. Правка корня PM из `gui-graceful-close` — после слияния 1.9b; с 1.10/1.11
   в одной волне не идёт (общий файл), очередь решает координатор. T4.x не ждёт ни одной из трёх (CTO D4).
@@ -492,13 +492,57 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 **Files:** — раздел «Files» файла задачи
 **Acceptance:** — раздел «Acceptance» файла задачи
 
+### Task 1.9m — `ExecutorManager`: исполнители как сотрудник процесса (решение владельца 2026-10-21)
+
+**Статус:** DONE 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — по брифу; инъекции — Haiku; ревью задачи — `reviewer` (Sonnet), ревью ветки — Opus
+**Goal:** `ExecutorManager(BaseManager)` внутри любого процесса: именованные исполнители из конфига процесса и регистрацией готового `OrderedExecutor`, жизнь в scope процесса, интроспекция `introspect.executors`; `register_command(executor=)` принимает объект или имя. Ядро `KeyedExecutor` 1.9a — без правок.
+**Зависит от:** Task 1.9a. **Даёт:** Task 1.9b (PM — первый потребитель менеджера). Слова владельца: «отдельный помощник наподобие nginx, чтобы не только PM, но и другие процессы при необходимости себе сделали; новый сотрудник на базе фреймворка (наследующий от base_manager)»; форма «внутри процесса, не отдельный процесс» согласована.
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9m.md`](lifecycle-stop-ownership/tasks/T1.9m.md) (+ [`T1.9m_facts.md`](lifecycle-stop-ownership/tasks/T1.9m_facts.md))
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → исполнитель (GREEN + hazard) → лид (инъекции) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+
+### Хвосты Task 1.9m — закрыть отдельным циклом в новом чате (решение владельца 2026-10-21)
+
+**Статус:** TODO · владелец при слиянии 1.9m: «все нюансы надо позже закрыть в новом чате». Источник — «Что осталось открытым»
+[отчёта 1.9m](../docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9m.md) и разборы ревью (`docs/reviews/2026-10-21_task-1.9m-*`,
+`2026-10-21_branch-1.9m-review-opus.md`). Каждый пункт — тест или правка с инъекцией, либо явное решение «оставить» с причиной.
+
+1. H2 слабый (`reply` зовётся напрямую, роутер не участвует) — переписать через роутер или снять в пользу
+   `test_real_process_command_by_executor_name_runs_on_executor_thread`.
+2. H5 вероятностный (5/5 и 3/3 на одной машине) — детерминировать или записать предел.
+3. Поздний `load_config` (мутант M2) ловит только тест наследника; регистрация после `initialize()` порядок не проверяет.
+4. И7: в слепом наборе нет теста `describe()` для исполнителя не из конфига (поломку ловят только H3/H5 автора).
+5. Автор видел матрицу И до написания H-тестов — независимая перепроверка H1–H9 (tester вслепую или инъекции reviewer).
+6. Процесс без корня (`work is None`): после `shutdown()` живы `keyed-*` и `message_processor` (воспроизведено ревью ветки) —
+   общий путь, в продукте недостижим; решить: исправить или записать в реестр.
+7. Хвост 1.9a: провал на втором рабочем `KeyedExecutor` оставляет первый в `WorkerManager` (найдено чтением).
+8. `_OwnedExecutor(...)` между конструктором и `try` в `create()`: синтетический бросок оставляет резерв и живые потоки
+   (реально не бросает) — закрыть построением или тестом.
+9. Гонка `create`/`register` одного имени не воспроизведена (register выиграл 200/200 из-за валидации до лока).
+10. Публичный `stats()` у `KeyedExecutor` (глубина очереди, ключи в работе, счётчики) → `introspect.executors` без
+    `unavailable` (строка в `docs/claude/OPEN_QUESTIONS.md`).
+11. Совет ревью задачи `assert spec` — не взят; решить.
+12. `T1.9m.md` 33 КБ — выше лимита doc-size-guard (32 КБ); вынести часть в `_facts.md`.
+13. Красные suite не от 1.9m — C-26 (`test_event_manager_exit` под нагрузкой), C-27 (`test_line_sim_overview_lists_robot`
+    setup под нагрузкой) — ведёт координатор; здесь только ссылка.
+
 ### Task 1.9b — PM первый потребитель: стоп вне `message_processor`, отложенный ответ (конечное состояние L-9)
 
 **Статус:** DRAFT 2026-10-20 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
-**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — обёртка над исполнителем.
-**Зависит от:** Task 1.9a; потребитель — план `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`)
+**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — Task 1.9c.
+**Зависит от:** Task 1.9a, Task 1.9m (исполнители PM — через `ExecutorManager`); потребитель — план `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`)
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9b.md`](lifecycle-stop-ownership/tasks/T1.9b.md)
 **Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции, стенд) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.9c — `_run_when_child_ready` поверх `KeyedExecutor` (выделена из 1.9b стадией 0)
+
+**Статус:** DRAFT 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** ядро `_run_when_child_ready` — `KeyedExecutor` вместо daemon-потока на адресата (дубль №1 карты); семантика ADR-PMM-024 прежняя; стоп PM не ждёт ждущие действия гейта.
+**Зависит от:** Task 1.9b, Task 1.11. Причина выделения: D5 ломал тесты ADR-PMM-024 «без правок» и добавлял hazard `_WorkersStop` (стадия 0 1.9b, п.2–5).
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9c.md`](lifecycle-stop-ownership/tasks/T1.9c.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции) → `reviewer`
 **Files:** — раздел «Files» файла задачи
 **Acceptance:** — раздел «Acceptance» файла задачи
 

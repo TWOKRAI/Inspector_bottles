@@ -37,7 +37,7 @@
 | `event_module` | **in-proc** typed pub/sub «фактов» (по `type(event)`) | межпроцессными событиями (`EventManager`), командами, состоянием |
 | `telemetry_readmodel_module` | **read-model телеметрии для GUI** (ADR-136): локальная проекция для чтения, история по запросу | сбором/публикацией метрик (это источник + `statistics_module`), транспортом |
 | `app_module` | **композиционная крыша** приложения («рыба», Ф5.11): манифест + дискавери, сборка proc-dicts, bootstrap состояния, `run_app`/`build_app` | внутренностями конкретных подсистем; внутри framework его **не импортирует никто** |
-| `worker_module` | потоки внутри процесса (LOOP/TASK, lifecycle) | процессами, DAG-пайплайнами |
+| `worker_module` | потоки внутри процесса (LOOP/TASK, lifecycle); `KeyedExecutor` (порядок по ключу, ADR-WRK-005) и `ExecutorManager` — **именованные исполнители процесса**: создаёт из `config["executors"]`/кода, владеет созданными, отдаёт `CommandManager` по имени, `introspect.executors` (Task 1.9m, ADR-WRK-006) | процессами, DAG-пайплайнами; командами и маршрутизацией (это `command_module`/`router_module`) |
 | `chain_module` | DAG/Chain/Parallel **исполнение** пайплайна + worker-pool | сетевым IPC, потоками общего назначения |
 | `process_module` | база дочернего процесса (собирает подсистемы) | оркестрацией нескольких процессов |
 | `process_manager_module` | оркестратор системы (spawn/monitor/registry) + топология (`SystemBlueprint`/`ProcessConfig`/`Wire` в `topology/`, ADR-PMM-016; структурный вывод `join`/`inspector` из wires, ADR-PMM-017) | внутренней логикой конкретного процесса |

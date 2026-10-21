@@ -28,6 +28,17 @@
 | `DataReceiver` + `_chain_queue` | `data_receiver.py:426`; `generic_process.py:263, 307-312` | data-plane, ограниченная очередь с бэкпрешером | **не трогать** | — | да: `process_module/generic/data_receiver.py:426 def run_loop(`; `process_module/generic/generic_process.py` `:263 _chain_queue = queue.Queue(maxsize=…)`, `:307-312 create_worker(…)` | не берётся |
 | `_sender` / `async_sender_buffer` / `QueueChannel._listen_loop` | `_sender.py:66-86`; `async_sender_buffer.py:67-89`; `queue_channel.py:143-209` | отправители/слушатель транспорта | не дубли исполнителя (Task 3.3) | — | да: `router_module/core/_sender.py` `:66 PriorityQueue(maxsize=…)`, `:86 threading.Thread(`; файл `async_sender_buffer.py` лежит в `channel_routing_module/buffers/` (`:67`, `:89` — то же); `router_module/channels/queue_channel.py` `:143 def start_listening(`, `:209 time.sleep(1.0)` | не берётся |
 
+## Владелец экземпляров — `ExecutorManager` (Task 1.9m)
+
+`worker_module/executor_manager.py` (ADR-WRK-006, 2026-10-21): сотрудник процесса (`BaseManager`), который **создаёт и
+держит** экземпляры `KeyedExecutor` — из `config["executors"]` или по вызову кода — и отдаёт их `CommandManager` по имени
+(`register_command(executor="io")`, ADR-CMD-007). Ядро `keyed_executor.py` не тронуто; это владелец поверх него, а не
+второй механизм. Ключ конфига, место в области `work` и команда `introspect.executors` — ADR-PM-055.
+
+| Инструмент | file:line | Что умеет | Вердикт | Чего не хватает | В какой задаче берётся |
+|---|---|---|---|---|---|
+| `ExecutorManager` / `ExecutorSpec` | `worker_module/executor_manager.py` (протоколы `IExecutorRegistry`, `IExecutorManager` — `worker_module/interfaces.py`) | `create` / `register` / `load_config` / `get` / `names` / `describe` / `is_executor_thread`; владеет созданными (область менеджера, срок общий), зарегистрированными не владеет | **владелец экземпляров `KeyedExecutor`**; переиспользовать | публичного `stats()` у `KeyedExecutor` нет: `introspect.executors` отдаёт глубину очереди и ключи в работе в `unavailable` (`docs/claude/OPEN_QUESTIONS.md`) | 1.9m; 1.9b — исполнитель PM и адаптеры через менеджер; позже — `ServiceHost` |
+
 ## Дубли к сведению (FREEZE, не KILL)
 
 1. `_run_when_child_ready` / `_drain_child_actions` (ADR-PMM-024) — сводится в **1.9b**: старые методы остаются

@@ -103,6 +103,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = {}
 
+    executors: Annotated[
+        dict[str, dict[str, Any]],
+        FieldMeta(
+            "Executors",
+            info="Именованные исполнители процесса {name: {kind, serial, max_workers, max_pending}} "
+            "(ExecutorManager, Task 1.9m). Пусто → исполнителей нет. Остаётся в proc_dict['config'].",
+        ),
+    ] = {}
+
     @property
     def memory(self) -> dict[str, Any] | None:
         """SharedMemory layout for proc_dict['memory']. Override in subclass."""
@@ -166,6 +175,10 @@ class ProcessLaunchConfig(SchemaBase):
         supervision_group = payload.pop("supervision_group", None) or ""
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
+        # executors остаётся в config (читает ProcessModule как config["executors"]); пустое значение
+        # снимаем — форма proc_dict у процессов без исполнителей прежняя (как restart_policy).
+        if not payload.get("executors"):
+            payload.pop("executors", None)
 
         # Очередь "state" ОБЯЗАТЕЛЬНА (Ф6.2: выбор транспорта удалён — state.changed
         # едет только ею). Кастомный `queues` без неё означал бы, что подписчик молча
