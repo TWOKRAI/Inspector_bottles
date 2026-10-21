@@ -20,7 +20,7 @@
   примитив `KeyedExecutor` и развилка в `CommandManager`, **1.9b** — PM первый потребитель); малые задачи рядом — **Task 1.10**
   (честный итог стопа `outcome`) и **Task 1.11** (окно стопа на ребёнка). Полоса Ф (сессия inspector-bottles-07). План
   закрытия окна GUI — отдельный, `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент; здесь только
-  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9b–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
+  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9b IN PROGRESS 2026-10-21 (шаг 0 → стадия 0); 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
 
 ## Зачем — одной фразой
 
