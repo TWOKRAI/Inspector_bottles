@@ -4,21 +4,19 @@
 `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock` (остальные строки не трогать) и одно сообщение каждой полосе:
 «координатор теперь <имя>».
 
-## Полосы (все три на связи, ListAgents)
+## Полосы (обновлено ~11:45)
 
-| Сессия | Полоса | Задача | Состояние ~10:00 |
-|---|---|---|---|
-| inspector-bottles-a9 | Р2 (робот v2, device_hub) | T5.3g — окна W1/W4/WW гонки connect ↔ request_stop | C-11 в main `a178e0b64`; проба воспроизвела W1/W4/WW (10/10 по прогнозу); слепой тестер написан (9 тестов), developer правит; ветка `feat/robot-v2-t53g` |
-| inspector-bottles-48 | Ф (фреймворк, L-9) | Task 1.9a — KeyedExecutor + развилка в CommandManager | реализация `8e7cf6a7a` (R 15/15, H 8/8, радиус medium зелёный); прогнозы инъекций закоммичены; в окне до ~10:15 (продлено: suite 18 мин); suite 2 failed — голый getLogger в keyed_executor.py:127 (её, чинит) и C-20 |
-| inspector-bottles-66 | Д (дефекты) | C-13 → C-16/C-17 | C-13 (`fix/c13-validate` 9e4623b95) готов, ждёт «да» владельца; C-16 (`fix/c16-collector` e5819bd88) реализован, ревью ветки Opus идёт, нужно окно |
-| claude-seed-b7 | — | не проект | простаивает; владелец может закрыть |
+В main за день: C-11 `a178e0b64`, C-13 `a1cd6f49e`, C-16+C-17 `09a925a4b`, 1.9a `6c4fc762e`, C-18 modbus_demo `3dc5d534b`,
+T5.3g `53b1e1564`; handoff'ы Ф `977cab6ec`, Д `7c76750de`, Р2 `aaf57167b`. validate и backend/tests на main зелёные.
 
-## Очередь окон (machine.lock)
+| Сессия | Полоса | Состояние |
+|---|---|---|
+| inspector-bottles-48 | Ф | Task **1.9m** ExecutorManager(BaseManager) — решение владельца, перед 1.9b; стадия 0 1.9b р.1 была CHANGES REQUESTED, р.2 придержана; порядок 1.9m → 1.9b → 1.10 → 1.11 → 1.9c → ServiceHost; отдан `multiprocess_prototype/orchestrator.py` (регистрация `recipe.activate`, ~:78–83) |
+| (новая) | Р2 | /clear; новая сессия — C-18 `robot_demo` по `docs/handoffs/2026-10-21_task-T5.3g-merged.md`, затем SPI хаба (после 1.9m: executor= по имени), T5.3e |
+| (новая) | Д | /clear; новая сессия — C-22 → C-19 → C-20 → C-21 по `docs/handoffs/2026-10-21_lane-D-C16-C13.md` |
+| claude-seed-b7 | — | не проект |
 
-1. Ф — heavy до ~10:15 (продлено): robot_comm → база → инъекции A/B → framework suite → validate → backend/tests.
-2. Р2 — heavy (timed medium device_hub) ~25 мин по «готов» (уже прислала): тестер + прогон правки developer.
-3. Д — heavy ~20 мин: framework suite + backend/tests + validate на C-16.
-Окно на машине одно (gate). Timed device_hub рядом с framework suite не пускать — тайминги.
+machine.lock: окон нет, стенд свободен.
 
 ## Границы, выданные сегодня
 
@@ -61,6 +59,12 @@
 - Правило проверок перед слиянием — в шаблоне стартового промпта навыка coordinator (`d66f32946`).
 - Пустой `stand.lock` удалён.
 - Не сделано: журнал дня `docs/sessions/2026-10-21.md`.
+
+## Ждут ответа владельца (~11:45)
+
+1. C-22: «collector без mode = тонкая настройка выведенного join; join не выведен — ошибка check() с подсказкой; fanin — только с явным
+   `mode: fanin`» (направление «громкая ошибка, рецепты универсальны» владелец уже одобрил; ждёт «да» на эту формулировку).
+2. SOFT при обычном «Отключить» посреди connect (из T5.3g; решение 2026-10-20 было только про request_stop). Координатор — за.
 
 ## Уроки дня
 
