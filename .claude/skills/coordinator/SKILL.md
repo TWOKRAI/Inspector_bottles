@@ -112,7 +112,9 @@ LOAD: coordinator is <session> (name also in machine.lock). First message to it:
   Every test/stand command through the gate from project-rules §8 (absolute path); heavy only in your
   window — request it in advance: `ready for window: …`. Pass the session name to every agent brief.
 COMMITS: Conventional Commits + Why:/Layer:/Refs: trailers (.claude/COMMIT_GUIDE.md); stage explicit paths;
-  plan open/close is its own docs(plans) commit.
+  plan open/close is its own docs(plans) commit. Before a merge into main (owner, 2026-10-21): rebase on main, then
+  validate.py + multiprocess_prototype/backend/tests + the framework suite (heavy, in your window); every red named
+  against plans/queue/defects.md — a red not in the registry blocks the merge until the coordinator registers it.
 LIMITS: 2 iterations per loop, escalate on the 3rd one level up; owner decisions you need → list them, do not guess.
 REPORT: Russian; numbers, not adjectives; a non-empty «what I left open / unreliable»; agentId table;
   at the end of the task — handoff and a new session (/clear), not /compact.
