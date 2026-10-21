@@ -29,8 +29,7 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, ValidationError
 
-from ..base_manager import BaseManager, ObservableMixin
-from ..base_manager.core.lifetime import _check_name
+from ..base_manager import BaseManager, ObservableMixin, check_scope_name
 from ..base_manager.interfaces import ScopeClosedError
 from ..data_schema_module import SchemaBase
 from .interfaces import OrderedExecutor
@@ -202,7 +201,7 @@ class ExecutorManager(BaseManager, ObservableMixin):
         return self._create(name, spec, should_reject, source="code")
 
     def register(self, name: str, executor: OrderedExecutor) -> None:
-        _check_name(name)
+        check_scope_name(name)
         if not callable(getattr(executor, "submit", None)):
             raise TypeError(f"register '{name}': у executor нет вызываемого submit ({type(executor).__name__})")
         with self._lock:
@@ -278,7 +277,7 @@ class ExecutorManager(BaseManager, ObservableMixin):
         *,
         source: Literal["config", "code"],
     ) -> OrderedExecutor:
-        _check_name(name)
+        check_scope_name(name)
         parsed = self._parse_spec(spec)
 
         reserved = _Entry(kind=_RESERVED)

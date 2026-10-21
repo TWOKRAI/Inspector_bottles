@@ -336,6 +336,7 @@ def test_root_attributes_get_scopes() -> None:
             "router_manager",
             "command_manager",
             "console_manager",
+            "executor_manager",  # Task 1.9m: область "executor_manager-scope" в work корня
         }
 
         # config={}: этих менеджеров нет, области им не достаются.

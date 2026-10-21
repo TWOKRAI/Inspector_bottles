@@ -207,48 +207,53 @@ def test_h3_executor_created_before_attach_scope_is_closed_by_shutdown(wm):
 
 
 def test_h5_describe_parallel_with_create_and_register(wm):
-    """H5: ``describe()`` x1000 параллельно с ``create`` / ``register`` - ни одного исключения."""
-    mgr = ExecutorManager("h_exec_desc", worker_manager=wm)
-    assert mgr.initialize() is True
-    errors: list[BaseException] = []
-    stop_describe = threading.Event()
-    describes = 0
+    """H5: ``describe()`` в цикле на A, 200 ``register`` + 10 ``create`` на B (старт по Barrier, x5) - 0 исключений."""
+    for rnd in range(5):
+        mgr = ExecutorManager(f"h_exec_desc{rnd}", worker_manager=wm)
+        assert mgr.initialize() is True
+        errors: list[BaseException] = []
+        barrier = threading.Barrier(2)
+        writer_done = threading.Event()
+        describes = 0
 
-    def describer() -> None:
-        nonlocal describes
-        try:
-            for _ in range(1000):
-                snapshot = mgr.describe()
-                assert isinstance(snapshot["executors"], dict)
-                describes += 1
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
-        finally:
-            stop_describe.set()
+        def describer(mgr=mgr, errors=errors, barrier=barrier, writer_done=writer_done) -> None:
+            nonlocal describes
+            try:
+                barrier.wait(5.0)
+                while not writer_done.is_set():
+                    snapshot = mgr.describe()
+                    assert isinstance(snapshot["executors"], dict)
+                    describes += 1
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
 
-    def writer() -> None:
-        try:
-            for i in range(15):
-                mgr.create(f"c{i}", {"serial": True})
-                mgr.register(f"r{i}", Registered())
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
+        def writer(mgr=mgr, errors=errors, barrier=barrier, writer_done=writer_done, rnd=rnd) -> None:
+            try:
+                barrier.wait(5.0)
+                for i in range(200):
+                    mgr.register(f"r{i}", Registered())
+                    if i % 20 == 0:
+                        mgr.create(f"c{rnd}x{i}", {"serial": True})
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                writer_done.set()
 
-    threads = [
-        threading.Thread(target=describer, daemon=True, name="h5-describe"),
-        threading.Thread(target=writer, daemon=True, name="h5-write"),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(30.0)
-    assert not any(t.is_alive() for t in threads), "зависание"
-    assert errors == [], errors
-    assert describes == 1000
-    final = mgr.describe()["executors"]
-    assert len(final) == 30
-    assert final["c0"]["kind"] == "keyed" and final["r0"]["kind"] == "registered"
-    bounded(mgr.shutdown, 10.0)
+        threads = [
+            threading.Thread(target=describer, daemon=True, name="h5-describe"),
+            threading.Thread(target=writer, daemon=True, name="h5-write"),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30.0)
+        assert not any(t.is_alive() for t in threads), f"раунд {rnd}: зависание"
+        assert errors == [], f"раунд {rnd}: {errors!r}"
+        assert describes > 0
+        final = mgr.describe()["executors"]
+        assert len(final) == 210
+        assert final["r0"]["kind"] == "registered" and final[f"c{rnd}x0"]["kind"] == "keyed"
+        bounded(mgr.shutdown, 10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +304,45 @@ def test_h6_failed_create_releases_name(wm):
     assert mgr.create("bad") is not None  # имя снова свободно
     bounded(mgr.shutdown, 10.0)
     bounded(first.shutdown, 10.0)
+
+
+# ---------------------------------------------------------------------------
+# H9
+# ---------------------------------------------------------------------------
+
+
+def test_h9_close_between_reservation_and_commit_refused_and_name_released(wm, monkeypatch):
+    """H9 (ветка late): закрытие после резерва имени, до записи - ``RuntimeError``, имени нет, рабочие остановлены."""
+    from multiprocess_framework.modules.worker_module import executor_manager as module
+
+    mgr = ExecutorManager("h_exec_late2", worker_manager=wm)
+    assert mgr.initialize() is True
+    real = module.KeyedExecutor
+
+    def closing_factory(*args, **kwargs):
+        mgr.shutdown()  # менеджер закрывается, пока имя "y" зарезервировано, а запись ещё не сделана
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "KeyedExecutor", closing_factory)
+
+    with pytest.raises(RuntimeError):
+        mgr.create("y", {"max_workers": 2})
+    assert "y" not in mgr.names()
+    assert mgr.get("y") is None
+    assert wait_gone("h_keyed-y-", 2.0), alive_keyed("h_keyed-y-")
+    # Белый ящик: публичное чтение резерв не показывает (names/get его фильтруют), а закрытый менеджер
+    # на любое create отвечает RuntimeError до проверки имени - утечку резерва видно только в записях.
+    assert "y" not in mgr._entries, "резерв имени не снят на пути late"
+
+
+def test_h9_create_after_shutdown_without_scope_refused(wm):
+    """H9: менеджер без области, ``shutdown()``, затем ``create`` - ``RuntimeError``, имени и потоков нет."""
+    mgr = ExecutorManager("h_exec_closed", worker_manager=wm)
+    assert mgr.initialize() is True
+    assert bounded(mgr.shutdown, 10.0) is True
+
+    with pytest.raises(RuntimeError):
+        mgr.create("x", {"max_workers": 2})
+    assert "x" not in mgr.names()
+    assert mgr.get("x") is None
+    assert wait_gone("h_keyed-x-", 2.0), alive_keyed("h_keyed-x-")
