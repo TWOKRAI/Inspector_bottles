@@ -531,3 +531,31 @@ def test_h17_request_stop_inside_disconnect_one_soft_total(monkeypatch: pytest.M
         monkeypatch.undo()
         _teardown(drv)
     assert observed == {"soft": 1, "t3_exited_before_d3": True}, f"H17: {observed}"
+
+
+def test_h18_ready_robot_dropped_link_tick_no_leak(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Стадия 0 р.2 (сценарий ревьюера): готовый робот, связь упала вне тика (``_ready`` True). Тик стоит после
+    ``connect_begin`` -> ("go", True); «Отключить» целиком; тик открывает сокет в C3, отказывает в C4 -> сокет закрыт,
+    SOFT нет (связи в D2 не было)."""
+    drv, client = _make_driver()
+    assert _bounded(drv.connect, _HANG_S, "H18 предварительный connect") is True, "H18: робот не подключился до T1"
+    client.transport.is_connected = False  # обрыв вне тика: готовность осталась
+    barrier = _Barrier()
+    box: dict[str, Any] = {}
+    original = RobotState.connect_begin
+
+    def connect_begin(self: RobotState) -> tuple[str, bool]:
+        result = original(self)
+        box.setdefault("connect_begin", result)
+        barrier.pause_if_t1()
+        return result
+
+    monkeypatch.setattr(RobotState, "connect_begin", connect_begin)
+
+    def stop() -> None:
+        drv.desired_connected = False
+        drv.disconnect()
+
+    obs = _tick_window(drv, client, stop, "H18", barrier=barrier)
+    observed = {"soft": obs["soft"], "transport_open": obs["transport_open"], "connect_begin": box.get("connect_begin")}
+    assert observed == {"soft": 0, "transport_open": False, "connect_begin": ("go", True)}, f"H18: {obs}"
