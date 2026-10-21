@@ -1000,11 +1000,11 @@ class BuiltinCommands:
                     "api_version": entry.api_version,
                     "requires": list(entry.requires),
                     "inputs": [
-                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "join": p.join, "shape": p.shape}
                         for p in entry.inputs
                     ],
                     "outputs": [
-                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "join": p.join, "shape": p.shape}
                         for p in entry.outputs
                     ],
                     "commands": list(getattr(entry.plugin_class, "commands", {}) or {}),

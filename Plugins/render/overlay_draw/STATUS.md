@@ -7,6 +7,7 @@
 - registers (color_table type+group + дефолты стиля, dash/gap, show_labels).
 - plugin: vlines → центральная линия + пунктирные границы; explicit lines/dashed_lines;
   points + подписи; резолв цвета per-shape→group→type→дефолт; рисование на копии кадра.
+- вход `overlay`: `optional=True, join=True` — подключённый участвует в join с `frame` (C-16, ADR-PMM-017 п.7).
 
 ## Зависит от
 - `JoinInspectorManager` (готов) — слияние frame+overlay в один item.

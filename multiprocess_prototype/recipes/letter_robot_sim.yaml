@@ -299,14 +299,8 @@ blueprint:
       protected: false
       category:
       restart_policy: {}
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
       extras: {}
     - process_name: layout
       plugins:
@@ -379,14 +373,8 @@ blueprint:
       protected: false
       category:
       restart_policy: {}
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
       extras: {}
     - process_name: maskview
       plugins:

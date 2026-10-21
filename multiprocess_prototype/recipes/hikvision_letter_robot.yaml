@@ -274,14 +274,8 @@ blueprint:
       description: crop(по триггеру линии) → калибровка px→мм (+энкодер) → нейронка буква+угол
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
     - process_name: layout
       plugins:
         - plugin_name: word_layout
@@ -350,14 +344,8 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
     - process_name: maskview
       plugins:
         - plugin_name: mask_to_frame

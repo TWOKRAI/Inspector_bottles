@@ -16,10 +16,9 @@
 #     (в join/дисплей/другую ветку) — ОБЯЗАН быть отдельным процессом.
 #     Здесь circle_detector ветвится на line/crop/draw/maskview → их не слить в линию.
 #   * Валидные слияния: roi_crop→color_convert (roi), hsv_mask→circle_detector (detector).
-#   * inspector (join) — ПРЯМОЙ ключ процесса, НЕ под metadata: загрузчик читает
-#     ProcessConfig.inspector; под metadata join МОЛЧА не активируется (линия не сольётся).
-#     ВНИМАНИЕ: GUI при пересохранении переносит inspector под metadata — после правок
-#     в редакторе проверяй, что join на месте (иначе линия/crop перестают работать).
+#   * join (draw, crop) выводится из портов плагина (Port.join, ADR-PMM-017 п.7): рецепт не
+#     задаёт mode/inputs. collector: {timeout_sec} — ПРЯМОЙ ключ процесса, только тонкая
+#     настройка; metadata.inspector/collector — deprecated (предупреждение в лог).
 #
 # detector: hsv_mask изолирует белый объект → item["mask"]; circle_detector(input_key=mask,
 #   keep_mask=true) ищет круги по ЧИСТОЙ маске (мало ложных) и НЕ рисует на кадре — кадр идёт
@@ -211,14 +210,8 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
     - process_name: saver
       plugins:
         - plugin_name: frame_saver
@@ -267,14 +260,8 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
     - process_name: maskview
       plugins:
         - plugin_name: mask_to_frame
