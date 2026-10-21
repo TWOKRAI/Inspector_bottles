@@ -2007,3 +2007,7 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 - Сторож M6 написан (`535398d87`, `test_t53f_m6_guard.py`); причина потери красного M6 между T5.3a/b и T5.3c/d остаётся открытой.
 - Слепые зоны сторожа `test_no_private_driver_state.py` (T5.3f f3): `st = drv.state; st._lock` (получатель не `.state`); `import …robot_driver_v2 as v2; v2.RobotState(...)` вне пакета; пять общих имён переходов (`view`, `enqueue_job`, `enqueue_return`, `stop_unconfirmed`, `stop_unconfirmed_text`) через псевдоним; тесты вне двух каталогов (`Services/device_hub/tests`, `Plugins/hub/device_hub/tests`).
 - `test_program_stop_after_g0_then_progress_does_not_repeat_stop` красный под H2b только в полном прогоне (изолированно 0/10 на базе и 0/10 под H2b): тест зависит от порядка/соседей. Сторож H2b — `test_robot_v2_ops.py::test_connect_path_sync_is_cancelled_by_stop`; зависимость от соседей не разобрана.
+
+## Task 1.9m (ExecutorManager): у `KeyedExecutor` нет публичного `stats()` (2026-10-21)
+
+- У `KeyedExecutor` нет публичного `stats()` (глубина очереди, ключи в работе, счётчики принятых/отказанных); команда `introspect.executors` отдаёт `pending_depth` и `running_keys` в списке `unavailable`. Ядро `keyed_executor.py` в 1.9m не правилось (решение владельца «1.9a без правок»); кандидат на будущую задачу.

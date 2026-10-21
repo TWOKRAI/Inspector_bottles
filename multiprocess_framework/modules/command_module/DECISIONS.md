@@ -102,3 +102,40 @@ keyword-only `reply`) — подделки CM и `BaseCommandManager` не тр�
 **Reversible:** yes (убрать kwarg и реестр; ни одна команда в 1.9a не помечена).
 **Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9a.md` (D3), ADR-WRK-005, ADR-RTR-015,
 `tests/test_command_executor_fork_acceptance.py`, `tests/test_command_executor_fork_hazards.py`.
+
+## ADR-CMD-007: `executor=` принимает имя — разрешение при регистрации через реестр исполнителей (Task 1.9m)
+
+**Статус:** accepted (2026-10-21, Task 1.9m плана `lifecycle-stop-ownership`; стадия 0 — reviewer Opus, 2 раунда).
+Расширяет ADR-CMD-006 (форма `executor=`); парный ADR-WRK-006 (`ExecutorManager`).
+
+**Контекст.** После ADR-CMD-006 `executor=` принимает только объект. Но исполнители процесса теперь создаёт и держит
+`ExecutorManager` (из конфига или кода), и вызывающему (плагин, `orchestrator.py`, команды PM в 1.9b) пришлось бы тащить
+ссылку на объект к каждой регистрации, в том числе через границы слоёв.
+
+**Решение.**
+- `register_command(..., executor: OrderedExecutor | str | None = None, ...)` — сигнатура и умолчания прежние, расширен
+  только тип. `CommandManager.__init__` получает keyword `executors: IExecutorRegistry | None = None` (хранится как
+  `_executor_source`); через `managers=` не передаётся — тот словарь уходит в реестр наблюдателей миксина.
+- Строка разрешается **в момент регистрации** (fail fast), до `_executor_refusal`. Отказ = `False` + WARNING с именем,
+  команда не зарегистрирована, метрика `registration.failed` — как прочие отказы: `""` → «пустое имя исполнителя»;
+  `executors is None` → «исполнитель по имени '<имя>' без менеджера исполнителей»; `get(имя) is None` → «исполнитель
+  '<имя>' не найден». Найден — дальше прежний путь с объектом.
+- Объект остаётся в `self._executors` вне `metadata` (ADR-CMD-006). В `metadata["executor"]` для строковой формы — строка,
+  переданная вызывающим (имя в реестре менеджера), а не `obj.name`: у адаптеров PM своё `.name`. Объектная форма — без
+  изменений.
+- `command_module` знает только `worker_module.interfaces.IExecutorRegistry` и только под `TYPE_CHECKING`; обратного
+  импорта нет.
+
+**Отвергнуто.**
+- *Позднее разрешение имени при `handle_command`* — ошибка конфигурации всплыла бы на первой команде в бою, а не при
+  регистрации; подмены имени под тем же именем нет (`ExecutorManager` запрещает занятое имя), позднее связывание ничего не даёт.
+- *Менеджер исполнителей через `managers=`* — словарь становится реестром наблюдателей миксина.
+
+**Следствия.** Команда, зарегистрированная до создания исполнителя, отклоняется (как отказ `key_from` без исполнителя):
+порядок «исполнитель, затем команды» — обязанность вызывающего (для PM — Task 1.9b). Строка с опечаткой в имени ловится
+сразу, а не на первой команде. Сигнатуры `register_command`, `handle_command`, `__init__` только расширены:
+`git diff main -- command_module/core/command_manager.py | grep -E '^-\s+def (register_command|handle_command|__init__)'` пусто.
+
+**Reversible:** yes (убрать kwarg `executors` и строковую ветку; объектная форма ADR-CMD-006 не затрагивается).
+**Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9m.md` (D4), ADR-CMD-006, ADR-WRK-006,
+`tests/test_command_executor_by_name_acceptance.py`.
