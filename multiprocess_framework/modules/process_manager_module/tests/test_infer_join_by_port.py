@@ -390,3 +390,39 @@ def test_a8_check_does_not_warn(warning_log: list[str]) -> None:
 
     bp.infer_missing_collectors()
     assert len(warning_log) == 1, warning_log
+
+
+@pytest.mark.parametrize(
+    ("metadata", "named_key"),
+    [
+        ({"collector": {"timeout_sec": 0.25}, "inspector": {"mode": "join"}}, "inspector"),
+        ({"collector": {"mode": "join"}, "inspector": {"timeout_sec": 1}}, "collector"),
+    ],
+    ids=["mode_join_in_inspector_collector_non_empty", "mode_join_in_collector_inspector_non_empty"],
+)
+def test_c17_mode_join_in_inspector_section_is_seen_when_collector_section_is_non_empty(
+    metadata: dict, named_key: str
+) -> None:
+    """C-17: обе секции metadata проверяются независимо — непустая соседняя секция ошибку не маскирует.
+
+    Один join-источник, ``mode: join`` лежит в одной из двух секций: ровно одна ошибка с именем процесса
+    и ключом секции, одинаковая до и после ``infer``.
+    """
+    results = []
+    for _ in range(2):
+        PluginRegistry.clear()
+        _register_fakes()
+        results.append(
+            _blueprint(
+                [_joiner_process("layout", "opt_default", metadata=metadata)], _wires_to("layout", "opt_default")
+            )
+        )
+    without_infer = results[0].check()
+    results[1].infer_missing_collectors()
+    after_infer = results[1].check()
+
+    for errors in (without_infer, after_infer):
+        assert len(errors) == 1, errors
+        assert "'layout'" in errors[0]
+        assert f"metadata.{named_key}.mode=join" in errors[0]
+    assert without_infer == after_infer

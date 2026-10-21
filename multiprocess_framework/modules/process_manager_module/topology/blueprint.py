@@ -469,11 +469,12 @@ class SystemBlueprint(SchemaBase):
         где бэкенд его не видел). Теперь join — СТРУКТУРНЫЙ факт графа wires, не зависит
         от расположения поля.
 
-        Признак join: процесс получает REQUIRED-порт(ы) (``Port.optional is False``) от
+        Признак join: процесс получает порт(ы) с ``Port.effective_join`` (``join``, иначе
+        ``not optional``; ``join=True`` включает и необязательный вход, ADR-PMM-017 п.7) от
         ≥2 РАЗНЫХ процессов-источников. Считаем именно процессы, не wires — один источник
         может слать несколько полей одним item (тот же ``data_type``, см.
         ``PipelineExecutor``/``SourceProducer``), поэтому N wires от одного процесса — всё
-        ещё ОДИН вход для join. Опциональные порты (``optional=True`` — триггеры/
+        ещё ОДИН вход для join. Опциональные порты без ``join=True`` (триггеры/
         best-effort сигналы, напр. пульт) НЕ считаются: подтверждено на живых рецептах —
         ``layout``/``points`` получают ≥2 источника, но все входы кроме одного
         опциональны → остаются fanin (иначе false positive).
@@ -555,7 +556,7 @@ class SystemBlueprint(SchemaBase):
 
             sources = required_sources.get(proc.process_name, {})
             if len(sources) < 2:
-                continue  # < 2 required-источников — join не нужен (fanin остаётся дефолтом)
+                continue  # < 2 join-источников (Port.effective_join) — join не нужен (fanin остаётся дефолтом)
 
             # Известный edge (в) (AU-3, follow-up В1, ADR-PMM-017 п.6, см. docstring):
             # источник с ≥2 РАЗНЫМИ src-портами даёт ОДИН тег на весь источник
@@ -922,8 +923,18 @@ class SystemBlueprint(SchemaBase):
         errors: list[str] = []
         joining = self._joining_sources()
         for proc in self.processes:
-            key, section = _legacy_metadata_section(proc)
-            if not section or section.get("mode") != "join":
+            # Обе секции проверяются независимо (приоритет collector → inspector нужен только
+            # тонкой настройке): mode=join в любой из них — заявка на join. Одна ошибка на процесс.
+            meta = proc.metadata if isinstance(proc.metadata, dict) else {}
+            key = next(
+                (
+                    k
+                    for k in (COLLECTOR_CONFIG_KEY, LEGACY_COLLECTOR_CONFIG_KEY)
+                    if isinstance(meta.get(k), dict) and meta[k].get("mode") == "join"
+                ),
+                None,
+            )
+            if key is None:
                 continue
             extras_bag = proc.extras or {}
             explicit = (
