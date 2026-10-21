@@ -135,9 +135,10 @@
 - [feedback_yaml_safe_load_raises_more_than_yamlerror](feedback_yaml_safe_load_raises_more_than_yamlerror.md)
 - [project_metrics_freeze_s27](project_metrics_freeze_s27.md)
 
-## concurrency (27)
+## concurrency (28)
 
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
+- [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
 - [feedback_dedup_by_name_loses_content](feedback_dedup_by_name_loses_content.md)
 - [feedback_drop_oldest_reports_success](feedback_drop_oldest_reports_success.md)
 - [feedback_gc_finalizer_test_needs_gen0_pin](feedback_gc_finalizer_test_needs_gen0_pin.md)
@@ -479,7 +480,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (32)
+## live-stand (33)
 
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
@@ -487,6 +488,7 @@
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
 - [feedback_backend_ctl_for_agents](feedback_backend_ctl_for_agents.md)
+- [feedback_backend_driver_needs_connect_before_shutdown](feedback_backend_driver_needs_connect_before_shutdown.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
@@ -812,7 +814,7 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (21)
+## windows-env (22)
 
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
@@ -820,6 +822,7 @@
 - [feedback_always_project_venv](feedback_always_project_venv.md)
 - [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
+- [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
 - [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_platform_noop_counts_the_opposite](feedback_platform_noop_counts_the_opposite.md)
