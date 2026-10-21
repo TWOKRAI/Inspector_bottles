@@ -27,10 +27,11 @@
 - [feedback_zero_mentions_criterion_erases_the_reason](feedback_zero_mentions_criterion_erases_the_reason.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## agents (28)
+## agents (29)
 
 - [feedback_a_background_chain_does_not_see_the_coordinator_pause](feedback_a_background_chain_does_not_see_the_coordinator_pause.md)
 - [feedback_a_peer_session_shares_the_tree](feedback_a_peer_session_shares_the_tree.md)
+- [feedback_a_stand_window_is_for_running_not_preparing](feedback_a_stand_window_is_for_running_not_preparing.md)
 - [feedback_agent_commit_quality](feedback_agent_commit_quality.md)
 - [feedback_agent_hard_budget_is_off_by_default](feedback_agent_hard_budget_is_off_by_default.md)
 - [feedback_agent_resume_ghost](feedback_agent_resume_ghost.md)
@@ -480,11 +481,12 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (33)
+## live-stand (34)
 
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
 - [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
+- [feedback_a_stand_window_is_for_running_not_preparing](feedback_a_stand_window_is_for_running_not_preparing.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
 - [feedback_backend_ctl_for_agents](feedback_backend_ctl_for_agents.md)

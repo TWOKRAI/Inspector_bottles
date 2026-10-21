@@ -5,6 +5,7 @@
 ## Канон вердикта
 - [Три объектива — три класса](feedback_three_lenses_three_defect_classes.md) — тесты=механика, прогон=проводка, ревью=связки
 - [Стенд с вердиктом — тоже оснастка](feedback_a_stand_with_a_verdict_is_also_a_harness.md) — приёмником был наш `http.server`, отвечавший 200 на любой путь; настоящий otelcol дал 404, 102 теста из 214 пинили форму, не доставившую ничего
+- [Окно стенда — для запуска, не подготовки](feedback_a_stand_window_is_for_running_not_preparing.md) — T5.3h: окно 1 ушло на подготовку (0 замеров), окно 2 перебрано на 17 мин — срок держал субагент через `date`, один вызов висел; подготовка и сухой прогон вне окна, timeout на каждой команде, срок у лида
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) · [вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — пара маркеров + признак жизни
 - [elementsFromPoint не видит псевдоэлементы](feedback_elements_from_point_misses_pseudo_elements.md) — артефакт стенда списан на курсор, рисовал `::details-content` закрытого `<details>`
 - [Зонд, гадающий о темпе, говорит «нет» вместо «не знаю»](feedback_a_probe_that_guesses_tempo_says_no_when_it_means_dont_know.md) — пять ложных опровержений подряд на ИСПРАВНОМ механизме: форма, темп, темп, готовность, вакуум; недобор фактов = «не доказано»
