@@ -42,7 +42,7 @@
 - [x] P2 — plugin-слой + `system.yaml` (`plugin_paths += Services`) + тесты (15), discovery OK
 - [x] P3 — service shell + README/STATUS + pyproject extra `[modbus]` + тесты (5)
 - [x] P4 — RouterManager как канал: `ModbusChannel(MessageChannel)` (send/poll + status/error события) + опц. регистрация в плагине + тесты (16)
-- [x] P5 — тестовый Modbus-slave (`server/`) для приёма + demo `modbus_sink` (Plugins) + рецепт `modbus_demo.yaml` + тесты (8)
+- [x] P5 — тестовый Modbus-slave (`server/`) для приёма + demo `modbus_sink` (Plugins) + рецепт `modbus_demo.yaml` (удалён 2026-10-21, C-18: провод на старый порт `frame`; замена — `color_inspect.yaml`) + тесты (8)
 
 ## Зависимости
 
