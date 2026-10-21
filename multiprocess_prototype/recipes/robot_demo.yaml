@@ -1,8 +1,10 @@
-# Рецепт robot_demo v4 — камера + тонкий robot_io (job-форвардер в devices).
+# Рецепт robot_demo v5 — пусконаладка робота и ПЧ: камера (превью) + хаб
+# devices с роботом и ПЧ, без детектора и моделей.
 #
 # Архитектура: процесс devices (always-on, base.yaml) владеет соединениями
 # с роботом и ПЧ. Плагин robot_io только форвардит job-координаты из pipeline
-# в devices через IPC (DeviceHubClient).
+# в devices через IPC (DeviceHubClient); в этом рецепте заданий нет —
+# конвейер камера -> детектор -> робот в letter_robot_sim.yaml.
 #
 # Управление — со вкладки Services -> «Робот Delta» / «ПЧ» (IPC в devices).
 #
@@ -15,8 +17,8 @@
 # С железом: host 192.168.1.7, port 502 (дефолты ниже).
 # Предусловие: pip install '.[modbus]' (pymodbus).
 name: robot_demo
-version: 4
-description: "Camera + тонкий robot_io (job-форвард в devices hub)"
+version: 5
+description: "Пусконаладка робота и ПЧ: камера + devices hub, без детектора"
 
 # Устройства рецепта — upsert в реестр devices при активации (Р11).
 # Формат DeviceEntry: id, kind, protocol, transport, params.
@@ -36,7 +38,7 @@ devices:
 
 blueprint:
   name: robot_demo
-  description: "Робот Delta: тонкий job-форвардер в devices hub"
+  description: "Пусконаладка робота и ПЧ: камера + devices hub"
 
   processes:
     - process_name: gui
@@ -56,7 +58,6 @@ blueprint:
       priority: high
       chain_targets:
         - gui
-        - robot
       source_target_fps: 25
       plugins:
         - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
@@ -80,11 +81,10 @@ blueprint:
           category: io
           device_id: robot_main
 
-  wires:
-    # Кадры в ноду робота: item с ключом robot_job ({x_mm, y_mm}) попадёт в
-    # forward-deque (upstream-детектор/калибровка добавится позже).
-    - source: camera_0.capture.frame
-      target: robot.robot_io.robot_job
+  # Проводов нет: вход robot_io.robot_job ждёт dict {x_mm, y_mm}, а не кадр
+  # (C-18: прежний провод camera_0.capture.frame -> robot_job не собирался).
+  # Источник robot_job — детектор + word_layout, см. letter_robot_sim.yaml.
+  wires: []
 
   displays:
     - node_id: camera_0.capture.frame
