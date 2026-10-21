@@ -173,14 +173,8 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
     - process_name: infer
       plugins:
         # ВХОД — квадратный кроп (от center_crop). Модель: буква + угол (angle_head).
@@ -230,14 +224,8 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      collector:
+        timeout_sec: 0.25
   wires:
     - source: capture.capture.frame
       target: roi.roi_crop.frame

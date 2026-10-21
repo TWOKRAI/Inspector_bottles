@@ -214,7 +214,10 @@ class ProcessConfig(SchemaBase):
             "терялся (extra=ignore до model_validate, см. снятый _hoist_inspector_from_"
             "metadata); теперь обычное typed-поле — не отбрасывается. Единственный "
             "потребитель — SystemBlueprint.infer_missing_collectors() (тонкая настройка "
-            "collector.timeout_sec/... из legacy metadata, Ф4.7).",
+            "collector.timeout_sec/... из legacy metadata, Ф4.7) и SystemBlueprint.check() "
+            "(C-17: metadata.<ключ>.mode=join при невыведенном join — ошибка). "
+            "metadata.collector/inspector — deprecated: штатно process-level collector "
+            "без mode (ADR-PMM-017 п.7).",
         ),
     ] = {}
 
@@ -407,6 +410,56 @@ class SystemBlueprint(SchemaBase):
         FieldMeta("Наблюдаемость рецепта", info="Слой L2: defaults + per-process переопределения"),
     ] = None
 
+    def _joining_sources(self) -> dict[str, dict[str, set[str]]]:
+        """Join-источники по процессам: ``процесс -> источник -> src-порты``.
+
+        Считаются только провода в входы с ``Port.effective_join`` (ADR-PMM-017 п.7):
+        ``join=None`` — как ``not optional``, ``join=True`` включает и необязательный вход.
+        Общий для ``infer_missing_collectors`` и ``check()`` — оба считают одним способом.
+        """
+        # target_process -> {source_process -> {source_port_names}}, только join-входы
+        # (Port.effective_join; optional без join=True в join-обязательство не входит).
+        # Группировка НЕ по target_port (проверено на живом рецепте, AU-3/follow-up В1 — см. docstring
+        # "Известный edge (в)"): источник, кормящий несколько РАЗНЫХ target-портов
+        # ОДНОГО процесса (frame+detections одного item на 2 параметра плагина), не
+        # отличим структурно от источника с genuinely двумя независимыми потоками —
+        # группировка по source_process (не по source+target_port) сохраняет прежнее
+        # поведение для обоих случаев.
+        required_sources: dict[str, dict[str, set[str]]] = {}
+
+        # (process_name, plugin_name) -> plugin_class — симметрия с check() (AU-4,
+        # follow-up В1): там `_find_plugin_entry(plugin_name, plugin_class)` берёт
+        # plugin_class ИЗ pdict, поэтому лукап плагина, находимого ТОЛЬКО по
+        # class-path (нестандартное/переопределённое имя), там резолвится. Здесь
+        # раньше всегда передавался "" вторым аргументом — class-path fallback
+        # в `_find_plugin_entry` был мёртвым кодом для этого вызова.
+        plugin_class_by_addr: dict[tuple[str, str], str] = {
+            (proc.process_name, pdict.get("plugin_name", "")): pdict.get("plugin_class", "")
+            for proc in self.processes
+            for pdict in proc.plugins
+        }
+
+        for wire in self.wires:
+            src_parts = wire.source.split(".")
+            tgt_parts = wire.target.split(".")
+            if len(src_parts) != 3 or len(tgt_parts) != 3:
+                continue  # не "process.plugin.port" — пропускаем
+
+            src_process, _src_plugin, src_port = src_parts
+            tgt_process, tgt_plugin, tgt_port_name = tgt_parts
+
+            tgt_plugin_class = plugin_class_by_addr.get((tgt_process, tgt_plugin), "")
+            entry = _find_plugin_entry(tgt_plugin, tgt_plugin_class)
+            if entry is None:
+                continue
+            tgt_port = next((p for p in entry.inputs if p.name == tgt_port_name), None)
+            if tgt_port is None or not tgt_port.effective_join:
+                continue
+
+            by_source = required_sources.setdefault(tgt_process, {})
+            by_source.setdefault(src_process, set()).add(src_port)
+        return required_sources
+
     def infer_missing_collectors(self) -> None:
         """Вывести collector(join) из wires для процессов без явного collector (Ф4.7).
 
@@ -472,49 +525,18 @@ class SystemBlueprint(SchemaBase):
         (валидация уже сделала копию — мутация внутренней копии, не входа вызывающей
         стороны), ДО ``build_configs()``/``check()``.
         """
-        # target_process -> {source_process -> {source_port_names}}, только REQUIRED
-        # входы (optional-порты в join-обязательство не входят). Группировка НЕ по
-        # target_port (проверено на живом рецепте, AU-3/follow-up В1 — см. docstring
-        # "Известный edge (в)"): источник, кормящий несколько РАЗНЫХ target-портов
-        # ОДНОГО процесса (frame+detections одного item на 2 параметра плагина), не
-        # отличим структурно от источника с genuinely двумя независимыми потоками —
-        # группировка по source_process (не по source+target_port) сохраняет прежнее
-        # поведение для обоих случаев.
-        required_sources: dict[str, dict[str, set[str]]] = {}
-
-        # (process_name, plugin_name) -> plugin_class — симметрия с check() (AU-4,
-        # follow-up В1): там `_find_plugin_entry(plugin_name, plugin_class)` берёт
-        # plugin_class ИЗ pdict, поэтому лукап плагина, находимого ТОЛЬКО по
-        # class-path (нестандартное/переопределённое имя), там резолвится. Здесь
-        # раньше всегда передавался "" вторым аргументом — class-path fallback
-        # в `_find_plugin_entry` был мёртвым кодом для этого вызова.
-        plugin_class_by_addr: dict[tuple[str, str], str] = {
-            (proc.process_name, pdict.get("plugin_name", "")): pdict.get("plugin_class", "")
-            for proc in self.processes
-            for pdict in proc.plugins
-        }
-
-        for wire in self.wires:
-            src_parts = wire.source.split(".")
-            tgt_parts = wire.target.split(".")
-            if len(src_parts) != 3 or len(tgt_parts) != 3:
-                continue  # не "process.plugin.port" — пропускаем
-
-            src_process, _src_plugin, src_port = src_parts
-            tgt_process, tgt_plugin, tgt_port_name = tgt_parts
-
-            tgt_plugin_class = plugin_class_by_addr.get((tgt_process, tgt_plugin), "")
-            entry = _find_plugin_entry(tgt_plugin, tgt_plugin_class)
-            if entry is None:
-                continue
-            tgt_port = next((p for p in entry.inputs if p.name == tgt_port_name), None)
-            if tgt_port is None or tgt_port.optional:
-                continue
-
-            by_source = required_sources.setdefault(tgt_process, {})
-            by_source.setdefault(src_process, set()).add(src_port)
+        required_sources = self._joining_sources()
 
         for proc in self.processes:
+            # Deprecated (ADR-PMM-017 п.7): непустой metadata.collector/inspector читается
+            # как раньше, но штатное место — process-level ``collector``. Один раз на
+            # процесс за вызов; значение metadata в текст не попадает.
+            if _legacy_metadata_section(proc)[1]:
+                logger.warning(
+                    f"Процесс '{proc.process_name}': metadata.collector/metadata.inspector устарел "
+                    f"(deprecated); штатный ключ — process-level collector (тонкая настройка без mode, "
+                    f"join выводится из портов, ADR-PMM-017 п.7)"
+                )
             # Явная секция корреляции: typed-поле приоритетнее extras (обе формы ключа).
             extras_bag = proc.extras or {}
             explicit = (
@@ -886,6 +908,40 @@ class SystemBlueprint(SchemaBase):
                     continue
                 errors.append(f"Вход '{addr}' ({port.dtype}) не подключен")
 
+        errors.extend(self._metadata_join_errors())
+        return errors
+
+    def _metadata_join_errors(self) -> list[str]:
+        """C-17: ``metadata.<ключ>.mode=join`` заявлен, а join не применён (ADR-PMM-017 п.7).
+
+        Эффективный mode: mode явного collector (typed или ``extras``, обе формы ключа),
+        если он задан; иначе ``join`` при ≥ 2 join-источниках; иначе нет. Результат не зависит
+        от того, вызывался ли ``infer_missing_collectors`` (после него typed ``collector.mode``
+        равен ``join`` ровно при ≥ 2 источниках). Значения ``metadata`` в текст не попадают.
+        """
+        errors: list[str] = []
+        joining = self._joining_sources()
+        for proc in self.processes:
+            key, section = _legacy_metadata_section(proc)
+            if not section or section.get("mode") != "join":
+                continue
+            extras_bag = proc.extras or {}
+            explicit = (
+                proc.collector
+                or extras_bag.get(COLLECTOR_CONFIG_KEY)
+                or extras_bag.get(LEGACY_COLLECTOR_CONFIG_KEY)
+                or {}
+            )
+            n_sources = len(joining.get(proc.process_name, {}))
+            explicit_mode = explicit.get("mode") if isinstance(explicit, dict) else None
+            effective_mode = explicit_mode or ("join" if n_sources >= 2 else None)
+            if effective_mode != "join":
+                errors.append(
+                    f"Процесс '{proc.process_name}': metadata.{key}.mode=join, но join не применён "
+                    f"(join-источников: {n_sources}, нужно ≥ 2, или явный collector задаёт иной mode). "
+                    f"Штатно: удали metadata.{key}; вход, участвующий в join, объявляет Port(join=True); "
+                    f"тонкая настройка — collector: {{timeout_sec: …}} без mode"
+                )
         return errors
 
     def describe(self) -> str:
@@ -991,6 +1047,19 @@ def _find_cycle(edges: list[tuple[str, str]]) -> list[str] | None:
             if found is not None:
                 return found
     return None
+
+
+def _legacy_metadata_section(proc: ProcessConfig) -> tuple[str, dict]:
+    """(ключ, секция) непустого ``metadata.collector``/``metadata.inspector`` процесса; иначе ``("", {})``.
+
+    Приоритет как в ``infer_missing_collectors``: ``collector``, затем легаси ``inspector``.
+    """
+    meta = proc.metadata if isinstance(proc.metadata, dict) else {}
+    for key in (COLLECTOR_CONFIG_KEY, LEGACY_COLLECTOR_CONFIG_KEY):
+        section = meta.get(key)
+        if isinstance(section, dict) and section:
+            return key, section
+    return "", {}
 
 
 def _find_plugin_entry(plugin_name: str, plugin_class: str):

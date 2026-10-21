@@ -58,13 +58,33 @@ class Port(SchemaBase):
 
     optional: Annotated[
         bool,
-        FieldMeta("Опциональный", info="Если True — порт может быть не подключен"),
+        FieldMeta("Опциональный", info="Если True — порт может быть не подключен (только подключение, не join)"),
     ] = False
+
+    join: Annotated[
+        bool | None,
+        FieldMeta(
+            "Участвует в join",
+            info="True — подключённый вход коррелируется с primary по seq_id; None — как not optional",
+        ),
+    ] = None
 
     description: Annotated[
         str,
         FieldMeta("Описание", info="Человекочитаемое описание порта"),
     ] = ""
+
+    @property
+    def effective_join(self) -> bool:
+        """Участвует ли подключённый вход в join (вывод collector из проводов).
+
+        Pre: поле ``join`` — True, False или None.
+        Post: ``join``, если задано явно; иначе ``not optional`` (умолчание: обязательный
+        вход участвует, необязательный — нет).
+        Invariants: ``effective_join`` не зависит от подключения порта; ``optional``
+        отвечает только за «может быть не подключён».
+        """
+        return self.join if self.join is not None else not self.optional
 
 
 def are_ports_compatible(output: Port, input_port: Port) -> bool:

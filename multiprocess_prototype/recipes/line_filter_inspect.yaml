@@ -8,7 +8,8 @@
 # detector: blob_detector → detections (center). → line.
 # line: line_filter (категория «Фильтр») — вход в зону/пересечение; выдаёт overlay
 #   (data_type=overlay, наследует seq_id), кадр НЕ трогает. → draw.
-# draw: overlay_draw в JOIN-режиме (inspector.mode=join) — JoinInspectorManager
+# draw: overlay_draw в JOIN-режиме (join выводится из портов: overlay_draw.overlay
+#   объявлен join=True, collector: {timeout_sec} — только тонкая настройка) — JoinInspectorManager
 #   коррелирует frame (от camera) + overlay (от line) по (seq_id, data_type),
 #   разворачивает vline в линию+пунктирные границы и рисует точки → дисплей.
 #
@@ -105,10 +106,7 @@ blueprint:
       priority: normal
       chain_targets:
         - gui
-      inspector:
-        mode: join
-        inputs: [frame, overlay]
-        primary: frame
+      collector:
         timeout_sec: 0.25
       plugins:
         - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin

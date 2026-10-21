@@ -36,7 +36,14 @@ class OverlayDrawPlugin(ProcessModulePlugin):
 
     inputs = [
         Port(name="frame", dtype="image/*", shape="", description="Исходный кадр: gray (H, W) или BGR (H, W, 3)"),
-        Port(name="overlay", dtype="dict", shape="-", optional=True, description="Draw-params (vlines/lines/points)"),
+        Port(
+            name="overlay",
+            dtype="dict",
+            shape="-",
+            optional=True,
+            join=True,
+            description="Draw-params (vlines/lines/points)",
+        ),
     ]
     outputs = [
         # Перезаписываем "frame" (конвенция framework: SHM→дисплей кеется на "frame",
