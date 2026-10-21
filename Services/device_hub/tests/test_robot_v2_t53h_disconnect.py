@@ -559,3 +559,51 @@ def test_h18_ready_robot_dropped_link_tick_no_leak(monkeypatch: pytest.MonkeyPat
     obs = _tick_window(drv, client, stop, "H18", barrier=barrier)
     observed = {"soft": obs["soft"], "transport_open": obs["transport_open"], "connect_begin": box.get("connect_begin")}
     assert observed == {"soft": 0, "transport_open": False, "connect_begin": ("go", True)}, f"H18: {obs}"
+
+
+# --------------------------------------------------------------------------------------------------
+# H12 (I6) — связь поднята между D1 (disconnect_begin) и D2 (disconnect_stop_plan): снимок в D2, не в D1
+# --------------------------------------------------------------------------------------------------
+
+
+def test_h12_link_up_between_disconnect_sections_one_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T1 стоит в ``transport.connect`` (до A3, как H6); T2 после D1 отпускает T1 и ждёт, пока T1 поднимет связь и
+    встанет в ``probe`` (второй барьер); T2 идёт в D2 и D3 -> ровно 1 SOFT; второй барьер отпускает тест после
+    возврата ``disconnect``."""
+    drv, client = _make_driver(connected=False)
+    barrier = _Barrier()
+    client.transport.on_connect = barrier.pause_if_t1
+    probe_entered = threading.Event()
+    probe_release = threading.Event()
+    box: dict[str, Any] = {}
+
+    def second_barrier() -> None:
+        if threading.current_thread() is barrier.t1:
+            probe_entered.set()
+            box["probe_released"] = probe_release.wait(_JOIN_S)
+
+    client.on_probe = second_barrier
+    original = RobotState.disconnect_begin
+
+    def disconnect_begin(self: RobotState) -> bool:
+        result = original(self)
+        if threading.current_thread() is not barrier.t1 and not barrier.release.is_set():
+            barrier.release.set()  # T1 выходит из transport.connect: связь поднимается ПОСЛЕ D1
+            box["t1_in_probe"] = probe_entered.wait(_ENTER_S)
+            assert box["t1_in_probe"], "H12: T1 не дошёл до probe за дедлайн (находка, не таймаут теста)"
+        return result
+
+    monkeypatch.setattr(RobotState, "disconnect_begin", disconnect_begin)
+
+    def stop() -> None:
+        try:
+            drv.disconnect()
+        finally:
+            probe_release.set()
+
+    try:
+        obs = _observe(drv, client, barrier, "H12", stop=stop, released_by_stop=True)
+    finally:
+        probe_release.set()
+    observed = {"soft": obs["soft_during_stop"], "connect": obs["connect"], "t1_in_probe": box.get("t1_in_probe")}
+    assert observed == {"soft": 1, "connect": False, "t1_in_probe": True}, f"H12: {observed}; {obs}"

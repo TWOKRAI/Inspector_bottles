@@ -815,6 +815,8 @@ _LATCH_ROWS: list[tuple[str, Callable[[Any], Any], bool]] = [
     ("enqueue_return", lambda st: st.enqueue_return(("return", "r")), False),
     ("begin_sync", lambda st: st.begin_sync(), False),
     ("admit_launch_refused_nolink", lambda st: st.admit_launch(lambda: False), False),
+    ("disconnect_soft_plan", lambda st: st.disconnect_soft_plan(lambda: True, lambda: True), False),
+    ("disconnect_owns_close", lambda st: st.disconnect_owns_close(), False),
     ("take_next_action_nothing", lambda st: st.take_next_action(), False),
     ("view", lambda st: st.view(), False),
 ]
@@ -860,6 +862,103 @@ def test_disconnect_begin_marks_stop() -> None:
     v = st.view()
     assert v.stopping is True
     assert v.stop_level == 1
+
+
+# --- T5.3h: SOFT при обычном «Отключить» посреди connect (контракт S1-S10, литералы брифа) ---
+
+
+def _link_up_state() -> Any:
+    """Робот был готов, ``connect`` идёт, связь поднята (``connect_begin`` -> ``("go", True)``)."""
+    st = _new()
+    st.set_ready(True)
+    assert st.connect_begin() == ("go", True)
+    return st
+
+
+def _lu() -> bool:
+    return True
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("s1_connected_robot", True, id="S1"),
+        pytest.param("s2_no_snapshot", False, id="S2"),
+        pytest.param("s3_snapshot_link_up", True, id="S3"),
+        pytest.param("s4_snapshot_link_down", False, id="S4"),
+        pytest.param("s5_latch_covers", False, id="S5"),
+    ],
+)
+def test_disconnect_soft_plan_contract(name: str, expected: bool) -> None:
+    """S1-S5: ``disconnect_soft_plan`` — подключён или (снимок связи и транспорт жив), и защёлка не покрывает."""
+    if name == "s1_connected_robot":
+        st = _new()
+        got = st.disconnect_soft_plan(lambda: True, lambda: False)
+    elif name == "s2_no_snapshot":
+        st = _new()
+        got = st.disconnect_soft_plan(lambda: False, lambda: True)
+    elif name == "s3_snapshot_link_up":
+        st = _link_up_state()
+        st.disconnect_stop_plan(1, link_up=_lu)
+        got = st.disconnect_soft_plan(lambda: False, lambda: True)
+    elif name == "s4_snapshot_link_down":
+        st = _link_up_state()
+        st.disconnect_stop_plan(1, link_up=_lu)
+        got = st.disconnect_soft_plan(lambda: False, lambda: False)
+    else:
+        st = _link_up_state()
+        st.disconnect_stop_plan(1, link_up=_lu)
+        st.stop_written(1, None)
+        got = st.disconnect_soft_plan(lambda: False, lambda: True)
+    assert got is expected
+
+
+def test_s6_request_stop_snapshot_survives_disconnect_plan() -> None:
+    """S6 (п. 1 р.1): снимок ``request_stop`` не переписывается стоп-секцией ``disconnect`` после выключения."""
+    st = _link_up_state()
+    st.request_stop_begin()
+    st.connect_end()
+    st.disconnect_stop_plan(1, link_up=_lu)
+    assert st.process_stop_plan(lambda: False, link_up=lambda: True)[0] == 1
+
+
+def test_s7_disconnect_snapshot_survives_request_stop() -> None:
+    """S7 (п. 2 р.1): снимок стоп-секции ``disconnect`` монотонен — ``request_stop_begin`` его не обнуляет."""
+    st = _link_up_state()
+    st.disconnect_stop_plan(1, link_up=_lu)
+    st.connect_end()
+    st.request_stop_begin()
+    assert st.process_stop_plan(lambda: False, link_up=lambda: True)[0] == 1
+
+
+def test_s8_disconnect_owns_close() -> None:
+    """S8: транспорт закрывает хвост обычного ``disconnect``, решившего «связь поднята»; не ``request_stop``."""
+    st = _link_up_state()
+    st.disconnect_stop_plan(1, link_up=_lu)
+    assert st.disconnect_owns_close() is True
+    st.request_stop_begin()
+    assert st.disconnect_owns_close() is False
+    bare = _new()
+    bare.disconnect_stop_plan(1, link_up=_lu)
+    assert bare.disconnect_owns_close() is False
+
+
+def test_s9_snapshot_reset_by_connect_and_taken_before_stopping() -> None:
+    """S9 (п. 2 р.2): ``connect_begin`` сбрасывает снимок; в стоп-секции он считается ДО ``_stopping = True``."""
+    st = _link_up_state()
+    st.disconnect_stop_plan(1, link_up=_lu)
+    st.connect_end()
+    assert st.connect_begin() == ("go", False)
+    st.disconnect_stop_plan(1, link_up=_lu)
+    assert st.disconnect_soft_plan(lambda: False, lambda: True) is False
+    assert st.disconnect_owns_close() is False
+
+
+def test_s10_snapshot_needs_live_link() -> None:
+    """S10 (п. 1 р.2): связь упала до стоп-секции — снимок не пишется, закрывает тик, не хвост ``disconnect``."""
+    st = _link_up_state()
+    st.disconnect_stop_plan(1, link_up=lambda: False)
+    assert st.disconnect_owns_close() is False
 
 
 def test_process_stop_attempts_capped_at_two() -> None:
