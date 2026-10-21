@@ -40,4 +40,34 @@
 
 ## Факт
 
-_(заполняется после окна)_
+Окно heavy 09:31–10:06, код `8e7cf6a7a` в отдельном detached worktree `keyed-exec-1.9a-inj` (`78ff43760`), скрипт
+`scratchpad/inject_matrix.py`, сырой вывод — `scratchpad/inj_out/<id>.txt` сессии inspector-bottles-48 (`-q -rA --tb=line`,
+без `-k`). После каждого отката `git status --porcelain --untracked-files=no` пуст.
+
+**База:** collected 188, 188 passed (17,45 с).
+
+| # | Итог прогона | Уверенные прогнозы | `?` | Сверх прогноза (красные) |
+|---|---|---|---|---|
+| И1 | 4 failed / 184 | R6 ✓, `busy_warns_once_per_episode` ✓ | `refusal_reaches_initiator` — зелёный | R4 (`:312`, точка «отказ» сделана через потолок), `contract_default_logger_name` (`:445`, WARNING потолка) |
+| И2 | 7 failed / 181 | R1 ✓, R5 ✓, R6 ✓, R12 ✓, H1b ✓ | H2 — красный | R4 (та же точка «отказ» через потолок) |
+| И3 | 3 failed / 185 | R3 ✓, R12b ✓ | H1a — зелёный | `contract_workers_are_permanent_system_workers` (`:313`, «рабочий должен быть ровно один») |
+| И4 | 1 failed / 187 | R4 ✓ | — | — |
+| И5 | 3 failed / 185 | R5 ✓, H2 ✓, `stop_all_workers_rejects_queue` ✓ | — | — |
+| И6 | 3 failed / 185 | R7 ✓ | `refusal_reaches_initiator` — красный; `targets_all_orders` — зелёный | H4 (`:256`, «ответов: без исполнителя 1, с исполнителем 2» — H4 идёт через роутер) |
+| И7 | 2 failed / 186 | R8 ✓, `erased_executor_metadata_runs_inline_through_router` ✓; **`deferred_with_reply_..._never_returns_deferred_without_reply` — зелёный ✗** | — | — |
+| И8 | 2 failed / 186 | R9 ✓, `key_missing_through_router_gets_one_auto_reply` ✓ | — | — |
+| И9 | 2 failed / 186 | R10 ✓ | `overwrite_command_makes_command_synchronous_again` — красный | — |
+| И10 | 1 failed / 187 | H3 ✓ | — | — |
+| И11 | 1 failed / 187 | R2b ✓ | `none_key_waits_for_earlier` — зелёный | — |
+| И12 | 4 failed / 184 | `test_router_manager.py` ×2 ✓ (`mock.py:949 expected call not found`), `test_reply_success_honesty.py` ✓ (`:103`) | — | `contract_erased_executor_metadata_runs_inline_through_router` (`:423`, роутер отдал `reply` → CM отложил) |
+
+**Вердикт лида.** Каждая из 12 поломок поймана хотя бы одним уверенно предсказанным тестом; каждый уверенный красный —
+красный, кроме одного:
+
+- **Находка (тест, minor):** `test_contract_deferred_with_reply_delivers_once_and_never_returns_deferred_without_reply`
+  (`command_module/tests/test_command_executor_fork_hazards.py`) вызывает `handle_command` только с `reply` — вторая
+  половина имени не проверяется. Прогноз лида строился по имени. Свойство «без `reply` никогда не `DEFERRED`» держит R8
+  (красный под И7). Правка: имя по содержанию или вторая точка без `reply`.
+- **Сверх прогноза — 6 красных, все объяснены по строке падения** (тест ходит к сломанному механизму вторым путём):
+  точка «отказ» в R4 сделана через потолок (И1, И2); тест имени логгера ловит WARNING потолка (И1); число рабочих при
+  `serial` (И3); H4 и `erased_executor_metadata` идут через настоящий роутер (И6, И12). Пробел модели лида, не дефект.
