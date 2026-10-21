@@ -41,7 +41,7 @@ _OTHER_DRIVER_TESTS = (
     "test_manager_template_1_2b_3.py",
 )
 # Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
-_SCANNED_FILES = 42
+_SCANNED_FILES = 44
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(
@@ -77,7 +77,7 @@ _STATE_FIELDS = frozenset(
 
 # Швы тестов: приватное имя драйвера (пакет + база) -> число обращений (AST). Снятие — задача SPI хаба.
 _SEAMS = {
-    "_client": 39,
+    "_client": 40,
     "_param_lock": 20,
     "_epoch": 16,
     "_resync_maybe": 7,

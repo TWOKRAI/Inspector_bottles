@@ -279,14 +279,16 @@ Q7 — как делить файл:
 - Related: ADR-DH-009 (путь стопа, не менялся), `plans/robot-protocol-v2/tasks/T5.3f.md`, `T5.3f.state-table.md`
 - Дальше: T5.3g (W1, W4; сделано — ADR-DH-011), затем SPI хаба (`Protocol`, `OpSpec`) — снятие швов `_SEAMS`.
 
-## ADR-DH-011: `connect` и `request_stop` драйвера робота v2 линеаризуются переходами `RobotState`
+## ADR-DH-011: `connect`, `request_stop` и обычный `disconnect` драйвера робота v2 линеаризуются переходами `RobotState`
 
 **Дата:** 2026-10-21
-**Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20)
-**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
+**Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20); дополнен T5.3h (решение владельца 2026-10-21)
+**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`, `T5.3h.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
 окна W1, W1′, W2, W4 закрыты); ADR-DH-009 (путь стопа) не меняется.
 
 ### Контекст
+
+ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `disconnect` посреди `connect` (T5.3h, решение владельца 2026-10-21).
 
 Проба окон барьером (`T5.3g.probe.md`) подтвердила W1, W4 и WW на коде T5.3f: простой робот, которому `request_stop`
 пришёл посреди `connect`, не получал SOFT, а `connect()` возвращал True и делал драйвер «готовым» после выключения;
@@ -318,7 +320,31 @@ Q7 — как делить файл:
 - **Обычный `disconnect` посреди `connect`** (`_stopping` без `_shutdown`) тоже отказывает `connect_finish` и
   `connect_restore`: `connect()` → False, `is_connected` False. Побочный эффект: в пути тика, если
   `desired_connected` остался True, отказ считается неудачным переподключением (`_note_reconnect_failed()`).
-  SOFT при обычном `disconnect` посреди `connect` вне T5.3g (`disconnect_stop_plan` смотрит только `is_connected`).
+- **SOFT при обычном «Отключить» посреди `connect` (T5.3h, решение владельца 2026-10-21 «да — SOFT и при обычном
+  «Отключить» посреди connect»).** Правило T5.3g для `request_stop` переносится на обычный `disconnect`: простой
+  робот, связь которого была поднята к стоп-секции `disconnect` (граница A3; у готового до `connect` робота —
+  `connect_begin`), получает ровно один SOFT; до A3 записи нет (правило 2026-10-19), `connect()` False.
+  Решение держится и на живом пути: переподключение тика против «Отключить» супервизора.
+  - **Снимок в D2.** `disconnect_stop_plan(program_level, link_up)` пишет `_stop_linked` — «связь была поднята» —
+    в стоп-секции (D2), а не в `disconnect_begin` (D1): между D1 и D2 `connect` ещё может поднять связь. Выражение
+    вычисляется ДО `self._stopping = True` (иначе оно читает свой же флаг) и только при `not _shutdown` (снимок
+    `request_stop` не переписывается). Терм `link_up()` живой (`transport.is_connected` в D2): без него готовый робот
+    с упавшей вне тика связью давал снимок True, хвост `disconnect` закрывал уже закрытый сокет, а тик открывал его
+    снова и не закрывал (утечка сокета, проба H18).
+  - **Монотонный снимок.** Оба писателя пишут одно выражение: `(_stopping and _stop_linked) or (_connecting and
+    _connect_linked)` (в D2 — с живым `link_up()`). Внутри одного выключения значение только растёт: `request_stop`
+    целиком между D2 и D3 снимок `disconnect` не обнуляет (H15). Точка сброса — `connect_begin` (снимает
+    `_stopping`). Новых полей нет.
+  - **Решение одной секцией.** `disconnect_soft_plan(connected, link_up)`: `connected() or (_stop_linked and
+    link_up())` и защёлка не покрывает SOFT. Заменяет `is_connected` и `latch_covers` в `_request_stop`. Отступление
+    от «правила 1:1» (см. докстринг `RobotState`): `connected()` теперь зовётся под замком состояния, как в
+    `process_stop_plan`.
+  - **Один владелец закрытия.** Тик после отказа `connect` при `desired_connected` False не закрывает транспорт,
+    если `disconnect_owns_close()` (`_stopping and not _shutdown and _stop_linked`): хвост `disconnect` (D6)
+    закрывает всегда, уже после решения о SOFT (H16). Без этого тик закрывал сокет раньше решения о SOFT, и
+    `disconnect_soft_plan` не видел живой связи.
+  - **Повторная проверка в тике.** `_ensure_connected` после захвата `_param_lock` проверяет `desired_connected`
+    ещё раз: «Отключить», пришедшее между первой проверкой и замком, не даёт `probe`, PARAM_SET, SERVO и DO (H13).
 
 ### Отклонено
 
@@ -331,7 +357,42 @@ Q7 — как делить файл:
   `connect_check`, `connect_reset`, `is_shutdown` остаются (контрактные тесты).
 - Окна W1, W1′, W2, W4 и WW закрыты. `request_stop` после `connect_finish` — по-прежнему 1 SOFT, `connect()` True.
 - Остаётся открытым: проба `issue_stop` в WW идёт без бюджета срока (на медленной живой связи до 3 чтений и 1 записи).
+- T5.3h: обычный `disconnect` посреди `connect` даёт один SOFT связи, поднятой к D2 (H1–H5, H12, H15, H16; блиндовая
+  приёмка B1, B2, B5); `request_stop`, прошедший целиком (с записью) до решения D3, и `disconnect` вместе дают всего один SOFT (H14, H15, H17).
+- **Остаток I1 (сужен, не закрыт).** Тик прошёл обе проверки `desired_connected` (в `_ensure_connected` и под
+  `_param_lock`), затем супервизор ставит `desired_connected = False` и проходит D1–D6, затем `connect_begin` тика
+  снимает `_stopping`. Окно «повторная проверка → `connect_begin`» — микросекунды, без ввода-вывода. Эффекты:
+  (а) PARAM_SET, SERVO и DO после «Отключить»: тик открывает сокет снова, `sync_params`, `_run_on_connect`
+  (`servo(True)` / `do_set`), `connect_finish`, затем закрытие ветки тика; (б) за эту сессию SOFT нет; (в) у настоящего
+  транспорта D6 между открытием сокета и вводом-выводом синхронизации даёт исключение, `_sync_cancelled()` False,
+  поэтому `_record_err` и `_publish_error(«подключение к роботу не удалось…»)`; «без `_record_err`» верно только
+  для порядков, где `_stopping` не снят (I2–I5). Полное закрытие требует поля «идёт disconnect» — отклонено.
+- **Остаток: `_shutdown` и «Отключить» одновременно.** `disconnect_owns_close` при `_shutdown` возвращает False: тик
+  закрывает сокет сам, и `process_stop_plan` может увидеть `link_up()` False (нет SOFT). Не регресс: до T5.3h тик
+  закрывал безусловно при `desired_connected` False.
+- **Остаток: снимок от завершённого `disconnect`.** `_stopping` от прошлого `disconnect` без `connect` между ними
+  делает снимок D2 монотонным (принято): безопасно только с живым `link_up()`. Лишний SOFT возможен, лишь если D6
+  прошлого `disconnect` упал и сокет остался открытым.
+- **Остаток: `request_stop` после решения D3 (до D6) или с записью, ещё идущей в момент решения D3, — 2 SOFT.** Как у подключённого робота на main: `request_stop_begin`
+  открывает новое поколение защёлки (ADR-DH-009), снимок монотонен, `link_up()` True до D6 — `process_stop_plan` пишет
+  второй SOFT (между решением D3 и записью, после записи до D6). Воспроизведено ревью ветки; закреплено H19. Каждое
+  выключение получает свой SOFT; один SOFT при любом порядке — отдельная задача, решение владельца.
+- **Остаток: готовый робот, ручной `connect` на живой связи, связь падает между D2 и открытием сокета (C3).**
+  Сокет открывает C3 самого `connect` (`if not transport.is_connected and not transport.connect()` в
+  `_connect_locked`) уже после D6, и его никто не закрывает. Тик до этого не доходит: `_param_lock.acquire(blocking=False)`
+  не берётся, пока идёт `connect`. Супервизор сериализует ручные `connect` и `disconnect` — практически недостижимо;
+  пробой не покрыто.
+- **Остаток: поток `disconnect` обрывается между D2 и D6.** Ввод-вывод в `_request_stop`, `_close_thread` и
+  `transport.disconnect` ловится, но `disconnect_stop_plan(..., link_up=...)` и `disconnect_soft_plan(lambda:
+  self.is_connected, ...)` стоят вне `try`: исключение из `transport.is_connected` (у `ModbusDevice` невозможно, у
+  подмены или моста возможно) и `BaseException` завершают `disconnect` до D6. До T5.3h тик закрыл бы сокет в этом
+  случае, теперь не закрывает (`disconnect_owns_close()`): сокет открыт до следующего `connect` (он закрывает старый
+  сокет) или до остановки процесса (`_on_shutdown` → D6). Для `ModbusDevice` практически недостижимо; разбор
+  чтением, не воспроизведено.
+- `_note_reconnect_failed` не менялся: для GUI «Отключить» не важен (супервизор ставит `desired_connected = False`
+  до `manager.disconnect`, тик идёт в ветку закрытия); неудачной попыткой отказ считается только при `disconnect()`
+  без смены `desired_connected` (`manager.remove`, `manager._on_shutdown`) — драйвер выбрасывается или выключается.
 
 ### Связь
 
-- Related: ADR-DH-009 (путь стопа), ADR-DH-010 (состояние и окна), `plans/robot-protocol-v2/tasks/T5.3g.md`
+- Related: ADR-DH-009 (путь стопа), ADR-DH-010 (состояние и окна), `plans/robot-protocol-v2/tasks/T5.3g.md`, `plans/robot-protocol-v2/tasks/T5.3h.md`

@@ -75,12 +75,16 @@ class StopMixin:
         """Текст причины для health: ``TEXT_STOP_UNCONFIRMED`` или ``TEXT_NO_ECHO_WINDOW``; ``None`` — не помечен."""
         return self._state.stop_unconfirmed_text()
 
+    def _transport_up(self) -> bool:
+        """Транспорт подключён сейчас (без ``_ready``); замков не берёт — зовётся под замком состояния."""
+        return self._transport is not None and bool(self._transport.is_connected)
+
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
         # is_connected зовётся под замком состояния, в той же ветке, что и раньше (простой робот)
         level, run, stop_jog = self._state.process_stop_plan(
             lambda: self.is_connected,
-            link_up=lambda: self._transport is not None and bool(self._transport.is_connected),
+            link_up=self._transport_up,
         )
         if not level or self._client is None:
             return  # простой неподключённый робот, стоп уже записан или нет клиента: записи нет
@@ -168,7 +172,9 @@ class StopMixin:
         """Стоп обычного ``disconnect``: флаг ``_stopping``, пометка jog, стопы с ожиданием эха без замков (К1)."""
         # V1: JOG_CONT в полёте дописывает jog под _jog_tx_lock — читаем его под тем же замком
         with self._jog_tx_lock:
-            run, stop_jog, prog_alive, job_active = self._state.disconnect_stop_plan(program_level)
+            run, stop_jog, prog_alive, job_active = self._state.disconnect_stop_plan(
+                program_level, link_up=self._transport_up
+            )
         # _stop_jog снова берёт _jog_tx_lock (не реентерабельный) — замки отпущены
         client = self._client
         if client is None:
@@ -193,16 +199,16 @@ class StopMixin:
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
-        if not (job_active or stop_jog or prog_alive) and self.is_connected:
+        if not (job_active or stop_jog or prog_alive) and self._state.disconnect_soft_plan(
+            lambda: self.is_connected, self._transport_up
+        ):
             # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
-            # защёлка гасит вторую запись в том же выключении (jog со стопом этого вызова). Только запись SOFT:
-            # эхо простого робота не читается (supervisor не ждёт soft_echo_timeout_s), last_error нет (T5.3c c3)
-            covered = self._state.latch_covers(STOP_LEVEL["SOFT"])
-            if not covered:
-                try:
-                    self._write_stop(STOP_LEVEL["SOFT"])
-                except Exception as exc:
-                    self._record_err()
-                    logger.warning(
-                        f"робот {self.entry.id!r}: стоп простого робота не записан: {type(exc).__name__}: {exc}"
-                    )
+            # решение владельца 2026-10-21: и робот посреди connect, чья связь была поднята к стоп-секции (снимок
+            # _stop_linked, транспорт жив). Защёлка гасит вторую запись в том же выключении (внутри перехода).
+            # Только запись SOFT: эхо простого робота не читается (supervisor не ждёт soft_echo_timeout_s),
+            # last_error нет (T5.3c c3)
+            try:
+                self._write_stop(STOP_LEVEL["SOFT"])
+            except Exception as exc:
+                self._record_err()
+                logger.warning(f"робот {self.entry.id!r}: стоп простого робота не записан: {type(exc).__name__}: {exc}")
