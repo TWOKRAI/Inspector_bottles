@@ -531,7 +531,7 @@ def test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop() -> None:
             t = threading.Thread(target=lambda: box.setdefault("r", drv.call("jog_hold", dict(_JOG))), daemon=True)
             t0 = time.perf_counter()
             t.start()
-            _until(lambda: drv._jog_starting, 5.0, "jog_hold не начался")
+            _until(lambda: drv.state.view().jog_starting, 5.0, "jog_hold не начался")
             bounded(lambda: drv.request_stop(time.monotonic() + 0.2), 5.0)
             t.join(5.0)
             assert not t.is_alive()
@@ -572,7 +572,7 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
             # Шов-рандеву: пульс зовётся из on_poll задания ПОСЛЕ проверки события тика. Пока ворота закрыты, тик
             # стоит здесь и не видит обрыва задания роботом; следующий on_poll после открытия видит событие ->
             # ветка _JobStopped входится детерминированно
-            if not gate.is_set() and drv._job_active:
+            if not gate.is_set() and drv.state.view().job_active:
                 parked.set()
                 gate.wait(5.0)
             return real_kick()
@@ -581,7 +581,7 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
         try:
             assert drv.call("enqueue_job", {"x_mm": 400.0, "y_mm": 100.0})["status"] == "ok"
             t.start()
-            _until(lambda: drv._job_active and _moving(rig) == 1, 10.0, "задание не поехало")
+            _until(lambda: drv.state.view().job_active and _moving(rig) == 1, 10.0, "задание не поехало")
             time.sleep(0.2)
             gate.clear()
             assert parked.wait(5.0), "тик не встал на пульсе задания"
@@ -613,7 +613,7 @@ def test_driver_without_spawn_refuses_return_job_and_tick_keeps_it_visible() -> 
             reply = drv.call("return_job", {"x_mm": 400.0, "y_mm": 100.0})
             assert reply == {"status": "error", "message": TEXT_NO_SPAWN}
             assert drv.snapshot()["return_queued"] == 0
-            drv._return_queue.append((400.0, 100.0, 0.0))  # шов: возврат уже в очереди (путь до отказа)
+            drv.state.enqueue_return((400.0, 100.0, 0.0))  # шов: возврат уже в очереди (путь до отказа)
             drv.tick(None)  # исключение — красный
             assert (drv.snapshot()["return_queued"], drv.snapshot()["returns_failed"]) == (0, 1)
             assert rec.at("devices.state.r1.last_error")[-1] == TEXT_NO_SPAWN
@@ -771,7 +771,7 @@ def test_second_process_stop_while_motion_alive_writes_once() -> None:
             t0 = time.perf_counter()
             bounded(lambda: drv.request_stop(deadline), 10.0)
             _until(lambda: _moving(rig) == 0, 2.0, "робот не остановился")
-            assert drv._prog_alive, "шов не держит исполнитель: проверка защёлки не имеет смысла"
+            assert drv.state.view().program_active, "шов не держит исполнитель: проверка защёлки не имеет смысла"
             bounded(lambda: drv.request_stop(deadline), 10.0)
             time.sleep(_SETTLE_S)
             assert rig.journal.count(t0) == 1, [x - t0 for x in rig.journal.stamps() if x >= t0]

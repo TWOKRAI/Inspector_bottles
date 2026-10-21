@@ -22,11 +22,45 @@ drivers/
   base.py              — BaseDeviceDriver (quality codes, stats)
   exchange_log.py      — ExchangeLog + ExchangeLogTransport (журнал обмена, T5.6)
   robot_driver.py      — RobotDriver (feeder CVT + draw)
+  robot_driver_v2/     — RobotDriverV2 (протокол Delta v2), пакет; раскладка — ниже
   vfd_driver.py        — VfdDriver (poll + DRAW-gating)
   hikvision_driver.py  — HikvisionDriver (control-only)
   generic_modbus_driver.py — GenericModbusDriver (универсальный)
 tests/
 ```
+
+## Драйвер робота v2 — пакет
+
+`drivers/robot_driver_v2/` (T5.3f, ADR-DH-010). Путь импорта `Services.device_hub.drivers.robot_driver_v2` прежний
+(`manager.py` не менялся). Всё состояние драйвера — один `RobotState` под одним листовым замком; ввод-вывод идёт под
+`_jog_tx_lock` и `_param_lock`, не под замком состояния. `RobotDriverV2` собирается в `__init__.py` из ядра
+`_RobotDriverCore` и миксинов (сборка там, а не в `driver.py`: иначе fan-out `driver.py` 17 > 15 и красный
+`sentrux no_god_files`).
+
+| модуль | назначение |
+|---|---|
+| `__init__.py` | сборка `RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, OpsMixin, _RobotDriverCore)`, `_OPS = OPS`, реэкспорт шести имён |
+| `driver.py` | ядро `_RobotDriverCore`: `__init__`, подключение и отключение, тик, телеметрия, `call`, `snapshot` |
+| `state.py` | `RobotState` (27 полей, 48 переходов + `view()` под одним замком), `RobotStateView`, `JogView`, `_JogRun` |
+| `stop.py` | `StopMixin`: `request_stop`, стоп процесса, защёлка, эхо стопа (ADR-DH-009) |
+| `jog.py` | `JogMixin`: удержание, отпускание, поводок и стоп jog |
+| `programs.py` | `ProgramMixin`: запуск программы в потоке исполнителя, возврат, смена инструмента |
+| `jobs.py` | `JobMixin`: очереди заданий и возвратов, дренаж тиком |
+| `params.py` | `ParamMixin`: синхронизация параметров, `param_set` / `param_apply`, откат значения |
+| `ops.py` | `OpsMixin` и таблица `OPS` (имя операции -> функция), операции оператора и журнала обмена |
+| `args.py` | проверка аргументов операций, отказы хранилища |
+| `tlm.py` | разбор блока телеметрии (`_parse_tlm`) |
+| `texts.py` | сроки, тексты отказов, ответы «занято», счётчик номеров потоков |
+
+**Чтение состояния в тестах.** `drv.state.view()` — замороженный `RobotStateView` (23 поля, присваивание поля даёт
+`FrozenInstanceError`); состояние строят переходами `drv.state.<переход>()`. Присваивать поля состояния (бывшие приватные поля драйвера) нельзя.
+Переходы `RobotState` — внутренние, не SPI хаба: код вне пакета и вне тестов их не зовёт.
+
+**Сторож.** `tests/test_no_private_driver_state.py` (AST): тесты (все файлы двух каталогов, кроме тестов других драйверов; 40 файлов) не трогают бывшие
+поля состояния и приватные атрибуты `.state` (0); прочие приватные имена драйвера и базы — литеральный белый список
+`_SEAMS` (112 обращений: `_client` 37, `_param_lock` 20, `_epoch` 16, ...), снятие швов — задача SPI хаба; вне пакета нет импорта
+`RobotState` / `RobotStateView` / `JogView` / `_JogRun` и вызовов переходов. Новый тест другого драйвера вносится в
+`_OTHER_DRIVER_TESTS` сторожа.
 
 ## Потокобезопасность (snapshot-API)
 
