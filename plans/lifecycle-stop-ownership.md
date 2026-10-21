@@ -20,7 +20,7 @@
   примитив `KeyedExecutor` и развилка в `CommandManager`, **1.9b** — PM первый потребитель); малые задачи рядом — **Task 1.10**
   (честный итог стопа `outcome`) и **Task 1.11** (окно стопа на ребёнка). Полоса Ф (сессия inspector-bottles-07). План
   закрытия окна GUI — отдельный, `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент; здесь только
-  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9m DRAFT 2026-10-21 — `ExecutorManager`, решение владельца, идёт перед 1.9b; 1.9b IN PROGRESS 2026-10-21 (стадия 0 р.1 CHANGES REQUESTED, правки внесены, р.2 — после 1.9m); 1.9c DRAFT 2026-10-21 — выделена из 1.9b стадией 0; 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
+  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9m DONE 2026-10-21 — `ExecutorManager` (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9m.md`); 1.9b IN PROGRESS 2026-10-21 (стадия 0 р.1 CHANGES REQUESTED, правки внесены, р.2 — после 1.9m); 1.9c DRAFT 2026-10-21 — выделена из 1.9b стадией 0; 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
 
 ## Зачем — одной фразой
 
@@ -494,7 +494,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 
 ### Task 1.9m — `ExecutorManager`: исполнители как сотрудник процесса (решение владельца 2026-10-21)
 
-**Статус:** DRAFT 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — по брифу; инъекции — Haiku; ревью задачи — `reviewer` (Sonnet), ревью ветки — Opus
+**Статус:** DONE 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — по брифу; инъекции — Haiku; ревью задачи — `reviewer` (Sonnet), ревью ветки — Opus
 **Goal:** `ExecutorManager(BaseManager)` внутри любого процесса: именованные исполнители из конфига процесса и регистрацией готового `OrderedExecutor`, жизнь в scope процесса, интроспекция `introspect.executors`; `register_command(executor=)` принимает объект или имя. Ядро `KeyedExecutor` 1.9a — без правок.
 **Зависит от:** Task 1.9a. **Даёт:** Task 1.9b (PM — первый потребитель менеджера). Слова владельца: «отдельный помощник наподобие nginx, чтобы не только PM, но и другие процессы при необходимости себе сделали; новый сотрудник на базе фреймворка (наследующий от base_manager)»; форма «внутри процесса, не отдельный процесс» согласована.
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9m.md`](lifecycle-stop-ownership/tasks/T1.9m.md) (+ [`T1.9m_facts.md`](lifecycle-stop-ownership/tasks/T1.9m_facts.md))
