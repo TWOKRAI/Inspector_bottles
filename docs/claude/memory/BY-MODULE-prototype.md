@@ -2,6 +2,10 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
+## prototype/apps (1)
+
+- [feedback_backend_driver_needs_connect_before_shutdown](feedback_backend_driver_needs_connect_before_shutdown.md) — BackendDriver из Python без connect() молча отвечает accepted=False / not conne…
+
 ## prototype/backend (7)
 
 - [feedback_detector_comparing_representation_fires_always](feedback_detector_comparing_representation_fires_always.md) — Детектор (detector) расхождения, сравнивающий целые dict'ы, горит всегда — и по…

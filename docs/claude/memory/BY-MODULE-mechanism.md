@@ -480,7 +480,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (32)
+## live-stand (33)
 
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
@@ -488,6 +488,7 @@
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
 - [feedback_backend_ctl_for_agents](feedback_backend_ctl_for_agents.md)
+- [feedback_backend_driver_needs_connect_before_shutdown](feedback_backend_driver_needs_connect_before_shutdown.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
