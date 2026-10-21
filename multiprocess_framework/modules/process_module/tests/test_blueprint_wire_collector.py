@@ -621,12 +621,13 @@ def test_metadata_inspector_mode_not_authoritative_wires_win():
 
 def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
     """AU-2 случай (б): legacy metadata.collector={mode: join} на узле без структурного
-    join (2 физ. источника, но 1 required + optional) тихо остаётся fanin.
+    join (2 физ. источника, но 1 join-вход + optional без ``join``) не даёт join.
 
-    metadata-mode не авторитетен: вывод не срабатывает (<2 required-источников), а тонкая
-    настройка подмешивается только в join-ветку → escape-hatch из metadata теряется.
-    Задокументированная деградация (ADR-PMM-017 п.5); митигация — явный collector
-    прямым ключом/extras.
+    metadata-mode не авторитетен: вывод не срабатывает (<2 join-источников), а тонкая
+    настройка подмешивается только в join-ветку → ``collector`` остаётся ``{}``.
+    Раньше это была тихая деградация в fanin (ADR-PMM-017 п.5); теперь (C-17, ADR-PMM-017
+    п.7) ``check()`` даёт громкую ошибку — одну, с именем процесса и ``metadata.collector.mode=join``,
+    одинаковую до и после ``infer_missing_collectors()``.
     """
     _register(_CircleDetector, _LineFilter, _WordLayout)
     bp = SystemBlueprint.model_validate(
@@ -649,10 +650,16 @@ def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
             ],
         }
     )
+    errors_before_infer = bp.check()
     bp.infer_missing_collectors()
+    errors_after_infer = bp.check()
 
     layout = next(p for p in bp.processes if p.process_name == "layout")
-    assert layout.collector == {}  # metadata-mode=join проигнорирован → тихо fanin
+    assert layout.collector == {}  # metadata-mode=join проигнорирован → join не применён
+    for errors in (errors_before_infer, errors_after_infer):
+        assert len(errors) == 1, errors  # C-17: громкая ошибка вместо тихого fanin
+        assert "'layout'" in errors[0]
+        assert "metadata.collector.mode=join" in errors[0]
 
 
 # ---------------------------------------------------------------------------
