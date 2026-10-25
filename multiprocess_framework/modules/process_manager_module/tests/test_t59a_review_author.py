@@ -106,7 +106,8 @@ def test_model_boundary_fresh_dict_plugin_in_the_middle_is_invisible_to_check() 
 
 
 def test_dotted_process_name_wire_does_not_cover_the_shorter_named_process() -> None:
-    """Процессы ``proc`` (без провода) и ``proc.a`` (с проводом): ошибка ровно у ``proc.needs_frame.frame``."""
+    """Процессы ``proc`` (без провода) и ``proc.a`` (с проводом): C-25 — точка в имени ``proc.a`` — ошибка,
+    и прежняя ошибка у входа ``proc.needs_frame.frame`` остаётся."""
     _register(_FrameSource, _NeedsFrame)
     bp = SystemBlueprint.model_validate(
         {
@@ -120,5 +121,6 @@ def test_dotted_process_name_wire_does_not_cover_the_shorter_named_process() -> 
         }
     )
     errors = bp.check()
-    assert len(errors) == 1, errors
-    assert "'proc.needs_frame.frame'" in errors[0], errors[0]
+    assert len(errors) == 2, errors
+    assert errors[0].startswith("Процесс 'proc.a': точка в имени процесса запрещена"), errors[0]
+    assert "'proc.needs_frame.frame'" in errors[1], errors[1]
