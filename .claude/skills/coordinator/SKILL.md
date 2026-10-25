@@ -90,6 +90,13 @@ A window can be split: a short lane slots in while a long lane pauses (2026-10-1
 lane Zh's radius and its matrix). The lane on the owner's priority («visible result first») goes first
 when two are ready. Update `machine.lock` before sending the signal, not after.
 
+**Message economy (owner, 2026-10-25).** Every message wakes the receiver, which re-reads its whole context
+(a lead often holds 100k+), so a message costs the receiver's context, not its text. Lanes write only:
+a window request, ОТЧЁТ, «сливаю», files outside their boundary before an edit, a registry line, a question
+for the owner. No acknowledgements («принял», «понял»). The coordinator replies only when the lane must act
+or wait; machine state goes out only to a lane whose plan it changes; a question to every lane only when
+it cannot wait for that lane's next signal.
+
 ## 5. Start prompt template — every prompt the coordinator writes
 
 Render it in Russian (the owner reads it); keep every block, write «none» rather than drop one.
