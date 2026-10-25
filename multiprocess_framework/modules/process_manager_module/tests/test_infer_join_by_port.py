@@ -249,20 +249,29 @@ def test_a7_explicit_fanin_collector_with_metadata_mode_join_is_an_error(key: st
 
 
 @pytest.mark.parametrize("key", _METADATA_KEYS)
-def test_a7_metadata_without_mode_join_is_not_an_error(key: str) -> None:
-    """Граница C-17: ошибку даёт только ``mode == "join"``; mode-less тонкая настройка и ``mode: fanin`` — нет.
+def test_a7_metadata_without_mode_join_is_a_c28_error(key: str) -> None:
+    """C-28: mode-less ``metadata.<ключ>`` и ``{mode: fanin}`` при одном join-источнике не применяются — ошибка.
 
-    Парная проверка достижимости к ошибочным кейсам A7: та же топология с одним join-источником.
+    Не C-17 (там только ``mode == "join"``), а C-28: ровно одна ошибка до и после infer, списки равны.
     """
-    for metadata in ({key: {"timeout_sec": _SECRET_TIMEOUT}}, {key: {"mode": "fanin"}}):
+    cases = (
+        ({key: {"timeout_sec": _SECRET_TIMEOUT}}, f"Процесс 'layout': metadata.{key} (deprecated, ключи: timeout_sec)"),
+        ({key: {"mode": "fanin"}}, f"Процесс 'layout': metadata.{key} (deprecated, ключи: mode)"),
+    )
+    for metadata, expected_start in cases:
         PluginRegistry.clear()
         _register_fakes()
         bp = _blueprint(
             [_joiner_process("layout", "opt_default", metadata=metadata)], _wires_to("layout", "opt_default")
         )
-        assert bp.check() == []
+        before = bp.check()
         bp.infer_missing_collectors()
-        assert bp.check() == []
+        after = bp.check()
+        for errors in (before, after):
+            assert len(errors) == 1, errors
+            assert errors[0].startswith(expected_start), errors[0]
+            assert str(_SECRET_TIMEOUT) not in errors[0]
+        assert before == after
 
 
 # ---------------------------------------------------------------------------

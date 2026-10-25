@@ -44,6 +44,10 @@ from ...process_module.generic.generic_process_config import GenericProcessConfi
 # быть, есть только общий разъём модуля.
 logger = get_std_logger("blueprint")
 
+# Структурные ключи collector: их выводит ``infer_missing_collectors`` из wires и НЕ подмешивает из
+# легаси-секции ``metadata`` (единый источник для ``infer`` и проверки затенения, C-28.3).
+_STRUCTURAL_COLLECTOR_KEYS = ("mode", "inputs", "primary")
+
 
 @register_schema("WireV1")
 class Wire(SchemaBase):
@@ -80,7 +84,7 @@ class ProcessConfig(SchemaBase):
 
     process_name: Annotated[
         str,
-        FieldMeta("Имя процесса", info="Уникальное имя в системе"),
+        FieldMeta("Имя процесса", info="Уникальное имя в системе, без точки (разделитель адреса)"),
     ] = ""
 
     plugins: Annotated[
@@ -569,13 +573,11 @@ class SystemBlueprint(SchemaBase):
             # Тонкая настройка (структурные mode/inputs/primary остаются из wires):
             # mode-less явная секция (typed/extras) + legacy metadata —
             # оба подмешивают только НЕ-структурные ключи (timeout_sec/… ) поверх skeleton.
-            legacy = None
-            if isinstance(proc.metadata, dict):
-                legacy = proc.metadata.get(COLLECTOR_CONFIG_KEY) or proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
+            legacy = _legacy_metadata_section(proc)[1]
             for tuning in (explicit, legacy):
                 if isinstance(tuning, dict):
                     for key, value in tuning.items():
-                        if key not in ("mode", "inputs", "primary"):
+                        if key not in _STRUCTURAL_COLLECTOR_KEYS:
                             derived[key] = value
 
             proc.collector = derived
@@ -668,6 +670,24 @@ class SystemBlueprint(SchemaBase):
             process_names.add(proc.process_name)
         return errors
 
+    def _dotted_process_names(self) -> list[str]:
+        """C-25: точка в ``process_name`` — ошибка (ADR-PMM-017 п.9). Одна ошибка на процесс.
+
+        Точка разделяет уровни адреса (``процесс.воркер``, ``процесс.плагин.порт``), роутер берёт
+        процессом первый сегмент (``address.py``): процесс ``draw.a`` он адресует как ``draw``.
+        Не зависит от ``PluginRegistry`` — общий для :meth:`check` и :meth:`check_structure`.
+        """
+        from ...message_module.addressing.address import SEPARATOR
+
+        return [
+            f"Процесс '{proc.process_name}': точка в имени процесса запрещена — точка разделяет уровни "
+            f"адреса (процесс.воркер, процесс.плагин.порт); роутер прочтёт адрес '{proc.process_name}' "
+            f"как процесс '{proc.process_name.split(SEPARATOR)[0]}'. Переименуй процесс "
+            f"(например, '{proc.process_name.replace(SEPARATOR, '_')}'), ADR-PMM-017 п.9"
+            for proc in self.processes
+            if _is_dotted_process(proc)
+        ]
+
     def _unknown_observability_processes(self) -> list[str]:
         """Имя в ``observability.processes``, которого нет в рецепте (Task 5.5, шаг 10 из 5.13).
 
@@ -739,7 +759,7 @@ class SystemBlueprint(SchemaBase):
         return errors
 
     def check_structure(self) -> list[str]:
-        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
+        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + точка в имени + циклы.
 
         НЕ зависит от PluginRegistry — безопасен как gate на запись рецепта
         (единый Save, load-from-file) даже в разреженном окружении (headless/
@@ -774,6 +794,7 @@ class SystemBlueprint(SchemaBase):
             все адреса ведут в объявленные процессы).
         """
         errors: list[str] = list(self._duplicate_process_names())
+        errors.extend(self._dotted_process_names())
         errors.extend(self._unknown_observability_processes())
         errors.extend(self._unaddressable_chain_targets())
 
@@ -800,6 +821,9 @@ class SystemBlueprint(SchemaBase):
         4. Все обязательные входы подключены
         5. ``metadata.<ключ>.mode=join`` при невыведенном join — ошибка (C-17)
         6. ``collector`` без mode при невыведенном join — ошибка (C-22)
+        7. Точка в ``process_name`` — ошибка (C-25, ADR-PMM-017 п.9); та же проверка в
+           :meth:`check_structure`
+        8. ``metadata.<ключ>`` (deprecated), которая не применится, — ошибка (C-28)
 
         НЕ проверяет циклы графа wires — та проверка живёт только в
         :meth:`check_structure` (RS-5 Save/load-gate); межпроцессная обратная
@@ -811,6 +835,7 @@ class SystemBlueprint(SchemaBase):
             Список ошибок. Пустой = всё ОК.
         """
         errors: list[str] = list(self._duplicate_process_names())
+        errors.extend(self._dotted_process_names())
         errors.extend(self._unknown_observability_processes())
         errors.extend(self._unaddressable_chain_targets())
 
@@ -818,8 +843,8 @@ class SystemBlueprint(SchemaBase):
         # одноимённые input/output порты (e.g. "frame" → "frame")
         input_map: dict[str, Port] = {}  # address → Port
         output_map: dict[str, Port] = {}  # address → Port
-        # address → (процесс, плагин, порт): имена берём отсюда, а не разбором адреса по «.»
-        # (имя процесса может содержать точку: «proc» и «proc.a» — разные процессы).
+        # address → (процесс, плагин, порт): точка в имени процесса запрещена (_dotted_process_names);
+        # карта нужна, чтобы не разбирать адрес повторно.
         input_origin: dict[str, tuple[str, str, str]] = {}
 
         for proc in self.processes:
@@ -911,6 +936,7 @@ class SystemBlueprint(SchemaBase):
 
         errors.extend(self._metadata_join_errors())
         errors.extend(self._modeless_collector_errors())
+        errors.extend(self._unapplied_metadata_errors())
         return errors
 
     def _modeless_collector_errors(self) -> list[str]:
@@ -925,6 +951,8 @@ class SystemBlueprint(SchemaBase):
         errors: list[str] = []
         joining = self._joining_sources()
         for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
             key, explicit = _explicit_collector(proc)
             if not explicit or explicit.get("mode"):
                 continue
@@ -951,6 +979,8 @@ class SystemBlueprint(SchemaBase):
         errors: list[str] = []
         joining = self._joining_sources()
         for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
             # Обе секции проверяются независимо (приоритет collector → inspector нужен только
             # тонкой настройке): mode=join в любой из них — заявка на join. Одна ошибка на процесс.
             meta = proc.metadata if isinstance(proc.metadata, dict) else {}
@@ -976,6 +1006,63 @@ class SystemBlueprint(SchemaBase):
                     f"тонкая настройка — collector: {{timeout_sec: …}} без mode "
                     f"(только при ≥ 2 join-источниках, иначе C-22)"
                 )
+        return errors
+
+    def _unapplied_metadata_errors(self) -> list[str]:
+        """C-28: непустая ``metadata.collector``/``metadata.inspector``, которую сборка не применит (ADR-PMM-017 п.10).
+
+        Секция применяется (``infer_missing_collectors``), только если у процесса ≥ 2 join-источников
+        и явная секция не задаёт ``mode``. ``mode == "join"`` у явной секции тоже считается
+        «применяется»: после ``infer`` выведенный join выглядит как явный ``mode: join``, и результат
+        не должен зависеть от того, вызывался ли ``infer``. Не применяется — одна ошибка на процесс,
+        кроме процесса, по которому уже есть ошибка C-17 (``_metadata_join_errors``). Значения секции
+        в текст не попадают (только ключи и значение ``mode`` явного collector).
+
+        Применённая секция одна (``collector``, затем ``inspector``): при ≥ 2 источниках непустая
+        ``metadata.inspector`` рядом с применённой ``metadata.collector`` затенена — это тоже ошибка
+        (C-28.2). При < 2 источниках затенение не сообщается: ошибка про ``metadata.collector``, а после
+        её лечения ``inspector`` станет основной секцией и получит свою.
+        """
+        joining = self._joining_sources()
+        c17_errors = self._metadata_join_errors()  # текст каждой начинается с «Процесс '<имя>': »
+        errors: list[str] = []
+        for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
+            meta_key, section = _legacy_metadata_section(proc)
+            if not section:
+                continue
+            if any(e.startswith(f"Процесс '{proc.process_name}': ") for e in c17_errors):
+                continue
+            exp_key, explicit = _explicit_collector(proc)
+            mode = explicit.get("mode")
+            n_sources = len(joining.get(proc.process_name, {}))
+            if n_sources >= 2 and (not mode or mode == "join"):
+                shadowed = proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
+                # Теряются только ключи, которые infer подмешал бы (не-структурные): mode/inputs/primary
+                # он отбрасывает и из применённой секции, их затенение ничего не меняет.
+                lost = (
+                    {k: v for k, v in shadowed.items() if k not in _STRUCTURAL_COLLECTOR_KEYS}
+                    if isinstance(shadowed, dict)
+                    else {}
+                )
+                if meta_key == COLLECTOR_CONFIG_KEY and lost:
+                    errors.append(
+                        _unapplied_metadata_text(
+                            proc.process_name,
+                            LEGACY_COLLECTOR_CONFIG_KEY,
+                            lost,
+                            f"затенена metadata.{COLLECTOR_CONFIG_KEY} "
+                            f"(сборка применяет одну секцию: collector, затем inspector)",
+                        )
+                    )
+                continue
+            reason = (
+                f"join не выведен (join-источников: {n_sources}, нужно ≥ 2)"
+                if n_sources < 2
+                else f"явный {exp_key} задаёт mode={mode}"
+            )
+            errors.append(_unapplied_metadata_text(proc.process_name, meta_key, section, reason))
         return errors
 
     def describe(self) -> str:
@@ -1112,6 +1199,26 @@ def _legacy_metadata_section(proc: ProcessConfig) -> tuple[str, dict]:
         if isinstance(section, dict) and section:
             return key, section
     return "", {}
+
+
+def _is_dotted_process(proc: ProcessConfig) -> bool:
+    """Точка в ``process_name`` (ADR-PMM-017 п.9): такой процесс судит только C-25."""
+    from ...message_module.addressing.address import SEPARATOR
+
+    return SEPARATOR in proc.process_name
+
+
+def _unapplied_metadata_text(process_name: str, meta_key: str, section: dict, reason: str) -> str:
+    """Текст ошибки C-28: процесс, ключ ``metadata``, ключи секции (без значений), причина и лечение."""
+    keys = sorted(str(k) for k in section)
+    keys_text = ", ".join(keys)
+    placeholder = ", ".join(f"{k}: …" for k in keys)
+    return (
+        f"Процесс '{process_name}': metadata.{meta_key} (deprecated, ключи: {keys_text}) "
+        f"не применяется — {reason}. Штатно: перенеси в process-level collector: "
+        f"{{{placeholder}}} (те же ключи; без mode — тонкая настройка выведенного join, "
+        f"только при ≥ 2 join-источниках; mode: fanin — настройка fanin) и удали metadata.{meta_key}"
+    )
 
 
 def _find_plugin_entry(plugin_name: str, plugin_class: str):
