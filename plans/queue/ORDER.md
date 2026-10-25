@@ -23,52 +23,53 @@
 
 > Что брать следующим, решает владелец: строка — план или задача плана, порядок строк — порядок работы. Сессия берёт верхний незакрытый пункт.
 > Формат, `--queue` и находки `OWNER_QUEUE_*` — [`scripts/plans_progress/README.md`](../../scripts/plans_progress/README.md), раздел «Очередь владельца». Пустая очередь — работают по «Снимку» и §2.
-> **Цель — прототип 1.0 (владелец 2026-10-25, решение 23 в [`decisions.md`](decisions.md)):** строки 1–27 — 1.0, ниже — 2.0. Полосы: Ф, Р2, Д → К; не больше трёх писателей.
+> **Цель — прототип 1.0 (владелец 2026-10-25, решения 23, 24 в [`decisions.md`](decisions.md)):** строки 1–27 — 1.0 (вехи α — сим, β — железо), ниже — 2.0. Полосы: Ф, Р2, Д → К; не больше трёх писателей.
 
 <!-- owner-queue:begin -->
 | # | План | Задача | Заметка |
 |---|---|---|---|
 | 1 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.9b | **1.0 · P0 · полоса Ф.** PM — первый потребитель `ExecutorManager` (1.9a `6c4fc762e`, 1.9m `751ba0dfd` в main); стоп не глохнет (L-9). Бриф `lifecycle-stop-ownership/tasks/T1.9b.md`, передача `docs/handoffs/2026-10-21_lane-F-T1.9m-to-T1.9b.md` |
-| 2 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.3 | **1.0 · P0 · полоса Р2.** Внутри T5.3 по порядку: C-29 «Отключить» прерывает ручной connect до SERVO/DO (`defects.md`) → SPI хаба (`register_command(executor=)` по имени) → T5.3e. Передача `docs/handoffs/2026-10-21_task-T5.3h-merged.md` |
-| 3 | [queue/defects](defects.md) | | **1.0 · P0 · полоса Д.** C-24 (красный `test_letter_robot_sim_diff`) → C-25 + C-28 (`blueprint.py`, одной правкой) → C-21(б) (последний активный рецепт вне git). Передача `docs/handoffs/2026-10-21_lane-D-C22.md`. После — полоса становится К (строка 13) |
-| 4 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.10 | 1.0 · P0 · Ф: честный `outcome` стопа (exited/terminated/killed/survived) |
-| 5 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.11 | 1.0 · P0 · Ф: окно стопа на ребёнка из конфига процесса |
-| 6 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.3e | 1.0 · P0 · Р2: «домой» — команда устройству до `process.stop` (условие D1 L-9); открывает gui-graceful-close 1.4 и пульт оператора (строка 10) |
-| 7 | [2026-10-20_gui-graceful-close](../2026-10-20_gui-graceful-close/plan.md) | 0.1 | 1.0 · P1 · Ф после 1.11: закрытие по крестику — 0.1 → 1.1 → 1.2, 1.3 → 1.4 (`pre_stop` «домой», после T5.3e). Ф2 (2.x) и 3.1 — 2.0 |
-| 8 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · экран оператора = Qt-GUI прототипа + вкладка «Пульт» (владелец 2026-10-25, вместо робота Ф6 T6.x). Шаг 1 — smoke пульта на текущем main (`pult_demo`, `action` к `device_hub`; Haiku + qt-mcp); задачу в план заводит полоса Ф |
-| 9 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · шаг 2 — Phase 5.4 `monitor` (показ состояния чужой ноды, только чтение: статус робота, счётчики) |
-| 10 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · шаг 3 — пульт оператора в рецепте 1.0: «Домой», «Стоп», режим, скорость, статус; после T5.3e |
-| 11 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.4 | 1.0 · P0 · Р2: калибровка, бэкенд |
-| 12 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.5 | 1.0 · P0 · Р2: плагины; открывает цепочку «брак → робот» (строки 20–22) |
-| 13 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 0.1 | **1.0 · P0 · полоса К (бывшая Д после строки 3).** Владелец 2026-10-25: в 1.0 одна MVS + один ID3013, **сразу на ядре** `camera_device`, не на старом пути. Сделано: W1a (0.2, 0.3, 0.4 — main `2b168d558`); 6.2 — на ветке `feat/camera-device-service`, влить в main первым шагом. W1b: 0.1 → 1.5 ∥ 1.1 (`--timed medium` — своё окно) |
-| 14 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 1.6 | 1.0 · К · W2 «ядро» (1.6, 1.8, 2.1, 2.2); граница волны — handoff + `/clear` |
-| 15 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 2.3a | 1.0 · К · W3 (2.3a, 2.3b, 2.4, 4.1, 3.1, 3.2) |
-| 16 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 4.2a | 1.0 · К · W4 (4.2a, 4.2b, 4.3, 4.4, 6.1, 6.3): К4' одним коммитом. Выбор по serial и `hikvision_dual.yaml` — делать (механизм на будущее); стенд 1.0 — одна MVS (М2), стенд двух MVS (М3) — после 1.0 |
-| 17 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 3.3 | 1.0 · К · W5 (3.3, 6.4): стенд 1.0 — один ID3013 на ядре; N=2 — после 1.0 |
-| 18 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 1.3 | 1.0 · К · механизмы на перспективу (владелец 2026-10-25): 1.3 контракты команд плагина, 1.4 `introspect.registers` с `meta`, 1.7 `shutdown()` детей до `kill_tree` |
-| 19 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 0.5 | 1.0 · ⚑ **день с MVS (шаг владельца, дату назначает владелец):** стенд MVS на старом пути (М1) — базовая линия железа до перевода на ядро |
-| 20 | [robot-calibration](../robot-calibration.md) | F4 | 1.0 · P0 · Р2 после T5.5: `reject → image_to_robot → send_job` через `devices` — **цепочка «камера нашла брак → робот получил задание» сейчас не замкнута** |
-| 21 | [robot-calibration](../robot-calibration.md) | F5 | 1.0 · Р2: интеграция в прототип, автомиграция файла калибровки |
-| 22 | [robot-place-pose](../robot-place-pose.md) | P3 | 1.0 · Р2: связка съём ↔ укладка |
-| 23 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T0.3 | 1.0 · ⚑ **день с роботом (шаг владельца):** `pc_probe.py all` на контроллере (GATE-1); открывает T4.0, T4.6 |
-| 24 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T4.0 | 1.0 · Р2, реальный робот: стенд сухого прогона → T4.6 контракт-тесты, T4.1 прошивка → T4.5 README |
-| 25 | [camera-robot-calibration](../camera-robot-calibration.md) | F7 | 1.0 · ⚑ железо: робот + Hikvision — в один день со строками 19 и 23 |
-| 26 | [letters-retrain](../letters-retrain/plan.md) | 0.4 | 1.0 · P2: базовая линия сети на симе — качество распознавания числом; заполнитель для свободной полосы |
-| 27 | release-1.0 | | **1.0 · приёмка — плана нет, написать (`/dev:plan`, manager) до конца Р2 T5.5.** Сквозной сценарий через `backend_ctl` на симе: холодный старт рецепта → N объектов → число отбраковок совпадает → «Стоп»/крестик → робот «домой», ничего не висит; затем тот же чек-лист на железе (MVS + ID3013 + робот) |
+| 2 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.3 | **1.0 · P0 · полоса Р2.** Внутри T5.3: C-29 «Отключить» прерывает ручной connect до SERVO/DO (`defects.md`) → SPI хаба (`register_command(executor=)` по имени) → T5.3e (строка 7). Передача `docs/handoffs/2026-10-21_task-T5.3h-merged.md` |
+| 3 | [queue/defects](defects.md) | | **1.0 · P0 · полоса Д.** C-24 (красный `test_letter_robot_sim_diff` — рецепт сценария 1.0) → C-25 + C-28 (`blueprint.py`, одной правкой) → C-21(б) последним (последний активный рецепт вне git). Передача `docs/handoffs/2026-10-21_lane-D-C22.md`. Затем полоса становится К (строка 18) |
+| 4 | release-1.0 | | **1.0 · приёмка — написать план сейчас (`/dev:plan`, manager, только документы, параллельно полосам).** Сценарий владельца (решение 24): на пульте вводят слово → по одному кидают диски с буквами → для подходящей буквы камера считывает угол, слежение по ленте, робот получает задание «взять → повернуть → положить в ячейку слова»; неподходящая буква уезжает дальше. Веха **α** (сим): журнал (`backend_ctl` + журнал обмена драйвера T5.6) показывает поимённо: буква, угол, ячейка, задание роботу `CVT_JOB`; пропуск для неподходящих. Веха **β** (железо): то же на MVS и настоящем роботе, робот берёт и кладёт. Сверить: умеет ли line-sim подавать диски в заданном порядке |
+| 5 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.10 | 1.0 · P0 · Ф: честный `outcome` стопа (exited/terminated/killed/survived) |
+| 6 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.11 | 1.0 · P0 · Ф: окно стопа на ребёнка из конфига процесса |
+| 7 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.3e | 1.0 · P0 · Р2: «домой» — команда устройству до `process.stop` (условие D1 L-9); открывает gui-graceful-close 1.4 и пульт оператора (строка 17) |
+| 8 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T1.4 | 1.0 · P0 · Р2: диапазоны APARAM → codegen; в плане «до Ф4» — **обязательно до T4.0** (настоящий робот), T3.3 закрыта — готова |
+| 9 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.5 | **1.0 · P0 · Р2: звено цепочки.** `robot_io` (подача CVT) → `CVT_JOB` на v2; приёмка — задание подачи даёт DONE в sim v2; REVIEW-5 → `cto` (приёмка Ф5 без GUI) |
+| 10 | [word-layout](../word-layout.md) | P3 | **1.0 · P0 · звено цепочки (после T5.5; Р2 или Ф — кто свободен).** Задание роботу = съём (`pixel_to_robot`) + укладка (ячейка `word_layout`) + доворот: сейчас `angle_deg` из `word_layout` в `robot_io` не доходит (`robot_io` ждёт `place_*_mm`, `place_rz_deg`). Делать одной задачей со строкой 11 |
+| 11 | [robot-place-pose](../robot-place-pose.md) | P3 | 1.0 · P0 · связка съём ↔ укладка — вместе со строкой 10; имя 4-й оси (`R`/`RZ`) — по прошивке v2 (T4.1) |
+| 12 | [word-layout](../word-layout.md) | P4 | **1.0 · веха α:** smoke на симе по сценарию строки 4, журнал поимённо; README/STATUS |
+| 13 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T5.4 | 1.0 · P0 · Р2: калибровка ленты (`P_BELT_FACTOR`), СК по трём точкам, точки инструмента; камера ↔ робот — существующий `Plugins/calibration/camera_robot` с v2 |
+| 14 | [2026-10-20_gui-graceful-close](../2026-10-20_gui-graceful-close/plan.md) | 0.1 | 1.0 · P1 · Ф после 1.11: закрытие по крестику — 0.1 → 1.1 → 1.2, 1.3 → 1.4 (`pre_stop` «домой», после T5.3e). Ф2 (2.x) и 3.1 — 2.0 |
+| 15 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · экран оператора = Qt-GUI прототипа + вкладка «Пульт» (владелец 2026-10-25, вместо робота Ф6). Шаг 1 — smoke пульта на текущем main (`pult_demo`, `action` к `device_hub`; Haiku + qt-mcp). Задачи заводятся новой фазой плана (план числится закрытым) |
+| 16 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · шаг 2 — `monitor` (бывшая 5.4): показ состояния чужой ноды, только чтение — статус робота, последняя буква, собранная часть слова |
+| 17 | [pult-control-panel](../pult-control-panel.md) | | 1.0 · P1 · шаг 3 — пульт оператора в рецепте 1.0: поле «Слово» (`param` → `word_layout.target_word`), старт/стоп ленты, «Домой», статус; после T5.3e |
+| 18 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 0.1 | **1.0 · P0 · полоса К (бывшая Д после строки 3).** Владелец 2026-10-25: в 1.0 **одна MVS** (ID3013 в 1.0 не участвует), **сразу на ядре** `camera_device`. Сделано W1a (0.2, 0.3, 0.4 — main `2b168d558`); 6.2 — на ветке `feat/camera-device-service`, влить в main первым шагом. W1b: 0.1 → 1.5 ∥ 1.1 (`--timed medium` — своё окно) |
+| 19 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 1.6 | 1.0 · К · W2 «ядро» (1.6, 1.8, 2.1, 2.2); граница волны — handoff + `/clear`; после W2 — сверка токенов с оценкой (порог плана 14M) |
+| 20 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 2.3a | 1.0 · К · W3 (2.3a, 2.3b, 2.4, 4.1). ID3013 (3.1 `mvcr`, 3.2 `code_reader_sdk`) — вне 1.0, **но 4.2a в плане стоит после 3.2**: лид К на стадии 0 решает с числами — снять зависимость или оставить 3.1/3.2 как второго вендора ядра |
+| 21 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 4.2a | 1.0 · К · W4 (4.2a, 4.2b, 4.3, 4.4, 6.1, 6.3): К4' одним коммитом. Выбор по serial — делать (механизм на будущее); стенд 1.0 — одна MVS (М2); две MVS (М3) — после 1.0 |
+| 22 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 1.3 | 1.0 · К · механизмы на перспективу: 1.3 контракты команд плагина, 1.4 `introspect.registers` с `meta`, 1.7 `shutdown()` детей до `kill_tree` (граница с Ф — назвать в брифе) |
+| 23 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 0.5 | **1.0 · ⚑ день с железом №1 — поставить как можно раньше (риск первым, от кода не зависит):** стенд MVS на старом пути (М1) + **записать набор реальных кадров дисков** для строки 27 |
+| 24 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T0.3 | **1.0 · ⚑ день с железом №1:** `pc_probe.py all` на контроллере (GATE-1) — открывает T4.0; без него объём прошивки T4.1–T4.4 неизвестен |
+| 25 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T4.0 | 1.0 · Р2, реальный робот (после T0.3, T1.4): стенд сухого прогона → T4.6 контракт-тесты, T4.1 прошивка (укладка с доворотом, ось `RZ`) → T4.5 README |
+| 26 | [camera-robot-calibration](../camera-robot-calibration.md) | F7 | 1.0 · ⚑ день с железом №2: робот + MVS + лента — калибровка камера ↔ робот → веха **β** по строке 4 |
+| 27 | [letters-retrain](../letters-retrain/plan.md) | 0.4 | 1.0 · P1: базовая линия сети — на симе **и на реальных кадрах дня №1**; сеть с сима может не узнать буквы с MVS — проверить до вехи β |
 | 28 | [line-sim](../line-sim/plan.md) | Task 6.4 | **2.0 ниже этой строки.** Один экран симуляторов на `pult_web`; затем 4.1, 4.2, 4.3 |
-| 29 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 4.6a | 1.x сразу после 1.0: W6 хаб-зеркало (4.6a, 4.6b, 5.1, 4.6c, 4.6d), затем W7 (5.2, 5.3, 1.2), W8 (6.5, 6.6), W9 P2 (3.4, 4.5, 5.4) |
-| 30 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.9c | 2.0: `_run_when_child_ready` поверх `KeyedExecutor` (меньше слоёв), затем `ServiceHost._cmd_start`, 1.7, 3.1–3.3 |
-| 31 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T6.0 | 2.0: робот Ф6 (T6.0–T6.5, движок форм) — в 1.0 его заменяет пульт (строки 8–10) |
-| 32 | [gui-constructor](../gui-constructor/plan.md) | Task 1.0 | 2.0: GUI-конструктор; вместе с `frontend-constructor` и `2026-09-22_gui-service` (удалённый Пульт; 1b.2b убирает `PluginRegistry` из GUI — учесть пикер `control_panel`) |
-| 33 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | 2.0: горячая смена рецепта; в 1.0 — рецепт при старте (`-Recipe`) + C-21(б) |
-| 34 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | 2.0: хвост, обход `BackendDriver(port=8766)`; Q-2 — начать с 0.1 или 5.1, решает владелец |
-| 35 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | 2.0: одна дорога к одному писателю журнала → 4.18 → Ф6 (6.1–6.14, отложено 2026-10-13) |
-| 36 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | 2.0: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4); K1.1 — не раньше 2026-11-10 |
-| 37 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
-| 38 | [layer-render](../layer-render/plan.md) | Task 3.1 | 2.0 (отложено владельцем 2026-10-14): реализм картинки, затем letters-retrain Ф1 |
-| 39 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | 2.0 (отложено 2026-10-13): R-10 бьёт только по горячей смене |
-| 40 | [qr-code-reader](../qr-code-reader.md) | | 2.0: сверить остаток с камерами 3.2/3.3 (ID3013 на ядре) — часть задач, вероятно, поглощена |
-| 41 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | | 2.0: решения 19, 22; вместе с В3–В6 `current-path` и Ф7–Ф8 `constructor-master` (решения 16, 18) |
+| 29 | [2026-10-18_camera-device-service](../2026-10-18_camera-device-service/plan.md) | 3.3 | 2.0: ID3013 на ядре (3.1, 3.2 — если не взяты в строке 20; 3.3, 6.4), затем W6 хаб-зеркало (4.6a–4.6d, 5.1), W7 (5.2, 5.3, 1.2), W8 (6.5, 6.6), W9 P2 (3.4, 4.5, 5.4) |
+| 30 | [robot-calibration](../robot-calibration.md) | F4 | 2.0, сверить: `reject → image_to_robot` писалась под отбраковку; в сценарии 1.0 её, вероятно, покрывают `pixel_to_robot` + `word_layout` + строка 10 — решает план `release-1.0`; F5 (две камеры, автомиграция) — 2.0 |
+| 31 | [lifecycle-stop-ownership](../lifecycle-stop-ownership.md) | 1.9c | 2.0: `_run_when_child_ready` поверх `KeyedExecutor` (меньше слоёв), затем `ServiceHost._cmd_start`, 1.7, 3.1–3.3 |
+| 32 | [robot-protocol-v2](../robot-protocol-v2/plan.md) | T6.0 | 2.0: робот Ф6 (T6.0–T6.5, движок форм) — в 1.0 его заменяет пульт (строки 15–17) |
+| 33 | [gui-constructor](../gui-constructor/plan.md) | Task 1.0 | 2.0: GUI-конструктор; вместе с `frontend-constructor` и `2026-09-22_gui-service` (удалённый Пульт; 1b.2b убирает `PluginRegistry` из GUI — учесть пикер `control_panel`) |
+| 34 | [2026-10-12_stand-recipe-switch](../2026-10-12_stand-recipe-switch/plan.md) | Task 1.1b | 2.0: горячая смена рецепта; в 1.0 — рецепт при старте (`-Recipe`) + C-21(б) |
+| 35 | [qr-code-reader](../qr-code-reader.md) | | 2.0: ID3013 и ПЛК — отдельная задача владельца, в 1.0 не участвует (решение 24); сверить остаток с камерами 3.2/3.3 |
+| 36 | [backend-ctl-review-remediation](../backend-ctl-review-remediation.md) | Task 5.1 | 2.0: хвост, обход `BackendDriver(port=8766)`; Q-2 — начать с 0.1 или 5.1, решает владелец |
+| 37 | [observability-closure](../observability-closure/plan.md) | Task 4.17 | 2.0: одна дорога к одному писателю журнала → 4.18 → Ф6 (6.1–6.14, отложено 2026-10-13) |
+| 38 | [2026-10-04_atlas](../2026-10-04_atlas/plan.md) | Task 2.1 | 2.0: остаток ревизии (2.1 → 1.9g → 2.5 → 1.10b → закрытие 2.4); K1.1 — не раньше 2026-11-10 |
+| 39 | [2026-10-11_memory-rules-delivery](../2026-10-11_memory-rules-delivery/plan.md) | Task 0.3 | FREEZE; 2026-11-10 — пересчёт повторов → ⚑ владелец |
+| 40 | [layer-render](../layer-render/plan.md) | Task 3.1 | 2.0 (отложено владельцем 2026-10-14): реализм картинки, затем letters-retrain Ф1 — **поднять в 1.0, если строка 27 покажет провал на реальных кадрах** |
+| 41 | [device-tree-recipe](../device-tree-recipe.md) | Task B2 | 2.0 (отложено 2026-10-13): R-10 бьёт только по горячей смене |
+| 42 | [framework-architecture-rework](../framework-architecture-rework/plan.md) | | 2.0: решения 19, 22; вместе с В3–В6 `current-path` и Ф7–Ф8 `constructor-master` (решения 16, 18) |
 <!-- owner-queue:end -->
 
 ## Снимок 2026-10-03 — где мы сейчас
