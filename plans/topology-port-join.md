@@ -333,3 +333,27 @@ C28.1:
 - K10: проверка затенения раньше исключения C-17 → красных нет (C-17 срабатывает только при < 2 источниках, а затенение — только при ≥ 2); эквивалентная мутация, записать.
 - K11: убрать `and shadowed` из условия затенения → красный только M16.
 **Out of scope:** F2 кодом; F5; приоритет typed `collector` над `metadata`.
+
+### Ревью ветки (reviewer Opus, 2026-10-25) — CHANGES REQUESTED, итерация 1
+
+Находки: №1 major — затенение судит секцию целиком, а `infer` подмешивает только не-структурные ключи (`blueprint.py:576`); `{collector: {timeout_sec}, inspector: {mode: join}}` при n = 2 даёт ошибку, а `{inspector: {mode: join}}` — нет; противоречит «Вне правила» ADR п.10. №2 minor — у процесса с точкой C-17/C-22/C-28 добавляют ошибку «join-источников: 0» (`_joining_sources` пропускает адрес из 4 частей). №3 minor — ADR п.9 неточно описывает причину. №4 advisory (исключение C-17 по тексту) — оставить. Вне ветки (в реестр): имена `all`, `broadcast`, `''` проходят `check_structure()`; `SystemLauncher.add_process` имя не проверяет (Ф).
+
+### Task C28.3 — затенение по не-структурным ключам; процесс с точкой судит только C-25
+
+**Level:** Middle (Sonnet). **Assignee:** developer (тот же). **Files:** `blueprint.py`; `process_manager_module/DECISIONS.md` (только ADR-PMM-017 п.9, п.10); `tests/test_unapplied_metadata_check.py` (M17a–c); `tests/test_dotted_process_name.py` (A6a–c, тесты автора).
+**DESIGN:**
+1. Константа модуля `_STRUCTURAL_COLLECTOR_KEYS = ("mode", "inputs", "primary")` — единый источник: ею пользуются `infer` (`:576`) и затенение.
+2. Затенение: `lost` = ключи затенённой `metadata.inspector` вне `_STRUCTURAL_COLLECTOR_KEYS`; ошибка только при непустом `lost`; в тексте `ключи:` и в подсказке — ключи `lost` (sorted).
+3. `_metadata_join_errors` (C-17), `_modeless_collector_errors` (C-22), `_unapplied_metadata_errors` (C-28) пропускают процесс, в имени которого есть `SEPARATOR` (его уже назвала C-25).
+4. ADR п.9: причина — «`_joining_sources` пропускал провод в `draw.a.…` (join не выводился), бюджет «в полёте» и граф циклов относили его к `draw`»; второе основание — пути StateStore `processes.<имя>.…` режутся точкой; C-17/C-22/C-28 процесс с точкой не судят. ADR п.10: затенение — только не-структурные ключи. `python -m scripts.sync`.
+**Acceptance:**
+- [ ] M17a. n = 2, `metadata: {collector: {timeout_sec: 0.25}, inspector: {mode: join}}` → до и после `infer` ошибок `(deprecated, ключи:` ноль; после `infer` `P.collector["timeout_sec"] == 0.25`.
+- [ ] M17b. n = 2, `metadata: {collector: {timeout_sec: 0.25}, inspector: {inputs: ["frame"], primary: "frame"}}` → ошибок `(deprecated, ключи:` ноль (до и после).
+- [ ] M17c. n = 2, `metadata: {collector: {timeout_sec: 0.25}, inspector: {mode: join, list_merge_keys: ["x"]}}` → ровно одна ошибка `(deprecated, ключи:`, начинается с `Процесс 'P': metadata.inspector (deprecated, ключи: list_merge_keys) не применяется — затенена metadata.collector`.
+- [ ] A6a/A6b/A6c (три отдельные функции). Процесс `draw.a` с двумя проводами на join-входы и соответственно `collector: {timeout_sec: 1}` / `metadata: {inspector: {timeout_sec: 1}}` / `metadata: {inspector: {mode: join}}` → в `check()` ровно одна ошибка с `точка в имени процесса` и ноль ошибок с `join-источников`, `mode=join`, `(deprecated, ключи:`. Контроль достижимости в той же функции: тот же чертёж с именем `draw_a` даёт ≥ 1 ошибку C-22 / C-28 / C-17 соответственно (литерал подстроки).
+- [ ] M1–M16, A0–A5, M0 и 4 файла радиуса зелёные.
+**Инъекции лида (предсказания до прогона):**
+- K12: затенение по всей секции (без фильтра) → красные M17a, M17b, M17c.
+- K13: фильтр в условии, но в тексте все ключи секции → красный только M17c.
+- K14 / K15 / K16: убрать пропуск процесса с точкой в C-22 / C-28 / C-17 → красный только A6a / A6b / A6c.
+**Out of scope:** имена `all`/`broadcast`/`''`; `SystemLauncher.add_process`; №4.
