@@ -8,11 +8,14 @@
   доворот `wrap180`, проверка зазора; потоковый жадный матчинг (дубли → нужное число раз,
   затем пропуск; готовность слова).
 - **Плагин** (`plugin.py`, `registers.py`, `config.py`): `predictions → robot_job {x,y,z,r}`;
-  режимы `use_pitch`/between; детект «нового диска» (смена буквы/пауза, дедуп по букве,
+  режимы `use_pitch`/between; детект «нового диска» (новый `sidecar.track_id`; без него — смена буквы/пауза, дедуп по букве,
   опц. `trigger`); калибровка `angle_zero`/`angle_invert`; команда `reset_word`; прогресс в state.
+  Ограничение: id zone_edge — счётчик процесса line; его рестарт без рестарта layout обнуляет
+  id, и диск с id, равным последнему взятому до рестарта, отбрасывается (`reset_word` это не лечит).
+  Новый id = новый диск, только если zone_edge даёт одно событие на диск. Диск, пропавший из детекции на ≥ rearm_frames кадров внутри зоны, и рестарт line при диске в зоне дают второй id → второе задание на тот же диск (правка в line_filter — C-42).
 - **Интеграция:** вписан в рецепт `hikvision_letter_robot` (`infer.predictions → layout.word_layout`),
   валидация структуры headless.
-- **Тесты:** 50 (geometry/assembler/plugin), ruff чист.
+- **Тесты:** 94 (geometry/assembler/plugin/nan-guard/below_threshold-guard, `test_disk_identity.py` + `test_disk_identity_author.py` + `test_disk_identity_chain.py` — C-32), ruff чист.
 
 - **Страж `below_threshold` (Task 0.3 letters-retrain):** `_top_pred` отказывает предсказанию
   с `below_threshold=True`; тесты `test_acceptance_below_threshold_guard.py`.

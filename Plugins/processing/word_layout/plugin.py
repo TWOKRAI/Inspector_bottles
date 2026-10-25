@@ -87,11 +87,16 @@ class WordLayoutPlugin(ProcessModulePlugin):
         # Латч слова: слово приходит ОДНИМ item (сигнал пульта/телефона), распознавание —
         # другими items (без слова). Держим последнее непустое, пока не придёт новое.
         self._latched_word = ""
-        # Детект «нового диска»: новый диск = сменилась буква ИЛИ была пауза (нет диска).
-        # Дедуп по БУКВЕ (не углу — угол дрожит на ±1-2° и плодил бы ложные «новые диски»).
+        # Детект «нового диска», два режима. 1) Есть sidecar.track_id (center_crop): новый диск =
+        # новый id; _cur_track — id текущего диска, _taken_track — id последнего взятого (после
+        # сброса слова не обнуляется: тот же id = то же событие линии), _armed не читается.
+        # 2) Нет id: новый диск = сменилась буква ИЛИ была пауза (нет диска). Дедуп по БУКВЕ
+        # (не углу — угол дрожит на ±1-2° и плодил бы ложные «новые диски»).
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        self._cur_track: object | None = None
+        self._taken_track: object | None = None
         # Триггер-режим: взвод по сигналу trigger.
         self._trig_armed = False
         # Возврат: фронт сигнала «вернуть на ленту» (срабатывает раз на нажатие).
@@ -158,7 +163,8 @@ class WordLayoutPlugin(ProcessModulePlugin):
                 self._trig_armed = True
 
         pred = self._top_pred(item)
-        if not self._should_take(pred):
+        tid = self._disk_id(item)
+        if not self._should_take(pred, tid):
             return item
         assert pred is not None
 
@@ -335,6 +341,11 @@ class WordLayoutPlugin(ProcessModulePlugin):
         )
         if sig == self._sig:
             return
+        # Старые значения — ДО пересборки: нужны для строки журнала о смене слова.
+        old_sig = self._sig
+        old_norm = self._reg.word_norm
+        old_filled = self._reg.slots_filled
+        old_total = self._reg.slots_total
         self._sig = sig
         self._assembler, positions = self._build_assembler(word)
         self._reg.word_norm = "".join(s.char for s in self._assembler.slots)
@@ -347,6 +358,12 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        # Смена слова (не первая сборка и не пересборка только по геометрии) — в журнал.
+        if old_sig is not None and sig[0] != old_sig[0]:
+            self._ctx.log_info(
+                f"WordLayoutPlugin: смена слова '{old_norm}' → '{self._reg.word_norm}' — "
+                f"ячейки с нуля (было заполнено {old_filled}/{old_total})"
+            )
         if self._reg.spacing_warn:
             self._ctx.log_info(
                 f"WordLayoutPlugin: ВНИМАНИЕ — слоты теснее диаметра диска "
@@ -372,18 +389,52 @@ class WordLayoutPlugin(ProcessModulePlugin):
             "angle_valid": bool(top.get("angle_valid", False)),
         }
 
-    def _should_take(self, pred: dict | None) -> bool:
+    def _disk_id(self, item: dict) -> object | None:
+        """Идентичность диска: ``sidecar.track_id`` (ставит center_crop) или None."""
+        sidecar = item.get("sidecar")
+        if isinstance(sidecar, dict):
+            return sidecar.get("track_id")
+        return None
+
+    def _should_take(self, pred: dict | None, tid: object | None) -> bool:
         """Брать ли этот диск сейчас. Триггер-режим — по сигналу; авто — новый диск.
 
-        Авто: «новый диск» = сменилась буква ИЛИ перед ним была пауза (нет диска).
-        Дедуп по букве защищает от повтора одного диска во многих кадрах (непрерывный
-        тракт); смена буквы взводит сразу (триггерный тракт даёт ~1 кадр на диск, без
-        пауз между разными буквами). settle_frames>1 — подавить разовый misread
-        (ОСТОРОЖНО: в тракте «1 кадр на диск» ставь 1, иначе диск не возьмётся).
+        Авто, два режима. С ``tid`` (sidecar.track_id): новый диск = новый id, дедуп по id —
+        два одинаковых диска подряд берутся оба. Без ``tid``: «новый диск» = сменилась буква
+        ИЛИ перед ним была пауза (нет диска). Дедуп по букве защищает от повтора одного диска
+        во многих кадрах (непрерывный тракт); смена буквы взводит сразу (триггерный тракт даёт
+        ~1 кадр на диск, без пауз между разными буквами). settle_frames>1 — подавить разовый
+        misread (ОСТОРОЖНО: в тракте «1 кадр на диск» ставь 1, иначе диск не возьмётся).
+        В id-режиме ``_armed`` не читается; пауза без id ``_taken_track`` не трогает.
+        В id-режиме у ml_inference должен стоять inference_every_n = 1: иначе кэшированное
+        предсказание прошлого диска приедет с новым track_id и новый диск получит чужую букву.
         """
         if self._reg.use_trigger:
             if self._trig_armed and pred is not None:
                 self._trig_armed = False
+                return True
+            return False
+
+        # id-режим: сравнение `is not None`, а не по истинности — id 0 допустим.
+        if tid is not None:
+            if tid != self._cur_track:  # новый диск
+                self._cur_track = tid
+                self._settle = 0
+                self._cur_label = ""
+            if tid == self._taken_track:  # этот диск уже взят (задание выдано или пропуск)
+                return False
+            if pred is None:
+                self._settle = 0
+                self._cur_label = ""
+                return False
+            if pred["label"] != self._cur_label:  # смена буквы внутри диска — без перевзвода
+                self._cur_label = pred["label"]
+                self._settle = 1
+            else:
+                self._settle += 1
+            if self._settle >= max(1, int(self._reg.settle_frames)):
+                self._taken_track = tid
+                self._settle = 0
                 return True
             return False
 
