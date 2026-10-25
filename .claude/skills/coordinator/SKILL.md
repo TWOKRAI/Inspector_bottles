@@ -97,6 +97,18 @@ for the owner. No acknowledgements («принял», «понял»). The coord
 or wait; machine state goes out only to a lane whose plan it changes; a question to every lane only when
 it cannot wait for that lane's next signal.
 
+**Session reset at a merge (owner, 2026-10-25).** A lane session that runs task after task re-reads every
+finished task on each request; the usage panel put this at 61 % of the day. The reset point is «влит <sha>»:
+by then the work lives in git, the plan, ORDER and the registry, and the task's agents are no longer
+re-summoned. Before «влит» the lane commits a short handoff (`docs/handoffs/<date>_<lane>-<task>-merged.md`,
+10–15 lines: next ORDER line, what stays open, findings for the coordinator). On «влит» the coordinator sends
+the owner one line: «<lane>: граница — /clear во вкладке <label>, затем вставить: `Ты полоса <X>, координатор
+<name>. Прочитай <handoff> и продолжай.`». Inside a task (stage 0 → tester → developer → injections → review)
+nobody clears — the lead holds the predictions and the agentId table; past ~150k there it is `/compact`
+(focus: files + tests + plan path). A pause to the next day is the same boundary. After a reset the session
+name may change: the lane sends its name first, as at any start. The coordinator itself resets once a day,
+after its evening handoff.
+
 ## 5. Start prompt template — every prompt the coordinator writes
 
 Render it in Russian (the owner reads it); keep every block, write «none» rather than drop one.
