@@ -685,7 +685,7 @@ class SystemBlueprint(SchemaBase):
             f"как процесс '{proc.process_name.split(SEPARATOR)[0]}'. Переименуй процесс "
             f"(например, '{proc.process_name.replace(SEPARATOR, '_')}'), ADR-PMM-017 п.9"
             for proc in self.processes
-            if SEPARATOR in proc.process_name
+            if _is_dotted_process(proc)
         ]
 
     def _unknown_observability_processes(self) -> list[str]:
