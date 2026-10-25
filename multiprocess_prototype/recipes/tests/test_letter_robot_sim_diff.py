@@ -19,6 +19,14 @@
 Поэтому ``name`` и ``description`` — ЛЕГАЛЬНЫЕ расхождения (идентичность файла), а "ровно
 один блок" из плана относится к ТОПОЛОГИИ: ``version``, все процессы, провода и все прочие
 ключи обязаны совпадать, единственное топологическое расхождение — источник ``camera_0``.
+
+C-24 (2026-10-25). Сравнение сырого YAML краснело 46 расхождениями после пересохранения
+сим-рецепта GUI-редактором (``efc2612c3``): редактор дописал пустые ``extras``,
+``restart_policy``, ``src_dtype``/``tgt_dtype``, top-level ``gui_positions: {}`` и перенёс
+``name``/``description`` блюпринта в ``blueprint.metadata``. Топология при этом не менялась.
+Поэтому блюпринт сравнивается в каноническом виде — через ``SystemBlueprint``, как его читает
+бэкенд, — а раскладка редактора (``blueprint.metadata``, top-level ``gui_positions``,
+ADR-RCP-004) вне сравнения. Намеренные расхождения — литералом ``_EXPECTED_DIFFS``.
 """
 
 from __future__ import annotations
@@ -28,9 +36,50 @@ from typing import Any
 
 import yaml
 
+from multiprocess_framework.modules.process_manager_module.topology.blueprint import SystemBlueprint
+
 _RECIPES_DIR = Path(__file__).resolve().parents[1]
 _BASE_PATH = _RECIPES_DIR / "hikvision_letter_robot.yaml"
 _SIM_PATH = _RECIPES_DIR / "letter_robot_sim.yaml"
+
+# Раскладка редактора, не топология: канон позиций — blueprint.metadata, top-level
+# gui_positions — дубль без уникальных данных (ADR-RCP-004). Весь blueprint.metadata вне
+# сравнения: у SystemBlueprint нет поля metadata, бэкенд (model_validate) его не видит.
+_LAYOUT_TOP_KEYS = ("gui_positions",)
+_LAYOUT_BLUEPRINT_KEYS = ("metadata",)
+
+# Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
+_EXPECTED_DIFFS = [
+    ".blueprint.wires[0].source",
+    ".description",
+    ".devices[0].params.robot_params",
+    ".devices[0].protocol",
+    ".devices[0].transport.host",
+    ".devices[0].transport.port",
+    ".name",
+]
+
+
+def _canonical(recipe: dict[str, Any]) -> dict[str, Any]:
+    """Рецепт без раскладки редактора; блюпринт — в виде ``SystemBlueprint``.
+
+    Пустые значения, которые дописывает редактор, совпадают с умолчаниями схемы и после
+    ``model_dump`` неотличимы от отсутствующих ключей. Ключи блюпринта вне схемы
+    (``displays``) ``model_dump`` отбрасывает — они сравниваются сырыми.
+
+    Предел (ревью C-24): ``model_dump`` теряет ``model_fields_set``, а явный typed-ключ
+    (``chain_targets``, ``source_target_fps``, ``collector``, ``io_peek``) побеждает одноимённый
+    в ``extras`` только при явной записи. Дрейф «тот же ключ в общем ``extras`` + явный ключ в
+    одном файле» тест не видит; сегодня ``extras`` обоих рецептов пусты.
+    """
+    out = {k: v for k, v in recipe.items() if k not in _LAYOUT_TOP_KEYS}
+    raw_bp = recipe.get("blueprint", {})
+    bp = SystemBlueprint.model_validate(raw_bp).model_dump(mode="json")
+    for key, value in raw_bp.items():
+        if key not in bp and key not in _LAYOUT_BLUEPRINT_KEYS:
+            bp[key] = value
+    out["blueprint"] = bp
+    return out
 
 
 def _diff_paths(a: Any, b: Any, path: str = "") -> list[str]:
@@ -83,16 +132,15 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     assert camera_idx is not None, f"process_name='camera_0' не найден в {_BASE_PATH} — эталон сломан?"
 
     allowed_prefix = f".blueprint.processes[{camera_idx}].plugins[0]"
+    # Ниже — причины каждого пути из _EXPECTED_DIFFS.
     # Идентичность файла (решение ведущего, см. докстринг): рецепт грузится по имени
     # файла, но ``name``/``description`` внутри обязаны говорить про сим, а не про бой.
-    identity_keys = (".name", ".description")
     # Провод, АДРЕСУЮЩИЙ заменённый плагин, — следствие той же замены, а не второе
     # расхождение. Найдено живым стендом 2026-09-21: прототип на сим-рецепте падал
     # валидацией `Wire: источник 'camera_0.hikvision.frame' не найден среди выходов`,
     # потому что провод называет плагин ПО ИМЕНИ, а имя сменилось вместе с блоком.
     # Прежняя буквальная трактовка «ровно один блок» запрещала эту правку и тем самым
     # требовала заведомо нерабочий рецепт.
-    wire_source_key = ".blueprint.wires[0].source"
     # Адрес робота — второе следствие «сим вместо железа» (найдено при подготовке стенда
     # Task 1.3, 2026-09-21): upsert рецепта при активации ПЕРЕЗАПИСЫВАЕТ transport в
     # data/devices.yaml (`DeviceManager.upsert`, merge поверх), так что копия боевого
@@ -100,27 +148,16 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # Протокол и параметры сим-робота — третье и четвёртое следствие «сим вместо железа» (T3.7):
     # сим линии работает по v2, боевой робот — по v1 до Ф4; кольцо забора сима шире умолчания.
     # Значения закреплены литералами в test_sim_recipe_points_robot_at_sim_not_hardware.
-    robot_sim_keys = (
-        ".devices[0].transport.host",
-        ".devices[0].transport.port",
-        ".devices[0].protocol",
-        ".devices[0].params.robot_params",
-    )
-    all_diffs = _diff_paths(base, sim)
-    real_diffs = [
-        d
-        for d in all_diffs
-        if not d.startswith(allowed_prefix)
-        and d not in identity_keys
-        and d != wire_source_key
-        and d not in robot_sim_keys
-    ]
+    all_diffs = _diff_paths(_canonical(base), _canonical(sim))
+    other_diffs = sorted(d for d in all_diffs if not d.startswith(allowed_prefix))
+    extra = [d for d in other_diffs if d not in _EXPECTED_DIFFS]
+    missing = [d for d in _EXPECTED_DIFFS if d not in other_diffs]
 
-    assert real_diffs == [], (
-        f"letter_robot_sim.yaml отличается от hikvision_letter_robot.yaml НЕ ТОЛЬКО в "
-        f"{allowed_prefix} (критерий 4 требует РОВНО это топологическое расхождение; "
-        f"легальны ещё только {identity_keys}): "
-        f"лишние расхождения ({len(real_diffs)}): {real_diffs[:20]}"
+    assert other_diffs == _EXPECTED_DIFFS, (
+        f"letter_robot_sim.yaml отличается от hikvision_letter_robot.yaml не так, как "
+        f"задумано (критерий 4: топологически — только {allowed_prefix}; блюпринт "
+        f"сравнивается в каноническом виде SystemBlueprint, раскладка редактора вне "
+        f"сравнения): лишние ({len(extra)}): {extra[:20]}; пропавшие намеренные: {missing}"
     )
 
     # Идентичность НЕ просто разрешена — она обязана быть переписана: файл-копия с
@@ -133,28 +170,19 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
         f"выдаёт себя за боевой"
     )
 
-    # Позитивная половина: camera_0.plugins[0] в sim-рецепте ДЕЙСТВИТЕЛЬНО отличается
-    # от боевого — иначе выше можно было бы солгать пустым файлом-копией (real_diffs==[]
-    # тривиально верно, если sim == base целиком, что провалило бы предыдущий assert
-    # разве что при точной копии — здесь фиксируем, что копия НЕ считается допустимым
-    # прохождением критерия 4: сим-рецепт обязан ОТЛИЧАТЬСЯ, не просто "не отличаться
-    # ничем лишним").
+    # Позитивная половина: camera_0 в сим-рецепте ДЕЙСТВИТЕЛЬНО заменён — литералы имён
+    # плагина ниже (точная копия боевого рецепта их не пройдёт).
     # Провод обязан адресовать плагин, который в сим-рецепте ДЕЙСТВИТЕЛЬНО есть:
     # иначе рецепт не собирается (воспроизведено на живом стенде).
     sim_plugin_name = sim["blueprint"]["processes"][camera_idx]["plugins"][0]["plugin_name"]
+    # Намеренная замена источника — литералом: бой читает Hikvision, сим — поток line_sim.
+    assert base_processes[camera_idx]["plugins"][0]["plugin_name"] == "hikvision"
+    assert sim_plugin_name == "camera_service"
     wire_src = sim["blueprint"]["wires"][0]["source"]
     assert wire_src == f"camera_0.{sim_plugin_name}.frame", (
         f"провод источника = {wire_src!r}, а плагин камеры в сим-рецепте называется "
         f"{sim_plugin_name!r} — провод адресует плагин по имени, рассинхрон роняет "
         f"сборку прототипа на валидации topology"
-    )
-
-    sim_camera_plugin0 = sim["blueprint"]["processes"][camera_idx]["plugins"][0]
-    base_camera_plugin0 = base_processes[camera_idx]["plugins"][0]
-    assert sim_camera_plugin0 != base_camera_plugin0, (
-        f"processes[camera_0].plugins[0] в sim-рецепте ИДЕНТИЧЕН боевому "
-        f"({sim_camera_plugin0!r}) — letter_robot_sim.yaml не может быть точной копией "
-        f"hikvision_letter_robot.yaml, camera_0 обязан стать симулятором"
     )
 
 
