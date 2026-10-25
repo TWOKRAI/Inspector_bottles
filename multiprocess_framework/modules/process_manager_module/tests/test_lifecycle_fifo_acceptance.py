@@ -522,7 +522,8 @@ def test_relay_to_target_in_restart_reaches_new_incarnation(rig: Rig) -> None:
     new_pid = rig.processes()["slow"]["pid"]
     assert new_pid != old_pid, "slow не получил нового воплощения"
     assert rig.wait_until(lambda: len(rig.pings("slow")) >= 1, 15.0) is not None, (
-        "ни одно воплощение slow не получило сообщение"
+        "ни одно воплощение slow не получило сообщение; хвост лога PM: "
+        + " | ".join(f"{lvl}:{msg[:160]}" for lvl, msg in rig.log[-12:] if lvl != "info")
     )
     time.sleep(1.0)  # окно для дубля / запоздавшей доставки
     rows = rig.pings("slow")
