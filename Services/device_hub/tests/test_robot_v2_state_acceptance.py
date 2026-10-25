@@ -819,6 +819,11 @@ _LATCH_ROWS: list[tuple[str, Callable[[Any], Any], bool]] = [
     ("disconnect_owns_close", lambda st: st.disconnect_owns_close(), False),
     ("take_next_action_nothing", lambda st: st.take_next_action(), False),
     ("view", lambda st: st.view(), False),
+    # C-29: «Отключить» и его счётчик защёлку не трогают
+    ("disconnect_request", lambda st: st.disconnect_request(lambda: True), False),
+    ("disconnect_end", lambda st: st.disconnect_end(), False),
+    ("disconnect_pending", lambda st: st.disconnect_pending(), False),
+    ("disconnect_refusal", lambda st: st.disconnect_refusal(), False),
 ]
 
 
@@ -960,6 +965,134 @@ def test_s10_snapshot_needs_live_link() -> None:
     st = _link_up_state()
     st.disconnect_stop_plan(1, link_up=lambda: False)
     assert st.disconnect_owns_close() is False
+
+
+# --- C-29: «Отключить» прерывает connect (контракт R1-R10, литералы tasks/C-29.injections.md) ---
+
+T_DISCONNECTING = "идёт отключение робота"
+
+
+def _linked_connect() -> Any:
+    """``connect`` идёт, связь поднята: ``connect_begin`` -> ``("go", False)`` + ``connect_link_up`` -> True."""
+    st = _new()
+    assert st.connect_begin() == ("go", False)
+    assert st.connect_link_up() is True
+    return st
+
+
+def _dsoft_after_dsp(st: Any, link_up: bool = True) -> bool:
+    st.connect_end()
+    st.disconnect_stop_plan(1, link_up=lambda: True)
+    return st.disconnect_soft_plan(lambda: False, lambda: link_up)
+
+
+def test_r1_k_with_link_up_gives_soft() -> None:
+    """R1: связь поднята, K, ``connect_finish`` отказывает; после выхода ``connect`` снимок даёт SOFT."""
+    st = _linked_connect()
+    st.disconnect_request(lambda: True)
+    assert st.connect_finish() is False
+    assert _dsoft_after_dsp(st) is True
+
+
+def test_r2_k_before_link_up_no_soft() -> None:
+    """R2: K до подъёма связи — ``connect_link_up`` отказывает, SOFT нет."""
+    st = _new()
+    assert st.connect_begin() == ("go", False)
+    st.disconnect_request(lambda: True)
+    assert st.connect_link_up() is False
+    assert _dsoft_after_dsp(st) is False
+
+
+def test_r3_k_without_connect_cancels_next_connect_until_end() -> None:
+    """R3: K без ``connect`` — следующий ``connect_begin`` "cancelled"; после ``disconnect_end`` — "go"."""
+    st = _new()
+    st.disconnect_request(lambda: True)
+    assert st.connect_begin()[0] == "cancelled"
+    st.disconnect_end()
+    assert st.connect_begin()[0] == "go"
+
+
+def test_r4_k_with_dead_link_no_soft() -> None:
+    """R4: транспорт мёртв к моменту K — снимок False, SOFT нет."""
+    st = _linked_connect()
+    st.disconnect_request(lambda: False)
+    assert _dsoft_after_dsp(st) is False
+
+
+def test_r5_k_after_shutdown_is_noop() -> None:
+    """R5: после ``request_stop_begin`` K ничего не считает — ``connect_begin`` отвечает "shutdown"."""
+    st = _new()
+    st.request_stop_begin()
+    st.disconnect_request(lambda: True)
+    assert st.connect_begin()[0] == "shutdown"
+    assert st.disconnect_pending() is False
+
+
+def test_r6_k_with_ready_robot_owns_close() -> None:
+    """R6: робот был готов (``("go", True)``), K — SOFT и закрытие за хвостом ``disconnect``."""
+    st = _new()
+    st.set_ready(True)
+    assert st.connect_begin() == ("go", True)
+    st.disconnect_request(lambda: True)
+    assert _dsoft_after_dsp(st) is True
+    assert st.disconnect_owns_close() is True
+
+
+def test_r7_cancelled_before_busy() -> None:
+    """R7: при задании тика и K ``connect_begin`` отвечает "cancelled", не "busy"."""
+    st = _new()
+    job = ("job", "owner")
+    st.enqueue_job(job)
+    assert st.take_next_action() == (None, job)
+    st.disconnect_request(lambda: True)
+    assert st.connect_begin()[0] == "cancelled"
+
+
+def test_r8_counter_pairs_and_floor() -> None:
+    """R8: два K — два ``disconnect_end``; лишний ``disconnect_end`` ниже нуля не уходит."""
+    st = _new()
+    st.disconnect_request(lambda: True)
+    st.disconnect_request(lambda: True)
+    st.disconnect_end()
+    assert st.connect_begin()[0] == "cancelled"
+    assert st.disconnect_pending() is True
+    st.disconnect_end()
+    assert st.disconnect_pending() is False
+    st.disconnect_end()
+    st.disconnect_request(lambda: True)
+    st.disconnect_end()
+    assert st.connect_begin()[0] == "go"
+
+
+def test_r9_refusals_and_job_queue_cleared() -> None:
+    """R9 (В4, В6): отказ jog и задания текстом, очередь не берётся, ``disconnect_end`` снимает задание."""
+    refusal = {"status": "error", "message": T_DISCONNECTING}
+    st = _new()
+    st.disconnect_request(lambda: True)
+    assert st.disconnect_refusal() == refusal
+    assert st.jog_hold_check() == refusal
+    assert st.jog_hold_admit() == (refusal, None)
+    st.enqueue_job(("job", "j"))
+    assert st.take_next_action() == (None, None)
+    assert st.disconnect_end() == (1, 0)
+    assert st.job_queue_len() == 0
+    assert st.disconnect_refusal() is None
+    bare = _new()
+    bare.enqueue_job(("job", "j"))
+    assert bare.disconnect_end() == (0, 0)
+    assert bare.job_queue_len() == 1
+
+
+def test_r10_launch_refused_and_return_queue_cleared() -> None:
+    """R10 (В5, В6): запуск исполнителя отказывает, возврат не берётся, ``disconnect_end`` снимает возврат."""
+    st = _new()
+    st.disconnect_request(lambda: True)
+    assert st.admit_launch(lambda: True) == {"status": "error", "message": T_DISCONNECTING}
+    st.enqueue_return((1.0, 2.0, 0.0))
+    assert st.take_next_action() == (None, None)
+    assert st.disconnect_end() == (0, 1)
+    assert st.return_queue_len() == 0
+    assert st.admit_launch(lambda: True) is None
 
 
 def test_process_stop_attempts_capped_at_two() -> None:

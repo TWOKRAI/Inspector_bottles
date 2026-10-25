@@ -19,6 +19,7 @@ __all__ = [
     "TEXT_BAD_RANGE",
     "TEXT_BAD_RETURN_ARGS",
     "TEXT_BAD_STOP_LEVEL",
+    "TEXT_DISCONNECTING",
     "TEXT_EPOCH_NOT_WRITTEN",
     "TEXT_LEASE_LOST",
     "TEXT_NO_ECHO_WINDOW",
@@ -27,6 +28,7 @@ __all__ = [
     "TEXT_NO_STORE",
     "TEXT_PARAM_DIVERGED",
     "TEXT_PARAM_NO_REPLY",
+    "TEXT_QUEUE_DROPPED",
     "TEXT_SCOPE_CLOSED",
     "TEXT_SPAWN_FAILED",
     "TEXT_SPAWN_NAME_BUSY",
@@ -41,6 +43,7 @@ __all__ = [
     "_BUSY_PROGRAM",
     "_BUSY_REPLIES",
     "_CLIENT_KEYS",
+    "_DISCONNECTING",
     "_DO_CHANNELS",
     "_HOLD_WINDOW_S",
     "_HUB_POLL_DEFAULT_S",
@@ -98,6 +101,10 @@ _WIRE_SCALE = CONSTANTS["WIRE_SCALE"]
 
 TEXT_LEASE_LOST = "поводок jog прерван: нет связи с роботом"
 TEXT_STOPPING = "драйвер робота останавливается"
+# C-29: «Отключить» нажато, disconnect() ещё не кончился — jog, задание, возврат, программа получают этот отказ
+TEXT_DISCONNECTING = "идёт отключение робота"
+# C-29 (В6): хвост disconnect снял очереди заданий и возвратов; числа — единственная переменная часть
+TEXT_QUEUE_DROPPED = "при отключении сняты задания: {jobs}, возвраты: {returns}"
 TEXT_SCOPE_CLOSED = "область потоков хаба закрыта"
 TEXT_SPAWN_NAME_BUSY = "имя потока драйвера занято"
 TEXT_SPAWN_FAILED = "поток драйвера не запущен"
@@ -127,8 +134,9 @@ _BUSY_PROGRAM = {"status": "error", "message": "робот занят прогр
 _BUSY_JOG = {"status": "error", "message": "робот в режиме jog"}
 _BUSY_JOB = {"status": "error", "message": "робот выполняет задание"}
 _NOT_CONNECTED = {"status": "error", "message": "нет связи с роботом"}
+_DISCONNECTING = {"status": "error", "message": TEXT_DISCONNECTING}
 # Ответы «захват занят» исполнителя: возврат из очереди при таком ответе идёт обратно в её начало (DESIGN п.6)
-_BUSY_REPLIES = (_BUSY_PROGRAM, _BUSY_JOG, _BUSY_JOB)
+_BUSY_REPLIES = (_BUSY_PROGRAM, _BUSY_JOG, _BUSY_JOB, _DISCONNECTING)
 # Тексты отказа постановки — постоянные, без входного значения (R8)
 TEXT_BAD_JOB_ARGS = "неверные аргументы задания"
 TEXT_BAD_RETURN_ARGS = "неверные аргументы возврата"

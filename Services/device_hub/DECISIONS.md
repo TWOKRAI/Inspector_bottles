@@ -282,8 +282,8 @@ Q7 — как делить файл:
 ## ADR-DH-011: `connect`, `request_stop` и обычный `disconnect` драйвера робота v2 линеаризуются переходами `RobotState`
 
 **Дата:** 2026-10-21
-**Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20); дополнен T5.3h (решение владельца 2026-10-21)
-**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`, `T5.3h.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
+**Статус:** accepted (T5.3g; решения лида inspector-bottles-a9 и владельца 2026-10-19, 2026-10-20); дополнен T5.3h (решение владельца 2026-10-21); дополнен C-29 (решения владельца 2026-10-25, В1–В6)
+**Контекст задачи:** `plans/robot-protocol-v2/tasks/T5.3g.md`, `T5.3g.design.md`, `T5.3h.md`, `C-29.md`; уточняет ADR-DH-010 (`_ready` теперь в состоянии,
 окна W1, W1′, W2, W4 закрыты); ADR-DH-009 (путь стопа) не меняется.
 
 ### Контекст
@@ -345,6 +345,30 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
     `disconnect_soft_plan` не видел живой связи.
   - **Повторная проверка в тике.** `_ensure_connected` после захвата `_param_lock` проверяет `desired_connected`
     ещё раз: «Отключить», пришедшее между первой проверкой и замком, не даёт `probe`, PARAM_SET, SERVO и DO (H13).
+- **«Отключить» прерывает `connect` (C-29, решения владельца 2026-10-25, В1–В6).** `request_disconnect` (только у
+  робота v2, плагин зовёт через `getattr`, как `request_stop`) вызывается из `cmd_device_disconnect` под
+  `_workers_lock` до постановки `disconnect` в очередь; без ввода-вывода, `_param_lock` не берёт.
+  - **Точка линеаризации — переход `disconnect_request(link_up)`** под замком состояния: счётчик `_disconnect_requests`
+    +1 (В1; не в `view()`), а посреди `connect` — монотонный снимок `_stop_linked` ДО `_stopping = True` и сам
+    `_stopping`. Снимок переживает выход `connect` (`connect_end` снимает только `_connecting` и `_connect_linked`),
+    поэтому при поднятой связи обычный `disconnect` пишет ровно 1 SOFT; до подъёма связи — 0.
+  - **Счётчик.** `connect_begin` при счётчике > 0 отвечает `"cancelled"` (раньше `"busy"`), драйвер возвращает False.
+    `disconnect_end` стоит в `finally` `disconnect()`: счётчик −1 (не ниже 0). Два «Отключить» подряд — два
+    `disconnect` в очереди — 0.
+  - **Супервизор.** Ветка `connect` пропускается, если `_desired_connected.get(dev_id) is False` (только `is False`:
+    интеграционные тесты кладут `connect` без записи в словарь). После `manager.connect` под `_workers_lock` desired
+    True и `reset_reconnect()` не ставятся, если `desired_connected` False или `disconnect_pending` (ABA
+    `[connect₁, disconnect, connect₂]`). Закрытие окна (б) — замком: «Отключить» и чтение супервизора взаимно
+    исключены. Новых замков нет; порядок `_workers_lock` → `_registry_lock` → замок состояния (лист).
+  - **Статусы (В3).** Прерванный `connect` не публикует `error`: `manager.connect` при `disconnect_pending`
+    публикует `disconnecting`; `conn` — `connecting`, `disconnecting`, `disconnected`.
+  - **Отказ `TEXT_DISCONNECTING` = «идёт отключение робота» (В4, В5).** `jog_hold` (check и admit, и продление),
+    `jog_step`, `enqueue_job`, `return_job`, `admit_launch` (программа, возврат, смена инструмента);
+    `take_next_action` в окне ничего не берёт. Возврат, отказанный в окне, возвращается в очередь (`_BUSY_REPLIES`).
+    `servo` / `do_set` не трогаются (решение лида).
+  - **Очереди (В6).** Хвост `disconnect` (`disconnect_end`) снимает очереди заданий и возвратов; число — в журнал
+    (WARNING) и `last_error` (`TEXT_QUEUE_DROPPED`). Голый `disconnect` без «Отключить» очереди не трогает.
+  - `_await_tlm` прерывается по `_sync_cancelled()`: SERVO / DO после «Отключить» не шлются, пока ожидание не вышло.
 
 ### Отклонено
 
@@ -366,7 +390,16 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
   (`servo(True)` / `do_set`), `connect_finish`, затем закрытие ветки тика; (б) за эту сессию SOFT нет; (в) у настоящего
   транспорта D6 между открытием сокета и вводом-выводом синхронизации даёт исключение, `_sync_cancelled()` False,
   поэтому `_record_err` и `_publish_error(«подключение к роботу не удалось…»)`; «без `_record_err`» верно только
-  для порядков, где `_stopping` не снят (I2–I5). Полное закрытие требует поля «идёт disconnect» — отклонено.
+  для порядков, где `_stopping` не снят (I2–I5). Закрыт C-29 для пути плагина: поле «идёт disconnect» принято (В1),
+  см. пункт «Отключить» прерывает `connect`.
+- **Остатки C-29.** О1: окно «проверка → запись» SERVO / DO, `jog_step`, задание остаётся (T5.3g), закрыть можно
+  только сериализацией с вводом-выводом под замком. О2: обмен в полёте не прерывается. О3: «Отключить» в миллисекунды
+  создания драйвера внутри первого `manager.connect`. О6: общая очередь — C-31. О7: `request_disconnect` без
+  `disconnect` вне плагина держит `connect` в `"cancelled"`. О8: пути счётчика без `disconnect_end` (остановка
+  плагина, `remove`) — драйвер выключается или выбрасывается. О9: `servo` / `do_set` в окне не отказывают. О10:
+  продление «hold» активного jog после «Отключить» отказывает — поводок истекает. О12: при живом воркере тика между
+  `connecting` и `disconnecting` возможны `disconnected` или `error`. О13: задание со своим чтением TLM, пережившим
+  весь `disconnect`, встанет в очередь после хвоста.
 - **Остаток: `_shutdown` и «Отключить» одновременно.** `disconnect_owns_close` при `_shutdown` возвращает False: тик
   закрывает сокет сам, и `process_stop_plan` может увидеть `link_up()` False (нет SOFT). Не регресс: до T5.3h тик
   закрывал безусловно при `desired_connected` False.

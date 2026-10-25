@@ -24,6 +24,7 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
     _BUSY_JOB,
     _BUSY_JOG,
     _BUSY_PROGRAM,
+    _DISCONNECTING,
     _HOLD_WINDOW_S,
     _NOT_CONNECTED,
 )
@@ -106,8 +107,9 @@ class RobotStateView:
 
 
 class RobotState:
-    """Состояние драйвера робота v2 (T5.3f f1, T5.3g): 27 полей и 4 поля текущего ``_JogRun`` под замком ``_lock``;
-    в ``view()`` — 23 из 27 (без ``_ready``, ``_connecting``, ``_connect_linked``, ``_stop_linked``).
+    """Состояние драйвера робота v2 (T5.3f f1, T5.3g, C-29): 28 полей и 4 поля текущего ``_JogRun`` под замком
+    ``_lock``; в ``view()`` — 23 из 28 (без ``_ready``, ``_connecting``, ``_connect_linked``, ``_stop_linked``,
+    ``_disconnect_requests``).
 
     Внутреннее, не SPI хаба: переходы зовёт только ``RobotDriverV2``; снаружи — ``view()``.
 
@@ -158,6 +160,8 @@ class RobotState:
         self._connecting = False
         self._connect_linked = False
         self._stop_linked = False
+        # C-29 (В1): «Отключить» нажато, disconnect() не кончился; не в view()
+        self._disconnect_requests = 0
         self._stop_unconfirmed_text: str | None = None  # текст для health; ставится вместе с флагом
         self._own_stops: deque[int] = deque(maxlen=8)  # seq своих JOG_CONT, остановленных драйвером (Д1)
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
@@ -279,14 +283,18 @@ class RobotState:
             self._ready = value
 
     def connect_begin(self) -> tuple[str, bool]:
-        """``connect``: вход. -> (``"shutdown"`` | ``"busy"`` | ``"go"``, была ли готовность).
+        """``connect``: вход. -> (``"shutdown"`` | ``"cancelled"`` | ``"busy"`` | ``"go"``, была ли готовность).
 
         ``"go"``: сброс останова (как ``connect_reset``), готовность снята, ``connect`` идёт; связь поднята сразу,
-        если робот был готов (транспорт уже подключён). ``"shutdown"`` готовность не трогает.
+        если робот был готов (транспорт уже подключён). ``"shutdown"`` готовность не трогает. ``"cancelled"`` (C-29):
+        «Отключить» нажато, ``disconnect`` не кончился — ``connect`` не идёт, состояние не трогается; проверка стоит
+        до ``"busy"``.
         """
         with self._lock:
             if self._shutdown:
                 return "shutdown", False
+            if self._disconnect_requests:
+                return "cancelled", False
             if self._job_active or self._activity_alive_locked():
                 return "busy", False
             self._connect_reset_locked()
@@ -329,6 +337,49 @@ class RobotState:
     def is_shutdown(self) -> bool:
         with self._lock:
             return self._shutdown
+
+    def disconnect_request(self, link_up: Callable[[], bool]) -> None:
+        """«Отключить» нажато (C-29, В1): точка линеаризации против ``connect`` — счётчик +1, останов, снимок.
+
+        Зовёт ``request_disconnect`` из потока команды плагина. При выключении процесса — ничего (``_shutdown``
+        отвечает раньше счётчика). Идущий ``connect``: снимок ``_stop_linked`` («связь поднята») монотонен, как в
+        ``disconnect_stop_plan``, и берётся ДО ``_stopping = True``; вне ``connect`` ``_stopping`` не ставится
+        (простому роботу отказывает счётчик). ``link_up`` — транспорт подключён сейчас; замков не берёт,
+        ввода-вывода нет.
+        """
+        with self._lock:
+            if self._shutdown:
+                return
+            self._disconnect_requests += 1
+            if self._connecting:
+                self._stop_linked = (self._stopping and self._stop_linked) or (self._connect_linked and link_up())
+                self._stopping = True  # только посреди connect: простой робот jog / заданию отказывает счётчик
+
+    def disconnect_end(self) -> tuple[int, int]:
+        """Конец ``disconnect`` (``finally``): счётчик -1 (не ниже 0), очереди заданий и возвратов снять (C-29, В6).
+
+        -> (снято заданий, снято возвратов). Голый ``disconnect`` без «Отключить» (счётчик 0) очереди не трогает.
+        """
+        with self._lock:
+            if self._disconnect_requests <= 0:
+                return 0, 0
+            self._disconnect_requests -= 1
+            jobs, returns = len(self._job_queue), len(self._return_queue)
+            self._job_queue.clear()
+            self._return_queue.clear()
+            return jobs, returns
+
+    def disconnect_pending(self) -> bool:
+        """«Отключить» нажато, ``disconnect`` ещё не кончился."""
+        with self._lock:
+            return self._disconnect_requests > 0
+
+    def disconnect_refusal(self) -> dict | None:
+        """Отказ ``TEXT_DISCONNECTING`` в окне «Отключить» -> конец ``disconnect``; иначе None."""
+        with self._lock:
+            if self._disconnect_requests > 0:
+                return dict(_DISCONNECTING)
+            return None
 
     def disconnect_begin(self) -> bool:
         """``disconnect``: выключение; не выключение — новое поколение защёлки."""
@@ -474,8 +525,9 @@ class RobotState:
     def disconnect_owns_close(self) -> bool:
         """Транспорт закрывает хвост обычного ``disconnect``, а не тик: ``disconnect`` решил «связь поднята».
 
-        Признак свежий: ``_stopping`` без ``_shutdown`` ставит только стоп-секция обычного ``disconnect``, в той же
-        секции она пишет ``_stop_linked``; ``connect_begin`` снимает ``_stopping``. При ``_shutdown`` тик закрывает
+        Признак свежий: ``_stopping`` без ``_shutdown`` ставят стоп-секция обычного ``disconnect`` и
+        ``disconnect_request`` (C-29); обе пишут ``_stop_linked`` в той же секции; ``connect_begin`` снимает
+        ``_stopping``. При ``_shutdown`` тик закрывает
         сокет сам (остаток ADR-DH-011).
         """
         with self._lock:
@@ -527,6 +579,7 @@ class RobotState:
                 or self._jog_stopping
                 or (run is not None and run.active)
                 or self._job_active
+                or self._disconnect_requests  # C-29 (В5): ни возвратов, ни заданий до конца отключения
             ):
                 return None, None
             if self._return_queue:
@@ -603,6 +656,8 @@ class RobotState:
         with self._lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}
+            if self._disconnect_requests:
+                return dict(_DISCONNECTING)  # и продление «hold»: поводок активного jog истекает (О10)
             if self._program_active:
                 return dict(_BUSY_PROGRAM)
             if self._job_active:
@@ -619,6 +674,8 @@ class RobotState:
         with self._lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}, None
+            if self._disconnect_requests:
+                return dict(_DISCONNECTING), None
             if self._program_active:
                 return dict(_BUSY_PROGRAM), None
             if self._job_active:
@@ -703,6 +760,8 @@ class RobotState:
         with self._lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}
+            if self._disconnect_requests:
+                return dict(_DISCONNECTING)  # C-29 (В5): программа, возврат, смена инструмента
             if self._program_active:
                 return dict(_BUSY_PROGRAM)
             if self._job_active:

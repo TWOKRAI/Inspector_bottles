@@ -41,7 +41,7 @@ _OTHER_DRIVER_TESTS = (
     "test_manager_template_1_2b_3.py",
 )
 # Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
-_SCANNED_FILES = 44
+_SCANNED_FILES = 46
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(
@@ -95,7 +95,9 @@ _SEAMS = {
 }
 
 # Переходы RobotState с общими именами: вне пакета ловятся только через ``<…>.state.<имя>(``
-_COMMON_NAMES = frozenset({"view", "enqueue_job", "enqueue_return", "stop_unconfirmed", "stop_unconfirmed_text"})
+_COMMON_NAMES = frozenset(
+    {"view", "enqueue_job", "enqueue_return", "stop_unconfirmed", "stop_unconfirmed_text", "disconnect_pending"}
+)
 _STATE_CLASSES = frozenset({"RobotState", "RobotStateView", "JogView", "_JogRun"})
 _ATTR_FUNCS = frozenset({"getattr", "setattr", "hasattr", "delattr"})
 
