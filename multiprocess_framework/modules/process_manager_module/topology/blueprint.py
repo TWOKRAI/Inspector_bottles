@@ -569,9 +569,7 @@ class SystemBlueprint(SchemaBase):
             # Тонкая настройка (структурные mode/inputs/primary остаются из wires):
             # mode-less явная секция (typed/extras) + legacy metadata —
             # оба подмешивают только НЕ-структурные ключи (timeout_sec/… ) поверх skeleton.
-            legacy = None
-            if isinstance(proc.metadata, dict):
-                legacy = proc.metadata.get(COLLECTOR_CONFIG_KEY) or proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
+            legacy = _legacy_metadata_section(proc)[1]
             for tuning in (explicit, legacy):
                 if isinstance(tuning, dict):
                     for key, value in tuning.items():
@@ -821,6 +819,7 @@ class SystemBlueprint(SchemaBase):
         6. ``collector`` без mode при невыведенном join — ошибка (C-22)
         7. Точка в ``process_name`` — ошибка (C-25, ADR-PMM-017 п.9); та же проверка в
            :meth:`check_structure`
+        8. ``metadata.<ключ>`` (deprecated), которая не применится, — ошибка (C-28)
 
         НЕ проверяет циклы графа wires — та проверка живёт только в
         :meth:`check_structure` (RS-5 Save/load-gate); межпроцессная обратная
@@ -933,6 +932,7 @@ class SystemBlueprint(SchemaBase):
 
         errors.extend(self._metadata_join_errors())
         errors.extend(self._modeless_collector_errors())
+        errors.extend(self._unapplied_metadata_errors())
         return errors
 
     def _modeless_collector_errors(self) -> list[str]:
@@ -998,6 +998,46 @@ class SystemBlueprint(SchemaBase):
                     f"тонкая настройка — collector: {{timeout_sec: …}} без mode "
                     f"(только при ≥ 2 join-источниках, иначе C-22)"
                 )
+        return errors
+
+    def _unapplied_metadata_errors(self) -> list[str]:
+        """C-28: непустая ``metadata.collector``/``metadata.inspector``, которую сборка не применит (ADR-PMM-017 п.10).
+
+        Секция применяется (``infer_missing_collectors``), только если у процесса ≥ 2 join-источников
+        и явная секция не задаёт ``mode``. ``mode == "join"`` у явной секции тоже считается
+        «применяется»: после ``infer`` выведенный join выглядит как явный ``mode: join``, и результат
+        не должен зависеть от того, вызывался ли ``infer``. Не применяется — одна ошибка на процесс,
+        кроме процесса, по которому уже есть ошибка C-17 (``_metadata_join_errors``). Значения секции
+        в текст не попадают (только ключи и значение ``mode`` явной секции).
+        """
+        joining = self._joining_sources()
+        c17_errors = self._metadata_join_errors()  # текст каждой начинается с «Процесс '<имя>': »
+        errors: list[str] = []
+        for proc in self.processes:
+            meta_key, section = _legacy_metadata_section(proc)
+            if not section:
+                continue
+            exp_key, explicit = _explicit_collector(proc)
+            mode = explicit.get("mode")
+            n_sources = len(joining.get(proc.process_name, {}))
+            if n_sources >= 2 and (not mode or mode == "join"):
+                continue
+            if any(e.startswith(f"Процесс '{proc.process_name}': ") for e in c17_errors):
+                continue
+            reason = (
+                f"join не выведен (join-источников: {n_sources}, нужно ≥ 2)"
+                if n_sources < 2
+                else f"явный {exp_key} задаёт mode={mode}"
+            )
+            keys = sorted(str(k) for k in section)
+            keys_text = ", ".join(keys)
+            placeholder = ", ".join(f"{k}: …" for k in keys)
+            errors.append(
+                f"Процесс '{proc.process_name}': metadata.{meta_key} (deprecated, ключи: {keys_text}) "
+                f"не применяется — {reason}. Штатно: перенеси в process-level collector: "
+                f"{{{placeholder}}} (те же ключи; без mode — тонкая настройка выведенного join, "
+                f"только при ≥ 2 join-источниках; mode: fanin — настройка fanin) и удали metadata.{meta_key}"
+            )
         return errors
 
     def describe(self) -> str:
