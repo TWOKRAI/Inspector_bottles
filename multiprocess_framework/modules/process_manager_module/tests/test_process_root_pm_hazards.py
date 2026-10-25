@@ -149,7 +149,8 @@ def test_monitor_paused_before_first_stop_event_with_infra_deadline() -> None:
     stop.request_stop()  # повтор — no-op
 
     assert journal == ["monitor.stop", "stop_event.set"]
-    assert pm._process_monitor.timeouts == [0.2]
+    # D4 (Task 1.9b): монитору — остаток общего срока исполнителя и паузы, поэтому с допуском.
+    assert pm._process_monitor.timeouts == [pytest.approx(0.2, abs=1e-3)]
 
 
 def test_registry_is_read_at_request_stop_not_at_construction() -> None:

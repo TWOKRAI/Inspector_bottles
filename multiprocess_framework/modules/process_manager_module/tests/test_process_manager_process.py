@@ -522,6 +522,7 @@ class TestOrchestratorReadySignalIsHonest:
         pmp = self._bare_pm(event)
         with (
             patch.object(ProcessModule, "initialize", return_value=True),
+            patch.object(ProcessManagerProcess, "_setup_lifecycle_executor", return_value=True),
             patch.object(ProcessManagerProcess, "_setup_console_manager"),
             patch.object(ProcessManagerProcess, "_setup_topology_manager"),
             patch.object(ProcessManagerProcess, "_setup_state_store"),
