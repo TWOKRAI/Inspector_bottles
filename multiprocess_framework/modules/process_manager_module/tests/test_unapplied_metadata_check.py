@@ -1,7 +1,7 @@
 """Неприменённая metadata.collector/inspector -> ошибка check() (plans/topology-port-join.md, C28.1).
 
 Слепые приёмочные тесты (написаны до реализации): M1-M13. M0 - у developer (существующий тест, правка ожидания).
-M14-M15 (C28.2, затенённая секция) - тесты автора правки.
+M14-M16 (C28.2, затенённая секция) - тесты автора правки.
 Ожидаемые значения - литералы плана (подстроки текста ошибки, ``join-источников: N``, значения collector).
 
 Каждый случай зовёт ``SystemBlueprint.check()`` дважды - до и после ``infer_missing_collectors()`` - и сравнивает
@@ -487,6 +487,20 @@ def test_m15_one_source_shadowing_is_not_reported_only_the_collector_error() -> 
         assert errors[0].startswith(
             "Процесс 'P': metadata.collector (deprecated, ключи: timeout_sec) не применяется — join не выведен"
         ), errors[0]
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m16_two_sources_empty_inspector_section_is_not_shadowed() -> None:
+    bp = _blueprint(
+        [_joiner_process("P", metadata={"collector": {"timeout_sec": 0.25}, "inspector": {}})],
+        [_frame_wire("P"), _overlay_wire("P")],
+    )
+
+    before_all, after_all = _before_after_all(bp)
+
+    assert _only(before_all, _C28) == []
+    assert _only(after_all, _C28) == []
+    assert _proc(bp, "P").collector["timeout_sec"] == 0.25  # достижимость: collector применён
 
 
 # ---------------------------------------------------------------------------

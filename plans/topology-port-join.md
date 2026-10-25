@@ -325,9 +325,11 @@ C28.1:
 **Acceptance:**
 - [ ] M14. Два join-источника, `metadata: {collector: {timeout_sec: 0.25}, inspector: {list_merge_keys: ["x"]}}` → до и после `infer` ровно одна ошибка `(deprecated, ключи:`, она начинается с `Процесс 'P': metadata.inspector (deprecated, ключи: list_merge_keys) не применяется — затенена metadata.collector`; после `infer` `P.collector["timeout_sec"] == 0.25` (достижимость: `collector` применён).
 - [ ] M15. Один join-источник, та же `metadata` → ровно одна ошибка `(deprecated, ключи:`, она начинается с `Процесс 'P': metadata.collector (deprecated, ключи: timeout_sec) не применяется — join не выведен`.
+- [ ] M16. Два join-источника, `metadata: {collector: {timeout_sec: 0.25}, inspector: {}}` → до и после `infer` ошибок `(deprecated, ключи:` ноль; после `infer` `P.collector["timeout_sec"] == 0.25` (пустая `inspector` не затеняется; тест зелёный сразу).
 - [ ] M1–M13, M0, A0 и весь `process_manager_module/tests` зелёные.
 **Инъекции лида (предсказания до прогона):**
 - K8: убрать проверку затенения → красный только M14.
 - K9: сообщать затенение и при < 2 источниках (вторая ошибка) → красный только M15.
 - K10: проверка затенения раньше исключения C-17 → красных нет (C-17 срабатывает только при < 2 источниках, а затенение — только при ≥ 2); эквивалентная мутация, записать.
+- K11: убрать `and shadowed` из условия затенения → красный только M16.
 **Out of scope:** F2 кодом; F5; приоритет typed `collector` над `metadata`.
