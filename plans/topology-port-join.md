@@ -1,6 +1,6 @@
-# topology-port-join — вход плагина объявляет участие в join отдельно от optional (C-16 + C-17 + C-22)
+# topology-port-join — вход плагина объявляет участие в join отдельно от optional (C-16 + C-17 + C-22 + C-25 + C-28)
 
-**Статус:** активный · **Ветка:** `fix/c16-collector` (C16.1, влита `09a925a4b`), `fix/c22-collector-modeless` (C22.1) · **Полоса:** Д (inspector-bottles-66)
+**Статус:** активный · **Ветка:** `fix/c16-collector` (C16.1, влита `09a925a4b`), `fix/c22-collector-modeless` (C22.1), `fix/c25-c28-blueprint` (C25.1, C28.1) · **Полоса:** Д (inspector-bottles-66; с 2026-10-25 — inspector-bottles-a3)
 **Источник:** реестр `plans/queue/defects.md`, строки C-16 и C-17; расследование `docs/reports/2026-10-21_defects_C-16.md`.
 **Стадия 0:** reviewer (Opus), 2 итерации — 13 + 5 + 4 правки внесены дословно, стадия закрыта (2026-10-21).
 
@@ -198,3 +198,113 @@
 **Открыто (для владельца):**
 - `metadata.collector/inspector` без `mode` у процесса без join тоже молча теряется (путь deprecated, в лог — предупреждение). Делать ли его ошибкой — не решено.
 - GUI-сохранение идёт через `validate_recipe_blueprint` → `check_structure()` (`recipes/save.py:149–180`), поэтому рецепт с нарушением C-22 сохранится и откажет только при сборке (`assembler.py:135`, `builder.py:249`). Обратная сторона пункта Out of scope «GUI-сохранение».
+
+## Фаза C-25 + C-28 — точка в имени процесса; deprecated `metadata` без применения (2026-10-25)
+
+**Источник:** `plans/queue/defects.md`, строки C-25 и C-28; ревью ветки C-22 (Opus), отчёт `docs/reports/2026-10-21_topology-port-join_C22.1.md` («Открыто»).
+**Полоса:** Д (inspector-bottles-a3, после перезапуска — inspector-bottles-d9). **Ветка:** `fix/c25-c28-blueprint`.
+**Стадия 0:** reviewer (Sonnet), итерация 1 — CHANGES REQUESTED, 12 правок внесены дословно; итерация 2 — 5 мелких правок и косметика внесены дословно (предел 2 итерации, третьей нет); п.13 (единый источник legacy-секции в `infer`) принят как DESIGN 6 C28.1. Правка тестов A0/M0 — разрешена координатором 2026-10-25. **Решение по `metadata` с `mode: fanin` (координатор по поручению владельца, 2026-10-25, запись main `ef372c6de`): вариант (б)** — любая непустая неприменённая `metadata.collector`/`metadata.inspector` — ошибка, `{mode: fanin}` тоже. Причина: правило «ошибка только при потере настройки» опиралось бы на умолчание fanin; сменится умолчание — `{mode: fanin}` начнёт теряться молча; одно место настройки вместо двух.
+
+**Решения владельца:**
+- C-28 (2026-10-21 ~16:50, через координатора): «да — ошибка `check()`, как C-22» — ничего не терять молча; рецепты универсальны.
+- C-25 (2026-10-25, через координатора, запись main `0869e86a8`): **вариант Б** — точка в `process_name` — громкая ошибка `check()` и `check_structure()` («точка — разделитель адреса»), одной правкой с C-28. Условия: «0 рецептов с точкой» — прогоном сборки всех рецептов; текст ошибки ссылается на ADR; тест на оба пути; в коде не остаётся второго, противоречащего правила (комментарий `check()` `:821–822`).
+
+**Граница (координатор inspector-bottles-bc, 2026-10-25):** `multiprocess_framework/modules/process_manager_module/topology/blueprint.py`; раздел ADR-PMM-017 в `process_manager_module/DECISIONS.md`; `process_module/tests/test_blueprint_wire_collector.py` (только если краснеет — стоп и вопрос лиду); новые тесты. Остальное `process_manager_module/**`, `command/process/worker_module/**` — полоса Ф, не трогать. Рецепты не меняются. Тесты `process_manager_module/tests/test_t59a_review_author.py` и `test_infer_join_by_port.py` — только ожидания (A0, M0), разрешено координатором 2026-10-25; Ф их не правит, при rebase увидит.
+
+### Факты (проверены чтением и прогоном, 2026-10-25)
+
+- Контракт адресации framework: `message_module/addressing/address.py:11,19` — первый сегмент адреса всегда процесс, доставка между процессами по `process_of(target) = address[0]` (`router_module/core/router_manager.py:2122`). Процесс `draw.a` роутер не адресует: `process_of("draw.a") == "draw"`.
+- В `blueprint.py` имя процесса до первой точки берут 5 мест: `:444–445` (`_joining_sources`, C-25), `:627` (chain_targets в бюджете «в полёте»), `:631–632` (провода в бюджете), `:732` (`_unaddressable_chain_targets`, «судится первый сегмент» — по контракту адресации), `:782–783` (циклы, `check_structure`). Только `check()` `:821–823` разбирает адрес через карту `input_origin`.
+- YAML репозитория с `processes`: 46, имён процесса с точкой: 0 (скрипт по `git ls-files *.yaml *.yml`).
+- Порядок боевой сборки: `assembler.py:133–135` — `infer_missing_collectors()`, затем `check()`. Значит, правило C-28 обязано давать тот же результат после `infer`.
+
+### Task C25.1 — имя процесса с точкой — ошибка структуры (вариант Б)
+
+**Level:** Middle (Sonnet). **Assignee:** developer (Sonnet).
+**Module contract:** не требуется — приватные методы, поведение `check()` фиксирует ADR-PMM-017 п.9.
+**Files:** `blueprint.py`; `process_manager_module/DECISIONS.md` (только ADR-PMM-017) + выход `scripts.sync`; `process_manager_module/tests/test_dotted_process_name.py` (новый; tester); `process_manager_module/tests/test_t59a_review_author.py` (A0, только ожидание).
+**Goal:** рецепт с точкой в `process_name` не проходит ни `check_structure()`, ни `check()`; текст называет процесс и причину (точка — разделитель адреса).
+
+**DESIGN:**
+1. Новый приватный метод `_dotted_process_names(self) -> list[str]` рядом с `_duplicate_process_names` (`:661`): одна ошибка на процесс, у которого в `process_name` есть `.` (константа `SEPARATOR` из `message_module.addressing.address`, импорт внутри метода — как `is_broadcast` в `:723`). Текст: `Процесс '<имя>': точка в имени процесса запрещена — точка разделяет уровни адреса (процесс.воркер, процесс.плагин.порт); роутер прочтёт адрес '<имя>' как процесс '<до первой точки>'. Переименуй процесс (например, '<имя с _ вместо .>'), ADR-PMM-017 п.9`.
+2. Вызов первым после `_duplicate_process_names()` в обоих гейтах: `check()` (`:813`) и `check_structure()` (`:776`).
+3. Остальные места с `split(".")` (кроме `:444–445`, чей дефект и закрывает запрет) не трогать: при запрете точки они корректны. Комментарий у `check()` `:821–822` («имя процесса может содержать точку») — заменить на «точка в имени запрещена (`_dotted_process_names`); карта нужна, чтобы не разбирать адрес повторно».
+4. Docstring `check()` — пункт «7. Точка в `process_name` — ошибка (C-25, ADR-PMM-017 п.9); та же проверка в `check_structure()`»; docstring `check_structure()` — первая строка «дубли имён + точка в имени + циклы». Docstring `ProcessConfig.process_name` FieldMeta — одна фраза: «без точки (разделитель адреса)».
+5. ADR-PMM-017 — новый п.9 (2026-10-25): правило, причина (контракт адресации, ссылка на `address.py`), рецептов с точкой в репозитории 0, последствие для чужих рецептов (перестают собираться и сохраняться; лечение — переименовать). В `**Refs:**` ADR — «(п.9: C-25; п.10: C-28)»; по строке в «Последствиях» о п.9 и п.10. `python -m scripts.sync`.
+
+**Acceptance (тестер вслепую):** файл `multiprocess_framework/modules/process_manager_module/tests/test_dotted_process_name.py`; реестр плагинов — как в `test_modeless_collector_check.py` (свой, снять/восстановить).
+- [ ] A0. Существующий тест, краснеющий от C-25: `process_manager_module/tests/test_t59a_review_author.py::test_dotted_process_name_wire_does_not_cover_the_shorter_named_process` (`proc.a`: `len(check()) == 1` -> 2). Правка (developer, разрешена координатором): ожидать ошибку «точка в имени процесса» про 'proc.a' и прежнюю ошибку про вход `proc.needs_frame.frame`, обе литералом.
+- [ ] A1. Процесс `draw.a` (плагин без портов) → `check_structure()` содержит ровно одну ошибку с `'draw.a'` и подстрокой `точка в имени процесса`; то же для `check()`. Текст ошибки содержит `ADR-PMM-017`.
+- [ ] A2. `check_structure()` для процессов `draw` и `draw.a`: среди ошибок с подстрокой `точка в имени процесса` ровно одна, она начинается с `Процесс 'draw.a':`; ни одна ошибка не начинается с `Процесс 'draw':`.
+- [ ] A3. Имя без точки (`draw_a`) → ни одной ошибки с подстрокой `точка в имени процесса`.
+- [ ] A4. `check_structure()` работает при пустом `PluginRegistry` (A1 повторить с очищенным реестром) — ошибка та же.
+- [ ] A5. Для каждого из 22 `multiprocess_prototype/recipes/*.yaml` (число в прогоне — литерал 22, `robot_demo` включён) `SystemBuilder.from_manifest(app, recipe).build()` (как `_built_collectors` в `multiprocess_prototype/backend/tests/test_recipes_join_contract.py`) не бросает, и ни одно имя в `launcher._processes` не содержит `.`.
+**Команда приёмки:** `pytest multiprocess_framework/modules/process_manager_module/tests/test_dotted_process_name.py -q`.
+**REDS до правки src:** A1, A2, A4 красные; A3, A5 зелёные; A0 — зелёный до src, красный после (существующий тест).
+
+
+### Task C28.1 — `metadata.collector`/`metadata.inspector`, которые не применяются, — ошибка `check()`
+
+**Level:** Middle (Sonnet). **Assignee:** developer (Sonnet). Образец — C22.1 (`_modeless_collector_errors`).
+**Module contract:** не требуется — приватные методы, поведение `check()` фиксирует ADR-PMM-017 п.10.
+**Files:** `blueprint.py`; `process_manager_module/DECISIONS.md` (только ADR-PMM-017) + выход `scripts.sync`; `process_manager_module/tests/test_unapplied_metadata_check.py` (новый; tester); `process_manager_module/tests/test_infer_join_by_port.py` (M0, только ожидание).
+**Dependencies:** после C25.1 (один файл `blueprint.py`, нумерация docstring и ADR п.9/п.10).
+**Goal:** deprecated секция `metadata.collector`/`metadata.inspector`, которую сборка не применит, даёт ошибку `check()`; предупреждение deprecated остаётся.
+
+**Когда секция применяется (факт кода, `infer_missing_collectors` `:533–580`):** её не-структурные ключи подмешиваются, только если у процесса ≥ 2 join-источников и явная секция (`_explicit_collector`) не задаёт `mode`. После `infer` такой процесс имеет `collector.mode == "join"`.
+
+**DESIGN:**
+1. Новый приватный метод `_unapplied_metadata_errors(self) -> list[str]`, вызов в `check()` сразу после `_modeless_collector_errors()`. `joining = self._joining_sources()` один раз.
+2. Для процесса: `meta_key, section = _legacy_metadata_section(proc)`; пусто — пропуск. `exp_key, explicit = _explicit_collector(proc)`; `mode = explicit.get("mode")`; `n = len(joining.get(proc.process_name, {}))`.
+   - **Применяется**, если `n >= 2` и `mode` ложно или равно `"join"`. Равенство `"join"` нужно, чтобы результат не зависел от `infer` (после `infer` выведенный join выглядит как явный `mode: join`). Остаток: явный пользовательский `collector: {mode: join, …}` при ≥ 2 источниках + `metadata`-настройка — секция не применяется, но ошибки нет (неотличимо после `infer`); записать в ADR как известную границу.
+   - Не применяется → одна ошибка, КРОМЕ процесса, по которому `_metadata_join_errors()` уже вернул ошибку (исключение по имени процесса, не по ключу секции); без дублирования расчёта эффективного режима.
+   - Ошибка C-22 по тому же процессу остаётся: она про другое поле.
+3. Текст (значений секции нет, кроме значения `mode` в причине (дискриминатор; M4 проверяет `mode=fanin`), ключи — `sorted(str(k))` через `, `):
+   `Процесс '<имя>': metadata.<meta_key> (deprecated, ключи: <k1, k2>) не применяется — <причина>. Штатно: перенеси в process-level collector: {<k1>: …, <k2>: …} (те же ключи; без mode — тонкая настройка выведенного join, только при ≥ 2 join-источниках; mode: fanin — настройка fanin) и удали metadata.<meta_key>`.
+   Причина: при `n < 2` — `join не выведен (join-источников: <n>, нужно ≥ 2)`; иначе — `явный <exp_key> задаёт mode=<mode>`.
+4. Предупреждение deprecated в `infer` (`:538–543`) не менять.
+5. Docstring `check()` — пункт «8. `metadata.<ключ>` (deprecated), которая не применится, — ошибка (C-28)». ADR-PMM-017 п.8: фразу «`metadata` … без `mode` (deprecated, п.7) правило НЕ задевает» заменить ссылкой на новый п.10 (C-28): правило владельца, условие применения, исключение C-17, остаток (явный `mode: join` при ≥ 2). `python -m scripts.sync`.
+6. Единый источник legacy-секции (стадия 0, п.13): в `infer` (`:572–574`) `legacy = _legacy_metadata_section(proc)[1]` вместо `proc.metadata.get(collector) or proc.metadata.get(inspector)` — иначе truthy не-dict `metadata.collector` прячет `metadata.inspector` от `infer`, а проверка его видит.
+
+**Acceptance (тестер вслепую):** файл `multiprocess_framework/modules/process_manager_module/tests/test_unapplied_metadata_check.py`. Каждый случай — `check()` дважды: без `infer` и после `infer`; списки, отфильтрованные по подстроке `(deprecated, ключи:`, одинаковые. Реестр — свой, как в `test_modeless_collector_check.py`.
+- [ ] M0. Существующий тест, краснеющий от C-28: `process_manager_module/tests/test_infer_join_by_port.py::test_a7_metadata_without_mode_join_is_not_an_error[collector|inspector]` (`:250-265`, `assert bp.check() == []`). Правка (developer, разрешена координатором; вариант (б)): тест переименовать в `test_a7_metadata_without_mode_join_is_a_c28_error`; для обоих параметров (`{timeout_sec: 0.7345}` и `{mode: fanin}`) — до и после infer ровно одна ошибка, литералом: начинается с `Процесс 'layout': metadata.<key> (deprecated, ключи: timeout_sec)` и `Процесс 'layout': metadata.<key> (deprecated, ключи: mode)` соответственно; списки до и после равны; подстроки `0.7345` нет.
+- [ ] M1. Один join-источник, `metadata: {inspector: {timeout_sec: 0.25}}`, явного collector нет → ровно одна ошибка; в тексте `'P'`, `metadata.inspector`, `timeout_sec`, `join-источников: 1`; подстроки `0.25` нет. В тексте `collector: {timeout_sec: …}`.
+- [ ] M2. Как M1, но `metadata.collector` → в тексте `metadata.collector`.
+- [ ] M3. Два join-источника, `metadata: {inspector: {timeout_sec: 0.25}}` → ошибки нет; после `infer` `P.collector["timeout_sec"] == 0.25`.
+- [ ] M4. Два источника, typed `collector: {mode: fanin}` + `metadata: {inspector: {timeout_sec: 0.25}}` → одна ошибка, в тексте `mode=fanin`.
+- [ ] M5. Один источник, `metadata: {inspector: {mode: join, inputs: [frame], primary: frame}}` → ошибка C-17 есть (подстрока `metadata.inspector.mode=join`), ошибок `(deprecated, ключи:` — ноль.
+- [ ] M6. Один источник, typed `collector: {timeout_sec: 1}` + `metadata: {inspector: {timeout_sec: 0.25}}` → одна ошибка C-22 (` без mode (ключи:`) и одна C-28.
+- [ ] M7. Ноль источников, `metadata: {collector: {timeout_sec: 0.25}}` → одна ошибка, `join-источников: 0`.
+- [ ] M8. `metadata: {inspector: {}}` и `metadata: {}` → ни одной ошибки C-28.
+- [ ] M9. Три процесса с одним источником каждый: A — `metadata.inspector` с настройкой, B — без `metadata`, C — `metadata: {source_target_fps: 25}` → ровно одна ошибка C-28, про `'A'`.
+- [ ] M10. Для каждого из 22 `multiprocess_prototype/recipes/*.yaml`: список процессов с непустой `metadata.collector`/`metadata.inspector` равен `[]` (литерал), и `SystemBuilder.from_manifest(app, recipe).build()` не бросает (число рецептов — 22).
+- [ ] M11. Один источник, `metadata: {collector: {timeout_sec: 0.25}, inspector: {mode: join}}` -> есть ошибка `metadata.inspector.mode=join`, ошибок `(deprecated, ключи:` ноль (до и после infer).
+- [ ] M12. Два join-источника, `metadata: {collector: 5, inspector: {timeout_sec: 0.25}}` → ошибок `(deprecated, ключи:` ноль; после `infer` `P.collector["timeout_sec"] == 0.25`.
+- [ ] M13. Один источник, `metadata: {inspector: {mode: fanin}}` → ровно одна ошибка (до и после infer), в тексте `metadata.inspector (deprecated, ключи: mode)` и `collector: {mode: …}`.
+**Команда приёмки:** `pytest multiprocess_framework/modules/process_manager_module/tests/test_unapplied_metadata_check.py -q`.
+**REDS до правки src:** M1, M2, M4, M6, M7, M9, M12, M13 красные; M3, M5, M8, M10, M11 зелёные; M0 — существующий тест зелёный до src и красный после (оба параметра `[collector]`, `[inspector]`); после правки developer зелёный.
+
+### Break-injection лида (после реализации), предсказания
+
+C25.1:
+- J1: убрать вызов из `check_structure()` → красные A1 (половина structure), A2, A4; A3, A5 зелёные.
+- J2: убрать вызов из `check()` → красная половина `check()` в A1.
+- J3: проверять `name.count(".") > 1` → красные A1, A2, A4.
+C28.1:
+- K1: убрать вызов `_unapplied_metadata_errors()` → красные M1, M2, M4, M6, M7, M9.
+- K2: условие «применяется» без `== "join"` (только `not mode`) → красная половина «после infer» в M3.
+- K3: убрать исключение C-17 → красные M5, M11.
+- K4: порог «применяется» `n >= 1` → красные M1, M2, M6, M9; M7 (n = 0) зелёный.
+- K5: убрать guard непустоты секции → красные M1–M10 (процессы без `metadata` получают ошибку), не только M8.
+- K7: пропускать секцию `{mode: fanin}` без других ключей (правило (а)) → красные M13 и параметр `{mode: fanin}` в M0 (оба ключа); M1–M12 зелёные.
+- K6: в `infer` вернуть `metadata.get(collector) or metadata.get(inspector)` → красный M12.
+
+**Handoff:** reviewer стадии 0 (Sonnet) → tester вслепую (worktree на коммите плана) → developer (Sonnet) → лид (инъекции) → reviewer задачи (Sonnet) → ревью ветки (Opus, framework) → слияние.
+**Gate:** радиус pytest как у C22.1 + `sentrux check .` + `scripts/validate.py`; перед слиянием framework suite (heavy, окно у координатора).
+**Радиус pytest:** `process_manager_module/tests`, `process_module/tests/test_blueprint_wire_collector.py`, `process_module/tests/test_blueprint_extras.py`, `multiprocess_prototype/backend/tests`, `multiprocess_prototype/backend/topology/tests`, `multiprocess_prototype/backend/assembly/tests`, `multiprocess_prototype/recipes/tests`, `Plugins/_shared/fanin/tests` — по одному каталогу (шлюз).
+
+**Перед слиянием:** rebase на main; `process_manager_module/DECISIONS.md` и сводные разделы `multiprocess_framework/DECISIONS.md` общие с полосой Ф — правим только ADR-PMM-017; конфликт в выходе `scripts.sync` руками не мержить: взять main и заново `python -m scripts.sync`; номера п.9/п.10 сверить с main.
+
+**Out of scope:** вывод join, теги, порог (ADR-PMM-017 п.3–6); `metadata.<ключ>.mode=fanin` при ≥ 2 источниках (вывод даёт join — противоречие, не потеря; в «Открыто»); `collector_registry.py`; рецепты; GUI-сохранение (C-30).
+
+**Открыто (для владельца):** `metadata.<ключ>.mode=fanin` при ≥ 2 join-источниках без явного `collector` — вывод даёт join, `mode: fanin` из metadata молча игнорируется (противоречие, не потеря; C-28 его не ловит). Делать ли ошибкой — не решено.
