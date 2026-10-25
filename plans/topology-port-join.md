@@ -308,3 +308,26 @@ C28.1:
 **Out of scope:** вывод join, теги, порог (ADR-PMM-017 п.3–6); `metadata.<ключ>.mode=fanin` при ≥ 2 источниках (вывод даёт join — противоречие, не потеря; в «Открыто»); `collector_registry.py`; рецепты; GUI-сохранение (C-30).
 
 **Открыто (для владельца):** `metadata.<ключ>.mode=fanin` при ≥ 2 join-источниках без явного `collector` — вывод даёт join, `mode: fanin` из metadata молча игнорируется (противоречие, не потеря; C-28 его не ловит). Делать ли ошибкой — не решено.
+
+### Ревью задачи C25.1 + C28.1 (reviewer Sonnet, 2026-10-25) — APPROVED, 7 замечаний
+
+Инъекции лида J1–J3, K1–K7: все стражи красные; K2 и K3 краснят ещё существующие `test_a7_two_join_sources_with_metadata_mode_join_is_not_an_error` и два параметра `test_c17_mode_join_in_inspector_section_is_seen_when_collector_section_is_non_empty`, `test_a7_one_join_source_with_metadata_mode_join_is_an_error` (точный список ошибок) — пробел прогноза лида, не дефект. Решения лида по замечаниям: F1 → Task C28.2; F2 → граница в ADR п.10; F3, F6, F7 — оставить (текст по спеке, страж M5/M11 есть); F4 (докстринги `frontend/widgets/topology/presenter.py:60`, `recipes/save.py::validate_recipe_blueprint`) — вне границы, в отчёт; F5 (deprecated `metadata` перекрывает typed `collector` при ≥ 2 источниках, поведение до C-28) — в «Открыто».
+
+### Task C28.2 — затенённая `metadata.inspector` при применённой `metadata.collector` — ошибка
+
+**Level:** Middle (Sonnet). **Assignee:** developer (тот же). **Files:** `blueprint.py`, `process_manager_module/DECISIONS.md` (только ADR-PMM-017 п.10) + выход `scripts.sync`, `tests/test_unapplied_metadata_check.py` (новые M14, M15 — тесты автора).
+**Goal:** при ≥ 2 join-источниках `infer` применяет одну секцию (`collector`, затем `inspector`); вторая непустая dict-секция теряется молча (ревью F1: `{collector: {timeout_sec: 1}, inspector: {list_merge_keys: [x]}}` → `check() == []`, `list_merge_keys` потерян).
+**DESIGN:**
+1. Порядок в `_unapplied_metadata_errors`: пустая секция → пропуск; исключение C-17 по имени процесса → пропуск; секция применяется → проверка затенения → пропуск; иначе прежняя ошибка. Одна ошибка на процесс сохраняется.
+2. Затенение: применённая секция `collector`, и `metadata.inspector` — непустой dict. Ошибка: `Процесс '<имя>': metadata.inspector (deprecated, ключи: <k…>) не применяется — затенена metadata.collector (сборка применяет одну секцию: collector, затем inspector). Штатно: …` — хвост «Штатно» тот же, что у прежней ошибки, ключи — ключи `inspector`.
+3. При < 2 источниках затенение не сообщается: прежняя ошибка про `metadata.collector`; после её лечения `inspector` станет основной секцией и получит свою ошибку.
+4. ADR п.10: абзац про затенение; в «Вне правила» добавить структурные ключи `inputs`/`primary` в `metadata` при ≥ 2 источниках (вывод их не подмешивает — противоречие, как `mode=fanin`; ревью F2). `python -m scripts.sync`.
+**Acceptance:**
+- [ ] M14. Два join-источника, `metadata: {collector: {timeout_sec: 0.25}, inspector: {list_merge_keys: ["x"]}}` → до и после `infer` ровно одна ошибка `(deprecated, ключи:`, она начинается с `Процесс 'P': metadata.inspector (deprecated, ключи: list_merge_keys) не применяется — затенена metadata.collector`; после `infer` `P.collector["timeout_sec"] == 0.25` (достижимость: `collector` применён).
+- [ ] M15. Один join-источник, та же `metadata` → ровно одна ошибка `(deprecated, ключи:`, она начинается с `Процесс 'P': metadata.collector (deprecated, ключи: timeout_sec) не применяется — join не выведен`.
+- [ ] M1–M13, M0, A0 и весь `process_manager_module/tests` зелёные.
+**Инъекции лида (предсказания до прогона):**
+- K8: убрать проверку затенения → красный только M14.
+- K9: сообщать затенение и при < 2 источниках (вторая ошибка) → красный только M15.
+- K10: проверка затенения раньше исключения C-17 → красных нет (C-17 срабатывает только при < 2 источниках, а затенение — только при ≥ 2); эквивалентная мутация, записать.
+**Out of scope:** F2 кодом; F5; приоритет typed `collector` над `metadata`.
