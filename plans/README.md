@@ -154,6 +154,7 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [gui-service](2026-09-22_gui-service/plan.md) | feat/gui-service | — | 0/0 | APPROVED ред. 2 | 2026-09-22 |
 | [memory-rules-delivery](2026-10-11_memory-rules-delivery/plan.md) | docs/memory-rules-delivery | phase 0 | 0/9 | DRAFT | 2026-10-11 |
 | [camera-device-service](2026-10-18_camera-device-service/plan.md) | feat/camera-device-service | — | 0/42 | ACTIVE | 2026-10-18 |
+| [release-1.0](release-1.0/plan.md) | docs/release-1.0-plan | phase 1 | 0/5 | DRAFT | 2026-10-25 |
 
 ## Архив
 
