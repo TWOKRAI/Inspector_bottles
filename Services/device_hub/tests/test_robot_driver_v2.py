@@ -759,6 +759,88 @@ def test_busy_reply_on_launch_requeues_return_at_head() -> None:
     drv.disconnect()
 
 
+def test_return_refused_by_disconnecting_requeues_and_tail_counts_it() -> None:
+    """C-29 (инжекция 22): возврат, взятый тиком до «Отключить», отказан ``admit_launch`` после него (текст
+    «идёт отключение робота» входит в ``_BUSY_REPLIES``) -> возврат вернулся в очередь, не в ``returns_failed``;
+    хвост ``disconnect`` снимает его и считает в «возвраты: 1» (журнал и ``last_error``)."""
+    rec = _Rec()
+    drv, _client, _transport = _fake_driver(rec)
+    assert drv.call("return_job", {"x_mm": 350.0, "y_mm": -150.0, "z_mm": -90.0})["return_queue_len"] == 1
+
+    def refused_after_k(_slot: Any, **_kw: Any) -> dict:
+        drv.request_disconnect()  # «Отключить» пришло после взятия возврата тиком
+        return {"status": "error", "message": "идёт отключение робота"}
+
+    drv.start_return = refused_after_k  # шов: K между take_next_action и admit_launch
+    drv.tick(None)
+    snap = drv.snapshot()
+    assert (snap["return_queued"], snap["returns_failed"], snap["returns_done"]) == (1, 0, 0)
+    drv.disconnect()
+    assert drv.snapshot()["return_queued"] == 0
+    assert drv.disconnect_pending is False
+    assert rec.at("rv2", "last_error")[-1] == "при отключении сняты задания: 0, возвраты: 1"
+
+
+def test_resync_after_disconnect_request_is_cancelled() -> None:
+    """C-29: готовый робот, «Отключить», затем пересинхронизация тика: предикат отмены истинный до первой записи
+    (``sync_params`` не шлёт ``PARAM_SET``)."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    from Services.robot_comm.core.protocol_v2 import REG
+
+    transport.tlm[REG["TLM_CFG_EPOCH"] - REG["TLM_PROTO_VER"]] = 2  # метка робота расходится с меткой ПК (1)
+    seen: list[bool] = []
+    client.sync_params = lambda _values, _epoch, *, cancelled=None: seen.append(cancelled())
+    drv.request_disconnect()
+    drv.tick(None)  # тик: сверка метки -> пересинхронизация
+    assert seen == [True]
+    drv.disconnect()
+    assert drv.disconnect_pending is False
+
+
+def test_disconnect_publication_failure_does_not_stick_counter(tmp_path: Any) -> None:
+    """C-29: ``_publish_state("disconnecting")`` бросил -> ``manager.disconnect`` всё равно вызван, счётчик
+    «Отключить» драйвера снят (иначе ``connect`` отменялся бы навсегда), ошибка ушла в health."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+    from Plugins.hub.device_hub.tests.conftest import make_ctx
+
+    rec = _Rec()
+    drv, _client, transport = _fake_driver(rec)
+    registry_file = tmp_path / "devices.yaml"
+    ctx = make_ctx({"registry_path": str(registry_file)}, tmp_registry=registry_file)
+    plugin = DeviceHubPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    try:
+        res = plugin.cmd_device_upsert(
+            {
+                "id": "rv2",
+                "name": "rv2",
+                "kind": "robot",
+                "protocol": "delta_v2",
+                "transport": {"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": ROBOT_UNIT_ID},
+            }
+        )
+        assert res["status"] == "ok", res
+        plugin._manager._drivers["rv2"] = drv  # как в test_lifecycle_regressions: драйвер уже создан
+        real_publish = plugin._publish_state
+
+        def publish(path: str, value: Any) -> None:
+            if isinstance(value, dict) and value.get("conn") == "disconnecting":
+                raise RuntimeError("публикация статуса упала")
+            real_publish(path, value)
+
+        plugin._publish_state = publish
+        assert plugin.cmd_device_disconnect({"device_id": "rv2"})["status"] == "ok"
+        assert drv.disconnect_pending is True
+        plugin._process_conn_queue()
+        assert drv.disconnect_pending is False
+        assert transport.closed >= 1 and drv.is_connected is False
+        assert ctx.health.report_error.call_count == 1
+    finally:
+        plugin.shutdown(ctx)
+
+
 def test_failed_return_program_counts_returns_failed() -> None:
     """Программа возврата упала: returns_failed, не returns_done (I14)."""
     rec = _Rec()

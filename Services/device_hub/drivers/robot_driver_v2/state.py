@@ -645,9 +645,10 @@ class RobotState:
             self._syncing = False
 
     def sync_cancelled(self) -> bool:
-        """Остановка — после стопа параметры не пишутся."""
+        """Остановка или «Отключить» (C-29, счётчик > 0) — параметры не пишутся: ни ``connect``, ни повторная
+        синхронизация тика на готовом роботе не шлют ``PARAM_SET`` до входа в ``disconnect``."""
         with self._lock:
-            return self._stopping or self._shutdown
+            return self._stopping or self._shutdown or self._disconnect_requests > 0
 
     # --- jog ---
 

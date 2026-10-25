@@ -294,6 +294,10 @@ class _RobotDriverCore(BaseDeviceDriver):
         ``disconnect`` в очередь. Ввода-вывода нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт
         ``disconnect()``: он снимает счётчик «идёт отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся
         отменённым (``"cancelled"``).
+
+        Module contract: lite — публичный метод, зовётся через ``getattr`` (как ``request_stop``); контракт —
+        R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``). Долг: внести
+        ``request_disconnect`` и ``disconnect_pending`` в Protocol драйвера (SPI хаба, следующая задача).
         """
         self.desired_connected = False
         self._state.disconnect_request(link_up=self._transport_up)

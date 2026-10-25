@@ -41,7 +41,7 @@ tests/
 |---|---|
 | `__init__.py` | сборка `RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, OpsMixin, _RobotDriverCore)`, `_OPS = OPS`, реэкспорт шести имён |
 | `driver.py` | ядро `_RobotDriverCore`: `__init__`, подключение и отключение, тик, телеметрия, `call`, `snapshot`; `request_disconnect` (C-29: «Отключить» прерывает `connect`; плагин зовёт через `getattr` под `_workers_lock` до очереди, без ввода-вывода) и `disconnect_pending` («Отключить» нажато, `disconnect` не кончился) |
-| `state.py` | `RobotState` (28 полей + 4 поля `_JogRun`, 58 переходов + `view()` под одним замком), `RobotStateView`, `JogView`, `_JogRun` |
+| `state.py` | `RobotState` (28 полей + 4 поля `_JogRun`, 62 перехода + `view()` под одним замком), `RobotStateView`, `JogView`, `_JogRun` |
 | `stop.py` | `StopMixin`: `request_stop`, стоп процесса, защёлка, эхо стопа (ADR-DH-009) |
 | `jog.py` | `JogMixin`: удержание, отпускание, поводок и стоп jog |
 | `programs.py` | `ProgramMixin`: запуск программы в потоке исполнителя, возврат, смена инструмента |

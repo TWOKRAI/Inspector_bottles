@@ -460,7 +460,15 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         conn = "connected" if ok else "error"
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
                 elif op == "disconnect":
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    # C-29: сбой публикации статуса не отменяет disconnect — иначе счётчик «Отключить» драйвера
+                    # (request_disconnect) остался бы навсегда. Ошибка уходит в health, как у соседних веток.
+                    try:
+                        self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    except Exception as pub_exc:
+                        if self._ctx:
+                            self._ctx.health.report_error(
+                                pub_exc, context="device_hub.disconnect_publish", device_id=dev_id
+                            )
                     # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
                     driver = self._manager.get_driver(dev_id)
                     if driver is not None:

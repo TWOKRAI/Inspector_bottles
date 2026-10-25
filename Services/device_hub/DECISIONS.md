@@ -357,7 +357,8 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
     `disconnect` в очереди — 0.
   - **Супервизор.** Ветка `connect` пропускается, если `_desired_connected.get(dev_id) is False` (только `is False`:
     интеграционные тесты кладут `connect` без записи в словарь). После `manager.connect` под `_workers_lock` desired
-    True и `reset_reconnect()` не ставятся, если `desired_connected` False или `disconnect_pending` (ABA
+    True и `reset_reconnect()` не ставятся, если `_desired_connected[dev_id]` (словарь плагина) False или у драйвера
+    `disconnect_pending` (ABA
     `[connect₁, disconnect, connect₂]`). Закрытие окна (б) — замком: «Отключить» и чтение супервизора взаимно
     исключены. Новых замков нет; порядок `_workers_lock` → `_registry_lock` → замок состояния (лист).
   - **Статусы (В3).** Прерванный `connect` не публикует `error`: `manager.connect` при `disconnect_pending`
@@ -369,6 +370,7 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
   - **Очереди (В6).** Хвост `disconnect` (`disconnect_end`) снимает очереди заданий и возвратов; число — в журнал
     (WARNING) и `last_error` (`TEXT_QUEUE_DROPPED`). Голый `disconnect` без «Отключить» очереди не трогает.
   - `_await_tlm` прерывается по `_sync_cancelled()`: SERVO / DO после «Отключить» не шлются, пока ожидание не вышло.
+    `sync_cancelled()` учитывает счётчик: пересинхронизация тика на готовом роботе после «Отключить» не шлёт `PARAM_SET`.
 
 ### Отклонено
 
@@ -396,10 +398,13 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
   только сериализацией с вводом-выводом под замком. О2: обмен в полёте не прерывается. О3: «Отключить» в миллисекунды
   создания драйвера внутри первого `manager.connect`. О6: общая очередь — C-31. О7: `request_disconnect` без
   `disconnect` вне плагина держит `connect` в `"cancelled"`. О8: пути счётчика без `disconnect_end` (остановка
-  плагина, `remove`) — драйвер выключается или выбрасывается. О9: `servo` / `do_set` в окне не отказывают. О10:
+  плагина, `remove`) — драйвер выключается или выбрасывается. О9: `servo` / `do_set` в окне не отказывают, как и `param_set`, `param_apply`, `point_capture`. О10:
   продление «hold» активного jog после «Отключить» отказывает — поводок истекает. О12: при живом воркере тика между
   `connecting` и `disconnecting` возможны `disconnected` или `error`. О13: задание со своим чтением TLM, пережившим
   весь `disconnect`, встанет в очередь после хвоста.
+- **Остаток О14 (C-29).** «Отключить» посреди `connect` ставит `_stopping`: `jog_hold_check`, `jog_hold_admit` и
+  `admit_launch` отвечают `TEXT_STOPPING`, а `jog_step`, `enqueue_job`, `return_job` — `TEXT_DISCONNECTING`.
+  `_stopping` держится до следующего `connect_begin` — отказ есть всегда, текст разный.
 - **Остаток: `_shutdown` и «Отключить» одновременно.** `disconnect_owns_close` при `_shutdown` возвращает False: тик
   закрывает сокет сам, и `process_stop_plan` может увидеть `link_up()` False (нет SOFT). Не регресс: до T5.3h тик
   закрывал безусловно при `desired_connected` False.
