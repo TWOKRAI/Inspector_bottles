@@ -922,7 +922,7 @@ def _supervisor_connected_publications(make_rig: Callable[..., Rig]) -> int:
     )
 
 
-def test_a15_command_waits_for_supervisor_status_publication(make_rig: Callable[..., Rig]) -> None:
+def test_a15_command_returns_fast_while_supervisor_stands_before_publication(make_rig: Callable[..., Rig]) -> None:
     last = _supervisor_connected_publications(make_rig)
     assert last >= 1, "A15: супервизор не публикует connected — окно недостижимо"
     rig = make_rig("real")
@@ -934,7 +934,7 @@ def test_a15_command_waits_for_supervisor_status_publication(make_rig: Callable[
         if op == "set" and p == path and isinstance(data, dict) and data.get("conn") == "connected":
             if threading.current_thread().name == SUP:
                 seen[0] += 1
-                if seen[0] == last:  # последняя публикация статуса супервизором: он уже прочитал «отключения нет»
+                if seen[0] == last:  # последняя публикация статуса супервизором: connect уже завершён
                     gate.hit()
 
     rig.proxy.hook = hook
@@ -942,19 +942,32 @@ def test_a15_command_waits_for_supervisor_status_publication(make_rig: Callable[
     assert rig.cmd("device_connect")["status"] == "ok"
     sup = rig.supervisor()
     assert gate.entered.wait(HIT_S), "A15: окно недостижимо — супервизор не дошёл до публикации"
-    cmd = rig.start(lambda: rig.plugin.cmd_device_disconnect({"device_id": DEV}), "c29-cmd-window")
-    still_blocked = not cmd.join(0.5)
+    assert sup.alive(), "A15: супервизор не стоит перед публикацией"
+    t0 = time.monotonic()
+    res = rig.cmd("device_disconnect", deadline_s=1.0)
+    elapsed = time.monotonic() - t0
+    desired_after_command = rig.driver().desired_connected
     gate.release.set()
-    assert cmd.join(JOIN_S), "A15: команда не вернулась после публикации статуса"
     assert sup.join(JOIN_S)
     rig.drain()
+    statuses = rig.proxy.statuses()
     observed = {
-        "blocked_while_supervisor_stands": still_blocked,
-        "reply_status": (cmd.result or {}).get("status"),
-        "desired": rig.driver().desired_connected,
+        "reply_status": res.get("status"),
+        "fast": elapsed < 1.0,
+        "desired_after_command": desired_after_command,
+        "desired_final": rig.driver().desired_connected,
+        "last_status": statuses[-1] if statuses else None,
+        "soft": rig.soft_count(),
     }
-    expected = {"blocked_while_supervisor_stands": True, "reply_status": "ok", "desired": False}
-    assert observed == expected, f"A15: {observed}"
+    expected = {
+        "reply_status": "ok",
+        "fast": True,
+        "desired_after_command": False,
+        "desired_final": False,
+        "last_status": "disconnected",
+        "soft": 1,
+    }
+    assert observed == expected, f"A15: {observed}; statuses={statuses}"
 
 
 # --------------------------------------------------------------------------------------------------
