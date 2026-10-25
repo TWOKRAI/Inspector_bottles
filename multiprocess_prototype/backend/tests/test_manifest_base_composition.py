@@ -137,6 +137,41 @@ class TestBothLoadersAgree:
 
         assert tuple(proto.base) == tuple(framework.base) == ()
 
+    def test_valid_state_is_taken_identically_by_both(self, tmp_path):
+        """Валидное app.state.yaml: оба загрузчика берут рецепт из состояния."""
+        from multiprocess_framework.modules.app_module.manifest import (
+            load_manifest as load_framework,
+        )
+
+        путь = _манифест(tmp_path, None)
+        рецепт = tmp_path / "recipes" / "b.yaml"
+        рецепт.write_text("processes: []\n", encoding="utf-8")
+        (tmp_path / "app.state.yaml").write_text("pipeline: recipes/b.yaml\n", encoding="utf-8")
+
+        proto, framework = load_manifest(путь), load_framework(путь)
+
+        assert proto.pipeline == framework.pipeline == рецепт.resolve()
+        assert proto.pipeline_origin == framework.pipeline_origin == "state"
+        assert proto.pipeline_note is None
+        assert framework.pipeline_note is None
+
+    def test_broken_state_falls_back_identically_in_both(self, tmp_path):
+        """Битое app.state.yaml: оба берут умолчание из app.yaml и дают непустой note."""
+        from multiprocess_framework.modules.app_module.manifest import (
+            load_manifest as load_framework,
+        )
+
+        путь = _манифест(tmp_path, None)
+        (tmp_path / "app.state.yaml").write_text("pipeline: [unclosed\n", encoding="utf-8")
+
+        proto, framework = load_manifest(путь), load_framework(путь)
+
+        assert proto.pipeline == framework.pipeline == (tmp_path / "pipe.yaml").resolve()
+        assert proto.pipeline_origin == framework.pipeline_origin == "manifest"
+        assert proto.pipeline_note
+        assert "app.state.yaml" in proto.pipeline_note
+        assert proto.pipeline_note == framework.pipeline_note
+
     def test_broken_value_is_refused_by_both(self, tmp_path):
         from multiprocess_framework.modules.app_module.manifest import (
             load_manifest as load_framework,
