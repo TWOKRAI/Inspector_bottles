@@ -143,7 +143,8 @@ def resolve_active_pipeline(manifest_path: Path | str, default_value: str) -> Ac
 
     try:
         data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        # ValueError — дата вида 2001-13-45 (конструктор timestamp), RecursionError — глубокая вложенность.
         return _fallback(f"битый YAML ({exc})")
     if not isinstance(data, dict):
         return _fallback("содержимое не словарь")
@@ -287,7 +288,7 @@ class ManifestStore:
 
         try:
             return yaml.safe_load(state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, yaml.YAMLError):
+        except (OSError, ValueError, RecursionError, yaml.YAMLError):
             return None
 
     @staticmethod

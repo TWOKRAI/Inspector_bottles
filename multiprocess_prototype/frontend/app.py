@@ -550,12 +550,12 @@ def run_gui(process: "GuiProcess") -> None:
             _boot_slug = _manifest.pipeline.stem
             if _recipe_manager.set_active(_boot_slug):
                 process._log_info(
-                    f"recipe_manager: активный рецепт восстановлен из манифеста: '{_boot_slug}'",
+                    f"recipe_manager: активный рецепт восстановлен ({_manifest.pipeline_origin}): '{_boot_slug}'",
                     module="startup",
                 )
             else:
                 process._log_warning(
-                    f"recipe_manager: рецепт из манифеста не найден: '{_boot_slug}'",
+                    f"recipe_manager: рецепт ({_manifest.pipeline_origin}) не найден: '{_boot_slug}'",
                     module="startup",
                 )
         except Exception as e:

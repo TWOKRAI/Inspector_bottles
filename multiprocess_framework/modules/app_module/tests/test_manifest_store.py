@@ -116,6 +116,39 @@ def test_resolver_persistent_read_error_falls_back_with_note(tmp_path: Path, mon
     assert "app.state.yaml" in active.note
 
 
+_PATHOLOGICAL_STATES = {
+    "extra_date_key": "pipeline: recipes/b.yaml\nwhen: 2001-13-45\n",
+    "date_like_value": "pipeline: 2001-13-45\n",
+    "deep_nesting": "pipeline: " + "[" * 100000 + "\n",
+}
+
+
+@pytest.mark.parametrize("content", _PATHOLOGICAL_STATES.values(), ids=_PATHOLOGICAL_STATES.keys())
+def test_resolver_never_raises_on_pathological_yaml(tmp_path: Path, content: str) -> None:
+    """YAML, на котором safe_load бросает не YAMLError (ValueError / RecursionError) -> умолчание + note."""
+    path, _recipe = _seed_state_with_recipe(tmp_path)
+    path.with_name("app.state.yaml").write_text(content, encoding="utf-8")
+
+    active = resolve_active_pipeline(path, "recipes/a.yaml")
+
+    assert active.origin == "manifest"
+    assert active.path == (tmp_path / "recipes" / "a.yaml").resolve()
+    assert active.note
+    assert "app.state.yaml" in active.note
+
+
+@pytest.mark.parametrize("content", _PATHOLOGICAL_STATES.values(), ids=_PATHOLOGICAL_STATES.keys())
+def test_set_pipeline_overwrites_pathological_state(tmp_path: Path, content: str) -> None:
+    """set_pipeline поверх такого состояния не падает и пишет валидное."""
+    path, _recipe = _seed_state_with_recipe(tmp_path)
+    state_path = path.with_name("app.state.yaml")
+    state_path.write_text(content, encoding="utf-8")
+
+    assert ManifestStore(path).set_pipeline("recipes/b.yaml") == "recipes/b.yaml"
+
+    assert yaml.safe_load(state_path.read_text(encoding="utf-8")) == {"pipeline": "recipes/b.yaml"}
+
+
 def test_atomic_write_no_leftover_tmp(tmp_path: Path) -> None:
     path = _seed(tmp_path)
     ManifestStore(path).update({"pipeline": "recipes/c.yaml"})

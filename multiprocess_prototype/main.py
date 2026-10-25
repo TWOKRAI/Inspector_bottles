@@ -156,10 +156,10 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
         try:
             written = persist_pipeline_choice(manifest_path, pipeline_override)
             print(f"[run] активный рецепт записан в состояние: {state_path_for(manifest_path)} (pipeline: {written})")
-            effective_override = None  # манифест уже указывает на нужный рецепт
+            effective_override = None  # файл состояния уже указывает на нужный рецепт
         except Exception as exc:  # noqa: BLE001 — persist не должен валить запуск
             print(
-                f"[run] не удалось записать рецепт в файл состояния <stem>.state.yaml ({exc}); "
+                f"[run] не удалось записать рецепт в файл состояния {state_path_for(manifest_path)} ({exc}); "
                 "запускаю бэкенд с CLI-override",
                 file=sys.stderr,
             )

@@ -126,7 +126,9 @@ def load_manifest(path: Path | str) -> AppManifest:
     Returns:
         ``AppManifest`` с абсолютными путями.
     """
-    # Импорт внутри функции: пакет app_module тянет builder (~1,0 с), а этот модуль лёгкий.
+    # Импорт отложен до первого вызова load_manifest, а не устранён: импорт app_module.store
+    # выполняет app_module/__init__ и грузит builder (замер ~1,3 с). Сам модуль манифеста
+    # остаётся лёгким на импорте, цена уходит на первую загрузку.
     from multiprocess_framework.modules.app_module.store import resolve_active_pipeline
 
     path = Path(path)
