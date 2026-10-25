@@ -478,7 +478,8 @@ class SystemBuilder:
         lines = [bar, f" {manifest.name}", bar, f" manifest : {manifest.source}"]
         if manifest.system is not None:
             lines.append(f" system   : {manifest.system.name}")
-        lines.append(f" pipeline : {manifest.pipeline.name}")
+        state_mark = " (state)" if manifest.pipeline_origin == "state" else ""
+        lines.append(f" pipeline : {manifest.pipeline.name}{state_mark}")
         lines.append(f" plugins  : {n_plugins}")
         lines.append(f" services : {n_services}")
         lines.append(f" processes: {n_processes}")

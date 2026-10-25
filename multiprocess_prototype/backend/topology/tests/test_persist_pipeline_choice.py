@@ -1,12 +1,13 @@
-"""Тесты persist_pipeline_choice — CLI-рецепт пишется в манифест (app.yaml).
+"""Тесты persist_pipeline_choice — CLI-рецепт пишется в состояние ``app.state.yaml``.
 
-Гарантируют, что `run.py <recipe>` делает рецепт «последним активным» в конфиге,
-чтобы бэкенд и дочерний GUI-процесс читали ОДИН и тот же рецепт (фикс рассинхрона
-рецептов → пустых дисплеев).
+Гарантируют, что `run.py <recipe>` делает рецепт «последним активным» в состоянии
+рядом с манифестом, чтобы бэкенд и дочерний GUI-процесс читали ОДИН и тот же рецепт
+(фикс рассинхрона рецептов → пустых дисплеев). ``app.yaml`` (умолчание) не меняется.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -60,20 +61,23 @@ def test_persist_writes_bare_name_as_recipe_path(tmp_path: Path) -> None:
     written = persist_pipeline_choice(manifest, "phone_sketch")
 
     assert written == "recipes/phone_sketch.yaml"
+    state = yaml.safe_load(manifest.with_name("app.state.yaml").read_text(encoding="utf-8"))
+    assert state == {"pipeline": "recipes/phone_sketch.yaml"}
+    # Умолчание в app.yaml остаётся прежним.
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-    assert data["pipeline"] == "recipes/phone_sketch.yaml"
+    assert data["pipeline"] == "recipes/webcam_sketch.yaml"
 
 
 def test_persist_preserves_comments(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
+    bytes_before = manifest.read_bytes()
 
     persist_pipeline_choice(manifest, "phone_sketch")
 
-    text = manifest.read_text(encoding="utf-8")
-    # Комментарии (ruamel round-trip) сохранены, остальные ключи не тронуты.
-    assert "Заголовок-комментарий манифеста" in text
-    assert "Активный pipeline (комментарий к ключу)." in text
-    assert "active: innotech_theme" in text
+    # app.yaml не открывается на запись: комментарии и остальные ключи — байт в байт.
+    assert manifest.read_bytes() == bytes_before
+    state = yaml.safe_load(manifest.with_name("app.state.yaml").read_text(encoding="utf-8"))
+    assert state == {"pipeline": "recipes/phone_sketch.yaml"}
 
 
 def test_missing_recipe_raises_and_leaves_the_manifest_alone(tmp_path: Path) -> None:
@@ -96,10 +100,18 @@ def test_missing_recipe_raises_and_leaves_the_manifest_alone(tmp_path: Path) -> 
 
 def test_persist_is_idempotent_no_rewrite(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
-    # Значение уже совпадает с текущим → файл не должен переписываться (mtime тот же).
-    mtime_before = manifest.stat().st_mtime_ns
+    bytes_before = manifest.read_bytes()
+    state_path = manifest.with_name("app.state.yaml")
 
+    # Первый вызов создаёт состояние (даже если значение равно умолчанию app.yaml).
     written = persist_pipeline_choice(manifest, "webcam_sketch")
-
     assert written == "recipes/webcam_sketch.yaml"
-    assert manifest.stat().st_mtime_ns == mtime_before
+    assert yaml.safe_load(state_path.read_text(encoding="utf-8")) == {"pipeline": "recipes/webcam_sketch.yaml"}
+
+    # Состояние отодвигаем в прошлое: повторный вызов с тем же значением не должен его переписывать.
+    t0 = 1_000_000_000_000_000_000
+    os.utime(state_path, ns=(t0, t0))
+    persist_pipeline_choice(manifest, "webcam_sketch")
+
+    assert state_path.stat().st_mtime_ns == t0
+    assert manifest.read_bytes() == bytes_before

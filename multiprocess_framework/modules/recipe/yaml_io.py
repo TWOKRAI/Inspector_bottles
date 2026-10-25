@@ -7,7 +7,8 @@ Generic comment-preserving writer модуля `recipe` (C3, ADR-RCP-005). Ра�
 
 Используется там, где файл редактирует и человек, и приложение:
   - рецепты (``recipes/*.yaml``) — заголовок-док + per-node комментарии;
-  - главный конфиг ``app.yaml`` — persist активного pipeline без потери комментариев.
+  - главный конфиг ``app.yaml`` — правка умолчания без потери комментариев (активный
+    pipeline пишется не сюда, а в ``<stem>.state.yaml``, ADR-APP-008).
 
 Запись атомарна (буфер -> ``service._atomic_write``: tmp + fsync + ``os.replace``),
 права файла сохраняются — см. ``_dump_atomic``.

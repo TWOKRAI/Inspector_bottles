@@ -210,8 +210,9 @@ class RecipeService:
             (на хабе — ``_cmd_topology_apply``); ``args`` —
             ``{"topology_dict": dict, "recipe_path": str}``.
         persist_active: записать «последний активный» (на хабе —
-            ``ManifestStore.set_pipeline`` через адаптер пути); получает
-            абсолютный путь файла рецепта.
+            ``ManifestStore.set_pipeline`` через адаптер пути: запись идёт в
+            ``<stem>.state.yaml``, а не в ``app.yaml``); получает абсолютный путь
+            файла рецепта.
         read_active: имя активного рецепта или ``None``.
 
     Потокобезопасность: обработчики могут звать с разных потоков; CAS на

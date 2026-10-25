@@ -30,7 +30,8 @@ relative → boundary ловит только чужие absolute-импорты
 |---|---|
 | `run_app(app.yaml | AppSpec)` | точка входа: собрать и запустить (`build_app` — собрать без запуска) |
 | `AppManifest` / `load_manifest` | generic-манифест: `name`/`version`/`extras` + пути + `discovery` |
-| `ManifestStore` | **единственная точка read/write `app.yaml`** (NEW-1, закрывает гонку backend↔GUI) |
+| `ManifestStore` | **единственная сериализованная точка записи** (NEW-1, закрывает гонку backend↔GUI): `update` / `read_raw` — `app.yaml` (умолчание), `set_pipeline` — `<stem>.state.yaml` (активный рецепт) |
+| `resolve_active_pipeline` / `ActivePipeline` / `state_path_for` | выбор активного pipeline: валидное состояние перебивает умолчание `app.yaml`; путь файла состояния (ADR-APP-008) |
 | `discover()` / `DiscoveryResult` / `ServiceManifest` | **единый helper** авто-скана плагинов (`plugin.py`) И сервисов (маркер `service.yaml`) |
 | `SystemBuilder` / `AppSpec` | generic-сборка launcher; `AppSpec` — DI-контейнер точек расширения |
 | `assemble_proc_dicts` | universal-шов blueprint → proc_dicts (framework-символы) |
@@ -69,13 +70,40 @@ child-side по строке (`GENERIC_ORCHESTRATOR_CLASS_PATH`), а не имп
 name: My App
 version: 1                    # задел движка миграций
 extras: {}                    # app-специфика pass-through (framework не читает)
-pipeline: pipeline.yaml        # активный запускаемый pipeline (топология/рецепт)
+pipeline: pipeline.yaml        # умолчание; активный — в <stem>.state.yaml (топология/рецепт)
 base: base.yaml                # опц. фундамент (always-on), суммируется с pipeline
 discovery:
   plugin_paths: [plugins]      # где искать plugin.py
   service_paths: [services]    # где искать маркер service.yaml
   auto_discover: true
 ```
+
+## Активный pipeline: `<stem>.state.yaml` (ADR-APP-008)
+
+`app.yaml` хранит только **умолчание** `pipeline`. Выбор пользователя (CLI `run.py <recipe>`,
+выбор рецепта в GUI) пишет `ManifestStore.set_pipeline` в файл состояния рядом с манифестом:
+`app.yaml` → `app.state.yaml`, `stand.yaml` → `stand.state.yaml`. Файл в `.gitignore`
+(`*.state.yaml`), `app.yaml` при выборе не меняется.
+
+```yaml
+# app.state.yaml — создаётся приложением, руками не правится
+pipeline: recipes/letter_robot_sim.yaml
+```
+
+- **Запись.** Под тем же локом `<manifest>.lock`, что и `update`. Атомарно: temp +
+  `os.replace`; при `PermissionError` подмена повторяется (20 × 25 мс). Если содержимое
+  уже то же — файл не трогается.
+- **Чтение.** `resolve_active_pipeline(manifest_path, default)` лока не берёт и не бросает.
+  Состояние принято, если это dict с непустой строкой `pipeline`, указывающей на
+  существующий файл (относительный путь — от каталога манифеста). Иначе берётся умолчание
+  из `app.yaml`, а `note` называет причину и путь файла состояния.
+- **Манифест.** `load_manifest` использует резолвер. `AppManifest.pipeline_origin` —
+  `"state"` или `"manifest"`; `AppManifest.pipeline_note` — причина отказа от состояния.
+- **Видимость.** Состояние **молча** (только лог) перебивает правку умолчания в `app.yaml`.
+  Баннер сборки: `pipeline : <имя> (state)`. Чтобы сменить умолчание, правят `app.yaml` и
+  удаляют `<stem>.state.yaml`. Команды «сделать умолчанием» нет.
+- **Копия манифеста.** Стенд с `INSPECTOR_MANIFEST=<копия>` получает свой
+  `<копия-stem>.state.yaml` рядом с копией.
 
 ## Хуки — два сорта (формализованы в Ф5.12, ADR-APP-006)
 

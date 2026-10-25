@@ -129,7 +129,9 @@ def build_recipe_service(pm, manifest_path: Path):
       (debounce, ретаргет L2, откат — не обходятся);
     * ``persist_active`` — ``ManifestStore.set_pipeline`` значением относительно
       каталога манифеста (``recipes/<slug>.yaml`` — как ``persist_pipeline_choice``);
-    * ``read_active`` — stem ``pipeline:``, если он лежит в каталоге рецептов.
+      пишет в ``<stem>.state.yaml``, ``app.yaml`` (умолчание) не меняется;
+    * ``read_active`` — stem активного pipeline (состояние, иначе умолчание ``app.yaml``),
+      если он лежит в каталоге рецептов.
     """
     from multiprocess_framework.modules.app_module import ManifestStore
     from multiprocess_framework.modules.recipe.service import RecipeService

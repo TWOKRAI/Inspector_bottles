@@ -1,19 +1,25 @@
-"""``ManifestStore`` — единственная точка read/write ``app.yaml`` (NEW-1, Ф5.11).
+"""``ManifestStore`` — единственная сериализованная точка записи манифеста (NEW-1, Ф5.11).
 
 Манифест — **разделяемое состояние двух процессов**: backend (сборка) и GUI
-(запись выбранного рецепта) читают/пишут один ``app.yaml``. Раньше это была
+(запись выбранного рецепта) пишут и читают одни файлы. Раньше это была
 конвенция (``persist_pipeline_choice`` в прототипе + ``_persist_active_recipe``
 в GUI) — два независимых писателя без синхронизации → гонка read-modify-write
 (потеря обновления, torn-read).
 
+Файлы разделены (ADR-APP-008):
+  - ``app.yaml`` — **умолчание**: ``update`` / ``read_raw`` работают с ним;
+  - ``<stem>.state.yaml`` рядом с ним (``app.yaml`` → ``app.state.yaml``, в ``.gitignore``) —
+    **активный рецепт**: его пишет ``set_pipeline``, выбирает :func:`resolve_active_pipeline`.
+    Валидное состояние перебивает умолчание; битое — игнорируется с ``note``.
+
 ``ManifestStore`` делает контракт явным:
   - **межпроцессный лок** на sidecar ``<manifest>.lock`` сериализует read-modify-write —
     параллельные писатели не теряют правки друг друга (``fcntl.flock`` на POSIX,
-    ``msvcrt.locking`` на Windows);
+    ``msvcrt.locking`` на Windows); один лок на оба файла;
   - **атомарная запись** (temp-файл + ``os.replace``) — читатель никогда не видит
     полу-записанный файл;
   - **сохранение комментариев** (ruamel round-trip) — заголовок/пояснения ``app.yaml``
-    переживают запись.
+    переживают ``update``.
 
 Одна точка — вместо конвенции «все аккуратно пишут через одну функцию».
 """
@@ -22,8 +28,10 @@ from __future__ import annotations
 
 import os
 import threading
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 try:  # POSIX (macOS/Linux) — межпроцессный advisory-лок.
     import fcntl
@@ -51,6 +59,108 @@ _WIN_LOCK_TIMEOUT_S = 15.0
 _PROCESS_LOCK = threading.Lock()
 
 
+#: Повторы ``os.replace`` файла состояния при ``PermissionError`` (читатели без лока
+#: держат файл открытым — на Windows это ``[WinError 5]`` у писателя, зонд стадии 0).
+_REPLACE_RETRIES = 20
+_REPLACE_DELAY_S = 0.025
+
+#: Повторы чтения файла состояния при ``OSError`` (писатель мог подменять файл).
+_READ_RETRIES = 3
+_READ_DELAY_S = 0.025
+
+
+@dataclass(frozen=True)
+class ActivePipeline:
+    """Итог :func:`resolve_active_pipeline`.
+
+    Attributes:
+        path:   абсолютный путь активного pipeline.
+        origin: ``"state"`` — взят из ``<stem>.state.yaml``, ``"manifest"`` — умолчание ``app.yaml``.
+        note:   причина, по которой состояние проигнорировано (с путём файла); ``None`` — состояния
+                нет или оно принято.
+    """
+
+    path: Path
+    origin: Literal["manifest", "state"]
+    note: str | None = None
+
+
+def state_path_for(manifest_path: Path | str) -> Path:
+    """Путь файла состояния рядом с манифестом: ``app.yaml`` → ``app.state.yaml``.
+
+    Путь манифеста приводится через ``.resolve()``: относительный и абсолютный
+    путь дают один и тот же файл.
+    """
+    resolved = Path(manifest_path).resolve()
+    return resolved.with_name(resolved.stem + ".state.yaml")
+
+
+def resolve_active_pipeline(manifest_path: Path | str, default_value: str) -> ActivePipeline:
+    """Выбрать активный pipeline: валидное состояние перебивает умолчание ``app.yaml``.
+
+    **Лока не берёт**: зовётся и под ним (``ManifestStore.load`` держит
+    ``_PROCESS_LOCK`` — он не реентерабельный, повторный захват = deadlock), и без него.
+    Наружу не бросает: любая причина «состояние непригодно» → умолчание + ``note``.
+    Файл состояния резолвер не удаляет и не правит (``set_pipeline`` перезапишет битый).
+
+    Args:
+        manifest_path: путь ``app.yaml`` (рядом ищется ``<stem>.state.yaml``).
+        default_value: значение ``pipeline`` из манифеста (умолчание).
+    """
+    manifest_path = Path(manifest_path)
+    base_dir = manifest_path.parent
+    default = Path(default_value)
+    default = default if default.is_absolute() else (base_dir / default).resolve()
+    manifest_choice = ActivePipeline(default, "manifest")
+
+    try:
+        state_path = state_path_for(manifest_path)
+    except (OSError, ValueError):
+        return manifest_choice
+
+    def _fallback(reason: str) -> ActivePipeline:
+        return ActivePipeline(
+            default, "manifest", f"файл состояния {state_path} проигнорирован: {reason}; взято умолчание {default}"
+        )
+
+    text: str | None = None
+    for attempt in range(_READ_RETRIES + 1):
+        try:
+            text = state_path.read_text(encoding="utf-8")
+            break
+        except FileNotFoundError:
+            return manifest_choice
+        except UnicodeDecodeError as exc:  # ValueError, не OSError: повторять бессмысленно
+            return _fallback(f"не UTF-8 ({exc})")
+        except OSError as exc:
+            if attempt == _READ_RETRIES:
+                return _fallback(f"не читается ({exc})")
+            time.sleep(_READ_DELAY_S)
+    if text is None:  # недостижимо, но тип сужаем явно
+        return _fallback("не прочитан")
+
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        # ValueError — дата вида 2001-13-45 (конструктор timestamp), RecursionError — глубокая вложенность.
+        return _fallback(f"битый YAML ({exc})")
+    if not isinstance(data, dict):
+        return _fallback("содержимое не словарь")
+    value = data.get("pipeline")
+    if not isinstance(value, str) or not value.strip():
+        return _fallback("ключ pipeline отсутствует, не строка или пуст")
+    try:
+        candidate = Path(value.strip())
+        candidate = (candidate if candidate.is_absolute() else base_dir / candidate).resolve()
+        if not candidate.is_file():
+            return _fallback(f"рецепт {candidate} не существует или не файл")
+    except (OSError, ValueError) as exc:
+        return _fallback(f"путь рецепта непригоден ({exc})")
+    return ActivePipeline(candidate, "state")
+
+
 def _make_yaml():
     """ruamel YAML в round-trip режиме (комментарии/структура сохраняются)."""
     from ruamel.yaml import YAML
@@ -61,11 +171,13 @@ def _make_yaml():
 
 
 class ManifestStore:
-    """Сериализованный read/write ``app.yaml`` — закрывает гонку backend↔GUI.
+    """Сериализованный read/write манифеста — закрывает гонку backend↔GUI.
 
-    Один store на путь манифеста. Потокобезопасен; между процессами защищён
-    локом на sidecar-файле ``<manifest>.lock``: ``fcntl.flock`` на POSIX,
-    ``msvcrt.locking`` на Windows (см. :class:`_FileLock`).
+    Один store на путь манифеста. ``update`` / ``read_raw`` — ``app.yaml`` (умолчание);
+    ``set_pipeline`` — ``<stem>.state.yaml`` (активный рецепт), ``app.yaml`` не трогает.
+    Потокобезопасен; между процессами защищён локом на sidecar-файле
+    ``<manifest>.lock``: ``fcntl.flock`` на POSIX, ``msvcrt.locking`` на Windows
+    (см. :class:`_FileLock`).
     """
 
     def __init__(self, path: Path | str) -> None:
@@ -101,6 +213,10 @@ class ManifestStore:
         Комментарии/структура сохраняются (ruamel round-trip). Если значение ключа
         уже совпадает с текущим — файл не переписывается (не дёргаем mtime/git).
 
+        Это правка ``app.yaml`` — то есть умолчания. ``update({"pipeline": X})``
+        меняет умолчание; активным остаётся валидный файл состояния
+        (см. :meth:`set_pipeline`, :func:`resolve_active_pipeline`).
+
         Args:
             updates: top-level ключи для записи (значение заменяется целиком).
 
@@ -119,13 +235,22 @@ class ManifestStore:
             return {k: data[k] for k in data}
 
     def set_pipeline(self, value: str) -> str:
-        """Записать активный pipeline (``pipeline:``) — самая частая правка (backend↔GUI).
+        """Записать активный pipeline в файл состояния ``<stem>.state.yaml`` (backend↔GUI).
+
+        ``app.yaml`` не открывается на запись: его байты и mtime не меняются, там
+        остаётся только умолчание. Запись — под тем же EX-локом ``<manifest>.lock``,
+        атомарно (temp + ``os.replace``). Если файл состояния уже равен
+        ``{pipeline: value}`` — он не трогается (mtime стабилен).
 
         Returns:
-            Записанное (или уже бывшее) значение ``pipeline``.
+            Записанная строка ``value``.
         """
-        result = self.update({"pipeline": value})
-        return result.get("pipeline", value)
+        desired = {"pipeline": value}
+        with self._locked(exclusive=True):
+            state_path = state_path_for(self._path)
+            if self._read_state_unlocked(state_path) != desired:
+                self._atomic_write_state_unlocked(state_path, desired)
+        return value
 
     # --- Внутреннее ---
 
@@ -151,6 +276,47 @@ class ManifestStore:
         from ruamel.yaml.comments import CommentedMap
 
         return CommentedMap()
+
+    @staticmethod
+    def _read_state_unlocked(state_path: Path) -> object:
+        """Прочитать файл состояния как есть; любое «не прочиталось» → ``None``.
+
+        Нужен только для сравнения «уже записано то же значение». Битый файл
+        отличается от желаемого — ``set_pipeline`` его перезапишет.
+        """
+        import yaml
+
+        try:
+            return yaml.safe_load(state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError, yaml.YAMLError):
+            return None
+
+    @staticmethod
+    def _atomic_write_state_unlocked(state_path: Path, data: dict[str, Any]) -> None:
+        """Атомарно записать файл состояния (temp + ``os.replace``).
+
+        Читатели резолвера берут файл БЕЗ лока и на Windows могут держать его
+        открытым в момент подмены → ``PermissionError [WinError 5]`` у писателя.
+        Подмена повторяется ``_REPLACE_RETRIES`` раз по ``_REPLACE_DELAY_S``.
+        """
+        import yaml
+
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_name(state_path.name + f".tmp.{os.getpid()}")
+        try:
+            with tmp.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+            for attempt in range(_REPLACE_RETRIES):
+                try:
+                    os.replace(tmp, state_path)
+                    return
+                except PermissionError:
+                    if attempt == _REPLACE_RETRIES - 1:
+                        raise
+                    time.sleep(_REPLACE_DELAY_S)
+        finally:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
 
     def _atomic_write_unlocked(self, data) -> None:
         yaml = _make_yaml()

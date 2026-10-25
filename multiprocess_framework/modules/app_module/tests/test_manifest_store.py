@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import threading
 from pathlib import Path
 
 import pytest
 import yaml
 
-from multiprocess_framework.modules.app_module import ManifestStore
+from multiprocess_framework.modules.app_module import ManifestStore, resolve_active_pipeline
 from multiprocess_framework.modules.app_module import store as store_mod
 
 _HEADER = "# app.yaml — заголовок-комментарий (должен пережить запись)\n"
@@ -45,12 +46,107 @@ def test_update_preserves_comments(tmp_path: Path) -> None:
 
 
 def test_set_pipeline_noop_when_unchanged(tmp_path: Path) -> None:
+    """Повторный set_pipeline тем же значением не переписывает файл состояния (A7)."""
     path = _seed(tmp_path)
+    state_path = path.with_name("app.state.yaml")
     store = ManifestStore(path)
-    before_mtime = path.stat().st_mtime_ns
-    result = store.set_pipeline("recipes/a.yaml")  # уже такое значение
-    assert result == "recipes/a.yaml"
-    assert path.stat().st_mtime_ns == before_mtime  # файл не тронут (не дёргаем mtime)
+
+    assert store.set_pipeline("recipes/b.yaml") == "recipes/b.yaml"
+    assert yaml.safe_load(state_path.read_text(encoding="utf-8")) == {"pipeline": "recipes/b.yaml"}
+
+    t0 = 1_000_000_000_000_000_000  # заведомо в прошлом: любая перезапись сдвинет mtime
+    os.utime(state_path, ns=(t0, t0))
+    assert store.set_pipeline("recipes/b.yaml") == "recipes/b.yaml"  # уже такое значение
+    assert state_path.stat().st_mtime_ns == t0  # файл состояния не тронут
+
+
+def _seed_state_with_recipe(tmp_path: Path) -> tuple[Path, Path]:
+    """Валидное состояние: app.state.yaml -> recipes/b.yaml, файл рецепта создан."""
+    path = _seed(tmp_path)
+    (tmp_path / "recipes").mkdir()
+    recipe = tmp_path / "recipes" / "b.yaml"
+    recipe.write_text("processes: []\n", encoding="utf-8")
+    path.with_name("app.state.yaml").write_text("pipeline: recipes/b.yaml\n", encoding="utf-8")
+    return path, recipe
+
+
+def _patch_read_text(monkeypatch: pytest.MonkeyPatch, *, fail_first_n: int | None) -> list[Path]:
+    """Path.read_text падает ``PermissionError`` на файле состояния.
+
+    ``fail_first_n=N`` — первые N обращений к ``app.state.yaml``; ``None`` — все.
+    Возвращает список обращений к файлу состояния (по нему видно число повторов).
+    """
+    real = Path.read_text
+    calls: list[Path] = []
+
+    def fake(self: Path, *args, **kwargs):
+        if self.name == "app.state.yaml":
+            calls.append(self)
+            if fail_first_n is None or len(calls) <= fail_first_n:
+                raise PermissionError(13, "файл занят писателем (имитация WinError 5)")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake)
+    return calls
+
+
+def test_resolver_retries_transient_read_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Писатель подменяет файл в момент чтения: первое чтение падает, повтор успешен."""
+    path, recipe = _seed_state_with_recipe(tmp_path)
+    calls = _patch_read_text(monkeypatch, fail_first_n=1)
+
+    active = resolve_active_pipeline(path, "recipes/a.yaml")
+
+    assert active.origin == "state"
+    assert active.path == recipe.resolve()
+    assert active.note is None
+    assert len(calls) >= 2  # было повторное чтение, а не сдача с первой ошибки
+
+
+def test_resolver_persistent_read_error_falls_back_with_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Чтение падает всегда: умолчание + note с путём состояния, исключения нет."""
+    path, _recipe = _seed_state_with_recipe(tmp_path)
+    _patch_read_text(monkeypatch, fail_first_n=None)
+
+    active = resolve_active_pipeline(path, "recipes/a.yaml")
+
+    assert active.origin == "manifest"
+    assert active.path == (tmp_path / "recipes" / "a.yaml").resolve()
+    assert active.note
+    assert "app.state.yaml" in active.note
+
+
+_PATHOLOGICAL_STATES = {
+    "extra_date_key": "pipeline: recipes/b.yaml\nwhen: 2001-13-45\n",
+    "date_like_value": "pipeline: 2001-13-45\n",
+    "deep_nesting": "pipeline: " + "[" * 100000 + "\n",
+}
+
+
+@pytest.mark.parametrize("content", _PATHOLOGICAL_STATES.values(), ids=_PATHOLOGICAL_STATES.keys())
+def test_resolver_never_raises_on_pathological_yaml(tmp_path: Path, content: str) -> None:
+    """YAML, на котором safe_load бросает не YAMLError (ValueError / RecursionError) -> умолчание + note."""
+    path, _recipe = _seed_state_with_recipe(tmp_path)
+    path.with_name("app.state.yaml").write_text(content, encoding="utf-8")
+
+    active = resolve_active_pipeline(path, "recipes/a.yaml")
+
+    assert active.origin == "manifest"
+    assert active.path == (tmp_path / "recipes" / "a.yaml").resolve()
+    assert active.note
+    assert "app.state.yaml" in active.note
+
+
+@pytest.mark.parametrize("content", _PATHOLOGICAL_STATES.values(), ids=_PATHOLOGICAL_STATES.keys())
+def test_set_pipeline_overwrites_pathological_state(tmp_path: Path, content: str) -> None:
+    """set_pipeline поверх такого состояния не падает и пишет валидное."""
+    path, _recipe = _seed_state_with_recipe(tmp_path)
+    state_path = path.with_name("app.state.yaml")
+    state_path.write_text(content, encoding="utf-8")
+
+    assert ManifestStore(path).set_pipeline("recipes/b.yaml") == "recipes/b.yaml"
+
+    assert yaml.safe_load(state_path.read_text(encoding="utf-8")) == {"pipeline": "recipes/b.yaml"}
 
 
 def test_atomic_write_no_leftover_tmp(tmp_path: Path) -> None:

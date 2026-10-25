@@ -17,10 +17,12 @@ YAML-dict, на выходе — Pydantic с абсолютными путями
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
+
+from .store import resolve_active_pipeline
 
 
 class DiscoverySpec(BaseModel):
@@ -59,6 +61,9 @@ class AppManifest(BaseModel):
                    инфраструктуры без правки общего фундамента).
         recipes:   Каталог GUI-редактируемых рецептов; ``None`` — не используется.
         discovery: Пути авто-скана плагинов/сервисов (абсолютные после загрузки).
+        pipeline_origin: ``"state"`` — ``pipeline`` взят из ``<stem>.state.yaml``,
+                   ``"manifest"`` — умолчание ``app.yaml``.
+        pipeline_note: Причина, по которой файл состояния проигнорирован (с путём); иначе ``None``.
     """
 
     source: Path
@@ -70,6 +75,8 @@ class AppManifest(BaseModel):
     base: tuple[Path, ...] = ()
     recipes: Path | None = None
     discovery: DiscoverySpec = Field(default_factory=DiscoverySpec)
+    pipeline_origin: Literal["manifest", "state"] = "manifest"
+    pipeline_note: str | None = None
 
 
 def _resolve_base(base_dir: Path, raw: object) -> tuple[Path, ...]:
@@ -138,6 +145,8 @@ def load_manifest(path: Path | str) -> AppManifest:
     base_raw = raw.get("base")
     recipes_raw = raw.get("recipes")
     system_raw = raw.get("system")
+    # Нет ключа pipeline в app.yaml — по-прежнему KeyError; активный выбирает резолвер.
+    active = resolve_active_pipeline(path, raw["pipeline"])
 
     return AppManifest(
         source=path.resolve(),
@@ -145,8 +154,10 @@ def load_manifest(path: Path | str) -> AppManifest:
         version=int(raw.get("version", 1)),
         extras=dict(raw.get("extras") or {}),
         system=_resolve(base_dir, system_raw) if system_raw else None,
-        pipeline=_resolve(base_dir, raw["pipeline"]),
+        pipeline=active.path,
         base=_resolve_base(base_dir, base_raw),
         recipes=_resolve(base_dir, recipes_raw) if recipes_raw else None,
         discovery=discovery,
+        pipeline_origin=active.origin,
+        pipeline_note=active.note,
     )

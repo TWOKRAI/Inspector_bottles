@@ -39,7 +39,7 @@ from .interfaces import (
     ThrottleRules,
 )
 from .manifest import AppManifest, DiscoverySpec, load_manifest
-from .store import ManifestStore
+from .store import ActivePipeline, ManifestStore, resolve_active_pipeline, state_path_for
 
 __all__ = [
     # entry
@@ -50,6 +50,9 @@ __all__ = [
     "DiscoverySpec",
     "load_manifest",
     "ManifestStore",
+    "ActivePipeline",
+    "resolve_active_pipeline",
+    "state_path_for",
     # discovery
     "discover",
     "discover_services",
