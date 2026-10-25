@@ -104,8 +104,9 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         не применяется (та же живая находка «сохранить не сохраняет», только
         воскрешённая для switch).
 
-        Свежее всего — манифест (``app.yaml: pipeline``): его пишет GUI при
-        активации рецепта. Фолбэк — boot-значение из orchestrator_config.
+        Свежее всего — активный pipeline манифеста (``<stem>.state.yaml``, иначе
+        умолчание ``app.yaml: pipeline``): состояние пишет GUI при активации рецепта.
+        Фолбэк — boot-значение из orchestrator_config.
         """
         from_manifest = getattr(orchestrator, "_active_recipe_from_manifest", None)
         if callable(from_manifest):

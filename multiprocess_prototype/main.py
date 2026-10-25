@@ -125,10 +125,12 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
     """Запуск приложения через ``app_module.run_app`` (Ф5.11).
 
     CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
-    активным»: он пишется в манифест (``app.yaml: pipeline``) через ``ManifestStore``
-    (NEW-1 — единая сериализованная точка, гонка backend↔GUI закрыта) ДО сборки.
-    Тогда и бэкенд, и дочерний GUI-процесс читают ОДИН активный рецепт. При ошибке
-    записи — graceful fallback (override только в бэкенд).
+    активным»: он пишется в файл состояния ``<stem>.state.yaml`` рядом с манифестом
+    (``app.state.yaml``, вне git) через ``ManifestStore`` (NEW-1 — единая
+    сериализованная точка, гонка backend↔GUI закрыта) ДО сборки; ``app.yaml`` хранит
+    только умолчание и не меняется (ADR-APP-008). Тогда и бэкенд, и дочерний
+    GUI-процесс читают ОДИН активный рецепт. При ошибке записи — graceful fallback
+    (override только в бэкенд).
 
     ``headless`` (Ф2 T2.2) — явный backend-only режим (см. ``_is_headless``): ``None``
     смотрит env ``INSPECTOR_HEADLESS``; явный ``True``/``False`` (CLI ``--headless``,
@@ -157,8 +159,8 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
             effective_override = None  # манифест уже указывает на нужный рецепт
         except Exception as exc:  # noqa: BLE001 — persist не должен валить запуск
             print(
-                f"[run] не удалось записать рецепт в манифест ({exc}); запускаю бэкенд "
-                "с CLI-override (GUI может взять рецепт из старого app.yaml)",
+                f"[run] не удалось записать рецепт в файл состояния <stem>.state.yaml ({exc}); "
+                "запускаю бэкенд с CLI-override",
                 file=sys.stderr,
             )
 

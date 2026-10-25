@@ -414,7 +414,7 @@ def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
 
 
 def _manifest_pipeline_value(override: str) -> str:
-    """Нормализовать CLI-override к строке для записи в ``app.yaml: pipeline``.
+    """Нормализовать CLI-override к строке ``pipeline`` для файла состояния.
 
     Голое имя рецепта → ``recipes/<name>.yaml`` (та же форма, что пишет GUI при
     активации рецепта, см. ``app.py::_persist_active_recipe``). Явный путь — как
@@ -427,17 +427,18 @@ def _manifest_pipeline_value(override: str) -> str:
 
 
 def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
-    """Записать выбранный CLI-рецепт в манифест (``app.yaml: pipeline``).
+    """Записать выбранный CLI-рецепт в файл состояния ``<stem>.state.yaml``.
 
     Делает CLI-override (`run.py <recipe>`) «последним активным рецептом»: и
     бэкенд (``main`` → ``build_launcher``), и дочерний GUI-процесс
     (``frontend/app.py`` читает ``resolve_manifest_path().pipeline``) после записи
-    видят ОДИН и тот же рецепт из конфига. Без этой записи override доходил только
-    до бэкенда, а GUI читал старый ``app.yaml`` — рецепты расходились (маршрутизация
-    дисплеев не совпадала, дисплеи пустые).
+    видят ОДИН и тот же рецепт. Без этой записи override доходил только
+    до бэкенда, а GUI читал прежний активный рецепт — рецепты расходились
+    (маршрутизация дисплеев не совпадала, дисплеи пустые).
 
-    Запись через ruamel round-trip — комментарии ``app.yaml`` сохраняются. Если
-    значение уже совпадает с текущим — файл не трогаем (не дёргаем mtime/git).
+    ``app.yaml`` не меняется (байты и mtime): там остаётся умолчание (ADR-APP-008).
+    Файл состояния лежит рядом с манифестом (``app.state.yaml``) и в ``.gitignore``.
+    Если он уже равен записываемому значению — его не трогаем (не дёргаем mtime).
 
     Args:
         manifest_path: путь к ``app.yaml``.
@@ -465,10 +466,11 @@ def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
             f"(проверьте имя: run.py <recipe> ищет recipes/<recipe>.yaml)"
         )
 
-    # NEW-1 (Ф5.11): запись через ManifestStore — единственная точка read/write
-    # app.yaml, сериализованная межпроцессным локом (закрывает гонку backend↔GUI:
-    # тот же store использует GUI ``_persist_active_recipe``). set_pipeline сам
-    # пропускает запись, если значение уже совпадает (не дёргаем mtime/git).
+    # NEW-1 (Ф5.11): запись через ManifestStore — единственная сериализованная точка
+    # записи манифеста, под межпроцессным локом (закрывает гонку backend↔GUI: тот же
+    # store использует GUI ``_persist_active_recipe``). set_pipeline пишет в
+    # <stem>.state.yaml, а не в app.yaml, и сам пропускает запись, если значение
+    # уже совпадает (не дёргаем mtime).
     from multiprocess_framework.modules.app_module import ManifestStore
 
     return ManifestStore(manifest_path).set_pipeline(value)

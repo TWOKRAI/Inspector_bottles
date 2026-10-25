@@ -1,19 +1,25 @@
-"""``ManifestStore`` — единственная точка read/write ``app.yaml`` (NEW-1, Ф5.11).
+"""``ManifestStore`` — единственная сериализованная точка записи манифеста (NEW-1, Ф5.11).
 
 Манифест — **разделяемое состояние двух процессов**: backend (сборка) и GUI
-(запись выбранного рецепта) читают/пишут один ``app.yaml``. Раньше это была
+(запись выбранного рецепта) пишут и читают одни файлы. Раньше это была
 конвенция (``persist_pipeline_choice`` в прототипе + ``_persist_active_recipe``
 в GUI) — два независимых писателя без синхронизации → гонка read-modify-write
 (потеря обновления, torn-read).
 
+Файлы разделены (ADR-APP-008):
+  - ``app.yaml`` — **умолчание**: ``update`` / ``read_raw`` работают с ним;
+  - ``<stem>.state.yaml`` рядом с ним (``app.yaml`` → ``app.state.yaml``, в ``.gitignore``) —
+    **активный рецепт**: его пишет ``set_pipeline``, выбирает :func:`resolve_active_pipeline`.
+    Валидное состояние перебивает умолчание; битое — игнорируется с ``note``.
+
 ``ManifestStore`` делает контракт явным:
   - **межпроцессный лок** на sidecar ``<manifest>.lock`` сериализует read-modify-write —
     параллельные писатели не теряют правки друг друга (``fcntl.flock`` на POSIX,
-    ``msvcrt.locking`` на Windows);
+    ``msvcrt.locking`` на Windows); один лок на оба файла;
   - **атомарная запись** (temp-файл + ``os.replace``) — читатель никогда не видит
     полу-записанный файл;
   - **сохранение комментариев** (ruamel round-trip) — заголовок/пояснения ``app.yaml``
-    переживают запись.
+    переживают ``update``.
 
 Одна точка — вместо конвенции «все аккуратно пишут через одну функцию».
 """
@@ -164,11 +170,13 @@ def _make_yaml():
 
 
 class ManifestStore:
-    """Сериализованный read/write ``app.yaml`` — закрывает гонку backend↔GUI.
+    """Сериализованный read/write манифеста — закрывает гонку backend↔GUI.
 
-    Один store на путь манифеста. Потокобезопасен; между процессами защищён
-    локом на sidecar-файле ``<manifest>.lock``: ``fcntl.flock`` на POSIX,
-    ``msvcrt.locking`` на Windows (см. :class:`_FileLock`).
+    Один store на путь манифеста. ``update`` / ``read_raw`` — ``app.yaml`` (умолчание);
+    ``set_pipeline`` — ``<stem>.state.yaml`` (активный рецепт), ``app.yaml`` не трогает.
+    Потокобезопасен; между процессами защищён локом на sidecar-файле
+    ``<manifest>.lock``: ``fcntl.flock`` на POSIX, ``msvcrt.locking`` на Windows
+    (см. :class:`_FileLock`).
     """
 
     def __init__(self, path: Path | str) -> None:

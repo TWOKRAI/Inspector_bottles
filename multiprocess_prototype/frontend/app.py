@@ -537,10 +537,11 @@ def run_gui(process: "GuiProcess") -> None:
         # sync_domain_to_state — no-op если proxy=None (adapter логирует warning)
         _recipe_adapter.sync_domain_to_state()
 
-        # Restore активного рецепта: манифест (app.yaml → pipeline) указывает на
-        # бутовый рецепт — он же «последний активный» (persist пишет pipeline при
-        # активации). set_active помечает его в движке, чтобы GUI (Pipeline/Recipes)
-        # знал текущий рецепт сразу после старта, без ручной активации. Зовём
+        # Restore активного рецепта: манифест указывает на бутовый рецепт — он же
+        # «последний активный». _manifest.pipeline берётся из <stem>.state.yaml
+        # (persist пишет его при активации), а если состояния нет или оно битое —
+        # из умолчания app.yaml. set_active помечает его в движке, чтобы GUI
+        # (Pipeline/Recipes) знал текущий рецепт сразу после старта, без ручной активации. Зовём
         # менеджер напрямую (не через presenter) — не зависит от UI-пути активации.
         try:
             if _manifest.pipeline_note:
@@ -843,14 +844,15 @@ def run_gui(process: "GuiProcess") -> None:
         app.quit()
 
     def _persist_active_recipe(slug: str) -> None:
-        """persist #1: записать активный рецепт в манифест (app.yaml → pipeline).
+        """persist #1: записать активный рецепт в файл состояния ``<stem>.state.yaml``.
 
-        Закрывает loop: активация в GUI → app.yaml обновлён → следующий старт
+        Закрывает loop: активация в GUI → состояние обновлено → следующий старт
         восстанавливает рецепт (restore выше читает _manifest.pipeline.stem). Запись
         через ManifestStore (NEW-1, Ф5.11) — единственная сериализованная точка
-        read/write app.yaml: тот же store использует backend ``persist_pipeline_choice``,
+        записи манифеста: тот же store использует backend ``persist_pipeline_choice``,
         поэтому одновременная запись GUI и backend не теряет обновление (гонка закрыта).
-        Комментарии app.yaml сохраняются (ruamel round-trip внутри store).
+        ``app.yaml`` не меняется — там остаётся умолчание (ADR-APP-008), tracked-файл
+        от выбора рецепта не грязнится.
         """
         from multiprocess_framework.modules.app_module import ManifestStore
 

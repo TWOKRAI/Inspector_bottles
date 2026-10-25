@@ -10,7 +10,7 @@
 | Файл | Роль |
 |---|---|
 | `manifest.py` | `AppManifest` (`name`/`version`/`extras` + пути + `discovery`), `load_manifest` |
-| `store.py` | `ManifestStore` — единственная точка read/write app.yaml (flock + atomic), NEW-1 |
+| `store.py` | `ManifestStore` — сериализованный read/write (flock + atomic), NEW-1; `set_pipeline` пишет `<stem>.state.yaml`, `resolve_active_pipeline` выбирает активный pipeline (ADR-APP-008) |
 | `discovery.py` | `discover()` — единый helper плагины (`plugin.py`) + сервисы (маркер `service.yaml`) |
 | `env.py` | `apply_env_aliases()` — `MULTIPROCESS_*` ↔ `INSPECTOR_*` back-compat |
 | `builder.py` | `SystemBuilder` + `AppSpec` (build-time хуки) + `assemble_proc_dicts` + `GENERIC_ORCHESTRATOR_CLASS_PATH` |
@@ -20,7 +20,7 @@
 
 ## Контракт (module-contract)
 
-- README + interfaces.py (Protocol) + contract-тесты + DECISIONS.md (ADR-APP-001..006) + STATUS.md ✅
+- README + interfaces.py (Protocol) + contract-тесты + DECISIONS.md (ADR-APP-001..008) + STATUS.md ✅
 - Инвариант яруса: внутри framework 0 импортов app_module — sentrux boundary + `test_contract.py`.
 
 ## Тесты
