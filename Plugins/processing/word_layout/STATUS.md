@@ -8,8 +8,10 @@
   доворот `wrap180`, проверка зазора; потоковый жадный матчинг (дубли → нужное число раз,
   затем пропуск; готовность слова).
 - **Плагин** (`plugin.py`, `registers.py`, `config.py`): `predictions → robot_job {x,y,z,r}`;
-  режимы `use_pitch`/between; детект «нового диска» (смена буквы/пауза, дедуп по букве,
-  опц. `trigger`); калибровка `angle_zero`/`angle_invert`; команда `reset_word`; прогресс в state.
+  режимы `use_pitch`/between; детект «нового диска» (новый `sidecar.track_id`; без него — смена буквы/пауза.
+  Ограничение: id zone_edge — счётчик процесса line; его рестарт без рестарта layout обнуляет
+  id, и диск с id, равным последнему взятому до рестарта, отбрасывается (`reset_word` это не
+  лечит); опц. `trigger`); калибровка `angle_zero`/`angle_invert`; команда `reset_word`; прогресс в state.
 - **Интеграция:** вписан в рецепт `hikvision_letter_robot` (`infer.predictions → layout.word_layout`),
   валидация структуры headless.
 - **Тесты:** 50 (geometry/assembler/plugin), ruff чист.
