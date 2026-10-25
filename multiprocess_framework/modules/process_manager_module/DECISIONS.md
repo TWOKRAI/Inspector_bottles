@@ -1741,7 +1741,7 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
 
 ## ADR-PMM-037: Ожидание стопа вычерпывает свои каналы (Task 1.8, L-9, 2026-10-19)
 
-**Статус:** accepted (стадия 0 — `docs/reviews/2026-10-19_lifecycle-1.8-stage0.md`; реализация — Task 1.8 плана `lifecycle-stop-ownership`).
+**Статус:** superseded by ADR-PMM-039 (2026-10-25); страховка, не основной путь; код FROZEN, не удалять (стадия 0 — `docs/reviews/2026-10-19_lifecycle-1.8-stage0.md`; реализация — Task 1.8 плана `lifecycle-stop-ownership`).
 
 ### Контекст
 
@@ -1867,3 +1867,91 @@ K=120 без вычерпывания — жив через 3 с (ожидани
 **Reversible:** yes (без `mode` команда идёт прежним путём; снять `set_force_deadline` — `force` станет graceful).
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/0.2.md`, `tests/test_system_shutdown_force.py`,
 `backend_ctl/tests/test_system_shutdown_driver.py`, `backend_ctl/tests/test_system_shutdown_force_live.py`.
+
+## ADR-PMM-039: Команды жизненного цикла PM исполняет `KeyedExecutor` вне `message_processor`; ответ — после подтверждённой смерти (Task 1.9b, L-9, 2026-10-25)
+
+**Статус:** accepted (2026-10-25; стадия 0 — три раунда: `docs/reviews/2026-10-21_task-1.9b-stage0-opus.md`, `2026-10-25_task-1.9b-stage0-r2-opus.md`, `2026-10-25_task-1.9b-stage0-r3-teamlead.md`; реализация — Task 1.9b плана `lifecycle-stop-ownership`). Заменяет ADR-PMM-037 как основной путь.
+
+### Контекст
+
+ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `process.stop` исполнялся внутри `receive()` потока `message_processor`, и PM
+досыпал паузу, перенося входящее в буфер. Это обход, а не причина: пока стоп ждёт смерти ребёнка, PM глух к
+`supervision.status` и прочему; неявная сериализация «рестарт/switch/стоп» держалась на том, что поток один (допущение
+`monitor/process_monitor.py`, докстринг у `process.restart`). Task 1.9a дал механизм (`KeyedExecutor` ADR-WRK-005, развилка
+по регистрации ADR-CMD-006, `reply` ADR-RTR-015), Task 1.9m — владельца (`ExecutorManager`, ADR-WRK-006). Здесь — политика PM.
+
+### Решение
+
+- **D1. Один исполнитель, два адаптера.** `executor_manager.create("pm-lifecycle", {"kind": "keyed", "serial": True},
+  should_reject=_pm_stopping)`: ВСЕ операции жизненного цикла строго последовательно (параллельные стопы разных детей на
+  гонки реестра не проверены). Адаптеры — объекты с `submit(...)`, зарегистрированные в менеджере: `pm-lifecycle-submit`
+  (считает операции в полёте) и `pm-transition-gate` (класс T). Создание и обе `register` — в `initialize()` между
+  `super().initialize()` и регистрацией встроенных команд; `executor_manager is None` — ERROR и `initialize()` → `False`.
+  Обработчики `_cmd_*` не менялись.
+- **D2. Класс команды задаёт регистрация** (`executor=`, `key_from=`, `targets=`), а не отправитель и не роутер.
+  L (всегда исполнитель): `process.create/start/stop/restart`, `topology.apply`, `wire.setup/teardown`, `recipe.activate`.
+  T (исполнитель, только если цель в переходе, иначе на месте): `process.relay/pause/resume`, `telemetry.broadcast`,
+  `observability.tail.subscribe_all/unsubscribe_all`. R (читают сразу), S (`system.shutdown` — никогда исполнитель).
+  Полная таблица с `файл:строка` — [`docs/maps/pm-lifecycle-commands.md`](../../../docs/maps/pm-lifecycle-commands.md);
+  здесь не копируется. Вложенная дверь (`process.command`) отвечает через тот же `reply`.
+- **D3. Чтение без нового лока.** `_routing_lock` как был (листовой, правило «лок не держится поверх ожидания, сна,
+  спавна, IPC»); `wire.status`, `supervision.status`, `topology.get` берут снимок словарей — единственное исключение из
+  «не менять обработчики».
+- **D4. Один владелец стопа.** Предикат `_pm_stopping() = system_stop_event or _children_stopping`.
+  `ChildProcessStop(should_abort=)` опрашивается каждый `STOP_POLL_S` и возвращается досрочно (`aborted`, без метки, без
+  `terminate`); `ProcessRegistry.stop_abort` передаётся ТОЛЬКО во временную область `_stop_many`. Группа детей корня
+  (`_ChildrenGroupStop`) не прерывается: она и есть стоп после прерывания, срок и эскалация прежние (ADR-PMM-036/038).
+  `_ChildrenStop.request_stop()` в фазе 1: `_children_stopping = True` → `executor.request_stop()` + `join_until` (один срок
+  `infra_s` на исполнитель и паузу монитора; на потоке самого исполнителя не ждёт) → стоп детей в `finally`.
+  Прерванный стоп — WARNING «стоп '<имя>' прерван системным стопом», не ERROR «жив после kill».
+
+### Инварианты (контракт)
+
+- **I1 (условно): один владелец ребёнка — при `join_until=True`.** Системный стоп во время стопа в исполнителе: очередь
+  снимается, текущая операция возвращается за ≤ 0,2 с, потом дети. При `False` — ERROR в лог, I1 не заявлен. Не
+  прерываются участки: `process.start()`, `apply_priority` (0,1 с), `remove_process`, `_wait_started_ready`,
+  `_resume_monitor` в `finally` `apply_topology`.
+- **I2: опись полна.** У каждой команды и не-командного писателя есть решение и `файл:строка` (карта выше); relay в цель в
+  переходе идёт через исполнитель.
+- **I3: ответы прежние, кроме перечня.** (а) команда с `key_from` без ключа: `process.stop` и прочие получают
+  `{"success": False, "error": "key_missing", "command": <имя>}` вместо `{"error": "process_name required"}` и текста relay;
+  (б) новые отказы `system_stopping` (операция снята из очереди) и `executor_busy` (очередь на потолке);
+  (в) прерванный стоп — `success: False`. Литерал `system_stopping` — только для снятых из очереди; прерванная
+  текущая операция отвечает так, как `_cmd_process_stop` отвечает при `stop_process == False`.
+- **I4: PM жив.** `message_processor` и `supervision.status` отвечают весь одиночный стоп и `topology.apply`.
+
+### Альтернативы
+
+**A. Исполнитель вне `message_processor` (выбрано).** Плюс: причина L-9 устранена (поток читает всегда), одно
+место сериализации, ответ после смерти ребёнка. Минус: класс команд надо описать по регистрации, ответы при ошибке
+меняются (I3), I1 условен.
+
+**B. Оставить вычерпывание (ADR-PMM-037).** Плюс: уже работает, ноль нового кода. Минус: PM глух на время стопа; не
+покрывает системный стоп; две политики ожидания на одном классе.
+
+**C. FIFO на каждого ребёнка (параллель по ключам).** Отвергнуто: гонки реестра при параллельных стопах не проверены; один
+исполнитель сегодня, параллель потом одной настройкой по замеру.
+
+**D. Ожидание как политика `request()` ((в), решение CTO D2).** Отвергнуто: меняет контракт ADR-RTR-011 для всех.
+
+**E. `manages_own_reply` для класса T.** Несовместимо с контрактом 1.9a: у T ответ на вызывающем потоке при простое.
+
+### Следствия и пределы
+
+- **Заморозка (принцип 3).** `RouterManager.pump_inbound`, `ProcessRegistry.stop_wait_idle`, `ChildProcessStop(idle=)`,
+  `ProcessManagerProcess._stop_wait_idle` не удаляются и не меняются. Присвоение `stop_wait_idle` в PM остаётся: на потоке
+  исполнителя `pump_inbound` возвращает 0 (вне `receive`, ADR-RTR-014 pre) — ноль затрат; страховка сработает, если опись
+  пропустила путь стопа на приёмном потоке. Тесты замороженного API остаются зелёными без правок. Снятие заморозки —
+  решением владельца.
+- Ответ на стоп по-прежнему приходит после подтверждённой смерти — поэтому `backend_ctl` (ответ 5 с) стоп дольше 5 с видит
+  таймаутом на своей стороне; предел сохранён, таймаут драйвера не менялся.
+- Срок `force` (ADR-PMM-038) фазу 1 не укорачивает: блок ≤ `infra_s`, как сегодня у паузы монитора. ADR-RTR-011 не меняется.
+- Ожидание готовности ребёнка (`_run_when_child_ready`) перенесено в Task 1.9c (в ADR-WRK-005 «Следствия» оно значилось за 1.9b); в 1.9b не менялось.
+- Не покрыто: загрузка PM (до приёма команд); ребёнок с `request()` к PM до готовности — `docs/claude/OPEN_QUESTIONS.md`.
+
+**Reversible:** yes (снять `executor=` у зарегистрированных команд — они вернутся на `message_processor`; присвоение
+`stop_wait_idle` вернёт вычерпывание).
+**Refs:** `plans/lifecycle-stop-ownership.md`, `plans/lifecycle-stop-ownership/tasks/T1.9b.md`, `T1.9b_context.md`,
+`docs/maps/pm-lifecycle-commands.md`, ADR-PMM-037, ADR-PMM-038, ADR-WRK-005, ADR-WRK-006, ADR-CMD-006, ADR-RTR-014,
+ADR-RTR-015, `tests/test_child_stop_idle_acceptance.py`, `tests/test_stop_wait_idle_hazards.py`,
+`tests/test_pm_stop_drains_own_queue_acceptance.py`.

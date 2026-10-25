@@ -94,8 +94,8 @@ STATUS.md явно отмечал: «рантайм ThreadConfig не замен
 ключи). Поток на операцию (нет потолка и join). `WorkerPoolExecutor` (нет ключей; план кадров). Блокирующий `submit`
 на потолке (приёмный поток ждал бы — ровно L-9).
 
-**Следствия.** PM в 1.9a не меняется (ни одна команда не помечена). 1.9b: `_run_when_child_ready` — тонкая обёртка
-над `submit(inline_if_idle=True)`, исполнитель — во владении `Scope` PM.
+**Следствия.** PM в 1.9a не меняется (ни одна команда не помечена). 1.9c (перенесено из 1.9b, ADR-PMM-039):
+`_run_when_child_ready` — тонкая обёртка над `submit(inline_if_idle=True)`, исполнитель — во владении `Scope` PM.
 
 **Reversible:** yes (новый файл; до 1.9b потребитель — только `CommandManager` через протокол).
 **Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9a.md` (D1, D2), ADR-PMM-024, ADR-CMD-006,

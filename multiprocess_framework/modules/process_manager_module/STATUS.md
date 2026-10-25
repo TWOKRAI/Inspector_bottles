@@ -208,3 +208,8 @@
 ## Потоки OpenCV процесса (2026-09-29, Task 4.6)
 
 - `extras: {cv_threads: N}` рецепта (только под `extras`: плоский ключ уходит в metadata и не доходит) → `cv2.setNumThreads(N)` в ребёнке до создания класса процесса (`_apply_cv_threads` в `runner/process_runner.py`), дефолт 2; cv2 нет — ничего. Как подбирать: сумма `cv_threads` одновременно занятых процессов ≈ числу ядер (тяжёлому процессу на крупных кадрах 4-8, лёгким 1), действующее значение — `introspect.status.cv_threads`, выбирать замером (CPU процесса + время плагина), а не на глаз.
+
+## Команды жизненного цикла на исполнителе (2026-10-25, Task 1.9b, ADR-PMM-039)
+
+- `process.create/start/stop/restart`, `topology.apply`, `wire.setup/teardown`, `recipe.activate` исполняет `KeyedExecutor` `pm-lifecycle` (через `ExecutorManager`) вне `message_processor`; ответ приходит после подтверждённой смерти ребёнка; PM отвечает на `supervision.status` весь стоп. Таблица классов — `docs/maps/pm-lifecycle-commands.md`. Изменения ответов (I3): `key_missing`, `system_stopping`, `executor_busy`, прерванный стоп — `success: False`. Статус: реализовано (коммиты `fb8911894`, `1fd52921c`); ревью и числа стенда — за лидом, `plans/lifecycle-stop-ownership/tasks/T1.9b_tests.md`.
+- **Замороженный API (принцип 3):** `RouterManager.pump_inbound`, `ProcessRegistry.stop_wait_idle`, `ChildProcessStop(idle=)`, `ProcessManagerProcess._stop_wait_idle` — не удалять и не менять (ADR-PMM-039; ADR-PMM-037 superseded). Снятие — только решением владельца.
