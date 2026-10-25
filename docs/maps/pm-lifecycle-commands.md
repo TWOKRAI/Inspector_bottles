@@ -116,11 +116,12 @@
 - **(д)** `_routing_lock` (`PMP:112`, `threading.Lock`, не `RLock`): `:755`, `:1971`, `:1999`, `:2013`, `:2051`. Других
   локов на словари D3 нет: `_process_configs`, `_active_wires`, `_instance_*` и журнал телеметрии (`:2072-2175`) — без
   лока. `_child_action_lock` (`:1533`) и лок поколений (`:2729`) — про другое.
-- **(е)** Правка `_own_work` не нужна. Рабочие `KeyedExecutor` — SYSTEM-воркеры `WorkerManager` (`keyed_executor.py:147-152`).
-  Их уже закрывает запись `work/workers` (`process_module.py:278`, `_WorkersStop.join_until` →
-  `stop_all_workers`, `process_lifecycle.py:192-196`). Порядок «исполнитель → дети» держит вызов внутри
-  `_ChildrenStop.request_stop()`: фаза 1 сегмента `work` идёт до LIFO-фазы 2 (`app_module/orchestrator.py:91-93`).
-  Создавать в `initialize()` после `super().initialize()` — `worker_manager` уже есть.
+- **(е)** Правка `_own_work` не нужна. Исполнитель создаёт `ExecutorManager` (1.9m) и держит во владении области
+  `executor_manager-scope` в `work` (`process_module.py:539-540`); прежнее «их закрывает `work/workers`» снято
+  2026-10-25. Порядок «исполнитель → дети» держит ожидание исполнителя **внутри** `_ChildrenStop.request_stop()` (фаза 1):
+  область проводит фазу 1 по всем записям сегмента до LIFO-фазы 2 (`lifetime.py:568-572`), так что ожидание в
+  `join_until` пришло бы после старта стопа детей (стадия 0 р.2 п.1; T1.9b D4). Создавать в `initialize()` после
+  `super().initialize()` — `executor_manager` уже есть.
 - **(ж)** Не в D2: `router.relay` (кандидат T); 31 имя BuiltinCommands (R); `service.start/stop/restart` — писатели, а не
   «чтение». В D2 по ошибке: ADR-PMM-038 уже занят (`process_manager_module/DECISIONS.md:1813`, `system.shutdown mode=force`)
   — новому ADR нужен свободный номер, `ADR-PMM-039` в коде и ADR не занят, его как кандидата называет `T1.10.md:29`; строки D2 `:666-681`, `:3251-3331`, `:3297`, `:3539`, `:4065-4123`,
