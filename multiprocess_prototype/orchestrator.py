@@ -76,11 +76,15 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
             self._log_warning(f"[recipe] в манифесте нет recipes: ({manifest_path}) — recipe.* не зарегистрированы")
             return
         for cmd_name, handler in service.handlers().items():
+            # Task 1.9b (D2): recipe.activate — класс L (зовёт topology.apply, ждёт смерти детей): строкой
+            # на адаптер PM, чтобы relay во время активации видел переход. Остальные recipe.* — как были.
+            routing = {"executor": "pm-lifecycle-submit", "targets": "all"} if cmd_name == "recipe.activate" else {}
             self.command_manager.register_command(
                 cmd_name,
                 handler,
                 metadata={"description": f"Сервис рецептов (ADR-RCP-007): {cmd_name}"},
                 tags=["system"],
+                **routing,
             )
 
     def _register_service_commands(self) -> None:

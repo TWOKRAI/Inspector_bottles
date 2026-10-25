@@ -48,6 +48,10 @@ class ProcessRegistry:
         # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
         # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
         self.stop_wait_idle: Optional[Callable[[float], None]] = None
+        # Task 1.9b (D4, I1): «системный стоп идёт» — прерывает ожидание стопа во временной области
+        # ``_stop_many`` (стоп ребёнка по одному). Группа корня (``_ChildrenGroupStop``) его НЕ получает:
+        # она и есть стоп после прерывания. None — не прерывается.
+        self.stop_abort: Optional[Callable[[], bool]] = None
         self.queue_registry = queue_registry
         self.config_manager = config_manager
         self.shared_resources = shared_resources
@@ -398,7 +402,11 @@ class ProcessRegistry:
         return float(timeout) if timeout > 0 else 0.0
 
     def _build_child_stop(
-        self, names: List[str], mark_reader_gone: bool
+        self,
+        names: List[str],
+        mark_reader_gone: bool,
+        *,
+        should_abort: Optional[Callable[[], bool]] = None,
     ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
         """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
 
@@ -431,6 +439,7 @@ class ProcessRegistry:
             on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
             logger=self.logger,
             idle=self.stop_wait_idle,
+            should_abort=should_abort,
         )
         return result, stop
 
@@ -451,7 +460,7 @@ class ProcessRegistry:
         подтверждения смерти каждого имени (``on_confirmed_dead``), выжившие — без метки.
         """
         timeout_s = self._stop_timeout_s(timeout)
-        result, stop = self._build_child_stop(names, mark_reader_gone)
+        result, stop = self._build_child_stop(names, mark_reader_gone, should_abort=self.stop_abort)
         if stop is None:
             return result
 
@@ -471,7 +480,12 @@ class ProcessRegistry:
         for name in group:
             result[name] = name not in survivors
         for name in survivors:
-            if self.logger:
+            if not self.logger:
+                continue
+            if stop.aborted:
+                # Task 1.9b (D4): ребёнка ведёт стоп корня — это не отказ эскалации.
+                self.logger._log_warning(f"стоп '{name}' прерван системным стопом")
+            else:
                 self.logger._log_error(f"stop_many: '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
         return result
 
