@@ -1008,7 +1008,12 @@ class SystemBlueprint(SchemaBase):
         «применяется»: после ``infer`` выведенный join выглядит как явный ``mode: join``, и результат
         не должен зависеть от того, вызывался ли ``infer``. Не применяется — одна ошибка на процесс,
         кроме процесса, по которому уже есть ошибка C-17 (``_metadata_join_errors``). Значения секции
-        в текст не попадают (только ключи и значение ``mode`` явной секции).
+        в текст не попадают (только ключи и значение ``mode`` явного collector).
+
+        Применённая секция одна (``collector``, затем ``inspector``): при ≥ 2 источниках непустая
+        ``metadata.inspector`` рядом с применённой ``metadata.collector`` затенена — это тоже ошибка
+        (C-28.2). При < 2 источниках затенение не сообщается: ошибка про ``metadata.collector``, а после
+        её лечения ``inspector`` станет основной секцией и получит свою.
         """
         joining = self._joining_sources()
         c17_errors = self._metadata_join_errors()  # текст каждой начинается с «Процесс '<имя>': »
@@ -1017,27 +1022,30 @@ class SystemBlueprint(SchemaBase):
             meta_key, section = _legacy_metadata_section(proc)
             if not section:
                 continue
+            if any(e.startswith(f"Процесс '{proc.process_name}': ") for e in c17_errors):
+                continue
             exp_key, explicit = _explicit_collector(proc)
             mode = explicit.get("mode")
             n_sources = len(joining.get(proc.process_name, {}))
             if n_sources >= 2 and (not mode or mode == "join"):
-                continue
-            if any(e.startswith(f"Процесс '{proc.process_name}': ") for e in c17_errors):
+                shadowed = proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
+                if meta_key == COLLECTOR_CONFIG_KEY and isinstance(shadowed, dict) and shadowed:
+                    errors.append(
+                        _unapplied_metadata_text(
+                            proc.process_name,
+                            LEGACY_COLLECTOR_CONFIG_KEY,
+                            shadowed,
+                            f"затенена metadata.{COLLECTOR_CONFIG_KEY} "
+                            f"(сборка применяет одну секцию: collector, затем inspector)",
+                        )
+                    )
                 continue
             reason = (
                 f"join не выведен (join-источников: {n_sources}, нужно ≥ 2)"
                 if n_sources < 2
                 else f"явный {exp_key} задаёт mode={mode}"
             )
-            keys = sorted(str(k) for k in section)
-            keys_text = ", ".join(keys)
-            placeholder = ", ".join(f"{k}: …" for k in keys)
-            errors.append(
-                f"Процесс '{proc.process_name}': metadata.{meta_key} (deprecated, ключи: {keys_text}) "
-                f"не применяется — {reason}. Штатно: перенеси в process-level collector: "
-                f"{{{placeholder}}} (те же ключи; без mode — тонкая настройка выведенного join, "
-                f"только при ≥ 2 join-источниках; mode: fanin — настройка fanin) и удали metadata.{meta_key}"
-            )
+            errors.append(_unapplied_metadata_text(proc.process_name, meta_key, section, reason))
         return errors
 
     def describe(self) -> str:
@@ -1174,6 +1182,19 @@ def _legacy_metadata_section(proc: ProcessConfig) -> tuple[str, dict]:
         if isinstance(section, dict) and section:
             return key, section
     return "", {}
+
+
+def _unapplied_metadata_text(process_name: str, meta_key: str, section: dict, reason: str) -> str:
+    """Текст ошибки C-28: процесс, ключ ``metadata``, ключи секции (без значений), причина и лечение."""
+    keys = sorted(str(k) for k in section)
+    keys_text = ", ".join(keys)
+    placeholder = ", ".join(f"{k}: …" for k in keys)
+    return (
+        f"Процесс '{process_name}': metadata.{meta_key} (deprecated, ключи: {keys_text}) "
+        f"не применяется — {reason}. Штатно: перенеси в process-level collector: "
+        f"{{{placeholder}}} (те же ключи; без mode — тонкая настройка выведенного join, "
+        f"только при ≥ 2 join-источниках; mode: fanin — настройка fanin) и удали metadata.{meta_key}"
+    )
 
 
 def _find_plugin_entry(plugin_name: str, plugin_class: str):

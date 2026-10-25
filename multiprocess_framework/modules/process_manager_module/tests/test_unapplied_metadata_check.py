@@ -1,6 +1,7 @@
 """Неприменённая metadata.collector/inspector -> ошибка check() (plans/topology-port-join.md, C28.1).
 
 Слепые приёмочные тесты (написаны до реализации): M1-M13. M0 - у developer (существующий тест, правка ожидания).
+M14-M15 (C28.2, затенённая секция) - тесты автора правки.
 Ожидаемые значения - литералы плана (подстроки текста ошибки, ``join-источников: N``, значения collector).
 
 Каждый случай зовёт ``SystemBlueprint.check()`` дважды - до и после ``infer_missing_collectors()`` - и сравнивает
@@ -444,6 +445,48 @@ def test_m13_bare_fanin_section_is_an_error_with_one_source() -> None:
     text = before[0]
     assert "metadata.inspector (deprecated, ключи: mode)" in text
     assert "collector: {mode: …}" in text
+
+
+# ---------------------------------------------------------------------------
+# M14-M15 (C28.2, тесты автора). infer применяет одну секцию (collector, затем inspector):
+# вторая непустая секция при >= 2 источниках затенена; при < 2 затенение не сообщается
+# ---------------------------------------------------------------------------
+
+_SHADOW_METADATA = {"collector": {"timeout_sec": 0.25}, "inspector": {"list_merge_keys": ["x"]}}
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m14_two_sources_inspector_section_shadowed_by_collector_is_an_error() -> None:
+    bp = _blueprint(
+        [_joiner_process("P", metadata=_SHADOW_METADATA)],
+        [_frame_wire("P"), _overlay_wire("P")],
+    )
+
+    before, after = _before_after(bp)
+
+    for errors in (before, after):
+        assert len(errors) == 1, errors
+        assert errors[0].startswith(
+            "Процесс 'P': metadata.inspector (deprecated, ключи: list_merge_keys) не применяется — "
+            "затенена metadata.collector"
+        ), errors[0]
+    assert _proc(bp, "P").collector["timeout_sec"] == 0.25  # достижимость: collector применён
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m15_one_source_shadowing_is_not_reported_only_the_collector_error() -> None:
+    bp = _blueprint(
+        [_joiner_process("P", metadata=_SHADOW_METADATA)],
+        [_frame_wire("P")],
+    )
+
+    before, after = _before_after(bp)
+
+    for errors in (before, after):
+        assert len(errors) == 1, errors
+        assert errors[0].startswith(
+            "Процесс 'P': metadata.collector (deprecated, ключи: timeout_sec) не применяется — join не выведен"
+        ), errors[0]
 
 
 # ---------------------------------------------------------------------------
