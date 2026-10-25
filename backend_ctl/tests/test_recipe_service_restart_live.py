@@ -60,6 +60,7 @@ def test_activate_survives_backend_restart(tmp_path: Path) -> None:
 
     shutil.copytree(repo_root / "multiprocess_prototype" / "recipes", tmp_path / "recipes")
     manifest = write_temp_manifest(real_manifest, tmp_path)
+    default_pipeline = yaml.safe_load(manifest.read_text(encoding="utf-8"))["pipeline"]
 
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(manifest))
     drv = harness.start()
@@ -76,7 +77,10 @@ def test_activate_survives_backend_restart(tmp_path: Path) -> None:
     finally:
         harness.stop()
 
-    assert yaml.safe_load(manifest.read_text(encoding="utf-8"))["pipeline"] == f"recipes/{_TARGET}.yaml"
+    # Выбор рецепта лежит в состоянии рядом с манифестом; умолчание app.yaml не тронуто.
+    state = yaml.safe_load(manifest.with_name("app.state.yaml").read_text(encoding="utf-8"))
+    assert state["pipeline"] == f"recipes/{_TARGET}.yaml"
+    assert yaml.safe_load(manifest.read_text(encoding="utf-8"))["pipeline"] == default_pipeline
     assert hashlib.sha256(real_manifest.read_bytes()).hexdigest() == real_sha, "боевой app.yaml изменён"
 
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(manifest))

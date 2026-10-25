@@ -543,6 +543,9 @@ def run_gui(process: "GuiProcess") -> None:
         # знал текущий рецепт сразу после старта, без ручной активации. Зовём
         # менеджер напрямую (не через presenter) — не зависит от UI-пути активации.
         try:
+            if _manifest.pipeline_note:
+                # Состояние (<stem>.state.yaml) было проигнорировано — виден в логе GUI.
+                process._log_warning(f"recipe_manager: {_manifest.pipeline_note}", module="startup")
             _boot_slug = _manifest.pipeline.stem
             if _recipe_manager.set_active(_boot_slug):
                 process._log_info(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import threading
 from pathlib import Path
 
@@ -45,12 +46,18 @@ def test_update_preserves_comments(tmp_path: Path) -> None:
 
 
 def test_set_pipeline_noop_when_unchanged(tmp_path: Path) -> None:
+    """Повторный set_pipeline тем же значением не переписывает файл состояния (A7)."""
     path = _seed(tmp_path)
+    state_path = path.with_name("app.state.yaml")
     store = ManifestStore(path)
-    before_mtime = path.stat().st_mtime_ns
-    result = store.set_pipeline("recipes/a.yaml")  # уже такое значение
-    assert result == "recipes/a.yaml"
-    assert path.stat().st_mtime_ns == before_mtime  # файл не тронут (не дёргаем mtime)
+
+    assert store.set_pipeline("recipes/b.yaml") == "recipes/b.yaml"
+    assert yaml.safe_load(state_path.read_text(encoding="utf-8")) == {"pipeline": "recipes/b.yaml"}
+
+    t0 = 1_000_000_000_000_000_000  # заведомо в прошлом: любая перезапись сдвинет mtime
+    os.utime(state_path, ns=(t0, t0))
+    assert store.set_pipeline("recipes/b.yaml") == "recipes/b.yaml"  # уже такое значение
+    assert state_path.stat().st_mtime_ns == t0  # файл состояния не тронут
 
 
 def test_atomic_write_no_leftover_tmp(tmp_path: Path) -> None:

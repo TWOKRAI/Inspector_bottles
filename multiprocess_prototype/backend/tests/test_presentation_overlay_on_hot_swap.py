@@ -140,8 +140,10 @@ def test_overlay_reaches_the_builder_through_the_real_front_entry_switch(monkeyp
     app = load_manifest(PROJECT_ROOT / "multiprocess_prototype" / "app.yaml")
     assert app.presentation is not None, "предусловие теста: env обязан включить презентацию"
 
-    with_pres = SystemBuilder.from_manifest(app, include_presentation=True)
-    headless = SystemBuilder.from_manifest(app, include_presentation=False)
+    # Явный рецепт: активный pipeline может прийти из app.state.yaml (невидимого в git),
+    # тест не должен зависеть от него.
+    with_pres = SystemBuilder.from_manifest(app, "phone_sketch", include_presentation=True)
+    headless = SystemBuilder.from_manifest(app, "phone_sketch", include_presentation=False)
 
     assert with_pres._presentation_overlay is not None
     assert with_pres._presentation_overlay.get("processes"), "патч обязан нести процессы"

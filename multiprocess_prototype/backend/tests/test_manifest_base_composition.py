@@ -113,7 +113,12 @@ class TestBothLoadersAgree:
         )
 
         путь = _манифест(tmp_path, base_value)
-        return load_manifest(путь), load_framework(путь)
+        proto, framework = load_manifest(путь), load_framework(путь)
+        # Активный pipeline (умолчание/состояние) обязан совпасть у обоих загрузчиков.
+        assert proto.pipeline == framework.pipeline
+        assert proto.pipeline_origin == framework.pipeline_origin == "manifest"
+        assert proto.pipeline_note == framework.pipeline_note is None
+        return proto, framework
 
     def test_string_form_resolves_identically(self, tmp_path):
         proto, framework = self._both(tmp_path, "a.yaml")

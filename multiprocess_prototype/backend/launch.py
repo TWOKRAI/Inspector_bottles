@@ -407,8 +407,10 @@ def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
     p = Path(override)
     if p.is_absolute() or p.suffix or ("/" in override) or ("\\" in override):
         return p
-    # Голое имя ('inspection_basic') — резолвим в каталоге pipeline-ов
-    return app.pipeline.parent / f"{override}.yaml"
+    # Голое имя ('inspection_basic') — резолвим в каталоге рецептов манифеста, а не от
+    # app.pipeline.parent: активный pipeline может прийти из состояния (<stem>.state.yaml)
+    # и лежать вне recipes/ — иначе голые имена ломались бы от невидимого в git файла.
+    return app.recipes / f"{override}.yaml"
 
 
 def _manifest_pipeline_value(override: str) -> str:
