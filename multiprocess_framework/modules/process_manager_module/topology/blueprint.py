@@ -44,6 +44,10 @@ from ...process_module.generic.generic_process_config import GenericProcessConfi
 # быть, есть только общий разъём модуля.
 logger = get_std_logger("blueprint")
 
+# Структурные ключи collector: их выводит ``infer_missing_collectors`` из wires и НЕ подмешивает из
+# легаси-секции ``metadata`` (единый источник для ``infer`` и проверки затенения, C-28.3).
+_STRUCTURAL_COLLECTOR_KEYS = ("mode", "inputs", "primary")
+
 
 @register_schema("WireV1")
 class Wire(SchemaBase):
@@ -573,7 +577,7 @@ class SystemBlueprint(SchemaBase):
             for tuning in (explicit, legacy):
                 if isinstance(tuning, dict):
                     for key, value in tuning.items():
-                        if key not in ("mode", "inputs", "primary"):
+                        if key not in _STRUCTURAL_COLLECTOR_KEYS:
                             derived[key] = value
 
             proc.collector = derived
@@ -947,6 +951,8 @@ class SystemBlueprint(SchemaBase):
         errors: list[str] = []
         joining = self._joining_sources()
         for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
             key, explicit = _explicit_collector(proc)
             if not explicit or explicit.get("mode"):
                 continue
@@ -973,6 +979,8 @@ class SystemBlueprint(SchemaBase):
         errors: list[str] = []
         joining = self._joining_sources()
         for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
             # Обе секции проверяются независимо (приоритет collector → inspector нужен только
             # тонкой настройке): mode=join в любой из них — заявка на join. Одна ошибка на процесс.
             meta = proc.metadata if isinstance(proc.metadata, dict) else {}
@@ -1019,6 +1027,8 @@ class SystemBlueprint(SchemaBase):
         c17_errors = self._metadata_join_errors()  # текст каждой начинается с «Процесс '<имя>': »
         errors: list[str] = []
         for proc in self.processes:
+            if _is_dotted_process(proc):
+                continue  # имя с точкой уже названо C-25; его провода _joining_sources не считает
             meta_key, section = _legacy_metadata_section(proc)
             if not section:
                 continue
@@ -1029,12 +1039,19 @@ class SystemBlueprint(SchemaBase):
             n_sources = len(joining.get(proc.process_name, {}))
             if n_sources >= 2 and (not mode or mode == "join"):
                 shadowed = proc.metadata.get(LEGACY_COLLECTOR_CONFIG_KEY)
-                if meta_key == COLLECTOR_CONFIG_KEY and isinstance(shadowed, dict) and shadowed:
+                # Теряются только ключи, которые infer подмешал бы (не-структурные): mode/inputs/primary
+                # он отбрасывает и из применённой секции, их затенение ничего не меняет.
+                lost = (
+                    {k: v for k, v in shadowed.items() if k not in _STRUCTURAL_COLLECTOR_KEYS}
+                    if isinstance(shadowed, dict)
+                    else {}
+                )
+                if meta_key == COLLECTOR_CONFIG_KEY and lost:
                     errors.append(
                         _unapplied_metadata_text(
                             proc.process_name,
                             LEGACY_COLLECTOR_CONFIG_KEY,
-                            shadowed,
+                            lost,
                             f"затенена metadata.{COLLECTOR_CONFIG_KEY} "
                             f"(сборка применяет одну секцию: collector, затем inspector)",
                         )
@@ -1182,6 +1199,13 @@ def _legacy_metadata_section(proc: ProcessConfig) -> tuple[str, dict]:
         if isinstance(section, dict) and section:
             return key, section
     return "", {}
+
+
+def _is_dotted_process(proc: ProcessConfig) -> bool:
+    """Точка в ``process_name`` (ADR-PMM-017 п.9): такой процесс судит только C-25."""
+    from ...message_module.addressing.address import SEPARATOR
+
+    return SEPARATOR in proc.process_name
 
 
 def _unapplied_metadata_text(process_name: str, meta_key: str, section: dict, reason: str) -> str:

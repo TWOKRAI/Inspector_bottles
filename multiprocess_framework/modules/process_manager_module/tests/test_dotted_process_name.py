@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import SystemBlueprint
 from multiprocess_framework.modules.process_module.plugins.base import ProcessModulePlugin
+from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
 
 # Литералы плана (A1/A2/A3).
@@ -170,3 +172,94 @@ def test_a5_built_recipe_has_no_dotted_process_name(recipe: str) -> None:
     names = [name for name, _proc in launcher._processes]
     assert names, f"{recipe}: сборка вернула ноль процессов"
     assert [n for n in names if "." in n] == []
+
+
+# ---------------------------------------------------------------------------
+# A6a-c (C28.3, тесты автора). Процесс с точкой судит только C-25: C-22 / C-28 / C-17 его пропускают.
+# Для адреса из четырёх частей ``_joining_sources`` провод не считает (join-источников: 0), и без пропуска
+# эти правила добавили бы к ошибке C-25 ложную «join-источников: 0».
+# ---------------------------------------------------------------------------
+
+
+def _register_join_fakes() -> None:
+    """Источники ``src_frame``/``src_overlay`` и ``joiner`` (``frame`` обязательный, ``overlay`` optional+join)."""
+
+    def _cls(cls_name: str, plugin_name: str, inputs: list[Port], outputs: list[Port]) -> type:
+        return type(
+            cls_name,
+            (ProcessModulePlugin,),
+            {
+                "name": plugin_name,
+                "category": "processing",
+                "inputs": inputs,
+                "outputs": outputs,
+                "configure": lambda self, ctx: None,
+                "start": lambda self, ctx: None,
+            },
+        )
+
+    classes = [
+        _cls("_SrcFrame", "src_frame", [], [Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")]),
+        _cls("_SrcOverlay", "src_overlay", [], [Port(name="overlay", dtype="dict", shape="-")]),
+        _cls(
+            "_Joiner",
+            "joiner",
+            [
+                Port(name="frame", dtype="image/bgr", shape="(H, W, 3)"),
+                Port(name="overlay", dtype="dict", shape="-", optional=True, join=True),
+            ],
+            [],
+        ),
+    ]
+    for cls in classes:
+        PluginRegistry.register(name=cls.name, plugin_class=cls, category=cls.category)
+
+
+def _join_blueprint(proc_name: str, *, sources: int, **extra: Any) -> SystemBlueprint:
+    """Процесс ``proc_name`` с плагином ``joiner`` и ``sources`` (1 или 2) проводами на join-входы."""
+    wires = [{"source": "s1.src_frame.frame", "target": f"{proc_name}.joiner.frame"}]
+    if sources == 2:
+        wires.append({"source": "s2.src_overlay.overlay", "target": f"{proc_name}.joiner.overlay"})
+    procs = [
+        {"process_name": "s1", "plugins": [{"plugin_name": "src_frame", "plugin_class": ""}]},
+        {"process_name": "s2", "plugins": [{"plugin_name": "src_overlay", "plugin_class": ""}]},
+        {"process_name": proc_name, "plugins": [{"plugin_name": "joiner", "plugin_class": ""}], **extra},
+    ]
+    return SystemBlueprint.model_validate({"name": "dotted_join", "processes": procs, "wires": wires})
+
+
+def _assert_only_c25(errors: list[str]) -> None:
+    """Ровно одна ошибка C-25 и ни одной ошибки про join-источники, mode=join, deprecated-ключи."""
+    assert len(_dotted(errors)) == 1, errors
+    for marker in ("join-источников", "mode=join", "(deprecated, ключи:"):
+        assert [e for e in errors if marker in e] == [], errors
+
+
+@pytest.mark.usefixtures("_isolated_registry")
+def test_a6a_dotted_process_is_not_judged_by_c22() -> None:
+    _register_join_fakes()
+    # Контроль достижимости: имя без точки и один join-источник (join не выведен) -> C-22 срабатывает.
+    control = _join_blueprint("draw_a", sources=1, collector={"timeout_sec": 1}).check()
+    assert len([e for e in control if " без mode (ключи:" in e]) >= 1, control
+
+    _assert_only_c25(_join_blueprint("draw.a", sources=2, collector={"timeout_sec": 1}).check())
+
+
+@pytest.mark.usefixtures("_isolated_registry")
+def test_a6b_dotted_process_is_not_judged_by_c28() -> None:
+    _register_join_fakes()
+    # Контроль достижимости: имя без точки и один join-источник -> C-28 срабатывает.
+    control = _join_blueprint("draw_a", sources=1, metadata={"inspector": {"timeout_sec": 1}}).check()
+    assert len([e for e in control if "(deprecated, ключи:" in e]) >= 1, control
+
+    _assert_only_c25(_join_blueprint("draw.a", sources=2, metadata={"inspector": {"timeout_sec": 1}}).check())
+
+
+@pytest.mark.usefixtures("_isolated_registry")
+def test_a6c_dotted_process_is_not_judged_by_c17() -> None:
+    _register_join_fakes()
+    # Контроль достижимости: имя без точки и один join-источник -> C-17 срабатывает.
+    control = _join_blueprint("draw_a", sources=1, metadata={"inspector": {"mode": "join"}}).check()
+    assert len([e for e in control if "metadata.inspector.mode=join" in e]) >= 1, control
+
+    _assert_only_c25(_join_blueprint("draw.a", sources=2, metadata={"inspector": {"mode": "join"}}).check())

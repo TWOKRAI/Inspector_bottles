@@ -1,7 +1,7 @@
 """Неприменённая metadata.collector/inspector -> ошибка check() (plans/topology-port-join.md, C28.1).
 
 Слепые приёмочные тесты (написаны до реализации): M1-M13. M0 - у developer (существующий тест, правка ожидания).
-M14-M16 (C28.2, затенённая секция) - тесты автора правки.
+M14-M17 (C28.2/C28.3, затенённая секция) - тесты автора правки.
 Ожидаемые значения - литералы плана (подстроки текста ошибки, ``join-источников: N``, значения collector).
 
 Каждый случай зовёт ``SystemBlueprint.check()`` дважды - до и после ``infer_missing_collectors()`` - и сравнивает
@@ -521,3 +521,69 @@ def test_extra_keys_are_sorted_in_preamble_and_hint() -> None:
     text = before[0]
     assert "(deprecated, ключи: inputs_hint, timeout_sec)" in text
     assert "{inputs_hint: …, timeout_sec: …}" in text
+
+
+# ---------------------------------------------------------------------------
+# M17a-c (C28.3, тесты автора). Затенение судит только ключи, которые infer подмешивает:
+# структурные mode/inputs/primary он отбрасывает, их затенение ничего не теряет
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m17a_two_sources_shadowed_inspector_with_only_mode_is_not_an_error() -> None:
+    bp = _blueprint(
+        [_joiner_process("P", metadata={"collector": {"timeout_sec": 0.25}, "inspector": {"mode": "join"}})],
+        [_frame_wire("P"), _overlay_wire("P")],
+    )
+
+    before_all, after_all = _before_after_all(bp)
+
+    assert _only(before_all, _C28) == []
+    assert _only(after_all, _C28) == []
+    assert _proc(bp, "P").collector["timeout_sec"] == 0.25  # достижимость: collector применён
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m17b_two_sources_shadowed_inspector_with_only_inputs_primary_is_not_an_error() -> None:
+    bp = _blueprint(
+        [
+            _joiner_process(
+                "P",
+                metadata={
+                    "collector": {"timeout_sec": 0.25},
+                    "inspector": {"inputs": ["frame"], "primary": "frame"},
+                },
+            )
+        ],
+        [_frame_wire("P"), _overlay_wire("P")],
+    )
+
+    before_all, after_all = _before_after_all(bp)
+
+    assert _only(before_all, _C28) == []
+    assert _only(after_all, _C28) == []
+
+
+@pytest.mark.usefixtures("fakes")
+def test_m17c_two_sources_shadowed_inspector_lists_only_lost_keys() -> None:
+    bp = _blueprint(
+        [
+            _joiner_process(
+                "P",
+                metadata={
+                    "collector": {"timeout_sec": 0.25},
+                    "inspector": {"mode": "join", "list_merge_keys": ["x"]},
+                },
+            )
+        ],
+        [_frame_wire("P"), _overlay_wire("P")],
+    )
+
+    before, after = _before_after(bp)
+
+    for errors in (before, after):
+        assert len(errors) == 1, errors
+        assert errors[0].startswith(
+            "Процесс 'P': metadata.inspector (deprecated, ключи: list_merge_keys) не применяется — "
+            "затенена metadata.collector"
+        ), errors[0]
