@@ -25,12 +25,14 @@ from Services.device_hub.tests.test_robot_v2_t53g_windows import (
     _JOIN_S,
     _Barrier,
     _bounded,
+    _capture,
     _make_driver,
     driver_scope,  # noqa: F401 — autouse-фикстура области потоков, нужна _make_driver
 )
 from Services.robot_comm.core.client_v2 import SyncCancelled
 from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.programs import Move, Point, Program
 
 _DEV = "rv2"
 _SYNC_S = 2.0  # «долгая» синхронизация фейка: опрос cancelled() каждые 10 мс
@@ -71,9 +73,13 @@ class _Rig:
         self.plugin.start(self.ctx)
         real_publish = self.plugin._publish_state
 
+        self.on_conn_publish: Any = None  # крючок барьера C14: (conn) -> None, зовётся до публикации
+
         def publish(path: str, value: Any) -> None:
             if path.endswith(".conn") and isinstance(value, dict):
                 self.conns.append(f"{value.get('conn')}")
+                if self.on_conn_publish is not None:
+                    self.on_conn_publish(f"{value.get('conn')}")
             real_publish(path, value)
 
         self.plugin._publish_state = publish
@@ -713,4 +719,160 @@ def test_c13_b_pair_job_outside_window_queued(tmp_path: Path, monkeypatch: pytes
         reply = _bounded(lambda: rig.drv.call("enqueue_job", dict(_JOB)), 5.0, "enqueue_job")
         assert reply == {"status": "ok", "queue_len": 1}, reply
     finally:
+        rig.close()
+
+
+# --------------------------------------------------------------------------------------------------
+# Итерация 4 (стадия 0 р.2): C14 — окно (б) супервизора против K (Н5); C15 — программа и return_job в окне (В5)
+# --------------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def c14(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    # сбой пробы (окно недостижимо) — FAILED строки, а не ERROR фикстуры (факт итерации 4)
+    return _capture(lambda: _c14_body(tmp_path, monkeypatch))
+
+
+def _c14_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Н5: супервизор в (б) прочитал «Отключить не было» (значение до паузы), стоит; K в своём потоке; 0,2 с; отпуск.
+
+    Вторая пауза — публикация ``conn`` супервизором после (б): K уже должен вернуться; читается ``desired_connected``.
+    С замком ``_workers_lock`` K ждёт конца (б) и пишет False последним; без замка (б) пишет True после K.
+    """
+    real = getattr(RobotDriverV2, "disconnect_pending", None)
+    first, second = _Barrier(), _Barrier()
+
+    def pending(self: Any) -> bool:
+        value = bool(real.fget(self)) if isinstance(real, property) else False
+        first.pause_if_t1()  # значение прочитано ДО паузы: K в паузе его не меняет
+        return value
+
+    monkeypatch.setattr(RobotDriverV2, "disconnect_pending", property(pending), raising=False)
+    rig = _Rig(tmp_path, monkeypatch, servo_tlm=1, do_on=False)
+    box: dict[str, Any] = {}
+    try:
+
+        def after_b(conn: str) -> None:
+            if first.fired and conn in ("connected", "error", "disconnecting"):
+                second.pause_if_t1()
+
+        rig.on_conn_publish = after_b
+        assert rig.cmd("connect")["status"] == "ok"
+        sup = threading.Thread(target=rig.plugin._process_conn_queue, name="c29-supervisor", daemon=True)
+        first.t1 = second.t1 = sup
+        sup.start()
+        if not first.entered.wait(_ENTER_S):
+            first.release.set()
+            second.release.set()
+            sup.join(_JOIN_S)
+            pytest.fail("окно (б) недостижимо: супервизор не прочитал disconnect_pending после connect")
+        k = threading.Thread(
+            target=lambda: box.update(cmd=rig.plugin.cmd_device_disconnect({"device_id": _DEV})),
+            name="c29-K",
+            daemon=True,
+        )
+        k.start()
+        time.sleep(0.2)
+        k_done_in_pause = not k.is_alive()
+        first.release.set()
+        if not second.entered.wait(_ENTER_S):
+            second.release.set()
+            sup.join(_JOIN_S)
+            pytest.fail("вторая пауза недостижима: супервизор не опубликовал conn после (б)")
+        k.join(_JOIN_S)
+        desired_at_publish = rig.drv.desired_connected
+        second.release.set()
+        sup.join(_JOIN_S)
+        assert not sup.is_alive() and not k.is_alive(), "супервизор или K не вернулся"
+        return {"k_done_in_pause": k_done_in_pause, "desired_at_publish": desired_at_publish, "cmd": box.get("cmd")}
+    finally:
+        first.release.set()
+        second.release.set()
+        rig.close()
+
+
+def test_c14_a_supervisor_b_does_not_overwrite_disconnect(c14: dict[str, Any]) -> None:
+    assert (c14["k_done_in_pause"], c14["desired_at_publish"]) == (False, False), f"C14-a: {c14}"
+
+
+_PROGRAM = Program(name="c29", steps=(Move(point="a", kind="JOINT"),))
+_POINTS = {"a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1)}
+_RETURN = {"x_mm": 10.0, "y_mm": 20.0}
+
+
+@pytest.fixture
+def c15(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """В5: робот подключён, K, очередь не разобрана; запуск программы и return_job в этом окне."""
+    rig = _connected_rig(tmp_path, monkeypatch)
+    try:
+        assert rig.cmd("disconnect")["status"] == "ok"
+        started = _bounded(lambda: rig.drv.start_program(_PROGRAM, _POINTS, None, name="c29"), 5.0, "start_program")
+        ran = rig.client.run_started.wait(0.5)
+        rig.client.run_release.set()
+        ret = _bounded(lambda: rig.drv.call("return_job", dict(_RETURN)), 5.0, "return_job")
+        _bounded(rig.plugin._process_conn_queue, 10.0, "disconnect")
+        return {"started": started, "ran": ran, "return": ret}
+    finally:
+        rig.client.run_release.set()
+        rig.close()
+
+
+def test_c15_a_program_refused_in_window(c15: dict[str, Any]) -> None:
+    started = c15["started"]
+    assert (started.get("status"), started.get("message")) == ("error", _TEXT_DISCONNECTING), f"C15-a: {c15}"
+
+
+def test_c15_b_program_not_run_in_window(c15: dict[str, Any]) -> None:
+    assert c15["ran"] is False, f"C15-b: программа дошла до робота; {c15}"
+
+
+def test_c15_c_return_job_refused_in_window(c15: dict[str, Any]) -> None:
+    ret = c15["return"]
+    assert (ret.get("status"), ret.get("message")) == ("error", _TEXT_DISCONNECTING), f"C15-c: {c15}"
+
+
+@pytest.fixture
+def c16(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """В6: задание в очереди до K; K, очередь супервизора, «Подключить», ещё одно задание — длина очереди."""
+    rig = _connected_rig(tmp_path, monkeypatch)
+    try:
+        first = _bounded(lambda: rig.drv.call("enqueue_job", dict(_JOB)), 5.0, "enqueue_job")
+        assert first == {"status": "ok", "queue_len": 1}, first
+        assert rig.cmd("disconnect")["status"] == "ok"
+        _bounded(rig.plugin._process_conn_queue, 5.0, "disconnect")
+        assert rig.cmd("connect")["status"] == "ok"
+        _bounded(rig.plugin._process_conn_queue, 5.0, "connect")
+        again = _bounded(lambda: rig.drv.call("enqueue_job", dict(_JOB)), 5.0, "enqueue_job")
+        return {"again": again, "is_connected": rig.drv.is_connected}
+    finally:
+        rig.close()
+
+
+def test_c16_a_queue_cleared_by_disconnect(c16: dict[str, Any]) -> None:
+    assert c16["again"] == {"status": "ok", "queue_len": 1}, f"C16-a: {c16}"
+
+
+def test_c16_b_pair_without_disconnect_queue_grows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Парная к C16: без «Отключить» очередь не чистится — второе задание даёт длину 2."""
+    rig = _connected_rig(tmp_path, monkeypatch)
+    try:
+        _bounded(lambda: rig.drv.call("enqueue_job", dict(_JOB)), 5.0, "enqueue_job")
+        again = _bounded(lambda: rig.drv.call("enqueue_job", dict(_JOB)), 5.0, "enqueue_job")
+        assert again == {"status": "ok", "queue_len": 2}, again
+    finally:
+        rig.close()
+
+
+def test_c15_d_pair_program_and_return_outside_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Парная к C15: без «Отключить» программа запускается, return_job встаёт в очередь."""
+    rig = _connected_rig(tmp_path, monkeypatch)
+    try:
+        started = _bounded(lambda: rig.drv.start_program(_PROGRAM, _POINTS, None, name="c29"), 5.0, "start_program")
+        assert started.get("status") == "ok", started
+        assert rig.client.run_started.wait(2.0), "программа не дошла до клиента"
+        rig.client.run_release.set()
+        ret = _bounded(lambda: rig.drv.call("return_job", dict(_RETURN)), 5.0, "return_job")
+        assert ret == {"status": "ok", "return_queue_len": 1}, ret
+    finally:
+        rig.client.run_release.set()
         rig.close()
