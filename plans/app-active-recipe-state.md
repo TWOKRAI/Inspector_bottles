@@ -5,6 +5,9 @@
 в локальном файле вне git; `app.yaml` хранит только умолчание. Правка во framework (`app_module`)
 и в прототипе, для любого приложения.
 
+**Статус (2026-10-25):** Task C21.1 DONE на ветке; ревью задачи APPROVED (Sonnet, 2 раунда), ревью ветки
+APPROVED (Opus); стенд и A18 зелёные. Отчёт — `docs/reports/2026-10-25_defect_C-21.md`. Ждёт merge в main.
+
 ## Симптом (воспроизведён дважды)
 
 1. 2026-10-21, стенд `letter_robot_sim` (полоса Д): `run.py <recipe>` → `persist_pipeline_choice` →
@@ -117,53 +120,53 @@
 #### C21.1 — Acceptance criteria (A1–A9)
 Слепой тестер пишет их до кода; все с `tmp_path`, без реального `app.yaml`. Манифест для прототипного
 парсера обязан нести `system:` и `recipes:` (без них `KeyError`). Рецепт состояния создаётся файлом, иначе состояние невалидно.
-- [ ] A1. `app.yaml: pipeline: recipes/a.yaml`, `set_pipeline("recipes/b.yaml")` → байты `app.yaml` равны исходным;
+- [x] A1. `app.yaml: pipeline: recipes/a.yaml`, `set_pipeline("recipes/b.yaml")` → байты `app.yaml` равны исходным;
       `yaml.safe_load(app.state.yaml) == {"pipeline": "recipes/b.yaml"}`.
       A1b. Нет состояния, умолчание `recipes/a.yaml`, `set_pipeline("recipes/a.yaml")` → `app.state.yaml` создан
       с `{"pipeline": "recipes/a.yaml"}`.
-- [ ] A2. После A1 (с созданным `recipes/b.yaml`) framework `load_manifest(app.yaml).pipeline == (tmp_path/"recipes"/"b.yaml").resolve()`,
+- [x] A2. После A1 (с созданным `recipes/b.yaml`) framework `load_manifest(app.yaml).pipeline == (tmp_path/"recipes"/"b.yaml").resolve()`,
       `pipeline_origin == "state"`.
       A2b. После A1 `ManifestStore(app.yaml).load()` вызывается в daemon-потоке с `join(10)` → поток завершён,
       `.pipeline == (tmp_path/"recipes"/"b.yaml").resolve()`, `.pipeline_origin == "state"`.
-- [ ] A3. Оба парсера (framework и `multiprocess_prototype.backend.config.manifest.load_manifest`) в одном тесте
+- [x] A3. Оба парсера (framework и `multiprocess_prototype.backend.config.manifest.load_manifest`) в одном тесте
       дают одинаковые `pipeline`, `pipeline_origin`, `pipeline_note` — для валидного состояния, для его отсутствия и для битого.
-- [ ] A4. Нет файла состояния → `pipeline` из `app.yaml`, `pipeline_origin == "manifest"`, `pipeline_note is None`.
-- [ ] A5. Состояние указывает на несуществующий рецепт → умолчание, `origin == "manifest"`, `note` содержит подстроку
+- [x] A4. Нет файла состояния → `pipeline` из `app.yaml`, `pipeline_origin == "manifest"`, `pipeline_note is None`.
+- [x] A5. Состояние указывает на несуществующий рецепт → умолчание, `origin == "manifest"`, `note` содержит подстроку
       `app.state.yaml`; исключения нет; байты и `st_mtime_ns` файла состояния не изменились.
-- [ ] A6. Каждый случай — умолчание + непустой `note`, без исключения: битый YAML; пустой файл (0 байт); список;
+- [x] A6. Каждый случай — умолчание + непустой `note`, без исключения: битый YAML; пустой файл (0 байт); список;
       `pipeline: 5`; `pipeline: ""`; `pipeline: "   "`; `pipeline: null`; `pipeline: "a\0b.yaml"` (в YAML-тексте —
       экранированная последовательность `\0` в двойных кавычках, не NUL-байт); `pipeline: recipes/dir`, где каталог `recipes/dir` создан.
-- [ ] A7. `set_pipeline("recipes/b.yaml")`; `os.utime(state, ns=(t0, t0))` с t0 в прошлом; повторный `set_pipeline`
+- [x] A7. `set_pipeline("recipes/b.yaml")`; `os.utime(state, ns=(t0, t0))` с t0 в прошлом; повторный `set_pipeline`
       тем же значением → `st_mtime_ns == t0`.
-- [ ] A8. `persist_pipeline_choice(manifest, "b")` → `app.yaml` байт в байт прежний, состояние `{"pipeline": "recipes/b.yaml"}`;
+- [x] A8. `persist_pipeline_choice(manifest, "b")` → `app.yaml` байт в байт прежний, состояние `{"pipeline": "recipes/b.yaml"}`;
       несуществующий рецепт → `FileNotFoundError`, `app.yaml` прежний, файла состояния нет.
-- [ ] A9. «Headless-бэкенд + отдельно запущенный GUI»: строго последовательно два
+- [x] A9. «Headless-бэкенд + отдельно запущенный GUI»: строго последовательно два
       `subprocess.run([sys.executable, "-c", код], cwd=<корень репо>, env={**os.environ, "PYTHONPATH": <корень>, "PYTHONUTF8": "1"}, timeout=60, check=True, capture_output=True)`.
       Процесс 1 зовёт `persist_pipeline_choice`; процесс 2 читает прототипный `load_manifest` и печатает JSON
       `{"pipeline": ..., "origin": ...}`; путь манифеста передаётся в `-c` через `sys.argv`; тест разбирает JSON →
       `pipeline == str((tmp_path/"recipes"/"b.yaml").resolve())`, `origin == "state"`.
 
 #### C21.1 — Acceptance criteria (A10–A19)
-- [ ] A10. Два манифеста в разных каталогах → запись через один не меняет состояние другого.
+- [x] A10. Два манифеста в разных каталогах → запись через один не меняет состояние другого.
       A10b: `app.yaml` и `stand.yaml` в одном каталоге → `app.state.yaml` и `stand.state.yaml` независимы.
-- [ ] A11. `mp.get_context("spawn")`, функция верхнего уровня; 2 процесса по 30 `set_pipeline` с уникальными значениями,
+- [x] A11. `mp.get_context("spawn")`, функция верхнего уровня; 2 процесса по 30 `set_pipeline` с уникальными значениями,
       старт по общему `mp.Event` → `exitcode == 0` у обоих; `safe_load(state)["pipeline"]` входит в множество записанных; нет `*.tmp.*`.
-- [ ] A12. `subprocess.run(["git","check-ignore","-q","multiprocess_prototype/app.state.yaml"], cwd=<корень>).returncode == 0`.
-- [ ] A13. Поток-писатель (`set_pipeline` по кругу из двух значений) + поток-читатель (прототипный `load_manifest` по кругу)
+- [x] A12. `subprocess.run(["git","check-ignore","-q","multiprocess_prototype/app.state.yaml"], cwd=<корень>).returncode == 0`.
+- [x] A13. Поток-писатель (`set_pipeline` по кругу из двух значений) + поток-читатель (прототипный `load_manifest` по кругу)
       2 с, оба в daemon-потоках с join-дедлайном; оба файла рецептов созданы → ноль исключений в обоих потоках;
       каждое прочитанное `pipeline` входит в {два пути} ∪ {умолчание из `app.yaml`}; за 2 с есть ≥ 1 чтение с `origin == "state"`.
-- [ ] A14. Состояние `{"pipeline": "backend/topology/x.yaml"}` (файл создан), `recipes: recipes` →
+- [x] A14. Состояние `{"pipeline": "backend/topology/x.yaml"}` (файл создан), `recipes: recipes` →
       `_resolve_pipeline(app, "phone_sketch") == app.recipes / "phone_sketch.yaml"`.
-- [ ] A15. `monkeypatch.setattr("multiprocess_prototype.main.build_launcher", lambda *a, **k: None)`; вызвать
+- [x] A15. `monkeypatch.setattr("multiprocess_prototype.main.build_launcher", lambda *a, **k: None)`; вызвать
       `_prototype_launcher_factory(types.SimpleNamespace(source=<tmp app.yaml>), None, headless=True)`; `capsys.readouterr().err`:
       битое состояние → содержит `[run]` и `app.state.yaml`; валидное → `источник: состояние`; без состояния — ни того ни другого.
-- [ ] A16. `monkeypatch.chdir(tmp_path)`; значение X через `ManifestStore(Path("app.yaml")).set_pipeline`, значение Y через
+- [x] A16. `monkeypatch.chdir(tmp_path)`; значение X через `ManifestStore(Path("app.yaml")).set_pipeline`, значение Y через
       абсолютный путь → `[p.name for p in tmp_path.glob("*.state.yaml")] == ["app.state.yaml"]`, `safe_load(...)["pipeline"] == Y`.
-- [ ] A17. Состояние `recipes/b.yaml` + `update({"pipeline": "recipes/c.yaml"})` → `load_manifest.pipeline` — b, origin `state`;
+- [x] A17. Состояние `recipes/b.yaml` + `update({"pipeline": "recipes/c.yaml"})` → `load_manifest.pipeline` — b, origin `state`;
       без состояния → c, origin `manifest`; `read_raw()["pipeline"] == "recipes/c.yaml"` в обоих случаях.
-- [ ] A19. `SystemBuilder(AppSpec(manifest_path=p))._print_banner(load_manifest(p), n_plugins=0, n_services=0, n_processes=0)` + `capsys`:
+- [x] A19. `SystemBuilder(AppSpec(manifest_path=p))._print_banner(load_manifest(p), n_plugins=0, n_services=0, n_processes=0)` + `capsys`:
       при валидном состоянии вывод содержит `pipeline : b.yaml (state)`, без состояния — `pipeline : a.yaml` без `(state)`.
-- [ ] A18 (ручная, стадия 3, не pytest). Положить `multiprocess_prototype/app.state.yaml` с `pipeline: backend/topology/hello_world.yaml`
+- [x] A18 (ручная, стадия 3, не pytest). Положить `multiprocess_prototype/app.state.yaml` с `pipeline: backend/topology/hello_world.yaml`
       (файл есть, вне `recipes/`); прогнать через машинный гейт 9 модулей из DESIGN 9 → тот же passed/failed, что без файла.
       До DESIGN 6 — красные (`FileNotFoundError` на `backend/topology/<имя>.yaml`). Файл удалить.
 
