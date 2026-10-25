@@ -409,7 +409,8 @@ ADR охватывает `connect`, `request_stop` (T5.3g) и обычный `di
   очередь и исполнится после «Подключить» (микросекунды, чтением).
 - **Остаток О14 (C-29).** «Отключить» посреди `connect` ставит `_stopping`: `jog_hold_check`, `jog_hold_admit` и
   `admit_launch` отвечают `TEXT_STOPPING`, а `jog_step`, `enqueue_job`, `return_job` — `TEXT_DISCONNECTING`.
-  `_stopping` держится до следующего `connect_begin` — отказ есть всегда, текст разный.
+  `_stopping` держится до следующего `connect_begin` — отказ есть всегда, текст разный. Принято владельцем 2026-10-25
+  (jog — только в ручном режиме); тексты выровнять в C-39 (режим ручной/авто драйвера v2).
 - **Остаток: `_shutdown` и «Отключить» одновременно.** `disconnect_owns_close` при `_shutdown` возвращает False: тик
   закрывает сокет сам, и `process_stop_plan` может увидеть `link_up()` False (нет SOFT). Не регресс: до T5.3h тик
   закрывал безусловно при `desired_connected` False.
