@@ -150,7 +150,7 @@ class OpsMixin:
             speed = _int_in(args, "spd", 1, 100)
         except _BadArgs:
             return {"status": "error", "message": TEXT_BAD_ARGS}
-        refusal = self._motion_refusal(syncing=True)
+        refusal = self._state.disconnect_refusal() or self._motion_refusal(syncing=True)
         if refusal is not None:
             return refusal
         if not self.is_connected:

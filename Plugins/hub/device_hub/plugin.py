@@ -429,22 +429,46 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 break
             try:
                 if op == "connect":
+                    # C-29 (а): «Отключить» уже нажато — этот connect не идёт и ничего не публикует.
+                    # Только `is False`: connect без записи в словаре (интеграционные тесты) идёт как раньше.
+                    with self._workers_lock:
+                        skip = self._desired_connected.get(dev_id) is False
+                    if skip:
+                        continue
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "connecting"})
                     ok = self._manager.connect(dev_id)
-                    conn = "connected" if ok else "error"
+                    # C-29 (б): «Отключить» пришло во время connect — desired True и сброс лимита не ставятся.
+                    # Проверка и запись под одним замком с cmd_device_disconnect (K): либо K раньше, либо позже.
+                    with self._workers_lock:
+                        driver = self._manager.get_driver(dev_id)
+                        stop = (
+                            self._desired_connected.get(dev_id) is False
+                            or getattr(driver, "disconnect_pending", False) is True
+                        )
+                        if driver is not None and not stop:
+                            # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
+                            driver.desired_connected = True
+                            # Ручной/повторный connect: сбросить лимит попыток, чтобы
+                            # после «сдался» (reconnect_exhausted) кнопка «Подключить»
+                            # дала драйверу заново полный лимит попыток.
+                            reset = getattr(driver, "reset_reconnect", None)
+                            if callable(reset):
+                                reset()
+                    if stop:
+                        conn = "disconnecting"
+                    else:
+                        conn = "connected" if ok else "error"
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
-                    # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
-                    driver = self._manager.get_driver(dev_id)
-                    if driver is not None:
-                        driver.desired_connected = True
-                        # Ручной/повторный connect: сбросить лимит попыток, чтобы
-                        # после «сдался» (reconnect_exhausted) кнопка «Подключить»
-                        # дала драйверу заново полный лимит попыток.
-                        reset = getattr(driver, "reset_reconnect", None)
-                        if callable(reset):
-                            reset()
                 elif op == "disconnect":
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    # C-29: сбой публикации статуса не отменяет disconnect — иначе счётчик «Отключить» драйвера
+                    # (request_disconnect) остался бы навсегда. Ошибка уходит в health, как у соседних веток.
+                    try:
+                        self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    except Exception as pub_exc:
+                        if self._ctx:
+                            self._ctx.health.report_error(
+                                pub_exc, context="device_hub.disconnect_publish", device_id=dev_id
+                            )
                     # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
                     driver = self._manager.get_driver(dev_id)
                     if driver is not None:
@@ -882,6 +906,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
             self._desired_connected[dev_id] = False
+            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock. Только робот v2
+            # (getattr, как request_stop); без ввода-вывода. Замки: _workers_lock -> _registry_lock -> состояние.
+            driver = self._manager.get_driver(dev_id)
+            request = getattr(driver, "request_disconnect", None) if driver is not None else None
+            if callable(request):
+                request()
         self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
 

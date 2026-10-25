@@ -77,6 +77,7 @@ from Services.device_hub.drivers.robot_driver_v2.args import _StoreIOError
 from Services.device_hub.drivers.robot_driver_v2.state import RobotState
 from Services.device_hub.drivers.robot_driver_v2.texts import (
     TEXT_NO_SPAWN,
+    TEXT_QUEUE_DROPPED,
     TEXT_SCOPE_CLOSED,
     TEXT_SPAWN_FAILED,
     TEXT_SPAWN_NAME_BUSY,
@@ -286,6 +287,26 @@ class _RobotDriverCore(BaseDeviceDriver):
         """
         return self._state.activity_alive()
 
+    def request_disconnect(self) -> None:
+        """«Отключить» нажато (C-29): прервать идущий ``connect`` и закрыть окно отказов до конца ``disconnect``.
+
+        Зовёт плагин через ``getattr`` (как ``request_stop``) из потока команды под ``_workers_lock`` до постановки
+        ``disconnect`` в очередь. Ввода-вывода нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт
+        ``disconnect()``: он снимает счётчик «идёт отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся
+        отменённым (``"cancelled"``).
+
+        Module contract: lite — публичный метод, зовётся через ``getattr`` (как ``request_stop``); контракт —
+        R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``). Долг: внести
+        ``request_disconnect`` и ``disconnect_pending`` в Protocol драйвера (SPI хаба, следующая задача).
+        """
+        self.desired_connected = False
+        self._state.disconnect_request(link_up=self._transport_up)
+
+    @property
+    def disconnect_pending(self) -> bool:
+        """«Отключить» нажато, ``disconnect()`` ещё не кончился (чтение для плагина и менеджера)."""
+        return self._state.disconnect_pending()
+
     def connect(self) -> bool:
         """Ручное подключение: ``_connect_locked`` под ``_param_lock`` (ждёт идущий ``param_set`` — его ввод-вывод
         ограничен; тик замок берёт не блокируя и не ждёт)."""
@@ -301,6 +322,8 @@ class _RobotDriverCore(BaseDeviceDriver):
         decision, was_ready = self._state.connect_begin()
         if decision == "shutdown":
             return False  # защёлка request_stop(): после остановки плагина драйвер не подключается (К1)
+        if decision == "cancelled":
+            return False  # C-29: «Отключить» нажато, disconnect не кончился — connect не идёт
         if decision == "busy":
             return self.is_connected
         try:
@@ -370,21 +393,26 @@ class _RobotDriverCore(BaseDeviceDriver):
                 if self._sync_cancelled():
                     return False
                 client.servo(self._servo_on)
-                self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO")
+                if not self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO"):
+                    return False
         for ch, on in self._do_on_connect.items():
             bit = 1 << (ch - 1)
             if bool(_w(self._read_tlm(), "TLM_DO_MASK") & bit) != on:
                 if self._sync_cancelled():
                     return False
                 client.do_set(ch, on)
-                self._await_tlm(lambda tlm, b=bit, o=on: bool(_w(tlm, "TLM_DO_MASK") & b) == o, f"DO{ch}")
+                if not self._await_tlm(lambda tlm, b=bit, o=on: bool(_w(tlm, "TLM_DO_MASK") & b) == o, f"DO{ch}"):
+                    return False
         return True
 
-    def _await_tlm(self, pred: Callable[[list[int]], bool], what: str) -> None:
+    def _await_tlm(self, pred: Callable[[list[int]], bool], what: str) -> bool:
+        """Ждать подтверждения чтением TLM до дедлайна. False — остановка / «Отключить» пришли: ожидание снято."""
         deadline = self._clock() + _ON_CONNECT_DEADLINE_S
         while True:
+            if self._sync_cancelled():
+                return False
             if pred(self._read_tlm()):
-                return
+                return True
             if self._clock() >= deadline:
                 raise TimeoutError(f"робот не подтвердил {what} за {_ON_CONNECT_DEADLINE_S} с")
             self._sleep(_ON_CONNECT_POLL_S)
@@ -397,24 +425,32 @@ class _RobotDriverCore(BaseDeviceDriver):
         Защёлку ``_shutdown`` не ставит: после обычного отключения ручной ``connect()`` снова работает (К1).
         После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется и эхо не читается (проверено в фазе 1).
         """
-        shutdown = self._state.disconnect_begin()  # не выключение — новое поколение защёлки
-        if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
-            self._request_stop(program_level=STOP_LEVEL["SOFT"])
-        run, prog = self._state.threads_to_close()
-        if run is not None and run.handle is not None:
-            self._close_thread(run.handle, _LEASE_JOIN_S)
-        if prog is not None:
-            self._close_thread(prog, _PROGRAM_JOIN_S)
-        self._ready = False
-        if self._transport is not None:
-            try:
-                self._transport.disconnect()
-            except Exception as exc:
-                self._record_err()  # сбой закрытия фиксируется, не глушится молча (как v1)
-                logger.warning(
-                    f"робот {self.entry.id!r}: транспорт при отключении не закрыт: {type(exc).__name__}: {exc}"
-                )
-        self._last_quality = "bad"
+        try:
+            shutdown = self._state.disconnect_begin()  # не выключение — новое поколение защёлки
+            if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
+                self._request_stop(program_level=STOP_LEVEL["SOFT"])
+            run, prog = self._state.threads_to_close()
+            if run is not None and run.handle is not None:
+                self._close_thread(run.handle, _LEASE_JOIN_S)
+            if prog is not None:
+                self._close_thread(prog, _PROGRAM_JOIN_S)
+            self._ready = False
+            if self._transport is not None:
+                try:
+                    self._transport.disconnect()
+                except Exception as exc:
+                    self._record_err()  # сбой закрытия фиксируется, не глушится молча (как v1)
+                    logger.warning(
+                        f"робот {self.entry.id!r}: транспорт при отключении не закрыт: {type(exc).__name__}: {exc}"
+                    )
+            self._last_quality = "bad"
+        finally:
+            # C-29 (В1, В6): конец отключения — счётчик -1, очереди заданий и возвратов сняты, число — в журнал и статус
+            jobs, returns = self._state.disconnect_end()
+            if jobs or returns:
+                text = TEXT_QUEUE_DROPPED.format(jobs=jobs, returns=returns)
+                logger.warning(f"робот {self.entry.id!r}: {text}")
+                self._publish_error(text)
 
     def _close_thread(self, handle: IHandle, budget_s: float) -> None:
         """Дождаться выхода потока через его запись. Выживший виден: ``tx_err`` +1, ``last_error``; не бросает.

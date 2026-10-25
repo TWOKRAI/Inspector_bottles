@@ -421,7 +421,10 @@ class DeviceManager(BaseManager, ObservableMixin):
                 )
 
         ok = driver.connect()
-        self._publish(f"devices.state.{dev_id}.conn", {"conn": "connected" if ok else "error"})
+        # C-29 (В3): connect, прерванный «Отключить», — не ошибка (`is True`: подмены MagicMock дают истинный объект)
+        aborted = not ok and getattr(driver, "disconnect_pending", False) is True
+        conn = "connected" if ok else ("disconnecting" if aborted else "error")
+        self._publish(f"devices.state.{dev_id}.conn", {"conn": conn})
         return ok
 
     def disconnect(self, dev_id: str) -> None:

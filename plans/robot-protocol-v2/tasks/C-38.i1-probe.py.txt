@@ -1,0 +1,82 @@
+"""Ревью ветки C-29 р.2: барьерная проба остатка I1 (не в репозитории).
+
+I1: тик прошёл обе проверки desired (пауза на первом чтении часов в потоке тика), затем K, затем супервизор
+проходит disconnect ЦЕЛИКОМ (счётчик -> 0), и только потом тик отпускается к connect_begin.
+Контроль: порядок C9 (тик отпускается ДО разбора очереди) — должен дать 0 probe / 0 servo.
+"""
+
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from Services.device_hub.tests.test_c29_probe import _Rig, _drop_link
+from Services.device_hub.tests.test_robot_v2_t53g_windows import (
+    _ENTER_S,
+    _JOIN_S,
+    _Barrier,
+    _bounded,
+    driver_scope,  # noqa: F401 — autouse
+)
+import time
+
+
+def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, queue_before_release: bool) -> dict[str, Any]:
+    barrier = _Barrier()
+
+    def clock() -> float:
+        barrier.pause_if_t1()
+        return time.monotonic()
+
+    rig = _Rig(tmp_path, monkeypatch, servo_tlm=0, do_on=False, clock=clock)
+    try:
+        _drop_link(rig)
+        tick = threading.Thread(target=rig.drv.tick, name="i1-tick", daemon=True)
+        barrier.t1 = tick
+        tick.start()
+        assert barrier.entered.wait(_ENTER_S), "окно недостижимо: тик не дошёл до часов"
+        mark = len(rig.events)
+        cmd = rig.cmd("disconnect")
+        pending_after_k = rig.drv.disconnect_pending
+        if queue_before_release:
+            _bounded(rig.plugin._process_conn_queue, 5.0, "disconnect")  # D1–D6 + хвост, счётчик -> 0
+        pending_at_release = rig.drv.disconnect_pending
+        inside = tick.is_alive() and not barrier.release.is_set()
+        soft_before_release = rig.client.soft_count()
+        barrier.release.set()
+        tick.join(_JOIN_S + 5.0)
+        assert not tick.is_alive(), "тик не вернулся"
+        assert inside, "команда/очередь прошли не внутри окна"
+        if not queue_before_release:
+            _bounded(rig.plugin._process_conn_queue, 5.0, "disconnect")
+        return {
+            "cmd": cmd.get("status"),
+            "pending_after_k": pending_after_k,
+            "pending_at_release": pending_at_release,
+            "probe_after": rig.after(mark, "probe"),
+            "sync_after": rig.after(mark, "sync"),
+            "servo_after": rig.after(mark, "servo"),
+            "soft_before_release": soft_before_release,
+            "soft": rig.client.soft_count(),
+            "events": rig.events[mark:],
+            "connected_end": rig.drv.is_connected,
+            "transport_open": bool(rig.transport.is_connected),
+        }
+    finally:
+        barrier.release.set()
+        rig.close()
+
+
+def test_i1_full_disconnect_before_tick_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    obs = _run(tmp_path, monkeypatch, queue_before_release=True)
+    print("I1:", obs)
+    assert (obs["probe_after"], obs["servo_after"]) == (0, 0), f"I1 воспроизведён: {obs}"
+
+
+def test_control_c9_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    obs = _run(tmp_path, monkeypatch, queue_before_release=False)
+    print("C9-control:", obs)
+    assert (obs["probe_after"], obs["servo_after"]) == (0, 0), f"контроль: {obs}"

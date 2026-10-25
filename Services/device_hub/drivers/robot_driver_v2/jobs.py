@@ -151,6 +151,9 @@ class JobMixin:
             ecap = None if raw_ecap is None else _whole(raw_ecap, "e_capture")
         except _BadArgs:
             return {"status": "error", "message": TEXT_BAD_JOB_ARGS, "queue_len": self._state.job_queue_len()}
+        refusal = self._state.disconnect_refusal()  # C-29 (В4): между «Отключить» и концом отключения
+        if refusal is not None:
+            return {**refusal, "queue_len": self._state.job_queue_len()}
         if not self.is_connected:
             return {**_NOT_CONNECTED, "queue_len": self._state.job_queue_len()}
         if ecap is None:
@@ -175,6 +178,9 @@ class JobMixin:
                 "message": TEXT_BAD_RETURN_ARGS,
                 "return_queue_len": self._state.return_queue_len(),
             }
+        refusal = self._state.disconnect_refusal()  # C-29 (В5)
+        if refusal is not None:
+            return {**refusal, "return_queue_len": self._state.return_queue_len()}
         if not self.is_connected:
             return {**_NOT_CONNECTED, "return_queue_len": self._state.return_queue_len()}
         n = self._state.enqueue_return(item)
