@@ -82,7 +82,7 @@ def _run(plugin: MLInferencePlugin) -> dict:
     return plugin.process([{"frame": _frame()}])[0]
 
 
-def test_cached_prediction_flag_follows_current_threshold(tmp_path: Path) -> None:
+def test_threshold_flag_follows_current_threshold(tmp_path: Path) -> None:
     """Что может сломаться: флаг порога «залипает» по порогу прошлого кадра.
 
     Топ-1 К=0.45. Кадр 1, порог 0.4 → False; set_threshold(0.5) → кадр 2 обязан стать True и в
@@ -147,7 +147,7 @@ def test_engine_predict_default_threshold_still_filters(tmp_path: Path) -> None:
     assert top[0]["label"] == "К"
 
 
-def test_inference_error_does_not_serve_stale_cache_next_frame(tmp_path: Path) -> None:
+def test_inference_error_does_not_leak_previous_prediction(tmp_path: Path) -> None:
     """Что может сломаться: после ошибки инференса следующий кадр отдаёт предсказание ДО ошибки.
 
     Кадры 1-2 — норма (К выше порога); кадр 3 — backend падает (predictions пуст, регистры
@@ -174,7 +174,7 @@ def test_inference_error_does_not_serve_stale_cache_next_frame(tmp_path: Path) -
     assert plugin._reg.last_below_threshold is False  # регистры согласованы с predictions
 
 
-def test_inference_error_with_persistent_failure_never_serves_cache(tmp_path: Path) -> None:
+def test_persistent_inference_error_never_leaks_previous_prediction(tmp_path: Path) -> None:
     """Backend падает и дальше: предсказание кадров 1-2 не всплывает на кадрах 3..6.
 
     Кадры 1-2 — норма. Кадр 3 — первая ошибка; после неё каждый кадр обязан пробовать инференс
@@ -184,12 +184,16 @@ def test_inference_error_with_persistent_failure_never_serves_cache(tmp_path: Pa
     _run(plugin)
     _run(plugin)
 
+    boom_calls: list[int] = []
+
     def boom(_tensor: np.ndarray) -> dict:
+        boom_calls.append(1)
         raise RuntimeError("onnx упал")
 
     backend.infer = boom  # type: ignore[method-assign]
     for _ in range(4):  # кадры 3..6
         assert _run(plugin)["predictions"] == []
+    assert len(boom_calls) == 4  # каждый кадр пробует инференс заново
 
 
 def test_nan_confidence_is_below_threshold(tmp_path: Path) -> None:

@@ -6,8 +6,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from Services.ml_inference.plugin.plugin import MLInferencePlugin
+from Services.ml_inference.tests.conftest import _build_dummy_onnx
 
 
 def _make_ctx(config: dict | None = None) -> MagicMock:
@@ -124,26 +126,39 @@ def test_max_latency_resets_last_persists_after_publish(dummy_models_dir: Path):
     assert plugin._reg.last_latency_ms == last  # last не сбрасывается
 
 
-def test_model_switch_first_frame_gets_fresh_inference(dummy_models_dir: Path):
-    """После смены модели первый кадр даёт свежий инференс новой модели (не результат прошлого)."""
+@pytest.fixture
+def two_models_dir(dummy_models_dir: Path) -> Path:
+    """К 'dummy' (метки alpha/beta/gamma) добавлена 'dummy2' со своими весами и метками delta/epsilon/zeta."""
+    _build_dummy_onnx(dummy_models_dir / "dummy2.onnx")
+    (dummy_models_dir / "labels2.txt").write_text("delta\nepsilon\nzeta", encoding="utf-8")
+    sidecar = (dummy_models_dir / "dummy.yaml").read_text(encoding="utf-8")
+    sidecar = sidecar.replace("Dummy Classifier", "Dummy Two").replace("dummy.onnx", "dummy2.onnx")
+    (dummy_models_dir / "dummy2.yaml").write_text(sidecar.replace("labels.txt", "labels2.txt"), encoding="utf-8")
+    return dummy_models_dir
+
+
+def _red_frame() -> np.ndarray:
+    """Нулевой кадр с красным каналом (BGR: индекс 2) = 255 — топ-1 у dummy детерминирован."""
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    frame[..., 2] = 255
+    return frame
+
+
+@pytest.mark.parametrize("pre", [1, 2, 3])
+def test_model_switch_first_frame_gets_fresh_inference(two_models_dir: Path, pre: int):
+    """После смены модели первый кадр даёт предсказание НОВОЙ модели, при любом числе кадров до смены."""
     plugin = MLInferencePlugin()
-    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
-    plugin.process([{"frame": _frame()}])
+    plugin.configure(_make_ctx({"models_dir": str(two_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
+    for _ in range(pre):
+        out = plugin.process([{"frame": _red_frame()}])
+    assert out[0]["predictions"][0]["label"] == "alpha"
 
-    calls: list[int] = []
-    real_predict = plugin._engine.predict
-
-    def counting_predict(*args, **kwargs):
-        calls.append(1)
-        return real_predict(*args, **kwargs)
-
-    plugin._engine.predict = counting_predict
-    plugin.cmd_set_model({"model": "dummy"})  # перезагрузка модели
+    plugin.cmd_set_model({"model": "dummy2"})
+    assert plugin._reg.last_error == ""
     assert plugin._reg.last_below_threshold is True  # телеметрия сброшена fail-safe до первого кадра
 
-    out = plugin.process([{"frame": _frame()}])  # первый кадр после смены — свежий инференс
-    assert calls == [1]
-    assert len(out[0]["predictions"]) == 3
+    out = plugin.process([{"frame": _red_frame()}])  # первый кадр после смены
+    assert out[0]["predictions"][0]["label"] == "delta"
 
 
 def test_empty_preds_resets_stale_telemetry(dummy_models_dir: Path):
