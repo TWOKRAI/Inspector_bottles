@@ -37,6 +37,11 @@ class LifecycleChild:
         self.name = name
         self.shared_resources = shared_resources
         self.config = config if isinstance(config, dict) else {}
+        # Потоки чтения останавливаются до выхода процесса: поток, убитый внутри ``mp.Queue.get``, оставляет
+        # ``_rlock`` очереди занятым, и новое воплощение с той же очередью получает вечный ``Empty`` (R8, отчёт
+        # debugger 2026-10-25_task-1.9b-R8-debugger.md).
+        self._stop_readers = threading.Event()
+        self._readers: list[threading.Thread] = []
 
     def initialize(self) -> bool:
         return True
@@ -45,9 +50,11 @@ class LifecycleChild:
         marker = self.config.get("marker_path")
         if marker:
             for qtype in _READ_QUEUES:
-                threading.Thread(
+                reader = threading.Thread(
                     target=self._drain, args=(qtype, str(marker)), daemon=True, name=f"drain-{qtype}"
-                ).start()
+                )
+                self._readers.append(reader)
+                reader.start()
 
     def should_stop(self) -> bool:
         return False
@@ -56,19 +63,21 @@ class LifecycleChild:
         time.sleep(float(self.config.get("stop_delay_s", 0.0)))
 
     def shutdown(self) -> None:
-        pass
+        self._stop_readers.set()
+        for reader in self._readers:
+            reader.join(1.0)
 
     # ------------------------------------------------------------------ #
 
     def _drain(self, qtype: str, marker: str) -> None:
-        """Читает свою очередь до конца жизни процесса; пишет в журнал только ``probe.ping``."""
+        """Читает свою очередь до ``shutdown()``; пишет в журнал только ``probe.ping``."""
         queue = None
         registry = getattr(self.shared_resources, "process_state_registry", None)
         if registry is not None:
             queue = registry.get_queue(self.name, qtype)
         if queue is None:
             return
-        while True:
+        while not self._stop_readers.is_set():
             try:
                 message = queue.get(timeout=0.05)
             except Exception:  # noqa: BLE001 — пустая очередь / закрытие: просто следующий такт
