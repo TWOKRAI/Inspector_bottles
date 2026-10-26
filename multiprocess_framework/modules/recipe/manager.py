@@ -19,6 +19,10 @@ Comment-preserving запись (duplicate) — по умолчанию чере
 ``patch_recipe`` и ``save_layout``. ``before`` строит менеджер сам из байтов файла, сверка
 ``expected_rev`` и запись идут под одним межпроцессным ``recipe_file_lock``; раскладка
 (``blueprint.metadata.{gui_positions,locked_nodes}``) пишется той же записью, что и топология.
+
+Каноническая форма (Task 1.1f, design.md §10): ``read_canonical`` отдаёт ``N(файл)`` и ``rev`` одного чтения байтов
+(``N`` — ``format_hook.normalize``); вызывающий правит свою часть канона и отдаёт его в ``patch_recipe``.
+``RecipeFormatError`` — файл нельзя привести к канону.
 """
 
 from __future__ import annotations
@@ -58,6 +62,15 @@ class RecipeConflict(Exception):
             f"рецепт '{self.slug}' изменён с момента чтения: "
             f"ожидалась ревизия {self.expected_rev!r}, в файле {self.current_rev!r}"
         )
+
+
+class RecipeFormatError(ValueError):
+    """Файл рецепта нельзя привести к канонической форме (Task 1.1f, design.md §10).
+
+    Причины: файл не разбирается, корень не mapping, ``format_hook.normalize`` бросил или вернул не dict,
+    ``normalize`` ввёл корневой ключ, которого нет в файле (устаревшая форма — сначала миграция).
+    Частичного результата нет; файл не тронут. Текст сообщения не содержит содержимого файла.
+    """
 
 
 class _IdentityFormatHook:
@@ -411,6 +424,30 @@ class RecipeManager:
             return None, rev
         return (data if isinstance(data, dict) else None), rev
 
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        """Каноническое тело рецепта ``N(файл)`` и ``rev`` одного чтения байтов (без лока).
+
+        Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
+        Post: файла нет -> ``(None, None)``; иначе ``(N(файл), rev)``: ``N`` — ``format_hook.normalize``, применён
+        один раз к файлу, разобранному из тех же байтов, что дали ``rev``; ``doc`` — новый dict, вызывающий
+        меняет только свою часть и отдаёт ``patch_recipe(slug, doc, expected_rev=rev)``.
+        Файл не разбирается, корень не mapping, ``normalize`` бросил или вернул не dict -> ``RecipeFormatError``
+        (без содержимого файла в сообщении), частичного результата нет.
+        """
+        path = self._recipe_path(slug)
+        raw = self._read_bytes(path)
+        if raw is None:
+            return None, None
+        rev = compute_rev(raw)
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            self._log_error(f"RecipeManager.read_canonical: ошибка разбора '{slug}': {exc}")
+            raise RecipeFormatError(f"{slug}: файл рецепта не разбирается") from exc
+        if not isinstance(data, dict):
+            raise RecipeFormatError(f"{slug}: корень файла рецепта — не mapping")
+        return self._normalize_file(slug, data), rev
+
     def patch_recipe(
         self,
         slug: str,
@@ -427,7 +464,9 @@ class RecipeManager:
         Post: сверка и запись — под одним ``recipe_file_lock``; ``expected_rev`` не совпал с файлом ->
         ``RecipeConflict``, файл не тронут. Раскладка пишется той же записью (``yaml_patcher`` вызван один раз).
         Пустая дельта (после равен файлу) -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
-        Файл не разбирается -> ``ValueError`` (без содержимого файла), байты целы.
+        Файл не разбирается -> ``RecipeFormatError`` (подкласс ``ValueError``, без содержимого файла), байты целы.
+        ``N(файл)`` вводит корневой ключ, которого нет в файле (устаревшая форма) -> ``RecipeFormatError``
+        «сначала миграция», байты целы; удаление и перенос вглубь отказа не дают.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         new_rev = self._write(slug, after=after, expected_rev=expected_rev, layout=layout)
@@ -448,7 +487,8 @@ class RecipeManager:
         Post: файла нет при ``expected_rev=None`` -> записи нет, возврат ``None``, ни каталог, ни lock-файл не
         создаются; файла нет при непустом ``expected_rev`` -> ``RecipeConflict(..., current_rev=None)``;
         ``blueprint`` не mapping -> записи нет, возврат текущего ``rev``. Пустая коллекция, которой нет в файле,
-        не создаётся. Раскладка из файла -> записи нет. Файл не разбирается -> ``ValueError``, байты целы.
+        не создаётся. Раскладка из файла -> записи нет. Файл не разбирается или в устаревшей форме (см.
+        ``patch_recipe``) -> ``RecipeFormatError`` (подкласс ``ValueError``), байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         return self._write(slug, after=None, expected_rev=expected_rev, layout=(positions, locked_nodes))
@@ -456,6 +496,18 @@ class RecipeManager:
     def _recipe_path(self, slug: str) -> Path:
         _validate_slug(slug)
         return self._engine.recipes_dir / f"{slug}.yaml"
+
+    def _normalize_file(self, slug: str, body: dict) -> dict:
+        """``N(тело файла)``; сбой хука и не-dict в ответе — ``RecipeFormatError`` (без содержимого файла)."""
+        try:
+            result = self._format_hook.normalize(body)
+        except RecipeFormatError:
+            raise
+        except Exception as exc:
+            raise RecipeFormatError(f"{slug}: формат-хук не принял файл рецепта ({type(exc).__name__})") from exc
+        if not isinstance(result, dict):
+            raise RecipeFormatError(f"{slug}: формат-хук вернул {type(result).__name__}, ждали dict")
+        return result
 
     @staticmethod
     def _read_bytes(path: Path) -> bytes | None:
@@ -496,8 +548,16 @@ class RecipeManager:
             try:
                 file_body = yaml.safe_load(raw) if raw is not None else None
             except yaml.YAMLError as exc:
-                raise ValueError(f"{slug}: файл рецепта не разбирается — запись отменена") from exc
-            before = self._format_hook.normalize(file_body) if isinstance(file_body, dict) else {}
+                raise RecipeFormatError(f"{slug}: файл рецепта не разбирается — запись отменена") from exc
+            before: dict = {}
+            if isinstance(file_body, dict):
+                before = self._normalize_file(slug, file_body)
+                introduced = sorted(str(key) for key in before if key not in file_body)
+                if introduced:
+                    # Дельта по такому файлу создала бы рядом со старым ключом второй (``topology`` + ``blueprint``).
+                    raise RecipeFormatError(
+                        f"{slug}: файл в устаревшей форме — сначала миграция (хук вводит корневые ключи: {introduced})"
+                    )
             if after is None:
                 # save_layout: «после» — тот же файл с новой раскладкой; нет файла / blueprint — записи нет.
                 if not isinstance(before.get("blueprint"), dict):
@@ -541,4 +601,4 @@ class RecipeManager:
             metadata["locked_nodes"] = locked
 
 
-__all__ = ["RecipeConflict", "RecipeManager"]
+__all__ = ["RecipeConflict", "RecipeFormatError", "RecipeManager"]

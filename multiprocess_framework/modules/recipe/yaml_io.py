@@ -37,7 +37,7 @@ import json
 import os
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import _ruamel_doc as _rd
 
@@ -92,22 +92,52 @@ def patch_yaml_preserving(path: str | Path, before: dict[str, Any], after: dict[
     if not isinstance(doc, dict):
         raise YamlPatchConflict(f"корень документа {path.name}: {type(doc).__name__}, дельта ждёт mapping")
     _Delta(doc, after).run(doc, before, after)
-    _dump_atomic(yaml, doc, path, newline=eol)
+    _dump_atomic(yaml, doc, path, newline=eol, expected=_expected_by_pyyaml(text, before, after))
     return True
 
 
-def apply_delta(target: dict[str, Any], before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+def apply_delta(
+    target: dict[str, Any],
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    on_insert: Callable[[tuple, Any], Any] | None = None,
+) -> dict[str, Any]:
     """Та же дельта ``before -> after`` на plain-dict ``target``.
 
     ``target`` не мутируется: возврат — новая глубокая копия с применённой дельтой.
+
+    ``on_insert(path, value) -> value`` вызывается ТОЛЬКО для поддерева, вставляемого целиком: ключа или
+    элемента списка нет в ``target`` и он действительно создаётся (design.md §2.3, §10.5). Результат вызова
+    встаёт в ``target`` вместо ``value`` (глубокой копии из ``after``). Изменённые листья, замена значения
+    и ключ, который не создаётся (равен в ``before`` и ``after``), хук не вызывают; детей вставленного
+    поддерева он не обходит. ``path`` — кортеж ключей и индексов от корня ``after`` (место поддерева в ``after``).
 
     Raises:
         YamlPatchConflict: путь дельты не ложится на ``target``.
     """
     result = copy.deepcopy(target)
     if not _equal(before, after):
-        _Delta(result, after).run(result, before, after)
+        _Delta(result, after, on_insert).run(result, before, after)
     return result
+
+
+def _expected_by_pyyaml(text: str, before: dict[str, Any], after: dict[str, Any]) -> Any:
+    """Чтение дампа глазами PyYAML, которое ждём после записи: исходный текст, прочитанный PyYAML, плюс та же дельта.
+
+    Неизменённое слово YAML 1.1 (``yes``, ``on``) ruamel (1.2) держит строкой, а PyYAML читает как bool — сверка
+    дампа с ruamel-документом отказывала бы любую запись по такому файлу (design.md §7, Р4). Исходный текст,
+    который PyYAML не читает или дельта на него не ложится, — ``_MISSING``: сверка с ruamel-документом, как раньше.
+    """
+    import yaml as pyyaml
+
+    try:
+        original = pyyaml.safe_load(text)
+        if not isinstance(original, dict):
+            return _MISSING
+        return apply_delta(original, before, after)
+    except (pyyaml.YAMLError, YamlPatchConflict):
+        return _MISSING
 
 
 def _detect_eol(raw: bytes) -> str:
@@ -200,8 +230,11 @@ def _shared_refs(root: Any) -> dict[int, tuple[Any, list[tuple]]]:
 class _Delta:
     """Один рекурсивный проход дельты по цели (ruamel-документ или plain-dict)."""
 
-    def __init__(self, target: Any, after_root: dict[str, Any]) -> None:
+    def __init__(
+        self, target: Any, after_root: dict[str, Any], on_insert: Callable[[tuple, Any], Any] | None = None
+    ) -> None:
         self._after_root = after_root
+        self._on_insert = on_insert
         self._shared = _shared_refs(target)
         self._done: set[int] = set()
 
@@ -238,7 +271,7 @@ class _Delta:
             if key not in node:  # нормализованный before шире цели
                 if key in before and _equal(before[key], new):
                     continue  # правки по пути нет — умолчание в файл не пишется (design §2.3, §10.5)
-                node[key] = copy.deepcopy(new)  # создаём целиком, с промежуточными контейнерами (F10)
+                node[key] = self._inserted(child_path, new)  # создаём целиком, с промежуточными контейнерами (F10)
             elif key in before:
                 self.set_child(node, key, before[key], new, child_path)
             elif not _equal(node[key], new):  # ключа нет в before, но цель его держит
@@ -264,7 +297,13 @@ class _Delta:
             for i in reversed(range(i1 + overlap, i2)):
                 _rd.delete_item(node, i, owner=owner)
             for offset, value in enumerate(after[j1 + overlap : j2]):
-                node.insert(i1 + overlap + offset, copy.deepcopy(value))
+                # Путь для хука — место элемента в ``after`` (не в промежуточном списке цели).
+                node.insert(i1 + overlap + offset, self._inserted((*path, j1 + overlap + offset), value))
+
+    def _inserted(self, path: tuple, value: Any) -> Any:
+        """Копия вставляемого поддерева; с ``on_insert`` — его результат (design.md §2.3)."""
+        copied = copy.deepcopy(value)
+        return copied if self._on_insert is None else self._on_insert(path, copied)
 
     def set_child(self, container: Any, key: Any, before: Any, after: Any, path: tuple) -> None:
         if _equal(before, after):
@@ -336,7 +375,7 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
+def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n", expected: Any = _MISSING) -> None:
     """Сериализовать в буфер и записать через ``service._atomic_write`` (tmp в том же
     каталоге + fsync + ``os.replace``; при сбое tmp убирается, старый файл цел).
 
@@ -366,7 +405,7 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
     except AssertionError as exc:  # внутренний assert ruamel (``merge_comments``), не наш контракт
         raise ValueError(f"{path}: дамп ruamel не удался — запись отменена, файл цел") from exc
     text = buf.getvalue()
-    _verify_dump(text, data, path)
+    _verify_dump(text, data, path, expected)
     if newline != "\n":
         text = text.replace("\n", newline)
     raw = text.encode("utf-8")
@@ -383,19 +422,22 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
         raise
 
 
-def _verify_dump(text: str, data: Any, path: Path) -> None:
+def _verify_dump(text: str, data: Any, path: Path, expected: Any = _MISSING) -> None:
     """Страховка записи: дамп читается тем загрузчиком, которым рецепты читают потребители
     (PyYAML ``safe_load``, YAML 1.1), и даёт те же данные — иначе ``ValueError`` до записи.
 
     Ловит невалидный YAML от переноса комментариев, склейку строк и строки вида ``On``/``yes``,
-    которые дампер YAML 1.2 пишет без кавычек, а PyYAML читает как bool (ревью 1.1a)."""
+    которые дампер YAML 1.2 пишет без кавычек, а PyYAML читает как bool (ревью 1.1a).
+
+    ``expected`` — чтение, которое ждём, уже в пространстве PyYAML (``_expected_by_pyyaml``); без него —
+    записываемые данные ``data``. Нужен, чтобы неизменённое ``yes`` файла не отказывало запись (Р4)."""
     import yaml as pyyaml
 
     try:
         loaded = pyyaml.safe_load(text)
     except pyyaml.YAMLError as exc:
         raise ValueError(f"{path.name}: дамп не читается PyYAML — запись отменена, файл цел: {exc}") from exc
-    if not _equal(loaded, _plain(data)):
+    if not _equal(loaded, _plain(data) if expected is _MISSING else expected):
         raise ValueError(f"{path.name}: PyYAML читает дамп иначе, чем записываемые данные — запись отменена, файл цел")
 
 

@@ -180,6 +180,24 @@ class RecipeManagerProtocol(Protocol):
         """
         ...
 
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        """Каноническое тело рецепта ``N(файл)`` и ``rev`` одного чтения байтов (без лока).
+
+        ``N`` — ``format_hook.normalize`` менеджера (design.md §10 п. 1). Хук идемпотентен, тотален на валидном
+        файле, детерминирован, без правок даёт пустую дельту (п. 2; общий набор проверок — ``hook_contract``).
+        Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
+        Post:
+          - нет файла -> ``(None, None)``.
+          - иначе ``(N(файл), rev)``: ``rev`` и разбор — из одних и тех же байтов, ``rev`` — ``compute_rev``;
+            ``doc`` — новый dict, вызывающий меняет только свою часть и отдаёт его в
+            ``patch_recipe(slug, doc, expected_rev=rev)`` (п. 3). Форма на диске другая (комментарии, опущенные
+            умолчания); мост — дельта-писатель (п. 5).
+          - файл не разбирается, корень не mapping, ``normalize`` бросил или вернул не dict ->
+            ``RecipeFormatError`` (подкласс ``ValueError``, без содержимого файла в сообщении); частичного
+            результата нет, файл не тронут.
+        """
+        ...
+
     def patch_recipe(
         self,
         slug: str,
@@ -200,7 +218,10 @@ class RecipeManagerProtocol(Protocol):
             ``expected_rev`` не совпал -> ``RecipeConflict(slug, expected_rev, current_rev)``, файл не тронут.
           - топология и раскладка — одна запись; пустая коллекция, которой нет в файле, не создаётся.
           - пустая дельта -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
-          - файл не разбирается -> ``ValueError`` (без содержимого файла), байты целы.
+          - файл не разбирается -> ``RecipeFormatError`` (подкласс ``ValueError``, без содержимого файла), байты целы.
+          - ``N(файл)`` вводит корневой ключ, которого нет в файле (устаревшая форма: ``topology:`` ->
+            ``blueprint:``, добавленный ключ) -> ``RecipeFormatError`` «сначала миграция», байты целы; удаление и
+            перенос вглубь (legacy ``gui_positions`` -> ``blueprint.metadata``) отказа не дают.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         ...
@@ -219,7 +240,8 @@ class RecipeManagerProtocol(Protocol):
         Post: файла нет при ``expected_rev=None`` -> записи нет, возврат ``None``, ни каталог, ни lock-файл не
         создаются; файла нет при непустом ``expected_rev`` -> ``RecipeConflict(..., current_rev=None)``;
         ``blueprint`` не mapping -> записи нет, возврат текущего ``rev``; раскладка из файла -> записи нет;
-        конфликт ``rev`` -> ``RecipeConflict``; файл не разбирается -> ``ValueError``, байты целы.
+        конфликт ``rev`` -> ``RecipeConflict``; файл не разбирается или в устаревшей форме (см. ``patch_recipe``) ->
+        ``RecipeFormatError`` (подкласс ``ValueError``), байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         ...
