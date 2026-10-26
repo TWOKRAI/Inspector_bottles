@@ -302,13 +302,13 @@ ROBOT_V1_OPS: tuple[OpSpec, ...] = (
     ),
     OpSpec(
         name="draw_square",
-        description="Нарисовать квадрат: {device_id, cx, cy, side}.",
-        args_schema=("x1", "y1", "x2", "y2", "z?"),  # по коду robot_driver.py:768-769; текст — литерал А3
+        description="Нарисовать квадрат по двум углам: {device_id, x1, y1, x2, y2, z?}.",
+        args_schema=("x1", "y1", "x2", "y2", "z?"),
     ),
     OpSpec(
         name="draw_set_pen",
-        description="Установить перо: {device_id, pen_z}.",
-        args_schema=("down?", "up?"),  # по коду robot_driver.py:779-782; текст — литерал А3
+        description="Установить перо: {device_id, down?, up?} (мм, можно одно из двух).",
+        args_schema=("down?", "up?"),
     ),
     OpSpec(
         name="draw_set_speed",
@@ -332,8 +332,8 @@ ROBOT_V1_OPS: tuple[OpSpec, ...] = (
     ),
     OpSpec(
         name="draw_set_overlap",
-        description="Установить overlap: {device_id, overlap}.",
-        args_schema=("mm",),  # по коду robot_driver.py:803; текст — литерал А3
+        description="Установить overlap: {device_id, mm}.",
+        args_schema=("mm",),
     ),
     OpSpec(
         name="draw_abort",

@@ -69,12 +69,12 @@
   «Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи (T5.6).»;
   `robot_exchange_log_set` «Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6).»;
   `robot_draw_polyline` «Нарисовать полилинию: {device_id, points, ...}.»; `robot_draw_circle` «Нарисовать окружность:
-  {device_id, cx, cy, r}.»; `robot_draw_square` «Нарисовать квадрат: {device_id, cx, cy, side}.»; `robot_draw_set_pen`
-  «Установить перо: {device_id, pen_z}.»; `robot_draw_set_speed` «Установить скорость рисования (перо по бумаге):
+  {device_id, cx, cy, r}.»; `robot_draw_square` «Нарисовать квадрат по двум углам: {device_id, x1, y1, x2, y2, z?}.»; `robot_draw_set_pen`
+  «Установить перо: {device_id, down?, up?} (мм, можно одно из двух).»; `robot_draw_set_speed` «Установить скорость рисования (перо по бумаге):
   {device_id, pct}.»; `robot_draw_set_travel` «Установить скорость переезда (перо вверх): {device_id, pct}.»;
   `robot_draw_set_accel` «Установить ускорение рисования: {device_id, accel} (мм/с²).»; `robot_draw_set_pass_size`
   «Установить размер пачки рисования: {device_id, n} (точек на проход).»; `robot_draw_set_overlap` «Установить overlap:
-  {device_id, overlap}.»; `robot_draw_abort` «Прервать рисование: {device_id}.»; `robot_draw_progress` «Прогресс
+  {device_id, mm}.»; `robot_draw_abort` «Прервать рисование: {device_id}.»; `robot_draw_progress` «Прогресс
   рисования: {device_id}.»; `vfd_run` «Пуск ПЧ: {device_id, direction?, freq_hz?}.»; `vfd_set_freq` «Установить частоту:
   {device_id, freq_hz}.»; `vfd_stop` «Стоп ПЧ: {device_id}.»; `vfd_reset_fault` «Сброс аварии ПЧ: {device_id}.»;
   `vfd_get_status` «Статус ПЧ: {device_id}.».
