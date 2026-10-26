@@ -47,12 +47,17 @@ class RecipeConflict(Exception):
     """
 
     def __init__(self, slug: str, expected_rev: str | None, current_rev: str | None) -> None:
-        super().__init__(
-            f"рецепт '{slug}' изменён с момента чтения: ожидалась ревизия {expected_rev!r}, в файле {current_rev!r}"
-        )
+        # args = три поля: исключение пиклится (``cls(*args)``), хотя через границу процессов оно не ходит.
+        super().__init__(slug, expected_rev, current_rev)
         self.slug = slug
         self.expected_rev = expected_rev
         self.current_rev = current_rev
+
+    def __str__(self) -> str:
+        return (
+            f"рецепт '{self.slug}' изменён с момента чтения: "
+            f"ожидалась ревизия {self.expected_rev!r}, в файле {self.current_rev!r}"
+        )
 
 
 class _IdentityFormatHook:
@@ -66,15 +71,6 @@ class _IdentityFormatHook:
 
     def to_topology(self, body: dict) -> dict:
         return body
-
-
-def _plain(value: Any) -> Any:
-    """Глубокая копия, кортежи -> списки (YAML-форма; ``(x, y)`` и ``[x, y]`` — одно и то же значение)."""
-    if isinstance(value, dict):
-        return {k: _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    return copy.deepcopy(value)
 
 
 def _validate_slug(slug: str) -> None:
@@ -400,8 +396,8 @@ class RecipeManager:
         """Тело рецепта и его ``rev`` одного чтения байтов (без лока).
 
         Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
-        Post: файла нет -> ``(None, None)``; файл не разбирается или корень не mapping -> ``(None, rev)``
-        (``rev`` есть — вызывающий может перезаписать такой файл); иначе ``(dict, rev)``.
+        Post: файла нет -> ``(None, None)``; файл не разбирается или корень не mapping -> ``(None, rev)``;
+        иначе ``(dict, rev)``. Писать по такому файлу нельзя: ``patch_recipe``/``save_layout`` дают ``ValueError``.
         """
         path = self._recipe_path(slug)
         raw = self._read_bytes(path)
@@ -431,6 +427,8 @@ class RecipeManager:
         Post: сверка и запись — под одним ``recipe_file_lock``; ``expected_rev`` не совпал с файлом ->
         ``RecipeConflict``, файл не тронут. Раскладка пишется той же записью (``yaml_patcher`` вызван один раз).
         Пустая дельта (после равен файлу) -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
+        Файл не разбирается -> ``ValueError`` (без содержимого файла), байты целы.
+        Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         new_rev = self._write(slug, after=after, expected_rev=expected_rev, layout=layout)
         assert new_rev is not None  # patch_recipe всегда пишет или возвращает ``rev`` существующего файла
@@ -448,7 +446,9 @@ class RecipeManager:
 
         Pre и сверка ``expected_rev`` — как у ``patch_recipe``.
         Post: файла нет или ``blueprint`` не mapping -> записи нет; возврат текущего ``rev`` (``None`` без
-        файла). Пустая коллекция, которой нет в файле, не создаётся. Раскладка из файла -> записи нет.
+        файла; в этом случае ни каталог, ни lock-файл не создаются). Пустая коллекция, которой нет в файле,
+        не создаётся. Раскладка из файла -> записи нет. Файл не разбирается -> ``ValueError``, байты целы.
+        Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         return self._write(slug, after=None, expected_rev=expected_rev, layout=(positions, locked_nodes))
 
@@ -476,6 +476,11 @@ class RecipeManager:
         Лок берётся здесь один раз; помощники ниже его не берут (``recipe_file_lock`` нереентерабелен).
         """
         path = self._recipe_path(slug)
+        if after is None and not path.exists():
+            # save_layout без файла: писать нечего — ни каталога, ни lock-файла.
+            if expected_rev is not None:
+                raise RecipeConflict(slug, expected_rev, None)
+            return None
         path.parent.mkdir(parents=True, exist_ok=True)
         with recipe_file_lock(path):
             raw = self._read_bytes(path)
@@ -487,7 +492,10 @@ class RecipeManager:
             if expected_rev != current_rev:
                 raise RecipeConflict(slug, expected_rev, current_rev)
 
-            file_body = yaml.safe_load(raw) if raw is not None else None
+            try:
+                file_body = yaml.safe_load(raw) if raw is not None else None
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{slug}: файл рецепта не разбирается — запись отменена") from exc
             before = self._format_hook.normalize(file_body) if isinstance(file_body, dict) else {}
             if after is None:
                 # save_layout: «после» — тот же файл с новой раскладкой; нет файла / blueprint — записи нет.
@@ -515,8 +523,11 @@ class RecipeManager:
         что в нём хранить. Pre: ``doc["blueprint"]`` — mapping. Мутирует ``doc``.
         """
         blueprint = doc["blueprint"]
-        pos = _plain(positions)
-        locked = _plain(sorted(locked_nodes) if isinstance(locked_nodes, (set, frozenset)) else list(locked_nodes))
+        pos = copy.deepcopy(positions)
+        # set без порядка: сортировка нужна, иначе байты файла зависят от PYTHONHASHSEED.
+        locked = (
+            sorted(locked_nodes) if isinstance(locked_nodes, (set, frozenset)) else copy.deepcopy(list(locked_nodes))
+        )
         metadata = blueprint.get("metadata")
         if not isinstance(metadata, dict):
             if not pos and not locked:

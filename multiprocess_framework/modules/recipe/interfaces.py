@@ -176,6 +176,7 @@ class RecipeManagerProtocol(Protocol):
         Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
         Post: нет файла -> ``(None, None)``; файл не разбирается / корень не mapping -> ``(None, rev)``;
         иначе ``(dict, rev)``. ``rev`` — ``compute_rev`` байтов файла.
+        Писать по неразбираемому файлу нельзя: ``patch_recipe``/``save_layout`` дают ``ValueError``.
         """
         ...
 
@@ -199,6 +200,8 @@ class RecipeManagerProtocol(Protocol):
             ``expected_rev`` не совпал -> ``RecipeConflict(slug, expected_rev, current_rev)``, файл не тронут.
           - топология и раскладка — одна запись; пустая коллекция, которой нет в файле, не создаётся.
           - пустая дельта -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
+          - файл не разбирается -> ``ValueError`` (без содержимого файла), байты целы.
+        Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         ...
 
@@ -214,7 +217,9 @@ class RecipeManagerProtocol(Protocol):
 
         Pre: как у ``patch_recipe`` (``slug``, ``expected_rev``).
         Post: файла нет или ``blueprint`` не mapping -> записи нет, возврат текущего ``rev`` (``None`` без
-        файла); раскладка из файла -> записи нет; конфликт ``rev`` -> ``RecipeConflict``.
+        файла; в этом случае ни каталог, ни lock-файл не создаются); раскладка из файла -> записи нет;
+        конфликт ``rev`` -> ``RecipeConflict``; файл не разбирается -> ``ValueError``, байты целы.
+        Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
         ...
 

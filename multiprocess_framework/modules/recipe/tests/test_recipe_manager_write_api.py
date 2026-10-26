@@ -16,16 +16,19 @@ import copy
 import hashlib
 import importlib
 import os
+import pickle
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import yaml
 
+from multiprocess_framework.modules.recipe.file_lock import RecipeLockTimeout, recipe_file_lock
 from multiprocess_framework.modules.recipe.manager import RecipeManager
 from multiprocess_framework.modules.recipe.recipe_engine import RecipeEngine
 from multiprocess_framework.modules.recipe.yaml_io import patch_yaml_preserving
@@ -399,3 +402,170 @@ def test_read_recipe_rev_missing_file(tmp_path: Path) -> None:
     mgr, _ = _make(tmp_path)
 
     assert mgr.read_recipe_rev("ghost") == (None, None)
+
+
+# --- запись идёт под локом (ревью 1.1e, F1) -------------------------------------------------
+
+
+@pytest.mark.parametrize("entry", ["patch_recipe", "save_layout"])
+def test_yaml_patcher_runs_while_interprocess_lock_is_held(tmp_path: Path, entry: str) -> None:
+    outcome: list[str] = []
+
+    def probe(path: Any, before: dict, after: dict) -> bool:
+        # Повторный вход того же процесса ждёт сам себя: если лок держит писатель, он не взят за 0.1 с.
+        try:
+            with recipe_file_lock(path, timeout=0.1):
+                outcome.append("acquired")
+        except RecipeLockTimeout:
+            outcome.append("busy")
+        return patch_yaml_preserving(path, before, after)
+
+    mgr, d = _make(tmp_path, yaml_patcher=probe)
+    raw = _put(d, LAYOUT_TEXT)
+
+    _call(mgr, entry, _sha(raw), change=True)
+
+    assert outcome == ["busy"]
+
+
+# --- файл не разбирается (F2) ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("entry", ["patch_recipe", "save_layout"])
+def test_unparseable_file_raises_value_error_bytes_intact(tmp_path: Path, entry: str) -> None:
+    mgr, d = _make(tmp_path)
+    raw = _put(d, "a: [\n")
+
+    with pytest.raises(ValueError) as info:
+        _call(mgr, entry, _sha(raw), change=True)
+
+    assert str(info.value) == f"{SLUG}: файл рецепта не разбирается — запись отменена"
+    assert (d / f"{SLUG}.yaml").read_bytes() == raw
+
+
+# --- каталога рецептов нет (F3) --------------------------------------------------------------
+
+
+def test_patch_recipe_creates_missing_recipes_dir_and_file(tmp_path: Path) -> None:
+    recipes_dir = tmp_path / "not_yet" / "recipes"
+    # RecipeEngine создаёт каталог сам, поэтому менеджеру даётся заглушка с одним атрибутом ``recipes_dir``.
+    mgr = RecipeManager(engine=SimpleNamespace(recipes_dir=recipes_dir))
+    assert not recipes_dir.exists()
+
+    new_rev = mgr.patch_recipe("fresh", {"name": "fresh", "blueprint": {"processes": []}}, expected_rev=None)
+
+    written = (recipes_dir / "fresh.yaml").read_bytes()
+    assert yaml.safe_load(written) == {"name": "fresh", "blueprint": {"processes": []}}
+    assert new_rev == _sha(written)
+
+
+# --- set -> отсортированный список (F4) -------------------------------------------------------
+
+_HASHSEED_CHILD = r"""
+import sys, pathlib
+from types import SimpleNamespace
+from multiprocess_framework.modules.recipe.manager import RecipeManager
+d = pathlib.Path(sys.argv[1])
+p = d / "r1.yaml"
+raw = b"name: r1\nblueprint:\n  processes:\n    - id: a\n"
+p.write_bytes(raw)
+import hashlib
+mgr = RecipeManager(engine=SimpleNamespace(recipes_dir=d))
+mgr.save_layout("r1", {"a": [1, 2]}, {"z", "b", "m", "q", "c"}, expected_rev=hashlib.sha256(raw).hexdigest())
+sys.stdout.write(p.read_bytes().hex())
+"""
+
+
+def test_save_layout_set_locked_nodes_written_sorted(tmp_path: Path) -> None:
+    mgr, d = _make(tmp_path)
+    raw = _put(d, "name: r1\nblueprint:\n  processes:\n    - id: a\n")
+
+    mgr.save_layout(SLUG, {"a": [1, 2]}, {"z", "b", "m"}, expected_rev=_sha(raw))
+
+    body = yaml.safe_load((d / f"{SLUG}.yaml").read_bytes())
+    assert body["blueprint"]["metadata"]["locked_nodes"] == ["b", "m", "z"]
+
+
+def test_save_layout_set_bytes_identical_across_hash_seed(tmp_path: Path) -> None:
+    outputs = []
+    for seed in ("0", "1", "2"):
+        work = tmp_path / f"seed{seed}"
+        work.mkdir()
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(_REPO_ROOT)
+        env["PYTHONHASHSEED"] = seed
+        proc = subprocess.run(
+            [sys.executable, "-c", _HASHSEED_CHILD, str(work)],
+            cwd=str(_REPO_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr
+        outputs.append(proc.stdout)
+
+    assert outputs[0] == outputs[1] == outputs[2]
+    body = yaml.safe_load(bytes.fromhex(outputs[0]))
+    assert body["blueprint"]["metadata"]["locked_nodes"] == ["b", "c", "m", "q", "z"]
+
+
+# --- tuple в позициях (F9) ---------------------------------------------------------------------
+
+
+def test_save_layout_tuple_positions_equal_to_file_list_is_noop(tmp_path: Path) -> None:
+    mgr, d = _make(tmp_path)
+    raw = _put(d, LAYOUT_TEXT)
+    path = d / f"{SLUG}.yaml"
+    _pin_mtime(path)
+
+    rev = mgr.save_layout(SLUG, {"a": (10, 20)}, ["a"], expected_rev=_sha(raw))
+
+    assert rev == _sha(raw)
+    assert path.read_bytes() == raw
+    assert path.stat().st_mtime_ns == _OLD_MTIME_NS
+
+
+def test_save_layout_tuple_positions_written_as_yaml_list(tmp_path: Path) -> None:
+    mgr, d = _make(tmp_path)
+    raw = _put(d, BASE_TEXT)
+
+    mgr.save_layout(SLUG, {"a": (1, 2)}, [], expected_rev=_sha(raw))
+
+    body = yaml.safe_load((d / f"{SLUG}.yaml").read_bytes())
+    assert body["blueprint"]["metadata"] == {"gui_positions": {"a": [1, 2]}}
+
+
+# --- save_layout без файла: ни каталога, ни lock-файла (F5) ---------------------------------
+
+
+def test_save_layout_without_file_creates_no_lock_file(tmp_path: Path) -> None:
+    mgr, d = _make(tmp_path)
+
+    assert mgr.save_layout("ghost", {"a": [1, 2]}, ["a"], expected_rev=None) is None
+
+    assert sorted(p.name for p in d.iterdir()) == []
+
+
+def test_save_layout_without_file_but_with_rev_is_conflict(tmp_path: Path) -> None:
+    mgr, d = _make(tmp_path)
+
+    with pytest.raises(_rc().RecipeConflict) as info:
+        mgr.save_layout("ghost", {"a": [1, 2]}, ["a"], expected_rev="0" * 64)
+
+    assert (info.value.slug, info.value.expected_rev, info.value.current_rev) == ("ghost", "0" * 64, None)
+    assert sorted(p.name for p in d.iterdir()) == []
+
+
+# --- RecipeConflict пиклится (F7) ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("current", ["c" * 64, None], ids=["file", "no_file"])
+def test_recipe_conflict_pickle_round_trip(current: str | None) -> None:
+    original = _rc().RecipeConflict("r1", "b" * 64, current)
+
+    restored = pickle.loads(pickle.dumps(original))
+
+    assert isinstance(restored, _rc().RecipeConflict)
+    assert (restored.slug, restored.expected_rev, restored.current_rev) == ("r1", "b" * 64, current)
+    assert str(restored) == str(original)
