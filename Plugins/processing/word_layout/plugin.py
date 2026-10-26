@@ -446,8 +446,6 @@ class WordLayoutPlugin(ProcessModulePlugin):
         ~1 кадр на диск, без пауз между разными буквами). settle_frames>1 — подавить разовый
         misread (ОСТОРОЖНО: в тракте «1 кадр на диск» ставь 1, иначе диск не возьмётся).
         В id-режиме ``_armed`` не читается; пауза без id ``_taken_track`` не трогает.
-        В id-режиме у ml_inference должен стоять inference_every_n = 1: иначе кэшированное
-        предсказание прошлого диска приедет с новым track_id и новый диск получит чужую букву.
         """
         if self._reg.use_trigger:
             if self._trig_armed and pred is not None:

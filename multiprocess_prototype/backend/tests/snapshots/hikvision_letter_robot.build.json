@@ -351,7 +351,6 @@
                   "confidence_threshold": 0.5,
                   "device": "cpu",
                   "draw_overlay": true,
-                  "inference_every_n": 1,
                   "model": "mobilenet_v3_large_20260616_050828",
                   "top_k": 3
                 },
@@ -4048,7 +4047,6 @@
               "confidence_threshold": 0.5,
               "device": "cpu",
               "draw_overlay": true,
-              "inference_every_n": 1,
               "model": "mobilenet_v3_large_20260616_050828",
               "top_k": 3
             },

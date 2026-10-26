@@ -120,9 +120,7 @@ class MLInferencePlugin(ProcessModulePlugin):
         # load/unload из команд (поток message_processor) — иначе гонка по сессии.
         self._engine_lock = threading.Lock()
 
-        # Кэш для inference_every_n + телеметрия latency.
-        self._frame_idx: int = 0
-        self._last_predictions: list[dict] = []
+        # Телеметрия latency.
         self._latency_sum_ms: float = 0.0
         self._latency_count: int = 0
         self._last_latency_ms: float = 0.0  # мгновенное значение последнего инференса
@@ -169,49 +167,32 @@ class MLInferencePlugin(ProcessModulePlugin):
         if not self._reg.model or not self._engine.is_ready:
             return {**item, "predictions": []}
 
-        every_n = max(1, self._reg.inference_every_n)
-        self._frame_idx += 1
-        run_now = (self._frame_idx % every_n) == 0 or not self._last_predictions
-
-        if run_now:
-            t0 = time.monotonic()
-            try:
-                # lock: команда set_model/reload на другом потоке может в этот момент
-                # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
-                with self._engine_lock:
-                    # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
-                    # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
-                    preds = self._mark_below_threshold(
-                        self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0)
-                    )
-            except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
-                self._reg.last_error = str(exc)
-                self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
-                logger.exception("MLInferencePlugin: inference error")  # traceback в лог
-                # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
-                # как «уверенное попадание»): пустой результат → fail-safe «не доверять».
-                # Кэш чистим тоже: иначе при inference_every_n>1 следующий кадр отдал бы
-                # предсказание ДО ошибки как «уверенное», а регистры остались бы fail-safe.
-                self._last_predictions = []
-                self._update_last_pred_telemetry([])
-                return {**item, "predictions": []}
-            # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
-            # висит в телеметрии до перезагрузки модели)
-            if self._reg.last_error:
-                self._reg.last_error = ""
-            dt_ms = (time.monotonic() - t0) * 1000
-            self._latency_sum_ms += dt_ms
-            self._latency_count += 1
-            self._last_latency_ms = dt_ms
-            self._max_latency_ms = max(self._max_latency_ms, dt_ms)
-            self._last_predictions = preds
-            self._update_last_pred_telemetry(preds)
-        else:
-            # кэш помечается ТЕКУЩИМ порогом: cmd_set_threshold между кадрами inference_every_n>1
-            # действует сразу (поднятый порог не оставит диск «уверенным» по устаревшему флагу)
-            preds = self._mark_below_threshold(self._last_predictions)
-            if preds:
-                self._reg.last_below_threshold = bool(preds[0]["below_threshold"])
+        t0 = time.monotonic()
+        try:
+            # lock: команда set_model/reload на другом потоке может в этот момент
+            # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
+            with self._engine_lock:
+                # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
+                # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
+                preds = self._mark_below_threshold(self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0))
+        except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
+            self._reg.last_error = str(exc)
+            self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
+            logger.exception("MLInferencePlugin: inference error")  # traceback в лог
+            # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
+            # как «уверенное попадание»): пустой результат → fail-safe «не доверять».
+            self._update_last_pred_telemetry([])
+            return {**item, "predictions": []}
+        # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
+        # висит в телеметрии до перезагрузки модели)
+        if self._reg.last_error:
+            self._reg.last_error = ""
+        dt_ms = (time.monotonic() - t0) * 1000
+        self._latency_sum_ms += dt_ms
+        self._latency_count += 1
+        self._last_latency_ms = dt_ms
+        self._max_latency_ms = max(self._max_latency_ms, dt_ms)
+        self._update_last_pred_telemetry(preds)
 
         result_frame = frame
         if self._reg.draw_overlay and preds:
@@ -265,7 +246,7 @@ class MLInferencePlugin(ProcessModulePlugin):
 
     def cmd_set_threshold(self, data: dict) -> dict:
         """Обновить порог/top_k без перезагрузки модели."""
-        for field in ("confidence_threshold", "top_k", "inference_every_n", "draw_overlay"):
+        for field in ("confidence_threshold", "top_k", "draw_overlay"):
             if field in data:
                 setattr(self._reg, field, data[field])
         return {"status": "ok"}
@@ -283,10 +264,6 @@ class MLInferencePlugin(ProcessModulePlugin):
     def _load_selected_model(self) -> None:
         """Загрузить self._reg.model в движок; ошибки → last_error (не падаем)."""
         self._reg.last_error = ""
-        # Сбросить кэш предсказаний/счётчик кадров — иначе при inference_every_n > 1
-        # первые кадры после смены модели вернут результаты предыдущей модели.
-        self._last_predictions = []
-        self._frame_idx = 0
         # сбросить угловую телеметрию — у новой модели может не быть angle_head
         self._reg.last_angle_deg = 0.0
         self._reg.last_angle_valid = False
@@ -340,7 +317,7 @@ class MLInferencePlugin(ProcessModulePlugin):
         """Опубликовать метрики инференса в StateStore.
 
         elapsed_s — длительность окна с прошлой публикации (для inference_fps =
-        число инференсов / окно; учитывает inference_every_n и простой).
+        число инференсов / окно; учитывает простой).
         """
         avg = self._latency_sum_ms / self._latency_count if self._latency_count else 0.0
         fps = self._latency_count / elapsed_s if elapsed_s > 0 else 0.0
