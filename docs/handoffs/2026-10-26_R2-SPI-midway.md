@@ -18,7 +18,11 @@ framework, seams, debts, deviations, injections, injections-predictions, injecti
 
 ## Дальше
 
-1. ~~Принять SPI.h2/h3~~ — сделано. «ready» на окно отправлено координатору 2026-10-26.
+1. ~~Принять SPI.h2/h3~~ — сделано. Окна ч.2 и ч.3 закрыты 2026-10-26: каталоги 922/339/3412/1348 passed, 0 failed;
+   CAPABILITIES b4049bd0c; стенд ветки 3 PASS, база main ×3 PASS (S1–S3 main 1,20–1,36 с, ветка 1,18–1,25) — «не хуже» да.
+   Гонка `introspect.*` после старта воспроизводится на main → не SPI, строки C-57/C-58 переданы координатору.
+   C-56 (v1-имена GUI → драйвер v2) не начат — проверить после слияния. Осталось: ждать слияния С (C-40), rebase, перегенерация
+   снимков build.json + CAPABILITIES, validate.py, backend/tests timed, framework suite heavy (новое окно), «сливаю».
 2. Окно координатора на ч.2 окна heavy (~40 мин): Services/device_hub/tests, Plugins/hub/device_hub/tests,
    process_module/tests, process_manager_module/tests целиком; регенерация CAPABILITIES (`python -m backend_ctl.dump_capabilities`,
    гейт `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` сейчас красный — условие слияния); стенд v2 по
