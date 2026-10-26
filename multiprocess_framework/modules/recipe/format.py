@@ -27,15 +27,23 @@ Purpose:
 
 Public API:
     - normalize_recipe_v3_raw — собрать v3-raw рецепта для записи.
+    - compute_rev — ревизия байтов файла рецепта (единственное определение; ``service``
+      импортирует её отсюда, имя ``service.compute_rev`` остаётся публичным путём).
 
 Stability: lite
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
-__all__ = ["normalize_recipe_v3_raw"]
+__all__ = ["compute_rev", "normalize_recipe_v3_raw"]
+
+
+def compute_rev(raw: bytes) -> str:
+    """Ревизия байтов файла (непрозрачна для клиента; сегодня sha256 hex)."""
+    return hashlib.sha256(raw).hexdigest()
 
 
 def normalize_recipe_v3_raw(

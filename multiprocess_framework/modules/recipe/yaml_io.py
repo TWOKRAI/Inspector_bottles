@@ -280,34 +280,42 @@ class _Delta:
 def update_yaml_preserving(path: str | Path, updates: dict[str, Any]) -> None:
     """Обновить top-level ключи YAML-файла, сохранив комментарии/структуру.
 
-    Существующий файл — round-trip load + перезапись значений только ключей из
-    ``updates`` (остальное, включая заголовок-комментарий, не тронуто). Новый файл —
-    создаётся из ``updates``.
+    Тонкий контракт над дельта-движком (design.md §2.1): ``before`` — текущее поддерево
+    файла по ключам ``updates``, ``after`` — те же ключи с новыми значениями. Значение
+    ключа заменяется целиком по итоговому содержимому (ключи внутри, которых нет в новом
+    значении, удаляются), но равные части не трогаются — комментарии внутри них живы.
+    Пустая дельта — без записи; EOL файла сохраняется. Новый файл создаётся из ``updates``.
 
     Args:
         path: путь к YAML-файлу.
         updates: top-level ключи для записи (значения заменяются целиком).
     """
     path = Path(path)
-    yaml = _make_yaml()
+    after = dict(updates)
+    if not path.exists():
+        patch_yaml_preserving(path, {}, after)
+        return
+    current = _read_plain(path)
+    if not isinstance(current, dict):
+        raise YamlPatchConflict(f"корень документа {path.name}: {type(current).__name__}, ждали mapping")
+    before = {key: current[key] for key in after if key in current}
+    patch_yaml_preserving(path, before, after)
 
-    if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            data = yaml.load(f)
-        if data is None:
-            from ruamel.yaml.comments import CommentedMap
 
-            data = CommentedMap()
-    else:
-        from ruamel.yaml.comments import CommentedMap
+def _read_plain(path: Path) -> Any:
+    """Содержимое файла как plain-структура (dict/list; скаляры ruamel — подклассы builtin).
 
-        data = CommentedMap()
+    Текст с universal newlines (как в движке, F15); пустой файл -> ``{}``."""
+    text = io.TextIOWrapper(io.BytesIO(path.read_bytes()), encoding="utf-8").read()
+    return _plain(_rd.load_document(_make_yaml(), text))
 
-    for key, value in updates.items():
-        data[key] = value
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _dump_atomic(yaml, data, path)
+def _plain(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _plain(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_plain(child) for child in value]
+    return value
 
 
 def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
@@ -356,9 +364,11 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
 def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dict[str, Any]) -> None:
     """Точечно обновить ``blueprint.metadata.<key>``, сохранив ВСЕ комментарии.
 
-    В отличие от :func:`update_yaml_preserving`, НЕ перезаписывает весь ``blueprint``
-    (что стёрло бы комментарии внутри него — per-node ``# --- ... ---`` и т.п.), а
-    меняет только указанные ключи внутри ``blueprint.metadata`` на ruamel-документе.
+    Тонкий контракт над дельта-движком (design.md §2.1): в отличие от
+    :func:`update_yaml_preserving`, ``before``/``after`` строятся на уровне
+    ``blueprint.metadata`` — остальной ``blueprint`` (per-node ``# --- ... ---`` и т.п.) в
+    дельту не входит. Значение каждого ключа заменяется целиком по итоговому содержимому,
+    равные части и комментарии внутри них не трогаются; пустая дельта — без записи.
     Применяется для авто-персиста layout (gui_positions / locked_nodes), который не
     должен портить рецепт при каждом перетаскивании ноды.
 
@@ -370,26 +380,23 @@ def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dic
         metadata_updates: ключи для записи в ``blueprint.metadata`` (значения заменяются
             целиком — напр. ``{"gui_positions": {...}, "locked_nodes": [...]}``).
     """
-    from ruamel.yaml.comments import CommentedMap
-
     path = Path(path)
     if not path.exists():
         return
-    yaml = _make_yaml()
-    with path.open("r", encoding="utf-8") as f:
-        doc = yaml.load(f)
-    if not isinstance(doc, dict):
+    current = _read_plain(path)
+    if not isinstance(current, dict):
         return
-    bp = doc.get("blueprint")
-    if not isinstance(bp, dict):
+    blueprint = current.get("blueprint")
+    if not isinstance(blueprint, dict):
         # raw-topology без вложенного blueprint — layout некуда писать.
         return
 
-    meta = bp.get("metadata")
-    if not isinstance(meta, dict):
-        meta = CommentedMap()
-        bp["metadata"] = meta
-    for key, value in metadata_updates.items():
-        meta[key] = value
-
-    _dump_atomic(yaml, doc, path)
+    if "metadata" in blueprint:
+        old_meta = blueprint["metadata"]
+        base = old_meta if isinstance(old_meta, dict) else {}
+        before = {"blueprint": {"metadata": old_meta}}
+    else:
+        base = {}
+        before = {"blueprint": {}}
+    after = {"blueprint": {"metadata": {**base, **metadata_updates}}}
+    patch_yaml_preserving(path, before, after)

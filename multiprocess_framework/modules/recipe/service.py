@@ -102,7 +102,6 @@ ADR-RCP-006 (сегодня единица — один файл); права н
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import tempfile
@@ -112,6 +111,8 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import yaml
+
+from .format import compute_rev  # единственное определение (design.md §9.1); имя остаётся публичным путём service
 
 # Имена команд — ровно как их регистрирует хаб в CommandManager.
 COMMANDS: tuple[str, ...] = (
@@ -394,8 +395,3 @@ def _atomic_write(path: Path, data: bytes) -> None:
         except OSError:
             pass
         raise
-
-
-def compute_rev(raw: bytes) -> str:
-    """Ревизия байтов файла (непрозрачна для клиента; сегодня sha256 hex)."""
-    return hashlib.sha256(raw).hexdigest()
