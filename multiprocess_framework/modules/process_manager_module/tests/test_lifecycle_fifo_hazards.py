@@ -548,3 +548,39 @@ def test_h11_executor_busy_rejections_are_logged_by_command_manager(rig: Rig) ->
     assert pm_duplicates == [], f"PM дублирует строку CommandManager: {pm_duplicates[:2]}"
     applied = rig.wait_reply(apply_sent)
     assert applied is not None, "topology.apply не ответил"
+
+
+# --------------------------------------------------------------------------- #
+# H12 (ревью ветки р.1 находка 1, вердикт CTO): L принят под потоком T
+# --------------------------------------------------------------------------- #
+
+T_CAP = 64  # потолок ждущих T шлюза (оценка до замера S3)
+RELAY_OVER_T_CAP = 22  # H12: сколько relay сверх T_CAP
+
+
+def test_h12_stop_is_accepted_under_relay_flood(rig: Rig) -> None:
+    """H12: ``topology.apply`` убирает только slow (стоп 3,0 с); +0,5 с — ``T_CAP + 22`` ``process.relay`` в other
+    (diff его не трогает), затем ``process.stop other`` (класс L). Поток T не вытесняет L: stop принят и исполнен
+    (``success: True``, other мёртв); ровно ``T_CAP`` relay прошли, 22 получили ``executor_busy`` (инвариант I5)."""
+    _remove_slow_topology(rig)
+    apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
+    time.sleep(0.5)
+    _assert_in_transition(rig, "slow", "H12")
+    relays = [
+        rig.send("process.relay", {"target_process": "other", "inner_message": rig.ping_message()})
+        for _ in range(T_CAP + RELAY_OVER_T_CAP)
+    ]
+    stop = rig.send("process.stop", {"process_name": "other"})
+
+    stop_reply = rig.wait_reply(stop, 60.0)
+    assert stop_reply is not None, "process.stop other не ответил за дедлайн"
+    assert stop_reply.result == {"success": True, "process_name": "other"}, stop_reply.result
+    other = rig.pm._process_registry.get_process_by_name("other")
+    assert other is None or not other.is_alive(), "other жив после принятого process.stop"
+
+    replies = [rig.wait_reply(sent) for sent in relays]
+    assert all(r is not None for r in replies), "не на все relay пришёл ответ за дедлайн"
+    busy = [r for r in replies if isinstance(r.result, dict) and r.result.get("error") == "executor_busy"]
+    ok = [r for r in replies if isinstance(r.result, dict) and r.result.get("success") is True]
+    assert (len(ok), len(busy)) == (64, 22), (len(ok), len(busy))
+    assert rig.wait_reply(apply_sent) is not None, "topology.apply не ответил"
