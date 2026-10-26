@@ -3,7 +3,7 @@
 The lead's break-injection matrix (`.claude/CLAUDE.md` → «Test authorship»): one object = one claimed property broken
 on purpose. The format is ADR-ATL-004 §3 (`scripts/atlas/DECISIONS.md`).
 
-**Writers:** the lead writes every key except `observed` BEFORE the run; `observed` comes from the run (`atlas inject
+**Writers:** the lead writes `id`, `prop`, `forecast` BEFORE the run; the author of the task writes `file`, `old`, `new` from them (`project-rules` §5); `observed` comes from the run (`atlas inject
 run`, Task 1.9e; by hand until then). **Readers:** `atlas lint-brief` (1.9c: `old` found once in `file`), `atlas inject`
 (1.9e: apply, run the radius, `observed`, revert, summary), `atlas pack` (mismatch tail — 1.9e), Atlas nodes
 `injection` and edges `breaks` (`observed`), `lists` (ADR-ATL-001). Contract test:

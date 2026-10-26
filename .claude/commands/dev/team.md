@@ -121,7 +121,7 @@ Don't spawn "just in case": an idle participant costs the same as a busy one.
 While work is delegated, you don't write code. Exception — something trivial (under 30 lines, one
 file), and say so out loud.
 
-## 7. Injections — you only
+## 7. Injections — predictions and verdict are yours
 
 After every mechanism: predict the set → revert each guarantee one at a time → the fact.
 Against both test sets, the author's and the tester's. The predictions and the verdict are yours; the

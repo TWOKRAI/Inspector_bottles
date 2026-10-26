@@ -50,7 +50,7 @@ Rules:
 - **A review verdict without a reproduction is advisory only.** Findings must carry
   input → observed output. Reviewers work **synchronously** — no background offload,
   no long waits; on a hang, skip that check and say so, but always issue the verdict.
-  Since Claude Code 2.1.212 subagents are **background by default**, so synchronous is
+  Subagents are **background by default** (code.claude.com `sub-agents`), so synchronous is
   no longer what you get by omission — pass `run_in_background: false` explicitly for
   `reviewer` and `tester`. See "Subagents are background by default" below.
 - A test that derives its expected value from the code under test agrees with any answer,
@@ -247,8 +247,8 @@ until one re-summoned subtask is measured in cache_read tokens, re-summon for re
 ## One executor per task (owner, 2026-10-26)
 
 Rule: `project-rules` §5 «One executor per task»; pointer in `.claude/CLAUDE.md` «The lead coordinates».
-In force for each lane from its next `/clear` after commit of this section; a task already running
-finishes under the old chain.
+In force in a lane once this text reaches its tree (merge to `main`, then the lane's next `/clear`; a lane
+worktree cut earlier gets it at its next sync with `main`); a task past stage 2 finishes under the old chain.
 
 **Source.** Anthropic, «Building agents: When to fold subagents into your main agent loop»
 (claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop),
@@ -275,7 +275,9 @@ a `tester` → `developer` pair at the same quality.
 **What changed.** The author diagnoses every red against its code — a blind tester's red too, with
 evidence of whether the code or the test is wrong — and writes the injection patches on its files
 from the lead's predictions. `debugger` remains for code no agent of the task wrote (a neighbour's
-regression, an old red) and after the author's 2nd failed iteration. The `tester FAIL → debugger`
+regression, an old red), and for one diagnosis on the author's 3rd iteration before `teamlead`. The author
+never edits the blind tester's test: a red it judges a wrong test goes to the lead with the evidence
+(review finding, 2026-10-26). The `tester FAIL → debugger`
 loop was rewritten in `/dev:pipeline`, `/dev:team`, `/dev:debug` and `team-protocol` (S5 and the
 «Regression FAIL» chain). Unchanged: the three test-authorship roles, the lead's predictions before
 any injection run, stage 6 (`investigator` for live defects), `backend_ctl` access for every role
@@ -357,8 +359,8 @@ Gaps the default system prompt covers weakly. Apply on non-trivial tasks.
 Lossless habits that shrink baseline + per-command cost (never trade reasoning quality for
 tokens — that's what `caveman` is for, trigger-based, user-facing only).
 
-- MCP tool-search is default-on (schemas load on demand) — don't force `ENABLE_TOOL_SEARCH=true`
-  behind a proxy/Vertex; tune via `ENABLE_TOOL_SEARCH=auto:N` in `settings.json` → `env` if needed.
+- MCP tool-search is default-on (schemas load on demand); `ENABLE_TOOL_SEARCH=false` only if a gateway
+  rejects it, `auto:N` tunes the threshold (`settings.json` → `env`).
 - Prefer CLI (`gh`/`git`/`sentrux`/`qex` via `Bash`) over MCP for one-off ops; disable unused
   servers in `enabled.yaml`. Audit the baseline with `/context` or skill **context-budget**.
 - Lean tool output at the source — hooks can't rewrite it after the fact: `pytest -q --tb=short`,

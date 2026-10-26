@@ -2,8 +2,9 @@
 
 Откуда: Inspector_bottles, сессия «Процессы · правила агентов» (inspector-bottles-60).
 Коммиты в Inspector_bottles: `232f78c97` (правило «один исполнитель»), `a72dffe24` (аудит противоречий).
-Патч для seed: [`2026-10-26_seed-agent-rules.patch`](2026-10-26_seed-agent-rules.patch) — 4 файла шаблона,
-`git -C claude_seed apply --check` → exit 0 (проверено 2026-10-26 на `8038b4c`).
+Патч для seed: [`2026-10-26_seed-agent-rules.patch`](2026-10-26_seed-agent-rules.patch) — 3 команды шаблона
+(`dev/commands/{pipeline,team,debug}.md`), `git -C claude_seed apply --check` → exit 0 (проверено 2026-10-26 на
+`8038b4c`, после правок по ревью р.1). Остальное — правками по смыслу ниже: в seed эти файлы написаны иначе.
 
 ## Зачем seed это нужно
 
@@ -37,23 +38,35 @@ Anthropic, «Building agents: When to fold subagents into your main agent loop»
 - новый агент платит за вход 107–228k, повторный вызов +3…56k (30 запусков, ~3.0M токенов);
 - замер Д47: один developer, сам пишущий красные, 92–105k против 210–237k у пары tester → developer.
 
-Файлы шаблона (в патче): `dev/commands/pipeline.md` (итерации FAIL, граф, правило),
-`dev/commands/team.md`, `dev/commands/debug.md` («Automatic activation»), `dev/skills/team-protocol/SKILL.md`
-(S5 и цепочка «Regression FAIL»).
+В патче: `dev/commands/pipeline.md` (итерации FAIL, граф, правило), `dev/commands/team.md` (сборка команды, §7
+инъекций), `dev/commands/debug.md` («Automatic activation»).
 
-**Вручную — `dev/skills/project-rules/SKILL.md`**: в seed §5 устроен иначе, патч не ложится.
-Вставить пунктом §5 после «Apply every instruction…»:
+**Вручную (в seed другой текст, патч не ложится):**
+
+| Файл seed | Строка сейчас | На что заменить по смыслу |
+|---|---|---|
+| `dev/skills/team-protocol/SKILL.md:28` | S5 «FAIL → debugger loop» | «FAIL → back to the author» |
+| `dev/skills/team-protocol/SKILL.md:56` | «`tester`(FAIL) → `debugger` → `developer` → `tester`(retry)» | «→ the same author re-summoned (diagnosis + fix) → `tester`(retry); 3rd iteration: one `debugger` diagnosis, still red → `teamlead`; code no agent of the task wrote → `debugger` from the start» |
+| `dev/modes/dev.md:10` | «(debugger on FAIL)» | «(author re-summoned on FAIL)» |
+| `dev/modes/dev.md:24` | «failure-recovery via the debugger» | «failure-recovery through the author (`project-rules` §5)» |
+| `dev/skills/project-rules/SKILL.md` §5 | — | вставить пункт ниже после «Apply every instruction…» |
 
 ```
 - **One executor per task.** The implementer (`developer` / `teamlead`) owns its files end to
-  end: the code, the diagnosis of every red against it (a blind tester's red too: the author
-  decides whether the code or the test is wrong and shows the evidence), and the injection
-  patches on its files from the lead's predictions. The lead re-summons the author by agentId
-  (`SendMessage`); no second role on the same files. `debugger` only for code no agent of this
-  task wrote, or after the author's 2nd failed iteration on the same red. `tester` and
-  `reviewer` stay independent and fresh. Split agents by context (a self-contained piece that
-  returns a compact result), never by role over the same files.
+  end: the code, the diagnosis of every red against it (a blind tester's red too: it works out
+  whether the code or the test is wrong and shows the evidence: failing assertion, spec line; it
+  changes its own code and tests only and never edits, deletes, skips or xfails a blind tester's
+  test or `interface.py`; a red it judges a wrong test goes to the lead, who decides), and the
+  injection patches on its files from the lead's predictions. The lead re-summons the author by
+  agentId (`SendMessage`); no second role on the same files. `debugger` from the start for code
+  no agent of this task wrote; on the author's 3rd iteration on the same red, one `debugger`
+  diagnosis (report only), still red → `teamlead`. `tester` and `reviewer` stay independent and
+  fresh. Split agents by context (a self-contained piece that returns a compact result), never
+  by role over the same files.
 ```
+
+Ревью р.1 (Sonnet) нашло, что первая редакция позволяла прочитать правило как «автор правит тест тестера»;
+текст выше это закрывает — переносить именно его.
 
 ## Изменение 2 — противоречия, найденные аудитом
 

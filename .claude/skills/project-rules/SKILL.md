@@ -68,10 +68,14 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
   inside your FILES and boundaries, never commit; a reviewer's helper never fixes code.
 - **One executor per task** (owner, 2026-10-26). The implementer (`developer` / `teamlead`) owns
   its files end to end: the code, the diagnosis of every red against it (a blind tester's red too:
-  the author decides whether the code or the test is wrong and shows the evidence), and the
+  it works out whether the code or the test is wrong and shows the evidence: failing assertion, spec
+  line; it changes its own code and tests only and never edits, deletes, skips or xfails a blind
+  tester's test or `interface.py`; a red it judges a wrong test goes to the lead, who decides), and the
   injection patches on its files from the lead's predictions. The lead re-summons the author by
-  agentId (`SendMessage`); no second role on the same files. `debugger` only for code no agent of
-  this task wrote, or after the author's 2nd failed iteration on the same red. `tester` and
+  agentId (`SendMessage`); no second role on the same files. `debugger` from the start for code no agent
+  of this task wrote; on the author's 3rd iteration on the same red, one `debugger` diagnosis (report
+  only), still red → `teamlead` (§7). A task past stage 2 when this text reaches your tree finishes
+  under the old chain. `tester` and
   `reviewer` stay independent and fresh. Split agents by context (a self-contained piece that
   returns a compact result), never by role over the same files.
 - **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,

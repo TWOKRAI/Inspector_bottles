@@ -1,23 +1,35 @@
 diff --git a/src/claude_kit_claude/template/plugins/dev/commands/debug.md b/src/claude_kit_claude/template/plugins/dev/commands/debug.md
-index c5eae3dc2..d775340b6 100644
+index c5eae3dc2..9ed2d01cf 100644
 --- a/src/claude_kit_claude/template/plugins/dev/commands/debug.md
 +++ b/src/claude_kit_claude/template/plugins/dev/commands/debug.md
 @@ -49,2 +49,2 @@ Input: $ARGUMENTS — description of the bug, a reproduction command, or a path
 
 -`/dev:pipeline` automatically calls the debugger on a FAIL from the tester (iterations 1 and 2). A manual `/dev:debug` is needed when the `/dev:pipeline` cycle isn't running, or the Director wants a diagnosis outside the pipeline.
-+None. A red against code written in the current task goes back to its author, re-summoned by agentId (`project-rules` §5 «One executor per task»). Call `/dev:debug` for code no agent of the task wrote (a regression in a neighbouring module, an old red), or after the author's 2nd failed iteration on the same red.
++None. A red against code written in the current task goes back to its author, re-summoned by agentId (`project-rules` §5 «One executor per task»). Call `/dev:debug` for code no agent of the task wrote (a regression in a neighbouring module, an old red), or for one diagnosis (report only) on the author's 3rd iteration on the same red.
 diff --git a/src/claude_kit_claude/template/plugins/dev/commands/pipeline.md b/src/claude_kit_claude/template/plugins/dev/commands/pipeline.md
-index 46a168986..05087d998 100644
+index 46a168986..7db4e7e3a 100644
 --- a/src/claude_kit_claude/template/plugins/dev/commands/pipeline.md
 +++ b/src/claude_kit_claude/template/plugins/dev/commands/pipeline.md
-@@ -196,4 +196,4 @@ Launch the **tester** agent (Sonnet) in `MODE: regression` (pass it through the
+@@ -1,3 +1,3 @@
+ ---
+-description: Full development cycle in one command — plan → implement → test → review → ship (with failure-recovery via debugger)
++description: Full development cycle in one command — plan → implement → test → review → ship (a red goes back to its author)
+ disable-model-invocation: true
+@@ -5,3 +5,3 @@ disable-model-invocation: true
+
+-Automatic full cycle. The Director drives every stage. Explicit failure-recovery loops via `debugger` and escalation to `teamlead`.
++Automatic full cycle. The Director drives every stage. Explicit failure-recovery loop through the re-summoned author, one `debugger` diagnosis on the 3rd iteration, escalation to `teamlead`.
+ Default transport is subagents; `--team` and `--workflow` are selected in §1′.
+@@ -196,5 +196,5 @@ Launch the **tester** agent (Sonnet) in `MODE: regression` (pass it through the
  - If FAIL:
 -  - **Iteration 1 (FAIL)**: launch **debugger** (Sonnet) with the failing test and the stack → either debugger fixes it in scope, or it gives a diagnosis → `developer`/`teamlead` applies the fix → tester retries regression
 -  - **Iteration 2 (repeat FAIL)**: debugger + developer again → tester retry
-+  - **Iteration 1 (FAIL)**: re-summon the **author** (`developer`/`teamlead`, `SendMessage` by agentId) with the failing test and the stack → it diagnoses (code or test wrong, with evidence) and fixes → tester retries regression
-+  - **Iteration 2 (repeat FAIL)**: the author again → tester retry. `debugger` (Sonnet) only when the red is in code no agent of this task wrote (`project-rules` §5 «One executor per task»)
-   - **Iteration 3 (still FAIL)**: **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
-@@ -263,5 +263,5 @@ plan → (developer)│
+-  - **Iteration 3 (still FAIL)**: **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
++  - **Iteration 1 (FAIL)**: re-summon the **author** (`developer`/`teamlead`, `SendMessage` by agentId) with the failing test and the stack → it diagnoses with evidence: code wrong → it fixes; test wrong → it stops and reports to the lead, the tester's file stays untouched → tester retries regression
++  - **Iteration 2 (repeat FAIL)**: the author again → tester retry. A red in code no agent of this task wrote goes to `debugger` (Sonnet) from the start (`project-rules` §5 «One executor per task»)
++  - **Iteration 3 (still FAIL)**: one `debugger` diagnosis (report only, `project-rules` §5) → the author applies it → tester retry; still red → **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
+
+@@ -263,7 +263,7 @@ plan → (developer)│
                                                                                                                         ↓ PASS  ↓ FAIL
 -                                                                                                                       review  debugger → impl [fix] → tester (retry)
 +                                                                                                                       review  author (re-summoned) [diagnose+fix] → tester (retry)
@@ -25,13 +37,16 @@ index 46a168986..05087d998 100644
 -                                                                                                                                       debugger → impl → tester
 +                                                                                                                                       same author → tester
                                                                                                                                             ↓ FAIL (iteration 3)
+-                                                                                                                                           ESCALATE → teamlead (rethink)
++                                                                                                                                           debugger diagnosis → author → tester; still red → ESCALATE → teamlead (rethink)
+
 @@ -295,3 +295,3 @@ For `impl-only` / `n/a` the `tester(RED) → impl(GREEN)` nodes on the graph are
    on a given iteration of their own stage
 -- debugger is invoked automatically on the first FAIL from tester (don't wait for a manual /dev:debug)
 +- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` only for code no agent of this task wrote
  - If the task is clearly Senior+ → go straight to teamlead for implementation (not developer)
 diff --git a/src/claude_kit_claude/template/plugins/dev/commands/team.md b/src/claude_kit_claude/template/plugins/dev/commands/team.md
-index 70437a186..29c40e938 100644
+index 70437a186..9083152e8 100644
 --- a/src/claude_kit_claude/template/plugins/dev/commands/team.md
 +++ b/src/claude_kit_claude/template/plugins/dev/commands/team.md
 @@ -66,3 +66,3 @@ executor by task level — §2 above. Here, only what gets decided when assembli
@@ -39,25 +54,13 @@ index 70437a186..29c40e938 100644
 -- `debugger` — on a FAIL from the tester. `cto` — phase acceptance, merge gate, `teamlead` ↔
 +- A FAIL from the tester goes to the author (the same teammate), not to a new role; `debugger` only for code no teammate wrote (`project-rules` §5 «One executor per task»). `cto` — phase acceptance, merge gate, `teamlead` ↔
    `reviewer` dispute; **not** per task.
-@@ -126,3 +126,4 @@ file), and say so out loud.
+@@ -123,6 +123,7 @@ file), and say so out loud.
+
+-## 7. Injections — you only
++## 7. Injections — predictions and verdict are yours
+
  After every mechanism: predict the set → revert each guarantee one at a time → the fact.
 -Against both test sets, the author's and the tester's. Not delegated. Record it, if the project
 +Against both test sets, the author's and the tester's. The predictions and the verdict are yours; the
 +mechanical run may go to an agent with your predictions in the prompt. Record it, if the project
  keeps an injection log (format and path — per project convention).
-diff --git a/src/claude_kit_claude/template/plugins/dev/skills/team-protocol/SKILL.md b/src/claude_kit_claude/template/plugins/dev/skills/team-protocol/SKILL.md
-index e2f291294..cd0813843 100644
---- a/src/claude_kit_claude/template/plugins/dev/skills/team-protocol/SKILL.md
-+++ b/src/claude_kit_claude/template/plugins/dev/skills/team-protocol/SKILL.md
-@@ -22,4 +22,4 @@ in the brief: `Handoff:` is per-task and no preload carries it.
- | S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 iterations → `teamlead` |
--| S4 | Injections | lead, never delegated | predicted red set vs the fact | recorded in the plan |
--| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → debugger loop |
-+| S4 | Injections | lead: predictions + verdict; the run → an agent with those predictions | predicted red set vs the fact | recorded in the plan |
-+| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → back to the author |
- | S6 | Integration | `integrator` | dsm-delta, coverage, god nodes | `integration_gate.py` |
-@@ -51,3 +51,3 @@ message buys nothing. Full role ↔ agent roster: `.claude/plugins/dev/modes/dev
- | Documentation | `docs-writer`\|`tech-writer` → `reviewer`(express) |
--| Regression FAIL | `tester`(FAIL) → `debugger` → `developer` → `tester`(retry); 2 iterations → `teamlead` |
-+| Regression FAIL | `tester`(FAIL) → the same author re-summoned (diagnosis + fix) → `tester`(retry); 2 iterations → `teamlead`; `debugger` only for code no agent of the task wrote (`project-rules` §5) |
- | Cross-module defect | `investigator`(diagnosis) → `teamlead` → `reviewer` |

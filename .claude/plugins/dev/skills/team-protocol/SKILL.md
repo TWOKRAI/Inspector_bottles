@@ -44,12 +44,12 @@ message buys nothing. Full role ↔ agent roster: `.claude/plugins/dev/modes/dev
 
 | Task type | Chain |
 |---|---|
-| New module / public API | `developer`(INTERFACE) → `tester`(RED) → `developer`\|`teamlead`(GREEN) → `reviewer` |
+| New module / public API | `developer`(INTERFACE) → `tester`(RED) → `developer`\|`teamlead`(GREEN; the INTERFACE author when the role is the same) → `reviewer` |
 | Unclear contract | `tester`(RED) → `developer`(GREEN) → `reviewer` |
 | impl-only / bugfix / review fix / wiring, design by the lead | `developer`(REDS in the brief: red run before the `src` edit, break-injection) → `reviewer` |
 | Mechanical, diff already written | `junior` → `developer`(check, commit) |
 | Documentation | `docs-writer`\|`tech-writer` → `reviewer`(express) |
-| Regression FAIL | `tester`(FAIL) → the same author re-summoned (diagnosis + fix) → `tester`(retry); 2 iterations → `teamlead`; `debugger` only for code no agent of the task wrote (`project-rules` §5) |
+| Regression FAIL | `tester`(FAIL) → the same author re-summoned (diagnosis + fix) → `tester`(retry); 3rd iteration: one `debugger` diagnosis, still red → `teamlead`; code no agent of the task wrote → `debugger` from the start (`project-rules` §5) |
 | Cross-module defect | `investigator`(diagnosis) → `teamlead` → `reviewer` |
 
 Chain by size (Д47): with the lead's line-by-line design a `tester` → `developer` pair cost
@@ -104,7 +104,7 @@ on the team whenever you expect escalations.
 | Mutation probe on the diff (S5) | script | `mutation_gate.py`; survivors are killed by a test or named equivalent — adds to break-injection |
 | Task closed (live team) | hook | `TaskCompleted`: ruff + pytest; 2 blocks → pass with a warning |
 | Went idle with uncommitted work | hook | `TeammateIdle` in the worktree |
-| Task review | `reviewer` | reproduction (break-injection is run by the lead); 2 iterations → `teamlead` |
+| Task review | `reviewer` | reproduction (break-injection: the lead predicts and judges; the run is mechanical); 2 iterations → `teamlead` |
 | Integration (S6) | `integrator` + script | `integration_gate.py`; advisory without a baseline |
 | Intake wording (S0) | **owner** | confirms goal / acceptance / out-of-scope before anything is built |
 | Plan approved (S1′) | `reviewer` `MODE: plan` → **owner** | the plan checklist |
