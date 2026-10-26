@@ -48,6 +48,11 @@ SETTLE_S = 2.0  # тишина после `disconnected`: поймать поз�
 TRIGGER_TIMEOUT_S = 260.0  # S3: 58 PARAM_SET при 300 мс - замер 2026-10-26: ~150 с
 DISC_TIMEOUT_S = 30.0  # потолок ожидания `disconnected` после команды (критерий C-29 - 5,0 с)
 POLL_S = 0.025
+# Замер гонки introspect.* после старта бэкенда (одинаковый на ветке и на main - не менять между деревьями):
+RACE_PAUSE_S = 0.1  # пауза между кругами опроса
+RACE_CALL_TIMEOUT_S = 2.0  # срок одного вызова
+RACE_EXTRA_S = 20.0  # после первого успешного device_list ждать introspect.* ещё не дольше
+RACE_CMDS = ("introspect.status", "introspect.executors")
 
 
 # --------------------------------------------------------------------------- план / конфиг
@@ -304,11 +309,13 @@ class Stand:
         self.drv: Any = None
         self.status: StatusPoller
         self.journal: JournalPoller
-        self.checks: dict[str, Any] = {}
+        self.checks: dict[str, Any] = {"meta": {"device_io_expected": not getattr(args, "base", False)}}
+        self.spawn_t: dict[str, float] = {}
 
     # ---- процессы
     def spawn(self, name: str, cmd: list[str]) -> None:
         out = (self.run_dir / f"{name}.out.log").open("w", encoding="utf-8")
+        self.spawn_t[name] = time.time()  # точка отсчёта замера гонки - до Popen
         self.procs[name] = subprocess.Popen(  # nosec B603
             cmd, cwd=self.run_dir, env=self.env, stdout=out, stderr=subprocess.STDOUT
         )
@@ -335,6 +342,110 @@ class Stand:
         self.ev("timeout", what=what, timeout_s=timeout)
         return None
 
+    # ---- запуск бэкенда и замер гонки introspect.* (одно правило на ветке и на main)
+    def race_probe(self, t_spawn: float) -> None:
+        """Опрос сразу после старта процесса бэкенда: круг = connect (если нет) -> device_list -> introspect.* у devices.
+
+        Каждая попытка пишется в `race.jsonl`: {i, cmd, t_start_s, t_end_s (от `Popen` бэкенда), ok, err}. Команда,
+        получившая ok, больше не опрашивается. Конец: device_list с robot_main И introspect.status ok И (introspect.executors
+        ok ИЛИ прошло RACE_EXTRA_S после первого успешного device_list). Итог - `race.json` и таблица в stdout.
+        """
+        from backend_ctl.driver import BackendDriver
+
+        fh = (self.run_dir / "race.jsonl").open("a", encoding="utf-8", buffering=1)
+        calls: dict[str, list[dict[str, Any]]] = {}
+
+        def rec(i: int, cmd: str, t0: float, ok: bool, err: str = "") -> bool:
+            row = {
+                "i": i,
+                "cmd": cmd,
+                "t_start_s": round(t0 - t_spawn, 3),
+                "t_end_s": round(time.time() - t_spawn, 3),
+                "ok": ok,
+                "err": err,
+            }
+            calls.setdefault(cmd, []).append(row)
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            return ok
+
+        def err_text(res: Any) -> str:
+            return str(find_key(res, "reason") or find_key(res, "error") or find_key(res, "message") or repr(res))[:200]
+
+        t_hub_ok: float | None = None
+        deadline = time.time() + self.args.boot_timeout
+        i = 0
+        while time.time() < deadline:
+            i += 1
+            if self.procs["backend"].poll() is not None:
+                raise SystemExit(f"бэкенд завершился при старте, код {self.procs['backend'].returncode}")
+            if self.drv is None:
+                t0 = time.time()
+                try:
+                    drv = BackendDriver(port=self.args.backend_port)
+                    drv.connect(1.0)
+                    self.drv = drv
+                    rec(i, "connect", t0, True)
+                except Exception as exc:  # noqa: BLE001 - бэкенд ещё поднимается: текст ошибки в журнал
+                    rec(i, "connect", t0, False, repr(exc)[:200])
+                    time.sleep(RACE_PAUSE_S)
+                    continue
+            if t_hub_ok is None:
+                t0 = time.time()
+                try:
+                    res = self.drv.send_command("devices", "device_list", {}, timeout=RACE_CALL_TIMEOUT_S)
+                    ids = [d.get("id") for d in (find_key(res, "devices") or []) if isinstance(d, dict)]
+                    if rec(i, "device_list", t0, ROBOT_ID in ids, "" if ROBOT_ID in ids else err_text(res)):
+                        t_hub_ok = time.time()
+                except Exception as exc:  # noqa: BLE001
+                    rec(i, "device_list", t0, False, repr(exc)[:200])
+            for cmd in RACE_CMDS:
+                if any(c["ok"] for c in calls.get(cmd, [])):
+                    continue
+                t0 = time.time()
+                try:
+                    res = self.drv.send_command("devices", cmd, {}, timeout=RACE_CALL_TIMEOUT_S)
+                    ok = isinstance(res, dict) and res.get("success") is True
+                    rec(i, cmd, t0, ok, "" if ok else err_text(res))
+                except Exception as exc:  # noqa: BLE001
+                    rec(i, cmd, t0, False, repr(exc)[:200])
+            got = {c: any(x["ok"] for x in calls.get(c, [])) for c in RACE_CMDS}
+            if (
+                t_hub_ok is not None
+                and got["introspect.status"]
+                and (got["introspect.executors"] or time.time() - t_hub_ok > RACE_EXTRA_S)
+            ):
+                break
+            time.sleep(RACE_PAUSE_S)
+        fh.close()
+        summary: dict[str, Any] = {}
+        for cmd in ("connect", "device_list", *RACE_CMDS):
+            rows = calls.get(cmd, [])
+            first = next((r for r in rows if r["ok"]), None)
+            errs: dict[str, int] = {}
+            for r in rows:
+                if not r["ok"]:
+                    errs[r["err"]] = errs.get(r["err"], 0) + 1
+            summary[cmd] = {
+                "ok": first is not None,
+                "attempts_to_first_ok": (rows.index(first) + 1) if first else None,
+                "attempts_total": len(rows),
+                "t_first_ok_s": first["t_end_s"] if first else None,
+                "errors": errs,
+            }
+        (self.run_dir / "race.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+        self.checks["race"] = summary
+        self.ev("race", summary=summary)
+        print(f"ГОНКА introspect (от Popen бэкенда; пауза {RACE_PAUSE_S} с, вызов <= {RACE_CALL_TIMEOUT_S} с):")
+        for cmd, v in summary.items():
+            print(
+                f"  {cmd}: ok={v['ok']} попыток до успеха={v['attempts_to_first_ok']} (всего {v['attempts_total']}), "
+                f"первый успех на {v['t_first_ok_s']} с, ошибки={v['errors']}"
+            )
+
+    def start_race_only(self) -> None:
+        self.spawn("backend", backend_cmd(self.args))
+        self.race_probe(self.spawn_t["backend"])
+
     # ---- старт
     def start(self) -> None:
         self.spawn("sim", sim_cmd(self.args, self.run_dir))
@@ -342,35 +453,7 @@ class Stand:
                              if (self.run_dir / "sim.log").exists() else False, 30, "sim start"):  # fmt: skip
             raise SystemExit("сим не стартовал за 30 с (см. sim.out.log)")
         self.spawn("backend", backend_cmd(self.args))
-        from backend_ctl.driver import BackendDriver
-
-        def booted() -> bool:
-            if self.procs["backend"].poll() is not None:
-                raise SystemExit(
-                    f"бэкенд завершился при старте, код {self.procs['backend'].returncode} (см. backend.out.log)"
-                )
-            try:
-                if self.drv is None:
-                    drv = BackendDriver(port=self.args.backend_port)
-                    drv.connect(2.0)
-                    self.drv = drv
-                res = self.drv.send_command("devices", "device_list", {}, timeout=3.0)
-                devs = find_key(res, "devices") or []
-                if not boot_seen or boot_seen[-1] != repr(res)[:300]:
-                    boot_seen.append(repr(res)[:300])
-                    self.ev("boot_reply", reply=res)  # форма ответа device_list - в events.jsonl
-                return ROBOT_ID in [d.get("id") for d in devs if isinstance(d, dict)]
-            except SystemExit:
-                raise
-            except Exception as exc:  # noqa: BLE001 - бэкенд ещё поднимается; причину - в events.jsonl
-                if not boot_seen or boot_seen[-1] != repr(exc)[:300]:
-                    boot_seen.append(repr(exc)[:300])
-                    self.ev("boot_error", error=repr(exc))
-                return False
-
-        boot_seen: list[str] = []
-        if not self.wait_for(booted, self.args.boot_timeout, "backend boot"):
-            raise SystemExit(f"бэкенд не ответил device_list с {ROBOT_ID} за {self.args.boot_timeout:.0f} с")
+        self.race_probe(self.spawn_t["backend"])
         self.status = StatusPoller(self.args.backend_port, self.run_dir / "status.jsonl")
         self.journal = JournalPoller(self.args.backend_port, self.run_dir / "journal.jsonl")
         self.status.start()
@@ -381,7 +464,7 @@ class Stand:
     def group_d(self) -> None:
         d: dict[str, Any] = {}
         # introspect.* у devices сразу после старта мог отвечать «No handler» (замер 2026-10-26) - повторы до 20 с
-        for attempt in range(20):
+        for attempt in range(3 if self.args.base else 20):
             d["executors"] = self.drv.send_command("devices", "introspect.executors", {}, timeout=5.0)
             st = self.drv.send_command("devices", "introspect.status", {}, timeout=5.0)
             d["introspect_attempts"] = attempt + 1
@@ -571,6 +654,15 @@ def main() -> int:
         "--param-sets", type=int, default=PARAM_SETS_FULL, help="сколько PARAM_SET в sync_params (триггер S3)"
     )
     ap.add_argument("--boot-timeout", type=float, default=90.0)
+    ap.add_argument(
+        "--base", action="store_true", help="дерево без device_io (main): проверки исполнителя n/a, не красные"
+    )
+    ap.add_argument(
+        "--race-only",
+        action="store_true",
+        help="только старт бэкенда и замер гонки introspect.* (без сима и сценариев)",
+    )
+    ap.add_argument("--repeats", type=int, default=1, help="сколько раз повторить --race-only")
     args = ap.parse_args()
     args.only = [s for s in args.only.split(",") if s]
     if bad := [s for s in args.only if s not in SCENARIOS]:
@@ -584,7 +676,16 @@ def main() -> int:
     if args.prepare_only:
         return 0
 
-    run_dir = args.stand_root / f"run-{datetime.now():%Y%m%d-%H%M%S}"
+    if args.race_only:
+        code = 0
+        for k in range(args.repeats):
+            code |= one_run(args, race_only=True, label=f"-race{k + 1}")
+        return code
+    return one_run(args, race_only=False, label="")
+
+
+def one_run(args: argparse.Namespace, race_only: bool, label: str) -> int:
+    run_dir = args.stand_root / f"run-{datetime.now():%Y%m%d-%H%M%S}{label}"
     (run_dir / "data").mkdir(parents=True)
     (run_dir / "logs").mkdir()
     preflight(args, run_dir)
@@ -593,11 +694,14 @@ def main() -> int:
     stand = Stand(args, run_dir)
     code = 0
     try:
-        stand.start()
-        stand.group_d()
-        for name in args.only:
-            stand.scenario(name)
-        stand.group_g()
+        if race_only:
+            stand.start_race_only()
+        else:
+            stand.start()
+            stand.group_d()
+            for name in args.only:
+                stand.scenario(name)
+            stand.group_g()
     except BaseException as exc:  # noqa: BLE001 - уборка обязана пройти при любом отказе
         stand.ev("abort", error=f"{type(exc).__name__}: {exc}")
         print(f"ПРЕРВАНО: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -605,6 +709,8 @@ def main() -> int:
     finally:
         stand.finish(md5_before, status_before)
     print(f"каталог прогона: {run_dir}")
+    if race_only:
+        return code
     cnt = subprocess.run([str(args.python), str(HERE / "count.py"), str(run_dir)], text=True)  # nosec B603
     return code or cnt.returncode
 

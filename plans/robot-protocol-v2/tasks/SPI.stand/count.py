@@ -196,6 +196,13 @@ def main() -> int:
     )
 
     bad |= check_groups(run)
+    race = run / "race.json"
+    if race.exists():
+        print("\nГонка introspect (от Popen бэкенда; пауза 0,1 с, вызов <= 2 с):")
+        for cmd, v in json.loads(race.read_text(encoding="utf-8")).items():
+            print(
+                f"- {cmd}: ok={v['ok']}, попыток до успеха {v['attempts_to_first_ok']} (всего {v['attempts_total']}), первый успех на {v['t_first_ok_s']} с, ошибки {v['errors']}"
+            )
     print("\nSTAND:", "FAIL/ПРОВЕРИТЬ" if bad else "PASS")
     return 1 if bad else 0
 
@@ -218,21 +225,35 @@ def check_groups(run: Path) -> bool:
             + (f"\n    ответ: {json.dumps(raw, ensure_ascii=False)[:400]}" if raw is not None else "")
         )
 
+    io = c.get("meta", {}).get("device_io_expected", True)
+
+    def na(text: str, raw: Any = None) -> None:
+        print(
+            f"- n/a  {text} (дерево без device_io)"
+            + (f"\n    ответ: {json.dumps(raw, ensure_ascii=False)[:400]}" if raw is not None else "")
+        )
+
     print("Проверки device_io (D, до связи) и форм ответов:")
     ex = (find_key(d.get("executors"), "executors") or {}).get("device_io") or {}
     alive = sum(1 for w in (ex.get("workers") or {}).values() if w.get("is_alive"))
-    line(bool(ex) and ex.get("max_workers") == 4 and ex.get("max_pending") == 64 and alive == 4,
-         f"introspect.executors: device_io есть, max_workers=4, max_pending=64, живых рабочих {alive} (рабочие: {sorted((ex.get('workers') or {}))})", d.get("executors"))  # fmt: skip
-    line(
-        len(d.get("workers_keyed") or []) >= 4,
-        f"introspect.status: рабочие keyed-device_io-*: {d.get('workers_keyed')}",
-    )
+    if io:
+        line(bool(ex) and ex.get("max_workers") == 4 and ex.get("max_pending") == 64 and alive == 4,
+             f"introspect.executors: device_io есть, max_workers=4, max_pending=64, живых рабочих {alive} (рабочие: {sorted((ex.get('workers') or {}))})", d.get("executors"))  # fmt: skip
+        line(
+            len(d.get("workers_keyed") or []) >= 4,
+            f"introspect.status: рабочие keyed-device_io-*: {d.get('workers_keyed')}",
+        )
+    else:
+        na("introspect.executors / рабочие keyed-device_io-*", d.get("executors"))
     pl = reply_body(d.get("point_list"))
     line(isinstance(pl, dict) and pl.get("status") == "ok" and "points" in pl and "rev" in pl,
-         f"robot_point_list {{device_id}} -> status ok, points, rev (за {d.get('point_list_s')} с, ответ пришёл по IPC через исполнитель)", pl)  # fmt: skip
+         f"robot_point_list {{device_id}} -> status ok, points, rev (за {d.get('point_list_s')} с, ответ пришёл по IPC; через исполнитель - только при device_io)", pl)  # fmt: skip
     nk = reply_body(d.get("point_list_no_id"))
-    line(nk == {"success": False, "error": "key_missing", "command": "robot_point_list"},
-         "robot_point_list без device_id -> key_missing (ответ CommandManager: так отвечает только команда, привязанная к исполнителю)", nk)  # fmt: skip
+    if io:
+        line(nk == {"success": False, "error": "key_missing", "command": "robot_point_list"},
+             "robot_point_list без device_id -> key_missing (ответ CommandManager: так отвечает только команда, привязанная к исполнителю)", nk)  # fmt: skip
+    else:
+        na("robot_point_list без device_id: ответ main записан, key_missing не ожидается", nk)
     rs = reply_body(d.get("robot_stop_no_id"))
     line(isinstance(rs, dict) and rs.get("status") == "error" and "device_id обязателен" in str(rs.get("message")),
          "robot_stop без device_id -> status error, «device_id обязателен» (не привязана к исполнителю: контраст с key_missing)", rs)  # fmt: skip
