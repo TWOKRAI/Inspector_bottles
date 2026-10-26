@@ -5,7 +5,7 @@
 ## ADR-DH-012: Явный SPI драйвера и команды хаба из описаний операций
 
 **Дата:** 2026-10-26
-**Статус:** accepted (SPI хаба, подзадачи a–g; решения лида inspector-bottles-00 и владельца 2026-10-26)
+**Статус:** accepted (SPI хаба, подзадачи a–h; решения лида inspector-bottles-00 и владельца 2026-10-26)
 **Контекст задачи:** `plans/robot-protocol-v2/tasks/SPI.md` (бриф, ред. 2), `SPI.seams.md`, `SPI.deviations.md`; ADR-DH-009..011 не меняются.
 
 ### Контекст
@@ -27,9 +27,12 @@
    `executor` и `immediate` вместе — `ValueError`). Каталоги: `ROBOT_V2_OPS` (17), `ROBOT_V1_OPS` (27),
    `ROBOT_DATA_OPS` (10 офлайн-операций, `executor="device_io"`), `VFD_OPS` (5); общие операции v1 и v2 (`abort`,
    `enqueue_job`, `get_telemetry`, `return_job`) — один объект. Итого 55 команд, описание и `args_schema` у каждой.
-3. **Команды хаба генерируются из каталогов:** `install_op_commands(cls, sources)` ставит 55 методов `cmd_robot_*` /
-   `cmd_vfd_*` (copy-on-write `commands`), вручную остались 11 `device_*` и 6 `hik_*`. Имена 72 команд не менялись
-   (FREEZE: GUI-каталог читает `DeviceHubPlugin.commands` с класса).
+3. **Команды хаба генерируются из `OP_SPECS` драйверов:** драйвер объявляет операции ссылкой `OP_SPECS = <каталог>`
+   (`RobotDriverV2` — `ROBOT_V2_OPS`, `RobotDriver` — `ROBOT_V1_OPS`, `VfdDriver` — `VFD_OPS`); источники команд
+   выводит `kinds.command_sources` из таблицы видов (п. 8), кортежи `spi.py` напрямую не читаются.
+   `install_op_commands(cls, sources)` ставит 55 методов `cmd_robot_*` / `cmd_vfd_*` при импорте модуля плагина
+   (copy-on-write `commands`), вручную остались 11 `device_*` и 6 `hik_*`. Имена 72 команд не менялись (FREEZE:
+   GUI-каталог читает `DeviceHubPlugin.commands` с класса).
 4. **Описание и аргументы — при регистрации:** хук плагина `command_options(name)` (SPI.d1, framework) возвращает
    `{"metadata": {"description", "args"}, "executor", "key_from"}`; пустые ключи не кладутся. Операции данных робота
    идут на именованный исполнитель `device_io` (Task 1.9m), ключ порядка — `device_id`; операции `immediate` — никогда
@@ -43,13 +46,21 @@
    `drv._client` в тестах хаба вне v1/ПЧ/сторожа: 43 → 0; AST-дифф узлов `assert` изменённых файлов пуст.
 7. **Затвор переподключения в базе (SPI.g):** `BaseDeviceDriver.RECONNECT_THROTTLE_S` и `_reconnect_due()`; тела
    `_attempt_reconnect` / `_ensure_connected` (в т. ч. `_param_lock` v2) остались у драйверов.
+8. **Таблица видов — один источник (SPI.h, ревью ветки р.1 п.1):** `Services/device_hub/kinds.py`, строка
+   `DeviceKind(kind, drivers, prefix, data_ops, build)`: классы драйверов по протоколу записи (`"*"` — любой другой),
+   префикс команд, операции данных вида (путь `data` плагина), сборка драйвера из `DriverContext` (publish, spawn,
+   хранилище данных робота, опции вида, `resolve_device`). Из `DEFAULT_KINDS` выводятся фабрики по умолчанию
+   `DeviceManager` (параметр `kinds`, вместо ручного `_register_defaults`), допустимые виды (= фабрики) и источники
+   команд `DEFAULT_SOURCES` (переехал из `spi.py`: `spi` не импортирует драйверы). Направление импортов пакета:
+   `spi` <- `drivers` <- `kinds` <- `manager` / плагин. Плагин: атрибут класса `device_kinds = DEFAULT_KINDS` —
+   его получает менеджер в `configure`, из него ставятся команды.
 
 ### Отступления от брифа (фиксируем, чтобы не открывать заново)
 
 | # | В брифе | Сделано | Почему |
 |---|---|---|---|
 | 1 | `command_table` сверяет `OpSpec` целиком | то же, и строго: одноимённая операция из второго источника равна первой, только если совпали `kind`, `route`, `key_from` источника — иначе `ValueError` | молчаливое слияние двух разных путей исполнения под одним именем скрыло бы ошибку каталога |
-| 2 | допустимый вид устройства — `VALID_KINDS` | допустимый вид = зарегистрированная фабрика драйвера (`DeviceManager._check_kind`, SPI.c1b) | новый вид = драйвер + `register_driver_factory`, без правок хаба |
+| 2 | допустимый вид устройства — `VALID_KINDS` | допустимый вид = зарегистрированная фабрика драйвера (`DeviceManager._check_kind`, SPI.c1b); фабрики по умолчанию — из таблицы видов (SPI.h) | один источник видов: строка таблицы даёт и фабрику, и команды |
 | 3 | `executors` из топологии «уже работает» | не работал: `ProcessConfig` отбрасывал ключ (C-47) — добавлено поле и проброс в `as_generic_config` (SPI.d0, framework) | проверено экспериментом: `build_configs()[0].executors == {}` |
 | 4 | литералы описаний `draw_square`, `draw_set_pen`, `draw_set_overlap` (А3) | описания и `args_schema` по коду `robot_driver.py` (`x1, y1, x2, y2, z?` / `down?, up?` / `mm`) (SPI.c2b) | литералы брали старые докстринги плагина, расходившиеся с драйвером; описание — правда о контракте (решение лида) |
 | 5 | `client_factory` внедряется в менеджер | универсальные `driver_options` по виду, менеджер не знает про клиента робота (SPI.f2a) | менеджер не связывается с конкретным драйвером; для v2 опция даёт `client_factory` |
@@ -63,16 +74,43 @@
 - `register_driver_factory("robot", ...)` в каждом тесте менеджера: пришлось бы повторять сборку драйвера из приватных
   `_publish`, `_spawn`, `_robot_store` менеджера (`publish` менеджера оборачивает обратный вызов). Отвергнуто.
 - `command_table` без проверки `kind` / `route` / `key_from`: см. отступление 1. Отвергнуто.
+- Убрать `OP_SPECS` с драйверов и строить команды из кортежей каталога (`DEFAULT_SOURCES` в `spi.py`), сторож — имена
+  каталога == ключи `_OPS` драйвера (ревью ветки р.1, п.1 (а)): цель брифа — «драйвер объявляет свои операции, команды
+  генерируются из него»; вид и его команды жили бы в трёх местах (драйвер, `_register_defaults`, `DEFAULT_SOURCES`).
+  Отвергнуто (SPI.h, решение лида).
+- Оставить два источника и связать их сторожем (п.1 (б)): дрейф ловится тестом, но новый вид всё равно правится в трёх
+  местах. Отвергнуто.
 
 ### Последствия
 
-- Новый вид устройства = класс драйвера с `OP_SPECS` + `register_driver_factory(kind, factory)`; в `manager.py` и
-  `plugin.py` ничего не правится; команды `<вид>_<операция>` ставятся `install_op_commands`.
+- **Путь роста:** новый вид устройства = класс драйвера с `kind`, `OP_SPECS` и `call` + одна строка `DeviceKind` в
+  `DEFAULT_KINDS` (правка хаба в одну строку `kinds.py`); `manager.py` и `plugin.py` не правятся, команды
+  `<префикс>_<операция>` ставит `install_op_commands` при импорте модуля плагина. Новая операция вида — строка в
+  `OP_SPECS` (каталоге) драйвера и ветка в его `call`. Вне дерева — подкласс плагина с `device_kinds` + строка вида и
+  `install_op_commands(Подкласс, command_sources((строка,)))` (родитель не меняется). Сторожа в
+  `test_spi_contract.py`: команды == `OP_SPECS` классов таблицы + данные; проба вида `lamp`; операция, добавленная в
+  `OP_SPECS`, — в командах.
+- `register_driver_factory(kind, factory)` — шов прямого использования `DeviceManager` (тесты): процесс хаба создаёт
+  менеджер в `DeviceHubPlugin.configure` и сразу зовёт `initialize()`, извне фабрику до `initialize()` не вставить.
 - Видимые изменения: описания 34 команд в каталоге и `CAPABILITIES.yaml` / `.md` (`args` в дамп не попадают:
   `_command_dump` пишет `name`, `description`, `tags`, `params_schema`; `args` — только в `metadata` команды,
   `get_command_info`) (регенерация командой
   `python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`); `key_missing` / `executor_busy` у 10
   команд данных; текст отказа регистров у ПЧ; каскад моста по `set_degraded() -> bool`.
+- Видимо и `backend_ctl` (ревью ветки р.1, п.3): 10 команд данных в окне остановки процесса отвечают
+  `{"success": False, "error": "system_stopping"}` — фаза 1 закрывает приём исполнителя до остановки плагинов
+  (`process_module/core/process_module.py:536-540`, `worker_module/keyed_executor.py:251-256`); до SPI такая команда
+  исполнялась на потоке роутера. Форма — как у `key_missing` / `executor_busy`.
+- В `metadata` команды (`get_command_info`, introspect) новые ключи: `args` у 55 команд, `executor` и `key_from` у 10
+  команд данных (аддитивно).
+- Команда данных без `reply` (прямой `handle_command`) исполняется на вызывающем потоке, мимо исполнителя, с одним
+  WARNING на имя команды (`command_module/core/command_manager.py:469-475`).
+- **Исключение из ADR-DH-009 (потоки у области плагина):** операции данных идут на потоках исполнителя `device_io`,
+  они принадлежат `ExecutorManager` процесса, не корню `device_hub`. Операция в полёте при остановке идёт параллельно
+  `DeviceHubPlugin.shutdown` и ждётся фреймворком в фазе 2 (`join_until` исполнителя после `workers`), вне срока хаба.
+  Вреда нет: операции данных трогают только `RobotDataStore` (замок документа, атомарная запись, сверка `base_rev`)
+  и чтение реестра под `_registry_lock`; драйверы, `_workers_lock` и порядок ADR-DH-010/011 не затронуты. Живой
+  остановки с операцией данных в полёте не гоняли.
 - **Ограничение `driver_options`:** опции действуют на весь `kind`, на драйверы, создаваемые после вызова. Опции вида
   `robot` получает и v1 `RobotDriver`; `client_factory` он не знает, так что в реестре с роботами обоих протоколов
   v1 упадёт `TypeError` конструктора (не глушится). v1 заморожен (FREEZE) и не меняется.
@@ -89,7 +127,15 @@
 - `driver_options` действуют на весь `kind` (v1 при `client_factory` — `TypeError`); ключ `(kind, protocol)` — возможное
   дальнейшее сужение. Принято.
 - `__init_subclass__` базы: класс, у которого `request_stop` и `stop_aware` не совпадают, не определяется (`TypeError`).
-- Фабрику нового вида регистрировать ДО `DeviceManager.initialize()`: вид записи реестра проверяется по фабрикам.
+- Фабрику, добавленную `register_driver_factory`, регистрировать ДО `DeviceManager.initialize()`: вид записи реестра
+  проверяется по фабрикам (только прямое использование менеджера; процесс берёт виды из таблицы).
+- Шов подмены класса драйвера в тестах — через атрибут модуля (`monkeypatch.setattr(robot_driver_v2,
+  "RobotDriverV2", V2)`; `kinds._bound`: позднее связывание, только подкласс класса таблицы, иначе `TypeError`);
+  кандидат на публичный шов.
+- Команды ставятся при импорте модуля плагина: `OP_SPECS`, изменённый после импорта, в командах не появится.
+- Имя исполнителя `device_io` — строковый контракт Services -> топология; сторож —
+  `multiprocess_prototype/backend/tests/test_devices_executors.py` (исполнители каталога ⊆ исполнителям `devices`).
+  При переносе среды робота в `Services/robot_comm` — вынести имя в плагин (`command_options`).
 
 ### Связь
 

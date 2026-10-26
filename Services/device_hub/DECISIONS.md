@@ -132,8 +132,8 @@ Enforced гейтом `Plugins/hub/device_hub/tests/test_no_private_access.py`
 ## ADR-DH-012: Явный SPI драйвера и команды хаба из описаний операций
 
 **Дата:** 2026-10-26
-**Статус:** accepted (SPI хаба, a–g; решения лида inspector-bottles-00 и владельца 2026-10-26)
+**Статус:** accepted (SPI хаба, a–h; решения лида inspector-bottles-00 и владельца 2026-10-26)
 
-**Суть.** Контракт драйвера записан в `Services/device_hub/spi.py` (`Protocol` `DeviceDriver`, умолчания в `BaseDeviceDriver`), каждая операция описана `OpSpec`, из каталогов (55 операций) генерируются команды `robot_*` и `vfd_*` с описанием, аргументами и исполнителем `device_io`; имена 72 команд не менялись. Новый вид устройства = драйвер + `register_driver_factory`, без правок хаба. Тесты внедряют клиента робота публичными швами (`client_factory`, `driver_options`), а не `drv._client`. Отступления от брифа (строгий `command_table`, вид = фабрика, C-47 `executors` из топологии, описания рисования по коду, `driver_options` вместо `client_factory` в менеджере) — в полном тексте.
+**Суть.** Контракт драйвера записан в `Services/device_hub/spi.py` (`Protocol` `DeviceDriver`, умолчания в `BaseDeviceDriver`), каждая операция описана `OpSpec`, из `OP_SPECS` классов драйверов таблицы видов (`kinds.py`, 55 операций) генерируются команды `robot_*` и `vfd_*` с описанием, аргументами и исполнителем `device_io`; имена 72 команд не менялись. Новый вид устройства = драйвер с `OP_SPECS` + одна строка таблицы видов `DEFAULT_KINDS` (из неё — фабрика менеджера и команды). Тесты внедряют клиента робота публичными швами (`client_factory`, `driver_options`), а не `drv._client`. Отступления от брифа (строгий `command_table`, вид = фабрика, C-47 `executors` из топологии, описания рисования по коду, `driver_options` вместо `client_factory` в менеджере) — в полном тексте.
 
 **Полный текст:** [docs/adr/ADR-DH-012.md](docs/adr/ADR-DH-012.md)

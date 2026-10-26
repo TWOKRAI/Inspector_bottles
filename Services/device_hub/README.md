@@ -17,6 +17,7 @@ registry/
   entry.py             — DeviceEntry (dataclass, to_dict/from_dict)
   store.py             — RegistryStore (atomic YAML)
 spi.py                 — SPI: Protocol DeviceDriver, OpSpec/OpSource, каталоги операций (ADR-DH-012)
+kinds.py               — таблица видов: фабрики драйверов менеджера и источники команд из OP_SPECS (ADR-DH-012)
 transports.py          — build_transport (tcp/rtu/bridge)
 manager.py             — DeviceManager (BaseManager + ObservableMixin)
 drivers/
@@ -41,17 +42,25 @@ tests/
   (`request_stop`), поток рассылки заводится только таким.
 - `OpSpec(name, description, args_schema, needs_link, executor, immediate)` — одна операция; `OpSource(prefix, kind,
   route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (17), `ROBOT_V1_OPS` (27),
-  `ROBOT_DATA_OPS` (10, офлайн, `executor="device_io"`), `VFD_OPS` (5); `DEFAULT_SOURCES` — для плагина. Всего 55
-  команд. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
+  `ROBOT_DATA_OPS` (10, офлайн, `executor="device_io"`), `VFD_OPS` (5). Драйвер ссылается на свой каталог
+  (`OP_SPECS = ROBOT_V2_OPS`). Всего 55 команд. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
   источника — `ValueError`.
-- Команды `robot_*` / `vfd_*` ставит `install_op_commands` (плагин, copy-on-write `commands`); вручную остались 11
-  `device_*` и 6 `hik_*`. Имена 72 команд не менялись.
+- `kinds.py` — таблица видов, один источник: строка `DeviceKind(kind, drivers, prefix, data_ops, build)` — классы
+  драйверов по протоколу записи (`"*"` — любой другой), префикс команд, операции данных вида, сборка драйвера. Из
+  `DEFAULT_KINDS` выводятся фабрики по умолчанию `DeviceManager` (допустимый вид = вид с фабрикой) и источники команд
+  `command_sources` / `DEFAULT_SOURCES` — из `OP_SPECS` классов драйверов, не из кортежей `spi.py`. Импорты пакета:
+  `spi` <- `drivers` <- `kinds` <- `manager` / плагин.
+- Команды `robot_*` / `vfd_*` ставит `install_op_commands(DeviceHubPlugin, command_sources(device_kinds))` при импорте
+  модуля плагина (copy-on-write `commands`); вручную остались 11 `device_*` и 6 `hik_*`. Имена 72 команд не менялись.
 
-**Новый вид устройства = драйвер + `register_driver_factory(kind, factory)`, без правок хаба:** класс с `kind`,
-`OP_SPECS` и методом `call`; фабрика `(entry, protocol) -> driver`; допустимый вид — тот, у которого есть фабрика
-(`DeviceManager._check_kind`). **Фабрику нового вида регистрировать ДО `initialize()`**: записи файла реестра
-проверяются по фабрикам при загрузке (неизвестный вид — `ValueError`, реестр остаётся пустым). Класс драйвера, у
-которого `request_stop` и `stop_aware` не совпадают, не определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`).
+**Новый вид устройства = класс драйвера + одна строка `DeviceKind` в `DEFAULT_KINDS` (правка хаба в одну строку
+`kinds.py`):** класс с `kind`, `OP_SPECS` и методом `call`; из строки менеджер получает фабрику, плагин — команды
+`<префикс>_<операция>`; `manager.py` и `plugin.py` не правятся. Вне дерева — подкласс плагина с `device_kinds` и
+`install_op_commands(Подкласс, command_sources((строка,)))`. `register_driver_factory(kind, factory)` — шов прямого
+использования `DeviceManager` (тесты): фабрику регистрировать ДО `initialize()` (записи реестра проверяются по фабрикам
+при загрузке; неизвестный вид — `ValueError`). Процесс хаба создаёт менеджер в `configure` плагина и сразу зовёт
+`initialize()` — его виды только из таблицы. Класс драйвера, у которого `request_stop` и `stop_aware` не совпадают, не
+определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`).
 
 **`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
 `{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
