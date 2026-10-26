@@ -10,16 +10,16 @@ framework, seams, debts, deviations, injections, injections-predictions, injecti
   c2b, f1, f2a, f2b, g, docs → ревью задачи Sonnet ×2 APPROVED → матрица 38 инъекций (22 да / 11 частично / 5 нет; 4 выживших
   закрыты тестами 9402aab38; 32 — эквивалентный мутант) → ревью ветки Opus р.1 CHANGES REQUESTED (два источника каталога) →
   SPI.h (beab63c97, 4fd918c39: таблица видов `Services/device_hub/kinds.py`, команды из `OP_SPECS`) → Opus р.2 APPROVED (b6e2012fa).
-- Идёт: **SPI.h2** (teamlead a11e0626915c174f9, не закоммичено на момент записи): убрать `_bound` (позднее связывание — костыль
-  по Opus р.2), `DeviceHubPlugin.__init_subclass__` (вид в подклассе = один шаг), `driver_options` по (kind, protocol),
-  охрана `stop_aware` не-bool → TypeError, ADR «args у 38», разметка «Открыто» — цель 0 костылей (принцип владельца,
-  повторён 2026-10-26: «костылей не должно быть»).
+- SPI.h2 (b090685e6, fda25cf19): `_bound` снят, `DeviceHubPlugin.__init_subclass__`, `driver_options` по (kind, protocol),
+  охрана `stop_aware`, разметка «Открыто» — 0 костылей (принцип владельца 2026-10-26: «костылей не должно быть»).
+  Opus р.3 APPROVED (224ba8fc5; ассерты слепых ригов 107/107, 100/100; light 401 + 52 passed). SPI.h3 (45d9f2180): охрана
+  `stop_aware` по MRO (`inspect.getattr_static`), разметка ADR/STATUS по совету р.3; light 200 + 124 passed, sentrux pass.
+  `device_io` строкой — по дизайну (исполнитель по имени, как канал; Opus согласен).
 
 ## Дальше
 
-1. Принять SPI.h2 (прогоны light поимённо; AST-дифф assert слепых C-29/SPI при смене рига пуст) → короткая проверка у
-   reviewer Opus a4428012eeb5b786d (тот же, р.3 как подтверждение правки после APPROVED).
-2. «ready» координатору на ч.2 окна heavy (~40 мин): Services/device_hub/tests, Plugins/hub/device_hub/tests,
+1. ~~Принять SPI.h2/h3~~ — сделано. «ready» на окно отправлено координатору 2026-10-26.
+2. Окно координатора на ч.2 окна heavy (~40 мин): Services/device_hub/tests, Plugins/hub/device_hub/tests,
    process_module/tests, process_manager_module/tests целиком; регенерация CAPABILITIES (`python -m backend_ctl.dump_capabilities`,
    гейт `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` сейчас красный — условие слияния); стенд v2 по
    `plans/robot-protocol-v2/tasks/SPI.stand/README.md` (S0–S3 + device_io; не хуже C-29 0,75–1,23 с). Машина: ~0,5 ГБ RAM, окон нет.
@@ -49,5 +49,5 @@ framework, seams, debts, deviations, injections, injections-predictions, injecti
 | a3111d7744f1699a8 | reviewer задачи | Sonnet | APPROVED ×2 | 327k |
 | ac025b3f21f0bddf8 | developer матрица + тесты выживших | Sonnet | готово | 252k |
 | a98d8ddbff4707ef3 | developer подготовка стенда | Sonnet | готово (не запускался) | 253k |
-| a4428012eeb5b786d | reviewer ветки | Opus | APPROVED р.2 | 263k |
-| a11e0626915c174f9 | teamlead SPI.h, SPI.h2 | Opus | **идёт SPI.h2** | 211k+ |
+| a4428012eeb5b786d | reviewer ветки | Opus | APPROVED р.3 | 297k |
+| a11e0626915c174f9 | teamlead SPI.h, h2, h3 | Opus | готово | 320k |
