@@ -19,6 +19,7 @@
 | HikvisionDriver | done (lazy SDK) | test_device_hub_plugin (enum/release) |
 | GenericModbusDriver | done | test_generic_modbus.py |
 | RobotDriverV2 (пакет `drivers/robot_driver_v2/`) | done (T5.3f; стенд `harness_smoke` 3 passed ×3, 2026-10-20) | test_robot_driver_v2.py, test_robot_v2_state_acceptance.py, test_no_private_driver_state.py |
+| SPI драйвера (`spi.py`, `OpSpec`, команды из описаний) | done (SPI a–g, 2026-10-26; стенд не гонялся) | test_spi_contract.py, test_spi_acceptance.py, test_op_commands.py, test_spi_commands_acceptance.py |
 | DeviceHubPlugin | done | test_device_hub_plugin.py |
 | DeviceHubClient | done | test_client.py |
 
@@ -34,6 +35,7 @@
 - ADR-DH-009: потоки робота — у области плагина; стоп процесса один раз, параллельно, под одним сроком
 - ADR-DH-010: одно состояние RobotDriverV2 под одним замком; драйвер — пакет
 - ADR-DH-011: `connect` и `request_stop` драйвера робота v2 линеаризуются переходами `RobotState`
+- ADR-DH-012: явный SPI драйвера и команды хаба из описаний операций
 
 ## T5.3f — итог
 
@@ -43,4 +45,16 @@
 
 **T5.3g:** окна W1, W1′, W2, W4 и WW (`request_stop` посреди `connect`) закрыты переходами `RobotState` (ADR-DH-011).
 
-**Открыто:** SPI хаба (снятие швов) — следующая задача.
+## SPI хаба — итог (ADR-DH-012)
+
+Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 55 операций в каталогах `OpSpec`, из них
+генерируются команды `robot_*` / `vfd_*` (72 имени не менялись); исполнитель `device_io` (4/64) объявлен в топологии
+(`base.yaml`, C-47 исправлен в framework); `drv._client` в тестах хаба вне v1/ПЧ/сторожа 43 -> 0; затвор переподключения
+в базе. Подзадачи и коммиты — `plans/robot-protocol-v2/tasks/SPI.md`, отступления — `SPI.deviations.md`.
+
+**Открыто:**
+- Регенерация `docs/contracts/CAPABILITIES.yaml` / `.md` (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно
+  `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
+- Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
+- `driver_options` действуют на весь `kind`: `client_factory` для вида `robot` упадёт `TypeError` на драйвере v1 (заморожен).
+- Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).

@@ -16,6 +16,7 @@ errors.py              — иерархия ошибок
 registry/
   entry.py             — DeviceEntry (dataclass, to_dict/from_dict)
   store.py             — RegistryStore (atomic YAML)
+spi.py                 — SPI: Protocol DeviceDriver, OpSpec/OpSource, каталоги операций (ADR-DH-012)
 transports.py          — build_transport (tcp/rtu/bridge)
 manager.py             — DeviceManager (BaseManager + ObservableMixin)
 drivers/
@@ -28,6 +29,40 @@ drivers/
   generic_modbus_driver.py — GenericModbusDriver (универсальный)
 tests/
 ```
+
+## SPI драйвера и команды хаба (ADR-DH-012)
+
+`spi.py` (только stdlib) — контракт:
+
+- `DeviceDriver` / `StopAwareDriver` — `Protocol` (статический контракт; `isinstance` во время работы не зовётся).
+  Умолчания — атрибуты класса `BaseDeviceDriver`: `OP_SPECS`, `stop_aware`, `transport`, `disconnect_pending`,
+  `stop_unconfirmed(_text)`, `last_io`, методы `request_disconnect()` и `set_degraded() -> bool`. Менеджер и плагин
+  читают драйвер напрямую, без `getattr`. `stop_aware = True` — драйвер получает стоп фазы 1 остановки
+  (`request_stop`), поток рассылки заводится только таким.
+- `OpSpec(name, description, args_schema, needs_link, executor, immediate)` — одна операция; `OpSource(prefix, kind,
+  route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (17), `ROBOT_V1_OPS` (27),
+  `ROBOT_DATA_OPS` (10, офлайн, `executor="device_io"`), `VFD_OPS` (5); `DEFAULT_SOURCES` — для плагина. Всего 55
+  команд. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
+  источника — `ValueError`.
+- Команды `robot_*` / `vfd_*` ставит `install_op_commands` (плагин, copy-on-write `commands`); вручную остались 11
+  `device_*` и 6 `hik_*`. Имена 72 команд не менялись.
+
+**Новый вид устройства = драйвер + `register_driver_factory(kind, factory)`, без правок хаба:** класс с `kind`,
+`OP_SPECS` и методом `call`; фабрика `(entry, protocol) -> driver`; допустимый вид — тот, у которого есть фабрика
+(`DeviceManager._check_kind`).
+
+**`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
+`{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
+идут на именованный исполнитель `device_io` процесса `devices` (`base.yaml`, `executors.device_io: {max_workers: 4,
+max_pending: 64}` — умолчания `ExecutorSpec`, не замер), ключ порядка — `device_id`. Операции `immediate` в очередь
+исполнителя не ставятся. Без исполнителя в процессе команда идёт запасным путём на потоке роутера (INFO в логе).
+
+**`driver_options`.** `DeviceManager(..., driver_options={kind: {имя: значение}})` и `set_driver_options(kind, **opts)` —
+именованные аргументы конструктора драйверов вида (для тестов: у робота v2 — `client_factory`, класс клиента
+`(transport, cfg) -> RobotClientV2`). Действует на драйверы, создаваемые ПОСЛЕ вызова. **Ограничение:** опции
+действуют на весь `kind`; опции вида `robot` получает и v1 `RobotDriver`, а он `client_factory` не знает — в реестре с
+роботами обоих протоколов v1 упадёт `TypeError` (не глушится; v1 заморожен). Тестовый помощник — `ClientRecorder` в
+`tests/conftest.py`.
 
 ## Драйвер робота v2 — пакет
 
