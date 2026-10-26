@@ -122,11 +122,12 @@ class VfdDriver(BaseDeviceDriver):
         self._vfd_client = None
         self._last_quality = "bad"
 
-    def set_degraded(self) -> None:
-        """Перевести в деградированное состояние (носитель отключился)."""
+    def set_degraded(self) -> bool:
+        """Перевести в деградированное состояние (носитель отключился); True — деградация наступила."""
         self._vfd_client = None
         self._last_quality = "bad"
         self._bridge_alive = False
+        return True
 
     # ------------------------------------------------------------------ #
     # Tick

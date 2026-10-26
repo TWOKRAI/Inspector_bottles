@@ -290,14 +290,14 @@ class _RobotDriverCore(BaseDeviceDriver):
     def request_disconnect(self) -> None:
         """«Отключить» нажато (C-29): прервать идущий ``connect`` и закрыть окно отказов до конца ``disconnect``.
 
-        Зовёт плагин через ``getattr`` (как ``request_stop``) из потока команды под ``_workers_lock`` до постановки
-        ``disconnect`` в очередь. Ввода-вывода нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт
-        ``disconnect()``: он снимает счётчик «идёт отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся
-        отменённым (``"cancelled"``).
+        Зовёт плагин напрямую (контракт ``DeviceDriver``, ``Services/device_hub/spi.py``; у прочих драйверов —
+        умолчание базы, ничего) из потока команды под ``_workers_lock`` до постановки ``disconnect`` в очередь.
+        Исключение плагин ловит и сообщает в health после выхода из замка; ``disconnect`` ставится всегда. Ввода-вывода
+        нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт ``disconnect()``: он снимает счётчик «идёт
+        отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся отменённым (``"cancelled"``).
 
-        Module contract: lite — публичный метод, зовётся через ``getattr`` (как ``request_stop``); контракт —
-        R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``). Долг: внести
-        ``request_disconnect`` и ``disconnect_pending`` в Protocol драйвера (SPI хаба, следующая задача).
+        Module contract: lite — член ``DeviceDriver`` (``request_disconnect``, ``disconnect_pending``; SPI хаба);
+        контракт — R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``).
         """
         self.desired_connected = False
         self._state.disconnect_request(link_up=self._transport_up)

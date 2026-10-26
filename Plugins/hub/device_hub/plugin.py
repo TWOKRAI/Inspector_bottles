@@ -365,13 +365,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Роботы, чей стоп процесса не подтверждён (нет эха / запись не прошла), — в health (решение §2, H3)."""
         for entry in self._manager.snapshot_registry():
             driver = self._manager.get_driver(entry.id)
-            if driver is None or not getattr(driver, "stop_unconfirmed", False):
+            if driver is None:
                 continue
             try:
+                # чтения свойств драйвера — внутри try: сбой одного драйвера не лишает отчёта соседей
+                if not driver.stop_unconfirmed:
+                    continue
                 # текст причины — свойство драйвера (T5.3c c3): «нет окна» отличается от «эхо не пришло»
-                text = getattr(driver, "stop_unconfirmed_text", None) or TEXT_STOP_UNCONFIRMED
+                text = driver.stop_unconfirmed_text or TEXT_STOP_UNCONFIRMED
                 ctx.health.report_error(RuntimeError(text), context="device_hub.stop_echo", device_id=entry.id)
-            except Exception as exc:  # no-health: сам health упал — лог, остановка идёт дальше
+            except Exception as exc:  # no-health: свойство драйвера или сам health упали — лог, остановка идёт дальше
                 ctx.log_warning(f"DeviceHubPlugin: health для {entry.id!r} не принят: {exc!r}")
 
     def _on_scope_report(self, report: CloseReport) -> None:
@@ -441,9 +444,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     # Проверка и запись под одним замком с cmd_device_disconnect (K): либо K раньше, либо позже.
                     with self._workers_lock:
                         driver = self._manager.get_driver(dev_id)
-                        stop = (
-                            self._desired_connected.get(dev_id) is False
-                            or getattr(driver, "disconnect_pending", False) is True
+                        stop = self._desired_connected.get(dev_id) is False or (
+                            driver is not None and driver.disconnect_pending is True
                         )
                         if driver is not None and not stop:
                             # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
@@ -451,9 +453,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             # Ручной/повторный connect: сбросить лимит попыток, чтобы
                             # после «сдался» (reconnect_exhausted) кнопка «Подключить»
                             # дала драйверу заново полный лимит попыток.
-                            reset = getattr(driver, "reset_reconnect", None)
-                            if callable(reset):
-                                reset()
+                            driver.reset_reconnect()
                     if stop:
                         conn = "disconnecting"
                     else:
@@ -548,9 +548,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 # дедуплицируется StateStore, и поздние подписчики (список,
                                 # страница добавления) видят stale «disconnected». ts меняется
                                 # → дельта проходит. quality снапшота отражает живость чтений.
-                                if getattr(drv, "is_connected", False):
+                                if drv.is_connected:
                                     conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
-                                elif getattr(drv, "reconnect_exhausted", False):
+                                elif drv.reconnect_exhausted:
                                     # Драйвер исчерпал попытки и «сдался» — ждёт ручного
                                     # «Подключить». Отдельное состояние для GUI (не спам).
                                     conn = "failed"
@@ -559,7 +559,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
                                 # io_peek для панели «Вход/Выход» (если драйвер
                                 # накапливает wire-обмен — robot/generic_modbus).
-                                io = getattr(drv, "last_io", None)
+                                io = drv.last_io
                                 if io and (io.get("input") or io.get("output")):
                                     self._publish_state(
                                         f"devices.state.{did}.io_peek",
@@ -906,13 +906,25 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
             self._desired_connected[dev_id] = False
-            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock. Только робот v2
-            # (getattr, как request_stop); без ввода-вывода. Замки: _workers_lock -> _registry_lock -> состояние.
+            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock; без ввода-вывода
+            # (у драйверов кроме робота v2 — умолчание базы, ничего). Замки: _workers_lock -> _registry_lock ->
+            # состояние. Исключение драйвера ловится здесь, в health уходит после выхода из замка (нет ребра
+            # _workers_lock -> health); постановка disconnect в очередь — всегда.
+            request_error: Exception | None = None
             driver = self._manager.get_driver(dev_id)
-            request = getattr(driver, "request_disconnect", None) if driver is not None else None
-            if callable(request):
-                request()
-        self._conn_queue.put(("disconnect", dev_id))
+            if driver is not None:
+                try:
+                    driver.request_disconnect()
+                except Exception as exc:
+                    request_error = exc
+        try:
+            if request_error is not None and self._ctx:
+                self._ctx.health.report_error(request_error, context="device_hub.request_disconnect", device_id=dev_id)
+        except Exception as exc:  # no-health: сам health упал — лог, disconnect идёт дальше
+            if self._ctx:
+                self._ctx.log_warning(f"DeviceHubPlugin: health для {dev_id!r} не принят: {exc!r}")
+        finally:
+            self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
 
     # ------------------------------------------------------------------ #

@@ -25,11 +25,13 @@ from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.device_hub.errors import (
     DeviceHubError,
     DeviceNotFoundError,
+    RegisterTransportUnavailable,
     RegistryIntegrityError,
 )
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
 from Services.device_hub.robot_data_ops import STORE_ERRORS, param_source_for, run_op, store_error_for_operator
+from Services.device_hub.spi import DeviceDriver
 
 if TYPE_CHECKING:
     from Services.device_hub.robot_data_ops import RobotDataStore
@@ -83,7 +85,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         self._entries: dict[str, DeviceEntry] = {}
 
         # Живые драйверы: id -> BaseDeviceDriver
-        self._drivers: dict[str, Any] = {}
+        self._drivers: dict[str, DeviceDriver] = {}
 
         # RLock на _entries/_drivers: мутируются из командного потока
         # (upsert/remove) и supervisor (connect→_get_or_create_driver).
@@ -128,7 +130,15 @@ class DeviceManager(BaseManager, ObservableMixin):
             if self._stop_deadline is None:
                 self._stop_deadline = deadline
             drivers = list(self._drivers.items())
-        targets = [(dev_id, req) for dev_id, drv in drivers if callable(req := getattr(drv, "request_stop", None))]
+        targets: list[tuple[str, Callable[..., object]]] = []
+        for dev_id, drv in drivers:
+            # Отбор — внутри try на драйвер: флаг stop_aware без метода request_stop (AttributeError) или сбойное
+            # свойство одного драйвера пишется в лог, соседи стоп получают
+            try:
+                if drv.stop_aware:
+                    targets.append((dev_id, drv.request_stop))
+            except Exception:
+                logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
         if self._spawn is None:
             for dev_id, request in targets:
                 self._stop_one(dev_id, request, deadline)
@@ -263,7 +273,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         with self._registry_lock:
             return list(self._entries.values())
 
-    def get_driver(self, dev_id: str) -> Any:
+    def get_driver(self, dev_id: str) -> DeviceDriver | None:
         """Живой драйвер по id под локом (``None`` если ещё не создан)."""
         with self._registry_lock:
             return self._drivers.get(dev_id)
@@ -422,7 +432,7 @@ class DeviceManager(BaseManager, ObservableMixin):
 
         ok = driver.connect()
         # C-29 (В3): connect, прерванный «Отключить», — не ошибка (`is True`: подмены MagicMock дают истинный объект)
-        aborted = not ok and getattr(driver, "disconnect_pending", False) is True
+        aborted = not ok and driver.disconnect_pending is True
         conn = "connected" if ok else ("disconnecting" if aborted else "error")
         self._publish(f"devices.state.{dev_id}.conn", {"conn": conn})
         return ok
@@ -449,10 +459,13 @@ class DeviceManager(BaseManager, ObservableMixin):
         # реестр может мутироваться параллельно; сам disconnect-IO вне лока).
         for e in self.snapshot_registry():
             if e.transport.get("type") == "bridge" and e.transport.get("bridge") == dev_id:
-                dep_driver = self.get_driver(e.id)
-                if dep_driver is not None and hasattr(dep_driver, "set_degraded"):
-                    dep_driver.set_degraded()
-                    self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                # Сбой одного зависимого не лишает деградации остальных (А20)
+                try:
+                    dep_driver = self.get_driver(e.id)
+                    if dep_driver is not None and dep_driver.set_degraded():
+                        self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                except Exception:
+                    logger.exception(f"device_hub: деградация зависимого {e.id!r} при отключении носителя не прошла")
 
     # ------------------------------------------------------------------ #
     # Dispatch: call
@@ -561,7 +574,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": f"Регистр {name!r} доступен только на запись"}
 
         try:
-            transport = getattr(driver, "transport", None) or driver._client
+            transport = self._register_transport(driver)
             val = driver.protocol.register_map.read(transport, name)
             return {"status": "ok", "name": name, "value": val}
         except Exception as exc:
@@ -594,7 +607,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 return {"status": "error", "message": f"{name}={value} > max={meta.max}"}
 
         try:
-            transport = getattr(driver, "transport", None) or driver._client
+            transport = self._register_transport(driver)
             ops = driver.protocol.register_map.write_ops(values)
             transport.transaction(ops)
             return {"status": "ok", "written": list(values.keys())}
@@ -605,14 +618,22 @@ class DeviceManager(BaseManager, ObservableMixin):
     # Служебное
     # ------------------------------------------------------------------ #
 
-    def _get_driver(self, dev_id: str) -> Any:
+    @staticmethod
+    def _register_transport(driver: DeviceDriver) -> Any:
+        """Транспорт регистров драйвера (``driver.transport``); нет — ``RegisterTransportUnavailable``."""
+        transport = driver.transport
+        if transport is None:
+            raise RegisterTransportUnavailable(driver.entry.id)
+        return transport
+
+    def _get_driver(self, dev_id: str) -> DeviceDriver | None:
         """Получить драйвер по id (для resolve_device в VfdDriver и transports).
 
         Внутренний алиас публичного :meth:`get_driver` (лукап под локом).
         """
         return self.get_driver(dev_id)
 
-    def _get_connected_driver(self, dev_id: str) -> Any:
+    def _get_connected_driver(self, dev_id: str) -> DeviceDriver:
         """Получить подключённый драйвер; raise при ошибке."""
         self.get(dev_id)  # проверка существования (DeviceNotFoundError)
         driver = self.get_driver(dev_id)
@@ -620,7 +641,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             raise DeviceHubError(f"Устройство {dev_id!r} не подключено")
         return driver
 
-    def _get_or_create_driver(self, entry: DeviceEntry) -> Any:
+    def _get_or_create_driver(self, entry: DeviceEntry) -> DeviceDriver:
         """Получить или лениво создать драйвер (потокобезопасно)."""
         with self._registry_lock:
             driver = self._drivers.get(entry.id)

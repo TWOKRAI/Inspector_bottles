@@ -262,3 +262,45 @@ def test_guard_sees_aliased_transition_call(tmp_path: Path) -> None:
     assert len(_violations_outside([imp], tmp_path)) == 1
     assert len(_violations_outside([common], tmp_path)) == 1
     assert _violations_outside([plain], tmp_path) == []
+
+
+# --- (в) SPI.b2: прод-код хаба вне пакета драйверов не читает приватных имён драйвера ---
+
+_HUB_PROD_DIRS = (_ROOT / "Services" / "device_hub", _ROOT / "Plugins" / "hub" / "device_hub")
+
+
+def _hub_prod_files() -> list[Path]:
+    """``*.py`` хаба и его плагина, кроме каталогов ``drivers/`` (свои драйверы) и ``tests/``."""
+    out: list[Path] = []
+    for top in _HUB_PROD_DIRS:
+        for path in sorted(top.rglob("*.py")):
+            rel = path.relative_to(top)
+            if rel.parts[0] in ("drivers", "tests") or "__pycache__" in rel.parts:
+                continue
+            out.append(path)
+    return out
+
+
+def _hub_prod_violations(paths: list[Path], names: frozenset[str]) -> list[str]:
+    return [
+        f"{path.name}:{line} {name}" for path in paths for name, line, _via in _private_accesses(path) if name in names
+    ]
+
+
+def test_hub_prod_code_has_no_driver_private_names() -> None:
+    """(в) Менеджер, плагин и прочий прод-код хаба: приватные имена драйвера (``_client``, ...) — 0 обращений."""
+    files = _hub_prod_files()
+    assert {"manager.py", "plugin.py"} <= {p.name for p in files}, "обход прод-кода хаба не нашёл файлов: сторож слеп"
+    assert _hub_prod_violations(files, _driver_private_names()) == []
+
+
+def test_guard_sees_driver_private_name_in_prod_code(tmp_path: Path) -> None:
+    """Сам сторож (в) видит ``driver._client`` и ``getattr(driver, "_client")``; ``self._client`` — свой атрибут."""
+    bad = tmp_path / "bad.py"
+    bad.write_text('def f(driver):\n    return driver._client or getattr(driver, "_client")\n', encoding="utf-8")
+    own = tmp_path / "own.py"
+    own.write_text("class M:\n    def f(self):\n        return self._client\n", encoding="utf-8")
+    names = _driver_private_names()
+    assert "_client" in names
+    assert len(_hub_prod_violations([bad], names)) == 2
+    assert _hub_prod_violations([own], names) == []

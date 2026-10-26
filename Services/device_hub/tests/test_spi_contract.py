@@ -238,15 +238,19 @@ def test_base_request_disconnect_default() -> None:
     assert not hasattr(driver, "request_stop")  # стоп фазы 1 умолчания не получает (D2)
 
 
-# Члены контракта, которых у драйвера ещё нет: умолчание ``set_degraded`` базы — SPI.b2 (вместе с ``-> bool`` и
-# ``if set_degraded():`` в менеджере, чтобы поведение каскада моста не менялось между коммитами). b2 пустит литерал.
-_NOT_YET: dict[str, list[str]] = {
-    "RobotDriver": ["set_degraded"],
-    "RobotDriverV2": ["set_degraded"],
-    "VfdDriver": [],
-    "HikvisionDriver": ["set_degraded"],
-    "GenericModbusDriver": ["set_degraded"],
-}
+def test_set_degraded_default_and_vfd() -> None:
+    """Умолчание базы — False без ``disconnect()``; ``VfdDriver`` деградирует (True)."""
+    disconnects: list[int] = []
+
+    class Plain(BaseDeviceDriver):
+        kind = "test"
+
+        def disconnect(self) -> None:
+            disconnects.append(1)
+
+    assert Plain(_entry("robot", "delta_v2")).set_degraded() is False
+    assert disconnects == []
+    assert _BUILDERS[VfdDriver]().set_degraded() is True
 
 
 def _protocol_members(proto: type) -> set[str]:
@@ -287,7 +291,7 @@ def test_driver_conforms_to_device_driver(cls: type) -> None:
     """Каждый член ``DeviceDriver`` есть у экземпляра пяти фабрик; ``StopAwareDriver`` — ровно при ``stop_aware``."""
     driver = _BUILDERS[cls]()
     missing = sorted(n for n in _protocol_members(spi.DeviceDriver) if not hasattr(driver, n))
-    assert missing == _NOT_YET[cls.__name__]
+    assert missing == []
     assert callable(getattr(cls, "request_stop", None)) is bool(cls.stop_aware)
 
 
@@ -301,3 +305,172 @@ def test_spi_imports_only_stdlib() -> None:
             roots.add(node.module.split(".")[0])
     assert roots, "недостижимо: импортов нет"
     assert roots - set(sys.stdlib_module_names) == set()
+
+
+# --- SPI.b2: менеджер и плагин зовут контракт драйвера напрямую — 0 getattr / hasattr к драйверу ---
+#
+# Получатель определяется потоком данных внутри функции (и её вложенных функций), а не списком имён переменных:
+# имя, связанное с вызовом get_driver / _get_driver / _get_connected_driver / _get_or_create_driver; переменные цикла
+# (и включений) по ``_drivers`` или его снимку (``drivers = list(self._drivers.items())``); элемент ``_drivers[...]``;
+# параметр с аннотацией ``DeviceDriver``; параметр локальной функции, куда передан получатель
+# (``make_tick_fn(did, drv)``).
+
+_DRIVER_GETTERS = frozenset({"get_driver", "_get_driver", "_get_connected_driver", "_get_or_create_driver"})
+_DUCK_FUNCS = frozenset({"getattr", "hasattr"})
+_DUCK_FILES = ("Services/device_hub/manager.py", "Plugins/hub/device_hub/plugin.py")
+_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        if isinstance(func, ast.Name):
+            return func.id
+    return None
+
+
+def _is_drivers_ref(node: ast.AST) -> bool:
+    """``x._drivers`` и вызовы над ним (``.items()`` / ``.values()`` / ``.copy()``, ``list(...)``, ``dict(...)``)."""
+    if isinstance(node, ast.Attribute) and node.attr == "_drivers":
+        return True
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ("items", "values", "copy") and _is_drivers_ref(func.value):
+            return True
+        if isinstance(func, ast.Name) and func.id in ("list", "dict", "tuple", "sorted") and node.args:
+            return _is_drivers_ref(node.args[0])
+    return False
+
+
+def _own_nodes(func: ast.AST) -> list[ast.AST]:
+    """Узлы функции без тел вложенных функций (у них своя область; сами вложенные узлы — в списке)."""
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(func))
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if not isinstance(node, _FUNC_NODES):
+            stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _params(func: ast.AST) -> list[ast.arg]:
+    args = func.args
+    return [*args.posonlyargs, *args.args, *args.kwonlyargs]
+
+
+def _duck_typing_sites(source: str) -> list[int]:
+    """Строки ``getattr`` / ``hasattr``, чей первый аргумент — драйвер по потоку данных (до неподвижной точки)."""
+    tree = ast.parse(source)
+    funcs = [n for n in ast.walk(tree) if isinstance(n, _FUNC_NODES)]
+    parent: dict[ast.AST, ast.AST] = {}
+    for f in funcs:
+        for node in _own_nodes(f):
+            if isinstance(node, _FUNC_NODES):
+                parent[node] = f
+    local_defs = {n.name: n for n in funcs if not isinstance(n, ast.Lambda)}
+    drivers: dict[ast.AST, set[str]] = {f: set() for f in funcs}
+    containers: dict[ast.AST, set[str]] = {f: set() for f in funcs}
+    for f in funcs:
+        for arg in _params(f):
+            if arg.annotation is not None and "DeviceDriver" in ast.unparse(arg.annotation):
+                drivers[f].add(arg.arg)
+
+    def visible(f: ast.AST | None, table: dict[ast.AST, set[str]]) -> set[str]:
+        names: set[str] = set()
+        while f is not None:
+            names |= table[f]
+            f = parent.get(f)
+        return names
+
+    def is_container(expr: ast.AST, f: ast.AST) -> bool:
+        return _is_drivers_ref(expr) or (isinstance(expr, ast.Name) and expr.id in visible(f, containers))
+
+    def is_driver(expr: ast.AST, f: ast.AST) -> bool:
+        if isinstance(expr, ast.Name):
+            return expr.id in visible(f, drivers)
+        if _call_name(expr) in _DRIVER_GETTERS:
+            return True
+        return isinstance(expr, ast.Subscript) and is_container(expr.value, f)
+
+    def add(table: dict[ast.AST, set[str]], f: ast.AST, name: str) -> bool:
+        if name in table[f]:
+            return False
+        table[f].add(name)
+        return True
+
+    changed = True
+    while changed:
+        changed = False
+        for f in funcs:
+            for node in _own_nodes(f):
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and is_driver(node.value, f):
+                            changed |= add(drivers, f, target.id)
+                        elif isinstance(target, ast.Name) and is_container(node.value, f):
+                            changed |= add(containers, f, target.id)
+                elif isinstance(node, (ast.For, ast.comprehension)) and is_container(node.iter, f):
+                    target = node.target
+                    elt = target.elts[-1] if isinstance(target, ast.Tuple) and target.elts else target
+                    if isinstance(elt, ast.Name):
+                        changed |= add(drivers, f, elt.id)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in local_defs:
+                    callee = local_defs[node.func.id]
+                    params = _params(callee)
+                    for i, arg in enumerate(node.args):
+                        if i < len(params) and is_driver(arg, f):
+                            changed |= add(drivers, callee, params[i].arg)
+    return sorted(
+        node.lineno
+        for f in funcs
+        for node in _own_nodes(f)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _DUCK_FUNCS
+        and node.args
+        and is_driver(node.args[0], f)
+    )
+
+
+def test_no_duck_typing_on_drivers() -> None:
+    """D3: в менеджере и плагине ``getattr`` / ``hasattr`` к драйверу — 0 (на базе SPI — 13 узлов)."""
+    root = _HUB.parents[1]
+    found = {rel: _duck_typing_sites((root / rel).read_text(encoding="utf-8")) for rel in _DUCK_FILES}
+    assert found == {rel: [] for rel in _DUCK_FILES}
+
+
+_CLOSURE_SRC = """
+def f(self):
+    def mk(did, z):
+        def run():
+            return getattr(z, "x")
+        return run
+    q = self.get_driver(1)
+    return mk(1, q)
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("def f(self):\n    d = self.get_driver(1)\n    return getattr(d, 'x', None)\n", 1, id="getter"),
+        pytest.param("def f(self):\n    return hasattr(self._get_connected_driver(1), 'x')\n", 1, id="inline"),
+        pytest.param(
+            "def f(self):\n    ds = list(self._drivers.items())\n    return [getattr(v, 'x') for k, v in ds]\n",
+            1,
+            id="snapshot_comprehension",
+        ),
+        pytest.param("def f(self):\n    for v in self._drivers.values():\n        hasattr(v, 'x')\n", 1, id="loop"),
+        pytest.param("def f(self):\n    return getattr(self._drivers['a'], 'x')\n", 1, id="subscript"),
+        pytest.param("def f(drv: DeviceDriver):\n    return getattr(drv, 'x')\n", 1, id="annotated"),
+        pytest.param(_CLOSURE_SRC, 1, id="closure_renamed"),
+        pytest.param("def f(self, ctx):\n    return getattr(ctx.worker_manager, 'x', None)\n", 0, id="not_driver"),
+    ],
+)
+def test_duck_typing_guard_sees_data_flow(source: str, expected: int) -> None:
+    """Сам сторож: получатель — по потоку данных; переименование переменной его не обходит."""
+    assert len(_duck_typing_sites(source)) == expected

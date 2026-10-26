@@ -6,6 +6,7 @@
         DeviceBusyError       -- устройство занято (draw, connect в процессе)
         TransportBuildError   -- не удалось построить транспорт (bridge-цикл и т.п.)
         RegistryIntegrityError -- нарушение целостности реестра (удаление носителя)
+        RegisterTransportUnavailable -- у драйвера нет транспорта регистров (device_read / device_write)
 """
 
 from __future__ import annotations
@@ -35,3 +36,16 @@ class RegistryIntegrityError(DeviceHubError):
 
     Пример: попытка удалить устройство-носитель при живых bridge-зависимых.
     """
+
+
+class RegisterTransportUnavailable(DeviceHubError):
+    """У драйвера нет транспорта регистров (``driver.transport is None``): чтение и запись регистров недоступны.
+
+    Текст постоянный, без входных значений; id устройства — в ``device_id``.
+    """
+
+    TEXT = "у устройства нет транспорта регистров"
+
+    def __init__(self, device_id: str = "") -> None:
+        super().__init__(self.TEXT)
+        self.device_id = device_id
