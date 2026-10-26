@@ -15,7 +15,7 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
@@ -63,6 +63,9 @@ class DeviceManager(BaseManager, ObservableMixin):
                     робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
         robot_store: Единственное на процесс ``RobotDataStore`` данных робота v2 (T5.3c): им пользуется ``robot_data``;
                     ``None`` — ``robot_data`` отвечает отказом «хранилище данных робота не задано».
+        driver_options: ``{kind: {имя: значение}}`` — именованные аргументы конструктора драйверов вида, создаваемых
+                    фабриками по умолчанию (универсальный шов тестов: у робота v2 — ``client_factory``). ``None`` —
+                    без опций (прод). Неизвестная опция — ``TypeError`` конструктора при создании драйвера.
     """
 
     def __init__(
@@ -72,6 +75,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         *,
         spawn: Callable[..., Any] | None = None,
         robot_store: RobotDataStore | None = None,
+        driver_options: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
@@ -79,6 +83,9 @@ class DeviceManager(BaseManager, ObservableMixin):
         self._publish = publish_cb or (lambda _p, _d: None)
         self._spawn = spawn
         self._robot_store = robot_store
+        self._driver_options: dict[str, dict[str, Any]] = {
+            kind: dict(opts) for kind, opts in (driver_options or {}).items()
+        }
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
         # Реестр: id -> DeviceEntry
@@ -200,6 +207,23 @@ class DeviceManager(BaseManager, ObservableMixin):
         """
         self._factories[kind] = factory
 
+    def set_driver_options(self, kind: str, **options: Any) -> None:
+        """Задать опции конструктора драйверов вида ``kind`` (заменяют прежние опции вида).
+
+        Действует на драйверы, создаваемые ПОСЛЕ вызова: уже созданные не меняются. Опции получают только фабрики по
+        умолчанию; неизвестная драйверу опция — ``TypeError`` его конструктора. Пустой вызов снимает опции вида.
+        """
+        with self._registry_lock:
+            if options:
+                self._driver_options[kind] = dict(options)
+            else:
+                self._driver_options.pop(kind, None)
+
+    def _options_for(self, kind: str) -> dict[str, Any]:
+        """Копия опций вида для конструктора драйвера (снимок под замком реестра)."""
+        with self._registry_lock:
+            return dict(self._driver_options.get(kind, {}))
+
     def _check_kind(self, kind: str) -> None:
         """Вид допустим, если для него зарегистрирована фабрика драйвера (один источник истины, SPI.c1b)."""
         if kind not in self._factories:
@@ -219,8 +243,9 @@ class DeviceManager(BaseManager, ObservableMixin):
 
                 if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
                     raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
+                options = self._options_for("robot")
                 if self._robot_store is None:
-                    return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn)
+                    return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn, **options)
                 # Параметры робота при подключении — из params.yaml (T5.3c c2); плохие данные бросают RobotDataInvalid
                 # и др. из фабрики, их перехватывает ``connect``
                 param_source = param_source_for(self._robot_store, entry.id, entry.params)
@@ -231,13 +256,20 @@ class DeviceManager(BaseManager, ObservableMixin):
                     spawn=self._spawn,
                     param_source=param_source,
                     store=self._robot_store,
+                    **options,
                 )
-            return RobotDriver(entry, proto)
+            return RobotDriver(entry, proto, **self._options_for("robot"))
 
         self._factories["robot"] = _robot_factory
-        self._factories["vfd"] = lambda entry, proto: VfdDriver(entry, proto, resolve_device=self._get_driver)
-        self._factories["hikvision"] = lambda entry, proto: HikvisionDriver(entry, proto)
-        self._factories["generic_modbus"] = lambda entry, proto: GenericModbusDriver(entry, proto)
+        self._factories["vfd"] = lambda entry, proto: VfdDriver(
+            entry, proto, resolve_device=self._get_driver, **self._options_for("vfd")
+        )
+        self._factories["hikvision"] = lambda entry, proto: HikvisionDriver(
+            entry, proto, **self._options_for("hikvision")
+        )
+        self._factories["generic_modbus"] = lambda entry, proto: GenericModbusDriver(
+            entry, proto, **self._options_for("generic_modbus")
+        )
 
     # ------------------------------------------------------------------ #
     # CRUD реестра

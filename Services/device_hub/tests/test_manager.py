@@ -345,3 +345,40 @@ class TestKindByFactory:
         with pytest.raises(ValueError) as info:
             manager.initialize()
         assert str(info.value) == _UNKNOWN_KIND_TEXT
+
+
+class TestDriverOptions:
+    """SPI.f2: опции конструктора драйверов вида — ``driver_options`` и ``set_driver_options``."""
+
+    @staticmethod
+    def _fake_transport() -> object:
+        from Services.robot_comm.server.sim_core import RobotSimCore
+        from Services.robot_comm.testing.fake_transport import FakeRobotTransport
+
+        return FakeRobotTransport(RobotSimCore())
+
+    def test_options_reach_driver_constructor(self) -> None:
+        """Опция вида из конструктора менеджера и из ``set_driver_options`` попадает в конструктор драйвера."""
+        fake = self._fake_transport()
+        mgr = DeviceManager(None, driver_options={"robot": {"transport": fake}})
+        mgr.upsert({"id": "r1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert mgr.connect("r1") is True  # без опции драйвер ушёл бы в настоящий tcp и не подключился
+
+        later = DeviceManager(None)
+        later.set_driver_options("robot", transport=self._fake_transport())
+        later.upsert({"id": "r2", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert later.connect("r2") is True
+
+    def test_options_do_not_touch_created_drivers_and_unknown_option_raises(self) -> None:
+        """Созданный драйвер не меняется; неизвестная опция — ``TypeError`` при создании следующего драйвера."""
+        mgr = DeviceManager(None, driver_options={"robot": {"transport": self._fake_transport()}})
+        mgr.upsert({"id": "r1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert mgr.connect("r1") is True
+        driver = mgr.get_driver("r1")
+
+        mgr.set_driver_options("robot", no_such_option=1)
+        assert mgr.get_driver("r1") is driver and driver.is_connected is True
+
+        mgr.upsert({"id": "r2", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        with pytest.raises(TypeError, match="no_such_option"):
+            mgr.connect("r2")
