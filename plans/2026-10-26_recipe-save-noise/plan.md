@@ -59,7 +59,7 @@ C-21(б)). Сохранение рецепта из GUI переписывает
 
 ## Бюджет
 
-16 задач. Запуски: стадия 0 (reviewer) × 4 (выполнены); слепой тестер × 1; teamlead (Opus) × 2 (1.1a, 1.1h);
+17 задач (поправка №2: +1.1i, +3 запуска, ≈ +0,6M → ≈ 10,1M). Запуски: стадия 0 (reviewer) × 4 (выполнены); слепой тестер × 1; teamlead (Opus) × 2 (1.1a, 1.1h);
 developer (Sonnet) × 13; tech-writer × 1 (1.3); reviewer стадии 5 × 16 (express у 1.6, 1.10, 1.3); ревью ветки (Opus) × 1 —
 **38 запусков** × ~56k старта ≈ 2,13M. Сверх старта (оценка): тестер ~0,3M; developer 13 × ~0,25M = 3,25M;
 teamlead 2 × ~0,35M = 0,7M; tech-writer ~0,2M; reviewer стадии 5: 13 × ~0,1M + 3 × ~0,05M = 1,45M; стадия 0: 4 × ~0,1M =
@@ -69,7 +69,7 @@ teamlead сверх 1.1a/1.1h — только эскалация. Пересч�
 ## Конвейер (`.claude/CLAUDE.md` «Task launch convention»)
 
 стадия 0 reviewer → слепой тестер (один раз на механизм, worktree на коммите до реализации) → исполнители по одному,
-режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
+режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
 INJECT задач) → стадия 5 reviewer на задачу → tech-writer 1.3 → ревью ветки (Opus) перед merge. Лимит — 2 итерации на
 цикл, третья → `teamlead`, затем `cto`. Порядок 1.1g → 1.7 → 1.1c: стор пишется один раз против финального Protocol.
 
@@ -78,10 +78,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 `recipes/tests/test_save_noise_save.py` (1.2). В остальных задачах исполнитель пишет REDS сам, до правки `src` (файлы —
 таблица «Injections»). Коммит задачи не краснеет от тестов следующих; TESTS называет только свои файлы.
 
-**Слепому тестеру запрещено читать:** `multiprocess_framework/modules/recipe/yaml_io.py`, `…/recipe/manager.py`,
-`multiprocess_prototype/adapters/stores/recipe_store.py`, `multiprocess_prototype/recipes/save.py`,
-`multiprocess_prototype/domain/entities/topology.py`, блоки DESIGN и INJECT в `tasks/*.md`, папку `probes/`.
-Читает только `design.md` §2, §6 и блоки ACCEPTANCE/REDS задач.
+**Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
 `scripts/machine_gate.sh`, сессия `inspector-bottles-d8`.
@@ -92,18 +89,20 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 **Цель фазы:** GUI сохраняет только изменённое; без правок файл не трогается.
 
-- Task 1.1a: **[VERTICAL SLICE]** часть 1 — дельта-движок (`patch_yaml_preserving`, `apply_delta`, `YamlPatchConflict`); первый шаг — F16 на спайке (teamlead) [PENDING]
+- Task 1.1a: **[VERTICAL SLICE]** часть 1 — дельта-движок (`patch_yaml_preserving`, `apply_delta`, `YamlPatchConflict`); первый шаг — F16 на спайке (teamlead) [DONE]
   - **Module contract:** public-api-change (`recipe/yaml_io.py`, `recipe/__init__.py`)
-- Task 1.6: пин `ruamel.yaml>=0.19.1,<0.20` и тест формы токенов [PENDING] (после 1.1a)
+- Task 1.6: пин `ruamel.yaml>=0.19.1,<0.20` и тест формы токенов [DONE] (после 1.1a)
   - **Module contract:** n/a
-- Task 1.1b: **[VERTICAL SLICE]** часть 2 — тонкие `update_*_preserving` над движком, `compute_rev` в `format.py` [PENDING] (после 1.6)
+- Task 1.1b: **[VERTICAL SLICE]** часть 2 — тонкие `update_*_preserving` над движком, `compute_rev` в `format.py` [DONE] (после 1.6)
   - **Module contract:** public-api-change (`format.compute_rev`)
-- Task 1.1h: межпроцессный лок `recipe_file_lock` (stdlib, `<slug>.yaml.lock`, таймаут → `RecipeLockTimeout`); `RecipeService.save/delete` под ним (teamlead) [PENDING] (после 1.1b)
+- Task 1.1h: межпроцессный лок `recipe_file_lock` (stdlib, `<slug>.yaml.lock`, таймаут → `RecipeLockTimeout`); `RecipeService.save/delete` под ним (teamlead) [DONE] (после 1.1b)
   - **Module contract:** new-lite (`recipe/file_lock.py`)
-- Task 1.1e: **[VERTICAL SLICE]** часть 3 — API записи `RecipeManager`: `read_recipe_rev`, `patch_recipe(..., layout=)`, `save_layout`, `RecipeConflict` [PENDING] (после 1.1h)
+- Task 1.1e: **[VERTICAL SLICE]** часть 3 — API записи `RecipeManager`: `read_recipe_rev`, `patch_recipe(..., layout=)`, `save_layout`, `RecipeConflict` [DONE] (после 1.1h)
   - **Module contract:** public-api-change (`RecipeManager`, `RecipeManagerProtocol`)
-- Task 1.1f: канон во framework — `read_canonical`, `RecipeFormatError`, `on_insert`, контракт хука [PENDING] (после 1.1e)
+- Task 1.1f: канон во framework — `read_canonical`, `RecipeFormatError`, `on_insert`, контракт хука [DONE] (после 1.1e)
   - **Module contract:** public-api-change (`RecipeManager.read_canonical`, `recipe/hook_contract.py`)
+- Task 1.1i: склейка комментариев у `- {}` — корень в движке, `YamlWriteRefused` (teamlead) [PENDING] (после 1.1f)
+  - **Module contract:** public-api-change (`recipe.YamlWriteRefused`)
 - Task 1.1g: хук v3 в GUI, адаптеры `Recipe`/`Topology` ↔ канон, контракт на 22 рецептах [PENDING] (после 1.1f)
   - **Module contract:** new-lite (`adapters/recipe_canonical.py`)
 - Task 1.7: `Topology` типизирует `name/description` + финальный Protocol `RecipeStore` (`read_canonical`, `read_raw_with_rev`, `expected_rev`, `layout`) и фейк [PENDING] (после 1.1g; слито с 1.1d)
@@ -130,7 +129,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 92 правки.
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; 97 правок.
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -138,6 +137,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.6 | 2 | `recipe/tests/test_ruamel_contract.py` | |
 | 1.1b | 3 | `recipe/tests/test_thin_contracts.py` | |
 | 1.1h | 5 | `recipe/tests/test_file_lock.py` | |
+| 1.1i | 5 | `recipe/tests/test_yaml_patch.py` | |
 | 1.1e | 8 | `recipe/tests/test_recipe_manager_write_api.py` | |
 | 1.1f | 6 | `recipe/tests/test_canonical_form.py` | |
 | 1.1g | 4 | `adapters/tests/test_recipe_canonical.py` | |
