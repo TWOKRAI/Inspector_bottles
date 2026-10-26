@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
@@ -79,9 +81,10 @@ def test_external_writes_from_other_thread() -> None:
 
 
 def test_port_and_register_writers_race() -> None:
-    """Регистр пишет второй поток, порт «МИР» подаёт основной: регистр и раскладка не расходятся.
+    """Smoke «нет исключений»: регистр пишет второй поток, порт «МИР» подаёт основной.
 
-    Проверяет отсутствие падений и согласие итога, не отсутствие потерь.
+    Итоговое согласие регистра и раскладки следует из устройства кода и порядок записей не доказывает —
+    порядок закреплён детерминированными тестами P3a/P3b ниже. Не проверяет отсутствие потерь.
     """
     p, rm = _make()
 
@@ -100,3 +103,116 @@ def test_port_and_register_writers_race() -> None:
     p.process([{"predictions": []}])
     reg = rm.get_register(_REG)
     assert " ".join(reg.target_word.upper().split()) == reg.word_norm
+
+
+# --- детерминированные тесты: отказ регистра и окна гонки (без потоков) -----------------------
+
+
+class _RefusingRegisters(WordLayoutRegisters):
+    """Регистр, чей ``update_field`` отказывает на ``target_word`` со значениями из ``refuse``."""
+
+    refuse: ClassVar[set[str]] = set()
+
+    def update_field(self, field_name: str, value: Any, access_level: int = 0) -> tuple[bool, str | None]:
+        if field_name == "target_word" and value in type(self).refuse:
+            return False, "отказ (инъекция)"
+        return super().update_field(field_name, value, access_level)
+
+
+class _HookedPlugin(WordLayoutPlugin):
+    """Крючки вокруг записи порта: ``before`` — до ``update_field``, ``after`` — сразу после него."""
+
+    before: Callable[[], None] | None = None
+    after: Callable[[], None] | None = None
+
+    def _write_word(self, w: str, log: bool = True) -> bool:
+        if self.before is not None:
+            hook, self.before = self.before, None
+            hook()
+        ok = super()._write_word(w, log)
+        if self.after is not None:
+            hook, self.after = self.after, None
+            hook()
+        return ok
+
+
+def _make_with(
+    plugin_cls: type[WordLayoutPlugin], reg_cls: type[WordLayoutRegisters], target_word: str = ""
+) -> tuple[WordLayoutPlugin, MockProcessServices, RegistersManager]:
+    cfg = {**_CFG, "target_word": target_word}
+    services = MockProcessServices(name="layout", config=dict(cfg))
+    rm = RegistersManager(registers={_REG: reg_cls()})
+    plugin = plugin_cls()
+    plugin.configure(PluginContext(services=services, config=dict(cfg), registers=rm))
+    return plugin, services, rm
+
+
+def _lines(services: MockProcessServices, mark: str) -> list[str]:
+    return [e["msg"] for e in services.logs if mark in e["msg"]]
+
+
+def _write(rm: RegistersManager, value: str) -> None:
+    assert rm.set_field_value(_REG, "target_word", value) == (True, None)
+
+
+def test_port_write_refused_keeps_register_word() -> None:
+    """Регистр отказал порту: слово порта не применено, действует «РИМ», одна строка об отказе."""
+    p, services, rm = _make_with(WordLayoutPlugin, _RefusingRegisters, "РИМ")
+    p.process([{"predictions": []}])
+    _RefusingRegisters.refuse = {"МИР"}
+    try:
+        p.process([{"signal_2": "МИР"}])
+    finally:
+        _RefusingRegisters.refuse = set()
+    assert p._reg.word_norm == "РИМ"
+    assert rm.get_register(_REG).target_word == "РИМ"
+    assert len(_lines(services, "не записано в регистр")) == 1
+
+
+def test_rollback_refused_logs_once_and_no_false_info() -> None:
+    """Откат пустой записи отклонён: 5 пустых items дают одну строку об отказе и ни одной «не принято»."""
+    p, services, rm = _make_with(WordLayoutPlugin, _RefusingRegisters)
+    p.process([{"signal_2": "МИР"}])
+    _write(rm, "")
+    _RefusingRegisters.refuse = {"МИР"}
+    try:
+        for _ in range(5):
+            p.process([{"predictions": []}])
+    finally:
+        _RefusingRegisters.refuse = set()
+    assert p._reg.word_norm == "МИР"
+    assert rm.get_register(_REG).target_word == ""
+    assert len(_lines(services, "не записано в регистр")) == 1
+    assert _lines(services, "пустое слово в регистре не принято") == []
+
+
+def test_port_word_stored_raw() -> None:
+    """Порт «мир» лежит в регистре как пришло, раскладка по нормализованному слову."""
+    p, _, rm = _make_with(WordLayoutPlugin, WordLayoutRegisters)
+    p.process([{"signal_2": "мир"}])
+    assert rm.get_register(_REG).target_word == "мир"
+    assert p._reg.word_norm == "МИР"
+
+
+def test_p3a_external_write_after_port_update_is_next_arrival() -> None:
+    """Ограничение (а): запись между update_field порта и ``_own_word = w`` принимается на следующем item."""
+    p, services, rm = _make_with(_HookedPlugin, WordLayoutRegisters, "РИМ")
+    p.process([{"predictions": []}])
+    p.after = lambda: _write(rm, "ЛЕС")
+    p.process([{"signal_2": "МИР"}])
+    p.process([{"predictions": []}])
+    assert p._reg.word_norm == "ЛЕС"
+    assert rm.get_register(_REG).target_word == "ЛЕС"
+    assert any("'МИР' → 'ЛЕС' (источник: регистр)" in m for m in _lines(services, "смена слова"))
+
+
+def test_p3b_external_write_before_port_write_loses_to_port() -> None:
+    """Ограничение (б): запись между проверкой регистра и записью порта того же item затёрта портом."""
+    p, services, rm = _make_with(_HookedPlugin, WordLayoutRegisters, "РИМ")
+    p.process([{"predictions": []}])
+    p.before = lambda: _write(rm, "ЛЕС")
+    p.process([{"signal_2": "МИР"}])
+    p.process([{"predictions": []}])
+    assert p._reg.word_norm == "МИР"
+    assert rm.get_register(_REG).target_word == "МИР"
+    assert _lines(services, "'ЛЕС'") == []

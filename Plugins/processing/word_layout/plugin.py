@@ -53,7 +53,12 @@ class WordLayoutPlugin(ProcessModulePlugin):
             shape="N",
             description="Топ-K от ml_inference: label, confidence, angle_deg, angle_valid, below_threshold",
         ),
-        Port(name="word", dtype="any", optional=True, description="Целевое слово (строка/dict); иначе register"),
+        Port(
+            name="word",
+            dtype="any",
+            optional=True,
+            description="Целевое слово (строка/dict); пишется в «Слово», действует последнее",
+        ),
         Port(name="trigger", dtype="any", optional=True, description="Сигнал «взять диск» (если use_trigger)"),
         Port(name="pick_xy", dtype="dict", optional=True, description="{x_mm,y_mm} забор с ленты (от pixel_to_robot)"),
         Port(name="return_trigger", dtype="any", optional=True, description="Сигнал «вернуть всё на ленту» (пульт)"),
@@ -95,6 +100,8 @@ class WordLayoutPlugin(ProcessModulePlugin):
         # _word_src — откуда оно пришло (для журнала).
         self._own_word = self._reg.target_word
         self._word_src = "регистр" if self._reg.target_word.strip() else ""
+        # Пустое значение регистра, которое откатить не удалось: об отказе пишем один раз на значение.
+        self._failed_val: str | None = None
         # Детект «нового диска», два режима. 1) Есть sidecar.track_id (center_crop): новый диск =
         # новый id; _cur_track — id текущего диска, _taken_track — id последнего взятого (после
         # сброса слова не обнуляется: тот же id = то же событие линии), _armed не читается.
@@ -231,10 +238,10 @@ class WordLayoutPlugin(ProcessModulePlugin):
     # Внутреннее
     # ------------------------------------------------------------------ #
 
-    def _write_word(self, w: str) -> bool:
+    def _write_word(self, w: str, log: bool = True) -> bool:
         """Записать слово в регистр «Слово» (единственное хранилище). False — регистр отказал."""
         ok, err = self._reg.update_field("target_word", w)
-        if not ok:
+        if not ok and log:
             self._ctx.log_error(f"WordLayoutPlugin: слово '{_norm(w)}' не записано в регистр: {err}")
         return ok
 
@@ -251,11 +258,16 @@ class WordLayoutPlugin(ProcessModulePlugin):
             if val.strip():
                 self._own_word = val
                 self._word_src = "регистр"
+                self._failed_val = None
             elif self._own_word.strip():
-                self._write_word(self._own_word)
-                self._ctx.log_info(
-                    f"WordLayoutPlugin: пустое слово в регистре не принято — действует '{_norm(self._own_word)}'"
-                )
+                # Отказ регистра: повторяем запись на каждом item, но в журнал — один раз на значение.
+                if self._write_word(self._own_word, log=val != self._failed_val):
+                    self._failed_val = None
+                    self._ctx.log_info(
+                        f"WordLayoutPlugin: пустое слово в регистре не принято — действует '{_norm(self._own_word)}'"
+                    )
+                else:
+                    self._failed_val = val
         src = self._reg.word_source
         if src:
             w = item.get(src)
