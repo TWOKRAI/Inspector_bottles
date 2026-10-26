@@ -41,6 +41,7 @@ from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.programs import Move, Point, Program
 from Services.robot_comm.server.sim_robot import SimRobotServer
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, RecordingCore, bounded
+from Services.device_hub.tests.conftest import ClientRecorder
 
 _JOG = {"dir": 1, "spd": 20}
 _CALL_S = 15.0
@@ -181,9 +182,11 @@ def _transport(port: int) -> dict:
     return {"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID}
 
 
-def _driver(rig: _Rig, rec: _Rec, spawn: Any, dev_id: str = "r1") -> RobotDriverV2:
+def _driver(
+    rig: _Rig, rec: _Rec, spawn: Any, dev_id: str = "r1", clients: ClientRecorder | None = None
+) -> RobotDriverV2:
     entry = DeviceEntry(id=dev_id, name=dev_id, kind="robot", protocol="delta_v2", transport=_transport(rig.port))
-    drv = RobotDriverV2(entry, None, publish=rec, spawn=spawn)
+    drv = RobotDriverV2(entry, None, publish=rec, spawn=spawn, client_factory=clients)
     assert bounded(drv.connect, _CONNECT_S) is True
     drv.desired_connected = True
     return drv
@@ -514,9 +517,10 @@ def test_jog_cont_in_flight_during_lockless_stop_gets_its_own_stop() -> None:
     после возврата JOG_CONT пишет стоп этого jog сам и поводок не запускает."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
-        drv = _driver(rig, rec, scope.spawn)
+        clients = ClientRecorder()
+        drv = _driver(rig, rec, scope.spawn, clients=clients)
         try:
-            client = drv._client
+            client = clients.last
             real_jog_cont = client.jog_cont
             jog_cont_returned: list[float] = []
 
@@ -554,7 +558,8 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
     """H1: задание CVT в ходе, стоп процесса, затем событие тика (как remove_worker) — одна запись, тик выходит."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
-        drv = _driver(rig, rec, scope.spawn)
+        clients = ClientRecorder()
+        drv = _driver(rig, rec, scope.spawn, clients=clients)
         ev = threading.Event()
 
         def ticker() -> None:
@@ -563,7 +568,7 @@ def test_job_in_motion_process_stop_one_write_tick_exits_fast(echo: str) -> None
                 ev.wait(0.02)
 
         t = threading.Thread(target=ticker, daemon=True)
-        client = drv._client
+        client = clients.last
         real_kick = client.kick_heartbeat
         gate, parked = threading.Event(), threading.Event()
         gate.set()
@@ -721,8 +726,9 @@ def test_program_stop_after_g0_then_progress_does_not_repeat_stop() -> None:
     нужен — прогон видит стоп сам. Ровно одна запись STOP_REQ (рандеву в wait_done: стоп, затем on_poll)."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
-        drv = _driver(rig, rec, scope.spawn)
-        client = drv._client
+        clients = ClientRecorder()
+        drv = _driver(rig, rec, scope.spawn, clients=clients)
+        client = clients.last
         real_wait = client.wait_done
         marks: dict[str, float] = {}
 
@@ -752,8 +758,9 @@ def test_second_process_stop_while_motion_alive_writes_once() -> None:
     остановить запись может только защёлка (срок 2.5 с вмещает вторую попытку)."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
-        drv = _driver(rig, rec, scope.spawn)
-        client = drv._client
+        clients = ClientRecorder()
+        drv = _driver(rig, rec, scope.spawn, clients=clients)
+        client = clients.last
         real_run_chunks = client.run_chunks
         gate = threading.Event()
 

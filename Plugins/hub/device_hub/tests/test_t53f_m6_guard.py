@@ -25,6 +25,8 @@ import threading
 import time
 from typing import Any
 
+from Services.device_hub.tests.conftest import ClientRecorder
+
 from Plugins.hub.device_hub.tests.test_t53r2_stop_hazards import (
     _CALL_S,
     _CONNECT_S,
@@ -48,7 +50,8 @@ def test_rehold_after_failed_release_new_generation_gets_process_stop() -> None:
     защёлку для нового движения: стоп процесса пишется. Записей после метки ровно две: стоп prev и стоп процесса."""
     rec = _Rec()
     with _Rig() as rig, _scope() as scope:
-        drv = _driver(rig, rec, scope.spawn)
+        clients = ClientRecorder()
+        drv = _driver(rig, rec, scope.spawn, clients=clients)
         try:
             _jog_moving(drv, rig)
             rig.journal.fail_stops = 1  # стоп release отклонён: у prev stop_sent False, stop_requested True
@@ -56,7 +59,7 @@ def test_rehold_after_failed_release_new_generation_gets_process_stop() -> None:
             if not drv.is_connected:  # отказ записи транспорт считает обрывом: связь поднимается заново
                 assert bounded(drv.connect, _CONNECT_S) is True
 
-            client = drv._client
+            client = clients.last
             real_issue_stop = client.issue_stop
             armed = [True]  # шов: первая запись стопа после этого места — стоп prev внутри jog_hold
             arm_lock = threading.Lock()

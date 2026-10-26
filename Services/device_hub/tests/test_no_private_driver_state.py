@@ -77,7 +77,6 @@ _STATE_FIELDS = frozenset(
 
 # Швы тестов: приватное имя драйвера (пакет + база) -> число обращений (AST). Снятие — задача SPI хаба.
 _SEAMS = {
-    "_client": 35,
     "_param_lock": 20,
     "_epoch": 16,
     "_resync_maybe": 7,

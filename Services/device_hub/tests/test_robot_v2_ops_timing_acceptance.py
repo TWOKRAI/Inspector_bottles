@@ -4,7 +4,7 @@ Purpose:
     Четыре приёмочных теста (REDS 9, 11, 12, 15) над ``DeviceManager(store=None, publish_cb=rec,
     spawn=scope.spawn, robot_store=RobotDataStore(tmp_path / "robot"))`` и ``E2eRig`` (sim v2):
 
-    * ``test_resync_does_not_race_commands`` (9) — детерминированный шов на ``drv._client.cmd`` держит первый
+    * ``test_resync_does_not_race_commands`` (9) — детерминированный шов на ``hub.clients.last.cmd`` держит первый
       ``PARAM_SET`` пересинхронизации по метке; команды движения и параметров в этом окне отвечают постоянным
       текстом, после окна работают, ``last_error`` о сбое синхронизации не публикуется;
     * ``test_handlers_return_within_one_second`` (11) — каждая из 15 операций возвращается не дольше 1,0 с;
@@ -48,6 +48,7 @@ import pytest
 from multiprocess_framework.modules.base_manager import open_scope
 
 from Services.device_hub.manager import DeviceManager
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.programs import Move, Point, Program
@@ -147,6 +148,7 @@ class Hub:
     rec: Rec
     drv: Any
     store: RobotDataStore
+    clients: ClientRecorder
 
     def count(self, pattern: str) -> int:
         """Сколько строк событий текущего ядра sim (на ACK) подходит под ``pattern``."""
@@ -174,7 +176,14 @@ def _hub(tmp_path: Path) -> Iterator[Hub]:
     """Менеджер хаба с драйвером v2 над ``E2eRig``; драйвер подключён, тик идёт раз в 0.1 с (как у супервизора)."""
     store = RobotDataStore(tmp_path / "robot")
     rec = Rec()
-    mgr = DeviceManager(store=None, publish_cb=rec, spawn=_SCOPE.spawn, robot_store=store)
+    clients = ClientRecorder()
+    mgr = DeviceManager(
+        store=None,
+        publish_cb=rec,
+        spawn=_SCOPE.spawn,
+        robot_store=store,
+        driver_options={"robot": {"client_factory": clients}},
+    )
     with E2eRig() as rig:
         mgr.upsert(
             {
@@ -190,7 +199,7 @@ def _hub(tmp_path: Path) -> Iterator[Hub]:
             drv = mgr.get_driver(DEV)
             drv.desired_connected = True
             with pulse(lambda: drv.tick(None), 0.1):
-                yield Hub(mgr, rig, rec, drv, store)
+                yield Hub(mgr, rig, rec, drv, store, clients)
         finally:
             try:
                 bounded(lambda: mgr.disconnect(DEV), _CALL_DEADLINE_S)
@@ -268,7 +277,7 @@ def test_resync_does_not_race_commands(tmp_path: Path, monkeypatch: pytest.Monke
         )
 
         # (2) шов на экземпляре клиента: первый PARAM_SET синхронизации стоит до исходного cmd (замок mailbox не держит)
-        client = drv._client
+        client = hub.clients.last
         original_cmd = client.cmd
         guard = threading.Lock()
         seen = {"param_set": 0}
@@ -515,7 +524,7 @@ def test_stop_not_blocked_by_inflight_jog_release(tmp_path: Path, monkeypatch: p
     """``jog_release`` застрял на ожидании эха (шов 2,0 с, только в его потоке): ``stop`` отвечает ≤ 1,5 с."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        client = drv._client
+        client = hub.clients.last
         original_await = client.await_stop_echo
         state: dict[str, Any] = {"release_ident": None}
         in_seam = threading.Event()
