@@ -7,7 +7,7 @@ Loaded for tasks: write code, implement a feature, fix a bug, refactor, migrate,
 ## Pipeline (Contract-first TDD)
 
 ```
-spec-writer → manager → developer(INTERFACE, only if new-*/public-api-change) → tester(RED, failing-test against interface) → developer/teamlead(GREEN, min impl) → [refactor] → tester(regression) → (debugger on FAIL) → reviewer → /dev:ship
+spec-writer → manager → developer(INTERFACE, only if new-*/public-api-change) → tester(RED, failing-test against interface) → developer/teamlead(GREEN, min impl) → [refactor] → tester(regression) → (author re-summoned on FAIL) → reviewer → /dev:ship
 ```
 
 **The order is strict and grounded in two practices:**
@@ -21,7 +21,7 @@ Branch on the `Module contract:` field in the Task (see `manager.md`):
 
 Details on tester modes — see [`agents/tester.md`](../agents/tester.md) → "Two modes". Details on the INTERFACE stage — `module-contract` skill.
 
-The `/dev:pipeline` skill runs the full chain with failure-recovery via the debugger.
+The `/dev:pipeline` skill runs the full chain with failure-recovery through the author (`project-rules` §5).
 
 ## Team composition (`.claude/plugins/dev/agents/`)
 
@@ -87,7 +87,7 @@ role covers all three.
   worktree at the pre-implementation commit). There is no legitimate skip: a forced one
   (agent unavailable, pure docs) is **recorded** in the plan and the commit message, and the
   task counts as unverified until the tester runs.
-- **break-injection on every claimed property is mandatory.** The lead runs it (stage 3 of
+- **break-injection on every claimed property is mandatory.** The lead predicts and judges; the mechanical run goes to an agent (stage 3 of
   the launch convention in `.claude/CLAUDE.md`): revert the implementation, confirm the test goes red.
 - A test that **stays green when the implementation is reverted does not exist** —
   rewrite or delete it.
