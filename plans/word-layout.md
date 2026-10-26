@@ -138,7 +138,7 @@ Plugins/processing/word_layout/
 - Task P2: Плагин `word_layout` — регистры, конфиг, `process()` [DONE 2026-06-16 — `23a65d8b`; позже правки `5ed21461`, `87d50a0f` (2026-10-01, порог уверенности)] (после P1)
 - Task P3: Проводка + рецепт [IN PROGRESS] (после P2) — рецепт `hikvision_letter_robot.yaml` с `word_layout` в `main` (`5196ab3b`); не найдено: проброс `angle_deg` в `robot_io` (`Plugins/io/robot_io/plugin.py` слова `angle` не содержит), live-smoke на стенде
 - Task C-32: Второй одинаковый диск подряд — новый диск по `sidecar.track_id`, журнал смены слова [DONE 2026-10-25 — `plans/word-layout/tasks/C-32.md`; сим-прогон случая C — после R1 полосы Д]
-- Task C-37: Слово с порта и запись регистра `target_word` равноправны — действует последнее пришедшее, источник в журнале [IN PROGRESS 2026-10-26 — `plans/word-layout/tasks/C-37.md`, ветка `fix/word-layout-c37`]
+- Task C-37: Слово с порта и запись регистра `target_word` равноправны — действует последнее пришедшее, источник в журнале [DONE 2026-10-26 — `plans/word-layout/tasks/C-37.md`; регистр — одно хранилище слова; форма GUI — C-46]
 - Task P4: Docs + memory + smoke [IN PROGRESS] (после P3) — `README.md`/`STATUS.md` плагина есть (`23a65d8b`); записи в `docs/claude/memory/` про `word_layout` нет, smoke не подтверждён
 
 ## Открытые вопросы / follow-up
