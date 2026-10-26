@@ -4637,6 +4637,22 @@ class _LifecycleSubmit:
         self._executor = executor
         self._count_all = 0
         self._count: dict[str, int] = {}
+        # Отказы ``executor_busy`` с запуска PM (решение лида 2026-10-26: не терять молча). Отдельный листовой лок:
+        # только арифметика, строка лога пишется вне его.
+        self._busy_lock = threading.Lock()
+        self._busy_total = 0
+
+    def _note_busy(self, action: Any, key: frozenset[str] | None) -> None:
+        """Отказ исполнителя ``executor_busy`` -> WARNING: команда, ключ, общее число отказов с запуска PM."""
+        with self._busy_lock:
+            self._busy_total += 1
+            total = self._busy_total
+        command = getattr(action, "__name__", "?")  # CommandManager кладёт имя команды в action.__name__
+        target = "все" if key is None else sorted(key)
+        self._pm._log_warning(
+            f"executor_busy: команда '{command}' (ключ {target}) отклонена — очередь pm-lifecycle на потолке; "
+            f"отказов с запуска PM: {total}"
+        )
 
     def _shift(self, key: frozenset[str] | None, delta: int) -> None:
         with self._pm._routing_lock:
@@ -4672,6 +4688,11 @@ class _LifecycleSubmit:
 
         def counted_reply(result: Any) -> None:
             try:
+                if isinstance(result, dict) and result.get("error") == "executor_busy":
+                    try:
+                        self._note_busy(action, key)
+                    except Exception as exc:  # noqa: BLE001 — учёт отказа не должен отнять у инициатора ответ
+                        self._pm._log_error(f"executor_busy: учёт отказа упал: {exc}")
                 reply(result)
             finally:
                 release()

@@ -503,3 +503,39 @@ def test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert(
     assert alerts and alerts[0] == ["slow"], f"alert «unstoppable» не опубликован или не ['slow']: {alerts}"
     handed = [line for _level, line in list(rig.log) if HANDED_MARK in line]
     assert not handed, f"«{HANDED_MARK}» без системного стопа: {handed}"
+
+
+# --------------------------------------------------------------------------- #
+# H11 (ревью р.1 совет A1, решение лида): executor_busy не теряется молча
+# --------------------------------------------------------------------------- #
+
+RELAY_BURST = 150
+MAX_PENDING_L = 64  # потолок ждущих операций исполнителя pm-lifecycle (общий для L и T)
+
+
+def test_h11_executor_busy_rejections_are_logged_with_running_total(rig: Rig) -> None:
+    """H11: ``topology.apply`` (убирает slow, стоп 3,0 с) держит исполнитель; на +0,5 с — 150 ``process.relay`` в other
+    с request_id. 64 ждут в очереди и проходят, 86 получают ``executor_busy``; на каждый отказ ровно одна строка
+    WARNING с командой, ключом и общим числом отказов с запуска PM: счётчики 1..86."""
+    _remove_slow_topology(rig)
+    apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
+    time.sleep(0.5)
+    _assert_in_transition(rig, "slow", "H11")
+    relays = [
+        rig.send("process.relay", {"target_process": "other", "inner_message": rig.ping_message()})
+        for _ in range(RELAY_BURST)
+    ]
+
+    replies = [rig.wait_reply(sent) for sent in relays]
+    assert all(r is not None for r in replies), "не на все 150 relay пришёл ответ за дедлайн"
+    busy = [r for r in replies if isinstance(r.result, dict) and r.result.get("error") == "executor_busy"]
+    ok = [r for r in replies if isinstance(r.result, dict) and r.result.get("success") is True]
+    assert (len(ok), len(busy)) == (MAX_PENDING_L, RELAY_BURST - MAX_PENDING_L), (len(ok), len(busy))
+
+    warned = [line for level, line in list(rig.log) if level == "warning" and "executor_busy" in line]
+    assert len(warned) == RELAY_BURST - MAX_PENDING_L, f"строк WARNING executor_busy {len(warned)}, ожидалось 86"
+    totals = sorted(int(line.rsplit(":", 1)[1]) for line in warned)
+    assert totals == list(range(1, 87)), f"счётчики отказов: {totals[:5]}...{totals[-3:]}"
+    assert all("process.relay" in line and "other" in line for line in warned), warned[:2]
+    applied = rig.wait_reply(apply_sent)
+    assert applied is not None, "topology.apply не ответил"
