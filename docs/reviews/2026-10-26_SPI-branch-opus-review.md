@@ -222,3 +222,81 @@ v2 не изменился — эта строка списка верна.
 - Каталог GUI в живом процессе не поднимал: вывод «ранний импорт безвреден» — по замеру импорта в одном процессе, без
   Qt и без замера холодного старта GUI.
 - Слияние с main `5c35da9a2` в р.2: `git merge-tree --write-tree --name-only main HEAD` → только хэш дерева, конфликтов нет; тесты на дереве слияния не гонял.
+
+---
+
+# Круг 3 — подтверждение SPI.h2: `git diff b6e2012fa..fda25cf19` (b090685e6 код и тесты, fda25cf19 документы)
+
+Код не менял. Проба — `opus_spi/probe_r3.py` (scratchpad); гейт light, сессия inspector-bottles-69.
+
+## Вердикт круга 3: APPROVED
+
+Пункты 1–5 заявления подтверждены запуском. По п.6 скрытого костыля среди пунктов «Открыто» не нашёл; две неточности
+разметки — ниже, не блокируют. Условие слияния прежнее: регенерация CAPABILITIES в окне heavy.
+
+## Пункты заявления (вход → выход, вывод пробы дословно)
+
+1. **`_bound` удалён, строка таблицы проверяется при построении.**
+   `1 kinds has _bound -> False`;
+   `1 row non-driver class -> TypeError вид 'lamp', протокол '*': <class '__main__.NotDriver'> не подкласс BaseDeviceDriver`;
+   `1 row kind mismatch -> TypeError вид 'lamp', протокол '*': у RobotDriver kind='robot'`.
+2. **`DeviceHubPlugin.__init_subclass__`.**
+   `2 subclass + lamp row: (child has, child n, parent has, parent n) -> (True, 73, False, 72)` — команда у подкласса,
+   родитель не изменён; `2 sub-subclass without device_kinds keeps commands -> True`;
+   `2 subclass dropping vfd row -> ValueError NoVfd: таблица видов расходится с командами родителя: нет ['vfd_get_status', ...`;
+   `2 subclass changing robot_point_list executor -> ValueError ... иначе ['robot_point_list']`;
+   `2 subclass with same table -> 72`.
+3. **Два слепых рига.** AST узлов `assert` и имена `test_*` против b6e2012fa:
+   `test_c29_disconnect_acceptance.py asserts 107 107 equal True tests equal True 23`;
+   `test_spi_commands_acceptance.py asserts 100 100 equal True tests equal True 33`.
+   По диффу изменилась только сборка: `monkeypatch.setattr(v2pkg, ...)` → `_hub_with_v2(V2)` (подкласс плагина со строкой
+   `robot`, протокол `delta_v2` → `V2`); `make_rig(plugin_cls=...)` и параметр `plugin_cls` рига были до правки (`:667`).
+4. **Опции по протоколу.** Вход: видовые опции `{"a": 1, "client_factory": "kind"}` + `set_driver_options("robot",
+   "delta_v2", client_factory="v2only")`. Выход: `v2 opts: {'a': 1, 'client_factory': 'v2only'} | v1 opts: {'a': 1,
+   'client_factory': 'kind'}` — пара перекрывает вид, опция пары в v1 не попадает.
+5. **`stop_aware` только bool.**
+   `5 stop_aware property -> TypeError P: stop_aware должен быть bool атрибутом класса, задан <property object ...>`;
+   `5 stop_aware = 1 -> TypeError I: ...`; `5 stop_aware True + request_stop -> True`.
+
+Прогоны: `Services/device_hub/tests/{test_spi_contract,test_spi_acceptance,test_manager,test_c29_disconnect_acceptance,
+test_no_private_driver_state}.py` + `Plugins/hub/device_hub/tests/{test_spi_commands_acceptance,test_spi_hazards,
+test_op_commands,test_robot_v2_commands_acceptance,test_robot_v2_scope}.py` → `401 passed, 1 warning in 45.82s`;
+`Services/device_hub/tests/{test_robot_v2_ops,test_robot_v2_ops_timing_acceptance}.py` +
+`multiprocess_prototype/backend/tests/test_devices_executors.py` → `52 passed, 1 warning in 132.26s`.
+`ruff check -q` на 7 изменённых `.py` → rc=0. `sentrux check .` → `✓ All rules pass`.
+ADR-DH-012:115 — `args` у 38 (р.2 п.1 закрыт).
+
+## П.6 — разметка «Открыто»: моё слово по каждому пункту
+
+Факт: в тексте ADR-DH-012 «Открыто» (6 пунктов) и STATUS «Открыто» (3 пункта) пометок «по дизайну» / «вне задачи» нет
+(`grep -i "дизайн"` по ADR, README, STATUS — 0 строк). Оцениваю по существу.
+
+| # | Пункт ADR «Открыто» | Слово |
+|---|---|---|
+| 1 | `immediate` без рантайм-потребителя; `args` в `metadata` никто не читает | по дизайну. `immediate` потребляется при построении каталога (`__post_init__` запрещает исполнитель), набор зафиксирован А12. `args` — публичные данные `get_command_info` / introspect. Костыля нет |
+| 2 | Порядок команд пульта изменился | по дизайну: порядок не контракт, имена и методы равны main |
+| 3 | `__init_subclass__` базы | не «открытое», а правило — место в «Решение». Граница: см. замечание 1 ниже |
+| 4 | `register_driver_factory` — до `initialize()` | второй путь допуска вида: фабрика без строки таблицы даёт вид без команд. Вызовы — только в 3 тестовых файлах. Публичный API до SPI — по принципу 3 заморозить, не снимать. Костыля нет, но запиши в пункте: путь без команд, только прямое использование менеджера |
+| 5 | Команды ставятся при импорте | по дизайну: каталог GUI читает `commands` с класса (FREEZE) |
+| 6 | Имя исполнителя `device_io` строкой | согласен с лидом: по дизайну. Контракт исполнителя во framework — имя (`register_command(executor="<имя>")`, Task 1.9m), как имя канала; сторож в прототипе и запасной путь А23 есть. Не оспариваю. Замечание о месте имени (каталог Services, а не плагин) остаётся советом, в ADR оно записано |
+
+STATUS «Открыто»: «4/64 не замер» и «длинные синхронные операции на потоке роутера» — вне задачи, верно. **Регенерация
+CAPABILITIES — не «вне задачи»**: она в FILES c2 брифа (`SPI.md`) и условие слияния этой ветки.
+
+## Замечания круга 3 (не блокируют)
+
+1. **[совет, граница] Проверка `stop_aware` смотрит только тело класса (`cls.__dict__`).** Вход: миксин не из
+   `BaseDeviceDriver` со свойством `stop_aware` и методом `request_stop`, `class MixD(Mix, BaseDeviceDriver)`. Выход:
+   класс определяется (`5 edge: property via mixin ... -> Mix`), проверка bool его не видит. Вариант «свойство отдаёт
+   False при живом `request_stop`» дал бы тихий пропуск стопа — это вывод из кода, не проба. Исправить: брать значение
+   через `inspect.getattr_static(cls, "stop_aware")`, а не из `cls.__dict__`. Таких миксинов в дереве нет.
+2. **[quality, minor] Разметка «Открыто».** Пункт 3 ADR — правило, а не открытый вопрос. В пункте 4 записать «путь без
+   команд, только прямое использование менеджера». В STATUS у CAPABILITIES — «условие слияния», а не «вне задачи».
+
+## Что оставил открытым / ненадёжным (круг 3)
+
+- Инъекции в новые сторожа (`__post_init__`, `__init_subclass__` плагина, опции пары, bool-проверка) не делал: проба
+  показывает поведение кода, а не то, что тесты краснеют при его поломке.
+- Граница миксина (замечание 1) с `False` из свойства не воспроизведена.
+- Не гонял: `test_dump_matches_committed`, наборы целиком, стенд v2; слияние с main в р.3 не сверял (`merge-tree` —
+  в р.2 на `5c35da9a2`).
