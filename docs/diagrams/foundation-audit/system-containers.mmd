@@ -1,0 +1,52 @@
+%% Аудит фундамента 2026-10-26 — процессы системы и что в них живёт (C4 L2)
+%% Источники: docs/maps/framework-core.md (уровень 2), docs/reports/2026-10-26_foundation-audit-1b-services.md (хостинг),
+%% docs/reports/2026-10-26_foundation-audit-1b-backend-ctl-libs.md (backend_ctl). HEAD f63f68403.
+%% Состав дочерних процессов задаёт рецепт (recipe.activate → apply_topology), здесь — типы и постоянные процессы.
+flowchart LR
+    classDef proc fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef ext fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef lib fill:#f4f4f4,stroke:#888,stroke-dasharray:4 3,color:#333
+    classDef dev fill:#fde2e1,stroke:#b3261e,color:#111
+
+    op["Оператор / GUI-пользователь"]:::ext
+    agent["Агент / инженер<br/>backend_ctl (MCP, 53 инструмента)"]:::ext
+    recipe[("Рецепт YAML<br/>multiprocess_prototype/recipes")]:::lib
+
+    subgraph host["Компьютер стенда"]
+        launcher["SystemLauncher<br/>главный процесс"]:::proc
+        pm["ProcessManager<br/>реестр, монитор, супервизия,<br/>RecipeService, сокет backend_ctl"]:::proc
+        gui["GUI (PySide6)<br/>frontend + bridge"]:::proc
+        subgraph children["Дочерние процессы по рецепту (ProcessModule / GenericProcess + плагины)"]
+            src["источники кадров<br/>camera_service / hikvision / code_reader / phone_gateway"]:::proc
+            proc["обработка<br/>chain, ml_inference, word_layout, line_filter …"]:::proc
+            devices["процесс devices<br/>DeviceHubPlugin: supervisor + поток на устройство"]:::proc
+        end
+        mltrain["ml_train<br/>QProcess из GUI"]:::proc
+        sdkapp["Hikvision SDK-app<br/>subprocess.Popen"]:::proc
+        subgraph libs["Библиотеки Services внутри devices"]
+            drv["драйверы robot v1 / v2, vfd,<br/>hikvision (нативный SDK), generic_modbus"]:::lib
+            rc["robot_comm client v1 / v2"]:::lib
+            mb["modbus (pymodbus)"]:::lib
+        end
+    end
+
+    robot["Робот Delta<br/>Modbus TCP"]:::dev
+    vfd["ПЧ GD20<br/>через носитель-робот"]:::dev
+    cam["Камеры Hikvision / ID3000<br/>GigE, TCP"]:::dev
+    phone["Телефон<br/>HTTP"]:::dev
+
+    launcher -- "spawn, system_stop_event" --> pm
+    pm -- "create_and_register, stop_event" --> children
+    recipe -. "recipe.activate → apply_topology" .-> pm
+    gui -- "команды и подписки через Router" --> pm
+    gui -- "robot_* команды (v1-имена)" --> devices
+    op --> gui
+    agent -- "TCP newline-JSON, канал backend_ctl" --> pm
+    src -- "кадры: очереди + SHM" --> proc
+    proc -- "события и задания" --> devices
+    devices --> drv --> rc --> mb --> robot
+    drv -. "транспорт носителя" .-> vfd
+    src --> cam
+    src --> phone
+    gui --> mltrain
+    src -.-> sdkapp

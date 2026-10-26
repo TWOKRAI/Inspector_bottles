@@ -27,6 +27,7 @@
 | Vocabulary плагинов (19 шт., reuse между приложениями) | `Plugins/` ← Phase 5 carve-out (см. ADR-120) |
 | Документация фреймворка | `multiprocess_framework/docs/` (`MODULES_OVERVIEW.md`, `MODULE_CONTRACTS.md`, `DIAGRAMS.md`) |
 | Диаграммы архитектуры | `docs/diagrams/` (Mermaid, PlantUML, SVG — diagrams-as-code) |
+| **Карта архитектуры (C4, снимок 2026-10-26)** | схемы [`docs/diagrams/foundation-audit/index.html`](docs/diagrams/foundation-audit/index.html) (процессы, модули, классы, пути, счётчики); данные — [`docs/maps/framework-core.md`](docs/maps/framework-core.md) (модули, интерфейсы, рёбра ast, рецепт → топология); опись и бриф CTO — `docs/reports/2026-10-26_foundation-audit-*.md`. Снимок, не генерируется: при сомнении сверять с кодом |
 | Конструктор-blueprint фреймворка (25 модулей) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
 | Точка входа v3 | `multiprocess_prototype/run.py` |
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |

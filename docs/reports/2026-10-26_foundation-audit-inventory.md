@@ -2,7 +2,7 @@
 
 Дата: 2026-10-26. Полоса А, сессия `inspector-bottles-1a`. Строка очереди: 6а в [ORDER.md](../../plans/queue/ORDER.md).
 Назначение: вход для CTO (шаг 2, вместе с приёмкой ProcessManager). Здесь только факты: что, где, с какого времени, чем опасно. Оценок «плохо / хорошо» нет, вердикт за CTO.
-Бриф для CTO: [2026-10-26_foundation-audit-cto-brief.md](2026-10-26_foundation-audit-cto-brief.md). Диаграммы: [docs/diagrams/foundation-audit/](../diagrams/foundation-audit/README.md). Сырьё для карты архитектуры: [docs/maps/framework-core.md](../maps/framework-core.md).
+Бриф для CTO: [2026-10-26_foundation-audit-cto-brief.md](2026-10-26_foundation-audit-cto-brief.md). Диаграммы: [docs/diagrams/foundation-audit/](../diagrams/foundation-audit/README.md). Сырьё для карты архитектуры: [docs/maps/framework-core.md](../maps/framework-core.md). Опись 1б (Services, backend_ctl, библиотеки): [Services](2026-10-26_foundation-audit-1b-services.md), [backend_ctl и библиотеки](2026-10-26_foundation-audit-1b-backend-ctl-libs.md).
 
 ## Как снято
 
@@ -76,7 +76,7 @@
 
 Вынесено в [2026-10-26_foundation-audit-inventory-promises.md](2026-10-26_foundation-audit-inventory-promises.md).
 
-## 6. Найдено попутно при сборе карты (воспроизведено, в реестре нет)
+## 6. Найдено попутно при сборе карты (воспроизведено; заведено в реестр как C-53, C-54 — `d37bbe6b5`)
 
 | файл:строка | факт | проверка | дата |
 |---|---|---|---|
@@ -84,7 +84,7 @@
 | shared_resources_module/adapters/data_schema_adapter.py:29–31 | `from ....data_schema_module.storage.storage_manager import StorageManager` → несуществующий `multiprocess_framework.data_schema_module`; `except ImportError: return None` | импорт цели: `ModuleNotFoundError`; значит `get_data_manager()` всегда `None` (модуль лежит в `modules/data_schema_module/storage/`) | ≤ 2026-04-30 |
 | router_module/interfaces.py:16 | `from ...message_module import Message` под `TYPE_CHECKING` — тот же лишний уровень | в рантайме не исполняется | — |
 
-Строки реестра заводит координатор. Карта модулей, интерфейсов и рёбер (ast) — [docs/maps/framework-core.md](../maps/framework-core.md).
+В реестре: C-53 (`process_module/__init__.py`), C-54 (`data_schema_adapter.py`). Карта модулей, интерфейсов и рёбер (ast) — [docs/maps/framework-core.md](../maps/framework-core.md).
 
 ## Что я оставил открытым / ненадёжным
 

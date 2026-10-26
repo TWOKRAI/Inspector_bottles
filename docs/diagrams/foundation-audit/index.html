@@ -19,8 +19,61 @@ pre.mermaid { margin:0; background:#fff; border-radius:6px; }
 </head>
 <body><main>
 <h1>Аудит фундамента framework — схемы</h1>
-<p>2026-10-26, HEAD 71bfc55fe. Опись: <code>docs/reports/2026-10-26_foundation-audit-inventory.md</code>, сырьё карты: <code>docs/maps/framework-core.md</code>.</p>
-<section><h2>Связи модулей по контурам</h2><p>C4 L3: 27 модулей, рёбра от 3 импортов, подпись «всего / вглубь». Пунктир — ярус optional. Исходник: <code>module-deps.mmd</code>.</p><div class="frame"><pre class="mermaid">
+<p>2026-10-26, HEAD 71bfc55fe (framework) / f63f68403 (Services, backend_ctl). Опись: <code>docs/reports/2026-10-26_foundation-audit-inventory.md</code>, сырьё карты: <code>docs/maps/framework-core.md</code>, опись 1б: <code>docs/reports/2026-10-26_foundation-audit-1b-*.md</code>.</p>
+<section><h2>Процессы системы (C4 L2)</h2><p>Что где живёт: PM, GUI, дочерние процессы по рецепту, процесс devices с драйверами Services, backend_ctl, устройства. Исходник: <code>system-containers.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — процессы системы и что в них живёт (C4 L2)
+%% Источники: docs/maps/framework-core.md (уровень 2), docs/reports/2026-10-26_foundation-audit-1b-services.md (хостинг),
+%% docs/reports/2026-10-26_foundation-audit-1b-backend-ctl-libs.md (backend_ctl). HEAD f63f68403.
+%% Состав дочерних процессов задаёт рецепт (recipe.activate → apply_topology), здесь — типы и постоянные процессы.
+flowchart LR
+    classDef proc fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef ext fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef lib fill:#f4f4f4,stroke:#888,stroke-dasharray:4 3,color:#333
+    classDef dev fill:#fde2e1,stroke:#b3261e,color:#111
+
+    op[&quot;Оператор / GUI-пользователь&quot;]:::ext
+    agent[&quot;Агент / инженер&lt;br/&gt;backend_ctl (MCP, 53 инструмента)&quot;]:::ext
+    recipe[(&quot;Рецепт YAML&lt;br/&gt;multiprocess_prototype/recipes&quot;)]:::lib
+
+    subgraph host[&quot;Компьютер стенда&quot;]
+        launcher[&quot;SystemLauncher&lt;br/&gt;главный процесс&quot;]:::proc
+        pm[&quot;ProcessManager&lt;br/&gt;реестр, монитор, супервизия,&lt;br/&gt;RecipeService, сокет backend_ctl&quot;]:::proc
+        gui[&quot;GUI (PySide6)&lt;br/&gt;frontend + bridge&quot;]:::proc
+        subgraph children[&quot;Дочерние процессы по рецепту (ProcessModule / GenericProcess + плагины)&quot;]
+            src[&quot;источники кадров&lt;br/&gt;camera_service / hikvision / code_reader / phone_gateway&quot;]:::proc
+            proc[&quot;обработка&lt;br/&gt;chain, ml_inference, word_layout, line_filter …&quot;]:::proc
+            devices[&quot;процесс devices&lt;br/&gt;DeviceHubPlugin: supervisor + поток на устройство&quot;]:::proc
+        end
+        mltrain[&quot;ml_train&lt;br/&gt;QProcess из GUI&quot;]:::proc
+        sdkapp[&quot;Hikvision SDK-app&lt;br/&gt;subprocess.Popen&quot;]:::proc
+        subgraph libs[&quot;Библиотеки Services внутри devices&quot;]
+            drv[&quot;драйверы robot v1 / v2, vfd,&lt;br/&gt;hikvision (нативный SDK), generic_modbus&quot;]:::lib
+            rc[&quot;robot_comm client v1 / v2&quot;]:::lib
+            mb[&quot;modbus (pymodbus)&quot;]:::lib
+        end
+    end
+
+    robot[&quot;Робот Delta&lt;br/&gt;Modbus TCP&quot;]:::dev
+    vfd[&quot;ПЧ GD20&lt;br/&gt;через носитель-робот&quot;]:::dev
+    cam[&quot;Камеры Hikvision / ID3000&lt;br/&gt;GigE, TCP&quot;]:::dev
+    phone[&quot;Телефон&lt;br/&gt;HTTP&quot;]:::dev
+
+    launcher -- &quot;spawn, system_stop_event&quot; --&gt; pm
+    pm -- &quot;create_and_register, stop_event&quot; --&gt; children
+    recipe -. &quot;recipe.activate → apply_topology&quot; .-&gt; pm
+    gui -- &quot;команды и подписки через Router&quot; --&gt; pm
+    gui -- &quot;robot_* команды (v1-имена)&quot; --&gt; devices
+    op --&gt; gui
+    agent -- &quot;TCP newline-JSON, канал backend_ctl&quot; --&gt; pm
+    src -- &quot;кадры: очереди + SHM&quot; --&gt; proc
+    proc -- &quot;события и задания&quot; --&gt; devices
+    devices --&gt; drv --&gt; rc --&gt; mb --&gt; robot
+    drv -. &quot;транспорт носителя&quot; .-&gt; vfd
+    src --&gt; cam
+    src --&gt; phone
+    gui --&gt; mltrain
+    src -.-&gt; sdkapp
+</pre></div></section><section><h2>Связи модулей по контурам (C4 L3)</h2><p>27 модулей framework, рёбра от 3 импортов, подпись «всего / вглубь». Пунктир — ярус optional. Исходник: <code>module-deps.mmd</code>.</p><div class="frame"><pre class="mermaid">
 %% Аудит фундамента 2026-10-26 — связи модулей framework по контурам (C4 L3)
 %% Сгенерировано из ast-разбора импортов production-кода, HEAD 71bfc55fe; данные: docs/maps/framework-core.md
 %% Показаны рёбра от 3 импортов; подпись «всего / вглубь» (вглубь = мимо interfaces.py и корня пакета).

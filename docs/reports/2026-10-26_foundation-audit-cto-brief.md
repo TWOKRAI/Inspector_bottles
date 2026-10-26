@@ -38,12 +38,34 @@
 
 16. **Один вход в топологию.** По решению владельца от 2026-10-13 публичный вход — только `recipe.activate`, а `topology.apply` внутренний (FREEZE). GUI прототипа зовёт `proxy.apply_topology(blueprint)` напрямую (`runtime_control.py:143, 227`) — [карта, уровень 2](../maps/framework-core.md). Это второй путь в обход PM-координатора или разрешённый внутренний вызов?
 
-## Найдено попутно (воспроизведено, в реестре нет)
+## Шаг 1б: Services, backend_ctl, библиотеки
 
-- `process_module.SystemBlueprint` / `ProcessConfig` / `Wire` — ленивый экспорт (`process_module/__init__.py:118–126`, 2026-07-11) падает с `ModuleNotFoundError`: в относительном импорте лишняя точка. Вызывающих по этим именам нет.
-- `DataSchemaAdapter.get_data_manager()` всегда возвращает `None`: импорт `data_schema_adapter.py:29` указывает на несуществующий пакет (лишняя точка), а `except ImportError` глотает ошибку.
+Опись: [Services](2026-10-26_foundation-audit-1b-services.md), [backend_ctl и библиотеки](2026-10-26_foundation-audit-1b-backend-ctl-libs.md). Схема процессов — `system-containers.mmd` в [docs/diagrams/foundation-audit/](../diagrams/foundation-audit/README.md).
 
-Оба факта проверены запуском импорта (light). Строки реестра заводит координатор.
+17. **Управляемость через `backend_ctl` — главный вопрос третьей линзы.** Из 102 команд framework у 32 есть свой инструмент. 70 доступны только через `send_command`, а в режиме read-only он закрыт. Не видны: оба события остановки, значения и источники 17 флагов `FW_*`, активный рецепт. Нет инструментов `recipe.*`, `topology.*`, `process.start/stop`, `wire.*`, `worker.*`. Что из этого обязательно до 1.0? Читатель флагов и активного рецепта — первые кандидаты: принцип владельца №6 ведёт смену рецепта через PM, а агент не может её ни вызвать отдельным инструментом, ни увидеть.
+18. **Робот v1 и v2 и имена команд GUI.** GUI шлёт `robot_send_test_job`, `robot_set_mode`, `robot_jog`, `robot_set_servo`, `robot_draw_*`, а в `OPS` драйвера v2 этих операций нет. На `letter_robot_sim` (единственный рецепт с `delta_v2`) ожидается «Неизвестная операция» — [Services B1](2026-10-26_foundation-audit-1b-services.md#3-дубли-механизмов). Сверено по таблицам, но не на стенде. Это дефект до 1.0? Какая версия драйвера целевая — v1 «заморожен как запасной» по плану?
+19. **Изоляция сбоев в процессе `devices`.** Драйверы робота, ПЧ и нативный SDK Hikvision живут в одном процессе. Сырой `OSError` pymodbus не преобразуется, `is_connected` остаётся `True`. Упавший поток воркера переходит в ERROR без рестарта: `restart_on_failure` не задан. Принцип №5 говорит: «сбой одного не валит соседей». Нужен ли до 1.0 отдельный процесс для нативного SDK или рестарт воркера?
+20. **Шесть реализаций переподключения и 12 загрузчиков YAML в Services** при наличии `CircuitBreaker` и `config_module` во framework — [Services B5, B6](2026-10-26_foundation-audit-1b-services.md). Это кандидат «меньше слоёв» после 1.0?
+21. **Зависимости.**
+    - 9 пакетов объявлены и нигде не импортируются: NodeGraphQt, pandas, plotly, seaborn, pygame, harvesters, environs, QDarkStyle, pydantic-settings.
+    - 4 пакета импортируются, но не объявлены: segno, pyarrow, scikit-image, mediapipe.
+    - `aiosqlite` из dev-группы нужен в рантайме.
+    - Стек расходится с lock: torch 2.13, а не 2.11; Ultralytics и драйвера PostgreSQL нет.
+
+    Чистка `pyproject.toml` до 1.0? Это дёшево, а сам принцип записан в `pyproject` (loguru сняли: «зависимость без потребителя — не безобидный вес»).
+22. **Опора на приватные поля CPython** (`q._thread`, `q._buffer`, `q._notempty`, `_sentinel`, `_maxsize`, `shm._name`): на них держатся отпуск очередей при выходе и ёмкость очереди — [backend_ctl и библиотеки 3.2](2026-10-26_foundation-audit-1b-backend-ctl-libs.md). Нужен ли до 1.0 тест-сторож на версию Python?
+23. **Заглушки сервисов и дрейф документов.**
+    - «TODO Phase 4+» в `service.py` у auth, sql и hikvision_camera.
+    - `phone_gateway` «always-on в base.yaml» — не найден.
+    - `backend_ctl/STATUS.md`: 47 инструментов вместо 53.
+    - `Services/STATUS.md` не описывает 3 из 17 сервисов.
+
+    Сверку документов с кодом — в того же сторожа (вопросы 11, 15)?
+
+## Найдено попутно (воспроизведено запуском, заведено в реестр)
+
+- C-53: `process_module.SystemBlueprint` / `ProcessConfig` / `Wire` — ленивый экспорт (`process_module/__init__.py:118–126`, 2026-07-11) падает с `ModuleNotFoundError`, в относительном импорте лишняя точка.
+- C-54: `DataSchemaAdapter.get_data_manager()` всегда `None`: импорт `data_schema_adapter.py:29` указывает на несуществующий пакет, `except ImportError` глотает ошибку.
 
 ## Команды для воспроизведения
 

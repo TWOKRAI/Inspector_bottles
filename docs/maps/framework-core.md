@@ -4,6 +4,8 @@
 
 Источники: ast-разбор импортов production-кода `multiprocess_framework/modules/` (тесты исключены), `rg` по интерфейсам, классам, потокам и IPC-примитивам (Haiku-агент, выборочно сверено), ярусы из [MODULE_TIERS.md](../../multiprocess_framework/docs/MODULE_TIERS.md), наследование из graphify.
 
+Схемы по этим данным — [docs/diagrams/foundation-audit/index.html](../diagrams/foundation-audit/index.html): процессы (C4 L2), модули по контурам (L3), иерархия классов, три пути, счётчики рестарта. Кто хостит каждый сервис `Services/` и как `backend_ctl` достаёт до ядра — [опись 1б: Services](../reports/2026-10-26_foundation-audit-1b-services.md), [backend_ctl](../reports/2026-10-26_foundation-audit-1b-backend-ctl-libs.md).
+
 ## Как читать
 
 - **id** — стабильный ключ узла для модели (`fw.<модуль>`). Имя модуля без `_module`.
