@@ -13,6 +13,8 @@ Stability: lite
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -157,3 +159,112 @@ def test_op_commands_descriptions_are_the_21() -> None:
     described = {n for n, (_src, spec) in vars(DeviceHubPlugin)["_op_commands"].items() if spec.description}
     assert len(described) == 21
     assert all(n.startswith("robot_") for n in described)
+
+
+# --- SPI.d2: command_options хаба ---
+
+
+def test_command_options_data_command_has_executor_key_and_description() -> None:
+    assert DeviceHubPlugin().command_options("robot_point_list") == {
+        "metadata": {"description": "Робот v2: список точек {device_id} -> points, rev"},
+        "executor": "device_io",
+        "key_from": "device_id",
+    }
+
+
+def test_command_options_driver_command_description_only_and_plain_commands_empty() -> None:
+    plugin = DeviceHubPlugin()
+    assert plugin.command_options("robot_stop") == {
+        "metadata": {"description": "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}"}
+    }
+    assert plugin.command_options("robot_abort") == {}  # описание придёт в c2; пустые ключи не кладутся
+    assert plugin.command_options("device_list") == {}
+    assert plugin.command_options("hik_enum") == {}
+
+
+def test_command_options_executor_exactly_on_ten_data_commands() -> None:
+    plugin = DeviceHubPlugin()
+    with_executor = sorted(n for n in DeviceHubPlugin.commands if plugin.command_options(n).get("executor"))
+    assert with_executor == sorted(
+        f"robot_{op}"
+        for op in (
+            "param_get_all",
+            "point_list",
+            "point_save",
+            "point_delete",
+            "frame_list",
+            "frame_teach",
+            "program_list",
+            "program_get",
+            "program_save",
+            "program_delete",
+        )
+    )
+
+
+def test_command_options_args_from_schema() -> None:
+    class Sub(DeviceHubPlugin):
+        pass
+
+    install_op_commands(Sub, [_source("arg", OpSpec(name="x", args_schema=("a", "b?")))])
+    assert Sub().command_options("arg_x") == {"metadata": {"args": ["a", "b?"]}}
+
+
+# --- SPI.d2 / D6: счётчики команд под _counters_lock (свойство 27, проверка детерминированная) ---
+
+
+class _LockCheckingReg:
+    """Регистр-заглушка: запись счётчика проверяет удержание замка и уступает поток между чтением и записью."""
+
+    def __init__(self, lock: Any) -> None:
+        object.__setattr__(self, "_lock", lock)
+        object.__setattr__(self, "unlocked_writes", [])
+        object.__setattr__(self, "commands_ok", 0)
+        object.__setattr__(self, "commands_err", 0)
+        object.__setattr__(self, "last_error", "")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if not self._lock.locked():
+            self.unlocked_writes.append(name)
+        time.sleep(0)  # уступить поток: без замка соседняя запись потеряла бы инкремент
+        object.__setattr__(self, name, value)
+
+
+def _counting_plugin() -> tuple[DeviceHubPlugin, _LockCheckingReg]:
+    plugin = DeviceHubPlugin()
+    plugin._counters_lock = threading.Lock()
+    reg = _LockCheckingReg(plugin._counters_lock)
+    plugin._reg = reg  # type: ignore[assignment]
+    return plugin, reg
+
+
+def test_safe_call_counters_written_under_lock() -> None:
+    plugin, reg = _counting_plugin()
+
+    def boom() -> dict:
+        raise RuntimeError("сбой")
+
+    assert plugin._safe_call(lambda: {"x": 1}) == {"x": 1, "status": "ok"}
+    assert plugin._safe_call(boom) == {"status": "error", "message": "сбой", "error": "сбой"}
+    assert (reg.commands_ok, reg.commands_err, reg.last_error) == (1, 1, "сбой")
+    assert reg.unlocked_writes == []
+
+
+def test_safe_call_counters_exact_under_parallel_calls() -> None:
+    plugin, reg = _counting_plugin()
+    start = threading.Event()
+
+    def worker() -> None:
+        start.wait(5.0)
+        for _ in range(50):
+            plugin._safe_call(lambda: {})
+
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join(10.0)
+    assert not any(t.is_alive() for t in threads)
+    assert reg.commands_ok == 400
+    assert reg.unlocked_writes == []

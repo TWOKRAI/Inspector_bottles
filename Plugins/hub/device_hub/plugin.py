@@ -154,6 +154,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Выжившие, о которых reporter уже сообщил в health (по пути): отчёты корня и ``handle.close`` повторяются
         self._scope_seen: set[str] = set()
         self._scope_seen_lock = threading.Lock()
+        # Счётчики команд (commands_ok / commands_err / last_error): команды данных идут на потоках исполнителя
+        # device_io параллельно потоку роутера (D6) — чтение и запись счётчика под одним замком
+        self._counters_lock = threading.Lock()
         scope = open_scope("device_hub", budget_s=_SCOPE_BUDGET_S, reporter=self._on_scope_report)
         try:
             self._reg: DeviceHubRegisters = self._init_register(ctx)
@@ -197,8 +200,6 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
-        self._apply_op_descriptions(ctx)
-
         # Upsert устройств из конфига рецепта (опционально).
         # н6: читаем recipe_origin из конфига плагина, чтобы slug не терялся
         # (origin="recipe" не позволяет отличить один рецепт от другого).
@@ -233,15 +234,29 @@ class DeviceHubPlugin(ProcessModulePlugin):
         )
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
-    def _apply_op_descriptions(self, ctx: PluginContext) -> None:
-        """Непустые описания операций (``OpSpec.description``) в каталог: команды регистрируются после ``configure``,
-        поэтому здесь. Сегодня это 21 команда робота v2."""
-        for name, (_source, spec) in self._op_commands.items():
-            if not spec.description:
-                continue
-            update = getattr(ctx.command_manager, "update_command_metadata", None)
-            if update is None or not update(name, {"description": spec.description}):
-                ctx.log_warning(f"DeviceHubPlugin: описание команды {name!r} не записано в каталог")
+    def command_options(self, command_name: str) -> dict[str, Any]:
+        """Опции регистрации команды из описания операции (хук ``ProcessModulePlugin``, SPI.d2).
+
+        Pre: ``command_name`` — ключ ``self.commands``. Post: для имён из ``_op_commands`` — ``metadata`` с непустыми
+        ``description`` / ``args`` (пустые ключи не кладутся); при ``spec.executor`` — плюс ``executor`` и ``key_from``
+        источника. Прочие команды (``device_*``, ``hik_*``) и операции без описания и исполнителя — ``{}``:
+        регистрация как без хука. Описание пишется при регистрации, а не в ``start()``: замена словаря ``metadata``
+        после регистрации стёрла бы ``executor``.
+        """
+        found = self._op_commands.get(command_name)
+        if found is None:
+            return {}
+        source, spec = found
+        metadata: dict[str, Any] = {}
+        if spec.description:
+            metadata["description"] = spec.description
+        if spec.args_schema:
+            metadata["args"] = list(spec.args_schema)
+        options: dict[str, Any] = {"metadata": metadata} if metadata else {}
+        if spec.executor:
+            options["executor"] = spec.executor
+            options["key_from"] = source.key_from
+        return options
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
@@ -581,7 +596,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Выполнить функцию, завернув ошибки в {"status": "error", "message": ...}."""
         try:
             result = fn(*args, **kwargs)
-            self._reg.commands_ok += 1
+            with self._counters_lock:
+                self._reg.commands_ok += 1
             if isinstance(result, dict):
                 if "status" not in result:
                     result["status"] = "ok"
@@ -590,8 +606,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         except Exception as exc:
             # no-health: ошибка не глотается — уходит вызывающему в dict-ответ команды
             # (учёт в commands_err/last_error; false-degrade от пользовательских ошибок не нужен)
-            self._reg.commands_err += 1
-            self._reg.last_error = str(exc)
+            with self._counters_lock:
+                self._reg.commands_err += 1
+                self._reg.last_error = str(exc)
             # error= дублирует message: CommandManager логирует reason/error, не message
             # (иначе все ошибки device-команд в консоли = «failed: None»).
             return {"status": "error", "message": str(exc), "error": str(exc)}

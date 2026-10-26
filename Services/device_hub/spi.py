@@ -211,45 +211,68 @@ ROBOT_V1_OPS: tuple[OpSpec, ...] = (
     OpSpec(name="draw_progress"),
 )
 
-# 10 офлайн-операций данных робота v2 (RobotDataStore): связь не нужна
+# 10 офлайн-операций данных робота v2 (RobotDataStore): связь не нужна; файловый ввод-вывод — на исполнителе
+# процесса device_io (SPI.d2), ключ порядка — device_id
 ROBOT_DATA_OPS: tuple[OpSpec, ...] = (
     OpSpec(
         name="param_get_all",
         description="Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev",
         needs_link=False,
+        executor="device_io",
     ),
-    OpSpec(name="point_list", description="Робот v2: список точек {device_id} -> points, rev", needs_link=False),
+    OpSpec(
+        name="point_list",
+        description="Робот v2: список точек {device_id} -> points, rev",
+        needs_link=False,
+        executor="device_io",
+    ),
     OpSpec(
         name="point_save",
         description="Робот v2: сохранить точку {device_id, point{name, x, y, z, rz, hand, frame?}, base_rev}",
         needs_link=False,
+        executor="device_io",
     ),
-    OpSpec(name="point_delete", description="Робот v2: удалить точку {device_id, name, base_rev}", needs_link=False),
+    OpSpec(
+        name="point_delete",
+        description="Робот v2: удалить точку {device_id, name, base_rev}",
+        needs_link=False,
+        executor="device_io",
+    ),
     OpSpec(
         name="frame_list",
         description="Робот v2: список систем координат {device_id} -> frames, rev",
         needs_link=False,
+        executor="device_io",
     ),
     OpSpec(
         name="frame_teach",
         description="Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev}",
         needs_link=False,
+        executor="device_io",
     ),
-    OpSpec(name="program_list", description="Робот v2: имена программ {device_id} -> programs", needs_link=False),
+    OpSpec(
+        name="program_list",
+        description="Робот v2: имена программ {device_id} -> programs",
+        needs_link=False,
+        executor="device_io",
+    ),
     OpSpec(
         name="program_get",
         description="Робот v2: прочитать программу {device_id, name} -> program, rev",
         needs_link=False,
+        executor="device_io",
     ),
     OpSpec(
         name="program_save",
         description="Робот v2: сохранить программу {device_id, program{name, steps}, base_rev}",
         needs_link=False,
+        executor="device_io",
     ),
     OpSpec(
         name="program_delete",
         description="Робот v2: удалить программу {device_id, name, base_rev}",
         needs_link=False,
+        executor="device_io",
     ),
 )
 
