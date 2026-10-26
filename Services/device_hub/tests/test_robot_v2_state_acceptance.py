@@ -17,10 +17,12 @@ Stability: lite
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import threading
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -801,39 +803,149 @@ def _take_job(st: Any) -> Any:
     return st.take_next_action()
 
 
-_LATCH_ROWS: list[tuple[str, Callable[[Any], Any], bool]] = [
-    ("admit_launch", _launch, True),
-    ("jog_started", lambda st: st.jog_started(_run(7)), True),
-    ("take_job", _take_job, True),
-    ("connect_reset", lambda st: st.connect_reset(), True),
-    ("request_stop_begin_first", lambda st: st.request_stop_begin(), True),
-    ("disconnect_begin_not_shutdown", lambda st: st.disconnect_begin(), True),
+def _no_setup(_st: Any) -> None:
+    return None
+
+
+def _in_connect(st: Any) -> None:
+    """``connect`` идёт: ``connect_begin`` -> ``("go", False)`` (сам сбрасывает защёлку — до ``_dirty_latch``)."""
+    assert st.connect_begin() == ("go", False)
+
+
+def _connect_begin_is(kind: str) -> Callable[[Any], Any]:
+    """Действие ``connect_begin`` с проверкой ветки ответа: строка доказывает, что setup привёл именно в неё."""
+
+    def action(st: Any) -> Any:
+        got = st.connect_begin()
+        assert got[0] == kind
+        return got
+
+    return action
+
+
+# Строка: (id, публичный метод ``RobotState`` — переход, setup ДО грязной защёлки, действие, сбрасывает ли)
+_LATCH_ROWS: list[tuple[str, str, Callable[[Any], Any], Callable[[Any], Any], bool]] = [
+    ("admit_launch", "admit_launch", _no_setup, _launch, True),
+    ("jog_started", "jog_started", _no_setup, lambda st: st.jog_started(_run(7)), True),
+    ("take_job", "take_next_action", _no_setup, _take_job, True),
+    ("connect_reset", "connect_reset", _no_setup, lambda st: st.connect_reset(), True),
+    ("request_stop_begin_first", "request_stop_begin", _no_setup, lambda st: st.request_stop_begin(), True),
+    ("disconnect_begin_not_shutdown", "disconnect_begin", _no_setup, lambda st: st.disconnect_begin(), True),
+    # T5.3g: вход connect — сброс только в ветке "go" (как connect_reset)
+    ("connect_begin_go", "connect_begin", _no_setup, _connect_begin_is("go"), True),
     # не точки сброса
-    ("jog_hold_admit", lambda st: st.jog_hold_admit(), False),
-    ("jog_hold_check", lambda st: st.jog_hold_check(), False),
-    ("enqueue_job", lambda st: st.enqueue_job(("job", "j")), False),
-    ("enqueue_return", lambda st: st.enqueue_return(("return", "r")), False),
-    ("begin_sync", lambda st: st.begin_sync(), False),
-    ("admit_launch_refused_nolink", lambda st: st.admit_launch(lambda: False), False),
-    ("disconnect_soft_plan", lambda st: st.disconnect_soft_plan(lambda: True, lambda: True), False),
-    ("disconnect_owns_close", lambda st: st.disconnect_owns_close(), False),
-    ("take_next_action_nothing", lambda st: st.take_next_action(), False),
-    ("view", lambda st: st.view(), False),
+    ("jog_hold_admit", "jog_hold_admit", _no_setup, lambda st: st.jog_hold_admit(), False),
+    ("jog_hold_check", "jog_hold_check", _no_setup, lambda st: st.jog_hold_check(), False),
+    ("enqueue_job", "enqueue_job", _no_setup, lambda st: st.enqueue_job(("job", "j")), False),
+    ("enqueue_return", "enqueue_return", _no_setup, lambda st: st.enqueue_return(("return", "r")), False),
+    ("begin_sync", "begin_sync", _no_setup, lambda st: st.begin_sync(), False),
+    ("admit_launch_refused_nolink", "admit_launch", _no_setup, lambda st: st.admit_launch(lambda: False), False),
+    (
+        "disconnect_soft_plan",
+        "disconnect_soft_plan",
+        _no_setup,
+        lambda st: st.disconnect_soft_plan(lambda: True, lambda: True),
+        False,
+    ),
+    ("disconnect_owns_close", "disconnect_owns_close", _no_setup, lambda st: st.disconnect_owns_close(), False),
+    ("take_next_action_nothing", "take_next_action", _no_setup, lambda st: st.take_next_action(), False),
+    ("view", "view", _no_setup, lambda st: st.view(), False),
     # C-29: «Отключить» и его счётчик защёлку не трогают
-    ("disconnect_request", lambda st: st.disconnect_request(lambda: True), False),
-    ("disconnect_end", lambda st: st.disconnect_end(), False),
-    ("disconnect_pending", lambda st: st.disconnect_pending(), False),
-    ("disconnect_refusal", lambda st: st.disconnect_refusal(), False),
+    ("disconnect_request", "disconnect_request", _no_setup, lambda st: st.disconnect_request(lambda: True), False),
+    ("disconnect_end", "disconnect_end", _no_setup, lambda st: st.disconnect_end(), False),
+    ("disconnect_pending", "disconnect_pending", _no_setup, lambda st: st.disconnect_pending(), False),
+    ("disconnect_refusal", "disconnect_refusal", _no_setup, lambda st: st.disconnect_refusal(), False),
+    # T5.3g: ветки connect_begin без сброса и вехи connect
+    (
+        "connect_begin_shutdown",
+        "connect_begin",
+        lambda st: st.request_stop_begin(),
+        _connect_begin_is("shutdown"),
+        False,
+    ),
+    (
+        "connect_begin_cancelled",
+        "connect_begin",
+        lambda st: st.disconnect_request(lambda: True),
+        _connect_begin_is("cancelled"),
+        False,
+    ),
+    ("connect_begin_busy", "connect_begin", _job, _connect_begin_is("busy"), False),
+    ("connect_link_up", "connect_link_up", _in_connect, lambda st: st.connect_link_up(), False),
+    ("connect_restore", "connect_restore", _in_connect, lambda st: st.connect_restore(True), False),
+    ("connect_finish", "connect_finish", _in_connect, lambda st: st.connect_finish(), False),
+    ("connect_end", "connect_end", _in_connect, lambda st: st.connect_end(), False),
+    ("set_ready", "set_ready", _no_setup, lambda st: st.set_ready(True), False),
+    ("connect_check", "connect_check", _no_setup, lambda st: st.connect_check(), False),
+    ("is_shutdown", "is_shutdown", _no_setup, lambda st: st.is_shutdown(), False),
 ]
+
+# Литерал (SPI.md D8): публичные методы ``RobotState``, сбрасывающие поколение защёлки хоть в одной ветке
+_RESET_TRANSITIONS = frozenset(
+    {
+        "admit_launch",
+        "connect_begin",
+        "connect_reset",
+        "disconnect_begin",
+        "jog_started",
+        "request_stop_begin",
+        "take_next_action",
+    }
+)
+
+# Публичные методы ``RobotState`` (не свойства) вне таблицы: защёлку не сбрасывают, строки не нужно
+# (выписано из AST ``state.py`` базы 2667f8a5d: 63 публичных метода - 26 переходов строк = 37)
+_LATCH_EXEMPT = frozenset(
+    {
+        "activity_alive",
+        "disconnect_stop_plan",
+        "echo_check_plan",
+        "end_sync",
+        "is_own_stop",
+        "is_stopping",
+        "job_finished",
+        "job_queue_len",
+        "jog_aborted_by_stop",
+        "jog_release_begin",
+        "jog_release_done",
+        "jog_spawn_failed",
+        "jog_start_done",
+        "latch_covers",
+        "launch_failed",
+        "lease_check",
+        "lease_exit",
+        "mark_unconfirmed",
+        "motion_refusal",
+        "next_stop_attempt",
+        "note_own_stop",
+        "param_refusal",
+        "process_stop_plan",
+        "program_finished",
+        "program_running",
+        "program_started",
+        "requeue_job",
+        "requeue_return",
+        "return_failed",
+        "return_queue_len",
+        "stop_resend_level",
+        "stop_unconfirmed",
+        "stop_unconfirmed_text",
+        "stop_write_failed",
+        "stop_written",
+        "sync_cancelled",
+        "threads_to_close",
+    }
+)
 
 
 @pytest.mark.parametrize(
-    ("action", "resets"),
-    [pytest.param(action, resets, id=name) for name, action, resets in _LATCH_ROWS],
+    ("setup", "action", "resets"),
+    [pytest.param(setup, action, resets, id=name) for name, _tr, setup, action, resets in _LATCH_ROWS],
 )
-def test_latch_generation_reset_points(action: Callable[[Any], Any], resets: bool) -> None:
+def test_latch_generation_reset_points(setup: Callable[[Any], Any], action: Callable[[Any], Any], resets: bool) -> None:
     """I5: поколение защёлки сбрасывается ровно в точках таблицы; прочие переходы его не трогают."""
     st = _new()
+    setup(st)
     before = _dirty_latch(st)
     action(st)
     after = _latch(st.view())
@@ -841,6 +953,77 @@ def test_latch_generation_reset_points(action: Callable[[Any], Any], resets: boo
         assert after == _CLEAN_LATCH
     else:
         assert after == before
+
+
+# --- Полнота оракула защёлки (SPI.md D8): AST ``state.py`` без импорта пакета ---
+
+_STATE_PY = Path(__file__).resolve().parents[1] / "drivers" / "robot_driver_v2" / "state.py"
+_RESET_HELPER = "_latch_reset_locked"
+
+
+def _state_methods() -> dict[str, ast.FunctionDef]:
+    tree = ast.parse(_STATE_PY.read_text(encoding="utf-8"))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "RobotState")
+    return {n.name: n for n in cls.body if isinstance(n, ast.FunctionDef)}
+
+
+def _is_property_def(node: ast.FunctionDef) -> bool:
+    return any(isinstance(d, ast.Name) and d.id == "property" for d in node.decorator_list)
+
+
+def _public_state_methods() -> frozenset[str]:
+    """Публичные методы ``RobotState`` без свойств — тот же отбор, что ``_transitions`` сторожа."""
+    methods = _state_methods()
+    return frozenset(n for n, node in methods.items() if not n.startswith("_") and not _is_property_def(node))
+
+
+def _self_calls(node: ast.FunctionDef, names: frozenset[str]) -> set[str]:
+    """Имена методов класса, вызванных как ``self.<имя>(...)`` в теле ``node``."""
+    out: set[str] = set()
+    for sub in ast.walk(node):
+        if not (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)):
+            continue
+        target = sub.func
+        if isinstance(target.value, ast.Name) and target.value.id == "self" and target.attr in names:
+            out.add(target.attr)
+    return out
+
+
+def _methods_reaching_reset() -> frozenset[str]:
+    """Публичные методы, из которых по цепочке ``self.<метод>()`` достижим ``_latch_reset_locked``."""
+    methods = _state_methods()
+    names = frozenset(methods)
+    assert _RESET_HELPER in names  # достижимость: помощник сброса существует под этим именем
+    calls = {name: _self_calls(node, names) for name, node in methods.items()}
+    reaching = {_RESET_HELPER}
+    changed = True
+    while changed:
+        changed = False
+        for name, callees in calls.items():
+            if name not in reaching and callees & reaching:
+                reaching.add(name)
+                changed = True
+    return frozenset(n for n in reaching if not n.startswith("_"))
+
+
+def test_latch_reset_transitions_match_state_ast() -> None:
+    """(1) Публичные методы, достигающие сброса защёлки через помощники, — ровно литерал."""
+    assert _methods_reaching_reset() == _RESET_TRANSITIONS
+
+
+def test_latch_rows_cover_every_reset_transition() -> None:
+    """(2) Переходы строк со сбросом — ровно литерал: каждая точка сброса имеет строку оракула."""
+    assert {tr for _id, tr, _setup, _action, resets in _LATCH_ROWS if resets} == _RESET_TRANSITIONS
+
+
+def test_latch_rows_or_exempt_cover_every_public_method() -> None:
+    """(3) Каждый публичный метод ``RobotState`` — переход строки или в ``_LATCH_EXEMPT``; исключения не сбрасывают."""
+    public = _public_state_methods()
+    rows = {tr for _id, tr, _setup, _action, _resets in _LATCH_ROWS}
+    assert rows <= public, f"переход строки не публичный метод: {sorted(rows - public)}"
+    assert public - rows == _LATCH_EXEMPT
+    assert not (rows & _LATCH_EXEMPT)
+    assert not (_LATCH_EXEMPT & _RESET_TRANSITIONS)
 
 
 def test_latch_not_reset_by_disconnect_after_shutdown() -> None:
