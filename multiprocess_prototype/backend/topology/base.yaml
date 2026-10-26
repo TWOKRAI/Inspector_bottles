@@ -32,6 +32,10 @@ processes:
         plugin_name: device_hub
         category: hub
         registry_path: data/devices.yaml
+    # Исполнитель файлового ввода-вывода данных робота (SPI.d2): 10 команд robot_* с executor="device_io",
+    # ключ порядка — device_id. Значения — умолчания ExecutorSpec, не замер.
+    executors:
+      device_io: {max_workers: 4, max_pending: 64}
 
   # Инфраструктурные side-effect процессы (сток истории телеметрии и т.п.) в
   # ЭТОМ файле не объявляются: вписанный сюда процесс платят ВСЕ сборки. Замерено

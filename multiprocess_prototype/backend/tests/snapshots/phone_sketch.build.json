@@ -1667,6 +1667,12 @@
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "executors": {
+          "device_io": {
+            "max_pending": 64,
+            "max_workers": 4
+          }
+        },
         "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
