@@ -500,7 +500,8 @@ class RecipeManager:
     def _normalize_file(self, slug: str, body: dict) -> dict:
         """``N(тело файла)``; сбой хука и не-dict в ответе — ``RecipeFormatError`` (без содержимого файла)."""
         try:
-            result = self._format_hook.normalize(body)
+            # Копия: хук, мутирующий вход, не портит тело вызывающего.
+            result = self._format_hook.normalize(copy.deepcopy(body))
         except RecipeFormatError:
             raise
         except Exception as exc:
@@ -551,8 +552,9 @@ class RecipeManager:
                 raise RecipeFormatError(f"{slug}: файл рецепта не разбирается — запись отменена") from exc
             before: dict = {}
             if isinstance(file_body, dict):
+                file_keys = frozenset(file_body)  # до хука: проверка не зависит от того, что хук сделал с телом
                 before = self._normalize_file(slug, file_body)
-                introduced = sorted(str(key) for key in before if key not in file_body)
+                introduced = sorted(str(key) for key in before if key not in file_keys)
                 if introduced:
                     # Дельта по такому файлу создала бы рядом со старым ключом второй (``topology`` + ``blueprint``).
                     raise RecipeFormatError(

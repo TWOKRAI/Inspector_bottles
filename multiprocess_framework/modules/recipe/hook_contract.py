@@ -7,6 +7,7 @@ Purpose:
 Public API:
     ``assert_format_hook_contract(hook_factory, docs, invalid_docs=())`` — ``AssertionError`` с причиной на первом
     нарушении, ``None`` — хук соответствует. Проверки:
+      * вход не мутирует (Post ``RecipeFormatHook.normalize``): хуку отдаётся копия, после вызова она равна оригиналу;
       * идемпотентность: ``N(N(x)) == N(x)`` (равенство движка: ``1 != True != 1.0``);
       * тотальность: валидное тело -> dict; невалидное (``invalid_docs``) -> ``RecipeFormatError``, любой другой
         исход (чужое исключение, возврат значения, в том числе частичного) — нарушение;
@@ -101,10 +102,14 @@ def _load_hook(hook_factory: str) -> Any:
 
 def _normalize(hook: Any, label: str, body: Any, what: str) -> Any:
     """``N(копия тела)``; любое исключение хука на валидном теле — нарушение тотальности."""
+    arg = copy.deepcopy(body)
     try:
-        return hook.normalize(copy.deepcopy(body))
+        result = hook.normalize(arg)
     except Exception as exc:
         raise AssertionError(f"{label}: normalize бросил {type(exc).__name__} на валидном теле ({what})") from exc
+    if not _equal(arg, body):  # Post RecipeFormatHook.normalize: вход не мутирует
+        raise AssertionError(f"{label}: normalize мутирует вход ({what})")
+    return result
 
 
 def _check_valid_doc(hook: Any, label: str, doc: dict) -> None:

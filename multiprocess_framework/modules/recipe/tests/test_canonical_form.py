@@ -25,7 +25,7 @@ import pytest
 
 from multiprocess_framework.modules.recipe.hook_contract import assert_format_hook_contract
 from multiprocess_framework.modules.recipe.manager import RecipeFormatError, RecipeManager
-from multiprocess_framework.modules.recipe.yaml_io import apply_delta
+from multiprocess_framework.modules.recipe.yaml_io import apply_delta, patch_yaml_preserving
 
 # Подпроцесс контракта импортирует этот модуль по полному имени: пытаться взять ``__name__`` нельзя — pytest
 # может назвать модуль иначе (rootdir/conftest), а в подпроцессе того имени нет.
@@ -165,6 +165,17 @@ class MoveGuiPositionsDeeperHook(IdentityHook):
         return out
 
 
+class MutatingRenameHook(IdentityHook):
+    """``old`` -> ``new`` прямо во входе (нарушает Post протокола: вход не мутирует) и возвращает его же."""
+
+    def normalize(self, body: Any) -> dict:
+        if not isinstance(body, dict):
+            raise RecipeFormatError("корень рецепта не mapping")
+        if "old" in body:
+            body["new"] = body.pop("old")
+        return body
+
+
 class BoomOnFileHook(IdentityHook):
     """Бросает на теле с ключом ``boom`` (несёт его только файл)."""
 
@@ -265,6 +276,42 @@ def test_patch_recipe_yaml11_scalar_unchanged_not_rewritten(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------------------------------------
 
 
+def test_patch_recipe_unchanged_yaml11_word_with_changed_bool_like_string_refused(tmp_path: Path) -> None:
+    """Неизменённое ``flag: yes`` запись не отказывает; изменённый лист строкой ``On`` (PyYAML читает bool) — отказ."""
+    mgr, d = _make(tmp_path)
+    raw = _put(d, "flag: yes\nmode: x\n")
+
+    with pytest.raises(ValueError, match="PyYAML читает дамп иначе"):
+        mgr.patch_recipe(SLUG, {"flag": True, "mode": "On"}, expected_rev=_sha(raw))
+
+    assert (d / f"{SLUG}.yaml").read_bytes() == raw
+
+
+def test_patch_yaml_source_unreadable_by_pyyaml_checks_dump_against_ruamel_doc(tmp_path: Path) -> None:
+    """Табуляция в flow-списке: PyYAML исходник не читает, ruamel читает и пишет без неё — запись проходит."""
+    path = tmp_path / "r.yaml"
+    path.write_bytes("k: [a,\t b]\nname: r1\n".encode("utf-8"))
+
+    written = patch_yaml_preserving(path, {"name": "r1"}, {"name": "r2"})
+
+    assert written is True
+    assert path.read_bytes() == b"k: [a, b]\nname: r2\n"
+
+
+def test_empty_file_read_canonical_refuses_patch_recipe_writes(tmp_path: Path) -> None:
+    """Пустой файл: для чтения не mapping (``RecipeFormatError``), для записи — пустой mapping (как в 1.1e)."""
+    mgr, d = _make(tmp_path)
+    raw = _put(d, "")
+
+    with pytest.raises(RecipeFormatError):
+        mgr.read_canonical(SLUG)
+
+    new_rev = mgr.patch_recipe(SLUG, {"name": "y"}, expected_rev=_sha(raw))
+
+    assert (d / f"{SLUG}.yaml").read_bytes() == b"name: y\n"
+    assert new_rev == _sha(b"name: y\n")
+
+
 @pytest.mark.parametrize("entry", ["patch_recipe", "save_layout"])
 def test_write_unparseable_file_raises_format_error_bytes_intact(tmp_path: Path, entry: str) -> None:
     mgr, d = _make(tmp_path)
@@ -305,6 +352,17 @@ def test_patch_recipe_refuses_new_root_key_file_intact(tmp_path: Path, hook: Any
 
     with pytest.raises(RecipeFormatError, match="устаревшей форме"):
         mgr.patch_recipe(SLUG, after, expected_rev=_sha(raw))
+
+    assert (d / f"{SLUG}.yaml").read_bytes() == raw
+
+
+def test_patch_recipe_mutating_hook_cannot_bypass_root_refusal(tmp_path: Path) -> None:
+    """Хук, меняющий вход на месте, не прячет смену корня: ключи файла сняты до хука, хуку уходит копия."""
+    mgr, d = _make(tmp_path, format_hook=MutatingRenameHook())
+    raw = _put(d, "old:\n  a: 1\nname: r1\n")
+
+    with pytest.raises(RecipeFormatError, match="устаревшей форме"):
+        mgr.patch_recipe(SLUG, {"new": {"a": 2}, "name": "r1"}, expected_rev=_sha(raw))
 
     assert (d / f"{SLUG}.yaml").read_bytes() == raw
 
@@ -376,6 +434,23 @@ def test_on_insert_applied_to_inserted_subtree_only() -> None:
     }
 
 
+def test_on_insert_path_is_position_in_after() -> None:
+    """Вложенная вставка под сдвинутым элементом: путь — индекс в ``after`` (2), не в ``before`` (1)."""
+    target = before = {"items": [{"id": "a"}, {"id": "b"}]}
+    after = {"items": [{"id": "new"}, {"id": "a"}, {"id": "b", "extra": {"k": 1}}]}
+    calls: list[tuple[tuple, Any]] = []
+
+    def on_insert(path: tuple, value: Any) -> Any:
+        calls.append((path, copy.deepcopy(value)))
+        return value
+
+    result = apply_delta(target, before, after, on_insert=on_insert)
+
+    assert len(calls) == 2
+    assert dict(calls) == {("items", 0): {"id": "new"}, ("items", 2, "extra"): {"k": 1}}
+    assert result == after
+
+
 def test_on_insert_not_applied_to_changed_leaf() -> None:
     target = {"a": {"b": 1, "c": [1, 2], "d": 1}}
     before = copy.deepcopy(target)
@@ -407,13 +482,13 @@ def _factory(hook_cls: type) -> str:
     return f"{_THIS_MODULE}:{hook_cls.__name__}"
 
 
-def _run_contract(hook_cls: type) -> None:
+def _run_contract(hook_cls: type, docs: list[dict] = _VALID_DOCS) -> None:
     """Контракт в daemon-потоке с дедлайном: исключение потока пробрасывается в тест."""
     outcome: list[BaseException] = []
 
     def target() -> None:
         try:
-            assert_format_hook_contract(_factory(hook_cls), _VALID_DOCS, _INVALID_DOCS)
+            assert_format_hook_contract(_factory(hook_cls), docs, _INVALID_DOCS)
         except BaseException as exc:  # noqa: BLE001 - передаём любое исключение в основной поток
             outcome.append(exc)
 
@@ -446,6 +521,11 @@ def test_hook_contract_rejects_hook_without_empty_delta() -> None:
     """``AddVersionHook`` идемпотентен, тотален и детерминирован, но вводит корневой ключ: запись отказывает."""
     with pytest.raises(AssertionError, match="не пуста"):
         _run_contract(AddVersionHook)
+
+
+def test_hook_contract_rejects_input_mutating_hook() -> None:
+    with pytest.raises(AssertionError, match="мутирует"):
+        _run_contract(MutatingRenameHook, [{"old": {"a": 1}, "name": "r1"}])
 
 
 def test_hook_contract_rejects_hash_seed_dependent_hook() -> None:

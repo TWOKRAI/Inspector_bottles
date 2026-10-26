@@ -241,7 +241,7 @@ class _Delta:
     def run(self, target: Any, before: dict, after: dict) -> None:
         """Применить дельту, сверить места ссылок алиасов уже на итоговой цели и довести
         ruamel-документ до формы для эмиттера (flow пустым контейнерам, общий заголовок элемента)."""
-        self.apply_map(target, before, after, ())
+        self.apply_map(target, before, after, (), apath=())
         self._check_shared(target)
         _rd.finalize(target)
 
@@ -258,7 +258,11 @@ class _Delta:
                         f"{_fmt(ref)}: узел с якорем — after различается в местах ссылок ({places})"
                     )
 
-    def apply_map(self, node: Any, before: dict, after: dict, path: tuple, owner: tuple | None = None) -> None:
+    # ``path`` — путь в ЦЕЛИ (тексты конфликтов); ``apath`` — путь того же узла в ``after`` (аргумент ``on_insert``):
+    # после вставки/удаления в списке индексы цели и ``after`` расходятся.
+    def apply_map(
+        self, node: Any, before: dict, after: dict, path: tuple, owner: tuple | None = None, *, apath: tuple
+    ) -> None:
         if not isinstance(node, dict):
             raise YamlPatchConflict(f"{_fmt(path)}: в цели {type(node).__name__}, дельта ждёт mapping")
         if not self._enter_shared(node, after, path):
@@ -268,16 +272,19 @@ class _Delta:
                 _rd.delete_item(node, key, owner=owner)
         for key, new in after.items():
             child_path = (*path, key)
+            child_apath = (*apath, key)
             if key not in node:  # нормализованный before шире цели
                 if key in before and _equal(before[key], new):
                     continue  # правки по пути нет — умолчание в файл не пишется (design §2.3, §10.5)
-                node[key] = self._inserted(child_path, new)  # создаём целиком, с промежуточными контейнерами (F10)
+                node[key] = self._inserted(child_apath, new)  # создаём целиком, с промежуточными контейнерами (F10)
             elif key in before:
-                self.set_child(node, key, before[key], new, child_path)
+                self.set_child(node, key, before[key], new, child_path, child_apath)
             elif not _equal(node[key], new):  # ключа нет в before, но цель его держит
                 self._replace(node, key, new, child_path)
 
-    def apply_list(self, node: Any, before: list, after: list, path: tuple, owner: tuple | None = None) -> None:
+    def apply_list(
+        self, node: Any, before: list, after: list, path: tuple, owner: tuple | None = None, *, apath: tuple
+    ) -> None:
         if not isinstance(node, list):
             raise YamlPatchConflict(f"{_fmt(path)}: в цели {type(node).__name__}, дельта ждёт список")
         if not self._enter_shared(node, after, path):
@@ -293,25 +300,25 @@ class _Delta:
                 raise YamlPatchConflict(f"{_fmt((*path, i2 - 1))}: индекс вне списка цели (длина {len(node)})")
             overlap = min(i2 - i1, j2 - j1) if tag == "replace" else 0
             for t in range(overlap):
-                self.set_child(node, i1 + t, before[i1 + t], after[j1 + t], (*path, i1 + t))
+                self.set_child(node, i1 + t, before[i1 + t], after[j1 + t], (*path, i1 + t), (*apath, j1 + t))
             for i in reversed(range(i1 + overlap, i2)):
                 _rd.delete_item(node, i, owner=owner)
             for offset, value in enumerate(after[j1 + overlap : j2]):
                 # Путь для хука — место элемента в ``after`` (не в промежуточном списке цели).
-                node.insert(i1 + overlap + offset, self._inserted((*path, j1 + overlap + offset), value))
+                node.insert(i1 + overlap + offset, self._inserted((*apath, j1 + overlap + offset), value))
 
     def _inserted(self, path: tuple, value: Any) -> Any:
         """Копия вставляемого поддерева; с ``on_insert`` — его результат (design.md §2.3)."""
         copied = copy.deepcopy(value)
         return copied if self._on_insert is None else self._on_insert(path, copied)
 
-    def set_child(self, container: Any, key: Any, before: Any, after: Any, path: tuple) -> None:
+    def set_child(self, container: Any, key: Any, before: Any, after: Any, path: tuple, apath: tuple) -> None:
         if _equal(before, after):
             return
         if isinstance(before, dict) and isinstance(after, dict):
-            self.apply_map(container[key], before, after, path, owner=(container, key))
+            self.apply_map(container[key], before, after, path, owner=(container, key), apath=apath)
         elif isinstance(before, list) and isinstance(after, list):
-            self.apply_list(container[key], before, after, path, owner=(container, key))
+            self.apply_list(container[key], before, after, path, owner=(container, key), apath=apath)
         else:  # изменённый скаляр или смена типа (§2.2.4) — значение целиком
             self._replace(container, key, after, path)
 
