@@ -126,20 +126,28 @@ def test_leaf_change_keeps_comments_and_flow_style(tmp_path: Path) -> None:
 
 
 def test_list_delete_noncontiguous_keeps_survivors(tmp_path: Path) -> None:
-    """Две привязки ``phone`` из четырёх (индексы 0 и 2) удалены; выжившие на месте и в порядке."""
+    """Две привязки ``phone`` из четырёх (индексы 0 и 2) удалены; выжившие — те же узлы (с комментариями), в порядке.
+
+    Inline-комментарии у выживших отличают сохранение узла от поиндексной перезаписи соседом
+    (инъекция I2 лида: префикс/суффикс вместо SequenceMatcher без комментариев давала те же байты).
+    """
     src = (
         b"displays:\n"
         b"  - node_id: a.x.frame\n"
         b"    display_id: phone\n"
         b"  - node_id: b.x.frame\n"
-        b"    display_id: main\n"
+        b"    display_id: main  # keep-b\n"
         b"  - node_id: c.x.frame\n"
         b"    display_id: phone\n"
         b"  - node_id: d.x.frame\n"
-        b"    display_id: mask\n"
+        b"    display_id: mask  # keep-d\n"
     )
     expected = (
-        b"displays:\n  - node_id: b.x.frame\n    display_id: main\n  - node_id: d.x.frame\n    display_id: mask\n"
+        b"displays:\n"
+        b"  - node_id: b.x.frame\n"
+        b"    display_id: main  # keep-b\n"
+        b"  - node_id: d.x.frame\n"
+        b"    display_id: mask  # keep-d\n"
     )
     before = {
         "displays": [
