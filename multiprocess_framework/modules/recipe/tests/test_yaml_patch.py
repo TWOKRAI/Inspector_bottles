@@ -738,3 +738,81 @@ def test_dump_unreadable_by_pyyaml_refuses_write(tmp_path: Path) -> None:
 
     assert path.read_bytes() == raw_before
     assert path.stat().st_mtime_ns == mtime_before
+
+
+# ---------------------------------------------------------------------------
+# Стражи под MISS матрицы инъекций лида (ревью 1.1a, раунд 1): метки новых токенов и снятый EOL
+# ---------------------------------------------------------------------------
+
+# Комментарий ``# lead`` лежит в слоте списка (``ca.items[1][1]``), а не в хвосте предыдущего
+# элемента, потому что предыдущий элемент кончается пустым flow-контейнером ``meta: {}``.
+# Тот же класс входа, что ``color_inspect.yaml`` (``# --- Камера ---`` после ``metadata: {}``).
+_LEAD_SRC = b"p:\n  - n: gui\n    meta: {}\n  # lead\n  - a: 1\n    # inner\n    b: 2\n  - n: z\n"
+_LEAD_BEFORE = {"p": [{"n": "gui", "meta": {}}, {"a": 1, "b": 2}, {"n": "z"}]}
+
+# case -> (after, комментарии, обязанные остаться в файле ровно по одному разу)
+_LEAD_CASES = {
+    # Сценарий ревьюера: элемент списка с комментариями заменяется пустым mapping. Число
+    # комментариев не проверяется: на HEAD ``# lead`` и ``# inner`` в этом случае выходят дважды
+    # (открытый дефект дельта-движка, не предмет этого теста).
+    "item_emptied": ({"p": [{"n": "gui", "meta": {}}, {}, {"n": "z"}]}, ()),
+    # Элемент теряет первый ключ: заголовок элемента дописывается к слоту списка.
+    "first_key_gone": ({"p": [{"n": "gui", "meta": {}}, {"b": 2}, {"n": "z"}]}, ("# lead", "# inner")),
+}
+
+
+@pytest.mark.parametrize("case", list(_LEAD_CASES), ids=list(_LEAD_CASES))
+def test_item_with_lead_comment_edited_does_not_crash_ruamel_compare(tmp_path: Path, case: str) -> None:
+    """Правка элемента списка с комментариями не роняет ruamel: файл читается PyYAML и равен after.
+
+    Без общего списка токенов (``_share_item_header``) representer сравнивает токен слота списка
+    с новым токеном заголовка и падает: ``AssertionError`` при метке ``StreamMark``,
+    ``AttributeError: 'CommentMark' object has no attribute 'line'`` при метке ``CommentMark``.
+    Метка ``StreamMark`` сама по себе здесь не проверяется: общий список исключает сравнение
+    меток, поэтому замена одной лишь ``_mark`` на ``CommentMark`` поведение не меняет.
+    """
+    after, once = _LEAD_CASES[case]
+    path = tmp_path / "r.yaml"
+    _write(path, _LEAD_SRC)
+
+    yaml_io.patch_yaml_preserving(path, _LEAD_BEFORE, after)
+
+    text = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(text) == after
+    for marker in once:
+        assert text.count(marker) == 1
+
+
+_SCALAR_EOL_SRC = b"a: 1\nkk: 2.5  # eol\nz: 3\n"
+_SCALAR_EOL_BEFORE = {"a": 1, "kk": 2.5, "z": 3}
+
+# case -> (after, ожидаемые байты файла)
+_SCALAR_TO_CONTAINER = {
+    "map": (
+        {"a": 1, "kk": {"x": 1, "y": 2}, "z": 3},
+        b"a: 1\nkk:\n  x: 1\n  y: 2\nz: 3\n",
+    ),
+    "list": (
+        {"a": 1, "kk": [1, 2], "z": 3},
+        b"a: 1\nkk:\n  - 1\n  - 2\nz: 3\n",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_SCALAR_TO_CONTAINER), ids=list(_SCALAR_TO_CONTAINER))
+def test_scalar_replaced_by_container_drops_scalar_eol_comment_no_glue(tmp_path: Path, case: str) -> None:
+    """Скаляр с EOL-комментарием заменён контейнером: комментарий старого значения снят, строки не склеены.
+
+    ``# eol`` описывал прежнее значение ``2.5``. Без снятия комментарий остаётся на строке ключа
+    (``kk:      # eol``); в ревью 1.1a та же правка давала склейку строк (``kk: 2.5   -``).
+    Ожидаемые байты заданы литералом.
+    """
+    after, expected = _SCALAR_TO_CONTAINER[case]
+    path = tmp_path / "r.yaml"
+    _write(path, _SCALAR_EOL_SRC)
+
+    yaml_io.patch_yaml_preserving(path, _SCALAR_EOL_BEFORE, after)
+
+    raw = path.read_bytes()
+    assert yaml.safe_load(raw.decode("utf-8")) == after
+    assert raw == expected
