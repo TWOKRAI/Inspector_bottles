@@ -303,8 +303,9 @@ class Rig:
             """Драйвер v2 с внедрёнными фейками; ``connect`` / ``disconnect`` пишут события (публичные методы)."""
 
             def __init__(self, entry: Any, protocol: Any = None, **kw: Any) -> None:
-                super().__init__(entry, protocol, transport=rig.transport, **kw)
-                self._client = rig.client
+                super().__init__(
+                    entry, protocol, transport=rig.transport, client_factory=lambda _t, _c: rig.client, **kw
+                )
                 self.connect_results: list[bool] = []
                 self.desired_at_connect_exit: list[bool] = []
 

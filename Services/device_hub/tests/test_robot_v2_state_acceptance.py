@@ -1468,9 +1468,15 @@ def make_driver() -> Iterator[Callable[..., tuple[Any, Any]]]:
             params={},
         )
         transport = _FakeTransport()
-        drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=scope.spawn)
         client = client_cls()
-        drv._client = client  # шов по образцу _fake_driver: клиент v2 без sim
+        drv = RobotDriverV2(
+            entry,
+            None,
+            transport=transport,
+            publish=lambda _p, _v: None,
+            spawn=scope.spawn,
+            client_factory=lambda _t, _c: client,  # шов: клиент v2 без sim
+        )
         assert _bounded(drv.connect) is True
         transport.closed = 0
         drv.desired_connected = True

@@ -121,6 +121,9 @@ class _RobotDriverCore(BaseDeviceDriver):
                       (T5.3a). None — драйвер без потоков: ``jog_hold`` и запуск программы бросают ``RuntimeError``.
         store:        ``RobotDataStore`` данных робота (T5.3d): точки, программы, параметры для ``point_capture``,
                       ``program_run``, ``param_set``; None — эти операции отвечают «хранилище данных робота не задано».
+        client_factory: ``(transport, cfg) -> RobotClientV2`` — шов тестов (SPI.f): класс клиента, не экземпляр; зовётся
+                      один раз в первом ``connect`` с транспортом драйвера и ``ClientV2Config``, собранным из
+                      ``entry.params``. None — ``RobotClientV2`` (прод; ``DeviceManager`` фабрику не передаёт).
 
     Raises:
         ValueError: некорректные поля конфига клиента, ``robot_params`` или ``on_connect``.
@@ -142,6 +145,7 @@ class _RobotDriverCore(BaseDeviceDriver):
         sleep: Any = None,
         spawn: Callable[..., IHandle] | None = None,
         store: RobotDataStore | None = None,
+        client_factory: Callable[[Any, ClientV2Config], RobotClientV2] | None = None,
     ) -> None:
         super().__init__(entry, protocol, clock=clock, sleep=sleep)
         params: Mapping[str, Any] = getattr(entry, "params", None) or {}
@@ -154,6 +158,7 @@ class _RobotDriverCore(BaseDeviceDriver):
 
         self._transport: Any = transport
         self._client: RobotClientV2 | None = None
+        self._client_factory = client_factory
         self._pub: Callable[[str, Any], None] = publish or (lambda _p, _d: None)
         self._param_source = param_source
         self._values, self._epoch = self._load_params()
@@ -336,7 +341,7 @@ class _RobotDriverCore(BaseDeviceDriver):
                     self._transport = build_transport(self.entry, lambda _id: None)
                     self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
                 if self._client is None:
-                    self._client = RobotClientV2(self._transport, self._cfg)
+                    self._client = (self._client_factory or RobotClientV2)(self._transport, self._cfg)
                 client = self._client
                 if not self._transport.is_connected and not self._transport.connect():
                     raise ConnectionError("транспорт не подключился")

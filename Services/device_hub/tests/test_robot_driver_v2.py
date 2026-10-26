@@ -552,9 +552,10 @@ def _fake_driver(rec: _Rec, **params: Any) -> tuple[RobotDriverV2, _FakeClient, 
         params=params,
     )
     transport = _FakeTransport()
-    drv = RobotDriverV2(entry, None, transport=transport, publish=rec, spawn=_SCOPE.spawn)
     client = _FakeClient()
-    drv._client = client  # шов: клиент v2 без sim (транспорт внедряется публично, клиент — нет)
+    drv = RobotDriverV2(
+        entry, None, transport=transport, publish=rec, spawn=_SCOPE.spawn, client_factory=lambda _t, _c: client
+    )  # шов: клиент v2 без sim
     assert drv.connect() is True
     transport.closed = 0  # первый connect закрывает «подключённый» сокет до probe — счёт закрытий с нуля после него
     drv.desired_connected = True
