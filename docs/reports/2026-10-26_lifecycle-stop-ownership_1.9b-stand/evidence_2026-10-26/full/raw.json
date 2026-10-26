@@ -1,0 +1,1648 @@
+{
+  "S1": [
+    {
+      "run": 1,
+      "precondition_ok": true,
+      "boot_s": 7.38,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.859,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "bd02c66c-ae96-46e3-b0c2-42683fe055c7",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.86,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 2,
+      "precondition_ok": true,
+      "boot_s": 9.17,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.516,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "87b77b54-3dd9-4a37-982d-1ca9f7ac7e21",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.52,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 3,
+      "precondition_ok": true,
+      "boot_s": 7.45,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.516,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "c0ef0c21-8411-4d36-9fb4-1543363d5ddf",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.52,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 4,
+      "precondition_ok": true,
+      "boot_s": 7.94,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.469,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "8dc25e83-1b99-4bfd-a723-6fee1cda3827",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.47,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 5,
+      "precondition_ok": true,
+      "boot_s": 7.41,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.468,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "a3c897f2-5462-48b4-bc26-f1a9b17a8089",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.47,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 6,
+      "precondition_ok": true,
+      "boot_s": 8.41,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.313,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "7f4a7847-faa9-4d3c-a301-e02bf1eec4e1",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.31,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 7,
+      "precondition_ok": true,
+      "boot_s": 7.91,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.36,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "dbaf8e45-f67d-4a68-a47f-9bf462312a32",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.36,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 8,
+      "precondition_ok": true,
+      "boot_s": 7.44,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.469,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "8dabdceb-7e21-45f0-8ac7-c5e68b1b8a95",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.47,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 9,
+      "precondition_ok": true,
+      "boot_s": 7.41,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.36,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "2955c5e4-ee1e-4d48-87da-2b61c05a8631",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.36,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 10,
+      "precondition_ok": true,
+      "boot_s": 7.41,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.36,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "3ee3cb99-663e-41b9-b56b-e8359515fd65",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices"
+        }
+      },
+      "waited_s": 0.36,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    }
+  ],
+  "S2": [
+    {
+      "stop": 1,
+      "stop_reply_s": 3.203,
+      "waited_s": 3.2,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "792c071b-0935-4079-90b7-f86c354cb7f0",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.016,
+        0.0
+      ],
+      "n_samples": 30,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 30,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.015,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 2,
+      "stop_reply_s": 3.156,
+      "waited_s": 3.16,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "89c02541-614e-4749-a3e7-a31d0391a31c",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.015,
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.0,
+        0.016,
+        0.015,
+        0.0,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.016,
+        0.016,
+        0.0,
+        0.016,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "n_samples": 29,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 29,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.015,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 3,
+      "stop_reply_s": 3.157,
+      "waited_s": 3.16,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "4879ed87-86fd-484d-a321-e77683fb552e",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.0,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016
+      ],
+      "n_samples": 29,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 29,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.015,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 4,
+      "stop_reply_s": 3.204,
+      "waited_s": 3.2,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "15c6f687-65d9-4888-af4f-afa635c94d3e",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "n_samples": 30,
+      "n_samples_total": 38,
+      "stats": {
+        "n": 30,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 5,
+      "stop_reply_s": 3.14,
+      "waited_s": 3.14,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "f38df3b4-a57f-47be-9ca6-b0337fc40ce9",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.0,
+        0.0,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "n_samples": 29,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 29,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.015,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 6,
+      "stop_reply_s": 3.156,
+      "waited_s": 3.16,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "8f4c0aeb-850d-4826-bd01-fd393648e7f0",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.0
+      ],
+      "n_samples": 29,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 29,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 7,
+      "stop_reply_s": 3.187,
+      "waited_s": 3.19,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "5ad8efb2-9272-4c77-8f2a-e5bb34ce88c1",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.016,
+        0.0,
+        0.016,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016
+      ],
+      "n_samples": 30,
+      "n_samples_total": 38,
+      "stats": {
+        "n": 30,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 8,
+      "stop_reply_s": 3.25,
+      "waited_s": 3.25,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "3621e282-34f4-446a-9cfa-bc3d23b06338",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.016,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "n_samples": 30,
+      "n_samples_total": 38,
+      "stats": {
+        "n": 30,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.015,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 9,
+      "stop_reply_s": 3.141,
+      "waited_s": 3.14,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "8361a566-52c7-43e7-85db-bacd5d805413",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.015,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.0
+      ],
+      "n_samples": 29,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 29,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    },
+    {
+      "stop": 10,
+      "stop_reply_s": 3.188,
+      "waited_s": 3.19,
+      "stop_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "652384ba-807f-4ea5-a182-f6d410897b35",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow"
+        }
+      },
+      "latencies": [
+        0.015,
+        0.016,
+        0.016,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.015,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.016,
+        0.016,
+        0.015,
+        0.0
+      ],
+      "n_samples": 30,
+      "n_samples_total": 37,
+      "stats": {
+        "n": 30,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      }
+    }
+  ],
+  "S3": [
+    {
+      "repeat": 1,
+      "stop_reply_s": 3.093,
+      "waited_s": 3.09,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "6972f690-2e78-41a8-a7d0-2b8ac0423c36",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.031,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 2,
+      "stop_reply_s": 3.141,
+      "waited_s": 3.14,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "a510b0f9-2427-420b-8038-5811f7ab8a34",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.047,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 3,
+      "stop_reply_s": 3.141,
+      "waited_s": 3.14,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "2ee5bccb-dfd2-4034-b8c0-90d2b36330f5",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.032,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 4,
+      "stop_reply_s": 3.109,
+      "waited_s": 3.11,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "f312428a-1f55-4220-9e93-ea1293c7ec93",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.062,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 5,
+      "stop_reply_s": 3.14,
+      "waited_s": 3.14,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "58910e2b-8360-4c2a-a5b5-5dba3a0d0c04",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.031,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 6,
+      "stop_reply_s": 3.141,
+      "waited_s": 3.14,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.016,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "da487a8e-035d-465d-8846-f3e607b9784c",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.032,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 7,
+      "stop_reply_s": 3.203,
+      "waited_s": 3.2,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "8ba81b23-2264-4aea-9a6e-084a196cec60",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.032,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 8,
+      "stop_reply_s": 3.203,
+      "waited_s": 3.2,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "f5d95fd2-95b1-40b0-9a72-d37ea9fa4c8a",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.062,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 9,
+      "stop_reply_s": 3.141,
+      "waited_s": 3.14,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "2aadd917-1b20-4b08-b043-3a1e0ab53c90",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.047,
+      "relay_inside_stop": true
+    },
+    {
+      "repeat": 10,
+      "stop_reply_s": 3.187,
+      "waited_s": 3.19,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "455f8afe-cd47-4de7-9729-24cd80a1882e",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.031,
+      "relay_inside_stop": true
+    }
+  ],
+  "S4": [
+    {
+      "run": 1,
+      "precondition_ok": true,
+      "boot_s": 9.19,
+      "override_seen": true,
+      "setup": {
+        "apply_s": 3.03,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "fast": true,
+          "slow": true
+        }
+      },
+      "shutdown_sent_at_s": 1.0,
+      "launcher_exit_s": 4.516,
+      "pm_exit_s": 4.5,
+      "pm_pid": 20864,
+      "waited_s": 4.52,
+      "shutdown_reply_s": 0.0,
+      "stop_slow_reply_s": 1.016,
+      "stop_slow_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "46080680-3299-45a2-9baf-73f7e4375551",
+        "success": false,
+        "result": {
+          "success": false,
+          "process_name": "slow"
+        }
+      },
+      "queued_reply_s": 0.922,
+      "queued_error": "system_stopping",
+      "queued_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "d3718052-f356-4819-8554-0e027d996366",
+        "success": false,
+        "result": {
+          "success": false,
+          "error": "system_stopping"
+        }
+      },
+      "t0_wall": 1792999516.7488644,
+      "dns": 0,
+      "dns_by_dir": {},
+      "lost": 0,
+      "terminating": 0,
+      "survived": 0,
+      "shutdown_line_s": 1.007
+    },
+    {
+      "run": 2,
+      "precondition_ok": true,
+      "boot_s": 7.89,
+      "override_seen": true,
+      "setup": {
+        "apply_s": 2.94,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "slow": true,
+          "fast": true
+        }
+      },
+      "shutdown_sent_at_s": 1.0,
+      "launcher_exit_s": 4.656,
+      "pm_exit_s": 4.641,
+      "pm_pid": 9720,
+      "waited_s": 4.66,
+      "shutdown_reply_s": 0.0,
+      "stop_slow_reply_s": 1.031,
+      "stop_slow_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "0d68e03c-8a82-4c46-ba1f-370da34d2691",
+        "success": false,
+        "result": {
+          "success": false,
+          "process_name": "slow"
+        }
+      },
+      "queued_reply_s": 0.907,
+      "queued_error": "system_stopping",
+      "queued_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "e997ce27-6121-4817-8b80-f75a751d472c",
+        "success": false,
+        "result": {
+          "success": false,
+          "error": "system_stopping"
+        }
+      },
+      "t0_wall": 1792999537.5568435,
+      "dns": 0,
+      "dns_by_dir": {},
+      "lost": 0,
+      "terminating": 0,
+      "survived": 0,
+      "shutdown_line_s": 0.992
+    },
+    {
+      "run": 3,
+      "precondition_ok": true,
+      "boot_s": 7.98,
+      "override_seen": true,
+      "setup": {
+        "apply_s": 3.22,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "fast": true,
+          "slow": true
+        }
+      },
+      "shutdown_sent_at_s": 1.0,
+      "launcher_exit_s": 4.954,
+      "pm_exit_s": 4.922,
+      "pm_pid": 31076,
+      "waited_s": 4.95,
+      "shutdown_reply_s": 0.0,
+      "stop_slow_reply_s": 1.032,
+      "stop_slow_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "b63ad22f-12f0-46f4-a3d6-52cfbb99f398",
+        "success": false,
+        "result": {
+          "success": false,
+          "process_name": "slow"
+        }
+      },
+      "queued_reply_s": 0.938,
+      "queued_error": "system_stopping",
+      "queued_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "44f50bfa-98b9-4b77-b300-99f5f54df136",
+        "success": false,
+        "result": {
+          "success": false,
+          "error": "system_stopping"
+        }
+      },
+      "t0_wall": 1792999559.0382035,
+      "dns": 0,
+      "dns_by_dir": {},
+      "lost": 0,
+      "terminating": 0,
+      "survived": 0,
+      "shutdown_line_s": 0.998
+    },
+    {
+      "run": 4,
+      "precondition_ok": true,
+      "boot_s": 13.77,
+      "override_seen": true,
+      "setup": {
+        "apply_s": 3.08,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "slow": true,
+          "fast": true
+        }
+      },
+      "shutdown_sent_at_s": 1.0,
+      "launcher_exit_s": 4.454,
+      "pm_exit_s": 4.422,
+      "pm_pid": 30308,
+      "waited_s": 4.45,
+      "shutdown_reply_s": 0.0,
+      "stop_slow_reply_s": 1.032,
+      "stop_slow_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "a9829ffd-ecfb-41ad-b984-ded5726ba027",
+        "success": false,
+        "result": {
+          "success": false,
+          "process_name": "slow"
+        }
+      },
+      "queued_reply_s": 0.922,
+      "queued_error": "system_stopping",
+      "queued_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "43e82539-0648-4041-9dac-ca67bb2eec63",
+        "success": false,
+        "result": {
+          "success": false,
+          "error": "system_stopping"
+        }
+      },
+      "t0_wall": 1792999588.2895463,
+      "dns": 0,
+      "dns_by_dir": {},
+      "lost": 0,
+      "terminating": 0,
+      "survived": 0,
+      "shutdown_line_s": 1.001
+    },
+    {
+      "run": 5,
+      "precondition_ok": true,
+      "boot_s": 8.38,
+      "override_seen": true,
+      "setup": {
+        "apply_s": 2.91,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "fast": true,
+          "slow": true
+        }
+      },
+      "shutdown_sent_at_s": 1.0,
+      "launcher_exit_s": 4.922,
+      "pm_exit_s": 4.906,
+      "pm_pid": 32112,
+      "waited_s": 4.92,
+      "shutdown_reply_s": 0.0,
+      "stop_slow_reply_s": 1.031,
+      "stop_slow_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "c9ee9893-8d31-493b-b86b-267f6854a85b",
+        "success": false,
+        "result": {
+          "success": false,
+          "process_name": "slow"
+        }
+      },
+      "queued_reply_s": 0.921,
+      "queued_error": "system_stopping",
+      "queued_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "e8d58cd3-989a-4d78-bddd-844f62fbae0f",
+        "success": false,
+        "result": {
+          "success": false,
+          "error": "system_stopping"
+        }
+      },
+      "t0_wall": 1792999610.2582505,
+      "dns": 0,
+      "dns_by_dir": {},
+      "lost": 0,
+      "terminating": 0,
+      "survived": 0,
+      "shutdown_line_s": 1.0
+    }
+  ],
+  "S5": [
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #1",
+      "elapsed_s": 5.016,
+      "ok": true,
+      "note": "",
+      "waited_s": 5.016
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #2",
+      "elapsed_s": 5.031,
+      "ok": true,
+      "note": "",
+      "waited_s": 5.031
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #3",
+      "elapsed_s": 5.031,
+      "ok": true,
+      "note": "",
+      "waited_s": 5.031
+    },
+    {
+      "kind": "restart",
+      "target": "devices #1",
+      "elapsed_s": 1.625,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.625
+    },
+    {
+      "kind": "restart",
+      "target": "devices #2",
+      "elapsed_s": 2.125,
+      "ok": true,
+      "note": "",
+      "waited_s": 2.125
+    },
+    {
+      "kind": "restart",
+      "target": "devices #3",
+      "elapsed_s": 2.063,
+      "ok": true,
+      "note": "",
+      "waited_s": 2.063
+    },
+    {
+      "kind": "activate",
+      "target": "region_pipeline",
+      "elapsed_s": 3.75,
+      "ok": true,
+      "note": "",
+      "waited_s": 3.75
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 1",
+      "elapsed_s": 2.938,
+      "waited_s": 2.94,
+      "survivors": [],
+      "n_pids": 11
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 2",
+      "elapsed_s": 5.5,
+      "waited_s": 5.5,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 3",
+      "elapsed_s": 5.719,
+      "waited_s": 5.72,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 4",
+      "elapsed_s": 5.578,
+      "waited_s": 5.58,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 5",
+      "elapsed_s": 5.328,
+      "waited_s": 5.33,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 6",
+      "elapsed_s": 5.203,
+      "waited_s": 5.2,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 7",
+      "elapsed_s": 5.094,
+      "waited_s": 5.09,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 8",
+      "elapsed_s": 5.922,
+      "waited_s": 5.92,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 9",
+      "elapsed_s": 5.047,
+      "waited_s": 5.05,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 10",
+      "elapsed_s": 5.875,
+      "waited_s": 5.88,
+      "survivors": [],
+      "n_pids": 10
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "boot_s": 7.91,
+  "override_seen": true,
+  "apply_s": 2.98,
+  "diff_commands": [
+    "",
+    "camera_0",
+    "fast",
+    "preprocessor",
+    "process_flip",
+    "process_grayscale",
+    "process_negative",
+    "region_splitter",
+    "slow",
+    "stitcher"
+  ],
+  "ready": {
+    "slow": true,
+    "fast": true
+  }
+}

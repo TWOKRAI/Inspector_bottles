@@ -432,7 +432,9 @@ def pids_alive(pids: list[int]) -> list[int]:
             except OSError:
                 pass
         return alive
-    out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=20).stdout  # nosec B603 B607 — литеральные аргументы, внешнего ввода нет
+    # Вывод tasklist - в OEM-кодировке консоли (имена процессов бывают не-UTF-8): читаем байты, декодируем с заменой.
+    raw = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, timeout=20).stdout  # nosec B603 B607 — литеральные аргументы, внешнего ввода нет
+    out = raw.decode("utf-8", errors="replace")
     present = set()
     for line in out.splitlines():
         parts = [x.strip('"') for x in line.split('","')]
@@ -647,7 +649,16 @@ def add_slow_fast(drv: Any, backend: Backend) -> dict[str, Any]:
         ],
         "wires": [],
     }
-    diff = leaf(drv.send_command("ProcessManager", "topology.diff", {"topology_dict": desired}, timeout=30.0))
+    # Гонка старта (найдена в окне 10:14): движок топологии PM конфигурируется позже, чем devices становится alive.
+    # Ждём, пока topology.diff начнёт отвечать успехом, а не "not configured".
+    engine_deadline = time.monotonic() + 60.0
+    while True:
+        diff = leaf(drv.send_command("ProcessManager", "topology.diff", {"topology_dict": desired}, timeout=30.0))
+        if diff.get("success") is True:
+            break
+        if time.monotonic() > engine_deadline:
+            raise RuntimeError(f"topology.diff не стал успешным за 60 с: {diff}")
+        time.sleep(0.5)
     touched = {c.get("process_name") for c in (diff.get("commands") or []) if isinstance(c, dict)}
     if "devices" in touched or "gui" in touched:
         raise RuntimeError(f"topology.diff трогает protected-процессы: {sorted(touched)}")
@@ -826,17 +837,22 @@ def run_s3_once(drv: Any, ctx: Ctx, idx: int) -> dict[str, Any]:
     from multiprocess_framework.modules.message_module import build_command_message
 
     revive(drv, SLOW, ctx.door)
-    inner_id = f"stand-l9-inner-{os.getpid()}-{idx}-{time.monotonic_ns()}"
-    arrivals: dict[str, float] = {}
-    drv.add_push_listener(
-        lambda m: (
-            arrivals.setdefault(m.get("request_id"), time.monotonic())
-            if isinstance(m, dict) and m.get("request_id") == inner_id
-            else None
-        )
-    )
+    # Сигнал доставки - ПОБОЧНЫЙ ЭФФЕКТ у получателя, а не ответ: ответ на request_id, которого PM не регистрировал,
+    # до клиента не доезжает (окно 10:16/10:19, два quick: delivery_s=None при reply_to=PM и при адресе сессии).
+    # Внутреннее сообщение - device_upsert записи-пустышки в реестр devices; доставка = момент, когда прямой
+    # device_list от клиента впервые её показал (опрос без пауз, шаг - один оборот сокета).
+    probe_id = f"relay_probe_{idx}"
     inner = build_command_message(
-        "devices", "introspect.status", {}, sender="backend_ctl", request_id=inner_id, reply_to="ProcessManager"
+        "devices",
+        "device_upsert",
+        {
+            "id": probe_id,
+            "name": probe_id,
+            "kind": "robot",
+            "protocol": "delta_v2",
+            "transport": {"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": 2},
+        },
+        sender="backend_ctl",
     )
     stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
     while time.monotonic() - stop_p.t_send < WAIT_RELAY_AT_S:
@@ -844,12 +860,16 @@ def run_s3_once(drv: Any, ctx: Ctx, idx: int) -> dict[str, Any]:
     relay_p = send_async(
         drv, pm_msg("process.relay", {"target_process": "devices", "inner_message": inner}, "direct"), 15.0
     )
+    delivered: float | None = None
+    end = relay_p.t_send + 8.0
+    while delivered is None and time.monotonic() < end:
+        listing = drv.send_command("devices", "device_list", {}, timeout=3.0)
+        if probe_id in json.dumps(listing, ensure_ascii=False, default=str):
+            delivered = time.monotonic()
     relay_p.ev.wait(15.0)
-    end = time.monotonic() + 6.0
-    while inner_id not in arrivals and time.monotonic() < end:
-        time.sleep(0.01)
     stop_p.ev.wait(25.0)
-    delivered = arrivals.get(inner_id)
+    if delivered is not None:
+        drv.send_command("devices", "device_remove", {"id": probe_id, "device_id": probe_id}, timeout=5.0)
     rec = {
         "repeat": idx,
         "stop_reply_s": stop_p.latency(),
@@ -898,6 +918,14 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
         revive(drv, SLOW, ctx.door)
         revive(drv, FAST, ctx.door)
         rec["precondition_ok"] = True
+        pm_pid = None
+        try:
+            from backend_ctl.protocol import _find_payload
+
+            got = _find_payload(drv.introspect_status("ProcessManager", timeout=5.0), "pid", "process").get("pid")
+            pm_pid = got if isinstance(got, int) else None
+        except Exception:  # noqa: BLE001 - нет PID PM: pm_exit_s будет равен выходу лаунчера
+            pm_pid = None
         t0_wall = time.time()
         stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
         time.sleep(0.1)
@@ -908,11 +936,25 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
         rec["shutdown_sent_at_s"] = round(sd_p.t_send - stop_p.t_send, 3)
         wait_limit = 40.0
         end = stop_p.t_send + wait_limit
+        pm_gone_t: float | None = None
+        next_probe = 0.0
         while be.proc.poll() is None and time.monotonic() < end:
+            now_t = time.monotonic()
+            if pm_pid is not None and pm_gone_t is None and now_t >= next_probe:
+                next_probe = now_t + 0.25
+                if not pids_alive([pm_pid]):
+                    pm_gone_t = time.monotonic()
             time.sleep(0.02)
         t_exit = time.monotonic()
         exited = be.proc.poll() is not None
-        rec["pm_exit_s"] = round(t_exit - stop_p.t_send, 3) if exited else None
+        # pm_exit_s - выход процесса ProcessManager (по PID, шаг опроса 0,25 с); launcher_exit_s - выход лаунчера
+        # (он дольше PM на уборку). Нет PID PM - pm_exit_s = выход лаунчера.
+        rec["launcher_exit_s"] = round(t_exit - stop_p.t_send, 3) if exited else None
+        if pm_gone_t is not None:
+            rec["pm_exit_s"] = round(pm_gone_t - stop_p.t_send, 3)
+        else:
+            rec["pm_exit_s"] = rec["launcher_exit_s"]
+        rec["pm_pid"] = pm_pid
         rec["waited_s"] = round(t_exit - stop_p.t_send, 2)
         rec["shutdown_reply_s"] = sd_p.latency()
         rec["stop_slow_reply_s"] = stop_p.latency()
@@ -968,7 +1010,11 @@ def run_s5(ctx: Ctx, restart_targets: list[str]) -> list[dict[str, Any]]:
                 for target in restart_targets:
                     name, subst = target, False
                     if name not in snap0:
-                        cands = [n for n, v in snap0.items() if n not in ("devices", "gui") and v.get("alive")]
+                        cands = [
+                            n
+                            for n, v in snap0.items()
+                            if n not in ("devices", "gui", "ProcessManager") and v.get("alive")
+                        ]
                         if not cands:
                             recs.append(
                                 {
@@ -1277,7 +1323,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  -", line)
         return 0
 
-    out = Path(args.out) if args.out else HERE / "results" / time.strftime("%Y%m%d_%H%M%S")
+    # Абсолютный путь обязателен: cwd бэкенда - его каталог запуска, относительный --out ломал манифест и lock.
+    out = (Path(args.out) if args.out else HERE / "results" / time.strftime("%Y%m%d_%H%M%S")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     root = Path(args.control_root if args.control else args.root).resolve()
     restart_targets = [x.strip() for x in args.s5_restart.split(",") if x.strip()]

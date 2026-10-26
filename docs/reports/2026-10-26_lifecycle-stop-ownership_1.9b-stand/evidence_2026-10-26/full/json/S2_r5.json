@@ -1,0 +1,61 @@
+{
+  "stop": 5,
+  "stop_reply_s": 3.14,
+  "waited_s": 3.14,
+  "stop_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "f38df3b4-a57f-47be-9ca6-b0337fc40ce9",
+    "success": true,
+    "result": {
+      "success": true,
+      "process_name": "slow"
+    }
+  },
+  "latencies": [
+    0.0,
+    0.016,
+    0.015,
+    0.016,
+    0.015,
+    0.016,
+    0.0,
+    0.0,
+    0.016,
+    0.016,
+    0.015,
+    0.016,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.015,
+    0.016,
+    0.015,
+    0.016,
+    0.016,
+    0.0,
+    0.0,
+    0.015,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "n_samples": 29,
+  "n_samples_total": 37,
+  "stats": {
+    "n": 29,
+    "unanswered": 0,
+    "min": 0.0,
+    "median": 0.015,
+    "max": 0.016,
+    "p99": 0.016
+  }
+}

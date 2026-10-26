@@ -1,0 +1,182 @@
+{
+  "mode": "control",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.9b-inj",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    }
+  },
+  "started": 1792999803.88206,
+  "control_tree_clean_after": true,
+  "control": {
+    "distinguishes": true,
+    "reasons": []
+  },
+  "rows": {
+    "S2": {
+      "verdict": "FAIL",
+      "reasons": [
+        "max ответа 3.188 с > 0.5",
+        "p99 3.172 с > 0.15"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "stats": {
+        "n": 294,
+        "unanswered": 0,
+        "min": 0.047,
+        "median": 1.625,
+        "max": 3.188,
+        "p99": 3.172
+      },
+      "primary_stats": {
+        "n": 294,
+        "unanswered": 0,
+        "min": 0.047,
+        "median": 1.625,
+        "max": 3.188,
+        "p99": 3.172
+      },
+      "threshold_text": "каждый ответ <= 0,5 с, p99 <= 150 мс",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "max_latency_s": 3.188
+    },
+    "S3": {
+      "verdict": "FAIL",
+      "reasons": [
+        "повтор 1: доставка 2.203 с > 0.5",
+        "повтор 1: ответ relay 2.156 с > 0.5",
+        "повтор 2: доставка 2.172 с > 0.5",
+        "повтор 2: ответ relay 2.156 с > 0.5",
+        "повтор 3: доставка 2.125 с > 0.5",
+        "повтор 3: ответ relay 2.110 с > 0.5",
+        "повтор 4: доставка 2.188 с > 0.5",
+        "повтор 4: ответ relay 2.172 с > 0.5",
+        "повтор 5: доставка 2.234 с > 0.5",
+        "повтор 5: ответ relay 2.218 с > 0.5",
+        "повтор 6: доставка 2.141 с > 0.5",
+        "повтор 6: ответ relay 2.109 с > 0.5",
+        "повтор 7: доставка 2.281 с > 0.5",
+        "повтор 7: ответ relay 2.218 с > 0.5",
+        "повтор 8: доставка 2.157 с > 0.5",
+        "повтор 8: ответ relay 2.157 с > 0.5",
+        "повтор 9: доставка 2.171 с > 0.5",
+        "повтор 9: ответ relay 2.171 с > 0.5",
+        "повтор 10: доставка 2.188 с > 0.5",
+        "повтор 10: ответ relay 2.157 с > 0.5"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "delivery_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.125,
+        "median": 2.18,
+        "max": 2.281,
+        "p99": 2.281
+      },
+      "relay_reply_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.109,
+        "median": 2.157,
+        "max": 2.218,
+        "p99": 2.218
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.125,
+        "median": 2.18,
+        "max": 2.281,
+        "p99": 2.281
+      },
+      "threshold_text": "доставка и ответ <= 0,5 с",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "max_delivery_s": 2.281
+    },
+    "S4": {
+      "verdict": "FAIL",
+      "reasons": [
+        "повтор 1: выход PM на +5.94 с > 4.5",
+        "повтор 1: строка на +4.00 с > 1.2",
+        "повтор 1: ответ ждущего в очереди = None, ожидалось 'system_stopping'",
+        "повтор 2: выход PM на +6.19 с > 4.5",
+        "повтор 2: строка на +4.05 с > 1.2",
+        "повтор 2: ответ ждущего в очереди = None, ожидалось 'system_stopping'",
+        "повтор 3: выход PM на +6.17 с > 4.5",
+        "повтор 3: строка на +4.06 с > 1.2",
+        "повтор 3: ответ ждущего в очереди = None, ожидалось 'system_stopping'",
+        "повтор 4: выход PM на +6.08 с > 4.5",
+        "повтор 4: строка на +3.95 с > 1.2",
+        "повтор 4: ответ ждущего в очереди = None, ожидалось 'system_stopping'",
+        "повтор 5: выход PM на +5.97 с > 4.5",
+        "повтор 5: строка на +3.96 с > 1.2",
+        "повтор 5: ответ ждущего в очереди = None, ожидалось 'system_stopping'"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "shutdown_line_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 3.951,
+        "median": 4.0,
+        "max": 4.056,
+        "p99": 4.056
+      },
+      "pm_exit_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 5.938,
+        "median": 6.078,
+        "max": 6.187,
+        "p99": 6.187
+      },
+      "primary_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 3.951,
+        "median": 4.0,
+        "max": 4.056,
+        "p99": 4.056
+      },
+      "threshold_text": "строка <= +1,2 с, выход PM <= +4,5 с, dns 0, system_stopping",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "min_shutdown_line_s": 3.951
+    }
+  },
+  "elapsed_s": 249.9
+}

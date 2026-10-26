@@ -1,0 +1,140 @@
+{
+  "S5": [
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #1",
+      "elapsed_s": 4.484,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.484
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #2",
+      "elapsed_s": 4.204,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.204
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #3",
+      "elapsed_s": 4.171,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.171
+    },
+    {
+      "kind": "restart",
+      "target": "devices #1",
+      "elapsed_s": 1.672,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.672
+    },
+    {
+      "kind": "restart",
+      "target": "devices #2",
+      "elapsed_s": 2.141,
+      "ok": true,
+      "note": "",
+      "waited_s": 2.141
+    },
+    {
+      "kind": "restart",
+      "target": "devices #3",
+      "elapsed_s": 1.969,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.969
+    },
+    {
+      "kind": "activate",
+      "target": "region_pipeline",
+      "elapsed_s": 3.843,
+      "ok": true,
+      "note": "",
+      "waited_s": 3.84
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 1",
+      "elapsed_s": 3.234,
+      "waited_s": 3.23,
+      "survivors": [],
+      "n_pids": 11
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 2",
+      "elapsed_s": 9.265,
+      "waited_s": 9.27,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 3",
+      "elapsed_s": 8.328,
+      "waited_s": 8.33,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 4",
+      "elapsed_s": 10.656,
+      "waited_s": 10.66,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 5",
+      "elapsed_s": 9.625,
+      "waited_s": 9.62,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 6",
+      "elapsed_s": 9.875,
+      "waited_s": 9.88,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 7",
+      "elapsed_s": 9.407,
+      "waited_s": 9.41,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 8",
+      "elapsed_s": 9.109,
+      "waited_s": 9.11,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 9",
+      "elapsed_s": 8.984,
+      "waited_s": 8.98,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 10",
+      "elapsed_s": 10.031,
+      "waited_s": 10.03,
+      "survivors": [],
+      "n_pids": 10
+    }
+  ]
+}
