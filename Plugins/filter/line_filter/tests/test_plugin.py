@@ -244,3 +244,39 @@ class TestZoneEdge:
         assert len(out[0]["filtered"]) == 1
         assert out[0]["filtered"][0]["xy"] == [100.0, 250.0]
         assert out[0]["counted_total"] == 1
+
+    def test_mode_switch_back_to_zone_edge_behaves_like_start(self):
+        """Переключение режима на лету: zone_edge -> cross_line -> zone_edge при диске в зоне —
+        как старт (О1): зона занята, событие не засчитывается; взвод — по пустым кадрам."""
+        p = _armed_zone_edge()
+        p._reg.mode = "cross_line"  # поле регистра меняют на лету (live)
+        for _ in range(3):
+            p.process([_dets((100, 225))])  # диск стоит в зоне; смены знака нет -> cross_line молчит
+        assert p._counted_total == 0
+        p._reg.mode = "zone_edge"
+        p.process([_dets((100, 225))])  # без правки здесь был бы rising edge: защёлка осталась снятой
+        assert p._counted_total == 0
+        for _ in range(2):  # rearm_frames пустых кадров -> защёлка снята
+            p.process([_EMPTY])
+        p.process([_dets((100, 255))])  # новый диск: 30 px от места пропажи > max_match_distance=20
+        assert p._counted_total == 1
+
+    @staticmethod
+    def _same_object_logs(p: LineFilterPlugin) -> list:
+        return [c for c in p._ctx.log_info.call_args_list if "тот же объект" in c.args[0]]
+
+    def test_log_guard_clean_pass_has_no_same_object_line(self):
+        """Чистый проход 6 px/кадр без потерь — ни одной строки «тот же объект» (журнал не засоряется)."""
+        p = _armed_zone_edge(zone_width=250, max_match_distance=60, max_age=30)
+        for y in range(103, 374, 6):
+            p.process([_dets((320, y))])
+        assert p._counted_total == 1
+        assert self._same_object_logs(p) == []
+
+    def test_log_guard_loss_gives_exactly_one_same_object_line(self):
+        """Тот же проход с потерей 2 кадров — ровно одна строка «тот же объект», одно событие."""
+        p = _armed_zone_edge(zone_width=250, max_match_distance=60, max_age=30)
+        for y in range(103, 374, 6):
+            p.process([_EMPTY if y in (235, 241) else _dets((320, y))])
+        assert p._counted_total == 1
+        assert len(self._same_object_logs(p)) == 1

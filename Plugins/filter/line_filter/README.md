@@ -45,7 +45,8 @@ tripwire / line-crossing. На вход — координаты объекто�
 - **Условия настройки** (v — смещение диска за кадр, L — самая длинная потеря детекции в кадрах;
   валидатора нет — скорость ленты регистром не задана):
   - `max_match_distance` ≥ v × (L + 1);
-  - `rearm_frames` ≤ L ≤ `max_age` (при `max_age` < `rearm_frames` память не работает);
+  - память работает, только если `max_age` ≥ `rearm_frames`; потеря в L кадров — тот же объект при
+    L ≤ `max_age` и v × (L + 1) ≤ `max_match_distance` (потерю короче `rearm_frames` держит одна защёлка);
   - `max_age` × v < `zone_width` − `max_match_distance` — иначе новый диск у входного края
     примут за пропавший прежний.
 
@@ -59,4 +60,4 @@ tripwire / line-crossing. На вход — координаты объекто�
 
 ## Тесты
 
-`pytest Plugins/filter/line_filter/tests/` — geometry / tracker / plugin (28 тестов).
+`pytest Plugins/filter/line_filter/tests/` — geometry / tracker / plugin / zone_edge.

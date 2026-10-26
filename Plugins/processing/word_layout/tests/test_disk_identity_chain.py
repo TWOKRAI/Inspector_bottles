@@ -83,3 +83,34 @@ def test_real_chain_two_same_letters_two_cells() -> None:
     # Достижимость: цепочка действительно дала три разных события (тест не проходит вхолостую).
     assert len(tids) == 3
     assert len(set(tids)) == 3
+
+
+def test_real_chain_loss_inside_zone_one_disc_one_slot() -> None:
+    """C-42: потеря детекции на 3 кадра внутри зоны (> rearm_frames=2) — тот же диск: один track_id, одно задание.
+
+    Диск едет по x с шагом 6 px/кадр (физика ленты ~6.6): v × (L + 1) = 24 px <= max_match_distance=60.
+    До правки второе событие давало track_id 2 и второе задание на слот 6.
+    """
+    line = _mk(LineFilterPlugin, _LINE_CFG)
+    crop = _mk(CenterCropPlugin, _CROP_CFG)
+    word = _mk(WordLayoutPlugin, _WORD_CFG)
+    frame = np.zeros((481, 800, 3), np.uint8)
+    lost = {357, 363, 369}  # три кадра подряд без детекции, середина прохода
+
+    tids: list[object] = []
+    slots: list[int | None] = []
+    seq = 0
+    for x in [None, None, *range(255, 500, 6)]:  # два пустых кадра взвода (О1), затем проход зоны x в [251, 501]
+        seq += 1
+        dets = [] if x is None or x in lost else [{"center": [x, 262], "radius": 40}]
+        ov = line.process([{"detections": dets, "seq_id": seq}])[0]
+        crops = crop.process([{"frame": frame, "filtered": ov["filtered"], "detections": dets, "seq_id": seq}])
+        pred = {"label": "Р", "confidence": 0.9, "angle_deg": 0.0, "angle_valid": True}
+        for c in crops:
+            out = word.process([{**c, "predictions": [pred]}])[0]
+            tids.append(out["sidecar"].get("track_id"))
+            slots.append(out["robot_job"]["slot"] if out.get("robot_job") else None)
+
+    assert 357 in range(255, 500, 6) and 369 in range(255, 500, 6)  # потеря действительно внутри прохода
+    assert tids == [1]
+    assert slots == [2]
