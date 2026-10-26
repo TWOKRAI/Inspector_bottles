@@ -399,3 +399,10 @@ def test_round2_tree_exit_runs_on_default_windows_restart_and_s4_keep_override(m
     assert seen == [("branch", True), ("main", True)]  # R2-C: окна по умолчанию, строго по очереди
     assert base.default_windows is False  # исходный контекст (R2-A, R2-B) остаётся на override 8,0
     assert st._tree_ctx(base, Path("m")).default_windows is False
+
+
+def test_pair_restart_records_driver_timeout_is_not_an_early_reply():
+    base = st.parse_log_ts("2026-10-26 15:00:10,000")
+    sent = [{"target": "camera_0", "t_send_wall": base - 5.0, "t_reply_wall": base - 0.5, "request_error": "timeout"}]
+    got = st.pair_restart_records(sent, {"camera_0": [base]})
+    assert got[0]["early"] is None and got[0]["reply_minus_restarted_s"] is None

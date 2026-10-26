@@ -1264,7 +1264,8 @@ def pair_restart_records(sent: list[dict[str, Any]], restarted: dict[str, list[f
                 used[target] = j + 1
                 break
         rec["restarted_ts"] = ts
-        if ts is None or rec.get("t_reply_wall") is None:
+        if ts is None or rec.get("t_reply_wall") is None or rec.get("request_error"):
+            # request_error (timeout драйвера) - возврат без ответа PM: «раньше restarted» к нему не относится
             rec["reply_minus_restarted_s"] = None
             rec["early"] = None
         else:
