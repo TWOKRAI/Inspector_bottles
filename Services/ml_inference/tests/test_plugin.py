@@ -128,7 +128,10 @@ def test_max_latency_resets_last_persists_after_publish(dummy_models_dir: Path):
 
 @pytest.fixture
 def two_models_dir(dummy_models_dir: Path) -> Path:
-    """К 'dummy' (метки alpha/beta/gamma) добавлена 'dummy2' со своими весами и метками delta/epsilon/zeta."""
+    """К 'dummy' (метки alpha/beta/gamma) добавлена 'dummy2': та же сеть без весов, свои метки delta/epsilon/zeta.
+
+    Модели различаются только файлом меток: тест ловит устаревшее предсказание, но не доказывает новую сессию.
+    """
     _build_dummy_onnx(dummy_models_dir / "dummy2.onnx")
     (dummy_models_dir / "labels2.txt").write_text("delta\nepsilon\nzeta", encoding="utf-8")
     sidecar = (dummy_models_dir / "dummy.yaml").read_text(encoding="utf-8")
