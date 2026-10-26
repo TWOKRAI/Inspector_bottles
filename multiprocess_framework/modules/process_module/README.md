@@ -986,3 +986,21 @@ Task 1.1).
 - **interfaces.py** — публичные контракты (IProcessModule, ISharedResources, IProcessCommunication)
 - **types/types.py** — типы и перечисления (ProcessStatus, ProcessConfigDict, и т.д.)
 - **Plan** — `process_module_refactoring_40da2b2c.plan.md`
+
+## Хук плагина `command_options`: опции регистрации команды (SPI.d1, ADR-PM-056)
+
+`ProcessModulePlugin.command_options(command_name) -> Mapping[str, Any] | None` — публичный хук; умолчание `{}`.
+`_auto_register_commands` зовёт его один раз на каждую команду из `self.commands`:
+
+* **Пусто / `None`** — вызов `register_command(имя, метод)` байт в байт как до хука: два позиционных, без именованных.
+  Плагины без хука ничего не замечают.
+* **Ключи** — белый список `executor`, `key_from`, `targets`, `metadata` (именованные аргументы
+  `CommandManager.register_command`). Чужой ключ отбрасывается одной строкой ERROR; команда регистрируется без него.
+* **Имя уже занято** (`get_command_info` через `getattr`, как у `set_config`) — одна строка ERROR, регистрации нет.
+* **Исполнитель не принят** (`register_command(...) is False`; WARNING уже пишет менеджер команд) — одна строка INFO
+  `команда <имя>: исполнитель не принят — регистрация без исполнителя` и повтор с одним `metadata`: команда живёт
+  синхронно на потоке роутера.
+
+Двойники: `testing.MockCommandManager.command_options` и `PluginTestBench.registered_command_options` хранят
+именованные опции. Тесты: `tests/test_plugin_command_options.py` (автор), `tests/test_plugin_command_options_acceptance.py`
+(слепая приёмка А26, А27).

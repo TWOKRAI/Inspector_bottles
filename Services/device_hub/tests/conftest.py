@@ -2,12 +2,46 @@
 
 from __future__ import annotations
 
+import threading
+from typing import Any
+
 import pytest
 
+from Services.robot_comm.core.client_v2 import RobotClientV2
 from Services.robot_comm.server.sim_core import RobotSimCore
 from Services.robot_comm.testing.fake_transport import FakeRobotTransport
 
 from Services.device_hub.registry.entry import DeviceEntry
+
+
+class ClientRecorder:
+    """Шов SPI.f: ``client_factory`` драйвера робота v2 — строит НАСТОЯЩИЙ ``RobotClientV2`` и хранит ссылку.
+
+    ``.last`` — последний созданный клиент, ``.all`` — все по порядку. Тест отдаёт рекордер драйверу
+    (``client_factory=rec`` или ``DeviceManager.set_driver_options("robot", "delta_v2", client_factory=rec)``) и
+    читает клиента после ``connect``; ``drv._client`` не нужен. Зовётся из потока подключения, список растёт под замком.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._clients: list[RobotClientV2] = []
+
+    def __call__(self, transport: Any, cfg: Any) -> RobotClientV2:
+        client = RobotClientV2(transport, cfg)
+        with self._lock:
+            self._clients.append(client)
+        return client
+
+    @property
+    def last(self) -> RobotClientV2:
+        with self._lock:
+            assert self._clients, "клиент ещё не создан: connect драйвера не вызывался"
+            return self._clients[-1]
+
+    @property
+    def all(self) -> list[RobotClientV2]:
+        with self._lock:
+            return list(self._clients)
 
 
 class FakeClock:

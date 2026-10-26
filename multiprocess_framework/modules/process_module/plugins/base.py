@@ -20,6 +20,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from ...statistics_module.observation.observation_manager import observation_port
@@ -36,6 +37,9 @@ from ..managers.observability_wiring import (
 )
 from .interfaces import IProcessServices
 from .manifest import PLUGIN_API_VERSION
+
+# Ключи опций регистрации команды (хук command_options) — именованные аргументы CommandManager.register_command
+_COMMAND_OPTION_KEYS: frozenset[str] = frozenset({"executor", "key_from", "targets", "metadata"})
 
 if TYPE_CHECKING:
     from ..health import HealthReporter
@@ -1673,7 +1677,12 @@ class ProcessModulePlugin(ABC):
                 ctx.log_error(f"Plugin '{self.name}': команда '{cmd_name}' → метод '{method_name}' не найден")
                 continue
 
-            ctx.command_manager.register_command(cmd_name, method)
+            options = self._command_registration_options(ctx, cmd_name)
+            if not options:
+                # Без опций — вызов байт в байт как до хука command_options (два позиционных, без именованных)
+                ctx.command_manager.register_command(cmd_name, method)
+                continue
+            self._register_command_with_options(ctx, cmd_name, method, options)
 
         # Generic set_config — поднимает boilerplate из плагинов с register_class.
         # Регистрируется только если у плагина есть register_class и команда
@@ -1691,6 +1700,51 @@ class ProcessModulePlugin(ABC):
             already = bool(get_info("set_config")) if callable(get_info) else False
             if not already:
                 ctx.command_manager.register_command("set_config", self.cmd_set_config)
+
+    def command_options(self, command_name: str) -> Mapping[str, Any] | None:
+        """Опции регистрации команды плагина в ``CommandManager`` (хук; умолчание — опций нет).
+
+        Pre: ``command_name`` — ключ ``self.commands``. Зовётся из ``_auto_register_commands`` один раз на команду.
+        Post: подмножество ключей ``{"executor", "key_from", "targets", "metadata"}`` (именованные аргументы
+        ``CommandManager.register_command``). Пусто / ``None`` — регистрация как без хука. Прочие ключи
+        отбрасываются с одной строкой ERROR; исполнитель, не принятый менеджером команд, — запасной путь: команда
+        регистрируется без исполнителя (с одним ``metadata``) и строкой INFO.
+        """
+        return {}
+
+    def _command_registration_options(self, ctx: PluginContext, cmd_name: str) -> dict[str, Any]:
+        """Опции хука по белому списку; чужие ключи -> одна строка ERROR, регистрация без них."""
+        raw = dict(self.command_options(cmd_name) or {})
+        unknown = sorted(set(raw) - _COMMAND_OPTION_KEYS)
+        if unknown:
+            ctx.log_error(
+                f"Plugin '{self.name}': команда '{cmd_name}' — опции {unknown} не из "
+                f"{sorted(_COMMAND_OPTION_KEYS)}: регистрация без них"
+            )
+        return {key: value for key, value in raw.items() if key in _COMMAND_OPTION_KEYS}
+
+    def _register_command_with_options(
+        self, ctx: PluginContext, cmd_name: str, method: Callable, options: dict[str, Any]
+    ) -> None:
+        """Регистрация с опциями: имя занято -> ERROR без повтора; исполнитель не принят -> INFO и запасной путь."""
+        cm = ctx.command_manager
+        get_info = getattr(cm, "get_command_info", None)  # заглушки менеджера команд без метода — как set_config
+        if callable(get_info) and get_info(cmd_name):
+            ctx.log_error(
+                f"Plugin '{self.name}': команда '{cmd_name}' уже зарегистрирована — повторной регистрации нет"
+            )
+            return
+        if cm.register_command(cmd_name, method, **options) is not False:  # заглушки возвращают None
+            return
+        if callable(get_info) and get_info(cmd_name):  # имя заняли между проверкой и регистрацией
+            ctx.log_error(
+                f"Plugin '{self.name}': команда '{cmd_name}' уже зарегистрирована — повторной регистрации нет"
+            )
+            return
+        # WARNING об отказе уже записал CommandManager.register_command; здесь — одна строка INFO
+        ctx.log_info(f"Plugin '{self.name}': команда {cmd_name}: исполнитель не принят — регистрация без исполнителя")
+        fallback = {"metadata": options["metadata"]} if "metadata" in options else {}
+        cm.register_command(cmd_name, method, **fallback)
 
     def cmd_set_config(self, data: dict) -> dict:
         """Generic handler для bridge.on_field_set → applied dict из GUI.

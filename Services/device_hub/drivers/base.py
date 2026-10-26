@@ -14,11 +14,13 @@ Stats: tx_ok, tx_err, reconnects, last_latency_ms — диагностическ
 
 from __future__ import annotations
 
+import inspect
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.logger_module import get_std_logger
+from Services.device_hub.spi import OpSpec
 
 #: Писатель драйверов. НЕ ``self._log_*`` миксина: слоты ``logger``/``error``/
 #: ``stats`` драйверу никто не регистрирует (проверено grep'ом по
@@ -49,6 +51,17 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
     """
 
     kind: str = ""
+
+    # Умолчания контракта ``DeviceDriver`` (``Services/device_hub/spi.py``). Атрибуты класса, не ``property``:
+    # подкласс вправе присвоить имя в ``__init__`` или перекрыть его своим свойством.
+    OP_SPECS: ClassVar[tuple[OpSpec, ...]] = ()
+    stop_aware: ClassVar[bool] = False  # True — драйвер получает стоп фазы 1 остановки (request_stop)
+    transport: Any = None  # транспорт регистров или None
+    disconnect_pending: bool = False  # «Отключить» нажато, disconnect() не кончился (C-29)
+    stop_unconfirmed: bool = False
+    stop_unconfirmed_text: str | None = None
+    last_io: dict | None = None
+    RECONNECT_THROTTLE_S: ClassVar[float] = 2.0  # минимальный интервал между попытками переподключения, с
 
     def __init__(
         self,
@@ -89,6 +102,39 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         self._reconnect_attempts: int = 0
         # Драйвер «сдался»: исчерпал попытки, ждёт ручного подключения (для conn="failed").
         self.reconnect_exhausted: bool = False
+        # Метка последней попытки переподключения (часы ``self._clock``); подкласс вправе задать иное начало
+        self._last_reconnect: float = 0.0
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Громко отказать классу, у которого ``request_stop`` и ``stop_aware`` не совпадают.
+
+        Менеджер шлёт стоп фазы 1 только драйверам с ``stop_aware``: метод без флага стоп молча не получит, флаг без
+        метода даст ``AttributeError`` на каждой остановке. Проверка — при определении класса, для любого вида.
+        """
+        super().__init_subclass__(**kwargs)
+        # Стоп — способность класса: флаг — простой bool, найденный по MRO без вызова дескрипторов (property или
+        # дескриптор миксина читался бы с класса как объект и всегда был бы истинным)
+        flag = inspect.getattr_static(cls, "stop_aware")
+        if type(flag) is not bool:
+            raise TypeError(f"{cls.__name__}: stop_aware должен быть bool атрибутом класса, задан {flag!r}")
+        if hasattr(cls, "request_stop") != flag:
+            raise TypeError(
+                f"{cls.__name__}: stop_aware={flag!r}, а метод request_stop "
+                f"{'есть' if hasattr(cls, 'request_stop') else 'отсутствует'} — задай stop_aware = True ровно "
+                f"драйверу с request_stop"
+            )
+
+    def _reconnect_due(self) -> bool:
+        """Затвор попыток переподключения: True и метка = «сейчас», если прошло ``RECONNECT_THROTTLE_S``.
+
+        Только затвор: счётчик попыток (``_record_reconnect``), сам ``connect`` и замки — у вызывающего драйвера.
+        Вызывать из одного потока тика; v2 зовёт под ``_param_lock``.
+        """
+        now = self._clock()
+        if now - self._last_reconnect < self.RECONNECT_THROTTLE_S:
+            return False
+        self._last_reconnect = now
+        return True
 
     # ------------------------------------------------------------------ #
     # Контракт BaseManager
@@ -129,6 +175,17 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
     def call(self, op: str, args: dict) -> dict:
         """Диспетчер операций."""
         return {"status": "error", "message": f"Неизвестная операция: {op!r}"}
+
+    def request_disconnect(self) -> None:
+        """«Отключить» нажато (C-29): умолчание — ничего; без ввода-вывода."""
+        return None
+
+    def set_degraded(self) -> bool:
+        """Носитель моста отключён. True — драйвер перешёл в деградацию (менеджер публикует ``disconnected``).
+
+        Умолчание — деградации нет (False), без ``disconnect()``: у зависимого на мосте транспорт общий с носителем.
+        """
+        return False
 
     # ------------------------------------------------------------------ #
     # Stats и snapshot

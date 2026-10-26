@@ -1,0 +1,302 @@
+# Ревью ветки «SPI хаба» перед слиянием (полоса Р2) — reviewer (Opus), фазовое
+
+Дерево `.claude/worktrees/robot-v2-spi`, ветка `feat/robot-v2-spi`, HEAD `9402aab38`, дифф `main...HEAD` (25 коммитов,
+72 файла). Код и тесты дерева я не менял; записан только этот отчёт (не закоммичен). Пробы — скрипты в scratchpad
+(`opus_spi/`), к дереву не относятся. Вход (не повторял): бриф `SPI*.md`, стадия 0 (2 круга), ревью Sonnet (2 круга,
+APPROVED), матрица 38 инъекций и вердикт лида, ADR-DH-012, ADR-PM-056, C-47.
+Память: `scripts/memory/search.py executor device_io shutdown plugin stop` → 8 уроков, к SPI не относятся.
+
+## Вердикт: CHANGES REQUESTED (итерация 1 из 2)
+
+Код держится: имена и методы 72 команд не изменились, слои зелёные, путь стопа и отключения не сдвинут, тесты радиуса
+зелёные. Причина вердикта — один дефект дизайна (два источника истины каталога операций и ложное утверждение ADR о пути
+роста) и известное условие слияния (CAPABILITIES). Исправления дешёвые: текст ADR/README и один тест (или удаление поля).
+
+## Замечания
+
+### 1. [architecture, major] `OP_SPECS` драйвера никто не читает: команды строятся из `DEFAULT_SOURCES`; путь роста в ADR ложный
+
+Где: `Services/device_hub/drivers/{base.py:56, robot_driver.py:48, robot_driver_v2/__init__.py:33, vfd_driver.py:35}`
+(`OP_SPECS`); `Plugins/hub/device_hub/plugin.py:1010` (`install_op_commands(DeviceHubPlugin, DEFAULT_SOURCES)` при
+импорте); `ADR-DH-012.md:69-70`, `Services/device_hub/README.md:50-54`.
+
+- `git grep` по `OP_SPECS`, `DEFAULT_SOURCES`, `install_op_commands(` вне тестов и документов: `OP_SPECS` только
+  присваивается (4 строки), прод-читателя нет. Команды ставит один вызов при импорте модуля плагина по `DEFAULT_SOURCES`.
+- Тест полноты (`test_spi_contract.py`) связывает `OP_SPECS` с `_OPS` драйвера, но ни один тест не связывает
+  `DEFAULT_SOURCES` с `OP_SPECS` драйверов (в тестах `DEFAULT_SOURCES` встречается только в `command_table(DEFAULT_SOURCES)`).
+  Сегодня это одни и те же объекты-кортежи, живого расхождения нет; дрейф тихий.
+- Проба `opus_spi/probe_design.py` (гейт light, PYTHONPATH = корень дерева), вывод дословно:
+  ```
+  1 upsert new kind: DeviceEntry lamp
+  1 lamp_on in DeviceHubPlugin.commands: False
+  1 commands with prefix lamp_: []
+  2 robot_new_op in commands after OP_SPECS change: False
+  ```
+  Вход: класс `LampDriver(BaseDeviceDriver)` с `kind="lamp"` и одной операцией в `OP_SPECS` + `register_driver_factory`.
+  Выход: вид принят менеджером, команд `lamp_*` нет. Вход: `RobotDriverV2.OP_SPECS` дополнен операцией. Выход: команды
+  `robot_new_op` нет.
+- Плюс: менеджер создаётся только внутри `DeviceHubPlugin.configure` и сразу зовёт `initialize()`
+  (`plugin.py:171-174`). Зарегистрировать фабрику нового вида «до `initialize()`», как требует ADR, извне нельзя.
+  Фактически набор видов — по-прежнему 4 фабрики `_register_defaults` (замороженный `VALID_KINDS` — их копия без читателей).
+
+Утверждение ADR «Новый вид = класс драйвера с `OP_SPECS` + `register_driver_factory`; в `manager.py` и `plugin.py`
+ничего не правится; команды ставит `install_op_commands`» не выполняется. На него опрётся следующий вид (миграция
+`hik_*`, новые устройства). По принципу «меньше слоёв» `OP_SPECS` на драйвере — лишний слой: указатель на тот же
+кортеж каталога без потребителя.
+
+Исправить (одно из двух, решение лида):
+- (а) убрать `OP_SPECS` с драйверов (поле новое, в main его нет — FREEZE не нужен); сторож полноты перевести на каталог:
+  имена `ROBOT_V2_OPS` == ключи `RobotDriverV2._OPS` и т. д.; `OP_SPECS` из `Protocol` `DeviceDriver` снять;
+- (б) оставить `OP_SPECS` и добавить сторож: для каждого вида фабрик по умолчанию объединение `OP_SPECS` его классов
+  == операции `DEFAULT_SOURCES` того же `kind` с `route="driver"`; инъекция — `RobotDriverV2.OP_SPECS` + операция при
+  неизменном `DEFAULT_SOURCES` → красный.
+В обоих случаях поправить ADR-DH-012 «Последствия» и README:50-54: новый вид = драйвер + фабрика в
+`_register_defaults` + `OpSource` в `DEFAULT_SOURCES` (правка хаба); шов «фабрика до `initialize()`» есть только у
+прямого `DeviceManager` (тесты), не у процесса.
+
+### 2. [spec, blocker, процессный, известно] CAPABILITIES не перегенерированы
+
+`git diff --stat main...HEAD -- docs/contracts` — пусто. Ревью Sonnet п.1 открыт; без регенерации
+`backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный (вывод Sonnet по чтению; я тоже не гонял —
+окно heavy). Условие слияния: регенерация в окне heavy лида (~17:20), оба файла в ветку до слияния.
+
+### 3. [quality, minor] Список видимых изменений IPC не полон
+
+Сверено: 72 имени и имена методов совпадают с main (AST литерала `commands` в `main:plugin.py` против
+`DeviceHubPlugin.commands` HEAD: `main 72 head 72 names equal True methods equal True`). Текст отказа регистров —
+действительно только у ПЧ: у робота v2 свойство `transport` есть (`_RobotDriverCore.transport`), путь чтения регистров
+v2 не изменился — эта строка списка верна.
+Не записано в ADR-DH-012 «Последствия»:
+- 10 команд данных в окне остановки процесса получают `{"success": False, "error": "system_stopping"}`: фаза 1
+  закрывает приём исполнителя до остановки плагинов (`process_module.py:536-540`, `keyed_executor.py:251-256`); до SPI
+  такая команда исполнялась на потоке роутера. Форма — как у `key_missing` / `executor_busy` (без `status`).
+- В `metadata` команды (`get_command_info`, introspect) добавились ключи: `args` у 55, `executor` и `key_from` у 10.
+  Аддитивно, но видно `backend_ctl`.
+- Вызов команды данных без `reply` (прямой `handle_command`) — исполнение на вызывающем потоке и один WARNING на имя
+  (`command_manager.py:469-475`).
+Исправить: три строки в «Последствия» ADR-DH-012.
+
+### 4. [совет, не воспроизводилось] Операция данных в полёте при остановке — вне области потоков хаба
+
+По чтению: потоки `device_io` принадлежат `ExecutorManager` процесса, не корню `device_hub` (ADR-DH-009 «потоки у
+области плагина»). Порядок: фаза 1 — `request_stop` исполнителя (ждущие получают `system_stopping`), затем
+`DeviceHubPlugin.shutdown` (срок хаба), фаза 2 — `join_until` исполнителя после `workers`. Операция в полёте идёт
+параллельно `shutdown` хаба и ждётся вне его срока. Вреда по коду нет: операции данных трогают только `RobotDataStore`
+(замок на документ, `_atomic_write` tmp + `os.replace`, сверка `base_rev` под замком, `Services/robot_comm/store.py:208-283`)
+и чтение реестра под `_registry_lock`; драйверы, `_workers_lock` и порядок ADR-DH-010/011 не затронуты; `immediate` идут
+на потоке роутера и исполнителя не ждут. Совет: одна строка в ADR-DH-012 — исключение из ADR-DH-009 и его основание.
+
+### 5. [совет] Имя исполнителя — строковый контракт через три слоя
+
+`"device_io"` записан в `Services/device_hub/spi.py` (каталог Services), передаётся плагином, объявляется в
+`multiprocess_prototype/backend/topology/base.yaml`. Сторож — только со стороны прототипа
+(`test_devices_executors.py`); без объявления команды уходят запасным путём (WARNING менеджера команд + INFO хука) —
+деградация мягкая, принцип 5 соблюдён. Политика размещения (исполнитель процесса) лежит в каталоге Services. Не блокирует;
+при переносе среды робота в `Services/robot_comm` — вынести имя исполнителя в плагин (`command_options`).
+
+## Что проверено по фокусу брифа
+
+1. **Дизайн.** `Protocol` + умолчания-атрибуты класса + `__init_subclass__` (громкий отказ в обе стороны) + `stop_aware`
+   — без `getattr`/`hasattr` по драйверу в `manager.py`/`plugin.py`. `command_table` строгий. `driver_options` — шов
+   тестов в публичном API менеджера с ограничением на весь `kind` (принято лидом, Sonnet п.7; не повторяю). Дефект — п.1.
+2. **Конкурентность.** `_safe_call`: оба счётчика и `last_error` под `_counters_lock` (`plugin.py:595-614`); других
+   держателей замка нет, цикла замков нет. Исполнитель keyed по `device_id`, 4/64; операции разных роботов параллельны,
+   одного — последовательны; гонки с операциями драйвера v2 (`point_capture`, `param_set` на потоке роутера) по одному
+   документу закрывает замок документа хранилища и `base_rev`. Путь стопа и отключения — п.4.
+3. **Framework.** Хук `command_options`: без опций — вызов байт в байт прежний; белый список ключей; запасной путь без
+   исполнителя. Регистрация — в `_do_configure` после `configure` (`base.py:1581-1584`); снятие команды снимает привязку
+   исполнителя (`command_manager.py:638`). C-45: блок `set_config` в диффе — только контекст. `blueprint.py`: поле
+   `executors` с умолчанием `{}`, ключ в `base_kwargs` только при непустом значении; `executors:` в yaml — только
+   `base.yaml:37`. Ф 1.9b: пересечение файлов `main...feat/lifecycle-pm-keyed-executor` и `main...HEAD` — пусто.
+   Слияние с текущим main (+34 коммита, в т. ч. `blueprint.py` C-25/C-28): `git merge-tree --write-tree --name-only main HEAD`
+   → только хэш дерева, конфликтов нет.
+4. **IPC.** П.3.
+5. **Слои.** `sentrux check .` (CLI, дерево ветки): `sentrux check — 41 rules checked ... ✓ All rules pass`, rc=0.
+
+## Прогоны (гейт light, сессия inspector-bottles-00, PYTHONPATH = корень дерева, PYTHONUTF8=1)
+
+| Что | Результат |
+|---|---|
+| `Services/device_hub/tests/{test_spi_contract,test_spi_acceptance,test_manager}.py`, `Plugins/hub/device_hub/tests/{test_spi_hazards,test_op_commands,test_spi_commands_acceptance}.py`, `multiprocess_prototype/backend/tests/test_devices_executors.py` | `331 passed, 1 warning in 20.84s` |
+| cwd `multiprocess_framework/modules`: `process_module/tests/test_plugin_command_options{,_acceptance}.py`, `process_manager_module/tests/test_blueprint_executors.py` | `16 passed, 1 warning in 1.14s` |
+| `pyright` на `manager.py`, `spi.py`, `plugin.py`, `drivers/base.py` | `0 errors, 1 warning` — `manager.py:467`, строка 2026-10-19, не SPI |
+| проба `opus_spi/probe_design.py` | вывод — п.1 |
+
+## Стадия 0
+
+Дефект ДИЗАЙНА, который должна была поймать стадия 0: **да, частично**. Два источника каталога — в самом брифе: D2
+вешает `OP_SPECS` на драйверы, D4/D5 строят команды из `DEFAULT_SOURCES`, сторож D4 связывает `OP_SPECS` только с `_OPS`.
+Вопрос «кто читает `OP_SPECS` во время работы» (класс «настройка введена, но не читается») стадия 0 не задала.
+Ложный путь роста («вид = фабрика, без правок хаба») появился позже, в отступлении c1b и ADR, — это не стадия 0.
+
+## Что оставил открытым / ненадёжным
+
+- П.4 — только чтением (`process_module.py:536-540`, `keyed_executor.py:251-281`, `store.py`); живой остановки с
+  операцией данных в полёте не гонял: нужен процесс `devices` с исполнителем и медленной записью.
+- Не гонял: `test_dump_matches_committed`, весь `Services/device_hub/tests`, `Plugins/**`, `process_module/tests`
+  целиком, стенд v2 — окно heavy у лида. Тесты на дереве слияния с main не гонял: проверено только отсутствие
+  конфликтов (`merge-tree`), не совместимость поведения с 34 коммитами main.
+- Матрицу инъекций не повторял; инъекцию для сторожа из п.1 (б) не писал — это работа исполнителя.
+- Ф 1.9b: сверил только ветку `feat/lifecycle-pm-keyed-executor`; `tests/lifecycle-1.9b-*`, `docs/lane-F-1.9b-pause`,
+  `origin/atlas/1.9b` — нет.
+- `pyright` не отметил `drv.request_stop` на `DeviceDriver` (`manager.py`, отбор стопа): в `Protocol` `DeviceDriver` метода
+  нет. Почему проверка молчит (режим конфигурации) — не выяснял; статический контракт `Protocol` поэтому слабее, чем
+  заявлено в D1.
+- Граница охраны `__init_subclass__` (метод `request_stop` на экземпляре; `stop_aware` как `property`) — из ревью Sonnet,
+  не перепроверял.
+- Тела тестов `test_spi_*` построчно не читал; качество их проверок держится на матрице лида и выборочных инъекциях Sonnet.
+
+---
+
+# Круг 2 (последний) — правки р.1: beab63c97 (SPI.h, `kinds.py`), 4fd918c39 (ADR-DH-012); HEAD 4fd918c39
+
+Код и тесты не менял. Проба — `opus_spi/probe_r2.py` в scratchpad (гейт light, PYTHONPATH = корень дерева).
+
+## Вердикт круга 2: APPROVED
+
+П.1 закрыт по коду и пробой, п.3 закрыт текстом ADR (одна неточность — моя, ниже). Условие слияния вне кода остаётся:
+п.2 — регенерация CAPABILITIES в окне heavy лида.
+
+## Что проверено (вход → выход)
+
+Вывод `probe_r2.py` дословно:
+```
+1 lamp_on in command_table(command_sources(table)): True
+1 driver class from manager: LampDriver
+2 robot_new_op in command_table(command_sources(DEFAULT_KINDS)): True
+3 _bound is identity in prod: True
+4 vs main: names equal True methods equal True 72 72
+5 vs 9402aab38: table order equal True source+spec equal True
+5 plugin generated order == new table order True
+5 executor count 10 args count 38 descr count 55
+```
+- **П.1 закрыт.** Вход: строка `DeviceKind("lamp", {"*": LampDriver}, prefix="lamp")` в таблице. Выход: команда
+  `lamp_on` есть, менеджер с `kinds=` создаёт `LampDriver`. Вход: операция добавлена в `RobotDriverV2.OP_SPECS`. Выход:
+  команда `robot_new_op` есть. Команды теперь читаются из `OP_SPECS` классов таблицы, второго источника нет.
+- **FREEZE.** 72 имени и имена методов — против main. Порядок 55 сгенерированных, источник (`prefix`, `kind`, `route`,
+  `key_from`) и все поля `OpSpec` каждой команды — против 9402aab38 (старый `spi.py` загружен отдельно, сравнение через
+  `dataclasses.astuple`): равны. Опции регистрации: `executor` у 10, `description` у 55, `args` у 38.
+- **Импорты.** `spi` ← `drivers` ← `kinds` ← `manager` / плагин: в `drivers/`, `spi.py`, `robot_data_ops.py`, `registry/`
+  импортов `kinds`, `manager`, `Plugins` нет (`git grep`, единственное совпадение — докстринг `spi.py:10`).
+  `sentrux check .` → `✓ All rules pass`.
+- **Ранний импорт драйверов модулем плагина.** Импортёры модуля плагина вне тестов: только `base.yaml:31`
+  (`plugin_class`) и каталог GUI через класс; прочие плагины импортируют `Plugins.hub.device_hub.client`, не `plugin`.
+  Прирост при импорте драйверов поверх того, что плагин импортировал на main: `27` модулей, `27.6` мс, пакеты только
+  `Services.device_hub` и `Services.robot_comm`, новых потоков нет (`threading.enumerate()` → `['MainThread']`), сторонних
+  пакетов и SDK нет. Вреда не вижу.
+- **Прогоны (гейт light).** `Services/device_hub/tests/{test_spi_contract,test_spi_acceptance,test_manager,
+  test_c29_disconnect_acceptance,test_no_private_driver_state}.py`, `Plugins/hub/device_hub/tests/{test_spi_hazards,
+  test_op_commands,test_robot_v2_commands,test_robot_v2_commands_acceptance,test_spi_commands_acceptance}.py`,
+  `multiprocess_prototype/backend/tests/test_devices_executors.py` → `412 passed, 1 warning in 17.10s`.
+
+## Решение лида `DeviceKind.create` → `_bound(cls)`: моё слово
+
+Это костыль, но ограниченный; к слиянию допустим только как записанный долг с шагом снятия.
+- Почему костыль: прод-код при каждом создании драйвера читает атрибут своего же модуля, чтобы работал
+  `monkeypatch.setattr(v2pkg, "RobotDriverV2", V2)` тестов. Это неявный шов: в контракте его нет, он держится на имени
+  модуля. Явный шов уже есть и доказан тестом лида (б): подкласс плагина с `device_kinds` / `DeviceManager(kinds=)`.
+- Почему не блокирует: в проде `_bound(cls) is cls` для всех классов таблицы (проба, строка 3); подмена не подклассом —
+  громкий `TypeError`; `importlib.reload` в проде трогает только модули плагинов (`plugins/manager.py:216`), не модули
+  драйверов, — расхождения класса не будет. Опора — 2 места в слепых тестах (`test_c29_disconnect_acceptance.py:326`,
+  `test_spi_commands_acceptance.py:845`), оба через риг плагина.
+- Шаг снятия: эти 2 рига — на подкласс плагина с `device_kinds` (строка робота с `V2`), критерий как у SPI.f — пустой
+  AST-дифф узлов `assert`; затем `_bound` удалить. Записать в `SPI.debts.md` / STATUS, а не только в «Открыто» ADR.
+
+## Замечания круга 2 (не блокируют)
+
+1. **[quality, minor] ADR-DH-012:104 — «`args` у 55 команд» неверно, по коду 38** (ключ `args` кладётся только при
+   непустом `args_schema`; проба: `args count 38`). Число 55 пришло из моего отчёта р.1 (п.3) — ошибка моя. Исправить
+   строку ADR.
+2. **[совет] Путь роста вне дерева — два согласованных шага.** Подкласс плагина задаёт `device_kinds` и отдельно зовёт
+   `install_op_commands(Подкласс, command_sources((строка,)))`. Задал первое без второго — у вида есть фабрика, но нет
+   команд, молча. Один шаг дал бы `DeviceHubPlugin.__init_subclass__`: при переопределённом `device_kinds` ставить
+   команды недостающих видов. Для пути внутри дерева (строка в `DEFAULT_KINDS`) расхождения нет.
+
+## Что оставил открытым / ненадёжным (круг 2)
+
+- Инъекции в сторожа (а)–(в) и в `_bound` я не делал — зубы тестов не проверены мной; проба показывает поведение кода,
+  а не то, что тесты краснеют при его поломке.
+- `test_dump_matches_committed`, наборы целиком, стенд v2 — не гонял (окно heavy у лида). CAPABILITIES в ветке
+  по-прежнему не перегенерированы (`git diff --stat main...HEAD -- docs/contracts` в р.1 — пусто; в р.2 файлы не
+  менялись).
+- Каталог GUI в живом процессе не поднимал: вывод «ранний импорт безвреден» — по замеру импорта в одном процессе, без
+  Qt и без замера холодного старта GUI.
+- Слияние с main `5c35da9a2` в р.2: `git merge-tree --write-tree --name-only main HEAD` → только хэш дерева, конфликтов нет; тесты на дереве слияния не гонял.
+
+---
+
+# Круг 3 — подтверждение SPI.h2: `git diff b6e2012fa..fda25cf19` (b090685e6 код и тесты, fda25cf19 документы)
+
+Код не менял. Проба — `opus_spi/probe_r3.py` (scratchpad); гейт light, сессия inspector-bottles-69.
+
+## Вердикт круга 3: APPROVED
+
+Пункты 1–5 заявления подтверждены запуском. По п.6 скрытого костыля среди пунктов «Открыто» не нашёл; две неточности
+разметки — ниже, не блокируют. Условие слияния прежнее: регенерация CAPABILITIES в окне heavy.
+
+## Пункты заявления (вход → выход, вывод пробы дословно)
+
+1. **`_bound` удалён, строка таблицы проверяется при построении.**
+   `1 kinds has _bound -> False`;
+   `1 row non-driver class -> TypeError вид 'lamp', протокол '*': <class '__main__.NotDriver'> не подкласс BaseDeviceDriver`;
+   `1 row kind mismatch -> TypeError вид 'lamp', протокол '*': у RobotDriver kind='robot'`.
+2. **`DeviceHubPlugin.__init_subclass__`.**
+   `2 subclass + lamp row: (child has, child n, parent has, parent n) -> (True, 73, False, 72)` — команда у подкласса,
+   родитель не изменён; `2 sub-subclass without device_kinds keeps commands -> True`;
+   `2 subclass dropping vfd row -> ValueError NoVfd: таблица видов расходится с командами родителя: нет ['vfd_get_status', ...`;
+   `2 subclass changing robot_point_list executor -> ValueError ... иначе ['robot_point_list']`;
+   `2 subclass with same table -> 72`.
+3. **Два слепых рига.** AST узлов `assert` и имена `test_*` против b6e2012fa:
+   `test_c29_disconnect_acceptance.py asserts 107 107 equal True tests equal True 23`;
+   `test_spi_commands_acceptance.py asserts 100 100 equal True tests equal True 33`.
+   По диффу изменилась только сборка: `monkeypatch.setattr(v2pkg, ...)` → `_hub_with_v2(V2)` (подкласс плагина со строкой
+   `robot`, протокол `delta_v2` → `V2`); `make_rig(plugin_cls=...)` и параметр `plugin_cls` рига были до правки (`:667`).
+4. **Опции по протоколу.** Вход: видовые опции `{"a": 1, "client_factory": "kind"}` + `set_driver_options("robot",
+   "delta_v2", client_factory="v2only")`. Выход: `v2 opts: {'a': 1, 'client_factory': 'v2only'} | v1 opts: {'a': 1,
+   'client_factory': 'kind'}` — пара перекрывает вид, опция пары в v1 не попадает.
+5. **`stop_aware` только bool.**
+   `5 stop_aware property -> TypeError P: stop_aware должен быть bool атрибутом класса, задан <property object ...>`;
+   `5 stop_aware = 1 -> TypeError I: ...`; `5 stop_aware True + request_stop -> True`.
+
+Прогоны: `Services/device_hub/tests/{test_spi_contract,test_spi_acceptance,test_manager,test_c29_disconnect_acceptance,
+test_no_private_driver_state}.py` + `Plugins/hub/device_hub/tests/{test_spi_commands_acceptance,test_spi_hazards,
+test_op_commands,test_robot_v2_commands_acceptance,test_robot_v2_scope}.py` → `401 passed, 1 warning in 45.82s`;
+`Services/device_hub/tests/{test_robot_v2_ops,test_robot_v2_ops_timing_acceptance}.py` +
+`multiprocess_prototype/backend/tests/test_devices_executors.py` → `52 passed, 1 warning in 132.26s`.
+`ruff check -q` на 7 изменённых `.py` → rc=0. `sentrux check .` → `✓ All rules pass`.
+ADR-DH-012:115 — `args` у 38 (р.2 п.1 закрыт).
+
+## П.6 — разметка «Открыто»: моё слово по каждому пункту
+
+Факт: в тексте ADR-DH-012 «Открыто» (6 пунктов) и STATUS «Открыто» (3 пункта) пометок «по дизайну» / «вне задачи» нет
+(`grep -i "дизайн"` по ADR, README, STATUS — 0 строк). Оцениваю по существу.
+
+| # | Пункт ADR «Открыто» | Слово |
+|---|---|---|
+| 1 | `immediate` без рантайм-потребителя; `args` в `metadata` никто не читает | по дизайну. `immediate` потребляется при построении каталога (`__post_init__` запрещает исполнитель), набор зафиксирован А12. `args` — публичные данные `get_command_info` / introspect. Костыля нет |
+| 2 | Порядок команд пульта изменился | по дизайну: порядок не контракт, имена и методы равны main |
+| 3 | `__init_subclass__` базы | не «открытое», а правило — место в «Решение». Граница: см. замечание 1 ниже |
+| 4 | `register_driver_factory` — до `initialize()` | второй путь допуска вида: фабрика без строки таблицы даёт вид без команд. Вызовы — только в 3 тестовых файлах. Публичный API до SPI — по принципу 3 заморозить, не снимать. Костыля нет, но запиши в пункте: путь без команд, только прямое использование менеджера |
+| 5 | Команды ставятся при импорте | по дизайну: каталог GUI читает `commands` с класса (FREEZE) |
+| 6 | Имя исполнителя `device_io` строкой | согласен с лидом: по дизайну. Контракт исполнителя во framework — имя (`register_command(executor="<имя>")`, Task 1.9m), как имя канала; сторож в прототипе и запасной путь А23 есть. Не оспариваю. Замечание о месте имени (каталог Services, а не плагин) остаётся советом, в ADR оно записано |
+
+STATUS «Открыто»: «4/64 не замер» и «длинные синхронные операции на потоке роутера» — вне задачи, верно. **Регенерация
+CAPABILITIES — не «вне задачи»**: она в FILES c2 брифа (`SPI.md`) и условие слияния этой ветки.
+
+## Замечания круга 3 (не блокируют)
+
+1. **[совет, граница] Проверка `stop_aware` смотрит только тело класса (`cls.__dict__`).** Вход: миксин не из
+   `BaseDeviceDriver` со свойством `stop_aware` и методом `request_stop`, `class MixD(Mix, BaseDeviceDriver)`. Выход:
+   класс определяется (`5 edge: property via mixin ... -> Mix`), проверка bool его не видит. Вариант «свойство отдаёт
+   False при живом `request_stop`» дал бы тихий пропуск стопа — это вывод из кода, не проба. Исправить: брать значение
+   через `inspect.getattr_static(cls, "stop_aware")`, а не из `cls.__dict__`. Таких миксинов в дереве нет.
+2. **[quality, minor] Разметка «Открыто».** Пункт 3 ADR — правило, а не открытый вопрос. В пункте 4 записать «путь без
+   команд, только прямое использование менеджера». В STATUS у CAPABILITIES — «условие слияния», а не «вне задачи».
+
+## Что оставил открытым / ненадёжным (круг 3)
+
+- Инъекции в новые сторожа (`__post_init__`, `__init_subclass__` плагина, опции пары, bool-проверка) не делал: проба
+  показывает поведение кода, а не то, что тесты краснеют при его поломке.
+- Граница миксина (замечание 1) с `False` из свойства не воспроизведена.
+- Не гонял: `test_dump_matches_committed`, наборы целиком, стенд v2; слияние с main в р.3 не сверял (`merge-tree` —
+  в р.2 на `5c35da9a2`).

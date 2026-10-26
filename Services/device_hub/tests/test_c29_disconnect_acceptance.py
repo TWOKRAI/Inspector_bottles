@@ -3,8 +3,9 @@
 Purpose:
     Обвязка: настоящий ``DeviceHubPlugin`` (``make_ctx``) + настоящий ``DeviceManager`` + настоящий драйвер v2.
     Фейки на границе драйвера: транспорт (``FakeTransport``) и клиент v2 (``FakeClient``), оба внедряются подклассом
-    драйвера в фабрике менеджера (подмена ``robot_driver_v2.RobotDriverV2`` на время теста; фабрика менеджера, ``spawn``
-    области плагина, ``publish`` и хранилище данных — настоящие). Приватных полей драйвера тест не трогает.
+    драйвера в строке ``robot`` таблицы видов подкласса плагина (``device_kinds``: протокол ``delta_v2`` -> подкласс;
+    сборка драйвера таблицей видов, ``spawn`` области плагина, ``publish`` и хранилище данных — настоящие).
+    Приватных полей драйвера тест не трогает.
     Наблюдается только публичное: ответы команд плагина, канал ``ctx.state_proxy.set`` с путём
     ``devices.state.<id>.conn`` (повторы подряд схлопнуты), счётчики на фейке (STOP_REQ по уровням, SERVO, DO, probe,
     JOG_CONT, кадры jog, задания, программы), журнал (caplog), ``desired_connected`` и ``is_connected``.
@@ -22,6 +23,7 @@ Stability: lite
 from __future__ import annotations
 
 import logging
+import dataclasses
 import threading
 import time
 import warnings
@@ -32,10 +34,10 @@ from typing import Any
 
 import pytest
 
-import Services.device_hub.drivers.robot_driver_v2 as v2pkg
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+from Services.device_hub.kinds import DEFAULT_KINDS
 from Services.robot_comm.core.client_v2 import SyncCancelled
 from Services.robot_comm.core.protocol_v2 import REG
 
@@ -286,6 +288,19 @@ class Proxy:
 # --------------------------------------------------------------------------------------------------
 
 
+def _hub_with_v2(v2: type) -> type[DeviceHubPlugin]:
+    """Подкласс плагина: в строке ``robot`` таблицы видов протокол ``delta_v2`` -> ``v2`` (явный шов вида)."""
+    rows = tuple(
+        dataclasses.replace(row, drivers={**row.drivers, "delta_v2": v2}) if row.kind == "robot" else row
+        for row in DEFAULT_KINDS
+    )
+
+    class Hub(DeviceHubPlugin):
+        device_kinds = rows
+
+    return Hub
+
+
 class Rig:
     def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.events: list[tuple[str, Any]] = []
@@ -303,8 +318,9 @@ class Rig:
             """Драйвер v2 с внедрёнными фейками; ``connect`` / ``disconnect`` пишут события (публичные методы)."""
 
             def __init__(self, entry: Any, protocol: Any = None, **kw: Any) -> None:
-                super().__init__(entry, protocol, transport=rig.transport, **kw)
-                self._client = rig.client
+                super().__init__(
+                    entry, protocol, transport=rig.transport, client_factory=lambda _t, _c: rig.client, **kw
+                )
                 self.connect_results: list[bool] = []
                 self.desired_at_connect_exit: list[bool] = []
 
@@ -322,10 +338,9 @@ class Rig:
                 rig.log("disconnect_exit")
 
         monkeypatch.delenv("INSPECTOR_DATA_DIR", raising=False)
-        monkeypatch.setattr(v2pkg, "RobotDriverV2", V2)
         registry = tmp_path / "devices.yaml"
         self.ctx = make_ctx({"registry_path": str(registry)}, state_proxy=self.proxy, tmp_registry=registry)
-        self.plugin = DeviceHubPlugin()
+        self.plugin = _hub_with_v2(V2)()
         self.plugin.configure(self.ctx)
         self.plugin.start(self.ctx)
         self.teardown_errors: list[str] = []

@@ -21,6 +21,7 @@ import os
 import queue
 import threading
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ from multiprocess_framework.modules.process_module.plugins import (
 from Services.device_hub import DeviceHubError
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.store import RegistryStore
+from Services.device_hub.kinds import DEFAULT_KINDS, DeviceKind, command_sources
+from Services.device_hub.spi import OpSource, OpSpec, command_table
 from Services.robot_comm.store import RobotDataStore
 
 from .registers import DeviceHubRegisters
@@ -53,32 +56,6 @@ _SHUTDOWN_MARGIN_S = 0.5
 # Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
 TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
-
-# Описания 21 команды робота v2 для каталога (T5.3c): пишет ``start()`` — команды регистрируются после ``configure``.
-# Запись — ключи аргументов; ``base_rev`` обязателен у записи (``null`` — файла ещё нет).
-_ROBOT_V2_DESCRIPTIONS: dict[str, str] = {
-    "robot_param_get_all": "Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev",
-    "robot_point_list": "Робот v2: список точек {device_id} -> points, rev",
-    "robot_point_save": "Робот v2: сохранить точку {device_id, point{name, x, y, z, rz, hand, frame?}, base_rev}",
-    "robot_point_delete": "Робот v2: удалить точку {device_id, name, base_rev}",
-    "robot_frame_list": "Робот v2: список систем координат {device_id} -> frames, rev",
-    "robot_frame_teach": "Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev}",
-    "robot_program_list": "Робот v2: имена программ {device_id} -> programs",
-    "robot_program_get": "Робот v2: прочитать программу {device_id, name} -> program, rev",
-    "robot_program_save": "Робот v2: сохранить программу {device_id, program{name, steps}, base_rev}",
-    "robot_program_delete": "Робот v2: удалить программу {device_id, name, base_rev}",
-    "robot_param_set": "Робот v2: записать параметр {device_id, name, value, base_rev}",
-    "robot_param_apply": "Робот v2: применить параметры класса reinit {device_id}",
-    "robot_stop": "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}",
-    "robot_servo": "Робот v2: серво {device_id, on: bool}",
-    "robot_do_set": "Робот v2: дискретный выход {device_id, ch: 1..16, on: bool}",
-    "robot_jog_step": "Робот v2: шаг jog {device_id, dx, dy, dz?, drz?, spd: 1..100}",
-    "robot_jog_hold": "Робот v2: удержание jog {device_id, dir: 1..8, spd: 1..100}",
-    "robot_jog_release": "Робот v2: отпустить jog {device_id}",
-    "robot_point_capture": "Робот v2: запомнить текущую позу как точку {device_id, name, base_rev}",
-    "robot_program_run": "Робот v2: запустить программу {device_id, name}",
-    "robot_program_abort": "Робот v2: прервать программу {device_id}",
-}
 
 
 class ScopeThreadSurvived(RuntimeError):
@@ -126,11 +103,17 @@ class DeviceHubPlugin(ProcessModulePlugin):
     _scope: IScope | None = None
     # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
     _shutting_down = False
+    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55).
+    # Подкласс со своим device_kinds получает команды новых строк сам (__init_subclass__, install_kind_commands)
+    device_kinds: tuple[DeviceKind, ...] = DEFAULT_KINDS
+    # Команды из описаний операций: имя -> (источник, операция); заполняет install_op_commands (copy-on-write)
+    _op_commands: dict[str, tuple[OpSource, OpSpec]] = {}
 
     # ------------------------------------------------------------------ #
-    # Таблица команд (Р7): имя_команды -> имя_метода
+    # Таблица команд (Р7): имя_команды -> имя_метода. Команды robot_* / vfd_* (55) генерирует install_op_commands
+    # сразу после класса из OP_SPECS классов драйверов таблицы видов (command_sources(device_kinds)).
     # ------------------------------------------------------------------ #
-    commands = {
+    commands: dict[str, str] = {
         # Реестр
         "device_list": "cmd_device_list",
         "device_describe": "cmd_device_describe",
@@ -145,65 +128,6 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Универсальные регистры
         "device_read": "cmd_device_read",
         "device_write": "cmd_device_write",
-        # Робот (11)
-        "robot_enqueue_job": "cmd_robot_enqueue_job",
-        "robot_return_job": "cmd_robot_return_job",
-        "robot_send_test_job": "cmd_robot_send_test_job",
-        "robot_abort": "cmd_robot_abort",
-        "robot_set_mode": "cmd_robot_set_mode",
-        "robot_jog": "cmd_robot_jog",
-        "robot_jog_abort": "cmd_robot_jog_abort",
-        "robot_set_servo": "cmd_robot_set_servo",
-        "robot_set_robot_config": "cmd_robot_set_robot_config",
-        "robot_get_robot_config": "cmd_robot_get_robot_config",
-        "robot_get_telemetry": "cmd_robot_get_telemetry",
-        "robot_read_echo": "cmd_robot_read_echo",
-        "robot_set_manual_mode": "cmd_robot_set_manual_mode",
-        "robot_clear_queue": "cmd_robot_clear_queue",
-        "robot_set_encoder_offset": "cmd_robot_set_encoder_offset",
-        "robot_toolchange": "cmd_robot_toolchange",
-        "robot_exchange_log_get": "cmd_robot_exchange_log_get",
-        "robot_exchange_log_set": "cmd_robot_exchange_log_set",
-        # Робот v2 (21, T5.3c): 10 офлайн-команд данных + 11 команд движения
-        "robot_param_get_all": "cmd_robot_param_get_all",
-        "robot_point_list": "cmd_robot_point_list",
-        "robot_point_save": "cmd_robot_point_save",
-        "robot_point_delete": "cmd_robot_point_delete",
-        "robot_frame_list": "cmd_robot_frame_list",
-        "robot_frame_teach": "cmd_robot_frame_teach",
-        "robot_program_list": "cmd_robot_program_list",
-        "robot_program_get": "cmd_robot_program_get",
-        "robot_program_save": "cmd_robot_program_save",
-        "robot_program_delete": "cmd_robot_program_delete",
-        "robot_param_set": "cmd_robot_param_set",
-        "robot_param_apply": "cmd_robot_param_apply",
-        "robot_stop": "cmd_robot_stop",
-        "robot_servo": "cmd_robot_servo",
-        "robot_do_set": "cmd_robot_do_set",
-        "robot_jog_step": "cmd_robot_jog_step",
-        "robot_jog_hold": "cmd_robot_jog_hold",
-        "robot_jog_release": "cmd_robot_jog_release",
-        "robot_point_capture": "cmd_robot_point_capture",
-        "robot_program_run": "cmd_robot_program_run",
-        "robot_program_abort": "cmd_robot_program_abort",
-        # Рисование (8)
-        "robot_draw_polyline": "cmd_robot_draw_polyline",
-        "robot_draw_circle": "cmd_robot_draw_circle",
-        "robot_draw_square": "cmd_robot_draw_square",
-        "robot_draw_set_pen": "cmd_robot_draw_set_pen",
-        "robot_draw_set_speed": "cmd_robot_draw_set_speed",
-        "robot_draw_set_travel": "cmd_robot_draw_set_travel",
-        "robot_draw_set_accel": "cmd_robot_draw_set_accel",
-        "robot_draw_set_pass_size": "cmd_robot_draw_set_pass_size",
-        "robot_draw_set_overlap": "cmd_robot_draw_set_overlap",
-        "robot_draw_abort": "cmd_robot_draw_abort",
-        "robot_draw_progress": "cmd_robot_draw_progress",
-        # ПЧ (5)
-        "vfd_run": "cmd_vfd_run",
-        "vfd_set_freq": "cmd_vfd_set_freq",
-        "vfd_stop": "cmd_vfd_stop",
-        "vfd_reset_fault": "cmd_vfd_reset_fault",
-        "vfd_get_status": "cmd_vfd_get_status",
         # Hikvision (6)
         "hik_enum": "cmd_hik_enum",
         "hik_open": "cmd_hik_open",
@@ -220,6 +144,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
         return DeviceHubPluginConfig
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Подкласс, задавший свой ``device_kinds``, получает команды новых строк таблицы видов; без своего
+        ``device_kinds`` — команды родителя как есть (не перегенерируются)."""
+        super().__init_subclass__(**kwargs)
+        if "device_kinds" in cls.__dict__:
+            install_kind_commands(cls)
+
     # ------------------------------------------------------------------ #
     # LIFECYCLE
     # ------------------------------------------------------------------ #
@@ -234,6 +165,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Выжившие, о которых reporter уже сообщил в health (по пути): отчёты корня и ``handle.close`` повторяются
         self._scope_seen: set[str] = set()
         self._scope_seen_lock = threading.Lock()
+        # Счётчики команд (commands_ok / commands_err / last_error): команды данных идут на потоках исполнителя
+        # device_io параллельно потоку роутера (D6) — чтение и запись счётчика под одним замком
+        self._counters_lock = threading.Lock()
         scope = open_scope("device_hub", budget_s=_SCOPE_BUDGET_S, reporter=self._on_scope_report)
         try:
             self._reg: DeviceHubRegisters = self._init_register(ctx)
@@ -246,7 +180,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
             # Одно хранилище данных робота на процесс: каталог data/robot рядом с devices.yaml (T5.3c)
             self._robot_store = RobotDataStore(resolved.parent / "robot")
             self._manager = DeviceManager(
-                store=store, publish_cb=self._publish_state, spawn=scope.spawn, robot_store=self._robot_store
+                store=store,
+                publish_cb=self._publish_state,
+                spawn=scope.spawn,
+                robot_store=self._robot_store,
+                kinds=self.device_kinds,
             )
             self._manager.initialize()
 
@@ -277,8 +215,6 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
-        self._apply_robot_v2_descriptions(ctx)
-
         # Upsert устройств из конфига рецепта (опционально).
         # н6: читаем recipe_origin из конфига плагина, чтобы slug не терялся
         # (origin="recipe" не позволяет отличить один рецепт от другого).
@@ -313,12 +249,29 @@ class DeviceHubPlugin(ProcessModulePlugin):
         )
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
-    def _apply_robot_v2_descriptions(self, ctx: PluginContext) -> None:
-        """Описания 21 команды робота v2 в каталоге: команды регистрируются после ``configure``, поэтому здесь."""
-        for name, text in _ROBOT_V2_DESCRIPTIONS.items():
-            update = getattr(ctx.command_manager, "update_command_metadata", None)
-            if update is None or not update(name, {"description": text}):
-                ctx.log_warning(f"DeviceHubPlugin: описание команды {name!r} не записано в каталог")
+    def command_options(self, command_name: str) -> dict[str, Any]:
+        """Опции регистрации команды из описания операции (хук ``ProcessModulePlugin``, SPI.d2).
+
+        Pre: ``command_name`` — ключ ``self.commands``. Post: для имён из ``_op_commands`` — ``metadata`` с непустыми
+        ``description`` / ``args`` (пустые ключи не кладутся); при ``spec.executor`` — плюс ``executor`` и ``key_from``
+        источника. Прочие команды (``device_*``, ``hik_*``) и операции без описания и исполнителя — ``{}``:
+        регистрация как без хука. Описание пишется при регистрации, а не в ``start()``: замена словаря ``metadata``
+        после регистрации стёрла бы ``executor``.
+        """
+        found = self._op_commands.get(command_name)
+        if found is None:
+            return {}
+        source, spec = found
+        metadata: dict[str, Any] = {}
+        if spec.description:
+            metadata["description"] = spec.description
+        if spec.args_schema:
+            metadata["args"] = list(spec.args_schema)
+        options: dict[str, Any] = {"metadata": metadata} if metadata else {}
+        if spec.executor:
+            options["executor"] = spec.executor
+            options["key_from"] = source.key_from
+        return options
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
@@ -365,13 +318,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Роботы, чей стоп процесса не подтверждён (нет эха / запись не прошла), — в health (решение §2, H3)."""
         for entry in self._manager.snapshot_registry():
             driver = self._manager.get_driver(entry.id)
-            if driver is None or not getattr(driver, "stop_unconfirmed", False):
+            if driver is None:
                 continue
             try:
+                # чтения свойств драйвера — внутри try: сбой одного драйвера не лишает отчёта соседей
+                if not driver.stop_unconfirmed:
+                    continue
                 # текст причины — свойство драйвера (T5.3c c3): «нет окна» отличается от «эхо не пришло»
-                text = getattr(driver, "stop_unconfirmed_text", None) or TEXT_STOP_UNCONFIRMED
+                text = driver.stop_unconfirmed_text or TEXT_STOP_UNCONFIRMED
                 ctx.health.report_error(RuntimeError(text), context="device_hub.stop_echo", device_id=entry.id)
-            except Exception as exc:  # no-health: сам health упал — лог, остановка идёт дальше
+            except Exception as exc:  # no-health: свойство драйвера или сам health упали — лог, остановка идёт дальше
                 ctx.log_warning(f"DeviceHubPlugin: health для {entry.id!r} не принят: {exc!r}")
 
     def _on_scope_report(self, report: CloseReport) -> None:
@@ -441,9 +397,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     # Проверка и запись под одним замком с cmd_device_disconnect (K): либо K раньше, либо позже.
                     with self._workers_lock:
                         driver = self._manager.get_driver(dev_id)
-                        stop = (
-                            self._desired_connected.get(dev_id) is False
-                            or getattr(driver, "disconnect_pending", False) is True
+                        stop = self._desired_connected.get(dev_id) is False or (
+                            driver is not None and driver.disconnect_pending is True
                         )
                         if driver is not None and not stop:
                             # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
@@ -451,9 +406,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             # Ручной/повторный connect: сбросить лимит попыток, чтобы
                             # после «сдался» (reconnect_exhausted) кнопка «Подключить»
                             # дала драйверу заново полный лимит попыток.
-                            reset = getattr(driver, "reset_reconnect", None)
-                            if callable(reset):
-                                reset()
+                            driver.reset_reconnect()
                     if stop:
                         conn = "disconnecting"
                     else:
@@ -548,9 +501,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 # дедуплицируется StateStore, и поздние подписчики (список,
                                 # страница добавления) видят stale «disconnected». ts меняется
                                 # → дельта проходит. quality снапшота отражает живость чтений.
-                                if getattr(drv, "is_connected", False):
+                                if drv.is_connected:
                                     conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
-                                elif getattr(drv, "reconnect_exhausted", False):
+                                elif drv.reconnect_exhausted:
                                     # Драйвер исчерпал попытки и «сдался» — ждёт ручного
                                     # «Подключить». Отдельное состояние для GUI (не спам).
                                     conn = "failed"
@@ -559,7 +512,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
                                 # io_peek для панели «Вход/Выход» (если драйвер
                                 # накапливает wire-обмен — robot/generic_modbus).
-                                io = getattr(drv, "last_io", None)
+                                io = drv.last_io
                                 if io and (io.get("input") or io.get("output")):
                                     self._publish_state(
                                         f"devices.state.{did}.io_peek",
@@ -658,7 +611,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Выполнить функцию, завернув ошибки в {"status": "error", "message": ...}."""
         try:
             result = fn(*args, **kwargs)
-            self._reg.commands_ok += 1
+            with self._counters_lock:
+                self._reg.commands_ok += 1
             if isinstance(result, dict):
                 if "status" not in result:
                     result["status"] = "ok"
@@ -667,8 +621,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         except Exception as exc:
             # no-health: ошибка не глотается — уходит вызывающему в dict-ответ команды
             # (учёт в commands_err/last_error; false-degrade от пользовательских ошибок не нужен)
-            self._reg.commands_err += 1
-            self._reg.last_error = str(exc)
+            with self._counters_lock:
+                self._reg.commands_err += 1
+                self._reg.last_error = str(exc)
             # error= дублирует message: CommandManager логирует reason/error, не message
             # (иначе все ошибки device-команд в консоли = «failed: None»).
             return {"status": "error", "message": str(exc), "error": str(exc)}
@@ -906,13 +861,25 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
             self._desired_connected[dev_id] = False
-            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock. Только робот v2
-            # (getattr, как request_stop); без ввода-вывода. Замки: _workers_lock -> _registry_lock -> состояние.
+            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock; без ввода-вывода
+            # (у драйверов кроме робота v2 — умолчание базы, ничего). Замки: _workers_lock -> _registry_lock ->
+            # состояние. Исключение драйвера ловится здесь, в health уходит после выхода из замка (нет ребра
+            # _workers_lock -> health); постановка disconnect в очередь — всегда.
+            request_error: Exception | None = None
             driver = self._manager.get_driver(dev_id)
-            request = getattr(driver, "request_disconnect", None) if driver is not None else None
-            if callable(request):
-                request()
-        self._conn_queue.put(("disconnect", dev_id))
+            if driver is not None:
+                try:
+                    driver.request_disconnect()
+                except Exception as exc:
+                    request_error = exc
+        try:
+            if request_error is not None and self._ctx:
+                self._ctx.health.report_error(request_error, context="device_hub.request_disconnect", device_id=dev_id)
+        except Exception as exc:  # no-health: сам health упал — лог, disconnect идёт дальше
+            if self._ctx:
+                self._ctx.log_warning(f"DeviceHubPlugin: health для {dev_id!r} не принят: {exc!r}")
+        finally:
+            self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
 
     # ------------------------------------------------------------------ #
@@ -932,240 +899,17 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return self._safe_call(self._manager.write_registers, dev_id, values)
 
     # ------------------------------------------------------------------ #
-    # КОМАНДЫ — Робот (11)
+    # КОМАНДЫ — robot_* / vfd_* из описаний операций (install_op_commands)
     # ------------------------------------------------------------------ #
 
-    def cmd_robot_enqueue_job(self, data: dict) -> dict:
-        """Поставить CVT-задание: {device_id, x_mm, y_mm, e_capture?}."""
-        return self._kind_call(data, "robot", "enqueue_job")
-
-    def cmd_robot_return_job(self, data: dict) -> dict:
-        """Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота)."""
-        return self._kind_call(data, "robot", "return_job")
-
-    def cmd_robot_send_test_job(self, data: dict) -> dict:
-        """Тестовое CVT-задание: {device_id, x, y}."""
-        return self._kind_call(data, "robot", "send_test_job")
-
-    def cmd_robot_abort(self, data: dict) -> dict:
-        """Стоп робота: {device_id, mode: 1|2|3}."""
-        return self._kind_call(data, "robot", "abort")
-
-    def cmd_robot_set_mode(self, data: dict) -> dict:
-        """Режим робота: {device_id, mode: cvt|draw|manual}."""
-        return self._kind_call(data, "robot", "set_mode")
-
-    def cmd_robot_jog(self, data: dict) -> dict:
-        """Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %."""
-        return self._kind_call(data, "robot", "jog")
-
-    def cmd_robot_jog_abort(self, data: dict) -> dict:
-        """Прервать ручной ход: {device_id}."""
-        return self._kind_call(data, "robot", "jog_abort")
-
-    def cmd_robot_set_servo(self, data: dict) -> dict:
-        """Серво: {device_id, on: bool}."""
-        return self._kind_call(data, "robot", "set_servo")
-
-    def cmd_robot_set_robot_config(self, data: dict) -> dict:
-        """Конфиг робота: {device_id, ...fields}."""
-        return self._kind_call(data, "robot", "set_robot_config")
-
-    def cmd_robot_get_robot_config(self, data: dict) -> dict:
-        """Прочитать конфиг-блок робота."""
-        return self._kind_call(data, "robot", "get_robot_config")
-
-    def cmd_robot_get_telemetry(self, data: dict) -> dict:
-        """Телеметрия робота."""
-        return self._kind_call(data, "robot", "get_telemetry")
-
-    def cmd_robot_read_echo(self, data: dict) -> dict:
-        """Эхо последнего задания."""
-        return self._kind_call(data, "robot", "read_echo")
-
-    def cmd_robot_set_manual_mode(self, data: dict) -> dict:
-        """Ручной режим: {device_id, on: bool}."""
-        return self._kind_call(data, "robot", "set_manual_mode")
-
-    def cmd_robot_clear_queue(self, data: dict) -> dict:
-        """Очистить очередь заданий."""
-        return self._kind_call(data, "robot", "clear_queue")
-
-    def cmd_robot_set_encoder_offset(self, data: dict) -> dict:
-        """Подстройка компенсации конвейера: {device_id, lead_mm} (мм вдоль ленты, знаковое)."""
-        return self._kind_call(data, "robot", "set_encoder_offset")
-
-    def cmd_robot_toolchange(self, data: dict) -> dict:
-        """Смена инструмента: {device_id, target: 0|1|2, timeout?}."""
-        return self._kind_call(data, "robot", "toolchange")
-
-    def cmd_robot_exchange_log_get(self, data: dict) -> dict:
-        """Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи (T5.6)."""
-        return self._driver_call(data, "robot", "exchange_log_get")
-
-    def cmd_robot_exchange_log_set(self, data: dict) -> dict:
-        """Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6)."""
-        return self._driver_call(data, "robot", "exchange_log_set")
-
-    # ------------------------------------------------------------------ #
-    # КОМАНДЫ — Робот v2: данные офлайн (10) и движение (11), T5.3c
-    # ------------------------------------------------------------------ #
-
-    def cmd_robot_param_get_all(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``param_get_all`` (T5.3c)."""
-        return self._robot_data(data, "param_get_all")
-
-    def cmd_robot_point_list(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``point_list`` (T5.3c)."""
-        return self._robot_data(data, "point_list")
-
-    def cmd_robot_point_save(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``point_save`` (T5.3c)."""
-        return self._robot_data(data, "point_save")
-
-    def cmd_robot_point_delete(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``point_delete`` (T5.3c)."""
-        return self._robot_data(data, "point_delete")
-
-    def cmd_robot_frame_list(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``frame_list`` (T5.3c)."""
-        return self._robot_data(data, "frame_list")
-
-    def cmd_robot_frame_teach(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``frame_teach`` (T5.3c)."""
-        return self._robot_data(data, "frame_teach")
-
-    def cmd_robot_program_list(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``program_list`` (T5.3c)."""
-        return self._robot_data(data, "program_list")
-
-    def cmd_robot_program_get(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``program_get`` (T5.3c)."""
-        return self._robot_data(data, "program_get")
-
-    def cmd_robot_program_save(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``program_save`` (T5.3c)."""
-        return self._robot_data(data, "program_save")
-
-    def cmd_robot_program_delete(self, data: dict) -> dict:
-        """Данные робота v2 офлайн, ``program_delete`` (T5.3c)."""
-        return self._robot_data(data, "program_delete")
-
-    def cmd_robot_param_set(self, data: dict) -> dict:
-        """Робот v2, ``param_set`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "param_set")
-
-    def cmd_robot_param_apply(self, data: dict) -> dict:
-        """Робот v2, ``param_apply`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "param_apply")
-
-    def cmd_robot_stop(self, data: dict) -> dict:
-        """Робот v2, ``stop`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "stop")
-
-    def cmd_robot_servo(self, data: dict) -> dict:
-        """Робот v2, ``servo`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "servo")
-
-    def cmd_robot_do_set(self, data: dict) -> dict:
-        """Робот v2, ``do_set`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "do_set")
-
-    def cmd_robot_jog_step(self, data: dict) -> dict:
-        """Робот v2, ``jog_step`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "jog_step")
-
-    def cmd_robot_jog_hold(self, data: dict) -> dict:
-        """Робот v2, ``jog_hold`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "jog_hold")
-
-    def cmd_robot_jog_release(self, data: dict) -> dict:
-        """Робот v2, ``jog_release`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "jog_release")
-
-    def cmd_robot_point_capture(self, data: dict) -> dict:
-        """Робот v2, ``point_capture`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "point_capture")
-
-    def cmd_robot_program_run(self, data: dict) -> dict:
-        """Робот v2, ``program_run`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "program_run")
-
-    def cmd_robot_program_abort(self, data: dict) -> dict:
-        """Робот v2, ``program_abort`` через драйвер (T5.3c; операции драйвера — T5.3d)."""
-        return self._kind_call(data, "robot", "program_abort")
-
-    # ------------------------------------------------------------------ #
-    # КОМАНДЫ — Рисование (8)
-    # ------------------------------------------------------------------ #
-
-    def cmd_robot_draw_polyline(self, data: dict) -> dict:
-        """Нарисовать полилинию: {device_id, points, ...}."""
-        return self._kind_call(data, "robot", "draw_polyline")
-
-    def cmd_robot_draw_circle(self, data: dict) -> dict:
-        """Нарисовать окружность: {device_id, cx, cy, r}."""
-        return self._kind_call(data, "robot", "draw_circle")
-
-    def cmd_robot_draw_square(self, data: dict) -> dict:
-        """Нарисовать квадрат: {device_id, cx, cy, side}."""
-        return self._kind_call(data, "robot", "draw_square")
-
-    def cmd_robot_draw_set_pen(self, data: dict) -> dict:
-        """Установить перо: {device_id, pen_z}."""
-        return self._kind_call(data, "robot", "draw_set_pen")
-
-    def cmd_robot_draw_set_speed(self, data: dict) -> dict:
-        """Установить скорость рисования (перо по бумаге): {device_id, pct}."""
-        return self._kind_call(data, "robot", "draw_set_speed")
-
-    def cmd_robot_draw_set_travel(self, data: dict) -> dict:
-        """Установить скорость переезда (перо вверх): {device_id, pct}."""
-        return self._kind_call(data, "robot", "draw_set_travel")
-
-    def cmd_robot_draw_set_accel(self, data: dict) -> dict:
-        """Установить ускорение рисования: {device_id, accel} (мм/с²)."""
-        return self._kind_call(data, "robot", "draw_set_accel")
-
-    def cmd_robot_draw_set_pass_size(self, data: dict) -> dict:
-        """Установить размер пачки рисования: {device_id, n} (точек на проход)."""
-        return self._kind_call(data, "robot", "draw_set_pass_size")
-
-    def cmd_robot_draw_set_overlap(self, data: dict) -> dict:
-        """Установить overlap: {device_id, overlap}."""
-        return self._kind_call(data, "robot", "draw_set_overlap")
-
-    def cmd_robot_draw_abort(self, data: dict) -> dict:
-        """Прервать рисование: {device_id}."""
-        return self._kind_call(data, "robot", "draw_abort")
-
-    def cmd_robot_draw_progress(self, data: dict) -> dict:
-        """Прогресс рисования: {device_id}."""
-        return self._kind_call(data, "robot", "draw_progress")
-
-    # ------------------------------------------------------------------ #
-    # КОМАНДЫ — ПЧ (5)
-    # ------------------------------------------------------------------ #
-
-    def cmd_vfd_run(self, data: dict) -> dict:
-        """Пуск ПЧ: {device_id, direction?, freq_hz?}."""
-        return self._kind_call(data, "vfd", "run")
-
-    def cmd_vfd_set_freq(self, data: dict) -> dict:
-        """Установить частоту: {device_id, freq_hz}."""
-        return self._kind_call(data, "vfd", "set_freq")
-
-    def cmd_vfd_stop(self, data: dict) -> dict:
-        """Стоп ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "stop")
-
-    def cmd_vfd_reset_fault(self, data: dict) -> dict:
-        """Сброс аварии ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "reset_fault")
-
-    def cmd_vfd_get_status(self, data: dict) -> dict:
-        """Статус ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "get_status")
+    def _op_command(self, data: dict, source: OpSource, spec: OpSpec) -> dict:
+        """Тело сгенерированной команды: данные робота -> ``_robot_data``; операция без связи -> ``_driver_call``;
+        прочие -> ``_kind_call`` (тела и тексты отказов прежние)."""
+        if source.route == "data":
+            return self._robot_data(data, spec.name)
+        if spec.needs_link is False:
+            return self._driver_call(data, source.kind, spec.name)
+        return self._kind_call(data, source.kind, spec.name)
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Hikvision (6)
@@ -1240,3 +984,72 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     # best-effort release-all: не прерываем обход, но отказ учитываем в health
                     self._ctx.health.report_error(exc, context="device_hub.hik_release")
         return {"status": "ok", "released": released}
+
+
+def _make_op_command(source: OpSource, spec: OpSpec) -> Callable[[DeviceHubPlugin, dict], dict]:
+    """Метод ``cmd_<префикс>_<операция>``: фабрика замыкания над ``(source, spec)``, не над переменной цикла (Т4)."""
+
+    def command(self: DeviceHubPlugin, data: dict) -> dict:
+        return self._op_command(data, source, spec)
+
+    command.__name__ = command.__qualname__ = f"cmd_{source.prefix}_{spec.name}"
+    command.__doc__ = spec.description or f"{source.prefix}: {spec.name}"
+    return command
+
+
+def install_op_commands(cls: type[DeviceHubPlugin], sources: Sequence[OpSource]) -> None:
+    """Сгенерировать команды из описаний операций: метод ``cmd_<имя>``, строка ``commands`` и ``_op_commands``.
+
+    Pre: ``cls`` — ``DeviceHubPlugin`` или его подкласс; ``sources`` — источники для ``command_table``.
+    Post: для каждой строки ``command_table(sources)`` у ``cls`` есть метод ``cmd_<имя>``,
+        ``cls.commands[<имя>] == "cmd_<имя>"`` и ``cls._op_commands[<имя>] == (source, spec)``. Словари ``commands`` и
+        ``_op_commands`` пишутся в собственные словари ``cls`` (copy-on-write: родитель не меняется).
+    Raises: ``ValueError`` — имя уже есть в ``cls.commands`` или атрибут ``cmd_<имя>`` уже есть у ``cls``, либо
+        конфликт описаний в ``command_table``; при отказе ``cls`` не меняется.
+    """
+    _install_table(cls, command_table(sources))
+
+
+def install_kind_commands(cls: type[DeviceHubPlugin]) -> None:
+    """Команды подкласса со своей таблицей видов ``device_kinds`` (зовёт ``DeviceHubPlugin.__init_subclass__``).
+
+    Pre: ``cls`` — подкласс ``DeviceHubPlugin``, ``device_kinds`` задан в его теле.
+    Post: у ``cls`` есть команда каждой строки ``command_table(command_sources(cls.device_kinds))``; новые имена
+        поставлены (copy-on-write, родитель не меняется), одноимённые команды родителя остались.
+    Raises: ``ValueError`` — одноимённая команда родителя с другим видом / путём / ключом / ``OpSpec``, или команда
+        родителя, которой нет в таблице подкласса (снять сгенерированную команду подклассом нельзя).
+    """
+    table = command_table(command_sources(cls.device_kinds))
+    inherited = cls._op_commands
+
+    def same(a: tuple[OpSource, OpSpec], b: tuple[OpSource, OpSpec]) -> bool:
+        return (a[0].kind, a[0].route, a[0].key_from, a[1]) == (b[0].kind, b[0].route, b[0].key_from, b[1])
+
+    dropped = sorted(set(inherited) - set(table))
+    changed = sorted(name for name in table if name in inherited and not same(table[name], inherited[name]))
+    if dropped or changed:
+        raise ValueError(
+            f"{cls.__name__}: таблица видов расходится с командами родителя: нет {dropped}, иначе {changed}"
+        )
+    _install_table(cls, {name: row for name, row in table.items() if name not in inherited})
+
+
+def _install_table(cls: type[DeviceHubPlugin], table: dict[str, tuple[OpSource, OpSpec]]) -> None:
+    """Поставить строки таблицы команд у ``cls`` (copy-on-write); занятое имя — ``ValueError``, ``cls`` не меняется."""
+    for name in table:
+        if name in cls.commands or hasattr(cls, f"cmd_{name}"):
+            raise ValueError(f"команда {name!r} уже есть у {cls.__name__}")
+    if not table:
+        return
+    if "commands" not in cls.__dict__:
+        cls.commands = dict(cls.commands)
+    if "_op_commands" not in cls.__dict__:
+        cls._op_commands = dict(cls._op_commands)
+    for name, (source, spec) in table.items():
+        method = f"cmd_{name}"
+        setattr(cls, method, _make_op_command(source, spec))
+        cls.commands[name] = method
+        cls._op_commands[name] = (source, spec)
+
+
+install_op_commands(DeviceHubPlugin, command_sources(DeviceHubPlugin.device_kinds))

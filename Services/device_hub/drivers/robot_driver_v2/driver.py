@@ -121,12 +121,16 @@ class _RobotDriverCore(BaseDeviceDriver):
                       (T5.3a). None — драйвер без потоков: ``jog_hold`` и запуск программы бросают ``RuntimeError``.
         store:        ``RobotDataStore`` данных робота (T5.3d): точки, программы, параметры для ``point_capture``,
                       ``program_run``, ``param_set``; None — эти операции отвечают «хранилище данных робота не задано».
+        client_factory: ``(transport, cfg) -> RobotClientV2`` — шов тестов (SPI.f): класс клиента, не экземпляр; зовётся
+                      один раз в первом ``connect`` с транспортом драйвера и ``ClientV2Config``, собранным из
+                      ``entry.params``. None — ``RobotClientV2`` (прод; ``DeviceManager`` фабрику не передаёт).
 
     Raises:
         ValueError: некорректные поля конфига клиента, ``robot_params`` или ``on_connect``.
     """
 
     kind = "robot"
+    RECONNECT_THROTTLE_S = _RECONNECT_THROTTLE_SEC
 
     _OPS: dict[str, Callable[[_RobotDriverCore, dict], dict]]  # заполняется после класса
 
@@ -142,6 +146,7 @@ class _RobotDriverCore(BaseDeviceDriver):
         sleep: Any = None,
         spawn: Callable[..., IHandle] | None = None,
         store: RobotDataStore | None = None,
+        client_factory: Callable[[Any, ClientV2Config], RobotClientV2] | None = None,
     ) -> None:
         super().__init__(entry, protocol, clock=clock, sleep=sleep)
         params: Mapping[str, Any] = getattr(entry, "params", None) or {}
@@ -154,13 +159,13 @@ class _RobotDriverCore(BaseDeviceDriver):
 
         self._transport: Any = transport
         self._client: RobotClientV2 | None = None
+        self._client_factory = client_factory
         self._pub: Callable[[str, Any], None] = publish or (lambda _p, _d: None)
         self._param_source = param_source
         self._values, self._epoch = self._load_params()
         self._servo_on, self._do_on_connect = self._parse_on_connect(params.get("on_connect"))
         self._hub_poll_s = float(params.get("poll_interval_s", _HUB_POLL_DEFAULT_S))
 
-        self._last_reconnect = 0.0
         self._last_resync = 0.0
 
         # Замок перехода jog: client.jog_cont и стоп jog; с замком состояния — только снаружи (он листовой)
@@ -290,14 +295,14 @@ class _RobotDriverCore(BaseDeviceDriver):
     def request_disconnect(self) -> None:
         """«Отключить» нажато (C-29): прервать идущий ``connect`` и закрыть окно отказов до конца ``disconnect``.
 
-        Зовёт плагин через ``getattr`` (как ``request_stop``) из потока команды под ``_workers_lock`` до постановки
-        ``disconnect`` в очередь. Ввода-вывода нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт
-        ``disconnect()``: он снимает счётчик «идёт отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся
-        отменённым (``"cancelled"``).
+        Зовёт плагин напрямую (контракт ``DeviceDriver``, ``Services/device_hub/spi.py``; у прочих драйверов —
+        умолчание базы, ничего) из потока команды под ``_workers_lock`` до постановки ``disconnect`` в очередь.
+        Исключение плагин ловит и сообщает в health после выхода из замка; ``disconnect`` ставится всегда. Ввода-вывода
+        нет, не ждёт, ``_param_lock`` не берёт. За ним всегда идёт ``disconnect()``: он снимает счётчик «идёт
+        отключение». Без ``disconnect`` (вне плагина) ``connect`` остаётся отменённым (``"cancelled"``).
 
-        Module contract: lite — публичный метод, зовётся через ``getattr`` (как ``request_stop``); контракт —
-        R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``). Долг: внести
-        ``request_disconnect`` и ``disconnect_pending`` в Protocol драйвера (SPI хаба, следующая задача).
+        Module contract: lite — член ``DeviceDriver`` (``request_disconnect``, ``disconnect_pending``; SPI хаба);
+        контракт — R1–R10 и C1–C13 (``test_robot_v2_state_acceptance.py``, ``test_c29_probe.py``).
         """
         self.desired_connected = False
         self._state.disconnect_request(link_up=self._transport_up)
@@ -336,7 +341,7 @@ class _RobotDriverCore(BaseDeviceDriver):
                     self._transport = build_transport(self.entry, lambda _id: None)
                     self._transport = ExchangeLogTransport(self._transport, self._exchange_log)
                 if self._client is None:
-                    self._client = RobotClientV2(self._transport, self._cfg)
+                    self._client = (self._client_factory or RobotClientV2)(self._transport, self._cfg)
                 client = self._client
                 if not self._transport.is_connected and not self._transport.connect():
                     raise ConnectionError("транспорт не подключился")
@@ -495,10 +500,8 @@ class _RobotDriverCore(BaseDeviceDriver):
                 return True
             if not self.desired_connected:  # «Отключить» пришло между проверкой выше и захватом замка (T5.3h)
                 return False
-            now = self._clock()
-            if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+            if not self._reconnect_due():
                 return False
-            self._last_reconnect = now
             self._record_reconnect()
             connected = self._connect_locked()
             if not self.desired_connected:

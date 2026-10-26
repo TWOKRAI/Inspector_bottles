@@ -5,7 +5,7 @@ Purpose:
     файла после ACK оставляет ``self._epoch`` прежним; откат значения при сбое метки (d-I21) и «откат не прошёл»;
     фабрика хаба передаёт драйверу единственное хранилище плагина (d-I8); ``_param_lock`` берётся не блокируя, а
     ``_syncing`` отказывает ``param_set`` / ``param_apply`` / ``jog_step`` и не трогает робота.
-    Шов на сбой — в ``drv._client.cmd`` (транспорт клиента), а не барьер на входе метода.
+    Шов на сбой — в ``cmd`` клиента (транспорт клиента), а не барьер на входе метода.
 
 Public API:
     Только тесты ``test_*``.
@@ -27,6 +27,7 @@ import pytest
 from multiprocess_framework.modules.base_manager import open_scope
 
 from Services.device_hub.manager import DeviceManager
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.robot_comm.core.params_v2 import PARAM_ID
 from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
@@ -63,8 +64,16 @@ def driver_scope() -> Iterator[Any]:
 
 
 class _Hub:
-    def __init__(self, mgr: DeviceManager, rig: E2eRig, drv: Any, store: RobotDataStore, errors: list[Any]) -> None:
-        self.mgr, self.rig, self.drv, self.store, self.errors = mgr, rig, drv, store, errors
+    def __init__(
+        self,
+        mgr: DeviceManager,
+        rig: E2eRig,
+        drv: Any,
+        store: RobotDataStore,
+        errors: list[Any],
+        clients: ClientRecorder,
+    ) -> None:
+        self.mgr, self.rig, self.drv, self.store, self.errors, self.clients = mgr, rig, drv, store, errors, clients
 
     def call(self, op: str, args: dict) -> dict:
         return bounded(lambda: self.mgr.call(DEV, op, dict(args)), 15.0)
@@ -83,7 +92,14 @@ def _hub(tmp_path: Path) -> Iterator[_Hub]:
         if path.endswith(".last_error"):
             errors.append(payload)
 
-    mgr = DeviceManager(store=None, publish_cb=publish, spawn=_SCOPE.spawn, robot_store=store)
+    clients = ClientRecorder()
+    mgr = DeviceManager(
+        store=None,
+        publish_cb=publish,
+        spawn=_SCOPE.spawn,
+        robot_store=store,
+        driver_options={("robot", "delta_v2"): {"client_factory": clients}},
+    )
     with E2eRig() as rig:
         mgr.upsert(
             {
@@ -96,7 +112,7 @@ def _hub(tmp_path: Path) -> Iterator[_Hub]:
         )
         try:
             assert bounded(lambda: mgr.connect(DEV), 60.0) is True
-            yield _Hub(mgr, rig, mgr.get_driver(DEV), store, errors)
+            yield _Hub(mgr, rig, mgr.get_driver(DEV), store, errors, clients)
         finally:
             try:
                 bounded(lambda: mgr.disconnect(DEV), 15.0)
@@ -104,9 +120,8 @@ def _hub(tmp_path: Path) -> Iterator[_Hub]:
                 pass
 
 
-def _fail_cmd(drv: Any, fails: Callable[[str, Any], bool]) -> list[tuple[str, Any]]:
+def _fail_cmd(client: Any, fails: Callable[[str, Any], bool]) -> list[tuple[str, Any]]:
     """Шов в транспорте клиента: ``cmd`` бросает там, где ``fails(op, args)``; возвращает журнал вызовов."""
-    client = drv._client
     real = client.cmd
     seen: list[tuple[str, Any]] = []
 
@@ -151,7 +166,7 @@ def test_epoch_write_failure_rolls_value_back(tmp_path: Path) -> None:
         epoch_before = hub.drv._epoch
         assert hub.robot_spd() == _SPD_DEFAULT_RAW
         epoch_id = PARAM_ID["P_CONFIG_EPOCH"]
-        seen = _fail_cmd(hub.drv, lambda op, args: op == "PARAM_SET" and args[0] == epoch_id)
+        seen = _fail_cmd(hub.clients.last, lambda op, args: op == "PARAM_SET" and args[0] == epoch_id)
 
         answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
 
@@ -172,7 +187,7 @@ def test_rollback_failure_reports_divergence(tmp_path: Path) -> None:
     with _hub(tmp_path) as hub:
         spd_id, epoch_id = PARAM_ID[_SPD], PARAM_ID["P_CONFIG_EPOCH"]
         _fail_cmd(
-            hub.drv,
+            hub.clients.last,
             lambda op, a: op == "PARAM_SET" and (a[0] == epoch_id or (a[0] == spd_id and a[1] == _SPD_DEFAULT_RAW)),
         )
 
@@ -188,7 +203,7 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
     """``_param_lock`` занят или ``_syncing`` -> отказ сразу, без записи роботу; ``jog_step`` при ``_syncing`` тоже."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         refusal = {"status": "error", "message": TEXT_SYNCING}
         holder: list[bool] = []
         if how == "lock_held":
@@ -221,9 +236,8 @@ def test_param_ops_refused_while_syncing_and_robot_untouched(tmp_path: Path, how
 # --------------------------------------------------------------------------------------------------
 
 
-def _block_first_param_set(drv: Any) -> tuple[threading.Event, threading.Event, list[tuple[str, Any]]]:
+def _block_first_param_set(client: Any) -> tuple[threading.Event, threading.Event, list[tuple[str, Any]]]:
     """Шов в транспорте клиента: первый ``PARAM_SET`` ждёт ``release`` ДО исходного ``cmd``; журнал вызовов."""
-    client = drv._client
     real = client.cmd
     entered, release = threading.Event(), threading.Event()
     seen: list[tuple[str, Any]] = []
@@ -248,9 +262,9 @@ def test_param_set_during_sync_answers_fast_and_robot_untouched(tmp_path: Path) 
     """d-I9: ``param_set`` во время ``sync_params`` (поток синхронизации стоит на ``PARAM_SET``) отвечает ≤ 0,5 с."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        entered, release, seen = _block_first_param_set(drv)
+        entered, release, seen = _block_first_param_set(hub.clients.last)
         _break_epoch(hub)
-        worker = threading.Thread(target=lambda: drv._resync_maybe(drv._client), daemon=True)
+        worker = threading.Thread(target=lambda: drv._resync_maybe(hub.clients.last), daemon=True)
         worker.start()
         try:
             assert entered.wait(3.0), "синхронизация не дошла до PARAM_SET"
@@ -300,18 +314,18 @@ def test_syncing_is_set_atomically_with_activity_check(tmp_path: Path, flag: str
     """d-I20: при активности синхронизации нет, ``_syncing`` и ``_last_resync`` не ставятся; без неё — ставится."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         _break_epoch(hub)
         admitted = _ACTIVITY[flag][0](drv.state)
         assert admitted in (None, (None, None))  # переход допущен, отказа нет
         try:
-            drv._resync_maybe(drv._client)
+            drv._resync_maybe(hub.clients.last)
             assert [op for op, _ in seen if op == "PARAM_SET"] == []
             assert drv.state.view().syncing is False
             assert drv._last_resync == 0.0  # отказ по активности задержки в 2 с не создаёт
         finally:
             _ACTIVITY[flag][1](drv.state)
-        drv._resync_maybe(drv._client)  # активности нет: сразу, без паузы
+        drv._resync_maybe(hub.clients.last)  # активности нет: сразу, без паузы
         assert [op for op, _ in seen if op == "PARAM_SET"] != []
         assert hub.rig.read("TLM_CFG_EPOCH") == [drv._epoch]
         assert drv.state.view().syncing is False
@@ -352,7 +366,7 @@ def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
     new_epoch = 4242  # метка после «param_set»: и у робота, и у драйвера
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         _break_epoch(hub)
         assert hub.rig.read("TLM_CFG_EPOCH") == [0] and drv._epoch != 0  # тик видит расхождение: метка робота 0
 
@@ -363,7 +377,7 @@ def test_resync_rereads_epoch_under_lock(tmp_path: Path) -> None:
         race_lock = _RaceLock(drv._param_lock, param_set_tail)
         drv._param_lock = race_lock
         try:
-            bounded(lambda: drv._resync_maybe(drv._client), 15.0)
+            bounded(lambda: drv._resync_maybe(hub.clients.last), 15.0)
         finally:
             drv._param_lock = race_lock._real
         assert race_lock.fired, "шов не сработал: _resync_maybe не брал замок"
@@ -388,7 +402,7 @@ def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypa
     with _hub(tmp_path) as hub:
         drv = hub.drv
         monkeypatch.setattr(module, "save_params", save)
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         answer: list[dict] = []
         worker = threading.Thread(
             target=lambda: answer.append(hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})),
@@ -398,7 +412,7 @@ def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypa
         try:
             assert entered.wait(5.0), "param_set не дошёл до записи файла"
             assert hub.rig.read("TLM_CFG_EPOCH") != [drv._epoch]  # робот уже с новой меткой, драйвер ещё со старой
-            drv._resync_maybe(drv._client)  # тик в этом окне
+            drv._resync_maybe(hub.clients.last)  # тик в этом окне
         finally:
             release.set()
             worker.join(10.0)
@@ -412,10 +426,9 @@ def test_param_set_vs_resync_between_epoch_ack_and_save(tmp_path: Path, monkeypa
 # --------------------------------------------------------------------------------------------------
 
 
-def _write_then_raise(drv: Any, pid: int, value: int | None = None) -> list[tuple[str, Any]]:
+def _write_then_raise(client: Any, pid: int, value: int | None = None) -> list[tuple[str, Any]]:
     """Шов «записать и бросить»: первый ``PARAM_SET`` параметра ``pid`` (со значением ``value``, если задано) настоящий,
     но ответ «потерян» (``RobotTimeout``): робот применил, драйвер не знает."""
-    client = drv._client
     real = client.cmd
     seen: list[tuple[str, Any]] = []
     fired = [False]
@@ -439,7 +452,7 @@ def test_value_write_lost_ack_rolls_value_back(tmp_path: Path) -> None:
         drv = hub.drv
         epoch_before = drv._epoch
         spd_id = PARAM_ID[_SPD]
-        seen = _write_then_raise(drv, spd_id, 55)
+        seen = _write_then_raise(hub.clients.last, spd_id, 55)
 
         answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
         drv.tick(None)  # тик не расходится с файлом
@@ -456,15 +469,15 @@ def test_value_write_lost_ack_rolls_value_back(tmp_path: Path) -> None:
 def test_value_write_lost_ack_and_rollback_failure_reports_divergence(tmp_path: Path) -> None:
     with _hub(tmp_path) as hub:
         spd_id = PARAM_ID[_SPD]
-        _write_then_raise(hub.drv, spd_id, 55)
-        real = hub.drv._client.cmd
+        _write_then_raise(hub.clients.last, spd_id, 55)
+        real = hub.clients.last.cmd
 
         def cmd(op: str, args: Any) -> Any:
             if op == "PARAM_SET" and args[0] == spd_id and args[1] == _SPD_DEFAULT_RAW:
                 raise RobotTimeout("res")  # откат тоже не дошёл
             return real(op, args)
 
-        hub.drv._client.cmd = cmd
+        hub.clients.last.cmd = cmd
         answer = hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None})
         assert answer == {"status": "error", "message": TEXT_NO_REPLY}
         assert hub.errors[-1] == TEXT_DIVERGED
@@ -485,7 +498,7 @@ def test_value_write_lost_ack_and_rollback_failure_reports_divergence(tmp_path: 
 def test_overflow_and_nonfinite_args_refused_before_robot(tmp_path: Path, op: str, args: dict) -> None:
     """F3: ``OverflowError`` и не-числа -> ``TEXT_BAD_ARGS`` (не английский текст Python), робот не тронут."""
     with _hub(tmp_path) as hub:
-        seen = _fail_cmd(hub.drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         assert hub.call(op, args) == {"status": "error", "message": TEXT_BAD_ARGS}
         assert [o for o, _ in seen if o in ("JOG_STEP", "PARAM_SET")] == []
 
@@ -494,7 +507,7 @@ def test_overflow_and_nonfinite_args_refused_before_robot(tmp_path: Path, op: st
 def test_jog_step_numbers_as_strings_refused(tmp_path: Path, key: str) -> None:
     """F4: число строкой — ``TEXT_BAD_ARGS``, робот не поехал (то же правило, что у ``param_set``)."""
     with _hub(tmp_path) as hub:
-        seen = _fail_cmd(hub.drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         args = {"dx": 1, "dy": 0, "spd": 50, key: "10"}
         assert hub.call("jog_step", args) == {"status": "error", "message": TEXT_BAD_ARGS}
         assert [o for o, _ in seen if o == "JOG_STEP"] == []
@@ -517,7 +530,7 @@ def test_param_ops_refused_while_stopping(tmp_path: Path) -> None:
     """F7: ``param_set`` / ``param_apply`` при ``_stopping`` -> ``TEXT_STOPPING``, робот не тронут, замок отпущен."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         drv.state.disconnect_stop_plan(0)
         refusal = {"status": "error", "message": TEXT_STOPPING}
         assert hub.call("param_set", {"name": _SPD, "value": 55, "base_rev": None}) == refusal
@@ -553,7 +566,7 @@ def test_tick_does_not_block_on_param_lock_while_reconnecting(tmp_path: Path) ->
     после отпускания следующий тик подключает и синхронизирует."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         _drop_link(hub)
         attempts, reconnects = drv._reconnect_attempts, drv.stats["reconnects"]
         assert drv._param_lock.acquire(blocking=False)
@@ -583,7 +596,7 @@ def test_reconnect_holds_param_lock_one_connect_one_probe(tmp_path: Path) -> Non
         drv = hub.drv
         _drop_link(hub)
         attempts, reconnects = drv._reconnect_attempts, drv.stats["reconnects"]
-        transport, client = drv._transport, drv._client
+        transport, client = drv._transport, hub.clients.last
         real_connect, real_probe = transport.connect, client.probe
         counts = {"connect": 0, "probe": 0}
         taken: list[bool] = []
@@ -620,7 +633,7 @@ def test_no_resync_after_shutdown_stop(tmp_path: Path) -> None:
     """G2: после ``request_stop`` (выключение) тики не синхронизируют параметры, даже при расходящихся метках."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        seen = _fail_cmd(drv, lambda *_: False)
+        seen = _fail_cmd(hub.clients.last, lambda *_: False)
         hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
         drv.request_stop(time.monotonic() + 2.5)
         end = time.monotonic() + 2.0
@@ -637,7 +650,7 @@ def test_params_file_oserror_in_resync_and_connect_is_constant_text(tmp_path: Pa
         drv = hub.drv
         (tmp_path / "robot" / DEV / "params.yaml").mkdir(parents=True)
         hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
-        drv._resync_maybe(drv._client)
+        drv._resync_maybe(hub.clients.last)
         assert hub.errors[-1] == TEXT_STORE_ERROR
         drv._ready = False
         assert drv.connect() is False
@@ -654,14 +667,14 @@ def test_dispatch_does_not_start_job_while_syncing(tmp_path: Path) -> None:
     with _hub(tmp_path) as hub:
         drv = hub.drv
         assert hub.call("enqueue_job", {"x_mm": 300, "y_mm": -150})["status"] == "ok"
-        entered, release, seen = _block_first_param_set(drv)
+        entered, release, seen = _block_first_param_set(hub.clients.last)
         hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
         worker = threading.Thread(target=drv.connect, daemon=True)  # ручное «Подключить» при живом соединении
         worker.start()
         try:
             assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
             assert drv.state.view().syncing is True
-            drv._dispatch(drv._client, True, None)  # хвост тика, начатого до connect
+            drv._dispatch(hub.clients.last, True, None)  # хвост тика, начатого до connect
             assert [o for o, _ in seen if o == "CVT_JOB"] == []
             assert len(drv.state.view().job_queue) == 1  # задание осталось в очереди
         finally:
@@ -682,7 +695,7 @@ def test_tick_rechecks_connected_after_taking_param_lock(tmp_path: Path) -> None
         drv = hub.drv
         _drop_link(hub)
         drv._last_reconnect = -100.0  # порог не мешает
-        client = drv._client
+        client = hub.clients.last
         real_probe, real_alive = client.probe, drv._activity_alive
         probes = [0]
         fired = [False]
@@ -712,9 +725,9 @@ def test_shutdown_stop_cancels_running_sync_at_next_parameter(tmp_path: Path) ->
     with _hub(tmp_path) as hub:
         drv = hub.drv
         epoch_before = drv._epoch
-        entered, release, seen = _block_first_param_set(drv)
+        entered, release, seen = _block_first_param_set(hub.clients.last)
         hub.rig.core.regs[REG["TLM_CFG_EPOCH"]] = 0
-        worker = threading.Thread(target=lambda: drv._resync_maybe(drv._client), daemon=True)
+        worker = threading.Thread(target=lambda: drv._resync_maybe(hub.clients.last), daemon=True)
         worker.start()
         try:
             assert entered.wait(5.0), "синхронизация не дошла до PARAM_SET"
@@ -770,7 +783,7 @@ def test_syncing_cleared_when_connect_sync_fails(tmp_path: Path) -> None:
     «идёт синхронизация параметров» не отвечает, после успешного подключения — ``ok``."""
     with _hub(tmp_path) as hub:
         drv = hub.drv
-        client = drv._client
+        client = hub.clients.last
         real_sync = client.sync_params
 
         def broken(*_a: Any, **_kw: Any) -> Any:
@@ -797,7 +810,7 @@ def test_syncing_cleared_when_connect_sync_fails(tmp_path: Path) -> None:
 def _stop_inside_first_param_set(hub: _Hub, run: Callable[[], Any]) -> tuple[Any, list[tuple[str, Any]]]:
     """``run`` в потоке; на первом ``PARAM_SET`` синхронизации (шов) — ``request_stop``; затем ``run`` дорабатывает."""
     drv = hub.drv
-    entered, release, seen = _block_first_param_set(drv)
+    entered, release, seen = _block_first_param_set(hub.clients.last)
     box: list[Any] = []
     worker = threading.Thread(target=lambda: box.append(run()), daemon=True)
     worker.start()
@@ -858,7 +871,7 @@ def test_user_disconnect_during_sync_is_not_an_error(tmp_path: Path) -> None:
         drv = hub.drv
         _drop_link(hub)
         drv._last_reconnect = -100.0
-        entered, release, _ = _block_first_param_set(drv)
+        entered, release, _ = _block_first_param_set(hub.clients.last)
         tx_err = drv.stats["tx_err"]
         worker = threading.Thread(target=lambda: drv.tick(None), daemon=True)
         worker.start()

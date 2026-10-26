@@ -29,6 +29,7 @@ from multiprocess_framework.modules.base_manager import open_scope
 
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2, _parse_tlm
 from Services.device_hub.registry.entry import DeviceEntry
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.programs import Move, Point, Program
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, bounded, pulse
@@ -76,7 +77,9 @@ class _Rec:
 
 
 @contextmanager
-def _driver(rec: _Rec, port: int, params: dict | None = None) -> Iterator[RobotDriverV2]:
+def _driver(
+    rec: _Rec, port: int, params: dict | None = None, clients: ClientRecorder | None = None
+) -> Iterator[RobotDriverV2]:
     entry = DeviceEntry(
         id="rv2",
         name="rv2",
@@ -85,7 +88,7 @@ def _driver(rec: _Rec, port: int, params: dict | None = None) -> Iterator[RobotD
         transport={"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID},
         params=dict(params or {}),
     )
-    drv = RobotDriverV2(entry, None, publish=rec, spawn=_SCOPE.spawn)
+    drv = RobotDriverV2(entry, None, publish=rec, spawn=_SCOPE.spawn, client_factory=clients)
     try:
         assert bounded(drv.connect, _CONNECT_DEADLINE_S) is True
         drv.desired_connected = True
@@ -168,13 +171,14 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
     движется, пока удержание подтверждается. Плюс: ``jog_hold`` вернулся не раньше стопа release.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
         assert _call(drv, "jog_hold", _JOG)["status"] == "ok"
         _hold(drv, 0.4)
         assert _moving(rig) == 1
         n_cmd = len(_jog_cmds(rig))
 
-        client = drv._client
+        client = clients.last
         real_stop = client.issue_stop
         real_jog_cont = client.jog_cont
         entered = threading.Event()
@@ -238,14 +242,15 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
     ``last_error`` за гонку нет; ``jog_hold`` вернулся не раньше стопа поводка.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
         assert _call(drv, "jog_hold", _JOG)["status"] == "ok"
         _hold(drv, 0.4)
         assert _moving(rig) == 1
         n_cmd = len(_jog_cmds(rig))
         n_err = len(rec.at("rv2", "last_error"))
 
-        client = drv._client
+        client = clients.last
         real_stop = client.issue_stop
         real_jog_cont = client.jog_cont
         entered = threading.Event()
@@ -308,8 +313,9 @@ def test_start_program_during_jog_hold_transition_returns_busy_jog() -> None:
     }
     program = Program(name="race", steps=tuple(Move(point="a" if i % 2 == 0 else "b", kind="JOINT") for i in range(4)))
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last
         real_jog_cont = client.jog_cont
         box: dict[str, Any] = {}
 
@@ -365,8 +371,9 @@ def test_lease_thread_exception_releases_jog_and_allows_reconnect() -> None:
     переподключается (флаг без живого потока переподключение не держит) и jog снова работает.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last
         real_lease = client.jog_lease
         fired = threading.Event()
 
@@ -552,9 +559,10 @@ def _fake_driver(rec: _Rec, **params: Any) -> tuple[RobotDriverV2, _FakeClient, 
         params=params,
     )
     transport = _FakeTransport()
-    drv = RobotDriverV2(entry, None, transport=transport, publish=rec, spawn=_SCOPE.spawn)
     client = _FakeClient()
-    drv._client = client  # шов: клиент v2 без sim (транспорт внедряется публично, клиент — нет)
+    drv = RobotDriverV2(
+        entry, None, transport=transport, publish=rec, spawn=_SCOPE.spawn, client_factory=lambda _t, _c: client
+    )  # шов: клиент v2 без sim
     assert drv.connect() is True
     transport.closed = 0  # первый connect закрывает «подключённый» сокет до probe — счёт закрытий с нуля после него
     drv.desired_connected = True
@@ -911,8 +919,9 @@ def test_job_waits_for_jog_release_stop_in_flight() -> None:
     """
     rec = _Rec()
     entered, release = threading.Event(), threading.Event()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client  # шов: стоп release — метод клиента драйвера
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last  # шов: стоп release — метод клиента драйвера
         original_stop = client.issue_stop
 
         def stop(level: int) -> Any:
