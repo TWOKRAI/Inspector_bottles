@@ -6,6 +6,7 @@ Purpose:
     запасным путём. Проверка — настоящей сборкой: тот же путь, что у сборщика прототипа (``SystemBuilder`` по
     манифесту), затем ``ExecutorManager.load_config`` принимает секцию ``config["executors"]`` процесса ``devices``.
     Ожидания — литералы. Сборка не спавнит процессы (см. ``test_build_characterization.py``).
+    Сторож строкового контракта: исполнители операций каталога хаба ⊆ исполнителям процесса ``devices``.
 
 Public API:
     Только тесты ``test_*``.
@@ -64,3 +65,14 @@ def test_executor_manager_accepts_devices_executors() -> None:
             thread = threading.Thread(target=stop, daemon=True)
             thread.start()
             thread.join(10.0)
+
+
+@pytest.mark.parametrize("recipe", RECIPES)
+def test_catalog_executors_are_declared_by_devices_process(recipe: str) -> None:
+    """Имя исполнителя — строковый контракт Services -> топология: каждый ``executor`` операций команд хаба
+    (``kinds.DEFAULT_SOURCES``) объявлен в секции ``executors`` процесса ``devices`` (ревью ветки SPI, п.5)."""
+    from Services.device_hub.kinds import DEFAULT_SOURCES
+
+    named = {spec.executor for source in DEFAULT_SOURCES for spec in source.ops if spec.executor is not None}
+    assert named == {"device_io"}
+    assert named <= set(_devices_config(recipe)["executors"])

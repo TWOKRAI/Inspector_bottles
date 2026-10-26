@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin, install_op_commands
-from Services.device_hub.spi import DEFAULT_SOURCES, OpSource, OpSpec, command_table
+from Services.device_hub.kinds import DEFAULT_SOURCES
+from Services.device_hub.spi import OpSource, OpSpec, command_table
 
 _DEVICE_AND_HIK = {
     "device_list",

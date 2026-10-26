@@ -24,7 +24,8 @@ from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
 from Services.device_hub.errors import DeviceHubError, DeviceNotFoundError
 from Services.device_hub.manager import DeviceManager
-from Services.device_hub.spi import DEFAULT_SOURCES, command_table
+from Services.device_hub.kinds import DEFAULT_SOURCES
+from Services.device_hub.spi import command_table
 from Services.robot_comm.store import RobotDataStore
 from Services.robot_comm.tests.e2e_rig_v2 import bounded
 

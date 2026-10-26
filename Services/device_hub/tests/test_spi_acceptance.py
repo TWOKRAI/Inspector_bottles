@@ -230,7 +230,7 @@ def test_a12_no_operation_has_both_executor_and_immediate() -> None:
     """А12: ни у одной операции нет одновременно ``executor`` и ``immediate`` (все каталоги и ``DEFAULT_SOURCES``)."""
     mod = spi()
     ops = [s for cat in ("ROBOT_V1_OPS", "ROBOT_V2_OPS", "VFD_OPS", "ROBOT_DATA_OPS") for s in getattr(mod, cat)]
-    ops += [s for source in mod.DEFAULT_SOURCES for s in source.ops]
+    ops += [s for source in importlib.import_module("Services.device_hub.kinds").DEFAULT_SOURCES for s in source.ops]
     assert len(ops) > 0
     assert [s.name for s in ops if s.executor and s.immediate] == []
     assert any(s.immediate for s in ops), "недостижимо: нет ни одной immediate-операции"

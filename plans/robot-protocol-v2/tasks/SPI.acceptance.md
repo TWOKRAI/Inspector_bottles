@@ -15,8 +15,9 @@
 - Сторож `Services/device_hub/tests/test_no_private_driver_state.py` сканирует все `*.py` двух каталогов хаба: приватные
   имена драйвера (`_client`, `_ready`, `_epoch`, `_transport`, …) в файлах tester — красный сторож. Нужен клиент — через
   публичные фикстуры `conftest.py`; нельзя без приватного — стоп, вопрос лиду.
-- Пути импорта: `from Services.device_hub.spi import OpSpec, OpSource, command_table, DEFAULT_SOURCES, ROBOT_V1_OPS,
+- Пути импорта: `from Services.device_hub.spi import OpSpec, OpSource, command_table, ROBOT_V1_OPS,
   ROBOT_V2_OPS, ROBOT_DATA_OPS, VFD_OPS, DeviceDriver, StopAwareDriver`;
+  `from Services.device_hub.kinds import DEFAULT_SOURCES` (SPI.h, решение лида: spi не импортирует драйверы);
   `from Plugins.hub.device_hub.plugin import DeviceHubPlugin, install_op_commands`;
   `from Services.device_hub.errors import RegisterTransportUnavailable`.
 - Метка `[c2]`, `[d]` — строка проверяется после подзадачи c2 / d2 (до неё тест помечается `xfail(strict=True)` лидом).

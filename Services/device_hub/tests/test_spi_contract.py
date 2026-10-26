@@ -5,6 +5,9 @@ Purpose:
     ``spi.py``). Сторож полноты: для каждого драйвера имена ``OP_SPECS`` == ключи его таблицы операций; ключи v1 и ПЧ
     читаются из AST модулей драйверов (приватное имя таблицы в тесте не трогается — сторож
     ``test_no_private_driver_state.py``), v2 — публичная ``robot_driver_v2.ops.OPS``.
+    Сторожа одного источника (SPI.h, ``kinds.py``): команды плагина выводятся из ``OP_SPECS`` классов драйверов таблицы
+    видов; новый вид (строка таблицы + драйвер) даёт команды и фабрику; операция, добавленная в ``OP_SPECS``,
+    попадает в команды.
     Ожидания — литералы.
 
 Public API:
@@ -23,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from Services.device_hub import spi
+from Services.device_hub import kinds, spi
 from Services.device_hub.drivers.base import BaseDeviceDriver
 from Services.device_hub.drivers.generic_modbus_driver import GenericModbusDriver
 from Services.device_hub.drivers.hikvision_driver import HikvisionDriver
@@ -171,7 +174,7 @@ def test_opsource_key_from_default() -> None:
 
 
 def test_command_table_default_sources_has_55_commands() -> None:
-    table = spi.command_table(spi.DEFAULT_SOURCES)
+    table = spi.command_table(kinds.DEFAULT_SOURCES)
     assert len(table) == 55
     assert sum(1 for name in table if name.startswith("robot_")) == 50
     assert {name for name in table if name.startswith("vfd_")} == {
@@ -184,7 +187,7 @@ def test_command_table_default_sources_has_55_commands() -> None:
 
 
 def test_command_table_routes_and_links() -> None:
-    table = spi.command_table(spi.DEFAULT_SOURCES)
+    table = spi.command_table(kinds.DEFAULT_SOURCES)
     data = {name for name, (source, _spec) in table.items() if source.route == "data"}
     assert len(data) == 10
     no_link = {name for name, (_source, spec) in table.items() if spec.needs_link is False}
@@ -198,12 +201,12 @@ def test_command_table_shared_robot_ops_one_row_one_object() -> None:
     shared = set(v1) & set(v2)
     assert shared == {"abort", "enqueue_job", "get_telemetry", "return_job"}
     assert all(v1[name] is v2[name] for name in shared)
-    table = spi.command_table(spi.DEFAULT_SOURCES)
+    table = spi.command_table(kinds.DEFAULT_SOURCES)
     assert table["robot_abort"][1] is v2["abort"]
 
 
 def test_command_table_descriptions_are_the_55() -> None:
-    table = spi.command_table(spi.DEFAULT_SOURCES)
+    table = spi.command_table(kinds.DEFAULT_SOURCES)
     assert {name for name, (_source, spec) in table.items() if spec.description} == _DESCRIBED
 
 
@@ -241,6 +244,149 @@ def test_op_specs_sizes() -> None:
     assert (len(RobotDriver.OP_SPECS), len(RobotDriverV2.OP_SPECS), len(VfdDriver.OP_SPECS)) == (27, 17, 5)
     assert len(spi.ROBOT_DATA_OPS) == 10
     assert HikvisionDriver.OP_SPECS == () and GenericModbusDriver.OP_SPECS == ()
+
+
+# --- один источник: таблица видов -> OP_SPECS драйверов -> команды и фабрики (SPI.h) ---
+
+# Литерал таблицы видов: вид -> (префикс команд, классы драйверов по протоколам записи)
+_KIND_ROWS = {
+    "robot": ("robot", {"delta_v2": RobotDriverV2, "*": RobotDriver}),
+    "vfd": ("vfd", {"*": VfdDriver}),
+    "hikvision": ("hik", {"*": HikvisionDriver}),
+    "generic_modbus": (None, {"*": GenericModbusDriver}),
+}
+
+
+class _LampDriver(BaseDeviceDriver):
+    """Драйвер нового вида для пробы пути роста: одна операция в ``OP_SPECS``."""
+
+    kind = "lamp"
+    OP_SPECS = (spi.OpSpec(name="on", description="Лампа: включить {device_id}."),)
+
+    def __init__(self, entry: Any, protocol: Any = None) -> None:
+        super().__init__(entry, protocol)
+        self.lit = False
+        self.connected = False
+
+    @property
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def connect(self) -> bool:
+        self.connected = True
+        return True
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def tick(self, stop_event: Any = None) -> dict | None:
+        return None
+
+    def call(self, op: str, args: dict) -> dict:
+        self.lit = op == "on"
+        return {"status": "ok", "lit": self.lit}
+
+
+_LAMP = kinds.DeviceKind(kind="lamp", drivers={"*": _LampDriver}, prefix="lamp")
+
+
+def test_kind_table_rows() -> None:
+    assert {row.kind: (row.prefix, dict(row.drivers)) for row in kinds.DEFAULT_KINDS} == _KIND_ROWS
+    assert [row.kind for row in kinds.DEFAULT_KINDS if row.data_ops] == ["robot"]
+
+
+def test_plugin_commands_are_op_specs_of_kind_table() -> None:
+    """(а) Команды плагина = ``{префикс_операция}`` по ``OP_SPECS`` классов каждой строки таблицы + операции данных."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+
+    expected = {
+        f"{prefix}_{spec.name}"
+        for prefix, drivers in _KIND_ROWS.values()
+        for cls in drivers.values()
+        for spec in cls.OP_SPECS
+    }
+    expected |= {f"robot_{spec.name}" for spec in spi.ROBOT_DATA_OPS}
+    assert set(DeviceHubPlugin._op_commands) == expected
+    assert len(expected) == 55 and len(DeviceHubPlugin.commands) == 72
+
+
+def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
+    """(б) Новый вид = драйвер с ``OP_SPECS`` + строка таблицы: команда ``lamp_on`` у наследника плагина (родитель не
+    меняется), фабрика вида — у менеджера и у менеджера плагина, вызов доходит до драйвера."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin, install_op_commands
+    from Plugins.hub.device_hub.tests.conftest import make_ctx
+    from Services.device_hub.manager import DeviceManager
+
+    table = (*kinds.DEFAULT_KINDS, _LAMP)
+
+    class LampHub(DeviceHubPlugin):
+        device_kinds = table
+
+    install_op_commands(LampHub, kinds.command_sources((_LAMP,)))
+    assert LampHub.commands["lamp_on"] == "cmd_lamp_on"
+    assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 72
+    assert len(LampHub.commands) == 73
+
+    manager = DeviceManager(store=None, kinds=table)
+    manager.upsert({"id": "lamp_1", "name": "Лампа", "kind": "lamp"})
+    assert manager.connect("lamp_1") is True
+    assert manager.call("lamp_1", "on", {}) == {"status": "ok", "lit": True}
+    with pytest.raises(ValueError):
+        DeviceManager(store=None).upsert({"id": "lamp_1", "name": "Лампа", "kind": "lamp"})
+
+    registry = tmp_path / "devices.yaml"
+    ctx = make_ctx({"registry_path": str(registry)}, tmp_registry=registry)
+    plugin = LampHub()
+    plugin.configure(ctx)
+    try:
+        assert plugin.cmd_device_upsert({"id": "lamp_1", "name": "Лампа", "kind": "lamp"})["status"] == "ok"
+    finally:
+        plugin.shutdown(ctx)
+
+
+def test_op_added_to_driver_op_specs_becomes_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """(в) Операция, добавленная в ``OP_SPECS`` класса драйвера, попадает в команды таблицы видов."""
+    extra = spi.OpSpec(name="new_op", description="Робот v2: новая операция {device_id}")
+    monkeypatch.setattr(RobotDriverV2, "OP_SPECS", (*RobotDriverV2.OP_SPECS, extra))
+    table = spi.command_table(kinds.command_sources(kinds.DEFAULT_KINDS))
+    assert table["robot_new_op"][1] is extra
+    assert len(table) == 56
+
+
+def test_module_attribute_substitution_binds_late_subclass_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Подмена класса атрибутом модуля (шов тестов фабрики до SPI): подкласс создаётся, ``OP_SPECS`` и команды прежние;
+    не подкласс — ``TypeError`` при создании драйвера."""
+    import Services.device_hub.drivers.vfd_driver as vfd_module
+
+    (row,) = [r for r in kinds.DEFAULT_KINDS if r.kind == "vfd"]
+    ctx = kinds.DriverContext(
+        publish=lambda _p, _d: None, spawn=None, robot_store=None, options={}, resolve_device=lambda _id: None
+    )
+
+    class Vfd(VfdDriver):
+        pass
+
+    monkeypatch.setattr(vfd_module, "VfdDriver", Vfd)
+    assert type(row.create(_entry("vfd"), None, ctx)) is Vfd
+    assert spi.command_table(kinds.command_sources(kinds.DEFAULT_KINDS)) == spi.command_table(kinds.DEFAULT_SOURCES)
+
+    class Stranger(BaseDeviceDriver):  # конструктор принимает аргументы сборки ПЧ: отказ — только от проверки класса
+        kind = "vfd"
+
+        def __init__(self, entry: Any, protocol: Any = None, **_kw: Any) -> None:
+            super().__init__(entry, protocol)
+
+    monkeypatch.setattr(vfd_module, "VfdDriver", Stranger)
+    with pytest.raises(TypeError):
+        row.create(_entry("vfd"), None, ctx)
+
+
+def test_command_sources_refuses_ops_without_prefix_and_repeated_kind() -> None:
+    no_prefix = kinds.DeviceKind(kind="lamp", drivers={"*": _LampDriver})
+    with pytest.raises(ValueError):
+        kinds.command_sources((no_prefix,))
+    with pytest.raises(ValueError):
+        kinds.command_sources((_LAMP, _LAMP))
 
 
 # --- умолчания базы (D2) и соответствие Protocol ---

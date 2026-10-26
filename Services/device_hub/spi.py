@@ -5,16 +5,19 @@ Purpose:
     статический контракт; во время работы ``isinstance`` по ним не вызывается — умолчания даёт ``BaseDeviceDriver``,
     стоп — флаг ``stop_aware``). ``OpSpec`` описывает одну операцию драйвера, ``OpSource`` — набор операций одного
     префикса команд; ``command_table`` сводит источники в таблицу «имя команды -> (источник, операция)».
-    Каталоги: ``ROBOT_V2_OPS`` (17), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5);
-    ``DEFAULT_SOURCES`` — их источники для плагина хаба. Флаги ``immediate`` — по коду драйверов
+    Каталоги: ``ROBOT_V2_OPS`` (17), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
+    Драйвер объявляет свои операции ссылкой ``OP_SPECS = <каталог>``; команды плагина строятся из ``OP_SPECS`` классов
+    драйверов таблицы видов (``Services/device_hub/kinds.py``: ``command_sources``, ``DEFAULT_SOURCES``), не из
+    кортежей этого модуля напрямую. Флаги ``immediate`` — по коду драйверов
     (``plans/robot-protocol-v2/tasks/SPI.framework.md``, таблица с file:line).
-    Импорт — только stdlib: модуль импортирует класс плагина, а класс плагина — GUI.
+    Импорт — только stdlib, драйверы не импортируются (их модули импортируют этот): модуль импортирует класс плагина,
+    а класс плагина — GUI.
     Контракт-тесты — ``Services/device_hub/tests/test_spi_contract.py`` (отступление от ``module-contract``: каталога
     ``tests/contract/`` в репозитории нет).
 
 Public API:
     ``OpSpec``, ``OpSource``, ``command_table``, ``DeviceDriver``, ``StopAwareDriver``, ``ROBOT_V2_OPS``,
-    ``ROBOT_V1_OPS``, ``ROBOT_DATA_OPS``, ``VFD_OPS``, ``DEFAULT_SOURCES``.
+    ``ROBOT_V1_OPS``, ``ROBOT_DATA_OPS``, ``VFD_OPS``.
 
 Stability: lite
 """
@@ -26,7 +29,6 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, Protocol
 
 __all__ = [
-    "DEFAULT_SOURCES",
     "ROBOT_DATA_OPS",
     "ROBOT_V1_OPS",
     "ROBOT_V2_OPS",
@@ -423,11 +425,4 @@ VFD_OPS: tuple[OpSpec, ...] = (
     OpSpec(name="stop", description="Стоп ПЧ: {device_id}.", immediate=True),  # vfd_driver.py:226-229
     OpSpec(name="reset_fault", description="Сброс аварии ПЧ: {device_id}."),
     OpSpec(name="get_status", description="Статус ПЧ: {device_id}."),
-)
-
-DEFAULT_SOURCES: tuple[OpSource, ...] = (
-    OpSource(prefix="robot", kind="robot", route="driver", ops=ROBOT_V2_OPS),
-    OpSource(prefix="robot", kind="robot", route="driver", ops=ROBOT_V1_OPS),
-    OpSource(prefix="robot", kind="robot", route="data", ops=ROBOT_DATA_OPS),
-    OpSource(prefix="vfd", kind="vfd", route="driver", ops=VFD_OPS),
 )

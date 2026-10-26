@@ -3,8 +3,8 @@
 CRUD реестра + lifecycle (connect/disconnect) + dispatch (call) + describe.
 Наследует BaseManager + ObservableMixin (правило владельца).
 
-Драйверы создаются лениво через register_driver_factory(kind, factory).
-Дефолтные фабрики (robot/vfd/hikvision/generic_modbus) регистрируются в __init__.
+Драйверы создаются лениво фабриками видов. Фабрики по умолчанию — из таблицы видов (``kinds.DEFAULT_KINDS``,
+параметр ``kinds``); ``register_driver_factory(kind, factory)`` — шов прямого использования менеджера (тесты).
 
 publish_cb — инъекция конструктора: ``(path, dict) -> None``.
 В тестах — фейк; в продакшене — state-публикация.
@@ -15,7 +15,7 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
@@ -28,9 +28,10 @@ from Services.device_hub.errors import (
     RegisterTransportUnavailable,
     RegistryIntegrityError,
 )
+from Services.device_hub.kinds import DEFAULT_KINDS, DeviceKind, DriverContext
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
-from Services.device_hub.robot_data_ops import STORE_ERRORS, param_source_for, run_op, store_error_for_operator
+from Services.device_hub.robot_data_ops import STORE_ERRORS, run_op, store_error_for_operator
 from Services.device_hub.spi import DeviceDriver
 
 if TYPE_CHECKING:
@@ -66,6 +67,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         driver_options: ``{kind: {имя: значение}}`` — именованные аргументы конструктора драйверов вида, создаваемых
                     фабриками по умолчанию (универсальный шов тестов: у робота v2 — ``client_factory``). ``None`` —
                     без опций (прод). Неизвестная опция — ``TypeError`` конструктора при создании драйвера.
+        kinds:      Таблица видов (``Services/device_hub/kinds.py``): фабрики драйверов по умолчанию; допустимый вид
+                    записи — вид с фабрикой. По умолчанию ``DEFAULT_KINDS``; повтор вида — ``ValueError``.
     """
 
     def __init__(
@@ -76,6 +79,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         spawn: Callable[..., Any] | None = None,
         robot_store: RobotDataStore | None = None,
         driver_options: Mapping[str, Mapping[str, Any]] | None = None,
+        kinds: Sequence[DeviceKind] = DEFAULT_KINDS,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
@@ -102,8 +106,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         # Фабрики драйверов: kind -> callable(entry, protocol) -> driver
         self._factories: dict[str, Callable] = {}
 
-        # Регистрация дефолтных фабрик
-        self._register_defaults()
+        # Фабрики по умолчанию — из таблицы видов
+        self._register_kinds(kinds)
 
     # ------------------------------------------------------------------ #
     # BaseManager
@@ -208,6 +212,8 @@ class DeviceManager(BaseManager, ObservableMixin):
             factory: ``(entry, protocol) -> BaseDeviceDriver``.
 
         Фабрику нового вида регистрировать ДО ``initialize()``: вид записи реестра проверяется по фабрикам при загрузке.
+        Шов прямого использования ``DeviceManager`` (тесты): процесс хаба создаёт менеджер в ``configure`` плагина и
+        сразу зовёт ``initialize()``, его виды — таблица видов (``kinds.py``).
         """
         self._factories[kind] = factory
 
@@ -237,47 +243,27 @@ class DeviceManager(BaseManager, ObservableMixin):
         if kind not in self._factories:
             raise ValueError(f"DeviceEntry.kind {kind!r} не из {sorted(self._factories)}")
 
-    def _register_defaults(self) -> None:
-        """Зарегистрировать дефолтные фабрики драйверов."""
-        from Services.device_hub.drivers.robot_driver import RobotDriver
-        from Services.device_hub.drivers.vfd_driver import VfdDriver
-        from Services.device_hub.drivers.hikvision_driver import HikvisionDriver
-        from Services.device_hub.drivers.generic_modbus_driver import GenericModbusDriver
+    def _register_kinds(self, kinds: Sequence[DeviceKind]) -> None:
+        """Фабрики драйверов по умолчанию — из таблицы видов (``Services/device_hub/kinds.py``)."""
+        for row in kinds:
+            if row.kind in self._factories:
+                raise ValueError(f"вид {row.kind!r} повторён в таблице видов")
+            self._factories[row.kind] = self._kind_factory(row)
 
-        def _robot_factory(entry: DeviceEntry, proto: Any) -> Any:
-            # Робот протокола v2 — свой драйвер (T5.1); импорт ленивый: v1-хаб не тянет клиент v2.
-            if entry.protocol == "delta_v2":
-                from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+    def _kind_factory(self, row: DeviceKind) -> Callable[[DeviceEntry, Any], DeviceDriver]:
+        """Фабрика ``(entry, protocol) -> драйвер`` строки таблицы видов; контекст сборки — на момент создания."""
 
-                if self._spawn is None:  # T5.3 круг 2: потоки робота v2 — только в области плагина
-                    raise RuntimeError(f"робот {entry.id!r} (delta_v2): менеджер без spawn не создаёт драйвер v2")
-                options = self._options_for("robot")
-                if self._robot_store is None:
-                    return RobotDriverV2(entry, proto, publish=self._publish, spawn=self._spawn, **options)
-                # Параметры робота при подключении — из params.yaml (T5.3c c2); плохие данные бросают RobotDataInvalid
-                # и др. из фабрики, их перехватывает ``connect``
-                param_source = param_source_for(self._robot_store, entry.id, entry.params)
-                return RobotDriverV2(
-                    entry,
-                    proto,
-                    publish=self._publish,
-                    spawn=self._spawn,
-                    param_source=param_source,
-                    store=self._robot_store,
-                    **options,
-                )
-            return RobotDriver(entry, proto, **self._options_for("robot"))
+        def factory(entry: DeviceEntry, proto: Any) -> DeviceDriver:
+            ctx = DriverContext(
+                publish=self._publish,
+                spawn=self._spawn,
+                robot_store=self._robot_store,
+                options=self._options_for(row.kind),
+                resolve_device=self._get_driver,
+            )
+            return row.create(entry, proto, ctx)
 
-        self._factories["robot"] = _robot_factory
-        self._factories["vfd"] = lambda entry, proto: VfdDriver(
-            entry, proto, resolve_device=self._get_driver, **self._options_for("vfd")
-        )
-        self._factories["hikvision"] = lambda entry, proto: HikvisionDriver(
-            entry, proto, **self._options_for("hikvision")
-        )
-        self._factories["generic_modbus"] = lambda entry, proto: GenericModbusDriver(
-            entry, proto, **self._options_for("generic_modbus")
-        )
+        return factory
 
     # ------------------------------------------------------------------ #
     # CRUD реестра

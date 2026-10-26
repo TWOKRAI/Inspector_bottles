@@ -39,7 +39,8 @@ from multiprocess_framework.modules.process_module.plugins import (
 from Services.device_hub import DeviceHubError
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.store import RegistryStore
-from Services.device_hub.spi import DEFAULT_SOURCES, OpSource, OpSpec, command_table
+from Services.device_hub.kinds import DEFAULT_KINDS, DeviceKind, command_sources
+from Services.device_hub.spi import OpSource, OpSpec, command_table
 from Services.robot_comm.store import RobotDataStore
 
 from .registers import DeviceHubRegisters
@@ -102,12 +103,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
     _scope: IScope | None = None
     # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
     _shutting_down = False
+    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55)
+    device_kinds: tuple[DeviceKind, ...] = DEFAULT_KINDS
     # Команды из описаний операций: имя -> (источник, операция); заполняет install_op_commands (copy-on-write)
     _op_commands: dict[str, tuple[OpSource, OpSpec]] = {}
 
     # ------------------------------------------------------------------ #
     # Таблица команд (Р7): имя_команды -> имя_метода. Команды robot_* / vfd_* (55) генерирует install_op_commands
-    # из описаний операций (Services/device_hub/spi.py) сразу после класса.
+    # сразу после класса из OP_SPECS классов драйверов таблицы видов (command_sources(device_kinds)).
     # ------------------------------------------------------------------ #
     commands: dict[str, str] = {
         # Реестр
@@ -169,7 +172,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
             # Одно хранилище данных робота на процесс: каталог data/robot рядом с devices.yaml (T5.3c)
             self._robot_store = RobotDataStore(resolved.parent / "robot")
             self._manager = DeviceManager(
-                store=store, publish_cb=self._publish_state, spawn=scope.spawn, robot_store=self._robot_store
+                store=store,
+                publish_cb=self._publish_state,
+                spawn=scope.spawn,
+                robot_store=self._robot_store,
+                kinds=self.device_kinds,
             )
             self._manager.initialize()
 
@@ -1007,4 +1014,4 @@ def install_op_commands(cls: type[DeviceHubPlugin], sources: Sequence[OpSource])
         cls._op_commands[name] = (source, spec)
 
 
-install_op_commands(DeviceHubPlugin, DEFAULT_SOURCES)
+install_op_commands(DeviceHubPlugin, command_sources(DeviceHubPlugin.device_kinds))
