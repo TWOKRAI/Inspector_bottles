@@ -297,6 +297,30 @@ def test_patch_yaml_source_unreadable_by_pyyaml_checks_dump_against_ruamel_doc(t
     assert written is True
     assert path.read_bytes() == b"k: [a, b]\nname: r2\n"
 
+    # Сторона отказа: откат на ruamel-документ не отключает сверку — ``mode: "On"`` PyYAML читает как bool.
+    refused = tmp_path / "refused.yaml"
+    raw = "k: [a,\t b]\nname: r1\nmode: x\n".encode("utf-8")
+    refused.write_bytes(raw)
+
+    with pytest.raises(ValueError, match="PyYAML читает дамп иначе"):
+        patch_yaml_preserving(refused, {"mode": "x"}, {"mode": "On"})
+
+    assert refused.read_bytes() == raw
+
+
+def test_patch_recipe_mutating_hook_does_not_corrupt_callers_after(tmp_path: Path) -> None:
+    """Хук-мутант получает копию ``after``: словарь вызывающего после ``patch_recipe`` прежний."""
+    mgr, d = _make(tmp_path, format_hook=MutatingRenameHook())
+    raw = _put(d, "new:\n  a: 1\nname: r1\n")
+    after = {"old": {"a": 2}, "name": "r1"}
+
+    new_rev = mgr.patch_recipe(SLUG, after, expected_rev=_sha(raw))
+
+    assert after == {"old": {"a": 2}, "name": "r1"}
+    expected = b"new:\n  a: 2\nname: r1\n"
+    assert (d / f"{SLUG}.yaml").read_bytes() == expected
+    assert new_rev == _sha(expected)
+
 
 def test_empty_file_read_canonical_refuses_patch_recipe_writes(tmp_path: Path) -> None:
     """Пустой файл: для чтения не mapping (``RecipeFormatError``), для записи — пустой mapping (как в 1.1e)."""

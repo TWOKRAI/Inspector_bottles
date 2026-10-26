@@ -566,7 +566,7 @@ class RecipeManager:
                     return current_rev
                 target = copy.deepcopy(before)
             else:
-                target = copy.deepcopy(self._format_hook.normalize(after))
+                target = copy.deepcopy(self._format_hook.normalize(copy.deepcopy(after)))
             if layout is not None:
                 if not isinstance(target.get("blueprint"), dict):
                     raise ValueError(f"раскладка рецепта '{slug}' требует blueprint-mapping в теле")

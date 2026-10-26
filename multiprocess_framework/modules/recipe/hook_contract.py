@@ -108,7 +108,7 @@ def _normalize(hook: Any, label: str, body: Any, what: str) -> Any:
     except Exception as exc:
         raise AssertionError(f"{label}: normalize бросил {type(exc).__name__} на валидном теле ({what})") from exc
     if not _equal(arg, body):  # Post RecipeFormatHook.normalize: вход не мутирует
-        raise AssertionError(f"{label}: normalize мутирует вход ({what})")
+        raise AssertionError(f"{label}: normalize мутирует вход")
     return result
 
 
