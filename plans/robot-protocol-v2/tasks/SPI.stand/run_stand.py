@@ -45,7 +45,7 @@ SCENARIOS = ("S0", "S1", "S2", "S3")
 PARAM_SETS_FULL = 58  # len(PARAM_ID) в Services/robot_comm/core/params_v2.py (проверено импортом, 2026-10-26)
 S0_CONNECT_WAIT_S = 0.5  # S0: «Отключить» через столько после «Подключить» при сим DOWN
 SETTLE_S = 2.0  # тишина после `disconnected`: поймать поздние SERVO/DO и тик-переподключение
-TRIGGER_TIMEOUT_S = 150.0  # S3: 58 PARAM_SET по ~0,3 с на транзакцию
+TRIGGER_TIMEOUT_S = 260.0  # S3: 58 PARAM_SET при 300 мс - замер 2026-10-26: ~150 с
 DISC_TIMEOUT_S = 30.0  # потолок ожидания `disconnected` после команды (критерий C-29 - 5,0 с)
 POLL_S = 0.025
 
@@ -241,7 +241,7 @@ class StatusPoller(Poller):
         res = self.drv.send_command(
             "ProcessManager", "state.get", {"path": f"devices.state.{ROBOT_ID}.conn"}, timeout=2.0
         )
-        value = res.get("value") if isinstance(res, dict) else None
+        value = find_key(res, "value")
         conn = value.get("conn") if isinstance(value, dict) else (value if isinstance(value, str) else "none")
         t = time.time()
         with self.lock:
@@ -270,8 +270,7 @@ class JournalPoller(Poller):
     def step(self) -> None:
         res = self.drv.send_command("devices", "robot_exchange_log_get",
                                     {"device_id": ROBOT_ID, "since_seq": self._cursor, "limit": 500}, timeout=2.0)  # fmt: skip
-        body = res.get("result", res) if isinstance(res, dict) else {}
-        for line in body.get("lines") or []:
+        for line in find_key(res, "lines") or []:
             seq, n = int(line["seq"]), int(line.get("n", 1))
             with self.lock:
                 known = self.lines.get(seq)
@@ -356,13 +355,20 @@ class Stand:
                     drv.connect(2.0)
                     self.drv = drv
                 res = self.drv.send_command("devices", "device_list", {}, timeout=3.0)
-                ids = [d.get("id") for d in (res.get("devices") or [])] if isinstance(res, dict) else []
-                return ROBOT_ID in ids
+                devs = find_key(res, "devices") or []
+                if not boot_seen or boot_seen[-1] != repr(res)[:300]:
+                    boot_seen.append(repr(res)[:300])
+                    self.ev("boot_reply", reply=res)  # форма ответа device_list - в events.jsonl
+                return ROBOT_ID in [d.get("id") for d in devs if isinstance(d, dict)]
             except SystemExit:
                 raise
-            except Exception:  # noqa: BLE001 - бэкенд ещё поднимается
+            except Exception as exc:  # noqa: BLE001 - бэкенд ещё поднимается; причину - в events.jsonl
+                if not boot_seen or boot_seen[-1] != repr(exc)[:300]:
+                    boot_seen.append(repr(exc)[:300])
+                    self.ev("boot_error", error=repr(exc))
                 return False
 
+        boot_seen: list[str] = []
         if not self.wait_for(booted, self.args.boot_timeout, "backend boot"):
             raise SystemExit(f"бэкенд не ответил device_list с {ROBOT_ID} за {self.args.boot_timeout:.0f} с")
         self.status = StatusPoller(self.args.backend_port, self.run_dir / "status.jsonl")
@@ -374,8 +380,14 @@ class Stand:
     # ---- группа D: device_io и формы ответов до связи
     def group_d(self) -> None:
         d: dict[str, Any] = {}
-        d["executors"] = self.drv.send_command("devices", "introspect.executors", {}, timeout=5.0)
-        st = self.drv.send_command("devices", "introspect.status", {}, timeout=5.0)
+        # introspect.* у devices сразу после старта мог отвечать «No handler» (замер 2026-10-26) - повторы до 20 с
+        for attempt in range(20):
+            d["executors"] = self.drv.send_command("devices", "introspect.executors", {}, timeout=5.0)
+            st = self.drv.send_command("devices", "introspect.status", {}, timeout=5.0)
+            d["introspect_attempts"] = attempt + 1
+            if "No handler" not in json.dumps(d["executors"], ensure_ascii=False):
+                break
+            time.sleep(1.0)
         d["workers_keyed"] = sorted(
             w for w in json.dumps(st, ensure_ascii=False).split('"') if w.startswith("keyed-device_io")
         )
@@ -427,8 +439,8 @@ class Stand:
             n_need = 3 if name == "S2" else self.args.param_sets
             seen = 0
             for x in lines:
-                if seen >= n_need and name == "S3":
-                    return x["side"] == "out"  # первая строка `out` после последней PARAM_SET
+                if seen >= n_need and name == "S3" and x["side"] == "out":
+                    return True  # первая строка `out` после последней PARAM_SET
                 if re.match(r"^W\*? CMD_OPCODE = \d+ \(PARAM_SET\)", x.get("text", "")):
                     seen += int(x.get("n", 1))
             return name == "S2" and seen >= n_need
@@ -500,6 +512,19 @@ class Stand:
         (self.run_dir / "checks.json").write_text(
             json.dumps(self.checks, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
         )
+
+
+def find_key(res: Any, key: str, depth: int = 3) -> Any:
+    """Значение `key` в ответе команды: на верхнем уровне или во вложенных `result` (форма обёртки не проверялась)."""
+    if isinstance(res, dict):
+        if key in res:
+            return res[key]
+        if depth:
+            for v in res.values():
+                got = find_key(v, key, depth - 1)
+                if got is not None:
+                    return got
+    return None
 
 
 def port_free(port: int) -> bool:

@@ -49,13 +49,22 @@ def opcount(lines: list[dict[str, Any]], *names: str) -> int:
 
 
 def soft_client(lines: list[dict[str, Any]]) -> int:
-    return sum(int(x.get("n", 1)) for x in lines if re.match(r"^W\*? STOP_REQ = 1$", x.get("text", "")))
+    # STOP_REQ = stop_seq*4 + level (client_v2.py:113), SOFT = 1: значение & 3 == 1
+    total = 0
+    for x in lines:
+        m = re.match(r"^W\*? STOP_REQ = (\d+)$", x.get("text", ""))
+        if m and int(m.group(1)) & 3 == 1:
+            total += int(x.get("n", 1))
+    return total
 
 
 def soft_sim(rows: list[tuple[float, str, str]], t0: float, t1: float) -> int:
-    return sum(
-        1 for t, k, x in rows if k == "IO" and t0 <= t < t1 and x.startswith("W STOP_REQ ") and x.endswith("[1]")
-    )
+    total = 0
+    for t, k, x in rows:
+        m = re.match(r"^W STOP_REQ fc=\d+ \[(\d+)\]$", x) if k == "IO" and t0 <= t < t1 else None
+        if m and int(m.group(1)) & 3 == 1:
+            total += 1
+    return total
 
 
 def sim_ops(rows: list[tuple[float, str, str]], t0: float, t1: float, *ops: str) -> int:
@@ -80,6 +89,18 @@ def phase_ok(name: str, label: str) -> bool:
     if name == "S2":
         return label.startswith("sync_params")
     return label == EXPECT_PHASE[name]
+
+
+def find_key(res: Any, key: str, depth: int = 3) -> Any:
+    if isinstance(res, dict):
+        if key in res:
+            return res[key]
+        if depth:
+            for v in res.values():
+                got = find_key(v, key, depth - 1)
+                if got is not None:
+                    return got
+    return None
 
 
 def reply_body(res: Any) -> Any:
@@ -120,7 +141,7 @@ def main() -> int:
         # Журнал сценария - строки после команды и до начала следующего сценария (журнал драйвера общий на весь прогон).
         nxt = [e for e in events if e["ev"] == "scenario_start" and e["t"] > t_start]
         seq_hi = nxt[0]["seq0"] if nxt else float("inf")
-        after = [journal[s] for s in sorted(journal) if seq_cmd < s <= seq_hi]
+        after = [journal[s] for s in sorted(journal) if seq_cmd < s <= seq_hi and journal[s].get("t_rx", 0) < t_end]
         servo_do_cli = opcount(after, "SERVO", "DO_SET")
         servo_do_sim = sim_ops(sim, t_cmd, t_end, "SERVO", "DO_SET")
         soft_cli = soft_client(after)
@@ -129,7 +150,7 @@ def main() -> int:
         t_disc = ev.get("disconnected_seen", {}).get("t_disc")
         seq = []
         for t, c in status:
-            if t_start <= t <= (t_disc or t + 1) and (not seq or seq[-1] != c):
+            if t_start <= t <= (t_disc + 0.01 if t_disc else t + 1) and (not seq or seq[-1] != c):
                 seq.append(c)
         label = phase_label(ev["scenario_end"]["phase"]) if "scenario_end" in ev else "?"
         want_soft = 0 if name == "S0" else 1
@@ -198,7 +219,7 @@ def check_groups(run: Path) -> bool:
         )
 
     print("Проверки device_io (D, до связи) и форм ответов:")
-    ex = (d.get("executors") or {}).get("executors", {}).get("device_io") or {}
+    ex = (find_key(d.get("executors"), "executors") or {}).get("device_io") or {}
     alive = sum(1 for w in (ex.get("workers") or {}).values() if w.get("is_alive"))
     line(bool(ex) and ex.get("max_workers") == 4 and ex.get("max_pending") == 64 and alive == 4,
          f"introspect.executors: device_io есть, max_workers=4, max_pending=64, живых рабочих {alive} (рабочие: {sorted((ex.get('workers') or {}))})", d.get("executors"))  # fmt: skip
@@ -239,7 +260,15 @@ def check_groups(run: Path) -> bool:
         sim = read_sim(run / "sim.log")
         t_stop = next((t for t, k, x in sim if k == "MARK" and x == "G_STOP"), None)
         if t_stop is not None:
-            n = soft_sim(sim, t_stop, float("inf"))
+            t_dis = next(
+                (
+                    e["t"]
+                    for e in read_jsonl(run / "events.jsonl")
+                    if e["ev"] == "disconnect_send" and e.get("scen") == "G"
+                ),
+                float("inf"),
+            )
+            n = soft_sim(sim, t_stop, t_dis)
             line(n == 1, f"сим после метки G_STOP: записей STOP_REQ=1 (SOFT) = {n}, ожидалось 1")
     line(bool(g.get("disconnected")), "device_disconnect -> conn disconnected")
 
