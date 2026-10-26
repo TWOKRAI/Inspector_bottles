@@ -144,6 +144,11 @@ def replace_item(container: Any, key: Any, value: Any) -> None:
     container.ca.items[key][slot] = None if not rest.strip() else _comment_token(rest, token)
 
 
+# Стиль контейнера до опустошения — в ``__dict__`` контейнера (у CommentedMap/Seq ruamel 0.19 он есть).
+_ORIG_STYLE = "_recipe_style_before_emptied"
+_NOT_EMPTIED = object()
+
+
 def finalize(doc: Any) -> None:
     """Довести документ до формы, которую эмиттер ruamel пишет валидно; зовётся после всей дельты.
 
@@ -176,10 +181,6 @@ def finalize(doc: Any) -> None:
                 if isinstance(item, (CommentedMap, CommentedSeq)) and _split_item_header(node, idx, item):
                     _share_item_header(item, (node, idx))
         stack.extend(node.values() if isinstance(node, CommentedMap) else node)
-
-
-_ORIG_STYLE = "_recipe_style_before_emptied"
-_NOT_EMPTIED = object()
 
 
 def _mark_emptied(container: Any) -> None:

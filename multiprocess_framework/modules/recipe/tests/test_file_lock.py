@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import errno
 import importlib
 import os
 import subprocess
@@ -339,3 +340,101 @@ def test_body_exception_survives_failing_unlock(tmp_path: Path, monkeypatch: pyt
     with pytest.raises(ValueError, match="boom"):
         with fl.recipe_file_lock(tmp_path / "r.yaml", timeout=1.0):
             raise ValueError("boom")
+
+
+def test_failing_unlock_noted_on_body_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сбой ``_unlock`` при летящем исключении тела не теряется: его текст в ``__notes__`` исходного."""
+    fl = _fl()
+
+    def broken_unlock(fd: int) -> None:
+        raise OSError("unlock failed")
+
+    monkeypatch.setattr(fl, "_unlock", broken_unlock)
+
+    with pytest.raises(ValueError) as info:
+        with fl.recipe_file_lock(tmp_path / "r.yaml", timeout=1.0):
+            raise ValueError("boom")
+
+    assert any("unlock failed" in note for note in getattr(info.value, "__notes__", []))
+
+
+def test_failing_unlock_without_body_exception_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тело прошло без исключения, ``_unlock`` бросает: ``OSError`` уходит наружу, а не глотается."""
+    fl = _fl()
+
+    def broken_unlock(fd: int) -> None:
+        raise OSError("unlock failed")
+
+    monkeypatch.setattr(fl, "_unlock", broken_unlock)
+
+    with pytest.raises(OSError, match="unlock failed"):
+        with fl.recipe_file_lock(tmp_path / "r.yaml", timeout=1.0):
+            pass
+
+
+def _locking_raising(err: int) -> Any:
+    def locking(fd: int, mode: int, nbytes: int) -> None:
+        raise OSError(err, os.strerror(err))
+
+    return locking
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ветка msvcrt.locking — только Windows")
+@pytest.mark.parametrize("err", [errno.EACCES, 36], ids=["EACCES", "EDEADLOCK"])
+def test_try_lock_windows_busy_errno_is_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, err: int) -> None:
+    """``msvcrt.locking`` отказал кодом «байт занят» (13 или 36): ``_try_lock`` возвращает ``False``."""
+    fl = _fl()
+    monkeypatch.setattr(fl.msvcrt, "locking", _locking_raising(err))
+    fd = os.open(tmp_path / "x.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        assert fl._try_lock(fd) is False
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ветка msvcrt.locking — только Windows")
+def test_try_lock_windows_other_errno_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``msvcrt.locking`` отказал другим кодом (ENOLCK) на живом fd: ``OSError`` наружу, не «занят»."""
+    fl = _fl()
+    monkeypatch.setattr(fl.msvcrt, "locking", _locking_raising(errno.ENOLCK))
+    fd = os.open(tmp_path / "x.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        with pytest.raises(OSError) as info:
+            fl._try_lock(fd)
+    finally:
+        os.close(fd)
+    assert not isinstance(info.value, fl.RecipeLockTimeout)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="ветка fcntl.flock — только POSIX")
+def test_try_lock_posix_blocking_is_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``flock`` бросил ``BlockingIOError`` (лок занят): ``_try_lock`` возвращает ``False``."""
+    fl = _fl()
+
+    def flock(fd: int, op: int) -> None:
+        raise BlockingIOError(errno.EWOULDBLOCK, "busy")
+
+    monkeypatch.setattr(fl.fcntl, "flock", flock)
+    fd = os.open(tmp_path / "x.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        assert fl._try_lock(fd) is False
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="ветка fcntl.flock — только POSIX")
+def test_try_lock_posix_other_error_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``flock`` бросил прочий ``OSError`` (ENOLCK): он уходит наружу, не «занят»."""
+    fl = _fl()
+
+    def flock(fd: int, op: int) -> None:
+        raise OSError(errno.ENOLCK, "no locks")
+
+    monkeypatch.setattr(fl.fcntl, "flock", flock)
+    fd = os.open(tmp_path / "x.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        with pytest.raises(OSError) as info:
+            fl._try_lock(fd)
+    finally:
+        os.close(fd)
+    assert not isinstance(info.value, (BlockingIOError, fl.RecipeLockTimeout))

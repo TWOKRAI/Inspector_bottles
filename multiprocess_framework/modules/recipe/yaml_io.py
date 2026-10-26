@@ -329,7 +329,7 @@ def _read_plain(path: Path) -> Any:
 def _plain(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _plain(child) for key, child in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list):
         return [_plain(child) for child in value]
     return value
 
