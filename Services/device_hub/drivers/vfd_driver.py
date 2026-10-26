@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver
+from Services.device_hub.spi import VFD_OPS
 
 # Минимальный интервал между попытками (ре)подключения VFD, сек
 _VFD_RECONNECT_THROTTLE_SEC = 3.0
@@ -31,6 +32,7 @@ class VfdDriver(BaseDeviceDriver):
     """
 
     kind = "vfd"
+    OP_SPECS = VFD_OPS  # описания операций _OPS (SPI хаба)
 
     def __init__(
         self,

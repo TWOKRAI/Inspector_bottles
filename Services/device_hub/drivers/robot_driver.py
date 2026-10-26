@@ -24,6 +24,7 @@ from collections import deque
 from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver
+from Services.device_hub.spi import ROBOT_V1_OPS
 
 # Минимальный интервал между попытками переподключения, сек
 _RECONNECT_THROTTLE_SEC = 2.0
@@ -44,6 +45,7 @@ class RobotDriver(BaseDeviceDriver):
     """
 
     kind = "robot"
+    OP_SPECS = ROBOT_V1_OPS  # описания операций _OPS (SPI хаба)
 
     def __init__(
         self,

@@ -22,12 +22,16 @@ from Services.device_hub.drivers.robot_driver_v2.state import JogView, RobotStat
 from Services.device_hub.drivers.robot_driver_v2.stop import StopMixin
 from Services.device_hub.drivers.robot_driver_v2.tlm import _parse_tlm
 from Services.device_hub.drivers.robot_driver_v2.driver import _RobotDriverCore
+from Services.device_hub.spi import ROBOT_V2_OPS
 
 __all__ = ["JogView", "RobotDriverV2", "RobotState", "RobotStateView", "_JogRun", "_parse_tlm"]
 
 
 class RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, OpsMixin, _RobotDriverCore):
     """Драйвер робота Delta v2: ядро ``_RobotDriverCore`` (``driver``) и миксины операций; описание — в ``driver``."""
+
+    OP_SPECS = ROBOT_V2_OPS  # описания операций _OPS (SPI хаба)
+    stop_aware = True  # получает стоп фазы 1 остановки: request_stop (StopMixin)
 
 
 RobotDriverV2._OPS = OPS
