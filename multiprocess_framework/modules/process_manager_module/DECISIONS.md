@@ -1904,6 +1904,16 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
   `_ChildrenStop.request_stop()` в фазе 1: `_children_stopping = True` → `executor.request_stop()` + `join_until` (один срок
   `infra_s` на исполнитель и паузу монитора; на потоке самого исполнителя не ждёт) → стоп детей в `finally`.
   Прерванный стоп — WARNING «стоп '<имя>' прерван системным стопом», не ERROR «жив после kill».
+  **Сиды `apply_topology` читают прерванный стоп так же (ревью р.1 п.1, исключение из «Не менять», согласовано лидом
+  2026-10-26; только два сида, `apply_topology` и `TopologyManager` не тронуты).** `False` из `stop_many` при
+  `_pm_stopping()` — не «зависший». `_topology_stop_all`: одна строка WARNING «system stop: children handed to the root
+  stop: [имена]», без ERROR и без `_publish_unstoppable_alert`; результат `False` прежний. Откат (фаза A): одна строка
+  WARNING «системный стоп … пересоздание пропущено», без ERROR и alert; фазы C–E (provision/create/start) при
+  `_pm_stopping()` не идут (`restore` пуст: `_topology_create` всё равно отказывает после системного стопа, Task 1.2).
+  Предикат тот же, что у `stop_abort`; один источник. Без системного стопа поведение прежнее (ERROR + alert). Причина:
+  до правки стоп посреди `topology.apply` публиковал в state/hub alert с именами, включая здорового ребёнка, и два
+  ERROR при штатном стопе; ответ нёс `unstoppable: [other, slow]`. Вариант «передавать `stop_abort` только из
+  `stop_process`» отвергнут: стоп снова получил бы двух владельцев.
 
 ### Инварианты (контракт)
 

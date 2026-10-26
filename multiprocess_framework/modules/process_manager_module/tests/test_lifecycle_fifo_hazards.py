@@ -418,3 +418,77 @@ def test_h9_hung_child_still_gets_terminate_as_today(tmp_path: Path, monkeypatch
         )
     finally:
         hung.close()
+
+
+# --------------------------------------------------------------------------- #
+# H10 (ревью р.1 п.1): системный стоп посреди topology.apply не даёт ложного «unstoppable»
+# --------------------------------------------------------------------------- #
+
+UNCONFIRMED_MARK = "НЕ подтверждена"
+HANDED_MARK = "handed to the root"
+
+
+def _record_unstoppable_alerts(rig: Rig) -> list[list[str]]:
+    """Подмена ``_publish_unstoppable_alert`` на запись вызовов (оригинал вызывается дальше)."""
+    alerts: list[list[str]] = []
+    original = rig.pm._publish_unstoppable_alert
+
+    def record(names: list[str]) -> None:
+        alerts.append(list(names))
+        original(names)
+
+    rig.pm._publish_unstoppable_alert = record
+    return alerts
+
+
+def test_h10_topology_apply_under_system_stop_hands_children_to_root(rig: Rig) -> None:
+    """H10 (а): ``topology.apply`` убирает slow (стоп 3,0 с), на +1,0 с приходит ``system.shutdown``:
+    0 строк «НЕ подтверждена» (любой уровень), 0 публикаций alert «unstoppable», ровно одна строка WARNING
+    «handed to the root» (сид ``_topology_stop_all``); откат (``rollback``) тоже не пишет ERROR."""
+    alerts = _record_unstoppable_alerts(rig)
+    _remove_slow_topology(rig)
+    apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
+    time.sleep(MID_STOP_S)
+    _assert_in_transition(rig, "slow", "H10")
+    rig.send("system.shutdown")
+
+    reply = rig.wait_reply(apply_sent)
+    assert reply is not None, "topology.apply не ответил за дедлайн после system.shutdown"
+    log = list(rig.log)
+    lines = [message for _level, message in log]
+    unconfirmed = [line for line in lines if UNCONFIRMED_MARK in line]
+    assert not unconfirmed, f"системный стоп дал строки «{UNCONFIRMED_MARK}»: {unconfirmed}; ответ: {reply.result}"
+    assert alerts == [], f"системный стоп опубликовал alert «unstoppable»: {alerts}; ответ: {reply.result}"
+    handed = [(level, line) for level, line in log if HANDED_MARK in line]
+    assert len(handed) == 1, f"ожидалась ровно 1 строка «{HANDED_MARK}», есть {len(handed)}: {handed}"
+    assert handed[0][0] == "warning", f"строка «{HANDED_MARK}» уровня {handed[0][0]}, ожидался warning"
+
+
+def test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """H10 (страж, б): без системного стопа остановка slow в ``topology.apply`` не подтверждена (``stop_many``
+    для slow подменён на ``False`` — настоящий зависший ребёнок на Windows умирает от ``kill`` и подтверждается):
+    ERROR «НЕ подтверждена» и alert ``['slow']`` — как сегодня."""
+    alerts = _record_unstoppable_alerts(rig)
+    registry = rig.pm._process_registry
+    real_stop_many = registry.stop_many
+
+    def stop_many_slow_hangs(names: list[str], timeout: float) -> dict[str, bool]:
+        others = [n for n in names if n != "slow"]
+        result = real_stop_many(others, timeout) if others else {}
+        if "slow" in names:
+            result["slow"] = False
+        return result
+
+    monkeypatch.setattr(registry, "stop_many", stop_many_slow_hangs)
+    _remove_slow_topology(rig)
+    apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
+
+    reply = rig.wait_reply(apply_sent, 90.0)
+    assert reply is not None, "topology.apply не ответил за дедлайн"
+    errors = [message for level, message in list(rig.log) if level == "error" and UNCONFIRMED_MARK in message]
+    assert errors, "без системного стопа нет ERROR «НЕ подтверждена» — регресс страха за зависшего"
+    assert alerts and alerts[0] == ["slow"], f"alert «unstoppable» не опубликован или не ['slow']: {alerts}"
+    handed = [line for _level, line in list(rig.log) if HANDED_MARK in line]
+    assert not handed, f"«{HANDED_MARK}» без системного стопа: {handed}"

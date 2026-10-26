@@ -1981,7 +1981,15 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:
                 self._log_error(f"rollback: stop_many не удался: {exc}")
         unstoppable = {n for n in to_stop if not stop_results.get(n, False)}
-        if unstoppable:
+        # Системный стоп (ревью 1.9b р.1 п.1, ADR-PMM-039 D4): прерванный ``stop_abort`` стоп — не «зависший».
+        # Один предикат с ``stop_abort``; имена не сносим и не пересоздаём — их гасит корень.
+        pm_stopping = self._pm_stopping()
+        if unstoppable and pm_stopping:
+            self._log_warning(
+                f"rollback: системный стоп — остановка {sorted(unstoppable)} прервана, "
+                f"пересоздание пропущено (остановку ведёт корень)"
+            )
+        elif unstoppable:
             self._log_error(
                 f"rollback: остановка НЕ подтверждена для {sorted(unstoppable)} — "
                 f"имена исключены из пересоздания (защита от дублей), retry на следующем switch"
@@ -1999,7 +2007,7 @@ class ProcessManagerProcess(ProcessModule):
                 self._log_error(f"rollback: cleanup '{name}' не удался: {exc}")
 
         # --- Фазы C/D/E: provision → create → start (двухфазно, как boot) ---
-        restore = {n: cfg for n, cfg in snapshot.items() if n not in unstoppable}
+        restore = {} if pm_stopping else {n: cfg for n, cfg in snapshot.items() if n not in unstoppable}
         for name, cfg in restore.items():
             try:
                 self._topology_provision(name, cfg)
@@ -4388,6 +4396,11 @@ class ProcessManagerProcess(ProcessModule):
         timeout = float(self.get_config("stop_process_timeout") or 5.0)
         results = self._process_registry.stop_many(list(names), timeout)
         failed = sorted(n for n in names if not results.get(n, False))
+        if failed and self._pm_stopping():
+            # Системный стоп прервал стоп (``stop_abort``, ADR-PMM-039 D4): имена не «зависли», их гасит корень.
+            # Ни ERROR, ни alert «unstoppable»; ``False`` — операция не выполнена, откат не пересоздаёт.
+            self._log_warning(f"topology stop_all: system stop: children handed to the root stop: {failed}")
+            return False
         if failed:
             self._log_error(f"topology stop_all: остановка НЕ подтверждена для {failed}; карта результатов: {results}")
             # B-3 (RS-3): alert в state/hub — зависшие имена видны, retry на след. switch.
