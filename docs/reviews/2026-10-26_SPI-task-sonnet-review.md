@@ -127,3 +127,31 @@ scratchpad (`rev_spi/`), к коду дерева не прикасались. �
   (г) значения `device_io` 4/64 не измерены (так записано и в ADR).
 - **Слабая проба 7б:** одна микро-нагрузка, одна версия pydantic дерева; «не дефект» держится на ней и на том, что запись `last_error` — присваивание; аудит `pydantic-core` не делал.
 - **Доверие к автору:** тесты `test_spi_contract.py` и `test_op_commands.py` запускал (зелёные), тела не читал построчно — качество их проверок (кроме выборочных инъекций) не оценено.
+
+---
+
+# Круг 2 (последний) — правки р.1: коммиты c313a2c85, 1eb8fcdd8, 0ceb235eb; HEAD fe5014ee8
+
+Проверял в дереве `robot-v2-spi-inj` (HEAD тот же, что у ветки; чисто). Файлы кода и тестов не менял. П.1 (CAPABILITIES) по просьбе лида в этом круге не проверялся.
+
+## Вердикт круга 2: APPROVED
+
+П.2, п.4, п.5, п.3 закрыты по коду с воспроизведением; новых дефектов правки не внесли. Условие слияния, не относящееся к этому кругу: п.1 (регенерация `docs/contracts/CAPABILITIES.yaml` / `.md` в окне heavy, лид) остаётся открытым — без неё `test_dump_matches_committed` красный.
+
+## Что проверено
+
+- **П.2 закрыт.** `BaseDeviceDriver.__init_subclass__` (`base.py:107-119`). Моя прежняя проба (подкласс `FakeDriver` с `request_stop` без флага) теперь падает при определении класса: `TypeError: NoFlag: stop_aware=False, а метод request_stop есть — задай stop_aware = True ровно драйверу с request_stop` (текст без входных значений, только имя класса). Флаг без метода — `TypeError`. Миксин с `request_stop` без флага (`class D(Mix, FakeDriver)`) — `TypeError`; с флагом — определяется. Драйвер с обоими признаками получает стоп (`request_stop_all` → `["b"]`).
+  Вред для существующего кода: `git grep` по всем подклассам `BaseDeviceDriver` и по подклассам конкретных драйверов (`RobotDriver`, `RobotDriverV2`, `VfdDriver`, `HikvisionDriver`, `GenericModbusDriver`, `_RobotDriverCore`, `FakeDriver`) — 17 определений в `Services/device_hub/**` и `Plugins/hub/device_hub/tests`; других подклассов в Plugins/** и Services/** нет (`Services/auth`, `Services/sql` и `Services/modbus/sdk/client.py` ссылаются на имя строкой или в докстринге; `backend_ctl` `FakeDriver` — другой класс). Все определения проходят: `RobotDriverV2` (флаг в самом классе, метод из `StopMixin`) и промежуточный `_RobotDriverCore` (ни того, ни другого) — оба в паре.
+  Зелёные прогоны (гейт light, поимённо): 375 passed (`test_spi_contract`, `test_spi_acceptance`, `test_manager`, `test_manager_template_1_2b_3`, `test_reconnect_exhausted_notice`, `test_no_private_driver_state`, `test_vfd_driver`, `test_robot_driver`, `test_robot_driver_v2`, `test_c29_disconnect_acceptance`, `test_entry`); 171 passed (`Plugins/hub/device_hub/tests/{test_spi_commands_acceptance,test_op_commands,test_t53r2_stop_hazards,test_robot_v2_commands}.py` + `Services/auth` и `Services/sql` `test_manager_template_1_2b_3.py`).
+  Зубы новых тестов (инъекция в памяти): `__init_subclass__` заменён пустым → красные ровно `test_class_with_request_stop_without_stop_aware_raises` и `test_class_with_stop_aware_without_request_stop_raises` (2 failed, 43 passed).
+- **П.4 закрыт.** `manager.py:112-120`: все записи проверяются, потом присваиваются. Проба: файл `[ok1 robot, bad camera]` → `ValueError`, `snapshot_registry() == []`, `is_initialized is False` (до правки было `[ok1]`); валидный файл из двух записей грузится целиком. Инъекция (старый цикл с перемежающимся присваиванием) → красный ровно `TestInitializeAllOrNothing::test_unknown_kind_in_file_loads_nothing` (1 failed, 32 passed). Строка про «фабрику ДО `initialize()`» — в докстринге `register_driver_factory` и в ADR.
+- **П.5 закрыт.** `test_spi_contract.py::test_reconnect_initial_mark_per_class_is_literal` (часы 0.0: v1 и v2 — отказ затвора, ПЧ — проходит). Инъекции в отдельных процессах на файле `test_spi_contract.py`: v2 `0.0 → -inf` теперь **красный** (было 178 passed); v1 `0.0 → -inf` красный; ПЧ `-inf → 0.0` красный; в каждом случае 1 failed, 44 passed, красный — именно этот тест.
+- **П.3 закрыт.** ADR-DH-012 строка 71 и `SPI.md` строка 282: `args` в дамп не попадают, только в `metadata` / `get_command_info`; в ADR добавлен раздел «Открыто»: `immediate` без рантайм-потребителя, `args` в `metadata` никто в проде не читает; п.6 (порядок пульта) и п.7 (`driver_options`) записаны как принятые. Осталось в `SPI.md` (строки 188, 244, 303) «`args` + CAPABILITIES» — в таблице ответа на стадию 0 и в списке шагов, то есть история и план, не утверждение результата; строка 303 — сам открытый вопрос. Не мешает.
+
+## Что оставил открытым / ненадёжным (круг 2)
+
+- **П.1 не проверялся** (по просьбе лида): регенерация CAPABILITIES до слияния; `test_dump_matches_committed` по-прежнему красный, пока её нет; heavy-прогон не делал.
+- **Остаточный путь мимо охраны класса:** метод `request_stop`, повешенный на ЭКЗЕМПЛЯР (не в классе), `__init_subclass__` не видит, и менеджер стоп ему не шлёт (проба: `instance-level request_stop delivered: []`). В дереве так не делает никто (`git grep "\.request_stop = "` пуст вне тестов SPI), поэтому не замечание, а граница охраны; в ADR она не записана. Ещё граница: `bool(cls.stop_aware)` при `stop_aware` как `property` вернёт истину от самого объекта-свойства — в базе это атрибут класса (тест А21 краснеет на `@property`), но подкласс может нарушить.
+- **Тест начальных меток — один тест на три класса:** первый упавший `assert` скрывает остальные; инъекции я гонял по классам раздельно, и каждая красная. Раздельные тесты дали бы точнее диагностику; не блокирует.
+- **Не гонялось:** весь набор `Services/device_hub/tests` целиком (heavy), `Plugins/**` целиком, стенд; проверил поимённо радиус `__init_subclass__` (все подклассы базы, найденные `git grep`) и три затронутые правкой области. Динамически созданные классы (`type(...)`) — `git grep` по `type(.*BaseDeviceDriver` пуст.
+- **Отчётный файл:** этот раздел дописан и в `robot-v2-spi-inj`, и в `robot-v2-spi`; не закоммичен (по просьбе лида).
