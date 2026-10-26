@@ -54,3 +54,19 @@ measuring is capacity planning ([[project-capacity-planning-goal]]). Also on 202
 **How to apply:** before any stand run, read the lock; pick the mode; for `measure` check out the stand worktree at
 the SHA(s) and tell the neighbour to hold heavy tests. Before a heavy test run, check that no `measure` lock is held.
 Agreed with session inspector-bottles-79 (line-sim) on 2026-09-30.
+
+## Окно heavy у лида и агенты (2026-10-26, полоса Ф, Task 1.9b)
+
+Четыре ловушки одного дня, все с замером:
+
+1. **Окно кончается по сроку, а не по команде.** Лид держит `stand.lock` после конца прогона, а следующая сессия ждёт.
+   Снимать замок по сроку окна. В тихом окне 16:51 замок снят в 16:58, порты 8765/8766 свободны.
+2. **pytest без файла шлюз считает heavy.** Голый `pytest <каталог>` или пустой аргумент — это полный набор. Агент запустил
+   его параллельно стенду: 22 мин, OpenBLAS не хватило памяти, R2-C дал 8 из 10 вместо 10 из 10. В тихом окне —
+   0,985 / 1,273 / 1,547 с, 10 из 10. Точечная команда light — всегда с путём к файлу теста. Прогоны в окне лид
+   ведёт сам, без агентов: внутри окна один heavy-процесс.
+3. **Вывод в файл, а не в `| tail`.** Вывод Rig-тестов, обрезанный через `tail`, теряет имена красных. Писать в файл
+   (`> D:/sNN/x.out 2>&1`), читать файл.
+4. **Агент записал вывод pytest в исходник.** Перенаправление попало в `test_stand_l9_verdict.py`: файл стал выводом прогона.
+   Восстановлено `git show HEAD:path > path`, остаток « M» из-за CRLF снят через `git add`. Путь для вывода давать агенту
+   литералом и вне дерева; после агента — `git status`.
