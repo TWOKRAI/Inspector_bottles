@@ -779,6 +779,22 @@ def test_stop_aware_not_plain_bool_on_class_raises() -> None:
             def request_stop(self, deadline: float | None = None) -> None: ...
 
 
+def test_stop_aware_property_from_mixin_outside_base_raises() -> None:
+    """Миксин не из ``BaseDeviceDriver`` с ``stop_aware = property(...)`` и ``request_stop``: флаг ищется по MRO без
+    вызова дескриптора — ``TypeError`` при определении класса драйвера (свойство вернуло бы False, стоп молча
+    пропустился бы)."""
+
+    class _StopMixin:
+        stop_aware = property(lambda self: False)
+
+        def request_stop(self, deadline: float | None = None) -> None: ...
+
+    with pytest.raises(TypeError, match="stop_aware должен быть bool атрибутом класса"):
+
+        class _Mixed(_StopMixin, BaseDeviceDriver):  # type: ignore[misc]
+            kind = "mixed"
+
+
 def test_class_with_both_or_neither_is_defined_and_inherits() -> None:
     class _Both(BaseDeviceDriver):
         kind = "both"

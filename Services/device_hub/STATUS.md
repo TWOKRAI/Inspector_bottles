@@ -54,7 +54,7 @@
 `device_kinds` получает команды сам, опции драйверов — по виду и по `(вид, протокол)` (SPI.h2). Подзадачи и коммиты — `plans/robot-protocol-v2/tasks/SPI.md`, отступления — `SPI.deviations.md`.
 
 **Открыто:**
-- Регенерация `docs/contracts/CAPABILITIES.yaml` / `.md` (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно
-  `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
+- **Условие слияния (входит в задачу, SPI c2):** регенерация `docs/contracts/CAPABILITIES.yaml` / `.md`
+  (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
 - Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
 - Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).
