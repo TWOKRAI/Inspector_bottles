@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +20,7 @@ from ..core.process_registry import _ChildrenGroupStop
 from ..core.restart_policy import RestartPolicy
 from ..core.stop_budget import stop_budget
 from ..monitor.process_monitor import ProcessMonitor
+from ..process import process_manager_process as pm_process
 from ..process.process_manager_process import ProcessManagerProcess, _ChildrenStop
 from ..runner.process_runner import _resolve_stop_budget
 
@@ -137,7 +139,10 @@ def test_pm_root_budget_is_pm_total_plus_infra() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_monitor_paused_before_first_stop_event_with_infra_deadline() -> None:
+def test_monitor_paused_before_first_stop_event_with_infra_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ``time.monotonic`` на Windows — GetTickCount64, шаг 15,6 мс: между двумя вызовами тик меняется (96 из 3000
+    # прогонов давали остаток 0,184). Часы корня PM подменены на постоянные — остаток точный, допуска нет.
+    monkeypatch.setattr(pm_process, "time", SimpleNamespace(monotonic=lambda: 0.0))
     journal: list[str] = []
     pm = MagicMock()
     pm._budget.return_value = stop_budget(1.0)
@@ -149,6 +154,7 @@ def test_monitor_paused_before_first_stop_event_with_infra_deadline() -> None:
     stop.request_stop()  # повтор — no-op
 
     assert journal == ["monitor.stop", "stop_event.set"]
+    # D4 (Task 1.9b): монитору — остаток общего срока исполнителя и паузы: при постоянных часах ровно ``infra_s``.
     assert pm._process_monitor.timeouts == [0.2]
 
 

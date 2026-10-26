@@ -1,0 +1,71 @@
+{
+  "run": 5,
+  "precondition_ok": true,
+  "boot_s": 8.38,
+  "override_seen": true,
+  "setup": {
+    "apply_s": 2.91,
+    "diff_commands": [
+      "",
+      "camera_0",
+      "fast",
+      "preprocessor",
+      "process_flip",
+      "process_grayscale",
+      "process_negative",
+      "region_splitter",
+      "slow",
+      "stitcher"
+    ],
+    "ready": {
+      "fast": true,
+      "slow": true
+    }
+  },
+  "shutdown_sent_at_s": 1.0,
+  "launcher_exit_s": 4.922,
+  "pm_exit_s": 4.906,
+  "pm_pid": 32112,
+  "waited_s": 4.92,
+  "shutdown_reply_s": 0.0,
+  "stop_slow_reply_s": 1.031,
+  "stop_slow_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "c9ee9893-8d31-493b-b86b-267f6854a85b",
+    "success": false,
+    "result": {
+      "success": false,
+      "process_name": "slow"
+    }
+  },
+  "queued_reply_s": 0.921,
+  "queued_error": "system_stopping",
+  "queued_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "e8d58cd3-989a-4d78-bddd-844f62fbae0f",
+    "success": false,
+    "result": {
+      "success": false,
+      "error": "system_stopping"
+    }
+  },
+  "t0_wall": 1792999610.2582505,
+  "dns": 0,
+  "dns_by_dir": {},
+  "lost": 0,
+  "terminating": 0,
+  "survived": 0,
+  "shutdown_line_s": 1.0
+}

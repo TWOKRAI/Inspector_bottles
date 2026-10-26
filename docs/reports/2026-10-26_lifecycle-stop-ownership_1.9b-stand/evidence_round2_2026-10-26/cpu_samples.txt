@@ -1,0 +1,5 @@
+cpu_before_quick LoadPercentage 62
+cpu_before_full LoadPercentage 16  15:47:36
+cpu_after_full LoadPercentage 26  15:59:17
+cpu_before_suite LoadPercentage 34  15:59:30
+cpu_after_suite LoadPercentage 54  16:07:28

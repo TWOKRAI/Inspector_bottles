@@ -1,0 +1,77 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.9b",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    }
+  },
+  "started": 1792999188.5024836,
+  "rows": {
+    "S3": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "hangs": 0,
+      "delivery_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 0.046,
+        "median": 0.046,
+        "max": 0.046,
+        "p99": 0.046
+      },
+      "relay_reply_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.0,
+        "p99": 0.0
+      },
+      "primary_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 0.046,
+        "median": 0.046,
+        "max": 0.046,
+        "p99": 0.046
+      },
+      "threshold_text": "доставка и ответ <= 0,5 с",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "max_delivery_s": 0.046
+    }
+  },
+  "elapsed_s": 21.4
+}

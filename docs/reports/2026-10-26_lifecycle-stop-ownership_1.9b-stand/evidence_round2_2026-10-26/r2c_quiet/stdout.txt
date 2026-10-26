@@ -1,0 +1,44 @@
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #1] pm_exit_s=1.219 launcher_exit_s=1.735 tasklist_call_s=0.563
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #1] pm_exit_s=1.516 launcher_exit_s=2.016 tasklist_call_s=0.797
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #2] pm_exit_s=1.5 launcher_exit_s=1.969 tasklist_call_s=0.656
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #2] pm_exit_s=1.562 launcher_exit_s=2.031 tasklist_call_s=0.609
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #3] pm_exit_s=1.453 launcher_exit_s=1.937 tasklist_call_s=0.594
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #3] pm_exit_s=1.563 launcher_exit_s=2.0 tasklist_call_s=0.641
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #4] pm_exit_s=1.313 launcher_exit_s=1.797 tasklist_call_s=0.719
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #4] pm_exit_s=1.578 launcher_exit_s=2.0 tasklist_call_s=0.641
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #5] pm_exit_s=1.547 launcher_exit_s=2.0 tasklist_call_s=0.64
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #5] pm_exit_s=1.484 launcher_exit_s=1.906 tasklist_call_s=0.594
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #6] pm_exit_s=1.547 launcher_exit_s=2.031 tasklist_call_s=0.641
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #6] pm_exit_s=1.485 launcher_exit_s=2.016 tasklist_call_s=0.843
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #7] pm_exit_s=1.141 launcher_exit_s=1.641 tasklist_call_s=0.625
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #7] pm_exit_s=0.953 launcher_exit_s=1.407 tasklist_call_s=0.843
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #8] pm_exit_s=1.234 launcher_exit_s=1.671 tasklist_call_s=0.594
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #8] pm_exit_s=1.187 launcher_exit_s=1.75 tasklist_call_s=0.687
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #9] pm_exit_s=0.985 launcher_exit_s=1.406 tasklist_call_s=0.657
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #9] pm_exit_s=1.375 launcher_exit_s=1.812 tasklist_call_s=0.61
+backend-ctl-reader: сервер закрыл соединение
+[R2-C branch #10] pm_exit_s=1.125 launcher_exit_s=1.547 tasklist_call_s=0.609
+backend-ctl-reader: сервер закрыл соединение
+[R2-C main #10] pm_exit_s=1.344 launcher_exit_s=1.782 tasklist_call_s=0.578
+## Раунд 2
+
+- R2C: **PASS**
+  - разброс min/median/max: {"branch": {"n": 10, "unanswered": 0, "min": 0.985, "median": 1.2734999999999999, "max": 1.547, "p99": 1.547}, "main": {"n": 10, "unanswered": 0, "min": 0.953, "median": 1.4845000000000002, "max": 1.578, "p99": 1.578}}

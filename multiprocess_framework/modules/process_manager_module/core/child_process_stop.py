@@ -60,6 +60,7 @@ class ChildProcessStop:
         kill_confirm_s: float = KILL_CONFIRM_S,
         poll_s: float = STOP_POLL_S,
         idle: Callable[[float], None] | None = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> None:
         self._processes: dict[str, Any] = dict(processes)
         self._events: dict[str, Any] = {name: stop_events.get(name) for name in self._processes}
@@ -74,6 +75,10 @@ class ChildProcessStop:
         self._idle = idle
         # Сбой idle пишется одной строкой на объект, а не на каждом проходе опроса.
         self._idle_error_logged = False
+        # Task 1.9b (D4, I1): системный стоп прерывает ожидание ``join_until`` — без метки, без
+        # ``terminate``: дальше ребёнка ведёт стоп корня PM (группа ``children``), у стопа один владелец.
+        self._should_abort = should_abort
+        self._aborted = False
         self._lock = threading.Lock()
         # Имена с подтверждённой смертью; каждое получило ровно одну попытку метки.
         self._dead: set[str] = set()
@@ -169,10 +174,29 @@ class ChildProcessStop:
             except Exception as exc:  # noqa: BLE001 — остальные дети получают свой сигнал
                 self._emit("warning", f"stop_event.set() для '{name}' упал: {exc}")
 
+    @property
+    def aborted(self) -> bool:
+        """``join_until`` прерван ``should_abort`` (системный стоп): выжившие не подтверждены."""
+        return self._aborted
+
+    def _abort_requested(self) -> bool:
+        """Опрос ``should_abort``; сбой предиката — ``False`` (стоп детей не должен падать от него)."""
+        check = self._should_abort
+        if check is None:
+            return False
+        try:
+            return bool(check())
+        except Exception as exc:  # noqa: BLE001 — предикат вторичен к стопу
+            self._emit("warning", f"should_abort() упал: {exc} — стоп продолжается")
+            return False
+
     def kill(self) -> None:
-        """Фаза 3, начало: ``terminate()`` каждому живому и возврат без ожидания. Повтор — no-op."""
+        """Фаза 3, начало: ``terminate()`` каждому живому и возврат без ожидания. Повтор — no-op.
+
+        Прерванный стоп (``aborted``) — no-op: ни строки, ни ``terminate`` (D4, один владелец).
+        """
         with self._lock:
-            if self._kill_started_at is not None:
+            if self._aborted or self._kill_started_at is not None:
                 return
             self._kill_started_at = time.monotonic()
             waited = self._kill_started_at - self._stop_requested_at
@@ -208,13 +232,19 @@ class ChildProcessStop:
         """Фаза 2 (и ожидание фазы 3): опрос всех живых каждые ``poll_s`` до абсолютного срока.
 
         ``True`` — ждать некого. На сроке ``False``, не бросает; срок в прошлом — ровно один
-        проход. После ``kill()`` настоящий ``kill()`` уходит один раз на первом проходе, где
+        проход. ``should_abort()`` истинен на проходе — ``False`` досрочно, ``aborted`` ``True``.
+        После ``kill()`` настоящий ``kill()`` уходит один раз на первом проходе, где
         ``now >= min(начало + terminate_grace_s, deadline - kill_confirm_s)``.
         """
         while True:
             alive = self._observe()
             if not alive:
                 return True
+            if self._abort_requested():
+                # Метки выжившим нет; ``survivors()`` их вернёт, ``kill()`` станет no-op.
+                with self._lock:
+                    self._aborted = True
+                return False
             now = time.monotonic()
             kill_at = self._kill_at(deadline)
             if kill_at is not None and now >= kill_at:

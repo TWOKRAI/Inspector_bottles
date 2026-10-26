@@ -522,6 +522,7 @@ class TestOrchestratorReadySignalIsHonest:
         pmp = self._bare_pm(event)
         with (
             patch.object(ProcessModule, "initialize", return_value=True),
+            patch.object(ProcessManagerProcess, "_setup_lifecycle_executor", return_value=True),
             patch.object(ProcessManagerProcess, "_setup_console_manager"),
             patch.object(ProcessManagerProcess, "_setup_topology_manager"),
             patch.object(ProcessManagerProcess, "_setup_state_store"),
@@ -573,6 +574,62 @@ class TestOrchestratorReadySignalIsHonest:
             "в момент объявления готовности не зарегистрирована ровно та команда, "
             f"на которой ловили дефект живьём (зарегистрировано: {len(seen_at_announce[0])})"
         )
+
+
+class TestInitializeRequiresExecutorManager:
+    """Task 1.9b (D1): без ``ExecutorManager`` PM не поднимается без команд жизненного цикла.
+
+    Команды класса L/T регистрируются с ``executor=`` по имени; без менеджера имя не разрешится, и PM
+    поднялся бы без ``process.stop``. Тест готовности выше подменяет установку исполнителя — здесь она
+    настоящая. Пара: тот же стенд с менеджером доходит до регистрации (иначе «не зарегистрировано» ничего
+    не доказывает).
+    """
+
+    def _initialize(self, executor_manager):
+        registered: list = []
+        pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+        pmp.name = "ProcessManager"
+        pmp.shared_resources = None
+        pmp.config = {}
+        pmp.command_manager = MagicMock()
+        pmp.command_manager.register_command = MagicMock(side_effect=lambda name, *a, **k: registered.append(name))
+        pmp.router_manager = MagicMock()
+        pmp._process_monitor = MagicMock()
+        pmp._system_ready_event = None
+        pmp._backend_ctl_channel = None
+        pmp._lifecycle_submit = None
+        pmp.executor_manager = executor_manager
+        pmp._log_error = MagicMock()
+        with (
+            patch.object(ProcessModule, "initialize", return_value=True),
+            patch.object(ProcessManagerProcess, "_setup_console_manager"),
+            patch.object(ProcessManagerProcess, "_setup_topology_manager"),
+            patch.object(ProcessManagerProcess, "_setup_state_store"),
+            patch.object(ProcessManagerProcess, "_log_active_feature_flags"),
+            patch.object(ProcessManagerProcess, "_wait_boot_ready"),
+            patch.object(ProcessManagerProcess, "get_config", return_value=None),
+            patch(
+                "multiprocess_framework.modules.process_manager_module.process."
+                "process_manager_process.setup_backend_ctl_channel",
+                return_value=None,
+            ),
+        ):
+            result = pmp.initialize()
+        return result, registered, pmp
+
+    def test_without_executor_manager_initialize_fails_before_registering(self) -> None:
+        result, registered, pmp = self._initialize(executor_manager=None)
+
+        assert result is False
+        assert registered == [], f"команды зарегистрированы без исполнителя: {registered}"
+        assert pmp._log_error.call_count == 1
+
+    def test_with_executor_manager_initialize_reaches_lifecycle_registration(self) -> None:
+        result, registered, _ = self._initialize(executor_manager=MagicMock())
+
+        assert result is True
+        assert "process.stop" in registered
+        assert "process.restart" in registered
 
 
 class TestProcessCommandResponse:

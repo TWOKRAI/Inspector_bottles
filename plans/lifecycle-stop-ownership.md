@@ -528,7 +528,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 
 ### Task 1.9b — PM первый потребитель: стоп вне `message_processor`, отложенный ответ (конечное состояние L-9)
 
-**Статус:** DRAFT 2026-10-20 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Статус:** ACCEPTED 2026-10-26 — гейт CTO MERGE на `d23dc31ab`; DONE и SHA слияния — после merge (был DRAFT 2026-10-20) · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
 **Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — Task 1.9c.
 **Зависит от:** Task 1.9a, Task 1.9m (исполнители PM — через `ExecutorManager`); потребитель — план `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`)
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9b.md`](lifecycle-stop-ownership/tasks/T1.9b.md)

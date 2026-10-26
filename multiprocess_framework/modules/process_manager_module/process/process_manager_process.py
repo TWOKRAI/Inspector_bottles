@@ -17,6 +17,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from ...command_module import DEFERRED
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...error_module.interfaces import SubsystemStartFailed
@@ -90,6 +91,13 @@ class ProcessManagerProcess(ProcessModule):
     _children_stop: Any = None
     #: Срок первого принятого ``system.shutdown mode=force``, с (ADR-PMM-038): повтор отвечает им.
     _force_deadline_s: float | None = None
+    #: Task 1.9b (D1/D4): стоп детей PM начат (``_ChildrenStop.request_stop``). Уровень класса — чтобы
+    #: атрибут был у любого экземпляра, в том числе собранного в тестах через ``__new__`` (``make_pm``).
+    _children_stopping: bool = False
+    #: Task 1.9b (D1): исполнитель операций жизненного цикла и два адаптера над ним; ``None`` до ``initialize()``.
+    _lifecycle_executor: Any = None
+    _lifecycle_submit: Any = None
+    _transition_gate: Any = None
 
     def __init__(
         self,
@@ -165,6 +173,8 @@ class ProcessManagerProcess(ProcessModule):
         )
         # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
         self._process_registry.stop_wait_idle = self._stop_wait_idle
+        # Task 1.9b (D4, I1): системный стоп прерывает стоп ребёнка по одному (``_stop_many``) без terminate.
+        self._process_registry.stop_abort = self._pm_stopping
         self._stop_wait_pump_error_logged = False
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)
@@ -265,6 +275,11 @@ class ProcessManagerProcess(ProcessModule):
                 self.shared_resources.register_process(self.name, {"queues": dict(HUB_QUEUES)})
 
             if not super().initialize():
+                return False
+
+            # Task 1.9b (D1): исполнитель и адаптеры СТРОГО до _register_builtin_commands —
+            # строковое имя исполнителя в register_command разрешается при регистрации.
+            if not self._setup_lifecycle_executor():
                 return False
 
             self._setup_console_manager()
@@ -478,6 +493,69 @@ class ProcessManagerProcess(ProcessModule):
         )
         self._topology_manager.initialize()
 
+    def _setup_lifecycle_executor(self) -> bool:
+        """Task 1.9b (D1): последовательный исполнитель ``pm-lifecycle`` + адаптеры классов L и T.
+
+        Всё через ``ExecutorManager`` процесса (ADR-WRK-006). Без менеджера L/T-команды не зарегистрируются
+        (отказ разрешения имени), PM поднялся бы без ``process.stop`` — поэтому ``False`` и ERROR.
+        """
+        manager = getattr(self, "executor_manager", None)
+        if manager is None:
+            self._log_error("initialize: executor_manager недоступен — команды жизненного цикла не зарегистрировать")
+            return False
+        # Строго последовательно: параллельные стопы разных детей на гонки реестра не проверены (CTO).
+        # Потолок явный: ждущие L (до _L_CAP) и отложенные T (до _T_CAP, считает шлюз) не делят одно место.
+        self._lifecycle_executor = manager.create(
+            "pm-lifecycle",
+            {"kind": "keyed", "serial": True, "max_pending": _L_CAP + _T_CAP},
+            should_reject=self._pm_stopping,
+        )
+        self._lifecycle_submit = _LifecycleSubmit(self, self._lifecycle_executor)
+        self._transition_gate = _TransitionGate(self, self._lifecycle_submit, t_cap=_T_CAP)
+        manager.register("pm-lifecycle-submit", self._lifecycle_submit)
+        manager.register("pm-transition-gate", self._transition_gate)
+        return True
+
+    def _pm_stopping(self) -> bool:
+        """Один предикат «PM гасится» (D1): системный стоп взведён ИЛИ начат стоп детей корня.
+
+        Для ``should_reject`` исполнителя, ``ProcessRegistry.stop_abort`` и отказа в порождении детей.
+        Событие читается поздно и мягко: PM из тестов (``__new__``) может его не иметь.
+        """
+        ev = getattr(self, "_system_stop_event", None)
+        return bool(ev is not None and ev.is_set()) or self._children_stopping
+
+    def _in_transition(self, name: str) -> bool:
+        """Процесс ``name`` в операции жизненного цикла (идёт или стоит в очереди исполнителя)."""
+        submit = self._lifecycle_submit
+        return submit.in_transition(name) if submit is not None else False
+
+    def _lifecycle_busy(self) -> bool:
+        """Есть хоть одна операция жизненного цикла (идёт или в очереди)."""
+        submit = self._lifecycle_submit
+        return submit.busy() if submit is not None else False
+
+    #: Task 1.9b (D2): классы команд по регистрации. L — всегда исполнитель; T — исполнитель, только если цель
+    #: в переходе. Значение — ``{"key_from": поле}`` или ``{"targets": "all"}``. Остальные команды PM —
+    #: класс R (сразу, на приёмном потоке); ``system.shutdown`` — класс S (никогда не исполнитель).
+    _LIFECYCLE_COMMANDS: dict = {
+        "process.create": {"key_from": "process_name"},
+        "process.start": {"key_from": "process_name"},
+        "process.stop": {"key_from": "process_name"},
+        "process.restart": {"key_from": "process_name"},
+        "topology.apply": {"targets": "all"},
+        "wire.setup": {"targets": "all"},
+        "wire.teardown": {"targets": "all"},
+    }
+    _TRANSITION_COMMANDS: dict = {
+        "process.relay": {"key_from": "target_process"},
+        "process.pause": {"key_from": "process_name"},
+        "process.resume": {"key_from": "process_name"},
+        "telemetry.broadcast": {"targets": "all"},
+        "observability.tail.subscribe_all": {"targets": "all"},
+        "observability.tail.unsubscribe_all": {"targets": "all"},
+    }
+
     def _register_builtin_commands(self) -> None:
         """Зарегистрировать встроенные команды системы."""
         if not self.command_manager:
@@ -529,11 +607,18 @@ class ProcessManagerProcess(ProcessModule):
         }
 
         for cmd_name, (handler, description) in commands.items():
+            if cmd_name in self._LIFECYCLE_COMMANDS:
+                routing = {"executor": "pm-lifecycle-submit", **self._LIFECYCLE_COMMANDS[cmd_name]}
+            elif cmd_name in self._TRANSITION_COMMANDS:
+                routing = {"executor": "pm-transition-gate", **self._TRANSITION_COMMANDS[cmd_name]}
+            else:
+                routing = {}
             self.command_manager.register_command(
                 cmd_name,
                 handler,
                 metadata={"description": description},
                 tags=["system"],
+                **routing,
             )
 
     # -------------------------------------------------------------------------
@@ -757,8 +842,9 @@ class ProcessManagerProcess(ProcessModule):
             incarnations = dict(self._incarnations)
         mon = getattr(self, "_process_monitor", None)
         snap = mon.get_supervision_snapshot() if mon is not None else {}
-        instance_restarts = getattr(self, "_instance_restarts", None) or {}
-        started_at = getattr(self, "_instance_started_at", None) or {}
+        # D3: снимки без лока — писатели класса L мутируют словари на потоке исполнителя.
+        instance_restarts = dict(getattr(self, "_instance_restarts", None) or {})
+        started_at = dict(getattr(self, "_instance_started_at", None) or {})
         registry = getattr(self, "_process_registry", None)
         target = data.get("process") if isinstance(data, dict) else None
         processes: dict = {}
@@ -971,7 +1057,12 @@ class ProcessManagerProcess(ProcessModule):
         """
         if self._topology_manager is None:
             return {"error": "TopologyManager not initialized"}
-        return self._topology_manager.get()
+        result = self._topology_manager.get()
+        # D3: менеджер отдаёт живой словарь; писатель класса L меняет его на потоке исполнителя.
+        topology = result.get("topology") if isinstance(result, dict) else None
+        if isinstance(topology, dict):
+            result = {**result, "topology": dict(topology)}
+        return result
 
     def _cmd_topology_diff(self, data=None, **kwargs) -> dict:
         """Dry-run: вычислить diff без применения."""
@@ -1131,7 +1222,8 @@ class ProcessManagerProcess(ProcessModule):
         Параметр data принимается но не используется — команда не требует аргументов.
         """
         result = {}
-        for wire_key, info in self._active_wires.items():
+        # D3: снимок без лока — wire.setup/teardown мутируют словарь на потоке исполнителя.
+        for wire_key, info in list(self._active_wires.items()):
             result[wire_key] = {
                 "status": info.get("status", "idle"),
                 "source_process": info.get("source_process", ""),
@@ -1892,7 +1984,15 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:
                 self._log_error(f"rollback: stop_many не удался: {exc}")
         unstoppable = {n for n in to_stop if not stop_results.get(n, False)}
-        if unstoppable:
+        # Системный стоп (ревью 1.9b р.1 п.1, ADR-PMM-039 D4): прерванный ``stop_abort`` стоп — не «зависший».
+        # Один предикат с ``stop_abort``; имена не сносим и не пересоздаём — их гасит корень.
+        pm_stopping = self._pm_stopping()
+        if unstoppable and pm_stopping:
+            self._log_warning(
+                f"rollback: системный стоп — остановка {sorted(unstoppable)} прервана, "
+                f"пересоздание пропущено (остановку ведёт корень)"
+            )
+        elif unstoppable:
             self._log_error(
                 f"rollback: остановка НЕ подтверждена для {sorted(unstoppable)} — "
                 f"имена исключены из пересоздания (защита от дублей), retry на следующем switch"
@@ -1910,7 +2010,7 @@ class ProcessManagerProcess(ProcessModule):
                 self._log_error(f"rollback: cleanup '{name}' не удался: {exc}")
 
         # --- Фазы C/D/E: provision → create → start (двухфазно, как boot) ---
-        restore = {n: cfg for n, cfg in snapshot.items() if n not in unstoppable}
+        restore = {} if pm_stopping else {n: cfg for n, cfg in snapshot.items() if n not in unstoppable}
         for name, cfg in restore.items():
             try:
                 self._topology_provision(name, cfg)
@@ -3320,13 +3420,30 @@ class ProcessManagerProcess(ProcessModule):
         data = msg.get("data") or {}
         cmd = data.get("cmd", "")
 
+        def reply(result: Any) -> None:
+            # Ответ инициатору через дженерик reply_to_request (absorb bespoke-reply,
+            # comm-system §9.4 / ADR-COMM-005). Корреляция — _extract_correlation_id:
+            # top-level request_id (driver) → data.correlation_id (legacy-обёртка). No-op
+            # без correlation (GUI fire-and-forget, паритет). Адресат — data.reply_to /
+            # reply_to / sender. manages_own_reply=True у регистрации команды → kind-router
+            # НЕ авто-reply'ит (иначе двойной ответ).
+            if not self.router_manager:
+                return
+            try:
+                self.router_manager.reply_to_request(
+                    msg,
+                    result,
+                    success=self._process_command_success(result),
+                    response_command="process.command.response",
+                )
+            except Exception as send_exc:
+                self._log_error(f"Не удалось отправить process.command.response: {send_exc}")
+
         try:
             if not cmd:
                 result = {"status": "error", "reason": "поле 'cmd' обязательно"}
-                success = False
             elif not self.command_manager:
                 result = {"status": "error", "reason": "command_manager недоступен"}
-                success = False
             else:
                 # Собираем внутреннее сообщение для CommandManager
                 inner_msg: dict[str, Any] = {"command": cmd, "data": {}}
@@ -3335,41 +3452,30 @@ class ProcessManagerProcess(ProcessModule):
                     if key not in ("cmd", "correlation_id"):
                         inner_msg["data"][key] = value
 
-                result = self.command_manager.handle_command(inner_msg)
-
-                # Определяем success. Приоритет — явному self-report команды
-                # (``result["success"]``): PM-методы (``replace_blueprint``,
-                # lifecycle) кладут ``"error": None`` даже на успехе, из-за чего
-                # эвристика ``"error" not in result`` ложно дала бы success=False
-                # (успешная горячая замена транслировалась бы как ошибка —
-                # ломает command-result-bridge «GUI узнаёт результат»). Эвристика
-                # остаётся фолбэком для результатов без явного ``"success"``.
-                if isinstance(result, dict):
-                    if "success" in result:
-                        success = bool(result["success"])
-                    else:
-                        success = "error" not in result and result.get("status") != "error"
-                else:
-                    success = True
+                # Task 1.9b (D2): команда с исполнителем (L/T) отвечает через ``reply`` сама, позже,
+                # с потока исполнителя; обёртка тогда не отвечает (``DEFERRED``).
+                result = self.command_manager.handle_command(inner_msg, reply=reply)
+                if result is DEFERRED:
+                    return
 
         except Exception as exc:
             self._log_error(f"Router process.command ошибка при выполнении '{cmd}': {exc}")
             result = {"status": "error", "reason": str(exc)}
-            success = False
 
-        # Ответ инициатору через дженерик reply_to_request (absorb bespoke-reply,
-        # comm-system §9.4 / ADR-COMM-005). Корреляция — _extract_correlation_id:
-        # top-level request_id (driver) → data.correlation_id (legacy-обёртка). No-op
-        # без correlation (GUI fire-and-forget, паритет). Адресат — data.reply_to /
-        # reply_to / sender. manages_own_reply=True у регистрации команды → kind-router
-        # НЕ авто-reply'ит (иначе двойной ответ).
-        if self.router_manager:
-            try:
-                self.router_manager.reply_to_request(
-                    msg, result, success=success, response_command="process.command.response"
-                )
-            except Exception as send_exc:
-                self._log_error(f"Не удалось отправить process.command.response: {send_exc}")
+        reply(result)
+
+    @staticmethod
+    def _process_command_success(result: Any) -> bool:
+        """Success ответа ``process.command.response``. Приоритет — явному self-report команды
+        (``result["success"]``): PM-методы (``replace_blueprint``, lifecycle) кладут ``"error": None``
+        даже на успехе, из-за чего эвристика ``"error" not in result`` ложно дала бы success=False
+        (успешная горячая замена транслировалась бы как ошибка — ломает command-result-bridge
+        «GUI узнаёт результат»). Эвристика остаётся фолбэком для результатов без явного ``"success"``."""
+        if isinstance(result, dict):
+            if "success" in result:
+                return bool(result["success"])
+            return "error" not in result and result.get("status") != "error"
+        return True
 
     def _handle_critical_error(self, exc: Exception, context: str) -> None:
         """Логировать критическую ошибку через error_module и запустить shutdown."""
@@ -3655,8 +3761,7 @@ class ProcessManagerProcess(ProcessModule):
     def _spawn_refused_after_system_stop(self, what: str, name: str | None) -> bool:
         """ADR-PMM-030: после системного стопа PM не порождает детей — рождение сняло бы
         метку «читатель ушёл», поставленную на пути к выходу, и писатели зависли бы снова."""
-        ev = getattr(self, "_system_stop_event", None)
-        if ev is None or not ev.is_set():
+        if not self._pm_stopping():
             return False
         self._log_warning(f"{what}({name or '*'}): отказ — системный стоп уже взведён")
         return True
@@ -4137,7 +4242,8 @@ class ProcessManagerProcess(ProcessModule):
         ready: dict[str, bool] = {}
         pending = set(names)
         deadline = time.monotonic() + timeout_s
-        while pending and time.monotonic() < deadline:
+        # Task 1.9b (D4): системный стоп прерывает ожидание (исполнитель не держит стоп корня).
+        while pending and time.monotonic() < deadline and not self._pm_stopping():
             for name in list(pending):
                 event = get_ready_event(name) if get_ready_event is not None else None
                 if event is not None and event.is_set():
@@ -4158,9 +4264,11 @@ class ProcessManagerProcess(ProcessModule):
                     self._log_warning(f"{reason}: '{name}' умер до готовности → not-ready")
             if pending:
                 time.sleep(0.05)
+        stopping = self._pm_stopping()
         for name in pending:
             ready[name] = True  # пережил окно — считаем работающим
-            self._voice_liveness_fallback(name, reason, timeout_s)
+            if not stopping:  # прерванное системным стопом ожидание — не «фолбэк по liveness»
+                self._voice_liveness_fallback(name, reason, timeout_s)
         return ready
 
     #: Ключ серии фолбэков готовности. Один на все процессы СОЗНАТЕЛЬНО: симптом,
@@ -4291,6 +4399,11 @@ class ProcessManagerProcess(ProcessModule):
         timeout = float(self.get_config("stop_process_timeout") or 5.0)
         results = self._process_registry.stop_many(list(names), timeout)
         failed = sorted(n for n in names if not results.get(n, False))
+        if failed and self._pm_stopping():
+            # Системный стоп прервал стоп (``stop_abort``, ADR-PMM-039 D4): имена не «зависли», их гасит корень.
+            # Ни ERROR, ни alert «unstoppable»; ``False`` — операция не выполнена, откат не пересоздаёт.
+            self._log_warning(f"topology stop_all: system stop: children handed to the root stop: {failed}")
+            return False
         if failed:
             self._log_error(f"topology stop_all: остановка НЕ подтверждена для {failed}; карта результатов: {results}")
             # B-3 (RS-3): alert в state/hub — зависшие имена видны, retry на след. switch.
@@ -4403,7 +4516,9 @@ class _ChildrenStop:
         self._phase1_error: Exception | None = None
         self._lock = threading.Lock()
 
-    def _start(self) -> Any:
+    def _start(self, deadline: float | None = None) -> Any:
+        """Пауза монитора и сборка группы детей. ``deadline`` (``monotonic``) — общий срок с исполнителем
+        (монитору остаток); без него — ``infra_s``, как раньше."""
         with self._lock:
             if self._group is not None or self._start_failed:
                 return None
@@ -4411,7 +4526,9 @@ class _ChildrenStop:
             try:
                 monitor = getattr(pm, "_process_monitor", None)
                 if monitor is not None:
-                    monitor.stop(wait=True, timeout=float(pm._budget()["infra_s"]))
+                    infra_s = float(pm._budget()["infra_s"])
+                    budget = infra_s if deadline is None else max(0.0, deadline - time.monotonic())
+                    monitor.stop(wait=True, timeout=budget)
                 self._group = pm._process_registry.children_stop(mark_reader_gone=True)
             except Exception as exc:
                 # Одна попытка: повтор в join_until/фазе 3 не лечит и множит ошибки.
@@ -4422,14 +4539,51 @@ class _ChildrenStop:
 
     def request_stop(self) -> None:
         """Фаза 1. Исключение запоминается и один раз повторяется из ``join_until``: на пути раннера
-        (``stop()`` → ``cancel()``) область не пишет ошибки фазы 1 в отчёт, на ``join_until`` пишет."""
+        (``stop()`` → ``cancel()``) область не пишет ошибки фазы 1 в отчёт, на ``join_until`` пишет.
+
+        Task 1.9b (D4, I1): СНАЧАЛА исполнитель операций жизненного цикла — флаг «PM гасится», снятие
+        очереди и ожидание операции в полёте; потом монитор (остаток общего срока ``infra_s``) и дети.
+        Ожидание здесь, а не в ``join_until``: область закрывает фазу 1 по ВСЕМ записям до фазы 2, и в
+        ``join_until`` у ребёнка, которого ещё держит операция, было бы два владельца стопа.
+        """
+        pm = self._pm
+        pm._children_stopping = True
+        # Один срок на исполнитель и паузу монитора (монитору — остаток).
+        deadline = time.monotonic() + float(pm._budget()["infra_s"])
         try:
-            group = self._start()
-            if group is not None:
-                group.request_stop()
+            try:
+                self._stop_lifecycle_executor(deadline)
+            finally:
+                # Стоп детей идёт всегда; BaseException пробрасывается после него.
+                group = self._start(deadline)
+                if group is not None:
+                    group.request_stop()
         except Exception as exc:
             self._phase1_error = exc
             raise
+
+    def _stop_lifecycle_executor(self, deadline: float) -> None:
+        """Снять очередь исполнителя и дождаться операции в полёте до ``deadline`` (``monotonic``).
+
+        С потока самого исполнителя — только ``request_stop`` (ждать себя нельзя). ``False`` от
+        ``join_until`` — ERROR в лог: I1 условен, при ``False`` один владелец не гарантирован.
+        """
+        pm = self._pm
+        executor = getattr(pm, "_lifecycle_executor", None)
+        if executor is None:
+            return
+        try:
+            executor.request_stop()
+            manager = getattr(pm, "executor_manager", None)
+            if manager is not None and manager.is_executor_thread("pm-lifecycle"):
+                return
+            if not executor.join_until(deadline):
+                pm._log_error(
+                    "shutdown: операция жизненного цикла не завершилась к сроку infra_s — "
+                    "стоп ребёнка может идти параллельно со стопом корня"
+                )
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: ожидание исполнителя жизненного цикла: {exc}")
 
     def set_force_deadline(self, at: float) -> bool:
         """Поставить срок ``force`` (абсолютный, ``time.monotonic()``). Первый вызов выигрывает:
@@ -4468,3 +4622,152 @@ class _ChildrenStop:
 
     def result(self) -> dict[str, bool]:
         return self._group.result() if self._group is not None else {}
+
+
+# Потолки очереди ``pm-lifecycle`` (вердикт CTO по L/T, ADR-PMM-039 D2/I5). Один FIFO, ёмкость раздельная:
+# ``max_pending = _L_CAP + _T_CAP``; T сверх ``_T_CAP`` отказывает шлюз, поэтому поток T не вытесняет L.
+# ``_T_CAP = 64`` — ОЦЕНКА до замера S3 на стенде (число — владельцу), не вывод из измерения.
+_L_CAP = 64
+_T_CAP = 64
+
+
+class _LifecycleSubmit:
+    """Считающий адаптер ``OrderedExecutor.submit`` над исполнителем ``pm-lifecycle`` (Task 1.9b, D1).
+
+    Класс L регистрируется с ним (``executor="pm-lifecycle-submit"``). Считает операции в переходе:
+    ``+1`` по каждой цели до подачи, ``-1`` в ``finally`` вокруг ``reply`` (в том числе на отказах —
+    исполнитель зовёт ``reply`` ровно раз). Счётчики — под ``_routing_lock`` PM (только арифметика).
+    Объект, а не метод: ``ExecutorManager.register`` и ``CommandManager`` требуют вызываемый ``submit``.
+    """
+
+    name = "pm-lifecycle-submit"
+
+    def __init__(self, pm: ProcessManagerProcess, executor: Any) -> None:
+        self._pm = pm
+        self._executor = executor
+        self._count_all = 0
+        self._count: dict[str, int] = {}
+
+    def _shift(self, key: frozenset[str] | None, delta: int) -> None:
+        with self._pm._routing_lock:
+            if key is None:
+                self._count_all += delta
+                return
+            for name in key:
+                value = self._count.get(name, 0) + delta
+                if value > 0:
+                    self._count[name] = value
+                else:
+                    self._count.pop(name, None)
+
+    def in_transition(self, name: str) -> bool:
+        with self._pm._routing_lock:
+            return self._count_all > 0 or self._count.get(name, 0) > 0
+
+    def busy(self) -> bool:
+        with self._pm._routing_lock:
+            return self._count_all > 0 or bool(self._count)
+
+    def submit(self, action, key, reply, *, inline_if_idle: bool = False) -> bool:
+        if key is not None:
+            key = frozenset(key)
+        self._shift(key, +1)
+        released = [False]
+
+        def release() -> None:
+            # Ровно один раз: и на ответе исполнителя, и на сбое самой подачи.
+            if not released[0]:
+                released[0] = True
+                self._shift(key, -1)
+
+        def counted_reply(result: Any) -> None:
+            try:
+                reply(result)
+            finally:
+                release()
+
+        try:
+            return self._executor.submit(action, key, counted_reply, inline_if_idle=inline_if_idle)
+        except BaseException:
+            release()
+            raise
+
+
+class _TransitionGate:
+    """Адаптер класса T (Task 1.9b, D1/D2): исполнитель — только если цель в переходе.
+
+    Цель в переходе (``key`` — её имя; ``key=None`` — идёт любая операция жизненного цикла) → подача в
+    ``_LifecycleSubmit`` (исполнится после перехода). Иначе ``action()`` и ``reply`` на вызывающем
+    потоке, возврат ``False`` (ADR-CMD-006 это допускает). Развилка здесь, не в обработчике.
+
+    Свой счётчик отложенных T (отдельно от счётчиков перехода ``_LifecycleSubmit``): проверка и ``+1`` под
+    ``_routing_lock`` до подачи, ``-1`` в ``finally`` вокруг ``reply`` (и на отказе исполнителя, и на исключении).
+    Сверх ``t_cap`` — ``executor_busy`` из шлюза тем же ``reply``: поток T не занимает места L (ADR-PMM-039, I5).
+    Строку WARNING пишет ``CommandManager`` — шлюз свою не добавляет.
+    """
+
+    name = "pm-transition-gate"
+
+    def __init__(self, pm: ProcessManagerProcess, lifecycle_submit: _LifecycleSubmit, *, t_cap: int = _T_CAP) -> None:
+        self._pm = pm
+        self._lifecycle_submit = lifecycle_submit
+        self._t_cap = t_cap
+        self._t_pending = 0
+
+    def t_pending(self) -> int:
+        with self._pm._routing_lock:
+            return self._t_pending
+
+    def _reserve(self) -> bool:
+        """Check-and-increment под одним локом: место T есть → занято."""
+        with self._pm._routing_lock:
+            if self._t_pending >= self._t_cap:
+                return False
+            self._t_pending += 1
+            return True
+
+    def _release(self) -> None:
+        with self._pm._routing_lock:
+            self._t_pending -= 1
+
+    def _reply_safely(self, reply, result: Any) -> None:
+        try:
+            reply(result)
+        except Exception as exc:  # noqa: BLE001 — сбой ответа не должен ронять приёмный поток
+            self._pm._log_error(f"transition-gate: reply упал: {exc}")
+
+    def _defer(self, action, key, reply) -> bool:
+        if not self._reserve():
+            self._reply_safely(reply, {"success": False, "error": "executor_busy"})
+            return False
+        released = [False]
+
+        def release() -> None:
+            # Ровно один раз: и на ответе исполнителя, и на сбое самой подачи.
+            if not released[0]:
+                released[0] = True
+                self._release()
+
+        def counted_reply(result: Any) -> None:
+            try:
+                reply(result)
+            finally:
+                release()
+
+        try:
+            return self._lifecycle_submit.submit(action, key, counted_reply)
+        except BaseException:
+            release()
+            raise
+
+    def submit(self, action, key, reply, *, inline_if_idle: bool = False) -> bool:
+        submit = self._lifecycle_submit
+        busy = submit.busy() if key is None else any(submit.in_transition(name) for name in key)
+        if busy:
+            return self._defer(action, key, reply)
+        try:
+            result = action()
+        except Exception as exc:  # noqa: BLE001 — тот же конверт, что у исполнителя
+            result = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._reply_safely(reply, result)
+        return False

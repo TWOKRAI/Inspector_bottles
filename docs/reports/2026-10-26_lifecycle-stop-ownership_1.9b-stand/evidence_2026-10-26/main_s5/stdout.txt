@@ -1,0 +1,46 @@
+[S5 restart camera_0 #1] 4.484s restarted=True
+[S5 restart camera_0 #2] 4.204s restarted=True
+[S5 restart camera_0 #3] 4.171s restarted=True
+[S5 restart devices #1] 1.672s restarted=True
+[S5 restart devices #2] 2.141s restarted=True
+[S5 restart devices #3] 1.969s restarted=True
+[S5 recipe.activate] 3.843s success=True
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 1] tree_exit_s=3.234 pids=11 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 2] tree_exit_s=9.265 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 3] tree_exit_s=8.328 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 4] tree_exit_s=10.656 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 5] tree_exit_s=9.625 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 6] tree_exit_s=9.875 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 7] tree_exit_s=9.407 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 8] tree_exit_s=9.109 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 9] tree_exit_s=8.984 pids=10 survivors=[]
+backend-ctl-reader: сервер закрыл соединение
+[S5 shutdown run 10] tree_exit_s=10.031 pids=10 survivors=[]
+## Основной прогон: числа «ПОСЛЕ»
+
+| сценарий | N | min | median | max | p99 | зависаний | not reported/lost | did not stop in | порог ПОСЛЕ | вердикт |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S5 | 10 | 3.234 | 9.336 | 10.656 | 10.656 | 0 | 0 | 0 | рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0 | **FAIL** |
+
+Причины FAIL:
+- S5: shutdown #8 (run 1): 3.23 с >= 2.0
+- S5: shutdown #9 (run 2): 9.27 с >= 2.0
+- S5: shutdown #10 (run 3): 8.33 с >= 2.0
+- S5: shutdown #11 (run 4): 10.66 с >= 2.0
+- S5: shutdown #12 (run 5): 9.62 с >= 2.0
+- S5: shutdown #13 (run 6): 9.88 с >= 2.0
+- S5: shutdown #14 (run 7): 9.41 с >= 2.0
+- S5: shutdown #15 (run 8): 9.11 с >= 2.0
+- S5: shutdown #16 (run 9): 8.98 с >= 2.0
+- S5: shutdown #17 (run 10): 10.03 с >= 2.0
+
+exit=1
