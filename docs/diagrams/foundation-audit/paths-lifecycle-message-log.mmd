@@ -1,0 +1,52 @@
+%% Аудит фундамента 2026-10-26 — три сквозных пути по звеньям
+%% Источник: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.2 (HEAD 71bfc55fe)
+%% Цвет: серый пунктир — звено только пересылает вызов ([F] / [F+]); синий — своя логика ([L]).
+flowchart TB
+    classDef fwd fill:#eeeeee,stroke:#888,stroke-dasharray:4 3,color:#333
+    classDef logic fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef ext fill:#fff3d6,stroke:#b07d00,color:#111
+
+    subgraph P1["Путь 1 — рестарт / стоп ребёнка (8 звеньев, 3 пересылают)"]
+        direction TB
+        a0["backend_ctl driver.py:1255<br/>cmd process.restart"]:::ext
+        a1["PM._cmd_process_restart<br/>_merge_cmd_args"]:::fwd
+        a2["PM.restart_process :3846<br/>stop · drain · incarnation? · start · instance_restarts+1"]:::logic
+        a3["PM.stop_process :3827<br/>is_alive + таймаут"]:::fwd
+        a4["ProcessRegistry.stop_one :339<br/>_stop_many([name])[name]"]:::fwd
+        a5["ProcessRegistry._stop_many :455<br/>область pm/stop"]:::logic
+        a6["ChildProcessStop<br/>request_stop · join_until · kill"]:::logic
+        a7["ребёнок: _run_lifecycle :192<br/>stop_event ИЛИ system_stop_event"]:::logic
+        a8["ProcessModule.stop :1394"]:::logic
+        a0 --> a1 --> a2 --> a3 --> a4 --> a5 --> a6 -. "stop_event.set()" .-> a7 --> a8
+        s1["_ChildrenGroupStop<br/>process_registry.py:523"]:::logic
+        s2["SystemLauncher.stop → ProcessSpawner.stop<br/>system_stop_event.set · terminate · kill"]:::logic
+        s2 -. "system_stop_event" .-> a7
+    end
+
+    subgraph P2["Путь 2 — сообщение процесс → Router → процесс (9 звеньев, 4 пересылают)"]
+        direction TB
+        b1["ProcessIO.send_data/command/event<br/>собирает конверт"]:::fwd
+        b2["ProcessModule.send_message :1187"]:::fwd
+        b3["ProcessCommunication.send_message :290<br/>«алиас send_to_process»"]:::fwd
+        b4["ProcessCommunication.send_to_process<br/>sender · targets"]:::logic
+        b5["RouterManager.send :552<br/>_do_send(_to_dict)"]:::fwd
+        b6["RouterManager._do_send<br/>middleware · учёт ошибок"]:::logic
+        b7["_resolve_channels :2145"]:::logic
+        b8["_deliver_by_targets :675<br/>выбор типа очереди"]:::logic
+        b9["QueueRegistry.send_to_queue<br/>put_nowait"]:::logic
+        b1 --> b2 --> b3 --> b4 --> b5 --> b6 --> b7 --> b8 --> b9
+    end
+
+    subgraph P3["Путь 3 — лог процесса → файл (9 звеньев, 4 пересылают)"]
+        direction TB
+        c1["ProcessModule._log_info :1126<br/>setdefault module · возврат теряется"]:::fwd
+        c2["ObservableMixin._log_info"]:::fwd
+        c3["ObservableMixin._log_checked"]:::fwd
+        c4["_call_manager_result<br/>is_enabled · ловит исключения"]:::logic
+        c5["LoggerCore.info :1921"]:::fwd
+        c6["LoggerCore.log :1478<br/>маршрут · процессоры · tap"]:::logic
+        c7["ChannelRoutingManager<br/>._write_record_to_channels :1043"]:::logic
+        c8["FileChannel.write<br/>log_channel.py:993"]:::logic
+        c9["_SafeRotatingFileHandler"]:::logic
+        c1 --> c2 --> c3 --> c4 --> c5 --> c6 --> c7 --> c8 --> c9
+    end

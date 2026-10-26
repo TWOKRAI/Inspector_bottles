@@ -1,0 +1,95 @@
+%% Аудит фундамента 2026-10-26 — связи модулей framework по контурам (C4 L3)
+%% Сгенерировано из ast-разбора импортов production-кода, HEAD 71bfc55fe; данные: docs/maps/framework-core.md
+%% Показаны рёбра от 3 импортов; подпись «всего / вглубь» (вглубь = мимо interfaces.py и корня пакета).
+%% Пунктирная рамка — ярус optional (MODULE_TIERS.md). Полная таблица 110 рёбер — в карте.
+flowchart LR
+    classDef core fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef opt fill:#f4f4f4,stroke:#888,stroke-dasharray:4 3,color:#333
+    subgraph foundation["Фундамент: базы и схемы"]
+        base_manager["base_manager"]:::core
+        data_schema["data_schema"]:::core
+    end
+    subgraph ipc["IPC: сообщения, каналы, очереди, SHM"]
+        message["message"]:::core
+        dispatch["dispatch"]:::core
+        channel_routing["channel_routing"]:::core
+        router["router"]:::core
+        command["command"]:::core
+        shared_resources["shared_resources"]:::core
+    end
+    subgraph obs["Наблюдаемость"]
+        logger["logger"]:::core
+        error["error"]:::core
+        statistics["statistics"]:::core
+        console["console"]:::core
+        telemetry_readmodel["telemetry_readmodel"]:::opt
+    end
+    subgraph life["Жизненный цикл и обработка"]
+        process_manager["process_manager"]:::core
+        process["process"]:::core
+        worker["worker"]:::core
+        chain["chain"]:::core
+        service["service"]:::opt
+        app["app"]:::opt
+    end
+    subgraph state["Состояние и конфиг"]
+        config["config"]:::core
+        state_store["state_store"]:::opt
+        registers["registers"]:::opt
+        recipe["recipe"]:::opt
+    end
+    subgraph ui["UI-слой"]
+        frontend["frontend"]:::opt
+        actions["actions"]:::opt
+        event["event"]:::opt
+        display["display"]:::opt
+    end
+    process -->|"26 / 21"| logger
+    frontend -->|"25 / 3"| logger
+    process_manager -->|"23 / 21"| process
+    process -->|"20 / 4"| data_schema
+    process -->|"14 / 11"| router
+    frontend -->|"13 / 0"| data_schema
+    process_manager -->|"12 / 8"| shared_resources
+    process -->|"12 / 9"| statistics
+    app -->|"11 / 11"| process
+    process -->|"11 / 9"| config
+    statistics -->|"11 / 3"| channel_routing
+    process_manager -->|"10 / 7"| logger
+    logger -->|"9 / 4"| channel_routing
+    process -->|"9 / 3"| worker
+    process_manager -->|"8 / 0"| data_schema
+    process -->|"8 / 5"| base_manager
+    app -->|"7 / 7"| process_manager
+    process -->|"7 / 7"| channel_routing
+    router -->|"6 / 0"| message
+    config -->|"5 / 3"| data_schema
+    process -->|"5 / 0"| message
+    process -->|"5 / 4"| console
+    shared_resources -->|"5 / 1"| base_manager
+    error -->|"4 / 4"| logger
+    process_manager -->|"4 / 0"| error
+    process_manager -->|"4 / 4"| config
+    process_manager -->|"4 / 4"| message
+    process -->|"4 / 1"| state_store
+    router -->|"4 / 4"| shared_resources
+    shared_resources -->|"4 / 2"| logger
+    statistics -->|"4 / 2"| logger
+    worker -->|"4 / 1"| base_manager
+    actions -->|"3 / 0"| logger
+    app -->|"3 / 3"| state_store
+    base_manager -->|"3 / 3"| logger
+    chain -->|"3 / 0"| base_manager
+    channel_routing -->|"3 / 0"| data_schema
+    channel_routing -->|"3 / 3"| logger
+    command -->|"3 / 1"| base_manager
+    console -->|"3 / 1"| base_manager
+    error -->|"3 / 2"| channel_routing
+    frontend -->|"3 / 1"| message
+    frontend -->|"3 / 3"| router
+    message -->|"3 / 0"| data_schema
+    process_manager -->|"3 / 1"| base_manager
+    process -->|"3 / 1"| registers
+    process -->|"3 / 1"| command
+    registers -->|"3 / 0"| data_schema
+    worker -->|"3 / 0"| data_schema

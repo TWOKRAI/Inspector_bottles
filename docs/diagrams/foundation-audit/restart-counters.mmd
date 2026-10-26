@@ -1,0 +1,43 @@
+%% Аудит фундамента 2026-10-26 — какое событие какой счётчик рестарта двигает
+%% Источник: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.3 L1 (сверено по коду, HEAD 71bfc55fe)
+%% Сплошная стрелка — счётчик растёт; пунктир с «нет» — событие счётчик НЕ двигает (место расхождения).
+flowchart LR
+    classDef ev fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef cnt fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef rd fill:#e8f5e9,stroke:#2e7d32,color:#111
+
+    e1["ручной рестарт<br/>backend_ctl / GUI"]:::ev
+    e2["краш-рестарт монитора<br/>(плановый, по RestartPolicy)"]:::ev
+    e3["induced-рестарт группы<br/>rest_for_one / one_for_all"]:::ev
+    e4["рестарт со сменой<br/>identity очередей"]:::ev
+    e5["_topology_provision<br/>(apply_topology)"]:::ev
+    e6["окно стабильности истекло"]:::ev
+    e7["сбой потока-воркера<br/>внутри процесса"]:::ev
+
+    inc["PM._incarnations<br/>incarnation<br/>pm_process.py:119"]:::cnt
+    ir["PM._instance_restarts<br/>instance_restarts<br/>:136"]:::cnt
+    rc["ProcessMonitor._restart_history<br/>restart_count = len()<br/>process_monitor.py:120"]:::cnt
+    wrc["worker_info restart_count<br/>worker_registry.py:72"]:::cnt
+
+    e1 --> ir
+    e1 -. "нет" .-> rc
+    e1 -. "нет при reuse очередей (default)" .-> inc
+    e2 --> ir
+    e2 --> rc
+    e3 --> ir
+    e3 -. "нет (process_monitor.py:1426)" .-> rc
+    e4 --> inc
+    e4 --> ir
+    e5 --> inc
+    e5 -. "нет" .-> ir
+    e6 -- "сброс в 0" --> rc
+    e7 --> wrc
+
+    r1["fence / routing_incarnation<br/>otel_export · телеметрия"]:::rd
+    r2["supervision_status<br/>backend_ctl process_restart_verified"]:::rd
+    r3["worker_manager.py:321, 360"]:::rd
+    inc --> r1
+    inc --> r2
+    ir --> r2
+    rc --> r2
+    wrc --> r3
