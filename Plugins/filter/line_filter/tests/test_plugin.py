@@ -261,6 +261,21 @@ class TestZoneEdge:
         p.process([_dets((100, 255))])  # новый диск: 30 px от места пропажи > max_match_distance=20
         assert p._counted_total == 1
 
+    def test_mode_switch_resets_empty_streak(self):
+        """Переключение режима обнуляет счёт пустых кадров: пустой кадр до переключения не считается
+        в rearm_frames (иначе после возврата в zone_edge защёлка снялась бы на кадр раньше)."""
+        p = _armed_zone_edge()
+        p.process([_dets((100, 225))])  # событие 1
+        p.process([_EMPTY])  # 1 пустой кадр, защёлка закрыта (rearm_frames=2)
+        p._reg.mode = "cross_line"
+        p.process([_EMPTY])
+        p._reg.mode = "zone_edge"
+        p.process([_EMPTY])  # 1 пустой кадр после возврата: меньше rearm_frames -> защёлка закрыта
+        p.process(
+            [_dets((100, 255))]
+        )  # 30 px от места пропажи > max_match_distance=20: при снятой защёлке было бы событие
+        assert p._counted_total == 1
+
     @staticmethod
     def _same_object_logs(p: LineFilterPlugin) -> list:
         return [c for c in p._ctx.log_info.call_args_list if "тот же объект" in c.args[0]]

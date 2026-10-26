@@ -24,8 +24,8 @@ _LINE_CFG = {
     "mode": "zone_edge",
     "rearm_frames": 2,
     # C-42: zone_edge помнит место пропажи; значения — как в рецепте letter_robot_sim.yaml.
-    "max_match_distance": 60,
-    "max_age": 20,
+    "max_match_distance": 100,
+    "max_age": 4,
 }
 _CROP_CFG = {
     "size_mode": "radius",
@@ -88,7 +88,7 @@ def test_real_chain_two_same_letters_two_cells() -> None:
 def test_real_chain_loss_inside_zone_one_disc_one_slot() -> None:
     """C-42: потеря детекции на 3 кадра внутри зоны (> rearm_frames=2) — тот же диск: один track_id, одно задание.
 
-    Диск едет по x с шагом 6 px/кадр (физика ленты ~6.6): v × (L + 1) = 24 px <= max_match_distance=60.
+    Диск едет по x с шагом 6 px/кадр (медленная лента): v × (L + 1) = 24 px <= max_match_distance=100, L=3 <= max_age=4.
     До правки второе событие давало track_id 2 и второе задание на слот 6.
     """
     line = _mk(LineFilterPlugin, _LINE_CFG)
@@ -114,3 +114,50 @@ def test_real_chain_loss_inside_zone_one_disc_one_slot() -> None:
     assert 357 in range(255, 500, 6) and 369 in range(255, 500, 6)  # потеря действительно внутри прохода
     assert tids == [1]
     assert slots == [2]
+
+
+# Физика sim-ленты: 101.13 мм/с × 8.163 px/мм / 25 кадр/с = 33 px/кадр; зона 250 px проходится за ~7.6 кадра.
+_SIM_PASS_XS = (260, 293, 326, 359, 392, 425, 458, 491)  # x в [251, 501]: 8 кадров в зоне
+
+
+def _run_sim_belt(frames: list[int | None]) -> tuple[list[object], list[int | None]]:
+    """Прогнать кадры (x диска или None — пустой кадр) через line_filter -> center_crop -> word_layout.
+
+    Метка «Р» на всех дисках; вернуть (track_id, слот) по каждому событию.
+    """
+    line = _mk(LineFilterPlugin, _LINE_CFG)
+    crop = _mk(CenterCropPlugin, _CROP_CFG)
+    word = _mk(WordLayoutPlugin, _WORD_CFG)
+    frame = np.zeros((481, 800, 3), np.uint8)
+    pred = {"label": "Р", "confidence": 0.9, "angle_deg": 0.0, "angle_valid": True}
+    tids: list[object] = []
+    slots: list[int | None] = []
+    for seq, x in enumerate(frames, start=1):
+        dets = [] if x is None else [{"center": [x, 262], "radius": 40}]
+        ov = line.process([{"detections": dets, "seq_id": seq}])[0]
+        crops = crop.process([{"frame": frame, "filtered": ov["filtered"], "detections": dets, "seq_id": seq}])
+        for c in crops:
+            out = word.process([{**c, "predictions": [pred]}])[0]
+            tids.append(out["sidecar"].get("track_id"))
+            slots.append(out["robot_job"]["slot"] if out.get("robot_job") else None)
+    return tids, slots
+
+
+def test_sim_belt_loss_of_two_frames_inside_zone_one_disc_one_slot() -> None:
+    """C-42, физика sim (33 px/кадр, значения рецепта): потеря 2 кадров подряд внутри зоны — тот же диск.
+
+    Диск виден на x=326, нет на 359 и 392, снова виден на 425: 99 px <= max_match_distance=100.
+    С max_match_distance=60 здесь было бы второе событие (track_id 2, слот 6).
+    """
+    frames = [None, None, 260, 293, 326, None, None, 425, 458, 491]  # два пустых кадра взвода (О1) + проход
+    tids, slots = _run_sim_belt(frames)
+    assert tids == [1]
+    assert slots == [2]
+
+
+def test_sim_belt_two_discs_give_two_events() -> None:
+    """C-42, физика sim: второй диск входит у дальнего края после ухода первого (5 пустых кадров) — два события."""
+    frames = [None, None, *_SIM_PASS_XS, *[None] * 5, *_SIM_PASS_XS]
+    tids, slots = _run_sim_belt(frames)
+    assert tids == [1, 2]
+    assert slots == [2, 6]

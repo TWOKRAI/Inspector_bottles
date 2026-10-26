@@ -75,8 +75,8 @@ _LINE_CFG = {
     "mode": "zone_edge",
     "rearm_frames": 2,
     # C-42: zone_edge помнит место пропажи; значения — как в рецепте letter_robot_sim.yaml.
-    "max_match_distance": 60,
-    "max_age": 20,
+    "max_match_distance": 100,
+    "max_age": 4,
 }
 _CROP_CFG = {
     "size_mode": "radius",

@@ -218,8 +218,8 @@
                   "angle": 90,
                   "center_x": 376,
                   "center_y": 262,
-                  "max_age": 20,
-                  "max_match_distance": 60,
+                  "max_age": 4,
+                  "max_match_distance": 100,
                   "mode": "zone_edge",
                   "rearm_frames": 2,
                   "zone_width": 250
@@ -2839,8 +2839,8 @@
               "angle": 90,
               "center_x": 376,
               "center_y": 262,
-              "max_age": 20,
-              "max_match_distance": 60,
+              "max_age": 4,
+              "max_match_distance": 100,
               "mode": "zone_edge",
               "rearm_frames": 2,
               "zone_width": 250
