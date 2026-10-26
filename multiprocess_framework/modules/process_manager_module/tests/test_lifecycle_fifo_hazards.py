@@ -74,6 +74,24 @@ class Direct:
         return None if self.t_done is None else self.t_done - self.t_start
 
 
+def _assert_in_transition(rig: Rig, name: str, what: str) -> None:
+    """Предусловие «операция с ``name`` идёт», не ожидая лок под проверкой.
+
+    ``_in_transition`` берёт ``_routing_lock``. Вызов на потоке теста при локе, взятом на всю операцию, ждал бы
+    её конца, и проверка лока ниже шла бы по свободному локу (H3/H7 зелёные под И7, разбор
+    ``docs/reviews/2026-10-26_task-1.9b-I7-debugger.md``). Поэтому — daemon-поток с дедлайном ``FAST_S``:
+    не ответил вовремя — читатель класса R заблокирован, это уже красный.
+    """
+    box: dict[str, bool] = {}
+    th = threading.Thread(
+        target=lambda: box.__setitem__("value", rig.pm._in_transition(name)), daemon=True, name="in-transition"
+    )
+    th.start()
+    th.join(FAST_S)
+    assert not th.is_alive(), f"предусловие {what}: _in_transition('{name}') не ответил за {FAST_S} с — лок занят"
+    assert box.get("value") is True, f"предусловие {what}: операция с '{name}' не идёт"
+
+
 def _remove_slow_topology(rig: Rig) -> None:
     """Планировщик убирает только slow (стоп 3,0 с в ``topology.apply``)."""
     rig.pm._topology_manager.configure(
@@ -94,7 +112,7 @@ def test_h1_system_shutdown_idles_executor_within_200ms(rig: Rig) -> None:
     """H1: в момент ``system.shutdown`` у исполнителя активная операция (стоп slow); от ОТПРАВКИ до простоя
     исполнителя ≤ 0,2 с."""
     stop = rig.start_slow_stop()
-    assert rig.pm._in_transition("slow"), "предусловие H1: у исполнителя нет активной операции со slow"
+    _assert_in_transition(rig, "slow", "H1")
 
     shutdown = rig.send("system.shutdown")
     assert rig.wait_until(rig.system_stop_event.is_set, 15.0) is not None, "system_stop_event не взведён"
@@ -154,7 +172,7 @@ def test_h2_no_lifecycle_stop_waits_on_message_processor(rig: Rig) -> None:
 def test_h3_routing_lock_free_while_executor_waits_for_child(rig: Rig) -> None:
     """H3: пока идёт стоп slow, ``_routing_lock`` берётся с таймаутом 0,1 с с другого потока."""
     rig.start_slow_stop()
-    assert rig.pm._in_transition("slow"), "предусловие H3: операция не идёт"
+    _assert_in_transition(rig, "slow", "H3")
     box: dict[str, bool] = {}
 
     def grab() -> None:
@@ -258,7 +276,7 @@ def test_h7_readers_survive_dict_mutation_during_topology_apply(rig: Rig) -> Non
     _remove_slow_topology(rig)
     apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
     time.sleep(MID_STOP_S)
-    assert rig.pm._in_transition("slow"), "предусловие H7: topology.apply не идёт"
+    _assert_in_transition(rig, "slow", "H7")
 
     stop_writer = threading.Event()
     wires = rig.pm._active_wires
@@ -328,7 +346,7 @@ def test_h8_single_child_stop_object_until_operation_returns(rig: Rig, monkeypat
     monkeypatch.setattr(rig.pm, "stop_process", timed_stop)
 
     stop = rig.start_slow_stop()
-    assert rig.pm._in_transition("slow"), "предусловие H8: у исполнителя нет активной операции со slow"
+    _assert_in_transition(rig, "slow", "H8")
     assert sum(1 for _t, has_slow in created if has_slow) == 1, "предусловие H8: объект стопа slow не один"
 
     rig.send("system.shutdown")
