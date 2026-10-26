@@ -1,0 +1,66 @@
+{
+  "tree": "branch",
+  "seq": 3,
+  "session": 2,
+  "target": "camera_0",
+  "rep": 3,
+  "elapsed_s": 4.16,
+  "ok": true,
+  "note": "",
+  "full_boot_wait_s": 6.89,
+  "windows": {
+    "mode": "override",
+    "stop_process_timeout": 8.0,
+    "shutdown_timeout": 8.0,
+    "override_line_in_stdout": true
+  },
+  "res": {
+    "restarted": true,
+    "replaced": true,
+    "process": "camera_0",
+    "pid_before": 33040,
+    "pid_after": 22304,
+    "instance_restarts_before": 2,
+    "instance_restarts_after": 3,
+    "alive": true,
+    "elapsed": 4.16,
+    "polls": 1,
+    "restart_reply": {
+      "type": "response",
+      "command": "process.command.response",
+      "sender": "ProcessManager",
+      "targets": [
+        "ProcessManager"
+      ],
+      "queue_type": "system",
+      "request_id": "72288112-4dd6-487e-bede-9a38dafbe58f",
+      "success": true,
+      "result": {
+        "success": true,
+        "process_name": "camera_0"
+      }
+    }
+  },
+  "t_send_wall": 1793018950.4565673,
+  "t_reply_wall": 1793018954.087019,
+  "request_s": 3.625,
+  "request_error": null,
+  "request_reply": {
+    "type": "response",
+    "command": "process.command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "72288112-4dd6-487e-bede-9a38dafbe58f",
+    "success": true,
+    "result": {
+      "success": true,
+      "process_name": "camera_0"
+    }
+  },
+  "restarted_ts": 1793018954.086,
+  "reply_minus_restarted_s": 0.001,
+  "early": false
+}
