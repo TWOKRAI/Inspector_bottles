@@ -51,7 +51,7 @@ class ProcessRegistry:
         # Task 1.9b (D4, I1): «системный стоп идёт» — прерывает ожидание стопа во временной области
         # ``_stop_many`` (стоп ребёнка по одному). Группа корня (``_ChildrenGroupStop``) его НЕ получает:
         # она и есть стоп после прерывания. None — не прерывается.
-        self.stop_abort: Optional[Callable[[], bool]] = None
+        self.stop_abort: Callable[[], bool] | None = None
         self.queue_registry = queue_registry
         self.config_manager = config_manager
         self.shared_resources = shared_resources
@@ -406,7 +406,7 @@ class ProcessRegistry:
         names: List[str],
         mark_reader_gone: bool,
         *,
-        should_abort: Optional[Callable[[], bool]] = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
         """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
 
