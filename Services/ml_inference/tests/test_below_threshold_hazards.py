@@ -1,7 +1,7 @@
 """Hazard-тесты автора Task 0.3: подпись всегда + below_threshold (внутренние опасные места).
 
 Слепая приёмка (`test_acceptance_always_label.py`) проверяет контракт по выходу; здесь —
-то, что может сломаться именно в этой реализации: кэш inference_every_n, ошибка инференса,
+то, что может сломаться именно в этой реализации: пометка порога, ошибка инференса,
 граница с holdout_eval.
 """
 
@@ -11,7 +11,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from Services.ml_inference.backends.base import BaseInferenceBackend
 from Services.ml_inference.core.model_spec import ModelSpec
@@ -47,7 +46,6 @@ def _make_plugin(
     tmp_path: Path,
     *,
     threshold: float,
-    every_n: int = 1,
     draw_overlay: bool = False,
     logits: np.ndarray = _LOGITS,
     state_proxy: object | None = None,
@@ -60,7 +58,6 @@ def _make_plugin(
         "confidence_threshold": threshold,
         "top_k": 3,
         "draw_overlay": draw_overlay,
-        "inference_every_n": every_n,
     }
     ctx.registers = None
     ctx.state_proxy = state_proxy
@@ -86,35 +83,22 @@ def _run(plugin: MLInferencePlugin) -> dict:
 
 
 def test_cached_prediction_flag_follows_current_threshold(tmp_path: Path) -> None:
-    """Что может сломаться: флаг на кэше «залипает» по порогу момента инференса.
+    """Что может сломаться: флаг порога «залипает» по порогу прошлого кадра.
 
-    every_n=3, топ-1 К=0.45. Кадр 1 (инференс) порог 0.4 → False; set_threshold(0.5) → кадр 2
-    (кэш) обязан стать True и в predictions, и в регистре; обратно (кадр 3, свежий инференс) → False.
-    На кадре 2 infer остаётся 1: пересчёт флага не должен гонять сеть. Если бы флаг был «as of inference», робот взял бы
-    диск по уже поднятому порогу.
+    Топ-1 К=0.45. Кадр 1, порог 0.4 → False; set_threshold(0.5) → кадр 2 обязан стать True и в
+    predictions, и в регистре; обратно (порог 0.4, кадр 3) → False. Каждый кадр — свежий инференс
+    (infer_calls растёт), порог читается из регистра при пометке: команда действует со следующего кадра.
     """
-    plugin, backend = _make_plugin(tmp_path, threshold=0.4, every_n=3)
+    plugin, backend = _make_plugin(tmp_path, threshold=0.4)
     assert _run(plugin)["predictions"][0]["below_threshold"] is False
     plugin.cmd_set_threshold({"confidence_threshold": 0.5})
     out = _run(plugin)
     assert out["predictions"][0]["below_threshold"] is True
     assert plugin._reg.last_below_threshold is True
-    assert backend.infer_calls == 1  # кадр 2 — из кэша, сеть не гонялась
+    assert backend.infer_calls == 2  # кадр 2 — свежий инференс
     plugin.cmd_set_threshold({"confidence_threshold": 0.4})
-    assert _run(plugin)["predictions"][0]["below_threshold"] is False  # кадр 3 — новый инференс
+    assert _run(plugin)["predictions"][0]["below_threshold"] is False  # кадр 3
     assert plugin._reg.last_below_threshold is False
-
-
-def test_cache_marking_does_not_mutate_cached_entries(tmp_path: Path) -> None:
-    """Что может сломаться: пометка кэша мутирует выданный ранее список (алиасинг).
-
-    Выданный кадром 1 список потребитель мог сохранить; смена порога не должна его менять.
-    """
-    plugin, _ = _make_plugin(tmp_path, threshold=0.4, every_n=3)
-    first = _run(plugin)["predictions"]
-    plugin.cmd_set_threshold({"confidence_threshold": 0.5})
-    _run(plugin)
-    assert first[0]["below_threshold"] is False
 
 
 def test_inference_error_resets_registers_to_failsafe(tmp_path: Path) -> None:
@@ -163,32 +147,17 @@ def test_engine_predict_default_threshold_still_filters(tmp_path: Path) -> None:
     assert top[0]["label"] == "К"
 
 
-@pytest.mark.parametrize("below", [True, False])
-def test_overlay_on_cached_frame_equals_inference_frame(tmp_path: Path, below: bool) -> None:
-    """Что может сломаться: на кэш-кадре оверлей рисуется без пометки (флаг не дошёл до top1).
-
-    every_n=2: кадр 2 — из кэша; он обязан совпасть с кадром 1 пиксель-в-пиксель.
-    """
-    plugin, _ = _make_plugin(tmp_path, threshold=0.5 if below else 0.4, draw_overlay=True, every_n=2)
-    f1 = _run(plugin)["frame"]
-    f2 = _run(plugin)["frame"]
-    assert f1.any()
-    assert np.array_equal(f1, f2)
-
-
 def test_inference_error_does_not_serve_stale_cache_next_frame(tmp_path: Path) -> None:
-    """Что может сломаться: после ошибки инференса следующий кадр отдаётся из СТАРОГО кэша.
+    """Что может сломаться: после ошибки инференса следующий кадр отдаёт предсказание ДО ошибки.
 
-    every_n=3: кадр 1 — инференс (К выше порога, кэш заполнен); кадр 2 — кэш; кадр 3 — backend
-    падает (predictions пуст, регистры fail-safe). Кадр 4 раньше брал кэш кадра 1 и отдавал
-    «уверенную» К, а регистры при этом были сброшены — predictions и регистры расходились,
-    потребитель (word_layout) принимал диск по фантому. Теперь ошибка чистит кэш: кадр 4
-    обязан переинференсить (infer_calls растёт), а не отдавать фантом.
+    Кадры 1-2 — норма (К выше порога); кадр 3 — backend падает (predictions пуст, регистры
+    fail-safe). Кадр 4 обязан переинференситься (infer_calls растёт) и вернуть свежий результат,
+    а регистры — согласоваться с predictions.
     """
-    plugin, backend = _make_plugin(tmp_path, threshold=0.4, every_n=3)
+    plugin, backend = _make_plugin(tmp_path, threshold=0.4)
     assert _run(plugin)["predictions"][0]["label"] == "К"  # кадр 1
-    _run(plugin)  # кадр 2 — из кэша
-    assert backend.infer_calls == 1
+    _run(plugin)  # кадр 2
+    assert backend.infer_calls == 2
 
     def boom(_tensor: np.ndarray) -> dict:
         raise RuntimeError("onnx упал")
@@ -200,18 +169,18 @@ def test_inference_error_does_not_serve_stale_cache_next_frame(tmp_path: Path) -
 
     backend.infer = good_infer  # type: ignore[method-assign]
     out = _run(plugin)  # кадр 4
-    assert backend.infer_calls == 2  # свежий инференс, не кэш кадра 1
+    assert backend.infer_calls == 3  # свежий инференс
     assert out["predictions"][0]["label"] == "К"
     assert plugin._reg.last_below_threshold is False  # регистры согласованы с predictions
 
 
 def test_inference_error_with_persistent_failure_never_serves_cache(tmp_path: Path) -> None:
-    """Backend падает и дальше: кэш кадра 1 не всплывает на кадрах 4..6 (every_n=3).
+    """Backend падает и дальше: предсказание кадров 1-2 не всплывает на кадрах 3..6.
 
-    Кадры 1-2 — норма (инференс + кэш). Кадр 3 — первая ошибка; после неё каждый кадр обязан
-    пробовать инференс заново (кэш пуст) и отдавать [] — без чистки кэша кадр 4 вернул бы К.
+    Кадры 1-2 — норма. Кадр 3 — первая ошибка; после неё каждый кадр обязан пробовать инференс
+    заново и отдавать [].
     """
-    plugin, backend = _make_plugin(tmp_path, threshold=0.4, every_n=3)
+    plugin, backend = _make_plugin(tmp_path, threshold=0.4)
     _run(plugin)
     _run(plugin)
 

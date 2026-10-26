@@ -97,19 +97,6 @@ def test_bad_model_sets_error_not_crash(dummy_models_dir: Path):
     assert out[0]["predictions"] == []
 
 
-def test_inference_every_n_reuses_result(dummy_models_dir: Path):
-    plugin = MLInferencePlugin()
-    plugin.configure(
-        _make_ctx(
-            {"models_dir": str(dummy_models_dir), "model": "dummy", "inference_every_n": 3, "confidence_threshold": 0.0}
-        )
-    )
-    # все кадры получают предсказания (между прогонами — reuse)
-    for _ in range(5):
-        out = plugin.process([{"frame": _frame()}])
-        assert len(out[0]["predictions"]) == 3
-
-
 def test_latency_telemetry_populated(dummy_models_dir: Path):
     """После инференса и публикации заполнены avg/last/max latency и inference_fps."""
     plugin = MLInferencePlugin()
@@ -137,23 +124,25 @@ def test_max_latency_resets_last_persists_after_publish(dummy_models_dir: Path):
     assert plugin._reg.last_latency_ms == last  # last не сбрасывается
 
 
-def test_model_switch_clears_stale_predictions(dummy_models_dir: Path):
-    """Смена модели сбрасывает кэш предсказаний и счётчик кадров (не reuse старого)."""
+def test_model_switch_first_frame_gets_fresh_inference(dummy_models_dir: Path):
+    """После смены модели первый кадр даёт свежий инференс новой модели (не результат прошлого)."""
     plugin = MLInferencePlugin()
-    plugin.configure(
-        _make_ctx(
-            {"models_dir": str(dummy_models_dir), "model": "dummy", "inference_every_n": 3, "confidence_threshold": 0.0}
-        )
-    )
-    plugin.process([{"frame": _frame()}])  # кадр 1 — инференс
-    plugin.process([{"frame": _frame()}])  # кадр 2 — reuse
-    assert plugin._last_predictions  # кэш заполнен
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
+    plugin.process([{"frame": _frame()}])
 
+    calls: list[int] = []
+    real_predict = plugin._engine.predict
+
+    def counting_predict(*args, **kwargs):
+        calls.append(1)
+        return real_predict(*args, **kwargs)
+
+    plugin._engine.predict = counting_predict
     plugin.cmd_set_model({"model": "dummy"})  # перезагрузка модели
-    assert plugin._last_predictions == []  # кэш сброшен
-    assert plugin._frame_idx == 0
+    assert plugin._reg.last_below_threshold is True  # телеметрия сброшена fail-safe до первого кадра
 
     out = plugin.process([{"frame": _frame()}])  # первый кадр после смены — свежий инференс
+    assert calls == [1]
     assert len(out[0]["predictions"]) == 3
 
 

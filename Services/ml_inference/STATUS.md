@@ -1,7 +1,7 @@
 # ml_inference — STATUS
 
 **Готовность:** foundation (классификация, ONNX backend) — 2026-06-08
-**Обновлено:** 2026-10-01 — Task 0.3 letters-retrain: подпись всегда + `below_threshold` + register `last_below_threshold` + пометка «<порог» в overlay (тесты: `test_acceptance_always_label.py`, `test_below_threshold_hazards.py`). Ранее: 2026-06-13 — `service.py` фасад IService (вкладка «Сервисы»: скан data/models + статус backend'ов)
+**Обновлено:** 2026-10-26 — C-40: каждый кадр на входе распознаётся; поле регистра `inference_every_n` и кэш повтора предсказаний убраны (старый ключ в рецепте/конфиге игнорируется; отбор кадров — отдельный фильтр в рецепте; тесты: `test_every_frame_c40.py`). Ранее: 2026-10-01 — Task 0.3 letters-retrain: подпись всегда + `below_threshold` + register `last_below_threshold` + пометка «<порог» в overlay (тесты: `test_acceptance_always_label.py`, `test_below_threshold_hazards.py`). Ранее: 2026-06-13 — `service.py` фасад IService (вкладка «Сервисы»: скан data/models + статус backend'ов)
 
 ## Что сделано
 
