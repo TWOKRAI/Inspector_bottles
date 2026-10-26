@@ -26,6 +26,7 @@ from .test_lifecycle_fifo_acceptance import FAST_S, MID_STOP_S, Rig
 
 SHUTDOWN_IDLE_S = 0.2  # H1: от отправки system.shutdown до простоя исполнителя
 DIRECT_DEADLINE_S = 40.0  # потолок ожидания прямого вызова команды
+H7_FILL_WIRES = 20_000  # H7: размер ``_active_wires`` — итерация по живому словарю должна длиться дольше кванта GIL
 
 
 @pytest.fixture
@@ -272,7 +273,8 @@ def test_h6_nested_topology_apply_inside_executor_runs_in_place(rig: Rig) -> Non
 def test_h7_readers_survive_dict_mutation_during_topology_apply(rig: Rig) -> None:
     """H7: ``topology.apply`` на исполнителе (стоп slow 3,0 с) + писатель, меняющий ``_active_wires``, +
     200 вызовов ``wire.status`` / ``supervision.status`` / ``topology.get`` с другого потока: 0 исключений
-    ``dictionary changed size during iteration``, каждый ответ ≤ 0,5 с."""
+    ``dictionary changed size during iteration``, каждый ответ ≤ 0,5 с. ``_active_wires`` заранее набит
+    20 000 записями (иначе итерация без снимка, инъекция И12, не различима)."""
     _remove_slow_topology(rig)
     apply_sent = rig.send("topology.apply", {"topology_dict": {"processes": {}}})
     time.sleep(MID_STOP_S)
@@ -280,6 +282,15 @@ def test_h7_readers_survive_dict_mutation_during_topology_apply(rig: Rig) -> Non
 
     stop_writer = threading.Event()
     wires = rig.pm._active_wires
+    # Итерация по ~400 ключам длится микросекунды — писатель не успевает вклиниться, и итерация по живому словарю
+    # (без снимка, инъекция И12) проходила незамеченной (0 из 5). На 20 000 ключей итерация длится десятки
+    # миллисекунд: без снимка ~3,5 % вызовов ``wire.status`` падают (замер ревью р.1: 7 из 200), со снимком 0 из 200.
+    wires.update(
+        {
+            f"h7-fill-{i}": {"status": "idle", "source_process": "a", "target_process": "b", "transport": "shm"}
+            for i in range(H7_FILL_WIRES)
+        }
+    )
 
     def writer() -> None:
         i = 0
