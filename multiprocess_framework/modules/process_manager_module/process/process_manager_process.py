@@ -504,11 +504,14 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error("initialize: executor_manager недоступен — команды жизненного цикла не зарегистрировать")
             return False
         # Строго последовательно: параллельные стопы разных детей на гонки реестра не проверены (CTO).
+        # Потолок явный: ждущие L (до _L_CAP) и отложенные T (до _T_CAP, считает шлюз) не делят одно место.
         self._lifecycle_executor = manager.create(
-            "pm-lifecycle", {"kind": "keyed", "serial": True}, should_reject=self._pm_stopping
+            "pm-lifecycle",
+            {"kind": "keyed", "serial": True, "max_pending": _L_CAP + _T_CAP},
+            should_reject=self._pm_stopping,
         )
         self._lifecycle_submit = _LifecycleSubmit(self, self._lifecycle_executor)
-        self._transition_gate = _TransitionGate(self, self._lifecycle_submit)
+        self._transition_gate = _TransitionGate(self, self._lifecycle_submit, t_cap=_T_CAP)
         manager.register("pm-lifecycle-submit", self._lifecycle_submit)
         manager.register("pm-transition-gate", self._transition_gate)
         return True
@@ -4621,6 +4624,13 @@ class _ChildrenStop:
         return self._group.result() if self._group is not None else {}
 
 
+# Потолки очереди ``pm-lifecycle`` (вердикт CTO по L/T, ADR-PMM-039 D2/I5). Один FIFO, ёмкость раздельная:
+# ``max_pending = _L_CAP + _T_CAP``; T сверх ``_T_CAP`` отказывает шлюз, поэтому поток T не вытесняет L.
+# ``_T_CAP = 64`` — ОЦЕНКА до замера S3 на стенде (число — владельцу), не вывод из измерения.
+_L_CAP = 64
+_T_CAP = 64
+
+
 class _LifecycleSubmit:
     """Считающий адаптер ``OrderedExecutor.submit`` над исполнителем ``pm-lifecycle`` (Task 1.9b, D1).
 
@@ -4689,25 +4699,75 @@ class _TransitionGate:
     Цель в переходе (``key`` — её имя; ``key=None`` — идёт любая операция жизненного цикла) → подача в
     ``_LifecycleSubmit`` (исполнится после перехода). Иначе ``action()`` и ``reply`` на вызывающем
     потоке, возврат ``False`` (ADR-CMD-006 это допускает). Развилка здесь, не в обработчике.
+
+    Свой счётчик отложенных T (отдельно от счётчиков перехода ``_LifecycleSubmit``): проверка и ``+1`` под
+    ``_routing_lock`` до подачи, ``-1`` в ``finally`` вокруг ``reply`` (и на отказе исполнителя, и на исключении).
+    Сверх ``t_cap`` — ``executor_busy`` из шлюза тем же ``reply``: поток T не занимает места L (ADR-PMM-039, I5).
+    Строку WARNING пишет ``CommandManager`` — шлюз свою не добавляет.
     """
 
     name = "pm-transition-gate"
 
-    def __init__(self, pm: ProcessManagerProcess, lifecycle_submit: _LifecycleSubmit) -> None:
+    def __init__(self, pm: ProcessManagerProcess, lifecycle_submit: _LifecycleSubmit, *, t_cap: int = _T_CAP) -> None:
         self._pm = pm
         self._lifecycle_submit = lifecycle_submit
+        self._t_cap = t_cap
+        self._t_pending = 0
+
+    def t_pending(self) -> int:
+        with self._pm._routing_lock:
+            return self._t_pending
+
+    def _reserve(self) -> bool:
+        """Check-and-increment под одним локом: место T есть → занято."""
+        with self._pm._routing_lock:
+            if self._t_pending >= self._t_cap:
+                return False
+            self._t_pending += 1
+            return True
+
+    def _release(self) -> None:
+        with self._pm._routing_lock:
+            self._t_pending -= 1
+
+    def _reply_safely(self, reply, result: Any) -> None:
+        try:
+            reply(result)
+        except Exception as exc:  # noqa: BLE001 — сбой ответа не должен ронять приёмный поток
+            self._pm._log_error(f"transition-gate: reply упал: {exc}")
+
+    def _defer(self, action, key, reply) -> bool:
+        if not self._reserve():
+            self._reply_safely(reply, {"success": False, "error": "executor_busy"})
+            return False
+        released = [False]
+
+        def release() -> None:
+            # Ровно один раз: и на ответе исполнителя, и на сбое самой подачи.
+            if not released[0]:
+                released[0] = True
+                self._release()
+
+        def counted_reply(result: Any) -> None:
+            try:
+                reply(result)
+            finally:
+                release()
+
+        try:
+            return self._lifecycle_submit.submit(action, key, counted_reply)
+        except BaseException:
+            release()
+            raise
 
     def submit(self, action, key, reply, *, inline_if_idle: bool = False) -> bool:
         submit = self._lifecycle_submit
         busy = submit.busy() if key is None else any(submit.in_transition(name) for name in key)
         if busy:
-            return submit.submit(action, key, reply)
+            return self._defer(action, key, reply)
         try:
             result = action()
         except Exception as exc:  # noqa: BLE001 — тот же конверт, что у исполнителя
             result = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
-        try:
-            reply(result)
-        except Exception as exc:  # noqa: BLE001 — сбой ответа не должен ронять приёмный поток
-            self._pm._log_error(f"transition-gate: reply упал: {exc}")
+        self._reply_safely(reply, result)
         return False
