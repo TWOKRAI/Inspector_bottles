@@ -145,3 +145,80 @@ v2 не изменился — эта строка списка верна.
 - Граница охраны `__init_subclass__` (метод `request_stop` на экземпляре; `stop_aware` как `property`) — из ревью Sonnet,
   не перепроверял.
 - Тела тестов `test_spi_*` построчно не читал; качество их проверок держится на матрице лида и выборочных инъекциях Sonnet.
+
+---
+
+# Круг 2 (последний) — правки р.1: beab63c97 (SPI.h, `kinds.py`), 4fd918c39 (ADR-DH-012); HEAD 4fd918c39
+
+Код и тесты не менял. Проба — `opus_spi/probe_r2.py` в scratchpad (гейт light, PYTHONPATH = корень дерева).
+
+## Вердикт круга 2: APPROVED
+
+П.1 закрыт по коду и пробой, п.3 закрыт текстом ADR (одна неточность — моя, ниже). Условие слияния вне кода остаётся:
+п.2 — регенерация CAPABILITIES в окне heavy лида.
+
+## Что проверено (вход → выход)
+
+Вывод `probe_r2.py` дословно:
+```
+1 lamp_on in command_table(command_sources(table)): True
+1 driver class from manager: LampDriver
+2 robot_new_op in command_table(command_sources(DEFAULT_KINDS)): True
+3 _bound is identity in prod: True
+4 vs main: names equal True methods equal True 72 72
+5 vs 9402aab38: table order equal True source+spec equal True
+5 plugin generated order == new table order True
+5 executor count 10 args count 38 descr count 55
+```
+- **П.1 закрыт.** Вход: строка `DeviceKind("lamp", {"*": LampDriver}, prefix="lamp")` в таблице. Выход: команда
+  `lamp_on` есть, менеджер с `kinds=` создаёт `LampDriver`. Вход: операция добавлена в `RobotDriverV2.OP_SPECS`. Выход:
+  команда `robot_new_op` есть. Команды теперь читаются из `OP_SPECS` классов таблицы, второго источника нет.
+- **FREEZE.** 72 имени и имена методов — против main. Порядок 55 сгенерированных, источник (`prefix`, `kind`, `route`,
+  `key_from`) и все поля `OpSpec` каждой команды — против 9402aab38 (старый `spi.py` загружен отдельно, сравнение через
+  `dataclasses.astuple`): равны. Опции регистрации: `executor` у 10, `description` у 55, `args` у 38.
+- **Импорты.** `spi` ← `drivers` ← `kinds` ← `manager` / плагин: в `drivers/`, `spi.py`, `robot_data_ops.py`, `registry/`
+  импортов `kinds`, `manager`, `Plugins` нет (`git grep`, единственное совпадение — докстринг `spi.py:10`).
+  `sentrux check .` → `✓ All rules pass`.
+- **Ранний импорт драйверов модулем плагина.** Импортёры модуля плагина вне тестов: только `base.yaml:31`
+  (`plugin_class`) и каталог GUI через класс; прочие плагины импортируют `Plugins.hub.device_hub.client`, не `plugin`.
+  Прирост при импорте драйверов поверх того, что плагин импортировал на main: `27` модулей, `27.6` мс, пакеты только
+  `Services.device_hub` и `Services.robot_comm`, новых потоков нет (`threading.enumerate()` → `['MainThread']`), сторонних
+  пакетов и SDK нет. Вреда не вижу.
+- **Прогоны (гейт light).** `Services/device_hub/tests/{test_spi_contract,test_spi_acceptance,test_manager,
+  test_c29_disconnect_acceptance,test_no_private_driver_state}.py`, `Plugins/hub/device_hub/tests/{test_spi_hazards,
+  test_op_commands,test_robot_v2_commands,test_robot_v2_commands_acceptance,test_spi_commands_acceptance}.py`,
+  `multiprocess_prototype/backend/tests/test_devices_executors.py` → `412 passed, 1 warning in 17.10s`.
+
+## Решение лида `DeviceKind.create` → `_bound(cls)`: моё слово
+
+Это костыль, но ограниченный; к слиянию допустим только как записанный долг с шагом снятия.
+- Почему костыль: прод-код при каждом создании драйвера читает атрибут своего же модуля, чтобы работал
+  `monkeypatch.setattr(v2pkg, "RobotDriverV2", V2)` тестов. Это неявный шов: в контракте его нет, он держится на имени
+  модуля. Явный шов уже есть и доказан тестом лида (б): подкласс плагина с `device_kinds` / `DeviceManager(kinds=)`.
+- Почему не блокирует: в проде `_bound(cls) is cls` для всех классов таблицы (проба, строка 3); подмена не подклассом —
+  громкий `TypeError`; `importlib.reload` в проде трогает только модули плагинов (`plugins/manager.py:216`), не модули
+  драйверов, — расхождения класса не будет. Опора — 2 места в слепых тестах (`test_c29_disconnect_acceptance.py:326`,
+  `test_spi_commands_acceptance.py:845`), оба через риг плагина.
+- Шаг снятия: эти 2 рига — на подкласс плагина с `device_kinds` (строка робота с `V2`), критерий как у SPI.f — пустой
+  AST-дифф узлов `assert`; затем `_bound` удалить. Записать в `SPI.debts.md` / STATUS, а не только в «Открыто» ADR.
+
+## Замечания круга 2 (не блокируют)
+
+1. **[quality, minor] ADR-DH-012:104 — «`args` у 55 команд» неверно, по коду 38** (ключ `args` кладётся только при
+   непустом `args_schema`; проба: `args count 38`). Число 55 пришло из моего отчёта р.1 (п.3) — ошибка моя. Исправить
+   строку ADR.
+2. **[совет] Путь роста вне дерева — два согласованных шага.** Подкласс плагина задаёт `device_kinds` и отдельно зовёт
+   `install_op_commands(Подкласс, command_sources((строка,)))`. Задал первое без второго — у вида есть фабрика, но нет
+   команд, молча. Один шаг дал бы `DeviceHubPlugin.__init_subclass__`: при переопределённом `device_kinds` ставить
+   команды недостающих видов. Для пути внутри дерева (строка в `DEFAULT_KINDS`) расхождения нет.
+
+## Что оставил открытым / ненадёжным (круг 2)
+
+- Инъекции в сторожа (а)–(в) и в `_bound` я не делал — зубы тестов не проверены мной; проба показывает поведение кода,
+  а не то, что тесты краснеют при его поломке.
+- `test_dump_matches_committed`, наборы целиком, стенд v2 — не гонял (окно heavy у лида). CAPABILITIES в ветке
+  по-прежнему не перегенерированы (`git diff --stat main...HEAD -- docs/contracts` в р.1 — пусто; в р.2 файлы не
+  менялись).
+- Каталог GUI в живом процессе не поднимал: вывод «ранний импорт безвреден» — по замеру импорта в одном процессе, без
+  Qt и без замера холодного старта GUI.
+- Слияние с main `5c35da9a2` в р.2: `git merge-tree --write-tree --name-only main HEAD` → только хэш дерева, конфликтов нет; тесты на дереве слияния не гонял.
