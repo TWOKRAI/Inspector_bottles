@@ -1,7 +1,7 @@
 ---
 name: a-pixel-threshold-needs-the-speed-from-config-and-a-margin
 description: "Порог в пикселях (pixel threshold: радиус ассоциации, окно кадров) ставить от скорости, посчитанной по конфигу (мм/с × px/мм / кадр/с), и с запасом на шум детектора — не от оценки из реестра и не впритык к границе"
-module: [plugins/filter/line_filter]
+module: [plugins/filter]
 mechanism: [spec-scope, live-stand]
 metadata:
   type: feedback
