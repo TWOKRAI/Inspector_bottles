@@ -20,10 +20,11 @@ from typing import Any
 
 import pytest
 
-from Plugins.hub.device_hub.plugin import _ROBOT_V2_DESCRIPTIONS, DeviceHubPlugin
+from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
 from Services.device_hub.errors import DeviceHubError, DeviceNotFoundError
 from Services.device_hub.manager import DeviceManager
+from Services.device_hub.spi import DEFAULT_SOURCES, command_table
 from Services.robot_comm.store import RobotDataStore
 from Services.robot_comm.tests.e2e_rig_v2 import bounded
 
@@ -243,8 +244,14 @@ def test_descriptions_refused_by_catalogue_only_warn(tmp_path: Path, monkeypatch
         catalogue = _RefusingCatalogue("robot_stop")
         ctx.command_manager = catalogue
         plugin.start(ctx)  # не бросает: описание, которое каталог не принял, - предупреждение
-        assert set(catalogue.updated) == set(_ROBOT_V2_DESCRIPTIONS) - {"robot_stop"}
-        assert len(_ROBOT_V2_DESCRIPTIONS) == 21
+        # описания каталога — непустые OpSpec.description (SPI.c1): те же 21 команда робота v2
+        described = {
+            name: spec.description for name, (_src, spec) in command_table(DEFAULT_SOURCES).items() if spec.description
+        }
+        assert len(described) == 21
+        assert catalogue.updated == {
+            name: {"description": text} for name, text in described.items() if name != "robot_stop"
+        }
         warned = [str(call.args[0]) for call in ctx.log_warning.call_args_list]
         assert len(warned) == 1 and "robot_stop" in warned[0]
     finally:
