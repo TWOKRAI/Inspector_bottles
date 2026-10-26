@@ -14,7 +14,7 @@ from .interfaces import (
     RecipeManagerProtocol,
     StoreProtocol,
 )
-from .manager import RecipeManager
+from .manager import RecipeConflict, RecipeManager
 from .migrations import migration, registered_steps, run_chain
 from .recipe_engine import RecipeEngine
 from .yaml_io import (
@@ -27,6 +27,7 @@ from .yaml_io import (
 __all__ = [
     "RecipeEngine",
     "RecipeManager",
+    "RecipeConflict",
     "is_v3_recipe",
     "has_top_level_blueprint",
     "nested_blueprint_data",

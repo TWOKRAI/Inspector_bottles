@@ -14,18 +14,80 @@ Comment-preserving запись (duplicate) — по умолчанию чере
 доменно-нейтрален и живёт в самом модуле, поэтому прототипу больше НЕ нужен
 субкласс-шим с инъекцией (seam снят). Вызывающий может подменить writer через
 параметр ``yaml_updater`` (напр. на plain-PyYAML в окружении без ruamel).
+
+Запись файла рецепта по дельте (Task 1.1e, design.md §9.1/§9.2/§9.5): ``read_recipe_rev``,
+``patch_recipe`` и ``save_layout``. ``before`` строит менеджер сам из байтов файла, сверка
+``expected_rev`` и запись идут под одним межпроцессным ``recipe_file_lock``; раскладка
+(``blueprint.metadata.{gui_positions,locked_nodes}``) пишется той же записью, что и топология.
 """
 
 from __future__ import annotations
 
+import copy
 import shutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import yaml
 
 from .detect import is_v3_recipe
-from .yaml_io import update_yaml_preserving
+from .file_lock import recipe_file_lock
+from .format import compute_rev
+from .yaml_io import patch_yaml_preserving, update_yaml_preserving
+
+if TYPE_CHECKING:  # service импортирует модули пакета — на рантайме это был бы цикл
+    from .service import RecipeFormatHook
+
+
+class RecipeConflict(Exception):
+    """``expected_rev`` вызывающего не совпал с ревизией файла: рецепт изменён с момента чтения.
+
+    Поля: ``slug``, ``expected_rev`` (что ждал вызывающий; ``None`` — «файла не было»), ``current_rev``
+    (ревизия файла сейчас; ``None`` — файла нет). Файл не тронут.
+    """
+
+    def __init__(self, slug: str, expected_rev: str | None, current_rev: str | None) -> None:
+        super().__init__(
+            f"рецепт '{slug}' изменён с момента чтения: ожидалась ревизия {expected_rev!r}, в файле {current_rev!r}"
+        )
+        self.slug = slug
+        self.expected_rev = expected_rev
+        self.current_rev = current_rev
+
+
+class _IdentityFormatHook:
+    """Формат-хук по умолчанию: форма файла как есть (``yaml.safe_load``), без миграций."""
+
+    def normalize(self, body: dict) -> dict:
+        return copy.deepcopy(body)
+
+    def validate(self, body: dict) -> list[dict]:
+        return []
+
+    def to_topology(self, body: dict) -> dict:
+        return body
+
+
+def _plain(value: Any) -> Any:
+    """Глубокая копия, кортежи -> списки (YAML-форма; ``(x, y)`` и ``[x, y]`` — одно и то же значение)."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return copy.deepcopy(value)
+
+
+def _validate_slug(slug: str) -> None:
+    """Pre: slug непустой и не путь (``ValueError`` до любого обращения к файлу)."""
+    if (
+        not isinstance(slug, str)
+        or not slug
+        or slug in (".", "..")
+        or "/" in slug
+        or "\\" in slug
+        or Path(slug).name != slug
+    ):
+        raise ValueError(f"slug рецепта должен быть именем без разделителей пути, получено: {slug!r}")
 
 
 class RecipeManager:
@@ -46,6 +108,10 @@ class RecipeManager:
                      Если None — по умолчанию ``recipe.yaml_io.update_yaml_preserving``
                      (ruamel round-trip, сохраняет комментарии; C3/ADR-RCP-005).
                      Подмена нужна лишь в окружении без ruamel (напр. plain-PyYAML).
+        yaml_patcher: писатель по дельте вида ``(path, before: dict, after: dict) -> bool``
+                     (``True`` — файл записан). Если None — ``recipe.yaml_io.patch_yaml_preserving``.
+        format_hook: ``RecipeFormatHook``; его ``normalize`` приводит файл и ``after`` к одной форме
+                     перед построением дельты. Если None — тождество (форма файла как есть).
     """
 
     def __init__(
@@ -54,11 +120,15 @@ class RecipeManager:
         state_proxy: Any | None = None,
         logger: Any | None = None,
         yaml_updater: Callable[[str | Path, dict], None] | None = None,
+        yaml_patcher: Callable[[str | Path, dict, dict], bool] | None = None,
+        format_hook: RecipeFormatHook | None = None,
     ) -> None:
         self._engine = engine
         self._state_proxy = state_proxy
         self._logger = logger
         self._yaml_updater = yaml_updater if yaml_updater is not None else update_yaml_preserving
+        self._yaml_patcher = yaml_patcher if yaml_patcher is not None else patch_yaml_preserving
+        self._format_hook: RecipeFormatHook = format_hook if format_hook is not None else _IdentityFormatHook()
 
     # ------------------------------------------------------------------
     # Вспомогательные методы логирования (silent fallback)
@@ -322,5 +392,141 @@ class RecipeManager:
             self._log_error(f"RecipeManager.read_recipe: ошибка чтения '{slug}': {exc}")
             return None
 
+    # ------------------------------------------------------------------
+    # Запись по дельте под оптимистичной ревизией (Task 1.1e)
+    # ------------------------------------------------------------------
 
-__all__ = ["RecipeManager"]
+    def read_recipe_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        """Тело рецепта и его ``rev`` одного чтения байтов (без лока).
+
+        Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
+        Post: файла нет -> ``(None, None)``; файл не разбирается или корень не mapping -> ``(None, rev)``
+        (``rev`` есть — вызывающий может перезаписать такой файл); иначе ``(dict, rev)``.
+        """
+        path = self._recipe_path(slug)
+        raw = self._read_bytes(path)
+        if raw is None:
+            return None, None
+        rev = compute_rev(raw)
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            self._log_error(f"RecipeManager.read_recipe_rev: ошибка разбора '{slug}': {exc}")
+            return None, rev
+        return (data if isinstance(data, dict) else None), rev
+
+    def patch_recipe(
+        self,
+        slug: str,
+        after: dict,
+        *,
+        expected_rev: str | None,
+        layout: tuple[dict, list] | None = None,
+    ) -> str:
+        """Записать ``after`` в файл рецепта дельтой ``N(файл) -> N(after)``; вернуть новый ``rev``.
+
+        Pre: ``slug`` — имя без разделителей (``ValueError``); ``expected_rev`` — ``rev`` файла при чтении
+        (``read_recipe_rev``), ``None`` — только если файла нет (иначе ``ValueError``); ``layout`` —
+        ``(positions, locked_nodes)`` или ``None``, при нём ``after`` несёт ``blueprint``-mapping (``ValueError``).
+        Post: сверка и запись — под одним ``recipe_file_lock``; ``expected_rev`` не совпал с файлом ->
+        ``RecipeConflict``, файл не тронут. Раскладка пишется той же записью (``yaml_patcher`` вызван один раз).
+        Пустая дельта (после равен файлу) -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
+        """
+        new_rev = self._write(slug, after=after, expected_rev=expected_rev, layout=layout)
+        assert new_rev is not None  # patch_recipe всегда пишет или возвращает ``rev`` существующего файла
+        return new_rev
+
+    def save_layout(
+        self,
+        slug: str,
+        positions: dict,
+        locked_nodes: list,
+        *,
+        expected_rev: str | None,
+    ) -> str | None:
+        """Записать раскладку в ``blueprint.metadata.{gui_positions,locked_nodes}``; вернуть новый ``rev``.
+
+        Pre и сверка ``expected_rev`` — как у ``patch_recipe``.
+        Post: файла нет или ``blueprint`` не mapping -> записи нет; возврат текущего ``rev`` (``None`` без
+        файла). Пустая коллекция, которой нет в файле, не создаётся. Раскладка из файла -> записи нет.
+        """
+        return self._write(slug, after=None, expected_rev=expected_rev, layout=(positions, locked_nodes))
+
+    def _recipe_path(self, slug: str) -> Path:
+        _validate_slug(slug)
+        return self._engine.recipes_dir / f"{slug}.yaml"
+
+    @staticmethod
+    def _read_bytes(path: Path) -> bytes | None:
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            return None
+
+    def _write(
+        self,
+        slug: str,
+        *,
+        after: dict | None,
+        expected_rev: str | None,
+        layout: tuple[dict, list] | None,
+    ) -> str | None:
+        """Единственный путь записи: ``patch_recipe`` (``after`` задан) и ``save_layout`` (``after=None``).
+
+        Лок берётся здесь один раз; помощники ниже его не берут (``recipe_file_lock`` нереентерабелен).
+        """
+        path = self._recipe_path(slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with recipe_file_lock(path):
+            raw = self._read_bytes(path)
+            current_rev = None if raw is None else compute_rev(raw)
+            if raw is not None and expected_rev is None:
+                raise ValueError(
+                    f"рецепт '{slug}' существует: запись без базовой ревизии (expected_rev=None) запрещена"
+                )
+            if expected_rev != current_rev:
+                raise RecipeConflict(slug, expected_rev, current_rev)
+
+            file_body = yaml.safe_load(raw) if raw is not None else None
+            before = self._format_hook.normalize(file_body) if isinstance(file_body, dict) else {}
+            if after is None:
+                # save_layout: «после» — тот же файл с новой раскладкой; нет файла / blueprint — записи нет.
+                if not isinstance(before.get("blueprint"), dict):
+                    return current_rev
+                target = copy.deepcopy(before)
+            else:
+                target = copy.deepcopy(self._format_hook.normalize(after))
+            if layout is not None:
+                if not isinstance(target.get("blueprint"), dict):
+                    raise ValueError(f"раскладка рецепта '{slug}' требует blueprint-mapping в теле")
+                self._apply_layout(target, *layout)
+
+            self._yaml_patcher(path, before, target)
+            new_rev = compute_rev(path.read_bytes())
+        if new_rev != current_rev:
+            self._log_info(f"RecipeManager: записан рецепт '{slug}'")
+        return new_rev
+
+    @staticmethod
+    def _apply_layout(doc: dict, positions: dict, locked_nodes: Any) -> None:
+        """Единственный писатель ``blueprint.metadata.{gui_positions,locked_nodes}`` (design.md §9.5).
+
+        Пустую коллекцию, которой нет в файле, не создаёт (F10); ``metadata`` создаётся, только если есть
+        что в нём хранить. Pre: ``doc["blueprint"]`` — mapping. Мутирует ``doc``.
+        """
+        blueprint = doc["blueprint"]
+        pos = _plain(positions)
+        locked = _plain(sorted(locked_nodes) if isinstance(locked_nodes, (set, frozenset)) else list(locked_nodes))
+        metadata = blueprint.get("metadata")
+        if not isinstance(metadata, dict):
+            if not pos and not locked:
+                return
+            metadata = {}
+            blueprint["metadata"] = metadata
+        if pos or "gui_positions" in metadata:
+            metadata["gui_positions"] = pos
+        if locked or "locked_nodes" in metadata:
+            metadata["locked_nodes"] = locked
+
+
+__all__ = ["RecipeConflict", "RecipeManager"]

@@ -131,7 +131,11 @@ class RecipeManagerProtocol(Protocol):
         ...
 
     def delete(self, slug: str) -> bool:
-        """Удалить рецепт (сброс active в state при удалении активного)."""
+        """Удалить рецепт.
+
+        Post: файл удалён; если удалён активный рецепт — ``state.recipes.active`` сброшен в ``None``
+        (побочный эффект сохраняется; его ждёт store прототипа, Task 1.1c). Нет файла -> ``False``.
+        """
         ...
 
     def duplicate(self, source_slug: str, new_slug: str) -> bool:
@@ -164,6 +168,54 @@ class RecipeManagerProtocol(Protocol):
 
     def read_recipe(self, slug: str) -> dict | None:
         """Прочитать YAML рецепта (dict) или None."""
+        ...
+
+    def read_recipe_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        """Тело рецепта и ``rev`` одного чтения байтов (без лока).
+
+        Pre: ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError``).
+        Post: нет файла -> ``(None, None)``; файл не разбирается / корень не mapping -> ``(None, rev)``;
+        иначе ``(dict, rev)``. ``rev`` — ``compute_rev`` байтов файла.
+        """
+        ...
+
+    def patch_recipe(
+        self,
+        slug: str,
+        after: dict,
+        *,
+        expected_rev: str | None,
+        layout: tuple[dict, list] | None = None,
+    ) -> str:
+        """Записать ``after`` дельтой ``N(файл) -> N(after)`` (``N`` — ``format_hook.normalize``); новый ``rev``.
+
+        Pre:
+          - ``slug`` непустой, ``Path(slug).name == slug`` (иначе ``ValueError`` до обращения к файлу).
+          - ``expected_rev`` — ``rev`` файла при чтении; ``None`` допустим только для нового файла,
+            для существующего — ``ValueError``.
+          - ``layout`` — ``(positions, locked_nodes)`` или ``None``; при нём ``after["blueprint"]`` — mapping.
+        Post:
+          - чтение байтов, сверка ``expected_rev`` и запись — под одним межпроцессным ``recipe_file_lock``;
+            ``expected_rev`` не совпал -> ``RecipeConflict(slug, expected_rev, current_rev)``, файл не тронут.
+          - топология и раскладка — одна запись; пустая коллекция, которой нет в файле, не создаётся.
+          - пустая дельта -> записи нет, возврат прежнего ``rev``, ``mtime`` прежний.
+        """
+        ...
+
+    def save_layout(
+        self,
+        slug: str,
+        positions: dict,
+        locked_nodes: list,
+        *,
+        expected_rev: str | None,
+    ) -> str | None:
+        """Записать ``blueprint.metadata.{gui_positions,locked_nodes}``; новый ``rev``.
+
+        Pre: как у ``patch_recipe`` (``slug``, ``expected_rev``).
+        Post: файла нет или ``blueprint`` не mapping -> записи нет, возврат текущего ``rev`` (``None`` без
+        файла); раскладка из файла -> записи нет; конфликт ``rev`` -> ``RecipeConflict``.
+        """
         ...
 
     @property
