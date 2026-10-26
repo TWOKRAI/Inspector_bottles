@@ -401,3 +401,71 @@ class TestInitializeAllOrNothing:
 
         assert mgr.snapshot_registry() == []
         assert mgr.is_initialized is False
+
+
+class TestStopFanOutTargets:
+    """Свойство 16 SPI: стоп фазы 1 получает только ``stop_aware``; прочие драйверы — молча, без записей об ошибке."""
+
+    @staticmethod
+    def _drivers() -> tuple[type, type]:
+        from Services.device_hub.drivers.base import BaseDeviceDriver
+
+        class Plain(BaseDeviceDriver):
+            """Наследник базы без ``request_stop`` и со ``stop_aware = False`` (умолчание)."""
+
+            kind = "vfd"
+
+            def connect(self) -> bool:
+                self.up = True
+                return True
+
+            @property
+            def is_connected(self) -> bool:
+                return getattr(self, "up", False)
+
+        class StopAware(Plain):
+            kind = "robot"
+            stop_aware = True
+
+            def __init__(self, entry: object, protocol: object = None) -> None:
+                super().__init__(entry, protocol)
+                self.stops: list[float] = []
+
+            def request_stop(self, deadline: float) -> None:
+                self.stops.append(deadline)
+
+        return Plain, StopAware
+
+    def test_only_stop_aware_driver_gets_stop_and_plain_one_leaves_no_error_record(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+        from types import SimpleNamespace
+
+        plain_cls, stop_cls = self._drivers()
+        spawned: list[str] = []
+
+        def spawn(target, *, name: str):
+            spawned.append(name)
+            target(None)  # поток стопа — синхронно: порядок и итог те же
+            return SimpleNamespace(close=lambda _budget: SimpleNamespace(survivors=[], errors=[]))
+
+        mgr = DeviceManager(None, spawn=spawn)
+        mgr.register_driver_factory("robot", lambda entry, proto: stop_cls(entry, proto))
+        mgr.register_driver_factory("vfd", lambda entry, proto: plain_cls(entry, proto))
+        tcp = {"type": "tcp", "host": "127.0.0.1", "port": 50999, "unit_id": 2}
+        mgr.upsert({"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_universal3", "transport": tcp})
+        mgr.upsert({"id": "v1", "name": "v1", "kind": "vfd", "protocol": "gd20_bridge", "transport": tcp})
+        assert mgr.connect("r1") is True and mgr.connect("v1") is True
+
+        with caplog.at_level(logging.DEBUG):
+            mgr.request_stop_all(deadline=12345.0)
+
+        assert mgr.get_driver("r1").stops == [12345.0]
+        assert [name.split("-")[1] for name in spawned] == ["r1"], spawned
+        manager_errors = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno >= logging.ERROR and "device_hub" in record.name
+        ]
+        assert manager_errors == [], manager_errors

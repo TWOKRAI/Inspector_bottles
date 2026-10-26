@@ -145,6 +145,7 @@ def test_executor_refused_fallback_with_metadata_one_info() -> None:
     ]
     assert log.of("INFO") == ["Plugin 'opts': команда alpha: исполнитель не принят — регистрация без исполнителя"]
     assert log.of("ERROR") == []
+    assert log.of("WARNING") == []  # свойство 30 SPI: WARNING об отказе пишет только CommandManager, не хук
 
 
 def test_stub_returning_none_is_not_a_refusal() -> None:
