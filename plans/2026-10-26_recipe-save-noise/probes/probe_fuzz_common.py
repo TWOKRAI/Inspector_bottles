@@ -10,12 +10,12 @@ from multiprocess_framework.modules.recipe import yaml_io as NEW
 
 
 def _load_old():
-    spec = importlib.util.spec_from_file_location(
-        "multiprocess_framework.modules.recipe._yaml_io_old", os.path.join(S, "old_yaml_io.py")
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
+    """Движок до задачи: пакет `oldrecipe` из make_oldpkg.py; каталог — env C30_OLDPKG."""
+    oldpkg = os.environ["C30_OLDPKG"]
+    if oldpkg not in sys.path:
+        sys.path.insert(0, oldpkg)
+    import oldrecipe.yaml_io as mod
+
     return mod
 
 
