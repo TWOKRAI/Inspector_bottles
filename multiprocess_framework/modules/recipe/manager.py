@@ -445,8 +445,9 @@ class RecipeManager:
         """Записать раскладку в ``blueprint.metadata.{gui_positions,locked_nodes}``; вернуть новый ``rev``.
 
         Pre и сверка ``expected_rev`` — как у ``patch_recipe``.
-        Post: файла нет или ``blueprint`` не mapping -> записи нет; возврат текущего ``rev`` (``None`` без
-        файла; в этом случае ни каталог, ни lock-файл не создаются). Пустая коллекция, которой нет в файле,
+        Post: файла нет при ``expected_rev=None`` -> записи нет, возврат ``None``, ни каталог, ни lock-файл не
+        создаются; файла нет при непустом ``expected_rev`` -> ``RecipeConflict(..., current_rev=None)``;
+        ``blueprint`` не mapping -> записи нет, возврат текущего ``rev``. Пустая коллекция, которой нет в файле,
         не создаётся. Раскладка из файла -> записи нет. Файл не разбирается -> ``ValueError``, байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """

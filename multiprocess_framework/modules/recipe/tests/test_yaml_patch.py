@@ -925,6 +925,16 @@ def test_absent_key_missing_in_before_is_created(tmp_path: Path) -> None:
     assert path.read_bytes() == b"b:\n  name: p\n  metadata:\n    gui_positions:\n      n:\n        - 1\n        - 2\n"
 
 
+def test_absent_key_none_missing_in_before_is_created(tmp_path: Path) -> None:
+    """Ключа ``m`` нет ни в файле, ни в before, в after ``None``: создаётся (пропуск — только при ``key in before``)."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"x: 1\n")
+
+    yaml_io.patch_yaml_preserving(path, {"x": 1}, {"x": 1, "m": None})
+
+    assert path.read_bytes() == b"x: 1\nm:\n"
+
+
 def test_absent_key_changed_between_before_after_is_created(tmp_path: Path) -> None:
     """Ключ ``m`` есть в before, но after другой, а в файле его нет: создаётся со значением after."""
     path = tmp_path / "r.yaml"

@@ -216,8 +216,9 @@ class RecipeManagerProtocol(Protocol):
         """Записать ``blueprint.metadata.{gui_positions,locked_nodes}``; новый ``rev``.
 
         Pre: как у ``patch_recipe`` (``slug``, ``expected_rev``).
-        Post: файла нет или ``blueprint`` не mapping -> записи нет, возврат текущего ``rev`` (``None`` без
-        файла; в этом случае ни каталог, ни lock-файл не создаются); раскладка из файла -> записи нет;
+        Post: файла нет при ``expected_rev=None`` -> записи нет, возврат ``None``, ни каталог, ни lock-файл не
+        создаются; файла нет при непустом ``expected_rev`` -> ``RecipeConflict(..., current_rev=None)``;
+        ``blueprint`` не mapping -> записи нет, возврат текущего ``rev``; раскладка из файла -> записи нет;
         конфликт ``rev`` -> ``RecipeConflict``; файл не разбирается -> ``ValueError``, байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
         """
