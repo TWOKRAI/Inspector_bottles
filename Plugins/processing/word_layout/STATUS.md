@@ -15,7 +15,9 @@
   Новый id = новый диск, только если zone_edge даёт одно событие на диск. Диск, пропавший из детекции на ≥ rearm_frames кадров внутри зоны, и рестарт line при диске в зоне дают второй id → второе задание на тот же диск (правка в line_filter — C-42).
 - **Интеграция:** вписан в рецепт `hikvision_letter_robot` (`infer.predictions → layout.word_layout`),
   валидация структуры headless.
-- **Тесты:** 94 (geometry/assembler/plugin/nan-guard/below_threshold-guard, `test_disk_identity.py` + `test_disk_identity_author.py` + `test_disk_identity_chain.py` — C-32), ruff чист.
+- **Тесты:** 122 (geometry/assembler/plugin/nan-guard/below_threshold-guard, `test_disk_identity*.py` — C-32, `test_word_source_order*.py` + `test_word_source_chain.py` — C-37), ruff чист.
+- **Слово (C-37):** регистр `target_word` — единственное хранилище; слово с порта пишется в него, действует последнее
+  пришедшее, журнал называет источник. Ограничения (а)–(и) — в README «Слово: регистр и порт».
 
 - **Страж `below_threshold` (Task 0.3 letters-retrain):** `_top_pred` отказывает предсказанию
   с `below_threshold=True`; тесты `test_acceptance_below_threshold_guard.py`.
