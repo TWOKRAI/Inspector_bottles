@@ -55,12 +55,16 @@ tests/
 
 **Новый вид устройства = класс драйвера + одна строка `DeviceKind` в `DEFAULT_KINDS` (правка хаба в одну строку
 `kinds.py`):** класс с `kind`, `OP_SPECS` и методом `call`; из строки менеджер получает фабрику, плагин — команды
-`<префикс>_<операция>`; `manager.py` и `plugin.py` не правятся. Вне дерева — подкласс плагина с `device_kinds` и
-`install_op_commands(Подкласс, command_sources((строка,)))`. `register_driver_factory(kind, factory)` — шов прямого
+`<префикс>_<операция>`; `manager.py` и `plugin.py` не правятся. Вне дерева — один шаг: подкласс плагина с
+`device_kinds = (*DEFAULT_KINDS, строка)`; команды новых строк ставит `DeviceHubPlugin.__init_subclass__` (родитель не
+меняется; снять или изменить команду родителя нельзя — `ValueError`). Подстановка класса драйвера (тесты) — тоже
+своей строкой таблицы (`dataclasses.replace(строка, drivers={..., "delta_v2": Подкласс})`); строка с классом не
+драйвером или с чужим `kind` не строится (`TypeError`). `register_driver_factory(kind, factory)` — шов прямого
 использования `DeviceManager` (тесты): фабрику регистрировать ДО `initialize()` (записи реестра проверяются по фабрикам
 при загрузке; неизвестный вид — `ValueError`). Процесс хаба создаёт менеджер в `configure` плагина и сразу зовёт
 `initialize()` — его виды только из таблицы. Класс драйвера, у которого `request_stop` и `stop_aware` не совпадают, не
-определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`).
+определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`); `stop_aware` — только простой `bool` атрибут
+класса (стоп — способность класса, не экземпляра).
 
 **`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
 `{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
@@ -68,12 +72,12 @@ tests/
 max_pending: 64}` — умолчания `ExecutorSpec`, не замер), ключ порядка — `device_id`. Операции `immediate` в очередь
 исполнителя не ставятся. Без исполнителя в процессе команда идёт запасным путём на потоке роутера (INFO в логе).
 
-**`driver_options`.** `DeviceManager(..., driver_options={kind: {имя: значение}})` и `set_driver_options(kind, **opts)` —
-именованные аргументы конструктора драйверов вида (для тестов: у робота v2 — `client_factory`, класс клиента
-`(transport, cfg) -> RobotClientV2`). Действует на драйверы, создаваемые ПОСЛЕ вызова. **Ограничение:** опции
-действуют на весь `kind`; опции вида `robot` получает и v1 `RobotDriver`, а он `client_factory` не знает — в реестре с
-роботами обоих протоколов v1 упадёт `TypeError` (не глушится; v1 заморожен). Тестовый помощник — `ClientRecorder` в
-`tests/conftest.py`.
+**`driver_options`.** `DeviceManager(..., driver_options={kind | (kind, protocol): {имя: значение}})` и
+`set_driver_options(kind, protocol=None, **opts)` — именованные аргументы конструктора драйверов. Ключ `kind` — все
+протоколы вида, ключ `(kind, protocol)` — только записи с этим протоколом, его опции перекрывают видовые. Для тестов:
+`client_factory` робота v2 (класс клиента `(transport, cfg) -> RobotClientV2`) по ключу `("robot", "delta_v2")` — v1 в
+том же реестре его не получает. Действует на драйверы, создаваемые ПОСЛЕ вызова; неизвестная драйверу опция —
+`TypeError` его конструктора. Тестовый помощник — `ClientRecorder` в `tests/conftest.py`.
 
 ## Драйвер робота v2 — пакет
 

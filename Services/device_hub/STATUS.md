@@ -50,11 +50,11 @@
 Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 55 операций в каталогах `OpSpec`, из них
 генерируются команды `robot_*` / `vfd_*` (72 имени не менялись); исполнитель `device_io` (4/64) объявлен в топологии
 (`base.yaml`, C-47 исправлен в framework); `drv._client` в тестах хаба вне v1/ПЧ/сторожа 43 -> 0; затвор переподключения
-в базе. Подзадачи и коммиты — `plans/robot-protocol-v2/tasks/SPI.md`, отступления — `SPI.deviations.md`.
+в базе. Команды и фабрики — из таблицы видов `kinds.py` по `OP_SPECS` драйверов (SPI.h); подкласс плагина со своим
+`device_kinds` получает команды сам, опции драйверов — по виду и по `(вид, протокол)` (SPI.h2). Подзадачи и коммиты — `plans/robot-protocol-v2/tasks/SPI.md`, отступления — `SPI.deviations.md`.
 
 **Открыто:**
 - Регенерация `docs/contracts/CAPABILITIES.yaml` / `.md` (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно
   `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
 - Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
-- `driver_options` действуют на весь `kind`: `client_factory` для вида `robot` упадёт `TypeError` на драйвере v1 (заморожен).
 - Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).
