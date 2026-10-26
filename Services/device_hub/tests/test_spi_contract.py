@@ -39,8 +39,48 @@ _TCP = {"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 1}
 # Литерал исключений сторожа полноты «OP_SPECS == таблица операций»: пуст (на базе 27/27, 17/17, 5/5)
 _OPS_EXCEPTIONS: dict[str, set[str]] = {"RobotDriver": set(), "RobotDriverV2": set(), "VfdDriver": set()}
 
-# 21 команда с описанием каталога (T5.3c): 10 данных + 11 операций драйвера v2
+# 55 команд с описанием каталога (T5.3c + SPI.c2): 10 данных + 17 v2 + 27 v1 - 4 общих + 5 vfd
 _DESCRIBED = {
+    "robot_jog_hold",
+    "robot_jog_release",
+    "robot_get_telemetry",
+    "robot_enqueue_job",
+    "robot_return_job",
+    "robot_abort",
+    "robot_exchange_log_get",
+    "robot_exchange_log_set",
+    "robot_stop",
+    "robot_servo",
+    "robot_do_set",
+    "robot_jog_step",
+    "robot_point_capture",
+    "robot_param_set",
+    "robot_param_apply",
+    "robot_program_run",
+    "robot_program_abort",
+    "robot_send_test_job",
+    "robot_set_mode",
+    "robot_jog",
+    "robot_jog_abort",
+    "robot_set_servo",
+    "robot_set_robot_config",
+    "robot_get_robot_config",
+    "robot_read_echo",
+    "robot_set_manual_mode",
+    "robot_clear_queue",
+    "robot_set_encoder_offset",
+    "robot_toolchange",
+    "robot_draw_polyline",
+    "robot_draw_circle",
+    "robot_draw_square",
+    "robot_draw_set_pen",
+    "robot_draw_set_speed",
+    "robot_draw_set_travel",
+    "robot_draw_set_accel",
+    "robot_draw_set_pass_size",
+    "robot_draw_set_overlap",
+    "robot_draw_abort",
+    "robot_draw_progress",
     "robot_param_get_all",
     "robot_point_list",
     "robot_point_save",
@@ -51,17 +91,11 @@ _DESCRIBED = {
     "robot_program_get",
     "robot_program_save",
     "robot_program_delete",
-    "robot_param_set",
-    "robot_param_apply",
-    "robot_stop",
-    "robot_servo",
-    "robot_do_set",
-    "robot_jog_step",
-    "robot_jog_hold",
-    "robot_jog_release",
-    "robot_point_capture",
-    "robot_program_run",
-    "robot_program_abort",
+    "vfd_run",
+    "vfd_set_freq",
+    "vfd_stop",
+    "vfd_reset_fault",
+    "vfd_get_status",
 }
 
 
@@ -168,7 +202,7 @@ def test_command_table_shared_robot_ops_one_row_one_object() -> None:
     assert table["robot_abort"][1] is v2["abort"]
 
 
-def test_command_table_descriptions_are_the_21() -> None:
+def test_command_table_descriptions_are_the_55() -> None:
     table = spi.command_table(spi.DEFAULT_SOURCES)
     assert {name for name, (_source, spec) in table.items() if spec.description} == _DESCRIBED
 

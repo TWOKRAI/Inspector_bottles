@@ -247,11 +247,11 @@ def test_descriptions_go_with_registration_refusal_only_logged(tmp_path: Path, m
         registry = _RefusingRegistry("robot_stop")
         ctx.command_manager = registry
         plugin._auto_register_commands(ctx)  # не бросает: отказ регистрации — строка INFO хука
-        # описания каталога — непустые OpSpec.description: те же 21 команда робота v2
+        # описания каталога — непустые OpSpec.description: все 55 команд каталога
         described = {
             name: spec.description for name, (_src, spec) in command_table(DEFAULT_SOURCES).items() if spec.description
         }
-        assert len(described) == 21
+        assert len(described) == 55
         got = {name: kw["metadata"]["description"] for name, kw in registry.registered.items() if "metadata" in kw}
         assert got == {name: text for name, text in described.items() if name != "robot_stop"}
         assert "robot_stop" not in registry.registered and registry.refused == 2  # с опциями и запасной путь

@@ -3,7 +3,7 @@
 Purpose:
     Copy-on-write словарей ``commands`` / ``_op_commands`` (родитель не меняется), фабрика замыкания (каждый метод
     несёт свою операцию, Т4), ``__doc__`` (N6), отказ без частичной записи, маршрут тела ``_op_command`` по
-    ``route`` / ``needs_link``, состав 55 команд и 21 описание. Ожидания — литералы.
+    ``route`` / ``needs_link``, состав 55 команд и 55 описаний. Ожидания — литералы.
 
 Public API:
     Только тесты ``test_*``.
@@ -78,9 +78,15 @@ def test_device_hub_plugin_has_72_commands_55_generated() -> None:
 
 def test_generated_docs_description_or_fallback() -> None:
     assert DeviceHubPlugin.cmd_robot_stop.__doc__ == "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}"
-    assert DeviceHubPlugin.cmd_robot_abort.__doc__ == "robot: abort"
-    assert DeviceHubPlugin.cmd_vfd_run.__doc__ == "vfd: run"
+    assert DeviceHubPlugin.cmd_robot_abort.__doc__ == "Стоп робота: {device_id, mode: 1|2|3}."
+    assert DeviceHubPlugin.cmd_vfd_run.__doc__ == "Пуск ПЧ: {device_id, direction?, freq_hz?}."
     assert DeviceHubPlugin.cmd_robot_stop.__name__ == "cmd_robot_stop"
+
+    class Sub(DeviceHubPlugin):
+        pass
+
+    install_op_commands(Sub, [_source("fake", OpSpec(name="ping"))])  # без описания: запасной текст «вид: операция»
+    assert Sub.cmd_fake_ping.__doc__ == "fake: ping"
 
 
 def test_copy_on_write_parent_unchanged() -> None:
@@ -155,10 +161,11 @@ def test_existing_cmd_attribute_raises() -> None:
         install_op_commands(Sub, [_source("own", OpSpec(name="x"))])
 
 
-def test_op_commands_descriptions_are_the_21() -> None:
+def test_op_commands_descriptions_are_the_55() -> None:
     described = {n for n, (_src, spec) in vars(DeviceHubPlugin)["_op_commands"].items() if spec.description}
-    assert len(described) == 21
-    assert all(n.startswith("robot_") for n in described)
+    assert len(described) == 55
+    assert all(n.startswith(("robot_", "vfd_")) for n in described)
+    assert sum(n.startswith("vfd_") for n in described) == 5
 
 
 # --- SPI.d2: command_options хаба ---
@@ -175,9 +182,12 @@ def test_command_options_data_command_has_executor_key_and_description() -> None
 def test_command_options_driver_command_description_only_and_plain_commands_empty() -> None:
     plugin = DeviceHubPlugin()
     assert plugin.command_options("robot_stop") == {
-        "metadata": {"description": "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}"}
+        "metadata": {"description": "Робот v2: стоп {device_id, level: SOFT|HARD|HALT}", "args": ["level"]}
     }
-    assert plugin.command_options("robot_abort") == {}  # описание придёт в c2; пустые ключи не кладутся
+    assert plugin.command_options("robot_abort") == {
+        "metadata": {"description": "Стоп робота: {device_id, mode: 1|2|3}.", "args": ["mode?"]}
+    }
+    assert plugin.command_options("robot_get_telemetry") == {"metadata": {"description": "Телеметрия робота."}}
     assert plugin.command_options("device_list") == {}
     assert plugin.command_options("hik_enum") == {}
 
