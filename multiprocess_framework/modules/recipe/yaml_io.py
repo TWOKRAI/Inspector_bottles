@@ -91,7 +91,7 @@ def patch_yaml_preserving(path: str | Path, before: dict[str, Any], after: dict[
     doc = _rd.load_document(yaml, text)
     if not isinstance(doc, dict):
         raise YamlPatchConflict(f"корень документа {path.name}: {type(doc).__name__}, дельта ждёт mapping")
-    _Delta(doc, after).apply_map(doc, before, after, ())
+    _Delta(doc, after).run(doc, before, after)
     _dump_atomic(yaml, doc, path, newline=eol)
     return True
 
@@ -106,7 +106,7 @@ def apply_delta(target: dict[str, Any], before: dict[str, Any], after: dict[str,
     """
     result = copy.deepcopy(target)
     if not _equal(before, after):
-        _Delta(result, after).apply_map(result, before, after, ())
+        _Delta(result, after).run(result, before, after)
     return result
 
 
@@ -205,14 +205,32 @@ class _Delta:
         self._shared = _shared_refs(target)
         self._done: set[int] = set()
 
-    def apply_map(self, node: Any, before: dict, after: dict, path: tuple) -> None:
+    def run(self, target: Any, before: dict, after: dict) -> None:
+        """Применить дельту и сверить места ссылок алиасов уже на итоговой цели."""
+        self.apply_map(target, before, after, ())
+        self._check_shared(target)
+
+    def _check_shared(self, target: Any) -> None:
+        """Узел с якорем во ВСЕХ местах ссылок итоговой цели равен ``after`` там же (design.md §2.3).
+
+        Пути берутся из цели ПОСЛЕ правки — сдвиги списков уже учтены (ревью 1.1a, S1/S3)."""
+        for node, refs in _shared_refs(target).values():
+            for ref in refs:
+                expected = _walk(self._after_root, ref)
+                if expected is not _MISSING and not _equal(node, expected):
+                    places = ", ".join(_fmt(p) for p in refs)
+                    raise YamlPatchConflict(
+                        f"{_fmt(ref)}: узел с якорем — after различается в местах ссылок ({places})"
+                    )
+
+    def apply_map(self, node: Any, before: dict, after: dict, path: tuple, owner: tuple | None = None) -> None:
         if not isinstance(node, dict):
             raise YamlPatchConflict(f"{_fmt(path)}: в цели {type(node).__name__}, дельта ждёт mapping")
         if not self._enter_shared(node, after, path):
             return
         for key in before:
             if key not in after and key in node:
-                _rd.delete_item(node, key)
+                _rd.delete_item(node, key, owner=owner)
         for key, new in after.items():
             child_path = (*path, key)
             if key not in node:  # нормализованный before шире цели (F10) — создаём целиком
@@ -222,7 +240,7 @@ class _Delta:
             elif not _equal(node[key], new):  # ключа нет в before, но цель его держит
                 self._replace(node, key, new, child_path)
 
-    def apply_list(self, node: Any, before: list, after: list, path: tuple) -> None:
+    def apply_list(self, node: Any, before: list, after: list, path: tuple, owner: tuple | None = None) -> None:
         if not isinstance(node, list):
             raise YamlPatchConflict(f"{_fmt(path)}: в цели {type(node).__name__}, дельта ждёт список")
         if not self._enter_shared(node, after, path):
@@ -240,7 +258,7 @@ class _Delta:
             for t in range(overlap):
                 self.set_child(node, i1 + t, before[i1 + t], after[j1 + t], (*path, i1 + t))
             for i in reversed(range(i1 + overlap, i2)):
-                _rd.delete_item(node, i)
+                _rd.delete_item(node, i, owner=owner)
             for offset, value in enumerate(after[j1 + overlap : j2]):
                 node.insert(i1 + overlap + offset, copy.deepcopy(value))
 
@@ -248,31 +266,25 @@ class _Delta:
         if _equal(before, after):
             return
         if isinstance(before, dict) and isinstance(after, dict):
-            self.apply_map(container[key], before, after, path)
+            self.apply_map(container[key], before, after, path, owner=(container, key))
         elif isinstance(before, list) and isinstance(after, list):
-            self.apply_list(container[key], before, after, path)
+            self.apply_list(container[key], before, after, path, owner=(container, key))
         else:  # изменённый скаляр или смена типа (§2.2.4) — значение целиком
             self._replace(container, key, after, path)
 
     def _replace(self, container: Any, key: Any, after: Any, path: tuple) -> None:
         if id(container[key]) in self._shared:
             raise YamlPatchConflict(f"{_fmt(path)}: узел с якорем заменяется целиком — алиас не разрывается молча")
-        container[key] = copy.deepcopy(after)
+        _rd.replace_item(container, key, copy.deepcopy(after))
 
     def _enter_shared(self, node: Any, after: Any, path: tuple) -> bool:
-        """Узел с якорем меняется на месте, только если ``after`` во всех местах ссылок одинаков.
-
-        ``False`` — правка уже применена через другое место ссылки (повтор не нужен)."""
-        entry = self._shared.get(id(node))
-        if entry is None:
+        """Узел с якорем правится один раз; ``False`` — правка уже применена через другое место
+        ссылки. Равенство ``after`` во всех местах ссылок сверяет ``_check_shared`` ПОСЛЕ правки:
+        буквальные пути цели до правки не учитывают сдвиги списков (ревью 1.1a, S1/S3)."""
+        if id(node) not in self._shared:
             return True
         if id(node) in self._done:
             return False
-        for ref in entry[1]:
-            other = _walk(self._after_root, ref)
-            if other is not _MISSING and not _equal(other, after):
-                places = ", ".join(_fmt(p) for p in entry[1])
-                raise YamlPatchConflict(f"{_fmt(path)}: узел с якорем — after различается в местах ссылок ({places})")
         self._done.add(id(node))
         return True
 
@@ -285,6 +297,8 @@ def update_yaml_preserving(path: str | Path, updates: dict[str, Any]) -> None:
     ключа заменяется целиком по итоговому содержимому (ключи внутри, которых нет в новом
     значении, удаляются), но равные части не трогаются — комментарии внутри них живы.
     Пустая дельта — без записи; EOL файла сохраняется. Новый файл создаётся из ``updates``.
+    Узел с якорем меняется на месте во всех местах ссылок, в том числе вне переданных ключей
+    (design.md §2.3).
 
     Args:
         path: путь к YAML-файлу.
@@ -345,6 +359,7 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
     buf = io.StringIO()
     yaml.dump(data, buf)
     text = buf.getvalue()
+    _verify_dump(text, data, path)
     if newline != "\n":
         text = text.replace("\n", newline)
     raw = text.encode("utf-8")
@@ -361,6 +376,22 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
         raise
 
 
+def _verify_dump(text: str, data: Any, path: Path) -> None:
+    """Страховка записи: дамп читается тем загрузчиком, которым рецепты читают потребители
+    (PyYAML ``safe_load``, YAML 1.1), и даёт те же данные — иначе ``ValueError`` до записи.
+
+    Ловит невалидный YAML от переноса комментариев, склейку строк и строки вида ``On``/``yes``,
+    которые дампер YAML 1.2 пишет без кавычек, а PyYAML читает как bool (ревью 1.1a)."""
+    import yaml as pyyaml
+
+    try:
+        loaded = pyyaml.safe_load(text)
+    except pyyaml.YAMLError as exc:
+        raise ValueError(f"{path.name}: дамп не читается PyYAML — запись отменена, файл цел: {exc}") from exc
+    if not _equal(loaded, _plain(data)):
+        raise ValueError(f"{path.name}: PyYAML читает дамп иначе, чем записываемые данные — запись отменена, файл цел")
+
+
 def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dict[str, Any]) -> None:
     """Точечно обновить ``blueprint.metadata.<key>``, сохранив ВСЕ комментарии.
 
@@ -369,6 +400,8 @@ def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dic
     ``blueprint.metadata`` — остальной ``blueprint`` (per-node ``# --- ... ---`` и т.п.) в
     дельту не входит. Значение каждого ключа заменяется целиком по итоговому содержимому,
     равные части и комментарии внутри них не трогаются; пустая дельта — без записи.
+    Узел с якорем меняется на месте во всех местах ссылок, в том числе вне ``blueprint.metadata``
+    (design.md §2.3).
     Применяется для авто-персиста layout (gui_positions / locked_nodes), который не
     должен портить рецепт при каждом перетаскивании ноды.
 

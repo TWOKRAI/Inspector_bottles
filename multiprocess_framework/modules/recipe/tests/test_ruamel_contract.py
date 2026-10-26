@@ -94,3 +94,56 @@ def _version() -> str:
     import ruamel.yaml
 
     return ruamel.yaml.__version__
+
+
+# ---------------------------------------------------------------------------
+# Форма ЗАПИСИ: перенесённый токен -> дамп -> перечитывание (ревью 1.1a/1.1b)
+# ---------------------------------------------------------------------------
+
+
+def _dump(doc) -> str:
+    import io
+
+    buf = io.StringIO()
+    rd.make_yaml().dump(doc, buf)
+    return buf.getvalue()
+
+
+def _reread_once(text: str, marker: str, before_line: str) -> None:
+    import yaml
+
+    yaml.safe_load(text)  # валидный YAML, иначе исключение
+    assert text.count(marker) == 1, text
+    assert text.index(marker) < text.index(before_line), text
+
+
+def test_write_shape_append_tail_roundtrip():
+    doc = _load("a: 1\nb: 2\n")
+    node, key, slot = rd._leaf_slot(doc, "a")
+    rd._append_tail(node, key, slot, "\n# moved\n")
+    _reread_once(_dump(doc), "# moved", "b: 2")
+
+
+def test_write_shape_append_header_roundtrip():
+    doc = _load("s:\n  - x\n  - y\n")
+    rd._append_header(doc["s"], "\n  # moved\n")
+    _reread_once(_dump(doc), "# moved", "- x")
+
+
+@pytest.mark.parametrize(
+    ("text", "path", "key", "marker", "before_line"),
+    [
+        ("a: 1\nb: 2\n# tail-b\nc: 3\n", (), "b", "# tail-b", "c: 3"),
+        ("s:\n  - x\n  # tail-x\n  - y\n", ("s",), 0, "# tail-x", "- y"),
+        ("s:\n  - x\n# after-s\nz: 1\n", ("s",), 0, "# after-s", "z: 1"),
+    ],
+    ids=["map_middle", "seq_first", "seq_emptied"],
+)
+def test_write_shape_delete_item_roundtrip(text, path, key, marker, before_line):
+    doc = _load(text)
+    parent, container = None, doc
+    for part in path:
+        parent, container = container, container[part]
+    owner = (parent, path[-1]) if path else None
+    rd.delete_item(container, key, owner=owner)
+    _reread_once(_dump(doc), marker, before_line)

@@ -165,3 +165,38 @@ def test_compute_rev_is_sha256_hex_of_bytes() -> None:
     from multiprocess_framework.modules.recipe import format as recipe_format
 
     assert recipe_format.compute_rev(b"abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_update_yaml_preserving_emptied_list_with_tail_comment(tmp_path: Path) -> None:
+    """Ревью 1.1b: ``items`` опустел при хвостовом комментарии — файл читается PyYAML, комментарий один раз."""
+    import yaml
+
+    path = tmp_path / "r.yaml"
+    _write(path, "a: 1\nitems:\n  - x: 1  # eol\n# c-after-items\nb: 2\n")
+
+    update_yaml_preserving(path, {"items": []})
+
+    text = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(text) == {"a": 1, "items": [], "b": 2}
+    assert text.count("# c-after-items") == 1
+
+
+def test_update_blueprint_metadata_emptied_locked_nodes_with_tail_comment(tmp_path: Path) -> None:
+    """Ревью 1.1b: автосохранение раскладки ``locked_nodes: []`` при хвостовом комментарии — файл валиден."""
+    import yaml
+
+    path = tmp_path / "r.yaml"
+    _write(
+        path,
+        "blueprint:\n  metadata:\n    gui_positions:\n      n1: [1, 2]\n    locked_nodes:\n      - n1\n"
+        "# next section\nz: 1\n",
+    )
+
+    update_blueprint_metadata_preserving(path, {"locked_nodes": []})
+
+    text = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(text) == {
+        "blueprint": {"metadata": {"gui_positions": {"n1": [1, 2]}, "locked_nodes": []}},
+        "z": 1,
+    }
+    assert text.count("# next section") == 1

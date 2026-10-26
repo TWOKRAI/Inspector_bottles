@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from multiprocess_framework.modules.recipe import yaml_io
@@ -508,3 +508,233 @@ def test_create_file_when_absent(tmp_path: Path) -> None:
 
     assert written is True
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == after
+
+
+# ---------------------------------------------------------------------------
+# Ревью 1.1a, раунд 1: опустевший контейнер, алиас под сдвигом списка, пустая строка
+# ---------------------------------------------------------------------------
+
+# case -> (исходник, before, after, комментарий, строка, перед которой он обязан стоять)
+_EMPTIED_CASES = {
+    "list_root": (
+        "a: 1\nitems:\n  - x: 1  # eol\n# c-after-items\nb: 2\n",
+        {"a": 1, "items": [{"x": 1}], "b": 2},
+        {"a": 1, "items": [], "b": 2},
+        "# c-after-items",
+        "b: 2",
+    ),
+    "map_root": (
+        "a: 1\nm:\n  k: 1\n# c-after-m\nb: 2\n",
+        {"a": 1, "m": {"k": 1}, "b": 2},
+        {"a": 1, "m": {}, "b": 2},
+        "# c-after-m",
+        "b: 2",
+    ),
+    "list_nested": (
+        "top:\n  items:\n    - 1\n  # c-next\n  z: 2\n",
+        {"top": {"items": [1], "z": 2}},
+        {"top": {"items": [], "z": 2}},
+        "# c-next",
+        "z: 2",
+    ),
+    "map_nested": (
+        "top:\n  m:\n    k: 1\n  # c-next\n  z: 2\n",
+        {"top": {"m": {"k": 1}, "z": 2}},
+        {"top": {"m": {}, "z": 2}},
+        "# c-next",
+        "z: 2",
+    ),
+    "map_first_key": (
+        "m:\n  k: 1\n# lead-of-z\nz: 2\n",
+        {"m": {"k": 1}, "z": 2},
+        {"m": {}, "z": 2},
+        "# lead-of-z",
+        "z: 2",
+    ),
+    "list_with_header": (
+        "a: 1\nitems:\n  # head\n  - x\nb: 2\n",
+        {"a": 1, "items": ["x"], "b": 2},
+        {"a": 1, "items": [], "b": 2},
+        "# head",
+        "b: 2",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_EMPTIED_CASES), ids=list(_EMPTIED_CASES))
+def test_emptied_container_keeps_tail_comment_valid(tmp_path: Path, case: str) -> None:
+    """Убран единственный элемент при комментарии в хвосте: файл читается, комментарий ровно один раз."""
+    src, before, after, marker, next_line = _EMPTIED_CASES[case]
+    path = tmp_path / "r.yaml"
+    _write(path, src.encode("utf-8"))
+
+    yaml_io.patch_yaml_preserving(path, before, after)
+
+    text = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(text) == after
+    assert text.count(marker) == 1
+    assert text.index(marker) < text.index(next_line)
+
+
+_S_SRC = b"a: &id\n  v: 1\nb:\n  - n: first\n  - n: second\n    x: *id\n"
+_S_BEFORE = {"a": {"v": 1}, "b": [{"n": "first"}, {"n": "second", "x": {"v": 1}}]}
+
+
+def test_alias_after_list_shift_no_silent_corruption(tmp_path: Path) -> None:
+    """S1: перед местом алиаса удалён элемент списка, якорь правится, у алиаса after прежний.
+
+    Допустимо: YamlPatchConflict (файл цел) или запись, которая читается ровно как after."""
+    path = tmp_path / "r.yaml"
+    raw_before, mtime_before = _write(path, _S_SRC)
+    after = {"a": {"v": 2}, "b": [{"n": "second", "x": {"v": 1}}]}
+
+    try:
+        yaml_io.patch_yaml_preserving(path, _S_BEFORE, after)
+    except yaml_io.YamlPatchConflict:
+        assert path.read_bytes() == raw_before
+        assert path.stat().st_mtime_ns == mtime_before
+    else:
+        assert yaml.safe_load(path.read_text(encoding="utf-8")) == after
+
+
+_S3_SRC = b"a: &id\n  v: 1\nb:\n  - n: first\n    x: {v: 7}\n  - n: second\n    x: *id\n"
+
+
+def test_alias_legal_insert_before_ref_no_conflict(tmp_path: Path) -> None:
+    """S3: вставка в начало списка и одинаковая правка во всех местах ссылок — не конфликт, якорь жив.
+
+    По буквальному пути цели ``b[1].x`` в after лежит ``first.x`` = {v: 7} — это не место алиаса."""
+    path = tmp_path / "r.yaml"
+    _write(path, _S3_SRC)
+    before = {"a": {"v": 1}, "b": [{"n": "first", "x": {"v": 7}}, {"n": "second", "x": {"v": 1}}]}
+    after = {
+        "a": {"v": 2},
+        "b": [{"n": "zero"}, {"n": "first", "x": {"v": 7}}, {"n": "second", "x": {"v": 2}}],
+    }
+
+    yaml_io.patch_yaml_preserving(path, before, after)
+
+    data = path.read_bytes()
+    assert yaml.safe_load(data.decode("utf-8")) == after
+    assert b"&id" in data
+    assert b"*id" in data
+
+
+def test_delete_last_item_keeps_blank_line_before_next_section(tmp_path: Path) -> None:
+    """Удалён последний элемент; пустая строка перед следующей секцией остаётся ровно одна."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"items:\n  - a\n  - b\n\nnext: 1\n")
+
+    yaml_io.patch_yaml_preserving(path, {"items": ["a", "b"], "next": 1}, {"items": ["a"], "next": 1})
+
+    assert path.read_bytes() == b"items:\n  - a\n\nnext: 1\n"
+
+
+def _dump_commented(doc: dict, rnd) -> str:
+    """Блочный YAML из doc со случайными комментариями: EOL, перед ключом/элементом, хвост вложенного блока."""
+    out: list[str] = []
+    counter = iter(range(10_000))
+
+    def eol() -> str:
+        return f"  # e{next(counter)}" if rnd.random() < 0.3 else ""
+
+    def lead(indent: int) -> None:
+        if rnd.random() < 0.3:
+            # Комментарий на отступе блока (стиль рецептов). Колонка 0 внутри вложенного блока
+            # ломает уже чистый round-trip ruamel 0.19 (без дельты) — это ловит страховка записи.
+            out.append(" " * indent + f"# c{next(counter)}")
+
+    def entry(head: str, value, indent: int) -> None:
+        if isinstance(value, (dict, list)) and value:
+            out.append(head + eol())
+            block(value, indent + 2)
+        else:
+            flow = ("{}" if isinstance(value, dict) else "[]") if isinstance(value, (dict, list)) else json.dumps(value)
+            # EOL-комментарий у пустого flow ``{}``/``[]`` — известный открытый случай (страховка
+            # записи отказывает, файл цел), в генератор не входит.
+            out.append(f"{head} {flow}" + ("" if isinstance(value, (dict, list)) else eol()))
+
+    def block(value, indent: int) -> None:
+        pairs = value.items() if isinstance(value, dict) else (("-", x) for x in value)
+        for key, child in pairs:
+            lead(indent)
+            entry(" " * indent + (f"{key}:" if isinstance(value, dict) else "-"), child, indent)
+
+    if doc:
+        block(doc, 0)
+    else:
+        out.append("{}")
+    return "\n".join(out) + "\n"
+
+
+def _ruamel_roundtrip_clean(src: str, before: dict) -> bool:
+    """Чистый round-trip ruamel (load -> dump без правок) читается PyYAML как before."""
+    import io
+
+    from multiprocess_framework.modules.recipe import _ruamel_doc
+
+    rt = _ruamel_doc.make_yaml()
+    buf = io.StringIO()
+    rt.dump(_ruamel_doc.load_document(rt, src), buf)
+    try:
+        return json.dumps(yaml.safe_load(buf.getvalue()), sort_keys=True) == json.dumps(before, sort_keys=True)
+    except yaml.YAMLError:
+        return False
+
+
+def _mutate(node, rnd):
+    """Случайная правка plain-дерева: удаление ключа/элемента, опустошение контейнера, смена скаляра, вставка."""
+    if isinstance(node, dict):
+        res = {}
+        for key, child in node.items():
+            r = rnd.random()
+            if r < 0.15:
+                continue
+            if r > 0.85 and isinstance(child, (dict, list)):
+                res[key] = type(child)()
+            else:
+                res[key] = _mutate(child, rnd) if r < 0.6 else child
+        if rnd.random() < 0.1:
+            res["knew"] = 1
+        return res
+    if isinstance(node, list):
+        res = [_mutate(x, rnd) if rnd.random() < 0.5 else x for x in node if rnd.random() >= 0.2]
+        if rnd.random() < 0.1:
+            res.insert(rnd.randint(0, len(res)), "sins")
+        if rnd.random() < 0.1:
+            res = []
+        return res
+    return node if rnd.random() < 0.8 else rnd.choice([7, "schg", True, None, 2.5])
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(before=_DOC, rnd=st.randoms(use_true_random=False))
+def test_property_patch_with_comments_reaches_after(before: dict, rnd) -> None:
+    """Файл с комментариями и опустошаемыми контейнерами: выход парсится, load == after, комментарий не дублирован."""
+    after = _mutate(before, rnd)
+    src = _dump_commented(before, rnd)
+    # Вход, который ruamel 0.19 портит уже чистым round-trip (без дельты), — дефект ruamel, а не
+    # движка; такой файл страховка записи отказывается писать (ValueError, файл цел).
+    assume(_ruamel_roundtrip_clean(src, before))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "r.yaml"
+        path.write_bytes(src.encode("utf-8"))
+
+        yaml_io.patch_yaml_preserving(path, before, after)
+
+        out = path.read_text(encoding="utf-8")
+    assert json.dumps(yaml.safe_load(out), sort_keys=True) == json.dumps(after, sort_keys=True)
+    comments = [line.split("#", 1)[1] for line in out.splitlines() if "#" in line]
+    assert len(comments) == len(set(comments))
+
+
+def test_dump_unreadable_by_pyyaml_refuses_write(tmp_path: Path) -> None:
+    """Страховка записи: лист стал строкой ``"On"`` (PyYAML 1.1 читает её как bool) — ValueError, файл прежний."""
+    path = tmp_path / "r.yaml"
+    raw_before, mtime_before = _write(path, b"# keep\nmode: off_mode\nother: 1\n")
+
+    with pytest.raises(ValueError):
+        yaml_io.patch_yaml_preserving(path, {"mode": "off_mode", "other": 1}, {"mode": "On", "other": 1})
+
+    assert path.read_bytes() == raw_before
+    assert path.stat().st_mtime_ns == mtime_before
