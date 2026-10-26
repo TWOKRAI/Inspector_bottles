@@ -195,8 +195,9 @@ class LineFilterPlugin(ProcessModulePlugin):
         if r.mode == "zone_edge":
             return self._apply_zone_edge(points, center, half)
         # Переключение режима на лету: вернувшись в zone_edge при диске в зоне, плагин ведёт себя
-        # как при старте (О1) — защёлка закрыта, занятая зона не засчитывается.
+        # как при старте (О1) — защёлка закрыта, счёт пустых кадров с нуля, занятая зона не засчитывается.
         self._zone_occupied = True
+        self._empty_streak = 0
 
         for t in self._tracker.update(points):
             sd = signed_distance(t.pos, center, r.angle)
