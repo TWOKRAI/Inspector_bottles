@@ -159,7 +159,6 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 - Чистка 21 строки шума в HEAD `letter_robot_sim.yaml` и возврат комментариев, legacy top-level `gui_positions` в
   `camera_robot_calibration`, `dataset_circle_capture`, `letter_robot_sim` — отдельный коммит с полосой C.
 - Строка C-30 в `plans/queue/defects.md`, строка 3 `ORDER.md` — лид при закрытии.
-- C-44 (хвосты C-21(б)) — следующая пачка полосы Д.
 
 ## Связи с соседними планами
 
@@ -169,8 +168,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 - [`plans/release-1.0/design.md`](../release-1.0/design.md) строка «#3 (полоса Д): C-21(б), C-30, R1» — условие
   «чистое дерево после прогона»: после C-30 сохранение без правок файл рецепта не меняет; lock-файлы игнорирует
   `.gitignore:150` (`*.yaml.lock`).
-- `plans/queue/ORDER.md` строка 3 — порядок полосы Д (C-30 → R1).
 
 ## Решения (decisions log)
 
-Полный журнал (директивы владельца, стадия 0 раунды 1–3) — [`design.md`](design.md) §11.
+Журнал — [`design.md`](design.md) §11.
