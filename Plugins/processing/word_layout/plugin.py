@@ -29,6 +29,11 @@ from .registers import WordLayoutRegisters
 _PUBLISH_PERIOD_S = 1.0
 
 
+def _norm(w: str) -> str:
+    """Слово в виде, по которому строятся ячейки: верхний регистр, пробелы схлопнуты."""
+    return " ".join(w.upper().split())
+
+
 @register_plugin(
     "word_layout",
     category="processing",
@@ -84,9 +89,12 @@ class WordLayoutPlugin(ProcessModulePlugin):
 
         self._assembler: WordAssembler | None = None
         self._sig: tuple | None = None  # подпись (слово+геометрия) — пересборка при смене
-        # Латч слова: слово приходит ОДНИМ item (сигнал пульта/телефона), распознавание —
-        # другими items (без слова). Держим последнее непустое, пока не придёт новое.
-        self._latched_word = ""
+        # Одно хранилище слова — регистр target_word. Слово с порта пишется в него же;
+        # действует последнее пришедшее (оператор или порт). _own_word — слово, которое
+        # плагин принял в последний раз (по нему видно, что регистр изменили снаружи),
+        # _word_src — откуда оно пришло (для журнала).
+        self._own_word = self._reg.target_word
+        self._word_src = "регистр" if self._reg.target_word.strip() else ""
         # Детект «нового диска», два режима. 1) Есть sidecar.track_id (center_crop): новый диск =
         # новый id; _cur_track — id текущего диска, _taken_track — id последнего взятого (после
         # сброса слова не обнуляется: тот же id = то же событие линии), _armed не читается.
@@ -143,7 +151,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         word = self._resolve_word(item)
         if not word.strip():
             return item
-        self._ensure_assembler(word)
+        self._ensure_assembler(word, self._word_src)
         assert self._assembler is not None
 
         # ВОЗВРАТ: сигнал с пульта → вернуть ВСЕ выложенные буквы на ленту, затем сброс.
@@ -223,22 +231,40 @@ class WordLayoutPlugin(ProcessModulePlugin):
     # Внутреннее
     # ------------------------------------------------------------------ #
 
-    def _resolve_word(self, item: dict) -> str:
-        """Слово: входной порт (приоритет) → латч последнего → register «Слово».
+    def _write_word(self, w: str) -> bool:
+        """Записать слово в регистр «Слово» (единственное хранилище). False — регистр отказал."""
+        ok, err = self._reg.update_field("target_word", w)
+        if not ok:
+            self._ctx.log_error(f"WordLayoutPlugin: слово '{_norm(w)}' не записано в регистр: {err}")
+        return ok
 
-        Слово приходит ОДНИМ item (сигнал пульта signal_2 / телефон), а распознавание —
-        другими items (без слова). Латчим последнее непустое слово и держим его, пока не
-        придёт новое — иначе target_word терялся бы на следующем же кадре предсказаний.
+    def _resolve_word(self, item: dict) -> str:
+        """Слово: регистр «Слово» и входной порт равноправны — действует последнее пришедшее.
+
+        Сначала смотрим регистр: изменился снаружи (оператор, set_config) — это новое слово.
+        Пустую запись в регистр не принимаем: возвращаем прежнее слово обратно в регистр.
+        Затем порт: слово с порта пишется в регистр (одно хранилище), порт после регистра —
+        на одном item побеждает порт. Слово приходит ОДНИМ item, распознавание — другими.
         """
+        val = self._reg.target_word
+        if val != self._own_word:
+            if val.strip():
+                self._own_word = val
+                self._word_src = "регистр"
+            elif self._own_word.strip():
+                self._write_word(self._own_word)
+                self._ctx.log_info(
+                    f"WordLayoutPlugin: пустое слово в регистре не принято — действует '{_norm(self._own_word)}'"
+                )
         src = self._reg.word_source
         if src:
             w = item.get(src)
             if isinstance(w, dict):
                 w = w.get("word") or w.get("value") or ""
-            if isinstance(w, str) and w.strip():
-                self._latched_word = w
-                return w
-        return self._latched_word or self._reg.target_word
+            if isinstance(w, str) and w.strip() and self._write_word(w):
+                self._own_word = w
+                self._word_src = f"порт {src}"
+        return self._own_word
 
     def _resolve_pick(self, item: dict) -> tuple[float, float] | None:
         """Координата забора с ленты (мм робота) из item[pick_source] = {x_mm, y_mm}."""
@@ -325,10 +351,10 @@ class WordLayoutPlugin(ProcessModulePlugin):
         slots = [Slot(ch, x, y) for ch, (x, y) in zip(letters, positions)]
         return WordAssembler(slots), positions
 
-    def _ensure_assembler(self, word: str) -> None:
-        """Пересобрать матчер при смене слова или геометрии линии."""
+    def _ensure_assembler(self, word: str, src: str = "") -> None:
+        """Пересобрать матчер при смене слова или геометрии линии. ``src`` — источник слова (журнал)."""
         sig = (
-            word,
+            _norm(word),
             self._reg.use_pitch,
             self._reg.first_x,
             self._reg.first_y,
@@ -358,11 +384,13 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
-        # Смена слова (не первая сборка и не пересборка только по геометрии) — в журнал.
-        if old_sig is not None and sig[0] != old_sig[0]:
+        # Первая сборка и смена слова — в журнал (с источником); пересборка по геометрии — без строки.
+        if old_sig is None:
+            self._ctx.log_info(f"WordLayoutPlugin: слово '{self._reg.word_norm}' (источник: {src})")
+        elif sig[0] != old_sig[0]:
             self._ctx.log_info(
-                f"WordLayoutPlugin: смена слова '{old_norm}' → '{self._reg.word_norm}' — "
-                f"ячейки с нуля (было заполнено {old_filled}/{old_total})"
+                f"WordLayoutPlugin: смена слова '{old_norm}' → '{self._reg.word_norm}' "
+                f"(источник: {src}) — ячейки с нуля (было заполнено {old_filled}/{old_total})"
             )
         if self._reg.spacing_warn:
             self._ctx.log_info(
