@@ -508,3 +508,31 @@ def f(self):
 def test_duck_typing_guard_sees_data_flow(source: str, expected: int) -> None:
     """Сам сторож: получатель — по потоку данных; переименование переменной его не обходит."""
     assert len(_duck_typing_sites(source)) == expected
+
+
+# --- SPI.g: затвор переподключения в базе ---
+
+
+def test_reconnect_throttle_intervals_per_class_are_literals() -> None:
+    assert BaseDeviceDriver.RECONNECT_THROTTLE_S == 2.0
+    assert RobotDriver.RECONNECT_THROTTLE_S == 2.0
+    assert RobotDriverV2.RECONNECT_THROTTLE_S == 2.0
+    assert VfdDriver.RECONNECT_THROTTLE_S == 3.0
+
+
+def test_reconnect_due_gate_opens_once_per_interval() -> None:
+    """Затвор базы: метка 0.0 -> закрыт до 2 с; открылся — метка «сейчас», следующий вызов закрыт до +2 с."""
+    now = [0.0]
+
+    class _Gate(BaseDeviceDriver):
+        kind = "gate"
+
+        def due(self) -> bool:
+            return self._reconnect_due()
+
+    drv = _Gate(_entry("gate"), clock=lambda: now[0])
+    seen = []
+    for t in (0.0, 1.9, 2.0, 3.9, 4.0, 4.5, 6.0):
+        now[0] = t
+        seen.append(drv.due())
+    assert seen == [False, False, True, False, True, False, True]

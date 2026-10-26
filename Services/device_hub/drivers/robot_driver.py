@@ -46,6 +46,7 @@ class RobotDriver(BaseDeviceDriver):
 
     kind = "robot"
     OP_SPECS = ROBOT_V1_OPS  # описания операций _OPS (SPI хаба)
+    RECONNECT_THROTTLE_S = _RECONNECT_THROTTLE_SEC
 
     def __init__(
         self,
@@ -83,9 +84,6 @@ class RobotDriver(BaseDeviceDriver):
 
         # Ручной режим: пауза авто-подачи из очереди
         self.manual_mode: bool = False
-
-        # Throttled reconnect
-        self._last_reconnect: float = 0.0
 
         # Wire-обмен для панели «Вход/Выход»: последние TX (запись) и RX (чтение).
         # Заполняется из on_data ModbusDevice (каждый read/write); публикуется
@@ -546,10 +544,8 @@ class RobotDriver(BaseDeviceDriver):
             return True
         if not self.desired_connected:
             return False
-        now = self._clock()
-        if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+        if not self._reconnect_due():
             return False
-        self._last_reconnect = now
         self._record_reconnect()
         if self.connect():
             self.reset_reconnect()

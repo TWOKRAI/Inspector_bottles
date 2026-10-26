@@ -60,6 +60,7 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
     stop_unconfirmed: bool = False
     stop_unconfirmed_text: str | None = None
     last_io: dict | None = None
+    RECONNECT_THROTTLE_S: ClassVar[float] = 2.0  # минимальный интервал между попытками переподключения, с
 
     def __init__(
         self,
@@ -100,6 +101,20 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         self._reconnect_attempts: int = 0
         # Драйвер «сдался»: исчерпал попытки, ждёт ручного подключения (для conn="failed").
         self.reconnect_exhausted: bool = False
+        # Метка последней попытки переподключения (часы ``self._clock``); подкласс вправе задать иное начало
+        self._last_reconnect: float = 0.0
+
+    def _reconnect_due(self) -> bool:
+        """Затвор попыток переподключения: True и метка = «сейчас», если прошло ``RECONNECT_THROTTLE_S``.
+
+        Только затвор: счётчик попыток (``_record_reconnect``), сам ``connect`` и замки — у вызывающего драйвера.
+        Вызывать из одного потока тика; v2 зовёт под ``_param_lock``.
+        """
+        now = self._clock()
+        if now - self._last_reconnect < self.RECONNECT_THROTTLE_S:
+            return False
+        self._last_reconnect = now
+        return True
 
     # ------------------------------------------------------------------ #
     # Контракт BaseManager

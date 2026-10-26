@@ -33,6 +33,7 @@ class VfdDriver(BaseDeviceDriver):
 
     kind = "vfd"
     OP_SPECS = VFD_OPS  # описания операций _OPS (SPI хаба)
+    RECONNECT_THROTTLE_S = _VFD_RECONNECT_THROTTLE_SEC
 
     def __init__(
         self,
@@ -263,13 +264,11 @@ class VfdDriver(BaseDeviceDriver):
         Возвращает snapshot: quality=bad + reason при неудаче.
         Не спамит connect каждый тик — throttle через _last_reconnect.
         """
-        now = self._clock()
-        if now - self._last_reconnect < _VFD_RECONNECT_THROTTLE_SEC:
+        if not self._reconnect_due():
             return self.snapshot(
                 data={"reason": "ожидание повторного подключения"},
                 quality="bad",
             )
-        self._last_reconnect = now
         self._record_reconnect()
         try:
             ok = self.connect()

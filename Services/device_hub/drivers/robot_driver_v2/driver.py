@@ -130,6 +130,7 @@ class _RobotDriverCore(BaseDeviceDriver):
     """
 
     kind = "robot"
+    RECONNECT_THROTTLE_S = _RECONNECT_THROTTLE_SEC
 
     _OPS: dict[str, Callable[[_RobotDriverCore, dict], dict]]  # заполняется после класса
 
@@ -165,7 +166,6 @@ class _RobotDriverCore(BaseDeviceDriver):
         self._servo_on, self._do_on_connect = self._parse_on_connect(params.get("on_connect"))
         self._hub_poll_s = float(params.get("poll_interval_s", _HUB_POLL_DEFAULT_S))
 
-        self._last_reconnect = 0.0
         self._last_resync = 0.0
 
         # Замок перехода jog: client.jog_cont и стоп jog; с замком состояния — только снаружи (он листовой)
@@ -500,10 +500,8 @@ class _RobotDriverCore(BaseDeviceDriver):
                 return True
             if not self.desired_connected:  # «Отключить» пришло между проверкой выше и захватом замка (T5.3h)
                 return False
-            now = self._clock()
-            if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+            if not self._reconnect_due():
                 return False
-            self._last_reconnect = now
             self._record_reconnect()
             connected = self._connect_locked()
             if not self.desired_connected:
