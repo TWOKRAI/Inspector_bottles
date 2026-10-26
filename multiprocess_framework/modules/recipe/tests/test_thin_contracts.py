@@ -200,3 +200,68 @@ def test_update_blueprint_metadata_emptied_locked_nodes_with_tail_comment(tmp_pa
         "z": 1,
     }
     assert text.count("# next section") == 1
+
+
+def test_update_yaml_preserving_tuple_value_written_as_list(tmp_path: Path) -> None:
+    """Ревью 1.1b, р2: значение-кортеж пишется списком (прежний писатель писал ``k: [1, 2]``), не ValueError."""
+    import yaml
+
+    path = tmp_path / "r.yaml"
+    _write(path, "a: 1\n")
+
+    update_yaml_preserving(path, {"k": (1, 2)})
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == {"a": 1, "k": [1, 2]}
+
+
+def test_update_blueprint_metadata_replaced_block_positions_stay_block(tmp_path: Path) -> None:
+    """Ревью 1.1b, р2 (p31): ``gui_positions`` целиком сменил ключи — карта остаётся блочной,
+    ``main:`` на своей строке (раньше опустевшая по дороге карта навсегда уходила во flow).
+    Форма — ``phone_inspect.yaml``. ``locked_nodes: []`` пополняется блочным списком: ruamel 0.19
+    читает пустой ``[]`` без flow-стиля (``None``), так же писал и прежний писатель."""
+    path = tmp_path / "recipe.yaml"
+    _write(
+        path,
+        "name: demo\n"
+        "blueprint:\n"
+        "  metadata:\n"
+        "    gui_positions:\n"
+        "      phone_cam.phone_camera:\n"
+        "        - 16.0\n"
+        "        - 40.0\n"
+        "      phone_view:\n"
+        "        - 0.0\n"
+        "        - 0.0\n"
+        "    locked_nodes: []\n"
+        "\n"
+        "displays:\n"
+        "  - id: phone_view\n",
+    )
+
+    update_blueprint_metadata_preserving(path, {"gui_positions": {"main": [1, 2]}, "locked_nodes": ["a"]})
+
+    assert path.read_bytes() == (
+        "name: demo\n"
+        "blueprint:\n"
+        "  metadata:\n"
+        "    gui_positions:\n"
+        "      main:\n"
+        "        - 1\n"
+        "        - 2\n"
+        "    locked_nodes:\n"
+        "      - a\n"
+        "\n"
+        "displays:\n"
+        "  - id: phone_view\n"
+    ).encode("utf-8")
+
+
+def test_update_yaml_preserving_tuple_equal_to_file_list_does_not_write(tmp_path: Path) -> None:
+    """Кортеж, равный списку в файле, — пустая дельта: байты и ``st_mtime_ns`` прежние."""
+    path = tmp_path / "r.yaml"
+    before_bytes, before_mtime = _write(path, "k: [1, 2]  # позиция\n")
+
+    update_yaml_preserving(path, {"k": (1, 2)})
+
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime

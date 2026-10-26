@@ -144,6 +144,59 @@ def replace_item(container: Any, key: Any, value: Any) -> None:
     container.ca.items[key][slot] = None if not rest.strip() else _comment_token(rest, token)
 
 
+def finalize(doc: Any) -> None:
+    """Довести документ до формы, которую эмиттер ruamel пишет валидно; зовётся после всей дельты.
+
+    - Пустой контейнер — flow (``[]``/``{}`` на строке ключа): блочный пустой эмиттер пишет ПОСЛЕ
+      комментария ключа, на отдельной строке, — невалидный YAML. Контейнеру, который опустел
+      по дороге (``_mark_emptied``) и снова наполнился, возвращается стиль до опустошения (p31).
+    - Элемент списка с собственным заголовком и комментарием-перед-элементом в слоте списка —
+      один общий список токенов (``_share_item_header``). Заголовок появляется не только при
+      удалении первого ключа элемента, но и при переносе заголовка опустевшей карты первого
+      ключа (``_evacuate_emptied``) — там владелец элемента-списка не известен. Иначе representer
+      ruamel падает ``assert val == nc`` в ``merge_comments`` (ревью 1.1a р2, п. 6).
+    Plain ``dict``/``list`` не трогаются."""
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    seen: set[int] = set()
+    stack = [doc]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, (CommentedMap, CommentedSeq)) or id(node) in seen:
+            continue
+        seen.add(id(node))  # алиас — тот же объект, обходится один раз
+        original = node.__dict__.pop(_ORIG_STYLE, _NOT_EMPTIED)
+        if not len(node):
+            node.fa.set_flow_style()
+            continue
+        if original is not _NOT_EMPTIED:
+            node.fa._flow_style = original  # опустел и снова наполнен — стиль до опустошения
+        if isinstance(node, CommentedSeq):
+            for idx, item in enumerate(node):
+                if isinstance(item, (CommentedMap, CommentedSeq)) and _split_item_header(node, idx, item):
+                    _share_item_header(item, (node, idx))
+        stack.extend(node.values() if isinstance(node, CommentedMap) else node)
+
+
+_ORIG_STYLE = "_recipe_style_before_emptied"
+_NOT_EMPTIED = object()
+
+
+def _mark_emptied(container: Any) -> None:
+    """Запомнить стиль контейнера до опустошения (только первый раз) и поставить flow."""
+    container.__dict__.setdefault(_ORIG_STYLE, container.fa._flow_style)
+    container.fa.set_flow_style()
+
+
+def _split_item_header(seq: Any, idx: int, item: Any) -> bool:
+    """У элемента есть и заголовок, и комментарий в слоте списка, и это разные списки токенов."""
+    slots = seq.ca.items.get(idx)
+    comment = item.ca.comment
+    if not slots or slots[1] is None or comment is None or comment[1] is None:
+        return False
+    return slots[1] is not comment[1]
+
+
 def _comment_token(value: str, like: Any) -> Any:
     from ruamel.yaml.tokens import CommentToken
 
@@ -226,8 +279,10 @@ def _evacuate_emptied(container: Any, owner: tuple[Any, Any] | None, tail: str, 
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
     # Блочный пустой контейнер эмиттер пишет ``[]``/``{}`` ПОСЛЕ комментария ключа (на отдельной
-    # строке — невалидно); flow-стиль ставит его на строку ключа, комментарий — следом.
-    container.fa.set_flow_style()
+    # строке — невалидно); flow-стиль ставит его на строку ключа, комментарий — следом. Контейнер
+    # может снова наполниться в той же дельте (карта целиком сменила ключи): исходный стиль
+    # запоминается, ``finalize`` возвращает его наполненным (ревью 1.1b р2, p31).
+    _mark_emptied(container)
     parent, pkey = owner if owner is not None else (None, None)
     if not isinstance(parent, (CommentedMap, CommentedSeq)):
         # корень документа: заголовок пустого корня перед ``{}`` валиден
@@ -251,6 +306,8 @@ def _evacuate_emptied(container: Any, owner: tuple[Any, Any] | None, tail: str, 
 def _pop_container_comments(container: Any, parent: Any, pkey: Any) -> tuple[str, str]:
     """Снять с контейнера заголовок (``ca.comment[1]`` и слот 3 ключа у родителя) и EOL-комментарий
     строки ключа (``ca.comment[0]``). Заголовок возвращается в форме хвоста: ``\\n`` + строки с отступом."""
+    from ruamel.yaml.comments import CommentedSeq
+
     tokens: list[Any] = []
     eol = ""
     comment = container.ca.comment
@@ -267,6 +324,11 @@ def _pop_container_comments(container: Any, parent: Any, pkey: Any) -> tuple[str
     if slots is not None and len(slots) > 3 and slots[3]:
         tokens.extend(t for t in slots[3] if all(t is not seen for seen in tokens))
         slots[3] = None
+    if isinstance(parent, CommentedSeq) and slots is not None and slots[1]:
+        # Заголовок элемента списка — общий список со слотом списка (``_share_item_header``):
+        # взятые токены убираются и оттуда, иначе комментарий выходит дважды (ревью 1.1a р2, п. 7).
+        rest = [t for t in slots[1] if all(t is not seen for seen in tokens)]
+        slots[1] = rest or None
     lines = [(" " * t.start_mark.column + t.value) if t.value.startswith("#") else t.value for t in tokens]
     return (_NL + "".join(lines)) if lines else "", eol
 

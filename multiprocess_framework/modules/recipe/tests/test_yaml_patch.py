@@ -752,10 +752,9 @@ _LEAD_BEFORE = {"p": [{"n": "gui", "meta": {}}, {"a": 1, "b": 2}, {"n": "z"}]}
 
 # case -> (after, комментарии, обязанные остаться в файле ровно по одному разу)
 _LEAD_CASES = {
-    # Сценарий ревьюера: элемент списка с комментариями заменяется пустым mapping. Число
-    # комментариев не проверяется: на HEAD ``# lead`` и ``# inner`` в этом случае выходят дважды
-    # (открытый дефект дельта-движка, не предмет этого теста).
-    "item_emptied": ({"p": [{"n": "gui", "meta": {}}, {}, {"n": "z"}]}, ()),
+    # Сценарий ревьюера: элемент списка с комментариями заменяется пустым mapping. До фикса р3
+    # ``# lead`` и ``# inner`` выходили дважды: общий список токенов оставался в слоте списка.
+    "item_emptied": ({"p": [{"n": "gui", "meta": {}}, {}, {"n": "z"}]}, ("# lead", "# inner")),
     # Элемент теряет первый ключ: заголовок элемента дописывается к слоту списка.
     "first_key_gone": ({"p": [{"n": "gui", "meta": {}}, {"b": 2}, {"n": "z"}]}, ("# lead", "# inner")),
 }
@@ -800,12 +799,12 @@ _SCALAR_TO_CONTAINER = {
 
 
 @pytest.mark.parametrize("case", list(_SCALAR_TO_CONTAINER), ids=list(_SCALAR_TO_CONTAINER))
-def test_scalar_replaced_by_container_drops_scalar_eol_comment_no_glue(tmp_path: Path, case: str) -> None:
-    """Скаляр с EOL-комментарием заменён контейнером: комментарий старого значения снят, строки не склеены.
+def test_scalar_replaced_by_container_drops_scalar_eol_comment(tmp_path: Path, case: str) -> None:
+    """Скаляр с EOL-комментарием заменён контейнером: комментарий старого значения снят.
 
     ``# eol`` описывал прежнее значение ``2.5``. Без снятия комментарий остаётся на строке ключа
-    (``kk:      # eol``); в ревью 1.1a та же правка давала склейку строк (``kk: 2.5   -``).
-    Ожидаемые байты заданы литералом.
+    (``kk:      # eol``). Склейка строк из ревью 1.1a (``kk: 2.5   -``) на ruamel 0.19 не
+    воспроизводится: тест страхует только снятие EOL-комментария. Ожидаемые байты заданы литералом.
     """
     after, expected = _SCALAR_TO_CONTAINER[case]
     path = tmp_path / "r.yaml"
@@ -816,3 +815,73 @@ def test_scalar_replaced_by_container_drops_scalar_eol_comment_no_glue(tmp_path:
     raw = path.read_bytes()
     assert yaml.safe_load(raw.decode("utf-8")) == after
     assert raw == expected
+
+
+# ---------------------------------------------------------------------------
+# Ревью 1.1a, раунд 2 (фикс р3): кортеж, AssertionError ruamel, заголовок элемента списка
+# ---------------------------------------------------------------------------
+
+
+def test_new_file_tuple_value_written_as_list(tmp_path: Path) -> None:
+    """Новый файл со значением-кортежем: записан список, PyYAML читает ``[1.0, 2.0]`` (страховка не отказывает)."""
+    path = tmp_path / "new.yaml"
+
+    yaml_io.patch_yaml_preserving(path, {}, {"k": (1.0, 2.0)})
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == {"k": [1.0, 2.0]}
+
+
+def test_ruamel_assertion_in_dump_becomes_value_error_file_intact(tmp_path: Path, monkeypatch) -> None:
+    """``AssertionError`` внутри дампа ruamel (класс ``merge_comments``) -> ``ValueError``, байты файла прежние."""
+    path = tmp_path / "r.yaml"
+    raw_before, _ = _write(path, b"# keep\na: 1\n")
+    real_make = yaml_io._make_yaml
+
+    def broken_make():
+        rt = real_make()
+
+        def dump(data, stream):
+            raise AssertionError("assert val == nc")
+
+        rt.dump = dump
+        return rt
+
+    monkeypatch.setattr(yaml_io, "_make_yaml", broken_make)
+
+    with pytest.raises(ValueError):
+        yaml_io.patch_yaml_preserving(path, {"a": 1}, {"a": 2})
+
+    assert path.read_bytes() == raw_before
+
+
+# Пример hypothesis для ``test_property_patch_with_comments_reaches_after`` (красный на f5b0b19ac):
+# внутренняя карта первого ключа элемента списка опустела, её заголовок ушёл в заголовок элемента —
+# отдельным списком токенов, не общим со слотом списка. representer ruamel падал
+# ``assert val == nc`` в ``merge_comments``. Закреплён литералом, без локальной базы hypothesis.
+_ITEM_HEADER_SRC = (
+    b"# c0\nk:  # e1\n  # c2\n  -  # e3\n    # c4\n    k:  # e5\n      # c6\n"
+    b"      k: null  # e7\n      # c8\n      ka: null  # e9\n"
+)
+_ITEM_HEADER_BEFORE = {"k": [{"k": {"k": None, "ka": None}}]}
+_ITEM_HEADER_AFTER = {"k": [{"k": {}, "knew": 1}], "knew": 1}
+
+
+def test_inner_map_of_item_emptied_reaches_after(tmp_path: Path) -> None:
+    """Опустела карта первого ключа элемента списка (пример hypothesis): ruamel не падает, PyYAML читает after."""
+    path = tmp_path / "r.yaml"
+    _write(path, _ITEM_HEADER_SRC)
+
+    yaml_io.patch_yaml_preserving(path, _ITEM_HEADER_BEFORE, _ITEM_HEADER_AFTER)
+
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == {"k": [{"k": {}, "knew": 1}], "knew": 1}
+
+
+def test_inner_map_of_item_emptied_keeps_comments_once(tmp_path: Path) -> None:
+    """Тот же пример: каждый полнострочный комментарий входа есть в файле ровно один раз."""
+    path = tmp_path / "r.yaml"
+    _write(path, _ITEM_HEADER_SRC)
+
+    yaml_io.patch_yaml_preserving(path, _ITEM_HEADER_BEFORE, _ITEM_HEADER_AFTER)
+
+    text = path.read_text(encoding="utf-8")
+    assert [text.count(f"# c{i}\n") for i in (0, 2, 4, 6, 8)] == [1, 1, 1, 1, 1]

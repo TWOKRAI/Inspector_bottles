@@ -130,7 +130,7 @@ def _kind(value: Any) -> str:
         return "none"
     if isinstance(value, dict):
         return "map"
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):  # кортеж ruamel пишет списком (ревью 1.1b р2, F1)
         return "list"
     return "other"
 
@@ -206,9 +206,11 @@ class _Delta:
         self._done: set[int] = set()
 
     def run(self, target: Any, before: dict, after: dict) -> None:
-        """Применить дельту и сверить места ссылок алиасов уже на итоговой цели."""
+        """Применить дельту, сверить места ссылок алиасов уже на итоговой цели и довести
+        ruamel-документ до формы для эмиттера (flow пустым контейнерам, общий заголовок элемента)."""
         self.apply_map(target, before, after, ())
         self._check_shared(target)
+        _rd.finalize(target)
 
     def _check_shared(self, target: Any) -> None:
         """Узел с якорем во ВСЕХ местах ссылок итоговой цели равен ``after`` там же (design.md §2.3).
@@ -327,7 +329,7 @@ def _read_plain(path: Path) -> Any:
 def _plain(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _plain(child) for key, child in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_plain(child) for child in value]
     return value
 
@@ -357,7 +359,10 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n") -> None:
         raise PermissionError(f"файл только для чтения: {path}")
 
     buf = io.StringIO()
-    yaml.dump(data, buf)
+    try:
+        yaml.dump(data, buf)
+    except AssertionError as exc:  # внутренний assert ruamel (``merge_comments``), не наш контракт
+        raise ValueError(f"{path}: дамп ruamel не удался — запись отменена, файл цел") from exc
     text = buf.getvalue()
     _verify_dump(text, data, path)
     if newline != "\n":
