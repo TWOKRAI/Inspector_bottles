@@ -513,3 +513,77 @@ layout=(positions, locked_nodes))` (Pipeline-Save — топология и ра
   про pyright; (G8) повтор `os.replace` в `service._atomic_write` (общий для сервиса и `RecipeManager`); (G9) маркеры
   «заменено»; (G10) `cwd`/`PYTHONPATH` подпроцессов 1.1f; (G11) отказ на любом новом корневом ключе. 16 задач, 38 запусков,
   ≈ 9,5M.
+
+## 12. Task 1.1i — склейка переноса комментариев у `- {}` (поправки №2–3)
+
+Источник: вердикт CTO (б) и решение владельца «чинить как полагается, без костылей» (2026-10-26); стадия 0 —
+`docs/reviews/2026-10-26_task-1.1i-stage0.md`. Нумерация §12.N — пункты DESIGN брифа `tasks/1.1i.md`.
+
+### 12.1–12.7 DESIGN
+
+```text
+  1. `class YamlWriteRefused(ValueError)` в `yaml_io.py` сразу под `YamlPatchConflict`; в `yaml_io.__all__` и в импорт
+     и `__all__` `recipe/__init__.py` рядом с `YamlPatchConflict`. Зачем: T1 отличает отказ страховки от любого другого
+     `ValueError`; подкласс `ValueError` — прежние `except ValueError` / `pytest.raises(ValueError)` не меняют смысла
+     (стадия 0 проверила вызывающих: смысл не меняется нигде). Бросают ровно три места `_dump_atomic`/`_verify_dump`:
+     AssertionError дампа ruamel, `pyyaml.YAMLError` при чтении дампа, `not _equal(...)`; `from exc` у первых двух.
+     `YamlPatchConflict` и `RecipeFormatError` не наследуют его и он не наследует их. Сообщение: «<путь>: … запись
+     отменена, файл цел» + `exc.problem` и позиция; строки дампа (снимок PyYAML) в текст НЕ попадают, `__cause__` хранит
+     исходное. Docstring Post/Raises у `patch_recipe`/`save_layout` (`manager.py`, `interfaces.py`): «страховка записи
+     отказала → `YamlWriteRefused` (подкласс `ValueError`), байты целы».
+  2. Корень класса — расстановка токенов комментариев в `_ruamel_doc.py`. Первый шаг — диагноз на B1–B9: какой токен
+     снимает склейку (стадия 0: EOL/заголовочный токен ключа, держащего правленый блочный список — `ca.items[ключ][2|3]`
+     родителя, — и хвостовой `ca.items[0][0]` списка; не слоты заменяемого элемента). Чинить РАССТАНОВКУ этого токена
+     так, чтобы комментарий выжившего узла остался на месте. Запрещено: очистка/удаление токена комментария ради снятия
+     склейки; правка строки дампа после эмиттера; эвристики по тексту; повтор записи после отказа; запись без
+     комментариев; сужение генератора; `assume` на исходе. Ранний выход: после диагноза, если единой расстановки нет
+     (склейка остаётся при любой расстановке токенов вокруг правки) — `ESCALATION -> lead` (формат project-rules §7) с
+     таблицей «литерал → слот → результат перестановки» ДО правки кода. Чистый load→dump здесь не критерий.
+  3. Порядок: (а) `YamlWriteRefused` и перетипизация трёх мест, (б) REDS склейки — красные по проваленному assert, не
+     по `AttributeError`, (в) корень.
+  4. T1 `test_property_patch_with_comments_reaches_after`: тело — общая функция `_patch_case(before, rnd) ->
+     "written" | "refused"`. Отказ допустим только как `type(exc) is YamlWriteRefused` при прежних байтах и
+     `st_mtime_ns`; любое другое исключение — красный. Для записи: `load == after`; ни один маркер комментария не
+     встречается дважды. `assume(_ruamel_roundtrip_clean(...))` остаётся входным фильтром (не исход).
+  5. T2 `test_property_refusal_budget[sd]`, `@pytest.mark.parametrize("sd", range(10))`: `_patch_case` под
+     `@seed(sd)`, `settings(database=None, max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])`,
+     `phases` по умолчанию; `written + refused == 300`, `rejected <= 15`, `refused == 0`. Поток hypothesis зависит от
+     процесса-хозяина (стадия 0: 17 общих примеров, затем расходятся) — T2 храповик, НЕ RED; детерминированный RED —
+     корпус (DESIGN 6). В отчёте — K по каждому `sd` и команда запуска.
+  6. Корпус `test_known_glue_input_reaches_after[B1..B9]`: литералы `src`/`before`/`after`; `load == after`; ни один
+     маркер не дважды; маркеры выживших узлов — ровно по разу, литералами: B1–B3 `# e3`, B4 `# e1`, B5 и B6 `# e1`;
+     для B7–B9 список выживших даёт лид до RED (не выводить из выхода кода). B7–B9 берутся в корпус, только если
+     красные на HEAD — показать в отчёте.
+  7. Итерация = один проход teamlead (REDS → корень → light + medium) + один проход инъекций и ревью лида; CHANGES
+     после этого исчерпывает лимит. Успех: B1–B9 зелёные без `xfail`, T2 `refused == 0` по всем `sd`, приёмка ниже.
+     Не уложился: переход к `xfail(strict=True, raises=YamlWriteRefused)` на оставшихся литералах + парный тест
+     «громкий отказ, байты и mtime целы», K — литерал с названным запуском, — только через `ESCALATION -> lead`, молча
+     не переходить.
+```
+
+### 12.8 INJECT лида (подробно)
+
+```text
+  - откат правки корня → test_known_glue_input_reaches_after (ids, которые правка закрыла); T2 — только если лид
+    подтвердит красный в запуске гейта
+  - корень заменён очисткой токена ключа → test_known_glue_input_reaches_after (B1–B6 на счёте маркеров выживших)
+  - `_verify_dump` всегда бросает `YamlWriteRefused` → test_property_refusal_budget (все ids), test_known_glue_input_reaches_after (все ids); T1 остаётся зелёным
+  - место AssertionError бросает голый `ValueError` → test_safety_net_refusal_is_yaml_write_refused[ruamel_assert]
+  - место `pyyaml.YAMLError` бросает голый `ValueError` → test_safety_net_refusal_is_yaml_write_refused[unreadable]
+  - место `not _equal` бросает голый `ValueError` → test_safety_net_refusal_is_yaml_write_refused[differs]
+  - `_verify_dump` — no-op → test_safety_net_refusal_is_yaml_write_refused[differs|unreadable], test_dump_unreadable_by_pyyaml_refuses_write
+  - бросок после `_atomic_write` → test_safety_net_refusal_is_yaml_write_refused (все ids, байты и mtime)
+```
+
+### 12.9 Приёмка лида
+
+```text
+ACCEPTANCE: REDS зелёные; T2 `refused == 0` по всем `sd`; `recipe/tests` зелёный (medium). Лид (агентом), после коммита:
+  (1) `probes/probe_style_22.py <worktree> <oldpkg>` на 22 `multiprocess_prototype/recipes/*.yaml` (1464 правки;
+  до задачи: ok 1454, ValueError 6 — `processes[0]` в dualcam_synth/dualcam_webcam/g1_perf_probe, YamlPatchConflict 4 —
+  алиасы): ValueError 0, YamlPatchConflict 4 названы; (2) `probes/probe_fuzz_diff.py plain|words|col0|flowc 1200`:
+  ни одного `WRITTEN-INVALID`/`WRITTEN-MISMATCH`, ни одной пары (written-ok до, refused после); остаток (refused,
+  refused) назван. «Движок до задачи» — снимок ОБОИХ `yaml_io.py` и `_ruamel_doc.py` (и всего, что они импортируют из
+  пакета) с `a6ebbc7f3` отдельным пакетом; `probes/probe_fuzz_common.py::_load_old` в нынешнем виде тянет текущий
+  `_ruamel_doc` — для 1.1i не годится.
+```
