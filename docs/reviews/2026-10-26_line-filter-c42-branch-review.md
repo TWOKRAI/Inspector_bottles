@@ -140,3 +140,77 @@ python — `.venv` главного дерева. Код ветки не пра�
 
 Каталог `C:\Users\INNOTECH\AppData\Local\Temp\claude\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\a7ed006a-106e-41f2-b245-4d6cf39aea24\scratchpad\c42\opus\`:
 `runwith.py` (подмена `plugin.py`), `plugin_main.py` (`git show main:...`), `mut_I1.py`, `mut_I2.py`, `probe_c42.py` (P1–P7), `probe_i2.py`.
+
+---
+
+# Раунд 2 (после `77387b429`, `51c09d8df`; решение владельца О2)
+
+Проверял только закрытие замечаний 1–3, новые цепочечные тесты и числа в доках. P6 заведён как C-51 — вне объёма.
+`plugin.py` с `cb0d732be` не менялся (`git diff --stat cb0d732be HEAD -- plugin.py` пуст), мутанты раунда 1 годны.
+
+## Вердикт раунда 2: CHANGES REQUESTED (итерация 2 из 2)
+
+Замечания 2 и 3 закрыты. Замечание 1 закрыто только на точной скорости и без шума: запас условия
+`max_match_distance ≥ v × (L + 1)` — 0.93 px. Шаг квантования центра у детектора (dp 1.4) больше этого запаса.
+
+## Прогоны раунда 2
+
+| Что | Вход | Вывод |
+|---|---|---|
+| HEAD, тесты автора | `runwith.py plugin.py test_plugin.py` | `23 passed` |
+| HEAD, цепочки C-32 | `runwith.py plugin.py test_disk_identity_chain.py` | `4 passed` |
+| main, цепочки C-32 | `runwith.py plugin_main.py test_disk_identity_chain.py` | `2 failed, 2 passed`: красные `test_real_chain_loss_inside_zone_one_disc_one_slot`, `test_sim_belt_loss_of_two_frames_inside_zone_one_disc_one_slot` |
+| I2 (снята строка `plugin.py:200`) | `runwith.py mut_I2.py test_plugin.py` | `1 failed, 22 passed`: `test_mode_switch_resets_empty_streak` — убит |
+| I3 (нет проверки расстояния) | `runwith.py mut_I3.py test_disk_identity_chain.py` | `1 failed, 3 passed`: красный только `test_real_chain_two_same_letters_two_cells` |
+| I4 (нет проверки `max_age`) | `runwith.py mut_I4.py test_disk_identity_chain.py` | `4 passed` (окно ловят A7 в приёмке) |
+| P2 с новыми числами | `probe_r2.py` | см. ниже |
+
+`probe_r2.py`, конфиг рецепта v2 (mmd 100, max_age 4, rearm 2, zone 250, angle 90). Точная v = 101.1311 × 8.163265 / 25 = 33.022 px/кадр; 3v = 99.07.
+- P2, v = 33.0, потеря 2 кадров → `(1, [1])`.
+- P2e, v = 33.022 → `(1, [1])`.
+- **P2j, v = 33.022, центр после потери сдвинут на 1 px по ходу → `(2, [1, 2])`.**
+- **P2f, `line` обрабатывает 24.5 кадра/с (v = 33.7) → `(2, [1, 2])`.**
+- P2b, потеря 3 кадров → `(2, [1, 2])` — по спеке v2 (покрыто L ≤ 2).
+- Вариант mmd 120 / max_age 3: P2j → `(1, [1])`, P2f → `(1, [1])`.
+
+## Состояние замечаний раунда 1
+
+| № | Состояние | Доказательство |
+|---|---|---|
+| 1 | **закрыто частично** | P2 → 1 событие. P2j и P2f → 2 события (замечание R2-1) |
+| 2 | закрыто | I2 → `test_mode_switch_resets_empty_streak` красный |
+| 3 | закрыто | README `line_filter` (пункт О1) и `word_layout/README.md:66`, `STATUS.md:15`: «даёт ВТОРОЕ событие (второе задание)» |
+
+## Замечание раунда 2
+
+### R2-1. [blocker, spec] Числа рецепта 100 / 4 держат потерю 2 кадров с запасом 0.93 px
+
+Где: `letter_robot_sim.yaml:234-235`, `hikvision_letter_robot.yaml:212-213`, снапшот `hikvision_letter_robot.build.json:221-222, 2842-2843`,
+`_LINE_CFG` в `test_disk_identity_chain.py:27-28` и `test_word_source_chain.py:78-79`, README `line_filter`, спека v2 п. 5.
+
+Вход → вывод: P2j (1 px шума центра) → `counted_total=2`; P2f (24.5 кадра/с вместо 25, минус 2 %) → `counted_total=2`.
+Почему шум будет: у `circle_detector` `dp: 1.4` (`letter_robot_sim.yaml:200`) — шаг сетки центра 1.4 px. Сим рендерит
+с частотой по умолчанию 25 кадров/с (`generic_process.py:157`), прототип забирает кадры тоже с 25 кадрами/с, часы не связаны.
+1 мс сдвига = 0.83 px при 825 px/с. Цель О2 «потеря 2 кадров — тот же диск» выполнится примерно наугад.
+Моя вина: в раунде 1 я дал диапазон «mmd ≥ 99» без запаса, 100 в него попадает.
+
+Исправление: `max_match_distance: 120`, `max_age: 3` в обоих рецептах, в снапшоте (`UPDATE_BUILD_SNAPSHOTS=1`) и в двух `_LINE_CFG`.
+Проверка по условиям README при v = 33: 3v = 99 ≤ 120 (запас 21 px: v до 40 px/кадр, то есть до 20.6 кадра/с);
+`max_age` 3 ≥ `rearm_frames` 2 и ≥ L = 2; 3v = 99 < 250 − 120 = 130 (запас 31 px). `max_age: 4` с mmd 120 нарушает условие 3
+(132 > 130). Числа в README, спеке v2 п. 5 и докстринге `test_disk_identity_chain.py:149` («99 px <= 100») поправить.
+Тест `test_real_chain_loss_inside_zone_one_disc_one_slot` (6 px/кадр, L = 3) с max_age 3 остаётся зелёным (3 ≤ 3).
+Желательно: тест-граница с шумом — тот же проход 33 px/кадр с центром после потери на 99 + 5 px → 1 событие.
+
+## Числа в доках
+
+Арифметика верна: README и спека v2 — 33 × 3 = 99 ≤ 100, 4 × 33 = 132 < 150, 4 ≥ 2; докстринги тестов —
+6 × 4 = 24 ≤ 100, L = 3 ≤ 4; снапшот, оба рецепта и оба `_LINE_CFG` — 100 / 4. Ошибка не в счёте, а в отсутствии запаса (R2-1).
+
+## Что осталось открытым / ненадёжным (раунд 2)
+
+- `test_sim_belt_two_discs_give_two_events` слабый сторож: I3 и I4 его не красят (зазор 5 кадров больше `max_age` 4,
+  расстояние 231 px больше 100). Ловит только мутант «всё — тот же объект». Пустым не считаю, но и доказательства мало.
+- v = 33 px/кадр — по-прежнему расчёт по конфигу, не замер; L на стенде не измерена (S2: 0 строк). Это и записано в статусе спеки.
+- Величину шума центра и разброс шага между кадрами на стенде я не мерил; 1 px и 2 % в зондах — модельные значения.
+- Зонды — на `MagicMock`-контексте; стенд, framework suite, ruff, A12 не запускал.
+- Новые файлы зондов: `probe_r2.py`, `mut_I3.py`, `mut_I4.py` в том же каталоге `...\scratchpad\c42\opus\`.
