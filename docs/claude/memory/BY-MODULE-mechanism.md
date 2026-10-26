@@ -481,8 +481,9 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (34)
+## live-stand (35)
 
+- [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
 - [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
@@ -668,12 +669,13 @@
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_task_4_11_ttl_sweep_voice_verdict_2026_09_08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md)
 
-## spec-scope (25)
+## spec-scope (26)
 
 - [feedback_a_cross_track_dependency_can_name_the_wrong_plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md)
 - [feedback_a_fix_on_a_finding_must_not_outgrow_it](feedback_a_fix_on_a_finding_must_not_outgrow_it.md)
 - [feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree](feedback_a_lost_gitignored_asset_may_survive_in_a_sibling_worktree.md)
 - [feedback_a_new_plan_must_be_placed_among_its_neighbours](feedback_a_new_plan_must_be_placed_among_its_neighbours.md)
+- [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_plans_premise_expires](feedback_a_plans_premise_expires.md)
 - [feedback_an_avoidance_rule_can_be_a_false_safety_catch](feedback_an_avoidance_rule_can_be_a_false_safety_catch.md)
 - [feedback_defect_fixed_on_one_path_only](feedback_defect_fixed_on_one_path_only.md)

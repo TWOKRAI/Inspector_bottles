@@ -6,6 +6,10 @@
 
 - [project_calibration_gui_progress](project_calibration_gui_progress.md) — Калибровка камера↔робот — баг прогресса визарда (GUI не подписан на calibration…
 
+## plugins/filter/line_filter (1)
+
+- [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md) — Порог в пикселях (pixel threshold: радиус ассоциации, окно кадров) ставить от с…
+
 ## plugins/hub (1)
 
 - [project_device_hub](project_device_hub.md) — device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и след…
