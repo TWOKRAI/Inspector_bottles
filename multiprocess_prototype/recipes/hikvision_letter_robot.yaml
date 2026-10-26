@@ -209,6 +209,8 @@ blueprint:
             zone_width: 250
             mode: zone_edge
             rearm_frames: 2
+            max_match_distance: 60
+            max_age: 20
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal

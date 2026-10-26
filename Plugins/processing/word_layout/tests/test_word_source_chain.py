@@ -74,6 +74,9 @@ _LINE_CFG = {
     "zone_width": 250,
     "mode": "zone_edge",
     "rearm_frames": 2,
+    # C-42: zone_edge помнит место пропажи; значения — как в рецепте letter_robot_sim.yaml.
+    "max_match_distance": 60,
+    "max_age": 20,
 }
 _CROP_CFG = {
     "size_mode": "radius",
@@ -84,7 +87,9 @@ _CROP_CFG = {
     "drop_partial": False,
     "pad_if_oob": True,
 }
-_DET = {"center": [376, 262], "radius": 40}  # диск в зоне линии
+# Физическая геометрия (как в test_disk_identity_chain.py): линия angle=90, зона x в [251, 501];
+# диск едет по x слева направо, новый входит слева — 228 px от места выхода прежнего.
+_PASS_XS = (260, 298, 336, 374, 412, 450, 488)
 _CHANGE_MARK = "смена слова"
 _DEADLINE_S = 5.0
 
@@ -158,18 +163,22 @@ def test_chain_on_real_objects_port_and_register() -> None:
     seq = 0
 
     def disk(label: str) -> int | None:
-        """Один диск: несколько кадров в зоне (событие только на входе) + пустые кадры для повторного взвода."""
+        """Один диск: проход зоны слева направо (событие только на входе) + пустые кадры для повторного взвода."""
         nonlocal seq
         outs: list[dict] = []
-        for _ in range(3):
+        for x in _PASS_XS:
             seq += 1
-            outs += feed([_DET], seq, label)
+            outs += feed([{"center": [x, 262], "radius": 40}], seq, label)
         for _ in range(2):
             seq += 1
             feed([], seq, label)
         assert len(outs) == 1  # достижимость: один диск = одно событие
         job = outs[0].get("robot_job")
         return job["slot"] if job else None
+
+    for _ in range(2):  # C-42/О1: защёлка стартует закрытой, взводится rearm_frames пустых кадров
+        seq += 1
+        feed([], seq, "Р")
 
     phone_word("МИР")
     assert rm.get_register("word_layout").target_word == "МИР"

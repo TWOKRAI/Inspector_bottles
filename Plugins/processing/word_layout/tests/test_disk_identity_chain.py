@@ -23,6 +23,9 @@ _LINE_CFG = {
     "zone_width": 250,
     "mode": "zone_edge",
     "rearm_frames": 2,
+    # C-42: zone_edge помнит место пропажи; значения — как в рецепте letter_robot_sim.yaml.
+    "max_match_distance": 60,
+    "max_age": 20,
 }
 _CROP_CFG = {
     "size_mode": "radius",
@@ -34,7 +37,11 @@ _CROP_CFG = {
     "pad_if_oob": True,
 }
 _WORD_CFG = {"require_pick": False, "word_source": "", "settle_frames": 1, "target_word": "ПЕРЕМИРИЕ"}
-_DET = {"center": [376, 262], "radius": 40}  # диск в зоне линии
+# Физическая геометрия: линия angle=90 вертикальна, зона |x - 376| <= 125 (x в [251, 501]).
+# Диск едет по x слева направо (шаг 38 px/кадр): входит у левого края (x=260), последний раз
+# виден у правого (x=488). Новый диск снова входит слева: 228 px от места выхода прежнего
+# (> max_match_distance=60) — это новый диск, а не повторное появление прежнего.
+_PASS_XS = (260, 298, 336, 374, 412, 450, 488)
 
 
 def _mk(cls: type, cfg: dict):
@@ -59,10 +66,13 @@ def test_real_chain_two_same_letters_two_cells() -> None:
     tids: list[object] = []
     slots: list[int | None] = []
     seq = 0
+    for _ in range(2):  # C-42/О1: защёлка стартует закрытой, взводится rearm_frames пустых кадров
+        seq += 1
+        feed([], seq, "Р")
     for label in ("Р", "Р", "Е"):
-        for _ in range(3):  # диск несколько кадров в зоне: событие только на входе
+        for x in _PASS_XS:  # диск проходит зону: событие только на входе
             seq += 1
-            for out in feed([_DET], seq, label):
+            for out in feed([{"center": [x, 262], "radius": 40}], seq, label):
                 tids.append(out["sidecar"].get("track_id"))
                 slots.append(out["robot_job"]["slot"] if out.get("robot_job") else None)
         for _ in range(2):  # пустые кадры >= rearm_frames: line_filter взводится заново
