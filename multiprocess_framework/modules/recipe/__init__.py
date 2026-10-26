@@ -16,7 +16,12 @@ from .interfaces import (
 from .manager import RecipeManager
 from .migrations import migration, registered_steps, run_chain
 from .recipe_engine import RecipeEngine
-from .yaml_io import update_blueprint_metadata_preserving, update_yaml_preserving
+from .yaml_io import (
+    YamlPatchConflict,
+    apply_delta,
+    update_blueprint_metadata_preserving,
+    update_yaml_preserving,
+)
 
 __all__ = [
     "RecipeEngine",
@@ -30,6 +35,8 @@ __all__ = [
     "run_chain",
     "update_yaml_preserving",
     "update_blueprint_metadata_preserving",
+    "apply_delta",
+    "YamlPatchConflict",
     "StoreProtocol",
     "RecipeEngineProtocol",
     "RecipeManagerProtocol",
