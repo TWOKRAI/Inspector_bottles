@@ -54,8 +54,14 @@ class LineFilterPlugin(ProcessModulePlugin):
         )
         self._frame = 0
         # zone_edge: latch занятости зоны (rising-edge) + счётчик пустых кадров для пере-взвода.
-        self._zone_occupied = False
+        # Защёлка стартует закрытой (решение владельца О1): если при старте/рестарте плагина зона
+        # занята, первый кадр не засчитывается — триггер взводится только после rearm_frames
+        # пустых кадров подряд. Диск, вошедший за время рестарта, теряется (дубль хуже потери).
+        self._zone_occupied = True
         self._empty_streak = 0
+        # zone_edge: где и когда плагин последний раз видел объект в зоне — (номер кадра, позиция).
+        # По нему повторное появление после пустых кадров опознаётся как тот же объект.
+        self._last_seen: tuple[int, tuple[float, float]] | None = None
         # Недавно зачтённые позиции для дедупа: list[(frame_idx, (x, y))].
         self._recent: list[tuple[int, tuple[float, float]]] = []
         # Накопленные события (emit_mode=accumulated): list[dict].
@@ -121,28 +127,59 @@ class LineFilterPlugin(ProcessModulePlugin):
         self._accumulated.append(event)
         return event
 
+    def _is_same_object(self, pos: tuple[float, float], prev: tuple[int, tuple[float, float]]) -> bool:
+        """zone_edge: точка — повторное появление того же объекта, что видели в зоне в ``prev``?
+
+        Та же ассоциация, что у трекера в других режимах: расстояние ≤ ``max_match_distance``
+        и не больше ``max_age`` кадров без точки в зоне между ``prev`` и текущим кадром.
+        """
+        last_frame, (lx, ly) = prev
+        r = self._reg
+        gap = self._frame - last_frame - 1  # кадров без точки в зоне между прежним и текущим
+        return gap <= r.max_age and math.hypot(pos[0] - lx, pos[1] - ly) <= r.max_match_distance
+
     def _apply_zone_edge(
         self, points: list[tuple[float, float]], center: tuple[float, float], half: float
     ) -> list[dict]:
-        """Rising-edge по занятости зоны — БЕЗ трекинга, робастно к скорости.
+        """Rising-edge по занятости зоны — одно событие на один проход диска.
 
-        Триггер на переходе «зона пуста → есть круг». Пере-взвод после
-        ``rearm_frames`` пустых кадров (гасит мерцание детекции). Не зависит от
-        ассоциации центров между кадрами → стабильно на любой скорости ленты,
-        лишь бы круг попал в зону хотя бы 1 кадр (``zone_width`` ≥ смещения за кадр).
-        Допущение: в зоне один объект за раз (однополосный конвейер).
+        Триггер на переходе «зона пуста → есть круг». Пере-взвод после ``rearm_frames``
+        пустых кадров (гасит мерцание детекции). Ассоциацию центров между соседними кадрами
+        не требует → стабильно на любой скорости ленты, лишь бы круг попал в зону хотя бы
+        1 кадр (``zone_width`` ≥ смещения за кадр).
+
+        Память последнего места (``_last_seen``): если детекция пропала внутри зоны дольше
+        ``rearm_frames`` и защёлка снялась, то точка, снова появившаяся не дальше
+        ``max_match_distance`` от места пропажи и не позднее чем через ``max_age`` пустых кадров,
+        — тот же диск, события нет. Защёлка стартует закрытой (О1): занятая зона при старте
+        не засчитывается.
+        Допущение: в зоне один объект за раз (однополосный конвейер); несколько точек рядом
+        с местом пропажи дают одно «тот же объект» на все.
         """
         r = self._reg
         in_zone = [(p, abs(signed_distance(p, center, r.angle))) for p in points]
         in_zone = [(p, sd) for p, sd in in_zone if sd <= half]
+        in_zone.sort(key=lambda x: x[1])  # ближайший к линии первым
         passed: list[dict] = []
 
         if in_zone:
             self._empty_streak = 0
+            # Сравнение — с ПРЕЖНИМ _last_seen: запись этого кадра идёт ниже.
+            prev = self._last_seen
+            self._last_seen = (self._frame, in_zone[0][0])
             if not self._zone_occupied:  # rising edge → один триггер до освобождения зоны
                 self._zone_occupied = True
-                for p, _sd in sorted(in_zone, key=lambda x: x[1]):  # ближайший к линии первым
-                    passed.append(self._record_pos(p))
+                for p, _sd in in_zone:
+                    if prev is not None and self._is_same_object(p, prev):
+                        gap = self._frame - prev[0] - 1
+                        dist = math.hypot(p[0] - prev[1][0], p[1] - prev[1][1])
+                        self._ctx.log_info(
+                            f"LineFilterPlugin: zone_edge — тот же объект, события нет: "
+                            f"({p[0]:.1f},{p[1]:.1f}), {dist:.1f}px от места пропажи, "
+                            f"пропуск {gap} кадр."
+                        )
+                    else:
+                        passed.append(self._record_pos(p))
         else:
             self._empty_streak += 1
             if self._empty_streak >= max(1, r.rearm_frames):
@@ -157,6 +194,10 @@ class LineFilterPlugin(ProcessModulePlugin):
 
         if r.mode == "zone_edge":
             return self._apply_zone_edge(points, center, half)
+        # Переключение режима на лету: вернувшись в zone_edge при диске в зоне, плагин ведёт себя
+        # как при старте (О1) — защёлка закрыта, счёт пустых кадров с нуля, занятая зона не засчитывается.
+        self._zone_occupied = True
+        self._empty_streak = 0
 
         for t in self._tracker.update(points):
             sd = signed_distance(t.pos, center, r.angle)

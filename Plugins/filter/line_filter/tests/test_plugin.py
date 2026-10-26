@@ -110,45 +110,188 @@ class TestOverlayAndOutput:
         assert p._counted_total == 1
 
 
+_EMPTY = {"detections": [], "seq_id": 1}
+
+
+def _armed_zone_edge(**reg_overrides) -> LineFilterPlugin:
+    """zone_edge-плагин с горизонтальной линией y=240, взведённый пустыми кадрами (О1: защёлка при старте закрыта)."""
+    cfg = {"center_y": 240, "angle": 0, "zone_width": 40, "mode": "zone_edge", **reg_overrides}
+    p = _make_plugin(**cfg)
+    for _ in range(max(1, p._reg.rearm_frames)):
+        p.process([_EMPTY])
+    return p
+
+
 class TestZoneEdge:
-    """zone_edge — rising-edge по занятости зоны, БЕЗ трекинга (робастно к скорости)."""
+    """zone_edge — rising-edge по занятости зоны: одно событие на проход диска.
+
+    Геометрия: angle=0 -> линия горизонтальна, зона |y - 240| <= 20 при zone_width=40; диск
+    едет поперёк линии, т.е. по y. Защёлка при старте закрыта (О1, C-42): тестам нужен пустой старт.
+    """
 
     def test_fires_on_first_frame_in_zone(self):
-        """Засчитывает с ПЕРВОГО кадра в зоне — без min_hits/трекинга."""
-        p = _make_plugin(center_x=320, center_y=240, angle=0, zone_width=40, mode="zone_edge")
-        out = p.process([_dets((100, 240))])  # круг сразу в зоне
+        """После rearm_frames пустых кадров засчитывает с ПЕРВОГО кадра в зоне — без min_hits/трекинга."""
+        p = _armed_zone_edge()
+        out = p.process([_dets((100, 225))])  # круг сразу в зоне
         assert p._counted_total == 1
-        assert out[0]["filtered"][0]["xy"] == [100.0, 240.0]
+        assert out[0]["filtered"][0]["xy"] == [100.0, 225.0]
+
+    def test_start_with_occupied_zone_not_counted(self):
+        """О1: плагин стартовал при занятой зоне — первый кадр не засчитывается, взвод по пустым кадрам."""
+        p = _make_plugin(center_y=240, angle=0, zone_width=40, rearm_frames=2, mode="zone_edge")
+        p.process([_dets((100, 225))])
+        assert p._counted_total == 0
+        p.process([_EMPTY])
+        p.process([_dets((100, 225))])  # 1 пустой кадр < rearm_frames: защёлка ещё закрыта
+        assert p._counted_total == 0
 
     def test_robust_to_large_jumps(self):
-        """Диск «телепортируется» большими скачками (быстрая лента) — каждый проход
-        засчитывается ровно один раз, БЕЗ зависимости от max_match_distance."""
-        p = _make_plugin(center_y=240, angle=0, zone_width=40, rearm_frames=1, mode="zone_edge")
-        p.process([_dets((10, 240))])  # появился в зоне скачком → зачёт
+        """Диск едет поперёк линии большими скачками (быстрая лента, 30 px/кадр при зоне 40 px) —
+        каждый проход засчитывается ровно один раз, ассоциация соседних кадров не нужна."""
+        p = _armed_zone_edge(rearm_frames=1, max_match_distance=20)
+        p.process([_dets((100, 225))])  # вошёл с верхнего края скачком -> зачёт
         assert p._counted_total == 1
-        p.process([_dets((30, 240))])  # ещё в зоне → не дубль
+        p.process([_dets((100, 255))])  # ещё в зоне (скачок 30 px) -> не дубль
         assert p._counted_total == 1
-        p.process([_dets((500, 50))])  # ушёл из зоны → пере-взвод (rearm_frames=1)
-        p.process([_dets((12, 240))])  # новый проход скачком → зачёт
+        p.process([_dets((100, 285))])  # вышел через нижний край -> пере-взвод (rearm_frames=1)
+        p.process([_dets((100, 225))])  # новый диск входит с верхнего края: 30 px от места выхода > 20
         assert p._counted_total == 2
 
     def test_no_retrigger_while_occupied(self):
         """Пока зона занята — один триггер (rising-edge), без повторов каждый кадр."""
-        p = _make_plugin(center_y=240, angle=0, zone_width=40, mode="zone_edge")
+        p = _armed_zone_edge()
         for _ in range(5):
             p.process([_dets((100, 240))])
         assert p._counted_total == 1
 
     def test_rearm_after_empty_streak(self):
-        """Пере-взвод только после rearm_frames пустых кадров (гасит мерцание детекции)."""
-        empty = {"detections": [], "seq_id": 1}
-        p = _make_plugin(center_y=240, angle=0, zone_width=40, rearm_frames=3, mode="zone_edge")
-        p.process([_dets((100, 240))])
+        """Пере-взвод только после rearm_frames пустых кадров (гасит мерцание детекции);
+        новый проход входит с другого края зоны, чем вышел прежний."""
+        p = _armed_zone_edge(rearm_frames=3, max_match_distance=20)
+        p.process([_dets((100, 225))])
         assert p._counted_total == 1
-        p.process([empty])  # 1 пустой кадр < rearm → НЕ пере-взводим (мерцание)
-        p.process([_dets((100, 240))])  # вернулся — зона ещё «занята»
+        p.process([_EMPTY])  # 1 пустой кадр < rearm -> НЕ пере-взводим (мерцание)
+        p.process([_dets((100, 225))])  # вернулся — зона ещё «занята»
         assert p._counted_total == 1  # не дубль
+        p.process([_dets((100, 255))])  # диск дошёл до нижнего края зоны
         for _ in range(3):  # полное освобождение зоны
-            p.process([empty])
-        p.process([_dets((100, 240))])  # новый проход
+            p.process([_EMPTY])
+        p.process([_dets((100, 225))])  # новый проход с верхнего края (30 px от места выхода > 20)
         assert p._counted_total == 2
+
+    # --- Тесты автора: порядок внутри кадра и побочные эффекты ветки «тот же объект» (C-42) ---
+
+    def test_reacquire_check_uses_previous_last_seen_not_this_frames(self):
+        """Внутри одного кадра сравнение идёт с _last_seen ПРЕЖНИХ кадров, а не с тем, что записан
+        этим же кадром: иначе вторая точка кадра «совпала» бы с первой."""
+        # zone_width=200 -> зона |y - 240| <= 100; радиус ассоциации 20 px.
+        p = _armed_zone_edge(zone_width=200, max_match_distance=20)
+        p.process([_dets((100, 330))])  # событие 1; _last_seen = (100, 330)
+        for _ in range(2):
+            p.process([_EMPTY])  # защёлка снята
+        # Обе точки далеко (>= 80 px) от места пропажи, но вторая в 11 px от первой (ближней к линии).
+        out = p.process([_dets((100, 245), (110, 250))])
+        assert p._counted_total == 3
+        assert [e["xy"] for e in out[0]["filtered"]] == [[100.0, 245.0], [110.0, 250.0]]
+
+    def test_second_point_matched_against_old_position_only(self):
+        """Первая точка кадра — тот же объект (в радиусе прежнего места), вторая в радиусе первой,
+        но не прежнего места -> она новая: цепочки «точка через точку» нет."""
+        p = _armed_zone_edge(zone_width=200, max_match_distance=20)
+        p.process([_dets((100, 250))])  # событие 1; _last_seen = (100, 250)
+        for _ in range(2):
+            p.process([_EMPTY])
+        # (100, 265): 15 px от прежнего места -> тот же объект; (100, 285): 35 px от прежнего места -> новый.
+        out = p.process([_dets((100, 265), (100, 285))])
+        assert p._counted_total == 2
+        assert [e["xy"] for e in out[0]["filtered"]] == [[100.0, 285.0]]
+
+    def test_last_seen_refreshed_on_every_frame_under_latch(self):
+        """_last_seen обновляется на КАЖДОМ кадре с точкой в зоне (и под защёлкой): потеря в конце
+        длинного прохода — всё ещё тот же объект, хотя с rising edge прошло больше max_age кадров."""
+        p = _armed_zone_edge(zone_width=200, max_age=5, max_match_distance=60)
+        for i in range(13):  # 13 кадров в зоне, шаг 10 px: y = 150 … 270; с rising edge прошло 12 > max_age
+            p.process([_dets((100, 150 + 10 * i))])
+        assert p._counted_total == 1
+        for _ in range(3):  # потеря 3 кадра: rearm_frames=2 <= 3 <= max_age=5, защёлка снята
+            p.process([_EMPTY])
+        out = p.process([_dets((100, 310))])  # 40 px от места пропажи (270) <= 60
+        assert p._counted_total == 1
+        assert out[0]["filtered"] == []
+
+    def test_suppressed_branch_leaves_counters_and_history_untouched(self):
+        """Ветка «тот же объект» не трогает _counted_total, _accumulated, _recent и filtered."""
+        p = _armed_zone_edge(zone_width=200, max_match_distance=60)
+        p.process([_dets((100, 250))])
+        for _ in range(2):
+            p.process([_EMPTY])
+        total, acc, recent = p._counted_total, list(p._accumulated), list(p._recent)
+        out = p.process([_dets((100, 280))])  # 30 px от места пропажи, пропуск 2 кадра -> тот же объект
+        assert p._counted_total == total == 1
+        assert p._accumulated == acc
+        assert p._recent == recent
+        assert out[0]["filtered"] == []
+        assert out[0]["counted_total"] == 1
+        assert out[0]["overlay"]["points"] == []
+
+    def test_accumulated_mode_keeps_single_entry_after_reacquire(self):
+        """emit_mode=accumulated: после повторного появления того же диска в списке по-прежнему одна запись."""
+        p = _armed_zone_edge(zone_width=200, max_match_distance=60, emit_mode="accumulated")
+        p.process([_dets((100, 250))])
+        for _ in range(2):
+            p.process([_EMPTY])
+        out = p.process([_dets((100, 280))])
+        assert len(out[0]["filtered"]) == 1
+        assert out[0]["filtered"][0]["xy"] == [100.0, 250.0]
+        assert out[0]["counted_total"] == 1
+
+    def test_mode_switch_back_to_zone_edge_behaves_like_start(self):
+        """Переключение режима на лету: zone_edge -> cross_line -> zone_edge при диске в зоне —
+        как старт (О1): зона занята, событие не засчитывается; взвод — по пустым кадрам."""
+        p = _armed_zone_edge()
+        p._reg.mode = "cross_line"  # поле регистра меняют на лету (live)
+        for _ in range(3):
+            p.process([_dets((100, 225))])  # диск стоит в зоне; смены знака нет -> cross_line молчит
+        assert p._counted_total == 0
+        p._reg.mode = "zone_edge"
+        p.process([_dets((100, 225))])  # без правки здесь был бы rising edge: защёлка осталась снятой
+        assert p._counted_total == 0
+        for _ in range(2):  # rearm_frames пустых кадров -> защёлка снята
+            p.process([_EMPTY])
+        p.process([_dets((100, 255))])  # новый диск: 30 px от места пропажи > max_match_distance=20
+        assert p._counted_total == 1
+
+    def test_mode_switch_resets_empty_streak(self):
+        """Переключение режима обнуляет счёт пустых кадров: пустой кадр до переключения не считается
+        в rearm_frames (иначе после возврата в zone_edge защёлка снялась бы на кадр раньше)."""
+        p = _armed_zone_edge()
+        p.process([_dets((100, 225))])  # событие 1
+        p.process([_EMPTY])  # 1 пустой кадр, защёлка закрыта (rearm_frames=2)
+        p._reg.mode = "cross_line"
+        p.process([_EMPTY])
+        p._reg.mode = "zone_edge"
+        p.process([_EMPTY])  # 1 пустой кадр после возврата: меньше rearm_frames -> защёлка закрыта
+        p.process(
+            [_dets((100, 255))]
+        )  # 30 px от места пропажи > max_match_distance=20: при снятой защёлке было бы событие
+        assert p._counted_total == 1
+
+    @staticmethod
+    def _same_object_logs(p: LineFilterPlugin) -> list:
+        return [c for c in p._ctx.log_info.call_args_list if "тот же объект" in c.args[0]]
+
+    def test_log_guard_clean_pass_has_no_same_object_line(self):
+        """Чистый проход 6 px/кадр без потерь — ни одной строки «тот же объект» (журнал не засоряется)."""
+        p = _armed_zone_edge(zone_width=250, max_match_distance=60, max_age=30)
+        for y in range(103, 374, 6):
+            p.process([_dets((320, y))])
+        assert p._counted_total == 1
+        assert self._same_object_logs(p) == []
+
+    def test_log_guard_loss_gives_exactly_one_same_object_line(self):
+        """Тот же проход с потерей 2 кадров — ровно одна строка «тот же объект», одно событие."""
+        p = _armed_zone_edge(zone_width=250, max_match_distance=60, max_age=30)
+        for y in range(103, 374, 6):
+            p.process([_EMPTY if y in (235, 241) else _dets((320, y))])
+        assert p._counted_total == 1
+        assert len(self._same_object_logs(p)) == 1
