@@ -186,6 +186,17 @@ class ProcessConfig(SchemaBase):
         FieldMeta("io-debug", info="Сводка in/out плагинов в дерево: {enabled, rate_hz, head_len}"),
     ] = {}
 
+    executors: Annotated[
+        dict[str, dict[str, Any]],
+        FieldMeta(
+            "Executors",
+            info="Именованные исполнители процесса {name: {kind, serial, max_workers, max_pending}} "
+            "(ExecutorManager, Task 1.9m). Чертёж только переносит запись в GenericProcessConfig; "
+            "форму проверяет ExecutorManager.load_config (ExecutorSpec, extra=forbid) в процессе. "
+            "Пусто → исполнителей нет, ключа в proc_dict['config'] нет.",
+        ),
+    ] = {}
+
     telemetry: Annotated[
         dict[str, Any] | None,
         FieldMeta(
@@ -313,6 +324,10 @@ class ProcessConfig(SchemaBase):
             base_kwargs[COLLECTOR_CONFIG_KEY] = collector
         if io_peek:
             base_kwargs["io_peek"] = io_peek
+        # C-47 / SPI.d0: именованные исполнители процесса. Без поля ключ executors молча терялся (extra=ignore
+        # у ProcessConfig его отбрасывал); пустое значение ключа в base_kwargs не даёт — proc_dict прежний.
+        if self.executors:
+            base_kwargs["executors"] = dict(self.executors)
         # Ф7 G.4.b/G.7 (финальное ревью фазы G): SHM-ключи процесса-владельца из рецепта.
         # Живут ТОЛЬКО в extras (typed-поля ProcessConfig не плодим — рычаг C6 №1);
         # раньше объявленные в доках ключи молча отбрасывались Pydantic'ом (extra=ignore)
