@@ -308,3 +308,40 @@ class TestWriteRegistersValidation:
         result = mgr.write_registers("sensor", {"freq": 100.0})
         assert result["status"] == "error"
         assert "max" in result["message"]
+
+
+# --- SPI.c1b: допустимость вида = фабрика драйвера, зарегистрированная в менеджере ---
+
+_UNKNOWN_KIND_TEXT = "DeviceEntry.kind 'camera' не из ['generic_modbus', 'hikvision', 'robot', 'vfd']"
+
+
+class TestKindByFactory:
+    @pytest.mark.parametrize("kind", ["robot", "vfd", "hikvision", "generic_modbus"])
+    def test_builtin_kinds_accepted(self, mgr: DeviceManager, kind: str) -> None:
+        """Связка с ``VALID_KINDS`` через публичный путь: каждый из 4 встроенных видов принимается."""
+        assert mgr.upsert({"id": "d1", "name": "d", "kind": kind}).kind == kind
+
+    def test_unknown_kind_refused_with_literal_text(self, mgr: DeviceManager) -> None:
+        with pytest.raises(ValueError) as info:
+            mgr.upsert({"id": "c1", "name": "c", "kind": "camera"})
+        assert str(info.value) == _UNKNOWN_KIND_TEXT
+        assert [e.id for e in mgr.snapshot_registry()] == []
+
+    def test_registered_factory_admits_kind(self, mgr: DeviceManager) -> None:
+        mgr.register_driver_factory("camera", lambda entry, proto: None)
+        assert mgr.upsert({"id": "c1", "name": "c", "kind": "camera"}).kind == "camera"
+
+    def test_merge_checks_kind_too(self, mgr: DeviceManager) -> None:
+        mgr.upsert({"id": "d1", "name": "d", "kind": "robot"})
+        with pytest.raises(ValueError) as info:
+            mgr.upsert({"id": "d1", "kind": "camera"})
+        assert str(info.value) == _UNKNOWN_KIND_TEXT
+        assert mgr.get("d1").kind == "robot"
+
+    def test_unknown_kind_in_registry_file_fails_initialize(self, tmp_path: Path) -> None:
+        path = tmp_path / "devices.yaml"
+        path.write_text("devices:\n  - {id: c1, name: c, kind: camera}\n", encoding="utf-8")
+        manager = DeviceManager(RegistryStore(path))
+        with pytest.raises(ValueError) as info:
+            manager.initialize()
+        assert str(info.value) == _UNKNOWN_KIND_TEXT

@@ -106,6 +106,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         """Загрузить реестр из store (store=None — пустой in-memory реестр)."""
         if self._store is not None:
             for e in self._store.load():
+                self._check_kind(e.kind)  # неизвестный вид в файле — ValueError при загрузке, как до SPI.c1b
                 self._entries[e.id] = e
         self.is_initialized = True
         return True
@@ -198,6 +199,11 @@ class DeviceManager(BaseManager, ObservableMixin):
             factory: ``(entry, protocol) -> BaseDeviceDriver``.
         """
         self._factories[kind] = factory
+
+    def _check_kind(self, kind: str) -> None:
+        """Вид допустим, если для него зарегистрирована фабрика драйвера (один источник истины, SPI.c1b)."""
+        if kind not in self._factories:
+            raise ValueError(f"DeviceEntry.kind {kind!r} не из {sorted(self._factories)}")
 
     def _register_defaults(self) -> None:
         """Зарегистрировать дефолтные фабрики драйверов."""
@@ -346,6 +352,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             if origin is not None:
                 entry_dict = {**entry_dict, "origin": origin}
             entry = DeviceEntry.from_dict(entry_dict)
+        self._check_kind(entry.kind)
 
         with self._registry_lock:
             self._entries[entry.id] = entry
