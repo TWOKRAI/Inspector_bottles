@@ -182,7 +182,7 @@ def _hub(tmp_path: Path) -> Iterator[Hub]:
         publish_cb=rec,
         spawn=_SCOPE.spawn,
         robot_store=store,
-        driver_options={"robot": {"client_factory": clients}},
+        driver_options={("robot", "delta_v2"): {"client_factory": clients}},
     )
     with E2eRig() as rig:
         mgr.upsert(

@@ -16,11 +16,11 @@ Stability: lite
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from Services.device_hub.drivers.base import BaseDeviceDriver
 from Services.device_hub.drivers.generic_modbus_driver import GenericModbusDriver
 from Services.device_hub.drivers.hikvision_driver import HikvisionDriver
 from Services.device_hub.drivers.robot_driver import RobotDriver
@@ -77,6 +77,14 @@ class DeviceKind:
     data_ops: tuple[OpSpec, ...] = ()
     build: DriverBuild = field(default=_build_plain)
 
+    def __post_init__(self) -> None:
+        """Громкий отказ при построении строки: класс не драйвер или его ``kind`` не равен виду строки."""
+        for protocol, cls in self.drivers.items():
+            if not (isinstance(cls, type) and issubclass(cls, BaseDeviceDriver)):
+                raise TypeError(f"вид {self.kind!r}, протокол {protocol!r}: {cls!r} не подкласс BaseDeviceDriver")
+            if cls.kind != self.kind:
+                raise TypeError(f"вид {self.kind!r}, протокол {protocol!r}: у {cls.__name__} kind={cls.kind!r}")
+
     def driver_class(self, protocol: str) -> type:
         """Класс драйвера для протокола записи. ``KeyError`` — протокол не назван и ключа ``"*"`` нет."""
         cls = self.drivers.get(protocol)
@@ -87,25 +95,10 @@ class DeviceKind:
         return tuple(dict.fromkeys(self.drivers.values()))
 
     def create(self, entry: DeviceEntry, proto: Any, ctx: DriverContext) -> DeviceDriver:
-        """Драйвер записи: класс по ``entry.protocol``, сборка ``build``.
-
-        Позднее связывание по модулю класса (``_bound``) — сохранено от фабрики до SPI (она импортировала класс при
-        создании драйвера); подмена атрибута модуля допускается только подклассом класса таблицы, иначе ``TypeError``.
-        """
-        return self.build(_bound(self.driver_class(entry.protocol)), entry, proto, ctx)
-
-
-def _bound(cls: type) -> type:
-    """Класс, привязанный сейчас к имени ``cls`` в модуле, где он определён.
-
-    Прежние фабрики импортировали драйвер при создании, и тесты подменяют класс атрибутом модуля
-    (``monkeypatch.setattr(robot_driver_v2, "RobotDriverV2", V2)`` — C-29, SPI). Шов сохранён: подмена действует на
-    создание драйвера. Подмена — только подкласс исходного: ``OP_SPECS`` и команды остаются верны, иначе ``TypeError``.
-    """
-    bound = getattr(sys.modules.get(cls.__module__), cls.__name__, cls)
-    if not (isinstance(bound, type) and issubclass(bound, cls)):
-        raise TypeError(f"{cls.__module__}.{cls.__name__} подменён не подклассом: {bound!r}")
-    return bound
+        """Драйвер записи: класс строки по ``entry.protocol``, сборка ``build``. Подстановка класса (тесты, расширения)
+        — только явно: своя строка таблицы с подклассом в ``drivers`` (``DeviceManager(kinds=...)``, ``device_kinds``
+        подкласса плагина)."""
+        return self.build(self.driver_class(entry.protocol), entry, proto, ctx)
 
 
 def command_sources(kinds: Sequence[DeviceKind]) -> tuple[OpSource, ...]:

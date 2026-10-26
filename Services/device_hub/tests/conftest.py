@@ -18,8 +18,8 @@ class ClientRecorder:
     """Шов SPI.f: ``client_factory`` драйвера робота v2 — строит НАСТОЯЩИЙ ``RobotClientV2`` и хранит ссылку.
 
     ``.last`` — последний созданный клиент, ``.all`` — все по порядку. Тест отдаёт рекордер драйверу
-    (``client_factory=rec`` или ``DeviceManager.set_driver_options("robot", client_factory=rec)``) и читает клиента
-    после ``connect``; ``drv._client`` не нужен. Зовётся из потока подключения, список растёт под замком.
+    (``client_factory=rec`` или ``DeviceManager.set_driver_options("robot", "delta_v2", client_factory=rec)``) и
+    читает клиента после ``connect``; ``drv._client`` не нужен. Зовётся из потока подключения, список растёт под замком.
     """
 
     def __init__(self) -> None:

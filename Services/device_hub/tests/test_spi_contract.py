@@ -313,16 +313,15 @@ def test_plugin_commands_are_op_specs_of_kind_table() -> None:
 def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
     """(б) Новый вид = драйвер с ``OP_SPECS`` + строка таблицы: команда ``lamp_on`` у наследника плагина (родитель не
     меняется), фабрика вида — у менеджера и у менеджера плагина, вызов доходит до драйвера."""
-    from Plugins.hub.device_hub.plugin import DeviceHubPlugin, install_op_commands
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
     from Plugins.hub.device_hub.tests.conftest import make_ctx
     from Services.device_hub.manager import DeviceManager
 
     table = (*kinds.DEFAULT_KINDS, _LAMP)
 
-    class LampHub(DeviceHubPlugin):
+    class LampHub(DeviceHubPlugin):  # один шаг: своя таблица видов — команды новых строк ставит __init_subclass__
         device_kinds = table
 
-    install_op_commands(LampHub, kinds.command_sources((_LAMP,)))
     assert LampHub.commands["lamp_on"] == "cmd_lamp_on"
     assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 72
     assert len(LampHub.commands) == 73
@@ -353,11 +352,9 @@ def test_op_added_to_driver_op_specs_becomes_command(monkeypatch: pytest.MonkeyP
     assert len(table) == 56
 
 
-def test_module_attribute_substitution_binds_late_subclass_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Подмена класса атрибутом модуля (шов тестов фабрики до SPI): подкласс создаётся, ``OP_SPECS`` и команды прежние;
-    не подкласс — ``TypeError`` при создании драйвера."""
-    import Services.device_hub.drivers.vfd_driver as vfd_module
-
+def test_subclass_in_table_row_is_created_and_non_driver_row_refused() -> None:
+    """Явный шов подстановки класса: подкласс в строке таблицы создаётся, команды прежние; класс не драйвер или с
+    чужим ``kind`` — ``TypeError`` при построении строки (раньше любого создания)."""
     (row,) = [r for r in kinds.DEFAULT_KINDS if r.kind == "vfd"]
     ctx = kinds.DriverContext(
         publish=lambda _p, _d: None, spawn=None, robot_store=None, options={}, resolve_device=lambda _id: None
@@ -366,19 +363,51 @@ def test_module_attribute_substitution_binds_late_subclass_only(monkeypatch: pyt
     class Vfd(VfdDriver):
         pass
 
-    monkeypatch.setattr(vfd_module, "VfdDriver", Vfd)
-    assert type(row.create(_entry("vfd"), None, ctx)) is Vfd
-    assert spi.command_table(kinds.command_sources(kinds.DEFAULT_KINDS)) == spi.command_table(kinds.DEFAULT_SOURCES)
+    custom = dataclasses.replace(row, drivers={"*": Vfd})
+    assert type(custom.create(_entry("vfd"), None, ctx)) is Vfd
+    table = (*[r for r in kinds.DEFAULT_KINDS if r.kind != "vfd"], custom)
+    assert set(spi.command_table(kinds.command_sources(table))) == set(spi.command_table(kinds.DEFAULT_SOURCES))
+    assert type(row.create(_entry("vfd"), None, ctx)) is VfdDriver
 
-    class Stranger(BaseDeviceDriver):  # конструктор принимает аргументы сборки ПЧ: отказ — только от проверки класса
+    class Stranger:
         kind = "vfd"
 
-        def __init__(self, entry: Any, protocol: Any = None, **_kw: Any) -> None:
-            super().__init__(entry, protocol)
+    with pytest.raises(TypeError, match="BaseDeviceDriver"):
+        dataclasses.replace(row, drivers={"*": Stranger})
+    with pytest.raises(TypeError, match="kind"):
+        dataclasses.replace(row, drivers={"*": HikvisionDriver})
 
-    monkeypatch.setattr(vfd_module, "VfdDriver", Stranger)
-    with pytest.raises(TypeError):
-        row.create(_entry("vfd"), None, ctx)
+
+def test_subclass_without_own_kinds_keeps_parent_commands() -> None:
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+
+    class Plain(DeviceHubPlugin):
+        pass
+
+    assert "commands" not in vars(Plain) and "_op_commands" not in vars(Plain)
+    assert Plain.commands is DeviceHubPlugin.commands
+
+
+def test_subclass_kinds_cannot_drop_or_change_parent_command() -> None:
+    """Подкласс со своей таблицей не снимает и не меняет команду родителя — ``ValueError`` при определении класса."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+
+    without_vfd = tuple(r for r in kinds.DEFAULT_KINDS if r.kind != "vfd")
+    with pytest.raises(ValueError, match="vfd_run"):
+
+        class NoVfd(DeviceHubPlugin):
+            device_kinds = without_vfd
+
+    class Vfd2(VfdDriver):
+        OP_SPECS = (spi.OpSpec(name="run", description="другое описание"), *VfdDriver.OP_SPECS[1:])
+
+    changed = tuple(dataclasses.replace(r, drivers={"*": Vfd2}) if r.kind == "vfd" else r for r in kinds.DEFAULT_KINDS)
+    with pytest.raises(ValueError, match="vfd_run"):
+
+        class ChangedVfd(DeviceHubPlugin):
+            device_kinds = changed
+
+    assert len(DeviceHubPlugin.commands) == 72
 
 
 def test_command_sources_refuses_ops_without_prefix_and_repeated_kind() -> None:
@@ -728,6 +757,28 @@ def test_class_with_stop_aware_without_request_stop_raises() -> None:
             stop_aware = True
 
 
+def test_stop_aware_not_plain_bool_on_class_raises() -> None:
+    """Флаг — простой bool класса: ``property`` (с классом читается объект, всегда истинный) и не-bool — отказ."""
+    with pytest.raises(TypeError, match="bool"):
+
+        class _Dynamic(BaseDeviceDriver):
+            kind = "dynamic"
+
+            @property
+            def stop_aware(self) -> bool:  # type: ignore[override]
+                return True
+
+            def request_stop(self, deadline: float | None = None) -> None: ...
+
+    with pytest.raises(TypeError, match="bool"):
+
+        class _Numeric(BaseDeviceDriver):
+            kind = "numeric"
+            stop_aware = 1
+
+            def request_stop(self, deadline: float | None = None) -> None: ...
+
+
 def test_class_with_both_or_neither_is_defined_and_inherits() -> None:
     class _Both(BaseDeviceDriver):
         kind = "both"
@@ -753,3 +804,78 @@ def test_five_shipped_drivers_are_defined_with_matching_pair() -> None:
         "HikvisionDriver": (False, False),
         "GenericModbusDriver": (False, False),
     }
+
+
+# --- опции драйверов по (вид, протокол) ---
+
+
+def test_driver_options_by_kind_and_protocol() -> None:
+    """Видовые опции — всем протоколам вида; опции ``(вид, протокол)`` — только ему и перекрывают видовые."""
+    from Services.device_hub.manager import DeviceManager
+
+    seen: dict[str, dict[str, Any]] = {}
+
+    class Stub(BaseDeviceDriver):
+        kind = "robot"
+
+        @property
+        def is_connected(self) -> bool:
+            return True
+
+        def connect(self) -> bool:
+            return True
+
+    def record(cls: type, entry: DeviceEntry, proto: Any, ctx: kinds.DriverContext) -> Any:
+        seen[entry.id] = dict(ctx.options)
+        return Stub(entry, proto)
+
+    robot = kinds.DeviceKind(kind="robot", drivers={"delta_v2": RobotDriverV2, "*": RobotDriver}, build=record)
+    manager = DeviceManager(
+        store=None,
+        kinds=(robot,),
+        driver_options={"robot": {"shared": 1, "level": "kind"}, ("robot", "delta_v2"): {"level": "v2", "only": 2}},
+    )
+    manager.upsert({"id": "v1", "name": "v1", "kind": "robot", "protocol": "delta_universal3"})
+    manager.upsert({"id": "v2", "name": "v2", "kind": "robot", "protocol": "delta_v2"})
+    assert manager.connect("v1") is True and manager.connect("v2") is True
+    assert seen == {"v1": {"shared": 1, "level": "kind"}, "v2": {"shared": 1, "level": "v2", "only": 2}}
+
+    manager.set_driver_options("robot", "delta_v2")  # пустой вызов снимает опции ключа (вид, протокол)
+    manager.set_driver_options("robot", only_kind=True)
+    manager.upsert({"id": "v2b", "name": "v2b", "kind": "robot", "protocol": "delta_v2"})
+    assert manager.connect("v2b") is True
+    assert seen["v2b"] == {"only_kind": True}
+
+
+def test_client_factory_for_v2_protocol_does_not_reach_v1() -> None:
+    """``client_factory`` по ``("robot", "delta_v2")``: настоящий v1 в том же реестре строится без ``TypeError``."""
+    (robot,) = [r for r in kinds.DEFAULT_KINDS if r.kind == "robot"]
+    from Services.device_hub.manager import DeviceManager
+
+    built: list[Any] = []
+
+    def keep(cls: type, entry: DeviceEntry, proto: Any, ctx: kinds.DriverContext) -> Any:
+        driver = robot.build(cls, entry, proto, ctx)
+        built.append(driver)
+        return driver
+
+    class _Probe(RobotDriverV2):
+        def connect(self) -> bool:  # без сети: проверяется только сборка
+            return True
+
+    class _ProbeV1(RobotDriver):
+        def connect(self) -> bool:
+            return True
+
+    row = dataclasses.replace(robot, drivers={"delta_v2": _Probe, "*": _ProbeV1}, build=keep)
+    factory = object()
+    manager = DeviceManager(
+        store=None,
+        spawn=lambda target, *, name: None,
+        kinds=(row,),
+        driver_options={("robot", "delta_v2"): {"client_factory": factory}},
+    )
+    manager.upsert({"id": "v1", "name": "v1", "kind": "robot", "protocol": "delta_universal3"})
+    manager.upsert({"id": "v2", "name": "v2", "kind": "robot", "protocol": "delta_v2"})
+    assert manager.connect("v1") is True and manager.connect("v2") is True
+    assert [type(d).__name__ for d in built] == ["_ProbeV1", "_Probe"]

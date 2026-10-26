@@ -64,9 +64,11 @@ class DeviceManager(BaseManager, ObservableMixin):
                     робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
         robot_store: Единственное на процесс ``RobotDataStore`` данных робота v2 (T5.3c): им пользуется ``robot_data``;
                     ``None`` — ``robot_data`` отвечает отказом «хранилище данных робота не задано».
-        driver_options: ``{kind: {имя: значение}}`` — именованные аргументы конструктора драйверов вида, создаваемых
-                    фабриками по умолчанию (универсальный шов тестов: у робота v2 — ``client_factory``). ``None`` —
-                    без опций (прод). Неизвестная опция — ``TypeError`` конструктора при создании драйвера.
+        driver_options: ``{kind | (kind, protocol): {имя: значение}}`` — именованные аргументы конструктора драйверов,
+                    создаваемых таблицей видов (шов тестов: у робота v2 — ``client_factory`` по ключу
+                    ``("robot", "delta_v2")``). Ключ ``kind`` — все протоколы вида; ключ ``(kind, protocol)`` — только
+                    записи с этим протоколом, его опции перекрывают видовые. ``None`` — без опций (прод). Неизвестная
+                    драйверу опция — ``TypeError`` его конструктора при создании.
         kinds:      Таблица видов (``Services/device_hub/kinds.py``): фабрики драйверов по умолчанию; допустимый вид
                     записи — вид с фабрикой. По умолчанию ``DEFAULT_KINDS``; повтор вида — ``ValueError``.
     """
@@ -78,7 +80,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         *,
         spawn: Callable[..., Any] | None = None,
         robot_store: RobotDataStore | None = None,
-        driver_options: Mapping[str, Mapping[str, Any]] | None = None,
+        driver_options: Mapping[str | tuple[str, str], Mapping[str, Any]] | None = None,
         kinds: Sequence[DeviceKind] = DEFAULT_KINDS,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
@@ -87,8 +89,9 @@ class DeviceManager(BaseManager, ObservableMixin):
         self._publish = publish_cb or (lambda _p, _d: None)
         self._spawn = spawn
         self._robot_store = robot_store
-        self._driver_options: dict[str, dict[str, Any]] = {
-            kind: dict(opts) for kind, opts in (driver_options or {}).items()
+        # Ключ — вид (все протоколы) или (вид, протокол)
+        self._driver_options: dict[str | tuple[str, str], dict[str, Any]] = {
+            key: dict(opts) for key, opts in (driver_options or {}).items()
         }
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
@@ -217,26 +220,26 @@ class DeviceManager(BaseManager, ObservableMixin):
         """
         self._factories[kind] = factory
 
-    def set_driver_options(self, kind: str, **options: Any) -> None:
-        """Задать опции конструктора драйверов вида ``kind`` (заменяют прежние опции вида).
+    def set_driver_options(self, kind: str, protocol: str | None = None, **options: Any) -> None:
+        """Задать опции конструктора драйверов вида ``kind`` или только его протокола ``protocol`` (заменяют прежние
+        опции того же ключа).
 
-        Действует на драйверы, создаваемые ПОСЛЕ вызова: уже созданные не меняются. Опции получают только фабрики по
-        умолчанию; неизвестная драйверу опция — ``TypeError`` его конструктора. Пустой вызов снимает опции вида.
-
-        Ограничение: опции действуют на весь ``kind``. Опции вида ``robot`` получает и драйвер v1 (``RobotDriver``), и
-        v2; ``client_factory`` знает только v2, так что в реестре с роботами обоих протоколов v1 упадёт ``TypeError``.
-        Драйвер v1 заморожен (FREEZE) и таких опций не принимает.
+        ``protocol=None`` — опции всех протоколов вида; иначе — только записей с ``entry.protocol == protocol``, они
+        перекрывают видовые по имени. Действует на драйверы, создаваемые ПОСЛЕ вызова: уже созданные не меняются.
+        Опции получают только фабрики таблицы видов; неизвестная драйверу опция — ``TypeError`` его конструктора.
+        Пустой вызов снимает опции ключа.
         """
+        key: str | tuple[str, str] = kind if protocol is None else (kind, protocol)
         with self._registry_lock:
             if options:
-                self._driver_options[kind] = dict(options)
+                self._driver_options[key] = dict(options)
             else:
-                self._driver_options.pop(kind, None)
+                self._driver_options.pop(key, None)
 
-    def _options_for(self, kind: str) -> dict[str, Any]:
-        """Копия опций вида для конструктора драйвера (снимок под замком реестра)."""
+    def _options_for(self, kind: str, protocol: str) -> dict[str, Any]:
+        """Опции конструктора драйвера записи: видовые, перекрытые опциями (вид, протокол); снимок под замком."""
         with self._registry_lock:
-            return dict(self._driver_options.get(kind, {}))
+            return {**self._driver_options.get(kind, {}), **self._driver_options.get((kind, protocol), {})}
 
     def _check_kind(self, kind: str) -> None:
         """Вид допустим, если для него зарегистрирована фабрика драйвера (один источник истины, SPI.c1b)."""
@@ -258,7 +261,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 publish=self._publish,
                 spawn=self._spawn,
                 robot_store=self._robot_store,
-                options=self._options_for(row.kind),
+                options=self._options_for(row.kind, entry.protocol),
                 resolve_device=self._get_driver,
             )
             return row.create(entry, proto, ctx)

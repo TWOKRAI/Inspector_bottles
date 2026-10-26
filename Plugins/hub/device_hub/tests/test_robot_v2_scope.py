@@ -189,7 +189,7 @@ def _plugin_with_robots(
     plugin.configure(ctx)
     plugin.start(ctx)
     if clients is not None:  # до подключения: драйверы создаются лениво при connect
-        plugin._manager.set_driver_options("robot", client_factory=clients)
+        plugin._manager.set_driver_options("robot", "delta_v2", client_factory=clients)
     for dev_id in ports:
         assert plugin.cmd_device_connect({"device_id": dev_id})["status"] == "ok"
     bounded(plugin._process_conn_queue, _CONNECT_DEADLINE_S)

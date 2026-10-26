@@ -111,6 +111,11 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         метода даст ``AttributeError`` на каждой остановке. Проверка — при определении класса, для любого вида.
         """
         super().__init_subclass__(**kwargs)
+        # Стоп — способность класса: флаг только простым bool на классе (property / дескриптор читался бы с класса
+        # как объект и всегда был бы истинным)
+        own_flag = cls.__dict__.get("stop_aware", False)
+        if type(own_flag) is not bool:
+            raise TypeError(f"{cls.__name__}: stop_aware должен быть bool атрибутом класса, задан {own_flag!r}")
         if hasattr(cls, "request_stop") != bool(cls.stop_aware):
             raise TypeError(
                 f"{cls.__name__}: stop_aware={bool(cls.stop_aware)!r}, а метод request_stop "

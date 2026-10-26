@@ -22,6 +22,7 @@ import ast
 import importlib
 import re
 import socket
+import dataclasses
 import threading
 import time
 from collections.abc import Callable
@@ -32,7 +33,6 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-import Services.device_hub.drivers.robot_driver_v2 as v2pkg
 from multiprocess_framework.modules.command_module.core.command_manager import CommandManager
 from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
 from multiprocess_framework.modules.worker_module import WorkerManager
@@ -41,6 +41,7 @@ from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 from Plugins.hub.device_hub.tests.conftest import make_ctx
 from Services.device_hub.drivers.base import BaseDeviceDriver
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+from Services.device_hub.kinds import DEFAULT_KINDS
 
 _CALL_S = 20.0
 _JOIN_S = 10.0
@@ -806,6 +807,19 @@ def test_a20_object_without_set_degraded_does_not_block_the_next_dependent(rig: 
 # --------------------------------------------------------------------------------------------------
 
 
+def _hub_with_v2(v2: type) -> type[DeviceHubPlugin]:
+    """Подкласс плагина: в строке ``robot`` таблицы видов протокол ``delta_v2`` -> ``v2`` (явный шов вида)."""
+    rows = tuple(
+        dataclasses.replace(row, drivers={**row.drivers, "delta_v2": v2}) if row.kind == "robot" else row
+        for row in DEFAULT_KINDS
+    )
+
+    class Hub(DeviceHubPlugin):
+        device_kinds = rows
+
+    return Hub
+
+
 class _Gate:
     def __init__(self) -> None:
         self.entered = threading.Event()
@@ -832,9 +846,7 @@ class _BarrierTransport:
         return [0] * 32
 
 
-def test_a14_disconnect_mid_connect_sets_pending_and_ends_disconnected(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a14_disconnect_mid_connect_sets_pending_and_ends_disconnected(make_rig: Callable[..., Rig]) -> None:
     """А14: ``device_disconnect`` посреди ``connect`` — ``disconnect_pending`` True; итог ``disconnected``."""
     gate = _Gate()
 
@@ -842,7 +854,7 @@ def test_a14_disconnect_mid_connect_sets_pending_and_ends_disconnected(
         def __init__(self, entry: Any, protocol: Any = None, **kw: Any) -> None:
             super().__init__(entry, protocol, transport=_BarrierTransport(gate), **kw)
 
-    monkeypatch.setattr(v2pkg, "RobotDriverV2", V2)
+    rig = make_rig(plugin_cls=_hub_with_v2(V2))
     rig.upsert("r1", "robot", "delta_v2", params={"poll_interval_s": 0.05})
     assert rig.cmd("device_connect", {"device_id": "r1"})["status"] == "ok"
     sup = rig.spawn_thread(rig.plugin._process_conn_queue, "spi-sup")

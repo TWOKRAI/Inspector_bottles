@@ -103,7 +103,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
     _scope: IScope | None = None
     # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
     _shutting_down = False
-    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55)
+    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55).
+    # Подкласс со своим device_kinds получает команды новых строк сам (__init_subclass__, install_kind_commands)
     device_kinds: tuple[DeviceKind, ...] = DEFAULT_KINDS
     # Команды из описаний операций: имя -> (источник, операция); заполняет install_op_commands (copy-on-write)
     _op_commands: dict[str, tuple[OpSource, OpSpec]] = {}
@@ -142,6 +143,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
         from .config import DeviceHubPluginConfig
 
         return DeviceHubPluginConfig
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Подкласс, задавший свой ``device_kinds``, получает команды новых строк таблицы видов; без своего
+        ``device_kinds`` — команды родителя как есть (не перегенерируются)."""
+        super().__init_subclass__(**kwargs)
+        if "device_kinds" in cls.__dict__:
+            install_kind_commands(cls)
 
     # ------------------------------------------------------------------ #
     # LIFECYCLE
@@ -999,10 +1007,40 @@ def install_op_commands(cls: type[DeviceHubPlugin], sources: Sequence[OpSource])
     Raises: ``ValueError`` — имя уже есть в ``cls.commands`` или атрибут ``cmd_<имя>`` уже есть у ``cls``, либо
         конфликт описаний в ``command_table``; при отказе ``cls`` не меняется.
     """
-    table = command_table(sources)
+    _install_table(cls, command_table(sources))
+
+
+def install_kind_commands(cls: type[DeviceHubPlugin]) -> None:
+    """Команды подкласса со своей таблицей видов ``device_kinds`` (зовёт ``DeviceHubPlugin.__init_subclass__``).
+
+    Pre: ``cls`` — подкласс ``DeviceHubPlugin``, ``device_kinds`` задан в его теле.
+    Post: у ``cls`` есть команда каждой строки ``command_table(command_sources(cls.device_kinds))``; новые имена
+        поставлены (copy-on-write, родитель не меняется), одноимённые команды родителя остались.
+    Raises: ``ValueError`` — одноимённая команда родителя с другим видом / путём / ключом / ``OpSpec``, или команда
+        родителя, которой нет в таблице подкласса (снять сгенерированную команду подклассом нельзя).
+    """
+    table = command_table(command_sources(cls.device_kinds))
+    inherited = cls._op_commands
+
+    def same(a: tuple[OpSource, OpSpec], b: tuple[OpSource, OpSpec]) -> bool:
+        return (a[0].kind, a[0].route, a[0].key_from, a[1]) == (b[0].kind, b[0].route, b[0].key_from, b[1])
+
+    dropped = sorted(set(inherited) - set(table))
+    changed = sorted(name for name in table if name in inherited and not same(table[name], inherited[name]))
+    if dropped or changed:
+        raise ValueError(
+            f"{cls.__name__}: таблица видов расходится с командами родителя: нет {dropped}, иначе {changed}"
+        )
+    _install_table(cls, {name: row for name, row in table.items() if name not in inherited})
+
+
+def _install_table(cls: type[DeviceHubPlugin], table: dict[str, tuple[OpSource, OpSpec]]) -> None:
+    """Поставить строки таблицы команд у ``cls`` (copy-on-write); занятое имя — ``ValueError``, ``cls`` не меняется."""
     for name in table:
         if name in cls.commands or hasattr(cls, f"cmd_{name}"):
             raise ValueError(f"команда {name!r} уже есть у {cls.__name__}")
+    if not table:
+        return
     if "commands" not in cls.__dict__:
         cls.commands = dict(cls.commands)
     if "_op_commands" not in cls.__dict__:
