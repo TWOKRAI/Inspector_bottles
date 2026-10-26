@@ -885,3 +885,51 @@ def test_inner_map_of_item_emptied_keeps_comments_once(tmp_path: Path) -> None:
 
     text = path.read_text(encoding="utf-8")
     assert [text.count(f"# c{i}\n") for i in (0, 2, 4, 6, 8)] == [1, 1, 1, 1, 1]
+
+
+# ---------------------------------------------------------------------------
+# design §2.3 «Ключа нет в цели» (ревью 1.1e): равный в before/after ключ не создаётся
+# ---------------------------------------------------------------------------
+
+
+def test_absent_key_equal_in_before_after_not_created(tmp_path: Path) -> None:
+    """Ключа ``m`` нет в файле, в before и after он равен: пишется только ``x``, ``m`` не появился."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"x: 1\n")
+
+    yaml_io.patch_yaml_preserving(path, {"x": 1, "m": {"a": 1}}, {"x": 2, "m": {"a": 1}})
+
+    assert path.read_bytes() == b"x: 2\n"
+
+
+def test_absent_nested_key_equal_in_before_after_not_created(tmp_path: Path) -> None:
+    """Вложенно: ``b.metadata`` нет в файле и он равен в before/after — меняется только ``name``."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"b:\n  name: p\n")
+    meta = {"g": {"k": [1, 2]}}
+
+    yaml_io.patch_yaml_preserving(path, {"b": {"name": "p", "metadata": meta}}, {"b": {"name": "q", "metadata": meta}})
+
+    assert path.read_bytes() == b"b:\n  name: q\n"
+
+
+def test_absent_key_missing_in_before_is_created(tmp_path: Path) -> None:
+    """Страж F10: ``metadata`` нет ни в файле, ни в before — создаётся из after."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"b:\n  name: p\n")
+
+    yaml_io.patch_yaml_preserving(
+        path, {"b": {"name": "p"}}, {"b": {"name": "p", "metadata": {"gui_positions": {"n": [1, 2]}}}}
+    )
+
+    assert path.read_bytes() == b"b:\n  name: p\n  metadata:\n    gui_positions:\n      n:\n        - 1\n        - 2\n"
+
+
+def test_absent_key_changed_between_before_after_is_created(tmp_path: Path) -> None:
+    """Ключ ``m`` есть в before, но after другой, а в файле его нет: создаётся со значением after."""
+    path = tmp_path / "r.yaml"
+    _write(path, b"x: 1\n")
+
+    yaml_io.patch_yaml_preserving(path, {"x": 1, "m": {"a": 1}}, {"x": 1, "m": {"a": 2}})
+
+    assert path.read_bytes() == b"x: 1\nm:\n  a: 2\n"

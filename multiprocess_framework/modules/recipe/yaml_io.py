@@ -235,8 +235,10 @@ class _Delta:
                 _rd.delete_item(node, key, owner=owner)
         for key, new in after.items():
             child_path = (*path, key)
-            if key not in node:  # нормализованный before шире цели (F10) — создаём целиком
-                node[key] = copy.deepcopy(new)
+            if key not in node:  # нормализованный before шире цели
+                if key in before and _equal(before[key], new):
+                    continue  # правки по пути нет — умолчание в файл не пишется (design §2.3, §10.5)
+                node[key] = copy.deepcopy(new)  # создаём целиком, с промежуточными контейнерами (F10)
             elif key in before:
                 self.set_child(node, key, before[key], new, child_path)
             elif not _equal(node[key], new):  # ключа нет в before, но цель его держит
