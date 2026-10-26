@@ -252,30 +252,90 @@ def test_service_delete_under_interprocess_lock(tmp_path: Path) -> None:
 # --- _atomic_write: повтор os.replace при открытом читателе -----------------------------
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="PermissionError при открытом читателе — только Windows")
-def test_atomic_write_retries_while_reader_holds_file(tmp_path: Path) -> None:
-    from multiprocess_framework.modules.recipe.service import _atomic_write
+def _write_with_reader(
+    monkeypatch: pytest.MonkeyPatch, recipe: Path, data: bytes, close_on_failure: int | None
+) -> tuple[list[str], BaseException | None]:
+    """``_atomic_write`` при открытом читателе, без времени: ``os.replace`` обёрнут счётчиком
+    (настоящая PermissionError от читателя сохраняется), пауза между попытками — пустышка.
+    Читатель закрывается на ``close_on_failure``-й отказавшей попытке (``None`` — не закрывается).
+    Возврат: исходы попыток (``"fail"``/``"ok"``) и исключение записи."""
+    from multiprocess_framework.modules.recipe import service
 
+    outcomes: list[str] = []
+    real_replace = os.replace
+    reader = open(recipe, "rb")  # open() Python не даёт FILE_SHARE_DELETE → os.replace падает
+
+    def counting_replace(src: Any, dst: Any) -> None:
+        try:
+            real_replace(src, dst)
+        except PermissionError:
+            outcomes.append("fail")
+            if outcomes.count("fail") == close_on_failure:
+                reader.close()
+            raise
+        outcomes.append("ok")
+
+    monkeypatch.setattr(service.os, "replace", counting_replace)
+    monkeypatch.setattr(service.time, "sleep", lambda _s: None)
+    try:
+        service._atomic_write(recipe, data)
+    except BaseException as exc:  # noqa: BLE001 — исключение проверяет тест
+        return outcomes, exc
+    finally:
+        reader.close()
+    return outcomes, None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PermissionError при открытом читателе — только Windows")
+def test_atomic_write_retries_until_reader_closes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Читатель закрылся на 2-й отказавшей попытке: запись прошла с 3-й попытки."""
     recipe = tmp_path / "r.yaml"
     recipe.write_bytes(b"old\n")
 
-    def write_while_reader_holds(hold_s: float, data: bytes) -> dict[str, Any]:
-        reader = open(recipe, "rb")  # open() Python не даёт FILE_SHARE_DELETE → os.replace падает
-        closer = threading.Timer(hold_s, reader.close)
-        closer.start()
-        try:
-            t, box = _in_thread(lambda: _atomic_write(recipe, data))
-            t.join(timeout=5)
-            assert not t.is_alive()
-            return box
-        finally:
-            closer.join(timeout=5)
-            reader.close()
+    outcomes, exc = _write_with_reader(monkeypatch, recipe, b"new\n", close_on_failure=2)
 
-    box = write_while_reader_holds(0.06, b"new\n")
-    assert "exc" not in box, box
+    assert exc is None
+    assert outcomes == ["fail", "fail", "ok"]
     assert recipe.read_bytes() == b"new\n"
 
-    box = write_while_reader_holds(0.5, b"newer\n")
-    assert isinstance(box.get("exc"), PermissionError), box
-    assert recipe.read_bytes() == b"new\n"
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PermissionError при открытом читателе — только Windows")
+def test_atomic_write_gives_up_after_five_attempts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Читатель не закрывается: PermissionError ровно после 5 попыток, файл прежний."""
+    recipe = tmp_path / "r.yaml"
+    recipe.write_bytes(b"old\n")
+
+    outcomes, exc = _write_with_reader(monkeypatch, recipe, b"new\n", close_on_failure=None)
+
+    assert isinstance(exc, PermissionError)
+    assert outcomes == ["fail", "fail", "fail", "fail", "fail"]
+    assert recipe.read_bytes() == b"old\n"
+
+
+# --- 1.1h, ревью р2: лок не прячет чужие ошибки ------------------------------------------
+
+
+def test_try_lock_on_closed_fd_raises_real_error(tmp_path: Path) -> None:
+    """``_try_lock`` на закрытом дескрипторе (EBADF): настоящий OSError, а не «лок занят»/таймаут."""
+    fl = _fl()
+    fd = os.open(tmp_path / "x.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    os.close(fd)
+
+    with pytest.raises(OSError) as info:
+        fl._try_lock(fd)
+
+    assert not isinstance(info.value, fl.RecipeLockTimeout)
+
+
+def test_body_exception_survives_failing_unlock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Исключение внутри ``with recipe_file_lock(...)`` всплывает исходным, даже если ``_unlock`` бросает."""
+    fl = _fl()
+
+    def broken_unlock(fd: int) -> None:
+        raise OSError("unlock failed")
+
+    monkeypatch.setattr(fl, "_unlock", broken_unlock)
+
+    with pytest.raises(ValueError, match="boom"):
+        with fl.recipe_file_lock(tmp_path / "r.yaml", timeout=1.0):
+            raise ValueError("boom")

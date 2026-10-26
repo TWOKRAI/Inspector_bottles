@@ -33,6 +33,7 @@ lite-контракт, внутренний для ``recipe``: сигнатур�
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 import time
@@ -48,6 +49,8 @@ else:
 __all__ = ["RecipeLockTimeout", "recipe_file_lock"]
 
 _POLL_S = 0.02
+# msvcrt.locking(LK_NBLCK) на занятом байте: EACCES (13); EDEADLOCK (36) — документированный код CRT.
+_WIN_LOCK_BUSY = (errno.EACCES, 36)
 
 
 class RecipeLockTimeout(TimeoutError):
@@ -60,14 +63,23 @@ class RecipeLockTimeout(TimeoutError):
 
 
 def _try_lock(fd: int) -> bool:
-    """Одна неблокирующая попытка; ``True`` — лок взят."""
-    try:
-        if sys.platform == "win32":
-            os.lseek(fd, 0, os.SEEK_SET)
+    """Одна неблокирующая попытка; ``True`` — лок взят, ``False`` — лок занят другим.
+
+    «Занят» — только Windows ``EACCES``/``EDEADLOCK`` и POSIX ``BlockingIOError``; прочий
+    ``OSError`` (``EBADF``, ``ENOLCK``, …) — настоящая причина, она пробрасывается, а не
+    превращается в ``RecipeLockTimeout`` (ревью 1.1h р2)."""
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+        except OSError as exc:
+            if exc.errno in _WIN_LOCK_BUSY:
+                return False
+            raise
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
         return False
     return True
 
@@ -93,7 +105,14 @@ def recipe_file_lock(path: str | Path, *, timeout: float = 5.0) -> Iterator[None
             time.sleep(_POLL_S)
         try:
             yield
-        finally:
-            _unlock(fd)
+        except BaseException as exc:
+            # Ошибка тела важнее ошибки снятия лока: ``_unlock`` её не затирает (ревью 1.1h р2).
+            # Лок снимет ``os.close`` ниже; сбой ``_unlock`` остаётся видимым в заметке исключения.
+            try:
+                _unlock(fd)
+            except OSError as unlock_exc:
+                exc.add_note(f"recipe_file_lock: снятие лока тоже не удалось: {unlock_exc!r}")
+            raise
+        _unlock(fd)
     finally:
         os.close(fd)
