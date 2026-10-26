@@ -334,3 +334,68 @@ def test_watch_pid_exit_sees_a_real_process_exit():
     gone: dict = {}
     st.watch_pid_exit(proc.pid, gone, "pm", limit_s=5.0).join(6.0)
     assert "pm" in gone  # уже вышел: не зависает
+
+
+# ---- окна остановки: R2-C на значениях по умолчанию, остальное с override 8,0 ----
+def test_stop_windows_default_has_no_override_and_override_is_8():
+    d, o = st.stop_windows(True), st.stop_windows(False)
+    assert d == {"mode": "default", "stop_process_timeout": None, "shutdown_timeout": None}
+    assert o == {"mode": "override", "stop_process_timeout": 8.0, "shutdown_timeout": 8.0}
+
+
+def _backend_for(tmp_path, default_windows):
+    from types import SimpleNamespace
+
+    root = HERE.parents[2]
+    ctx = SimpleNamespace(
+        root=root,
+        out=tmp_path,
+        python="x",
+        recipe=st.DEFAULT_REPO_RECIPE,
+        door="direct",
+        boot_timeout_s=1.0,
+        default_windows=default_windows,
+    )
+    be = st.Backend(ctx, f"win_{default_windows}")
+    be.workdir.mkdir(parents=True, exist_ok=True)
+    return be
+
+
+def test_backend_temp_system_yaml_stop_timeout_override_vs_default(tmp_path):
+    import yaml
+
+    over = _backend_for(tmp_path, False)
+    over._write_configs()
+    assert yaml.safe_load((over.workdir / "system.yaml").read_text(encoding="utf-8"))["system"]["stop_timeout"] == 8.0
+    assert over.windows["mode"] == "override"
+
+    dflt = _backend_for(tmp_path, True)
+    dflt._write_configs()
+    written = yaml.safe_load((dflt.workdir / "system.yaml").read_text(encoding="utf-8"))["system"]["stop_timeout"]
+    assert written == 5.0  # значение system.yaml дерева (backend/config/system.yaml), не 8.0
+    assert dflt.windows == {
+        "mode": "default",
+        "stop_process_timeout": None,
+        "shutdown_timeout": None,
+        "system_yaml_stop_timeout": 5.0,
+    }
+
+
+def test_round2_tree_exit_runs_on_default_windows_restart_and_s4_keep_override(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    base = SimpleNamespace(root=Path("."), recipe="r", default_windows=False, round2=False)
+    seen = []
+    monkeypatch.setattr(st, "write_run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        st,
+        "_tree_exit_once",
+        lambda c, tree, run, seq: (
+            seen.append((tree, c.default_windows)) or {"tree": tree, "run": run, "pm_exit_s": 1.0}
+        ),
+    )
+    st.run_r2_tree_exit(base, Path("main"), 1)
+    assert seen == [("branch", True), ("main", True)]  # R2-C: окна по умолчанию, строго по очереди
+    assert base.default_windows is False  # исходный контекст (R2-A, R2-B) остаётся на override 8,0
+    assert st._tree_ctx(base, Path("m")).default_windows is False

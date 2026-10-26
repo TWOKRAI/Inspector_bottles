@@ -56,6 +56,21 @@ CONTROL_FLOORS: dict[str, float] = {"S2_max_latency_s": 2.0, "S3_delivery_s": 2.
 REPEATS = {"S1": 10, "S2": 10, "S3": 10, "S4": 5, "S5": 10}
 STOP_PROCESS_TIMEOUT_S = 8.0
 SHUTDOWN_TIMEOUT_S = 8.0
+
+
+def stop_windows(default_windows: bool) -> dict[str, Any]:
+    """Окна остановки прогона: ``override`` (8,0/8,0 - под медленного ребёнка 3,0 с, S1-S5 и R2-A/R2-B) или ``default`` (R2-C,
+    исходный метод Task 1.1: ни ``stop_process_timeout`` в orchestrator_config, ни ``stop_timeout`` во временном system.yaml -
+    значения кода и system.yaml дерева). Пишется в JSON каждого сеанса."""
+    if default_windows:
+        return {"mode": "default", "stop_process_timeout": None, "shutdown_timeout": None}
+    return {
+        "mode": "override",
+        "stop_process_timeout": STOP_PROCESS_TIMEOUT_S,
+        "shutdown_timeout": SHUTDOWN_TIMEOUT_S,
+    }
+
+
 SLOW = "slow"
 FAST = "fast"
 SLOW_CLASS = "stand_slow_child.SlowChild"
@@ -468,6 +483,7 @@ class Backend:
         self.drv: Any = None
         self.boot_s: float | None = None
         self.stdout_path = self.workdir / "backend.stdout.log"
+        self.windows = stop_windows(bool(getattr(ctx, "default_windows", False)))
 
     # ---- конфиги этого запуска (закоммиченные файлы не трогаются) ----
     def _write_configs(self) -> Path:
@@ -483,9 +499,12 @@ class Backend:
             return str(p if p.is_absolute() else (base_dir / p).resolve())
 
         sys_raw = yaml.safe_load(Path(absolutize(raw["system"])).read_text(encoding="utf-8")) or {}
-        sys_raw.setdefault("system", {})["stop_timeout"] = (
-            SHUTDOWN_TIMEOUT_S  # -> shutdown_timeout PM (spawner.py:90-92)
-        )
+        if self.windows["mode"] == "override":
+            sys_raw.setdefault("system", {})["stop_timeout"] = (
+                SHUTDOWN_TIMEOUT_S  # -> shutdown_timeout PM (spawner.py:90-92)
+            )
+        else:  # default: stop_timeout остаётся значением system.yaml дерева; запоминаем его в JSON
+            self.windows["system_yaml_stop_timeout"] = (sys_raw.get("system") or {}).get("stop_timeout")
         sys_raw["system"]["log_dir"] = str(self.log_root)
         sys_raw.setdefault("backend_ctl", {}).update({"enabled": True, "port": self.port, "host": "127.0.0.1"})
         sys_path = self.workdir / "system.yaml"
@@ -524,9 +543,12 @@ class Backend:
                 "INSPECTOR_HEADLESS": "1",
                 "MULTIPROCESS_PID_FILE": str(self.workdir / "pids.jsonl"),
                 "INSPECTOR_PID_FILE": str(self.workdir / "pids.jsonl"),
-                "STAND_STOP_PROCESS_TIMEOUT": str(STOP_PROCESS_TIMEOUT_S),
             }
         )
+        if self.windows["mode"] == "override":
+            env["STAND_STOP_PROCESS_TIMEOUT"] = str(STOP_PROCESS_TIMEOUT_S)
+        else:
+            env.pop("STAND_STOP_PROCESS_TIMEOUT", None)  # R2-C: без подмены orchestrator_config
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
         t0 = time.monotonic()
         out = open(self.stdout_path, "wb")
@@ -561,6 +583,7 @@ class Backend:
         self.drv = drv
         text = self.stdout_path.read_text(encoding="utf-8", errors="replace")
         self.override_seen = f"stop_process_timeout={STOP_PROCESS_TIMEOUT_S}" in text
+        self.windows["override_line_in_stdout"] = self.override_seen  # default: обязано быть False
         return drv
 
     @staticmethod
@@ -607,6 +630,7 @@ class Ctx:
         self.door = args.door
         self.boot_timeout_s = args.boot_timeout
         self.quick = args.quick
+        self.default_windows = False  # R2-C: исходные окна остановки (без override 8,0)
         self.round2 = False  # R2-B: выход PM через WaitForSingleObject
         self.n = {k: (1 if args.quick else v) for k, v in REPEATS.items()}
 
@@ -916,6 +940,7 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
     try:
         drv = be.start()
         rec["boot_s"], rec["override_seen"] = be.boot_s, be.override_seen
+        rec["windows"] = be.windows
         rec["setup"] = add_slow_fast(drv, be)
         revive(drv, SLOW, ctx.door)
         revive(drv, FAST, ctx.door)
@@ -1434,6 +1459,7 @@ def _restart_session(ctx: "Ctx", tree: str, session: int, seq: int) -> list[dict
                         "ok": bool(res.get("restarted")),
                         "note": res.get("reason", ""),
                         "full_boot_wait_s": full_boot_s,
+                        "windows": be.windows,
                         "res": res,
                         **current,
                     }
@@ -1486,7 +1512,7 @@ def run_r2_restart(ctx: "Ctx", main_root: Path, sessions: int) -> dict[str, Any]
 def _tree_exit_once(ctx: "Ctx", tree: str, run: int, seq: int) -> dict[str, Any]:
     """Один выход дерева методом Task 1.1: полная загрузка + 2,0 с, ``system.shutdown``, метрика = выход процесса PM."""
     be = Backend(ctx, f"r2c_{tree}_{run}")
-    rec: dict[str, Any] = {"tree": tree, "run": run, "seq": seq, "pm_exit_s": None}
+    rec: dict[str, Any] = {"tree": tree, "run": run, "seq": seq, "pm_exit_s": None, "windows": be.windows}
     try:
         drv = be.start()
         rec["full_boot_wait_s"] = wait_full_boot(be)
@@ -1534,6 +1560,8 @@ def _tree_exit_once(ctx: "Ctx", tree: str, run: int, seq: int) -> dict[str, Any]
 
 def run_r2_tree_exit(ctx: "Ctx", main_root: Path, runs: int) -> dict[str, Any]:
     ctxs = {"branch": _tree_ctx(ctx, ctx.root, R2_TREE_RECIPE), "main": _tree_ctx(ctx, main_root, R2_TREE_RECIPE)}
+    for c in ctxs.values():
+        c.default_windows = True  # R2-C: исходный метод Task 1.1 идёт на окнах по умолчанию
     order: list[str] = []
     recs: list[dict[str, Any]] = []
     for i in range(1, runs + 1):
@@ -1600,14 +1628,17 @@ def round2_plan(args: argparse.Namespace) -> list[str]:
     s4_runs = 1 if q else REPEATS["S4"]
     return [
         f"режим: РАУНД 2; части: {args.round2_parts}; quick={q}; ветка: {args.root}; main (только чтение): {args.main_root}",
-        f"R2-A: {sessions} сеанс(а) на дерево, строго A/B/A/B (ветка, main, ветка, main, ...); сеанс = свежий бэкенд, полная "
+        f"R2-A [окна: {stop_windows(False)['mode']} stop_process_timeout={STOP_PROCESS_TIMEOUT_S} "
+        f"stop_timeout={SHUTDOWN_TIMEOUT_S}]: {sessions} сеанс(а) на дерево, строго A/B/A/B (ветка, main, ветка, main, ...); сеанс = свежий бэкенд, полная "
         f"загрузка (строка PM 'registration summary'), {', '.join(R2_TARGETS)} x{R2_REPS} через process_restart_verified; "
         "в JSON весь res, момент отправки/возврата запроса драйвера, error ('timeout' = окно драйвера, не ответ PM), "
         f"ответ против строки PM 'restarted'; порог: ранний ответ (> {EARLY_REPLY_TOL_S} с до 'restarted') = FAIL, "
         f"ветка < {R2_THRESHOLDS['max_restart_s']} с",
-        f"R2-B: S4 x{s4_runs} на ветке; выход PM через OpenProcess+WaitForSingleObject (ctypes), выход лаунчера и стоимость "
+        f"R2-B [окна: {stop_windows(False)['mode']} stop_process_timeout={STOP_PROCESS_TIMEOUT_S} "
+        f"stop_timeout={SHUTDOWN_TIMEOUT_S}]: S4 x{s4_runs} на ветке; выход PM через OpenProcess+WaitForSingleObject (ctypes), выход лаунчера и стоимость "
         "одного вызова tasklist пишутся отдельно; порог S4 прежний (строка <= +1,2 с, выход PM <= +4,5 с, dns 0)",
-        f"R2-C: выход дерева методом Task 1.1 (test_system_shutdown_live.py:64-100): рецепт {R2_TREE_RECIPE}, полная загрузка "
+        f"R2-C [окна: {stop_windows(True)['mode']} - без stop_process_timeout, без stop_timeout во временном system.yaml "
+        "(значения кода/system.yaml дерева)]: выход дерева методом Task 1.1 (test_system_shutdown_live.py:64-100): рецепт {R2_TREE_RECIPE}, полная загрузка "
         f"+ {R2_TREE_WARMUP_S} с, system.shutdown, метрика = выход процесса PM; {runs} на ветке и {runs} на main, строго по "
         f"очереди; порог < {R2_THRESHOLDS['max_tree_exit_s']} с, {runs} из {runs} на КАЖДОМ дереве (литерал)",
         "вывод: <out>/json/R2A_*.json, R2C_*.json, S4_r*.json, <out>/round2_summary.json, <out>/results_round2.md",
