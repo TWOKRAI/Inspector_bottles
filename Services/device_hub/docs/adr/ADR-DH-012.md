@@ -68,7 +68,9 @@
 
 - Новый вид устройства = класс драйвера с `OP_SPECS` + `register_driver_factory(kind, factory)`; в `manager.py` и
   `plugin.py` ничего не правится; команды `<вид>_<операция>` ставятся `install_op_commands`.
-- Видимые изменения: описания 34 команд и `args` в каталоге и `CAPABILITIES.yaml` / `.md` (регенерация командой
+- Видимые изменения: описания 34 команд в каталоге и `CAPABILITIES.yaml` / `.md` (`args` в дамп не попадают:
+  `_command_dump` пишет `name`, `description`, `tags`, `params_schema`; `args` — только в `metadata` команды,
+  `get_command_info`) (регенерация командой
   `python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`); `key_missing` / `executor_busy` у 10
   команд данных; текст отказа регистров у ПЧ; каскад моста по `set_degraded() -> bool`.
 - **Ограничение `driver_options`:** опции действуют на весь `kind`, на драйверы, создаваемые после вызова. Опции вида
@@ -77,6 +79,17 @@
 - `immediate` защищает от очереди исполнителя, но не от потока роутера: длинная синхронная операция (`toolchange` v1,
   `stop` v2 ждёт эхо до 0,8 с) по-прежнему задерживает следующие команды процесса. Вне SPI.
 - Значения исполнителя `4/64` — умолчания, не замер; живой стенд для SPI не гонялся.
+
+### Открыто
+
+- `OpSpec.immediate` — декларация и запрет `executor` + `immediate` в `__post_init__`; рантайм-потребителя нет (команда
+  с `immediate` не обходит поток роутера). `args` в `metadata` тоже пока никто в проде не читает.
+- Порядок команд в `DeviceHubPlugin.commands` изменился (11 `device_*`, 6 `hik_*`, затем 55 по `command_table`); он виден
+  оператору в выпадающем списке пульта (`catalog.py:133` -> `picker.py:153`), имена и функции не менялись. Принято.
+- `driver_options` действуют на весь `kind` (v1 при `client_factory` — `TypeError`); ключ `(kind, protocol)` — возможное
+  дальнейшее сужение. Принято.
+- `__init_subclass__` базы: класс, у которого `request_stop` и `stop_aware` не совпадают, не определяется (`TypeError`).
+- Фабрику нового вида регистрировать ДО `DeviceManager.initialize()`: вид записи реестра проверяется по фабрикам.
 
 ### Связь
 

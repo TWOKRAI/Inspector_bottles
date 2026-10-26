@@ -49,7 +49,9 @@ tests/
 
 **Новый вид устройства = драйвер + `register_driver_factory(kind, factory)`, без правок хаба:** класс с `kind`,
 `OP_SPECS` и методом `call`; фабрика `(entry, protocol) -> driver`; допустимый вид — тот, у которого есть фабрика
-(`DeviceManager._check_kind`).
+(`DeviceManager._check_kind`). **Фабрику нового вида регистрировать ДО `initialize()`**: записи файла реестра
+проверяются по фабрикам при загрузке (неизвестный вид — `ValueError`, реестр остаётся пустым). Класс драйвера, у
+которого `request_stop` и `stop_aware` не совпадают, не определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`).
 
 **`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
 `{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
