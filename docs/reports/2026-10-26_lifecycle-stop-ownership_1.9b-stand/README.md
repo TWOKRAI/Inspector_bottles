@@ -71,3 +71,23 @@ S2-S4 на И1 дали FAIL **и** достигли нижних границ �
 4. Имена файлов логов PM: считаются все `*.log` каталога логов; строка shutdown берётся самая ранняя.
 5. `renderer` в рецепте `region_pipeline` нет (он из старых рецептов): S5 берёт первый живой non-protected процесс и пишет подстановку в JSON.
 6. `recipe.activate` активного рецепта на первом вызове после boot идёт в полную замену (`_current_topology` = None) - но это слабая проверка регресса, не замена прогона другого рецепта.
+
+## Раунд 2 (`--round2`): методика после вердикта investigator
+
+Источник: `docs/reviews/2026-10-26_task-1.9b-stand-investigator.md`. Запуск (окно стенда, класс `heavy`; бэкенд не запускался ни разу — офлайн
+проверены компиляция, `--help`, `--dry-run --round2`, юнит-тест вердиктов и `watch_pid_exit` на настоящем процессе):
+
+```
+... stand_l9.py --round2 --out <каталог> [--round2-parts restart,s4,tree] [--main-root <корень main, только чтение>] [--quick]
+```
+
+| Часть | Что делает | Порог (литерал `R2_THRESHOLDS`) |
+|---|---|---|
+| R2-A `restart` | 3 сеанса на дерево, **строго A/B/A/B одиночными сеансами** (ветка, main, ветка, main, ...), поровну. Сеанс = свежий бэкенд, полная загрузка (строка PM `CommandManager 'ProcessManager' registration summary`), `process_restart_verified` camera_0 x3 и devices x3. В JSON весь `res` (polls, elapsed), момент отправки/возврата запроса драйвера (`drv.request` обёрнут), `request_error` (`timeout` = собственное окно драйвера 5,0 с, не ответ PM), ответ против строки PM `Process '<имя>' restarted` | ответ раньше `restarted` больше чем на 0,05 с = FAIL; `request_error` = FAIL; ветка < 5,0 с строго (main - база, числа печатаются) |
+| R2-B `s4` | S4 x5 на ветке; выход PM по дескриптору (`OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject`, ctypes), без `tasklist`; отдельно `launcher_exit_s` и `tasklist_call_s` (стоимость одного вызова) | порог S4 прежний: строка <= +1,2 с, выход PM <= +4,5 с, dns 0 |
+| R2-C `tree` | Выход дерева исходным методом Task 1.1 (`backend_ctl/tests/test_system_shutdown_live.py:64-100`): рецепт `inspection_full` (`multiprocess_prototype/backend/topology/inspection_full.yaml`), полная загрузка + 2,0 с, `system.shutdown`, метрика = выход **процесса PM** (дескриптор); 10 на ветке и 10 на main строго по очереди | `< 2,0 с` строго, 10 из 10 на каждом дереве (не ослаблен) |
+
+Выход: `<out>/json/R2A_*.json`, `R2C_*.json`, `S4_r*.json`, `round2_summary.json` (разброс min/median/max/p99 по дереву и цели), `results_round2.md`.
+Ограничения метода: момент прихода ответа - возврат `request()` у вызывающего (пробуждение события reader-потока, расхождение - мс), а не штамп
+внутри reader-потока; штамп `restarted` - мс-разрешение лога PM против `time.time()` той же машины (допуск 0,05 с). Рецепт `inspection_full` как
+`pipeline` временного манифеста офлайн не проверялся (формат runnable-топологии допустим по `manifest.py`, но живой запуск не делался).

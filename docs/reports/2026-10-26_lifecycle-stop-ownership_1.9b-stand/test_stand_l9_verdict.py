@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ruff: noqa: E501  (русские docstring/строки плана длиннее 120)
 """Юнит-тест вердиктов стенда T1.9b (без бэкенда): зависание = FAIL, края порогов - литералы из T1.9b_tests.md.
 
 Запуск: ``python -m pytest -q --tb=short
@@ -213,3 +214,123 @@ def test_scan_log_texts_dedups_across_files_and_finds_shutdown_ts():
     assert res["dns_by_dir"] == {"ProcessManager": 1}
     expected = time.mktime(time.strptime("2026-08-26 08:40:42", "%Y-%m-%d %H:%M:%S")) + 0.349
     assert abs(res["shutdown_ts"] - expected) < 1e-3
+
+
+# ---- раунд 2 ----
+def test_alternation_strict_and_equal_counts():
+    assert st.check_alternation(["branch", "main", "branch", "main"]) == []
+    assert st.check_alternation(["main", "branch", "main", "branch"]) == []
+    blocks = st.check_alternation(["branch", "branch", "main", "main"])
+    assert any("не чередуется" in r for r in blocks)
+    assert any("не поровну" in r for r in st.check_alternation(["branch", "main", "branch"]))
+    assert any("неизвестные" in r for r in st.check_alternation(["branch", "x"]))
+
+
+_PM_LOG = (
+    "#1 2026-10-26 15:00:10,000 [INFO] [ProcessManager] ProcessManager: Process 'camera_0' restarted\n"
+    "#2 2026-10-26 15:00:10,000 [INFO] [ProcessManager] ProcessManager: Process 'camera_0' restarted\n"  # дубль в другом файле
+    "#3 2026-10-26 15:00:20,500 [INFO] [ProcessManager] ProcessManager: Process 'camera_0' restarted\n"
+    "#4 2026-10-26 15:00:12,250 [INFO] [ProcessManager] ProcessManager: Process 'devices' restarted\n"
+    "#5 2026-10-26 15:00:13,000 [INFO] m.m.x: something else\n"
+)
+
+
+def test_scan_restarted_lines_dedups_and_sorts():
+    got = st.scan_restarted_lines(_PM_LOG)
+    assert sorted(got) == ["camera_0", "devices"]
+    assert len(got["camera_0"]) == 2 and got["camera_0"][1] - got["camera_0"][0] == 10.5
+    assert len(got["devices"]) == 1
+
+
+def test_pair_restart_records_marks_early_reply_with_tolerance():
+    base = st.parse_log_ts("2026-10-26 15:00:10,000")
+    lines = {"camera_0": [base, base + 10.5]}
+    sent = [
+        {"target": "camera_0", "t_send_wall": base - 4.0, "t_reply_wall": base + 0.2},  # после строки: не ранний
+        {"target": "camera_0", "t_send_wall": base + 5.0, "t_reply_wall": base + 10.5 - 0.7},  # на 0,7 с раньше
+        {"target": "camera_0", "t_send_wall": base + 5.0, "t_reply_wall": base + 10.5 - 0.04},  # в допуске 0,05
+        {"target": "devices", "t_send_wall": base, "t_reply_wall": base + 1.0},  # нет строки
+    ]
+    got = st.pair_restart_records(sent, {"camera_0": lines["camera_0"] + [base + 10.5]})
+    assert [g["early"] for g in got] == [False, True, False, None]
+    assert got[1]["reply_minus_restarted_s"] == -0.7
+
+
+def _rr(tree, target="camera_0", rep=1, el=4.0, ok=True, early=False, err=None):
+    return {
+        "tree": tree,
+        "session": 1,
+        "target": target,
+        "rep": rep,
+        "elapsed_s": el,
+        "ok": ok,
+        "early": early,
+        "request_error": err,
+    }
+
+
+def test_judge_restart_ab_pass_and_each_fail_reason():
+    recs = [_rr("branch"), _rr("main", el=4.4)]
+    ok = st.judge_restart_ab(recs, ["branch", "main"])
+    assert ok["verdict"] == "PASS" and ok["spread"]["branch/camera_0"]["max"] == 4.0
+    assert (
+        st.judge_restart_ab(
+            [_rr("branch", early=True) | {"reply_minus_restarted_s": -0.7}, _rr("main")], ["branch", "main"]
+        )["verdict"]
+        == "FAIL"
+    )
+    assert st.judge_restart_ab([_rr("branch", err="timeout"), _rr("main")], ["branch", "main"])["verdict"] == "FAIL"
+    assert st.judge_restart_ab([_rr("branch", ok=False), _rr("main")], ["branch", "main"])["verdict"] == "FAIL"
+    assert (
+        st.judge_restart_ab([_rr("branch", el=5.0), _rr("main")], ["branch", "main"])["verdict"] == "FAIL"
+    )  # < 5,0 строго
+    assert st.judge_restart_ab([_rr("branch", el=None), _rr("main")], ["branch", "main"])["verdict"] == "FAIL"
+    assert st.judge_restart_ab([_rr("branch"), _rr("branch")], ["branch", "branch"])["verdict"] == "FAIL"  # блок
+    assert (
+        st.judge_restart_ab([_rr("branch"), _rr("main", el=9.0)], ["branch", "main"])["verdict"] == "PASS"
+    )  # main - база
+
+
+def _tx(n, branch=1.5, main=1.5):
+    recs, order = [], []
+    for i in range(1, n + 1):
+        for tree, v in (("branch", branch), ("main", main)):
+            order.append(tree)
+            recs.append({"tree": tree, "run": i, "pm_exit_s": v})
+    return recs, order
+
+
+def test_judge_tree_exit_ab_strict_2s_ten_of_ten_each_tree():
+    recs, order = _tx(10)
+    assert st.judge_tree_exit_ab(recs, order)["verdict"] == "PASS"
+    recs, order = _tx(10, branch=1.999)
+    assert st.judge_tree_exit_ab(recs, order)["verdict"] == "PASS"
+    recs, order = _tx(10, branch=2.0)
+    assert st.judge_tree_exit_ab(recs, order)["verdict"] == "FAIL"  # < 2,0 строго
+    recs, order = _tx(10, main=2.5)
+    assert st.judge_tree_exit_ab(recs, order)["verdict"] == "FAIL"  # порог и на main - литерал
+    recs, order = _tx(10)
+    recs[2]["pm_exit_s"] = None
+    res = st.judge_tree_exit_ab(recs, order)
+    assert res["verdict"] == "FAIL" and any("ЗАВИСАНИЕ" in r for r in res["reasons"])
+    recs, order = _tx(9)
+    res = st.judge_tree_exit_ab(recs, order)
+    assert res["verdict"] == "FAIL" and res["invalid"] is True
+    recs, order = _tx(10)
+    assert st.judge_tree_exit_ab(recs, sorted(order))["verdict"] == "FAIL"  # блоки
+
+
+def test_watch_pid_exit_sees_a_real_process_exit():
+    import subprocess  # nosec B404 — тест: свой интерпретатор, литеральный код
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])  # nosec B603
+    box: dict = {}
+    th = st.watch_pid_exit(proc.pid, box, "pm", limit_s=20.0)
+    t0 = time.monotonic()
+    th.join(20.0)
+    proc.wait(5)
+    assert "pm" in box and 0.2 <= box["pm"] - t0 <= 5.0
+    gone: dict = {}
+    st.watch_pid_exit(proc.pid, gone, "pm", limit_s=5.0).join(6.0)
+    assert "pm" in gone  # уже вышел: не зависает

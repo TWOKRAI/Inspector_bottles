@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ruff: noqa: E501  (русские docstring/строки плана длиннее 120)
 """stand_l9.py - живой стенд Task 1.9b (lifecycle-stop-ownership): сценарии S1-S5 и контроль.
 
 Печатает числа, а не прилагательные. Бэкенд ведёт только через backend_ctl (сокет ProcessManager, BACKEND_CTL=1):
@@ -606,6 +607,7 @@ class Ctx:
         self.door = args.door
         self.boot_timeout_s = args.boot_timeout
         self.quick = args.quick
+        self.round2 = False  # R2-B: выход PM через WaitForSingleObject
         self.n = {k: (1 if args.quick else v) for k, v in REPEATS.items()}
 
 
@@ -926,6 +928,17 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
             pm_pid = got if isinstance(got, int) else None
         except Exception:  # noqa: BLE001 - нет PID PM: pm_exit_s будет равен выходу лаунчера
             pm_pid = None
+        exit_box: dict[str, Any] = {}
+        if ctx.round2:
+            # Раунд 2: выход PM по дескриптору (OpenProcess+WaitForSingleObject), без tasklist в замере.
+            if pm_pid is not None:
+                watch_pid_exit(pm_pid, exit_box, "pm")
+            proc_ref = be.proc
+            threading.Thread(
+                target=lambda: (proc_ref.wait(60), exit_box.__setitem__("launcher", time.monotonic())),
+                daemon=True,
+                name="s4-launcher-wait",
+            ).start()
         t0_wall = time.time()
         stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
         time.sleep(0.1)
@@ -940,7 +953,7 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
         next_probe = 0.0
         while be.proc.poll() is None and time.monotonic() < end:
             now_t = time.monotonic()
-            if pm_pid is not None and pm_gone_t is None and now_t >= next_probe:
+            if not ctx.round2 and pm_pid is not None and pm_gone_t is None and now_t >= next_probe:
                 next_probe = now_t + 0.25
                 if not pids_alive([pm_pid]):
                     pm_gone_t = time.monotonic()
@@ -950,7 +963,17 @@ def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
         # pm_exit_s - выход процесса ProcessManager (по PID, шаг опроса 0,25 с); launcher_exit_s - выход лаунчера
         # (он дольше PM на уборку). Нет PID PM - pm_exit_s = выход лаунчера.
         rec["launcher_exit_s"] = round(t_exit - stop_p.t_send, 3) if exited else None
-        if pm_gone_t is not None:
+        if ctx.round2:
+            end_w = time.monotonic() + 5.0
+            while time.monotonic() < end_w and ("pm" not in exit_box or "launcher" not in exit_box):
+                time.sleep(0.01)
+            rec["pm_exit_s"] = round(exit_box["pm"] - stop_p.t_send, 3) if "pm" in exit_box else None
+            rec["launcher_exit_s"] = round(exit_box["launcher"] - stop_p.t_send, 3) if "launcher" in exit_box else None
+            t_tl = time.monotonic()
+            pids_alive([pm_pid] if pm_pid else [])
+            rec["tasklist_call_s"] = round(time.monotonic() - t_tl, 3)
+            rec["exit_probe"] = "WaitForSingleObject"
+        elif pm_gone_t is not None:
             rec["pm_exit_s"] = round(pm_gone_t - stop_p.t_send, 3)
         else:
             rec["pm_exit_s"] = rec["launcher_exit_s"]
@@ -1148,6 +1171,450 @@ class PatchedTree:
 
 
 # --------------------------------------------------------------------------------------------------------------
+# Раунд 2 (--round2): методика стенда по вердикту investigator (docs/reviews/2026-10-26_task-1.9b-stand-investigator.md)
+#   R2-A  рестарт camera_0 и devices x3: ветка и main строго по очереди A/B/A/B, ответ против строки PM «restarted»;
+#   R2-B  S4 x5 на ветке: выход PM через OpenProcess+WaitForSingleObject, без tasklist в замере;
+#   R2-C  выход дерева исходным методом Task 1.1: полная загрузка + 2,0 с, метрика = выход процесса PM,
+#         по 10 на ветке и на main строго по очереди; порог «< 2,0 с 10 из 10» - литерал, не ослаблен.
+# Чистая часть (judge_*, check_alternation, scan_restarted_lines, pair_restart_records) - в юнит-тесте.
+# --------------------------------------------------------------------------------------------------------------
+R2_THRESHOLDS: dict[str, float | int] = {"max_restart_s": 5.0, "max_tree_exit_s": 2.0, "tree_runs_per_tree": 10}
+R2_SESSIONS_PER_TREE = 3  # рестарт A/B: сеансов бэкенда на дерево (в каждом camera_0 x3 и devices x3)
+R2_TREE_RECIPE = "multiprocess_prototype/backend/topology/inspection_full.yaml"  # как test_system_shutdown_live.py:42
+R2_TARGETS = ("camera_0", "devices")
+R2_REPS = 3
+R2_TREE_WARMUP_S = 2.0  # после полной загрузки (test_system_shutdown_live.py:70)
+EARLY_REPLY_TOL_S = 0.05  # допуск штампа лога (мс) и дрейфа часов: ответ раньше `restarted` больше чем на это = ранний
+DEFAULT_MAIN_ROOT = "D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles"
+_RESTARTED = re.compile(r"Process '([^']+)' restarted")
+
+
+def check_alternation(order: list[str], trees: tuple[str, str] = ("branch", "main")) -> list[str]:
+    """Строгое чередование A/B/A/B одиночными прогонами (не блоками) и равное число прогонов; пусто = порядок верный."""
+    reasons: list[str] = []
+    a, b = trees
+    unknown = sorted({t for t in order if t not in trees})
+    if unknown:
+        reasons.append(f"неизвестные деревья в порядке: {unknown}")
+    if order.count(a) != order.count(b):
+        reasons.append(f"прогонов не поровну: {a}={order.count(a)}, {b}={order.count(b)}")
+    for i in range(1, len(order)):
+        if order[i] == order[i - 1]:
+            reasons.append(f"не чередуется: прогоны {i} и {i + 1} оба {order[i]!r} (блок, а не A/B/A/B)")
+            break
+    return reasons
+
+
+def scan_restarted_lines(text: str) -> dict[str, list[float]]:
+    """Строки PM ``Process '<имя>' restarted`` -> ``{имя: [epoch, ...]}`` по возрастанию (уникальные по штампу и тексту)."""
+    seen: set[tuple[str, str]] = set()
+    out: dict[str, list[float]] = {}
+    for raw in text.splitlines():
+        m = _LOG_LINE.match(raw.strip())
+        if not m:
+            continue
+        stamp, _level, message = m.groups()
+        hit = _RESTARTED.search(message)
+        if not hit or (stamp, message) in seen:
+            continue
+        seen.add((stamp, message))
+        out.setdefault(hit.group(1), []).append(parse_log_ts(stamp))
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def pair_restart_records(sent: list[dict[str, Any]], restarted: dict[str, list[float]]) -> list[dict[str, Any]]:
+    """К каждому ``process.restart`` (``target``, ``t_send_wall``, ``t_reply_wall``) - первая строка PM ``restarted`` этого
+    процесса не раньше отправки (минус допуск); ``reply_minus_restarted_s`` = ответ - строка; ``early`` = ответ раньше строки
+    больше чем на ``EARLY_REPLY_TOL_S``. Нет строки - ``restarted_ts`` None, ``early`` None (нечем сравнить)."""
+    used: dict[str, int] = {}
+    out: list[dict[str, Any]] = []
+    for rec in sent:
+        rec = dict(rec)
+        target = str(rec.get("target"))
+        lines = restarted.get(target, [])
+        ts = None
+        for j in range(used.get(target, 0), len(lines)):
+            if lines[j] >= float(rec["t_send_wall"]) - EARLY_REPLY_TOL_S:
+                ts = lines[j]
+                used[target] = j + 1
+                break
+        rec["restarted_ts"] = ts
+        if ts is None or rec.get("t_reply_wall") is None:
+            rec["reply_minus_restarted_s"] = None
+            rec["early"] = None
+        else:
+            diff = float(rec["t_reply_wall"]) - ts
+            rec["reply_minus_restarted_s"] = round(diff, 3)
+            rec["early"] = diff < -EARLY_REPLY_TOL_S
+        out.append(rec)
+    return out
+
+
+def judge_restart_ab(
+    recs: list[dict[str, Any]], order: list[str], th: dict[str, float | int] | None = None
+) -> dict[str, Any]:
+    """R2-A. ``recs``: ``{tree, session, target, rep, elapsed_s, ok, request_error, early, ...}``; ``order`` - дерево каждого
+    сеанса по порядку. FAIL: нарушено чередование/равенство; ранний ответ; ответ драйвера ``timeout``; рестарт не подтверждён;
+    ветка не уложилась в ``max_restart_s`` строго (main - база, порог к нему не применяется, числа печатаются)."""
+    th = th or R2_THRESHOLDS
+    reasons = [f"порядок: {r}" for r in check_alternation(order)]
+    for r in recs:
+        who = f"{r.get('tree')} s{r.get('session')} {r.get('target')} #{r.get('rep')}"
+        if r.get("request_error"):
+            reasons.append(f"{who}: запрос драйвера завершился {r['request_error']!r} (не ответ PM)")
+        if r.get("early") is True:
+            reasons.append(f"{who}: ОТВЕТ РАНЬШЕ строки PM restarted на {-r['reply_minus_restarted_s']:.3f} с")
+        if not r.get("ok", False):
+            reasons.append(f"{who}: рестарт не подтверждён ({r.get('note', '')})")
+        el = r.get("elapsed_s")
+        if r.get("tree") == "branch":
+            if el is None:
+                reasons.append(f"{who}: ЗАВИСАНИЕ, нет результата")
+            elif not el < float(th["max_restart_s"]):
+                reasons.append(f"{who}: {el:.2f} с >= {th['max_restart_s']}")
+    spread: dict[str, dict[str, Any]] = {}
+    for tree in ("branch", "main"):
+        for target in sorted({str(r.get("target")) for r in recs}):
+            vals = [r.get("elapsed_s") for r in recs if r.get("tree") == tree and r.get("target") == target]
+            spread[f"{tree}/{target}"] = stats(vals)
+    return {
+        **_verdict(reasons),
+        "spread": spread,
+        "unpaired": sum(1 for r in recs if r.get("early") is None),
+        "n_early": sum(1 for r in recs if r.get("early") is True),
+    }
+
+
+def judge_tree_exit_ab(
+    recs: list[dict[str, Any]], order: list[str], th: dict[str, float | int] | None = None
+) -> dict[str, Any]:
+    """R2-C. ``recs``: ``{tree, run, pm_exit_s}``; метрика = выход процесса PM от отправки ``system.shutdown``. Порог
+    ``< max_tree_exit_s`` строго, по ``tree_runs_per_tree`` прогонов на КАЖДОМ дереве (и на main тоже - литерал)."""
+    th = th or R2_THRESHOLDS
+    reasons = [f"порядок: {r}" for r in check_alternation(order)]
+    invalid = False
+    spread: dict[str, dict[str, Any]] = {}
+    for tree in ("branch", "main"):
+        mine = [r for r in recs if r.get("tree") == tree]
+        spread[tree] = stats([r.get("pm_exit_s") for r in mine])
+        if len(mine) != int(th["tree_runs_per_tree"]):
+            reasons.append(f"{tree}: прогонов {len(mine)}, нужно {th['tree_runs_per_tree']}")
+            invalid = True
+        for r in mine:
+            el = r.get("pm_exit_s")
+            if el is None:
+                reasons.append(f"{tree} run {r.get('run')}: ЗАВИСАНИЕ, PM не вышел")
+            elif not el < float(th["max_tree_exit_s"]):
+                reasons.append(f"{tree} run {r.get('run')}: {el:.3f} с >= {th['max_tree_exit_s']}")
+    return {**_verdict(reasons, invalid), "spread": spread}
+
+
+# ---- живая часть раунда 2 ----------------------------------------------------------------------------------------
+def watch_pid_exit(pid: int, box: dict[str, Any], key: str, limit_s: float = 60.0) -> threading.Thread:
+    """Daemon-поток: ``box[key]`` = ``time.monotonic()`` выхода процесса ``pid`` (Windows: ``OpenProcess(SYNCHRONIZE)`` +
+    ``WaitForSingleObject``, без tasklist). Процесса уже нет к открытию - ``box[key+'_already_gone']``. Не вышел за ``limit_s`` -
+    ключ не ставится."""
+
+    def run() -> None:
+        if sys.platform != "win32":
+            end = time.monotonic() + limit_s
+            while time.monotonic() < end:
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    box[key] = time.monotonic()
+                    return
+                time.sleep(0.01)
+            return
+        import ctypes
+
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = k32.OpenProcess(0x00100000, 0, pid)  # SYNCHRONIZE
+        if not handle:
+            box[key + "_already_gone"] = True
+            box[key] = time.monotonic()
+            return
+        try:
+            if k32.WaitForSingleObject(handle, int(limit_s * 1000)) == 0:  # WAIT_OBJECT_0
+                box[key] = time.monotonic()
+        finally:
+            k32.CloseHandle(handle)
+
+    th = threading.Thread(target=run, daemon=True, name=f"exit-watch-{key}-{pid}")
+    th.start()
+    return th
+
+
+def pm_pid_of(drv: Any) -> int | None:
+    try:
+        from backend_ctl.protocol import _find_payload
+
+        got = _find_payload(drv.introspect_status("ProcessManager", timeout=5.0), "pid", "process").get("pid")
+        return got if isinstance(got, int) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def wait_full_boot(be: "Backend", timeout_s: float = 120.0) -> float:
+    """Полная загрузка: в логе PM строка ``CommandManager 'ProcessManager' registration summary`` (investigator, шаг 1).
+    Возврат - секунды ожидания; не дождались - RuntimeError."""
+    t0 = time.monotonic()
+    needle = "CommandManager 'ProcessManager' registration summary"
+    pm_dir = be.log_root / "ProcessManager"
+    while time.monotonic() - t0 < timeout_s:
+        for p in pm_dir.glob("*.log") if pm_dir.exists() else []:
+            try:
+                if needle in p.read_text(encoding="utf-8", errors="replace"):
+                    return round(time.monotonic() - t0, 2)
+            except OSError:
+                continue
+        time.sleep(0.25)
+    raise RuntimeError(f"строка PM 'registration summary' не появилась за {timeout_s} с")
+
+
+def _tree_ctx(ctx: "Ctx", root: Path, recipe: str | None = None) -> "Ctx":
+    import copy
+
+    other = copy.copy(ctx)
+    other.root = root
+    if recipe is not None:
+        other.recipe = recipe
+    return other
+
+
+def _restart_session(ctx: "Ctx", tree: str, session: int, seq: int) -> list[dict[str, Any]]:
+    """Один сеанс R2-A: свежий бэкенд, полная загрузка, camera_0 x3 и devices x3 через ``process_restart_verified``.
+
+    Запрос драйвера оборачивается (``drv.request``): момент отправки/возврата и ``error`` ответа (``timeout`` = собственное
+    окно драйвера, не ответ PM). Возврат ``request()`` - пробуждение события reader-потока, расхождение с приходом - мс.
+    """
+    be = Backend(ctx, f"r2a_{tree}_{session}")
+    sent: list[dict[str, Any]] = []
+    try:
+        drv = be.start()
+        full_boot_s = wait_full_boot(be)
+        original = drv.request
+        current: dict[str, Any] = {}
+
+        def spy(message: dict[str, Any], timeout: float | None = None) -> Any:
+            data = message.get("data") if isinstance(message, dict) else None
+            is_restart = isinstance(data, dict) and data.get("cmd") == "process.restart"
+            t_send, t_send_wall = time.monotonic(), time.time()
+            res = original(message, timeout=timeout)
+            if is_restart:
+                failed = isinstance(res, dict) and res.get("success") is False
+                current.update(
+                    {
+                        "t_send_wall": t_send_wall,
+                        "t_reply_wall": time.time(),
+                        "request_s": round(time.monotonic() - t_send, 3),
+                        "request_error": res.get("error") if failed else None,
+                        "request_reply": res,
+                    }
+                )
+            return res
+
+        drv.request = spy  # type: ignore[method-assign]
+        for target in R2_TARGETS:
+            for rep in range(1, R2_REPS + 1):
+                current.clear()
+                res = drv.process_restart_verified(target, wait=30.0, timeout=30.0)
+                sent.append(
+                    {
+                        "tree": tree,
+                        "seq": seq,
+                        "session": session,
+                        "target": target,
+                        "rep": rep,
+                        "elapsed_s": res.get("elapsed"),
+                        "ok": bool(res.get("restarted")),
+                        "note": res.get("reason", ""),
+                        "full_boot_wait_s": full_boot_s,
+                        "res": res,
+                        **current,
+                    }
+                )
+                print(
+                    f"[R2-A {tree} s{session} {target} #{rep}] elapsed={res.get('elapsed')} "
+                    f"restarted={res.get('restarted')} request_s={current.get('request_s')} "
+                    f"err={current.get('request_error')}",
+                    flush=True,
+                )
+    except Exception as exc:  # noqa: BLE001
+        sent.append(
+            {
+                "tree": tree,
+                "seq": seq,
+                "session": session,
+                "target": "-",
+                "rep": 0,
+                "elapsed_s": None,
+                "ok": False,
+                "note": repr(exc),
+                "t_send_wall": time.time(),
+                "t_reply_wall": None,
+            }
+        )
+    finally:
+        be.stop()
+    restarted: dict[str, list[float]] = {}
+    pm_dir = be.log_root / "ProcessManager"
+    if pm_dir.exists():
+        text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in sorted(pm_dir.glob("*.log")))
+        restarted = scan_restarted_lines(text)
+    paired = pair_restart_records([r for r in sent if r.get("target") != "-"], restarted)
+    return paired + [r for r in sent if r.get("target") == "-"]
+
+
+def run_r2_restart(ctx: "Ctx", main_root: Path, sessions: int) -> dict[str, Any]:
+    ctxs = {"branch": ctx, "main": _tree_ctx(ctx, main_root)}
+    order: list[str] = []
+    recs: list[dict[str, Any]] = []
+    for s in range(1, sessions + 1):
+        for tree in ("branch", "main"):  # строго по одному: A, B, A, B
+            order.append(tree)
+            recs += _restart_session(ctxs[tree], tree, s, len(order))
+    for j, r in enumerate(recs, 1):
+        write_run(ctx, "R2A", j, r)
+    return {"recs": recs, "order": order, "verdict": judge_restart_ab(recs, order)}
+
+
+def _tree_exit_once(ctx: "Ctx", tree: str, run: int, seq: int) -> dict[str, Any]:
+    """Один выход дерева методом Task 1.1: полная загрузка + 2,0 с, ``system.shutdown``, метрика = выход процесса PM."""
+    be = Backend(ctx, f"r2c_{tree}_{run}")
+    rec: dict[str, Any] = {"tree": tree, "run": run, "seq": seq, "pm_exit_s": None}
+    try:
+        drv = be.start()
+        rec["full_boot_wait_s"] = wait_full_boot(be)
+        time.sleep(R2_TREE_WARMUP_S)
+        pm_pid = pm_pid_of(drv)
+        rec["pm_pid"] = pm_pid
+        box: dict[str, Any] = {}
+        if pm_pid is not None:
+            watch_pid_exit(pm_pid, box, "pm")
+        proc = be.proc
+        assert proc is not None
+
+        def wait_launcher() -> None:
+            try:
+                proc.wait(60)
+                box["launcher"] = time.monotonic()
+            except subprocess.TimeoutExpired:
+                pass
+
+        threading.Thread(target=wait_launcher, daemon=True, name="launcher-wait").start()
+        sd = send_async(drv, pm_msg("system.shutdown", {"mode": "graceful"}, "command"), 15.0)
+        end = sd.t_send + 40.0
+        while time.monotonic() < end and ("pm" not in box or "launcher" not in box):
+            time.sleep(0.01)
+        rec["shutdown_reply_s"] = sd.latency()
+        rec["pm_exit_s"] = round(box["pm"] - sd.t_send, 3) if "pm" in box else None
+        rec["launcher_exit_s"] = round(box["launcher"] - sd.t_send, 3) if "launcher" in box else None
+        rec["pm_already_gone_at_open"] = bool(box.get("pm_already_gone"))
+        t0 = time.monotonic()
+        pids_alive([pm_pid] if pm_pid else [])
+        rec["tasklist_call_s"] = round(time.monotonic() - t0, 3)
+    except Exception as exc:  # noqa: BLE001
+        rec["error"] = repr(exc)
+    finally:
+        if be.proc is not None and be.proc.poll() is None and rec.get("pm_exit_s") is None:
+            be.kill()
+        be.stop()
+    print(
+        f"[R2-C {tree} #{run}] pm_exit_s={rec.get('pm_exit_s')} launcher_exit_s={rec.get('launcher_exit_s')} "
+        f"tasklist_call_s={rec.get('tasklist_call_s')}",
+        flush=True,
+    )
+    return rec
+
+
+def run_r2_tree_exit(ctx: "Ctx", main_root: Path, runs: int) -> dict[str, Any]:
+    ctxs = {"branch": _tree_ctx(ctx, ctx.root, R2_TREE_RECIPE), "main": _tree_ctx(ctx, main_root, R2_TREE_RECIPE)}
+    order: list[str] = []
+    recs: list[dict[str, Any]] = []
+    for i in range(1, runs + 1):
+        for tree in ("branch", "main"):
+            order.append(tree)
+            recs.append(_tree_exit_once(ctxs[tree], tree, i, len(order)))
+    for j, r in enumerate(recs, 1):
+        write_run(ctx, "R2C", j, r)
+    th = dict(R2_THRESHOLDS)
+    th["tree_runs_per_tree"] = runs
+    return {"recs": recs, "order": order, "verdict": judge_tree_exit_ab(recs, order, th)}
+
+
+def run_round2(args: argparse.Namespace, root: Path, out: Path) -> int:
+    ctx = Ctx(args, root, out)
+    ctx.round2 = False
+    main_root = Path(args.main_root).resolve()
+    parts = {p.strip() for p in args.round2_parts.split(",") if p.strip()}
+    quick = args.quick
+    started = time.time()
+    summary: dict[str, Any] = {
+        "mode": "round2",
+        "branch_root": str(root),
+        "main_root": str(main_root),
+        "parts": sorted(parts),
+        "thresholds": R2_THRESHOLDS,
+        "started": started,
+    }
+    ok = True
+    if "restart" in parts:
+        r = run_r2_restart(ctx, main_root, 1 if quick else R2_SESSIONS_PER_TREE)
+        summary["R2A"] = {"order": r["order"], "verdict": r["verdict"]}
+        ok &= r["verdict"]["verdict"] == "PASS"
+    if "s4" in parts:
+        s4ctx = _tree_ctx(ctx, root)
+        s4ctx.round2 = True
+        runs = run_s4(s4ctx)
+        summary["R2B"] = {"verdict": judge_s4(runs)}
+        ok &= summary["R2B"]["verdict"]["verdict"] == "PASS"
+    if "tree" in parts:
+        r = run_r2_tree_exit(ctx, main_root, 1 if quick else int(R2_THRESHOLDS["tree_runs_per_tree"]))
+        summary["R2C"] = {"order": r["order"], "verdict": r["verdict"]}
+        ok &= r["verdict"]["verdict"] == "PASS"
+    summary["elapsed_s"] = round(time.time() - started, 1)
+    (out / "round2_summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    lines = ["## Раунд 2", ""]
+    for key in ("R2A", "R2B", "R2C"):
+        if key in summary:
+            v = summary[key]["verdict"]
+            lines.append(f"- {key}: **{v['verdict']}**" + "".join(f"\n  - {x}" for x in v.get("reasons", [])))
+            if "spread" in v:
+                lines.append(f"  - разброс min/median/max: {json.dumps(v['spread'], ensure_ascii=False)}")
+    (out / "results_round2.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+    return 0 if ok else 1
+
+
+def round2_plan(args: argparse.Namespace) -> list[str]:
+    q = args.quick
+    sessions = 1 if q else R2_SESSIONS_PER_TREE
+    runs = 1 if q else int(R2_THRESHOLDS["tree_runs_per_tree"])
+    s4_runs = 1 if q else REPEATS["S4"]
+    return [
+        f"режим: РАУНД 2; части: {args.round2_parts}; quick={q}; ветка: {args.root}; main (только чтение): {args.main_root}",
+        f"R2-A: {sessions} сеанс(а) на дерево, строго A/B/A/B (ветка, main, ветка, main, ...); сеанс = свежий бэкенд, полная "
+        f"загрузка (строка PM 'registration summary'), {', '.join(R2_TARGETS)} x{R2_REPS} через process_restart_verified; "
+        "в JSON весь res, момент отправки/возврата запроса драйвера, error ('timeout' = окно драйвера, не ответ PM), "
+        f"ответ против строки PM 'restarted'; порог: ранний ответ (> {EARLY_REPLY_TOL_S} с до 'restarted') = FAIL, "
+        f"ветка < {R2_THRESHOLDS['max_restart_s']} с",
+        f"R2-B: S4 x{s4_runs} на ветке; выход PM через OpenProcess+WaitForSingleObject (ctypes), выход лаунчера и стоимость "
+        "одного вызова tasklist пишутся отдельно; порог S4 прежний (строка <= +1,2 с, выход PM <= +4,5 с, dns 0)",
+        f"R2-C: выход дерева методом Task 1.1 (test_system_shutdown_live.py:64-100): рецепт {R2_TREE_RECIPE}, полная загрузка "
+        f"+ {R2_TREE_WARMUP_S} с, system.shutdown, метрика = выход процесса PM; {runs} на ветке и {runs} на main, строго по "
+        f"очереди; порог < {R2_THRESHOLDS['max_tree_exit_s']} с, {runs} из {runs} на КАЖДОМ дереве (литерал)",
+        "вывод: <out>/json/R2A_*.json, R2C_*.json, S4_r*.json, <out>/round2_summary.json, <out>/results_round2.md",
+    ]
+
+
+# --------------------------------------------------------------------------------------------------------------
 # Таблицы, план, точка входа
 # --------------------------------------------------------------------------------------------------------------
 def _f(x: Any, nd: int = 3) -> str:
@@ -1257,6 +1724,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--control", action="store_true", help="контроль: S2-S4 на дереве с патчем И1")
     ap.add_argument("--control-root", default=None, help="контрольное дерево (worktree lso-1.9b-inj)")
     ap.add_argument("--inj-patch", default=None, help="путь к I1.patch")
+    ap.add_argument(
+        "--round2", action="store_true", help="раунд 2: рестарт A/B, S4 с WaitForSingleObject, выход дерева main/ветка"
+    )
+    ap.add_argument("--main-root", default=DEFAULT_MAIN_ROOT, help="дерево main (только чтение) для A/B раунда 2")
+    ap.add_argument("--round2-parts", default="restart,s4,tree", help="части раунда 2: restart,s4,tree")
     ap.add_argument("--dry-run", action="store_true", help="напечатать план и пороги, бэкенд не трогать")
     return ap.parse_args(argv)
 
@@ -1313,7 +1785,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if args.control and not (args.control_root and args.inj_patch):
         raise SystemExit("--control требует --control-root и --inj-patch")
-    picked = scenarios_of(args)
+    picked = [] if args.round2 else scenarios_of(args)
+    if args.dry_run and args.round2:
+        print("[dry-run] бэкенд не запускается. План раунда 2:")
+        for line in round2_plan(args):
+            print("  -", line)
+        return 0
     if args.dry_run:
         print("[dry-run] бэкенд не запускается. План:")
         for line in build_plan(args):
@@ -1327,6 +1804,8 @@ def main(argv: list[str] | None = None) -> int:
     out = (Path(args.out) if args.out else HERE / "results" / time.strftime("%Y%m%d_%H%M%S")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     root = Path(args.control_root if args.control else args.root).resolve()
+    if args.round2:
+        return run_round2(args, root, out)
     restart_targets = [x.strip() for x in args.s5_restart.split(",") if x.strip()]
     started = time.time()
     summary: dict[str, Any] = {
