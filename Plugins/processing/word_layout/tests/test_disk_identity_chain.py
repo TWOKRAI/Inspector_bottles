@@ -24,8 +24,8 @@ _LINE_CFG = {
     "mode": "zone_edge",
     "rearm_frames": 2,
     # C-42: zone_edge помнит место пропажи; значения — как в рецепте letter_robot_sim.yaml.
-    "max_match_distance": 100,
-    "max_age": 4,
+    "max_match_distance": 120,
+    "max_age": 3,
 }
 _CROP_CFG = {
     "size_mode": "radius",
@@ -88,7 +88,7 @@ def test_real_chain_two_same_letters_two_cells() -> None:
 def test_real_chain_loss_inside_zone_one_disc_one_slot() -> None:
     """C-42: потеря детекции на 3 кадра внутри зоны (> rearm_frames=2) — тот же диск: один track_id, одно задание.
 
-    Диск едет по x с шагом 6 px/кадр (медленная лента): v × (L + 1) = 24 px <= max_match_distance=100, L=3 <= max_age=4.
+    Диск едет по x с шагом 6 px/кадр (медленная лента): v × (L + 1) = 24 px <= max_match_distance=120, L=3 <= max_age=3.
     До правки второе событие давало track_id 2 и второе задание на слот 6.
     """
     line = _mk(LineFilterPlugin, _LINE_CFG)
@@ -146,7 +146,7 @@ def _run_sim_belt(frames: list[int | None]) -> tuple[list[object], list[int | No
 def test_sim_belt_loss_of_two_frames_inside_zone_one_disc_one_slot() -> None:
     """C-42, физика sim (33 px/кадр, значения рецепта): потеря 2 кадров подряд внутри зоны — тот же диск.
 
-    Диск виден на x=326, нет на 359 и 392, снова виден на 425: 99 px <= max_match_distance=100.
+    Диск виден на x=326, нет на 359 и 392, снова виден на 425: 99 px <= max_match_distance=120 (запас 21 px).
     С max_match_distance=60 здесь было бы второе событие (track_id 2, слот 6).
     """
     frames = [None, None, 260, 293, 326, None, None, 425, 458, 491]  # два пустых кадра взвода (О1) + проход
@@ -156,8 +156,11 @@ def test_sim_belt_loss_of_two_frames_inside_zone_one_disc_one_slot() -> None:
 
 
 def test_sim_belt_two_discs_give_two_events() -> None:
-    """C-42, физика sim: второй диск входит у дальнего края после ухода первого (5 пустых кадров) — два события."""
-    frames = [None, None, *_SIM_PASS_XS, *[None] * 5, *_SIM_PASS_XS]
+    """C-42, физика sim: второй диск входит у дальнего края через 3 пустых кадра (= max_age) — два события.
+
+    Окно max_age ещё открыто, поэтому два диска разделяет только проверка расстояния: 231 px > max_match_distance=120.
+    """
+    frames = [None, None, *_SIM_PASS_XS, *[None] * 3, *_SIM_PASS_XS]
     tids, slots = _run_sim_belt(frames)
     assert tids == [1, 2]
     assert slots == [2, 6]
