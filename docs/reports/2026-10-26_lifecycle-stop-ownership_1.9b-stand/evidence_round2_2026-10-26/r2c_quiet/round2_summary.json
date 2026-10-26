@@ -1,0 +1,62 @@
+{
+  "mode": "round2",
+  "branch_root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.9b",
+  "main_root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles",
+  "parts": [
+    "tree"
+  ],
+  "thresholds": {
+    "max_restart_s": 5.0,
+    "max_tree_exit_s": 2.0,
+    "tree_runs_per_tree": 10
+  },
+  "started": 1793022743.815871,
+  "R2C": {
+    "order": [
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main"
+    ],
+    "verdict": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "spread": {
+        "branch": {
+          "n": 10,
+          "unanswered": 0,
+          "min": 0.985,
+          "median": 1.2734999999999999,
+          "max": 1.547,
+          "p99": 1.547
+        },
+        "main": {
+          "n": 10,
+          "unanswered": 0,
+          "min": 0.953,
+          "median": 1.4845000000000002,
+          "max": 1.578,
+          "p99": 1.578
+        }
+      }
+    }
+  },
+  "elapsed_s": 349.1
+}
