@@ -112,8 +112,10 @@ class DeviceManager(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         """Загрузить реестр из store (store=None — пустой in-memory реестр)."""
         if self._store is not None:
-            for e in self._store.load():
-                self._check_kind(e.kind)  # неизвестный вид в файле — ValueError при загрузке, как до SPI.c1b
+            loaded = self._store.load()
+            for e in loaded:  # все записи проверяются до первого присваивания: неизвестный вид — реестр пуст
+                self._check_kind(e.kind)  # ValueError при загрузке, как до SPI.c1b
+            for e in loaded:
                 self._entries[e.id] = e
         self.is_initialized = True
         return True
@@ -204,6 +206,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         Args:
             kind:    Тип устройства (``robot``, ``vfd``, ...).
             factory: ``(entry, protocol) -> BaseDeviceDriver``.
+
+        Фабрику нового вида регистрировать ДО ``initialize()``: вид записи реестра проверяется по фабрикам при загрузке.
         """
         self._factories[kind] = factory
 

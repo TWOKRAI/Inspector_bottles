@@ -104,6 +104,20 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         # Метка последней попытки переподключения (часы ``self._clock``); подкласс вправе задать иное начало
         self._last_reconnect: float = 0.0
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Громко отказать классу, у которого ``request_stop`` и ``stop_aware`` не совпадают.
+
+        Менеджер шлёт стоп фазы 1 только драйверам с ``stop_aware``: метод без флага стоп молча не получит, флаг без
+        метода даст ``AttributeError`` на каждой остановке. Проверка — при определении класса, для любого вида.
+        """
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "request_stop") != bool(cls.stop_aware):
+            raise TypeError(
+                f"{cls.__name__}: stop_aware={bool(cls.stop_aware)!r}, а метод request_stop "
+                f"{'есть' if hasattr(cls, 'request_stop') else 'отсутствует'} — задай stop_aware = True ровно "
+                f"драйверу с request_stop"
+            )
+
     def _reconnect_due(self) -> bool:
         """Затвор попыток переподключения: True и метка = «сейчас», если прошло ``RECONNECT_THROTTLE_S``.
 

@@ -382,3 +382,22 @@ class TestDriverOptions:
         mgr.upsert({"id": "r2", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
         with pytest.raises(TypeError, match="no_such_option"):
             mgr.connect("r2")
+
+
+class TestInitializeAllOrNothing:
+    """Ревью п.4: файл реестра с неизвестным видом — ``ValueError``, реестр пуст, менеджер не инициализирован."""
+
+    def test_unknown_kind_in_file_loads_nothing(self, tmp_path: Path) -> None:
+        import yaml
+
+        ok = {"id": "ok1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}}
+        bad = {"id": "bad", "name": "C", "kind": "camera", "transport": {"type": "tcp"}}
+        path = tmp_path / "devices.yaml"
+        path.write_text(yaml.safe_dump({"devices": [ok, bad]}), encoding="utf-8")
+        mgr = DeviceManager(RegistryStore(path))
+
+        with pytest.raises(ValueError):
+            mgr.initialize()
+
+        assert mgr.snapshot_registry() == []
+        assert mgr.is_initialized is False

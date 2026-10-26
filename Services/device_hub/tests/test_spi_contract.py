@@ -536,3 +536,74 @@ def test_reconnect_due_gate_opens_once_per_interval() -> None:
         now[0] = t
         seen.append(drv.due())
     assert seen == [False, False, True, False, True, False, True]
+
+
+def test_reconnect_initial_mark_per_class_is_literal() -> None:
+    """Начальная метка затвора: при часах 0.0 первый вызов у v1 и v2 закрыт (метка 0.0), у ПЧ открыт (-inf)."""
+
+    class _V1(RobotDriver):
+        def first_due(self) -> bool:
+            return self._reconnect_due()
+
+    class _V2(RobotDriverV2):
+        def first_due(self) -> bool:
+            return self._reconnect_due()
+
+    class _Vfd(VfdDriver):
+        def first_due(self) -> bool:
+            return self._reconnect_due()
+
+    def clock() -> float:
+        return 0.0
+
+    assert _V1(_entry("robot", "delta_universal3"), clock=clock).first_due() is False
+    assert _V2(_entry("robot", "delta_v2"), None, clock=clock).first_due() is False
+    vfd_entry = _entry("vfd", "gd20_bridge", {"type": "bridge", "bridge": "robot_1"})
+    assert _Vfd(vfd_entry, clock=clock).first_due() is True
+
+
+# --- request_stop и stop_aware определяются вместе (громко при определении класса) ---
+
+
+def test_class_with_request_stop_without_stop_aware_raises() -> None:
+    with pytest.raises(TypeError, match="request_stop"):
+
+        class _Silent(BaseDeviceDriver):
+            kind = "silent"
+
+            def request_stop(self, deadline: float | None = None) -> None: ...
+
+
+def test_class_with_stop_aware_without_request_stop_raises() -> None:
+    with pytest.raises(TypeError, match="stop_aware"):
+
+        class _Phantom(BaseDeviceDriver):
+            kind = "phantom"
+            stop_aware = True
+
+
+def test_class_with_both_or_neither_is_defined_and_inherits() -> None:
+    class _Both(BaseDeviceDriver):
+        kind = "both"
+        stop_aware = True
+
+        def request_stop(self, deadline: float | None = None) -> None: ...
+
+    class _Neither(BaseDeviceDriver):
+        kind = "neither"
+
+    class _Child(_Both):  # наследник держит оба признака — определяется без ошибки
+        kind = "child"
+
+    assert (_Both.stop_aware, _Neither.stop_aware, _Child.stop_aware) == (True, False, True)
+
+
+def test_five_shipped_drivers_are_defined_with_matching_pair() -> None:
+    pairs = {cls.__name__: (cls.stop_aware, hasattr(cls, "request_stop")) for cls in _BUILDERS}
+    assert pairs == {
+        "RobotDriver": (False, False),
+        "RobotDriverV2": (True, True),
+        "VfdDriver": (False, False),
+        "HikvisionDriver": (False, False),
+        "GenericModbusDriver": (False, False),
+    }
