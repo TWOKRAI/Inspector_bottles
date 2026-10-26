@@ -194,8 +194,8 @@ Launch the **tester** agent (Sonnet) in `MODE: regression` (pass it through the 
     for one module (24 of 24 killed) — the cost is the Task's tests × mutants, not the repo size.
 - If PASS (suite + live-smoke; mutation survivors killed or explained) → step 4 (review)
 - If FAIL:
-  - **Iteration 1 (FAIL)**: launch **debugger** (Sonnet) with the failing test and the stack → either debugger fixes it in scope, or it gives a diagnosis → `developer`/`teamlead` applies the fix → tester retries regression
-  - **Iteration 2 (repeat FAIL)**: debugger + developer again → tester retry
+  - **Iteration 1 (FAIL)**: re-summon the **author** (`developer`/`teamlead`, `SendMessage` by agentId) with the failing test and the stack → it diagnoses (code or test wrong, with evidence) and fixes → tester retries regression
+  - **Iteration 2 (repeat FAIL)**: the author again → tester retry. `debugger` (Sonnet) only when the red is in code no agent of this task wrote (`project-rules` §5 «One executor per task»)
   - **Iteration 3 (still FAIL)**: **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
 
 ### 4. Review
@@ -261,9 +261,9 @@ Run `/dev:ship`:
 plan → (developer)│                                                          │
                   └─ impl-only / n/a ───────────────────────────────────────→┴→ tester(RED) → impl(GREEN) → [refactor] → tester(regression)
                                                                                                                        ↓ PASS  ↓ FAIL
-                                                                                                                       review  debugger → impl [fix] → tester (retry)
+                                                                                                                       review  author (re-summoned) [diagnose+fix] → tester (retry)
                                                                                                                                        ↓ FAIL (iteration 2)
-                                                                                                                                       debugger → impl → tester
+                                                                                                                                       same author → tester
                                                                                                                                            ↓ FAIL (iteration 3)
                                                                                                                                            ESCALATE → teamlead (rethink)
 
@@ -293,7 +293,7 @@ For `impl-only` / `n/a` the `tester(RED) → impl(GREEN)` nodes on the graph are
   (who writes to whom, the `ESCALATION -> <role>` format) and [`team-protocol`](../skills/team-protocol/SKILL.md)
   §4 (the lead is a mailman, not a substitute for the level above). §3/§4/§7 spell out only who does what
   on a given iteration of their own stage
-- debugger is invoked automatically on the first FAIL from tester (don't wait for a manual /dev:debug)
+- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` only for code no agent of this task wrote
 - If the task is clearly Senior+ → go straight to teamlead for implementation (not developer)
 - If it's an architectural change — reviewer checks that there's an entry in `DECISIONS.md` (or tech-writer was called)
 - By default the stages are **sequential**; for a plan with independent Tasks — opt-in **Parallel mode** (see below)

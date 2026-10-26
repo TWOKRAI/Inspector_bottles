@@ -47,4 +47,4 @@ Input: $ARGUMENTS — description of the bug, a reproduction command, or a path 
 
 ## Automatic activation
 
-`/dev:pipeline` automatically calls the debugger on a FAIL from the tester (iterations 1 and 2). A manual `/dev:debug` is needed when the `/dev:pipeline` cycle isn't running, or the Director wants a diagnosis outside the pipeline.
+None. A red against code written in the current task goes back to its author, re-summoned by agentId (`project-rules` §5 «One executor per task»). Call `/dev:debug` for code no agent of the task wrote (a regression in a neighbouring module, an old red), or after the author's 2nd failed iteration on the same red.

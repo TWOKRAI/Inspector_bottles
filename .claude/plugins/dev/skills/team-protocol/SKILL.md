@@ -21,7 +21,7 @@ in the brief: `Handoff:` is per-task and no preload carries it.
 | S2 | Team assembly | lead | transport §8, sandbox mode §6, briefs, worktrees | clean tree; no second session in it; branch ≠ `main` |
 | S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 iterations → `teamlead` |
 | S4 | Injections | lead, never delegated | predicted red set vs the fact | recorded in the plan |
-| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → debugger loop |
+| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → back to the author |
 | S6 | Integration | `integrator` | dsm-delta, coverage, god nodes | `integration_gate.py` |
 | S7 | Phase acceptance | `cto` | ACCEPT / WITH CONDITIONS / BLOCK | three lenses, reproduction |
 | S8 | Merge-back and close | lead → `cto` → owner | branches merged, plan DONE, session log, team stopped | push only on the owner's word |
@@ -49,7 +49,7 @@ message buys nothing. Full role ↔ agent roster: `.claude/plugins/dev/modes/dev
 | impl-only / bugfix / review fix / wiring, design by the lead | `developer`(REDS in the brief: red run before the `src` edit, break-injection) → `reviewer` |
 | Mechanical, diff already written | `junior` → `developer`(check, commit) |
 | Documentation | `docs-writer`\|`tech-writer` → `reviewer`(express) |
-| Regression FAIL | `tester`(FAIL) → `debugger` → `developer` → `tester`(retry); 2 iterations → `teamlead` |
+| Regression FAIL | `tester`(FAIL) → the same author re-summoned (diagnosis + fix) → `tester`(retry); 2 iterations → `teamlead`; `debugger` only for code no agent of the task wrote (`project-rules` §5) |
 | Cross-module defect | `investigator`(diagnosis) → `teamlead` → `reviewer` |
 
 Chain by size (Д47): with the lead's line-by-line design a `tester` → `developer` pair cost

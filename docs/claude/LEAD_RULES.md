@@ -233,6 +233,43 @@ until one re-summoned subtask is measured in cache_read tokens, re-summon for re
 - **The live stand stays mandatory before merge.** It found two things no review predicted, one of them
   contradicting the CTO's own forecast (4.7d-5: `reject_delay_ms=100` under `every` → zero verdicts).
 
+## One executor per task (owner, 2026-10-26)
+
+Rule: `project-rules` §5 «One executor per task»; pointer in `.claude/CLAUDE.md` «The lead coordinates».
+In force for each lane from its next `/clear` after commit of this section; a task already running
+finishes under the old chain.
+
+**Source.** Anthropic, «Building agents: When to fold subagents into your main agent loop»
+(claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop),
+read twice by the lead on 2026-10-26 (WebFetch gives an extract, so the quotes are short and were
+checked by a second request). What it keeps for subagents: they «are effective at verification,
+parallel work, and modular permissioning»; good split points include «black-box verification».
+What it warns against: agents «split by problem type» play a «telephone game», each handoff losing
+fidelity; it advises «dividing by context» — a piece of work that needs little from the rest of the
+system and hands back a compact result. There is no section titled «When to keep subagents»: that
+list sits in the introduction.
+
+**Mapping to this project.** Blind `tester`, fresh `reviewer`, lanes and the coordinating lead are
+verification, parallel work and fresh context — they stay. What breaks is the role relay inside one
+task over the same files: `developer` → `debugger` → a new `developer` for injection patches.
+
+**Measured cost of the relay.** Task 1.9b (`docs/handoffs/2026-10-25_lane-F-T1.9b-pause2.md`,
+agentId table): developer 221k → debugger 146k (cause of R8: the tester's harness, not the code) →
+a fresh developer for 14 injection patches 124k = **491k** on one set of files. A re-summon costs
++3…56k against 107–228k for a fresh entry («Persistent agents» above), so the two fresh entries
+would have been roughly +60…110k for the author (estimate, not a measurement). Related measurement
+Д47 (`team-protocol` §3): one developer writing its own reds 92–105k per piece against 210–237k for
+a `tester` → `developer` pair at the same quality.
+
+**What changed.** The author diagnoses every red against its code — a blind tester's red too, with
+evidence of whether the code or the test is wrong — and writes the injection patches on its files
+from the lead's predictions. `debugger` remains for code no agent of the task wrote (a neighbour's
+regression, an old red) and after the author's 2nd failed iteration. The `tester FAIL → debugger`
+loop was rewritten in `/dev:pipeline`, `/dev:team`, `/dev:debug` and `team-protocol` (S5 and the
+«Regression FAIL» chain). Unchanged: the three test-authorship roles, the lead's predictions before
+any injection run, stage 6 (`investigator` for live defects), `backend_ctl` access for every role
+that had it.
+
 ## Commands — history
 
 Removed from the quick reference in `.claude/CLAUDE.md`: "(bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review; the

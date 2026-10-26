@@ -66,6 +66,14 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
   Grep / qex / sentrux before a helper. The helper's output is a map, not evidence: you read the decisive
   lines and run the reproduction yourself before a verdict. Helpers run `run_in_background: false`, stay
   inside your FILES and boundaries, never commit; a reviewer's helper never fixes code.
+- **One executor per task** (owner, 2026-10-26). The implementer (`developer` / `teamlead`) owns
+  its files end to end: the code, the diagnosis of every red against it (a blind tester's red too:
+  the author decides whether the code or the test is wrong and shows the evidence), and the
+  injection patches on its files from the lead's predictions. The lead re-summons the author by
+  agentId (`SendMessage`); no second role on the same files. `debugger` only for code no agent of
+  this task wrote, or after the author's 2nd failed iteration on the same red. `tester` and
+  `reviewer` stay independent and fresh. Split agents by context (a self-contained piece that
+  returns a compact result), never by role over the same files.
 - **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,
   a file outside FILES → stop and ask. Apply every instruction to every listed file; targeted edits,
   not whole-file rewrites. A pre-existing bug is a report line, not a change.

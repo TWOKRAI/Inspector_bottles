@@ -64,7 +64,7 @@ executor by task level — §2 above. Here, only what gets decided when assembli
 
 - Always: you (lead/PM) and `reviewer` — once on the Task spec before the tester, and synchronously after every task.
 - `tester` — **once per mechanism, before implementation**, in a worktree on a pre-impl commit.
-- `debugger` — on a FAIL from the tester. `cto` — phase acceptance, merge gate, `teamlead` ↔
+- A FAIL from the tester goes to the author (the same teammate), not to a new role; `debugger` only for code no teammate wrote (`project-rules` §5 «One executor per task»). `cto` — phase acceptance, merge gate, `teamlead` ↔
   `reviewer` dispute; **not** per task.
 - `teamlead` — when you expect escalations (why exactly — `team-protocol` §4).
 
