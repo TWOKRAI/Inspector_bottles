@@ -293,7 +293,7 @@ For `impl-only` / `n/a` the `tester(RED) → impl(GREEN)` nodes on the graph are
   (who writes to whom, the `ESCALATION -> <role>` format) and [`team-protocol`](../skills/team-protocol/SKILL.md)
   §4 (the lead is a mailman, not a substitute for the level above). §3/§4/§7 spell out only who does what
   on a given iteration of their own stage
-- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` only for code no agent of this task wrote
+- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` from the start for code no agent of this task wrote, and one diagnosis on the 3rd iteration
 - If the task is clearly Senior+ → go straight to teamlead for implementation (not developer)
 - If it's an architectural change — reviewer checks that there's an entry in `DECISIONS.md` (or tech-writer was called)
 - By default the stages are **sequential**; for a plan with independent Tasks — opt-in **Parallel mode** (see below)

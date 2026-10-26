@@ -19,7 +19,7 @@ in the brief: `Handoff:` is per-task and no preload carries it.
 | S1 | Plan | `manager` (4+ files), else lead | `plans/<date>_<slug>.md` with Task X.Y | frontmatter complete |
 | S1′ | Plan review | `reviewer` in `MODE: plan` | checklist verdict | **owner** approves → branch + plan commit |
 | S2 | Team assembly | lead | transport §8, sandbox mode §6, briefs, worktrees | clean tree; no second session in it; branch ≠ `main` |
-| S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 iterations → `teamlead` |
+| S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 author iterations → one `debugger` diagnosis → `teamlead` |
 | S4 | Injections | lead: predictions + verdict; the run → an agent with those predictions | predicted red set vs the fact | recorded in the plan |
 | S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → back to the author |
 | S6 | Integration | `integrator` | dsm-delta, coverage, god nodes | `integration_gate.py` |
