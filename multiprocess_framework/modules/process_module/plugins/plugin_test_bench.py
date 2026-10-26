@@ -74,6 +74,7 @@ class PluginTestBench:
 
         # Зарегистрированные команды (перехватываем из mock)
         self.registered_commands: dict[str, Any] = {}
+        self.registered_command_options: dict[str, dict[str, Any]] = {}  # именованные опции (command_options)
         self._mock_process.command_manager.register_command = self._capture_command
 
     @property
@@ -113,6 +114,7 @@ class PluginTestBench:
         """Снимок метрик."""
         return self.metrics.snapshot()
 
-    def _capture_command(self, name: str, handler: Any) -> None:
-        """Перехватчик для command_manager.register_command."""
+    def _capture_command(self, name: str, handler: Any, **kwargs: Any) -> None:
+        """Перехватчик для command_manager.register_command (именованные опции хука — отдельно)."""
         self.registered_commands[name] = handler
+        self.registered_command_options[name] = dict(kwargs)

@@ -64,7 +64,6 @@ def _make_plugin(
     labels: list[str] | None = None,
     top_k: int = 3,
     draw_overlay: bool = False,
-    every_n: int = 1,
     angle_deg: float | None = None,
 ) -> tuple[MLInferencePlugin, _FakeBackend]:
     """Плагин с подставленным движком: модель 'fake' в каталоге нет → подменяем backend руками."""
@@ -75,7 +74,6 @@ def _make_plugin(
         "confidence_threshold": threshold,
         "top_k": top_k,
         "draw_overlay": draw_overlay,
-        "inference_every_n": every_n,
     }
     ctx.registers = None
     ctx.state_proxy = None
@@ -191,20 +189,6 @@ def test_below_threshold_top1_carries_angle_fields(tmp_path: Path) -> None:
     assert top["below_threshold"] is True
     assert top["angle_valid"] is True
     assert top["angle_deg"] == pytest.approx(123.0, abs=0.01)
-
-
-def test_below_threshold_predictions_reused_between_inference_frames(tmp_path: Path) -> None:
-    """inference_every_n=3: ниже порога результат кэшируется, а не пересчитывается каждый кадр.
-
-    Кадры 1..4: прогоны на 1-м и 3-м → backend.infer ровно 2 раза; на всех кадрах predictions
-    непуст и топ-1 помечен. Пустой кэш (как сейчас ниже порога) заставил бы гонять сеть 4 раза.
-    """
-    plugin, backend = _make_plugin(tmp_path, threshold=0.5, every_n=3)
-    outs = [_run(plugin) for _ in range(4)]
-    assert backend.infer_calls == 2
-    for out in outs:
-        assert out["predictions"][0]["label"] == _TOP1_LABEL
-        assert out["predictions"][0]["below_threshold"] is True
 
 
 # --------------------------------------------------------------------------- #

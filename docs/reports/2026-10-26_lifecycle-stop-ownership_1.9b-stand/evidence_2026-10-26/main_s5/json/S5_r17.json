@@ -1,0 +1,8 @@
+{
+  "kind": "shutdown",
+  "target": "run 10",
+  "elapsed_s": 10.031,
+  "waited_s": 10.03,
+  "survivors": [],
+  "n_pids": 10
+}

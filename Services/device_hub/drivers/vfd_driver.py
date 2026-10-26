@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver
+from Services.device_hub.spi import VFD_OPS
 
 # Минимальный интервал между попытками (ре)подключения VFD, сек
 _VFD_RECONNECT_THROTTLE_SEC = 3.0
@@ -31,6 +32,8 @@ class VfdDriver(BaseDeviceDriver):
     """
 
     kind = "vfd"
+    OP_SPECS = VFD_OPS  # описания операций _OPS (SPI хаба)
+    RECONNECT_THROTTLE_S = _VFD_RECONNECT_THROTTLE_SEC
 
     def __init__(
         self,
@@ -120,11 +123,12 @@ class VfdDriver(BaseDeviceDriver):
         self._vfd_client = None
         self._last_quality = "bad"
 
-    def set_degraded(self) -> None:
-        """Перевести в деградированное состояние (носитель отключился)."""
+    def set_degraded(self) -> bool:
+        """Перевести в деградированное состояние (носитель отключился); True — деградация наступила."""
         self._vfd_client = None
         self._last_quality = "bad"
         self._bridge_alive = False
+        return True
 
     # ------------------------------------------------------------------ #
     # Tick
@@ -260,13 +264,11 @@ class VfdDriver(BaseDeviceDriver):
         Возвращает snapshot: quality=bad + reason при неудаче.
         Не спамит connect каждый тик — throttle через _last_reconnect.
         """
-        now = self._clock()
-        if now - self._last_reconnect < _VFD_RECONNECT_THROTTLE_SEC:
+        if not self._reconnect_due():
             return self.snapshot(
                 data={"reason": "ожидание повторного подключения"},
                 quality="bad",
             )
-        self._last_reconnect = now
         self._record_reconnect()
         try:
             ok = self.connect()

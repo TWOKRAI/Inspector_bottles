@@ -16,6 +16,8 @@ errors.py              — иерархия ошибок
 registry/
   entry.py             — DeviceEntry (dataclass, to_dict/from_dict)
   store.py             — RegistryStore (atomic YAML)
+spi.py                 — SPI: Protocol DeviceDriver, OpSpec/OpSource, каталоги операций (ADR-DH-012)
+kinds.py               — таблица видов: фабрики драйверов менеджера и источники команд из OP_SPECS (ADR-DH-012)
 transports.py          — build_transport (tcp/rtu/bridge)
 manager.py             — DeviceManager (BaseManager + ObservableMixin)
 drivers/
@@ -28,6 +30,54 @@ drivers/
   generic_modbus_driver.py — GenericModbusDriver (универсальный)
 tests/
 ```
+
+## SPI драйвера и команды хаба (ADR-DH-012)
+
+`spi.py` (только stdlib) — контракт:
+
+- `DeviceDriver` / `StopAwareDriver` — `Protocol` (статический контракт; `isinstance` во время работы не зовётся).
+  Умолчания — атрибуты класса `BaseDeviceDriver`: `OP_SPECS`, `stop_aware`, `transport`, `disconnect_pending`,
+  `stop_unconfirmed(_text)`, `last_io`, методы `request_disconnect()` и `set_degraded() -> bool`. Менеджер и плагин
+  читают драйвер напрямую, без `getattr`. `stop_aware = True` — драйвер получает стоп фазы 1 остановки
+  (`request_stop`), поток рассылки заводится только таким.
+- `OpSpec(name, description, args_schema, needs_link, executor, immediate)` — одна операция; `OpSource(prefix, kind,
+  route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (17), `ROBOT_V1_OPS` (27),
+  `ROBOT_DATA_OPS` (10, офлайн, `executor="device_io"`), `VFD_OPS` (5). Драйвер ссылается на свой каталог
+  (`OP_SPECS = ROBOT_V2_OPS`). Всего 55 команд. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
+  источника — `ValueError`.
+- `kinds.py` — таблица видов, один источник: строка `DeviceKind(kind, drivers, prefix, data_ops, build)` — классы
+  драйверов по протоколу записи (`"*"` — любой другой), префикс команд, операции данных вида, сборка драйвера. Из
+  `DEFAULT_KINDS` выводятся фабрики по умолчанию `DeviceManager` (допустимый вид = вид с фабрикой) и источники команд
+  `command_sources` / `DEFAULT_SOURCES` — из `OP_SPECS` классов драйверов, не из кортежей `spi.py`. Импорты пакета:
+  `spi` <- `drivers` <- `kinds` <- `manager` / плагин.
+- Команды `robot_*` / `vfd_*` ставит `install_op_commands(DeviceHubPlugin, command_sources(device_kinds))` при импорте
+  модуля плагина (copy-on-write `commands`); вручную остались 11 `device_*` и 6 `hik_*`. Имена 72 команд не менялись.
+
+**Новый вид устройства = класс драйвера + одна строка `DeviceKind` в `DEFAULT_KINDS` (правка хаба в одну строку
+`kinds.py`):** класс с `kind`, `OP_SPECS` и методом `call`; из строки менеджер получает фабрику, плагин — команды
+`<префикс>_<операция>`; `manager.py` и `plugin.py` не правятся. Вне дерева — один шаг: подкласс плагина с
+`device_kinds = (*DEFAULT_KINDS, строка)`; команды новых строк ставит `DeviceHubPlugin.__init_subclass__` (родитель не
+меняется; снять или изменить команду родителя нельзя — `ValueError`). Подстановка класса драйвера (тесты) — тоже
+своей строкой таблицы (`dataclasses.replace(строка, drivers={..., "delta_v2": Подкласс})`); строка с классом не
+драйвером или с чужим `kind` не строится (`TypeError`). `register_driver_factory(kind, factory)` — шов прямого
+использования `DeviceManager` (тесты): фабрику регистрировать ДО `initialize()` (записи реестра проверяются по фабрикам
+при загрузке; неизвестный вид — `ValueError`). Процесс хаба создаёт менеджер в `configure` плагина и сразу зовёт
+`initialize()` — его виды только из таблицы. Класс драйвера, у которого `request_stop` и `stop_aware` не совпадают, не
+определяется (`TypeError` в `BaseDeviceDriver.__init_subclass__`); `stop_aware` — только простой `bool` атрибут
+класса (стоп — способность класса, не экземпляра).
+
+**`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
+`{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
+идут на именованный исполнитель `device_io` процесса `devices` (`base.yaml`, `executors.device_io: {max_workers: 4,
+max_pending: 64}` — умолчания `ExecutorSpec`, не замер), ключ порядка — `device_id`. Операции `immediate` в очередь
+исполнителя не ставятся. Без исполнителя в процессе команда идёт запасным путём на потоке роутера (INFO в логе).
+
+**`driver_options`.** `DeviceManager(..., driver_options={kind | (kind, protocol): {имя: значение}})` и
+`set_driver_options(kind, protocol=None, **opts)` — именованные аргументы конструктора драйверов. Ключ `kind` — все
+протоколы вида, ключ `(kind, protocol)` — только записи с этим протоколом, его опции перекрывают видовые. Для тестов:
+`client_factory` робота v2 (класс клиента `(transport, cfg) -> RobotClientV2`) по ключу `("robot", "delta_v2")` — v1 в
+том же реестре его не получает. Действует на драйверы, создаваемые ПОСЛЕ вызова; неизвестная драйверу опция —
+`TypeError` его конструктора. Тестовый помощник — `ClientRecorder` в `tests/conftest.py`.
 
 ## Драйвер робота v2 — пакет
 

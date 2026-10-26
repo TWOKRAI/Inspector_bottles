@@ -1,9 +1,9 @@
 ---
-description: Full development cycle in one command — plan → implement → test → review → ship (with failure-recovery via debugger)
+description: Full development cycle in one command — plan → implement → test → review → ship (a red goes back to its author)
 disable-model-invocation: true
 ---
 
-Automatic full cycle. The Director drives every stage. Explicit failure-recovery loops via `debugger` and escalation to `teamlead`.
+Automatic full cycle. The Director drives every stage. Explicit failure-recovery loop through the re-summoned author, one `debugger` diagnosis on the 3rd iteration, escalation to `teamlead`.
 Default transport is subagents; `--team` and `--workflow` are selected in §1′.
 
 ## Algorithm
@@ -194,9 +194,9 @@ Launch the **tester** agent (Sonnet) in `MODE: regression` (pass it through the 
     for one module (24 of 24 killed) — the cost is the Task's tests × mutants, not the repo size.
 - If PASS (suite + live-smoke; mutation survivors killed or explained) → step 4 (review)
 - If FAIL:
-  - **Iteration 1 (FAIL)**: re-summon the **author** (`developer`/`teamlead`, `SendMessage` by agentId) with the failing test and the stack → it diagnoses (code or test wrong, with evidence) and fixes → tester retries regression
-  - **Iteration 2 (repeat FAIL)**: the author again → tester retry. `debugger` (Sonnet) only when the red is in code no agent of this task wrote (`project-rules` §5 «One executor per task»)
-  - **Iteration 3 (still FAIL)**: **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
+  - **Iteration 1 (FAIL)**: re-summon the **author** (`developer`/`teamlead`, `SendMessage` by agentId) with the failing test and the stack → it diagnoses with evidence: code wrong → it fixes; test wrong → it stops and reports to the lead, the tester's file stays untouched → tester retries regression
+  - **Iteration 2 (repeat FAIL)**: the author again → tester retry. A red in code no agent of this task wrote goes to `debugger` (Sonnet) from the start (`project-rules` §5 «One executor per task»)
+  - **Iteration 3 (still FAIL)**: one `debugger` diagnosis (report only, `project-rules` §5) → the author applies it → tester retry; still red → **STOP**, escalate to **teamlead** (Opus) — either the spec is inadequate or the architecture needs revisiting
 
 ### 4. Review
 Launch the **reviewer** agent (Opus, `run_in_background: false` — the verdict is needed before step 5):
@@ -265,7 +265,7 @@ plan → (developer)│                                                         
                                                                                                                                        ↓ FAIL (iteration 2)
                                                                                                                                        same author → tester
                                                                                                                                            ↓ FAIL (iteration 3)
-                                                                                                                                           ESCALATE → teamlead (rethink)
+                                                                                                                                           debugger diagnosis → author → tester; still red → ESCALATE → teamlead (rethink)
 
 review → [APPROVED] → integration (S7) → docs? → ship
 review → [CHANGES] → impl → tester(regression) → review (iteration 2)
@@ -293,7 +293,7 @@ For `impl-only` / `n/a` the `tester(RED) → impl(GREEN)` nodes on the graph are
   (who writes to whom, the `ESCALATION -> <role>` format) and [`team-protocol`](../skills/team-protocol/SKILL.md)
   §4 (the lead is a mailman, not a substitute for the level above). §3/§4/§7 spell out only who does what
   on a given iteration of their own stage
-- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` only for code no agent of this task wrote
+- A FAIL from tester goes back to the re-summoned author, not to a new role (`project-rules` §5 «One executor per task»); `debugger` from the start for code no agent of this task wrote, and one diagnosis on the 3rd iteration
 - If the task is clearly Senior+ → go straight to teamlead for implementation (not developer)
 - If it's an architectural change — reviewer checks that there's an entry in `DECISIONS.md` (or tech-writer was called)
 - By default the stages are **sequential**; for a plan with independent Tasks — opt-in **Parallel mode** (see below)

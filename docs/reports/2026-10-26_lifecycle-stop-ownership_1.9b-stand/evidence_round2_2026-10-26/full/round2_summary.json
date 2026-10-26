@@ -1,0 +1,143 @@
+{
+  "mode": "round2",
+  "branch_root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.9b",
+  "main_root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles",
+  "parts": [
+    "restart",
+    "s4",
+    "tree"
+  ],
+  "thresholds": {
+    "max_restart_s": 5.0,
+    "max_tree_exit_s": 2.0,
+    "tree_runs_per_tree": 10
+  },
+  "started": 1793018857.0743043,
+  "R2A": {
+    "order": [
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main"
+    ],
+    "verdict": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "spread": {
+        "branch/camera_0": {
+          "n": 9,
+          "unanswered": 0,
+          "min": 2.03,
+          "median": 4.16,
+          "max": 4.45,
+          "p99": 4.45
+        },
+        "branch/devices": {
+          "n": 9,
+          "unanswered": 0,
+          "min": 1.56,
+          "median": 1.88,
+          "max": 2.14,
+          "p99": 2.14
+        },
+        "main/camera_0": {
+          "n": 9,
+          "unanswered": 0,
+          "min": 2.03,
+          "median": 4.23,
+          "max": 4.7,
+          "p99": 4.7
+        },
+        "main/devices": {
+          "n": 9,
+          "unanswered": 0,
+          "min": 1.59,
+          "median": 1.97,
+          "max": 2.94,
+          "p99": 2.94
+        }
+      },
+      "unpaired": 0,
+      "n_early": 0
+    }
+  },
+  "R2B": {
+    "verdict": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "hangs": 0,
+      "shutdown_line_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 0.989,
+        "median": 0.995,
+        "max": 1.003,
+        "p99": 1.003
+      },
+      "pm_exit_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 3.75,
+        "median": 3.828,
+        "max": 4.016,
+        "p99": 4.016
+      }
+    }
+  },
+  "R2C": {
+    "order": [
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main",
+      "branch",
+      "main"
+    ],
+    "verdict": {
+      "verdict": "FAIL",
+      "reasons": [
+        "branch run 6: 2.015 с >= 2.0",
+        "branch run 7: 2.031 с >= 2.0",
+        "main run 4: 2.156 с >= 2.0"
+      ],
+      "invalid": false,
+      "spread": {
+        "branch": {
+          "n": 10,
+          "unanswered": 0,
+          "min": 1.125,
+          "median": 1.5859999999999999,
+          "max": 2.031,
+          "p99": 2.031
+        },
+        "main": {
+          "n": 10,
+          "unanswered": 0,
+          "min": 1.125,
+          "median": 1.4845000000000002,
+          "max": 2.156,
+          "p99": 2.156
+        }
+      }
+    }
+  },
+  "elapsed_s": 698.1
+}

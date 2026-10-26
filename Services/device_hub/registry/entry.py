@@ -1,7 +1,8 @@
 """DeviceEntry -- запись реестра устройств (Р2 плана device-hub).
 
 Dataclass + Dict-at-Boundary (НЕ SchemaBase — доменная сущность Services-слоя).
-Валидация id (slug: [a-z0-9_]+), kind, transport.type при создании.
+Валидация id (slug: [a-z0-9_]+) и transport.type при создании; допустимость kind проверяет ``DeviceManager``
+(вид допустим, если для него зарегистрирована фабрика драйвера, SPI.c1b).
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# Допустимые значения kind (расширяемо — generic_modbus для произвольных устройств)
+# Встроенные виды = фабрики ``DeviceManager`` по умолчанию. Заморожено (SPI.c1b): допустимость вида решает менеджер
+# по зарегистрированным фабрикам драйверов; новый вид — ``register_driver_factory``, не правка этого множества.
 VALID_KINDS: frozenset[str] = frozenset({"robot", "vfd", "hikvision", "generic_modbus"})
 
 # Допустимые типы транспорта
@@ -51,11 +53,9 @@ class DeviceEntry:
         self._validate()
 
     def _validate(self) -> None:
-        """Проверить id/kind/transport.type."""
+        """Проверить id/transport.type (синтаксис записи; допустимость kind — у ``DeviceManager``)."""
         if not isinstance(self.id, str) or not _ID_RE.match(self.id):
             raise ValueError(f"DeviceEntry.id должен быть slug [a-z0-9_]+, получено: {self.id!r}")
-        if self.kind not in VALID_KINDS:
-            raise ValueError(f"DeviceEntry.kind {self.kind!r} не из {sorted(VALID_KINDS)}")
         t_type = self.transport.get("type", "")
         if t_type and t_type not in VALID_TRANSPORT_TYPES:
             raise ValueError(f"DeviceEntry.transport.type {t_type!r} не из {sorted(VALID_TRANSPORT_TYPES)}")

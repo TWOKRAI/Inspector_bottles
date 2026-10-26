@@ -54,7 +54,7 @@ class _FakeCommandManager:
         self.handlers: dict = {}
         self.metadata: dict = {}
 
-    def register_command(self, name, handler, metadata=None, tags=None) -> None:
+    def register_command(self, name, handler, metadata=None, tags=None, **kwargs) -> None:
         self.handlers[name] = handler
         self.metadata[name] = metadata or {}
 

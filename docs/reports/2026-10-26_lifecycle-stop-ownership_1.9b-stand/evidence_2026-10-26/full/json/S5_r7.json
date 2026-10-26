@@ -1,0 +1,8 @@
+{
+  "kind": "activate",
+  "target": "region_pipeline",
+  "elapsed_s": 3.75,
+  "ok": true,
+  "note": "",
+  "waited_s": 3.75
+}

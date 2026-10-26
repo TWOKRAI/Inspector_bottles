@@ -1,0 +1,8 @@
+{
+  "kind": "restart",
+  "target": "camera_0 (вместо renderer) #2",
+  "elapsed_s": 5.031,
+  "ok": true,
+  "note": "",
+  "waited_s": 5.031
+}

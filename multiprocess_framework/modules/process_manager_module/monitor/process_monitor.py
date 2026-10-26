@@ -1476,9 +1476,11 @@ class ProcessMonitor:
         """Отправить в PM рестарты, чей backoff истёк (IPC, не прямой вызов).
 
         Прямая команда ``process.restart`` (``type=command``) в СОБСТВЕННУЮ
-        очередь PM → message_processor-поток → CommandManager → PM.restart_process.
-        На том же потоке исполняется topology.apply, поэтому рестарт НЕ может
-        бежать параллельно с заменой топологии. Если имя заменено switch'ем до
+        очередь PM → message_processor-поток → CommandManager → исполнитель
+        ``pm-lifecycle`` (Task 1.9b, класс L) → PM.restart_process. Тот же
+        последовательный исполнитель исполняет topology.apply, поэтому рестарт НЕ может
+        бежать параллельно с заменой топологии; на системном стопе исполнитель
+        отклоняет очередь (``system_stopping``). Если имя заменено switch'ем до
         диспатча — cleanup уже вызвал forget_process и снял pending.
 
         ВАЖНО (Ф3.7): ``type`` обязан быть ``"command"`` — kind-router зовёт

@@ -1,0 +1,54 @@
+%% Аудит фундамента 2026-10-26 — иерархия базовых классов ядра
+%% Источник: graphify (рёбра inherits, EXTRACTED), сверка: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.4
+%% Чтение: A --|> B — A наследует B.
+classDiagram
+    direction BT
+
+    class BaseManager
+    class ObservableMixin
+    class IBaseManager
+    class ChannelRoutingManager
+    class IChannelRoutingManager
+    class ProcessModule
+    class IProcessModule
+
+    BaseManager --|> IBaseManager
+
+    ChannelRoutingManager --|> BaseManager
+    ChannelRoutingManager --|> ObservableMixin
+    ChannelRoutingManager --|> IChannelRoutingManager
+
+    LoggerCore --|> ChannelRoutingManager
+    LoggerManager --|> LoggerCore
+    ErrorManager --|> LoggerCore
+    RouterManager --|> ChannelRoutingManager
+    StatsManager --|> ChannelRoutingManager
+    ObservationManager --|> ChannelRoutingManager
+
+    ProcessModule --|> BaseManager
+    ProcessModule --|> ObservableMixin
+    ProcessModule --|> IProcessModule
+    ProcessManagerProcess --|> ProcessModule
+    GenericProcess --|> ProcessModule
+
+    CommandManager --|> BaseManager
+    SharedResourcesManager --|> BaseManager
+    EventManager --|> BaseManager
+    MemoryManager --|> BaseManager
+    QueueRegistry --|> BaseManager
+    StateStoreManager --|> BaseManager
+    StateProxy --|> BaseManager
+    WorkerManager --|> BaseManager
+    ExecutorManager --|> BaseManager
+    WorkerPoolExecutor --|> BaseManager
+    WorkerPoolDispatcher --|> BaseManager
+    LatencyTracker --|> BaseManager
+    TopologyManager --|> BaseManager
+    PluginManager --|> BaseManager
+    RegistersManager --|> BaseManager
+    ConsoleManager --|> BaseManager
+    Dispatcher --|> BaseManager
+
+    note for LoggerManager "своих методов два: __init__, _on_shutdown (F14)"
+    note for GenericProcess "модуль помечен DEPRECATED, но это база generic-процессов"
+    note for WorkerPoolDispatcher "ни одного теста поведения (promises C1–C3)"

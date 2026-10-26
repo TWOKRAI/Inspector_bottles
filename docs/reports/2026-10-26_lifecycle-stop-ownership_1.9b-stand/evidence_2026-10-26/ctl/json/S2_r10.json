@@ -1,0 +1,61 @@
+{
+  "stop": 10,
+  "stop_reply_s": 3.156,
+  "waited_s": 3.16,
+  "stop_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "1c8e24cb-f75c-4c91-a275-7907a0b17d85",
+    "success": true,
+    "result": {
+      "success": true,
+      "process_name": "slow"
+    }
+  },
+  "latencies": [
+    3.14,
+    3.031,
+    2.921,
+    2.812,
+    2.703,
+    2.593,
+    2.484,
+    2.391,
+    2.297,
+    2.187,
+    2.078,
+    1.969,
+    1.859,
+    1.75,
+    1.641,
+    1.547,
+    1.422,
+    1.312,
+    1.203,
+    1.094,
+    1.0,
+    0.875,
+    0.797,
+    0.688,
+    0.578,
+    0.469,
+    0.36,
+    0.25,
+    0.141
+  ],
+  "n_samples": 29,
+  "n_samples_total": 37,
+  "stats": {
+    "n": 29,
+    "unanswered": 0,
+    "min": 0.141,
+    "median": 1.641,
+    "max": 3.14,
+    "p99": 3.14
+  }
+}

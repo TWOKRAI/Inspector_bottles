@@ -25,7 +25,7 @@ Input: $ARGUMENTS — description of the bug, a reproduction command, or a path 
    Synchronous call — the diagnosis is needed to decide the next step in the same turn.
 
 4. **Handle the result**
-   - If **FIXED** → the debugger fixed and committed everything itself
+   - If **FIXED** → the debugger fixed and committed everything itself (never on the 3rd-iteration diagnosis of an author's red: there it reports only, no commit)
    - If **ROOT CAUSE FOUND** (without a fix) → hand the diagnosis to the right agent:
      - Junior/Middle level → `developer` (Sonnet)
      - Senior+ level → `teamlead` (Opus)
@@ -47,4 +47,4 @@ Input: $ARGUMENTS — description of the bug, a reproduction command, or a path 
 
 ## Automatic activation
 
-None. A red against code written in the current task goes back to its author, re-summoned by agentId (`project-rules` §5 «One executor per task»). Call `/dev:debug` for code no agent of the task wrote (a regression in a neighbouring module, an old red), or after the author's 2nd failed iteration on the same red.
+None. A red against code written in the current task goes back to its author, re-summoned by agentId (`project-rules` §5 «One executor per task»). Call `/dev:debug` for code no agent of the task wrote (a regression in a neighbouring module, an old red), or for one diagnosis (report only) on the author's 3rd iteration on the same red.

@@ -97,10 +97,13 @@ class MockCommandManager:
     def __init__(self) -> None:
         # Словарь зарегистрированных команд: имя → handler
         self.commands: dict[str, Callable] = {}
+        # Именованные опции регистрации (хук command_options): имя → kwargs
+        self.command_options: dict[str, dict[str, Any]] = {}
 
     def register_command(self, name: str, handler: Callable, **kwargs: Any) -> None:
-        """Зарегистрировать команду (сохраняет для последующей проверки)."""
+        """Зарегистрировать команду (сохраняет handler и именованные опции для последующей проверки)."""
         self.commands[name] = handler
+        self.command_options[name] = dict(kwargs)
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -151,6 +152,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -232,6 +234,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `hik_release` |  |  |
 | `hik_set_params` |  |  |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -254,29 +257,29 @@ request-response (dict). События (push без request_id) читаютс�
 | `observability.tail.unsubscribe` | Снять подписку на live-хвост наблюдаемости процесса | system |
 | `register_update` | GUI/процесс обновляет значение регистра | registers |
 | `reset_metrics` |  | stats |
-| `robot_abort` |  |  |
-| `robot_clear_queue` |  |  |
+| `robot_abort` | Стоп робота: {device_id, mode: 1|2|3}. |  |
+| `robot_clear_queue` | Очистить очередь заданий. |  |
 | `robot_do_set` | Робот v2: дискретный выход {device_id, ch: 1..16, on: bool} |  |
-| `robot_draw_abort` |  |  |
-| `robot_draw_circle` |  |  |
-| `robot_draw_polyline` |  |  |
-| `robot_draw_progress` |  |  |
-| `robot_draw_set_accel` |  |  |
-| `robot_draw_set_overlap` |  |  |
-| `robot_draw_set_pass_size` |  |  |
-| `robot_draw_set_pen` |  |  |
-| `robot_draw_set_speed` |  |  |
-| `robot_draw_set_travel` |  |  |
-| `robot_draw_square` |  |  |
-| `robot_enqueue_job` |  |  |
-| `robot_exchange_log_get` |  |  |
-| `robot_exchange_log_set` |  |  |
+| `robot_draw_abort` | Прервать рисование: {device_id}. |  |
+| `robot_draw_circle` | Нарисовать окружность: {device_id, cx, cy, r}. |  |
+| `robot_draw_polyline` | Нарисовать полилинию: {device_id, points, ...}. |  |
+| `robot_draw_progress` | Прогресс рисования: {device_id}. |  |
+| `robot_draw_set_accel` | Установить ускорение рисования: {device_id, accel} (мм/с²). |  |
+| `robot_draw_set_overlap` | Установить overlap: {device_id, mm}. |  |
+| `robot_draw_set_pass_size` | Установить размер пачки рисования: {device_id, n} (точек на проход). |  |
+| `robot_draw_set_pen` | Установить перо: {device_id, down?, up?} (мм, можно одно из двух). |  |
+| `robot_draw_set_speed` | Установить скорость рисования (перо по бумаге): {device_id, pct}. |  |
+| `robot_draw_set_travel` | Установить скорость переезда (перо вверх): {device_id, pct}. |  |
+| `robot_draw_square` | Нарисовать квадрат по двум углам: {device_id, x1, y1, x2, y2, z?}. |  |
+| `robot_enqueue_job` | Поставить CVT-задание: {device_id, x_mm, y_mm, e_capture?}. |  |
+| `robot_exchange_log_get` | Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи (T5.6). |  |
+| `robot_exchange_log_set` | Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6). |  |
 | `robot_frame_list` | Робот v2: список систем координат {device_id} -> frames, rev |  |
 | `robot_frame_teach` | Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev} |  |
-| `robot_get_robot_config` |  |  |
-| `robot_get_telemetry` |  |  |
-| `robot_jog` |  |  |
-| `robot_jog_abort` |  |  |
+| `robot_get_robot_config` | Прочитать конфиг-блок робота. |  |
+| `robot_get_telemetry` | Телеметрия робота. |  |
+| `robot_jog` | Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %. |  |
+| `robot_jog_abort` | Прервать ручной ход: {device_id}. |  |
 | `robot_jog_hold` | Робот v2: удержание jog {device_id, dir: 1..8, spd: 1..100} |  |
 | `robot_jog_release` | Робот v2: отпустить jog {device_id} |  |
 | `robot_jog_step` | Робот v2: шаг jog {device_id, dx, dy, dz?, drz?, spd: 1..100} |  |
@@ -293,17 +296,17 @@ request-response (dict). События (push без request_id) читаютс�
 | `robot_program_list` | Робот v2: имена программ {device_id} -> programs |  |
 | `robot_program_run` | Робот v2: запустить программу {device_id, name} |  |
 | `robot_program_save` | Робот v2: сохранить программу {device_id, program{name, steps}, base_rev} |  |
-| `robot_read_echo` |  |  |
-| `robot_return_job` |  |  |
-| `robot_send_test_job` |  |  |
+| `robot_read_echo` | Эхо последнего задания. |  |
+| `robot_return_job` | Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота). |  |
+| `robot_send_test_job` | Тестовое CVT-задание: {device_id, x, y}. |  |
 | `robot_servo` | Робот v2: серво {device_id, on: bool} |  |
-| `robot_set_encoder_offset` |  |  |
-| `robot_set_manual_mode` |  |  |
-| `robot_set_mode` |  |  |
-| `robot_set_robot_config` |  |  |
-| `robot_set_servo` |  |  |
+| `robot_set_encoder_offset` | Подстройка компенсации конвейера: {device_id, lead_mm} (мм вдоль ленты, знаковое). |  |
+| `robot_set_manual_mode` | Ручной режим: {device_id, on: bool}. |  |
+| `robot_set_mode` | Режим робота: {device_id, mode: cvt|draw|manual}. |  |
+| `robot_set_robot_config` | Конфиг робота: {device_id, ...fields}. |  |
+| `robot_set_servo` | Серво: {device_id, on: bool}. |  |
 | `robot_stop` | Робот v2: стоп {device_id, level: SOFT|HARD|HALT} |  |
-| `robot_toolchange` |  |  |
+| `robot_toolchange` | Смена инструмента: {device_id, target: 0|1|2, timeout?}. |  |
 | `router.relay` | Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам) | system |
 | `routing.probe` | Диагностика: отправить inner-билет соседу (peer→peer доставка после switch) | system |
 | `routing.refresh` | Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1) | system |
@@ -311,11 +314,11 @@ request-response (dict). События (push без request_id) читаютс�
 | `set_enabled` | Включить/выключить ноду (bypass) | control |
 | `stats_snapshot` |  | diagnostics, stats |
 | `telemetry.reconfigure` | Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle) | system |
-| `vfd_get_status` |  |  |
-| `vfd_reset_fault` |  |  |
-| `vfd_run` |  |  |
-| `vfd_set_freq` |  |  |
-| `vfd_stop` |  |  |
+| `vfd_get_status` | Статус ПЧ: {device_id}. |  |
+| `vfd_reset_fault` | Сброс аварии ПЧ: {device_id}. |  |
+| `vfd_run` | Пуск ПЧ: {device_id, direction?, freq_hz?}. |  |
+| `vfd_set_freq` | Установить частоту: {device_id, freq_hz}. |  |
+| `vfd_stop` | Стоп ПЧ: {device_id}. |  |
 | `wire.configure` | Настроить wire middleware (SHM sender/receiver) | system |
 | `wire.deconfigure` | Удалить wire middleware | system |
 | `worker.create` | Создать воркер в процессе | system |
@@ -352,6 +355,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -406,6 +410,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -471,6 +476,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -530,6 +536,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -589,6 +596,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -648,6 +656,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |
@@ -707,6 +716,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `health.report` | Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости | health, system |
 | `health.status` | Текущий снапшот здоровья процесса (status/errors/last_error) | health, system |
 | `introspect.capabilities` | Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers | system |
+| `introspect.executors` | Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки | system |
 | `introspect.handlers` | Router message-handlers + команды CommandManager процесса | system |
 | `introspect.memory` | Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI) | system |
 | `introspect.observability` | Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor) | system |

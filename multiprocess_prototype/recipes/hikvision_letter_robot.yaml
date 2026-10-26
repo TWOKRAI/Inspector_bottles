@@ -209,6 +209,8 @@ blueprint:
             zone_width: 250
             mode: zone_edge
             rearm_frames: 2
+            max_match_distance: 140
+            max_age: 2
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
@@ -262,7 +264,6 @@ blueprint:
             device: cpu
             confidence_threshold: 0.5
             top_k: 3
-            inference_every_n: 1
             draw_overlay: true
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp

@@ -196,10 +196,17 @@ def _make_driver(
         params={},
     )
     transport = _FakeTransport(connected=connected, servo_tlm=servo_tlm)
-    drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=_SCOPE.spawn, clock=clock)
     client = _FakeClient()
     client.transport = transport
-    drv._client = client  # шов: клиент v2 без sim (как test_robot_driver_v2._fake_driver)
+    drv = RobotDriverV2(
+        entry,
+        None,
+        transport=transport,
+        publish=lambda _p, _v: None,
+        spawn=_SCOPE.spawn,
+        clock=clock,
+        client_factory=lambda _t, _c: client,  # шов: клиент v2 без sim (как test_robot_driver_v2._fake_driver)
+    )
     return drv, client
 
 

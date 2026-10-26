@@ -99,10 +99,9 @@ class TestDeviceEntryValidation:
         with pytest.raises(ValueError, match="slug"):
             DeviceEntry(id="", name="Test", kind="robot")
 
-    def test_invalid_kind(self) -> None:
-        """Неизвестный kind — ошибка."""
-        with pytest.raises(ValueError, match="kind"):
-            DeviceEntry(id="dev_1", name="Test", kind="unknown")
+    def test_kind_is_not_checked_by_entry(self) -> None:
+        """SPI.c1b: запись не проверяет kind — допустимость вида решает менеджер по фабрикам драйверов."""
+        assert DeviceEntry(id="dev_1", name="Test", kind="unknown").kind == "unknown"
 
     def test_invalid_transport_type(self) -> None:
         """Неизвестный transport.type — ошибка."""

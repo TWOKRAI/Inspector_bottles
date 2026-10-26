@@ -4205,3 +4205,31 @@ Free-threaded Python — пересмотреть.
 использует ни один процесс прототипа).
 **Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9m.md` (D3, D6), ADR-WRK-006, ADR-CMD-007, ADR-PM-054, ADR-PM-043,
 `process_module/tests/test_process_executors_acceptance.py`.
+
+
+### ADR-PM-056 — Хук `ProcessModulePlugin.command_options`: опции регистрации команды плагина (2026-10-26, SPI.d1)
+
+Плагину нужен публичный путь зарегистрировать свою команду с исполнителем (`executor`, `key_from`, ADR-CMD-007) и
+описанием (`metadata`). `_auto_register_commands` звал `register_command(имя, метод)` без опций; иного пути не было:
+повторная регистрация имени отклоняется, `overwrite_command` снимает исполнителя, `update_command_metadata` заменяет
+словарь и стирает `metadata.executor` — команда молча шла бы на потоке роутера.
+
+- *Решение.* Публичный хук `command_options(command_name) -> Mapping[str, Any] | None`, умолчание `{}`. Правка только в
+  цикле `_auto_register_commands`; `set_config` / `cmd_set_config` не тронуты. Пустые опции — вызов байт в байт как
+  раньше (`register_command(имя, метод)`, два позиционных) — для всех плагинов без хука и для `process_manager_module`
+  ничего не меняется.
+- *Белый список* `{"executor", "key_from", "targets", "metadata"}`; чужие ключи — одна строка ERROR и регистрация без них
+  (опечатка не роняет конфигурацию).
+- *Имя занято* — проверка `get_command_info` до регистрации (через `getattr`: у заглушек менеджера метода может не быть);
+  одна строка ERROR, повтора нет — чужая команда не перехватывается.
+- *Исполнитель не принят* — `result is False` (не `not result`: заглушка `testing` отвечает `None`). Если имя заняли между
+  проверкой и вызовом — ERROR без повтора; иначе одна строка INFO и повтор с одним `metadata` (запасной путь: команда
+  синхронная). WARNING об отказе уже пишет `CommandManager.register_command` — второго WARNING нет.
+- *Отвергнуто.* Подмена `self.commands` или переопределение приватного `_auto_register_commands` в плагине — костыль;
+  `update_command_metadata` после регистрации — стирает `executor`; регистрация с опциями для всех плагинов (пустые
+  именованные аргументы) — меняет вызов у плагинов без хука и у двойников с узкой сигнатурой.
+- *Следствия и риски.* Хук зовётся при `configure`; опции, зависящие от состояния, должны быть готовы до него. Двойники
+  `testing.MockCommandManager` и `PluginTestBench` принимают и хранят именованные опции.
+
+**Refs:** `plans/robot-protocol-v2/tasks/SPI.framework.md` (D7, правка framework), ADR-CMD-007, ADR-PM-055,
+`process_module/tests/test_plugin_command_options.py`, `process_module/tests/test_plugin_command_options_acceptance.py`.

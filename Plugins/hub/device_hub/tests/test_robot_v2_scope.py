@@ -36,6 +36,7 @@ from Plugins.hub.device_hub.tests.conftest import make_ctx
 from Plugins.hub.device_hub.tests.test_t53r2_stop_hazards import _Rig as _HoldRig
 from Services.device_hub.drivers import robot_driver_v2
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
@@ -147,13 +148,14 @@ def _bench(
     wrap: Callable[[Callable[..., Any]], Callable[..., Any]] | None = None,
     params: dict | None = None,
     rec: Rec | None = None,
+    clients: ClientRecorder | None = None,
 ) -> Iterator[tuple[RobotDriverV2, E2eRig, Rec, Any]]:
     """Стенд: sim + область ``g53`` + подключённый драйвер ``r1``. ``wrap(spawn)`` подменяет ``spawn`` драйвера."""
     rec = rec or Rec()
     with E2eRig() as rig:
         scope = open_scope("g53", budget_s=2.5)
         spawn = wrap(scope.spawn) if wrap is not None else scope.spawn
-        drv = RobotDriverV2(_entry(rig.port, params=params), None, publish=rec, spawn=spawn)
+        drv = RobotDriverV2(_entry(rig.port, params=params), None, publish=rec, spawn=spawn, client_factory=clients)
         try:
             assert bounded(drv.connect, _CONNECT_DEADLINE_S) is True
             drv.desired_connected = True
@@ -167,7 +169,7 @@ def _bench(
 
 
 def _plugin_with_robots(
-    tmp_path: Path, ports: dict[str, int], params: dict | None = None
+    tmp_path: Path, ports: dict[str, int], params: dict | None = None, clients: ClientRecorder | None = None
 ) -> tuple[DeviceHubPlugin, Any]:
     """Плагин на ``make_ctx``: реестр во ``tmp_path``, роботы в ``recipe_devices``, подключение — разбор очереди."""
     registry_file = tmp_path / "devices.yaml"
@@ -186,6 +188,8 @@ def _plugin_with_robots(
     plugin = DeviceHubPlugin()
     plugin.configure(ctx)
     plugin.start(ctx)
+    if clients is not None:  # до подключения: драйверы создаются лениво при connect
+        plugin._manager.set_driver_options("robot", "delta_v2", client_factory=clients)
     for dev_id in ports:
         assert plugin.cmd_device_connect({"device_id": dev_id})["status"] == "ok"
     bounded(plugin._process_conn_queue, _CONNECT_DEADLINE_S)
@@ -225,9 +229,10 @@ def _wait_running(rec: Rec, dev_id: str = "r1") -> None:
 
 
 def test_s1_disconnect_between_jog_ack_and_jog_record_still_stops_robot() -> None:
-    with _bench() as (drv, rig, _rec, _scope):
+    clients = ClientRecorder()
+    with _bench(clients=clients) as (drv, rig, _rec, _scope):
         core = rig.core
-        client = drv._client
+        client = clients.last
         real = client.jog_cont
         acked, go = threading.Event(), threading.Event()
 
@@ -260,10 +265,11 @@ def test_s1_disconnect_between_jog_ack_and_jog_record_still_stops_robot() -> Non
 
 
 def test_s2_launch_during_jog_release_stop_in_flight_is_busy_jog() -> None:
-    with _bench() as (drv, rig, _rec, _scope):
+    clients = ClientRecorder()
+    with _bench(clients=clients) as (drv, rig, _rec, _scope):
         assert drv.call("jog_hold", _JOG)["status"] == "ok"
         time.sleep(0.1)
-        client = drv._client
+        client = clients.last
         real_stop = client.issue_stop
         entered, gate = threading.Event(), threading.Event()
 
@@ -454,9 +460,10 @@ def test_s9_survivor_visible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 def _s9_part_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(robot_driver_v2.driver, "_PROGRAM_JOIN_S", 0.3)
     done_evt = threading.Event()
-    with _bench() as (drv, _rig, rec, _scope):
+    clients = ClientRecorder()
+    with _bench(clients=clients) as (drv, _rig, rec, _scope):
         try:
-            drv._client.run_chunks = _fake_run_chunks(done_evt)  # type: ignore[method-assign]
+            clients.last.run_chunks = _fake_run_chunks(done_evt)  # type: ignore[method-assign]
             assert _start(drv, 4, "p9")["status"] == "ok"
             _wait_running(rec)
             errs_before = drv.stats["tx_err"]
@@ -474,9 +481,10 @@ def _s9_part_plugin(tmp_path: Path) -> None:
     plugin = ctx = None
     try:
         with _HoldRig() as rig:
-            plugin, ctx = _plugin_with_robots(tmp_path, {"r1": rig.port})
+            clients = ClientRecorder()
+            plugin, ctx = _plugin_with_robots(tmp_path, {"r1": rig.port}, clients=clients)
             drv = plugin._manager.get_driver("r1")
-            drv._client.run_chunks = _fake_run_chunks(done_evt)
+            clients.last.run_chunks = _fake_run_chunks(done_evt)
             assert _start(drv, 4, "p9")["status"] == "ok"
             _until(lambda: drv.state.view().program_active, 5.0, "исполнитель запущен")
             # Фаза 1 дольше на 0.5 с: робот держит ответ на запись стопа (не патч драйвера). Тогда scope.close с
@@ -645,9 +653,10 @@ def test_s14_survivor_of_plain_disconnect_reaches_health(tmp_path: Path, monkeyp
     plugin = ctx = None
     try:
         with E2eRig() as rig:
-            plugin, ctx = _plugin_with_robots(tmp_path, {"r1": rig.port})
+            clients = ClientRecorder()
+            plugin, ctx = _plugin_with_robots(tmp_path, {"r1": rig.port}, clients=clients)
             drv = plugin._manager.get_driver("r1")
-            drv._client.run_chunks = _fake_run_chunks(done_evt)
+            clients.last.run_chunks = _fake_run_chunks(done_evt)
             assert _start(drv, 4, "p14")["status"] == "ok"
             _until(lambda: drv.state.view().program_active, 5.0, "исполнитель запущен")
             bounded(lambda: plugin._manager.disconnect("r1"), _CALL_DEADLINE_S)
@@ -692,8 +701,9 @@ def test_s15_supervisor_does_nothing_after_shutdown(tmp_path: Path) -> None:
 
 
 def test_s16_stop_between_stopping_check_and_run_chunks_still_aborts() -> None:
-    with _bench() as (drv, rig, rec, _scope):
-        client = drv._client
+    clients = ClientRecorder()
+    with _bench(clients=clients) as (drv, rig, rec, _scope):
+        client = clients.last
         real = client.run_chunks
 
         def run_chunks(*a: Any, **k: Any) -> Any:

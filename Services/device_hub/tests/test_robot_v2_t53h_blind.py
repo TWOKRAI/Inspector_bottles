@@ -188,9 +188,15 @@ def make_rig(driver_scope: Any) -> Iterator[Callable[..., _Rig]]:
             params=params,
         )
         transport = _FakeTransport(transport_connected)
-        drv = RobotDriverV2(entry, None, transport=transport, publish=lambda _p, _v: None, spawn=driver_scope.spawn)
         client = _FakeClient()
-        drv._client = client  # шов: клиент v2 без sim (как во всех тестах драйвера)
+        drv = RobotDriverV2(
+            entry,
+            None,
+            transport=transport,
+            publish=lambda _p, _v: None,
+            spawn=driver_scope.spawn,
+            client_factory=lambda _t, _c: client,  # шов: клиент v2 без sim (как во всех тестах драйвера)
+        )
         rig = _Rig(drv, client, transport)
         rigs.append(rig)
         return rig

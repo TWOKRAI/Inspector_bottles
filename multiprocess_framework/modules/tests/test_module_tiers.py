@@ -372,6 +372,12 @@ _RUNNERLESS_BY_DECISION: dict[str, str] = {
         "`--import-mode=importlib`, поэтому в testpaths не входят; запуск явным путём — команда в докстринге "
         "`test_apply_2.4g.py`. Каталог уйдёт вместе с инструментом, когда 2.4g закроется"
     ),
+    "docs/reports/2026-10-26_lifecycle-stop-ownership_1.9b-stand": (
+        "юнит вердиктов стенда L-9 (задача 1.9b): стенд — улика отчёта, грузит бэкенд прототипа через "
+        "`assemble_launcher`, в framework-прогон не входит по слоям. Запуск — "
+        "`pytest <каталог>/test_stand_l9_verdict.py` (шлюз light), команда в README каталога. "
+        "Каталог замораживается вместе с отчётом"
+    ),
     "scripts/plans_progress/tests": (
         "свой прогон плана plans-progress-dashboard: `pytest scripts/plans_progress/tests` — 1553 теста за 387 с "
         "(замер 2026-10-05), каждый тест строит временный git-репозиторий. validate.py шаг 7 гоняет только "

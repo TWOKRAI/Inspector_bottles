@@ -33,6 +33,7 @@ import pytest
 from multiprocess_framework.modules.base_manager import open_scope
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 from Services.device_hub.registry.entry import DeviceEntry
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.robot_comm.core.protocol_v2 import REG
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, bounded
@@ -83,7 +84,7 @@ _PAST_WINDOW_S = 0.3
 
 
 @contextmanager
-def _driver(scope: Any) -> Iterator[tuple[RobotDriverV2, E2eRig, _ManualClock]]:
+def _driver(scope: Any, clients: ClientRecorder | None = None) -> Iterator[tuple[RobotDriverV2, E2eRig, _ManualClock]]:
     """Подключённый драйвер v2 над ``E2eRig`` и его управляемые часы (тик драйвера не идёт: только поводок)."""
     with E2eRig() as rig:
         entry = DeviceEntry(
@@ -94,7 +95,14 @@ def _driver(scope: Any) -> Iterator[tuple[RobotDriverV2, E2eRig, _ManualClock]]:
             transport={"type": "tcp", "host": "127.0.0.1", "port": rig.port, "unit_id": ROBOT_UNIT_ID},
         )
         clock = _ManualClock()
-        drv = RobotDriverV2(entry, None, publish=lambda _path, _payload: None, spawn=scope.spawn, clock=clock.now)
+        drv = RobotDriverV2(
+            entry,
+            None,
+            publish=lambda _path, _payload: None,
+            spawn=scope.spawn,
+            clock=clock.now,
+            client_factory=clients,
+        )
         assert bounded(drv.connect, _CONNECT_S) is True
         drv.desired_connected = True
         try:
@@ -203,8 +211,9 @@ def test_latch_race_lease_write_covers_shutdown_stop_with_one_line(
     claim = threading.Lock()
     claimed: list[bool] = []
 
-    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope) as (drv, rig, clock):
-        client = drv._client
+    clients = ClientRecorder()
+    with caplog.at_level(logging.INFO, logger=_LOGGER), _driver(scope, clients=clients) as (drv, rig, clock):
+        client = clients.last
         real = client.issue_stop
 
         def issue_stop(level: int) -> int:

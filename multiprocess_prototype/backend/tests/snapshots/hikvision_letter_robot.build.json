@@ -218,6 +218,8 @@
                   "angle": 90,
                   "center_x": 376,
                   "center_y": 262,
+                  "max_age": 2,
+                  "max_match_distance": 140,
                   "mode": "zone_edge",
                   "rearm_frames": 2,
                   "zone_width": 250
@@ -349,7 +351,6 @@
                   "confidence_threshold": 0.5,
                   "device": "cpu",
                   "draw_overlay": true,
-                  "inference_every_n": 1,
                   "model": "mobilenet_v3_large_20260616_050828",
                   "top_k": 3
                 },
@@ -1170,6 +1171,12 @@
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "executors": {
+          "device_io": {
+            "max_pending": 64,
+            "max_workers": 4
+          }
+        },
         "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -2837,6 +2844,8 @@
               "angle": 90,
               "center_x": 376,
               "center_y": 262,
+              "max_age": 2,
+              "max_match_distance": 140,
               "mode": "zone_edge",
               "rearm_frames": 2,
               "zone_width": 250
@@ -4044,7 +4053,6 @@
               "confidence_threshold": 0.5,
               "device": "cpu",
               "draw_overlay": true,
-              "inference_every_n": 1,
               "model": "mobilenet_v3_large_20260616_050828",
               "top_k": 3
             },
