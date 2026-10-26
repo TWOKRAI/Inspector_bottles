@@ -110,6 +110,17 @@ The owner's multi-select on 2026-08-13 picked the full roster *and* "tester only
 the two are incompatible, and this table is how it was resolved — full roster as the default,
 solo as the named exception. The owner was asked to say so if they meant the opposite (history, not a rule).
 
+**Model by class — history (moved from `.claude/CLAUDE.md` on 2026-10-26).** Set by the owner on
+2026-10-18, narrowed on 2026-10-21 and again on 2026-10-25 (pilot, to save the 5-hour limit: 59 % of
+it spent in 3 hours, reviewer subagents the main consumer). On 2026-10-25 stage 0 of Senior+ tasks
+moved to Sonnet; a design defect that the Opus branch review finds and stage 0 should have caught is
+recorded as evidence for returning it to Opus (ledger:
+`docs/claude/memory/feedback_sonnet_implements_opus_designs_and_reviews.md`; evaluation:
+`docs/reports/2026-10-26_stage0-eval.md`). A fresh reviewer costs ~56k context against a re-summon
+(25–29 % of one measured session). Evidence: `docs/reviews/2026-10-17_codereader-multicamera-opus-review.md`
+→ «Оценка Sonnet» — the only real defect came from an unreviewed commit; Sonnet-reviewed commits added
+none; Opus at stage 0 would have saved a ~189k rework round.
+
 ## ponytail — when the laziness ladder applies
 
 The `ponytail` skill (`.claude/plugins/ponytail/`) is installed **skills-only**: no
@@ -173,10 +184,9 @@ conversation history, an agent would not. Protocol: `.claude/commands/dev/team.m
 (Russian): [`docs/claude/AGENT_TEAMS_GUIDE.md`](AGENT_TEAMS_GUIDE.md). Brief template
 with per-model prompting notes: `.claude/plugins/dev/templates/team-brief.md`.
 
-Roles → models (all 14): `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration,
-answers to escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
-`investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` /
-`tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
+Roles → models: the single list is `.claude/CLAUDE.md` → «The lead coordinates» (17 roles). `cto` gives
+verdicts only: phase acceptance, merge gate, arbitration, answers to escalations from Opus roles — once
+per phase, never per task. `junior` never commits. No role exists without a task: spawn the minimal roster.
 
 **Escalation ladder (owner's decision 2026-09-02, `project-rules` §7).** A question goes one level up,
 never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` →
@@ -186,7 +196,8 @@ outside a team it ends its report with `ESCALATION -> <role>` (question / tried 
 and the lead spawns that role. The lead relays; it does not answer in place of the higher role.
 
 What does NOT change in team mode: tester once per mechanism BEFORE the code, in a worktree at the
-pre-implementation commit; break-injection by the lead, never delegated; reviewer synchronous after
+pre-implementation commit; break-injection predictions and the verdict by the lead, the mechanical run
+delegated with those predictions (owner, 2026-10-12); reviewer synchronous after
 every task; Fable only at phase acceptance / merge gate / arbitration / escalation.
 
 Hooks as gates (fail-open after two blocks on the same task or agent; `TEAM_GATES=off` disables):

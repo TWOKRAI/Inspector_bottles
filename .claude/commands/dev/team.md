@@ -124,7 +124,8 @@ file), and say so out loud.
 ## 7. Injections — you only
 
 After every mechanism: predict the set → revert each guarantee one at a time → the fact.
-Against both test sets, the author's and the tester's. Not delegated. Record it, if the project
+Against both test sets, the author's and the tester's. The predictions and the verdict are yours; the
+mechanical run may go to an agent with your predictions in the prompt. Record it, if the project
 keeps an injection log (format and path — per project convention).
 
 ## 8. Review and escalation — questions go up a level, like in a company
