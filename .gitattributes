@@ -8,3 +8,6 @@ docs/atlas/INDEX.md text eol=lf
 docs/claude/memory/BY-MODULE*.md text eol=lf
 scripts/machine_gate.sh text eol=lf
 .claude/plugins/dev/hooks/machine-gate-guard.sh text eol=lf
+# C-30: фикстуры с заданным EOL (LF/CRLF) — байты как есть, без autocrlf
+plans/2026-10-26_recipe-save-noise/probes/fixture_*.yaml -text
+multiprocess_framework/modules/recipe/tests/fixtures/** -text
