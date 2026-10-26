@@ -7,6 +7,7 @@
 """
 
 from .detect import has_top_level_blueprint, is_v3_recipe, nested_blueprint_data
+from .file_lock import RecipeLockTimeout, recipe_file_lock
 from .format import normalize_recipe_v3_raw
 from .interfaces import (
     RecipeEngineProtocol,
@@ -37,6 +38,8 @@ __all__ = [
     "update_blueprint_metadata_preserving",
     "apply_delta",
     "YamlPatchConflict",
+    "recipe_file_lock",
+    "RecipeLockTimeout",
     "StoreProtocol",
     "RecipeEngineProtocol",
     "RecipeManagerProtocol",

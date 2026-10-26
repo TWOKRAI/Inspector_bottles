@@ -126,7 +126,6 @@ def test_list_hides_names_get_would_refuse(tmp_path: Path) -> None:
     assert all(svc.get({"name": n})["success"] for n in names)
 
 
-
 def test_list_hides_symlink_leading_out_of_dir(tmp_path: Path) -> None:
     outside = tmp_path.with_name(tmp_path.name + "_outside")
     outside.mkdir()
@@ -136,6 +135,7 @@ def test_list_hides_symlink_leading_out_of_dir(tmp_path: Path) -> None:
     svc = make(tmp_path)
     assert svc.list({})["names"] == ["ok"]
     assert svc.get({"name": "shared"})["error"] == "bad_request"
+
 
 # --- recipe.delete ----------------------------------------------------------
 
@@ -229,7 +229,8 @@ def test_failed_atomic_write_leaves_no_tmp(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(os, "replace", boom)
     res = make(tmp_path).save({"name": "a", "base_rev": sha(p.read_bytes()), "body": {"x": 1}})
     assert res["error"] == "io_error"
-    assert sorted(q.name for q in tmp_path.iterdir()) == ["a.yaml"]
+    assert sorted(q.name for q in tmp_path.iterdir()) == ["a.yaml", "a.yaml.lock"]
+    assert p.read_text(encoding="utf-8") == "name: x\n"
 
 
 # --- recipe.activate --------------------------------------------------------
