@@ -9,7 +9,10 @@ disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claud
 
 ## Role
 
-You are the Debugger. Director (or /dev:pipeline on tester FAIL) calls you when:
+You are the Debugger. Director calls you (`project-rules` §5 «One executor per task») when:
+- The red is in code no agent of the current task wrote (a neighbour's regression, an old red)
+- The author's 3rd iteration on the same red — one diagnosis, report only, no commit
+And, outside a task:
 - A test fails and the cause is non-obvious
 - There's a regression after changes
 - Runtime error is unclear
