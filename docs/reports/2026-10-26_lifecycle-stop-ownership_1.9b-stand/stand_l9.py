@@ -1,0 +1,1324 @@
+# -*- coding: utf-8 -*-
+"""stand_l9.py - живой стенд Task 1.9b (lifecycle-stop-ownership): сценарии S1-S5 и контроль.
+
+Печатает числа, а не прилагательные. Бэкенд ведёт только через backend_ctl (сокет ProcessManager, BACKEND_CTL=1):
+тот же router-путь, что у GUI. Без psutil, без GUI, без qt-mcp.
+
+Запуск (в окне стенда):
+    bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" \
+        heavy inspector-bottles-90 \
+        <корень main>/.venv/Scripts/python.exe <этот файл> --scenario all --out <каталог>
+    PYTHONPATH=<корень worktree>, PYTHONUTF8=1 ставит оболочка запуска (скрипт ставит PYTHONPATH детям сам).
+Без бэкенда: ``--help``, ``--dry-run``.
+
+Вердикты: PASS / FAIL против порогов «ПОСЛЕ» из plans/lifecycle-stop-ownership/tasks/T1.9b_tests.md («Стенд»),
+пороги - литералы в ``THRESHOLDS``. Зависание - FAIL с затраченным временем (дефект старого скрипта: ``verdict: OK``
+у зависших). Нет ответа, нет сигнала доставки, не поднялась предпосылка (медленный ребёнок не добавлен, роботы не
+подключились) - тоже FAIL, с пометкой ``invalid``.
+
+Часы: интервалы - ``time.monotonic()`` одного процесса (отправка и приход в reader-потоке сокета);
+сравнение со строками логов - ``time.time()`` против штампа строки (мс, местное время).
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import math
+import os
+import re
+import socket
+import statistics
+import subprocess  # nosec B404 — стенд: запускает бэкенд, git и tasklist с литеральными аргументами
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+HERE = Path(__file__).resolve().parent
+
+# --------------------------------------------------------------------------------------------------------------
+# Пороги «ПОСЛЕ» (литералы из T1.9b_tests.md, «Стенд») и «ДО» для контроля. Не выводятся из кода под проверкой.
+# --------------------------------------------------------------------------------------------------------------
+THRESHOLDS: dict[str, dict[str, float | int]] = {
+    "S1": {"reply_min_s": 0.85, "reply_max_s": 1.20, "hang_s": 4.5, "max_hangs": 0, "max_lost": 0},
+    "S2": {"max_latency_s": 0.5, "p99_s": 0.150, "min_samples_per_stop": 20, "min_stop_reply_s": 2.5},
+    "S3": {"max_delivery_s": 0.5, "max_relay_reply_s": 0.5, "min_stop_reply_s": 2.5},
+    "S4": {"max_shutdown_line_s": 1.2, "max_pm_exit_s": 4.5, "max_dns": 0},
+    "S5": {"max_restart_s": 5.0, "max_tree_exit_s": 2.0, "max_activate_s": 5.0, "shutdown_runs": 10},
+}
+#: Нижние границы «ДО» (main/И1): контроль обязан их вернуть, иначе стенд не различает.
+CONTROL_FLOORS: dict[str, float] = {"S2_max_latency_s": 2.0, "S3_delivery_s": 2.0, "S4_shutdown_line_s": 3.0}
+
+REPEATS = {"S1": 10, "S2": 10, "S3": 10, "S4": 5, "S5": 10}
+STOP_PROCESS_TIMEOUT_S = 8.0
+SHUTDOWN_TIMEOUT_S = 8.0
+SLOW = "slow"
+FAST = "fast"
+SLOW_CLASS = "stand_slow_child.SlowChild"
+FAST_CLASS = "stand_slow_child.FastChild"
+WAIT_RELAY_AT_S = 1.0  # S3/S4: момент действия после отправки process.stop slow
+SAMPLE_PERIOD_S = 0.1  # S2
+DEFAULT_REPO_RECIPE = "multiprocess_prototype/recipes/region_pipeline.yaml"
+
+
+# --------------------------------------------------------------------------------------------------------------
+# Чистая часть: статистика, разбор логов, вердикты (юнит-тест: test_stand_l9_verdict.py)
+# --------------------------------------------------------------------------------------------------------------
+def percentile_nearest_rank(values: list[float], p: float) -> float | None:
+    """Перцентиль по ближайшему рангу: ``sorted[ceil(p/100*n)-1]``; пусто -> None."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, math.ceil(p / 100.0 * len(ordered)))
+    return ordered[rank - 1]
+
+
+def stats(values: list[float | None]) -> dict[str, Any]:
+    """min/median/max/p99 по ответившим; ``unanswered`` - число None (оно же зависание)."""
+    got = [float(v) for v in values if v is not None]
+    return {
+        "n": len(values),
+        "unanswered": len(values) - len(got),
+        "min": min(got) if got else None,
+        "median": statistics.median(got) if got else None,
+        "max": max(got) if got else None,
+        "p99": percentile_nearest_rank(got, 99.0),
+    }
+
+
+def is_hung(reply_s: float | None, status: str | None = None, lost: int = 0, hang_s: float = 4.5) -> bool:
+    """Зависание S1 (правило из stand_report L-9): нет ответа, ответ >= hang_s, статус crashed или lost > 0."""
+    if reply_s is None or reply_s >= hang_s:
+        return True
+    return status == "crashed" or lost > 0
+
+
+_LOG_LINE = re.compile(r"^#\d+ (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3}) \[(\w+)\] (.*)$")
+_NEEDLES = {
+    "dns": "did not stop in",
+    "lost": "not reported/lost",
+    "terminating": "terminating",
+    "survived": ("всё ещё жив после kill", "ВЫЖИЛИ"),
+}
+_SHUTDOWN_LINE = "System shutdown requested"
+
+
+def parse_log_ts(text: str) -> float:
+    """``2026-08-26 08:40:42,349`` (местное время) -> epoch."""
+    return dt.datetime.strptime(text, "%Y-%m-%d %H:%M:%S,%f").timestamp()
+
+
+def scan_log_texts(texts: dict[str, str]) -> dict[str, Any]:
+    """Подсчёт строк по набору ``{относительный путь: текст}``.
+
+    Одна запись журнала лежит в нескольких файлах (messages.log и system.log) - считаем уникальные
+    ``(штамп, сообщение)``. ``shutdown_ts`` - самая ранняя строка ``System shutdown requested``.
+    """
+    seen: set[tuple[str, str]] = set()
+    counts = {"dns": 0, "lost": 0, "terminating": 0, "survived": 0}
+    dns_by_dir: dict[str, int] = {}
+    shutdown_ts: float | None = None
+    for path, text in texts.items():
+        for raw in text.splitlines():
+            m = _LOG_LINE.match(raw.strip())
+            if not m:
+                continue
+            stamp, _level, message = m.groups()
+            key = (stamp, message)
+            if key in seen:
+                continue
+            seen.add(key)
+            for name, needle in _NEEDLES.items():
+                needles = needle if isinstance(needle, tuple) else (needle,)
+                if any(n in message for n in needles):
+                    counts[name] += 1
+                    if name == "dns":
+                        top = path.replace("\\", "/").split("/")[0]
+                        dns_by_dir[top] = dns_by_dir.get(top, 0) + 1
+            if _SHUTDOWN_LINE in message:
+                ts = parse_log_ts(stamp)
+                shutdown_ts = ts if shutdown_ts is None else min(shutdown_ts, ts)
+    return {**counts, "dns_by_dir": dns_by_dir, "shutdown_ts": shutdown_ts}
+
+
+def scan_log_dir(root: Path) -> dict[str, Any]:
+    texts: dict[str, str] = {}
+    if root.exists():
+        for p in sorted(root.rglob("*.log")):
+            try:
+                texts[str(p.relative_to(root))] = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+    return scan_log_texts(texts)
+
+
+def _verdict(reasons: list[str], invalid: bool = False) -> dict[str, Any]:
+    return {"verdict": "FAIL" if reasons else "PASS", "reasons": reasons, "invalid": bool(invalid and reasons)}
+
+
+def judge_s1(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
+    """S1: 0 зависаний из N, ответ в [0,85; 1,20] с, ``not reported/lost`` = 0. Прогон: reply_s, status, lost, ok."""
+    th = th or THRESHOLDS["S1"]
+    reasons: list[str] = []
+    invalid = False
+    hangs = 0
+    for i, r in enumerate(runs, 1):
+        if not r.get("precondition_ok", True):
+            reasons.append(f"r{i}: предпосылка не выполнена ({r.get('precondition_note', '')})")
+            invalid = True
+            continue
+        if is_hung(r.get("reply_s"), r.get("status"), int(r.get("lost", 0)), float(th["hang_s"])):
+            hangs += 1
+            elapsed = r.get("reply_s")
+            reasons.append(
+                f"r{i}: ЗАВИСАНИЕ reply_s={'нет ответа' if elapsed is None else elapsed} "
+                f"status={r.get('status')} lost={r.get('lost', 0)}"
+            )
+            continue
+        rs = float(r["reply_s"])
+        if not float(th["reply_min_s"]) <= rs <= float(th["reply_max_s"]):
+            reasons.append(f"r{i}: reply_s={rs} вне [{th['reply_min_s']}; {th['reply_max_s']}]")
+    if hangs > int(th["max_hangs"]):
+        reasons.append(f"зависаний {hangs} из {len(runs)} (порог {th['max_hangs']})")
+    if len(runs) != REPEATS["S1"] and not runs:
+        reasons.append("нет ни одного прогона")
+    return {**_verdict(reasons, invalid), "hangs": hangs, "stats": stats([r.get("reply_s") for r in runs])}
+
+
+def judge_s2(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
+    """S2: каждый ответ ``supervision.status`` во время стопа <= 0,5 с, p99 <= 150 мс.
+
+    Прогон: stop_reply_s (None = зависание), latencies (None = без ответа), stop_success.
+    Предпосылки: стоп действительно длился (>= 2,5 с) и снято >= 20 проб на стоп.
+    """
+    th = th or THRESHOLDS["S2"]
+    reasons: list[str] = []
+    invalid = False
+    flat: list[float | None] = []
+    hangs = 0
+    for i, r in enumerate(runs, 1):
+        lat = list(r.get("latencies") or [])
+        flat.extend(lat)
+        sr = r.get("stop_reply_s")
+        if sr is None:
+            hangs += 1
+            reasons.append(f"стоп {i}: ЗАВИСАНИЕ, ответа на process.stop нет за {r.get('waited_s')} с")
+            invalid = True
+            continue
+        if sr < float(th["min_stop_reply_s"]):
+            reasons.append(f"стоп {i}: stop_reply_s={sr} < {th['min_stop_reply_s']} - медленный стоп не воспроизведён")
+            invalid = True
+        if len(lat) < int(th["min_samples_per_stop"]):
+            reasons.append(f"стоп {i}: проб {len(lat)} < {th['min_samples_per_stop']}")
+            invalid = True
+    st = stats(flat)
+    if st["unanswered"]:
+        reasons.append(f"проб без ответа: {st['unanswered']}")
+    if st["max"] is not None and st["max"] > float(th["max_latency_s"]):
+        reasons.append(f"max ответа {st['max']:.3f} с > {th['max_latency_s']}")
+    if st["p99"] is not None and st["p99"] > float(th["p99_s"]):
+        reasons.append(f"p99 {st['p99']:.3f} с > {th['p99_s']}")
+    if not flat:
+        reasons.append("нет ни одной пробы")
+        invalid = True
+    return {**_verdict(reasons, invalid), "hangs": hangs, "stats": st}
+
+
+def judge_s3(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
+    """S3: доставка (ответ ``devices`` на внутреннее сообщение) и ответ relay <= 0,5 с. None = нет сигнала -> FAIL."""
+    th = th or THRESHOLDS["S3"]
+    reasons: list[str] = []
+    invalid = False
+    hangs = 0
+    for i, r in enumerate(runs, 1):
+        if r.get("stop_reply_s") is None:
+            hangs += 1
+            reasons.append(f"повтор {i}: ЗАВИСАНИЕ стопа slow, ответа нет за {r.get('waited_s')} с")
+            invalid = True
+        elif r["stop_reply_s"] < float(th["min_stop_reply_s"]):
+            reasons.append(f"повтор {i}: stop_reply_s={r['stop_reply_s']} < {th['min_stop_reply_s']}")
+            invalid = True
+        d, rr = r.get("delivery_s"), r.get("relay_reply_s")
+        if d is None:
+            reasons.append(f"повтор {i}: сигнал доставки не пришёл (devices не ответил на внутреннее сообщение)")
+        elif d > float(th["max_delivery_s"]):
+            reasons.append(f"повтор {i}: доставка {d:.3f} с > {th['max_delivery_s']}")
+        if rr is None:
+            reasons.append(f"повтор {i}: ответа relay нет")
+        elif rr > float(th["max_relay_reply_s"]):
+            reasons.append(f"повтор {i}: ответ relay {rr:.3f} с > {th['max_relay_reply_s']}")
+    return {
+        **_verdict(reasons, invalid),
+        "hangs": hangs,
+        "delivery_stats": stats([r.get("delivery_s") for r in runs]),
+        "relay_reply_stats": stats([r.get("relay_reply_s") for r in runs]),
+    }
+
+
+def judge_s4(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
+    """S4: строка ``System shutdown requested`` на <= +1,2 с, выход PM <= +4,5 с, 0 ``did not stop in``,
+    ждущий в очереди - ``system_stopping``. Времена - от отправки ``process.stop slow``."""
+    th = th or THRESHOLDS["S4"]
+    reasons: list[str] = []
+    invalid = False
+    hangs = 0
+    for i, r in enumerate(runs, 1):
+        if not r.get("precondition_ok", True):
+            reasons.append(f"повтор {i}: предпосылка не выполнена ({r.get('precondition_note', '')})")
+            invalid = True
+            continue
+        line, ex = r.get("shutdown_line_s"), r.get("pm_exit_s")
+        if ex is None:
+            hangs += 1
+            reasons.append(f"повтор {i}: ЗАВИСАНИЕ, PM не вышел за {r.get('waited_s')} с")
+        elif ex > float(th["max_pm_exit_s"]):
+            reasons.append(f"повтор {i}: выход PM на +{ex:.2f} с > {th['max_pm_exit_s']}")
+        if line is None:
+            reasons.append(f"повтор {i}: строки 'System shutdown requested' нет в логах")
+        elif line > float(th["max_shutdown_line_s"]):
+            reasons.append(f"повтор {i}: строка на +{line:.2f} с > {th['max_shutdown_line_s']}")
+        if int(r.get("dns", 0)) > int(th["max_dns"]):
+            reasons.append(f"повтор {i}: 'did not stop in' x{r.get('dns')}")
+        if r.get("queued_error") != "system_stopping":
+            reasons.append(
+                f"повтор {i}: ответ ждущего в очереди = {r.get('queued_error')!r}, ожидалось 'system_stopping'"
+            )
+    return {
+        **_verdict(reasons, invalid),
+        "hangs": hangs,
+        "shutdown_line_stats": stats([r.get("shutdown_line_s") for r in runs]),
+        "pm_exit_stats": stats([r.get("pm_exit_s") for r in runs]),
+    }
+
+
+def judge_s5(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
+    """S5: рестарт < 5,0 с; выход дерева < 2,0 с в 10 из 10; ответ recipe.activate < 5,0 с (строгие неравенства).
+
+    Запись: ``{kind: restart|activate|shutdown, elapsed_s: float|None, ok: bool, target?}``.
+    """
+    th = th or THRESHOLDS["S5"]
+    reasons: list[str] = []
+    limits = {
+        "restart": float(th["max_restart_s"]),
+        "activate": float(th["max_activate_s"]),
+        "shutdown": float(th["max_tree_exit_s"]),
+    }
+    invalid = False
+    hangs = 0
+    for i, r in enumerate(runs, 1):
+        kind = r.get("kind")
+        if kind not in limits:
+            reasons.append(f"запись {i}: неизвестный kind {kind!r}")
+            continue
+        el = r.get("elapsed_s")
+        if el is None:
+            hangs += 1
+            reasons.append(f"{kind} #{i} ({r.get('target', '')}): ЗАВИСАНИЕ, нет результата за {r.get('waited_s')} с")
+        elif not el < limits[kind]:
+            reasons.append(f"{kind} #{i} ({r.get('target', '')}): {el:.2f} с >= {limits[kind]}")
+        if kind != "shutdown" and not r.get("ok", True):
+            reasons.append(f"{kind} #{i} ({r.get('target', '')}): команда не подтвердила успех ({r.get('note', '')})")
+        if r.get("survivors"):
+            reasons.append(f"{kind} #{i}: после выхода живы PID {r['survivors']}")
+    n_shutdown = sum(1 for r in runs if r.get("kind") == "shutdown")
+    if n_shutdown != int(th["shutdown_runs"]):
+        reasons.append(f"выходов дерева измерено {n_shutdown}, нужно {th['shutdown_runs']}")
+        invalid = True
+    return {
+        **_verdict(reasons, invalid),
+        "hangs": hangs,
+        "restart_stats": stats([r.get("elapsed_s") for r in runs if r.get("kind") == "restart"]),
+        "activate_stats": stats([r.get("elapsed_s") for r in runs if r.get("kind") == "activate"]),
+        "tree_exit_stats": stats([r.get("elapsed_s") for r in runs if r.get("kind") == "shutdown"]),
+    }
+
+
+def judge_control(rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Контроль (патч И1): стенд различает, если S2-S4 на И1 дают FAIL по ПОСЛЕ и достигают нижних границ «ДО».
+
+    ``rows`` - результаты ``judge_*`` + ключи ``max_latency_s`` (S2), ``max_delivery_s`` (S3),
+    ``min_shutdown_line_s`` (S4), посчитанные по контрольным прогонам.
+    """
+    reasons: list[str] = []
+    for key in ("S2", "S3", "S4"):
+        if rows.get(key, {}).get("verdict") != "FAIL":
+            reasons.append(
+                f"{key}: на И1 вердикт {rows.get(key, {}).get('verdict')!r}, ожидался FAIL (иначе стенд не различает)"
+            )
+    s2 = rows.get("S2", {}).get("max_latency_s")
+    s3 = rows.get("S3", {}).get("max_delivery_s")
+    s4 = rows.get("S4", {}).get("min_shutdown_line_s")
+    if s2 is None or s2 < CONTROL_FLOORS["S2_max_latency_s"]:
+        reasons.append(f"S2: max ответа на И1 = {s2}, ожидалось >= {CONTROL_FLOORS['S2_max_latency_s']}")
+    if s3 is None or s3 < CONTROL_FLOORS["S3_delivery_s"]:
+        reasons.append(f"S3: доставка на И1 = {s3}, ожидалось >= {CONTROL_FLOORS['S3_delivery_s']}")
+    if s4 is None or s4 < CONTROL_FLOORS["S4_shutdown_line_s"]:
+        reasons.append(f"S4: строка shutdown на И1 = +{s4}, ожидалось >= +{CONTROL_FLOORS['S4_shutdown_line_s']}")
+    return {"distinguishes": not reasons, "reasons": reasons}
+
+
+# --------------------------------------------------------------------------------------------------------------
+# Живая часть. Всё ниже требует бэкенда; в --dry-run и юнит-тесте не вызывается.
+# --------------------------------------------------------------------------------------------------------------
+class Pending:
+    """Один асинхронный запрос: момент отправки, момент прихода (reader-поток сокета), ответ."""
+
+    def __init__(self) -> None:
+        self.ev = threading.Event()
+        self.t_send = 0.0
+        self.t_arr: float | None = None
+        self.result: Any = None
+
+    @property
+    def answered(self) -> bool:
+        r = self.result
+        if self.t_arr is None or not isinstance(r, dict):
+            return False
+        return r.get("error") not in ("timeout", "connection lost", "connection closed", "dropped", "not connected")
+
+    def latency(self) -> float | None:
+        return round(self.t_arr - self.t_send, 4) if self.answered and self.t_arr is not None else None
+
+
+def leaf(res: Any) -> dict[str, Any]:
+    from backend_ctl.protocol import unwrap
+
+    out = unwrap(res, leaf=True)
+    return out if isinstance(out, dict) else {}
+
+
+def send_async(drv: Any, msg: dict[str, Any], timeout: float) -> Pending:
+    p = Pending()
+
+    def cb(res: Any) -> None:
+        p.t_arr = time.monotonic()
+        p.result = res
+        p.ev.set()
+
+    p.t_send = time.monotonic()
+    drv.request_async(msg, cb, timeout=timeout)
+    return p
+
+
+def pm_msg(cmd: str, args: dict[str, Any] | None, door: str) -> dict[str, Any]:
+    """Команда PM: ``direct`` - прямая дверь (target ProcessManager), ``command`` - ``process.command`` (дверь GUI)."""
+    from multiprocess_framework.modules.message_module import build_command_message, build_system_command_message
+
+    args = dict(args or {})
+    if door == "command":
+        return build_system_command_message({"cmd": cmd, **args}, sender="backend_ctl", reply_to="ProcessManager")
+    return build_command_message("ProcessManager", cmd, args, sender="backend_ctl", reply_to="ProcessManager")
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def pids_alive(pids: list[int]) -> list[int]:
+    """Какие из PID ещё есть в таблице процессов (``tasklist``, без psutil)."""
+    if not pids:
+        return []
+    if sys.platform != "win32":
+        alive = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                alive.append(pid)
+            except OSError:
+                pass
+        return alive
+    out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=20).stdout  # nosec B603 B607 — литеральные аргументы, внешнего ввода нет
+    present = set()
+    for line in out.splitlines():
+        parts = [x.strip('"') for x in line.split('","')]
+        if len(parts) > 1 and parts[1].isdigit():
+            present.add(int(parts[1]))
+    return [p for p in pids if p in present]
+
+
+def kill_pids(pids: list[int]) -> None:
+    for pid in pids:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=20)  # nosec B603 B607 — PID из supervision.status, аргументы литеральные
+        else:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+
+
+class Backend:
+    """Бэкенд стенда: свой каталог запуска, временный манифест и system.yaml, свой порт; запуск и уборка."""
+
+    def __init__(self, ctx: "Ctx", tag: str) -> None:
+        self.ctx = ctx
+        self.tag = tag
+        self.workdir = ctx.out / "runs" / tag
+        self.log_root = self.workdir / "logs"
+        self.port = free_port()
+        self.proc: subprocess.Popen | None = None
+        self.drv: Any = None
+        self.boot_s: float | None = None
+        self.stdout_path = self.workdir / "backend.stdout.log"
+
+    # ---- конфиги этого запуска (закоммиченные файлы не трогаются) ----
+    def _write_configs(self) -> Path:
+        import yaml
+
+        repo = self.ctx.root
+        src_manifest = repo / "multiprocess_prototype" / "app.yaml"
+        raw = yaml.safe_load(src_manifest.read_text(encoding="utf-8")) or {}
+        base_dir = src_manifest.parent
+
+        def absolutize(value: str) -> str:
+            p = Path(value)
+            return str(p if p.is_absolute() else (base_dir / p).resolve())
+
+        sys_raw = yaml.safe_load(Path(absolutize(raw["system"])).read_text(encoding="utf-8")) or {}
+        sys_raw.setdefault("system", {})["stop_timeout"] = (
+            SHUTDOWN_TIMEOUT_S  # -> shutdown_timeout PM (spawner.py:90-92)
+        )
+        sys_raw["system"]["log_dir"] = str(self.log_root)
+        sys_raw.setdefault("backend_ctl", {}).update({"enabled": True, "port": self.port, "host": "127.0.0.1"})
+        sys_path = self.workdir / "system.yaml"
+        sys_path.write_text(yaml.safe_dump(sys_raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        raw["system"] = str(sys_path)
+        raw["recipes"] = absolutize(raw["recipes"])
+        raw["pipeline"] = str((repo / self.ctx.recipe).resolve())
+        if isinstance(raw.get("styles"), dict) and raw["styles"].get("dir"):
+            raw["styles"]["dir"] = absolutize(raw["styles"]["dir"])
+        base = raw.get("base")
+        if isinstance(base, str):
+            raw["base"] = absolutize(base)
+        elif isinstance(base, list):
+            raw["base"] = [absolutize(x) for x in base]
+        if raw.get("presentation"):
+            raw["presentation"] = absolutize(raw["presentation"])
+        manifest = self.workdir / "app.yaml"
+        manifest.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        return manifest
+
+    def start(self) -> Any:
+        from backend_ctl.driver import BackendDriver
+
+        self.workdir.mkdir(parents=True, exist_ok=True)
+        (self.workdir / "data").mkdir(exist_ok=True)  # registry_path data/devices.yaml - относительно cwd запуска
+        manifest = self._write_configs()
+        env = dict(os.environ)
+        env.update(
+            {
+                "PYTHONUTF8": "1",
+                "PYTHONPATH": os.pathsep.join([str(self.ctx.root), str(HERE)]),
+                "BACKEND_CTL": "1",
+                "BACKEND_CTL_PORT": str(self.port),
+                "INSPECTOR_MANIFEST": str(manifest),
+                "INSPECTOR_HEADLESS": "1",
+                "MULTIPROCESS_PID_FILE": str(self.workdir / "pids.jsonl"),
+                "INSPECTOR_PID_FILE": str(self.workdir / "pids.jsonl"),
+                "STAND_STOP_PROCESS_TIMEOUT": str(STOP_PROCESS_TIMEOUT_S),
+            }
+        )
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        t0 = time.monotonic()
+        out = open(self.stdout_path, "wb")
+        self.proc = subprocess.Popen(  # nosec B603 — свой python и свой скрипт стенда
+            [self.ctx.python, str(HERE / "stand_backend.py")],
+            cwd=str(self.workdir),
+            env=env,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
+        )
+        drv = BackendDriver(port=self.port)
+        deadline = t0 + self.ctx.boot_timeout_s
+        while True:
+            if self.proc.poll() is not None:
+                raise RuntimeError(f"бэкенд завершился при старте, код {self.proc.returncode}; см. {self.stdout_path}")
+            try:
+                drv.connect()
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f"сокет backend_ctl не открылся за {self.ctx.boot_timeout_s} с")
+                time.sleep(0.25)
+        while time.monotonic() < deadline:
+            snap = self.supervision(drv)
+            if snap.get("devices", {}).get("alive"):
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("devices не стал alive за срок старта")
+        self.boot_s = round(time.monotonic() - t0, 2)
+        self.drv = drv
+        text = self.stdout_path.read_text(encoding="utf-8", errors="replace")
+        self.override_seen = f"stop_process_timeout={STOP_PROCESS_TIMEOUT_S}" in text
+        return drv
+
+    @staticmethod
+    def supervision(drv: Any, name: str | None = None) -> dict[str, Any]:
+        try:
+            res = leaf(drv.supervision_status(name, timeout=5.0))
+        except Exception:  # noqa: BLE001 - опрос готовности терпит моргание
+            return {}
+        procs = res.get("processes")
+        return procs if isinstance(procs, dict) else {}
+
+    def stop(self) -> None:
+        """Погасить: system.shutdown, ждать выход; не вышел - kill дерева по PID (без psutil)."""
+        if self.drv is not None:
+            try:
+                self.drv.system_shutdown(wait=False)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self.drv.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self.drv = None
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                kill_pids([self.proc.pid])
+                self.proc.wait(10)
+
+    def kill(self) -> None:
+        if self.proc is not None and self.proc.poll() is None:
+            kill_pids([self.proc.pid])
+
+
+class Ctx:
+    """Параметры прогона."""
+
+    def __init__(self, args: argparse.Namespace, root: Path, out: Path) -> None:
+        self.root = root
+        self.out = out
+        self.python = args.python
+        self.recipe = args.recipe
+        self.door = args.door
+        self.boot_timeout_s = args.boot_timeout
+        self.quick = args.quick
+        self.n = {k: (1 if args.quick else v) for k, v in REPEATS.items()}
+
+
+def write_run(ctx: Ctx, scenario: str, idx: int, data: dict[str, Any]) -> None:
+    d = ctx.out / "json"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{scenario}_r{idx}.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+
+
+def revive(drv: Any, name: str, door: str, deadline_s: float = 45.0) -> dict[str, Any]:
+    """Поднять ребёнка, если он мёртв (``process.restart`` мёртвого = старт), и дождаться ``alive``."""
+    snap = Backend.supervision(drv, name).get(name, {})
+    if snap.get("alive"):
+        return snap
+    p = send_async(drv, pm_msg("process.restart", {"process_name": name}, door), 60.0)
+    p.ev.wait(60.0)
+    end = time.monotonic() + deadline_s
+    while time.monotonic() < end:
+        snap = Backend.supervision(drv, name).get(name, {})
+        if snap.get("alive"):
+            time.sleep(1.0)  # ребёнок успел открыть читателей очередей
+            return snap
+        time.sleep(0.25)
+    raise RuntimeError(f"{name} не стал alive за {deadline_s} с")
+
+
+def add_slow_fast(drv: Any, backend: Backend) -> dict[str, Any]:
+    """Добавить ``slow`` и ``fast`` через ``topology.apply`` (с предварительным ``topology.diff``).
+
+    Что остаётся от рецепта: на первом ``topology.apply`` PM сносит все non-protected процессы
+    (``process_manager_process.py:3988``: на boot ``_current_topology`` = None), protected (devices, gui) живут.
+    Предохранитель: diff не должен трогать protected-процессы.
+    """
+    desired = {
+        "name": "stand_l9",
+        "processes": [
+            {"process_name": SLOW, "process_class": SLOW_CLASS},
+            {"process_name": FAST, "process_class": FAST_CLASS},
+        ],
+        "wires": [],
+    }
+    diff = leaf(drv.send_command("ProcessManager", "topology.diff", {"topology_dict": desired}, timeout=30.0))
+    touched = {c.get("process_name") for c in (diff.get("commands") or []) if isinstance(c, dict)}
+    if "devices" in touched or "gui" in touched:
+        raise RuntimeError(f"topology.diff трогает protected-процессы: {sorted(touched)}")
+    t0 = time.monotonic()
+    res = leaf(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": desired}, timeout=120.0))
+    if res.get("success") is not True:
+        raise RuntimeError(f"topology.apply slow/fast не удался: {res}")
+    for name in (SLOW, FAST):
+        end = time.monotonic() + 45.0
+        while time.monotonic() < end and not Backend.supervision(drv, name).get(name, {}).get("alive"):
+            time.sleep(0.25)
+        if not Backend.supervision(drv, name).get(name, {}).get("alive"):
+            raise RuntimeError(f"{name} не alive после topology.apply")
+    time.sleep(1.0)
+    return {
+        "apply_s": round(time.monotonic() - t0, 2),
+        "diff_commands": sorted(str(x) for x in touched),
+        "ready": res.get("ready"),
+    }
+
+
+# ---- S1 ---------------------------------------------------------------------------------------------------------
+class Sims:
+    """Два симулятора робота v2 в процессе стенда (TCP на свободных портах), как ``E2eRig``."""
+
+    def __init__(self) -> None:
+        self.servers: list[Any] = []
+        self.ports: list[int] = []
+
+    def start(self, n: int = 2) -> None:
+        from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+        from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
+        from Services.robot_comm.server.sim_robot import SimRobotServer
+
+        for _ in range(n):
+            port = free_port()
+            server = SimRobotServer("127.0.0.1", port, ROBOT_UNIT_ID, core=RobotSimCoreV2())
+            server.start()
+            self.servers.append(server)
+            self.ports.append(port)
+        self.unit = ROBOT_UNIT_ID
+
+    def stop(self) -> None:
+        for s in self.servers:
+            try:
+                s.stop()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def connect_robots(drv: Any, sims: Sims, deadline_s: float = 25.0) -> tuple[bool, str]:
+    for i, port in enumerate(sims.ports, 1):
+        did = f"r{i}"
+        up = leaf(
+            drv.send_command(
+                "devices",
+                "device_upsert",
+                {
+                    "id": did,
+                    "name": did,
+                    "kind": "robot",
+                    "protocol": "delta_v2",
+                    "transport": {"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": sims.unit},
+                },
+                timeout=15.0,
+            )
+        )
+        if up.get("status") != "ok":
+            return False, f"device_upsert {did}: {up}"
+        con = leaf(drv.send_command("devices", "device_connect", {"device_id": did}, timeout=15.0))
+        if con.get("status") != "ok":
+            return False, f"device_connect {did}: {con}"
+    end = time.monotonic() + deadline_s
+    pending = {f"r{i}" for i in range(1, len(sims.ports) + 1)}
+    while pending and time.monotonic() < end:
+        for did in sorted(pending):
+            v = leaf(
+                drv.send_command("ProcessManager", "state.get", {"path": f"devices.state.{did}.conn"}, timeout=5.0)
+            )
+            val = v.get("value")
+            if v.get("status") == "ok" and isinstance(val, dict) and val.get("conn") == "connected":
+                pending.discard(did)
+        time.sleep(0.1)
+    return (not pending), ("" if not pending else f"не connected: {sorted(pending)}")
+
+
+def run_s1(ctx: Ctx) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    sims = Sims()
+    sims.start(2)
+    try:
+        for i in range(1, ctx.n["S1"] + 1):
+            be = Backend(ctx, f"s1_r{i}")
+            rec: dict[str, Any] = {"run": i, "precondition_ok": False}
+            try:
+                drv = be.start()
+                rec["boot_s"] = be.boot_s
+                rec["override_seen"] = be.override_seen
+                ok, note = connect_robots(drv, sims)
+                rec["precondition_ok"], rec["precondition_note"] = ok, note
+                if ok:
+                    p = send_async(drv, pm_msg("process.stop", {"process_name": "devices"}, ctx.door), 20.0)
+                    p.ev.wait(20.0)
+                    rec["reply_s"] = p.latency()
+                    rec["reply"] = p.result
+                    rec["waited_s"] = round(time.monotonic() - p.t_send, 2)
+                    time.sleep(3.0)
+                    rec["status"] = (Backend.supervision(drv, "devices").get("devices") or {}).get("status")
+            except Exception as exc:  # noqa: BLE001
+                rec["error"] = repr(exc)
+                rec["precondition_note"] = rec.get("precondition_note") or repr(exc)
+            finally:
+                be.stop()
+            logs = scan_log_dir(be.log_root)
+            rec.update({"lost": logs["lost"], "dns": logs["dns"], "dns_by_dir": logs["dns_by_dir"]})
+            rec["hung"] = (
+                is_hung(rec.get("reply_s"), rec.get("status"), rec["lost"]) if rec["precondition_ok"] else None
+            )
+            write_run(ctx, "S1", i, rec)
+            runs.append(rec)
+            print(
+                f"[S1 r{i}] reply_s={rec.get('reply_s')} status={rec.get('status')} "
+                f"lost={rec['lost']} dns={rec['dns']} hung={rec['hung']}",
+                flush=True,
+            )
+    finally:
+        sims.stop()
+    return runs
+
+
+# ---- S2 / S3 (один бэкенд на оба сценария) ------------------------------------------------------------------------
+def run_s2_once(drv: Any, ctx: Ctx, idx: int) -> dict[str, Any]:
+    revive(drv, SLOW, ctx.door)
+    samples: list[Pending] = []
+    halt = threading.Event()
+
+    def sampler() -> None:
+        while not halt.is_set():
+            samples.append(send_async(drv, pm_msg("supervision.status", {}, "direct"), 5.0))
+            halt.wait(SAMPLE_PERIOD_S)
+
+    th = threading.Thread(target=sampler, name="s2-sampler", daemon=True)
+    th.start()
+    time.sleep(0.5)
+    stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
+    stop_p.ev.wait(25.0)
+    time.sleep(0.3)
+    halt.set()
+    th.join(2.0)
+    for p in samples:
+        p.ev.wait(max(0.0, 6.0 - (time.monotonic() - p.t_send)))
+    stop_end = stop_p.t_arr if stop_p.t_arr is not None else time.monotonic()
+    during = [p for p in samples if stop_p.t_send <= p.t_send <= stop_end]
+    lat = [p.latency() for p in during]
+    rec = {
+        "stop": idx,
+        "stop_reply_s": stop_p.latency(),
+        "waited_s": round(stop_end - stop_p.t_send, 2),
+        "stop_reply": stop_p.result,
+        "latencies": lat,
+        "n_samples": len(during),
+        "n_samples_total": len(samples),
+        "stats": stats(lat),
+    }
+    write_run(ctx, "S2", idx, rec)
+    s = rec["stats"]
+    print(
+        f"[S2 #{idx}] stop_reply_s={rec['stop_reply_s']} samples={rec['n_samples']} "
+        f"max={s['max']} p99={s['p99']} unanswered={s['unanswered']}",
+        flush=True,
+    )
+    return rec
+
+
+def run_s3_once(drv: Any, ctx: Ctx, idx: int) -> dict[str, Any]:
+    from multiprocess_framework.modules.message_module import build_command_message
+
+    revive(drv, SLOW, ctx.door)
+    inner_id = f"stand-l9-inner-{os.getpid()}-{idx}-{time.monotonic_ns()}"
+    arrivals: dict[str, float] = {}
+    drv.add_push_listener(
+        lambda m: (
+            arrivals.setdefault(m.get("request_id"), time.monotonic())
+            if isinstance(m, dict) and m.get("request_id") == inner_id
+            else None
+        )
+    )
+    inner = build_command_message(
+        "devices", "introspect.status", {}, sender="backend_ctl", request_id=inner_id, reply_to="ProcessManager"
+    )
+    stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
+    while time.monotonic() - stop_p.t_send < WAIT_RELAY_AT_S:
+        time.sleep(0.005)
+    relay_p = send_async(
+        drv, pm_msg("process.relay", {"target_process": "devices", "inner_message": inner}, "direct"), 15.0
+    )
+    relay_p.ev.wait(15.0)
+    end = time.monotonic() + 6.0
+    while inner_id not in arrivals and time.monotonic() < end:
+        time.sleep(0.01)
+    stop_p.ev.wait(25.0)
+    delivered = arrivals.get(inner_id)
+    rec = {
+        "repeat": idx,
+        "stop_reply_s": stop_p.latency(),
+        "waited_s": round((stop_p.t_arr or time.monotonic()) - stop_p.t_send, 2),
+        "relay_sent_at_s": round(relay_p.t_send - stop_p.t_send, 3),
+        "relay_reply_s": relay_p.latency(),
+        "relay_reply": relay_p.result,
+        "delivery_s": round(delivered - relay_p.t_send, 4) if delivered is not None else None,
+        "relay_inside_stop": stop_p.t_arr is None or relay_p.t_arr is None or relay_p.t_arr <= stop_p.t_arr,
+    }
+    write_run(ctx, "S3", idx, rec)
+    print(
+        f"[S3 #{idx}] relay_at=+{rec['relay_sent_at_s']} reply_s={rec['relay_reply_s']} "
+        f"delivery_s={rec['delivery_s']} stop_reply_s={rec['stop_reply_s']}",
+        flush=True,
+    )
+    return rec
+
+
+def run_s23(ctx: Ctx, want: set[str]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {"S2": [], "S3": []}
+    be = Backend(ctx, "s23")
+    try:
+        drv = be.start()
+        setup = add_slow_fast(drv, be)
+        write_run(ctx, "setup", 23, {"boot_s": be.boot_s, "override_seen": be.override_seen, **setup})
+        if "S2" in want:
+            for i in range(1, ctx.n["S2"] + 1):
+                out["S2"].append(run_s2_once(drv, ctx, i))
+        if "S3" in want:
+            for i in range(1, ctx.n["S3"] + 1):
+                out["S3"].append(run_s3_once(drv, ctx, i))
+    finally:
+        be.stop()
+    return out
+
+
+# ---- S4 ---------------------------------------------------------------------------------------------------------
+def run_s4_once(ctx: Ctx, idx: int) -> dict[str, Any]:
+    be = Backend(ctx, f"s4_r{idx}")
+    rec: dict[str, Any] = {"run": idx, "precondition_ok": False}
+    try:
+        drv = be.start()
+        rec["boot_s"], rec["override_seen"] = be.boot_s, be.override_seen
+        rec["setup"] = add_slow_fast(drv, be)
+        revive(drv, SLOW, ctx.door)
+        revive(drv, FAST, ctx.door)
+        rec["precondition_ok"] = True
+        t0_wall = time.time()
+        stop_p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), 25.0)
+        time.sleep(0.1)
+        queued_p = send_async(drv, pm_msg("process.restart", {"process_name": FAST}, ctx.door), 25.0)
+        while time.monotonic() - stop_p.t_send < WAIT_RELAY_AT_S:
+            time.sleep(0.005)
+        sd_p = send_async(drv, pm_msg("system.shutdown", {"mode": "graceful"}, "command"), 15.0)
+        rec["shutdown_sent_at_s"] = round(sd_p.t_send - stop_p.t_send, 3)
+        wait_limit = 40.0
+        end = stop_p.t_send + wait_limit
+        while be.proc.poll() is None and time.monotonic() < end:
+            time.sleep(0.02)
+        t_exit = time.monotonic()
+        exited = be.proc.poll() is not None
+        rec["pm_exit_s"] = round(t_exit - stop_p.t_send, 3) if exited else None
+        rec["waited_s"] = round(t_exit - stop_p.t_send, 2)
+        rec["shutdown_reply_s"] = sd_p.latency()
+        rec["stop_slow_reply_s"] = stop_p.latency()
+        rec["stop_slow_reply"] = stop_p.result
+        q = leaf(queued_p.result) if queued_p.answered else {}
+        rec["queued_reply_s"] = queued_p.latency()
+        rec["queued_error"] = q.get("error") if queued_p.answered else None
+        rec["queued_reply"] = queued_p.result
+        rec["t0_wall"] = t0_wall
+    except Exception as exc:  # noqa: BLE001
+        rec["error"] = repr(exc)
+        rec["precondition_note"] = repr(exc)
+    finally:
+        be.kill() if rec.get("pm_exit_s") is None else None
+        be.stop()
+    logs = scan_log_dir(be.log_root)
+    rec.update(
+        {
+            "dns": logs["dns"],
+            "dns_by_dir": logs["dns_by_dir"],
+            "lost": logs["lost"],
+            "terminating": logs["terminating"],
+            "survived": logs["survived"],
+        }
+    )
+    ts = logs["shutdown_ts"]
+    rec["shutdown_line_s"] = round(ts - rec["t0_wall"], 3) if ts is not None and "t0_wall" in rec else None
+    write_run(ctx, "S4", idx, rec)
+    print(
+        f"[S4 #{idx}] line=+{rec.get('shutdown_line_s')} pm_exit=+{rec.get('pm_exit_s')} "
+        f"dns={rec['dns']} queued={rec.get('queued_error')!r}",
+        flush=True,
+    )
+    return rec
+
+
+def run_s4(ctx: Ctx) -> list[dict[str, Any]]:
+    return [run_s4_once(ctx, i) for i in range(1, ctx.n["S4"] + 1)]
+
+
+# ---- S5 ---------------------------------------------------------------------------------------------------------
+def run_s5(ctx: Ctx, restart_targets: list[str]) -> list[dict[str, Any]]:
+    """10 прогонов с нуля: system.shutdown без slow, замер выхода дерева; в прогоне 1 - рестарты и recipe.activate."""
+    from backend_ctl.protocol import unwrap  # noqa: F401  (проверка доступности до старта)
+
+    recs: list[dict[str, Any]] = []
+    for i in range(1, ctx.n["S5"] + 1):
+        be = Backend(ctx, f"s5_r{i}")
+        try:
+            drv = be.start()
+            if i == 1:
+                snap0 = Backend.supervision(drv)
+                for target in restart_targets:
+                    name, subst = target, False
+                    if name not in snap0:
+                        cands = [n for n, v in snap0.items() if n not in ("devices", "gui") and v.get("alive")]
+                        if not cands:
+                            recs.append(
+                                {
+                                    "kind": "restart",
+                                    "target": target,
+                                    "elapsed_s": None,
+                                    "ok": False,
+                                    "note": "нет подходящего процесса",
+                                    "waited_s": 0,
+                                }
+                            )
+                            continue
+                        name, subst = cands[0], True
+                    for rep in (1, 2, 3):
+                        t0 = time.monotonic()
+                        res = drv.process_restart_verified(name, wait=30.0, timeout=30.0)
+                        el = round(time.monotonic() - t0, 3)
+                        recs.append(
+                            {
+                                "kind": "restart",
+                                "target": f"{name}{' (вместо ' + target + ')' if subst else ''} #{rep}",
+                                "elapsed_s": el,
+                                "ok": bool(res.get("restarted")),
+                                "note": res.get("reason", ""),
+                                "waited_s": el,
+                            }
+                        )
+                        print(f"[S5 restart {name} #{rep}] {el}s restarted={res.get('restarted')}", flush=True)
+                p = send_async(drv, pm_msg("recipe.activate", {"name": Path(ctx.recipe).stem}, "direct"), 60.0)
+                p.ev.wait(60.0)
+                res_l = leaf(p.result)
+                recs.append(
+                    {
+                        "kind": "activate",
+                        "target": Path(ctx.recipe).stem,
+                        "elapsed_s": p.latency(),
+                        "ok": res_l.get("success") is True,
+                        "note": str(res_l.get("error", "")),
+                        "waited_s": round((p.t_arr or time.monotonic()) - p.t_send, 2),
+                    }
+                )
+                print(f"[S5 recipe.activate] {p.latency()}s success={res_l.get('success')}", flush=True)
+                time.sleep(2.0)
+            snap = Backend.supervision(drv)
+            pids = [v.get("pid") for v in snap.values() if isinstance(v.get("pid"), int)]
+            try:
+                from backend_ctl.protocol import _find_payload
+
+                pm_pid = _find_payload(drv.introspect_status("ProcessManager", timeout=5.0), "pid", "process").get(
+                    "pid"
+                )
+                if isinstance(pm_pid, int):
+                    pids.append(pm_pid)
+            except Exception:  # noqa: BLE001
+                pass
+            sd = send_async(drv, pm_msg("system.shutdown", {"mode": "graceful"}, "command"), 15.0)
+            tree_gone: float | None = None
+            end = sd.t_send + 30.0
+            while time.monotonic() < end:
+                if be.proc.poll() is not None:
+                    left = pids_alive(pids)
+                    if not left:
+                        tree_gone = time.monotonic()
+                        break
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.02)
+            survivors = pids_alive(pids) if tree_gone is None else []
+            rec = {
+                "kind": "shutdown",
+                "target": f"run {i}",
+                "elapsed_s": round(tree_gone - sd.t_send, 3) if tree_gone else None,
+                "waited_s": round(time.monotonic() - sd.t_send, 2),
+                "survivors": survivors,
+                "n_pids": len(pids),
+            }
+            if survivors:
+                kill_pids(survivors)
+            recs.append(rec)
+            print(
+                f"[S5 shutdown run {i}] tree_exit_s={rec['elapsed_s']} pids={len(pids)} survivors={survivors}",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            recs.append(
+                {
+                    "kind": "shutdown",
+                    "target": f"run {i}",
+                    "elapsed_s": None,
+                    "waited_s": 0,
+                    "note": repr(exc),
+                    "survivors": [],
+                }
+            )
+        finally:
+            be.kill() if be.proc and be.proc.poll() is None and not recs[-1].get("elapsed_s") else None
+            be.stop()
+    for j, r in enumerate(recs, 1):
+        write_run(ctx, "S5", j, r)
+    return recs
+
+
+# ---- контроль (И1) ----------------------------------------------------------------------------------------------
+def git(root: Path, *a: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True, timeout=60)  # nosec B603 B607 — git с литеральными аргументами
+
+
+class PatchedTree:
+    """Контрольное дерево с патчем: ``git apply`` на входе, ``git apply -R`` и ``git diff --quiet`` на выходе."""
+
+    def __init__(self, root: Path, patch: Path) -> None:
+        self.root, self.patch = root, patch
+        self.clean_after: bool | None = None
+
+    def __enter__(self) -> "PatchedTree":
+        if git(self.root, "diff", "--quiet").returncode != 0:
+            raise RuntimeError(f"контрольное дерево {self.root} не чистое до патча")
+        chk = git(self.root, "apply", "--check", str(self.patch))
+        if chk.returncode != 0:
+            raise RuntimeError(f"git apply --check: {chk.stderr.strip()}")
+        ap = git(self.root, "apply", str(self.patch))
+        if ap.returncode != 0:
+            raise RuntimeError(f"git apply: {ap.stderr.strip()}")
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        rv = git(self.root, "apply", "-R", str(self.patch))
+        self.clean_after = rv.returncode == 0 and git(self.root, "diff", "--quiet").returncode == 0
+        if not self.clean_after:
+            print(f"[control] ВНИМАНИЕ: дерево {self.root} не чистое после отката И1: {rv.stderr.strip()}", flush=True)
+
+
+# --------------------------------------------------------------------------------------------------------------
+# Таблицы, план, точка входа
+# --------------------------------------------------------------------------------------------------------------
+def _f(x: Any, nd: int = 3) -> str:
+    return "-" if x is None else (f"{x:.{nd}f}" if isinstance(x, float) else str(x))
+
+
+def markdown_table(title: str, rows: dict[str, dict[str, Any]]) -> str:
+    lines = [
+        f"## {title}",
+        "",
+        "| сценарий | N | min | median | max | p99 | зависаний | not reported/lost | did not stop in "
+        "| порог ПОСЛЕ | вердикт |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for key, r in rows.items():
+        st = r.get("primary_stats") or {}
+        lines.append(
+            f"| {key} | {st.get('n', '-')} | {_f(st.get('min'))} | {_f(st.get('median'))} | "
+            f"{_f(st.get('max'))} | {_f(st.get('p99'))} | "
+            f"{r.get('hangs', '-')} | {r.get('lost_lines', '-')} | {r.get('dns_lines', '-')} | "
+            f"{r.get('threshold_text', '')} | "
+            f"**{r['verdict']}**{' (invalid)' if r.get('invalid') else ''} |"
+        )
+    reasons = [f"- {k}: {why}" for k, r in rows.items() for why in r.get("reasons", [])]
+    return "\n".join(lines + ([""] + ["Причины FAIL:"] + reasons if reasons else []) + [""])
+
+
+THRESHOLD_TEXT = {
+    "S1": "0 зависаний, ответ 0,85-1,20 с, lost 0",
+    "S2": "каждый ответ <= 0,5 с, p99 <= 150 мс",
+    "S3": "доставка и ответ <= 0,5 с",
+    "S4": "строка <= +1,2 с, выход PM <= +4,5 с, dns 0, system_stopping",
+    "S5": "рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0",
+}
+
+
+def summarize(name: str, verdict: dict[str, Any], runs: list[dict[str, Any]], primary_key: str) -> dict[str, Any]:
+    row = dict(verdict)
+    row["primary_stats"] = verdict.get(primary_key)
+    row["threshold_text"] = THRESHOLD_TEXT[name]
+    row["lost_lines"] = sum(int(r.get("lost", 0)) for r in runs if isinstance(r, dict))
+    row["dns_lines"] = sum(int(r.get("dns", 0)) for r in runs if isinstance(r, dict))
+    return row
+
+
+def build_plan(args: argparse.Namespace) -> list[str]:
+    n = {k: (1 if args.quick else v) for k, v in REPEATS.items()}
+    mode = "КОНТРОЛЬ (патч И1)" if args.control else "основной прогон"
+    plan = [
+        f"режим: {mode}; сценарии: {args.scenario}; quick={args.quick}",
+        f"python: {args.python}",
+        f"корень дерева: {args.control_root if args.control else args.root}",
+        f"рецепт: {args.recipe} (headless, свой временный манифест INSPECTOR_MANIFEST, "
+        "свой system.yaml, свой порт, свой cwd)",
+        f"окна остановки: shutdown_timeout={SHUTDOWN_TIMEOUT_S} "
+        "(system.yaml system.stop_timeout временной копии -> spawner.py:90-92), "
+        f"stop_process_timeout={STOP_PROCESS_TIMEOUT_S} (stand_backend.py: orchestrator_config; иного пути в коде нет)",
+        f"дверь команд process.*: {args.door}",
+        f"S1 x{n['S1']}: свежий бэкенд на прогон, 2 sim-робота v2 (в процессе стенда), "
+        "device_upsert+connect, process.stop devices, +3 с статус, логи PM",
+        f"S2 x{n['S2']}: общий бэкенд S2+S3; topology.diff/apply (slow=SlowChild 3,0 с, fast); "
+        f"supervision.status каждые {SAMPLE_PERIOD_S} с весь стоп slow",
+        f"S3 x{n['S3']}: process.relay в devices (introspect.status, reply_to=PM) на +{WAIT_RELAY_AT_S} с стопа slow; "
+        "доставка = ответ devices по request_id (push-слушатель)",
+        f"S4 x{n['S4']}: свежий бэкенд; stop slow; +0,1 с process.restart fast (ждущий); "
+        f"+{WAIT_RELAY_AT_S} с system.shutdown; строка лога, выход PM, dns, ответ ждущего",
+        f"S5: свежий бэкенд x{n['S5']} (system.shutdown без slow, выход дерева по PID через tasklist); "
+        f"в прогоне 1 ещё process_restart_verified x3 на {args.s5_restart} и recipe.activate",
+        "пороги ПОСЛЕ (литералы THRESHOLDS): " + json.dumps(THRESHOLDS, ensure_ascii=False),
+        "нижние границы ДО для контроля: " + json.dumps(CONTROL_FLOORS, ensure_ascii=False),
+        "вывод: <out>/json/<сценарий>_rN.json, <out>/summary.json, <out>/results.md, "
+        "<out>/runs/<tag>/ (логи и stdout бэкенда)",
+    ]
+    if args.control:
+        plan.append(
+            f"контроль: git apply {args.inj_patch} в {args.control_root}; S2-S4; git apply -R; git diff --quiet"
+        )
+    return plan
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(
+        description="Стенд T1.9b: S1-S5 и контроль (патч И1). Подробности: README.md и докстринг."
+    )
+    ap.add_argument("--scenario", default="all", help="all | список через запятую из S1,S2,S3,S4,S5 (по умолчанию all)")
+    ap.add_argument("--out", default=None, help="каталог результатов (по умолчанию <каталог стенда>/results/<время>)")
+    ap.add_argument(
+        "--root", default=str(HERE.parents[2]), help="корень проверяемого дерева (по умолчанию worktree со скриптом)"
+    )
+    ap.add_argument("--python", default=sys.executable, help="интерпретатор для бэкенда (main .venv)")
+    ap.add_argument("--recipe", default=DEFAULT_REPO_RECIPE, help="рецепт относительно корня дерева")
+    ap.add_argument(
+        "--door",
+        choices=("direct", "command"),
+        default="direct",
+        help="дверь process.* : прямая (по умолчанию) или process.command",
+    )
+    ap.add_argument(
+        "--s5-restart",
+        default="renderer,devices",
+        help="цели process_restart_verified; нет такого процесса - берётся первый non-protected, это пишется в JSON",
+    )
+    ap.add_argument("--boot-timeout", type=float, default=90.0)
+    ap.add_argument(
+        "--quick", action="store_true", help="по 1 повтору (проверка самого стенда в окне перед полным прогоном)"
+    )
+    ap.add_argument("--control", action="store_true", help="контроль: S2-S4 на дереве с патчем И1")
+    ap.add_argument("--control-root", default=None, help="контрольное дерево (worktree lso-1.9b-inj)")
+    ap.add_argument("--inj-patch", default=None, help="путь к I1.patch")
+    ap.add_argument("--dry-run", action="store_true", help="напечатать план и пороги, бэкенд не трогать")
+    return ap.parse_args(argv)
+
+
+def scenarios_of(args: argparse.Namespace) -> list[str]:
+    allowed = ["S1", "S2", "S3", "S4", "S5"]
+    if args.control:
+        allowed = ["S2", "S3", "S4"]
+    if args.scenario.lower() == "all":
+        return allowed
+    picked = [s.strip().upper() for s in args.scenario.split(",") if s.strip()]
+    bad = [s for s in picked if s not in allowed]
+    if bad:
+        raise SystemExit(f"сценарии {bad} недоступны в этом режиме (допустимы {allowed})")
+    return picked
+
+
+def run_set(ctx: Ctx, picked: list[str], restart_targets: list[str]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    raw: dict[str, Any] = {}
+    if "S1" in picked:
+        runs = run_s1(ctx)
+        raw["S1"] = runs
+        rows["S1"] = summarize("S1", judge_s1(runs), runs, "stats")
+    if "S2" in picked or "S3" in picked:
+        out = run_s23(ctx, set(picked))
+        if "S2" in picked:
+            raw["S2"] = out["S2"]
+            rows["S2"] = summarize("S2", judge_s2(out["S2"]), out["S2"], "stats")
+            allv = [v for r in out["S2"] for v in r.get("latencies", [])]
+            rows["S2"]["max_latency_s"] = max([v for v in allv if v is not None], default=None)
+        if "S3" in picked:
+            raw["S3"] = out["S3"]
+            rows["S3"] = summarize("S3", judge_s3(out["S3"]), out["S3"], "delivery_stats")
+            rows["S3"]["max_delivery_s"] = rows["S3"]["delivery_stats"]["max"]
+    if "S4" in picked:
+        runs = run_s4(ctx)
+        raw["S4"] = runs
+        rows["S4"] = summarize("S4", judge_s4(runs), runs, "shutdown_line_stats")
+        rows["S4"]["min_shutdown_line_s"] = rows["S4"]["shutdown_line_stats"]["min"]
+    if "S5" in picked:
+        runs = run_s5(ctx, restart_targets)
+        raw["S5"] = runs
+        rows["S5"] = summarize("S5", judge_s5(runs), runs, "tree_exit_stats")
+    (ctx.out / "raw.json").write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return rows
+
+
+def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        rec = getattr(stream, "reconfigure", None)
+        if callable(rec):
+            rec(encoding="utf-8", errors="replace")
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.control and not (args.control_root and args.inj_patch):
+        raise SystemExit("--control требует --control-root и --inj-patch")
+    picked = scenarios_of(args)
+    if args.dry_run:
+        print("[dry-run] бэкенд не запускается. План:")
+        for line in build_plan(args):
+            head = line.split(" ", 1)[0].rstrip(":")
+            if head in REPEATS and head not in picked:
+                continue  # шаг сценария, которого нет в этом режиме/выборе
+            print("  -", line)
+        return 0
+
+    out = Path(args.out) if args.out else HERE / "results" / time.strftime("%Y%m%d_%H%M%S")
+    out.mkdir(parents=True, exist_ok=True)
+    root = Path(args.control_root if args.control else args.root).resolve()
+    restart_targets = [x.strip() for x in args.s5_restart.split(",") if x.strip()]
+    started = time.time()
+    summary: dict[str, Any] = {
+        "mode": "control" if args.control else "main",
+        "root": str(root),
+        "python": args.python,
+        "stop_process_timeout": STOP_PROCESS_TIMEOUT_S,
+        "shutdown_timeout": SHUTDOWN_TIMEOUT_S,
+        "door": args.door,
+        "thresholds": THRESHOLDS,
+        "started": started,
+    }
+    if args.control:
+        with PatchedTree(root, Path(args.inj_patch)) as tree:
+            ctx = Ctx(args, root, out)
+            rows = run_set(ctx, picked, restart_targets)
+        summary["control_tree_clean_after"] = tree.clean_after
+        if set(picked) >= {"S2", "S3", "S4"}:
+            summary["control"] = judge_control(rows)
+    else:
+        ctx = Ctx(args, root, out)
+        rows = run_set(ctx, picked, restart_targets)
+    summary["rows"] = rows
+    summary["elapsed_s"] = round(time.time() - started, 1)
+    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    md = markdown_table(
+        "Контроль (И1): числа «ДО» обязаны вернуться" if args.control else "Основной прогон: числа «ПОСЛЕ»", rows
+    )
+    if "control" in summary:
+        md += f"\nСтенд различает: **{summary['control']['distinguishes']}**\n" + "".join(
+            f"- {r}\n" for r in summary["control"]["reasons"]
+        )
+        md += f"\nДерево после отката чистое: {summary['control_tree_clean_after']}\n"
+    (out / ("results_control.md" if args.control else "results.md")).write_text(md, encoding="utf-8")
+    print(md)
+    if args.control:
+        return 0 if summary.get("control", {}).get("distinguishes") and summary["control_tree_clean_after"] else 1
+    return 0 if all(r["verdict"] == "PASS" for r in rows.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
