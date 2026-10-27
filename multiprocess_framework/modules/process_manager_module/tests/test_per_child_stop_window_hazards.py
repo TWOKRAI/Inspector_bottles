@@ -205,3 +205,41 @@ def test_h5_stop_all_uses_name_windows() -> None:
     assert result == {"A": True, "B": True}
     assert a.terminate_at == [], a.terminate_at
     assert len(b.terminate_at) == 1 and 0.25 <= b.terminate_at[0] - t0 <= 0.5, b.terminate_at
+
+
+# --------------------------------------------------------------------------- #
+# H7: явный stop(timeout=X) выше потолка — внешний срок от X (max(X, G)), не от G
+# --------------------------------------------------------------------------- #
+
+
+class _FakeOrchestrator:
+    """Живой двойник PM для ``ProcessSpawner.stop``: пишет срок внешнего ``join``; после ``join`` мёртв."""
+
+    def __init__(self) -> None:
+        self.alive = True
+        self.join_timeouts: list[float | None] = []
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def join(self, timeout: float | None = None) -> None:
+        self.join_timeouts.append(timeout)
+        self.alive = False
+
+    def terminate(self) -> None:
+        self.alive = False
+
+    def kill(self) -> None:
+        self.alive = False
+
+
+def test_spawner_explicit_timeout_above_ceiling_wins() -> None:
+    """Потолок 10, ``shutdown_timeout`` 5, ``stop(timeout=12.0)`` → внешний join 15,5 (12 + 1 + 1 + 1,5), не 13,5."""
+    from ..launcher.spawner import ProcessSpawner
+
+    spawner = ProcessSpawner(stop_timeout=5.0, orchestrator_config={"shutdown_timeout": 5.0, "max_stop_window_s": 10.0})
+    fake = _FakeOrchestrator()
+    spawner._process = fake
+    _bounded(lambda: spawner.stop(timeout=12.0))
+    assert fake.join_timeouts, "spawner.stop() не позвал join"
+    assert abs(fake.join_timeouts[0] - 15.5) < 1e-9, fake.join_timeouts
