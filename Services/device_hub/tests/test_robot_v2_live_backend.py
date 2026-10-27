@@ -867,7 +867,8 @@ def test_park_running_program_then_process_stop(tmp_path: Path, monkeypatch: pyt
             before = rig.read("STOP_REQ")[0] >> 2
 
             point_a = {"name": "a", "x": 400.0, "y": 100.0, "z": -60.0, "rz": 0.0, "hand": 1, "frame": None}
-            point_b = {"name": "b", "x": 300.0, "y": -210.0, "z": -40.0, "rz": -100.0, "hand": 1, "frame": None}
+            # b не должна совпадать с P_HOME (300, -210, -40, -100): иначе после abort робот уже дома (home == already)
+            point_b = {"name": "b", "x": 300.0, "y": 210.0, "z": -40.0, "rz": 100.0, "hand": 1, "frame": None}
             first = _cmd(
                 drv, "devices", "robot_point_save", {"device_id": _PARK_ID, "point": point_a, "base_rev": None}
             )

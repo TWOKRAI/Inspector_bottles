@@ -240,7 +240,8 @@ def _off_home(e: Env) -> None:
 def _legs_program(name: str, legs: int) -> tuple[Program, dict[str, Point]]:
     points = {
         "a": Point(name="a", x=400, y=100, z=-60, rz=0, hand=1),
-        "b": Point(name="b", x=300, y=-210, z=-40, rz=-100, hand=1),
+        # b не должна совпадать с P_HOME (300, -210, -40, -100): иначе после abort робот уже дома (home == already)
+        "b": Point(name="b", x=300, y=210, z=-40, rz=100, hand=1),
     }
     steps = tuple(Move(point="a" if i % 2 == 0 else "b", kind="JOINT") for i in range(legs))
     return Program(name=name, steps=steps), points
