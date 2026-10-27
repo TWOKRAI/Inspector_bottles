@@ -46,24 +46,27 @@ _EMITTER: Any = None
 def _emitter_class() -> Any:
     """``RoundTripEmitter`` с исправлением дефекта ruamel 0.19.1 (Task 1.1i, design.md §12, поправка №5).
 
-    Дефект: ``Emitter.expect_first_flow_mapping_key`` (ruamel/yaml/emitter.py) для пустого flow ``{}`` не
-    сбрасывает ``no_newline`` — ``expect_flow_sequence_item`` для ``[]`` его сбрасывает. Флаг, взведённый
-    EOL-комментарием ключа списка на первом ``-``, протекает через ``- {}`` до второй строки следующей
-    блочной карты: ``ka:  # e`` / ``- {}`` / ``- a: 1`` / ``b: 2`` пишется ``- a: 1 b: 2`` — уже чистым
-    load -> dump, без движка. Исправление — сброс в той же ветке, где его делает flow-список.
-    Пин ``ruamel.yaml<0.20``; при обновлении проверить upstream и удалить подкласс, если починено
-    (тест ``test_make_yaml_empty_flow_mapping_keeps_block_layout``)."""
+    Механизм: комментарий ключа списка (``ka:  # e``) взводит ``no_newline`` (``Emitter.expect_node``,
+    ветка ``SequenceStartEvent``), первый ``-`` переносит флаг на элемент. Элемент-список в списке флаг
+    сбрасывает: ``expect_node`` (ruamel/yaml/emitter.py) после ``expect_flow_sequence``/``expect_block_sequence``
+    делает ``if self.indents.seq_seq(): self.indention = True; self.no_newline = False``. У ветки
+    ``MappingStartEvent`` такого сброса нет: флаг проходит сквозь ``- {}`` (и ``- {}  # x``) и съедает перевод
+    строки у второго ключа следующей блочной карты — ``ka:  # e`` / ``- {}`` / ``- a: 1`` / ``b: 2`` пишется
+    ``- a: 1 b: 2`` уже чистым load -> dump, без движка. Исправление — тот же сброс в той же точке
+    ``expect_node`` для пустой карты-элемента списка (``indents.last_seq()`` — у карты свой уровень не
+    списочный, родитель — список: зеркало ``seq_seq``). Пин ``ruamel.yaml<0.20``; при обновлении проверить
+    upstream и удалить подкласс, если починено (тест ``test_make_yaml_empty_flow_mapping_keeps_block_layout``)."""
     global _EMITTER
     if _EMITTER is None:
         from ruamel.yaml.emitter import RoundTripEmitter
-        from ruamel.yaml.events import MappingEndEvent
+        from ruamel.yaml.events import MappingStartEvent
 
         class _RecipeEmitter(RoundTripEmitter):
-            def expect_first_flow_mapping_key(self) -> None:
-                empty = isinstance(self.event, MappingEndEvent)
-                eol = empty and bool(self.event.comment and self.event.comment[0])
-                super().expect_first_flow_mapping_key()
-                if empty and not eol:  # как ``expect_flow_sequence_item``: без EOL-комментария — сброс
+            def expect_node(self, *args: Any, **kwargs: Any) -> None:
+                empty_map = isinstance(self.event, MappingStartEvent) and self.check_empty_mapping()
+                super().expect_node(*args, **kwargs)
+                if empty_map and self.indents.last_seq():  # зеркало сброса у списка в списке
+                    self.indention = True
                     self.no_newline = False
 
         _EMITTER = _RecipeEmitter
@@ -231,13 +234,22 @@ def _lift_item_tail(seq: Any, idx: int, item: Any, owner: tuple[Any, Any] | None
     переживает первую строку элемента: ``kt: knew: 1`` (B1–B3, B7–B9). Загрузчик ruamel такой
     расстановки не делает: комментарии перед первым элементом он кладёт в EOL-токен ключа списка
     (``ka:  # e3`` + ``  # c4``), перед остальными — в комментарий-перед-элементом ``ca.items[i][1]``.
-    Туда же токен и переезжает — с текстом целиком: ни один комментарий не теряется."""
-    from ruamel.yaml.comments import CommentedMap
+    Туда же токен и переезжает — с текстом целиком: ни один комментарий не теряется.
+
+    Flow-элемент (``- {a: 1}  # q``, ``- [1, 2]  # q``) не трогается: загрузчик кладёт его EOL-комментарий
+    в тот же слот, и эмиттер пишет его после ``}``/``]`` — это его место (ревью 1.1i р1, F1). Стиль —
+    эффективный: опустевший и снова наполненный контейнер ещё помечен ``_ORIG_STYLE`` (``finalize`` вернёт
+    стиль при обходе самого элемента, а здесь обход родителя)."""
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from ruamel.yaml.tokens import CommentToken
 
     slots = seq.ca.items.get(idx)
     if not slots or slots[0] is None or not isinstance(item, (dict, list)) or not len(item):
         return
+    if isinstance(item, (CommentedMap, CommentedSeq)):
+        style = item.__dict__.get(_ORIG_STYLE, _NOT_EMPTIED)
+        if (item.fa.flow_style() if style is _NOT_EMPTIED else style) is True:
+            return
     token, slots[0] = slots[0], None
     text, line = token.value, getattr(token.start_mark, "line", 0)
     parent, pkey = owner if owner is not None else (None, None)

@@ -731,7 +731,9 @@ def _patch_case(before: dict, rnd) -> str:
         raw_before, mtime_before = _write(path, src.encode("utf-8"))
         try:
             yaml_io.patch_yaml_preserving(path, before, after)
-        except yaml_io.YamlWriteRefused:
+        except yaml_io.YamlWriteRefused as exc:
+            if type(exc) is not yaml_io.YamlWriteRefused:
+                raise  # подкласс отказа — не отказ страховки
             assert path.read_bytes() == raw_before
             assert path.stat().st_mtime_ns == mtime_before
             return "refused"
@@ -921,22 +923,51 @@ def test_known_glue_input_reaches_after(tmp_path: Path, case: str) -> None:
         assert marks.count(marker) == 1, f"{marker}: {marks.count(marker)} раз в\n{out}"
 
 
-def test_make_yaml_empty_flow_mapping_keeps_block_layout() -> None:
+# id -> (исходник: load -> dump без правок обязан дать его же, данные PyYAML)
+_EMPTY_FLOW_MAP_CASES = {
+    "key_eol": ("ka:  # e\n  - {}\n  - a: 1\n    b: 2\n", {"ka": [{}, {"a": 1, "b": 2}]}),
+    "item_eol": ("ka:  # e\n  - {}  # x\n  - a: 1\n    b: 2\n", {"ka": [{}, {"a": 1, "b": 2}]}),
+}
+
+
+@pytest.mark.parametrize("case", list(_EMPTY_FLOW_MAP_CASES), ids=list(_EMPTY_FLOW_MAP_CASES))
+def test_make_yaml_empty_flow_mapping_keeps_block_layout(case: str) -> None:
     """Дефект эмиттера ruamel 0.19.1 (без движка): EOL ключа + элемент ``- {}`` + блочная карта.
 
-    Пустой flow ``{}`` не сбрасывал ``no_newline`` — вторая строка карты склеивалась с первой
-    (``- a: 1 b: 2``). ``make_yaml`` подключает исправленный эмиттер: load -> dump без правок даёт исходник."""
+    ``no_newline``, взведённый комментарием ключа, у ``- []`` сбрасывает ``expect_node`` на старте списка
+    в списке; у ``- {}`` сброса нет — вторая строка карты склеивалась с первой (``- a: 1 b: 2``).
+    ``make_yaml`` подключает исправленный эмиттер: load -> dump без правок даёт исходник."""
     import io
 
     from multiprocess_framework.modules.recipe import _ruamel_doc
 
-    src = "ka:  # e\n  - {}\n  - a: 1\n    b: 2\n"
+    src, data = _EMPTY_FLOW_MAP_CASES[case]
     rt = _ruamel_doc.make_yaml()
     buf = io.StringIO()
     rt.dump(_ruamel_doc.load_document(rt, src), buf)
 
-    assert buf.getvalue() == "ka:  # e\n  - {}\n  - a: 1\n    b: 2\n"
-    assert yaml.safe_load(buf.getvalue()) == {"ka": [{}, {"a": 1, "b": 2}]}
+    assert buf.getvalue() == src
+    assert yaml.safe_load(buf.getvalue()) == data
+
+
+# id -> (исходные байты, ожидаемые байты после правки ``kb: 1 -> 2``) — литералы
+_FLOW_ITEM_EOL_CASES = {
+    "map": (b"ka:\n  - {a: 1}  # q\n  - z\nkb: 1\n", b"ka:\n  - {a: 1}  # q\n  - z\nkb: 2\n"),
+    "seq": (b"ka:\n  - [1, 2]  # q\n  - z\nkb: 1\n", b"ka:\n  - [1, 2]  # q\n  - z\nkb: 2\n"),
+}
+
+
+@pytest.mark.parametrize("case", list(_FLOW_ITEM_EOL_CASES), ids=list(_FLOW_ITEM_EOL_CASES))
+def test_flow_item_eol_comment_untouched_by_unrelated_edit(tmp_path: Path, case: str) -> None:
+    """EOL-комментарий непустого flow-элемента остаётся на его строке при правке другого ключа (ревью 1.1i р1, F1)."""
+    raw, expected = _FLOW_ITEM_EOL_CASES[case]
+    path = tmp_path / "r.yaml"
+    _write(path, raw)
+    before = yaml.safe_load(raw.decode("utf-8"))
+
+    yaml_io.patch_yaml_preserving(path, before, {**before, "kb": 2})
+
+    assert path.read_bytes() == expected
 
 
 # ---------------------------------------------------------------------------
