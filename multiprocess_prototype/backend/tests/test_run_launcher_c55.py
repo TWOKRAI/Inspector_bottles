@@ -5,9 +5,10 @@
 guard'а одна.
 
 Правила харнеса:
-  * ``execv`` во ВСЕХ вызовах ``launch`` передаётся явно фейком: значение по умолчанию связано
-    с ``os.execv`` при определении функции, ``monkeypatch.setattr(os, "execv", ...)`` его не
-    меняет, а настоящий ``os.execv`` на Windows запускает приложение и убивает pytest.
+  * seam ``relaunch`` во ВСЕХ вызовах ``launch`` передаётся явно фейком: значение по умолчанию —
+    ``run.default_relaunch``, связано при определении функции; ``monkeypatch.setattr(os, "execv", ...)``
+    его не меняет; на Windows ``run.default_relaunch`` ждёт дочерний процесс вместо ``os.execv``
+    и без фейка запустит настоящее приложение и будет ждать его — pytest зависнет.
   * ``git`` подменяется лямбдой ``common_dir_of``; настоящий git не запускается (на этой машине
     выше tmp-каталогов лежит чужой репозиторий, поэтому «нет репозитория выше» не годится).
   * Модуль ``multiprocess_prototype.main`` подменён заглушкой: путь, дошедший до приложения,
@@ -74,7 +75,7 @@ def _execv_forbidden(*args: object, **kwargs: object) -> None:
 def _call_expecting_exec(spy: _ExecvSpy, fn: Callable[..., object], **kwargs: object) -> None:
     """Вызвать ``fn`` с фейковым execv; сработавший фейк — норма."""
     try:
-        fn(execv=spy, **kwargs)
+        fn(relaunch=spy, **kwargs)
     except _Execed:
         pass
 
@@ -171,7 +172,7 @@ def test_v4_no_duplicate_candidate(trees: tuple[Path, Path]) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# L1-L5: run.launch(project_root=, common_dir_of=, execv=)
+# L1-L5: run.launch(project_root=, common_dir_of=, relaunch=)
 # --------------------------------------------------------------------------------------
 
 
@@ -182,7 +183,7 @@ def test_l1_worktree_no_venv_no_uv_sync_hint(
 ) -> None:
     wt, main = trees
 
-    rc = run.launch(project_root=wt, common_dir_of=lambda _: main / ".git", execv=_execv_forbidden)
+    rc = run.launch(project_root=wt, common_dir_of=lambda _: main / ".git", relaunch=_execv_forbidden)
 
     err = capsys.readouterr().err
     assert rc == 1
@@ -223,7 +224,7 @@ def test_l3_git_unknown_reports_main_copy_undetermined(
 ) -> None:
     wt, _main = trees
 
-    rc = run.launch(project_root=wt, common_dir_of=lambda _: None, execv=_execv_forbidden)
+    rc = run.launch(project_root=wt, common_dir_of=lambda _: None, relaunch=_execv_forbidden)
 
     err = capsys.readouterr().err
     assert rc == 1
@@ -256,7 +257,7 @@ def test_l5_main_copy_without_venv_keeps_uv_sync_hint(
 ) -> None:
     wt, _main = trees
 
-    rc = run.launch(project_root=wt, common_dir_of=lambda _: wt / ".git", execv=_execv_forbidden)
+    rc = run.launch(project_root=wt, common_dir_of=lambda _: wt / ".git", relaunch=_execv_forbidden)
 
     err = capsys.readouterr().err
     assert rc == 1
