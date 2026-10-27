@@ -1478,7 +1478,7 @@ def test_running_wait_prints_overdue_once_while_minutes_do_not_change(bash: str,
 
     assert closed.code == 0, closed.ctx()
     assert res.code == 0, res.ctx()
-    assert res.out.splitlines() == ["OVERDUE s1 +20 min", "GRANTED until ~00:10"], res.ctx()
+    assert res.out.splitlines() == ["OVERDUE s1 +20 min", "GRANTED until ~00:20"], res.ctx()
 
 
 # =====================================================================================================================

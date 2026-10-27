@@ -6,6 +6,12 @@
 #   bash scripts/machine_gate.sh grant <coordinator> <session> quiet|heavy|stand <minutes> <что...>
 #   bash scripts/machine_gate.sh close <coordinator> <session>
 #   bash scripts/machine_gate.sh status
+#   bash scripts/machine_gate.sh request <session> quiet|heavy|stand <minutes> <what...>
+#   bash scripts/machine_gate.sh release <session>
+#   bash scripts/machine_gate.sh wait <session> [--timeout <minutes>]
+#   bash scripts/machine_gate.sh extend <session> <minutes>
+#   bash scripts/machine_gate.sh merge-begin <session> <branch>
+#   bash scripts/machine_gate.sh merge-end <session>
 #
 # heavy  — полный прогон, матрица инъекций, серия e2e, стенд, индексация qex:
 #          только если строка `window:` в machine.lock — у этой сессии.
@@ -320,6 +326,11 @@ is_window_kind() {
     return 1
 }
 
+# Ветка = [A-Za-z0-9._/-]+ (перечислено явно, как is_name).
+is_branch() {
+    [ -n "$1" ] && [[ $1 != *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-]* ]]
+}
+
 # Строка -> FIELDS (разделитель « | », без перекрытий слева направо).
 split_fields() {
     local rest=$1
@@ -339,7 +350,7 @@ validate_lock() {
         LOCK_ERR='machine_gate: cannot read machine.lock'
         return 2
     fi
-    local line n=0 coords=0 windows=0 ok name
+    local line n=0 coords=0 windows=0 merges=0 ok name
     for line in "${LOCK_LINES[@]}"; do
         n=$((n + 1))
         [ -z "$line" ] && continue
@@ -365,6 +376,14 @@ validate_lock() {
             'waiting: '*)
                 name=${FIELDS[0]#waiting: }
                 if [ "${#FIELDS[@]}" = 4 ] && is_name "$name" && is_window_kind "${FIELDS[1]}"; then ok=1; fi
+                ;;
+            'merging: '*)
+                name=${FIELDS[0]#merging: }
+                if [ "${#FIELDS[@]}" = 3 ] && is_name "$name" && is_branch "${FIELDS[1]}" &&
+                    [[ ${FIELDS[2]} == 'since '* ]] && [ "$merges" = 0 ]; then
+                    ok=1
+                    merges=1
+                fi
                 ;;
             'stand: '?*) ok=1 ;;
         esac
@@ -497,6 +516,499 @@ cmd_edit() {
     exit 0
 }
 
+# --- самообслуживание окон и merge-слота (plans/2026-10-27_tooling-gate-self-service/plan.md, Task 1.1) --------------
+# request / release / wait / extend / merge-begin / merge-end пишут замок одним путём: lock_edit.
+# plan_<команда> — функция от LOCK_LINES, NOW и аргументов: готовит NEW_LINES, PLAN_WRITE (0/1), PLAN_OUT (stdout
+# после успешного mv) и PLAN_ERR (текст отказа). Её зовут дважды: по непроверенному чтению (быстрый путь без записи)
+# и под защитой machine.lock.tmp по свежему замку.
+
+OWN_TMP=0 # 1 — machine.lock.tmp создан этим процессом (флаг владения для trap)
+NOW=0 NOW_HHMM='' NOW_MIN=0
+PLAN_WRITE=0 PLAN_OUT='' PLAN_ERR='' PLAN_STATE=pending PROMOTED='' PROMOTED_UNTIL=''
+NEW_LINES=()
+SESSION='' KIND='' MINUTES='' WHAT='' BRANCH='' WAIT_FIRST=1
+S_HAS_WINDOW=0 S_WOWNER='' S_WKIND='' S_WUNTIL='' S_MOWNER='' S_OWN_WAIT=0 S_POS=0 S_NWAIT=0
+U_MIN=0 REM=0
+
+die_usage() {
+    echo "usage: machine_gate.sh $1" >&2
+    exit 2
+}
+
+# «Сейчас» читается один раз до tmp. MACHINE_GATE_NOW_EPOCH (только тесты) — целые секунды, нечисловое игнорируется.
+read_now() {
+    local v=${MACHINE_GATE_NOW_EPOCH:-}
+    case $v in
+        '' | *[!0-9]*) NOW=$(date +%s) ;;
+        *) NOW=$((10#$v)) ;;
+    esac
+    NOW_HHMM=$(date -d "@$NOW" +%H:%M)
+    NOW_MIN=$((10#${NOW_HHMM%:*} * 60 + 10#${NOW_HHMM#*:}))
+}
+
+# Замок есть и годен -> LOCK_LINES. $1 — число попыток, $2 — пауза, $3 — 1: повторять при любой ошибке, 0: только когда
+# замок нечитаем (миг подмены mv на Windows). Не вышло — текст отказа в stderr, код 2.
+load_lock() {
+    local i
+    [ -e "$machine_lock" ] || [ "$3" = 1 ] || refuse "no machine.lock"
+    for ((i = 1; i <= $1; i++)); do
+        validate_lock "$machine_lock" && return 0
+        if [ "$3" = 0 ] && [ "$LOCK_ERR" != 'machine_gate: cannot read machine.lock' ]; then break; fi
+        [ "$i" -lt "$1" ] && sleep "$2"
+    done
+    printf '%s\n' "$LOCK_ERR" >&2
+    exit 2
+}
+
+check_session() { is_name "$SESSION" || refuse "bad session name"; }
+check_kind() { is_window_kind "$KIND" || refuse "window kind must be quiet, heavy or stand"; }
+
+# $1 — минуты: 1..600 без ведущих нулей.
+is_minutes() {
+    case $1 in '' | *[!0-9]* | 0*) return 1 ;; esac
+    [ "${#1}" -le 3 ] && [ "$1" -le 600 ]
+}
+
+check_minutes() { is_minutes "$MINUTES" || refuse "minutes must be 1..600"; }
+
+check_what() {
+    case $WHAT in
+        *'|'* | *$'\r'* | *$'\n'*) refuse "what must not contain | or line breaks" ;;
+    esac
+}
+
+# --- разбор замка (по NEW_LINES) ---
+
+# NEW_LINES -> S_*: окно (владелец, вид, until), слот merging, заявки (сколько и позиция первой заявки SESSION).
+scan() {
+    local line
+    S_HAS_WINDOW=0 S_WOWNER='' S_WKIND='' S_WUNTIL='' S_MOWNER='' S_OWN_WAIT=0 S_POS=0 S_NWAIT=0
+    for line in "${NEW_LINES[@]}"; do
+        case $line in
+            'window: '*)
+                split_fields "$line"
+                S_HAS_WINDOW=1 S_WOWNER=${FIELDS[0]#window: } S_WKIND=${FIELDS[1]} S_WUNTIL=${FIELDS[3]#until }
+                ;;
+            'merging: '*)
+                split_fields "$line"
+                S_MOWNER=${FIELDS[0]#merging: }
+                ;;
+            'waiting: '*)
+                split_fields "$line"
+                S_NWAIT=$((S_NWAIT + 1))
+                if [ "$S_OWN_WAIT" = 0 ] && [ "${FIELDS[0]#waiting: }" = "$SESSION" ]; then
+                    S_OWN_WAIT=1 S_POS=$S_NWAIT
+                fi
+                ;;
+        esac
+    done
+}
+
+# "~HH:MM" (HH <= 23, MM <= 59) -> U_MIN (минута суток). Иное — код 1.
+parse_until() {
+    local re='^~([0-9][0-9]):([0-9][0-9])$'
+    [[ $1 =~ $re ]] || return 1
+    [ "$((10#${BASH_REMATCH[1]}))" -le 23 ] && [ "$((10#${BASH_REMATCH[2]}))" -le 59 ] || return 1
+    U_MIN=$((10#${BASH_REMATCH[1]} * 60 + 10#${BASH_REMATCH[2]}))
+}
+
+# Остаток окна U_MIN относительно NOW_MIN -> REM, приведён к [-13 ч, +11 ч): свежее окно (<= 600 мин) всегда в плюсе.
+remaining() {
+    REM=$((((U_MIN - NOW_MIN + 780) % 1440 + 1440) % 1440 - 780))
+}
+
+# Окно из S_* просрочено (остаток <= -1) -> код 0 и REM; until не вида ~HH:MM — не просрочено.
+window_overdue() {
+    [ "$S_HAS_WINDOW" = 1 ] && parse_until "$S_WUNTIL" || return 1
+    remaining
+    [ "$REM" -le -1 ]
+}
+
+# --- правки NEW_LINES ---
+
+plan_init() {
+    PLAN_WRITE=0 PLAN_OUT='' PLAN_ERR=''
+    NEW_LINES=("${LOCK_LINES[@]}")
+}
+
+# $1 — новая строка, $2 — префикс строки, после которой её вставить (первая такая).
+insert_after() {
+    local line out=() placed=0
+    for line in "${NEW_LINES[@]}"; do
+        out+=("$line")
+        if [ "$placed" = 0 ]; then
+            case $line in
+                "$2"*)
+                    out+=("$1")
+                    placed=1
+                    ;;
+            esac
+        fi
+    done
+    NEW_LINES=("${out[@]}")
+}
+
+# Убрать строки, у которых первое поле (до « | ») равно $1.
+remove_field() {
+    local line out=() f
+    for line in "${NEW_LINES[@]}"; do
+        f=${line%%' | '*}
+        [ "$f" = "$1" ] || out+=("$line")
+    done
+    NEW_LINES=("${out[@]}")
+}
+
+# Автовыдача: окна нет и есть waiting: -> ПЕРВАЯ waiting становится окном на N минут (N из «~N min», N <= 600, иначе 60).
+# Код 0 — выдано (PROMOTED, PROMOTED_UNTIL = "~HH:MM"), 1 — нечего выдавать.
+promote() {
+    local line first='' out=() n=60 until_hhmm window skipped=0 placed=0 re='^~([1-9][0-9]{0,2}) min'
+    scan
+    [ "$S_HAS_WINDOW" = 0 ] && [ "$S_NWAIT" -gt 0 ] || return 1
+    for line in "${NEW_LINES[@]}"; do
+        case $line in 'waiting: '*) first=$line; break ;; esac
+    done
+    split_fields "$first"
+    if [[ ${FIELDS[3]} =~ $re ]] && [ "${BASH_REMATCH[1]}" -le 600 ]; then n=${BASH_REMATCH[1]}; fi
+    PROMOTED=${FIELDS[0]#waiting: }
+    until_hhmm=$(date -d "@$((NOW + n * 60))" +%H:%M)
+    PROMOTED_UNTIL="~$until_hhmm"
+    window="window: $PROMOTED | ${FIELDS[1]} | ${FIELDS[2]} | until $PROMOTED_UNTIL"
+    for line in "${NEW_LINES[@]}"; do
+        if [ "$skipped" = 0 ] && [ "$line" = "$first" ]; then
+            skipped=1
+            continue
+        fi
+        out+=("$line")
+        if [ "$placed" = 0 ]; then
+            case $line in 'coordinator: '*) out+=("$window"); placed=1 ;; esac
+        fi
+    done
+    NEW_LINES=("${out[@]}")
+    scan
+    return 0
+}
+
+# --- планы команд ---
+
+plan_request() {
+    plan_init
+    scan
+    if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_WOWNER" = "$SESSION" ]; then
+        PLAN_OUT="GRANTED until $S_WUNTIL"$'\n'
+        return 0
+    fi
+    if [ "$S_OWN_WAIT" = 0 ]; then
+        NEW_LINES+=("waiting: $SESSION | $KIND | $WHAT | ~$MINUTES min")
+        PLAN_WRITE=1
+    fi
+    if promote; then PLAN_WRITE=1; fi
+    scan
+    if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_WOWNER" = "$SESSION" ]; then
+        PLAN_OUT="GRANTED until $S_WUNTIL"$'\n'
+    else
+        PLAN_OUT="QUEUED position $S_POS"$'\n'
+    fi
+}
+
+plan_release() {
+    plan_init
+    scan
+    if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_WOWNER" = "$SESSION" ]; then
+        remove_field "window: $SESSION"
+        PLAN_WRITE=1
+        PLAN_OUT="RELEASED"$'\n'
+        if promote; then PLAN_OUT+="NEXT $PROMOTED until $PROMOTED_UNTIL"$'\n'; fi
+    elif [ "$S_OWN_WAIT" = 1 ]; then
+        remove_field "waiting: $SESSION"
+        PLAN_WRITE=1
+        PLAN_OUT="CANCELLED"$'\n'
+    else
+        PLAN_ERR='no window or request of this session'
+    fi
+}
+
+plan_extend() {
+    local base total new_until line out=() f
+    plan_init
+    scan
+    if [ "$S_HAS_WINDOW" = 0 ] || [ "$S_WOWNER" != "$SESSION" ]; then
+        PLAN_ERR='no window of this session'
+        return 0
+    fi
+    if ! parse_until "$S_WUNTIL"; then
+        PLAN_ERR='window has no valid until'
+        return 0
+    fi
+    remaining
+    base=$REM
+    [ "$base" -lt 0 ] && base=0
+    total=$((base + MINUTES))
+    if [ "$total" -gt 600 ]; then
+        PLAN_ERR='extension too long (more than 600 minutes left)'
+        return 0
+    fi
+    new_until=$(date -d "@$((NOW + total * 60))" +%H:%M)
+    for line in "${NEW_LINES[@]}"; do
+        f=${line%%' | '*}
+        if [ "$f" = "window: $SESSION" ]; then
+            split_fields "$line"
+            line="${FIELDS[0]} | ${FIELDS[1]} | ${FIELDS[2]} | until ~$new_until"
+        fi
+        out+=("$line")
+    done
+    NEW_LINES=("${out[@]}")
+    PLAN_WRITE=1
+    PLAN_OUT="EXTENDED until ~$new_until"$'\n'
+}
+
+plan_merge_begin() {
+    local anchor='coordinator: '
+    plan_init
+    scan
+    if [ -n "$S_MOWNER" ]; then
+        PLAN_ERR="merge slot is taken by $S_MOWNER"
+        return 0
+    fi
+    if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_WKIND" = quiet ]; then
+        PLAN_ERR='a quiet window is open'
+        return 0
+    fi
+    [ "$S_HAS_WINDOW" = 1 ] && anchor='window: '
+    insert_after "merging: $SESSION | $BRANCH | since $NOW_HHMM" "$anchor"
+    PLAN_WRITE=1
+    PLAN_OUT="MERGE SLOT TAKEN"$'\n'
+}
+
+plan_merge_end() {
+    plan_init
+    scan
+    if [ -z "$S_MOWNER" ]; then
+        PLAN_ERR='no merge slot'
+    elif [ "$S_MOWNER" = "$SESSION" ] || [ "$SESSION" = "$LOCK_COORD" ]; then
+        remove_field "merging: $S_MOWNER"
+        PLAN_WRITE=1
+        PLAN_OUT="MERGE SLOT FREE"$'\n'
+    else
+        PLAN_ERR="merge slot belongs to $S_MOWNER"
+    fi
+}
+
+# Один опрос wait: PLAN_STATE = granted (окно стало или уже было своим) | pending.
+plan_wait() {
+    plan_init
+    PLAN_STATE=pending
+    scan
+    if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_WOWNER" = "$SESSION" ]; then
+        PLAN_STATE=granted
+        return 0
+    fi
+    if [ "$S_OWN_WAIT" = 0 ]; then
+        if [ "$WAIT_FIRST" = 1 ]; then PLAN_ERR='no request of this session'; else PLAN_ERR='request of this session disappeared'; fi
+        return 0
+    fi
+    if promote; then
+        PLAN_WRITE=1
+        if [ "$PROMOTED" = "$SESSION" ]; then PLAN_STATE=granted; fi
+    fi
+}
+
+# --- запись замка ---
+
+# Снять свой tmp (только при флаге владения) и trap'ы. Чужой tmp не трогается никогда.
+release_tmp() {
+    if [ "$OWN_TMP" = 1 ]; then
+        OWN_TMP=0
+        rm -f "$lock_dir/machine.lock.tmp"
+    fi
+    trap - EXIT INT TERM HUP
+}
+
+# Захват machine.lock.tmp под set -C (O_EXCL). Занят — повтор раз в 0.1 с до MACHINE_GATE_TMP_WAIT_SEC (умолч. 10);
+# tmp старше 60 с (по РЕАЛЬНЫМ часам) считается остатком убитого держателя: удаляется, захват повторяется.
+acquire_tmp() {
+    local tmp=$lock_dir/machine.lock.tmp wait_sec=${MACHINE_GATE_TMP_WAIT_SEC:-} i=0 limit mtime real reclaims=0
+    case $wait_sec in '' | *[!0-9]*) wait_sec=10 ;; esac
+    limit=$((10#$wait_sec * 10))
+    while :; do
+        if ( set -C; : >"$tmp" ) >/dev/null 2>&1; then return 0; fi
+        mtime=$(stat -c %Y "$tmp" 2>/dev/null) || mtime=''
+        real=$(date +%s)
+        case $mtime in
+            '' | *[!0-9]*) ;;
+            *)
+                if [ "$((real - mtime))" -gt 60 ] && [ "$reclaims" -lt 5 ]; then
+                    reclaims=$((reclaims + 1))
+                    rm -f "$tmp"
+                    continue
+                fi
+                ;;
+        esac
+        [ "$i" -ge "$limit" ] && return 1
+        i=$((i + 1))
+        sleep 0.1
+    done
+}
+
+# NEW_LINES на stdout: LF, у каждой строки снят \r (read_lock), \n после последней.
+write_new_lines() {
+    local line
+    for line in "${NEW_LINES[@]}"; do
+        printf '%s\n' "$line" || return 1
+    done
+    return 0
+}
+
+# Запись под tmp: перечитать и проверить замок, решить заново ($1 — plan-функция), записать и подменить одним mv -f
+# (до 5 попыток по 0.2 с). После возврата PLAN_OUT/PLAN_STATE — по свежему замку; stdout не печатается.
+lock_commit() {
+    local plan=$1 tmp=$lock_dir/machine.lock.tmp attempt
+    acquire_tmp || refuse "machine.lock.tmp exists (another grant/close running, or a leftover)"
+    OWN_TMP=1 # trap — только ПОСЛЕ захвата: проигравший не должен снять tmp победителя
+    trap release_tmp EXIT
+    trap 'release_tmp; exit 130' INT
+    trap 'release_tmp; exit 143' TERM
+    trap 'release_tmp; exit 129' HUP
+    if ! validate_lock "$machine_lock"; then
+        release_tmp
+        printf '%s\n' "$LOCK_ERR" >&2
+        exit 2
+    fi
+    "$plan"
+    if [ -n "$PLAN_ERR" ]; then
+        release_tmp
+        refuse "$PLAN_ERR"
+    fi
+    if [ "$PLAN_WRITE" = 0 ]; then
+        release_tmp
+        return 0
+    fi
+    if ! write_new_lines >"$tmp" 2>/dev/null; then
+        release_tmp
+        refuse "cannot replace machine.lock (busy), retry"
+    fi
+    for ((attempt = 1; attempt <= 5; attempt++)); do
+        if mv -f "$tmp" "$machine_lock" </dev/null >/dev/null 2>&1; then
+            OWN_TMP=0 # tmp переименован в замок: больше не наш
+            trap - EXIT INT TERM HUP
+            return 0
+        fi
+        [ "$attempt" -lt 5 ] && sleep 0.2
+    done
+    release_tmp
+    refuse "cannot replace machine.lock (busy), retry"
+}
+
+# План по непроверенному чтению; запись нужна — lock_commit. stdout печатается только после успешного mv.
+lock_edit() {
+    local plan=$1
+    "$plan"
+    [ -z "$PLAN_ERR" ] || refuse "$PLAN_ERR"
+    if [ "$PLAN_WRITE" = 1 ]; then lock_commit "$plan"; fi
+    printf '%s' "$PLAN_OUT"
+}
+
+# --- подкоманды ---
+
+cmd_request() {
+    [ $# -ge 5 ] || die_usage 'request <session> quiet|heavy|stand <minutes> <what...>'
+    SESSION=$2 KIND=$3 MINUTES=$4
+    shift 4
+    WHAT=$*
+    load_lock 5 0.2 0
+    check_session
+    check_kind
+    check_minutes
+    check_what
+    read_now
+    lock_edit plan_request
+    exit 0
+}
+
+cmd_release() {
+    [ $# -eq 2 ] || die_usage 'release <session>'
+    SESSION=$2
+    load_lock 5 0.2 0
+    check_session
+    read_now
+    lock_edit plan_release
+    exit 0
+}
+
+cmd_extend() {
+    [ $# -eq 3 ] || die_usage 'extend <session> <minutes>'
+    SESSION=$2 MINUTES=$3
+    load_lock 5 0.2 0
+    check_session
+    check_minutes
+    read_now
+    lock_edit plan_extend
+    exit 0
+}
+
+cmd_merge_begin() {
+    [ $# -eq 3 ] || die_usage 'merge-begin <session> <branch>'
+    SESSION=$2 BRANCH=$3
+    load_lock 5 0.2 0
+    check_session
+    is_branch "$BRANCH" || refuse "bad branch name"
+    read_now
+    lock_edit plan_merge_begin
+    exit 0
+}
+
+cmd_merge_end() {
+    [ $# -eq 2 ] || die_usage 'merge-end <session>'
+    SESSION=$2
+    load_lock 5 0.2 0
+    check_session
+    read_now
+    lock_edit plan_merge_end
+    exit 0
+}
+
+# wait <session> [--timeout <minutes>]: опрос каждые MACHINE_GATE_POLL_SEC (умолч. 15) секунд; по умолчанию 120 минут.
+cmd_wait() {
+    local timeout_min=120 poll=${MACHINE_GATE_POLL_SEC:-} deadline last_overdue='' re='^(0|[1-9][0-9]{0,3})$'
+    case $# in
+        2) ;;
+        4)
+            [ "$3" = --timeout ] && [[ $4 =~ $re ]] || die_usage 'wait <session> [--timeout <minutes>]'
+            timeout_min=$4
+            ;;
+        *) die_usage 'wait <session> [--timeout <minutes>]' ;;
+    esac
+    SESSION=$2
+    [[ $poll =~ ^[1-9][0-9]*$ ]] || poll=15
+    load_lock 5 0.2 0
+    check_session
+    deadline=$(($(date +%s) + 10#$timeout_min * 60)) # дедлайн по реальным часам: NOW_EPOCH его не двигает
+    while :; do
+        if [ "$WAIT_FIRST" = 0 ]; then load_lock 3 0.5 1; fi
+        read_now
+        plan_wait
+        [ -z "$PLAN_ERR" ] || refuse "$PLAN_ERR"
+        if [ "$PLAN_WRITE" = 1 ]; then lock_commit plan_wait; fi
+        WAIT_FIRST=0
+        if [ "$PLAN_STATE" = granted ]; then
+            printf 'GRANTED until %s\n' "$S_WUNTIL"
+            exit 0
+        fi
+        if window_overdue; then
+            if [ "$last_overdue" != "$REM" ]; then
+                last_overdue=$REM
+                printf 'OVERDUE %s +%s min\n' "$S_WOWNER" "$((-REM))"
+            fi
+        else
+            last_overdue=''
+        fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo TIMEOUT
+            exit 124
+        fi
+        sleep "$poll"
+    done
+}
+
 # status: замок + свободная память + загрузка процессора. Одна команда powershell; запрос LoadPercentage сам
 # меряет ~1 с, пять подряд — выборка на 5 с без Start-Sleep. Пустые ($null) замеры пропускаются.
 read -r -d '' PS_STATUS <<'PS'
@@ -508,6 +1020,15 @@ cmd_status() {
     if [ -e "$machine_lock" ]; then
         validate_lock "$machine_lock" || rc=2
         for line in "${LOCK_LINES[@]}"; do printf '%s\n' "$line"; done
+        if [ "$rc" = 0 ]; then
+            # Просроченное окно при ожидающих заявках: OVERDUE <держатель> +<N> min (окно не отбирается).
+            NEW_LINES=("${LOCK_LINES[@]}")
+            scan
+            if [ "$S_HAS_WINDOW" = 1 ] && [ "$S_NWAIT" -gt 0 ]; then
+                read_now
+                if window_overdue; then printf 'OVERDUE %s +%s min\n' "$S_WOWNER" "$((-REM))"; fi
+            fi
+        fi
     else
         echo "machine.lock: none"
     fi
@@ -539,6 +1060,12 @@ stand_lock=$lock_dir/stand.lock
 
 case ${1:-} in
     grant | close) cmd_edit "$@" ;;
+    request) cmd_request "$@" ;;
+    release) cmd_release "$@" ;;
+    wait) cmd_wait "$@" ;;
+    extend) cmd_extend "$@" ;;
+    merge-begin) cmd_merge_begin "$@" ;;
+    merge-end) cmd_merge_end "$@" ;;
     status) cmd_status ;;
 esac
 
