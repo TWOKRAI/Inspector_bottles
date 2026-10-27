@@ -73,8 +73,10 @@ class ProcessRegistry:
         # Task 1.10 (D3): итог последнего стопа ТЕКУЩЕГО воплощения по имени (D1: exited | terminated |
         # killed | handed_over | survived). Пишет ``_stop_many``; ``add_process`` того же имени сбрасывает.
         self._stop_outcomes: Dict[str, str] = {}
-        # Итоги ТЕКУЩЕГО вызова ``_stop_many`` на этом потоке: PM отличает «стоп прошёл и записал итог»
-        # от «имя не дошло до ChildProcessStop» (запись реестра тогда от прошлого стопа). Без лока.
+        # Единственный канал итога стопа ДЛЯ ОТВЕТА PM (Task 1.10, D4): итоги ТЕКУЩЕГО вызова ``_stop_many``
+        # на этом потоке. Отличает «стоп прошёл и записал итог» от «имя не дошло до ChildProcessStop» (запись
+        # ``_stop_outcomes`` тогда от прошлого стопа). Поток исполнителя переиспользуется, поэтому читатель
+        # сбрасывает канал ДО вызова (``reset_call_stop_outcomes``). ``add_process`` канал не трогает. Без лока.
         self._stop_call = threading.local()
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
@@ -98,6 +100,10 @@ class ProcessRegistry:
     def stop_outcome(self, name: str) -> str | None:
         """Итог последнего стопа текущего воплощения ``name`` (D1) или ``None`` — не стопался."""
         return self._stop_outcomes.get(name)
+
+    def reset_call_stop_outcomes(self) -> None:
+        """Сбросить канал итога вызова на этом потоке: читатель зовёт ДО стопа и читает после."""
+        self._stop_call.outcomes = {}
 
     def call_stop_outcome(self, name: str) -> str | None:
         """Итог ``name`` в последнем ``_stop_many`` ЭТОГО потока; ``None`` — имя до ребёнка не дошло."""

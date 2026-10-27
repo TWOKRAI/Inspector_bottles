@@ -575,9 +575,11 @@ class ProcessManagerProcess(ProcessModule):
             "supervision.status": (
                 self._cmd_supervision_status,
                 "Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/"
-                "status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts "
+                "status/pid/started_at/instance_restarts/stop_outcome. Маркер замены инстанса = pid+instance_restarts "
                 "(считает и ручные, и авто-рестарты supervision — они идут той же process.restart). "
-                "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора",
+                "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора; "
+                "stop_outcome — как умер ребёнок при последнем стопе текущего воплощения "
+                "(exited|terminated|killed|handed_over|survived), None — не стопался",
             ),
             "topology.apply": (self._cmd_topology_apply, "Применить топологию процессов"),
             "topology.get": (self._cmd_topology_get, "Получить текущую топологию"),
@@ -721,9 +723,9 @@ class ProcessManagerProcess(ProcessModule):
         args = _merge_cmd_args(data, kwargs)
         if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        self._reset_stop_outcome()
+        self._process_registry.reset_call_stop_outcomes()
         success = self.stop_process(pn)
-        return {"success": success, "process_name": pn, "outcome": self._take_stop_outcome()}
+        return {"success": success, "process_name": pn, "outcome": self._process_registry.call_stop_outcome(pn)}
 
     def _cmd_process_pause(self, data=None, **kwargs) -> dict:
         """Поставить именованный процесс на паузу."""
@@ -744,10 +746,10 @@ class ProcessManagerProcess(ProcessModule):
         args = _merge_cmd_args(data, kwargs)
         if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        self._reset_stop_outcome()
+        self._process_registry.reset_call_stop_outcomes()
         success = self.restart_process(pn)
-        # Итог фазы стопа ЭТОГО вызова: канал, а не запись реестра (её сбросил add_process нового инстанса).
-        return {"success": success, "process_name": pn, "outcome": self._take_stop_outcome()}
+        # Итог фазы стопа ЭТОГО вызова: канал вызова, а не запись реестра (её сбросил add_process нового инстанса).
+        return {"success": success, "process_name": pn, "outcome": self._process_registry.call_stop_outcome(pn)}
 
     def _cmd_process_status(self, data=None, **kwargs) -> dict:
         """Статус именованного процесса."""
@@ -877,7 +879,7 @@ class ProcessManagerProcess(ProcessModule):
                 "started_at": started_at.get(name),
                 "instance_restarts": instance_restarts.get(name, 0),
                 # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
-                "stop_outcome": registry.stop_outcome(name) if hasattr(registry, "stop_outcome") else None,
+                "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
             }
         return {"success": True, "epoch": epoch, "processes": processes}
 
@@ -3831,26 +3833,6 @@ class ProcessManagerProcess(ProcessModule):
         if rest > 0:
             time.sleep(rest)
 
-    def _reset_stop_outcome(self) -> None:
-        """Сбросить боковой канал итога стопа этого потока (Task 1.10, D4)."""
-        self._stop_outcome_channel().value = None
-
-    def _take_stop_outcome(self) -> str | None:
-        """Итог стопа, оставленный ``stop_process`` на этом потоке; ``None`` — стопа не было."""
-        return getattr(self._stop_outcome_channel(), "value", None)
-
-    def _stop_outcome_channel(self) -> threading.local:
-        """Хранилище канала: ``threading.local`` на PM, создаётся при первом обращении.
-
-        Поток-локальное, потому что ``stop_process`` зовут и с потока исполнителя команд (он
-        переиспользуется между командами — поэтому вход ``stop_process`` сбрасывает канал), и с других
-        потоков (монитор, shutdown): чужой стоп не подменяет итог ответа, который ждёт исполнитель.
-        """
-        channel = self.__dict__.get("_stop_outcome_tls")
-        if channel is None:
-            channel = self.__dict__.setdefault("_stop_outcome_tls", threading.local())
-        return channel
-
     def stop_process(self, process_name: str | None = None, *, mark_reader_gone: bool = True) -> bool:
         """
         Остановить один процесс (per-process stop_event) или все.
@@ -3858,11 +3840,9 @@ class ProcessManagerProcess(ProcessModule):
         ``mark_reader_gone`` (ADR-PMM-030) — пробрасывается в реестр: подтверждённо мёртвым
         ставится метка «читатель ушёл». ``restart_process`` передаёт ``False``.
 
-        Итог стопа (Task 1.10, D1) остаётся в боковом канале потока: канал сбрасывается на входе и
-        заполняется на каждом выходе (короткие выходы — ``None``); его читают ``_cmd_process_stop`` и
-        ``_cmd_process_restart``. Возвращаемое значение не меняется.
+        Итог стопа (Task 1.10, D1) метод не возвращает и канал не трогает: его пишет реестр
+        (``call_stop_outcome``), сбрасывают и читают ``_cmd_process_stop`` / ``_cmd_process_restart``.
         """
-        self._reset_stop_outcome()
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)
             if not process:
@@ -3870,12 +3850,7 @@ class ProcessManagerProcess(ProcessModule):
             if not process.is_alive():
                 return True
             stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
-            stopped = self._process_registry.stop_one(process_name, stop_timeout, mark_reader_gone=mark_reader_gone)
-            # Итог ЭТОГО стопа: имя могло не дойти до ребёнка (гонка «жив для PM, мёртв для реестра») → None.
-            # ``call_stop_outcome`` — метод конкретного реестра, не ``IProcessRegistry`` (двойник без него → None).
-            call_outcome = getattr(self._process_registry, "call_stop_outcome", None)
-            self._stop_outcome_channel().value = call_outcome(process_name) if callable(call_outcome) else None
-            return stopped
+            return self._process_registry.stop_one(process_name, stop_timeout, mark_reader_gone=mark_reader_gone)
         shutdown_timeout = stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY))["pm_graceful_s"]
         self._process_registry.stop_all(timeout=shutdown_timeout, mark_reader_gone=mark_reader_gone)
         return True
