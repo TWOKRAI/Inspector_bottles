@@ -923,6 +923,40 @@ def test_known_glue_input_reaches_after(tmp_path: Path, case: str) -> None:
         assert marks.count(marker) == 1, f"{marker}: {marks.count(marker)} раз в\n{out}"
 
 
+# id -> (src, before, after). C-61, seed 1 на 36ba0c22f: T1 упал в общем прогоне, пример не записан
+# (`@example` в T1 не подходит — там `rnd`). Отказ на 36ba0c22f: «дамп не читается PyYAML» (``ka: knew: 1``).
+_C61_CASES = {
+    "ex1": (
+        b"# c0\nk:  # e1\n  # c2\n  k:  # e3\n    # c4\n    - null  # e5\n    # c6\n    -  # e7\n      # c8\n"
+        b"      k: null  # e9\n      # c10\n      ka: null  # e11\n    # c12\n    - null  # e13\n",
+        {"k": {"k": [None, {"k": None, "ka": None}, None]}},
+        {"k": {"k": [{"ka": None, "knew": 1}, "sins"], "knew": 1}, "knew": 1},
+    ),
+    "ex2": (
+        b"kf:\n  kxnch:\n    # c0\n    - null  # e1\n    # c2\n    -\n      k: 28.0\n      # c3\n      kklrp: null\n"
+        b"    - true\n",
+        {"kf": {"kxnch": [None, {"k": 28.0, "kklrp": None}, True]}},
+        {"kf": {"kxnch": [{"k": 28.0, "kklrp": "schg"}, "sins"]}},
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_C61_CASES), ids=list(_C61_CASES))
+def test_c61_examples_reach_after(tmp_path: Path, case: str) -> None:
+    """C-61, seed 1 на 36ba0c22f: примеры флейка T1 литералами — файл записан, PyYAML читает after,
+    ни один маркер комментария не встречается дважды."""
+    src, before, after = _C61_CASES[case]
+    path = tmp_path / "r.yaml"
+    _write(path, src)
+
+    yaml_io.patch_yaml_preserving(path, before, after)
+
+    out = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(out) == after
+    marks = _markers(out)
+    assert len(marks) == len(set(marks)), f"маркер дважды: {marks}"
+
+
 # id -> (исходник: load -> dump без правок обязан дать его же, данные PyYAML)
 _EMPTY_FLOW_MAP_CASES = {
     "key_eol": ("ka:  # e\n  - {}\n  - a: 1\n    b: 2\n", {"ka": [{}, {"a": 1, "b": 2}]}),
