@@ -17,7 +17,7 @@ from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_NO_PROGRAM, T
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS
 from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
 from Services.robot_comm.errors import RobotAborted
-from Services.robot_comm.programs import Point, compile_program
+from Services.robot_comm.programs import Move, Point, Program, compile_program
 from Services.robot_comm.programs.generators import return_slot, toolchange
 from Services.robot_comm.robot_data import load_frames, load_points, load_program
 
@@ -37,12 +37,22 @@ class ProgramMixin:
         """Запустить программу в потоке исполнителя; один прогон за раз (DESIGN п.6)."""
         return self._launch(program, points, frames, name=name, kind="program")
 
-    def _launch(self, program: Any, points: Mapping[str, Point], frames: Any, *, name: str, kind: str) -> dict:
-        """Захват (программа / задание / jog) -> компиляция -> поток исполнителя. ``kind`` уходит в счётчики
-        возвратов ``_program_loop`` (T3.7 DESIGN п.7). Без ``spawn`` — ``RuntimeError`` до захвата."""
+    def _launch(
+        self,
+        program: Any,
+        points: Mapping[str, Point],
+        frames: Any,
+        *,
+        name: str,
+        kind: str,
+        park_seq: int | None = None,
+    ) -> dict:
+        """Захват (программа / задание / jog) -> компиляция -> поток исполнителя. ``kind`` («program», «return»,
+        «toolchange», «park») уходит в счётчики возвратов ``_program_loop`` (T3.7 DESIGN п.7) и в допуск park
+        (T5.3e). Без ``spawn`` — ``RuntimeError`` до захвата."""
         spawn = self._spawn_fn()
         # is_connected зовётся под замком состояния последней проверкой, как раньше
-        refusal = self._state.admit_launch(lambda: self.is_connected)
+        refusal = self._state.admit_launch(lambda: self.is_connected, kind=kind, park_seq=park_seq)
         if refusal is not None:
             return refusal
         try:
@@ -74,7 +84,13 @@ class ProgramMixin:
             gp = toolchange(current, target, points, home=self._home_point(), **kw)
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
-        return self.start_program(gp.program, gp.points, None, name=gp.program.name)
+        return self._launch(gp.program, gp.points, None, name=gp.program.name, kind="toolchange")
+
+    def start_park_home(self, seq: int) -> dict:
+        """Ход домой основной остановки ``seq`` (T5.3e): программа ``park_home`` из одного хода JOINT в дом из
+        параметров; допуск — только своему живому park (``admit_launch(kind="park")``)."""
+        program = Program(name="park_home", steps=(Move(point="home", kind="JOINT"),))
+        return self._launch(program, {"home": self._home_point()}, None, name="park_home", kind="park", park_seq=seq)
 
     def _program_loop(self, scenario: Any, name: str, total: int, kind: str = "program") -> None:
         path = f"devices.state.{self.entry.id}.program"
@@ -87,7 +103,7 @@ class ProgramMixin:
             # Микроокно (К1): стоп, записанный между проверкой stopping и взятием поколения в run_chunks, прогон
             # не видит — повторяем его при первом же опросе. Повтор привязан к прогону и идёт мимо защёлки стопа
             # процесса (та запись удачна, но могла лечь до g0 прогона); только запись, без эха
-            level = self._state.stop_resend_level(resent[0])
+            level = self._state.stop_resend_level(resent[0], kind)
             if level:
                 resent[0] = True  # локальная переменная потока исполнителя
             client = self._client
@@ -102,7 +118,8 @@ class ProgramMixin:
 
         try:
             self._pub(path, dict(state))
-            stopping = self._state.is_stopping()
+            # T5.3e: park пришёл до первого хода программы пользователя — она не начинается (В-1)
+            stopping = self._state.is_stopping() or (kind == "program" and self._state.park_view().parking)
             if stopping:
                 state["state"] = "aborted"  # стоп пришёл до первого хода: run_chunks не зовём
             else:
@@ -119,7 +136,7 @@ class ProgramMixin:
                 # Итог публикуется ДО снятия program_active: robot_program_run может прийти сразу после (DESIGN 7)
                 self._pub(path, dict(state))
             finally:
-                self._state.program_finished(kind, state["state"] == "done")
+                self._state.program_finished(kind, state["state"] == "done", state["state"])
 
     def _op_program_run(self, args: dict) -> dict:
         """Программа, точки и СК из хранилища -> ``start_program``; ответ сразу, ход — в потоке исполнителя."""
