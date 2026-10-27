@@ -85,3 +85,22 @@ def test_restart_refused_before_stop_does_not_leak_previous_outcome(rig: Rig) ->
     assert refused.result == {"success": False, "process_name": "ghost", "outcome": None}, (
         f"рестарт ghost: {refused.result}"
     )
+
+
+@pytest.mark.timeout(150)
+def test_restart_of_dead_child_does_not_leak_previous_outcome(rig: Rig) -> None:
+    """H2b: канал итога ключуется по имени, поэтому H2 (``ghost``) ловит утечку прошлого итога только чужого имени —
+    а его там нет. Тот же ключ: ``process.stop slow`` (``terminated``), затем ``process.restart slow`` уже мёртвого
+    (стопа нет — ``stop_process`` выходит коротко) -> ``{"success": True, "process_name": "slow", "outcome": None}``."""
+    stopped = _stop(rig, "slow")
+    assert stopped is not None and stopped.result == {
+        "success": True,
+        "process_name": "slow",
+        "outcome": "terminated",
+    }, f"предусловие: стоп slow: {stopped and stopped.result}"
+
+    restarted = rig.wait_reply(rig.send("process.restart", {"process_name": "slow"}))
+    assert restarted is not None, "ответ process.restart уже мёртвого slow не пришёл за дедлайн"
+    assert restarted.result == {"success": True, "process_name": "slow", "outcome": None}, (
+        f"рестарт мёртвого slow: {restarted.result}"
+    )
