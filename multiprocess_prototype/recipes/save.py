@@ -10,23 +10,27 @@ Purpose:
       - Recipes-путь собирал только ``processes``/``wires``/``displays`` БЕЗ ``metadata`` — т.е.
         стирал позиции узлов (``gui_positions``) и фиксацию (``locked_nodes``).
 
-    Здесь — ОДИН честный сборщик v3-raw: из существующего raw рецепта + плоского topology-dict
-    (SSOT) собирает полный blueprint, СОХРАНЯЯ авторские ``name``/``description`` и layout-метаданные.
-    Делегирует финальную нормализацию (снятие legacy ``data:``/``meta:``/top-level ``gui_positions``)
-    в :func:`normalize_recipe_v3_raw` — единый нормализатор на запись (C1, ADR-RCP-001).
+    Путь записи теперь один — :func:`save_editor_topology_to_recipe`: читает канон файла
+    (``read_canonical``), правит в нём только ``blueprint.processes/wires/displays`` адаптером
+    ``topology_to_canonical`` и пишет одной ``save_raw`` (ADR-RCP-010, design.md §10); рецепт целиком из
+    модели не собирается, ``name``/``description``/раскладка остаются как в файле.
+
+    :func:`build_recipe_v3_raw` (прежний сборщик v3-raw; делегирует нормализацию в
+    :func:`normalize_recipe_v3_raw`, C1, ADR-RCP-001) — FREEZE: на пути записи не используется,
+    оставлен как публичный контракт и для своих contract-тестов.
 
     ``validate_recipe_blueprint`` (RS-5, C-4) — gate на запись: домен-валидация ПЕРЕД
     ``store.save_raw``. Домен-валидатор не новый — переиспользует
     ``SystemBlueprint.check_structure()`` (blueprint.py), НЕ пишет второй валидатор.
-    ``build_recipe_v3_raw`` сам НЕ валидирует (contract-тесты test_save.py используют
-    синтетические wire-фикстуры, не проходящие полную доменную проверку) — gate стоит у
-    вызывающих (``RecipesPresenter.on_save``, ``LayoutController.save_to_active_recipe``)
-    и у ``TopologyPresenter.load_from_file`` (тот же валидатор на чтении из файла).
+    Gate стоит внутри :func:`save_editor_topology_to_recipe` (общий для всех Save-путей) и у
+    ``TopologyPresenter.load_from_file`` (тот же валидатор на чтении из файла).
+    ``build_recipe_v3_raw`` сам НЕ валидирует (его contract-тесты используют синтетические
+    wire-фикстуры, не проходящие полную доменную проверку).
 
 Public API (module-contract: lite):
     - build_recipe_v3_raw — собрать v3-raw рецепта на запись из raw + topology-dict.
     - validate_recipe_blueprint — структурная gate-валидация blueprint перед записью.
-    - save_editor_topology_to_recipe — единая последовательность read→build→validate→save (RS-4 #5).
+    - save_editor_topology_to_recipe — единая последовательность read_canonical→adapt→validate→save_raw (RS-4 #5).
     - RecipeValidationError — ошибка невалидного blueprint (дубли имён процессов / циклы).
     - RecipeNotFoundError — рецепт не читается через RecipeStore.
 
@@ -36,6 +40,8 @@ Stability: lite
 from __future__ import annotations
 
 from typing import Any
+
+from pydantic import ValidationError
 
 from multiprocess_framework.modules.recipe.format import normalize_recipe_v3_raw
 
@@ -75,7 +81,7 @@ def build_recipe_v3_raw(
     gui_positions: dict[str, Any] | None = None,
     locked_nodes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Собрать полный v3-raw рецепта из существующего raw + живой топологии.
+    """Собрать полный v3-raw рецепта из существующего raw + живой топологии. FREEZE: на пути записи не используется.
 
     Единый механизм для обоих GUI-путей Save (Pipeline-таб / Recipes-таб). Из плоского
     topology-dict берёт ``processes``/``wires``/``displays``; авторские ``name``/``description``
@@ -148,9 +154,8 @@ def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
     валидатор: та же логика, что используется и при полной pre-launch проверке
     (``SystemBlueprint.check()``), но без части, зависящей от PluginRegistry.
 
-    Вызывается ОБОИМИ путями Save (``RecipesPresenter.on_save``,
-    ``LayoutController.save_to_active_recipe``) сразу после
-    :func:`build_recipe_v3_raw` и ДО ``store.save_raw`` — при непустых ошибках
+    Вызывается из :func:`save_editor_topology_to_recipe` (общий для обоих путей Save) на каноне
+    ПОСЛЕ ``topology_to_canonical`` и ДО ``store.save_raw`` — при непустых ошибках
     исключение всплывает в уже существующий ``except Exception`` вызывающего
     (``show_error``/``QMessageBox.critical``), запись на диск не происходит.
     Также используется ``TopologyPresenter.load_from_file`` (тот же валидатор
@@ -172,6 +177,19 @@ def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
         raise RecipeValidationError(errors)
 
 
+def _validation_messages(exc: ValidationError) -> list[str]:
+    """Сообщения pydantic-ошибки без входных значений: ``"<loc через точку>: <msg>"`` (design.md §4.3).
+
+    ``str(exc)`` не годится: он несёт входные значения конфига (пароли, пути). Остаточный путь:
+    ``msg`` кастомного валидатора модели может сам вставить значение (``ttl={raw!r}``) — секретов
+    в таких валидаторах нет, но гарантия держится на их тексте, не на этой функции.
+    """
+    return [
+        f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+        for err in exc.errors(include_input=False, include_url=False)
+    ]
+
+
 def save_editor_topology_to_recipe(
     recipes: Any,
     slug: str,
@@ -179,33 +197,68 @@ def save_editor_topology_to_recipe(
     *,
     gui_positions: dict[str, Any] | None = None,
     locked_nodes: list[str] | None = None,
-) -> None:
-    """Единая последовательность записи графа редактора в рецепт: read → build → validate → save.
+    expected_rev: str | None = None,
+) -> str:
+    """Единая последовательность записи графа редактора в рецепт: read_canonical → adapt → validate → save_raw.
 
     Один вызываемый для ВСЕХ Save-путей (RS-4 #5, класс A-3): ``RecipesPresenter.on_save``,
-    ``LayoutController.save_to_active_recipe`` (с layout-override) и closeEvent-сохранение в
-    ``app.py``. Раньше app.py дублировал всю последовательность отдельно — расхождение Save-путей
-    (A-3), которое чинил RS-1. Теперь place — один.
+    ``LayoutController.save_to_active_recipe`` (с раскладкой) и closeEvent-сохранение в ``app.py``.
 
-    Порядок: ``read_raw`` (raise :class:`RecipeNotFoundError` если None) → :func:`build_recipe_v3_raw`
-    (сохраняет name/description/layout) → :func:`validate_recipe_blueprint` (RS-5 gate) → ``save_raw``.
-    Исключения (RecipeNotFoundError/RecipeValidationError и пр.) НЕ глотает — вызывающий сам решает,
-    как показать пользователю (show_error / QMessageBox.critical) и НЕ помечает сессию сохранённой.
+    Политика ADR-RCP-010 (design.md §10): рецепт целиком из модели НЕ собирается. Читается канон файла
+    (``read_canonical`` — канон и ``rev`` одного чтения), адаптер :func:`topology_to_canonical` правит
+    в нём только ``blueprint.processes/wires/displays``, остальное (в т.ч. ``name``/``description``
+    и неизменённые поля) остаётся как в файле. Запись — ОДНА (``save_raw``), минимальной дельтой:
+    раскладка (``gui_positions``/``locked_nodes``, если переданы) идёт в ту же запись через ``layout=``
+    (design.md §9.5), второго вызова ``save_layout`` нет. :func:`build_recipe_v3_raw` здесь не
+    используется (FREEZE).
+
+    Исключения (RecipeNotFoundError/RecipeValidationError/RecipeConflict) НЕ глотает — вызывающий сам
+    решает, как показать пользователю и не помечает ли сессию сохранённой.
 
     Args:
-        recipes: RecipeStore (read_raw/save_raw).
+        recipes: RecipeStore (``read_canonical``/``save_raw``).
         slug: целевой рецепт.
         topology: плоский topology-dict (processes/wires/displays).
-        gui_positions: override позиций узлов (Pipeline-путь; None → сохранить из рецепта).
-        locked_nodes: override фиксации узлов (Pipeline-путь; None → сохранить из рецепта).
+        gui_positions: позиции узлов (Pipeline-путь); None → раскладка файла не меняется.
+        locked_nodes: фиксация узлов (Pipeline-путь); None → раскладка файла не меняется.
+        expected_rev: ревизия, на которой строилась правка редактора; None → ревизия этого чтения.
+
+    Returns:
+        ``rev`` единственной записи.
+
+    Pre:
+      - ``recipes`` — RecipeStore с ``read_canonical`` / ``save_raw(slug, data, *, expected_rev, layout)``.
+      - ``topology`` — dict, который разбирает ``Topology`` (``extra="forbid"``).
+    Post:
+      - записан ровно один раз (одна ``save_raw``), возвращён ``rev`` этой записи; при любом
+        исключении запись не выполнена.
 
     Raises:
         RecipeNotFoundError: рецепт ``slug`` не читается.
-        RecipeValidationError: граф не прошёл структурную валидацию (дубли имён / циклы).
+        RecipeFormatError: файл рецепта не разбирается (битый YAML / корень не mapping).
+        RecipeValidationError: топология или blueprint (в т.ч. не-mapping ``blueprint`` в файле) не
+            разбираются / не прошли структурную валидацию.
+        RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения).
     """
-    raw = recipes.read_raw(slug)
-    if raw is None:
+    # Ленивый импорт: цикла recipes.save <-> adapters.recipe_canonical сегодня нет; импорт в теле
+    # функции — в стиле файла и страхует от будущего цикла.
+    from multiprocess_prototype.adapters.recipe_canonical import topology_to_canonical
+
+    doc, rev = recipes.read_canonical(slug)
+    if doc is None:
         raise RecipeNotFoundError(slug)
-    new_raw = build_recipe_v3_raw(raw, topology, gui_positions=gui_positions, locked_nodes=locked_nodes)
-    validate_recipe_blueprint(new_raw.get("blueprint", {}))
-    recipes.save_raw(slug, new_raw)
+    if "blueprint" in doc and not isinstance(doc["blueprint"], dict):
+        raise RecipeValidationError(["blueprint: ожидался mapping"])
+    try:
+        after = topology_to_canonical(topology, doc)
+        validate_recipe_blueprint(after.get("blueprint", {}))
+    except ValidationError as exc:
+        raise RecipeValidationError(_validation_messages(exc)) from None
+    layout = None
+    if gui_positions is not None or locked_nodes is not None:
+        metadata = (after.get("blueprint") or {}).get("metadata") or {}
+        layout = (
+            gui_positions if gui_positions is not None else dict(metadata.get("gui_positions") or {}),
+            locked_nodes if locked_nodes is not None else list(metadata.get("locked_nodes") or []),
+        )
+    return recipes.save_raw(slug, after, expected_rev=expected_rev if expected_rev is not None else rev, layout=layout)
