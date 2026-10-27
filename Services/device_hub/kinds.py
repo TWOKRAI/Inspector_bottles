@@ -171,5 +171,5 @@ DEFAULT_KINDS: tuple[DeviceKind, ...] = (
     DeviceKind(kind="generic_modbus", drivers={ANY_PROTOCOL: GenericModbusDriver}),
 )
 
-# Источники команд плагина хаба по умолчанию (55 команд robot_* / vfd_*)
+# Источники команд плагина хаба по умолчанию (56 команд robot_* / vfd_*)
 DEFAULT_SOURCES: tuple[OpSource, ...] = command_sources(DEFAULT_KINDS)

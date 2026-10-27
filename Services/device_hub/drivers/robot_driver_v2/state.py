@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from multiprocess_framework.modules.base_manager.interfaces import IHandle
 
 from Services.device_hub.drivers.robot_driver_v2.texts import (
+    TEXT_PARKING,
     TEXT_STOPPING,
     TEXT_SYNCING,
     _BUSY_JOB,
@@ -27,10 +28,12 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
     _DISCONNECTING,
     _HOLD_WINDOW_S,
     _NOT_CONNECTED,
+    _PARKED,
+    _PARKING,
 )
 from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
 
-__all__ = ["JogView", "RobotState", "RobotStateView", "_Job", "_JogRun", "_Place"]
+__all__ = ["JogView", "ParkBegin", "ParkView", "RobotState", "RobotStateView", "_Job", "_JogRun", "_Place"]
 
 
 type _Place = tuple[float, float, float, float]
@@ -106,8 +109,35 @@ class RobotStateView:
     returns_failed: int
 
 
+@dataclass(frozen=True)
+class ParkBegin:
+    """Итог ``park_begin`` (T5.3e): отказ или допуск (``seq``, держащийся jog ``run`` для стопа, SOFT программе)."""
+
+    refusal: dict | None
+    seq: int = 0
+    run: _JogRun | None = None
+    prog_soft: bool = False
+
+
+@dataclass(frozen=True)
+class ParkView:
+    """Срез полей основной остановки для ``ParkMachine`` (T5.3e); в ``view()`` их нет (23 поля не меняются)."""
+
+    parking: bool
+    parked: bool
+    seq: int
+    cancel: str | None
+    shutdown: bool
+    disconnecting: bool
+    job_active: bool
+    program_active: bool
+    program_kind: str | None
+    jog_busy: bool
+    home_outcome: str | None
+
+
 class RobotState:
-    """Состояние драйвера робота v2 (T5.3f f1, T5.3g, C-29): 28 полей и 4 поля текущего ``_JogRun`` под замком
+    """Состояние драйвера робота v2 (T5.3f f1, T5.3g, C-29, T5.3e): 34 поля и 4 поля текущего ``_JogRun`` под замком
     ``_lock``; в ``view()`` — 23 из 28 (без ``_ready``, ``_connecting``, ``_connect_linked``, ``_stop_linked``,
     ``_disconnect_requests``).
 
@@ -169,6 +199,14 @@ class RobotState:
         self._return_queue: deque[tuple[float, float, float]] = deque(maxlen=queue_maxlen)
         self._returns_done = 0
         self._returns_failed = 0
+        # Основная остановка (T5.3e, park): идёт; дошла до done — движение запрещено до «серво ON» (В-4, реконнект
+        # его не снимает); номер park; причина отмены стопом оператора; вид идущей программы; исход хода домой
+        self._parking = False
+        self._parked = False
+        self._park_seq = 0
+        self._park_cancel: str | None = None
+        self._program_kind: str | None = None
+        self._park_home_outcome: str | None = None
 
     # --- без замка: чтения, которые и раньше шли без него ---
 
@@ -295,8 +333,8 @@ class RobotState:
                 return "shutdown", False
             if self._disconnect_requests:
                 return "cancelled", False
-            if self._job_active or self._activity_alive_locked():
-                return "busy", False
+            if self._job_active or self._activity_alive_locked() or self._parking:
+                return "busy", False  # T5.3e: посреди park connect не синхронизирует и не снимает _stopping
             self._connect_reset_locked()
             was_ready = self._ready
             self._ready = False
@@ -379,7 +417,7 @@ class RobotState:
         with self._lock:
             if self._disconnect_requests > 0:
                 return dict(_DISCONNECTING)
-            return None
+            return self._park_refusal_locked()  # T5.3e: enqueue_job, return_job, jog_step
 
     def disconnect_begin(self) -> bool:
         """``disconnect``: выключение; не выключение — новое поколение защёлки."""
@@ -580,6 +618,8 @@ class RobotState:
                 or (run is not None and run.active)
                 or self._job_active
                 or self._disconnect_requests  # C-29 (В5): ни возвратов, ни заданий до конца отключения
+                or self._parking  # T5.3e: ни возвратов, ни заданий во время park и после него
+                or self._parked
             ):
                 return None, None
             if self._return_queue:
@@ -630,6 +670,7 @@ class RobotState:
             if (
                 self._stopping
                 or self._shutdown
+                or self._parking  # T5.3e: P_HOME_* не меняется посреди park
                 or self._program_active
                 or self._jog_starting
                 or self._jog_stopping
@@ -659,6 +700,9 @@ class RobotState:
                 return {"status": "error", "message": TEXT_STOPPING}
             if self._disconnect_requests:
                 return dict(_DISCONNECTING)  # и продление «hold»: поводок активного jog истекает (О10)
+            park = self._park_refusal_locked()  # T5.3e: ранний отказ; гарантию даёт jog_hold_admit
+            if park is not None:
+                return park
             if self._program_active:
                 return dict(_BUSY_PROGRAM)
             if self._job_active:
@@ -677,6 +721,9 @@ class RobotState:
                 return {"status": "error", "message": TEXT_STOPPING}, None
             if self._disconnect_requests:
                 return dict(_DISCONNECTING), None
+            park = self._park_refusal_locked()  # T5.3e: park_begin мог прийти после jog_hold_check
+            if park is not None:
+                return park, None
             if self._program_active:
                 return dict(_BUSY_PROGRAM), None
             if self._job_active:
@@ -692,13 +739,17 @@ class RobotState:
             return None, prev
 
     def jog_started(self, run: _JogRun) -> bool:
-        """JOG_CONT подтверждён: jog, ``last_hold``, новое поколение защёлки (H-A). -> останов уже идёт (H-B)."""
+        """JOG_CONT подтверждён: jog, ``last_hold``, новое поколение защёлки (H-A). -> останов уже идёт (H-B).
+
+        T5.3e: True и при ``_parking`` — park пришёл, пока JOG_CONT был в полёте (держащегося jog ещё не было,
+        пометок release нет): ``jog.py`` ведёт его путём H-B (свой SOFT, поводок не запускается).
+        """
         with self._lock:
             self._jog = run
             self._last_hold = self._clock()
             # H-A: запись движения — новое поколение защёлки ПОСЛЕ неё (стоп prev выше её не покрывает)
             self._latch_reset_locked()
-            stopping = self._stopping
+            stopping = self._stopping or self._parking
             return stopping
 
     def jog_aborted_by_stop(self, run: _JogRun) -> None:
@@ -756,13 +807,27 @@ class RobotState:
 
     # --- программы ---
 
-    def admit_launch(self, connected: Callable[[], bool]) -> dict | None:
-        """Захват исполнителя: отказ или None (``program_active``, сброс защёлки)."""
+    def admit_launch(
+        self, connected: Callable[[], bool], *, kind: str = "program", park_seq: int | None = None
+    ) -> dict | None:
+        """Захват исполнителя: отказ или None (``program_active``, ``program_kind``, сброс защёлки).
+
+        T5.3e: ``kind == "park"`` (ход домой) допускается только своему живому park: ``_parking``, тот же
+        ``park_seq``, нет отмены стопом оператора, не выключение; иначе — ``_PARKING``. Прочим видам park отказывает.
+        """
         with self._lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}
             if self._disconnect_requests:
                 return dict(_DISCONNECTING)  # C-29 (В5): программа, возврат, смена инструмента
+            if kind == "park":
+                own = self._parking and self._park_seq == park_seq and self._park_cancel is None
+                if not own or self._shutdown:
+                    return dict(_PARKING)
+            else:
+                park = self._park_refusal_locked()
+                if park is not None:
+                    return park
             if self._program_active:
                 return dict(_BUSY_PROGRAM)
             if self._job_active:
@@ -775,6 +840,7 @@ class RobotState:
             if not connected():
                 return dict(_NOT_CONNECTED)
             self._program_active = True
+            self._program_kind = kind
             self._latch_reset_locked()
             return None
 
@@ -786,19 +852,29 @@ class RobotState:
         with self._lock:
             self._prog_handle = handle
 
-    def stop_resend_level(self, already_resent: bool) -> int:
-        """Микроокно К1: уровень повтора стопа в ``on_progress`` (0 — повтора нет)."""
+    def stop_resend_level(self, already_resent: bool, kind: str = "program") -> int:
+        """Микроокно К1: уровень повтора стопа в ``on_progress`` (0 — повтора нет).
+
+        T5.3e: SOFT ``_op_park`` мог лечь до g0 прогона программы пользователя — тот же один повтор SOFT.
+        """
         with self._lock:
-            return self._stop_level if (self._stopping and not already_resent) else 0
+            if self._stopping:
+                return self._stop_level if not already_resent else 0
+            if kind == "program" and self._parking and not already_resent:
+                return STOP_LEVEL["SOFT"]
+            return 0
 
     def is_stopping(self) -> bool:
         with self._lock:
             return self._stopping
 
-    def program_finished(self, kind: str, done: bool) -> None:
-        """Исполнитель вышел: снять ``program_active``; возврат — счётчик исхода."""
+    def program_finished(self, kind: str, done: bool, outcome: str | None = None) -> None:
+        """Исполнитель вышел: снять ``program_active``; возврат — счётчик исхода; ход домой — исход для park."""
         with self._lock:
             self._program_active = False
+            self._program_kind = None
+            if kind == "park":
+                self._park_home_outcome = outcome  # "done" | "aborted" | "failed" | "link" — в той же секции (T5.3e)
             if kind == "return":
                 if done:
                     self._returns_done += 1
@@ -812,6 +888,8 @@ class RobotState:
         with self._lock:
             if self._stopping:
                 return {"status": "error", "message": TEXT_STOPPING}
+            if self._parking:
+                return dict(_PARKING)  # T5.3e: после park (_parked) servo и DO разрешены — «серво ON» снимает запрет
             if self._program_active:
                 return dict(_BUSY_PROGRAM)
             if self._job_active:
@@ -830,7 +908,98 @@ class RobotState:
     def param_refusal(self) -> str | None:
         """``param_set`` / ``param_apply`` после ``_param_lock``: текст отказа (останов, синхронизация) или None."""
         with self._lock:
-            stopping, syncing = self._stopping, self._syncing
-        if stopping or syncing:
-            return TEXT_STOPPING if stopping else TEXT_SYNCING
+            stopping, parking, syncing = self._stopping, self._parking, self._syncing
+        if stopping:
+            return TEXT_STOPPING
+        if parking:
+            return TEXT_PARKING  # T5.3e: P_HOME_* не меняется посреди park
+        if syncing:
+            return TEXT_SYNCING
         return None
+
+    # --- основная остановка (T5.3e, park): переходы ParkMachine и команды park ---
+
+    def _park_refusal_locked(self) -> dict | None:
+        """Отказ движения во время park (``_PARKING``) и после него до «серво ON» (``_PARKED``)."""
+        if self._parking:
+            return dict(_PARKING)
+        if self._parked:
+            return dict(_PARKED)
+        return None
+
+    def park_begin(self) -> ParkBegin:
+        """``robot_park``: допуск одной секцией. Отказы: останов, «Отключить», park идёт, синхронизация.
+
+        Допуск: ``_parking``, новый ``seq``, отмена и исход хода домой сняты (``_parked`` не трогается). Держащийся
+        jog получает пометки release в той же секции (как ``jog_release_begin``) и уходит вызывающему для стопа;
+        ``prog_soft`` — идёт программа пользователя (В-1: ей SOFT; возврат и смена инструмента доезжают сами).
+        """
+        with self._lock:
+            if self._shutdown or self._stopping:
+                return ParkBegin({"status": "error", "message": TEXT_STOPPING})
+            if self._disconnect_requests:
+                return ParkBegin(dict(_DISCONNECTING))
+            if self._parking:
+                return ParkBegin(dict(_PARKING))
+            if self._syncing:
+                return ParkBegin({"status": "error", "message": TEXT_SYNCING})
+            self._parking = True
+            self._park_seq += 1
+            self._park_cancel = None
+            self._park_home_outcome = None
+            run: _JogRun | None = None
+            if self._holding_locked():
+                run = self._jog
+                assert run is not None
+                run.released = True  # поток поводка выходит по "released": стоп пишет park (lease_check)
+                run.stop_requested = True
+                run.wake.set()
+                self._jog_stopping = True  # до возврата стопа тик не берёт задание (как jog_release_begin)
+            prog_soft = self._program_active and self._program_kind == "program"
+            return ParkBegin(None, self._park_seq, run, prog_soft)
+
+    def park_end(self, seq: int, ok: bool) -> tuple[bool, int, int]:
+        """Терминал park сравнением по ``seq``: не свой / уже закрыт -> ``(False, 0, 0)``.
+
+        Свой: ``_parking`` снят, при ``ok`` — ``_parked`` (при ``failed`` не трогается); очереди заданий и возвратов
+        сняты (В-5) -> ``(True, заданий, возвратов)``.
+        """
+        with self._lock:
+            if not self._parking or self._park_seq != seq:
+                return False, 0, 0
+            self._parking = False
+            if ok:
+                self._parked = True
+            jobs, returns = len(self._job_queue), len(self._return_queue)
+            self._job_queue.clear()
+            self._return_queue.clear()
+            return True, jobs, returns
+
+    def park_cancel(self, reason: str) -> None:
+        """Стоп оператора во время park: запомнить первую причину; терминал ставит тик (``ParkMachine``)."""
+        with self._lock:
+            if self._parking and self._park_cancel is None:
+                self._park_cancel = reason
+
+    def park_view(self) -> ParkView:
+        """Срез полей park и занятости одной секцией (для ``ParkMachine``, ``_run_on_connect``)."""
+        with self._lock:
+            run = self._jog
+            return ParkView(
+                parking=self._parking,
+                parked=self._parked,
+                seq=self._park_seq,
+                cancel=self._park_cancel,
+                shutdown=self._shutdown,
+                disconnecting=self._disconnect_requests > 0,
+                job_active=self._job_active,
+                program_active=self._program_active,
+                program_kind=self._program_kind,
+                jog_busy=self._jog_starting or self._jog_stopping or (run is not None and run.active),
+                home_outcome=self._park_home_outcome,
+            )
+
+    def servo_on_done(self) -> None:
+        """``robot_servo {on: true}`` записан: запрет движения после park снят (В-4)."""
+        with self._lock:
+            self._parked = False

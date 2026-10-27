@@ -417,7 +417,7 @@ def test_catalogue_descriptions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         for name in _OLD_NAMES + _LOG_NAMES:
             assert name in DeviceHubPlugin.commands, name
             assert manager.get_command_info(name) is not None, name
-        assert len(DeviceHubPlugin.commands) == 72
+        assert len(DeviceHubPlugin.commands) == 73
         assert len(_NEW_NAMES) == 21 and len(_OLD_NAMES) == 27 and len(set(_NEW_NAMES + _OLD_NAMES)) == 48
     finally:
         _shutdown(plugin, ctx)
