@@ -558,7 +558,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 
 ### Task 1.11 — окно стопа на ребёнка: ключ конфига процесса, внешние сроки — из максимума
 
-**Статус:** DRAFT 2026-10-20 · **Level:** Senior · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Статус:** IN PROGRESS 2026-10-27 — стадии 0–3 сделаны (GREEN `b1e695121`, heavy 1451/0, матрица 13/18 + H7), впереди стенд и ревью Opus; handoff `docs/handoffs/2026-10-27_Ф-T1.11-pause.md` · **Level:** Senior · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
 **Goal:** окно стопа на ребёнка (`stop_window_s`) на всех путях стопа, потолок `max_stop_window_s`, внешние сроки PM и спавнера — из потолка; не носитель возврата робота домой.
 **Зависит от:** Task 1.9b, Task 1.10; ловушка `launcher/spawner.py` (camera-device-service 1.7)
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.11.md`](lifecycle-stop-ownership/tasks/T1.11.md)
