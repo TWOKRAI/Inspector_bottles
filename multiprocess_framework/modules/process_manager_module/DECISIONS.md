@@ -1938,7 +1938,8 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
   текущая операция отвечает так, как `_cmd_process_stop` отвечает при `stop_process == False`.
   (г) (Task 1.10) `outcome` — только в ответах `_cmd_process_stop` / `_cmd_process_restart`; отказы исполнителя
   (`key_missing`, `system_stopping`, `executor_busy`) без него. У прерванного системным стопом одиночного стопа ключа
-  `error` по-прежнему нет: `{"success": False, "process_name", "outcome": "handed_over"}`.
+  `error` по-прежнему нет: `{"success": False, "process_name", "outcome": "handed_over"}`. Исключение обработчика после
+  фазы стопа (например, в рестарте после `remove_process`) отвечает прежним конвертом ошибки без `outcome`: оно не ловится.
 - **I4: PM жив.** `message_processor` и `supervision.status` отвечают весь одиночный стоп и `topology.apply`.
 - **I5: L не отказывается из-за ждущего T; при `T_pending = T_CAP` у L не меньше `L_CAP` мест.** Следует из
   `max_pending = L_CAP + T_CAP` и счётчика T в шлюзе: отказ по ёмкости получает T, не L. Проверка — H12
@@ -1962,11 +1963,13 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
   имени сбрасывает в `None`; призраки и уже мёртвые запись не трогают. `call_stop_outcome(name)` — итог в последнем
   `_stop_many` этого потока (для PM). Без нового лока. `IProcessRegistry` не меняется (оба метода — у конкретного реестра).
 - **D4. Ответ PM.** `_cmd_process_stop` / `_cmd_process_restart` отвечают `{"success", "process_name", "outcome"}`;
-  `outcome` — итог стопа ЭТОГО вызова. Итог идёт боковым каналом `threading.local` PM: `stop_process` сбрасывает его на
-  входе и заполняет на выходе (короткие выходы — `None`), обработчики сбрасывают перед вызовом и читают после. Канал
-  поточно-локальный: поток исполнителя переиспользуется, а чужой стоп с другого потока (монитор, shutdown) не подменяет
-  ответ. Публичные `stop_process` / `restart_process -> bool` и `interfaces.py` не менялись. `supervision.status` —
-  поле `stop_outcome` на записи процесса = `registry.stop_outcome(name)`.
+  `outcome` — итог стопа ЭТОГО вызова. Один боковой канал — в реестре: `ProcessRegistry.call_stop_outcome(name)` отдаёт
+  итог последнего `_stop_many` этого потока (`threading.local`; имя, не дошедшее до `ChildProcessStop`, — `None`),
+  `reset_call_stop_outcomes()` сбрасывает его. Сбрасывают читатели: оба обработчика сбрасывают канал до вызова и
+  читают после (поток исполнителя переиспользуется — без сброса короткий путь или отказанный рестарт вернули бы итог
+  прошлой операции); `stop_process` канал не трогает, `add_process` сбрасывает только `stop_outcome`, не канал вызова.
+  Канала в PM нет. Публичные `stop_process` / `restart_process -> bool` и `interfaces.py` не менялись.
+  `supervision.status` — поле `stop_outcome` на запись процесса = `registry.stop_outcome(name)`.
 
 | Путь | `success` | `outcome` |
 |---|---|---|
