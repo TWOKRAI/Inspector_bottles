@@ -468,6 +468,7 @@ class RecipeManager:
         ``N(файл)`` вводит корневой ключ, которого нет в файле (устаревшая форма) -> ``RecipeFormatError``
         «сначала миграция», байты целы; удаление и перенос вглубь отказа не дают.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
+        Страховка записи отказала -> ``YamlWriteRefused`` (подкласс ``ValueError``), байты целы.
         """
         new_rev = self._write(slug, after=after, expected_rev=expected_rev, layout=layout)
         assert new_rev is not None  # patch_recipe всегда пишет или возвращает ``rev`` существующего файла
@@ -490,6 +491,7 @@ class RecipeManager:
         не создаётся. Раскладка из файла -> записи нет. Файл не разбирается или в устаревшей форме (см.
         ``patch_recipe``) -> ``RecipeFormatError`` (подкласс ``ValueError``), байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
+        Страховка записи отказала -> ``YamlWriteRefused`` (подкласс ``ValueError``), байты целы.
         """
         return self._write(slug, after=None, expected_rev=expected_rev, layout=(positions, locked_nodes))
 

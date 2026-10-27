@@ -223,6 +223,7 @@ class RecipeManagerProtocol(Protocol):
             ``blueprint:``, добавленный ключ) -> ``RecipeFormatError`` «сначала миграция», байты целы; удаление и
             перенос вглубь (legacy ``gui_positions`` -> ``blueprint.metadata``) отказа не дают.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
+        Страховка записи отказала -> ``YamlWriteRefused`` (подкласс ``ValueError``), байты целы.
         """
         ...
 
@@ -243,6 +244,7 @@ class RecipeManagerProtocol(Protocol):
         конфликт ``rev`` -> ``RecipeConflict``; файл не разбирается или в устаревшей форме (см. ``patch_recipe``) ->
         ``RecipeFormatError`` (подкласс ``ValueError``), байты целы.
         Raises: ``RecipeLockTimeout`` — лок занят дольше ``timeout`` (5 с), файл цел.
+        Страховка записи отказала -> ``YamlWriteRefused`` (подкласс ``ValueError``), байты целы.
         """
         ...
 

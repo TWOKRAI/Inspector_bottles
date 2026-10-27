@@ -33,10 +33,41 @@ def make_yaml():
             "комментариев. Установи зависимости: `uv sync` (ruamel.yaml уже в pyproject)."
         ) from exc
     yaml = YAML()  # round-trip по умолчанию
+    yaml.Emitter = _emitter_class()
     yaml.preserve_quotes = True
     yaml.width = 4096  # не переносить длинные строки
     yaml.indent(mapping=2, sequence=4, offset=2)
     return yaml
+
+
+_EMITTER: Any = None
+
+
+def _emitter_class() -> Any:
+    """``RoundTripEmitter`` с исправлением дефекта ruamel 0.19.1 (Task 1.1i, design.md §12, поправка №5).
+
+    Дефект: ``Emitter.expect_first_flow_mapping_key`` (ruamel/yaml/emitter.py) для пустого flow ``{}`` не
+    сбрасывает ``no_newline`` — ``expect_flow_sequence_item`` для ``[]`` его сбрасывает. Флаг, взведённый
+    EOL-комментарием ключа списка на первом ``-``, протекает через ``- {}`` до второй строки следующей
+    блочной карты: ``ka:  # e`` / ``- {}`` / ``- a: 1`` / ``b: 2`` пишется ``- a: 1 b: 2`` — уже чистым
+    load -> dump, без движка. Исправление — сброс в той же ветке, где его делает flow-список.
+    Пин ``ruamel.yaml<0.20``; при обновлении проверить upstream и удалить подкласс, если починено
+    (тест ``test_make_yaml_empty_flow_mapping_keeps_block_layout``)."""
+    global _EMITTER
+    if _EMITTER is None:
+        from ruamel.yaml.emitter import RoundTripEmitter
+        from ruamel.yaml.events import MappingEndEvent
+
+        class _RecipeEmitter(RoundTripEmitter):
+            def expect_first_flow_mapping_key(self) -> None:
+                empty = isinstance(self.event, MappingEndEvent)
+                eol = empty and bool(self.event.comment and self.event.comment[0])
+                super().expect_first_flow_mapping_key()
+                if empty and not eol:  # как ``expect_flow_sequence_item``: без EOL-комментария — сброс
+                    self.no_newline = False
+
+        _EMITTER = _RecipeEmitter
+    return _EMITTER
 
 
 def load_document(yaml, text: str) -> Any:
@@ -155,6 +186,9 @@ def finalize(doc: Any) -> None:
     - Пустой контейнер — flow (``[]``/``{}`` на строке ключа): блочный пустой эмиттер пишет ПОСЛЕ
       комментария ключа, на отдельной строке, — невалидный YAML. Контейнеру, который опустел
       по дороге (``_mark_emptied``) и снова наполнился, возвращается стиль до опустошения (p31).
+    - Хвостовой токен ``seq.ca.items[i][0]`` у непустого блочного элемента-контейнера (его ставит движок:
+      ``replace_item``/``_append_tail`` при правке соседей) переезжает «перед элементом» —
+      ``_lift_item_tail`` (Task 1.1i).
     - Элемент списка с собственным заголовком и комментарием-перед-элементом в слоте списка —
       один общий список токенов (``_share_item_header``). Заголовок появляется не только при
       удалении первого ключа элемента, но и при переносе заголовка опустевшей карты первого
@@ -164,6 +198,7 @@ def finalize(doc: Any) -> None:
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
     seen: set[int] = set()
+    owners: dict[int, tuple[Any, Any]] = {}  # id(список) -> (родитель, ключ)
     stack = [doc]
     while stack:
         node = stack.pop()
@@ -178,9 +213,48 @@ def finalize(doc: Any) -> None:
             node.fa._flow_style = original  # опустел и снова наполнен — стиль до опустошения
         if isinstance(node, CommentedSeq):
             for idx, item in enumerate(node):
+                _lift_item_tail(node, idx, item, owners.get(id(node)))
                 if isinstance(item, (CommentedMap, CommentedSeq)) and _split_item_header(node, idx, item):
                     _share_item_header(item, (node, idx))
-        stack.extend(node.values() if isinstance(node, CommentedMap) else node)
+        children = list(node.items()) if isinstance(node, CommentedMap) else list(enumerate(node))
+        for key, child in children:
+            if isinstance(child, CommentedSeq):
+                owners.setdefault(id(child), (node, key))
+        stack.extend(child for _, child in children)
+
+
+def _lift_item_tail(seq: Any, idx: int, item: Any, owner: tuple[Any, Any] | None) -> None:
+    """Хвостовой токен ``seq.ca.items[idx][0]`` непустого элемента-контейнера — «перед элементом» (Task 1.1i).
+
+    У скаляра этот слот — EOL строки и комментарии перед следующим соседом. У блочного контейнера
+    эмиттер пишет его сразу после ``-``, и ``no_newline``, взведённый комментарием ключа списка,
+    переживает первую строку элемента: ``kt: knew: 1`` (B1–B3, B7–B9). Загрузчик ruamel такой
+    расстановки не делает: комментарии перед первым элементом он кладёт в EOL-токен ключа списка
+    (``ka:  # e3`` + ``  # c4``), перед остальными — в комментарий-перед-элементом ``ca.items[i][1]``.
+    Туда же токен и переезжает — с текстом целиком: ни один комментарий не теряется."""
+    from ruamel.yaml.comments import CommentedMap
+    from ruamel.yaml.tokens import CommentToken
+
+    slots = seq.ca.items.get(idx)
+    if not slots or slots[0] is None or not isinstance(item, (dict, list)) or not len(item):
+        return
+    token, slots[0] = slots[0], None
+    text, line = token.value, getattr(token.start_mark, "line", 0)
+    parent, pkey = owner if owner is not None else (None, None)
+    if idx == 0 and isinstance(parent, CommentedMap) and _token(parent, pkey, 2) is not None:
+        own = seq.ca.comment[0] if seq.ca.comment is not None else None
+        mirrored = own is not None and own is _token(parent, pkey, 2)
+        _append_tail(parent, pkey, 2, text, line)  # новый токен: EOL ключа + комментарии перед элементом
+        if mirrored:  # загрузчик держит EOL ключа и в ``seq.ca.comment[0]`` — тем же объектом
+            seq.ca.comment[0] = parent.ca.items[pkey][2]
+        return
+    body = text[1:] if text.startswith(_NL) else text
+    if not body:
+        return  # только EOL удалённой строки — комментария нет
+    stripped = body.lstrip(" ")
+    pre = slots[1] if slots[1] is not None else []
+    pre.append(CommentToken(stripped, _mark(len(body) - len(stripped), line), None))
+    slots[1] = pre
 
 
 def _mark_emptied(container: Any) -> None:

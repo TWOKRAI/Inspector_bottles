@@ -19,13 +19,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
 import pytest
 import yaml
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, given, seed, settings
 from hypothesis import strategies as st
+from hypothesis.errors import UnsatisfiedAssumption
 
 from multiprocess_framework.modules.recipe import yaml_io
 
@@ -707,25 +709,307 @@ def _mutate(node, rnd):
     return node if rnd.random() < 0.8 else rnd.choice([7, "schg", True, None, 2.5])
 
 
-@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(before=_DOC, rnd=st.randoms(use_true_random=False))
-def test_property_patch_with_comments_reaches_after(before: dict, rnd) -> None:
-    """Файл с комментариями и опустошаемыми контейнерами: выход парсится, load == after, комментарий не дублирован."""
+_MARKER = re.compile(r"# [ce]\d+")
+
+
+def _markers(text: str) -> list[str]:
+    """Маркеры комментариев генератора (``# c<N>``/``# e<N>``) в порядке появления."""
+    return _MARKER.findall(text)
+
+
+def _patch_case(before: dict, rnd) -> str:
+    """Один случай T1/T2: ``"written"`` — файл записан и верен; ``"refused"`` — отказ страховки, файл цел.
+
+    Отказ допустим только как ``YamlWriteRefused`` при прежних байтах и ``st_mtime_ns`` (design.md §12.4);
+    любое другое исключение уходит наружу — красный. ``assume`` — входной фильтр, не исход."""
     after = _mutate(before, rnd)
     src = _dump_commented(before, rnd)
-    # Вход, который ruamel 0.19 портит уже чистым round-trip (без дельты), — дефект ruamel, а не
-    # движка; такой файл страховка записи отказывается писать (ValueError, файл цел).
+    # Вход, который ruamel 0.19 портит уже чистым round-trip (без дельты), — дефект ruamel, а не движка.
     assume(_ruamel_roundtrip_clean(src, before))
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "r.yaml"
-        path.write_bytes(src.encode("utf-8"))
-
-        yaml_io.patch_yaml_preserving(path, before, after)
-
+        raw_before, mtime_before = _write(path, src.encode("utf-8"))
+        try:
+            yaml_io.patch_yaml_preserving(path, before, after)
+        except yaml_io.YamlWriteRefused:
+            assert path.read_bytes() == raw_before
+            assert path.stat().st_mtime_ns == mtime_before
+            return "refused"
         out = path.read_text(encoding="utf-8")
     assert json.dumps(yaml.safe_load(out), sort_keys=True) == json.dumps(after, sort_keys=True)
-    comments = [line.split("#", 1)[1] for line in out.splitlines() if "#" in line]
-    assert len(comments) == len(set(comments))
+    marks = _markers(out)
+    assert len(marks) == len(set(marks)), f"маркер комментария дважды: {marks}"
+    return "written"
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(before=_DOC, rnd=st.randoms(use_true_random=False))
+def test_property_patch_with_comments_reaches_after(before: dict, rnd) -> None:
+    """Файл с комментариями: запись даёт after без дублей комментариев; отказ — только YamlWriteRefused, файл цел."""
+    _patch_case(before, rnd)
+
+
+@pytest.mark.parametrize("sd", range(10))
+def test_property_refusal_budget(sd: int) -> None:
+    """Храповик (design.md §12.5, не RED): 300 примеров под ``@seed(sd)`` — ни одного отказа страховки.
+
+    Поток hypothesis зависит от процесса-хозяина: детерминированный RED — корпус
+    ``test_known_glue_input_reaches_after``."""
+    counts = {"written": 0, "refused": 0, "rejected": 0}
+
+    @seed(sd)
+    @settings(database=None, max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @given(before=_DOC, rnd=st.randoms(use_true_random=False))
+    def run(before: dict, rnd) -> None:
+        try:
+            counts[_patch_case(before, rnd)] += 1
+        except UnsatisfiedAssumption:
+            counts["rejected"] += 1
+            raise
+
+    run()
+    assert counts["written"] + counts["refused"] == 300, counts
+    assert counts["rejected"] <= 15, counts
+    assert counts["refused"] == 0, counts
+
+
+# ---------------------------------------------------------------------------
+# Task 1.1i: склейка строк при переносе комментариев у блочного списка (design.md §12.6)
+# ---------------------------------------------------------------------------
+
+# id -> (src, before, after, маркеры выживших: каждый ровно по разу). B1–B6 — ревью 1.1f §B,
+# B7–B9 — ``probes/glue_refused_examples.json``. Все девять на HEAD 1.1f — отказ страховки.
+_GLUE_CASES = {
+    "B1": (
+        "# c0\nk: null  # e1\n# c2\nka:  # e3\n  # c4\n  - null  # e5\n  # c6\n  - null  # e7\n  # c8\n  -  # e9\n"
+        "    # c10\n    k: null  # e11\n    # c12\n    ka: null  # e13\n    # c14\n    kb: null  # e15\n"
+        "    # c16\n    kt: null  # e17\n",
+        {"k": None, "ka": [None, None, {"k": None, "ka": None, "kb": None, "kt": None}]},
+        {"ka": [{"kt": None, "knew": 1}], "knew": 1},
+        ("# c0", "# c2", "# e3", "# c4", "# c6", "# c8"),
+    ),
+    "B2": (
+        "# c0\nk: null  # e1\n# c2\nka:  # e3\n  # c4\n  -  # e5\n    # c6\n    k: null  # e7\n  # c8\n  - null  # e9\n"
+        "  # c10\n  -  # e11\n    # c12\n    k: null  # e13\n    # c14\n    ka: null  # e15\n    # c16\n"
+        "    kb: null  # e17\n    # c18\n    ki: null  # e19\n",
+        {"k": None, "ka": [{"k": None}, None, {"k": None, "ka": None, "kb": None, "ki": None}]},
+        {"ka": [{"knew": 1}, {"knew": 1}], "knew": 1},
+        ("# c0", "# c2", "# e3", "# c4", "# e5", "# c6", "# c8", "# c10"),
+    ),
+    "B3": (
+        "# c0\nk: []\n# c1\nka:  # e2\n  # c3\n  - []\n  # c4\n  -  # e5\n    # c6\n    k: null  # e7\n    # c8\n"
+        "    ka: null  # e9\n  # c10\n  - null  # e11\n",
+        {"k": [], "ka": [[], {"k": None, "ka": None}, None]},
+        {"ka": [{"ka": None, "knew": 1}], "knew": 1},
+        ("# c0", "# c1", "# e2", "# c3", "# c10"),
+    ),
+    "B4": (
+        "# c0\nkgv:  # e1\n  - {}\n  - {}\n  -\n    - null  # e2\n    # c3\n    - null\n  -\n    kggr: null  # e4\n"
+        "    kcats: null\n    # c5\n    k: {}\n    kliyk: null  # e6\n",
+        {"kgv": [{}, {}, [None, None], {"kggr": None, "kcats": None, "k": {}, "kliyk": None}]},
+        {"kgv": [{}, {}, {"kcats": None}, "sins"]},
+        ("# c0", "# e1"),
+    ),
+    "B5": (
+        "# c0\nk:  # e1\n  # c2\n  - {}\n  # c3\n  - {}\n  # c4\n  - null  # e5\n  # c6\n  -  # e7\n    # c8\n"
+        "    k: []\n    # c9\n    ka: null  # e10\n    kaa: null\n    # c11\n    kaaa: null  # e12\n",
+        {"k": [{}, {}, None, {"k": [], "ka": None, "kaa": None, "kaaa": None}]},
+        {"k": [{}, {"knew": 1}, {"kaaa": None, "knew": 1}, "sins"], "knew": 1},
+        ("# c0", "# e1", "# c2", "# c3", "# c4", "# c6", "# e7", "# c8"),
+    ),
+    "B6": (
+        "# c0\nk:  # e1\n  # c2\n  - {}\n  # c3\n  - {}\n  # c4\n  - null  # e5\n  # c6\n  -  # e7\n    # c8\n"
+        "    k: []\n    # c9\n    ka: null  # e10\n    kaa: null\n    # c11\n    kaaa: null  # e12\n",
+        {"k": [{}, {}, None, {"k": [], "ka": None, "kaa": None, "kaaa": None}]},
+        {"k": [{}, "sins", {"knew": 1}, {"knew": 1}], "knew": 1},
+        ("# c0", "# e1", "# c2", "# c3", "# c4", "# c6", "# e7", "# c8", "# c11"),
+    ),
+    "B7": (
+        '# c0\nkuruq:\n  # c1\n  - []\n  - []\n  -\n    k: null\n    kr: "s"\n    # c2\n    kwdqc:  # e3\n'
+        "      # c4\n      kf: false  # e5\n# c6\nk:  # e7\n  - -22.625\n  - []\n# c8\nkt:  # e9\n"
+        '  k: null  # e10\n  kahx: "sw0f"  # e11\n  kzv: false  # e12\n  kjgk: -19.5\nku: true  # e13\n',
+        {
+            "kuruq": [[], [], {"k": None, "kr": "s", "kwdqc": {"kf": False}}],
+            "k": [-22.625, []],
+            "kt": {"k": None, "kahx": "sw0f", "kzv": False, "kjgk": -19.5},
+            "ku": True,
+        },
+        {"kuruq": [{"k": None, "kr": "s"}], "kt": {"k": None, "kahx": "sw0f", "kzv": False, "kjgk": -19.5}},
+        # ``# c8`` не требуется: потеря при удалении ключа с пустым flow в конце — класс F16 (Task 1.3).
+        ("# c0", "# c1", "# c6", "# e9", "# e10", "# e11", "# e12"),
+    ),
+    "B8": (
+        "# c0\nkadk:\n  # c1\n  krokx: -38\nkvmco:  # e2\n  k:\n    # c3\n    - 122  # e4\n  # c5\n  krbq: 181\n"
+        "  khlat: {}\n  kifc:\n    # c6\n    -  # e7\n      kq: 499.875  # e8\n# c9\nk:\n"
+        '  khgrb: "srxgm"  # e10\n  # c11\n  k:\n    # c12\n    kuz: null\n  kde:\n    kukih: -9.375  # e13\n'
+        "    # c14\n    kjf: false  # e15\n  # c16\n  kws: null  # e17\nkxena:  # e18\n  -\n    # c19\n"
+        "    ko: 187\n    # c20\n    k: false  # e21\n  # c22\n  -\n    # c23\n    kxuxe: 111.0\n",
+        {
+            "kadk": {"krokx": -38},
+            "kvmco": {"k": [122], "krbq": 181, "khlat": {}, "kifc": [{"kq": 499.875}]},
+            "k": {"khgrb": "srxgm", "k": {"kuz": None}, "kde": {"kukih": -9.375, "kjf": False}, "kws": None},
+            "kxena": [{"ko": 187, "k": False}, {"kxuxe": 111.0}],
+        },
+        {
+            "k": {
+                "khgrb": "srxgm",
+                "k": {"kuz": None, "knew": 1},
+                "kde": {"kukih": -9.375, "kjf": False},
+                "kws": None,
+                "knew": 1,
+            },
+            "kxena": [{"kxuxe": 111.0, "knew": 1}],
+        },
+        ("# c0", "# c9", "# e10", "# c11", "# c12", "# e13", "# c14", "# e15", "# c16", "# e17", "# e18", "# c22"),
+    ),
+    "B9": (
+        "# c0\nkadk:\n  # c1\n  krokx: -38\nkvmco:  # e2\n  k:\n    # c3\n    - 122  # e4\n  # c5\n  krbq: {}\n"
+        "  khlat: {}\n  kifc:\n    -  # e6\n      # c7\n      kq: 499.875\n# c8\nk:  # e9\n"
+        '  khgrb: "srxgm"\n  # c10\n  k:  # e11\n    kuz: null  # e12\n  kde:\n    kukih: -9.375\n    # c13\n'
+        "    kjf: false  # e14\n  # c15\n  kws: null  # e16\n# c17\nkxena:\n  # c18\n  -\n    ko: 187  # e19\n"
+        "    k: false  # e20\n  # c21\n  -  # e22\n    kxuxe: 111.0  # e23\n",
+        {
+            "kadk": {"krokx": -38},
+            "kvmco": {"k": [122], "krbq": {}, "khlat": {}, "kifc": [{"kq": 499.875}]},
+            "k": {"khgrb": "srxgm", "k": {"kuz": None}, "kde": {"kukih": -9.375, "kjf": False}, "kws": None},
+            "kxena": [{"ko": 187, "k": False}, {"kxuxe": 111.0}],
+        },
+        {
+            "k": {
+                "khgrb": "srxgm",
+                "k": {"kuz": None, "knew": 1},
+                "kde": {"kukih": -9.375, "kjf": False},
+                "kws": None,
+                "knew": 1,
+            },
+            "kxena": [{"kxuxe": 111.0, "knew": 1}],
+        },
+        (
+            "# c0",
+            "# c8",
+            "# e9",
+            "# c10",
+            "# e11",
+            "# e12",
+            "# c13",
+            "# e14",
+            "# c15",
+            "# e16",
+            "# c17",
+            "# c18",
+            "# c21",
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(_GLUE_CASES), ids=list(_GLUE_CASES))
+def test_known_glue_input_reaches_after(tmp_path: Path, case: str) -> None:
+    """Правка блочного списка у ``- {}``/комментариев: файл записан, PyYAML читает after, комментарии
+    выживших узлов — каждый ровно один раз, ни один маркер не дважды (design.md §12.6)."""
+    src, before, after, survivors = _GLUE_CASES[case]
+    path = tmp_path / "r.yaml"
+    _write(path, src.encode("utf-8"))
+
+    yaml_io.patch_yaml_preserving(path, before, after)
+
+    out = path.read_text(encoding="utf-8")
+    assert yaml.safe_load(out) == after
+    marks = _markers(out)
+    assert len(marks) == len(set(marks)), f"маркер дважды: {marks}"
+    for marker in survivors:
+        assert marks.count(marker) == 1, f"{marker}: {marks.count(marker)} раз в\n{out}"
+
+
+def test_make_yaml_empty_flow_mapping_keeps_block_layout() -> None:
+    """Дефект эмиттера ruamel 0.19.1 (без движка): EOL ключа + элемент ``- {}`` + блочная карта.
+
+    Пустой flow ``{}`` не сбрасывал ``no_newline`` — вторая строка карты склеивалась с первой
+    (``- a: 1 b: 2``). ``make_yaml`` подключает исправленный эмиттер: load -> dump без правок даёт исходник."""
+    import io
+
+    from multiprocess_framework.modules.recipe import _ruamel_doc
+
+    src = "ka:  # e\n  - {}\n  - a: 1\n    b: 2\n"
+    rt = _ruamel_doc.make_yaml()
+    buf = io.StringIO()
+    rt.dump(_ruamel_doc.load_document(rt, src), buf)
+
+    assert buf.getvalue() == "ka:  # e\n  - {}\n  - a: 1\n    b: 2\n"
+    assert yaml.safe_load(buf.getvalue()) == {"ka": [{}, {"a": 1, "b": 2}]}
+
+
+# ---------------------------------------------------------------------------
+# Task 1.1i: отказ страховки записи — свой тип ``YamlWriteRefused`` (design.md §12.1)
+# ---------------------------------------------------------------------------
+
+
+def _dump_replaced(monkeypatch, dump) -> None:
+    """Подменить ``dump`` у YAML(), который строит ``yaml_io._make_yaml``."""
+    real_make = yaml_io._make_yaml
+
+    def broken_make():
+        rt = real_make()
+        rt.dump = dump
+        return rt
+
+    monkeypatch.setattr(yaml_io, "_make_yaml", broken_make)
+
+
+def _raise_ruamel_assert(data, stream) -> None:
+    raise AssertionError("assert val == nc")
+
+
+def _write_unreadable(data, stream) -> None:
+    stream.write("a: b: c\n")
+
+
+# id -> (исходные байты, before, after, подмена dump или None)
+_SAFETY_NET_CASES = {
+    "unreadable": (b"# keep\na: 1\n", {"a": 1}, {"a": 2}, _write_unreadable),
+    "differs": (
+        b"# keep\nmode: off_mode\nother: 1\n",
+        {"mode": "off_mode", "other": 1},
+        {"mode": "On", "other": 1},
+        None,
+    ),
+    "ruamel_assert": (b"# keep\na: 1\n", {"a": 1}, {"a": 2}, _raise_ruamel_assert),
+}
+
+
+@pytest.mark.parametrize("case", list(_SAFETY_NET_CASES), ids=list(_SAFETY_NET_CASES))
+def test_safety_net_refusal_is_yaml_write_refused(tmp_path: Path, monkeypatch, case: str) -> None:
+    """Каждое место отказа страховки бросает ровно ``YamlWriteRefused`` (подкласс ``ValueError``), файл цел."""
+    raw, before, after, dump = _SAFETY_NET_CASES[case]
+    if dump is not None:
+        _dump_replaced(monkeypatch, dump)
+    path = tmp_path / "r.yaml"
+    raw_before, mtime_before = _write(path, raw)
+
+    with pytest.raises(Exception) as info:
+        yaml_io.patch_yaml_preserving(path, before, after)
+
+    exc = info.value
+    assert type(exc) is yaml_io.YamlWriteRefused
+    assert isinstance(exc, ValueError)
+    assert not isinstance(exc, yaml_io.YamlPatchConflict)
+    assert path.read_bytes() == raw_before
+    assert path.stat().st_mtime_ns == mtime_before
+    if case == "unreadable":
+        assert 'in "<unicode string>"' not in str(exc)
+        assert isinstance(exc.__cause__, yaml.YAMLError)
+
+
+def test_yaml_write_refused_disjoint_from_conflict_and_format_error() -> None:
+    """``YamlWriteRefused`` — подкласс ``ValueError``; с ``YamlPatchConflict``/``RecipeFormatError`` не пересекается."""
+    from multiprocess_framework.modules import recipe
+
+    refused = recipe.YamlWriteRefused
+    assert refused is yaml_io.YamlWriteRefused
+    assert issubclass(refused, ValueError)
+    for other in (recipe.YamlPatchConflict, recipe.RecipeFormatError):
+        assert not issubclass(refused, other)
+        assert not issubclass(other, refused)
 
 
 def test_dump_unreadable_by_pyyaml_refuses_write(tmp_path: Path) -> None:
