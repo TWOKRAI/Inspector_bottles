@@ -326,7 +326,9 @@ def test_layout_autosave_after_hand_edit_no_write(
 
     assert path.read_bytes() == hand_edited
     assert boxes == []
-    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [_CONFLICT_TEXT]
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [
+        f"{_CONFLICT_TEXT} (рецепт '{_SLUG}')"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -406,3 +408,210 @@ def test_on_create_new_recipe_without_base_rev(tmp_path: Path) -> None:
     assert path_a.read_bytes() == src
     assert session.base_rev_for(_SLUG) == base_before
     view.show_error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Раунд 1 (F2): собственные записи редактора не делают базу устаревшей
+# ---------------------------------------------------------------------------
+
+
+def _gui_positions_in(path: Path) -> dict:
+    return yaml.safe_load(path.read_bytes().decode("utf-8"))["blueprint"]["metadata"]["gui_positions"]
+
+
+def test_pipeline_save_twice_in_a_row_both_land(tmp_path: Path, boxes: list[tuple[str, str]]) -> None:
+    """Pipeline Save дважды подряд без внешней правки: оба True, вторая запись с новыми позициями лежит в файле."""
+    path = _put(tmp_path, _SLUG, _fixture_a_lf())
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    presenter = _pipeline_presenter(store, session)
+
+    presenter._layout.gui_positions["camera_0"] = (111.0, 222.0)
+    first = _within(60, presenter.save_to_active_recipe, None)
+    after_first = path.read_bytes()
+    presenter._layout.gui_positions["camera_0"] = (333.0, 444.0)
+    second = _within(60, presenter.save_to_active_recipe, None)
+
+    assert first is True
+    assert second is True
+    assert path.read_bytes() != after_first
+    assert _gui_positions_in(path)["camera_0"] == [333.0, 444.0]
+    assert [kind for kind, _text in boxes] == ["information", "information"]
+
+
+def test_layout_autosave_then_pipeline_save_ok(tmp_path: Path, boxes: list[tuple[str, str]]) -> None:
+    """Автосохранение раскладки, затем Pipeline Save без внешней правки: Save проходит, позиции из Save в файле."""
+    path = _put(tmp_path, _SLUG, _fixture_a_lf())
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    presenter = _pipeline_presenter(store, session)
+
+    presenter._layout.gui_positions["camera_0"] = (111.0, 222.0)
+    _within(60, presenter._layout._persist_layout_to_recipe)
+    assert _gui_positions_in(path)["camera_0"] == [111.0, 222.0]
+    presenter._layout.gui_positions["camera_0"] = (333.0, 444.0)
+    ok = _within(60, presenter.save_to_active_recipe, None)
+
+    assert ok is True
+    assert _gui_positions_in(path)["camera_0"] == [333.0, 444.0]
+    assert boxes == [("information", f"Рецепт сохранён: {_SLUG}")]
+
+
+# --- closeEvent-путь: app._save_active_topology ----------------------------------
+
+
+def test_close_save_after_hand_edit_runtime_error_bytes_intact(tmp_path: Path) -> None:
+    """closeEvent-Save после ручной правки: RuntimeError с текстом, mark_saved не вызван, байты целы."""
+    from multiprocess_prototype.frontend.app import _save_active_topology
+
+    src = _fixture_a_lf()
+    path = _put(tmp_path, _SLUG, src)
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    session.mark_edited()
+    repo = _Repo(_set_protected(_topology_of_a(), True))
+    hand_edited = _hand_edited(src)
+    path.write_bytes(hand_edited)
+
+    with pytest.raises(RuntimeError) as info:
+        _within(60, _save_active_topology, session, store, repo)
+
+    assert str(info.value) == _CONFLICT_TEXT
+    assert path.read_bytes() == hand_edited
+    assert session.dirty is True
+
+
+def test_close_save_without_edit_succeeds_and_rebases(tmp_path: Path) -> None:
+    """closeEvent-Save без внешней правки: True, файл записан, база = rev записи, сессия «сохранена»."""
+    from multiprocess_prototype.frontend.app import _save_active_topology
+
+    src = _fixture_a_lf()
+    path = _put(tmp_path, _SLUG, src)
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    session.mark_edited()
+    repo = _Repo(_set_protected(_topology_of_a(), True))
+
+    ok = _within(60, _save_active_topology, session, store, repo)
+
+    assert ok is True
+    assert path.read_bytes() != src
+    assert session.dirty is False
+    assert session.base_rev_for(_SLUG) == store.read_raw_with_rev(_SLUG)[1]
+
+
+# ---------------------------------------------------------------------------
+# Раунд 1 (F3, F4, F6): проводка старта и активации
+# ---------------------------------------------------------------------------
+
+
+def test_recipe_activated_event_captures_base_then_hand_edit_conflicts(
+    tmp_path: Path, boxes: list[tuple[str, str]], qtbot: Any
+) -> None:
+    """RecipeActivated на настоящей шине: база = rev файла рецепта; после ручной правки Save даёт конфликт."""
+    from multiprocess_prototype.domain import TopologySession
+    from multiprocess_prototype.domain.events import RecipeActivated
+    from multiprocess_prototype.frontend.app import _make_recipe_activated_handler
+    from multiprocess_prototype.frontend.qt_event_bus import QtEventBus
+
+    src = _fixture_a_lf()
+    _put(tmp_path, "b_recipe", _B_RECIPE)
+    path = _put(tmp_path, _SLUG, src)
+    store = _build_store(tmp_path, _SLUG)
+    session = TopologySession()
+    bus = QtEventBus()
+    bus.subscribe(RecipeActivated, _make_recipe_activated_handler(session, store))
+    presenter = _pipeline_presenter(store, session)
+
+    bus.publish(RecipeActivated(slug=_SLUG))
+
+    assert session.base_rev_for(_SLUG) == store.read_raw_with_rev(_SLUG)[1]
+    assert session.base_rev_for("b_recipe") is None
+    hand_edited = _hand_edited(src)
+    path.write_bytes(hand_edited)
+    ok = _within(60, presenter.save_to_active_recipe, None)
+    assert ok is False
+    assert path.read_bytes() == hand_edited
+    assert boxes == [("critical", _CONFLICT_TEXT)]
+
+
+class _Recipes:
+    """Стор, чьё второе чтение падает или не даёт rev (F6)."""
+
+    def __init__(self, result: Any = None, error: Exception | None = None) -> None:
+        self._result = result
+        self._error = error
+
+    def read_raw_with_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+@pytest.mark.parametrize(
+    ("recipes", "reason"),
+    [
+        (_Recipes(result=(None, None)), "rev не получен"),
+        (_Recipes(error=OSError("диск отвалился")), "чтение не удалось: диск отвалился"),
+    ],
+    ids=["rev-none", "read-raises"],
+)
+def test_recipe_activated_second_read_failure_resets_base_and_warns(
+    recipes: Any, reason: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Второе чтение упало или вернуло rev=None: прежняя база не остаётся, в логе slug и причина, сессия чистая."""
+    from multiprocess_prototype.domain import TopologySession
+    from multiprocess_prototype.domain.events import RecipeActivated
+    from multiprocess_prototype.frontend.app import _make_recipe_activated_handler
+
+    session = TopologySession()
+    session.capture_base(_SLUG, "old-rev-of-slug")
+    session.mark_edited()
+
+    with caplog.at_level(logging.WARNING):
+        _make_recipe_activated_handler(session, recipes)(RecipeActivated(slug=_SLUG))
+
+    assert session.base_rev_for(_SLUG) is None
+    assert session.dirty is False
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert _SLUG in warnings[0]
+    assert reason in warnings[0]
+
+
+class _Manifest:
+    def __init__(self, pipeline: Path, base: list[Path]) -> None:
+        self.pipeline = pipeline
+        self.base = base
+
+
+def test_load_boot_topology_returns_rev_of_recipe_bytes(tmp_path: Path) -> None:
+    """Старт без фрагментов фундамента: топология рецепта и rev = rev файла по версии стора."""
+    from multiprocess_prototype.frontend.app import _load_boot_topology
+
+    path = _put(tmp_path, _SLUG, _fixture_a_lf())
+    store = _build_store(tmp_path, _SLUG)
+    warnings: list[str] = []
+
+    topology, rev = _load_boot_topology(_Manifest(path, []), warnings.append)
+
+    assert "camera_0" in [proc["process_name"] for proc in topology["processes"]]
+    assert rev == store.read_raw_with_rev(_SLUG)[1]
+    assert warnings == []
+
+
+def test_load_boot_topology_broken_base_fragment_gives_no_rev(tmp_path: Path) -> None:
+    """Битый фрагмент фундамента: ({}, None) — базы для рецепта, которого редактор не держит, нет."""
+    from multiprocess_prototype.frontend.app import _load_boot_topology
+
+    path = _put(tmp_path, _SLUG, _fixture_a_lf())
+    fragment = tmp_path / "base_fragment.yaml"
+    fragment.write_bytes(b"key: [unclosed\n")
+    warnings: list[str] = []
+
+    topology, rev = _load_boot_topology(_Manifest(path, [fragment]), warnings.append)
+
+    assert topology == {}
+    assert rev is None
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Не удалось загрузить topology")

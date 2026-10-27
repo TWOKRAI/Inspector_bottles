@@ -16,6 +16,7 @@ from multiprocess_framework.modules.frontend_module.core.app_identity import (
     set_app_identity,
 )
 from multiprocess_framework.modules.process_module.generic import frame_trace
+from multiprocess_framework.modules.logger_module import get_std_logger
 from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
@@ -24,7 +25,11 @@ from .widgets.image_panel import ImagePanelWidget
 from .tab_factory import TabFactory
 from .styles.theme_loader import apply_default_theme
 
+_log = get_std_logger(__name__)
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from multiprocess_prototype.domain import TopologySession
 
     from .process import GuiProcess
@@ -44,6 +49,80 @@ def _read_boot_recipe(path: Path) -> tuple[dict[str, Any], str]:
 
     raw = path.read_bytes()
     return unwrap_recipe(yaml.safe_load(raw.decode("utf-8")) or {}), compute_rev(raw)
+
+
+def _load_boot_topology(manifest: Any, warn: "Callable[[str], None]") -> tuple[dict[str, Any], str | None]:
+    """Стартовая топология GUI и базовый rev редактора: (topology-dict, rev | None).
+
+    Та же сборка, что грузит backend (фундамент ⊕ pipeline из общего манифеста) — GUI-редактор
+    показывает то же, что реально бежит. ``unwrap_recipe`` обязателен: ``manifest.pipeline`` указывает на
+    РЕЦЕПТ (вложенный ``blueprint:``), без разворачивания GUI видел бы только base (Этап 1 pipeline-live-control).
+    Фундамент — СПИСОК фрагментов, склеиваемых по порядку (тот же цикл, что в ``backend/launch.py::from_manifest``).
+
+    C-30 (Task 1.8): байты рецепта читаются один раз — из них и топология, и ``rev``. Сбой чтения/сборки
+    (в т.ч. битый фрагмент фундамента) -> ``({}, None)``: редактор пуст, базы для рецепта нет (иначе Save
+    сверялся бы с ревизией рецепта, которого редактор не держит).
+    """
+    import yaml
+
+    try:
+        from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
+
+        topology, rev = _read_boot_recipe(manifest.pipeline)
+        for fragment in manifest.base:
+            base_dict = unwrap_recipe(yaml.safe_load(fragment.read_text(encoding="utf-8")) or {})
+            topology = merge_topologies(base_dict, topology)
+    except Exception as e:
+        warn(f"Не удалось загрузить topology: {e}")
+        return {}, None
+    return topology, rev
+
+
+def _make_recipe_activated_handler(session: "TopologySession", recipes: Any) -> "Callable[[Any], None]":
+    """Обработчик ``RecipeActivated``: новый baseline сессии + база правок = rev файла активированного рецепта.
+
+    Второе чтение после ``Project._apply_activate_recipe`` (окно между записью проекта и этим чтением
+    остаётся, design.md §7, Р6). Сбой чтения или ``rev is None`` -> база сбрасывается в ``(slug, None)``
+    (Save возьмёт rev своего чтения — как без базы) и пишется предупреждение; прежняя база от ДРУГОГО
+    рецепта не остаётся.
+    """
+
+    def handler(event: Any) -> None:
+        session.mark_activated()
+        slug = event.slug
+        try:
+            rev = recipes.read_raw_with_rev(slug)[1]
+            reason = "rev не получен (рецепт не читается)" if rev is None else None
+        except Exception as exc:  # noqa: BLE001 — обработчик события не должен ронять публикацию
+            rev, reason = None, f"чтение не удалось: {exc}"
+        if reason is not None:
+            _log.warning("База правок рецепта '%s' не захвачена: %s", slug, reason)
+        session.capture_base(slug, rev)
+
+    return handler
+
+
+def _save_active_topology(session: "TopologySession", recipes: Any, topology_repo: Any) -> bool:
+    """Сохранить граф редактора в активный рецепт (closeEvent / перезапуск UI): True — записан.
+
+    Тонкая обёртка над общим Save-helper (тот же путь, что Recipes-Save и Pipeline-Save, RS-4 #5, класс A-3).
+    Raises: любое исключение helper'а — его показывает MainWindow («Не удалось сохранить: <текст>»);
+    ``RecipeConflict`` (файл изменён снаружи, запись не выполнена) -> ``RuntimeError`` с понятным текстом.
+    """
+    from multiprocess_framework.modules.recipe import RecipeConflict
+    from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
+
+    slug = recipes.get_active()
+    if slug is None:
+        return False
+    topo = topology_repo.load().to_dict()
+    try:
+        new_rev = save_editor_topology_to_recipe(recipes, slug, topo, expected_rev=session.base_rev_for(slug))
+    except RecipeConflict:
+        raise RuntimeError("Рецепт изменён снаружи — перезагрузите его") from None
+    session.rebase(slug, new_rev)
+    session.mark_saved()
+    return True
 
 
 def _capture_boot_base(session: "TopologySession", pipeline: Path, recipes_dir: Path, boot_rev: str | None) -> None:
@@ -277,32 +356,11 @@ def run_gui(process: "GuiProcess") -> None:
     # EventBus создаётся рано (QApplication уже есть, app.py:54) — на него подписываются
     # PipelinePresenter (scene reload) и TopologyBridge (cache). build_app_services получает
     # event_bus + topology_store через AppServicesDeps.
-    import yaml as _yaml
     from multiprocess_prototype.adapters import TopologyRepositoryStore
     from .qt_event_bus import QtEventBus
 
-    _boot_rev: str | None = None
-    try:
-        # Та же сборка, что грузит backend (фундамент ⊕ pipeline из общего манифеста)
-        # — GUI-редактор показывает то же, что реально бежит.
-        # unwrap_recipe обязателен: manifest.pipeline указывает на РЕЦЕПТ (вложенный
-        # blueprint:), а без разворачивания GUI читает processes с верхнего уровня и
-        # видит только base (Этап 1 pipeline-live-control: иначе «Перезапустить»
-        # применял бы неполный граф и убивал живой pipeline). Зеркалит backend launch.
-        from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
-
-        # C-30 (Task 1.8): байты рецепта читаются один раз — из них и топология, и базовый rev редактора.
-        _topology_dict, _boot_rev = _read_boot_recipe(_manifest.pipeline)
-        # Фундамент — СПИСОК фрагментов, склеиваемых по порядку (тот же цикл, что в
-        # backend/launch.py::from_manifest). Зеркалить обязательно: разойдись эти
-        # два места — GUI показывал бы граф, отличный от запущенного, и «Перезапустить»
-        # применял бы не то, что видно на экране.
-        for _fragment in _manifest.base:
-            _base_dict = unwrap_recipe(_yaml.safe_load(_fragment.read_text(encoding="utf-8")) or {})
-            _topology_dict = merge_topologies(_base_dict, _topology_dict)
-    except Exception as e:
-        process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
-        _topology_dict = {}
+    # C-30 (Task 1.8): рецепт читается один раз — из него и топология, и базовый rev редактора.
+    _topology_dict, _boot_rev = _load_boot_topology(_manifest, lambda msg: process._log_warning(msg, module="startup"))
 
     # 3a.0. Наполнить DisplayRegistry из display_definitions активного рецепта
     # (Task 2.2 displays-in-recipe). Topology уже содержит display_definitions
@@ -747,15 +805,8 @@ def run_gui(process: "GuiProcess") -> None:
     # окно между записью проекта и этим чтением остаётся, design.md §7, Р6).
     _capture_boot_base(topology_session, _manifest.pipeline, _recipes_dir, _boot_rev)
 
-    def _on_recipe_activated(event: Any) -> None:
-        topology_session.mark_activated()
-        _slug = event.slug
-        _rev = app_services.recipes.read_raw_with_rev(_slug)[1]
-        if _rev is not None:
-            topology_session.capture_base(_slug, _rev)
-
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_session.mark_edited())
-    event_bus.subscribe(_RecipeActivated, _on_recipe_activated)
+    event_bus.subscribe(_RecipeActivated, _make_recipe_activated_handler(topology_session, app_services.recipes))
 
     # 3h.2. G.4.3 (Y1) + Этап 2 pipeline-live-control: live field-write listener.
     # При dispatch(SetPluginConfig) или undo/redo field-config orchestrator публикует
@@ -842,30 +893,10 @@ def run_gui(process: "GuiProcess") -> None:
     # save_fn закрывает вариант «Сохранить» в диалоге закрытия окна: пишет текущий
     # граф (services.topology) в активный рецепт через тот же сборщик, что и Recipes-
     # Save (RS-1), с домен-валидацией (RS-5). Провал → False → окно не закрывается.
-    def _save_active_topology() -> bool:
-        # RS-4 #5: тонкая обёртка над общим Save-helper (тот же путь, что Recipes-Save и
-        # Pipeline-Save) — не дублируем read→build→validate→save (класс A-3, чинил RS-1).
-        slug = app_services.recipes.get_active()
-        if slug is None:
-            return False
-        from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
+    def _save_active_topology_cb() -> bool:
+        return _save_active_topology(topology_session, app_services.recipes, app_services.topology)
 
-        topo = app_services.topology.load().to_dict()
-        from multiprocess_framework.modules.recipe import RecipeConflict
-
-        # raise → покажет MainWindow («Не удалось сохранить: <текст>»). Файл изменён снаружи → запись не выполнена,
-        # пользователю — понятный текст вместо repr RecipeConflict.
-        try:
-            new_rev = save_editor_topology_to_recipe(
-                app_services.recipes, slug, topo, expected_rev=topology_session.base_rev_for(slug)
-            )
-        except RecipeConflict:
-            raise RuntimeError("Рецепт изменён снаружи — перезагрузите его") from None
-        topology_session.rebase(slug, new_rev)
-        topology_session.mark_saved()
-        return True
-
-    window.set_topology_session(topology_session, _save_active_topology)
+    window.set_topology_session(topology_session, _save_active_topology_cb)
     topology_session.add_change_callback(
         lambda: window.set_topology_indicators(topology_session.dirty, topology_session.diverged)
     )

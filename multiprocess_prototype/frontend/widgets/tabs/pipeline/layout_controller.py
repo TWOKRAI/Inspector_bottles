@@ -319,7 +319,7 @@ class LayoutController:
             logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
         except RecipeConflict:
             # Рецепт изменён снаружи: тихо не затираем, окна нет (автосохранение не дёргает пользователя).
-            logger.warning(_CONFLICT_MESSAGE)
+            logger.warning("%s (рецепт '%s')", _CONFLICT_MESSAGE, active_slug)
         except Exception:
             logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
 
