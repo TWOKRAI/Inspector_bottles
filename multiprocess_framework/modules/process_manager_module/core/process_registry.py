@@ -13,7 +13,14 @@ from multiprocessing import Event, Process, RawArray
 
 from .bundle_contract import build_bundle
 from .child_process_stop import ChildProcessStop
-from .stop_budget import DEFAULT_SHUTDOWN_TIMEOUT_S, KILL_RESERVE_S
+from .stop_budget import (
+    DEFAULT_SHUTDOWN_TIMEOUT_S,
+    KILL_RESERVE_S,
+    MAX_STOP_WINDOW_KEY,
+    STOP_WINDOW_KEY,
+    stop_budget,
+    valid_window_s,
+)
 from ..runner import run_process_function
 from ...base_manager import open_scope
 from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
@@ -39,6 +46,7 @@ class ProcessRegistry:
         routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = None,
         system_ready_event: Optional[Event] = None,
         child_stop_budget: Optional[Dict[str, float]] = None,
+        max_stop_window_s: float | None = None,
     ) -> None:
         self.logger = logger
         # Task 1.1 (ADR-PMM-035): словарь ``stop_budget(shutdown_timeout PM)`` — каждый ребёнок
@@ -47,6 +55,11 @@ class ProcessRegistry:
         self._child_stop_budget: Optional[Dict[str, float]] = (
             dict(child_stop_budget) if child_stop_budget is not None else None
         )
+        # Task 1.11: потолок окон ``stop_window_s`` (``C``); не задан или негоден — ``g`` системного стопа.
+        ceiling = valid_window_s(max_stop_window_s)
+        self._stop_window_ceiling_s: float = ceiling if ceiling is not None else self._system_window_s()
+        # Task 1.11: карта ``{имя: w_i}`` — окно воплощения после проверки и потолка; только имена с ключом.
+        self._stop_windows: Dict[str, float] = {}
         # Task 1.8 (L-9, ADR-PMM-037): чем ждать между проходами опроса остановки детей.
         # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
         # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
@@ -115,7 +128,52 @@ class ProcessRegistry:
                 return p
         return None
 
+    def _system_window_s(self) -> float:
+        """Окно имени без ключа на системном стопе (``g``): ``pm_graceful_s`` бюджета ребёнка, иначе 5,0."""
+        budget = self._child_stop_budget
+        if budget is not None:
+            value = valid_window_s(budget.get("pm_graceful_s"))
+            if value is not None:
+                return value
+        return DEFAULT_SHUTDOWN_TIMEOUT_S
+
+    def _register_stop_window(self, name: str, process_config: Dict[str, Any]) -> float | None:
+        """Окно воплощения из ``stop_window_s`` (Task 1.11, DESIGN 2–4): проверка, потолок, запись в карту.
+
+        Негодное значение — ключа нет (WARNING без значения); выше потолка — потолок (WARNING с числами).
+        Не бросает: ошибка конфига не роняет создание процесса.
+        """
+        self._stop_windows.pop(name, None)
+        if STOP_WINDOW_KEY not in process_config:
+            return None
+        window = valid_window_s(process_config.get(STOP_WINDOW_KEY))
+        if window is None:
+            if self.logger:
+                self.logger._log_warning(
+                    f"{STOP_WINDOW_KEY} процесса '{name}' негоден (нужно конечное число секунд > 0) — "
+                    f"ключ проигнорирован, окно стопа по умолчанию"
+                )
+            return None
+        ceiling = self._stop_window_ceiling_s
+        if window > ceiling:
+            if self.logger:
+                self.logger._log_warning(
+                    f"{STOP_WINDOW_KEY} процесса '{name}' = {window} выше потолка "
+                    f"{MAX_STOP_WINDOW_KEY} = {ceiling} — окно обрезано до {ceiling}"
+                )
+            window = ceiling
+        self._stop_windows[name] = window
+        return window
+
+    def _group_windows(self, names: List[str], default_window_s: float) -> Dict[str, float] | None:
+        """``windows_s`` группы: все имена, если хоть у одного есть ключ; иначе ``None`` (прежний путь)."""
+        windows = self._stop_windows
+        if not any(name in windows for name in names):
+            return None
+        return {name: windows.get(name, default_window_s) for name in names}
+
     def remove_process(self, name: str) -> None:
+        self._stop_windows.pop(name, None)  # Task 1.11: окно живёт с воплощением
         # B-5 (RS-2): мутация СПИСКА НА МЕСТЕ (slice-assign), а НЕ ребиндинг
         # `self.os_processes = [...]`. ProcessStatusMonitor захватывает ссылку на
         # ЭТОТ list-объект в конструкторе (PM: ProcessStatusMonitor(registry.os_processes));
@@ -200,6 +258,10 @@ class ProcessRegistry:
             process_config = dict(config or {})
             process_config["name"] = name
             process_config["class"] = class_path
+            # Task 1.11 (DESIGN 6): ребёнок с окном — бюджет от своего окна; явный stop_budget сильнее.
+            window = self._register_stop_window(name, process_config)
+            if window is not None:
+                process_config.setdefault("stop_budget", stop_budget(window))
             if self._child_stop_budget is not None:
                 process_config.setdefault("stop_budget", dict(self._child_stop_budget))
 
@@ -434,12 +496,17 @@ class ProcessRegistry:
         mark_reader_gone: bool,
         *,
         should_abort: Callable[[], bool] | None = None,
+        default_window_s: float | None = None,
     ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
         """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
 
         Нет в реестре / уже мёртв → ``True`` и метка СРАЗУ (идемпотентность, паритет
         ``PM.stop_process``: «призрак» в конфигах не валит switch). Живые — в одну группу
         ``ChildProcessStop``; ``None`` — живых нет.
+
+        Task 1.11: есть ``stop_window_s`` хоть у одного живого — группа получает ``windows_s`` по
+        всем именам; имя без ключа — ``default_window_s`` (скаляр вызова), ``None`` — ``g``
+        системного стопа (область ``children``).
         """
         result: Dict[str, bool] = {}
         procs: Dict[str, Process] = {}
@@ -460,6 +527,7 @@ class ProcessRegistry:
             procs[name] = process
         if not procs:
             return result, None
+        keyless_s = default_window_s if default_window_s is not None else self._system_window_s()
         stop = ChildProcessStop(
             procs,
             self._stop_events,
@@ -467,6 +535,7 @@ class ProcessRegistry:
             logger=self.logger,
             idle=self.stop_wait_idle,
             should_abort=should_abort,
+            windows_s=self._group_windows(list(procs), keyless_s),
         )
         return result, stop
 
@@ -488,14 +557,19 @@ class ProcessRegistry:
         """
         timeout_s = self._stop_timeout_s(timeout)
         self.reset_call_stop_outcomes()
-        result, stop = self._build_child_stop(names, mark_reader_gone, should_abort=self.stop_abort)
+        result, stop = self._build_child_stop(
+            names, mark_reader_gone, should_abort=self.stop_abort, default_window_s=timeout_s
+        )
         if stop is None:
             return result
 
         group = [name for name in dict.fromkeys(names) if name not in result]
         if self.logger:
             self.logger._log_info(f"Stopping {len(group)} processes in parallel (timeout={timeout_s}s): {list(group)}")
-        scope = open_scope("pm/stop", budget_s=timeout_s, kill_reserve_s=KILL_RESERVE_S)
+        # Task 1.11 (DESIGN 4): срок области не короче окна любого имени — иначе ``min(…, deadline)`` его обрежет.
+        windows = stop.windows_s
+        budget_s = max(timeout_s, max(windows.values())) if windows else timeout_s
+        scope = open_scope("pm/stop", budget_s=budget_s, kill_reserve_s=KILL_RESERVE_S)
         try:
             scope.own(stop, name="children", kind="process")
         finally:
