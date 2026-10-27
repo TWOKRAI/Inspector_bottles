@@ -20,7 +20,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -283,19 +283,41 @@ def test_operator_stop_cancels_park_before_home_launch(fake_clock: FakeClock) ->
         assert [p for p in e.rec.at("program") if p.get("name") == "park_home"] == []
 
 
-def test_guard_runs_before_early_exit_on_link_loss(fake_clock: FakeClock) -> None:
+def test_guard_closes_park_on_link_loss_before_program_thread(fake_clock: FakeClock) -> None:
+    """Обрыв, пока потока программы нет: park закрывает только ``guard`` первой строкой тика (сторож P-I6).
+
+    Шов — обёртка ``drv.state.park_view``: срез с ``jog_busy`` держит автомат на шаге ``activity``, ход домой не
+    запускается, и путь ``step`` / исход «link» недостижим (гонки с потоком ``park_home`` нет). Плечо «поток программы
+    увидел обрыв первым» охраняют ``test_home_program_link_failure_gives_link_reason`` (state) и
+    ``test_home_program_transport_error_gives_link_reason[oserror]``.
+    """
     with _env(fake_clock) as e:
-        _start_home(e)
+        _off_home(e)
+        st = e.drv.state
+        original = st.park_view
+        st.park_view = lambda: replace(original(), jog_busy=True)
+        connected_at_close: list[bool] = []
+
+        def on_publish(path: str, payload: Any) -> None:
+            if path.endswith(".park") and payload.get("state") == "failed":
+                connected_at_close.append(e.drv.is_connected)
+
+        e.rec.hooks.append(on_publish)
+        assert _call(e, "park")["accepted"] is True
+        bounded(e.drv.tick, _CALL_S)  # связь жива: шов держит шаг activity
+        held = _last_park(e)
+        assert held is not None and (held["state"], held["step"]) == ("parking", "activity")
         bounded(e.rig.restart, 20.0)
-        final = None
-        for _ in range(2):
-            time.sleep(0.3)
+        final = held
+        for _ in range(4):
+            time.sleep(0.1)
             bounded(e.drv.tick, _CALL_S)
             final = _last_park(e)
             if final is not None and final["state"] != "parking":
                 break
         assert final is not None and (final["state"], final["reason"]) == ("failed", TEXT_LINK)
-        assert e.drv.is_connected is False  # итог поставлен тиком, который до переподключения не дошёл
+        assert connected_at_close == [False]  # итог поставлен до переподключения: guard, не step
+        assert [p for p in e.rec.at("program") if p.get("name") == "park_home"] == []
 
 
 def test_request_stop_publishes_failed_after_stop_write(fake_clock: FakeClock) -> None:

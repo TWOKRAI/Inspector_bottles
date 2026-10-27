@@ -129,6 +129,27 @@ def test_jog_started_during_parking_returns_stop() -> None:
     assert st.jog_started(_api().JogRun(seq=6)) is True
 
 
+def test_stop_resend_level_soft_once_for_user_program_while_parking() -> None:
+    """SOFT ``_op_park`` мог лечь до g0 программы пользователя: во время park ей — один повтор SOFT (D2 Opus m6).
+
+    Ход домой (``park``) и возврат (``return``) доезжают сами — им повтора нет; вне park повтора нет никому.
+    """
+    from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
+
+    soft = 1  # литерал уровня SOFT; сверка с таблицей протокола — строкой ниже
+    assert STOP_LEVEL["SOFT"] == soft
+    st = _state()
+    assert st.admit_launch(lambda: True, kind="program") is None  # программа пользователя едет
+    assert st.stop_resend_level(False, "program") == 0  # park ещё не начат
+    b = _begin(st)
+    assert st.stop_resend_level(False, "program") == soft
+    assert st.stop_resend_level(True, "program") == 0
+    assert st.stop_resend_level(False, "park") == 0
+    assert st.stop_resend_level(False, "return") == 0
+    assert st.park_end(b.seq, False)[0] is True
+    assert st.stop_resend_level(False, "program") == 0  # park закрыт
+
+
 def test_park_end_stale_seq_is_noop() -> None:
     st = _state()
     assert _begin(st).seq == 1
