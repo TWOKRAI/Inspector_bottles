@@ -3,6 +3,7 @@
 Бриф: `docs/handoffs/2026-10-27_gate-self-service.md`. Полоса: tooling. Ветка: `feat/tooling-gate-self-service`
 (worktree `.claude/worktrees/gs`). Сессия лида: `inspector-bottles-dd`. Координатор: `inspector-bottles-10`.
 Контракт старых подкоманд: `plans/2026-10-13_tooling-machine-gate-hook/task-1.2.md`.
+Стадия 0, итерация 1: `stage0-review.md` (CHANGES REQUESTED → правки внесены в этот текст, SHA ниже).
 
 ## Цель
 
@@ -12,140 +13,218 @@
 
 ## Статус
 
-- [ ] Стадия 0 — `reviewer` (sonnet), синхронно, один раз на текст Task 1.1
+- [x] Стадия 0, итерация 1 — reviewer sonnet: CHANGES REQUESTED (10 пунктов, приняты)
+- [ ] Стадия 0, итерация 2 — тот же reviewer, `SendMessage`, по правленому тексту
 - [ ] Стадия 1 — слепой `tester` в worktree на коммите до кода
-- [ ] Стадия 2 — реализация (`developer` sonnet по точному DESIGN)
-- [ ] Стадия 3 — матрица инъекций по обоим наборам тестов
-- [ ] Стадия 5 — `reviewer` после задачи
+- [ ] Стадия 2 — реализация (`developer` sonnet по точному DESIGN; он же чинит свои красные и правки инъекций)
+- [ ] Стадия 3 — матрица инъекций по обоим наборам тестов (предсказания лида до прогона; прогон — haiku)
+- [ ] Стадия 5 — `reviewer` после задачи, синхронно
 - [ ] Merge: «сливаю» координатору (последний раз по старому протоколу), ждать «ок»
 
-## Task 1.1 — подкоманды `request` / `release` / `wait` / `extend` / `merge-begin` / `merge-end`, входящие реестра, правила
+## Task 1.1 — самообслуживание окон и merge-слота
 
-**Level:** Senior (конкурентная запись замка; реализация — Sonnet по точному DESIGN, дизайн-решения по
-конкурентности остаются за лидом/teamlead).
+**Level:** Senior (конкурентная запись замка); реализация — Sonnet по точному DESIGN.
+**Assignee:** developer (sonnet); дизайн-решения по конкурентности — лид.
 **Goal:** полоса сама встаёт в очередь, получает и отдаёт окно, занимает merge-слот; замок остаётся годным при
 гонках.
+**Один Task, а не три** (reviewer предлагал делить: 12 REDS > 10): всё — один файл, один путь записи замка
+(`lock_edit`), один слепой тестер на механизм; части A (окна), B (merge-слот), C (inbox + правила) идут одним
+исполнителем.
+**Module contract:** n/a (скрипт, не модуль).
+**Gate (зелёный):** `MACHINE_LOCK_DIR=<tmp> bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" medium inspector-bottles-dd python -m pytest scripts/machine_gate_tests -q --tb=short`
+(medium; боевой замок не трогается — тесты ставят `MACHINE_LOCK_DIR` сами) + `python scripts/validate.py`.
+**Handoff:** `docs/handoffs/2026-10-27_tooling-gate-self-service-merged.md` (10–15 строк) в merge-коммите.
 
 ### DESIGN
 
-Общее.
+#### Окружение (только для тестов; значения по умолчанию — боевые)
 
-- Все новые подкоманды пишут замок тем же способом, что `cmd_edit`: `machine.lock.tmp` под `set -C` (O_EXCL) +
-  `mv -f`, проверки повторяются под защитой tmp. Отличие от `grant`/`close`: занятый tmp **ждётся** (повтор
-  каждые ~0.1 с, до ~10 с), после чего отказ `machine_gate: machine.lock.tmp exists …` с кодом 2. Поведение
-  `grant`/`close` (мгновенный отказ при занятом tmp) не менять.
-- Нет `machine.lock` → отказ `machine_gate: no machine.lock`, код 2. Битый замок → код 2 с текстом
-  `validate_lock`. Имя сессии — `is_name`, иначе `bad session name`, код 2.
-- Порядок строк при записи: `coordinator`, `window`, `merging`, затем остальные строки в прежнем порядке;
-  новые `waiting:` — в конец (FIFO = порядок строк `waiting:` сверху вниз). Прочие строки (`stand:` и т. д.)
-  и пустые — как были.
-- Время: `now` = `date +%s`; переопределяется `MACHINE_GATE_NOW_EPOCH` (только для тестов). `until ~HH:MM`
-  считается `date -d "@<now+N*60>" +%H:%M`. Остаток окна в минутах = `HH:MM` из замка относительно now, приведённый
-  к интервалу [−12 ч, +12 ч) (окна ≤ 600 мин, переход через полночь корректен).
-- `what` не содержит `|`, `\r`, `\n` (как у `grant`); минуты 1..600 (как у `grant`).
-- Автовыдача (`promote`): после изменения замка, если `window:` нет и есть `waiting:` — первая по порядку
-  строка `waiting:` становится `window: <s> | <kind> | <what> | until ~<now+N min>`, где N берётся из `~N min`
-  этой строки. Выполняется в `request`, `release`, `merge-end` и **не** выполняется в `grant`/`close`.
+- `MACHINE_LOCK_DIR` — как сейчас.
+- `MACHINE_GATE_NOW_EPOCH` — целые секунды, подменяет «сейчас» в расчётах `until`/остатка; нечисловое — игнорируется.
+  Время суток считается `date -d "@<epoch>" +%H:%M` (тесты ставят `TZ=UTC`).
+- `MACHINE_GATE_POLL_SEC` — шаг опроса `wait`, `^[1-9][0-9]*$`, иначе 15.
+- `MACHINE_GATE_TMP_WAIT_SEC` — сколько ждать занятый `machine.lock.tmp`, `^[0-9]+$`, иначе 10.
 
-Подкоманды.
+#### Запись замка (`lock_edit`) — один путь для всех изменяющих новых команд
+
+1. `now` читается ОДИН раз в начале вызова, до захвата tmp.
+2. Быстрый путь без записи (идемпотентные ветки: свой `window`/своя `waiting` уже есть; отказы): tmp не берётся,
+   inode замка прежний.
+3. Захват `machine.lock.tmp` под `set -C` (O_EXCL). Занят — повтор каждые 0.1 с до `MACHINE_GATE_TMP_WAIT_SEC`;
+   tmp старше 60 с (по mtime) считается оставшимся от убитого держателя: удаляется, захват повторяется
+   (остаточная гонка двух реклеймеров принята и записана здесь). Не вышло — отказ тем же текстом, что у `grant`
+   (`machine.lock.tmp exists (another grant/close running, or a leftover)`), код 2, чужой tmp цел.
+4. `trap` на EXIT/INT/TERM/HUP, снимающий tmp, ставится только ПОСЛЕ успешного захвата (флаг владения): иначе
+   проигравший удалил бы tmp победителя.
+5. Под защитой tmp замок читается и проверяется заново (`validate_lock`), решение принимается по свежему
+   содержимому; результат пишется в tmp и подменяется `mv -f`. Не вышло (`Device or resource busy` у читателя) —
+   5 повторов × 0.2 с, затем `cannot replace machine.lock (busy), retry`, tmp снят, код 2.
+6. Один `mv` на вызов (запись заявки и автовыдача — одной записью). Результат в stdout печатается только после
+   успешного `mv`.
+7. `grant`/`close` и их мгновенный отказ при занятом tmp НЕ менять.
+
+#### Порядок строк
+
+Существующие строки не двигаются. Новая `window:` — сразу после `coordinator:`; новая `merging:` — сразу после
+`window:` (если её нет — после `coordinator:`); новая `waiting:` — в конец файла (после `stand:` и прочего).
+Автовыдача (`promote`) убирает выданную `waiting:` и вставляет `window:` по правилу выше.
+
+#### `promote` (автовыдача)
+
+Если `window:` нет и есть `waiting:` — ПЕРВАЯ по порядку `waiting:` становится
+`window: <s> | <kind> | <what> | until ~<HH:MM(now+N)>`; N — из 4-го поля по шаблону `^~([1-9][0-9]{0,2}) min`,
+N ≤ 600, иначе N = 60 (строка не пропускается и очередь не клинится). Выполняется в `request`, `release` и на
+каждом опросе `wait` при отсутствии окна; в `grant`/`close` и в `merge-end` — НЕТ. Причина: старый
+`test_close_removes_own_window` ждёт `waiting:` на месте; `merge-end` освобождает слот, окон он не трогает.
+
+#### Время и просрочка
+
+- Остаток окна (минут) = `HH:MM` из `until ~HH:MM` минус now, приведённый к интервалу [−13 ч, +11 ч)
+  (свежее окно ≤ 600 мин всегда в плюсе, просрочка видна 13 ч, переход через полночь корректен). Арифметика —
+  `10#` (иначе `08`/`09` ломают `$((…))`).
+- Просрочено ⇔ остаток ≤ −1. `until` не вида `~HH:MM` (HH ≤ 23, MM ≤ 59) → окно не считается просроченным,
+  `OVERDUE` не печатается, `extend` на нём — код 2.
+- `status` (после строк замка, до `ram_free_mb`) печатает `OVERDUE <holder> +<N> min` для просроченного
+  `window:` ТОЛЬКО если есть хотя бы одна `waiting:`. Иначе вывод `status` побайтно прежний. На битом замке
+  `OVERDUE` не печатается.
+- `wait` печатает ту же строку на опросе, если чужое окно просрочено (по строке на опрос, не чаще смены N).
+- Окно не отбирается автоматически.
+
+#### Тексты и порядок отказов (все — `machine_gate: <текст>` в stderr, код 2; usage — без префикса, как у `grant`)
+
+Порядок проверок: usage → нет замка → битый замок → имя сессии → kind → минуты → what → branch → проверка
+операции → tmp → перепроверка под tmp.
+
+| Что | Текст |
+|---|---|
+| usage `request` | `usage: machine_gate.sh request <session> quiet\|heavy\|stand <minutes> <what...>` |
+| usage `release` | `usage: machine_gate.sh release <session>` |
+| usage `wait` | `usage: machine_gate.sh wait <session> [--timeout <minutes>]` |
+| usage `extend` | `usage: machine_gate.sh extend <session> <minutes>` |
+| usage `merge-begin` | `usage: machine_gate.sh merge-begin <session> <branch>` |
+| usage `merge-end` | `usage: machine_gate.sh merge-end <session>` |
+| нет замка | `no machine.lock` |
+| битый замок | текст `validate_lock` (`malformed machine.lock:<n>: <line>` и т. п.) |
+| имя | `bad session name` |
+| kind | `window kind must be quiet, heavy or stand` |
+| минуты | `minutes must be 1..600` |
+| what | `what must not contain \| or line breaks` |
+| branch | `bad branch name` (допустимо `[A-Za-z0-9._/-]+`) |
+| `release`: нет ни окна, ни заявки | `no window or request of this session` |
+| `wait`: нет ни окна, ни заявки | `no request of this session` |
+| `wait`: заявка пропала посреди опроса | `request of this session disappeared` |
+| `extend`: нет своего окна | `no window of this session` |
+| `extend`: `until` не `~HH:MM` | `window has no valid until` |
+| `extend`: остаток после продления > 600 | `extension too long (more than 600 minutes left)` |
+| `merge-begin`: слот занят | `merge slot is taken by <session>` |
+| `merge-begin`: открыто окно quiet | `a quiet window is open` |
+| `merge-end`: слота нет | `no merge slot` |
+| `merge-end`: слот чужой | `merge slot belongs to <session>` |
+| tmp занят | `machine.lock.tmp exists (another grant/close running, or a leftover)` |
+| `mv` не удался | `cannot replace machine.lock (busy), retry` |
+
+`wait`: разбор `wait S` или `wait S --timeout N`, N `^(0|[1-9][0-9]{0,3})$`; иное — usage. Нечитаемый/битый замок на
+опросе — 3 повтора × 0.5 с, затем код 2 с текстом отказа.
+
+#### Подкоманды
 
 1. `request <session> quiet|heavy|stand <minutes> <what...>`
-   - Своё окно уже есть → ничего не меняет, печатает `GRANTED until ~<тот же HH:MM>`, код 0.
-   - Своя `waiting:` уже есть → ничего не меняет, печатает `QUEUED position <N>`, код 0.
-   - Иначе дописывает `waiting: <s> | <kind> | <what> | ~<minutes> min`, затем `promote`. Если после этого у
-     сессии `window:` — `GRANTED until ~HH:MM`; иначе `QUEUED position N`, где N = номер её строки среди
-     `waiting:` (1 = первая в очереди).
-   - Плохой kind/минуты/what — код 2, замок без изменений.
-2. `release <session>`
-   - Есть своё окно → строка снимается, `promote`, печать `RELEASED`; при выдаче следующему —
-     вторая строка `NEXT <session> until ~HH:MM`. Код 0.
-   - Окна нет, но есть своя `waiting:` → строка снимается (отмена заявки), печать `CANCELLED`, код 0.
-   - Нет ни окна, ни заявки, либо окно чужое → `machine_gate: no window of this session`, код 2, замок не
-     тронут.
-3. `wait <session> [--timeout <min>]`
-   - Нет своей `waiting:` и нет своего `window:` → код 2 (`no request of this session`).
-   - Своё окно есть → печать `GRANTED until ~HH:MM`, код 0. Иначе опрос замка раз в `MACHINE_GATE_POLL_SEC`
-     (по умолчанию 15). `--timeout` в минутах, целое ≥ 0, по умолчанию 120; `0` — одна проверка. Истёк →
-     печать `TIMEOUT`, код 124.
-   - На каждом опросе, если окно держит другая сессия, оно просрочено и сессия ждёт, печатается
-     `OVERDUE <holder> +<N> min` (строка не чаще раза на смену N).
-   - Замок пропал или стал битым во время ожидания → код 2.
-4. `extend <session> <minutes>`: только своё окно (иначе код 2); новое `until` = max(now, старое until) +
-   минуты; минуты 1..600. Печать `EXTENDED until ~HH:MM`.
-5. Просрочка: окно **не** отбирается. `status` (после строк замка, до `ram_free_mb`) печатает
-   `OVERDUE <holder> +<N> min` для просроченного `window:`, только если есть хотя бы одна `waiting:`. Иначе вывод
-   `status` побайтно прежний.
-6. Merge-слот: строка `merging: <session> | <branch> | since <HH:MM>` (ровно 3 поля, не более одной на замок).
-   - `merge-begin <session> <branch>`: отказ (код 2), если слот занят (любой сессией, в т. ч. своей) или есть
-     `window:` вида `quiet` (любой сессии). Иначе строка записывается, печать `MERGE SLOT TAKEN`. Branch =
-     `[A-Za-z0-9._/-]+`.
-   - `merge-end <session>`: только владелец слота, иначе код 2 и замок не тронут; печать `MERGE SLOT FREE`.
-   - Освобождение слота `promote` не вызывает ограничений для `quiet` (см. «Открытые вопросы»).
-7. `validate_lock`: правило `merging: <s> | <branch> | since <HH:MM-текст>`: 3 поля, `is_name`, branch по
-   шаблону, третье поле начинается с `since `; не более одной такой строки. Иначе код 2 с прежним текстом
-   `malformed machine.lock:<n>: <line>`.
+   - Своё окно уже есть → замок не тронут, `GRANTED until ~<тот же HH:MM>`, код 0.
+   - Своя `waiting:` уже есть → `promote` (если окна нет) и затем `GRANTED until ~HH:MM`, если окно стало своим,
+     иначе `QUEUED position <N>`; код 0; если ничего не изменилось — замок не тронут.
+   - Иначе дописывает `waiting: <s> | <kind> | <what> | ~<minutes> min`, затем `promote`; печать `GRANTED until ~HH:MM`
+     или `QUEUED position <N>`, N = номер её строки среди `waiting:` (1 = первая).
+2. `release <session>`: свое окно → строка снята, `promote`, печать `RELEASED` (+ вторая строка
+   `NEXT <session> until ~HH:MM`, если окно выдано следующему); иначе своя `waiting:` (при любом чужом окне) →
+   сняты все `waiting: <s>`, `CANCELLED`, окно чужого цело; иначе отказ (таблица). Код 0 / 2.
+3. `wait <session> [--timeout <min>]`: по умолчанию 120 мин, `0` — одна проверка. Каждый опрос: своё окно →
+   `GRANTED until ~HH:MM`, код 0; нет окна → `promote` под tmp; чужое просрочено → `OVERDUE …`; истёк дедлайн
+   (по реальным часам, `MACHINE_GATE_NOW_EPOCH` его не двигает) → `TIMEOUT`, код 124.
+4. `extend <session> <minutes>`: только своё окно; новое `until` = max(now, старое until) + минуты; остаток после
+   продления не более 600; печать `EXTENDED until ~HH:MM`.
+5. `merge-begin <session> <branch>`: отказ, если слот занят (любой сессией, и своей) или есть `window:` вида
+   `quiet`; иначе `merging: <s> | <branch> | since <HH:MM>`, печать `MERGE SLOT TAKEN`. Quiet-окно при открытом
+   слоте выдаться МОЖЕТ (замер перезапускается) — симметрии нет сознательно.
+6. `merge-end <session>`: владелец слота ИЛИ имя из `coordinator:` (снять застрявший слот без ручной правки замка);
+   иначе отказ. Печать `MERGE SLOT FREE`.
+7. `validate_lock`: строка `merging: <s> | <branch> | since <текст>` — ровно 3 поля, `is_name`, branch по шаблону,
+   третье поле с префиксом `since `, не более одной такой строки; иначе код 2 с прежним текстом
+   `malformed machine.lock:<n>: <line>`. Битый замок остаётся rc=2 для всех подкоманд (прежний контракт).
 
-Входящие реестра.
+#### Входящие реестра
 
-- Каталог `plans/queue/inbox/`, файл `README.md` (формат: имя `<YYYY-MM-DD>_<session>_<N>.md`, содержимое —
-  одна строка таблицы реестра целиком, номер C-NN не присвоен, кладётся в merge-коммит полосы; сворачивает в
-  `defects.md` / `ORDER.md` одним коммитом координатор или любая сессия раз в полдня, номера присваиваются при
-  свёртке). Скрипта свёртки не делать.
+`plans/queue/inbox/README.md`: файл `<YYYY-MM-DD>_<session>_<N>.md`; первая строка `registry: defects.md|ORDER.md|backlog.md`
+(целевой реестр), далее одна строка таблицы реестра целиком, номер C-NN не присвоен; кладётся в merge-коммит
+полосы; сворачивает в реестр одним коммитом координатор или любая сессия раз в полдня, номера присваиваются при
+свёртке. Скрипта свёртки не делать.
 
-Правила (английский, model-read; источник `.claude/plugins/dev/…`, затем копия байт в байт в зеркало).
+#### Правила (английский, model-read; источник `.claude/plugins/dev/…`, затем копия байт в байт в зеркало)
 
-- skill `coordinator` §2 (грамматика: `merging:`), §4 (сигналы: окна и merge идут через скрипт; сообщения —
-  только вопрос владельцу, владение файлом, находка в чужом коде; без «принято» и подтверждений; отчёт
-  координатору не нужен — итог в файле полосы), §5 (шаблон старт-промпта: LOAD/REPORT).
-- `project-rules` §8 и `.claude/CLAUDE.md` → «Shared machine»: кратко те же команды.
+skill `coordinator` §2 (грамматика `merging:`), §4 (сигналы: окна и merge — через скрипт; сообщения только: вопрос
+владельцу, владение файлом, находка в чужом коде; без «принято» и подтверждений; отчёт координатору не нужен —
+итог в файле полосы), §5 (шаблон старт-промпта: LOAD/REPORT); `project-rules` §8 и `.claude/CLAUDE.md` →
+«Shared machine» — кратко те же команды. Отдельные строки правил: `request` только когда полоса готова стартовать
+СЕЙЧАС (иначе автовыдача откроет окно впустую); ручные `waiting:` координатора до слияния снимаются; `release`
+отменяет и заявку (`CANCELLED`).
 
 ### FILES
 
-- `scripts/machine_gate.sh` — подкоманды, грамматика, `promote`, OVERDUE в `status`.
+- `scripts/machine_gate.sh`
 - `scripts/machine_gate_tests/test_machine_gate_self_service.py` (приёмка тестера),
-  `test_machine_gate_self_service_hazards.py` (hazard-тесты автора).
-- `plans/queue/inbox/README.md`.
-- `.claude/plugins/dev/skills/coordinator/SKILL.md` + зеркало `.claude/skills/coordinator/SKILL.md`;
-  `project-rules` (источник в `.claude/plugins/…`, зеркало — найти `git grep -l "Shared machine"`);
-  `.claude/CLAUDE.md`.
-- Хук `machine-gate-guard.sh` — только если новые подкоманды блокируются (проверить `classify` на строке
-  `machine_gate.sh request s heavy 10 pytest …`: слово `pytest` в `what`).
+  `test_machine_gate_self_service_hazards.py` (hazard-тесты автора)
+- `plans/queue/inbox/README.md`
+- `.claude/plugins/dev/skills/coordinator/SKILL.md` + зеркало `.claude/skills/coordinator/SKILL.md`; `project-rules`
+  (источник в `.claude/plugins/…`, зеркало — найти `git grep -l "Shared machine"`); `.claude/CLAUDE.md`
+- Хук `machine-gate-guard.sh` — НЕ менять (reviewer воспроизвёл rc=0 на `request … pytest -q …`).
 
 ### Вне объёма
 
 Классификация (`classify`, `machine_gate_timed.txt`); автоотбор просроченного окна; свёртка inbox скриптом;
-боевой `machine.lock` (тесты — только `MACHINE_LOCK_DIR` на временный каталог).
+боевой `machine.lock` (тесты — только `MACHINE_LOCK_DIR` на временный каталог); `grant`/`close`.
 
-### REDS (приёмка; литералы уточнят стадия 0 и тестер)
+### REDS (приёмка; литералы для тестов — `MACHINE_GATE_NOW_EPOCH=1798329600` + `TZ=UTC` = 00:00)
 
-R1. `request s1 heavy 10 a` в замке без окон → `GRANTED until ~HH:MM`, код 0, `window: s1 | heavy | a | until ~HH:MM`;
-    затем `request s2 heavy 5 b` → `QUEUED position 1`, код 0, `waiting: s2 | heavy | b | ~5 min`.
-R2. `release s1` → у s2 `window:`, строки `waiting: s2` нет; `wait s2 --timeout 0` → код 0.
-R3. `release s2` при окне s1 → код 2, байты замка прежние.
-R4. FIFO: s1 держит окно, `request` s2, s3, s4 по очереди → позиции 1, 2, 3; после `release s1` окно у s2, не у s3.
-R5. Повторный `request s2` → замок побайтно тот же, `QUEUED position 1`.
-R6. Две параллельные `request` (разные сессии, окон нет) → замок годен (`status` rc=0), обе сессии присутствуют, ровно
-    одно `window:`. Тест — в daemon-потоках с дедлайном.
-R7. `merge-begin s1 feat/x` → слот; второй `merge-begin s2 feat/y` → код 2; при `window: … | quiet |` → код 2;
-    `merge-end s2` при слоте s1 → код 2; `merge-end s1` → слот свободен.
-R8. `validate_lock`: `merging: s1 | feat/x` (2 поля) → код 2; две строки `merging:` → код 2.
-R9. `wait` для чужой/отсутствующей заявки → 2; таймаут `--timeout 0` без окна → 124; `wait`, запущенный до
-    `release` другим процессом, завершается кодом 0 (`MACHINE_GATE_POLL_SEC=1`).
-R10. `status` при просроченном окне и одной `waiting:` → строка `OVERDUE s1 +<N> min`
-    (`MACHINE_GATE_NOW_EPOCH`); без `waiting:` — вывод прежний.
-R11. `extend s1 30` продлевает; `extend s2 30` при окне s1 → код 2.
-R12. Старые `grant`/`close`/`status` и существующие тесты `scripts/machine_gate_tests` — зелёные без правки литералов.
+R1. Замок `coordinator` без окон: `request s1 heavy 5 a` → stdout `GRANTED until ~00:05`, код 0; в замке
+    `window: s1 | heavy | a | until ~00:05` сразу после `coordinator:`. Затем `request s2 heavy 10 b` →
+    `QUEUED position 1`, код 0, последняя строка замка `waiting: s2 | heavy | b | ~10 min`.
+R2. После `release s1` (stdout `RELEASED` + `NEXT s2 until ~00:10`): `window: s2 | heavy | b | until ~00:10`, строки
+    `waiting: s2` нет; `wait s2 --timeout 0` → `GRANTED until ~00:10`, код 0.
+R3. `release s3` (нет ни окна, ни заявки) при окне s1 → код 2, `no window or request of this session`, байты замка прежние.
+R3b. `release s2` (s2 в очереди, окно у s1) → `CANCELLED`, код 0, `window: s1` и остальные строки цел, `waiting: s2` снята.
+R4. FIFO: окно s1, `request` s2, s3, s4 → `QUEUED position 1/2/3`; после `release s1` окно у s2 (не у s3).
+R5. Повторный `request s2` → замок побайтно тот же (inode не менялся — mtime/ino), `QUEUED position 1`.
+R6. Две параллельные `request` (разные сессии, окон нет) → замок годен (`status` rc=0), обе сессии присутствуют,
+    ровно одно `window:`. Тест в daemon-потоках с дедлайном. Детерминированный вариант — приём
+    `BASH_ENV`-slow-date из `test_grant_does_not_write_from_a_stale_read`.
+R7. `merge-begin s1 feat/x` → `MERGE SLOT TAKEN`, `merging: s1 | feat/x | since 00:00` сразу после `window:`/`coordinator:`;
+    `merge-begin s2 feat/y` → код 2, `merge slot is taken by s1`; при `window: … | quiet |` → код 2,
+    `a quiet window is open`; `merge-end s2` при слоте s1 → код 2, `merge slot belongs to s1`; `merge-end c1`
+    (имя координатора) → слот свободен; `merge-end s1` → слот свободен.
+R8. `validate_lock`: `merging: s1 | feat/x` (2 поля), две строки `merging:`, не `is_name`, 4 поля, без `since `, плохой
+    branch → код 2 `malformed machine.lock:<n>: <line>`.
+R9. `wait s9` без заявки → 2 `no request of this session`; `wait s2 --timeout 0` при ЧУЖОМ окне → `TIMEOUT`, 124;
+    `wait`, запущенный до `release` другим процессом, завершается кодом 0 (`MACHINE_GATE_POLL_SEC=1`).
+R10. `status` при просроченном окне (`until ~23:50`, now 00:10) и одной `waiting:` → строка `OVERDUE s1 +20 min`;
+     без `waiting:` и на битом замке — вывод прежний.
+R11. `extend s1 30` на окне `until ~00:20` при now=00:10 → `EXTENDED until ~00:50`; `extend s2 30` при окне s1 → код 2
+     `no window of this session`; продление, дающее остаток > 600 → код 2.
+R12. Строка `waiting: s | heavy | x | after owner` (без `~N min`) → `promote` выдаёт окно на 60 мин; `~900 min` — на 60;
+     `~3 min` — на 3.
+R13. Ожидание tmp: чужой свежий tmp существует, `MACHINE_GATE_TMP_WAIT_SEC=1` → `request` отказывает кодом 2, tmp цел;
+     tmp старше 60 с → удаляется, `request` проходит.
+R14. Старые `grant`/`close`/`status` и существующие тесты `scripts/machine_gate_tests` — зелёные без правки литералов.
 
-Инъекции (предсказания записываются ДО прогона): (а) убрать проверку владельца в `release` → R3 красный;
-(б) убрать FIFO (брать последнюю `waiting:`) → R4; (в) убрать O_EXCL (`set -C`) → R6; (г) убрать проверку
-слота/quiet в `merge-begin` → R7; (д) пропустить `merging:` с 2 полями → R8; (е) `extend` без проверки владельца
-→ R11. Точные имена тестов фиксируются после стадии 1.
+#### Инъекции (предсказания записываются ДО прогона; имена тестов — после стадии 1)
 
-### Открытые вопросы (для стадии 0)
+(а) `release` снимает любое `window:` (без проверки владельца) → R3/R3b; (б) FIFO — брать последнюю `waiting:` → R4;
+(в) убрать `set -C` (O_EXCL) → R6 (детерминированный); (г) убрать проверку слота/quiet в `merge-begin` → R7;
+(д) пропустить `merging:` с 2 полями → R8; (е) `extend` без проверки владельца → R11; (ж) ожидание tmp → мгновенный
+отказ → R13; (з) N жёстко 30 → R2/R12; (и) арифметика без `10#` → R10 при now=…09:08; (к) убрать `promote` из
+`wait` → тест «close координатора, затем wait»; (л) `CANCELLED` снимает чужое окно → R3b; (м) `trap` без флага
+владения → R13 (проигравший удаляет tmp победителя).
 
-1. `promote` при `release` откроет **любую** первую `waiting:` — в т. ч. `stand`-заявку, которую координатор вёл
-   вручную «после готовности владельца» (в живом замке сейчас такая есть). Принять как есть или не выдавать
-   `stand` автоматически?
-2. Асимметрия merge/quiet: `quiet`-окно не выдаётся при открытом `merging:` — нужно ли (сейчас: нет)?
-3. Застрявший `merging:` (сессия упала): снимает координатор правкой замка вручную — достаточно?
-4. `wait` по умолчанию 120 мин и `release` как отмена заявки — не расширение ли сверх брифа?
+### Открытые вопросы — закрыты стадией 0
+
+Q1 принято + правило и шаг «Merge» (координатор снимает ручные `waiting:`; в живом замке сейчас
+`waiting: inspector-bottles-78 | stand …` — упомянуть в «сливаю»); Q2 «нет»; Q3 `merge-end` допускает координатора;
+Q4 принять оба.
