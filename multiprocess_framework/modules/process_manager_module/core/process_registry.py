@@ -487,7 +487,7 @@ class ProcessRegistry:
         подтверждения смерти каждого имени (``on_confirmed_dead``), выжившие — без метки.
         """
         timeout_s = self._stop_timeout_s(timeout)
-        self._stop_call.outcomes = {}
+        self.reset_call_stop_outcomes()
         result, stop = self._build_child_stop(names, mark_reader_gone, should_abort=self.stop_abort)
         if stop is None:
             return result

@@ -70,9 +70,10 @@ def test_stop_reply_none_when_registry_sees_dead_after_pm_saw_alive(rig: Rig) ->
 
 
 @pytest.mark.timeout(150)
-def test_restart_refused_before_stop_does_not_leak_previous_outcome(rig: Rig) -> None:
-    """H2: ``process.stop slow`` (``terminated``), затем ``process.restart ghost`` (конфига нет, отказ до фазы
-    стопа) -> ``{"success": False, "process_name": "ghost", "outcome": None}``."""
+def test_restart_refused_before_stop_reply_shape(rig: Rig) -> None:
+    """H2: форма ответа отказанного рестарта — ``process.stop slow`` (``terminated``), затем ``process.restart ghost``
+    (конфига нет, отказ до фазы стопа) -> ``{"success": False, "process_name": "ghost", "outcome": None}``.
+    Утечку прошлого итога этот тест не обнаруживает (канал ключуется по имени) — её держит H2b."""
     stopped = _stop(rig, "slow")
     assert stopped is not None and stopped.result == {
         "success": True,
