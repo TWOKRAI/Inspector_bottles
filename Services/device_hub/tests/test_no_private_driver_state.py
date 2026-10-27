@@ -41,7 +41,7 @@ _OTHER_DRIVER_TESTS = (
     "test_manager_template_1_2b_3.py",
 )
 # Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
-_SCANNED_FILES = 53
+_SCANNED_FILES = 54
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(

@@ -5,7 +5,7 @@ Purpose:
     статический контракт; во время работы ``isinstance`` по ним не вызывается — умолчания даёт ``BaseDeviceDriver``,
     стоп — флаг ``stop_aware``). ``OpSpec`` описывает одну операцию драйвера, ``OpSource`` — набор операций одного
     префикса команд; ``command_table`` сводит источники в таблицу «имя команды -> (источник, операция)».
-    Каталоги: ``ROBOT_V2_OPS`` (17), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
+    Каталоги: ``ROBOT_V2_OPS`` (18), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
     Драйвер объявляет свои операции ссылкой ``OP_SPECS = <каталог>``; команды плагина строятся из ``OP_SPECS`` классов
     драйверов таблицы видов (``Services/device_hub/kinds.py``: ``command_sources``, ``DEFAULT_SOURCES``), не из
     кортежей этого модуля напрямую. Флаги ``immediate`` — по коду драйверов
@@ -148,7 +148,7 @@ class StopAwareDriver(DeviceDriver, Protocol):
 
 
 # --------------------------------------------------------------------------------------------------
-# Каталоги операций. Описания и ``args_schema`` — тексты каталога команд (T5.3c, SPI.c2): у каждой из 55 операций.
+# Каталоги операций. Описания и ``args_schema`` — тексты каталога команд (T5.3c, SPI.c2): у каждой из 56 операций.
 # ``args_schema`` — ключи аргументов кроме ``device_id``; "?" в конце — необязательный (по коду драйверов).
 # --------------------------------------------------------------------------------------------------
 
@@ -172,7 +172,7 @@ _RETURN_JOB = OpSpec(
 )
 _SHARED_ROBOT_OPS: tuple[OpSpec, ...] = (_ABORT, _ENQUEUE_JOB, _GET_TELEMETRY, _RETURN_JOB)
 
-# 17 ключей robot_driver_v2/ops.py (OPS), в том же порядке
+# 18 ключей robot_driver_v2/ops.py (OPS), в том же порядке
 ROBOT_V2_OPS: tuple[OpSpec, ...] = (
     OpSpec(
         name="jog_hold",
@@ -231,6 +231,15 @@ ROBOT_V2_OPS: tuple[OpSpec, ...] = (
         args_schema=("name",),
     ),
     OpSpec(name="program_abort", description="Робот v2: прервать программу {device_id}", immediate=True),
+    OpSpec(
+        name="park",
+        description=(
+            "Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id, "
+            "timeout_s?}; ответ сразу, итог — devices.state.<id>.park"
+        ),
+        args_schema=("timeout_s?",),
+        immediate=True,
+    ),
 )
 
 # 27 ключей RobotDriver._OPS (robot_driver.py): 16 «старых» и 11 draw_*, в том же порядке
