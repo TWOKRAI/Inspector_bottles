@@ -18,6 +18,9 @@ from ..runner import run_process_function
 from ...base_manager import open_scope
 from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
+# Task 1.10 (D1/D3): итоги стопа, при которых смерть ребёнка подтверждена.
+_CONFIRMED_OUTCOMES = frozenset({"exited", "terminated", "killed"})
+
 # Окна эскалации стопа детей (STOP_POLL_S, TERMINATE_GRACE_S, KILL_CONFIRM_S) и формула
 # бюджета живут в ``core/stop_budget.py`` (Task 1.1, ADR-PMM-035): реестр, спавнер и
 # ребёнок читают одни числа.
@@ -67,6 +70,12 @@ class ProcessRegistry:
         # выхода ребёнка (release_queues_at_exit) для PM. Свежий на каждый (пере)спавн,
         # как и ready_event: старый инстанс не может подложить отчёт новому.
         self._exit_reports: Dict[str, Any] = {}
+        # Task 1.10 (D3): итог последнего стопа ТЕКУЩЕГО воплощения по имени (D1: exited | terminated |
+        # killed | handed_over | survived). Пишет ``_stop_many``; ``add_process`` того же имени сбрасывает.
+        self._stop_outcomes: Dict[str, str] = {}
+        # Итоги ТЕКУЩЕГО вызова ``_stop_many`` на этом потоке: PM отличает «стоп прошёл и записал итог»
+        # от «имя не дошло до ChildProcessStop» (запись реестра тогда от прошлого стопа). Без лока.
+        self._stop_call = threading.local()
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
@@ -81,6 +90,18 @@ class ProcessRegistry:
 
     def add_process(self, process: Process) -> None:
         self.os_processes.append(process)
+        # Новое воплощение — итога стопа у него ещё нет (двойники без ``name`` терпим).
+        name = getattr(process, "name", None)
+        if name is not None:
+            self._stop_outcomes.pop(name, None)
+
+    def stop_outcome(self, name: str) -> str | None:
+        """Итог последнего стопа текущего воплощения ``name`` (D1) или ``None`` — не стопался."""
+        return self._stop_outcomes.get(name)
+
+    def call_stop_outcome(self, name: str) -> str | None:
+        """Итог ``name`` в последнем ``_stop_many`` ЭТОГО потока; ``None`` — имя до ребёнка не дошло."""
+        return getattr(self._stop_call, "outcomes", {}).get(name)
 
     def get_process_by_name(self, name: str) -> Optional[Process]:
         for p in self.os_processes:
@@ -460,6 +481,7 @@ class ProcessRegistry:
         подтверждения смерти каждого имени (``on_confirmed_dead``), выжившие — без метки.
         """
         timeout_s = self._stop_timeout_s(timeout)
+        self._stop_call.outcomes = {}
         result, stop = self._build_child_stop(names, mark_reader_gone, should_abort=self.stop_abort)
         if stop is None:
             return result
@@ -476,9 +498,13 @@ class ProcessRegistry:
             for path, error in report.errors:
                 self.logger._log_error(f"stop_many: {path}: {error}")
 
-        survivors = stop.survivors()
+        outcomes = stop.outcomes()
         for name in group:
-            result[name] = name not in survivors
+            outcome = outcomes[name]
+            self._stop_outcomes[name] = outcome
+            self._stop_call.outcomes[name] = outcome
+            result[name] = outcome in _CONFIRMED_OUTCOMES
+        survivors = [name for name in group if not result[name]]
         for name in survivors:
             if not self.logger:
                 continue
