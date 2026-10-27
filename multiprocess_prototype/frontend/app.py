@@ -25,7 +25,38 @@ from .tab_factory import TabFactory
 from .styles.theme_loader import apply_default_theme
 
 if TYPE_CHECKING:
+    from multiprocess_prototype.domain import TopologySession
+
     from .process import GuiProcess
+
+
+def _read_boot_recipe(path: Path) -> tuple[dict[str, Any], str]:
+    """Прочитать рецепт старта ОДИН раз: (topology-dict после unwrap_recipe, rev этих байтов).
+
+    Байты читаются один раз, чтобы ``rev`` базы редактора (C-30, Task 1.8) относился ровно к тому
+    содержимому, из которого построена стартовая топология (нет окна между чтением и ``rev``).
+    ``decode`` + ``yaml.safe_load`` понимают и CRLF.
+    """
+    import yaml
+
+    from multiprocess_framework.modules.recipe.format import compute_rev
+    from multiprocess_prototype.backend.launch import unwrap_recipe
+
+    raw = path.read_bytes()
+    return unwrap_recipe(yaml.safe_load(raw.decode("utf-8")) or {}), compute_rev(raw)
+
+
+def _capture_boot_base(session: "TopologySession", pipeline: Path, recipes_dir: Path, boot_rev: str | None) -> None:
+    """Базовый rev редактора со старта: slug = имя файла рецепта, если он лежит в каталоге рецептов.
+
+    Рецепт вне каталога рецептов (или не прочитанный) базы не получает: Save его не защищён,
+    стор возьмёт rev своего чтения.
+    """
+    if boot_rev is None:
+        return
+    if pipeline.parent.resolve() != recipes_dir.resolve():
+        return
+    session.capture_base(pipeline.stem, boot_rev)
 
 
 def _resolve_dev_login_settings() -> tuple[bool, str, str]:
@@ -250,6 +281,7 @@ def run_gui(process: "GuiProcess") -> None:
     from multiprocess_prototype.adapters import TopologyRepositoryStore
     from .qt_event_bus import QtEventBus
 
+    _boot_rev: str | None = None
     try:
         # Та же сборка, что грузит backend (фундамент ⊕ pipeline из общего манифеста)
         # — GUI-редактор показывает то же, что реально бежит.
@@ -259,7 +291,8 @@ def run_gui(process: "GuiProcess") -> None:
         # применял бы неполный граф и убивал живой pipeline). Зеркалит backend launch.
         from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
-        _topology_dict = unwrap_recipe(_yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {})
+        # C-30 (Task 1.8): байты рецепта читаются один раз — из них и топология, и базовый rev редактора.
+        _topology_dict, _boot_rev = _read_boot_recipe(_manifest.pipeline)
         # Фундамент — СПИСОК фрагментов, склеиваемых по порядку (тот же цикл, что в
         # backend/launch.py::from_manifest). Зеркалить обязательно: разойдись эти
         # два места — GUI показывал бы граф, отличный от запущенного, и «Перезапустить»
@@ -709,8 +742,20 @@ def run_gui(process: "GuiProcess") -> None:
     from multiprocess_prototype.domain.events import RecipeActivated as _RecipeActivated
 
     topology_session = TopologySession()
+    # C-30 (Task 1.8): база правок редактора. Со старта — rev единственного чтения рецепта (выше);
+    # на активации — rev файла активированного рецепта (второе чтение после Project._apply_activate_recipe:
+    # окно между записью проекта и этим чтением остаётся, design.md §7, Р6).
+    _capture_boot_base(topology_session, _manifest.pipeline, _recipes_dir, _boot_rev)
+
+    def _on_recipe_activated(event: Any) -> None:
+        topology_session.mark_activated()
+        _slug = event.slug
+        _rev = app_services.recipes.read_raw_with_rev(_slug)[1]
+        if _rev is not None:
+            topology_session.capture_base(_slug, _rev)
+
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_session.mark_edited())
-    event_bus.subscribe(_RecipeActivated, lambda _e: topology_session.mark_activated())
+    event_bus.subscribe(_RecipeActivated, _on_recipe_activated)
 
     # 3h.2. G.4.3 (Y1) + Этап 2 pipeline-live-control: live field-write listener.
     # При dispatch(SetPluginConfig) или undo/redo field-config orchestrator публикует
@@ -806,7 +851,17 @@ def run_gui(process: "GuiProcess") -> None:
         from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
         topo = app_services.topology.load().to_dict()
-        save_editor_topology_to_recipe(app_services.recipes, slug, topo)  # raise → покажет MainWindow
+        from multiprocess_framework.modules.recipe import RecipeConflict
+
+        # raise → покажет MainWindow («Не удалось сохранить: <текст>»). Файл изменён снаружи → запись не выполнена,
+        # пользователю — понятный текст вместо repr RecipeConflict.
+        try:
+            new_rev = save_editor_topology_to_recipe(
+                app_services.recipes, slug, topo, expected_rev=topology_session.base_rev_for(slug)
+            )
+        except RecipeConflict:
+            raise RuntimeError("Рецепт изменён снаружи — перезагрузите его") from None
+        topology_session.rebase(slug, new_rev)
         topology_session.mark_saved()
         return True
 
