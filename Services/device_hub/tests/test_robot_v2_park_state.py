@@ -17,6 +17,8 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from Services.robot_comm.programs import Point
 
 _TEXT_PARKING = "идёт основная остановка робота"
@@ -301,3 +303,24 @@ def test_home_program_link_failure_gives_link_reason() -> None:
     m.step(_AWAY, True)
     last = f.pubs[-1]
     assert (last["state"], last["step"], last["reason"]) == ("failed", "home", "связь с роботом потеряна")
+
+
+@pytest.mark.parametrize("second", ["home", "away"])
+def test_home_done_out_of_tolerance_waits_one_tick(second: str) -> None:
+    """Отсрочка D5: исход ``done`` при позе вне допуска — один тик без терминала; затем ``moved`` или ``NOT_HOME``."""
+    st = _state()
+    f = _Fakes(st)
+    m = f.machine()
+    _begin(st)
+    m.accept(1, 30.0)
+    m.step(_AWAY, True)
+    assert f.launches == [1]
+    st.program_finished("park", True, "done")
+    m.step(_AWAY, True)  # TLM тика мог быть прочитан до DONE
+    assert [p for p in f.pubs if p["state"] != "parking"] == []
+    m.step(_HOME if second == "home" else _AWAY, True)
+    last = f.pubs[-1]
+    if second == "home":
+        assert (last["state"], last["home"], f.servo_calls) == ("done", "moved", 1)
+    else:
+        assert (last["state"], last["reason"], f.servo_calls) == ("failed", "после хода робот не дома", 0)

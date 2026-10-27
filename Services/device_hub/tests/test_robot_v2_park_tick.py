@@ -315,3 +315,27 @@ def test_tick_duration_during_park(fake_clock: FakeClock) -> None:
             bounded(e.drv.tick, _CALL_S)
             durations.append(time.perf_counter() - t0)
         assert statistics.median(durations) <= 0.1, durations
+
+
+def test_servo_step_after_shutdown_begin_writes_no_servo(fake_clock: FakeClock) -> None:
+    """Выключение началось между решением шага ``servo`` и записью: SERVO 0 не пишется (серво sim остаётся ON)."""
+    with _env(fake_clock) as e:
+        assert e.rig.read("TLM_SERVO") == [1]
+        assert _call(e, "park")["accepted"] is True  # робот дома: шаг servo в первом же тике
+        st = e.drv.state
+        original = st.park_view
+        calls = [0]
+
+        def view_then_shutdown() -> Any:
+            v = original()
+            calls[0] += 1
+            if calls[0] == 2:  # 1-й — guard, 2-й — шаг: решение «servo» по срезу до выключения
+                st.request_stop_begin()
+            return v
+
+        st.park_view = view_then_shutdown
+        bounded(e.drv.tick, _CALL_S)
+        time.sleep(0.3)
+        assert calls[0] >= 2
+        assert e.rig.read("TLM_SERVO") == [1]
+        assert [p for p in e.rec.at("park") if p["state"] == "done"] == []
