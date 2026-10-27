@@ -595,9 +595,10 @@
 - [project_chain_module_overhead_profile](project_chain_module_overhead_profile.md)
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 
-## persistence (5)
+## persistence (6)
 
 - [feedback_a_migration_fixture_built_by_todays_writer_tests_the_writer](feedback_a_migration_fixture_built_by_todays_writer_tests_the_writer.md)
+- [feedback_ruamel_emitter_no_newline_glues_lines](feedback_ruamel_emitter_no_newline_glues_lines.md)
 - [feedback_sqlite_pragma_fails_silently](feedback_sqlite_pragma_fails_silently.md)
 - [project_sql_insert_many_debt](project_sql_insert_many_debt.md)
 - [project_storage_stack_verdict](project_storage_stack_verdict.md)

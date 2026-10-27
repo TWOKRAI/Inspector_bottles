@@ -50,6 +50,7 @@ __all__ = [
     "patch_yaml_preserving",
     "apply_delta",
     "YamlPatchConflict",
+    "YamlWriteRefused",
 ]
 
 
@@ -60,6 +61,14 @@ __all__ = [
 
 class YamlPatchConflict(ValueError):
     """Путь дельты не ложится на цель (design.md §2.4). Бросается до записи — файл цел."""
+
+
+class YamlWriteRefused(ValueError):
+    """Страховка записи отказала (design.md §12.1): дамп ruamel упал на внутреннем assert,
+    не читается PyYAML или читается иначе, чем записываемые данные. Бросается до записи —
+    байты и mtime файла прежние. Подкласс ``ValueError`` — прежние ``except ValueError``
+    не меняют смысла; с ``YamlPatchConflict`` и ``RecipeFormatError`` не пересекается.
+    Строк дампа в тексте нет; исходная ошибка — в ``__cause__``."""
 
 
 _MISSING = object()
@@ -410,7 +419,9 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n", expected: Any
     try:
         yaml.dump(data, buf)
     except AssertionError as exc:  # внутренний assert ruamel (``merge_comments``), не наш контракт
-        raise ValueError(f"{path}: дамп ruamel не удался — запись отменена, файл цел") from exc
+        raise YamlWriteRefused(
+            f"{path}: дамп ruamel не удался — запись отменена, файл цел ({type(exc).__name__})"
+        ) from exc
     text = buf.getvalue()
     _verify_dump(text, data, path, expected)
     if newline != "\n":
@@ -431,7 +442,7 @@ def _dump_atomic(yaml, data: Any, path: Path, newline: str = "\n", expected: Any
 
 def _verify_dump(text: str, data: Any, path: Path, expected: Any = _MISSING) -> None:
     """Страховка записи: дамп читается тем загрузчиком, которым рецепты читают потребители
-    (PyYAML ``safe_load``, YAML 1.1), и даёт те же данные — иначе ``ValueError`` до записи.
+    (PyYAML ``safe_load``, YAML 1.1), и даёт те же данные — иначе ``YamlWriteRefused`` до записи.
 
     Ловит невалидный YAML от переноса комментариев, склейку строк и строки вида ``On``/``yes``,
     которые дампер YAML 1.2 пишет без кавычек, а PyYAML читает как bool (ревью 1.1a).
@@ -443,9 +454,18 @@ def _verify_dump(text: str, data: Any, path: Path, expected: Any = _MISSING) -> 
     try:
         loaded = pyyaml.safe_load(text)
     except pyyaml.YAMLError as exc:
-        raise ValueError(f"{path.name}: дамп не читается PyYAML — запись отменена, файл цел: {exc}") from exc
+        # Строки дампа (снимок PyYAML в str(exc)) в текст не попадают — только суть и позиция;
+        # у ReaderError нет problem/problem_mark, поэтому getattr.
+        problem = getattr(exc, "problem", None) or type(exc).__name__
+        mark = getattr(exc, "problem_mark", None)
+        where = f" (строка {mark.line + 1}, столбец {mark.column + 1})" if mark is not None else ""
+        raise YamlWriteRefused(
+            f"{path.name}: дамп не читается PyYAML — запись отменена, файл цел: {problem}{where}"
+        ) from exc
     if not _equal(loaded, _plain(data) if expected is _MISSING else expected):
-        raise ValueError(f"{path.name}: PyYAML читает дамп иначе, чем записываемые данные — запись отменена, файл цел")
+        raise YamlWriteRefused(
+            f"{path.name}: PyYAML читает дамп иначе, чем записываемые данные — запись отменена, файл цел"
+        )
 
 
 def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dict[str, Any]) -> None:

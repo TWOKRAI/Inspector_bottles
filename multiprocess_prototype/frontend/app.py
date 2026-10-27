@@ -507,6 +507,7 @@ def run_gui(process: "GuiProcess") -> None:
         # Wrapper короткозамыкает load() для v3-рецептов (top-level blueprint) — без
         # migrate/replay/перезаписи. Generic-движок считал v3 legacy (нет meta.version)
         # и портил файл миграцией пустого data при каждом set_active (старт/«Загрузить»).
+        from multiprocess_prototype.backend.recipe_format_hook import InspectorRecipeFormatHook
         from multiprocess_prototype.backend.state.recipes import RecipeEngine
         from multiprocess_prototype.recipes.manager import RecipeManager
         from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import (
@@ -529,6 +530,8 @@ def run_gui(process: "GuiProcess") -> None:
             engine=_recipe_engine,
             state_proxy=None,  # GUI-процесс не имеет StateProxy
             logger=None,
+            # Тот же класс хука, что у хаба (orchestrator.py): одна каноническая форма рецепта (design.md §10 п. 1).
+            format_hook=InspectorRecipeFormatHook(),
         )
         _recipe_adapter = RecipeStateAdapter(
             recipe_manager=_recipe_manager,
