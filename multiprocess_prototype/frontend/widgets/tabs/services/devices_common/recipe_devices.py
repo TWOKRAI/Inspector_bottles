@@ -133,15 +133,17 @@ class RecipeDevicesStore:
     def remove(self, device_id: str) -> None:
         """Удалить устройство из секции ``devices:`` рецепта.
 
-        No-op по содержимому, если id не найден (список просто перезаписывается).
+        Если id не найден — ничего не пишет (файл и база не тронуты).
 
         Raises:
             RecipeDevicesError: нет активного рецепта или файл рецепта изменён снаружи.
         """
         slug = self._require_active()
         devices, read_rev = self._read_canonical_devices(slug)
-        devices = [d for d in devices if d.get("id") != device_id]
-        self._write_devices(slug, devices, read_rev)
+        kept = [d for d in devices if d.get("id") != device_id]
+        if len(kept) == len(devices):
+            return
+        self._write_devices(slug, kept, read_rev)
 
     # ------------------------------------------------------------------ #
     # Внутреннее

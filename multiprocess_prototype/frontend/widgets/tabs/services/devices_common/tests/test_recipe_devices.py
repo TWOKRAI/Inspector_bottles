@@ -353,3 +353,18 @@ def test_devices_list_broken_yaml_returns_empty(tmp_path: Path, caplog: pytest.L
     assert result == []
     assert any(r.levelname == "WARNING" for r in caplog.records)
     assert "unclosed" not in caplog.text
+
+
+def test_devices_remove_unknown_id_without_devices_key_leaves_bytes_and_base(tmp_path: Path) -> None:
+    """remove("nope") в рецепте без секции devices ничего не пишет: байты и база прежние (шум Save, C-30)."""
+    from multiprocess_prototype.recipes.tests.test_save_noise_store import _within
+
+    store, path, session = _real_chain(tmp_path, "b_recipe", _RECIPE_B)
+    base_before = session.base_rev_for("b_recipe")
+    assert base_before is not None
+
+    devices = RecipeDevicesStore(store, active_provider=lambda: "b_recipe", session=session)
+    _within(60, devices.remove, "nope")
+
+    assert path.read_bytes() == _RECIPE_B
+    assert session.base_rev_for("b_recipe") == base_before
