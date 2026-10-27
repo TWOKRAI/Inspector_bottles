@@ -669,6 +669,10 @@
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_task_4_11_ttl_sweep_voice_verdict_2026_09_08](project_task_4_11_ttl_sweep_voice_verdict_2026_09_08.md)
 
+## serialization (1)
+
+- [feedback_ruamel_emitter_no_newline_glues_lines](feedback_ruamel_emitter_no_newline_glues_lines.md)
+
 ## spec-scope (26)
 
 - [feedback_a_cross_track_dependency_can_name_the_wrong_plane](feedback_a_cross_track_dependency_can_name_the_wrong_plane.md)
