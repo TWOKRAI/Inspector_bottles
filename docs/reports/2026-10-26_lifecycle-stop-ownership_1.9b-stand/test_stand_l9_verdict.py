@@ -406,3 +406,50 @@ def test_pair_restart_records_driver_timeout_is_not_an_early_reply():
     sent = [{"target": "camera_0", "t_send_wall": base - 5.0, "t_reply_wall": base - 0.5, "request_error": "timeout"}]
     got = st.pair_restart_records(sent, {"camera_0": [base]})
     assert got[0]["early"] is None and got[0]["reply_minus_restarted_s"] is None
+
+
+# ---- S6 (T1.10): outcome terminated, success True, ответ 5,0-5,3 с ----
+def _s6(reply_s=5.1, outcome="terminated", success=True, reply="default", ok=True):
+    if reply == "default":
+        reply = {"success": success, "process_name": "slow", "outcome": outcome}
+    return {"reply_s": reply_s, "reply": reply, "precondition_ok": ok}
+
+
+def test_s6_pass_terminated_true_5_1():
+    res = st.judge_s6([_s6(5.1)] * 3)
+    assert res["verdict"] == "PASS" and res["outcomes"] == {"terminated": 3}
+
+
+def test_s6_edges_5_0_and_5_3_pass():
+    assert st.judge_s6([_s6(5.0), _s6(5.3), _s6(5.15)])["verdict"] == "PASS"
+
+
+def test_s6_fail_on_exited():
+    res = st.judge_s6([_s6(5.1), _s6(5.1, outcome="exited"), _s6(5.1)])
+    assert res["verdict"] == "FAIL" and any("outcome='exited'" in r for r in res["reasons"])
+
+
+def test_s6_fail_on_success_false():
+    assert st.judge_s6([_s6(5.1, success=False)] + [_s6(5.1)] * 2)["verdict"] == "FAIL"
+
+
+def test_s6_fail_on_reply_5_4_and_4_9():
+    assert st.judge_s6([_s6(5.4)] + [_s6(5.1)] * 2)["verdict"] == "FAIL"
+    assert st.judge_s6([_s6(4.9)] + [_s6(5.1)] * 2)["verdict"] == "FAIL"
+
+
+def test_s6_fail_on_missing_reply():
+    assert st.judge_s6([_s6(None, reply=None)] + [_s6(5.1)] * 2)["verdict"] == "FAIL"
+    assert st.judge_s6([_s6(5.1, reply=None)] + [_s6(5.1)] * 2)["verdict"] == "FAIL"
+
+
+def test_s6_precondition_failure_is_invalid_fail():
+    res = st.judge_s6([_s6(ok=False)] + [_s6(5.1)] * 2)
+    assert res["verdict"] == "FAIL" and res["invalid"] is True
+
+
+def test_s1_outcomes_counted_and_do_not_change_verdict():
+    runs = [dict(_s1(1.0), reply={"success": True, "process_name": "devices", "outcome": "exited"})] * 9
+    runs.append(dict(_s1(1.0), reply={"success": True, "process_name": "devices", "outcome": "terminated"}))
+    res = st.judge_s1(runs)
+    assert res["verdict"] == "PASS" and res["outcomes"] == {"exited": 9, "terminated": 1}

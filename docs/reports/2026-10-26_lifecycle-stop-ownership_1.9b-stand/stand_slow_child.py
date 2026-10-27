@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from multiprocess_framework.modules.process_manager_module.tests._lifecycle_fifo_helpers import LifecycleChild
@@ -25,6 +26,19 @@ class SlowChild(LifecycleChild):
     def __init__(self, name: str, shared_resources: Any, config: Any) -> None:
         cfg = dict(config) if isinstance(config, dict) else {}
         cfg["stop_delay_s"] = SLOW_STOP_DELAY_S
+        super().__init__(name, shared_resources, cfg)
+
+
+class S6SlowChild(LifecycleChild):
+    """Медленный ребёнок S6: стоп ``STAND_S6_SLOW_STOP_S`` с (по умолчанию 6,0 > окна 5,0).
+
+    Значение берётся из окружения бэкенда (стенд ставит его в env; spawn-дети наследуют env). S2 (``SlowChild``, 3,0 с)
+    не затронут.
+    """
+
+    def __init__(self, name: str, shared_resources: Any, config: Any) -> None:
+        cfg = dict(config) if isinstance(config, dict) else {}
+        cfg["stop_delay_s"] = float(os.environ.get("STAND_S6_SLOW_STOP_S", "6.0"))
         super().__init__(name, shared_resources, cfg)
 
 

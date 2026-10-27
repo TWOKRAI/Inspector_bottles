@@ -1936,10 +1936,52 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
   (б) новые отказы `system_stopping` (операция снята из очереди) и `executor_busy` (очередь на потолке);
   (в) прерванный стоп — `success: False`. Литерал `system_stopping` — только для снятых из очереди; прерванная
   текущая операция отвечает так, как `_cmd_process_stop` отвечает при `stop_process == False`.
+  (г) (Task 1.10) `outcome` — только в ответах `_cmd_process_stop` / `_cmd_process_restart`; отказы исполнителя
+  (`key_missing`, `system_stopping`, `executor_busy`) без него. У прерванного системным стопом одиночного стопа ключа
+  `error` по-прежнему нет: `{"success": False, "process_name", "outcome": "handed_over"}`. Исключение обработчика после
+  фазы стопа (например, в рестарте после `remove_process`) отвечает прежним конвертом ошибки без `outcome`: оно не ловится.
 - **I4: PM жив.** `message_processor` и `supervision.status` отвечают весь одиночный стоп и `topology.apply`.
 - **I5: L не отказывается из-за ждущего T; при `T_pending = T_CAP` у L не меньше `L_CAP` мест.** Следует из
   `max_pending = L_CAP + T_CAP` и счётчика T в шлюзе: отказ по ёмкости получает T, не L. Проверка — H12
   (`test_lifecycle_fifo_hazards.py`) и юнит счётчика (`test_transition_gate_counter.py`).
+
+### Дополнение (Task 1.10, 2026-10-27): честный итог стопа `outcome` рядом с `success`
+
+Источник — CTO §7 D3 (1): `success: True` и при `terminate`. `success` не меняется (смерть подтверждена; для рестарта —
+стоп подтверждён и новый инстанс создан). Спецификация и стадия 0 — `plans/lifecycle-stop-ownership/tasks/T1.10.md`.
+
+- **D1. Пять значений, источник — шаг эскалации, не exitcode.** `exited` — этому имени не доставлен ни `terminate()`, ни
+  `kill()`; `terminated` — смерть подтверждена после доставленного ему `terminate()`; `killed` — после доставленного ему
+  `proc.kill()`; `handed_over` — не подтверждена, стоп прерван системным стопом (D4 выше); `survived` — не подтверждена без
+  прерывания. Exitcode не годится (замер на Windows: сам — 0, `terminate()` и `kill()` — −15; ребёнок, вышедший сам с
+  кодом ≠ 0, неотличим от убитого).
+- **D2. `ChildProcessStop.outcomes() -> dict[str, str]`.** Множества `_terminated` и `_killed` на имя заполняются там,
+  где сигнал доставлен этому имени (не флаги группы `_kill_started_at` / `_real_kill_sent`). Метод начинает с
+  `_observe()` (последний проход, как `survivors()`), затем один снимок; `on_confirmed_dead` по-прежнему ровно один раз.
+- **D3. `ProcessRegistry`.** `_stop_many` строит `result` и итоги из ОДНОГО снимка `outcomes()` (`success` ⇔ итог в
+  `exited | terminated | killed`). `stop_outcome(name)` — итог последнего стопа текущего воплощения; `add_process` того же
+  имени сбрасывает в `None`; призраки и уже мёртвые запись не трогают. `call_stop_outcome(name)` — итог в последнем
+  `_stop_many` этого потока (для PM). Без нового лока. `IProcessRegistry` не меняется (оба метода — у конкретного реестра).
+- **D4. Ответ PM.** `_cmd_process_stop` / `_cmd_process_restart` отвечают `{"success", "process_name", "outcome"}`;
+  `outcome` — итог стопа ЭТОГО вызова. Один боковой канал — в реестре: `ProcessRegistry.call_stop_outcome(name)` отдаёт
+  итог последнего `_stop_many` этого потока (`threading.local`; имя, не дошедшее до `ChildProcessStop`, — `None`),
+  `reset_call_stop_outcomes()` сбрасывает его. Сбрасывают читатели: оба обработчика сбрасывают канал до вызова и
+  читают после (поток исполнителя переиспользуется — без сброса короткий путь или отказанный рестарт вернули бы итог
+  прошлой операции); `stop_process` канал не трогает, `add_process` сбрасывает только `stop_outcome`, не канал вызова.
+  Канала в PM нет. Публичные `stop_process` / `restart_process -> bool` и `interfaces.py` не менялись.
+  `supervision.status` — поле `stop_outcome` на запись процесса = `registry.stop_outcome(name)`.
+
+| Путь | `success` | `outcome` |
+|---|---|---|
+| стоп живого ребёнка | как раньше | D1 |
+| имени нет в реестре / процесс уже мёртв | как раньше | `None` |
+| рестарт: стоп подтверждён, `create_and_register` упал | `False` | итог фазы стопа |
+| рестарт отказан до фазы стопа | как раньше | `None` |
+| стоп прерван системным стопом | `False` | `handed_over`, ключа `error` нет |
+| отказ исполнителя | как раньше | ключа нет |
+
+Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня (`_ChildrenGroupStop` `stop_outcome` не пишет);
+код 76; GUI; парсеры `backend_ctl`.
 
 ### Альтернативы
 
