@@ -30,7 +30,9 @@ from multiprocess_framework.modules.base_manager import open_scope
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.tests.conftest import FakeClock
+from Services.robot_comm.core.client_v2 import RobotClientV2
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.errors import RobotNak
 from Services.robot_comm.programs import Move, Point, Program
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, bounded
 
@@ -88,7 +90,7 @@ class _Env:
 
 
 @contextmanager
-def _env(fake_clock: FakeClock) -> Iterator[_Env]:
+def _env(fake_clock: FakeClock, client_factory: Any = None) -> Iterator[_Env]:
     rec = _Rec()
     with E2eRig() as rig:
         entry = DeviceEntry(
@@ -99,7 +101,14 @@ def _env(fake_clock: FakeClock) -> Iterator[_Env]:
             transport={"type": "tcp", "host": "127.0.0.1", "port": rig.port, "unit_id": ROBOT_UNIT_ID},
             params={"robot_params": {"P_SPD_DEFAULT": 10}},  # ход домой длиннее вмешательств теста
         )
-        drv = RobotDriverV2(entry, clock=fake_clock.clock, sleep=fake_clock.sleep, publish=rec, spawn=_SCOPE.spawn)
+        drv = RobotDriverV2(
+            entry,
+            clock=fake_clock.clock,
+            sleep=fake_clock.sleep,
+            publish=rec,
+            spawn=_SCOPE.spawn,
+            client_factory=client_factory,
+        )
         assert bounded(drv.connect, 60.0) is True
         drv.desired_connected = True
         try:
@@ -339,3 +348,30 @@ def test_servo_step_after_shutdown_begin_writes_no_servo(fake_clock: FakeClock) 
         assert calls[0] >= 2
         assert e.rig.read("TLM_SERVO") == [1]
         assert [p for p in e.rec.at("park") if p["state"] == "done"] == []
+
+
+@pytest.mark.parametrize("kind", ["oserror", "nak"])
+def test_home_program_transport_error_gives_link_reason(kind: str, fake_clock: FakeClock) -> None:
+    """Сбой ``run_chunks`` хода домой в цикле программы: транспорт -> «связь потеряна», NAK -> «не выполнен»."""
+    armed: list[Exception] = []
+
+    class _FailingClient(RobotClientV2):
+        def run_chunks(self, *args: Any, **kwargs: Any) -> Any:
+            if armed:
+                raise armed[0]
+            return super().run_chunks(*args, **kwargs)
+
+    with _env(fake_clock, client_factory=_FailingClient) as e:
+        _off_home(e)
+        armed.append(OSError("reset") if kind == "oserror" else RobotNak(1, None, "nak", None, ()))
+        assert _call(e, "park")["accepted"] is True
+        bounded(e.drv.tick, _CALL_S)  # запуск хода домой
+        _until(
+            lambda: any(p.get("name") == "park_home" and p.get("state") == "failed" for p in e.rec.at("program")),
+            _WAIT_S,
+            ".program park_home failed",
+        )
+        bounded(e.drv.tick, _CALL_S)
+        final = _last_park(e)
+        reason = "связь с роботом потеряна" if kind == "oserror" else "ход домой не выполнен"
+        assert final is not None and (final["state"], final["reason"]) == ("failed", reason)
