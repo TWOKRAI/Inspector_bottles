@@ -336,3 +336,51 @@ def test_g8_non_utf8_labels_is_error_without_exception_text(tmp_path: Path) -> N
     assert d.path == tmp_path.resolve() / "m1_classes.txt"
     assert d.message.endswith("UnicodeDecodeError")
     assert "codec" not in d.message
+
+
+# --------------------------------------------------------------------------- #
+# Г9: тик _publish_state не ждёт загрузку модели
+# --------------------------------------------------------------------------- #
+
+
+class _BlockingBackend(_FakeBackend):
+    """Backend, чей `load` встаёт на `threading.Event` (не sleep) до сигнала теста."""
+
+    def __init__(self, entered: threading.Event, release: threading.Event) -> None:
+        super().__init__()
+        self._entered = entered
+        self._release = release
+
+    def load(self, spec: ModelSpec, device: str = "cpu") -> None:
+        self._entered.set()
+        self._release.wait(_DEADLINE_S)
+        self._spec = spec
+
+
+def test_g9_publish_tick_does_not_wait_for_model_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Команда держит `_engine_lock` на загрузке модели -> `process` без кадра возвращается сразу."""
+    _write_assets(tmp_path)
+    plugin, _state, _calls, ctx = _make_plugin(tmp_path, monkeypatch, model="")
+    plugin.configure(ctx)
+    entered, release = threading.Event(), threading.Event()
+    monkeypatch.setattr("Services.ml_inference.engine._make_backend", lambda _t: _BlockingBackend(entered, release))
+
+    box: dict[str, Any] = {}
+    command = _in_daemon(lambda: plugin.cmd_set_model({"model": "m1"}), box, "command")
+    tick: threading.Thread | None = None
+    try:
+        assert entered.wait(_DEADLINE_S), "загрузка модели не началась"
+        plugin._last_publish -= 2.0
+        tick = _in_daemon(lambda: plugin.process([{"no_frame": 1}]), box, "tick")
+        tick.join(1.0)
+        tick_done = not tick.is_alive()
+        load_still_blocked = not release.is_set()
+    finally:
+        release.set()
+    _join_all([command] + ([tick] if tick is not None else []))
+
+    assert load_still_blocked
+    assert tick_done, "process ждал замок на время загрузки модели"
+    for key in ("command", "tick"):
+        kind, value = box[key]
+        assert kind == "ok", f"{key}: {value!r}"
