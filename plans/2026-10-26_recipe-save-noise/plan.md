@@ -103,7 +103,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** public-api-change (`RecipeManager.read_canonical`, `recipe/hook_contract.py`)
 - Task 1.1i: склейка комментариев у `- {}` — корень в движке, `YamlWriteRefused` (teamlead) [DONE] (после 1.1f)
   - **Module contract:** public-api-change (`recipe.YamlWriteRefused`)
-- Task 1.1g: хук v3 в GUI, адаптеры `Recipe`/`Topology` ↔ канон, контракт на 22 рецептах [PENDING] (после 1.1f)
+- Task 1.1g: хук v3 в GUI, адаптеры `Recipe`/`Topology` ↔ канон, контракт на 22 рецептах [DONE] (после 1.1f)
   - **Module contract:** new-lite (`adapters/recipe_canonical.py`)
 - Task 1.7: `Topology` типизирует `name/description` + финальный Protocol `RecipeStore` (`read_canonical`, `read_raw_with_rev`, `expected_rev`, `layout`) и фейк [PENDING] (после 1.1g; слито с 1.1d)
   - **Module contract:** public-api-change (Protocol `RecipeStore` прототипа)
