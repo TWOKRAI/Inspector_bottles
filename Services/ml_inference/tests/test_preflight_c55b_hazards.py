@@ -1,0 +1,240 @@
+"""Сторожа разработчика C-55b: инварианты проверки ассетов, которых нет в слепых REDS.
+
+Г1 — `scan()` и `diagnose()` выбирают один и тот же файл весов.
+Г2 — своя деградация health снимается, чужая — нет.
+Г3 — пустая модель (штатный pass-through) health не портит.
+Г4 — обход C-66: деградация из-за ассетов возвращается после закрытия breaker.
+Г5 — смена модели из команды против идущего `process` не рвёт ни один поток.
+
+Харнес (`_write_assets`, `_FakeBackend`, `_make_plugin`) скопирован из слепого
+`test_preflight_c55b.py` (его не импортируем и не правим). Вызовы, способные повиснуть,
+идут в daemon-потоке с дедлайном `join`. Ожидаемые значения — литералы спецификации.
+"""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+
+from multiprocess_framework.modules.process_module.health import HealthReporter, HealthState
+from Services.ml_inference.backends.base import BaseInferenceBackend
+from Services.ml_inference.core.model_spec import ModelSpec
+from Services.ml_inference.core.registry import ModelRegistry
+from Services.ml_inference.plugin.plugin import MLInferencePlugin
+
+_DEADLINE_S = 10.0
+_SIDECAR = "name: m1\ninput_size: [8, 8]\nresize_policy: stretch\nlabels: m1_classes.txt\n"
+_FRAME = np.zeros((8, 8, 3), np.uint8)
+
+
+def _write_assets(root: Path, *, weights: str | None = "m1.onnx") -> None:
+    """Ассеты модели `m1` (sidecar + метки) и, если задано, файл весов."""
+    root.mkdir(parents=True, exist_ok=True)
+    if weights is not None:
+        (root / weights).write_bytes(b"x")
+    (root / "m1.yaml").write_text(_SIDECAR, encoding="utf-8")
+    (root / "m1_classes.txt").write_text("A\n", encoding="utf-8")
+
+
+class _FakeBackend(BaseInferenceBackend):
+    """Backend-заглушка с фиксированными выходами (без onnxruntime)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._outputs = {"logits": np.array([[1.0]], dtype=np.float32)}
+
+    def load(self, spec: ModelSpec, device: str = "cpu") -> None:
+        self._spec = spec
+
+    def infer(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+        return self._outputs
+
+    def unload(self) -> None:
+        self._spec = None
+
+
+def _make_plugin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model: str = "m1",
+    clock: Callable[[], float] | None = None,
+) -> tuple[MLInferencePlugin, HealthState, list[str], MagicMock]:
+    """Плагин с настоящими `HealthState`/`HealthReporter`; `configure` НЕ вызван."""
+    monkeypatch.setattr("Services.ml_inference.engine._make_backend", lambda _t: _FakeBackend())
+    calls: list[str] = []
+    state_kwargs: dict[str, Any] = {} if clock is None else {"clock": clock}
+    state = HealthState(
+        log=lambda m: None,
+        track=lambda exc, payload=None: calls.append(type(exc).__name__),
+        log_only=False,
+        **state_kwargs,
+    )
+    ctx = MagicMock()
+    ctx.config = {"model": model, "models_dir": str(tmp_path)}
+    ctx.registers = None
+    ctx.state_proxy = None
+    ctx.process_name = "ml_proc"
+    ctx.health = HealthReporter(state, source="ml_inference")
+    return MLInferencePlugin(), state, calls, ctx
+
+
+def _in_daemon(fn: Callable[[], Any], box: dict[str, Any], key: str) -> threading.Thread:
+    """Запустить `fn` в daemon-потоке; результат/исключение — в `box[key]`."""
+
+    def _runner() -> None:
+        try:
+            box[key] = ("ok", fn())
+        except BaseException as exc:  # noqa: BLE001 — отдаём в поток теста без потерь
+            box[key] = ("exc", exc)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    return thread
+
+
+def _join_all(threads: list[threading.Thread]) -> None:
+    for thread in threads:
+        thread.join(_DEADLINE_S)
+        if thread.is_alive():
+            pytest.fail(f"поток не завершился за {_DEADLINE_S} с (взаимная блокировка?)")
+
+
+# --------------------------------------------------------------------------- #
+# Г1: scan ≡ diagnose
+# --------------------------------------------------------------------------- #
+
+
+def test_g1_scan_and_diagnose_pick_the_same_weights(tmp_path: Path) -> None:
+    """При `m1.onnx` + `m1.pth` обе дороги выбирают `m1.pth`; `bad.onnx` без sidecar — error."""
+    _write_assets(tmp_path)
+    (tmp_path / "m1.pth").write_bytes(b"x")
+    (tmp_path / "bad.onnx").write_bytes(b"x")
+    registry = ModelRegistry(tmp_path)
+
+    scanned = registry.scan()
+
+    assert sorted(scanned) == ["m1"]
+    for model_id, spec in scanned.items():
+        d = registry.diagnose(model_id)
+        assert d.severity == "info", d.message
+        assert d.path == spec.weights_path
+    assert registry.diagnose("m1").path == tmp_path.resolve() / "m1.pth"
+    assert registry.diagnose("bad").severity == "error"
+
+
+# --------------------------------------------------------------------------- #
+# Г2: чужая деградация не снимается
+# --------------------------------------------------------------------------- #
+
+
+def test_g2_foreign_degraded_survives_reload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ассеты на месте, деградацию поставил кто-то другой → `cmd_reload_model` её не трогает."""
+    _write_assets(tmp_path)
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch)
+    plugin.configure(ctx)
+    state.degraded("чужая причина")
+
+    plugin.cmd_reload_model({})
+
+    snap = state.snapshot()
+    assert snap["status"] == "degraded"
+    assert snap["degraded_reason"] == "чужая причина"
+
+
+# --------------------------------------------------------------------------- #
+# Г3: пустая модель не деградирует
+# --------------------------------------------------------------------------- #
+
+
+def test_g3_empty_model_is_not_a_degradation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Модель не выбрана — штатный pass-through: статус `ok`, в плоскость ошибок ничего не уходит."""
+    plugin, state, calls, ctx = _make_plugin(tmp_path, monkeypatch, model="")
+
+    plugin.configure(ctx)
+
+    assert state.snapshot()["status"] == "ok"
+    assert calls == []
+
+    answer = plugin.cmd_set_model({"model": ""})
+
+    assert answer == {"status": "ok", "loaded_model": "", "error": ""}
+    assert state.snapshot()["status"] == "ok"
+    assert calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Г4: обход C-66
+# --------------------------------------------------------------------------- #
+
+
+def test_g4_asset_degraded_returns_after_breaker_closes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """5 провалов загрузки открывают breaker; его закрытие стирает причину; `process` ставит её снова."""
+    now = [1000.0]
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch, clock=lambda: now[0])
+
+    plugin.configure(ctx)
+    for _ in range(4):
+        plugin.cmd_reload_model({})
+    assert state.breaker_state == "open"
+
+    # open -> half_open -> closed: каждый шаг ждёт свой cooldown (30 с по умолчанию), точка отсчёта
+    # сдвигается на первом poll, поэтому часы двигаем перед каждым.
+    now[0] += 62.0
+    state.poll()
+    now[0] += 62.0
+    state.poll()
+    # Предпосылка обхода (C-66): breaker закрылся и вместе со своей деградацией снял чужую причину.
+    assert state.snapshot()["status"] == "ok"
+
+    plugin._last_publish -= 2.0
+    plugin.process([{"frame": _FRAME}])
+
+    snap = state.snapshot()
+    assert snap["status"] == "degraded"
+    assert "m1" in snap["degraded_reason"]
+
+
+# --------------------------------------------------------------------------- #
+# Г5: гонка команды смены модели и process
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("last_model", "status", "loaded"),
+    [("m1", "ok", "m1"), ("absent", "degraded", "")],
+    ids=["valid-model", "missing-model"],
+)
+def test_g5_set_model_races_with_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, last_model: str, status: str, loaded: str
+) -> None:
+    """`cmd_set_model` из второго потока во время 50 `process`: без исключений, итог = последняя модель."""
+    _write_assets(tmp_path)
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch, model="")
+    plugin.configure(ctx)
+
+    box: dict[str, Any] = {}
+
+    def _frames() -> int:
+        for _ in range(50):
+            plugin._last_publish -= 2.0  # каждый вызов доходит до _publish_state (проверка Б5а под замком)
+            plugin.process([{"frame": _FRAME}])
+        return 50
+
+    def _commands() -> dict:
+        plugin.cmd_set_model({"model": "m1"})
+        return plugin.cmd_set_model({"model": last_model})
+
+    _join_all([_in_daemon(_frames, box, "process"), _in_daemon(_commands, box, "command")])
+
+    for key in ("process", "command"):
+        kind, value = box[key]
+        assert kind == "ok", f"{key}: {value!r}"
+    assert state.snapshot()["status"] == status
+    assert plugin._reg.loaded_model == loaded
