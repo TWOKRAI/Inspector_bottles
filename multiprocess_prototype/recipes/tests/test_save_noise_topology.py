@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from multiprocess_prototype.domain.entities import Recipe, RecipeMeta, Topology
+from multiprocess_prototype.domain.entities import Process, Recipe, RecipeMeta, Topology
 from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
 
 _MISSING = object()
@@ -48,9 +48,31 @@ def test_recipe_to_dict_nested_blueprint_has_no_none_name_description() -> None:
 
     assert "name" not in blueprint
     assert "description" not in blueprint
+    # Смешанный случай: name задан, description None - остаётся только name.
+    mixed = Recipe(meta=_meta(), blueprint=Topology.from_dict({"name": "bp"})).to_dict()["blueprint"]
+    assert mixed["name"] == "bp"
+    assert "description" not in mixed
     # Прямой дамп вложенной модели (мимо Topology.to_dict) тоже без ключей.
     assert "name" not in Topology().model_dump(mode="json")
     assert "description" not in Topology().model_dump(mode="json")
+
+
+def test_recipe_to_dict_keeps_process_null_fields() -> None:
+    """Сторож: законные ``null`` процесса переживают ``Recipe.to_dict()`` (не ``exclude_none``)."""
+    blueprint = Recipe(
+        meta=_meta(),
+        blueprint=Topology(processes=(Process(process_name="p1", priority=None),)),
+    ).to_dict()["blueprint"]
+
+    process = blueprint["processes"][0]
+    assert "priority" in process
+    assert process["priority"] is None
+    assert process["description"] is None
+    assert process["category"] is None
+    # Тот же контракт на прямом ``Topology.to_dict`` (путь мимо Recipe).
+    direct = Topology(processes=(Process(process_name="p1", priority=None),)).to_dict()["processes"][0]
+    assert "priority" in direct
+    assert direct["priority"] is None
 
 
 def test_write_blueprint_name_change_lands_at_top() -> None:

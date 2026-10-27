@@ -40,7 +40,8 @@ class RecipeStore(Protocol):
 
         Pre: ``expected_rev`` — ``rev`` чтения, на котором основано изменение; ``None`` — стор берёт
         ``rev`` своего чтения внутри операции (для нового рецепта: ``(None, None)`` → создание).
-        Post: возвращает новый ``rev``. Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev`` рецепта
+        Post: возвращает новый ``rev``, если рецепт изменился; холостая запись (тело не изменилось) —
+        прежний ``rev``, без новой версии. Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev`` рецепта
         (рецепт изменён с момента чтения; запись не выполнена).
         """
         ...
@@ -96,8 +97,10 @@ class RecipeStore(Protocol):
         Pre: ``expected_rev`` — ``rev`` чтения-основания; ``None`` — стор берёт ``rev`` своего чтения
         внутри операции (новый рецепт: ``(None, None)`` → создание). ``layout`` = ``(positions,
         locked_nodes)`` — раскладка пишется той же записью, что и топология (design.md §9.5).
-        Post: возвращает новый ``rev``; топология и раскладка — одна версия. Raises: ``RecipeConflict``
-        при ``expected_rev`` ≠ ``rev`` рецепта (запись не выполнена).
+        Post: возвращает новый ``rev``, если тело изменилось; холостая запись — прежний ``rev``. Топология и
+        раскладка — одна версия. Пустая коллекция раскладки, которой не было в рецепте, не создаётся.
+        Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev`` рецепта (запись не выполнена);
+        ``ValueError`` — ``layout`` задан, а в ``data`` нет ``blueprint``-mapping.
         """
         ...
 
@@ -116,8 +119,13 @@ class RecipeStore(Protocol):
         перетаскивании/фиксации нод (free-layout): частый тихий вызов не должен портить
         документ.
 
-        Pre: ``expected_rev`` как у ``save_raw``. Post: новый ``rev``; ``None`` — no-op (рецепт не
-        найден / без вложенного blueprint). Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev``.
+        Pre: ``expected_rev`` как у ``save_raw``. Post (как у ``RecipeManager.save_layout``):
+          - рецепта нет, ``expected_rev=None`` -> ``None`` (писать нечего);
+          - рецепта нет, ``expected_rev`` задан -> ``RecipeConflict`` (current_rev ``None``);
+          - ``expected_rev`` ≠ ``rev`` рецепта -> ``RecipeConflict`` (в том числе у рецепта без blueprint);
+          - нет вложенного blueprint-mapping -> записи нет, текущий ``rev``;
+          - раскладка не изменилась -> записи нет, прежний ``rev``; иначе новый ``rev``.
+        Пустая коллекция, которой не было в рецепте, не создаётся.
         """
         ...
 

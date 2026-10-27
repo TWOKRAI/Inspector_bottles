@@ -98,8 +98,8 @@ class Recipe(SchemaBase):
     def _normalize_blueprint(cls, v: Any) -> Any:
         """Нормализует blueprint: передаёт dict через Topology.from_dict.
 
-        Topology.from_dict перемещает неизвестные ключи (name, description)
-        в metadata, чтобы не нарушать extra='forbid'.
+        Topology.from_dict оставляет name/description типизированными полями Topology;
+        в metadata переносится только display_definitions (Task 1.7).
         """
         if isinstance(v, dict):
             return Topology.from_dict(v)
@@ -233,8 +233,8 @@ class Recipe(SchemaBase):
             version: 3
             description: ...
             blueprint:
-              name: ...       ← мета blueprint, перемещается в Topology.metadata
-              description: ...
+              name: ...       ← типизированное поле Topology.name
+              description: ...  ← Topology.description
               processes: [...]
               wires: [...]
         """
