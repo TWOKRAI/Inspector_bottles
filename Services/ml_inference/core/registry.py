@@ -5,10 +5,17 @@
 
 Безопасность: путь `weights` из sidecar резолвится и проверяется на принадлежность
 папке моделей (sandbox) — не загружаем произвольный бинарь по `../` или абсолютному пути.
+
+`diagnose(model_id)` (C-55b) — проверка ассетов ОДНОЙ выбранной модели без побочных эффектов:
+веса, sidecar, пути из sidecar, файл меток. Выбор файла весов и разбор sidecar общие с `scan()`
+(`_weight_files`, `_load_one`), поэтому диагноз и каталог не расходятся.
 """
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+from typing import Literal
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 from pathlib import Path
@@ -21,6 +28,32 @@ logger = get_std_logger(__name__)
 
 _WEIGHT_SUFFIXES = (".onnx", ".pt", ".pth")
 _BACKEND_BY_SUFFIX = {".onnx": "onnx", ".pt": "torch", ".pth": "torch"}
+
+# Белый список id модели. Копия литерала `_NAME_RE` из
+# multiprocess_framework/modules/recipe/service.py:142 (имена рецептов): начало и конец — \w,
+# внутри буквы/цифры/`_`/`.`/`-`/пробел. Не импортируем: `modules/recipe` — чужой модуль,
+# его приватное имя не часть публичного API. Меняется там — сверить здесь.
+_MODEL_ID_RE = re.compile(r"\w(?:[\w.\- ]*\w)?")
+
+
+@dataclass(frozen=True)
+class ModelDiagnosis:
+    """Итог проверки ассетов модели (`ModelRegistry.diagnose`).
+
+    severity: `error` (модель использовать нельзя), `warning` (модель не выбрана),
+    `info` (всё в порядке). message — текст для оператора: без сырого id и без `str(exc)`
+    (у pydantic это многострочный ввод). path — файл/каталог, из-за которого находка
+    (None — id недопустим, путь строить нельзя). spec — только при `info`.
+    """
+
+    severity: Literal["error", "warning", "info"]
+    message: str
+    path: Path | None
+    spec: ModelSpec | None = None
+
+
+class ModelAssetError(RuntimeError):
+    """Тип инцидента «ассеты выбранной модели непригодны» — для `ctx.health.report_error`."""
 
 
 class ModelRegistry:
@@ -53,21 +86,74 @@ class ModelRegistry:
             logger.warning("ModelRegistry: папка не найдена: %s", self._dir)
             return {}
 
-        for weights in sorted(self._dir.iterdir()):
-            if not weights.is_file() or weights.suffix.lower() not in _WEIGHT_SUFFIXES:
-                continue
-            sidecar = weights.with_suffix(".yaml")
-            if not sidecar.is_file():
-                logger.info("ModelRegistry: пропуск %s — нет sidecar %s", weights.name, sidecar.name)
-                continue
+        for stem, weights in self._weight_files().items():
             try:
-                spec = self._load_spec(weights, sidecar)
+                spec = self._load_one(weights)
+            except FileNotFoundError:
+                logger.info(
+                    "ModelRegistry: пропуск %s — нет sidecar %s", weights.name, weights.with_suffix(".yaml").name
+                )
+                continue
             except Exception as exc:  # noqa: BLE001 — каталог не должен падать из-за одной модели
                 logger.warning("ModelRegistry: пропуск %s — ошибка sidecar: %s", weights.name, exc)
                 continue
-            self._specs[weights.stem] = spec
+            self._specs[stem] = spec
         logger.info("ModelRegistry: найдено моделей: %d (%s)", len(self._specs), self._dir)
         return dict(self._specs)
+
+    def diagnose(self, model_id: str) -> ModelDiagnosis:
+        """Проверить ассеты одной модели. Без кэша `_specs` и без побочных эффектов.
+
+        Порядок проверок: пустой id (warning) → допустимость id → каталог → веса → sidecar →
+        разбор sidecar → файл весов из sidecar → файл меток → info. Первая найденная проблема
+        возвращается сразу. Выбор файла весов — тот же, что у `scan()`.
+        """
+        root = self._dir
+        if model_id == "":
+            return ModelDiagnosis("warning", "модель не выбрана — pass-through до выбора в GUI", root)
+        if _MODEL_ID_RE.fullmatch(model_id) is None or ".." in model_id:
+            # Сырой id в текст не идёт: сообщение уходит в last_error и degraded_reason.
+            return ModelDiagnosis(
+                "error",
+                "недопустимый id модели — разрешены буквы, цифры, подчёркивание, точка, дефис "
+                "и пробел внутри имени; две точки подряд запрещены",
+                None,
+            )
+        if not root.is_dir():
+            return ModelDiagnosis("error", f"каталог моделей не найден: {root}", root)
+
+        weights = self._weight_files().get(model_id)
+        if weights is None:
+            suffixes = "|".join(_WEIGHT_SUFFIXES)
+            return ModelDiagnosis(
+                "error", f"нет весов модели ({model_id} + один из {suffixes}) в {root}", root / model_id
+            )
+
+        sidecar = weights.with_suffix(".yaml")
+        if not sidecar.is_file():
+            return ModelDiagnosis("error", f"нет sidecar {sidecar.name} для модели '{model_id}'", sidecar)
+        try:
+            spec = self._load_one(weights)
+        except Exception as exc:  # noqa: BLE001 — диагноз не падает; str(exc) в текст не идёт
+            return ModelDiagnosis("error", f"sidecar {sidecar.name} не читается: {type(exc).__name__}", sidecar)
+
+        if not spec.weights_path.is_file():
+            return ModelDiagnosis("error", f"файл весов из sidecar {sidecar.name} не найден", spec.weights_path)
+        if spec.labels_path is not None:
+            try:
+                labels = spec.load_labels()
+            except Exception as exc:  # noqa: BLE001 — нечитаемый файл меток — та же находка
+                return ModelDiagnosis(
+                    "error", f"файл меток из sidecar не читается: {type(exc).__name__}", spec.labels_path
+                )
+            if labels is None:
+                return ModelDiagnosis("error", "файл меток из sidecar отсутствует или пуст", spec.labels_path)
+        return ModelDiagnosis(
+            "info",
+            f"модель '{model_id}': {spec.weights_path.name}, backend {spec.backend}",
+            spec.weights_path,
+            spec,
+        )
 
     def names(self) -> list[str]:
         """Список model_id (для выпадающего списка GUI)."""
@@ -84,6 +170,25 @@ class ModelRegistry:
     # ------------------------------------------------------------------ #
     # Внутреннее
     # ------------------------------------------------------------------ #
+
+    def _weight_files(self) -> dict[str, Path]:
+        """{стем: файл весов} из папки моделей; общий выбор для `scan()` и `diagnose()`.
+
+        Один проход `sorted(iterdir())`; при `m1.onnx` + `m1.pth` побеждает последний в
+        порядке `sorted` (`m1.pth`). Вызывающий проверяет, что папка существует.
+        """
+        found: dict[str, Path] = {}
+        for weights in sorted(self._dir.iterdir()):
+            if weights.is_file() and weights.suffix.lower() in _WEIGHT_SUFFIXES:
+                found[weights.stem] = weights
+        return found
+
+    def _load_one(self, weights: Path) -> ModelSpec:
+        """ModelSpec по файлу весов: sidecar `<стем>.yaml` (нет → FileNotFoundError) + разбор."""
+        sidecar = weights.with_suffix(".yaml")
+        if not sidecar.is_file():
+            raise FileNotFoundError(sidecar)
+        return self._load_spec(weights, sidecar)
 
     def _load_spec(self, weights: Path, sidecar: Path) -> ModelSpec:
         """Распарсить sidecar и собрать ModelSpec с безопасными путями."""
