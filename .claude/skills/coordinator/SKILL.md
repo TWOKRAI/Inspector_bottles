@@ -35,6 +35,9 @@ stand: free | <session> measure|functional <SHA> <ports>
 
 - `<session>` is the session name as `ListAgents` prints it, **without** the `[ref]` suffix (the first line reads
   «This session is inspector-bottles-84 [cfb773] …», or «This process's main session is …» inside a subagent).
+- After every hand edit of `machine.lock` run `machine_gate.sh status`: a malformed line returns rc=2 to every
+  lane's gate. `waiting:` and `window:` need all four fields; the kind is only quiet|heavy|stand (a timed
+  `medium` waits and runs as `heavy`).
 - One `window:` line at most. Kinds: **quiet** — only the holder runs anything (A/B, flaky-test
   discriminators, timing measurements); **heavy** — the holder runs one heavy process at a time, others run
   `light` and non-timed `medium` (§3); **stand** — `run_sim_all.ps1` / backend stand, plus the `stand:` line;
