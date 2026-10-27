@@ -874,7 +874,7 @@ class RobotState:
             self._program_active = False
             self._program_kind = None
             if kind == "park":
-                self._park_home_outcome = outcome  # "done" | "aborted" | "failed" — в той же секции (T5.3e)
+                self._park_home_outcome = outcome  # "done" | "aborted" | "failed" | "link" — в той же секции (T5.3e)
             if kind == "return":
                 if done:
                     self._returns_done += 1

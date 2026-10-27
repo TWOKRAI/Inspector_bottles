@@ -249,7 +249,12 @@ class ParkMachine:
                         return None
                     self._finish_locked(self._seq, False, TEXT_PARK_NOT_HOME)
                     return None
-                text = TEXT_PARK_HOME_ABORTED if outcome == "aborted" else TEXT_PARK_HOME_FAILED
+                if outcome == "link":
+                    text = TEXT_PARK_LINK  # поток программы дома увидел обрыв раньше guard тика
+                elif outcome == "aborted":
+                    text = TEXT_PARK_HOME_ABORTED
+                else:
+                    text = TEXT_PARK_HOME_FAILED
                 self._finish_locked(self._seq, False, text)
                 return None
             elif step == "servo":

@@ -16,7 +16,7 @@ from Services.device_hub.drivers.robot_driver_v2.args import _STORE_ERRORS, _Bad
 from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_NO_PROGRAM, TEXT_NO_STORE, _next_thread_k
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS
 from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
-from Services.robot_comm.errors import RobotAborted
+from Services.robot_comm.errors import RobotAborted, RobotCommError, RobotNotConnectedError
 from Services.robot_comm.programs import Move, Point, Program, compile_program
 from Services.robot_comm.programs.generators import return_slot, toolchange
 from Services.robot_comm.robot_data import load_frames, load_points, load_program
@@ -96,6 +96,7 @@ class ProgramMixin:
         path = f"devices.state.{self.entry.id}.program"
         state = {"name": name, "state": "running", "done": 0, "total": total, "error": None}
         resent = [False]  # повтор стопа в on_progress — один раз на прогон
+        link_lost = False  # T5.3e: исход хода домой при сбое связи — «link», а не «failed»
 
         def on_progress(done: int, all_records: int) -> None:
             state["done"], state["total"] = done, all_records
@@ -129,6 +130,8 @@ class ProgramMixin:
             state["state"] = "aborted"
         except Exception as exc:
             self._record_err()
+            # Ошибка транспорта (не ответ робота и не компиляция) — потеря связи, как в _run_next_job (jobs.py)
+            link_lost = isinstance(exc, RobotNotConnectedError) or not isinstance(exc, (RobotCommError, ValueError))
             state["state"], state["error"] = "failed", f"программа прервана ошибкой: {type(exc).__name__}: {exc}"
             logger.warning(f"робот {self.entry.id!r}: программа {name!r}: {state['error']}")
         finally:
@@ -136,7 +139,10 @@ class ProgramMixin:
                 # Итог публикуется ДО снятия program_active: robot_program_run может прийти сразу после (DESIGN 7)
                 self._pub(path, dict(state))
             finally:
-                self._state.program_finished(kind, state["state"] == "done", state["state"])
+                # Поток программы может увидеть обрыв раньше тика (тот же сокет переподключается сам): park
+                # узнаёт причину из исхода, а не из guard следующего тика (А8)
+                outcome = "link" if link_lost else state["state"]
+                self._state.program_finished(kind, state["state"] == "done", outcome)
 
     def _op_program_run(self, args: dict) -> dict:
         """Программа, точки и СК из хранилища -> ``start_program``; ответ сразу, ход — в потоке исполнителя."""

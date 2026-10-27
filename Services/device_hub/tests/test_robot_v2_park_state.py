@@ -286,3 +286,18 @@ def test_shutdown_freezes_machine() -> None:
     assert len(f.pubs) == at_launch[0] + 1
     last = f.pubs[-1]
     assert (last["state"], last["step"], last["reason"]) == ("failed", "home", _TEXT_STOPPING)
+
+
+def test_home_program_link_failure_gives_link_reason() -> None:
+    """Поток программы дома увидел обрыв раньше guard тика: исход «link» -> «связь с роботом потеряна» (А8)."""
+    st = _state()
+    f = _Fakes(st)
+    m = f.machine()
+    _begin(st)
+    m.accept(1, 30.0)
+    m.step(_AWAY, True)
+    assert f.launches == [1]
+    st.program_finished("park", False, "link")
+    m.step(_AWAY, True)
+    last = f.pubs[-1]
+    assert (last["state"], last["step"], last["reason"]) == ("failed", "home", "связь с роботом потеряна")
