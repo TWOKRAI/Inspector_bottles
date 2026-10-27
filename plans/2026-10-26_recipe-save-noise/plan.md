@@ -109,7 +109,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** public-api-change (Protocol `RecipeStore` прототипа)
 - Task 1.1c: **[VERTICAL SLICE]** часть 4 — `RecipeStoreFromManager` по slug через канон и `RecipeManager`; приёмка Дисплеи/Камера/Устройства/раскладка [DONE] (после 1.7)
   - **Module contract:** impl-only
-- Task 1.2: Recipes/Pipeline/closeEvent-Save через `topology_to_canonical`, раскладка той же записью; непарсимое — `RecipeValidationError` [PENDING] (после 1.1c)
+- Task 1.2: Recipes/Pipeline/closeEvent-Save через `topology_to_canonical`, раскладка той же записью; непарсимое — `RecipeValidationError` [DONE] (после 1.1c)
   - **Module contract:** impl-only
 - Task 1.8: базовый `rev` редактора в `TopologySession` (старт и активация), конфликт — «Рецепт изменён снаружи — перезагрузите его» [PENDING] (после 1.2)
   - **Module contract:** impl-only
