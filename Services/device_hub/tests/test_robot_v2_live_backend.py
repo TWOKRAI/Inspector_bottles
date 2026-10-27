@@ -44,6 +44,7 @@ from typing import Any
 
 import pytest
 
+from backend_ctl.events import iter_state_deltas
 from backend_ctl.harness import BackendHarness
 from backend_ctl.protocol import unwrap
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig
@@ -584,3 +585,344 @@ def test_process_stop_after_lease_expiry_stops_standing_robot(tmp_path: Path, mo
     assert d2 == 1, f"простой r2: записей STOP_REQ {d2}, ожидалось 1; {numbers}"
     assert last1 & 3 == 1, f"уровень последней записи r1 {last1 & 3}, ожидался 1 (SOFT); {numbers}"
     assert last2 & 3 == 1, f"уровень последней записи r2 {last2 & 3}, ожидался 1 (SOFT); {numbers}"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# T5.3e.3 (бриф 3a): L1-L3 — robot_park на живом бэкенде (форма RED 16, один робот robot_main)
+# ---------------------------------------------------------------------------------------------------------------
+
+_PARK_ID = "robot_main"
+_PARK_REPLY_MAX_S = 1.0
+_PARK_DONE_MAX_S = 30.0
+_PARK_POLL_DEADLINE_S = 40.0
+_PARK_ALREADY_MAX_S = 1.5
+_READY_DEADLINE_S = 20.0
+_LINE_PARK_L1 = "робот 'robot_main': jog остановлен поводком: окно удержания истекло"
+_LINE_PARK_A1 = "робот 'robot_main': jog остановлен поводком после начала остановки"
+_LINE_PARK_E1 = "робот 'robot_main': jog остановлен поводком: область закрывается"
+_LINE_PARK_INTERRUPTED = "робот 'robot_main': поводок jog прерван"
+
+
+def _connect_ready(drv: Any, port: int) -> int:
+    """Подключение и готовность (C-57): ``conn == connected``, затем ``.status`` с ``ts > t_conn``; число попыток.
+
+    ``_upsert_and_connect`` ждёт ``connected``; ``t_conn`` берётся после него (строже спеки: ждём ``.status``, снятый
+    уже после ``connected``). Ответы «Путь не существует» / ``No handler for key`` / ``timeout`` — ждать дальше.
+    """
+    _upsert_and_connect(drv, _PARK_ID, port)
+    t_conn = time.time()
+    attempts = 0
+    deadline = time.monotonic() + _READY_DEADLINE_S
+    last: Any = None
+    while time.monotonic() < deadline:
+        attempts += 1
+        try:
+            last = _state_value(drv, f"devices.state.{_PARK_ID}.status")
+        except Exception:  # noqa: BLE001 — timeout / нет хендлера: ждём дальше
+            last = None
+        if isinstance(last, dict) and isinstance(last.get("ts"), (int, float)) and last["ts"] > t_conn:
+            return attempts
+        time.sleep(0.05)
+    pytest.fail(f".status с ts > t_conn не появился за {_READY_DEADLINE_S} с, последнее: {last!r}")
+
+
+class _ParkHolder:
+    """Держатель: ``robot_jog_hold`` каждые <= 0,1 с до ``halt_and_join``; копит ``(t_send, status, message)``."""
+
+    def __init__(self, drv: Any) -> None:
+        self._drv = drv
+        self._halt = threading.Event()
+        self._lock = threading.Lock()
+        self._results: list[tuple[float, Any, Any]] = []
+        self._t_reply: float | None = None
+        self._thread = threading.Thread(target=self._run, name="park-holder", daemon=True)
+
+    def _run(self) -> None:
+        args = {"device_id": _PARK_ID, "dir": 1, "spd": 20}
+        while not self._halt.is_set():
+            t_send = time.monotonic()
+            try:
+                leaf = unwrap(self._drv.send_command("devices", "robot_jog_hold", args, timeout=1.0), leaf=True)
+                status, message = leaf.get("status"), leaf.get("message")
+            except Exception as exc:  # noqa: BLE001 — не-ok, классифицируется тестом
+                status, message = "exception", repr(exc)
+            with self._lock:
+                self._results.append((t_send, status, message))
+            self._halt.wait(0.05)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def halt_and_join(self, deadline_s: float = 6.0) -> None:
+        self._halt.set()
+        self._thread.join(deadline_s)
+
+    def mark_reply(self) -> None:
+        with self._lock:
+            self._t_reply = time.monotonic()
+
+    def ok_count(self) -> int:
+        with self._lock:
+            return sum(1 for _, status, _ in self._results if status == "ok")
+
+    def after_reply(self) -> list[tuple[float, Any, Any]]:
+        with self._lock:
+            return [r for r in self._results if self._t_reply is not None and r[0] >= self._t_reply]
+
+
+def _wait_moving_plain(drv: Any, deadline_s: float = 5.0) -> None:
+    deadline = time.monotonic() + deadline_s
+    last: Any = None
+    while time.monotonic() < deadline:
+        last = _telemetry(drv, _PARK_ID).get("moving")
+        if last is True:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"telemetry['moving'] не стал True за {deadline_s} с, последнее: {last!r}")
+
+
+def _robot_park(drv: Any) -> tuple[dict[str, Any], float, float]:
+    """``robot_park``: ответ-лист (исключение отправки -> ``status: error``), время ответа и момент его прихода."""
+    t0 = time.monotonic()
+    try:
+        reply = _cmd(drv, "devices", "robot_park", {"device_id": _PARK_ID}, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001 — команды park нет: красный тест с понятным текстом
+        reply = {"status": "error", "message": f"исключение отправки: {exc!r}"}
+    t_reply = time.monotonic()
+    return reply, t_reply - t0, t_reply
+
+
+def _assert_park_accepted(reply: dict[str, Any], reply_s: float) -> int:
+    assert reply.get("status") == "ok" and reply.get("accepted") is True, f"robot_park не принят: {reply}"
+    assert reply_s <= _PARK_REPLY_MAX_S, f"ответ robot_park {reply_s:.3f} с > {_PARK_REPLY_MAX_S} с"
+    seq = reply.get("seq")
+    assert isinstance(seq, int), f"нет seq в ответе: {reply}"
+    return seq
+
+
+def _poll_park_final(drv: Any, seq: int) -> tuple[dict[str, Any], float]:
+    """Опрос ``.park`` до ``value.seq == seq`` и ``state in {done, failed}`` (40 с, шаг 0,05 с): значение и момент."""
+    path = f"devices.state.{_PARK_ID}.park"
+    deadline = time.monotonic() + _PARK_POLL_DEADLINE_S
+    last: Any = None
+    while time.monotonic() < deadline:
+        last = _state_value(drv, path)
+        if isinstance(last, dict) and last.get("seq") == seq and last.get("state") in ("done", "failed"):
+            return last, time.monotonic()
+        time.sleep(0.05)
+    pytest.fail(f"итог park seq={seq} не получен за {_PARK_POLL_DEADLINE_S} с, последнее: {last!r}")
+
+
+def _park_log_numbers(log_dir: Path) -> dict[str, Any]:
+    l1, _ = _count_lines(log_dir, _LINE_PARK_L1)
+    a1, _ = _count_lines(log_dir, _LINE_PARK_A1)
+    e1, _ = _count_lines(log_dir, _LINE_PARK_E1)
+    interrupted, _ = _count_lines(log_dir, _LINE_PARK_INTERRUPTED)
+    return {"L1": l1, "A1": a1, "E1": e1, "interrupted": interrupted}
+
+
+def test_park_then_process_stop_no_lease_soft(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """L1: park при подтверждённом jog, затем ``process.stop``: d1 == 2 (SOFT release и SOFT выключения)."""
+    monkeypatch.setenv("INSPECTOR_DATA_DIR", str(tmp_path / "data"))
+    log_dir = tmp_path / "logs"
+    numbers: dict[str, Any] = {}
+
+    with E2eRig() as rig:
+        with BackendHarness(with_base=True, port=_free_port(), log_dir=log_dir, ready_timeout=60.0) as drv:
+            numbers["ready_attempts"] = _connect_ready(drv, rig.port)
+            before = rig.read("STOP_REQ")[0] >> 2
+
+            holder = _ParkHolder(drv)
+            holder.start()
+            try:
+                deadline = time.monotonic() + 3.0
+                while holder.ok_count() < 1 and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert holder.ok_count() >= 1, "робот не ответил ok на robot_jog_hold за 3 с"
+                _wait_moving_plain(drv)
+                time.sleep(0.3)  # moving is True + 0,3 с
+                reply, reply_s, t_reply = _robot_park(drv)
+                holder.mark_reply()
+                seq = _assert_park_accepted(reply, reply_s)
+                final, t_final = _poll_park_final(drv, seq)
+                time.sleep(0.2)  # держатель продолжает слать и после итога
+                t_before_stop = time.monotonic()
+                stop_s = _process_stop(drv)
+            finally:
+                holder.halt_and_join()
+
+        after_raw = rig.read("STOP_REQ")[0]
+
+    d1 = (after_raw >> 2) - before
+    log = _park_log_numbers(log_dir)
+    after = holder.after_reply()
+    ok_after = [r for r in after if r[1] == "ok"]
+    to_final = t_final - t_reply
+    numbers.update(
+        reply_s=round(reply_s, 3),
+        final=final,
+        to_final_s=round(to_final, 3),
+        final_to_stop_s=round(t_before_stop - t_final, 3),
+        d1=d1,
+        process_stop_s=round(stop_s, 3),
+        holds_after=len(after),
+        holds_ok_after=len(ok_after),
+        **log,
+    )
+    _report_numbers("L1", numbers)
+
+    assert final.get("state") == "done", f"итог park: {final}; {numbers}"
+    assert final.get("home") == "moved", f"home == {final.get('home')!r}, ожидалось 'moved'; {numbers}"
+    assert to_final <= _PARK_DONE_MAX_S, f"итог через {to_final:.3f} с > {_PARK_DONE_MAX_S} с; {numbers}"
+    assert len(after) >= 3, f"jog_hold после ответа {len(after)} < 3; {numbers}"
+    assert not ok_after, f"jog_hold с ok после ответа: {ok_after}"
+    assert log["L1"] == 0, f"L1 == {log['L1']}, ожидалось 0; {numbers}"
+    assert log["A1"] == 0, f"A1 == {log['A1']}, ожидалось 0; {numbers}"
+    assert log["E1"] == 0, f"E1 == {log['E1']}, ожидалось 0; {numbers}"
+    assert d1 == 2, f"d1 == {d1}, ожидалось 2 (SOFT release и SOFT выключения); {numbers}"
+    assert after_raw & 3 == 1, f"уровень последней записи {after_raw & 3}, ожидался 1 (SOFT); {numbers}"
+
+
+def test_park_home_robot_then_process_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """L2: park без jog, серво ON, второй park: ``home == "already"`` за <= 1,5 с; d1 == 1 (только выключение)."""
+    monkeypatch.setenv("INSPECTOR_DATA_DIR", str(tmp_path / "data"))
+    log_dir = tmp_path / "logs"
+    numbers: dict[str, Any] = {}
+
+    with E2eRig() as rig:
+        with BackendHarness(with_base=True, port=_free_port(), log_dir=log_dir, ready_timeout=60.0) as drv:
+            numbers["ready_attempts"] = _connect_ready(drv, rig.port)
+            before = rig.read("STOP_REQ")[0] >> 2
+
+            # робот выводится из дома одной командой jog_step (JOG_STEP — команда mailbox, STOP_REQ не пишет)
+            x_before = _telemetry(drv, _PARK_ID)["x_mm"]
+            step = _cmd(drv, "devices", "robot_jog_step", {"device_id": _PARK_ID, "dx": 80, "dy": 0, "spd": 50})
+            assert step.get("status") == "ok", f"robot_jog_step: {step}"
+            deadline = time.monotonic() + 10.0
+            tel: dict[str, Any] = {}
+            while time.monotonic() < deadline:
+                tel = _telemetry(drv, _PARK_ID)
+                if abs(tel["x_mm"] - (x_before + 80.0)) <= 0.1 and tel.get("moving") is False:
+                    break
+                time.sleep(0.05)
+            moved = abs(tel["x_mm"] - (x_before + 80.0)) <= 0.1 and tel.get("moving") is False
+            assert moved, f"робот не вышел из дома: {tel}"
+
+            reply1, reply1_s, _ = _robot_park(drv)
+            seq1 = _assert_park_accepted(reply1, reply1_s)
+            final1, _ = _poll_park_final(drv, seq1)
+            assert final1.get("state") == "done", f"первый park: {final1}"
+
+            servo = _cmd(drv, "devices", "robot_servo", {"device_id": _PARK_ID, "on": True})
+            assert servo.get("status") == "ok", f"robot_servo on: {servo}"
+
+            reply2, reply2_s, t_reply2 = _robot_park(drv)
+            seq2 = _assert_park_accepted(reply2, reply2_s)
+            assert seq2 != seq1, f"seq второго park совпал с первым: {seq1}"
+            final2, t_final2 = _poll_park_final(drv, seq2)
+            stop_s = _process_stop(drv)
+
+        after_raw = rig.read("STOP_REQ")[0]
+
+    d1 = (after_raw >> 2) - before
+    log = _park_log_numbers(log_dir)
+    to_final2 = t_final2 - t_reply2
+    numbers.update(
+        d1=d1, second_final=final2, second_to_final_s=round(to_final2, 3), process_stop_s=round(stop_s, 3), **log
+    )
+    _report_numbers("L2", numbers)
+
+    assert final2.get("state") == "done" and final2.get("home") == "already", f"второй park: {final2}; {numbers}"
+    assert to_final2 <= _PARK_ALREADY_MAX_S, f"второй итог за {to_final2:.3f} с > {_PARK_ALREADY_MAX_S} с; {numbers}"
+    assert d1 == 1, f"d1 == {d1}, ожидалось 1 (только SOFT выключения); {numbers}"
+    assert log["L1"] == 0, f"L1 == {log['L1']}, ожидалось 0; {numbers}"
+
+
+def test_park_running_program_then_process_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """L3: идёт программа пользователя (>= 3 хода), park: дельта ``aborted`` раньше ``park_home``; итог done/moved."""
+    monkeypatch.setenv("INSPECTOR_DATA_DIR", str(tmp_path / "data"))
+    log_dir = tmp_path / "logs"
+    numbers: dict[str, Any] = {}
+    deltas: list[tuple[str, Any]] = []
+    deltas_lock = threading.Lock()
+    prefix = f"devices.state.{_PARK_ID}.program."
+
+    def on_event(msg: Any) -> None:  # reader-поток драйвера: только лёгкая запись
+        for delta in iter_state_deltas(msg):
+            path = delta.get("path")
+            if isinstance(path, str) and path.startswith(prefix):
+                with deltas_lock:
+                    deltas.append((path, delta.get("new_value")))
+
+    def first_index(leaf: str, value: Any) -> int | None:
+        with deltas_lock:
+            for i, (path, new_value) in enumerate(deltas):
+                if path == prefix + leaf and new_value == value:
+                    return i
+        return None
+
+    with E2eRig() as rig:
+        with BackendHarness(with_base=True, port=_free_port(), log_dir=log_dir, ready_timeout=60.0) as drv:
+            numbers["ready_attempts"] = _connect_ready(drv, rig.port)
+            before = rig.read("STOP_REQ")[0] >> 2
+
+            point_a = {"name": "a", "x": 400.0, "y": 100.0, "z": -60.0, "rz": 0.0, "hand": 1, "frame": None}
+            point_b = {"name": "b", "x": 300.0, "y": -210.0, "z": -40.0, "rz": -100.0, "hand": 1, "frame": None}
+            first = _cmd(
+                drv, "devices", "robot_point_save", {"device_id": _PARK_ID, "point": point_a, "base_rev": None}
+            )
+            assert first.get("status") == "ok", f"robot_point_save a: {first}"
+            second = _cmd(
+                drv, "devices", "robot_point_save", {"device_id": _PARK_ID, "point": point_b, "base_rev": first["rev"]}
+            )
+            assert second.get("status") == "ok", f"robot_point_save b: {second}"
+            steps = [{"op": "move", "point": "a" if i % 2 == 0 else "b", "kind": "JOINT"} for i in range(20)]
+            saved = _cmd(
+                drv,
+                "devices",
+                "robot_program_save",
+                {"device_id": _PARK_ID, "program": {"name": "p3", "steps": steps}, "base_rev": None},
+            )
+            assert saved.get("status") == "ok", f"robot_program_save p3: {saved}"
+            run = _cmd(drv, "devices", "robot_program_run", {"device_id": _PARK_ID, "name": "p3"})
+            assert run.get("status") == "ok", f"robot_program_run: {run}"
+
+            deadline = time.monotonic() + 20.0
+            prog: Any = None
+            while time.monotonic() < deadline:
+                prog = _state_value(drv, f"devices.state.{_PARK_ID}.program")
+                if isinstance(prog, dict) and prog.get("state") == "running" and (prog.get("done") or 0) >= 3:
+                    break
+                time.sleep(0.05)
+            running3 = isinstance(prog, dict) and prog.get("state") == "running" and (prog.get("done") or 0) >= 3
+            assert running3, f"программа p3 не дошла до 3 ходов в running: {prog!r}"
+
+            drv.subscribe(on_event)
+            sub = unwrap(drv.state_subscribe(prefix + "**", timeout=10.0), leaf=True)  # открыта ДО robot_park
+            assert sub.get("status") == "ok", f"state_subscribe: {sub}"
+
+            reply, reply_s, _ = _robot_park(drv)
+            seq = _assert_park_accepted(reply, reply_s)
+            final, _ = _poll_park_final(drv, seq)
+            deadline = time.monotonic() + 3.0  # дельты идут отдельным потоком: даём дойти
+            while time.monotonic() < deadline and (
+                first_index("state", "aborted") is None or first_index("name", "park_home") is None
+            ):
+                time.sleep(0.05)
+            stop_s = _process_stop(drv)
+
+        after_raw = rig.read("STOP_REQ")[0]
+
+    log = _park_log_numbers(log_dir)
+    aborted_i, park_i = first_index("state", "aborted"), first_index("name", "park_home")
+    with deltas_lock:
+        seen = list(deltas)
+    numbers.update(d1=(after_raw >> 2) - before, process_stop_s=round(stop_s, 3), final=final, **log)
+    _report_numbers("L3", numbers)
+
+    assert final.get("state") == "done" and final.get("home") == "moved", f"итог park: {final}; {numbers}"
+    assert aborted_i is not None, f"нет дельты program.state == 'aborted'; дельты: {seen}"
+    assert park_i is not None, f"нет дельты program.name == 'park_home'; дельты: {seen}"
+    assert aborted_i < park_i, f"aborted ({aborted_i}) не раньше park_home ({park_i}); дельты: {seen}"
+    assert log["L1"] == 0, f"L1 == {log['L1']}, ожидалось 0; {numbers}"
+    assert log["A1"] == 0, f"A1 == {log['A1']}, ожидалось 0; {numbers}"
