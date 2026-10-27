@@ -105,7 +105,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** public-api-change (`recipe.YamlWriteRefused`)
 - Task 1.1g: хук v3 в GUI, адаптеры `Recipe`/`Topology` ↔ канон, контракт на 22 рецептах [DONE] (после 1.1f)
   - **Module contract:** new-lite (`adapters/recipe_canonical.py`)
-- Task 1.7: `Topology` типизирует `name/description` + финальный Protocol `RecipeStore` (`read_canonical`, `read_raw_with_rev`, `expected_rev`, `layout`) и фейк [PENDING] (после 1.1g; слито с 1.1d)
+- Task 1.7: `Topology` типизирует `name/description` + финальный Protocol `RecipeStore` (`read_canonical`, `read_raw_with_rev`, `expected_rev`, `layout`) и фейк [DONE] (после 1.1g; слито с 1.1d)
   - **Module contract:** public-api-change (Protocol `RecipeStore` прототипа)
 - Task 1.1c: **[VERTICAL SLICE]** часть 4 — `RecipeStoreFromManager` по slug через канон и `RecipeManager`; приёмка Дисплеи/Камера/Устройства/раскладка [PENDING] (после 1.7)
   - **Module contract:** impl-only
