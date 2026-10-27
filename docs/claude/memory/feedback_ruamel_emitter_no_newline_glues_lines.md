@@ -2,7 +2,7 @@
 name: feedback_ruamel_emitter_no_newline_glues_lines
 description: "ruamel 0.19 склеивает строки блочной карты (`- a: 1 b: 2`) после EOL-комментария ключа списка — флаг эмиттера no_newline; чинится расстановкой токена и сбросом флага, не очисткой комментариев / ruamel emitter no_newline leak glues block mapping lines"
 module: [recipe]
-mechanism: [serialization]
+mechanism: [persistence]
 metadata:
   type: feedback
 ---
