@@ -457,7 +457,7 @@
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 
-## lifecycle (21)
+## lifecycle (22)
 
 - [feedback_born_wrong_then_fixed_looks_like_working](feedback_born_wrong_then_fixed_looks_like_working.md)
 - [feedback_cleanup_must_survive_abnormal_disconnect](feedback_cleanup_must_survive_abnormal_disconnect.md)
@@ -475,6 +475,7 @@
 - [project_code_reader_mode_restore_is_not_a_guarantee](project_code_reader_mode_restore_is_not_a_guarantee.md)
 - [project_f7_g7_num_consumers](project_f7_g7_num_consumers.md)
 - [project_graceful_stop_debt](project_graceful_stop_debt.md)
+- [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_otlp_http_timeout_is_not_a_call_ceiling](project_otlp_http_timeout_is_not_a_call_ceiling.md)
 - [project_silent_observability_plane](project_silent_observability_plane.md)
 - [project_switch_delivers_layer](project_switch_delivers_layer.md)
@@ -558,7 +559,7 @@
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## owner-decision (19)
+## owner-decision (20)
 
 - [feedback_always_latest_models](feedback_always_latest_models.md)
 - [feedback_dialog_conventions](feedback_dialog_conventions.md)
@@ -576,6 +577,7 @@
 - [feedback_three_lenses_three_defect_classes](feedback_three_lenses_three_defect_classes.md)
 - [feedback_unused_paths_are_contracts](feedback_unused_paths_are_contracts.md)
 - [project_gui_constructor_layers_2026_09_26](project_gui_constructor_layers_2026_09_26.md)
+- [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_owner_push_and_tools_decisions](project_owner_push_and_tools_decisions.md)
 - [project_priority_engine_first](project_priority_engine_first.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
