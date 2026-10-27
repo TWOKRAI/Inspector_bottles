@@ -107,7 +107,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** new-lite (`adapters/recipe_canonical.py`)
 - Task 1.7: `Topology` типизирует `name/description` + финальный Protocol `RecipeStore` (`read_canonical`, `read_raw_with_rev`, `expected_rev`, `layout`) и фейк [DONE] (после 1.1g; слито с 1.1d)
   - **Module contract:** public-api-change (Protocol `RecipeStore` прототипа)
-- Task 1.1c: **[VERTICAL SLICE]** часть 4 — `RecipeStoreFromManager` по slug через канон и `RecipeManager`; приёмка Дисплеи/Камера/Устройства/раскладка [PENDING] (после 1.7)
+- Task 1.1c: **[VERTICAL SLICE]** часть 4 — `RecipeStoreFromManager` по slug через канон и `RecipeManager`; приёмка Дисплеи/Камера/Устройства/раскладка [DONE] (после 1.7)
   - **Module contract:** impl-only
 - Task 1.2: Recipes/Pipeline/closeEvent-Save через `topology_to_canonical`, раскладка той же записью; непарсимое — `RecipeValidationError` [PENDING] (после 1.1c)
   - **Module contract:** impl-only
