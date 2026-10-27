@@ -41,6 +41,7 @@
 - [Приоритет — маятник](project_priority_engine_first.md) — порядок в `ORDER.md`
 - [Жизненный цикл](project_universal_lifecycle_decision.md) — один scope-владелец подписок, потоков, процессов
 - [Framework-first](feedback_framework_first.md) — fix-forward, FREEZE не KILL, меньше слоёв, конструктор
+- [PackML и стандарты](project_industrial_standards_packml.md) — состояния по PackML, причины NE 107, стопы IEC 60204-1
 - [Флаг закрыт, когда удалён](feedback_flags_must_not_become_crutches.md) — не костыль
 - [Ручки наблюдаемости](feedback_observability_knobs_switchable_at_any_boundary_zero_cost_off.md) — вкл/выкл везде, ноль нагрузки выключенной
 - [Один пишущий логгер](feedback_one_log_writer.md) — остальное — вид поверх
