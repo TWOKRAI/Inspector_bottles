@@ -19,6 +19,7 @@ from .migrations import migration, registered_steps, run_chain
 from .recipe_engine import RecipeEngine
 from .yaml_io import (
     YamlPatchConflict,
+    YamlWriteRefused,
     apply_delta,
     update_blueprint_metadata_preserving,
     update_yaml_preserving,
@@ -40,6 +41,7 @@ __all__ = [
     "update_blueprint_metadata_preserving",
     "apply_delta",
     "YamlPatchConflict",
+    "YamlWriteRefused",
     "recipe_file_lock",
     "RecipeLockTimeout",
     "StoreProtocol",

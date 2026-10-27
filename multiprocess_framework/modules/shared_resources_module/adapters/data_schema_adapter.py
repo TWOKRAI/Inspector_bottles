@@ -3,7 +3,8 @@ DataSchemaAdapter — тонкий мост к data_schema_module.
 
 Делегирует в data_schema_module.storage.StorageManager.
 Не содержит схемной логики, валидации или типов — всё в data_schema_module.
-Ленивый импорт: data_schema_module опционален (graceful degradation).
+Импорт StorageManager ленивый (при первом вызове); data_schema_module — core,
+ошибка импорта не глотается (C-54).
 """
 
 from typing import Optional, Any
@@ -15,7 +16,7 @@ class DataSchemaAdapter:
 
     Предоставляет доступ к хранению ComponentDNA и manager-моделей в ProcessData.custom.
     Вся логика схем, валидации, RegisterBase — в data_schema_module.
-    Graceful degradation: возвращает None если data_schema_module недоступен.
+    Ошибка импорта StorageManager уходит вызывающему как ImportError.
     """
 
     def __init__(self, shared_resources_manager: Any) -> None:
@@ -25,11 +26,9 @@ class DataSchemaAdapter:
     def get_data_manager(self) -> Optional[Any]:
         """Получить StorageManager (ленивая инициализация)."""
         if self._data_manager is None:
-            try:
-                from ....data_schema_module.storage.storage_manager import StorageManager
-                self._data_manager = StorageManager(shared_resources=self._srm)
-            except ImportError:
-                return None
+            from ...data_schema_module.storage.storage_manager import StorageManager
+
+            self._data_manager = StorageManager(shared_resources=self._srm)
         return self._data_manager
 
     @property
@@ -37,4 +36,5 @@ class DataSchemaAdapter:
         return self.get_data_manager()
 
     def is_available(self) -> bool:
+        """True, если StorageManager создан; ошибку импорта не прячет — бросает."""
         return self.get_data_manager() is not None

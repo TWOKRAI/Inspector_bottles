@@ -5,15 +5,14 @@ adapters/stores/recipe_store.py — RecipeStoreFromManager: domain RecipeStore a
 Реализует Protocol RecipeStore из domain/protocols/recipe_store.py
 поверх существующего RecipeManager.
 
-Решение Q2 (Variant A): при write() денормализует meta -> top-level
+Решение Q2 (Variant A): при создании рецепта денормализует meta -> top-level
 для backward-compat с live YAML reader'ами (legacy формат v2).
 
-Write обходит RecipeManager.save() намеренно — тот выполняет snapshot
-config-store ветвей через TreeStore, что неприменимо для domain entity write.
-
-Read делегирует RecipeManager.read_recipe(), который уже читает YAML
-и возвращает raw dict. Recipe.from_dict() понимает оба формата
-(с meta: и без — top-level name/version/...).
+C-30 (Task 1.1c): стор работает только по slug, весь IO — через RecipeManager (design.md §9.1, §10).
+Операция «прочитал -> записал»: ``(doc, rev) = read_canonical(slug)``, правка переносится на ``doc``
+(каноническая форма ``N(файл)``), запись — ``patch_recipe(slug, after, expected_rev=...)``; движок
+правит файл минимальной дельтой, без шума (комментарии, flow-стиль, порядок ключей, EOL). ``RecipeConflict``
+не глотается. Каталог рецептов владеет RecipeManager: ``recipe_dir`` конструктора для IO не используется.
 
 Phase F: + read_raw/save_raw/duplicate/deactivate, set_active -> bool.
 Прямой доступ к engine._active_name убран — через RecipeManager.deactivate().
@@ -27,27 +26,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.recipe import RecipeFormatError
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_prototype.domain.entities.recipe import Recipe
 
 if TYPE_CHECKING:
     from multiprocess_prototype.recipes.manager import RecipeManager
 
+logger = get_std_logger(__name__)
+
 
 class RecipeStoreFromManager:
-    """Adapter поверх RecipeManager для domain RecipeStore Protocol.
+    """Adapter поверх RecipeManager для domain RecipeStore Protocol (только slug, IO через менеджер).
 
-    Q2 (Variant A): при write денормализует meta -> top-level
-    для backward-compat с live YAML reader'ами.
-
-    Read использует RecipeManager.read_recipe() (он уже понимает оба формата).
-    Write обходит RecipeManager.save() — пишет YAML напрямую.
+    Чтения: ``read_raw_with_rev`` / ``read_canonical`` возвращают ``(тело, rev)`` одного чтения.
+    Записи: принимают ``expected_rev`` (``None`` — стор берёт ``rev`` своего чтения внутри операции),
+    возвращают новый ``rev`` (холостая запись — прежний). ``RecipeConflict`` пробрасывается.
 
     Phase F: set_active(None) делегирует в RecipeManager.deactivate() (публичный API).
     """
 
     def __init__(self, recipe_manager: RecipeManager, recipe_dir: Path) -> None:
         self._rm = recipe_manager
+        # FREEZE: каталог рецептов владеет RecipeManager; ``_dir`` для IO не используется.
         self._dir = Path(recipe_dir)
 
     # ------------------------------------------------------------------
@@ -55,37 +57,49 @@ class RecipeStoreFromManager:
     # ------------------------------------------------------------------
 
     def list(self) -> tuple[str, ...]:
-        """Вернуть отсортированный tuple slug'ов всех доступных рецептов."""
-        return tuple(sorted(p.stem for p in self._dir.glob("*.yaml")))
+        """Вернуть отсортированный tuple slug'ов всех доступных рецептов (RecipeManager.list())."""
+        return tuple(self._rm.list())
 
     def read(self, slug: str) -> Recipe | None:
-        """Прочитать рецепт по slug через RecipeManager.read_recipe().
+        """Прочитать рецепт по slug из канонической формы (``read_canonical``, не из raw).
 
-        RecipeManager.read_recipe() возвращает dict | None.
-        Recipe.from_dict() понимает оба формата (meta: и top-level).
+        Битый файл (не разбирается, корень не mapping, хук отверг тело) -> ``None`` и ``error`` в лог:
+        контракт до 1.1c («None если не найден»), потребители (каталог дисплеев, ``ActivateRecipe``)
+        не знают ``RecipeFormatError``.
         """
-        raw = self._rm.read_recipe(slug)
-        if raw is None:
+        from multiprocess_prototype.adapters.recipe_canonical import recipe_from_canonical
+
+        try:
+            doc, _rev = self._rm.read_canonical(slug)
+        except RecipeFormatError as exc:
+            logger.error("RecipeStoreFromManager.read: рецепт '%s' не читается: %s", slug, exc)
             return None
-        return Recipe.from_dict(raw)
+        if doc is None:
+            return None
+        return recipe_from_canonical(doc)
 
-    def write(self, slug: str, recipe: Recipe) -> None:
-        """Записать рецепт в YAML, денормализуя meta -> top-level (Q2 Variant A).
+    def write(self, slug: str, recipe: Recipe, *, expected_rev: str | None = None) -> str:
+        """Записать рецепт: правка модели переносится на канон файла дельтой (1.1g), одна запись.
 
-        Обходит RecipeManager.save() — тот делает snapshot config-store,
-        а нам нужно записать domain entity как есть. Запись через
-        update_yaml_preserving (ruamel) — сохраняет комментарии существующего файла.
+        Рецепта нет — создание из ``_denormalize(recipe.to_dict())`` (meta -> top-level, Q2 Variant A),
+        верхние ключи проходят ``minimize`` (как вставка в ``recipe_to_canonical``: умолчания модели не пишутся).
+        Возвращает новый ``rev`` (холостая запись — прежний). Raises: ``RecipeConflict``.
         """
-        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+        from multiprocess_prototype.adapters.recipe_canonical import minimize, recipe_to_canonical
 
-        data = self._denormalize(recipe.to_dict())
-        self._dir.mkdir(parents=True, exist_ok=True)
-        update_yaml_preserving(self._dir / f"{slug}.yaml", data)
+        doc, rev = self._rm.read_canonical(slug)
+        if doc is None:
+            after = {key: minimize((key,), value) for key, value in self._denormalize(recipe.to_dict()).items()}
+        else:
+            after = recipe_to_canonical(recipe, doc)
+        return self._rm.patch_recipe(slug, after, expected_rev=expected_rev if expected_rev is not None else rev)
 
     def delete(self, slug: str) -> None:
-        """Удалить файл рецепта. Если файла нет — молча игнорировать."""
-        path = self._dir / f"{slug}.yaml"
-        path.unlink(missing_ok=True)
+        """Удалить рецепт через RecipeManager.delete(). Если файла нет — молча игнорировать.
+
+        Побочный эффект менеджера: удаление активного рецепта сбрасывает ``state.recipes.active``.
+        """
+        self._rm.delete(slug)
 
     # ------------------------------------------------------------------
     # Raw dict I/O (Phase F)
@@ -95,32 +109,52 @@ class RecipeStoreFromManager:
         """Прочитать raw YAML dict (полная структура) через RecipeManager.read_recipe()."""
         return self._rm.read_recipe(slug)
 
-    def save_raw(self, slug: str, data: dict) -> None:
-        """Записать top-level ключи рецепта, СОХРАНИВ комментарии (ruamel round-trip).
+    def read_raw_with_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        """Raw dict и ``rev`` одного чтения (``RecipeManager.read_recipe_rev``); нет файла — ``(None, None)``."""
+        return self._rm.read_recipe_rev(slug)
 
-        merge-семантика: обновляются только переданные top-level ключи (blueprint,
-        gui_positions, ...); остальные (name/version/description) и комментарии файла
-        не тронуты. Новый файл создаётся из ``data``. Используется presenter'ами для
-        сохранения живого графа в рецепт без порчи документа.
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        """Каноническое тело ``N(файл)`` и ``rev`` одного чтения (``RecipeManager.read_canonical``)."""
+        return self._rm.read_canonical(slug)
+
+    def save_raw(
+        self,
+        slug: str,
+        data: dict,
+        *,
+        expected_rev: str | None = None,
+        layout: tuple[dict[str, list[float]], list[str]] | None = None,
+    ) -> str:
+        """Записать top-level ключи ``data`` в рецепт минимальной дельтой; вернуть новый ``rev``.
+
+        merge-семантика: ``after = {**канон файла, **data}`` — переданные top-level ключи заменяются,
+        остальные не тронуты. Файла нет — создание из ``data``. ``layout`` пишется той же записью.
+        Raises: ``RecipeConflict`` (``expected_rev`` не совпал), ``ValueError`` (``layout`` без blueprint).
         """
-        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
-
-        self._dir.mkdir(parents=True, exist_ok=True)
-        update_yaml_preserving(self._dir / f"{slug}.yaml", data)
-
-    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
-        """Сохранить GUI-layout в blueprint.metadata, СОХРАНИВ комментарии рецепта.
-
-        Точечно пишет ``blueprint.metadata.{gui_positions,locked_nodes}`` через
-        ruamel (не перезаписывая весь blueprint) — авто-персист при перетаскивании
-        не стирает per-node комментарии. См. free-layout (Task 2/3).
-        """
-        from multiprocess_prototype.recipes.yaml_io import update_blueprint_metadata_preserving
-
-        update_blueprint_metadata_preserving(
-            self._dir / f"{slug}.yaml",
-            {"gui_positions": gui_positions, "locked_nodes": locked_nodes},
+        doc, rev = self._rm.read_canonical(slug)
+        after = {**(doc or {}), **data}
+        return self._rm.patch_recipe(
+            slug, after, expected_rev=expected_rev if expected_rev is not None else rev, layout=layout
         )
+
+    def save_layout(
+        self,
+        slug: str,
+        positions: dict[str, list[float]],
+        locked_nodes: list[str],
+        *,
+        expected_rev: str | None = None,
+    ) -> str | None:
+        """Точечно сохранить ``blueprint.metadata.{gui_positions,locked_nodes}`` (RecipeManager.save_layout).
+
+        Комментарии и стиль файла сохраняются. ``expected_rev=None`` — rev своего чтения внутри операции;
+        рецепта нет и ``expected_rev=None`` — ``None``.
+        Raises: ``RecipeConflict``, ``RecipeFormatError`` (файл устаревшей формы).
+        """
+        if expected_rev is None:
+            # Менеджер запрещает запись по существующему файлу без базовой ревизии: берём rev своего чтения.
+            _body, expected_rev = self._rm.read_recipe_rev(slug)
+        return self._rm.save_layout(slug, positions, locked_nodes, expected_rev=expected_rev)
 
     # ------------------------------------------------------------------
     # Active recipe

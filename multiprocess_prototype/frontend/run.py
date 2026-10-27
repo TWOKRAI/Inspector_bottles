@@ -25,8 +25,9 @@ Headless-флаг (``INSPECTOR_HEADLESS=1`` / ``--headless``, см. ``main.py``)
 запуск ``frontend/run.py --headless`` поднимет систему БЕЗ окна: процесс ``gui``
 останется, но будет дренировать data-трафик вместо рисования.
 
-venv-guard — 1-в-1 с ``multiprocess_prototype/run.py`` (см. его докстринг про
-``sys.path[0]`` при прямом запуске скрипта).
+venv-guard — общий: ``multiprocess_prototype.run.venv_guard`` (одна реализация, C-55a);
+бутстрап ``sys.path`` ниже нужен, чтобы импортировать его до re-exec (см. докстринг
+``multiprocess_prototype/run.py`` про ``sys.path[0]`` при прямом запуске скрипта).
 """
 
 from __future__ import annotations
@@ -40,48 +41,34 @@ PROTOTYPE_ROOT = HERE.parent  # .../multiprocess_prototype
 PROJECT_ROOT = PROTOTYPE_ROOT.parent  # .../Inspector_bottles
 PROJECT_VENV = PROJECT_ROOT / ".venv"
 
+# При запуске скриптом sys.path[0] — каталог frontend/, а не корень проекта: без этой строки
+# импорт общего guard'а ниже (он нужен ДО re-exec, под любым python) не разрешается.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from multiprocess_prototype.run import git_common_dir, venv_guard  # noqa: E402 — sys.path с корнем проекта выставлен строкой выше; импорт нужен до re-exec
+
 #: Прошитый overlay фронта — единственный презентационный файл, который знает
 #: этот entry-point (хардкод-shell, не generic-конструктор — см. докстринг модуля).
 PRESENTATION_PATH = HERE / "presentation.yaml"
 
 
-def _venv_python() -> Path:
-    """Путь к python в проектном venv."""
-    if os.name == "nt":
-        return PROJECT_VENV / "Scripts" / "python.exe"
-    return PROJECT_VENV / "bin" / "python"
-
-
-def _same_interpreter(a: Path, b: Path) -> bool:
-    """Проверка что два пути указывают на один и тот же интерпретатор."""
-    try:
-        return a.resolve() == b.resolve()
-    except (OSError, ValueError):
-        return False
-
-
-def launch() -> int:
+def launch(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    common_dir_of=git_common_dir,
+    execv=os.execv,
+) -> int:
     """venv-guard: переключиться на проектный .venv, включить presentation, запустить."""
-    venv_py = _venv_python()
-    current_py = Path(sys.executable)
-
-    if not venv_py.exists():
-        print(
-            f"[frontend/run] ОШИБКА: не найден проектный venv: {venv_py}\n"
-            f"       Создай его: cd {PROJECT_ROOT} && uv sync",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Re-exec через проектный Python, если сейчас другой интерпретатор
-    if not _same_interpreter(current_py, venv_py):
-        print(f"[frontend/run] переключаюсь на {venv_py}", file=sys.stderr)
-        # Re-exec в проектный venv — аргументы контролируемые (venv-python + этот файл + argv)
-        os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]])  # nosec B606
-
-    # Уже в проектном venv — добавляем корень проекта в sys.path
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
+    rc = venv_guard(
+        Path(__file__),
+        project_root=project_root,
+        common_dir_of=common_dir_of,
+        execv=execv,
+        tag="[frontend/run]",
+    )
+    if rc is not None:
+        return rc
 
     # Прошитый выбор overlay (хардкод-shell): фронт ВСЕГДА включает свою презентацию.
     # --headless / INSPECTOR_HEADLESS, если передан, всё равно победит (main._is_headless
