@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Task 1.10 — тесты рисков автора (ревью р.1, пп. 1-2): две строки таблицы путей D4, которые приёмка R1-R14 не держит.
+"""Task 1.10 — тесты рисков автора (ревью р.1, пп. 1-2): строки таблицы путей D4, которые приёмка R1-R14 не держит.
 
 Обвязка — как в ``test_stop_outcome_acceptance.py`` (настоящий PM + два spawn-ребёнка ``slow`` / ``other``, окно
 стопа 1,0 с). Ожидаемые значения — литералы из таблицы D4 (``plans/lifecycle-stop-ownership/tasks/T1.10.md``).
@@ -7,7 +7,8 @@
 * H1 — гонка «жив для PM, мёртв для реестра»: ответ ``outcome: None``, ``success: True`` (итог берётся из канала
   ЭТОГО вызова, а не из записи реестра, которая могла остаться от прошлого стопа);
 * H2 — «рестарт отказан до фазы стопа»: ответ ``outcome: None`` и после недавнего стопа на том же потоке исполнителя
-  (канал вызова сбрасывает сам обработчик рестарта).
+  (канал вызова сбрасывает сам обработчик рестарта);
+* H3 — «рестарт: стоп прошёл, пересоздание упало»: ``success: False`` и итог фазы стопа (ревью ветки, advisory 2).
 """
 
 from __future__ import annotations
@@ -104,4 +105,30 @@ def test_restart_of_dead_child_does_not_leak_previous_outcome(rig: Rig) -> None:
     assert restarted is not None, "ответ process.restart уже мёртвого slow не пришёл за дедлайн"
     assert restarted.result == {"success": True, "process_name": "slow", "outcome": None}, (
         f"рестарт мёртвого slow: {restarted.result}"
+    )
+
+
+@pytest.mark.timeout(150)
+def test_restart_recreate_failed_reply_carries_stop_phase_outcome(rig: Rig) -> None:
+    """H3 (ревью ветки, advisory 2): строка D4 «рестарт: стоп прошёл, ``create_and_register`` упал» — живой ``slow``
+    (стоп дольше окна 1,0 с), ``create_and_register`` возвращает ``None`` -> ``{"success": False, "process_name":
+    "slow", "outcome": "terminated"}``: итог фазы стопа не теряется при отказе пересоздания."""
+    registry = rig.pm._process_registry
+    real_create = registry.create_and_register
+    calls: list[str] = []
+
+    def create_fails(name, *args, **kwargs):
+        calls.append(name)
+        return None
+
+    registry.create_and_register = create_fails
+    try:
+        reply = rig.wait_reply(rig.send("process.restart", {"process_name": "slow"}))
+    finally:
+        registry.create_and_register = real_create
+
+    assert calls == ["slow"], f"подмена не сработала: create_and_register вызван для {calls}"
+    assert reply is not None, "ответ process.restart slow не пришёл за дедлайн"
+    assert reply.result == {"success": False, "process_name": "slow", "outcome": "terminated"}, (
+        f"рестарт slow с отказом пересоздания: {reply.result}"
     )
