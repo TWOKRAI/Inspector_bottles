@@ -5,9 +5,12 @@
   1. Ищем свой ``<корень дерева>/.venv/Scripts/python.exe`` (или ``bin/python``). Есть — git не зовём.
   2. Своего нет (связанный git worktree) — спрашиваем git, где основная копия
      (``git rev-parse --git-common-dir``), и берём ``.venv`` основной копии.
-  3. Если найденный python — НЕ текущий интерпретатор — re-exec через него (скрипт остаётся
-     из текущего дерева: код worktree, а не основной копии).
-  4. Прямой вызов main.main() (без subprocess).
+  3. Если найденный python — НЕ текущий интерпретатор — перезапуск через него (скрипт остаётся
+     из текущего дерева: код worktree, а не основной копии). POSIX: ``os.execv`` подменяет процесс.
+     Windows: ``execv`` лишь эмулируется (новый процесс + немедленный выход с кодом 0), поэтому
+     ``default_relaunch`` запускает приложение через ``subprocess.Popen``, ждёт его и отдаёт его код
+     выхода (C-70).
+  4. Прямой вызов main.main() (без перезапуска), если интерпретатор уже нужный.
 
 Подсказка «uv sync» печатается только для основной копии без ``.venv``. В связанном worktree
 ``uv sync`` подсказывать нельзя: он создал бы второй ``.venv`` (с подменой CUDA-сборки torch).
@@ -27,7 +30,7 @@ Python кладёт в `sys.path[0]` директорию скрипта, а н�
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 — единственный вызов: git rev-parse, argv литеральный, без shell
+import subprocess  # nosec B404 — git rev-parse и перезапуск через Popen: argv списком, без shell
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -117,18 +120,45 @@ def resolve_venv_python(project_root: Path, main_root: Path | None) -> tuple[Pat
     return None, candidates
 
 
+def default_relaunch(exe: str, argv: list[str]) -> int:
+    """Перезапустить ``argv`` интерпретатором ``exe`` и вернуть код выхода приложения.
+
+    POSIX: ``os.execv`` подменяет процесс и не возвращается. Windows: ``execv`` — эмуляция
+    (родитель сразу выходит с кодом 0, приложение теряется для гейта и TaskStop), поэтому
+    запускаем ``Popen`` и ждём. stdin/stdout/stderr и окружение наследуются.
+    """
+    if os.name != "nt":
+        # Аргументы контролируемые (venv-python + скрипт этого дерева + argv)
+        os.execv(exe, argv)  # nosec B606
+    # executable=exe: при argv[0] != exe Windows иначе даёт FileNotFoundError. OSError не ловим.
+    proc = subprocess.Popen(argv, executable=exe)  # nosec B603
+    while True:
+        try:
+            rc = proc.wait()
+            break
+        except KeyboardInterrupt:
+            # Ctrl+C в общей консоли получают оба процесса; приложение гасит себя само, а
+            # Popen.wait() на Windows сигналом не прерывается — исключение приходит уже ПОСЛЕ
+            # выхода ребёнка. Ребёнка не убиваем (subprocess.run сделал бы kill): ждём дальше.
+            continue
+    # Popen.returncode на Windows беззнаковый (0xC0000005 -> 3221225477); возвращаем знаковый.
+    return rc - (1 << 32) if rc >= (1 << 31) else rc
+
+
 def venv_guard(
     script: Path,
     *,
     project_root: Path = PROJECT_ROOT,
     common_dir_of: Callable[[Path], Path | None] = git_common_dir,
-    execv: Callable[..., object] = os.execv,
+    relaunch: Callable[[str, list[str]], int] = default_relaunch,
     tag: str = "[run]",
 ) -> int | None:
-    """Единственная реализация venv-guard: найти venv, при необходимости re-exec ``script``.
+    """Единственная реализация venv-guard: найти venv, при необходимости перезапустить ``script``.
 
-    Возврат: ``1`` — venv не найден (сообщение в stderr); ``None`` — текущий интерпретатор
-    уже нужный, продолжать запуск. Настоящий ``os.execv`` не возвращается.
+    Возврат: ``None`` — интерпретатор уже нужный, продолжать запуск; любое ``int`` (в том числе
+    ``0``) — завершить вход с этим кодом: ``1`` — venv не найден (сообщение в stderr), иначе код
+    выхода перезапущенного приложения (``relaunch``). На POSIX настоящий ``default_relaunch``
+    через ``os.execv`` не возвращается.
     """
     own = venv_python(project_root / ".venv")
     if own.exists():
@@ -155,8 +185,7 @@ def venv_guard(
     if not _same_interpreter(Path(sys.executable), venv_py):
         note = f" (venv основной копии {main_root})" if venv_py != own else ""
         print(f"{tag} переключаюсь на {venv_py}{note}", file=sys.stderr)
-        # Re-exec в venv — аргументы контролируемые (venv-python + скрипт этого дерева + argv)
-        execv(str(venv_py), [str(venv_py), str(script.resolve()), *sys.argv[1:]])  # nosec B606
+        return relaunch(str(venv_py), [str(venv_py), str(script.resolve()), *sys.argv[1:]])
     return None
 
 
@@ -164,10 +193,12 @@ def launch(
     *,
     project_root: Path = PROJECT_ROOT,
     common_dir_of: Callable[[Path], Path | None] = git_common_dir,
-    execv: Callable[..., object] = os.execv,
+    relaunch: Callable[[str, list[str]], int] = default_relaunch,
 ) -> int:
     """venv-guard: переключиться на проектный .venv и передать управление приложению."""
-    rc = venv_guard(Path(__file__), project_root=project_root, common_dir_of=common_dir_of, execv=execv, tag="[run]")
+    rc = venv_guard(
+        Path(__file__), project_root=project_root, common_dir_of=common_dir_of, relaunch=relaunch, tag="[run]"
+    )
     if rc is not None:
         return rc
 

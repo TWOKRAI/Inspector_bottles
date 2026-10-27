@@ -5,9 +5,10 @@
 репозитория и без git), сбои ``subprocess.run`` и бутстрап ``frontend/run.py`` под
 изолированным python.
 
-Правила харнеса те же: ``execv`` во ВСЕХ вызовах ``launch`` передаётся явно фейком
-(значение по умолчанию связано с ``os.execv`` при определении функции, а настоящий
-``os.execv`` на Windows запускает приложение и убивает pytest); приложение подменено
+Правила харнеса те же: seam ``relaunch`` во ВСЕХ вызовах ``launch`` передаётся явно фейком
+(значение по умолчанию — ``run.default_relaunch``, связано при определении функции; настоящий
+``run.default_relaunch`` на Windows ждёт дочерний процесс вместо ``os.execv`` и без фейка
+запустит настоящее приложение и будет ждать его — pytest зависнет); приложение подменено
 заглушкой.
 """
 
@@ -99,7 +100,7 @@ def test_h1_no_reexec_loop_when_already_in_main_venv(tmp_path: Path, monkeypatch
     main_py = _make_venv(main)
     monkeypatch.setattr(sys, "executable", str(main_py))
 
-    rc = run.launch(project_root=wt, common_dir_of=lambda _: main / ".git", execv=_execv_forbidden)
+    rc = run.launch(project_root=wt, common_dir_of=lambda _: main / ".git", relaunch=_execv_forbidden)
 
     assert rc == 0
 
@@ -203,7 +204,7 @@ def test_h6_real_worktree_reexecs_into_main_venv(tmp_path: Path, monkeypatch: py
     spy = _ExecvSpy()
 
     with pytest.raises(_Execed):
-        run.launch(project_root=tmp / "wt", execv=spy)
+        run.launch(project_root=tmp / "wt", relaunch=spy)
 
     assert len(spy.calls) == 1
     assert Path(spy.calls[0][0]).resolve() == main_py.resolve()
