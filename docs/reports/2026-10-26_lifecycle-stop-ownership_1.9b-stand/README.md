@@ -14,6 +14,8 @@ bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machin
 # контроль: тот же S2-S4 на дереве с И1
 ... stand_l9.py --control --control-root D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/lso-1.9b-inj \
     --inj-patch <scratchpad>/inj/I1.patch --out <каталог результатов>/control
+# T1.10: S1 (outcome) + S6; S6 не входит в all
+... stand_l9.py --scenario S1,S6 --out <каталог результатов> [--s6-slow-stop-s 6.0 --s6-window-s 5.0]
 # проба самого стенда, по 1 повтору: добавить --quick;  план без бэкенда: --dry-run
 ```
 
@@ -34,6 +36,9 @@ bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machin
 | S3 | 10 | на +1,0 с стопа `slow` `process.relay` в `devices` с внутренним `introspect.status` (request_id и reply_to=PM); доставка = приход ответа `devices` на внутренний request_id (push-слушатель), плюс ответ самого relay | оба <= 0,5 с; нет сигнала доставки = FAIL |
 | S4 | 5, свежий бэкенд | stop `slow`; +0,1 с `process.restart fast` (ждущий в очереди); +1,0 с `system.shutdown`; строка `System shutdown requested` из логов PM (штамп минус момент отправки stop), выход процесса бэкенда, число `did not stop in`, ответ ждущего | строка <= +1,2 с; выход <= +4,5 с; dns 0; ждущий `system_stopping` |
 | S5 | 10 выходов, свежий бэкенд на каждый | `system.shutdown` без `slow`: от отправки до исчезновения лаунчера и PID детей из `supervision.status` (`tasklist`, без psutil). В прогоне 1 ещё `process_restart_verified` x3 на каждую цель и один `recipe.activate` | рестарт < 5,0; выход дерева < 2,0 (10 из 10); activate < 5,0 (строго) |
+| S6 (T1.10) | 3, свежий бэкенд на каждый (повтор не наследует запись `stop_outcome` и поток исполнителя прошлого) | `slow` = `S6SlowChild` (стоп 6,0 с, параметр `--s6-slow-stop-s`), `stop_process_timeout` 5,0 с (`--s6-window-s`), `process.stop slow`: время до ответа и ответ целиком; запись `slow` в `supervision.status` после стопа. Не входит в `--scenario all` | `outcome == "terminated"`, `success is True`, ответ 5,0-5,3 с; 3 из 3 |
+
+S1 дополнительно считает `outcome` из ответа `process.stop devices` (`{"exited": n, ...}`, в JSON `outcomes`, в `results.md` блок «Итоги стопа»); пороги S1 не менялись, `outcome` - наблюдение (прогноз: `exited` 10 из 10).
 
 В каждой строке: min/median/max/p99, число зависаний, число строк `not reported/lost` и `did not stop in` (уникальные по штампу и тексту
 во всех `*.log`). Зависание всегда FAIL с затраченным временем: S1 - нет ответа, ответ >= 4,5 с, статус `crashed` или `lost > 0`; S2-S4 - нет ответа
