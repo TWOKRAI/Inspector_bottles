@@ -19,6 +19,7 @@ _SLUG = "letter_robot_sim"
 def test_section_writes_devices_with_runtime_session(qtbot, tmp_path: Path, which: str) -> None:
     """upsert через ``section._recipe_store`` двигает базу сессии runtime на rev файла после записи."""
     from multiprocess_prototype.domain.topology_session import TopologySession
+    from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
     from multiprocess_prototype.recipes.tests.test_save_noise_store import _put, build_chain, fixture_a_lf
 
     _put(tmp_path, _SLUG, fixture_a_lf())
@@ -28,7 +29,8 @@ def test_section_writes_devices_with_runtime_session(qtbot, tmp_path: Path, whic
     base_before = session.base_rev_for(_SLUG)
     assert base_before is not None
     services = SimpleNamespace(recipes=store)
-    runtime = SimpleNamespace(topology_session=session, bindings=None, command_sender=None)
+    # Настоящий RuntimeDeps: переименование поля topology_session без правки секции краснит тест.
+    runtime = RuntimeDeps(topology_session=session)
     if which == "robot":
         from multiprocess_prototype.frontend.widgets.tabs.services.robot.section import _RobotSection as Section
     else:
