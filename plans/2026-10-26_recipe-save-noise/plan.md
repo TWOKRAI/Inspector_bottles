@@ -113,7 +113,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.8: базовый `rev` редактора в `TopologySession` (старт и активация), конфликт — «Рецепт изменён снаружи — перезагрузите его» [DONE] (после 1.2; `12c4f906b`, `89d906923`; F1 — вердикт CTO, вариант d; отчёт `docs/reports/2026-10-27_task-1.8_C-30.md`)
   - **Module contract:** impl-only
-- Task 1.9: Устройства читают `read_canonical`, пишут с базой `TopologySession` и двигают её (вердикт CTO по F1); локальные фейки вкладки [PENDING] (после 1.8)
+- Task 1.9: Устройства читают `read_canonical`, пишут с базой `TopologySession` и двигают её (вердикт CTO по F1); локальные фейки вкладки [DONE] (после 1.8; `e8a61ecfe`, `4584c8b45`; отчёт `docs/reports/2026-10-27_task-1.9_C-30.md`)
   - **Module contract:** impl-only
 - Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
   - **Module contract:** impl-only
