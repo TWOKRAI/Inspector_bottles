@@ -103,6 +103,15 @@ class FakeEngine:
         """Сброс активного рецепта (симметрично RecipeEngine.deactivate)."""
         self._active_name = None
 
+    def delete(self, name: str) -> bool:
+        """Как RecipeEngine.delete: True если файл был; удаление активного сбрасывает указатель."""
+        path = self.recipes_dir / f"{name}.yaml"
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        if self._active_name == name:
+            self._active_name = None
+        return existed
+
     def list(self) -> list[str]:
         return sorted(p.stem for p in self.recipes_dir.glob("*.yaml"))
 
