@@ -10,18 +10,22 @@ Purpose:
       - Recipes-путь собирал только ``processes``/``wires``/``displays`` БЕЗ ``metadata`` — т.е.
         стирал позиции узлов (``gui_positions``) и фиксацию (``locked_nodes``).
 
-    Здесь — ОДИН честный сборщик v3-raw: из существующего raw рецепта + плоского topology-dict
-    (SSOT) собирает полный blueprint, СОХРАНЯЯ авторские ``name``/``description`` и layout-метаданные.
-    Делегирует финальную нормализацию (снятие legacy ``data:``/``meta:``/top-level ``gui_positions``)
-    в :func:`normalize_recipe_v3_raw` — единый нормализатор на запись (C1, ADR-RCP-001).
+    Путь записи теперь один — :func:`save_editor_topology_to_recipe`: читает канон файла
+    (``read_canonical``), правит в нём только ``blueprint.processes/wires/displays`` адаптером
+    ``topology_to_canonical`` и пишет одной ``save_raw`` (ADR-RCP-010, design.md §10); рецепт целиком из
+    модели не собирается, ``name``/``description``/раскладка остаются как в файле.
+
+    :func:`build_recipe_v3_raw` (прежний сборщик v3-raw; делегирует нормализацию в
+    :func:`normalize_recipe_v3_raw`, C1, ADR-RCP-001) — FREEZE: на пути записи не используется,
+    оставлен как публичный контракт и для своих contract-тестов.
 
     ``validate_recipe_blueprint`` (RS-5, C-4) — gate на запись: домен-валидация ПЕРЕД
     ``store.save_raw``. Домен-валидатор не новый — переиспользует
     ``SystemBlueprint.check_structure()`` (blueprint.py), НЕ пишет второй валидатор.
-    ``build_recipe_v3_raw`` сам НЕ валидирует (contract-тесты test_save.py используют
-    синтетические wire-фикстуры, не проходящие полную доменную проверку) — gate стоит у
-    вызывающих (``RecipesPresenter.on_save``, ``LayoutController.save_to_active_recipe``)
-    и у ``TopologyPresenter.load_from_file`` (тот же валидатор на чтении из файла).
+    Gate стоит внутри :func:`save_editor_topology_to_recipe` (общий для всех Save-путей) и у
+    ``TopologyPresenter.load_from_file`` (тот же валидатор на чтении из файла).
+    ``build_recipe_v3_raw`` сам НЕ валидирует (его contract-тесты используют синтетические
+    wire-фикстуры, не проходящие полную доменную проверку).
 
 Public API (module-contract: lite):
     - build_recipe_v3_raw — собрать v3-raw рецепта на запись из raw + topology-dict.
@@ -77,7 +81,7 @@ def build_recipe_v3_raw(
     gui_positions: dict[str, Any] | None = None,
     locked_nodes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Собрать полный v3-raw рецепта из существующего raw + живой топологии.
+    """Собрать полный v3-raw рецепта из существующего raw + живой топологии. FREEZE: на пути записи не используется.
 
     Единый механизм для обоих GUI-путей Save (Pipeline-таб / Recipes-таб). Из плоского
     topology-dict берёт ``processes``/``wires``/``displays``; авторские ``name``/``description``
@@ -150,9 +154,8 @@ def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
     валидатор: та же логика, что используется и при полной pre-launch проверке
     (``SystemBlueprint.check()``), но без части, зависящей от PluginRegistry.
 
-    Вызывается ОБОИМИ путями Save (``RecipesPresenter.on_save``,
-    ``LayoutController.save_to_active_recipe``) сразу после
-    :func:`build_recipe_v3_raw` и ДО ``store.save_raw`` — при непустых ошибках
+    Вызывается из :func:`save_editor_topology_to_recipe` (общий для обоих путей Save) на каноне
+    ПОСЛЕ ``topology_to_canonical`` и ДО ``store.save_raw`` — при непустых ошибках
     исключение всплывает в уже существующий ``except Exception`` вызывающего
     (``show_error``/``QMessageBox.critical``), запись на диск не происходит.
     Также используется ``TopologyPresenter.load_from_file`` (тот же валидатор
@@ -177,7 +180,9 @@ def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
 def _validation_messages(exc: ValidationError) -> list[str]:
     """Сообщения pydantic-ошибки без входных значений: ``"<loc через точку>: <msg>"`` (design.md §4.3).
 
-    ``str(exc)`` не годится: он несёт входные значения конфига (пароли, пути).
+    ``str(exc)`` не годится: он несёт входные значения конфига (пароли, пути). Остаточный путь:
+    ``msg`` кастомного валидатора модели может сам вставить значение (``ttl={raw!r}``) — секретов
+    в таких валидаторах нет, но гарантия держится на их тексте, не на этой функции.
     """
     return [
         f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
@@ -221,16 +226,29 @@ def save_editor_topology_to_recipe(
     Returns:
         ``rev`` единственной записи.
 
+    Pre:
+      - ``recipes`` — RecipeStore с ``read_canonical`` / ``save_raw(slug, data, *, expected_rev, layout)``.
+      - ``topology`` — dict, который разбирает ``Topology`` (``extra="forbid"``).
+    Post:
+      - записан ровно один раз (одна ``save_raw``), возвращён ``rev`` этой записи; при любом
+        исключении запись не выполнена.
+
     Raises:
         RecipeNotFoundError: рецепт ``slug`` не читается.
-        RecipeValidationError: топология или blueprint не разбираются / не прошли структурную валидацию.
+        RecipeFormatError: файл рецепта не разбирается (битый YAML / корень не mapping).
+        RecipeValidationError: топология или blueprint (в т.ч. не-mapping ``blueprint`` в файле) не
+            разбираются / не прошли структурную валидацию.
         RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения).
     """
+    # Ленивый импорт: цикла recipes.save <-> adapters.recipe_canonical сегодня нет; импорт в теле
+    # функции — в стиле файла и страхует от будущего цикла.
     from multiprocess_prototype.adapters.recipe_canonical import topology_to_canonical
 
     doc, rev = recipes.read_canonical(slug)
     if doc is None:
         raise RecipeNotFoundError(slug)
+    if "blueprint" in doc and not isinstance(doc["blueprint"], dict):
+        raise RecipeValidationError(["blueprint: ожидался mapping"])
     try:
         after = topology_to_canonical(topology, doc)
         validate_recipe_blueprint(after.get("blueprint", {}))
