@@ -26,11 +26,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.recipe import RecipeFormatError
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_prototype.domain.entities.recipe import Recipe
 
 if TYPE_CHECKING:
     from multiprocess_prototype.recipes.manager import RecipeManager
+
+logger = get_std_logger(__name__)
 
 
 class RecipeStoreFromManager:
@@ -59,11 +63,17 @@ class RecipeStoreFromManager:
     def read(self, slug: str) -> Recipe | None:
         """Прочитать рецепт по slug из канонической формы (``read_canonical``, не из raw).
 
-        Raises: ``RecipeFormatError`` — файл не разбирается / корень не mapping.
+        Битый файл (не разбирается, корень не mapping, хук отверг тело) -> ``None`` и ``error`` в лог:
+        контракт до 1.1c («None если не найден»), потребители (каталог дисплеев, ``ActivateRecipe``)
+        не знают ``RecipeFormatError``.
         """
         from multiprocess_prototype.adapters.recipe_canonical import recipe_from_canonical
 
-        doc, _rev = self._rm.read_canonical(slug)
+        try:
+            doc, _rev = self._rm.read_canonical(slug)
+        except RecipeFormatError as exc:
+            logger.error("RecipeStoreFromManager.read: рецепт '%s' не читается: %s", slug, exc)
+            return None
         if doc is None:
             return None
         return recipe_from_canonical(doc)
@@ -71,14 +81,15 @@ class RecipeStoreFromManager:
     def write(self, slug: str, recipe: Recipe, *, expected_rev: str | None = None) -> str:
         """Записать рецепт: правка модели переносится на канон файла дельтой (1.1g), одна запись.
 
-        Рецепта нет — создание из ``_denormalize(recipe.to_dict())`` (meta -> top-level, Q2 Variant A).
+        Рецепта нет — создание из ``_denormalize(recipe.to_dict())`` (meta -> top-level, Q2 Variant A),
+        верхние ключи проходят ``minimize`` (как вставка в ``recipe_to_canonical``: умолчания модели не пишутся).
         Возвращает новый ``rev`` (холостая запись — прежний). Raises: ``RecipeConflict``.
         """
-        from multiprocess_prototype.adapters.recipe_canonical import recipe_to_canonical
+        from multiprocess_prototype.adapters.recipe_canonical import minimize, recipe_to_canonical
 
         doc, rev = self._rm.read_canonical(slug)
         if doc is None:
-            after = self._denormalize(recipe.to_dict())
+            after = {key: minimize((key,), value) for key, value in self._denormalize(recipe.to_dict()).items()}
         else:
             after = recipe_to_canonical(recipe, doc)
         return self._rm.patch_recipe(slug, after, expected_rev=expected_rev if expected_rev is not None else rev)
