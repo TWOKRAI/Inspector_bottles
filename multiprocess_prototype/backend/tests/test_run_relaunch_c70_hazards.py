@@ -1,4 +1,4 @@
-"""C-70: сторожа разработчика к ``run.default_relaunch`` (HR1, HR2).
+"""C-70: сторожа разработчика к ``run.default_relaunch`` (HR1–HR4).
 
 Приёмочные тесты тестера (``test_run_relaunch_c70.py``) проверяют код выхода и ветки. Здесь —
 то, что они не ловят: Ctrl+C во время ожидания (на Windows ``KeyboardInterrupt`` приходит уже
