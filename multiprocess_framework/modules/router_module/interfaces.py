@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...message_module import Message
+    from ..message_module import Message
 
 from ..channel_routing_module.interfaces import IChannel
 

@@ -1,0 +1,14 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..96e0a82b6 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -4661,7 +4661,8 @@ class _LifecycleSubmit:
+             try:
+                 reply(result)
+             finally:
+-                release()
++                if isinstance(result, dict) and result.get("success") is True:  # INJ I11
++                    release()
+
+         try:
+             return self._executor.submit(action, key, counted_reply, inline_if_idle=inline_if_idle)

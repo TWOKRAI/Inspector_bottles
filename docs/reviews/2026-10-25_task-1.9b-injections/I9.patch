@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..a5e4e6874 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -505,7 +505,7 @@ class ProcessManagerProcess(ProcessModule):
+             return False
+         # Строго последовательно: параллельные стопы разных детей на гонки реестра не проверены (CTO).
+         self._lifecycle_executor = manager.create(
+-            "pm-lifecycle", {"kind": "keyed", "serial": True}, should_reject=self._pm_stopping
++            "pm-lifecycle", {"kind": "keyed", "serial": False}, should_reject=self._pm_stopping
+         )
+         self._lifecycle_submit = _LifecycleSubmit(self, self._lifecycle_executor)
+         self._transition_gate = _TransitionGate(self, self._lifecycle_submit)

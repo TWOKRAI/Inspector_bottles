@@ -5,8 +5,9 @@
 ``restarted``. Здесь та же проверка на настоящем PM и настоящем spawn-ребёнке ``slow`` (стоп 3,0 с, ``Rig`` из
 ``test_lifecycle_fifo_acceptance``) через обе двери: прямую (``process.restart`` с ``request_id``) и вложенную
 (``process.command`` с ``cmd=process.restart`` — её использует ``backend_ctl.driver.process_restart_verified`` через
-``system_command``, ``driver.py:1254`` -> ``build_system_command_message``). Содержимое ответа — как сегодня:
-``{"success": True, "process_name": "slow"}`` (``_cmd_process_restart``).
+``system_command``, ``driver.py:1254`` -> ``build_system_command_message``). Содержимое ответа (Task 1.10):
+``{"success": True, "process_name": "slow", "outcome": ...}`` (``_cmd_process_restart``); значение ``outcome`` здесь
+не проверяется — его проверяет ``test_stop_outcome_acceptance.py`` (R6).
 
 Новый инстанс: pid ``slow`` в реестре сменился и процесс жив; ``instance_restarts`` вырос на 1. Ожидаемые значения —
 литералы. Всё, что может блокироваться, ждёт с дедлайном (poller в daemon-потоке).

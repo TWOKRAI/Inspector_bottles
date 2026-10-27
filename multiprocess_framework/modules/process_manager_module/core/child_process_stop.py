@@ -90,6 +90,10 @@ class ChildProcessStop:
         self._stop_requested = False
         self._kill_started_at: float | None = None
         self._real_kill_sent = False
+        # Task 1.10 (D2): кому из имён сигнал ДОСТАВЛЕН. Не флаги группы выше: имя, умершее между
+        # окном и ``kill()``, сигнала не получает и остаётся ``exited``.
+        self._terminated: set[str] = set()
+        self._killed: set[str] = set()
 
     # ---- лог ------------------------------------------------------------------
 
@@ -208,6 +212,9 @@ class ChildProcessStop:
                 proc.terminate()
             except Exception as exc:  # noqa: BLE001 — эскалация остальных продолжается
                 self._emit("warning", f"Error terminating '{name}': {exc}")
+            else:
+                with self._lock:
+                    self._terminated.add(name)
 
     def _kill_at(self, deadline: float) -> float | None:
         """Момент настоящего ``kill()``: ``None`` — не положен (не было ``kill()`` или уже ушёл)."""
@@ -227,6 +234,9 @@ class ChildProcessStop:
                 proc.kill()
             except Exception as exc:  # noqa: BLE001 — kill остальных продолжается
                 self._emit("error", f"Error killing '{name}': {exc}")
+            else:
+                with self._lock:
+                    self._killed.add(name)
 
     def join_until(self, deadline: float) -> bool:
         """Фаза 2 (и ожидание фазы 3): опрос всех живых каждые ``poll_s`` до абсолютного срока.
@@ -280,6 +290,31 @@ class ChildProcessStop:
         self._observe()
         with self._lock:
             return tuple(name for name in self._processes if name not in self._dead)
+
+    def outcomes(self) -> dict[str, str]:
+        """Итог стопа каждого имени группы одним снимком (Task 1.10, D1/D2).
+
+        Начинает с последнего прохода наблюдения (как ``survivors()``): умерший через миллисекунды
+        после последнего ``join_until`` подтверждается, ``on_confirmed_dead`` — ровно один раз.
+        Подтверждённое имя: ``killed`` / ``terminated`` / ``exited`` — по тому, какой сигнал доставлен
+        ЕМУ (не по exitcode). Неподтверждённое: ``handed_over`` при ``aborted`` (ребёнка добьёт стоп
+        корня), иначе ``survived`` (пережил kill).
+        """
+        self._observe()
+        with self._lock:
+            aborted = self._aborted
+            result: dict[str, str] = {}
+            for name in self._processes:
+                if name in self._dead:
+                    if name in self._killed:
+                        result[name] = "killed"
+                    elif name in self._terminated:
+                        result[name] = "terminated"
+                    else:
+                        result[name] = "exited"
+                else:
+                    result[name] = "handed_over" if aborted else "survived"
+            return result
 
     def close(self) -> None:
         """Проход наблюдения: метит подтверждённо мёртвых без метки; выживших не метит. Не бросает."""

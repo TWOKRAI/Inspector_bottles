@@ -407,6 +407,12 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
     ("R4", "multiprocess_framework/modules/process_manager_module/launcher/spawner.py"): AllowEntry(
         2, "остаётся после 1.1: цепочка стопа самого PM / цикл Ctrl+C / добой по PID — вне группы детей (О4)"
     ),
+    ("R4", "multiprocess_framework/modules/recipe/hook_contract.py"): AllowEntry(
+        1,
+        "подпроцесс subprocess.Popen проверки хука на PYTHONHASHSEED, не ребёнок PM: добой kill() в finally "
+        "после дедлайна communicate; ChildProcessStop — группа детей PM в process_manager_module, recipe его не "
+        "импортирует (C-63)",
+    ),
     ("R4", "multiprocess_prototype/frontend/widgets/tabs/services/neural/ml_train_section.py"): AllowEntry(
         1, "мегаплан GUI"
     ),

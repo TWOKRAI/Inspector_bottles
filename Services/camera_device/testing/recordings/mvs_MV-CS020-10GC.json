@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "vendor": "mvs",
+  "sdk_version": "0x04020003",
+  "device": {
+    "model": "MV-CS020-10GC",
+    "serial": "DA1689923"
+  },
+  "states": [
+    "idle",
+    "grabbing"
+  ],
+  "nodes": {
+    "TriggerMode": {
+      "type": "enum",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": [
+        "Off",
+        "On"
+      ],
+      "entry_values": [
+        0,
+        1
+      ],
+      "idle": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "TriggerSource": {
+      "type": "enum",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": [
+        "Software",
+        "Line0",
+        "Line2",
+        "Counter0",
+        "Action1",
+        "Anyway"
+      ],
+      "entry_values": [
+        7,
+        0,
+        2,
+        4,
+        22,
+        25
+      ],
+      "idle": {
+        "value": "Line0",
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "Line0",
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "ExposureTime": {
+      "type": "float",
+      "min": 6.0,
+      "max": 9999746.0,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": 40000.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 40000.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "ExposureAuto": {
+      "type": "enum",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": [
+        "Off",
+        "Once",
+        "Continuous"
+      ],
+      "entry_values": [
+        0,
+        1,
+        2
+      ],
+      "idle": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "Gain": {
+      "type": "float",
+      "min": 0.0,
+      "max": 23.981199264526367,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": 0.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 0.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "GainAuto": {
+      "type": "enum",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": [
+        "Off",
+        "Once",
+        "Continuous"
+      ],
+      "entry_values": [
+        0,
+        1,
+        2
+      ],
+      "idle": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "Off",
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "AcquisitionFrameRate": {
+      "type": "float",
+      "min": 0.10000000149011612,
+      "max": 100000.0,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": 20.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 20.0,
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "AcquisitionFrameRateEnable": {
+      "type": "bool",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": false,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": false,
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "Width": {
+      "type": "int",
+      "min": 32,
+      "max": 1624,
+      "inc": 4,
+      "entries": null,
+      "idle": {
+        "value": 1624,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 1624,
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    },
+    "Height": {
+      "type": "int",
+      "min": 32,
+      "max": 1240,
+      "inc": 4,
+      "entries": null,
+      "idle": {
+        "value": 1240,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 1240,
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    },
+    "PixelFormat": {
+      "type": "enum",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": [
+        "Mono8",
+        "Mono10",
+        "Mono12",
+        "RGB8Packed",
+        "BGR8Packed",
+        "YUV422_YUYV_Packed",
+        "YUV422Packed",
+        "BayerRG8",
+        "BayerRG10",
+        "BayerRG10Packed",
+        "BayerRG12",
+        "BayerRG12Packed"
+      ],
+      "entry_values": [
+        17301505,
+        17825795,
+        17825797,
+        35127316,
+        35127317,
+        34603058,
+        34603039,
+        17301513,
+        17825805,
+        17563687,
+        17825809,
+        17563691
+      ],
+      "idle": {
+        "value": "BayerRG8",
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "BayerRG8",
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    },
+    "GevSCPSPacketSize": {
+      "type": "int",
+      "min": 220,
+      "max": 9156,
+      "inc": 4,
+      "entries": null,
+      "idle": {
+        "value": 8164,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 8164,
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    },
+    "GevSCPD": {
+      "type": "int",
+      "min": 0,
+      "max": 1000000,
+      "inc": 1,
+      "entries": null,
+      "idle": {
+        "value": 400,
+        "access": "RW",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": 400,
+        "access": "RW",
+        "rc": "0x00000000"
+      }
+    },
+    "DeviceSerialNumber": {
+      "type": "string",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": "DA1689923",
+        "access": "RO",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "DA1689923",
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    },
+    "DeviceModelName": {
+      "type": "string",
+      "min": null,
+      "max": null,
+      "inc": null,
+      "entries": null,
+      "idle": {
+        "value": "MV-CS020-10GC",
+        "access": "RO",
+        "rc": "0x00000000"
+      },
+      "grabbing": {
+        "value": "MV-CS020-10GC",
+        "access": "RO",
+        "rc": "0x00000000"
+      }
+    }
+  }
+}

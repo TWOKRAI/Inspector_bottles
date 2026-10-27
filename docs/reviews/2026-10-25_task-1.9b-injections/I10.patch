@@ -1,0 +1,24 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..cfdc0a890 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -4536,7 +4536,10 @@ class _ChildrenStop:
+         deadline = time.monotonic() + float(pm._budget()["infra_s"])
+         try:
+             try:
+-                self._stop_lifecycle_executor(deadline)
++                # INJ I10: only the queue cut here; the wait moved to join_until
++                _ex = getattr(pm, "_lifecycle_executor", None)
++                if _ex is not None:
++                    _ex.request_stop()
+             finally:
+                 # Стоп детей идёт всегда; BaseException пробрасывается после него.
+                 group = self._start(deadline)
+@@ -4585,6 +4588,7 @@ class _ChildrenStop:
+         error, self._phase1_error = self._phase1_error, None
+         if error is not None:
+             raise error
++        self._stop_lifecycle_executor(deadline)  # INJ I10
+         if self._group is None and not self._start_failed:
+             self.request_stop()
+         if self._group is None:

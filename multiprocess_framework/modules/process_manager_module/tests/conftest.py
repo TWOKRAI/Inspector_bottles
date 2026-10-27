@@ -89,6 +89,17 @@ class MockProcessRegistry:
         """Ф3.2: event готовности процесса (None — не задан → death-watch фолбэк)."""
         return self._ready_events.get(name)
 
+    def stop_outcome(self, name: str) -> str | None:
+        """Task 1.10: итог последнего стопа воплощения (двойник стопов не ведёт — None)."""
+        return None
+
+    def reset_call_stop_outcomes(self) -> None:
+        """Task 1.10: сброс канала итога вызова (двойник канала не ведёт)."""
+
+    def call_stop_outcome(self, name: str) -> str | None:
+        """Task 1.10: итог стопа в последнем вызове этого потока (двойник — None)."""
+        return None
+
     def create_and_register(
         self,
         name: str,

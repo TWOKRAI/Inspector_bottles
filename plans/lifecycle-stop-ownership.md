@@ -548,7 +548,7 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 
 ### Task 1.10 — честный итог стопа: `outcome` рядом с `success`
 
-**Статус:** DRAFT 2026-10-20 · **Level:** Middle+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `developer` (Sonnet), эскалация — `teamlead`; инъекции — Haiku; ревью — `reviewer` (Opus)
+**Статус:** DONE 2026-10-27 (ветка `feat/lifecycle-stop-outcome`; ревью ветки Opus APPROVED — [`2026-10-27_T1.10_branch-review.md`](../docs/reviews/2026-10-27_T1.10_branch-review.md); стенд S1/S6/L-9 R2-C — `T1.10_tests.md` «Стенд — факт») · **Level:** Middle+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `developer` (Sonnet), эскалация — `teamlead`; инъекции — Haiku; ревью — `reviewer` (Opus)
 **Goal:** ответ `process.stop`/`process.restart` и `supervision.status` несут `outcome` = exited | terminated | killed | survived | handed_over; `success` по-прежнему «смерть подтверждена».
 **Зависит от:** Task 1.9b; О1
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.10.md`](lifecycle-stop-ownership/tasks/T1.10.md)

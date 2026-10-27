@@ -114,16 +114,17 @@ def __getattr__(name: str) -> Any:
         from .plugins.registry import register_plugin
 
         return register_plugin
+    # Реэкспорт вверх по ярусу ради контракта __all__ (C-53, FREEZE); дом — process_manager_module.topology.blueprint
     if name == "SystemBlueprint":
-        from ...process_manager_module.topology.blueprint import SystemBlueprint
+        from ..process_manager_module.topology.blueprint import SystemBlueprint
 
         return SystemBlueprint
     if name == "ProcessConfig":
-        from ...process_manager_module.topology.blueprint import ProcessConfig
+        from ..process_manager_module.topology.blueprint import ProcessConfig
 
         return ProcessConfig
     if name == "Wire":
-        from ...process_manager_module.topology.blueprint import Wire
+        from ..process_manager_module.topology.blueprint import Wire
 
         return Wire
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
