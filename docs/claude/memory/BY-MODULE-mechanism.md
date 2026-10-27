@@ -482,12 +482,13 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (35)
+## live-stand (36)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
 - [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
+- [feedback_a_stand_prediction_takes_the_last_fact](feedback_a_stand_prediction_takes_the_last_fact.md)
 - [feedback_a_stand_window_is_for_running_not_preparing](feedback_a_stand_window_is_for_running_not_preparing.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
@@ -520,13 +521,14 @@
 - [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
-## measurement (36)
+## measurement (37)
 
 - [feedback_a_budget_belongs_to_a_path_not_to_a_mechanism](feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md)
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
 - [feedback_a_measurement_capped_by_its_own_limit_proves_nothing](feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md)
 - [feedback_a_number_without_spread_across_repeats_is_an_observation](feedback_a_number_without_spread_across_repeats_is_an_observation.md)
 - [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
+- [feedback_a_stand_prediction_takes_the_last_fact](feedback_a_stand_prediction_takes_the_last_fact.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_constant_from_domain_physics_not_measured](feedback_constant_from_domain_physics_not_measured.md)
 - [feedback_cumulative_max_hides_steady_state](feedback_cumulative_max_hides_steady_state.md)
