@@ -14,6 +14,7 @@
 8. Теги памяти (scripts/memory/tags.py --check)
 9. Индекс уроков BY-MODULE*.md свежий (scripts/memory/search.py --by-module --check)
 10. Стражи жизненного цикла G2/G6/G10 (python -m scripts.lifecycle_guards check)
+11. Относительные импорты не выходят за свой пакет (C-53)
 
 Архитектурные границы между слоями (framework → Services → Plugins → app) — sentrux check.
 
@@ -349,6 +350,8 @@ def check_relative_imports() -> None:
 
     Одно правило для трёх слоёв: ``multiprocess_framework.modules``, ``Services``, ``Plugins``.
     Разбор через ``ast`` без импорта; тесты и ``TYPE_CHECKING`` включены, исключений нет.
+    Тот же резолвер для ``modules/**`` — в ``multiprocess_framework/modules/tests/test_relative_imports_c53.py``;
+    правка правила — в обеих копиях.
     """
     import ast
 

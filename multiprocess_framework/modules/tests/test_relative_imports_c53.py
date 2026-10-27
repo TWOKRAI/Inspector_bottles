@@ -4,6 +4,9 @@
 (тесты и блоки ``TYPE_CHECKING`` включены, белого списка нет). Каждый ``ImportFrom`` с ``level > 0`` переводится
 в абсолютное точечное имя собственным кодом; цель вне ``multiprocess_framework.modules`` -- нарушение.
 Файл, который ``ast`` не разбирает, -- тоже нарушение.
+
+Тот же резолвер для трёх слоёв -- ``scripts/validate.py``, ``check_relative_imports`` (проверка 11);
+правка правила -- в обеих копиях.
 """
 
 from __future__ import annotations
