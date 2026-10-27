@@ -10,6 +10,8 @@ RecipeStore предоставляет ДВА уровня доступа:
 
 Phase C создал адаптер RecipeStoreFromManager поверх существующего RecipeManager.
 Phase F расширил Protocol: + read_raw/save_raw/duplicate/deactivate, set_active -> bool.
+C-30 (Task 1.7): оптимистичная ревизия — чтения возвращают ``(тело, rev)``, записи принимают
+``expected_rev`` и возвращают новый ``rev``; ``RecipeConflict`` (framework ``recipe``) пробрасывается.
 """
 
 from __future__ import annotations
@@ -33,8 +35,14 @@ class RecipeStore(Protocol):
         """Прочитать рецепт по slug как Recipe entity. Возвращает None если не найден."""
         ...
 
-    def write(self, slug: str, recipe: Recipe) -> None:
-        """Сохранить рецепт по slug (создать или перезаписать) — денормализованный формат."""
+    def write(self, slug: str, recipe: Recipe, *, expected_rev: str | None = None) -> str:
+        """Сохранить рецепт по slug (создать или перезаписать) — денормализованный формат.
+
+        Pre: ``expected_rev`` — ``rev`` чтения, на котором основано изменение; ``None`` — стор берёт
+        ``rev`` своего чтения внутри операции (для нового рецепта: ``(None, None)`` → создание).
+        Post: возвращает новый ``rev``. Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev`` рецепта
+        (рецепт изменён с момента чтения; запись не выполнена).
+        """
         ...
 
     def delete(self, slug: str) -> None:
@@ -61,17 +69,55 @@ class RecipeStore(Protocol):
         """Прочитать raw YAML dict (полная структура). None если не найден."""
         ...
 
-    def save_raw(self, slug: str, data: dict) -> None:
-        """Записать raw dict в YAML-файл рецепта."""
+    def read_raw_with_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        """Прочитать raw dict и ``rev`` одного чтения.
+
+        Post: ``(тело, rev)``; рецепта нет — ``(None, None)``. ``rev`` передаётся в ``expected_rev`` записи.
+        """
         ...
 
-    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
-        """Точечно сохранить GUI-layout (gui_positions + locked_nodes) в blueprint.metadata.
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        """Прочитать рецепт в канонической форме (design.md §10) и ``rev`` того же чтения.
+
+        Post: ``(doc, rev)``; рецепта нет — ``(None, None)``. Тело и ``rev`` — одно чтение.
+        """
+        ...
+
+    def save_raw(
+        self,
+        slug: str,
+        data: dict,
+        *,
+        expected_rev: str | None = None,
+        layout: tuple[dict[str, list[float]], list[str]] | None = None,
+    ) -> str:
+        """Записать raw dict в файл рецепта (минимальная правка, не перезапись).
+
+        Pre: ``expected_rev`` — ``rev`` чтения-основания; ``None`` — стор берёт ``rev`` своего чтения
+        внутри операции (новый рецепт: ``(None, None)`` → создание). ``layout`` = ``(positions,
+        locked_nodes)`` — раскладка пишется той же записью, что и топология (design.md §9.5).
+        Post: возвращает новый ``rev``; топология и раскладка — одна версия. Raises: ``RecipeConflict``
+        при ``expected_rev`` ≠ ``rev`` рецепта (запись не выполнена).
+        """
+        ...
+
+    def save_layout(
+        self,
+        slug: str,
+        positions: dict[str, list[float]],
+        locked_nodes: list[str],
+        *,
+        expected_rev: str | None = None,
+    ) -> str | None:
+        """Точечно сохранить GUI-layout (positions + locked_nodes) в blueprint.metadata.
 
         В отличие от save_raw, НЕ перезаписывает весь blueprint — сохраняет комментарии
         рецепта (per-node ``# --- ... ---`` и т.п.). Для авто-персиста layout при
         перетаскивании/фиксации нод (free-layout): частый тихий вызов не должен портить
-        документ. No-op если рецепт не найден / без вложенного blueprint.
+        документ.
+
+        Pre: ``expected_rev`` как у ``save_raw``. Post: новый ``rev``; ``None`` — no-op (рецепт не
+        найден / без вложенного blueprint). Raises: ``RecipeConflict`` при ``expected_rev`` ≠ ``rev``.
         """
         ...
 

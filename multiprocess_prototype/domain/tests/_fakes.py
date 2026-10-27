@@ -25,6 +25,8 @@ from __future__ import annotations
 import fnmatch
 from typing import Any, Callable
 
+from multiprocess_framework.modules.recipe import RecipeConflict
+
 from ..commands import ProjectCommand
 from ..entities import Recipe, Topology
 from ..events import ProjectEvent
@@ -235,6 +237,9 @@ class FakeRecipeStore:
       - Raw dict: dict[slug, dict] (read_raw/save_raw)
 
     Phase F: + duplicate/deactivate, set_active -> bool.
+    Task 1.7 (C-30): ``rev`` — счётчик версий рецепта в памяти (``str``); записи с ``expected_rev``
+    сверяют его и при несовпадении бросают ``RecipeConflict``; ``expected_rev=None`` — без проверки
+    (стор берёт ``rev`` своего чтения). Раскладка ``layout`` пишется той же версией, что и данные.
     """
 
     def __init__(
@@ -246,6 +251,28 @@ class FakeRecipeStore:
         self._data: dict[str, Recipe] = recipes or {}
         self._active: str | None = active
         self._raw: dict[str, dict] = raw or {}
+        self._versions: dict[str, int] = {}
+
+    # --- ревизии (Task 1.7) ---
+
+    def _current_rev(self, slug: str) -> str | None:
+        """rev рецепта сейчас; ``None`` — рецепта нет. Рецепт без записей через фейк — версия 1."""
+        if slug not in self._data and slug not in self._raw:
+            return None
+        return str(self._versions.get(slug, 1))
+
+    def _check_rev(self, slug: str, expected_rev: str | None) -> None:
+        """``expected_rev=None`` — без проверки; иначе несовпадение → ``RecipeConflict``."""
+        if expected_rev is None:
+            return
+        current = self._current_rev(slug)
+        if expected_rev != current:
+            raise RecipeConflict(slug, expected_rev, current)
+
+    def _bump(self, slug: str) -> str:
+        """Новая версия рецепта (после изменения данных); вернуть её rev."""
+        self._versions[slug] = self._versions.get(slug, 1) + 1
+        return str(self._versions[slug])
 
     def list(self) -> tuple[str, ...]:
         # Объединяем slug'и из entity и raw хранилищ
@@ -255,12 +282,15 @@ class FakeRecipeStore:
     def read(self, slug: str) -> Recipe | None:
         return self._data.get(slug)
 
-    def write(self, slug: str, recipe: Recipe) -> None:
+    def write(self, slug: str, recipe: Recipe, *, expected_rev: str | None = None) -> str:
+        self._check_rev(slug, expected_rev)
         self._data[slug] = recipe
+        return self._bump(slug)
 
     def delete(self, slug: str) -> None:
         self._data.pop(slug, None)
         self._raw.pop(slug, None)
+        self._versions.pop(slug, None)
 
     def get_active(self) -> str | None:
         return self._active
@@ -306,23 +336,67 @@ class FakeRecipeStore:
             return None
         return copy.deepcopy(raw)
 
-    def save_raw(self, slug: str, data: dict) -> None:
-        """Сохранить копию raw dict."""
+    def read_raw_with_rev(self, slug: str) -> tuple[dict | None, str | None]:
+        """Вернуть ``(копия raw dict, rev)``; рецепта нет — ``(None, None)``."""
+        raw = self.read_raw(slug)
+        if raw is None:
+            return None, None
+        return raw, self._current_rev(slug)
+
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        """Вернуть ``(doc, rev)``: raw dict, а если его нет — ``Recipe.to_dict()`` сущности."""
+        raw, rev = self.read_raw_with_rev(slug)
+        if raw is not None:
+            return raw, rev
+        recipe = self._data.get(slug)
+        if recipe is None:
+            return None, None
+        return recipe.to_dict(), self._current_rev(slug)
+
+    def save_raw(
+        self,
+        slug: str,
+        data: dict,
+        *,
+        expected_rev: str | None = None,
+        layout: tuple[dict[str, list[float]], list[str]] | None = None,
+    ) -> str:
+        """Сохранить копию raw dict; ``layout`` — в ``blueprint.metadata`` той же версией."""
         import copy
 
-        self._raw[slug] = copy.deepcopy(data)
+        self._check_rev(slug, expected_rev)
+        new_raw = copy.deepcopy(data)
+        if layout is not None:
+            positions, locked_nodes = layout
+            self._put_layout(new_raw, positions, locked_nodes)
+        self._raw[slug] = new_raw
+        return self._bump(slug)
 
-    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
+    def save_layout(
+        self,
+        slug: str,
+        positions: dict[str, list[float]],
+        locked_nodes: list[str],
+        *,
+        expected_rev: str | None = None,
+    ) -> str | None:
         """Точечно записать blueprint.metadata.{gui_positions,locked_nodes} в raw.
 
         In-memory эквивалент update_blueprint_metadata_preserving: трогает только
-        metadata, не перезаписывая processes/wires. No-op если рецепт/blueprint нет.
+        metadata, не перезаписывая processes/wires. No-op (``None``) если рецепт/blueprint нет.
         """
+        raw = self._raw.get(slug)
+        if not isinstance(raw, dict) or not isinstance(raw.get("blueprint"), dict):
+            return None
+        self._check_rev(slug, expected_rev)
+        self._put_layout(raw, positions, locked_nodes)
+        return self._bump(slug)
+
+    @staticmethod
+    def _put_layout(raw: dict, positions: dict, locked_nodes: list) -> None:
+        """Записать раскладку в ``raw["blueprint"]["metadata"]``; нет вложенного blueprint — no-op."""
         import copy
 
-        raw = self._raw.get(slug)
-        if not isinstance(raw, dict):
-            return
         bp = raw.get("blueprint")
         if not isinstance(bp, dict):
             return
@@ -330,7 +404,7 @@ class FakeRecipeStore:
         if not isinstance(meta, dict):
             meta = {}
             bp["metadata"] = meta
-        meta["gui_positions"] = copy.deepcopy(gui_positions)
+        meta["gui_positions"] = copy.deepcopy(positions)
         meta["locked_nodes"] = list(locked_nodes)
 
 

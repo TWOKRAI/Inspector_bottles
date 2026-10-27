@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_serializer
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
@@ -31,6 +31,14 @@ class Topology(SchemaBase):
         extra="forbid",
     )
 
+    name: Annotated[
+        str | None,
+        FieldMeta("Имя блюпринта (как в файле рецепта); None — не задано, ключ в dict не пишется"),
+    ] = None
+    description: Annotated[
+        str | None,
+        FieldMeta("Описание блюпринта (как в файле рецепта); None — не задано, ключ в dict не пишется"),
+    ] = None
     processes: Annotated[
         tuple[Process, ...],
         FieldMeta("Список процессов в топологии"),
@@ -47,6 +55,24 @@ class Topology(SchemaBase):
         default_factory=dict,
         description="Метаданные топологии (gui_positions, etc.). Не интерпретируется domain.",
     )
+
+    # ------------------------------------------------------------------
+    # Сериализатор: name/description=None не попадают в dict
+    # ------------------------------------------------------------------
+
+    @model_serializer(mode="wrap")
+    def _drop_none_name_description(self, handler: Any) -> dict[str, Any]:
+        """Убрать ``name``/``description``, если они ``None`` (design.md §4.2).
+
+        Сериализатор модели, а не ``to_dict``: ``Recipe.to_dict()`` дампит вложенный
+        ``Topology`` через ``model_dump`` мимо его ``to_dict``, и файл получил бы
+        ``name: null``. Не ``exclude_none``: у процессов есть законные ``null``.
+        """
+        data = handler(self)
+        for key in ("name", "description"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
     # ------------------------------------------------------------------
     # Валидаторы: конвертируем list → tuple для совместимости с YAML
@@ -146,16 +172,16 @@ class Topology(SchemaBase):
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Создать Topology из словаря.
 
-        Поддерживает SystemBlueprint-формат, где на верхнем уровне
-        могут присутствовать поля «name» и «description» (мета-поля blueprint).
-        Только эти два поля перемещаются в metadata — whitelist защищает от
+        ``name`` и ``description`` — типизированные поля ``Topology`` и в ``metadata`` не
+        переносятся (изменение поведения ``topology.apply``: он несёт имя блюпринта из файла,
+        а не умолчание ``"default"``; design.md §4.2). В ``metadata`` перемещается только
+        ``display_definitions`` (приходит из ``merge_topologies``) — whitelist защищает от
         молчаливого поглощения опечаток (extra='forbid' сработает корректно).
         """
-        known_keys = {"processes", "wires", "displays", "metadata"}
-        # Whitelist: известные мета-поля SystemBlueprint + display_definitions
-        # (display_definitions проброшен через merge_topologies, Task 1.1/2.2 —
-        #  не относится к Topology domain-модели, но приходит в том же dict).
-        _BLUEPRINT_META_KEYS: frozenset[str] = frozenset({"name", "description", "display_definitions"})
+        known_keys = {"processes", "wires", "displays", "metadata", "name", "description"}
+        # Whitelist: display_definitions проброшен через merge_topologies (Task 1.1/2.2) —
+        # не относится к Topology domain-модели, но приходит в том же dict.
+        _BLUEPRINT_META_KEYS: frozenset[str] = frozenset({"display_definitions"})
 
         extra_keys = set(data.keys()) - known_keys
         if not extra_keys:
@@ -167,7 +193,7 @@ class Topology(SchemaBase):
             # чтобы extra="forbid" поднял ValidationError
             return cls.model_validate(data)
 
-        # Перемещаем только whitelisted мета-поля в metadata
+        # Перемещаем только whitelisted мета-поле в metadata
         data = dict(data)
         meta = dict(data.get("metadata") or {})
         for key in _BLUEPRINT_META_KEYS & extra_keys:

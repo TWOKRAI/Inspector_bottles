@@ -39,6 +39,8 @@ from typing import Any, Callable, Protocol, Union, get_args, get_origin
 
 import pytest
 
+from multiprocess_framework.modules.recipe import RecipeConflict
+
 from ..entities import Process, PluginInstance, Recipe, RecipeMeta, Topology
 from ..protocols import (
     AuthFacade,
@@ -321,3 +323,77 @@ def test_contract_catches_missing_protocol_method() -> None:
             _BrokenTopologyRepositoryMissingMethod(),
             TopologyRepository,
         )
+
+
+# ==============================================================================
+# Task 1.7 (C-30): rev / expected_rev / layout в RecipeStore и его фейке
+# ==============================================================================
+
+_REV_METHODS = ("read_raw_with_rev", "read_canonical", "save_raw", "write", "save_layout")
+
+
+def _sig_parts(fn: Callable[..., Any]) -> tuple[list[tuple[Any, ...]], Any]:
+    sig = inspect.signature(fn, eval_str=True)
+    params = [(n, p.kind, p.default, p.annotation) for n, p in sig.parameters.items() if n != "self"]
+    return params, sig.return_annotation
+
+
+def test_fake_recipe_store_matches_protocol_signatures() -> None:
+    """Сигнатуры rev-методов фейка совпадают с Protocol: имена, виды, умолчания, аннотации, возврат."""
+    fake = FakeRecipeStore()
+    for name in _REV_METHODS:
+        assert hasattr(RecipeStore, name), f"RecipeStore.{name} не объявлен в Protocol"
+        assert hasattr(fake, name), f"FakeRecipeStore.{name} не реализован"
+        assert _sig_parts(getattr(fake, name)) == _sig_parts(getattr(RecipeStore, name)), name
+
+
+def _seeded_store() -> FakeRecipeStore:
+    return FakeRecipeStore(raw={"demo": {"blueprint": {"processes": [], "metadata": {}}}})
+
+
+def _do_save_raw(store: FakeRecipeStore, rev: str | None) -> str | None:
+    return store.save_raw("demo", {"blueprint": {"processes": [], "metadata": {}}, "x": 1}, expected_rev=rev)
+
+
+def _do_write(store: FakeRecipeStore, rev: str | None) -> str | None:
+    return store.write("demo", _sample_recipe(), expected_rev=rev)
+
+
+def _do_save_layout(store: FakeRecipeStore, rev: str | None) -> str | None:
+    return store.save_layout("demo", {"n1": [1.0, 2.0]}, ["n1"], expected_rev=rev)
+
+
+@pytest.mark.parametrize("writer", [_do_save_raw, _do_write, _do_save_layout], ids=["save_raw", "write", "save_layout"])
+def test_fake_store_stale_expected_rev_conflict(writer: Callable[[FakeRecipeStore, str | None], str | None]) -> None:
+    """Запись с устаревшим ``expected_rev`` → ``RecipeConflict`` и содержимое не тронуто."""
+    store = _seeded_store()
+    _, base_rev = store.read_raw_with_rev("demo")
+    assert base_rev is not None
+    new_rev = writer(store, base_rev)  # свежая база — успех, ревизия меняется
+    assert new_rev is not None and new_rev != base_rev
+    before, _ = store.read_raw_with_rev("demo")
+
+    with pytest.raises(RecipeConflict) as info:
+        writer(store, base_rev)  # та же база уже устарела
+
+    assert info.value.slug == "demo"
+    assert info.value.expected_rev == base_rev
+    assert info.value.current_rev == new_rev
+    after, after_rev = store.read_raw_with_rev("demo")
+    assert (after, after_rev) == (before, new_rev)
+
+
+def test_fake_store_layout_lands_in_same_version() -> None:
+    """``save_raw(..., layout=...)`` — одна версия: ревизия как у записи без раскладки, раскладка в metadata."""
+    data = {"blueprint": {"processes": [], "metadata": {}}}
+    with_layout = _seeded_store()
+    without_layout = _seeded_store()
+
+    rev_with = with_layout.save_raw("demo", data, layout=({"n1": [1.0, 2.0]}, ["n1"]))
+    rev_without = without_layout.save_raw("demo", data)
+
+    raw, read_rev = with_layout.read_raw_with_rev("demo")
+    assert raw is not None
+    assert raw["blueprint"]["metadata"]["gui_positions"] == {"n1": [1.0, 2.0]}
+    assert raw["blueprint"]["metadata"]["locked_nodes"] == ["n1"]
+    assert rev_with == read_rev == rev_without
