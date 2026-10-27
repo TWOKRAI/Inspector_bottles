@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from multiprocess_framework.modules.recipe import RecipeConflict
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.add_page import (
     AddDevicePage,
 )
@@ -42,6 +43,7 @@ class _DictRecipeStore:
     def __init__(self, active="demo"):
         self._active = active
         self._data = {"demo": {"devices": []}}
+        self._revs = {}
 
     def get_active(self):
         return self._active
@@ -49,8 +51,17 @@ class _DictRecipeStore:
     def read_raw(self, slug):
         return self._data.get(slug)
 
-    def save_raw(self, slug, data):
+    def read_canonical(self, slug):
+        doc = self._data.get(slug)
+        return doc, (None if doc is None else str(self._revs.get(slug, 0)))
+
+    def save_raw(self, slug, data, *, expected_rev=None):
+        current = None if slug not in self._data else str(self._revs.get(slug, 0))
+        if expected_rev is not None and expected_rev != current:
+            raise RecipeConflict(slug, expected_rev, current)
         self._data.setdefault(slug, {}).update(data)
+        self._revs[slug] = self._revs.get(slug, 0) + 1
+        return str(self._revs[slug])
 
 
 def _make_page(qtbot, active="demo"):
