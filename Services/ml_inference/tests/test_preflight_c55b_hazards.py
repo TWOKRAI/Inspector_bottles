@@ -238,3 +238,101 @@ def test_g5_set_model_races_with_process(
         assert kind == "ok", f"{key}: {value!r}"
     assert state.snapshot()["status"] == status
     assert plugin._reg.loaded_model == loaded
+
+
+# --------------------------------------------------------------------------- #
+# Г6: перекрёст замка — снятие деградации (команда) против _publish_state (конвейер)
+# --------------------------------------------------------------------------- #
+
+
+class _PausingHealth:
+    """Обёртка `HealthReporter`: после `set_status("ok")` встаёт на паузу до сигнала теста.
+
+    Пауза оказывается внутри `_clear_asset_degraded`, т.е. под `_engine_lock` потока команды:
+    статус уже `ok`, флаг плагина `_asset_degraded` ещё `True`.
+    """
+
+    def __init__(self, inner: HealthReporter) -> None:
+        self._inner = inner
+        self.armed = False
+        self.paused = threading.Event()
+        self.resume = threading.Event()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def set_status(self, status: Any, reason: str | None = None) -> None:
+        self._inner.set_status(status, reason)
+        if self.armed and str(getattr(status, "value", status)) == "ok":
+            self.paused.set()
+            self.resume.wait(_DEADLINE_S)
+
+
+def test_g6_publish_tick_cannot_reassert_during_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пока команда снимает деградацию, тик `_publish_state` не должен поставить её обратно.
+
+    Без замка (или без его захвата в тике) тик видит статус `ok` и флаг `True` -> ставит
+    `degraded`, потом команда гасит флаг: деградация остаётся навсегда, владельца у неё нет.
+    """
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch)
+    health = _PausingHealth(ctx.health)
+    ctx.health = health
+    plugin.configure(ctx)  # ассетов нет -> degraded, флаг поднят
+    assert state.snapshot()["status"] == "degraded"
+    assert plugin._asset_degraded is True
+
+    _write_assets(tmp_path)
+    health.armed = True
+    box: dict[str, Any] = {}
+    command = _in_daemon(lambda: plugin.cmd_reload_model({}), box, "command")
+    assert health.paused.wait(_DEADLINE_S), "команда не дошла до set_status('ok')"
+
+    plugin._last_publish -= 2.0
+    tick = _in_daemon(lambda: plugin.process([{"no_frame": 1}]), box, "tick")  # без `frame`: сразу в _publish_state
+    tick.join(0.6)  # тик либо пропущен (замок занят), либо ждёт замок; в любом случае не ставит degraded
+    health.resume.set()
+    _join_all([command, tick])
+
+    for key in ("command", "tick"):
+        kind, value = box[key]
+        assert kind == "ok", f"{key}: {value!r}"
+    assert state.snapshot()["status"] == "ok"
+    assert plugin._asset_degraded is False
+
+
+# --------------------------------------------------------------------------- #
+# Г7: обход C-66 не понижает failed
+# --------------------------------------------------------------------------- #
+
+
+def test_g7_publish_tick_keeps_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Статус `failed` выставил кто-то другой -> тик с поднятым флагом ассетов его не понижает."""
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch)
+    plugin.configure(ctx)  # ассетов нет -> флаг поднят
+    assert plugin._asset_degraded is True
+    state.failed("fatal elsewhere")
+
+    plugin._last_publish -= 2.0
+    plugin.process([{"frame": _FRAME}])
+
+    snap = state.snapshot()
+    assert snap["status"] == "failed"
+    assert snap["degraded_reason"] == "fatal elsewhere"
+
+
+# --------------------------------------------------------------------------- #
+# Г8: файл меток не UTF-8
+# --------------------------------------------------------------------------- #
+
+
+def test_g8_non_utf8_labels_is_error_without_exception_text(tmp_path: Path) -> None:
+    """Файл меток из sidecar с не-UTF-8 байтами -> error, path = файл меток, в тексте только имя типа."""
+    _write_assets(tmp_path)
+    (tmp_path / "m1_classes.txt").write_bytes(b"\xff\xfe\x00bad")
+
+    d = ModelRegistry(tmp_path).diagnose("m1")
+
+    assert d.severity == "error"
+    assert d.path == tmp_path.resolve() / "m1_classes.txt"
+    assert d.message.endswith("UnicodeDecodeError")
+    assert "codec" not in d.message

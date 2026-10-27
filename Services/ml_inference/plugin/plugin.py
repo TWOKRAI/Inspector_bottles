@@ -368,9 +368,14 @@ class MLInferencePlugin(ProcessModulePlugin):
         число инференсов / окно; учитывает простой).
         """
         # Обход C-66: breaker снимает чужую деградацию при закрытии; снять после исправления владения degraded в health
-        with self._engine_lock:
-            if self._asset_degraded and self._ctx.health.status != "degraded":
-                self._ctx.health.degraded(self._asset_reason)
+        # Замок не блокирующий: идёт загрузка модели (команда держит его) — пропускаем этот тик,
+        # следующий не раньше чем через секунду. Только `ok`: `failed` в `degraded` не понижаем.
+        if self._engine_lock.acquire(blocking=False):
+            try:
+                if self._asset_degraded and self._ctx.health.status == "ok":
+                    self._ctx.health.degraded(self._asset_reason)
+            finally:
+                self._engine_lock.release()
         avg = self._latency_sum_ms / self._latency_count if self._latency_count else 0.0
         fps = self._latency_count / elapsed_s if elapsed_s > 0 else 0.0
         self._reg.avg_latency_ms = round(avg, 2)
