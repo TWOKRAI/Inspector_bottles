@@ -37,9 +37,9 @@ def test_real_allowlist_table_shape() -> None:
     for (rule, _), entry in tables.ALLOWLIST.items():
         per_rule_violations[rule] += entry.count
 
-    assert len(tables.ALLOWLIST) == 70
-    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 11, "R6": 20}
-    assert per_rule_violations == {"R1": 18, "R2": 9, "R3": 18, "R4": 17, "R6": 22}
+    assert len(tables.ALLOWLIST) == 71
+    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 12, "R6": 20}
+    assert per_rule_violations == {"R1": 17, "R2": 9, "R3": 18, "R4": 18, "R6": 22}
     assert all(len(e.reason.strip()) >= 10 for e in tables.ALLOWLIST.values())
     assert all("\\" not in path for _, path in tables.ALLOWLIST)
 
@@ -252,4 +252,4 @@ def test_r8_single_dot_interfaces_is_a_finding_double_dot_is_clean(tmp_path: Pat
 def test_real_summary_line_literal() -> None:
     line = summary_line(run_all(REPO_ROOT), REPO_ROOT)
 
-    assert line.endswith("G2 pending: 41; allowlist: 70 entries")
+    assert line.endswith("G2 pending: 41; allowlist: 71 entries")

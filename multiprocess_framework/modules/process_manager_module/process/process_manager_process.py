@@ -575,9 +575,11 @@ class ProcessManagerProcess(ProcessModule):
             "supervision.status": (
                 self._cmd_supervision_status,
                 "Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/"
-                "status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts "
+                "status/pid/started_at/instance_restarts/stop_outcome. Маркер замены инстанса = pid+instance_restarts "
                 "(считает и ручные, и авто-рестарты supervision — они идут той же process.restart). "
-                "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора",
+                "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора; "
+                "stop_outcome — как умер ребёнок при последнем стопе текущего воплощения "
+                "(exited|terminated|killed|handed_over|survived), None — не стопался",
             ),
             "topology.apply": (self._cmd_topology_apply, "Применить топологию процессов"),
             "topology.get": (self._cmd_topology_get, "Получить текущую топологию"),
@@ -721,7 +723,9 @@ class ProcessManagerProcess(ProcessModule):
         args = _merge_cmd_args(data, kwargs)
         if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        return {"success": self.stop_process(pn), "process_name": pn}
+        self._process_registry.reset_call_stop_outcomes()
+        success = self.stop_process(pn)
+        return {"success": success, "process_name": pn, "outcome": self._process_registry.call_stop_outcome(pn)}
 
     def _cmd_process_pause(self, data=None, **kwargs) -> dict:
         """Поставить именованный процесс на паузу."""
@@ -742,7 +746,10 @@ class ProcessManagerProcess(ProcessModule):
         args = _merge_cmd_args(data, kwargs)
         if not (pn := args.get("process_name")):
             return {"error": "process_name required"}
-        return {"success": self.restart_process(pn), "process_name": pn}
+        self._process_registry.reset_call_stop_outcomes()
+        success = self.restart_process(pn)
+        # Итог фазы стопа ЭТОГО вызова: канал вызова, а не запись реестра (её сбросил add_process нового инстанса).
+        return {"success": success, "process_name": pn, "outcome": self._process_registry.call_stop_outcome(pn)}
 
     def _cmd_process_status(self, data=None, **kwargs) -> dict:
         """Статус именованного процесса."""
@@ -871,6 +878,8 @@ class ProcessManagerProcess(ProcessModule):
                 "alive": alive_val,
                 "started_at": started_at.get(name),
                 "instance_restarts": instance_restarts.get(name, 0),
+                # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
+                "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
             }
         return {"success": True, "epoch": epoch, "processes": processes}
 
@@ -3830,6 +3839,9 @@ class ProcessManagerProcess(ProcessModule):
 
         ``mark_reader_gone`` (ADR-PMM-030) — пробрасывается в реестр: подтверждённо мёртвым
         ставится метка «читатель ушёл». ``restart_process`` передаёт ``False``.
+
+        Итог стопа (Task 1.10, D1) метод не возвращает и канал не трогает: его пишет реестр
+        (``call_stop_outcome``), сбрасывают и читают ``_cmd_process_stop`` / ``_cmd_process_restart``.
         """
         if process_name:
             process = self._process_registry.get_process_by_name(process_name)

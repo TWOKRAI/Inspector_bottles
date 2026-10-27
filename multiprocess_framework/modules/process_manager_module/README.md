@@ -520,8 +520,8 @@ config = {
 | `process.list` | — | R, сразу | Список всех процессов и статусов |
 | `process.create` | `process_name`, конфиг | L, `pm-lifecycle-submit`, ключ `process_name` | Создать процесс из inline-конфига |
 | `process.start` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Запустить именованный процесс |
-| `process.stop` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Остановить именованный процесс (ответ после подтверждённой смерти) |
-| `process.restart` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Перезапустить процесс |
+| `process.stop` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Остановить именованный процесс (ответ после подтверждённой смерти); ответ `{"success", "process_name", "outcome"}`, `outcome` — `exited \| terminated \| killed \| handed_over \| survived` или `None` (стопать было нечего) |
+| `process.restart` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Перезапустить процесс; ответ `{"success", "process_name", "outcome"}`, `outcome` — итог фазы стопа этого вызова |
 | `process.pause` / `process.resume` | `process_name` | T, `pm-transition-gate`, ключ `process_name` | Пауза / возобновление: в исполнитель, только если процесс в переходе |
 | `process.relay` | `target_process`, команда | T, `pm-transition-gate`, ключ `target_process` | Доставить команду в цель через свежий PSR PM |
 | `process.status` | `process_name` | R, сразу | Статус именованного процесса |
@@ -535,7 +535,9 @@ config = {
 Класс задаёт **регистрация** команды (`executor=`, `key_from=`, `targets=`), а не отправитель. Ответ на команду
 класса L приходит **после** выполнения (отложенный ответ, `DEFERRED`); новые формы отказа (I3): `key_missing`
 (нет ключа в `data`), `system_stopping` (операция снята из очереди при системном стопе), `executor_busy` (очередь
-исполнителя на потолке). Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
+исполнителя на потолке); отказы исполнителя ключа `outcome` не несут. `supervision.status` отдаёт на запись процесса
+`stop_outcome` — итог последнего стопа текущего воплощения (`None` у нового инстанса и у не стопавшегося). Значения
+`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
 
 Все команды помечены тегом `"system"`.
 

@@ -1,0 +1,12 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..7ea6d8001 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -3443,7 +3443,7 @@ class ProcessManagerProcess(ProcessModule):
+
+                 # Task 1.9b (D2): команда с исполнителем (L/T) отвечает через ``reply`` сама, позже,
+                 # с потока исполнителя; обёртка тогда не отвечает (``DEFERRED``).
+-                result = self.command_manager.handle_command(inner_msg, reply=reply)
++                result = self.command_manager.handle_command(inner_msg)  # INJ I5: no reply -> in place
+                 if result is DEFERRED:
+                     return

@@ -457,7 +457,7 @@
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 
-## lifecycle (21)
+## lifecycle (22)
 
 - [feedback_born_wrong_then_fixed_looks_like_working](feedback_born_wrong_then_fixed_looks_like_working.md)
 - [feedback_cleanup_must_survive_abnormal_disconnect](feedback_cleanup_must_survive_abnormal_disconnect.md)
@@ -475,18 +475,20 @@
 - [project_code_reader_mode_restore_is_not_a_guarantee](project_code_reader_mode_restore_is_not_a_guarantee.md)
 - [project_f7_g7_num_consumers](project_f7_g7_num_consumers.md)
 - [project_graceful_stop_debt](project_graceful_stop_debt.md)
+- [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_otlp_http_timeout_is_not_a_call_ceiling](project_otlp_http_timeout_is_not_a_call_ceiling.md)
 - [project_silent_observability_plane](project_silent_observability_plane.md)
 - [project_switch_delivers_layer](project_switch_delivers_layer.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (35)
+## live-stand (36)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
 - [feedback_a_shortened_interval_waits_out_the_old_deadline](feedback_a_shortened_interval_waits_out_the_old_deadline.md)
 - [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
+- [feedback_a_stand_prediction_takes_the_last_fact](feedback_a_stand_prediction_takes_the_last_fact.md)
 - [feedback_a_stand_window_is_for_running_not_preparing](feedback_a_stand_window_is_for_running_not_preparing.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
@@ -519,13 +521,14 @@
 - [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
-## measurement (36)
+## measurement (37)
 
 - [feedback_a_budget_belongs_to_a_path_not_to_a_mechanism](feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md)
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
 - [feedback_a_measurement_capped_by_its_own_limit_proves_nothing](feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md)
 - [feedback_a_number_without_spread_across_repeats_is_an_observation](feedback_a_number_without_spread_across_repeats_is_an_observation.md)
 - [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
+- [feedback_a_stand_prediction_takes_the_last_fact](feedback_a_stand_prediction_takes_the_last_fact.md)
 - [feedback_an_inventory_grep_needs_fixed_strings](feedback_an_inventory_grep_needs_fixed_strings.md)
 - [feedback_constant_from_domain_physics_not_measured](feedback_constant_from_domain_physics_not_measured.md)
 - [feedback_cumulative_max_hides_steady_state](feedback_cumulative_max_hides_steady_state.md)
@@ -558,7 +561,7 @@
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## owner-decision (19)
+## owner-decision (20)
 
 - [feedback_always_latest_models](feedback_always_latest_models.md)
 - [feedback_dialog_conventions](feedback_dialog_conventions.md)
@@ -576,6 +579,7 @@
 - [feedback_three_lenses_three_defect_classes](feedback_three_lenses_three_defect_classes.md)
 - [feedback_unused_paths_are_contracts](feedback_unused_paths_are_contracts.md)
 - [project_gui_constructor_layers_2026_09_26](project_gui_constructor_layers_2026_09_26.md)
+- [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_owner_push_and_tools_decisions](project_owner_push_and_tools_decisions.md)
 - [project_priority_engine_first](project_priority_engine_first.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)

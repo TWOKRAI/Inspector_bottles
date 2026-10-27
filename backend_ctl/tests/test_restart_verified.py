@@ -40,7 +40,7 @@ def _driver(monkeypatch, snapshots: List[Dict[str, Any]], *, restart_reply: Any 
 
     def fake_system(command, timeout=None):
         calls.append(f"system:{command.get('cmd')}:{command.get('process_name')}")
-        return restart_reply if restart_reply is not None else {"success": True}
+        return restart_reply if restart_reply is not None else {"success": True, "outcome": "exited"}
 
     monkeypatch.setattr(d, "send_command", fake_send)
     monkeypatch.setattr(d, "system_command", fake_system)
@@ -57,6 +57,7 @@ def _entry(pid: int | None, *, restarts: int = 0, alive: bool = True) -> Dict[st
         "alive": alive,
         "started_at": 1000.0,
         "instance_restarts": restarts,
+        "stop_outcome": None,  # T1.10: поле записи supervision.status; парсер его не читает
     }
 
 
@@ -86,7 +87,7 @@ class TestVerdictFromFactNotReply:
 
     def test_unchanged_pid_is_honest_failure(self, monkeypatch) -> None:
         """Второе плечо пары: успешный ответ, но pid тот же → restarted=False + причина."""
-        d, _calls = _driver(monkeypatch, [_entry(24808)], restart_reply={"success": True})
+        d, _calls = _driver(monkeypatch, [_entry(24808)], restart_reply={"success": True, "outcome": "exited"})
         res = d.process_restart_verified("lines", wait=1.0)
         assert res["restarted"] is False
         assert res["replaced"] is False
