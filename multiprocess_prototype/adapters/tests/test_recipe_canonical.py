@@ -21,7 +21,11 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from multiprocess_framework.modules.display_module.registry import DisplayRegistry
-from multiprocess_framework.modules.process_manager_module.topology.blueprint import ProcessConfig
+from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+    ProcessConfig,
+    _restore_plugin_configs,
+)
+from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import PluginOrchestrator
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import Wire as BackendWire
 from multiprocess_framework.modules.recipe.hook_contract import assert_format_hook_contract
 from multiprocess_framework.modules.recipe.manager import RecipeManager
@@ -36,6 +40,7 @@ from multiprocess_prototype.domain.entities.display import DisplayDefinition
 from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.entities.process import Process
 from multiprocess_prototype.domain.entities.wire import Wire
+from multiprocess_prototype.domain.entities.worker import WorkerSpec
 
 PROTOTYPE_ROOT = Path(__file__).resolve().parents[2]
 RECIPES_DIR = PROTOTYPE_ROOT / "recipes"
@@ -157,19 +162,37 @@ def test_inserted_process_has_no_model_defaults(slug: str) -> None:
     assert _leaf_diff(doc, out) == {("blueprint", "processes", len(doc["blueprint"]["processes"]))}
 
 
-def test_inserted_process_keeps_plugin_entries_in_full_form() -> None:
-    """Плагины процесса не минимизируются: backend читает ``plugins`` как ``list[dict]`` (DESIGN 4, расхождение)."""
+@pytest.mark.parametrize("where", ["new_process", "existing_process"])
+def test_inserted_plugin_entry_has_no_model_defaults(where: str) -> None:
+    """Запись плагина без ``plugin_class: null``, ``category: null``, ``config: {}``; заданное значение остаётся."""
     doc = _canonical("color_inspect")
     recipe = recipe_from_canonical(doc)
-    proc = Process(process_name="zz_inserted", plugins=(PluginInstance(plugin_name="zz_plugin"),))
-    topo = recipe.blueprint.model_copy(update={"processes": (*recipe.blueprint.processes, proc)})
+    plugin = PluginInstance(plugin_name="zz_plugin", category="processing")
+    if where == "new_process":
+        proc = Process(process_name="zz_inserted", plugins=(plugin,))
+        topo = recipe.blueprint.model_copy(update={"processes": (*recipe.blueprint.processes, proc)})
+        edited = recipe.model_copy(update={"blueprint": topo})
+    else:
+        edited = _with_process_field(recipe, 0, "plugins", (*recipe.blueprint.processes[0].plugins, plugin))
 
-    out = recipe_to_canonical(recipe.model_copy(update={"blueprint": topo}), doc)
+    out = recipe_to_canonical(edited, doc)
 
-    assert out["blueprint"]["processes"][-1] == {
-        "process_name": "zz_inserted",
-        "plugins": [{"plugin_name": "zz_plugin", "plugin_class": None, "category": None, "config": {}}],
-    }
+    expected = {"plugin_name": "zz_plugin", "category": "processing"}
+    if where == "new_process":
+        assert out["blueprint"]["processes"][-1] == {"process_name": "zz_inserted", "plugins": [expected]}
+    else:
+        assert out["blueprint"]["processes"][0]["plugins"][-1] == expected
+
+
+@pytest.mark.parametrize("slug", SLUGS)
+def test_worker_inserted_into_existing_process_is_minimal(slug: str) -> None:
+    doc = _canonical(slug)
+    recipe = recipe_from_canonical(doc)
+    workers = (*recipe.blueprint.processes[0].workers, WorkerSpec(worker_name="zz_w"))
+
+    out = recipe_to_canonical(_with_process_field(recipe, 0, "workers", workers), doc)
+
+    assert out["blueprint"]["processes"][0]["workers"][-1] == {"worker_name": "zz_w"}
 
 
 @pytest.mark.parametrize("slug", ["color_inspect", "bridge_synth"])
@@ -334,10 +357,23 @@ def _full_entities(kind: str) -> list[tuple[str, tuple, dict]]:
 
 
 def _backend_load(kind: str, entity: dict) -> Any:
-    """Как файл читает backend: процесс — ``ProcessConfig``, провод — ``Wire``, дисплей — ``DisplayRegistry``."""
+    """Что backend строит из записи: процесс — поля ``ProcessConfig``, ``as_generic_config``, восстановленные конфиги
+    плагинов (``_restore_plugin_configs``) и плоский конфиг каждого плагина; провод — ``Wire``; дисплей — реестр."""
     if kind == "process":
         cfg = ProcessConfig.model_validate(entity)
-        return cfg, cfg.as_generic_config().model_dump()
+        fields = cfg.model_dump()
+        generic = cfg.as_generic_config().model_dump()
+        # сырые dict плагинов сравниваются поведением ниже, не набором ключей
+        fields.pop("plugins"), generic.pop("plugins")
+        # пустой ``config`` у восстановленного конфига — инертный extra (поля плагина плоские, ``config`` читает только
+        # ``_extract_plugin_config`` ниже); поведение конфига — его поля и ``memory``
+        restored = [
+            ({k: v for k, v in c.model_dump().items() if not (k == "config" and v == {})}, c.memory)
+            for c in _restore_plugin_configs(cfg.plugins)
+        ]
+        flat = [PluginOrchestrator._extract_plugin_config(p) for p in cfg.plugins]
+        names = [(p.get("plugin_class") or "", p.get("plugin_name", "unknown")) for p in cfg.plugins]
+        return fields, generic, restored, flat, names
     if kind == "wire":
         return BackendWire.model_validate(entity)
     registry = DisplayRegistry()
@@ -353,6 +389,15 @@ def test_minimized_and_full_load_equal_in_backend_model(kind: str, clean_display
     for slug, path, full in samples:
         minimized = minimize(path, copy.deepcopy(full))
         assert _backend_load(kind, minimized) == _backend_load(kind, full), f"{slug} {path}: {minimized} vs {full}"
+
+
+def test_minimized_process_keeps_extras_over_typed_default() -> None:
+    """Минимальная форма не затеняет ``extras.chain_targets`` явным пустым typed-полем (``_pick``)."""
+    proc = Process(process_name="p", extras={"chain_targets": ["a"]})
+
+    minimized = minimize(("blueprint", "processes", 0), proc.model_dump(mode="json"))
+
+    assert ProcessConfig.model_validate(minimized).as_generic_config().chain_targets == ["a"]
 
 
 # ---------------------------------------------------------------------------------------------------------

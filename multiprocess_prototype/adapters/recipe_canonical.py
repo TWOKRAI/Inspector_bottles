@@ -23,10 +23,10 @@ Stability:
     Новый публичный модуль слоя адаптеров (new-lite). Зависит от ``domain`` и ``multiprocess_framework.modules.recipe``;
     НЕ импортирует ``recipes.save`` / ``backend`` (``recipes.save`` в Task 1.2 импортирует этот модуль).
     Файл читает backend-модель ``SystemBlueprint`` (умолчания другие, чем у доменной модели, design.md §10.2 В-П2):
-    поле остаётся в минимальной форме только если ``backend_load(minimize(x)) == backend_load(x)`` на 22 рецептах
-    (``adapters/tests/test_recipe_canonical.py``). Расхождение сегодня одно: ``Process.plugins`` — backend хранит
-    ``plugins`` как ``list[dict]``, и минимальный плагин (без ``config: {}``) не равен полному; поэтому ``plugins``
-    вставляется как есть (полная форма ``PluginInstance``), остальные поля процесса минимизируются.
+    минимальная форма допустима, только если backend строит из неё то же, что из полной (поля ``ProcessConfig``,
+    ``as_generic_config``, восстановленные конфиги плагинов, плоский конфиг плагина; ``adapters/tests/
+    test_recipe_canonical.py`` на 22 рецептах). Плагины и воркеры минимизируются как сущности: полная запись плагина
+    (``plugin_class: null``) хуже минимальной — ``_restore_plugin_configs`` не восстанавливает его конфиг.
 """
 
 from __future__ import annotations
@@ -36,27 +36,39 @@ from typing import Any
 from multiprocess_framework.modules.recipe.yaml_io import apply_delta
 from multiprocess_prototype.adapters.stores.recipe_store import RecipeStoreFromManager
 from multiprocess_prototype.domain.entities.display import DisplayDefinition
+from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.entities.process import Process
 from multiprocess_prototype.domain.entities.recipe import Recipe
 from multiprocess_prototype.domain.entities.topology import Topology
 from multiprocess_prototype.domain.entities.wire import Wire
+from multiprocess_prototype.domain.entities.worker import WorkerSpec
 
 __all__ = ["minimize", "recipe_from_canonical", "recipe_to_canonical", "topology_to_canonical"]
 
-# Топологические секции canon-пути ``blueprint.<секция>`` -> тип сущности в списке.
-_BLUEPRINT_ENTITIES: dict[str, Any] = {"processes": Process, "wires": Wire}
-# Поля процесса, которые backend читает сырым ``dict`` — остаются в полной форме (см. Stability).
-_PROCESS_RAW_FIELDS = ("plugins",)
+# Путь списка сущностей (индекс элемента — ``*``) -> тип элемента.
+_LIST_ENTITIES: dict[tuple, Any] = {
+    ("displays",): DisplayDefinition,
+    ("blueprint", "processes"): Process,
+    ("blueprint", "wires"): Wire,
+    ("blueprint", "processes", "*", "plugins"): PluginInstance,
+    ("blueprint", "processes", "*", "workers"): WorkerSpec,
+}
 
 
 def recipe_from_canonical(doc: dict) -> Recipe:
-    """Модель рецепта из канонического тела. Pre: ``doc`` — ``N(файл)`` (корень mapping). Post: новый ``Recipe``."""
+    """Модель рецепта из канонического тела.
+
+    Pre: ``doc`` — ``N(файл)`` (корень mapping, валидный рецепт). Post: новый ``Recipe``; ``doc`` не мутируется.
+    """
     return Recipe.from_dict(doc)
 
 
 def recipe_to_canonical(recipe: Recipe, base_doc: dict) -> dict:
     """Канон ``base_doc`` с правкой модели ``recipe``; поддеревья вставки проходят ``minimize``.
 
+    Pre: ``base_doc`` — канон (``N(файл)``), ``recipe`` выведен из ``base_doc`` (``recipe_from_canonical``) и правлен:
+    до-состояние дельты считается из ``base_doc``, поэтому чужая правка в ``base_doc``, которой нет в ``recipe``, будет
+    откачена (защита — ``expected_rev`` менеджера).
     Post: новый dict; ``base_doc`` не мутируется; ключи и значения, которых правка не касалась, не меняются.
     """
     before = _model_form(recipe_from_canonical(base_doc))
@@ -67,6 +79,8 @@ def recipe_to_canonical(recipe: Recipe, base_doc: dict) -> dict:
 def topology_to_canonical(topology: dict, base_doc: dict) -> dict:
     """Канон ``base_doc`` с правкой ``blueprint.processes/wires/displays`` из dict ``topology``.
 
+    Pre: ``base_doc`` — канон с ``blueprint``, ``topology`` выведен из ``base_doc["blueprint"]`` и правлен; без
+    ``blueprint`` в ``base_doc`` секция вставляется целиком (включая пустые ``wires``/``displays``).
     Post: новый dict; ``base_doc`` не мутируется; остальные секции рецепта и ``blueprint.metadata`` не меняются.
     """
     before = {"blueprint": _topology_view(base_doc.get("blueprint") or {})}
@@ -77,23 +91,28 @@ def topology_to_canonical(topology: dict, base_doc: dict) -> dict:
 def minimize(path: tuple, value: Any) -> Any:
     """``on_insert``: убрать из вставляемого поддерева поля, равные умолчанию доменной модели.
 
-    ``path`` — путь поддерева в канонической форме. Сущность — по пути: ``blueprint.processes[i]`` (``Process``),
-    ``blueprint.wires[i]`` (``Wire``), ``displays[i]`` (``DisplayDefinition``); контейнер выше (список, ``blueprint``)
-    обходится по элементам. Прочее возвращается как есть. Исходное ``value`` не мутируется.
+    Pre: ``path`` — путь вставляемого поддерева в канонической форме (кортеж ключей и индексов), ``value`` — его полная
+    форма из ``M(recipe)``.
+    Post: новое значение, ``value`` не мутируется. Сущность определяется по пути: ``displays[i]``
+    (``DisplayDefinition``),
+    ``blueprint.processes[i]`` (``Process``), ``blueprint.wires[i]`` (``Wire``), ``blueprint.processes[i].plugins[j]``
+    (``PluginInstance``), ``blueprint.processes[i].workers[j]`` (``WorkerSpec``); список сущностей и ``blueprint``
+    обходятся по элементам. Вложенные сущности внутри процесса минимизируются вместе с ним. Прочее — как есть.
     """
-    if path == ("displays",) and isinstance(value, list):
-        return [_dump_minimal(DisplayDefinition, item) for item in value]
-    if len(path) == 2 and path[0] == "displays":
-        return _dump_minimal(DisplayDefinition, value)
     if path == ("blueprint",) and isinstance(value, dict):
         return {key: minimize(("blueprint", key), item) for key, item in value.items()}
-    if len(path) >= 2 and path[0] == "blueprint" and path[1] in _BLUEPRINT_ENTITIES:
-        entity = _BLUEPRINT_ENTITIES[path[1]]
-        if len(path) == 2 and isinstance(value, list):
-            return [_dump_minimal(entity, item) for item in value]
-        if len(path) == 3:
-            return _dump_minimal(entity, value)
+    entity = _LIST_ENTITIES.get(_shape(path))
+    if entity is not None and isinstance(value, list):
+        return [_dump_minimal(entity, item) for item in value]
+    entity = _LIST_ENTITIES.get(_shape(path[:-1])) if path and isinstance(path[-1], int) else None
+    if entity is not None:
+        return _dump_minimal(entity, value)
     return value
+
+
+def _shape(path: tuple) -> tuple:
+    """Путь с индексами, заменёнными на ``*``."""
+    return tuple("*" if isinstance(part, int) else part for part in path)
 
 
 def _model_form(recipe: Recipe) -> dict:
@@ -111,11 +130,4 @@ def _dump_minimal(entity: Any, value: Any) -> Any:
     """Минимальная форма сущности; не mapping возвращается как есть. Невалидная сущность — ``ValidationError``."""
     if not isinstance(value, dict):
         return value
-    model = entity.model_validate(value)
-    minimal = model.model_dump(mode="json", exclude_defaults=True)
-    if entity is Process:
-        full = model.model_dump(mode="json")
-        for field in _PROCESS_RAW_FIELDS:
-            if field in minimal:
-                minimal[field] = full[field]
-    return minimal
+    return entity.model_validate(value).model_dump(mode="json", exclude_defaults=True)
