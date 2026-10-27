@@ -115,11 +115,12 @@ class _RecordingStore:
         self._raw = raw
         self.saved: list[tuple[str, dict]] = []
 
-    def read_raw(self, slug: str) -> dict:
-        return self._raw
+    def read_canonical(self, slug: str) -> tuple[dict, str]:
+        return self._raw, "rev-0"
 
-    def save_raw(self, slug: str, raw: dict) -> None:
+    def save_raw(self, slug: str, raw: dict, *, expected_rev: str | None = None, layout=None) -> str:
         self.saved.append((slug, raw))
+        return "rev-1"
 
 
 def _raw() -> dict:
