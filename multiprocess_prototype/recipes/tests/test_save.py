@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from multiprocess_prototype.recipes.save import build_recipe_v3_raw
 
 
@@ -165,8 +167,6 @@ def test_saving_a_dangling_address_is_refused_and_nothing_is_written() -> None:
     цена приходила позже и в другом месте: отказ доставки на каждый кадр
     (замер плана D8 — 1418 отказов за 30 с) вместо отказа в момент правки.
     """
-    import pytest
-
     from multiprocess_prototype.recipes.save import RecipeValidationError, save_editor_topology_to_recipe
 
     store = _RecordingStore(_raw())
@@ -314,23 +314,52 @@ def _real_store(recipes_dir: Path) -> Any:
     return RecipeStoreFromManager(recipe_manager=manager, recipe_dir=recipes_dir)
 
 
-def test_non_mapping_blueprint_in_file_is_a_typed_refusal(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tail", ["blueprint: [1]\n", "blueprint: hello\n", "blueprint:\n"])
+def test_non_mapping_blueprint_in_file_is_a_typed_refusal(tmp_path: Path, tail: str) -> None:
     """``blueprint: [1]`` / ``hello`` / пустой (null) в файле — RecipeValidationError, байты файла прежние."""
-    import pytest
-
     from multiprocess_prototype.recipes.save import RecipeValidationError, save_editor_topology_to_recipe
 
     store = _real_store(tmp_path)
-    for tail in ("blueprint: [1]\n", "blueprint: hello\n", "blueprint:\n"):
-        path = tmp_path / "r1.yaml"
-        path.write_bytes(("name: r1\nversion: 3\n" + tail).encode("utf-8"))
-        before = path.read_bytes()
+    path = tmp_path / "r1.yaml"
+    path.write_bytes(("name: r1\nversion: 3\n" + tail).encode("utf-8"))
+    before = path.read_bytes()
 
-        with pytest.raises(RecipeValidationError) as info:
-            save_editor_topology_to_recipe(store, "r1", _topo_same_as_raw())
+    with pytest.raises(RecipeValidationError) as info:
+        save_editor_topology_to_recipe(store, "r1", _topo_same_as_raw())
 
-        assert info.value.errors == ["blueprint: ожидался mapping"], tail
-        assert path.read_bytes() == before, tail
+    assert info.value.errors == ["blueprint: ожидался mapping"]
+    assert path.read_bytes() == before
+
+
+def test_file_without_blueprint_key_still_saves_the_section(tmp_path: Path) -> None:
+    """Файл без ключа ``blueprint`` — не отказ: секция вставляется целиком вместе с процессом."""
+    from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
+
+    store = _real_store(tmp_path)
+    path = tmp_path / "r1.yaml"
+    path.write_bytes("name: r1\nversion: 3\n".encode("utf-8"))
+
+    save_editor_topology_to_recipe(store, "r1", _topo_same_as_raw())
+
+    text = path.read_text(encoding="utf-8")
+    assert "blueprint:" in text
+    assert "process_name: producer" in text
+
+
+def test_broken_yaml_file_is_a_format_error_not_a_missing_recipe(tmp_path: Path) -> None:
+    """Файл ``name: [unclosed`` — RecipeFormatError (не RecipeNotFoundError), байты файла прежние."""
+    from multiprocess_framework.modules.recipe import RecipeFormatError
+    from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
+
+    store = _real_store(tmp_path)
+    path = tmp_path / "r1.yaml"
+    path.write_bytes("name: [unclosed\n".encode("utf-8"))
+    before = path.read_bytes()
+
+    with pytest.raises(RecipeFormatError):
+        save_editor_topology_to_recipe(store, "r1", _topo_same_as_raw())
+
+    assert path.read_bytes() == before
 
 
 _SHORT_MARKER = "S3CR3T-7f3a"
