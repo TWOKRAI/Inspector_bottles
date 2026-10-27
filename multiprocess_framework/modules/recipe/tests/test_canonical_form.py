@@ -25,7 +25,7 @@ import pytest
 
 from multiprocess_framework.modules.recipe.hook_contract import assert_format_hook_contract
 from multiprocess_framework.modules.recipe.manager import RecipeFormatError, RecipeManager
-from multiprocess_framework.modules.recipe.yaml_io import apply_delta, patch_yaml_preserving
+from multiprocess_framework.modules.recipe.yaml_io import YamlWriteRefused, apply_delta, patch_yaml_preserving
 
 # Подпроцесс контракта импортирует этот модуль по полному имени: пытаться взять ``__name__`` нельзя — pytest
 # может назвать модуль иначе (rootdir/conftest), а в подпроцессе того имени нет.
@@ -281,7 +281,7 @@ def test_patch_recipe_unchanged_yaml11_word_with_changed_bool_like_string_refuse
     mgr, d = _make(tmp_path)
     raw = _put(d, "flag: yes\nmode: x\n")
 
-    with pytest.raises(ValueError, match="PyYAML читает дамп иначе"):
+    with pytest.raises(YamlWriteRefused, match="PyYAML читает дамп иначе"):
         mgr.patch_recipe(SLUG, {"flag": True, "mode": "On"}, expected_rev=_sha(raw))
 
     assert (d / f"{SLUG}.yaml").read_bytes() == raw
@@ -302,7 +302,7 @@ def test_patch_yaml_source_unreadable_by_pyyaml_checks_dump_against_ruamel_doc(t
     raw = "k: [a,\t b]\nname: r1\nmode: x\n".encode("utf-8")
     refused.write_bytes(raw)
 
-    with pytest.raises(ValueError, match="PyYAML читает дамп иначе"):
+    with pytest.raises(YamlWriteRefused, match="PyYAML читает дамп иначе"):
         patch_yaml_preserving(refused, {"mode": "x"}, {"mode": "On"})
 
     assert refused.read_bytes() == raw

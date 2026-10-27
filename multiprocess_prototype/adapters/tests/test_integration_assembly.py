@@ -125,6 +125,26 @@ class _FakeRecipeManager:
     def read_recipe(self, slug: str) -> dict[str, Any] | None:
         return None
 
+    def read_recipe_rev(self, slug: str) -> tuple[dict[str, Any] | None, str | None]:
+        return None, None
+
+    def read_canonical(self, slug: str) -> tuple[dict[str, Any] | None, str | None]:
+        return None, None
+
+    def patch_recipe(self, slug: str, after: dict[str, Any], *, expected_rev: str | None, layout: Any = None) -> str:
+        return "fake-rev"
+
+    def save_layout(
+        self, slug: str, positions: dict[str, Any], locked_nodes: list[str], *, expected_rev: str | None
+    ) -> str | None:
+        return None
+
+    def list(self) -> list[str]:
+        return []
+
+    def delete(self, slug: str) -> bool:
+        return False
+
     def get_active_recipe(self) -> str | None:
         return None
 
