@@ -10,13 +10,17 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
+import textwrap
 import threading
+from pathlib import Path
 
 import pytest
 
+import multiprocess_prototype.frontend.run as frun
 import multiprocess_prototype.run as run
 
 _windows_only = pytest.mark.skipif(os.name != "nt", reason="HR1: ветка Popen+wait только на Windows")
@@ -79,6 +83,45 @@ def test_hr1_keyboard_interrupt_during_wait_keeps_waiting(monkeypatch: pytest.Mo
     assert seen["poll_at_interrupt"] is None, "ребёнок уже вышел к моменту прерывания: сторож ничего не проверяет"
     assert seen["killed"] is False
     assert seen["waits"] == 2
+
+
+@_windows_only
+def test_hr3_executable_comes_from_exe_not_from_argv0(tmp_path: Path) -> None:
+    """Настоящий ребёнок при ``argv[0] != exe``: без ``executable=exe`` Windows даёт FileNotFoundError."""
+    marker = tmp_path / "ran.marker"
+    script = tmp_path / "child.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""            import sys
+            open({str(marker)!r}, "w").write("ran")
+            sys.exit(5)
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    rc = _call_with_deadline(run.default_relaunch, sys.executable, ["relaunch-child-name", str(script)])
+
+    assert rc == 5
+    assert marker.read_text() == "ran"
+
+
+@pytest.mark.parametrize(
+    "fn",
+    [
+        pytest.param(run.venv_guard, id="run.venv_guard"),
+        pytest.param(run.launch, id="run.launch"),
+        pytest.param(frun.launch, id="frontend.launch"),
+    ],
+)
+def test_hr4_seam_default_is_default_relaunch(fn) -> None:
+    """Умолчание шва — ``run.default_relaunch`` во всех трёх сигнатурах.
+
+    Все остальные тесты передают ``relaunch=`` явно, поэтому подмену умолчания на ``os.execv``
+    (на Windows она возвращает дефект C-70) они не видят. Поведенческий вариант невозможен:
+    настоящий ``execv`` на Windows завершил бы сессию pytest.
+    """
+    assert inspect.signature(fn).parameters["relaunch"].default is run.default_relaunch
 
 
 @pytest.mark.parametrize(

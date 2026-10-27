@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent  # .../multiprocess_prototype/frontend
@@ -57,7 +58,7 @@ def launch(
     *,
     project_root: Path = PROJECT_ROOT,
     common_dir_of=git_common_dir,
-    relaunch=default_relaunch,
+    relaunch: Callable[[str, list[str]], int] = default_relaunch,
 ) -> int:
     """venv-guard: переключиться на проектный .venv, включить presentation, запустить."""
     rc = venv_guard(
