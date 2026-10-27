@@ -574,7 +574,7 @@ def test_h12_stop_is_accepted_under_relay_flood(rig: Rig) -> None:
 
     stop_reply = rig.wait_reply(stop, 60.0)
     assert stop_reply is not None, "process.stop other не ответил за дедлайн"
-    assert stop_reply.result == {"success": True, "process_name": "other"}, stop_reply.result
+    assert stop_reply.result == {"success": True, "process_name": "other", "outcome": "exited"}, stop_reply.result
     other = rig.pm._process_registry.get_process_by_name("other")
     assert other is None or not other.is_alive(), "other жив после принятого process.stop"
 

@@ -8,6 +8,9 @@
   * ``stop_delay_s`` (конфиг процесса, дефолт 0.0) — сколько хук остановки ``stop()`` спит. Это и есть
     «медленный ребёнок»: ``run_process_function`` зовёт ``stop()`` после сигнала остановки, и только
     потом процесс выходит;
+  * ``stop_exit_code`` (конфиг процесса, дефолт ``None`` — поведение 1.9b без изменений) — при значении хук
+    ``stop()`` после ``stop_delay_s`` выходит ``os._exit(code)``: ребёнок, вышедший сам с кодом ≠ 0
+    (Task 1.10, R13);
   * ``marker_path`` — файл, в который ребёнок дописывает по строке ``<pid>\\t<time.time()>\\t<command>``
     на каждое полученное сообщение с командой ``probe.ping``. Так тест видит, КТО и КОГДА получил
     внутреннее сообщение (relay), не зная ничего о внутренностях PM.
@@ -61,6 +64,9 @@ class LifecycleChild:
 
     def stop(self) -> None:
         time.sleep(float(self.config.get("stop_delay_s", 0.0)))
+        exit_code = self.config.get("stop_exit_code")
+        if exit_code is not None:
+            os._exit(int(exit_code))
 
     def shutdown(self) -> None:
         self._stop_readers.set()

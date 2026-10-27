@@ -83,7 +83,14 @@ class Reply:
 class Rig:
     """PM + два ребёнка + зонд ответов. Всё ожидание — с дедлайном."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        stop_timeout_s: float = 8.0,
+        child_overrides: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        """``stop_timeout_s`` — окно ``stop_process_timeout`` (дефолт 8,0: тесты 1.9b без изменений);
+        ``child_overrides`` — добавки к конфигу детей по имени (Task 1.10: ``{"other": {"stop_exit_code": 3}}``)."""
         ctx = multiprocessing.get_context("spawn")
         self.system_stop_event = ctx.Event()
         self.srm = SharedResourcesManager()
@@ -106,10 +113,12 @@ class Rig:
                 "marker_path": str(self.markers["other"]),
             },
         }
+        for child_name, extra in (child_overrides or {}).items():
+            processes_config[child_name].update(extra)
         self.pm = ProcessManagerProcess(
             shared_resources=self.srm,
             config={
-                "stop_process_timeout": 8.0,
+                "stop_process_timeout": float(stop_timeout_s),
                 "shutdown_timeout": 8.0,
                 "processes_config": processes_config,
             },
@@ -373,7 +382,9 @@ def test_stop_via_process_command_door_deferred_same_content(rig: Rig) -> None:
     assert reply is not None, "process.command.response на стоп не пришёл за дедлайн"
     assert reply.message.get("command") == "process.command.response", f"ответ не той двери: {reply.message}"
     assert reply.success is True, f"process.command.response: success={reply.success}"
-    assert reply.result == {"success": True, "process_name": "slow"}, f"содержимое ответа: {reply.result}"
+    assert reply.result == {"success": True, "process_name": "slow", "outcome": "exited"}, (
+        f"содержимое ответа: {reply.result}"
+    )
     assert reply.slow_alive is False, "process.command.response пришёл, пока slow ещё жив"
     assert reply.t_arrival - stop.t_send >= STOP_LONG_S, "ответ пришёл раньше, чем мог закончиться стоп в 3,0 с"
 
@@ -441,7 +452,9 @@ def test_stop_reply_after_confirmed_death_direct_door(rig: Rig) -> None:
     assert reply.slow_alive is False, (
         "ответ process.stop пришёл, пока slow ещё жив (is_alive() == True в момент прихода)"
     )
-    assert reply.result == {"success": True, "process_name": "slow"}, f"содержимое ответа: {reply.result}"
+    assert reply.result == {"success": True, "process_name": "slow", "outcome": "exited"}, (
+        f"содержимое ответа: {reply.result}"
+    )
     assert reply.success is True
     assert reply.t_arrival - stop.t_send >= STOP_LONG_S, "ответ пришёл раньше, чем мог закончиться стоп в 3,0 с"
     assert rig.slow0.exitcode == 0, f"exitcode slow = {rig.slow0.exitcode}, ожидалось 0"
@@ -544,8 +557,12 @@ def test_lifecycle_commands_keep_arrival_order(rig: Rig) -> None:
     restart_reply = rig.wait_reply(restart)
     assert stop_reply is not None, "ответ process.stop не пришёл за дедлайн"
     assert restart_reply is not None, "ответ process.restart не пришёл за дедлайн"
-    assert stop_reply.result == {"success": True, "process_name": "slow"}, f"ответ stop: {stop_reply.result}"
-    assert restart_reply.result == {"success": True, "process_name": "other"}, f"ответ restart: {restart_reply.result}"
+    assert stop_reply.result == {"success": True, "process_name": "slow", "outcome": "exited"}, (
+        f"ответ stop: {stop_reply.result}"
+    )
+    assert restart_reply.result == {"success": True, "process_name": "other", "outcome": "exited"}, (
+        f"ответ restart: {restart_reply.result}"
+    )
     assert stop_reply.t_arrival < restart_reply.t_arrival, (
         f"ответ restart ({restart_reply.t_arrival - restart.t_send:.2f} с) раньше ответа stop "
         f"({stop_reply.t_arrival - stop.t_send:.2f} с): порядок прибытия нарушен"

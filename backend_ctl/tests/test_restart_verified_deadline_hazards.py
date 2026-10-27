@@ -57,6 +57,7 @@ def _entry(pid: Optional[int], *, restarts: int = 0, alive: bool = True) -> Dict
         "alive": alive,
         "started_at": 1000.0,
         "instance_restarts": restarts,
+        "stop_outcome": None,  # T1.10: поле записи supervision.status; парсер его не читает
     }
 
 
@@ -97,7 +98,7 @@ def _driver_with_virtual_clock(
         system_calls.append({"command": command, "timeout": timeout})
         clock.sleep(request_delay)
         state["confirming"] = True
-        return {"success": True}
+        return {"success": True, "outcome": "exited"}
 
     monkeypatch.setattr(d, "send_command", fake_send)
     monkeypatch.setattr(d, "system_command", fake_system)

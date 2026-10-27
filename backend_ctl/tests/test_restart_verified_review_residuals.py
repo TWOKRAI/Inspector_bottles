@@ -74,11 +74,11 @@ class _Driver(BackendDriver):
         restarts = 0 if первый else 1
         return {
             "success": True,
-            "processes": {"p": {"pid": pid, "instance_restarts": restarts, "alive": True}},
+            "processes": {"p": {"pid": pid, "instance_restarts": restarts, "alive": True, "stop_outcome": None}},
         }
 
     def system_command(self, payload: Any, *, timeout: Any = None) -> Dict[str, Any]:
-        return {"success": True}
+        return {"success": True, "outcome": "exited"}
 
 
 def _run(drv: BackendDriver, **kw: Any) -> Dict[str, Any]:
