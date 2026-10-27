@@ -219,8 +219,7 @@ def outcome_counts(runs: list[dict[str, Any]]) -> dict[str, int]:
     """Счёт ``outcome`` из ответов стопа: ``{"exited": n, ...}``; нет ответа или ключа - ``"<нет>"``."""
     counts: dict[str, int] = {}
     for r in runs:
-        reply = r.get("reply")
-        key = str(reply.get("outcome")) if isinstance(reply, dict) and "outcome" in reply else "<нет>"
+        key = str(_outcome_of(r.get("reply")))
         counts[key] = counts.get(key, 0) + 1
     return counts
 
@@ -885,7 +884,11 @@ def run_s1(ctx: Ctx) -> list[dict[str, Any]]:
 
 
 def _outcome_of(reply: Any) -> Any:
-    return reply.get("outcome", "<нет>") if isinstance(reply, dict) else "<нет>"
+    """``outcome`` ответа стопа: S1 хранит весь конверт ``command.response`` (итог в ``result``), S6 - уже ``leaf``."""
+    if not isinstance(reply, dict):
+        return "<нет>"
+    body = reply["result"] if isinstance(reply.get("result"), dict) else reply
+    return body.get("outcome", "<нет>")
 
 
 def run_s6(ctx: Ctx) -> list[dict[str, Any]]:
