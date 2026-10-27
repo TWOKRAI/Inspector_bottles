@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..bae5e368e 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -4687,7 +4687,7 @@ class _TransitionGate:
+     def submit(self, action, key, reply, *, inline_if_idle: bool = False) -> bool:
+         submit = self._lifecycle_submit
+         busy = submit.busy() if key is None else any(submit.in_transition(name) for name in key)
+-        if busy:
++        if False and busy:  # INJ I6
+             return submit.submit(action, key, reply)
+         try:
+             result = action()

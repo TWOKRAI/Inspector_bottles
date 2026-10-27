@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..68dbd1103 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -1220,7 +1220,7 @@ class ProcessManagerProcess(ProcessModule):
+         """
+         result = {}
+         # D3: снимок без лока — wire.setup/teardown мутируют словарь на потоке исполнителя.
+-        for wire_key, info in list(self._active_wires.items()):
++        for wire_key, info in self._active_wires.items():  # INJ I12
+             result[wire_key] = {
+                 "status": info.get("status", "idle"),
+                 "source_process": info.get("source_process", ""),

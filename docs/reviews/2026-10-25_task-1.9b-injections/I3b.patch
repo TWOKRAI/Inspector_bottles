@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py b/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
+index 420f74677..528d706d5 100644
+--- a/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
++++ b/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
+@@ -196,7 +196,7 @@ class ChildProcessStop:
+         Прерванный стоп (``aborted``) — no-op: ни строки, ни ``terminate`` (D4, один владелец).
+         """
+         with self._lock:
+-            if self._aborted or self._kill_started_at is not None:
++            if self._kill_started_at is not None:  # INJ I3b
+                 return
+             self._kill_started_at = time.monotonic()
+             waited = self._kill_started_at - self._stop_requested_at

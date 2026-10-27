@@ -1,0 +1,15 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..ec35c3204 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -604,7 +604,9 @@ class ProcessManagerProcess(ProcessModule):
+         }
+
+         for cmd_name, (handler, description) in commands.items():
+-            if cmd_name in self._LIFECYCLE_COMMANDS:
++            if cmd_name == "system.shutdown":  # INJ I8
++                routing = {"executor": "pm-lifecycle-submit", "targets": "all"}
++            elif cmd_name in self._LIFECYCLE_COMMANDS:
+                 routing = {"executor": "pm-lifecycle-submit", **self._LIFECYCLE_COMMANDS[cmd_name]}
+             elif cmd_name in self._TRANSITION_COMMANDS:
+                 routing = {"executor": "pm-transition-gate", **self._TRANSITION_COMMANDS[cmd_name]}

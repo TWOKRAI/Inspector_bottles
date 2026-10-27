@@ -1,0 +1,61 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..ac700bed1 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -837,6 +837,8 @@ class ProcessManagerProcess(ProcessModule):
+         with self._routing_lock:
+             epoch = self._routing_epoch
+             incarnations = dict(self._incarnations)
++        with _INJ7B_LOCK:  # INJ I7b
++            pass
+         mon = getattr(self, "_process_monitor", None)
+         snap = mon.get_supervision_snapshot() if mon is not None else {}
+         # D3: снимки без лока — писатели класса L мутируют словари на потоке исполнителя.
+@@ -1054,7 +1056,8 @@ class ProcessManagerProcess(ProcessModule):
+         """
+         if self._topology_manager is None:
+             return {"error": "TopologyManager not initialized"}
+-        result = self._topology_manager.get()
++        with _INJ7B_LOCK:  # INJ I7b
++            result = self._topology_manager.get()
+         # D3: менеджер отдаёт живой словарь; писатель класса L меняет его на потоке исполнителя.
+         topology = result.get("topology") if isinstance(result, dict) else None
+         if isinstance(topology, dict):
+@@ -1220,7 +1223,9 @@ class ProcessManagerProcess(ProcessModule):
+         """
+         result = {}
+         # D3: снимок без лока — wire.setup/teardown мутируют словарь на потоке исполнителя.
+-        for wire_key, info in list(self._active_wires.items()):
++        with _INJ7B_LOCK:  # INJ I7b
++            _inj_snap = list(self._active_wires.items())
++        for wire_key, info in _inj_snap:
+             result[wire_key] = {
+                 "status": info.get("status", "idle"),
+                 "source_process": info.get("source_process", ""),
+@@ -4608,6 +4613,9 @@ class _ChildrenStop:
+         return self._group.result() if self._group is not None else {}
+
+
++_INJ7B_LOCK = threading.RLock()  # INJ I7b
++
++
+ class _LifecycleSubmit:
+     """Считающий адаптер ``OrderedExecutor.submit`` над исполнителем ``pm-lifecycle`` (Task 1.9b, D1).
+
+@@ -4663,8 +4671,15 @@ class _LifecycleSubmit:
+             finally:
+                 release()
+
++        inner_action = action
++
++        def locked_action() -> Any:  # INJ I7b
++            with _INJ7B_LOCK:
++                return inner_action()
++
++        locked_action.__name__ = getattr(inner_action, "__name__", "action")
+         try:
+-            return self._executor.submit(action, key, counted_reply, inline_if_idle=inline_if_idle)
++            return self._executor.submit(locked_action, key, counted_reply, inline_if_idle=inline_if_idle)
+         except BaseException:
+             release()
+             raise

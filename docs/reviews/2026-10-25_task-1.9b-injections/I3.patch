@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py b/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
+index 420f74677..10226b59e 100644
+--- a/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
++++ b/multiprocess_framework/modules/process_manager_module/core/child_process_stop.py
+@@ -240,7 +240,7 @@ class ChildProcessStop:
+             alive = self._observe()
+             if not alive:
+                 return True
+-            if self._abort_requested():
++            if False and self._abort_requested():  # INJ I3
+                 # Метки выжившим нет; ``survivors()`` их вернёт, ``kill()`` станет no-op.
+                 with self._lock:
+                     self._aborted = True
