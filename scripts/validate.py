@@ -344,6 +344,52 @@ def check_lifecycle_guards() -> None:
     print(f"  {summary_line(findings, BASE)}")
 
 
+def check_relative_imports() -> None:
+    """Относительный импорт не выходит за свой верхний пакет (C-53, решение владельца 2026-10-27).
+
+    Одно правило для трёх слоёв: ``multiprocess_framework.modules``, ``Services``, ``Plugins``.
+    Разбор через ``ast`` без импорта; тесты и ``TYPE_CHECKING`` включены, исключений нет.
+    """
+    import ast
+
+    check_header("11. Относительные импорты не выходят за свой пакет (C-53)")
+    roots = [
+        (MODULES_ROOT, ["multiprocess_framework", "modules"]),
+        (SERVICES_ROOT, ["Services"]),
+        (BASE / "Plugins", ["Plugins"]),
+    ]
+    found = []
+    for root, top in roots:
+        for py_file in sorted(root.rglob("*.py")):
+            if "__pycache__" in py_file.parts:
+                continue
+            rel_parts = list(py_file.relative_to(root).with_suffix("").parts)
+            is_package = rel_parts[-1] == "__init__"
+            module = top + (rel_parts[:-1] if is_package else rel_parts)
+            package = module if is_package else module[:-1]
+            shown = py_file.relative_to(BASE).as_posix()
+            try:
+                tree = ast.parse(py_file.read_bytes())
+            except (SyntaxError, ValueError) as exc:
+                found.append(f"  [FAIL] {shown}: ast не разобрал: {exc!r}")
+                continue
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.ImportFrom) and node.level > 0):
+                    continue
+                up = node.level - 1
+                base = package[: len(package) - up] if up < len(package) else []
+                target = base + (node.module.split(".") if node.module else [])
+                if not base or target[: len(top)] != top:
+                    shown_target = ".".join(target) if base else "<выше корня>"
+                    dots = "." * node.level
+                    found.append(f"  [FAIL] {shown}:{node.lineno}: {dots}{node.module or ''} -> {shown_target}")
+    for msg in found:
+        print(msg)
+        errors.append(msg)
+    if not found:
+        print("  [OK] выходов за пакет нет")
+
+
 def main() -> int:
     print("\nMULTIPROCESS FRAMEWORK — Валидация")
     print(f"Base: {BASE}")
@@ -360,6 +406,7 @@ def main() -> int:
     check_memory_tags()
     check_memory_index()
     check_lifecycle_guards()
+    check_relative_imports()
 
     print(f"\n{'=' * 60}")
     print("  ИТОГ")
