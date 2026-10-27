@@ -160,6 +160,19 @@ def test_h5_failed_git_is_none(repo_root: Path, monkeypatch: pytest.MonkeyPatch,
     assert run.git_common_dir(repo_root) is None
 
 
+def test_h8_git_env_does_not_leak(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``GIT_DIR`` из окружения (git hook, ``rebase --exec``) не должен перебивать cwd."""
+    tmp = tmp_path.resolve()
+    _git(tmp, "init", "a")
+    _git(tmp, "init", "b")
+    monkeypatch.setenv("GIT_DIR", str(tmp / "b" / ".git"))
+
+    common = run.git_common_dir(tmp / "a")
+
+    assert common is not None
+    assert common.resolve() == (tmp / "a" / ".git").resolve()
+
+
 # --------------------------------------------------------------------------------------
 # Н6: настоящие объекты — git worktree без common_dir_of
 # --------------------------------------------------------------------------------------

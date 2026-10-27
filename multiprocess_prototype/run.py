@@ -52,6 +52,10 @@ def _same_interpreter(a: Path, b: Path) -> bool:
         return False
 
 
+#: Переменные окружения git, которые перебивают поиск репозитория по cwd.
+_GIT_REPO_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+
+
 def git_common_dir(cwd: Path) -> Path | None:
     """Абсолютный путь общего git-каталога дерева ``cwd`` или ``None``.
 
@@ -61,7 +65,10 @@ def git_common_dir(cwd: Path) -> Path | None:
     # Потолок поиска — родитель cwd: git не уйдёт вверх по дереву в чужой репозиторий
     # (на этой машине tmp резолвится в C:/Users/INNOTECH/.git). Корень дерева с `.git`
     # (каталог у основной копии, файл у worktree) git находит и так.
-    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(cwd.parent)}
+    # Переменные, которыми git выбирает репозиторий в обход cwd (приходят из git hook или
+    # `git rebase --exec`), сбрасываем: иначе ответ был бы про чужое дерево.
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_REPO_ENV}
+    env["GIT_CEILING_DIRECTORIES"] = str(cwd.parent)
     try:
         # Аргументы — литералы, cwd — каталог дерева; таймаут — страховка от зависшего git.
         result = subprocess.run(  # nosec B603 B607
