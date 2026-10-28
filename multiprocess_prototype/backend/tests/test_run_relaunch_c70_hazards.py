@@ -56,8 +56,8 @@ def test_hr1_keyboard_interrupt_during_wait_keeps_waiting(monkeypatch: pytest.Mo
     seen: dict[str, object] = {"killed": False, "poll_at_interrupt": "unset", "waits": 0}
 
     class _InterruptingPopen:
-        def __init__(self, argv: list[str], **kwargs: object) -> None:
-            self._real = _REAL_POPEN(argv, **kwargs)
+        def __init__(self, argv: list[str], exe: str) -> None:
+            self._real = _REAL_POPEN(argv, executable=exe)
 
         def wait(self, *args: object, **kwargs: object) -> int:
             seen["waits"] = int(seen["waits"]) + 1  # type: ignore[call-overload]
@@ -74,7 +74,8 @@ def test_hr1_keyboard_interrupt_during_wait_keeps_waiting(monkeypatch: pytest.Mo
             seen["killed"] = True
             self._real.terminate()
 
-    monkeypatch.setattr(run.subprocess, "Popen", _InterruptingPopen)
+    # Шов C-76: фейк не имеет .pid и не попадает в job (давать ему pid = os.getpid() нельзя).
+    monkeypatch.setattr(run, "_start_in_kill_job", lambda exe, argv: _InterruptingPopen(argv, exe))
     argv = [sys.executable, "-c", "import sys, time; time.sleep(1); sys.exit(6)"]
 
     rc = _call_with_deadline(run.default_relaunch, sys.executable, argv)
@@ -139,13 +140,11 @@ def test_hr2_unsigned_windows_code_becomes_signed(monkeypatch: pytest.MonkeyPatc
     """Граница знакового преобразования на фейковом ``Popen`` (работает на любой ОС)."""
 
     class _FakePopen:
-        def __init__(self, argv: list[str], **kwargs: object) -> None:
-            pass
-
         def wait(self) -> int:
             return raw
 
-    monkeypatch.setattr(run.subprocess, "Popen", _FakePopen)
+    # Шов C-76: фейк без .pid и без _kill_job (job не создаётся, handle закрывать нечего).
+    monkeypatch.setattr(run, "_start_in_kill_job", lambda exe, argv: _FakePopen())
     fn = run.default_relaunch  # имя берётся до подмены os.name
     with monkeypatch.context() as mp:
         mp.setattr(os, "name", "nt")
