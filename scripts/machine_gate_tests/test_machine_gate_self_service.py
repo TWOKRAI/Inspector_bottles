@@ -1291,7 +1291,7 @@ def test_wait_with_foreign_window_times_out_with_124_without_write(bash: str, lo
     res = _gate(bash, ["wait", "s2", "--timeout", "0"], lock_dir)
 
     assert res.code == 124, res.ctx()
-    assert "TIMEOUT" in res.both, res.ctx()
+    assert "TIMEOUT" in res.out, res.ctx()
     assert "GRANTED" not in res.both, res.ctx()
     _assert_untouched(lock, snap, lock_dir)
 

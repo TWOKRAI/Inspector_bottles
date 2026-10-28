@@ -138,7 +138,7 @@ Files: <paths>
   `wait <session>` in the background and `release <session>` when done (it also cancels a queued request); `extend
   <session> <min>` moves its own `until`; `merge-begin <session> <branch>` / `merge-end <session>` replace «сливаю» /
   «ок». No message to the coordinator for a window, a merge or a report, and no «принято» (owner, 2026-10-27); a manual
-  `waiting:` of the coordinator is dropped before the merge. While `machine.lock` exists
+  `waiting:` of the coordinator is dropped before the merge. No `machine.lock` → `request` and the other new subcommands exit 2 («no machine.lock»): there is no coordinator, take no window, use the old `stand.lock` rule. While `machine.lock` exists
   the hook `machine-gate-guard.sh` blocks any command `classify` marks (bare `pytest`, `make gate` / `make test`,
   `run_framework_tests.py`, `run_sim_all`, …) that bypasses the gate (its message shows the gated command to run).
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
