@@ -67,12 +67,15 @@ class TopologySession:
     main thread (EventBus публикует синхронно там же).
     """
 
-    __slots__ = ("_dirty", "_diverged", "_callbacks")
+    __slots__ = ("_dirty", "_diverged", "_callbacks", "_base")
 
     def __init__(self) -> None:
         self._dirty: bool = False
         self._diverged: bool = False
         self._callbacks: list[Callable[[], None]] = []
+        # База правок редактора: (slug рецепта, rev его файла на момент загрузки в редактор).
+        # None — базы нет (рецепт загружен не из каталога рецептов / активации ещё не было).
+        self._base: tuple[str, str | None] | None = None
 
     # ------------------------------------------------------------------ #
     #  Чтение состояния                                                    #
@@ -87,6 +90,42 @@ class TopologySession:
     def diverged(self) -> bool:
         """Граф редактора расходится с живой системой (backend)."""
         return self._diverged
+
+    # ------------------------------------------------------------------ #
+    #  База правок (C-30, Task 1.8)                                        #
+    # ------------------------------------------------------------------ #
+
+    def capture_base(self, slug: str, rev: str | None) -> None:
+        """Запомнить базу: редактор загрузил рецепт ``slug`` с файла ревизии ``rev``.
+
+        Зовут composition root на старте (рецепт, прочитанный один раз) и на активации
+        (``RecipeActivated``). Заменяет прежнюю базу целиком.
+        """
+        self._base = (slug, rev)
+
+    def base_rev_for(self, slug: str) -> str | None:
+        """``rev`` базы, если она относится к ``slug``; иначе ``None`` (стор возьмёт rev своего чтения).
+
+        Save в ДРУГОЙ рецепт не должен сверяться с ревизией чужого файла: сверка по slug.
+        """
+        if self._base is None or self._base[0] != slug:
+            return None
+        return self._base[1]
+
+    def rebase(self, slug: str, rev: str | None) -> None:
+        """После успешной записи ``slug``: база = ревизия, которую вернула запись.
+
+        Запись в рецепт, не являющийся базой редактора, базу не меняет: редактор по-прежнему
+        построен на файле базового рецепта.
+
+        Предусловие: ``rebase`` допустим только после записи, сделанной с ``expected_rev == base_rev_for(slug)``,
+        и только если её сделал сам редактор из своей модели (Save) либо она лежит вне секций, из которых
+        построена модель (``blueprint.processes`` / ``wires`` / ``displays``). Другая вкладка меняет эти секции
+        через модель редактора (dispatch), а не в файл: rebase после её записи туда откатил бы правку при
+        следующем Save (Р7 design.md).
+        """
+        if self._base is not None and self._base[0] == slug:
+            self._base = (slug, rev)
 
     # ------------------------------------------------------------------ #
     #  Подписка GUI                                                        #

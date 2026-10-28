@@ -48,6 +48,9 @@ if TYPE_CHECKING:
 
 logger = get_std_logger(__name__)
 
+# Текст для пользователя при RecipeConflict (рецепт-файл изменён снаружи после загрузки в редактор).
+_CONFLICT_MESSAGE = "Рецепт изменён снаружи — перезагрузите его"
+
 
 class LayoutController:
     """Владелец GUI-состояния layout и операций сохранения/загрузки для Pipeline.
@@ -70,10 +73,14 @@ class LayoutController:
         services: "AppServices",
         model: "PipelineModel",
         topo: Any,
+        topology_session: Any = None,
     ) -> None:
         self._host = host
         self._services = services
         self._model = model
+        # C-30 (Task 1.8): сессия хранит базовый rev рецепта, на котором строилась правка редактора;
+        # Save и автосохранение раскладки сверяются с ним. None → rev берёт стор (чтение в момент записи).
+        self._topology_session = topology_session
         # TopologyPresenter (load/save YAML) — стабильный снимок, инжектится.
         self._topo = topo
         # --- GUI-состояние (F.7: владелец — контроллер) -------------------- #
@@ -299,9 +306,20 @@ class LayoutController:
         self._sync_positions_from_scene()
 
         gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
+        from multiprocess_framework.modules.recipe import RecipeConflict
+
+        session = self._topology_session
+        expected_rev = session.base_rev_for(active_slug) if session is not None else None
         try:
-            store.save_layout(active_slug, gui_positions, sorted(self._locked_nodes))
+            new_rev = store.save_layout(
+                active_slug, gui_positions, sorted(self._locked_nodes), expected_rev=expected_rev
+            )
+            if session is not None and new_rev is not None:
+                session.rebase(active_slug, new_rev)
             logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
+        except RecipeConflict:
+            # Рецепт изменён снаружи: тихо не затираем, окна нет (автосохранение не дёргает пользователя).
+            logger.warning("%s (рецепт '%s')", _CONFLICT_MESSAGE, active_slug)
         except Exception:
             logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
 
@@ -407,6 +425,8 @@ class LayoutController:
         """
         from PySide6.QtWidgets import QMessageBox
 
+        from multiprocess_framework.modules.recipe import RecipeConflict
+
         from .io import graph_to_blueprint
 
         store = self._services.recipes
@@ -443,15 +463,24 @@ class LayoutController:
             # вызываемом — общий с Recipes-Save и closeEvent (класс A-3). RS-5-валидация
             # ВНУТРИ helper; RecipeValidationError ловится тем же except ниже (QMessageBox).
             # Живые позиции/фиксация — авторитетный override (Pipeline-путь).
-            save_editor_topology_to_recipe(
+            session = self._topology_session
+            new_rev = save_editor_topology_to_recipe(
                 store,
                 active_slug,
                 topology,
                 gui_positions=gui_positions,
                 locked_nodes=sorted(self._locked_nodes),
+                expected_rev=session.base_rev_for(active_slug) if session is not None else None,
             )
+            if session is not None:
+                session.rebase(active_slug, new_rev)
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
+        except RecipeConflict:
+            # Файл рецепта изменён после загрузки в редактор: запись не выполнена, mark_saved не зовётся.
+            logger.warning("Save рецепта '%s': %s", active_slug, _CONFLICT_MESSAGE)
+            QMessageBox.critical(parent, "Сохранение рецепта", _CONFLICT_MESSAGE)
+            return False
         except Exception as exc:
             logger.exception("Ошибка при сохранении рецепта '%s'", active_slug)
             QMessageBox.critical(parent, "Сохранение рецепта", f"Ошибка: {exc}")

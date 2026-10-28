@@ -10,7 +10,7 @@ Purpose:
 
 Public API (внутренний модуль ``core/``, из ``__init__``/``interfaces`` пакета не экспортируется):
     ``ChildProcessStop(processes, stop_events, *, on_confirmed_dead, logger, terminate_grace_s,
-    kill_confirm_s, poll_s)`` — ``request_stop()``, ``join_until(deadline)``, ``kill()``,
+    kill_confirm_s, poll_s, idle, should_abort, windows_s)`` — ``request_stop()``, ``join_until(deadline)``, ``kill()``,
     ``survivors()``, ``close()``.
 
 Инварианты:
@@ -18,8 +18,10 @@ Public API (внутренний модуль ``core/``, из ``__init__``/``int
       в момент наблюдения смерти; выжившему метка не ставится;
     * ``survivors()`` строится по набору подтверждённых: имя не в выживших ⇒ метка была
       (правило ADR-PMM-030 «True ⇒ метка»);
-    * до ``kill()`` процессам не шлётся ни одного сигнала; ``kill()`` только шлёт
-      ``terminate()`` и возвращается, настоящий ``kill()`` уходит из ``join_until``.
+    * без ``windows_s`` до ``kill()`` сигналов нет; с ``windows_s`` — сигнал имени только по
+      его сроку (``request_stop`` + окно, не позже срока ``join_until``) и только без abort
+      (Task 1.11, ADR-PMM-035); ``kill()`` только шлёт ``terminate()`` тем, кому по имени ещё
+      не слали, и возвращается, настоящий ``kill()`` уходит из ``join_until``.
 
 Stability: lite
 """
@@ -61,8 +63,17 @@ class ChildProcessStop:
         poll_s: float = STOP_POLL_S,
         idle: Callable[[float], None] | None = None,
         should_abort: Callable[[], bool] | None = None,
+        windows_s: Mapping[str, float] | None = None,
     ) -> None:
         self._processes: dict[str, Any] = dict(processes)
+        # Task 1.11: окно каждого имени от ``request_stop`` (None — прежний путь, сигналы только с kill()).
+        self._windows: dict[str, float] | None = (
+            {name: float(value) for name, value in windows_s.items()} if windows_s is not None else None
+        )
+        # Имена, которым terminate по имени уже слан (или была попытка): kill() их пропускает.
+        self._name_signalled: set[str] = set()
+        # Момент настоящего kill имени (terminate по имени + terminate_grace_s); после отправки — снят.
+        self._name_kill_at: dict[str, float] = {}
         self._events: dict[str, Any] = {name: stop_events.get(name) for name in self._processes}
         self._on_confirmed_dead = on_confirmed_dead
         self._logger = logger
@@ -179,6 +190,11 @@ class ChildProcessStop:
                 self._emit("warning", f"stop_event.set() для '{name}' упал: {exc}")
 
     @property
+    def windows_s(self) -> dict[str, float] | None:
+        """Окна имён (Task 1.11), копия; ``None`` — группа без окон (прежний путь)."""
+        return dict(self._windows) if self._windows is not None else None
+
+    @property
     def aborted(self) -> bool:
         """``join_until`` прерван ``should_abort`` (системный стоп): выжившие не подтверждены."""
         return self._aborted
@@ -205,6 +221,9 @@ class ChildProcessStop:
             self._kill_started_at = time.monotonic()
             waited = self._kill_started_at - self._stop_requested_at
         for name, proc in self._pending():
+            with self._lock:
+                if name in self._name_signalled:
+                    continue  # Task 1.11: terminate по имени уже ушёл — повтор не шлётся
             if not self._alive(name, proc):
                 continue
             self._emit("warning", f"Process '{name}' did not stop in {waited:.1f}s, terminating...")
@@ -228,6 +247,8 @@ class ChildProcessStop:
             if self._real_kill_sent:
                 return
             self._real_kill_sent = True
+            # Task 1.11: у имени с terminate по имени свой срок kill (``_name_escalate``).
+            alive = [(name, proc) for name, proc in alive if name not in self._name_signalled]
         for name, proc in alive:
             self._emit("error", f"Force killing process '{name}'")
             try:
@@ -256,6 +277,8 @@ class ChildProcessStop:
                     self._aborted = True
                 return False
             now = time.monotonic()
+            # Task 1.11: сроки имён — после проверки abort (1.9b D4: прерванному стопу сигналов нет).
+            name_next = self._name_escalate(alive, now, deadline) if self._windows is not None else None
             kill_at = self._kill_at(deadline)
             if kill_at is not None and now >= kill_at:
                 self._send_real_kill(alive)
@@ -265,7 +288,64 @@ class ChildProcessStop:
             pause = min(self._poll_s, deadline - now)
             if kill_at is not None:
                 pause = min(pause, kill_at - now)
+            if name_next is not None:
+                pause = min(pause, name_next - now)
             self._wait(max(0.0, pause))
+
+    def _name_escalate(self, alive: list[tuple[str, Any]], now: float, deadline: float) -> float | None:
+        """Эскалация по окнам имён (Task 1.11): terminate на сроке имени, kill через ``terminate_grace_s``.
+
+        Срок имени — ``min(request_stop + окно, deadline)``; kill имени — в момент его terminate +
+        ``terminate_grace_s`` и в фазе 3 тоже (групповой зажим ``deadline − kill_confirm_s`` его не
+        трогает). Возвращает ближайший следующий момент события по имени (для паузы) или ``None``.
+        """
+        windows = self._windows or {}
+        upcoming: float | None = None
+        for name, proc in alive:
+            window = windows.get(name)
+            if window is None:
+                continue  # имени нет в карте (нарушение Pre) — его ведёт эскалация группы
+            with self._lock:
+                if self._aborted:
+                    return None
+                signalled = name in self._name_signalled
+                kill_at = self._name_kill_at.get(name)
+                if not signalled:
+                    term_at = min(self._stop_requested_at + window, deadline)
+                    if now < term_at:
+                        upcoming = term_at if upcoming is None else min(upcoming, term_at)
+                        continue
+                    self._name_signalled.add(name)
+                    kill_at = now + self._terminate_grace_s
+                    self._name_kill_at[name] = kill_at
+                    send = "terminate"
+                elif kill_at is not None and now >= kill_at:
+                    del self._name_kill_at[name]
+                    send = "kill"
+                else:
+                    if kill_at is not None:
+                        upcoming = kill_at if upcoming is None else min(upcoming, kill_at)
+                    continue
+            if send == "terminate":
+                self._emit("warning", f"Process '{name}' did not stop in {window:.1f}s, terminating...")
+                try:
+                    proc.terminate()
+                except Exception as exc:  # noqa: BLE001 — эскалация остальных продолжается
+                    self._emit("warning", f"Error terminating '{name}': {exc}")
+                else:
+                    with self._lock:
+                        self._terminated.add(name)
+                upcoming = kill_at if upcoming is None else min(upcoming, kill_at)
+            else:
+                self._emit("error", f"Force killing process '{name}'")
+                try:
+                    proc.kill()
+                except Exception as exc:  # noqa: BLE001 — kill остальных продолжается
+                    self._emit("error", f"Error killing '{name}': {exc}")
+                else:
+                    with self._lock:
+                        self._killed.add(name)
+        return upcoming
 
     def _wait(self, pause: float) -> None:
         """Пауза между проходами: ``idle(pause)`` или ``time.sleep``; сбой idle не прерывает стоп.

@@ -16,6 +16,9 @@ bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machin
     --inj-patch <scratchpad>/inj/I1.patch --out <каталог результатов>/control
 # T1.10: S1 (outcome) + S6; S6 не входит в all
 ... stand_l9.py --scenario S1,S6 --out <каталог результатов> [--s6-slow-stop-s 6.0 --s6-window-s 5.0]
+# T1.11: S7 (окно стопа на ребёнка) и его контроль; S7 не входит в all, в окне quiet/heavy шлюза
+... stand_l9.py --scenario S7 --out <каталог результатов> [--s7-slow-stop-s 6.0 --s7-window-s 10.0 --s7-ceiling-s 12.0]
+... stand_l9.py --scenario S7 --s7-control --out <каталог результатов>   # без ключа stop_window_s, 1 повтор
 # проба самого стенда, по 1 повтору: добавить --quick;  план без бэкенда: --dry-run
 ```
 
@@ -37,6 +40,8 @@ bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machin
 | S4 | 5, свежий бэкенд | stop `slow`; +0,1 с `process.restart fast` (ждущий в очереди); +1,0 с `system.shutdown`; строка `System shutdown requested` из логов PM (штамп минус момент отправки stop), выход процесса бэкенда, число `did not stop in`, ответ ждущего | строка <= +1,2 с; выход <= +4,5 с; dns 0; ждущий `system_stopping` |
 | S5 | 10 выходов, свежий бэкенд на каждый | `system.shutdown` без `slow`: от отправки до исчезновения лаунчера и PID детей из `supervision.status` (`tasklist`, без psutil). В прогоне 1 ещё `process_restart_verified` x3 на каждую цель и один `recipe.activate` | рестарт < 5,0; выход дерева < 2,0 (10 из 10); activate < 5,0 (строго) |
 | S6 (T1.10) | 3, свежий бэкенд на каждый (повтор не наследует запись `stop_outcome` и поток исполнителя прошлого) | `slow` = `S6SlowChild` (стоп 6,0 с, параметр `--s6-slow-stop-s`), `stop_process_timeout` 5,0 с (`--s6-window-s`), `process.stop slow`: время до ответа и ответ целиком; запись `slow` в `supervision.status` после стопа. Не входит в `--scenario all` | `outcome == "terminated"`, `success is True`, ответ 5,0-5,3 с; 3 из 3 |
+| S7 (T1.11) | 3, свежий бэкенд на каждый | `slow` = `S6SlowChild` (стоп 6,0 с, `--s7-slow-stop-s`), `stop_process_timeout` 5,0 с (окно PM как в S6), ключ `stop_window_s` = 10,0 с (`--s7-window-s`) в записи `slow` в `topology.apply`, `max_stop_window_s` = 12,0 с (`--s7-ceiling-s`) в `orchestrator_config` PM (env `STAND_MAX_STOP_WINDOW` -> `stand_backend.py`, тот же патч `assemble_launcher`); `process.stop slow`: время до ответа и ответ целиком. Предпосылка: в stdout бэкенда есть обе строки `[stand] orchestrator_config...`. Не входит в `--scenario all` | `outcome == "exited"`, `success is True`, ответ 6,0-6,6 с; 3 из 3 |
+| S7-контроль (`--s7-control`) | 1 | тот же S7, но в записи `slow` нет ключа `stop_window_s` (потолок 12,0 с остаётся) | не приёмка, а различитель стенда: ждём `terminated`, ответ 5,0-5,3 с (поведение T1.10); `exited` - стенд не различает, S7 не засчитывать (отдельная причина в `results.md`) |
 
 S1 дополнительно считает `outcome` из ответа `process.stop devices` (`{"exited": n, ...}`, в JSON `outcomes`, в `results.md` блок «Итоги стопа»); пороги S1 не менялись, `outcome` - наблюдение (прогноз: `exited` 10 из 10).
 

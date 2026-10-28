@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
+from multiprocess_framework.modules.recipe import RecipeConflict
 from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_prototype.domain.commands import ActivateRecipe
 from multiprocess_prototype.domain.errors import DomainError
@@ -29,6 +30,9 @@ if TYPE_CHECKING:
     from multiprocess_prototype.domain.protocols.recipe_store import RecipeStore
 
     from .view import IRecipesView
+
+# Текст для пользователя при RecipeConflict (рецепт-файл изменён снаружи после загрузки в редактор).
+_CONFLICT_MESSAGE = "Рецепт изменён снаружи — перезагрузите его"
 
 
 def _slugify(name: str) -> str:
@@ -591,13 +595,27 @@ class RecipesPresenter:
             from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
             topo = self._topology_store.load().to_dict()
-            save_editor_topology_to_recipe(self._store, target_slug, topo)
+            session = self._topology_session
+            # C-30 (Task 1.8): база редактора — rev рецепта, на котором строилась правка. Для другого
+            # рецепта base_rev_for даёт None → стор берёт rev своего чтения.
+            new_rev = save_editor_topology_to_recipe(
+                self._store,
+                target_slug,
+                topo,
+                expected_rev=session.base_rev_for(target_slug) if session is not None else None,
+            )
             # RS-4: граф записан в рецепт-файл → снять dirty (diverged держится, если был:
             # запись в файл живую систему не тронула).
-            if self._topology_session is not None:
-                self._topology_session.mark_saved()
+            if session is not None:
+                session.rebase(target_slug, new_rev)
+                session.mark_saved()
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
+        except RecipeConflict:
+            # Рецепт изменён снаружи: запись не выполнена, mark_saved не зовётся.
+            self._view.show_error(_CONFLICT_MESSAGE)
+            self._log_warning(f"RecipesPresenter.on_save: '{target_slug}': {_CONFLICT_MESSAGE}")
+            return False
         except Exception as exc:  # noqa: BLE001
             self._view.show_error(f"Ошибка сохранения: {exc}")
             self._log_error(f"RecipesPresenter.on_save: '{target_slug}': {exc}")

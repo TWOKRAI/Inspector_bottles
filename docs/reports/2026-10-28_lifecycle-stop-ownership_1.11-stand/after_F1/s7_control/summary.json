@@ -1,0 +1,92 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.11",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    },
+    "S6": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 3
+    },
+    "S7": {
+      "outcome": "exited",
+      "success": true,
+      "reply_min_s": 6.0,
+      "reply_max_s": 6.6,
+      "pass_runs": 3
+    },
+    "S7_control": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 1
+    }
+  },
+  "started": 1793183531.9023888,
+  "rows": {
+    "S7-контроль": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 5.047,
+        "median": 5.047,
+        "max": 5.047,
+        "p99": 5.047
+      },
+      "outcomes": {
+        "terminated": 1
+      },
+      "distinguishes": true,
+      "primary_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 5.047,
+        "median": 5.047,
+        "max": 5.047,
+        "p99": 5.047
+      },
+      "threshold_text": "без ключа: outcome terminated, ответ 5,0-5,3 с (exited = стенд не различает)",
+      "lost_lines": 1,
+      "dns_lines": 1
+    }
+  },
+  "elapsed_s": 23.9
+}
