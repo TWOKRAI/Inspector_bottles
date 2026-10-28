@@ -91,6 +91,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = ""
 
+    stop_window_s: Annotated[
+        Any,
+        FieldMeta(
+            "Stop window",
+            info="Окно стопа процесса, с (Task 1.11): верхний уровень proc_dict, читает ProcessRegistry. "
+            "Тип Any — значение идёт сырым (проверка в реестре: годно конечное число > 0). None → окно PM.",
+        ),
+    ] = None
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -173,6 +182,10 @@ class ProcessLaunchConfig(SchemaBase):
         depends_on = payload.pop("depends_on", None) or []
         # supervision_group (NEW-6b) — на верхний уровень proc_dict (читает ProcessMonitor).
         supervision_group = payload.pop("supervision_group", None) or ""
+        # stop_window_s (Task 1.11) — на верхний уровень proc_dict как есть (проверяет реестр PM). None не кладём.
+        # Ключ — литерал, не импорт: константа STOP_WINDOW_KEY живёт в process_manager_module/core/stop_budget.py,
+        # а импорт оттуда дал бы обратную зависимость слоёв (process_module → process_manager_module).
+        stop_window_s = payload.pop("stop_window_s", None)
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
         # executors остаётся в config (читает ProcessModule как config["executors"]); пустое значение
@@ -216,6 +229,8 @@ class ProcessLaunchConfig(SchemaBase):
             proc_dict["depends_on"] = list(depends_on)
         if supervision_group:
             proc_dict["supervision_group"] = supervision_group
+        if stop_window_s is not None:
+            proc_dict["stop_window_s"] = stop_window_s
         if self.memory is not None:
             proc_dict["memory"] = self.memory
         return name, proc_dict

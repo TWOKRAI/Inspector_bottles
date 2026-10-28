@@ -1,0 +1,91 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.11",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    },
+    "S6": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 3
+    },
+    "S7": {
+      "outcome": "exited",
+      "success": true,
+      "reply_min_s": 6.0,
+      "reply_max_s": 6.6,
+      "pass_runs": 3
+    },
+    "S7_control": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 1
+    }
+  },
+  "started": 1793180615.4611752,
+  "rows": {
+    "S7": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "stats": {
+        "n": 3,
+        "unanswered": 0,
+        "min": 6.125,
+        "median": 6.172,
+        "max": 6.203,
+        "p99": 6.203
+      },
+      "outcomes": {
+        "exited": 3
+      },
+      "primary_stats": {
+        "n": 3,
+        "unanswered": 0,
+        "min": 6.125,
+        "median": 6.172,
+        "max": 6.203,
+        "p99": 6.203
+      },
+      "threshold_text": "outcome exited, success True, ответ 6,0-6,6 с; 3 из 3",
+      "lost_lines": 0,
+      "dns_lines": 0
+    }
+  },
+  "elapsed_s": 79.0
+}

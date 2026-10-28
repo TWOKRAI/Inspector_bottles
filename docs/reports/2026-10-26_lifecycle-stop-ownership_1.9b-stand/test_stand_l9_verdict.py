@@ -453,3 +453,128 @@ def test_s1_outcomes_counted_and_do_not_change_verdict():
     runs.append(dict(_s1(1.0), reply={"success": True, "process_name": "devices", "outcome": "terminated"}))
     res = st.judge_s1(runs)
     assert res["verdict"] == "PASS" and res["outcomes"] == {"exited": 9, "terminated": 1}
+
+
+# ---- S7 (T1.11): outcome exited, success True, ответ 6,0-6,6 с, 3 из 3 ----
+def _s7(reply_s=6.2, outcome="exited", success=True, reply="default", ok=True):
+    if reply == "default":
+        reply = {"success": success, "process_name": "slow", "outcome": outcome}
+    return {"reply_s": reply_s, "reply": reply, "precondition_ok": ok}
+
+
+def test_s7_pass_exited_true_6_2():
+    res = st.judge_s7([_s7(6.2)] * 3)
+    assert res["verdict"] == "PASS" and res["outcomes"] == {"exited": 3}
+
+
+def test_s7_edges_6_0_and_6_6_pass():
+    assert st.judge_s7([_s7(6.0), _s7(6.6), _s7(6.3)])["verdict"] == "PASS"
+
+
+def test_s7_fail_just_outside_edges():
+    assert st.judge_s7([_s7(5.99)] + [_s7(6.2)] * 2)["verdict"] == "FAIL"
+    assert st.judge_s7([_s7(6.61)] + [_s7(6.2)] * 2)["verdict"] == "FAIL"
+
+
+def test_s7_fail_on_terminated():
+    res = st.judge_s7([_s7(6.2, outcome="terminated")] + [_s7(6.2)] * 2)
+    assert res["verdict"] == "FAIL" and any("outcome='terminated'" in r for r in res["reasons"])
+
+
+def test_s7_fail_on_success_false():
+    assert st.judge_s7([_s7(6.2, success=False)] + [_s7(6.2)] * 2)["verdict"] == "FAIL"
+
+
+def test_s7_two_of_three_is_fail():
+    res = st.judge_s7([_s7(6.2), _s7(6.2), _s7(5.2, outcome="terminated")])
+    assert res["verdict"] == "FAIL" and any("прошло 2 из 3" in r for r in res["reasons"])
+
+
+def test_s7_fail_on_missing_reply():
+    assert st.judge_s7([_s7(None, reply=None)] + [_s7(6.2)] * 2)["verdict"] == "FAIL"
+
+
+def test_s7_precondition_failure_is_invalid_fail():
+    res = st.judge_s7([_s7(ok=False)] + [_s7(6.2)] * 2)
+    assert res["verdict"] == "FAIL" and res["invalid"] is True
+
+
+def test_s7_thresholds_are_literals():
+    assert st.THRESHOLDS["S7"] == {
+        "outcome": "exited",
+        "success": True,
+        "reply_min_s": 6.0,
+        "reply_max_s": 6.6,
+        "pass_runs": 3,
+    }
+    assert st.REPEATS["S7"] == 3
+
+
+# ---- контроль S7 (--s7-control): без ключа ожидается terminated, 5,0-5,3 с ----
+def test_s7_control_terminated_5_1_distinguishes():
+    res = st.judge_s7_control([_s7(5.1, outcome="terminated")])
+    assert res["verdict"] == "PASS" and res["distinguishes"] is True
+
+
+def test_s7_control_edges_5_0_and_5_3():
+    assert st.judge_s7_control([_s7(5.0, outcome="terminated")])["distinguishes"] is True
+    assert st.judge_s7_control([_s7(5.3, outcome="terminated")])["distinguishes"] is True
+    assert st.judge_s7_control([_s7(5.31, outcome="terminated")])["distinguishes"] is False
+
+
+def test_s7_control_exited_means_stand_does_not_distinguish():
+    res = st.judge_s7_control([_s7(6.2, outcome="exited")])
+    assert res["verdict"] == "FAIL" and res["distinguishes"] is False
+    assert any("не различает" in r and "S7 не засчитывать" in r for r in res["reasons"])
+
+
+# ---- S7: сборка запуска (без бэкенда) ----
+def _args(argv):
+    return st.parse_args(argv)
+
+
+def test_s7_not_in_scenario_all():
+    assert "S7" not in st.scenarios_of(_args(["--scenario", "all"]))
+
+
+def test_s7_can_be_picked_explicitly_and_cli_defaults():
+    args = _args(["--scenario", "S7"])
+    assert st.scenarios_of(args) == ["S7"]
+    assert (args.s7_slow_stop_s, args.s7_window_s, args.s7_ceiling_s, args.s7_control) == (6.0, 10.0, 12.0, False)
+
+
+def test_s7_control_requires_scenario_s7_only():
+    assert st.scenarios_of(_args(["--scenario", "S7", "--s7-control"])) == ["S7"]
+    for bad in (["--scenario", "all", "--s7-control"], ["--scenario", "S6,S7", "--s7-control"]):
+        try:
+            st.scenarios_of(_args(bad))
+        except SystemExit:
+            continue
+        raise AssertionError(f"{bad} должен быть отвергнут")
+
+
+def test_s7_control_ctx_has_one_repeat_and_main_has_three(tmp_path):
+    main_ctx = st.Ctx(_args(["--scenario", "S7"]), tmp_path, tmp_path)
+    ctl_ctx = st.Ctx(_args(["--scenario", "S7", "--s7-control"]), tmp_path, tmp_path)
+    assert (main_ctx.n["S7"], ctl_ctx.n["S7"]) == (3, 1)
+    assert (ctl_ctx.s7_pm_window_s, ctl_ctx.s7_window_s, ctl_ctx.s7_ceiling_s) == (5.0, 10.0, 12.0)
+
+
+def test_add_slow_fast_sends_slow_extra_only_on_slow_record(monkeypatch):
+    sent = []
+
+    class FakeDrv:
+        def send_command(self, target, cmd, args, timeout=0.0):
+            sent.append((cmd, args["topology_dict"]))
+            return {"success": True, "commands": [], "ready": True}
+
+    monkeypatch.setattr(st, "leaf", lambda res: res)
+    monkeypatch.setattr(st.Backend, "supervision", staticmethod(lambda drv, name=None: {name: {"alive": True}}))
+    monkeypatch.setattr(st.time, "sleep", lambda s: None)
+    st.add_slow_fast(FakeDrv(), None, st.S6_SLOW_CLASS, {"stop_window_s": 10.0})
+    st.add_slow_fast(FakeDrv(), None)
+    with_key, without_key = sent[1][1]["processes"], sent[3][1]["processes"]
+    assert [p.get("stop_window_s") for p in with_key] == [10.0, None]  # slow, fast
+    assert with_key[0]["process_class"] == "stand_slow_child.S6SlowChild"
+    assert all("stop_window_s" not in p for p in without_key)  # S1-S6 как раньше
+    assert sent[0][0] == "topology.diff" and sent[1][0] == "topology.apply"
