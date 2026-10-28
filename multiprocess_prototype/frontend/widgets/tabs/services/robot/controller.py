@@ -13,6 +13,7 @@ UX-ограничения:
 
 from __future__ import annotations
 
+import copy
 import time
 from typing import Any
 
@@ -25,6 +26,8 @@ from .widget import RobotControlWidget
 # Если time.time() - ts > _STALE_THRESHOLD_S, данные считаются stale
 # независимо от quality-поля (hub мог упасть и quality «замёрз»).
 _STALE_THRESHOLD_S = 3.0
+
+_TXT_PARK_ACCEPTED = "Основная остановка принята: домой, затем серво OFF…"
 
 
 class RobotWidgetController:
@@ -42,6 +45,13 @@ class RobotWidgetController:
         self._bindings = bindings
         self._device_id: str | None = None
         self._status_handles: list[Any] = []
+
+        # «Остановить» (robot_park): вид devices.state.<id>.park собирается из дельт,
+        # итог показывается только для seq из ответа на команду (T5.3e.4).
+        self._park_view: dict[str, Any] = {}
+        self._park_state_seq: Any = None  # seq вида, к которому относится последний state
+        self._park_seq: Any = None  # seq из ответа accepted; None — park не ждём
+        self._park_text: str | None = None  # липкий текст статуса, пока его не снял другой стоп
 
         # н5 ревью Fable: QTimer для периодической проверки устаревания
         # данных. Если hub упал — пуши прекращаются, но индикатор
@@ -63,6 +73,8 @@ class RobotWidgetController:
         w.refresh_requested.connect(self._on_refresh)
         w.send_job_requested.connect(self._on_send_job)
         w.stop_requested.connect(self._on_stop)
+        w.park_requested.connect(self._on_park)
+        w.force_stop_requested.connect(self._on_force_stop)
         w.mode_change_requested.connect(self._on_mode)
         w.servo_requested.connect(self._on_servo)
         w.manual_mode_toggled.connect(self._on_manual)
@@ -88,6 +100,7 @@ class RobotWidgetController:
         self._unbind_state()
         self._device_id = device_id
         self._last_status_ts = None
+        self._reset_park()
         if not device_id:
             self._stale_timer.stop()
             self._widget.set_status("Робот: устройство не выбрано.")
@@ -142,6 +155,13 @@ class RobotWidgetController:
                 self._on_telemetry_push,
                 owner=self._widget,
             )
+        if hasattr(self._bindings, "bind_fanout"):
+            # ``**`` ловит и сам узел ``.park`` (первая публикация целым словарём), и проигрыш кэша
+            self._bindings.bind_fanout(
+                f"{base}.park.**",
+                self._on_park_push,
+                owner=self._widget,
+            )
 
     def _on_telemetry_push(self, _path: str, value: Any) -> None:
         """Push-телеметрия из state-дерева."""
@@ -165,7 +185,8 @@ class RobotWidgetController:
 
         telemetry = data.get("telemetry")
         if isinstance(telemetry, dict):
-            self._widget.set_status("Связь с роботом активна.")
+            if self._park_text is None:  # итог «Остановить» не затираем
+                self._widget.set_status("Связь с роботом активна.")
             self._widget.set_telemetry(
                 float(telemetry.get("x_mm", 0)),
                 float(telemetry.get("y_mm", 0)),
@@ -189,12 +210,14 @@ class RobotWidgetController:
     def _on_send_job(self, x: float, y: float, z: float = 0.0) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} Z={z:.1f} отправлен.")
         self._presenter.send_test_job(self._device_id, x, y, z)
 
     def _on_stop(self, mode: int) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         labels = {1: "СТОП: домой, в цикле", 2: "СТОП: домой, выход", 3: "СТОП: на месте"}
         self._widget.set_status(labels.get(mode, "СТОП"))
         self._presenter.abort(self._device_id, mode)
@@ -202,24 +225,28 @@ class RobotWidgetController:
     def _on_mode(self, mode: str) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status(f"Режим {mode.upper()}.")
         self._presenter.set_mode(self._device_id, mode)
 
     def _on_servo(self, on: bool) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status(f"Серво {'ON' if on else 'OFF'}.")
         self._presenter.set_servo(self._device_id, on)
 
     def _on_manual(self, on: bool) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status("Ручной режим: авто-подача на паузе." if on else "Авто-подача возобновлена.")
         self._presenter.set_manual_mode(self._device_id, on)
 
     def _on_jog(self, dx: float, dy: float, spd: int, absolute: bool) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         kind = "абс" if absolute else "отн"
         self._widget.set_status(f"Jog dX={dx:.1f} dY={dy:.1f} @ {spd}% ({kind}).")
         self._presenter.jog(self._device_id, dx, dy, int(spd), bool(absolute))
@@ -227,8 +254,108 @@ class RobotWidgetController:
     def _on_jog_abort(self) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status("Jog: стоп.")
         self._presenter.jog_abort(self._device_id)
+
+    # ------------------------------------------------------------------ #
+    # Остановка через хаб: «Остановить» (park) / «Остановить принудительно» (HARD)
+    # ------------------------------------------------------------------ #
+
+    def _reset_park(self) -> None:
+        """Забыть вид ``.park`` и ожидание итога (смена устройства)."""
+        self._park_view = {}
+        self._park_state_seq = None
+        self._park_seq = None
+        self._park_text = None
+
+    def _on_park(self) -> None:
+        if not self._device_id:
+            return
+        self._park_text = None
+        self._park_seq = None  # итог прошлого запуска, лежащий в виде, не должен сработать до ответа
+        device_id = self._device_id
+        self._presenter.park(device_id, lambda data: self._on_park_result(device_id, data))
+
+    def _on_park_result(self, device_id: str, data: dict) -> None:
+        """Ответ robot_park: accepted -> ждём итог из дельт; иначе текст отказа как есть."""
+        if device_id != self._device_id:
+            return  # ответ для устройства, которое уже сменили
+        if isinstance(data, dict) and data.get("accepted"):
+            self._park_seq = data.get("seq")
+            self._park_text = _TXT_PARK_ACCEPTED
+            self._widget.set_status(self._park_text)
+            self._render_park()  # итог мог прийти раньше ответа
+            return
+        message = data.get("message") if isinstance(data, dict) else None
+        self._park_seq = None
+        self._park_text = message or "Основная остановка не принята."
+        self._widget.set_status(self._park_text)
+
+    def _on_force_stop(self) -> None:
+        if not self._device_id:
+            return
+        self._park_text = None
+        device_id = self._device_id
+        self._presenter.force_stop(device_id, lambda data: self._on_force_stop_result(device_id, data))
+
+    def _on_force_stop_result(self, device_id: str, data: dict) -> None:
+        if device_id != self._device_id:
+            return
+        if isinstance(data, dict) and data.get("status") == "ok":
+            self._widget.set_status("Робот остановлен (HARD).")
+        else:
+            message = data.get("message") if isinstance(data, dict) else None
+            self._widget.set_status(message or "Принудительная остановка не выполнена.")
+
+    def _on_park_push(self, path: str, value: Any) -> None:
+        """Дельта ``devices.state.<id>.park[.leaf]``: собрать вид и пересчитать итог."""
+        prefix = f"devices.state.{self._device_id}.park"
+        if path == prefix:
+            rel = ""
+        elif path.startswith(prefix + "."):
+            rel = path[len(prefix) + 1 :]
+        else:
+            return  # чужое устройство (отвязка bindings не гарантирована)
+        view = self._park_view
+        if rel == "":
+            if not isinstance(value, dict):
+                return
+            self._park_view = copy.deepcopy(value)
+            self._park_state_seq = value.get("seq")
+        elif rel == "seq" and value != view.get("seq"):
+            self._park_view = {"seq": value}  # новый запуск: листья прошлого сброшены
+            self._park_state_seq = None
+        else:
+            node = view
+            *parents, leaf = rel.split(".")
+            for key in parents:
+                child = node.get(key)
+                if not isinstance(child, dict):
+                    child = {}
+                    node[key] = child
+                node = child
+            node[leaf] = copy.deepcopy(value)
+            if rel == "state":
+                self._park_state_seq = view.get("seq")
+        self._render_park()
+
+    def _render_park(self) -> None:
+        """Показать итог park, если вид относится к запомненному seq и state пришёл для него."""
+        seq = self._park_seq
+        if seq is None or self._park_view.get("seq") != seq or self._park_state_seq != seq:
+            return
+        state = self._park_view.get("state")
+        if state == "done":
+            already = self._park_view.get("home") == "already"
+            text = "Робот уже дома, серво выключено." if already else "Робот дома, серво выключено."
+        elif state == "failed":
+            reason = self._park_view.get("reason")
+            text = f"Основная остановка не выполнена: {reason}." if reason else "Основная остановка не выполнена."
+        else:
+            return  # parking и прочее: статус не меняется
+        self._park_text = text
+        self._widget.set_status(text)
 
     # ------------------------------------------------------------------ #
     # Рисование
@@ -237,18 +364,21 @@ class RobotWidgetController:
     def _on_draw_circle(self, cx: float, cy: float, r: float, z: float) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status(f"Круг ({cx:.1f},{cy:.1f}) R={r:.1f} поставлен в очередь.")
         self._presenter.draw_circle(self._device_id, cx, cy, r, z)
 
     def _on_draw_square(self, x1: float, y1: float, x2: float, y2: float, z: float) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status("Квадрат поставлен в очередь.")
         self._presenter.draw_square(self._device_id, x1, y1, x2, y2, z)
 
     def _on_draw_abort(self) -> None:
         if not self._device_id:
             return
+        self._park_text = None
         self._widget.set_status("Рисование прервано.")
         self._presenter.abort_draw(self._device_id)
 

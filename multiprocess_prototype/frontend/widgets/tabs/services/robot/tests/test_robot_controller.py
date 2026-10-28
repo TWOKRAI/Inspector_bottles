@@ -147,6 +147,175 @@ def test_jog_abort_forwards_to_presenter(qtbot) -> None:
     presenter.jog_abort.assert_called_once_with("robot_main")
 
 
+# --- T5.3e.4: «Остановить» (robot_park) — итог собирается из дельт devices.state.<id>.park.* ---
+
+_PARK = "devices.state.robot_main.park"
+_TXT_ACCEPTED = "Основная остановка принята: домой, затем серво OFF…"
+_TXT_DONE = "Робот дома, серво выключено."
+_TXT_LINK = "Связь с роботом активна."
+_TELEMETRY = {"telemetry": {"x_mm": 1.0, "servo": True}, "free": True, "encoder": 5, "queue_len": 0}
+
+
+def make_park_controller(qtbot) -> tuple[RobotControlWidget, RobotWidgetController, MagicMock]:
+    widget = RobotControlWidget()
+    qtbot.addWidget(widget)
+    presenter = make_presenter()
+    controller = RobotWidgetController(widget, presenter, bindings=MagicMock())
+    controller.set_device("robot_main")
+    return widget, controller, presenter
+
+
+def press_park(widget: RobotControlWidget, presenter: MagicMock):
+    """Клик «Остановить»: вернуть on_result, отданный presenter.park."""
+    widget.park_requested.emit()
+    return presenter.park.call_args.args[1]
+
+
+def test_park_accepted_then_done_from_state(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    reply({"status": "ok", "accepted": True, "seq": 1})
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.home", "moved")
+    assert widget._lbl_status.text() == _TXT_ACCEPTED  # без state итога нет
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_park_refusal_message_shown(qtbot) -> None:
+    widget, _controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    reply({"status": "error", "message": "идёт отключение робота"})
+    assert widget._lbl_status.text() == "идёт отключение робота"
+
+
+def test_park_state_with_other_seq_ignored(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    reply({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(f"{_PARK}.seq", 0)
+    controller._on_park_push(f"{_PARK}.home", "moved")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+
+
+def test_park_status_survives_telemetry_push(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    reply({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.home", "moved")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    controller._on_telemetry_push("devices.state.robot_main.status", _TELEMETRY)
+    assert widget._lbl_status.text() == _TXT_DONE
+    # телеметрия при этом всё равно применена к остальным полям
+    assert "X=1.0" in widget._lbl_telemetry.text()
+
+
+def test_park_first_publication_as_whole_dict(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    reply({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(_PARK, {"seq": 1, "state": "done", "home": "moved", "reason": ""})
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_park_second_run_stale_state_not_shown(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    # итог первого запуска лежит в виде
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.state", "done")
+    reply = press_park(widget, presenter)
+    reply({"status": "ok", "accepted": True, "seq": 2})
+    controller._on_park_push(f"{_PARK}.seq", 2)  # новый seq, state в сторе ещё старый
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_park_terminal_before_reply_shown(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    controller._on_park_push(f"{_PARK}.seq", 3)
+    controller._on_park_push(f"{_PARK}.home", "moved")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    reply({"status": "ok", "accepted": True, "seq": 3})
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_park_nested_dropped_whole_dict_and_leaf_merge(qtbot) -> None:
+    """dropped приходит целым словарём, затем лист dropped.jobs — оба ложатся в вид, итог не ломается."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.dropped", {"jobs": 2, "queue": 1})
+    controller._on_park_push(f"{_PARK}.dropped.jobs", 5)
+    assert controller._park_view == {"seq": 1, "dropped": {"jobs": 5, "queue": 1}}
+    controller._on_park_push(f"{_PARK}.home", "already")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == "Робот уже дома, серво выключено."
+
+
+def test_park_failed_without_reason_has_no_dangling_colon(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(_PARK, {"seq": 1, "state": "failed", "home": "", "reason": ""})
+    assert widget._lbl_status.text() == "Основная остановка не выполнена."
+
+
+def test_park_repeat_press_ignores_previous_run_until_reply(qtbot) -> None:
+    """Второй клик: итог прошлого seq в виде не показывается как итог нового запуска до ответа."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(_PARK, {"seq": 1, "state": "done", "home": "moved", "reason": ""})
+    assert widget._lbl_status.text() == _TXT_DONE
+    widget._lbl_status.setText("ожидание")  # второй клик ещё без ответа
+    widget.park_requested.emit()
+    controller._on_park_push(f"{_PARK}.dropped.jobs", 1)  # любая дельта до ответа
+    assert widget._lbl_status.text() == "ожидание"
+
+
+def test_park_set_device_resets_view_and_ignores_old_device_pushes(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller.set_device("robot_2")
+    assert controller._park_view == {}
+    assert controller._park_seq is None
+    assert controller._park_text is None
+    # bindings старого устройства не снимаются (дескрипторы не хранятся) — дельты чужого пути игнорируются
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert controller._park_view == {}
+    assert "robot_2" in widget._lbl_status.text()
+
+
+def test_park_reply_for_previous_device_ignored(qtbot) -> None:
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    controller.set_device("robot_2")
+    reply({"status": "ok", "accepted": True, "seq": 1})
+    assert controller._park_seq is None
+    assert "Основная остановка" not in widget._lbl_status.text()
+
+
+def test_park_text_kept_by_refresh_responses(qtbot) -> None:
+    """_on_telemetry_response и _on_draw_progress липкий текст не снимают."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": 1})
+    controller._on_telemetry_response(_TELEMETRY)
+    controller._on_draw_progress({"state": "idle"})
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+
+
+def test_force_stop_without_ok_shows_message(qtbot) -> None:
+    widget, _controller, presenter = make_park_controller(qtbot)
+    widget.force_stop_requested.emit()
+    presenter.force_stop.call_args.args[1]({"status": "error", "message": "нет связи с роботом"})
+    assert widget._lbl_status.text() == "нет связи с роботом"
+
+
 def test_jog_button_click_emits(qtbot) -> None:
     """Клик по «Ехать» с полей виджета доходит до presenter."""
     widget, controller, presenter = make_controller(qtbot)
