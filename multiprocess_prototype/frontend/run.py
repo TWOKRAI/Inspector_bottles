@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent  # .../multiprocess_prototype/frontend
@@ -46,7 +47,7 @@ PROJECT_VENV = PROJECT_ROOT / ".venv"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from multiprocess_prototype.run import git_common_dir, venv_guard  # noqa: E402 — sys.path с корнем проекта выставлен строкой выше; импорт нужен до re-exec
+from multiprocess_prototype.run import default_relaunch, git_common_dir, venv_guard  # noqa: E402 — sys.path с корнем проекта выставлен строкой выше; импорт нужен до re-exec
 
 #: Прошитый overlay фронта — единственный презентационный файл, который знает
 #: этот entry-point (хардкод-shell, не generic-конструктор — см. докстринг модуля).
@@ -57,14 +58,14 @@ def launch(
     *,
     project_root: Path = PROJECT_ROOT,
     common_dir_of=git_common_dir,
-    execv=os.execv,
+    relaunch: Callable[[str, list[str]], int] = default_relaunch,
 ) -> int:
     """venv-guard: переключиться на проектный .venv, включить presentation, запустить."""
     rc = venv_guard(
         Path(__file__),
         project_root=project_root,
         common_dir_of=common_dir_of,
-        execv=execv,
+        relaunch=relaunch,
         tag="[frontend/run]",
     )
     if rc is not None:
