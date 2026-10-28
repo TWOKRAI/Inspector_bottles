@@ -165,10 +165,16 @@ class ProcessRegistry:
         self._stop_windows[name] = window
         return window
 
-    def _group_windows(self, names: List[str], default_window_s: float) -> Dict[str, float] | None:
-        """``windows_s`` группы: все имена, если хоть у одного есть ключ; иначе ``None`` (прежний путь)."""
+    def _group_windows(
+        self, names: List[str], default_window_s: float, *, force: bool = False
+    ) -> Dict[str, float] | None:
+        """``windows_s`` группы: все имена, если хоть у одного есть ключ; иначе ``None`` (прежний путь).
+
+        ``force=True`` — карта по всем именам и без ключей (область ``children`` считается от ``G``,
+        имя без ключа обязано получить ``g``, а не дожить до ``G``).
+        """
         windows = self._stop_windows
-        if not any(name in windows for name in names):
+        if not force and not any(name in windows for name in names):
             return None
         return {name: windows.get(name, default_window_s) for name in names}
 
@@ -528,6 +534,9 @@ class ProcessRegistry:
         if not procs:
             return result, None
         keyless_s = default_window_s if default_window_s is not None else self._system_window_s()
+        # Task 1.11 (DESIGN 4, исключение): путь children (скаляра вызова нет) при потолке C > g — область от G,
+        # поэтому windows_s строится по всем именам, даже если ключей нет ни у кого.
+        children_from_g = default_window_s is None and self._stop_window_ceiling_s > keyless_s
         stop = ChildProcessStop(
             procs,
             self._stop_events,
@@ -535,7 +544,7 @@ class ProcessRegistry:
             logger=self.logger,
             idle=self.stop_wait_idle,
             should_abort=should_abort,
-            windows_s=self._group_windows(list(procs), keyless_s),
+            windows_s=self._group_windows(list(procs), keyless_s, force=children_from_g),
         )
         return result, stop
 

@@ -243,3 +243,89 @@ def test_spawner_explicit_timeout_above_ceiling_wins() -> None:
     _bounded(lambda: spawner.stop(timeout=12.0))
     assert fake.join_timeouts, "spawner.stop() не позвал join"
     assert abs(fake.join_timeouts[0] - 15.5) < 1e-9, fake.join_timeouts
+
+
+# --------------------------------------------------------------------------- #
+# H9: ключей нет нигде, потолок 12 > g 5, системный стоп — имя без ключа живёт g, не G
+# --------------------------------------------------------------------------- #
+
+
+def test_h9_keyless_child_system_stop_with_ceiling_above_g_dies_at_g(tmp_path) -> None:
+    """Настоящий PM: ``shutdown_timeout`` 5, потолок 12, один ребёнок B без ключа игнорирует стоп.
+
+    DESIGN 3: окно без ключа на системном стопе — ``g`` (5,0), потолок его не трогает. Область ``children``
+    считается от ``G`` (DESIGN 7), поэтому без ``windows_s`` по всем именам B дожил бы до ~12 с.
+    Окно смерти 5,0–6,2 с — литерал R4 (g + 1 с терпения + запас).
+    """
+    from .test_per_child_stop_window_acceptance import (
+        DEATH_DEADLINE_S,
+        MARKED_CHILD_PATH,
+        DeathWatch,
+        _wait_until,
+        child,
+        running_rig,
+    )
+
+    children = {"B": child(MARKED_CHILD_PATH, stop_delay_s=60.0, stop_marker_path=str(tmp_path / "B.stop"))}
+    with running_rig(tmp_path, children, ceiling=12.0) as rig:
+        watch = DeathWatch({name: rig.proc(name) for name in children})
+        t0 = time.monotonic()
+        rig.send("system.shutdown")
+        armed = _wait_until(rig.system_stop_event.is_set, 10.0)
+        threading.Thread(target=rig.pm.shutdown, daemon=True, name="root-shutdown").start()
+        all_dead = watch.wait(DEATH_DEADLINE_S)
+        watch.stop()
+    b_t = watch.since(t0, "B")
+    assert armed and all_dead, f"armed={armed} all_dead={all_dead}"
+    assert b_t is not None and 5.0 <= b_t <= 6.2, f"B без ключа умер на {b_t} с, ждали 5,0–6,2 (g), не ~12 (G)"
+
+
+# --------------------------------------------------------------------------- #
+# F2: join спавнера по числам + негодный shutdown_timeout при потолке — WARNING про него ровно один раз
+# --------------------------------------------------------------------------- #
+
+
+class _RecordingLogger:
+    """Двойник логгера спавнера: копит тексты WARNING."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: Any) -> None:
+        self.warnings.append(message % args if args else message)
+
+    def info(self, message: str, *args: Any) -> None:
+        pass
+
+
+def _spawner_join_and_warnings(stop_timeout: float, orchestrator_config: dict[str, Any], explicit: float | None):
+    from ..launcher.spawner import ProcessSpawner
+
+    spawner = ProcessSpawner(stop_timeout=stop_timeout, orchestrator_config=orchestrator_config)
+    logger = _RecordingLogger()
+    spawner._logger = logger
+    fake = _FakeOrchestrator()
+    spawner._process = fake
+    _bounded(lambda: spawner.stop(timeout=explicit))
+    assert fake.join_timeouts, "spawner.stop() не позвал join"
+    return fake.join_timeouts[0], logger.warnings
+
+
+def test_f2_spawner_join_numbers_with_and_without_ceiling() -> None:
+    """Литералы: без потолка stop(3.0) → 6,5; потолок 10 + shutdown_timeout 5 + stop() → 13,5; NaN-потолок → 8,5."""
+    join_s, warnings = _spawner_join_and_warnings(5.0, {"shutdown_timeout": 5.0}, 3.0)
+    assert abs(join_s - 6.5) < 1e-9 and warnings == [], (join_s, warnings)
+    join_s, warnings = _spawner_join_and_warnings(5.0, {"shutdown_timeout": 5.0, "max_stop_window_s": 10.0}, None)
+    assert abs(join_s - 13.5) < 1e-9 and warnings == [], (join_s, warnings)
+    nan_config = {"shutdown_timeout": 5.0, "max_stop_window_s": float("nan")}
+    join_s, warnings = _spawner_join_and_warnings(5.0, nan_config, None)
+    assert abs(join_s - 8.5) < 1e-9, join_s
+    assert len(warnings) == 1 and "nan" not in warnings[0].lower(), warnings
+
+
+def test_f2_bad_shutdown_timeout_with_ceiling_warns_once() -> None:
+    """``shutdown_timeout`` = "x", потолок 10 → join 13,5; WARNING про ``shutdown_timeout`` ровно один (не два)."""
+    join_s, warnings = _spawner_join_and_warnings(5.0, {"shutdown_timeout": "x", "max_stop_window_s": 10.0}, None)
+    about_shutdown = [w for w in warnings if "stop:" in w]  # _stop_graceful_s: «stop: <ошибка бюджета> — взято …»
+    assert abs(join_s - 13.5) < 1e-9, join_s
+    assert len(about_shutdown) == 1, warnings

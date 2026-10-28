@@ -206,7 +206,9 @@ class ProcessSpawner:
         # Task 1.11 (DESIGN 7): с годным потолком окон детей внешний срок — от max(X, G); без него — как прежде.
         ceiling = self._stop_window_ceiling_s()
         if ceiling is not None:
-            graceful = max(graceful, outer_graceful_s(self._stop_graceful_s(None), ceiling))
+            # g оркестратора: при timeout=None это уже посчитанный graceful (второй вызов дал бы WARNING дважды).
+            orchestrator_graceful = graceful if timeout is None else self._stop_graceful_s(None)
+            graceful = max(graceful, outer_graceful_s(orchestrator_graceful, ceiling))
         effective_timeout = stop_budget(graceful)["outer_s"]
 
         if self._logger:

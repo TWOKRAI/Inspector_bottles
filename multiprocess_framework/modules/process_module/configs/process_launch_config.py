@@ -183,6 +183,8 @@ class ProcessLaunchConfig(SchemaBase):
         # supervision_group (NEW-6b) — на верхний уровень proc_dict (читает ProcessMonitor).
         supervision_group = payload.pop("supervision_group", None) or ""
         # stop_window_s (Task 1.11) — на верхний уровень proc_dict как есть (проверяет реестр PM). None не кладём.
+        # Ключ — литерал, не импорт: константа STOP_WINDOW_KEY живёт в process_manager_module/core/stop_budget.py,
+        # а импорт оттуда дал бы обратную зависимость слоёв (process_module → process_manager_module).
         stop_window_s = payload.pop("stop_window_s", None)
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
