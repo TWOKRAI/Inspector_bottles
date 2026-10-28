@@ -21,6 +21,7 @@ CTL = f"{R}/controller.py"
 PRES = f"{R}/presenter.py"
 PY = "D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.venv/Scripts/python.exe"
 SESSION = "inspector-bottles-35"
+BASH = "C:/Program Files/Git/bin/bash.exe"  # не "bash": из Python он резолвится в WSL-релей
 
 # (имя, файл, было, стало); \n в строках - переводы строк файла (скрипт подгоняет под CRLF/LF)
 MUTATIONS: list[tuple[str, str, str, str]] = [
@@ -89,7 +90,7 @@ def run_tests(tree: Path) -> tuple[int, list[str], str]:
     common = Path(gate.split("gitdir:", 1)[1].strip()).parent.parent  # <repo>/.git
     script = (common.parent / "scripts" / "machine_gate.sh").as_posix()
     cmd = [
-        "bash", script, "light", SESSION, "env", "PYTHONUTF8=1", f"PYTHONPATH={tree.as_posix()}", PY,
+        BASH, script, "light", SESSION, "env", "PYTHONUTF8=1", f"PYTHONPATH={tree.as_posix()}", PY,
         "-m", "pytest", "-q", "--tb=no", "-p", "no:cacheprovider", "-rf", f"{R}/tests",
     ]  # fmt: skip
     proc = subprocess.run(
