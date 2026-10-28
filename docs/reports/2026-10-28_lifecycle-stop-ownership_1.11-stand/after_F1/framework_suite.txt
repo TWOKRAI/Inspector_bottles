@@ -1,0 +1,952 @@
+.............................................................s.......... [  0%]
+........................................................................ [  1%]
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+..............................s......................................... [  4%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  8%]
+......................ss................................................ [  9%]
+..........................  цена штампа: 397 нс (потолок 2000)
+.  новых строк за 100 резолвов: 0
+............................................. [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+....................................................................s... [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+....................................................  .upper() на 100 решений: было 100 -> стало 0
+....
+  гейт отклонённой записи: было 212 нс -> стало 115 нс
+.  решение скоупа:          было 251 нс -> стало 252 нс
+.  запись отклонена:        0.21 мкс
+  запись принята:          13.65 мкс
+.  отклонена (готовая):     0.21 мкс
+  отклонена (callable):    0.25 мкс
+..  ключ кэша, identity-хэш: 43 нс; штатный Enum.__hash__: 148 нс; ускорение x3.4
+...  ключ кэша, скоуп строкой: 45 нс; скоуп enum'ом (было): 47 нс
+........ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 32%]
+........................................................................ [ 33%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+.......................................................................s [ 34%]
+s....................................................................... [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+.................................................s...................... [ 38%]
+........................................................................ [ 39%]
+...................s.................................................... [ 40%]
+........................ssssss..........sssssssss....................... [ 40%]
+..................................................sssssssssssssss....... [ 41%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+.................................................s...................... [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+..............
+Цена выключенной метрики (Task 2.1, шаг 5 / Task 2.10):
+  (а) выключенная через боевой порт: 0.477 мкс
+  (в) включённая тем же путём:        4.121 мкс
+  (б) голый policy.resolve на кэше:   0.169 мкс  (справочно)
+  отношение (а)/(в):                  0.116x  (гейтуется, потолок 0.3)
+  вызовов py/C (выключенная / включённая): (6, 5) / (28, 30)
+  инструкций (выключенная / включённая): 139 / 607
+  пик памяти (выкл/вкл): 363 / 990 байт, отношение 0.367x  (справочно, НЕ гейтуется)
+.......................................................... [ 52%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+.................................................x...................... [ 65%]
+........................................................................ [ 66%]
+.........................................
+Цена stats-фасада (задача 1.1):
+  через ctx.record_metric:   4.179 мкс
+  напрямую с тем же тегом:   3.739 мкс
+  цена фасада (дельта):      0.441 мкс  (справочно — НЕ гейтуется)
+  отношение facade/direct:   1.118x  (гейтуется)
+  для сравнения, база гейта: 0.26-0.35 мкс (отклонённая запись лога)
+............................... [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+.......ss............................................................... [ 77%]
+........................................................................ [ 78%]
+............................................................s........... [ 79%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 88%]
+...........................................ss...s....................... [ 89%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 95%]
+.....................
+[bucket/timing] 200 набл.: 1088 Б; 20 000 набл.: 1320 Б; рост 232 Б
+.
+[bucket/histogram] 200 набл.: 944 Б; 20 000 набл.: 2608 Б; рост 1664 Б
+.
+[legacy-list] 200 набл.: 7040 Б; 20 000 набл.: 653480 Б; рост 646440 Б
+.
+[window] 30x50: 18678 Б; 30x5000: 32238 Б; рост 13560 Б на 148500 наблюдений = 0.0913 Б/наблюдение
+..
+[сетка] боевые величины: старая — занято 2 бакетов (108 из 109 наблюдений в первом); новая — занято 5
+.
+[вырождение p95] доля p95==max: старая сетка 39.2%, новая 24.0%
+...
+[observe] бакеты: 0.290 мкс/вызов; список: 0.101 мкс/вызов; дельта +0.190 мкс (x2.9)
+.
+[aggregate 5000 набл.] бакеты: 1.16 мкс; список: 53.89 мкс
+.
+[enqueue] без стража: 1.001 мкс; со стражем: 1.007 мкс; дельта +0.006 мкс (минимум из 3 чередующихся раундов)
+.
+[строка снапшота] одна метрика: без buckets/sum 146 Б, с ними 230 Б (+84 Б, +58%); из 40 метрик в 2048 Б влезает 8 против 12
+....................................... [ 96%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+........................................................................ [ 99%]
+..............................................                           [100%]
+============================== warnings summary ===============================
+app_module\tests\test_f1_task10_acceptance.py:206
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\app_module\tests\test_f1_task10_acceptance.py:206: PytestUnknownMarkWarning: Unknown pytest.mark.harness_smoke - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.harness_smoke
+
+app_module\tests\test_f1_task10_acceptance.py:234
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\app_module\tests\test_f1_task10_acceptance.py:234: PytestUnknownMarkWarning: Unknown pytest.mark.harness_smoke - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.harness_smoke
+
+app_module\tests\test_f1_task10_acceptance.py:257
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\app_module\tests\test_f1_task10_acceptance.py:257: PytestUnknownMarkWarning: Unknown pytest.mark.harness_smoke - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.harness_smoke
+
+frontend_module\components\common\__init__.py:13
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\common\__init__.py:13: DeprecationWarning: legacy_sync module is deprecated; use components.base.traits.sync_trait instead
+    from multiprocess_framework.modules.frontend_module.components.common.legacy_sync import (
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:325
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:325: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:345
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:345: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:368
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:368: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:392
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:392: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:410
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:410: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:444
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:444: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:463
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:463: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:489
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:489: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:517
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:517: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_lifecycle_fifo_acceptance.py:548
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_lifecycle_fifo_acceptance.py:548: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:406
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:406: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:418
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:418: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:429
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:429: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:467
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:467: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(240)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:572
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:572: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:582
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:582: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:612
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:612: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(240)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:631
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:631: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(240)
+
+process_manager_module\tests\test_per_child_stop_window_acceptance.py:687
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_per_child_stop_window_acceptance.py:687: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(240)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:150
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:150: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:161
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:161: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:173
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:173: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:191
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:191: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:208
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:208: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:224
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:224: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:246
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:246: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:297
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:297: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:313
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:313: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:335
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:335: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:356
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:356: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:384
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:384: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:398
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:398: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_acceptance.py:418
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_acceptance.py:418: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_hazards.py:39
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_hazards.py:39: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_hazards.py:73
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_hazards.py:73: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_hazards.py:92
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_hazards.py:92: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+process_manager_module\tests\test_stop_outcome_hazards.py:111
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_manager_module\tests\test_stop_outcome_hazards.py:111: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(150)
+
+frontend_module/tests/integration/test_form_context_integration.py: 2 warnings
+frontend_module/tests/test_checkbox_v2.py: 4 warnings
+frontend_module/tests/test_controls_v2_hooks.py: 3 warnings
+frontend_module/tests/test_example_with_data_schema.py: 2 warnings
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\checkbox\presenter.py:81: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    self._access.update(current_access_level)
+
+frontend_module/tests/test_checkbox_v2.py::TestCheckboxPresenter::test_write_on_change
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_checkbox_v2.py:108: DeprecationWarning: CheckboxPresenter._on_changed без form_ctx — legacy путь только для _examples/ и FW unit-тестов. Передай form_ctx в production-коде.
+    self._on_changed(new_value)
+
+frontend_module/tests/test_checkbox_v2.py::TestCheckboxPresenter::test_set_access_level_without_view_safe
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\checkbox\presenter.py:183: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    self._access.update(level)
+
+frontend_module/tests/test_combo_form_ctx.py::test_combo_write_via_form_ctx
+frontend_module/tests/test_combo_form_ctx.py::test_combo_undo_restores_view
+frontend_module/tests/test_combo_form_ctx.py::test_combo_legacy_path_no_form_ctx
+frontend_module/tests/test_combo_form_ctx.py::test_combo_access_level_guard
+frontend_module/tests/test_combo_v2.py::TestComboPresenter::test_write_on_change
+frontend_module/tests/test_combo_v2.py::TestComboPresenter::test_external_sync_updates_view
+frontend_module/tests/test_combo_v2.py::TestComboPresenter::test_items_set_on_attach_view
+frontend_module/tests/test_combo_v2.py::TestComboPresenter::test_access_denied_no_write
+frontend_module/tests/test_combo_v2.py::TestComboControlFacade::test_create_returns_widget_and_presenter
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\combo\presenter.py:85: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    self._access.update(current_access_level)
+
+frontend_module/tests/test_combo_form_ctx.py::test_combo_legacy_path_no_form_ctx
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_combo_form_ctx.py:237: DeprecationWarning: ComboPresenter._on_changed без form_ctx — legacy путь только для _examples/ и FW unit-тестов. Передай form_ctx в production-коде.
+    presenter._on_changed("off")
+
+frontend_module/tests/test_combo_v2.py::TestComboPresenter::test_write_on_change
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_combo_v2.py:123: DeprecationWarning: ComboPresenter._on_changed без form_ctx — legacy путь только для _examples/ и FW unit-тестов. Передай form_ctx в production-коде.
+    self._on_changed(new_value)
+
+frontend_module/tests/test_compound_form_ctx.py: 12 warnings
+frontend_module/tests/test_controls_v2_hooks.py: 3 warnings
+frontend_module/tests/test_example_with_data_schema.py: 7 warnings
+frontend_module/tests/test_numeric_form_ctx.py: 4 warnings
+frontend_module/tests/test_slider_form_ctx.py: 4 warnings
+frontend_module/tests/test_spinbox_form_ctx.py: 4 warnings
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\numeric\presenter.py:76: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    self._access.update(current_access_level)
+
+frontend_module/tests/test_compound_form_ctx.py::test_compound_legacy_path_no_form_ctx
+frontend_module/tests/test_controls_v2_hooks.py::TestSliderSpinboxHooksAndTypes::test_slider_rejected_hook
+frontend_module/tests/test_numeric_form_ctx.py::test_numeric_form_ctx_legacy_path
+frontend_module/tests/test_slider_form_ctx.py::test_slider_form_ctx_legacy_path
+frontend_module/tests/test_spinbox_form_ctx.py::test_spinbox_legacy_path_no_form_ctx
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\numeric\presenter.py:188: DeprecationWarning: NumericPresenter._write без form_ctx — legacy путь только для _examples/ и FW unit-тестов. Передай form_ctx в production-коде.
+    self._write(storage_value)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_can_modify
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:247: DeprecationWarning: AccessTrait(required_level=...) is deprecated, use legacy_required_level= instead.
+    a = AccessTrait(required_level=2)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_can_modify
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:248: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    a.update(1)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_can_modify
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:250: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    a.update(2)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_set_required_level
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:254: DeprecationWarning: AccessTrait(required_level=...) is deprecated, use legacy_required_level= instead.
+    a = AccessTrait(required_level=2)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_set_required_level
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:255: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    a.update(3)
+
+frontend_module/tests/test_controls_v2_base.py::TestAccessTrait::test_set_required_level
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\tests\test_controls_v2_base.py:259: DeprecationWarning: AccessTrait.update(int) is deprecated, pass AccessContext instead.
+    a.update(5)
+
+frontend_module/tests/test_controls_v2_hooks.py::TestCheckboxHooks::test_write_rejected_hook
+frontend_module/tests/test_controls_v2_hooks.py::TestCheckboxHooks::test_write_committed_hook
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\frontend_module\components\checkbox\view.py:112: DeprecationWarning: CheckboxPresenter._on_changed без form_ctx — legacy путь только для _examples/ и FW unit-тестов. Передай form_ctx в production-коде.
+    self._checkbox.stateChanged.connect(lambda _state: callback(self._checkbox.isChecked()))
+
+logger_module/tests/test_process_hooks.py::TestReentrancy::test_warning_raised_inside_error_delivery_is_counted_not_recursed
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread nested-worker
+
+  Traceback (most recent call last):
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\logger_module\tests\test_process_hooks.py", line 75, in _raise_named_error
+      raise RuntimeError(message)
+  RuntimeError: nested
+
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+process_module/tests/test_process_hooks_acceptance.py::TestA8DiagCommands::test_diag_thread_raise_returns_success_with_thread_name_and_counter
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread diag-thread-raise
+
+  Traceback (most recent call last):
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_module\commands\builtin_commands.py", line 3636, in _raise_diagnostic_error
+      raise RuntimeError(message)
+  RuntimeError: probe-22ce840fb8214d7faab2060b85841b1a
+
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+process_module/tests/test_process_hooks_acceptance.py::TestA8DiagCommands::test_diag_thread_raise_uses_the_given_thread_name
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread probe-thread-4105cb68
+
+  Traceback (most recent call last):
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\process_module\commands\builtin_commands.py", line 3636, in _raise_diagnostic_error
+      raise RuntimeError(message)
+  RuntimeError: custom name probe
+
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+worker_module/tests/test_keyed_executor_hazards.py::test_h8_system_exit_in_action_replies_once_and_closes_executor
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread wmh-h8-0_keyed-h8-0
+
+  Traceback (most recent call last):
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\lifecycle\worker_lifecycle.py", line 216, in _worker_wrapper
+      target(stop_event, pause_event)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 331, in _worker_loop
+      self._execute(op.action, op.key, op.reply, op.label)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 371, in _execute
+      result = action()
+               ^^^^^^^^
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\tests\test_keyed_executor_hazards.py", line 461, in die
+      raise SystemExit("h8")
+  SystemExit: h8
+
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+worker_module/tests/test_keyed_executor_hazards.py::test_h10_base_exception_in_reply_during_drain_still_answers_every_waiting_op
+  D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread wmh-h10-0_keyed-h10-0
+
+  Traceback (most recent call last):
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 331, in _worker_loop
+      self._execute(op.action, op.key, op.reply, op.label)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 371, in _execute
+      result = action()
+               ^^^^^^^^
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\tests\test_keyed_executor_hazards.py", line 513, in die
+      raise SystemExit("h10")
+  SystemExit: h10
+
+  During handling of the above exception, another exception occurred:
+
+  Traceback (most recent call last):
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\INNOTECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\lifecycle\worker_lifecycle.py", line 216, in _worker_wrapper
+      target(stop_event, pause_event)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 347, in _worker_loop
+      self.request_stop()
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 257, in request_stop
+      self._reject_all(dropped)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 413, in _reject_all
+      raise first
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 402, in _reject_all
+      self._deliver(op.reply, _refusal(SYSTEM_STOPPING), op.label)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\keyed_executor.py", line 389, in _deliver
+      reply(payload)
+    File "D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.claude\worktrees\lso-1.11\multiprocess_framework\modules\worker_module\tests\test_keyed_executor_hazards.py", line 517, in q1_reply
+      raise _ReplyBoom("q1")
+  multiprocess_framework.modules.worker_module.tests.test_keyed_executor_hazards._ReplyBoom: q1
+
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+gc-policy: collections=12673 collected_objects=6226729 enabled_violations=0 foreign_collections=281 max_pause_ms=236.793 total_pause_ms=2847.2
+=========================== lifecycle-guards report ===========================
+G3 unclosed roots: 107
+  t028264a2d889 (abandoned)
+  t-160e0adc (abandoned)
+  t022841fd9408 (abandoned)
+  t02d9a0d1cd62 (abandoned)
+  t0213c12cda08 (abandoned)
+  t028c3eb46eae (abandoned)
+  t0264a794fda3 (abandoned)
+  t025ab92c8319 (abandoned)
+  t02a6890b0f15 (abandoned)
+  t021a21ff4e77 (abandoned)
+  t02cc5781acee (abandoned)
+  t02b04b483616 (abandoned)
+  t02ef3dcbec7f (abandoned)
+  t0221e7bf1f05 (abandoned)
+  t021b67e206d0 (abandoned)
+  t0294bf853aaf (abandoned)
+  t02a7a546c892 (abandoned)
+  t022e3aa9fed2 (abandoned)
+  t028cf3cbc17f (abandoned)
+  t02625375d8ae (abandoned)
+  t02d2f056feb0 (abandoned)
+  t02c105328ec2 (abandoned)
+  t02295765ed28 (abandoned)
+  t02cc9b4edfbe (abandoned)
+  t02ab020652ab (abandoned)
+  t028307da35bb (abandoned)
+  t025cbba2cfb1 (abandoned)
+  t02bdec0602a8 (abandoned)
+  t024b4141c064 (abandoned)
+  t02cac0516958 (abandoned)
+  t02c24629d897 (abandoned)
+  t02869739b46a (abandoned)
+  t022a9041add1 (abandoned)
+  t0286e231623c (abandoned)
+  t021805548490 (abandoned)
+  t02b69fc79969 (abandoned)
+  t02b058e0ba32 (abandoned)
+  t02732a9d03b5 (abandoned)
+  t026950f4ad8c (abandoned)
+  t0204744f9288 (abandoned)
+  t023a0b254e97 (abandoned)
+  t0293f490701d (abandoned)
+  t029490077576 (abandoned)
+  t02e2df8b87c1 (abandoned)
+  t02f629538864 (abandoned)
+  t0292e9d445e2 (abandoned)
+  t0284657a98fe (abandoned)
+  t02af2aa11a5b (abandoned)
+  t0238ab821625 (abandoned)
+  t025ee9aa4241 (abandoned)
+  t02dbc5261ff1 (abandoned)
+  t02f1e159ede3 (abandoned)
+  t029adee71e03 (abandoned)
+  t02080ccd255f (abandoned)
+  t0262f252397c (abandoned)
+  t027549cdeec7 (abandoned)
+  t02895b96c8b4 (abandoned)
+  t02eda2f8b98c (abandoned)
+  t0258ff613656 (abandoned)
+  t022fe16e36fe (abandoned)
+  t02e927ee812b (abandoned)
+  t02a4abc231d0 (abandoned)
+  t021afdd2c47e (abandoned)
+  t02e2f3c38ec4 (abandoned)
+  t02eac08a56db (abandoned)
+  t027412aa2a56 (abandoned)
+  t02030e4605e9 (abandoned)
+  t027fea031114 (abandoned)
+  t0289f88441ca (abandoned)
+  t0232243d195e (abandoned)
+  t028bfaa17125 (abandoned)
+  t0218304c7e74 (abandoned)
+  t02faf30587e8 (abandoned)
+  t023c41be3bd4 (abandoned)
+  t02d7ec1bcdb5 (abandoned)
+  t027f0b7b7bf4 (abandoned)
+  t02715c284a12 (abandoned)
+  t02ac704a7f8d (abandoned)
+  t024b66f490aa (abandoned)
+  t024881d7fb3e (abandoned)
+  t022dad3e889e (abandoned)
+  t02a930177f5d (abandoned)
+  t02f5f456fd73 (abandoned)
+  t02cd79c35511 (abandoned)
+  t023b1f321bcb (abandoned)
+  t0222f1f0b7bc (abandoned)
+  t02545f22116e (abandoned)
+  t022035586460 (abandoned)
+  t024d9a58755c (abandoned)
+  t022d7acbadab (abandoned)
+  t0201a248938a (abandoned)
+  t020e35f52573 (abandoned)
+  t02443c100c7e (abandoned)
+  t02d1902b8ccf (abandoned)
+  t02aa12771a5b (abandoned)
+  t023ffed861ac (abandoned)
+  t02e581781b8a (abandoned)
+  t0297d0ee11e5 (abandoned)
+  t020fb5b01953 (abandoned)
+  t02e6dd7bb8c9 (abandoned)
+  t0255f2bcc8f4 (abandoned)
+  t02bc1aeb68de (abandoned)
+  t02d6d07ecaee (abandoned)
+  t0227b20ce050 (abandoned)
+  t029e331ba53a (abandoned)
+  t02e90e870169 (abandoned)
+  o (abandoned)
+G4 threads without scope path: 258
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionKT2Flush::test_flush_returns_written_and_lost_pair :: batch-drain-batch_drain
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionKT2Flush::test_flush_returns_promptly_with_honest_loss_on_unreachable_deadline :: batch-drain-batch_drain
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionKT3CounterNameIsAParameter::test_constructor_counter_name_drives_the_voice_and_the_counter :: batch-drain-batch_drain
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionCapacityAndWindowedVoice::test_capacity_is_bounded_and_overflow_is_voiced_by_window_not_per_drop :: batch-drain-batch_drain
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionCapacityAndWindowedVoice::test_capacity_is_bounded_and_overflow_is_voiced_by_window_not_per_drop :: batch-drain-batch_drain
+  channel_routing_module/observability/tests/test_task_3_3_store_tap_batch_acceptance.py::TestCriterionClassDoesNotKnowAboutStore::test_constructs_and_works_with_a_bare_sink_double_no_store_anywhere :: batch-drain-batch_drain
+  process_manager_module/tests/test_lifecycle_command_classes.py::test_lt_command_registration_matches_class_table[process.create] :: router-sender-router_ProcessManager
+  process_manager_module/tests/test_lifecycle_command_classes.py::test_lt_command_registration_matches_class_table[process.create] :: aggregation-window-timer
+  process_manager_module/tests/test_lifecycle_command_classes.py::test_lt_command_registration_matches_class_table[process.create] :: ProcessManager_message_processor
+  process_manager_module/tests/test_lifecycle_command_classes.py::test_lt_command_registration_matches_class_table[process.create] :: ProcessManager_keyed-pm-lifecycle-0
+  process_manager_module/tests/test_lifecycle_command_classes.py::test_lt_command_registration_matches_class_table[process.create] :: ProcessManager_state_monitor
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_answers_during_long_child_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_answers_during_long_child_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_answers_during_long_child_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_answers_during_long_child_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_other_process_during_long_stop_delivered_fast :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_other_process_during_long_stop_delivered_fast :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_other_process_during_long_stop_delivered_fast :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_other_process_during_long_stop_delivered_fast :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_via_process_command_door_deferred_same_content :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_via_process_command_door_deferred_same_content :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_via_process_command_door_deferred_same_content :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_via_process_command_door_deferred_same_content :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_shutdown_during_stop_sets_events_immediately :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_shutdown_during_stop_sets_events_immediately :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_shutdown_during_stop_sets_events_immediately :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_shutdown_during_stop_sets_events_immediately :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_alive_through_topology_apply_with_slow_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_alive_through_topology_apply_with_slow_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_supervision_status_alive_through_topology_apply_with_slow_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_reply_after_confirmed_death_direct_door :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_reply_after_confirmed_death_direct_door :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_reply_after_confirmed_death_direct_door :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_stop_reply_after_confirmed_death_direct_door :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_queued_lifecycle_ops_rejected_on_system_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_queued_lifecycle_ops_rejected_on_system_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_queued_lifecycle_ops_rejected_on_system_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_queued_lifecycle_ops_rejected_on_system_stop :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_stop_mid_single_stop_one_owner :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_stop_mid_single_stop_one_owner :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_stop_mid_single_stop_one_owner :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_system_stop_mid_single_stop_one_owner :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_target_in_restart_reaches_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_target_in_restart_reaches_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_target_in_restart_reaches_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_relay_to_target_in_restart_reaches_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_lifecycle_commands_keep_arrival_order :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_lifecycle_commands_keep_arrival_order :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_lifecycle_commands_keep_arrival_order :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_lifecycle_commands_keep_arrival_order :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_acceptance.py::test_lifecycle_commands_keep_arrival_order :: ready-gate-other
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h1_system_shutdown_idles_executor_within_200ms :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h1_system_shutdown_idles_executor_within_200ms :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h1_system_shutdown_idles_executor_within_200ms :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h1_system_shutdown_idles_executor_within_200ms :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h2_no_lifecycle_stop_waits_on_message_processor :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h2_no_lifecycle_stop_waits_on_message_processor :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h2_no_lifecycle_stop_waits_on_message_processor :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h2_no_lifecycle_stop_waits_on_message_processor :: ready-gate-other
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h3_routing_lock_free_while_executor_waits_for_child :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h3_routing_lock_free_while_executor_waits_for_child :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h3_routing_lock_free_while_executor_waits_for_child :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h3_routing_lock_free_while_executor_waits_for_child :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h4_handler_exception_replies_failure_and_queue_goes_on :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h4_handler_exception_replies_failure_and_queue_goes_on :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h4_handler_exception_replies_failure_and_queue_goes_on :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h6_nested_topology_apply_inside_executor_runs_in_place :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h6_nested_topology_apply_inside_executor_runs_in_place :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h6_nested_topology_apply_inside_executor_runs_in_place :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h7_readers_survive_dict_mutation_during_topology_apply :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h7_readers_survive_dict_mutation_during_topology_apply :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h7_readers_survive_dict_mutation_during_topology_apply :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h8_single_child_stop_object_until_operation_returns :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h8_single_child_stop_object_until_operation_returns :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h8_single_child_stop_object_until_operation_returns :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h8_single_child_stop_object_until_operation_returns :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_system_stop_without_operation_group_stops_children :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_system_stop_without_operation_group_stops_children :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_system_stop_without_operation_group_stops_children :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_hung_child_still_gets_terminate_as_today :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_hung_child_still_gets_terminate_as_today :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h9_hung_child_still_gets_terminate_as_today :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_topology_apply_under_system_stop_hands_children_to_root :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_topology_apply_under_system_stop_hands_children_to_root :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_topology_apply_under_system_stop_hands_children_to_root :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_topology_apply_under_system_stop_hands_children_to_root :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h10_guard_hung_child_removed_without_system_stop_keeps_error_and_alert :: ready-gate-other
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h11_executor_busy_rejections_are_logged_by_command_manager :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h11_executor_busy_rejections_are_logged_by_command_manager :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h11_executor_busy_rejections_are_logged_by_command_manager :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h12_stop_is_accepted_under_relay_flood :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h12_stop_is_accepted_under_relay_flood :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_fifo_hazards.py::test_h12_stop_is_accepted_under_relay_flood :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[direct-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[direct-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[direct-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[direct-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[direct-door] :: ready-gate-slow
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[process.command-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[process.command-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[process.command-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[process.command-door] :: QueueFeederThread
+  process_manager_module/tests/test_lifecycle_restart_reply.py::test_restart_reply_not_before_new_incarnation_alive[process.command-door] :: ready-gate-slow
+  process_manager_module/tests/test_observability_broker.py::TestReplayWaitsForRealReadiness::test_seam_does_not_block_the_message_loop :: ready-gate-camera_1
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_longer_window_child_exits_itself :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_longer_window_child_exits_itself :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_longer_window_child_exits_itself :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_child_without_key_uses_pm_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_child_without_key_uses_pm_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_child_without_key_uses_pm_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_window_above_ceiling_clamped_with_warning :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_window_above_ceiling_clamped_with_warning :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_window_above_ceiling_clamped_with_warning :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_system_stop_respects_per_child_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_system_stop_respects_per_child_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_system_stop_respects_per_child_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_system_stop_respects_per_child_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_child_stop_budget_from_own_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_child_stop_budget_from_own_window :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_keyless_child_budget_not_raised_by_ceiling :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_keyless_child_budget_not_raised_by_ceiling :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_recipe_key_reaches_process_config :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_recipe_key_reaches_process_config :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_recipe_key_reaches_process_config :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_recipe_key_reaches_process_config :: ready-gate-recipe_w
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[topology_apply_batch] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[topology_apply_batch] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[restart_one] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[restart_one] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[restart_one] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[restart_one] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_batch_and_restart_paths_use_child_window[restart_one] :: ready-gate-A
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[zero-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[negative-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[nan-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[bool_true-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-recipe] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_acceptance.py::test_invalid_window_ignored_with_warning[str_8-processes_config] :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_hazards.py::test_h9_keyless_child_system_stop_with_ceiling_above_g_dies_at_g :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_hazards.py::test_h9_keyless_child_system_stop_with_ceiling_above_g_dies_at_g :: QueueFeederThread
+  process_manager_module/tests/test_per_child_stop_window_hazards.py::test_h9_keyless_child_system_stop_with_ceiling_above_g_dies_at_g :: QueueFeederThread
+  process_manager_module/tests/test_ready_gate_redelivery.py::TestGateDoesNotBlockTheMessageLoop::test_broadcast_returns_immediately_when_a_child_is_not_ready :: ready-gate-camera_0
+  process_manager_module/tests/test_ready_gate_redelivery.py::TestGateDoesNotBlockTheMessageLoop::test_broadcast_returns_the_broadcast_reach_not_the_redelivery_count :: ready-gate-camera_0
+  process_manager_module/tests/test_ready_gate_redelivery.py::TestRedeliveryDoesNotDeliverThePast::test_one_worker_per_addressee_not_one_per_envelope :: ready-gate-camera_0
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_cooperative_child :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_cooperative_child :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_cooperative_child :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_cooperative_child :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_terminated_for_child_ignoring_stop_event :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_terminated_for_child_ignoring_stop_event :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_terminated_for_child_ignoring_stop_event :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_terminated_for_child_ignoring_stop_event :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_supervision_status_carries_stop_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_supervision_status_carries_stop_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_supervision_status_carries_stop_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_supervision_status_carries_stop_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[direct] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[direct] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[direct] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[direct] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[direct] :: ready-gate-slow
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[process_command] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[process_command] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[process_command] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[process_command] :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_restart_reply_carries_outcome_of_stop_phase[process_command] :: ready-gate-slow
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_handed_over_when_system_stop_interrupts :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_handed_over_when_system_stop_interrupts :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_handed_over_when_system_stop_interrupts :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_handed_over_when_system_stop_interrupts :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_none_when_nothing_was_stopped :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_none_when_nothing_was_stopped :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_none_when_nothing_was_stopped :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_none_when_nothing_was_stopped :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_stop_outcome_reset_on_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_stop_outcome_reset_on_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_stop_outcome_reset_on_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_stop_outcome_reset_on_new_incarnation :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_stop_outcome_reset_on_new_incarnation :: ready-gate-slow
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_child_exiting_nonzero :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_child_exiting_nonzero :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_child_exiting_nonzero :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_acceptance.py::test_outcome_exited_for_child_exiting_nonzero :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_stop_reply_none_when_registry_sees_dead_after_pm_saw_alive :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_stop_reply_none_when_registry_sees_dead_after_pm_saw_alive :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_stop_reply_none_when_registry_sees_dead_after_pm_saw_alive :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_stop_reply_none_when_registry_sees_dead_after_pm_saw_alive :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_refused_before_stop_reply_shape :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_refused_before_stop_reply_shape :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_refused_before_stop_reply_shape :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_refused_before_stop_reply_shape :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_of_dead_child_does_not_leak_previous_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_of_dead_child_does_not_leak_previous_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_of_dead_child_does_not_leak_previous_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_of_dead_child_does_not_leak_previous_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_of_dead_child_does_not_leak_previous_outcome :: ready-gate-slow
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_recreate_failed_reply_carries_stop_phase_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_recreate_failed_reply_carries_stop_phase_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_recreate_failed_reply_carries_stop_phase_outcome :: QueueFeederThread
+  process_manager_module/tests/test_stop_outcome_hazards.py::test_restart_recreate_failed_reply_carries_stop_phase_outcome :: QueueFeederThread
+  process_module/tests/test_process_hooks_wiring.py::TestFailedInitializeDoesNotLeakHooks::test_hooks_are_removed_when_initialize_fails_after_managers :: router-sender-router_hook_leak_probe
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_create_worker_via_command :: test_wm_grabber
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_create_duplicate_rejected :: test_wm_w
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_create_with_explicit_class_path :: test_wm_w
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_restart_worker_via_command :: test_wm_w
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_drain_worker_via_command :: test_wm_w
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_start_worker_via_command :: test_wm_w
+  process_module/tests/test_worker_crud_commands.py::TestWorkerCrudCommands::test_update_worker_changes_priority :: test_wm_w
+  router_module/tests/test_router_manager.py::TestDispatchCommand::test_command_in_cm_dispatched_and_replied :: router-sender-rr_cmd
+  router_module/tests/test_router_manager.py::TestDispatchCommand::test_handler_exception_replies_error :: router-sender-rr_cmd
+  router_module/tests/test_router_manager.py::TestDispatchCommand::test_manages_own_reply_skips_auto_reply :: router-sender-rr_cmd
+  router_module/tests/test_router_manager.py::TestDispatchCommand::test_no_command_manager_falls_back :: router-sender-rr_nocm
+  router_module/tests/test_router_manager.py::TestDispatchCommand::test_unknown_command_goes_through_cm_no_fallback :: router-sender-rr_cmd
+  router_module/tests/test_socket_client.py::test_drop_during_request_errors_within_timeout :: socket-ch-inbound-backend_ctl
+  service_module/tests/test_host_acceptance.py::test_slow_start_does_not_block_other_command :: service-start-slow
+  shared_resources_module/tests/test_exit_loss_line_acceptance.py::test_a2_buffered_n_reported_literal :: QueueFeederThread
+  shared_resources_module/tests/test_exit_loss_line_acceptance.py::test_a3_in_flight_with_empty_buffer_still_released :: QueueFeederThread
+  shared_resources_module/tests/test_handles.py::TestQueueHandle::test_send_and_receive :: QueueFeederThread
+  shared_resources_module/tests/test_handles.py::TestQueueHandle::test_size :: QueueFeederThread
+  shared_resources_module/tests/test_handles.py::TestSRMHighLevel::test_broadcast :: QueueFeederThread
+  shared_resources_module/tests/test_handles.py::TestSRMHighLevel::test_broadcast :: QueueFeederThread
+  shared_resources_module/tests/test_handles.py::TestSRMHighLevel::test_broadcast_with_exclude :: QueueFeederThread
+  shared_resources_module/tests/test_reader_gone_hazards.py::TestH5H6HookIdempotentAndPlainQueueUntouched::test_second_call_is_noop :: QueueFeederThread
+  shared_resources_module/tests/test_reader_gone_hazards.py::TestH7BufferedCountIsExact::test_n_buffered_items_give_n :: QueueFeederThread
+  shared_resources_module/tests/test_shared_resources_manager.py::TestPickleRoundtrip::test_queue_ipc_via_process :: QueueFeederThread
+  statistics_module/tests/test_f2_gate_precedes_assembly.py::TestTheGateRunsBeforeTheRecordIsAssembled::test_a_denied_metric_never_has_its_tags_read :: aggregation-window-timer
+  statistics_module/tests/test_f2_gate_precedes_assembly.py::TestTheGateRunsBeforeTheRecordIsAssembled::test_the_control_an_allowed_metric_does_read_its_tags :: aggregation-window-timer
+  statistics_module/tests/test_f2_gate_precedes_assembly.py::TestTheGateRunsBeforeTheRecordIsAssembled::test_all_four_kinds_share_the_guarantee :: aggregation-window-timer
+  statistics_module/tests/test_stats_manager.py::TestStatsManagerCreation::test_initialize :: aggregation-window-timer
+  statistics_module/tests/test_stats_manager.py::TestStatsManagerCreation::test_initialize_with_config_object :: aggregation-window-timer
+12527 passed, 46 skipped, 1 deselected, 1 xfailed, 117 warnings in 1447.11s (0:24:07)
+rc=0
