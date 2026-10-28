@@ -23,3 +23,4 @@
 - `StartGrabbing` не прошёл -> `states: ["idle"]`, ключей `grabbing` нет.
 - `--orig` — та же схема, `states: ["idle"]`, только узлы, которые опыт будет писать; `--restore` читает его тем же загрузчиком.
 - Загрузчик 1.5 на неизвестный `schema_version` -> `ValueError`; текст называет ключ, значения в тексте нет.
+- Отклонения реальной записи `mvcr_ID3013.json` (2026-10-19, `tasks/6.2.result.md`), которые загрузчик 1.5 обязан принимать: `sdk_version: null`; `states: ["idle"]` без `grabbing`; `value: null` при `rc="0x00000000"` (узел читался, значения нет); `entries: null` при непустом `entry_values`; `min`/`max` заданы у узла с `access: "NA"` (сняты в состоянии On/SelfTrigger). Версия схемы не меняется.

@@ -49,7 +49,7 @@
 | ADR-CAM-002 | один сеанс прибора на процесс, поток-владелец, run/rest, проверка чтением (Р1, Р6) | там же | 0.1 |
 | ADR-CAM-003 | универсальность: `Binding.kind`, `Capabilities`, `DeviceIdentity` (Р2, Р3) | там же | 0.1 |
 | ADR-CAM-004 | политика переименования: без алиасов, FREEZE только без живого вызывающего (Р8, Р9, Р14) | там же | 0.1 |
-| ADR-DS-<след.> | `FieldMeta.apply`, `FieldMeta.enabled_if` | `multiprocess_framework/modules/data_schema_module/DECISIONS.md` | 1.1 |
+| ADR-DS-011 | `FieldMeta.apply`, `FieldMeta.enabled_if` | `multiprocess_framework/modules/data_schema_module/DECISIONS.md` | 1.1 |
 | ADR-<код process_module>-<след.> | контракты и описания команд плагина; `introspect.registers` с `meta` | `multiprocess_framework/modules/process_module/DECISIONS.md` | 1.3, 1.4 |
 | ADR-CR-011 | `code_reader_sdk` на ядре; механизм ADR-CR-010 (возврат исходных) заменён профилем rest | `Services/code_reader/DECISIONS.md` (сейчас ADR-CR-001…010) | 3.2 |
 | ADR-HIK-001 | `hikvision` на ядре, новые команды, `sdk_app` FROZEN | `Services/hikvision_camera/DECISIONS.md` (новый: файла нет) | 4.3 |
