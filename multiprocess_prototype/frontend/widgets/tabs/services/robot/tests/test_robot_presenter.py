@@ -67,6 +67,28 @@ def test_set_manual_mode() -> None:
     )
 
 
+def test_park_sends_robot_park() -> None:
+    """«Остановить» → robot_park {device_id}; ответ разворачивается."""
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"result": {"status": "ok", "accepted": True, "seq": 1}}
+    results: list[dict] = []
+    presenter.park("robot_main", results.append)
+    sender.request_command.assert_called_once_with("devices", "robot_park", {"device_id": "robot_main"})
+    assert results == [{"status": "ok", "accepted": True, "seq": 1}]
+
+
+def test_force_stop_sends_robot_stop_hard() -> None:
+    """«Остановить принудительно» → robot_stop {device_id, level: "HARD"}."""
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    results: list[dict] = []
+    presenter.force_stop("robot_main", results.append)
+    sender.request_command.assert_called_once_with(
+        "devices", "robot_stop", {"device_id": "robot_main", "level": "HARD"}
+    )
+    assert results == [{"status": "ok"}]
+
+
 def test_draw_circle_routed_to_devices() -> None:
     presenter, sender = make_presenter()
     sender.request_command.return_value = {"status": "ok"}

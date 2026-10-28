@@ -56,6 +56,14 @@ class RobotPresenter:
         """Стоп робота: 1=домой+цикл, 2=домой+выход, 3=на месте."""
         self._request("robot_abort", {"device_id": device_id, "mode": int(mode)})
 
+    def park(self, device_id: str, on_result: Callable[[dict], None]) -> None:
+        """«Остановить»: домой, затем серво OFF (robot_park). Ответ: {accepted, seq} или отказ."""
+        self._request("robot_park", {"device_id": device_id}, lambda r: on_result(_unwrap(r)))
+
+    def force_stop(self, device_id: str, on_result: Callable[[dict], None]) -> None:
+        """«Остановить принудительно»: robot_stop с level HARD."""
+        self._request("robot_stop", {"device_id": device_id, "level": "HARD"}, lambda r: on_result(_unwrap(r)))
+
     def set_mode(self, device_id: str, mode: str) -> None:
         """Режим cvt|draw (переключать только при free)."""
         self._request("robot_set_mode", {"device_id": device_id, "mode": mode})

@@ -46,6 +46,8 @@ class RobotControlWidget(QWidget):
     refresh_requested = Signal()
     send_job_requested = Signal(float, float, float)  # x, y, z (z=глубина захвата; 0 = дефолт прошивки)
     stop_requested = Signal(int)  # 1|2|3
+    park_requested = Signal()  # «Остановить»: домой, затем серво OFF
+    force_stop_requested = Signal()  # «Остановить принудительно»: robot_stop HARD
     mode_change_requested = Signal(str)  # cvt|draw|manual
     servo_requested = Signal(bool)
     manual_mode_toggled = Signal(bool)
@@ -136,6 +138,13 @@ class RobotControlWidget(QWidget):
         grid.addWidget(self._btn_stop1, 1, 0, 1, 2)
         grid.addWidget(self._btn_stop2, 1, 2, 1, 2)
         grid.addWidget(self._btn_stop3, 1, 4)
+        # Остановка робота через хаб (robot_park / robot_stop HARD)
+        self._btn_park = QPushButton("Остановить")
+        self._btn_park.clicked.connect(lambda: self.park_requested.emit())
+        self._btn_force_stop = QPushButton("Остановить принудительно")
+        self._btn_force_stop.clicked.connect(lambda: self.force_stop_requested.emit())
+        grid.addWidget(self._btn_park, 1, 5)
+        grid.addWidget(self._btn_force_stop, 1, 6)
 
         grid.addWidget(QLabel("Режим:"), 2, 0)
         self._combo_mode = QComboBox()
