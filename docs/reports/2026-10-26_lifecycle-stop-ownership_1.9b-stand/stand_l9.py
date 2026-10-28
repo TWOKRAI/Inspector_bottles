@@ -51,11 +51,16 @@ THRESHOLDS: dict[str, dict[str, Any]] = {
     "S5": {"max_restart_s": 5.0, "max_tree_exit_s": 2.0, "max_activate_s": 5.0, "shutdown_runs": 10},
     # T1.10: медленный стоп 6,0 с при окне 5,0 с -> terminate; ответ с окном (5,0-5,3 с), 3 из 3.
     "S6": {"outcome": "terminated", "success": True, "reply_min_s": 5.0, "reply_max_s": 5.3, "pass_runs": 3},
+    # T1.11: стоп 6,0 с, окно ребёнка 10,0 (stop_window_s), потолок 12,0, окно PM 5,0 -> slow выходит сам; ответ 6,0-6,6 с.
+    "S7": {"outcome": "exited", "success": True, "reply_min_s": 6.0, "reply_max_s": 6.6, "pass_runs": 3},
+    # Контроль S7 (--s7-control): тот же стенд без ключа stop_window_s -> поведение T1.10 (terminate по окну PM 5,0 с).
+    # Не приёмка, а различитель: exited здесь = стенд не различает, S7 не засчитывать.
+    "S7_control": {"outcome": "terminated", "success": True, "reply_min_s": 5.0, "reply_max_s": 5.3, "pass_runs": 1},
 }
 #: Нижние границы «ДО» (main/И1): контроль обязан их вернуть, иначе стенд не различает.
 CONTROL_FLOORS: dict[str, float] = {"S2_max_latency_s": 2.0, "S3_delivery_s": 2.0, "S4_shutdown_line_s": 3.0}
 
-REPEATS = {"S1": 10, "S2": 10, "S3": 10, "S4": 5, "S5": 10, "S6": 3}
+REPEATS = {"S1": 10, "S2": 10, "S3": 10, "S4": 5, "S5": 10, "S6": 3, "S7": 3}
 STOP_PROCESS_TIMEOUT_S = 8.0
 SHUTDOWN_TIMEOUT_S = 8.0
 
@@ -79,6 +84,10 @@ SLOW_CLASS = "stand_slow_child.SlowChild"
 S6_SLOW_CLASS = "stand_slow_child.S6SlowChild"
 S6_SLOW_STOP_S = 6.0  # --s6-slow-stop-s: хук остановки slow в S6
 S6_WINDOW_S = 5.0  # --s6-window-s: stop_process_timeout в S6
+S7_SLOW_STOP_S = 6.0  # --s7-slow-stop-s: хук остановки slow (S6SlowChild) в S7
+S7_WINDOW_S = 10.0  # --s7-window-s: ключ stop_window_s в записи slow
+S7_CEILING_S = 12.0  # --s7-ceiling-s: max_stop_window_s в orchestrator_config PM
+S7_PM_WINDOW_S = 5.0  # stop_process_timeout в S7: окно PM как в S6 (ключ ребёнка его перекрывает)
 FAST_CLASS = "stand_slow_child.FastChild"
 WAIT_RELAY_AT_S = 1.0  # S3/S4: момент действия после отправки process.stop slow
 SAMPLE_PERIOD_S = 0.1  # S2
@@ -263,6 +272,23 @@ def judge_s6(runs: list[dict[str, Any]], th: dict[str, Any] | None = None) -> di
         "stats": stats([r.get("reply_s") for r in runs]),
         "outcomes": outcome_counts(runs),
     }
+
+
+def judge_s7(runs: list[dict[str, Any]], th: dict[str, Any] | None = None) -> dict[str, Any]:
+    """S7 (T1.11): ``process.stop slow`` (стоп 6,0 с, окно ребёнка 10,0 с, потолок 12,0 с): ``outcome == exited``,
+    ``success is True``, ответ 6,0-6,6 с; 3 из 3. Проверка та же, что у S6 (``judge_s6``), другие литералы порогов."""
+    return judge_s6(runs, th or THRESHOLDS["S7"])
+
+
+def judge_s7_control(runs: list[dict[str, Any]], th: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Контроль S7 (``--s7-control``): тот же стенд без ключа ``stop_window_s``: ожидается поведение T1.10
+    (``terminated``, ответ 5,0-5,3 с). ``distinguishes`` False - стенд не различает; ``exited`` без ключа = S7 не засчитывать."""
+    res = judge_s6(runs, th or THRESHOLDS["S7_control"])
+    distinguishes = res["verdict"] == "PASS"
+    reasons = list(res["reasons"])
+    if res["outcomes"].get("exited"):
+        reasons.append("контроль дал exited без ключа stop_window_s: стенд не различает, S7 не засчитывать")
+    return {**res, "reasons": reasons, "distinguishes": distinguishes}
 
 
 def judge_s2(runs: list[dict[str, Any]], th: dict[str, float | int] | None = None) -> dict[str, Any]:
@@ -547,6 +573,8 @@ class Backend:
         self.windows = stop_windows(bool(getattr(ctx, "default_windows", False)))
         self.stop_window_s = STOP_PROCESS_TIMEOUT_S  # S6 ставит своё (--s6-window-s) до start()
         self.slow_stop_s: float | None = None  # S6: STAND_S6_SLOW_STOP_S для S6SlowChild
+        self.ceiling_s: float | None = None  # S7: STAND_MAX_STOP_WINDOW -> orchestrator_config.max_stop_window_s
+        self.ceiling_seen: bool | None = None  # None - потолок не задан; иначе строка [stand] найдена в stdout
 
     # ---- конфиги этого запуска (закоммиченные файлы не трогаются) ----
     def _write_configs(self) -> Path:
@@ -615,6 +643,10 @@ class Backend:
             env.pop("STAND_STOP_PROCESS_TIMEOUT", None)  # R2-C: без подмены orchestrator_config
         if self.slow_stop_s is not None:
             env["STAND_S6_SLOW_STOP_S"] = str(self.slow_stop_s)
+        if self.ceiling_s is not None:
+            env["STAND_MAX_STOP_WINDOW"] = str(self.ceiling_s)
+        else:
+            env.pop("STAND_MAX_STOP_WINDOW", None)  # S1-S6: без потолка, чужой env не просачивается
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
         t0 = time.monotonic()
         out = open(self.stdout_path, "wb")
@@ -650,6 +682,10 @@ class Backend:
         text = self.stdout_path.read_text(encoding="utf-8", errors="replace")
         self.override_seen = f"stop_process_timeout={self.stop_window_s}" in text
         self.windows["override_line_in_stdout"] = self.override_seen  # default: обязано быть False
+        if self.ceiling_s is not None:
+            self.ceiling_seen = f"orchestrator_config.max_stop_window_s={self.ceiling_s}" in text
+            self.windows["max_stop_window_s"] = self.ceiling_s
+            self.windows["ceiling_line_in_stdout"] = self.ceiling_seen
         return drv
 
     @staticmethod
@@ -700,7 +736,14 @@ class Ctx:
         self.round2 = False  # R2-B: выход PM через WaitForSingleObject
         self.s6_slow_stop_s = float(getattr(args, "s6_slow_stop_s", S6_SLOW_STOP_S))
         self.s6_window_s = float(getattr(args, "s6_window_s", S6_WINDOW_S))
+        self.s7_slow_stop_s = float(getattr(args, "s7_slow_stop_s", S7_SLOW_STOP_S))
+        self.s7_window_s = float(getattr(args, "s7_window_s", S7_WINDOW_S))
+        self.s7_ceiling_s = float(getattr(args, "s7_ceiling_s", S7_CEILING_S))
+        self.s7_pm_window_s = S7_PM_WINDOW_S
+        self.s7_control = bool(getattr(args, "s7_control", False))  # S7 без ключа stop_window_s, 1 повтор
         self.n = {k: (1 if args.quick else v) for k, v in REPEATS.items()}
+        if self.s7_control:
+            self.n["S7"] = 1
 
 
 def write_run(ctx: Ctx, scenario: str, idx: int, data: dict[str, Any]) -> None:
@@ -728,8 +771,12 @@ def revive(drv: Any, name: str, door: str, deadline_s: float = 45.0) -> dict[str
     raise RuntimeError(f"{name} не стал alive за {deadline_s} с")
 
 
-def add_slow_fast(drv: Any, backend: Backend, slow_class: str = SLOW_CLASS) -> dict[str, Any]:
+def add_slow_fast(
+    drv: Any, backend: Backend, slow_class: str = SLOW_CLASS, slow_extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Добавить ``slow`` и ``fast`` через ``topology.apply`` (с предварительным ``topology.diff``).
+
+    ``slow_extra`` (S7): дополнительные ключи записи ``slow`` (``stop_window_s``); по умолчанию запись как в S1-S6.
 
     Что остаётся от рецепта: на первом ``topology.apply`` PM сносит все non-protected процессы
     (``process_manager_process.py:3988``: на boot ``_current_topology`` = None), protected (devices, gui) живут.
@@ -738,7 +785,7 @@ def add_slow_fast(drv: Any, backend: Backend, slow_class: str = SLOW_CLASS) -> d
     desired = {
         "name": "stand_l9",
         "processes": [
-            {"process_name": SLOW, "process_class": slow_class},
+            {"process_name": SLOW, "process_class": slow_class, **(slow_extra or {})},
             {"process_name": FAST, "process_class": FAST_CLASS},
         ],
         "wires": [],
@@ -934,6 +981,66 @@ def run_s6(ctx: Ctx) -> list[dict[str, Any]]:
         runs.append(rec)
         print(
             f"[S6 r{i}] reply_s={rec.get('reply_s')} reply={rec.get('reply')} "
+            f"supervision.stop_outcome={rec.get('supervision_stop_outcome')} dns={rec['dns']}",
+            flush=True,
+        )
+    return runs
+
+
+def run_s7(ctx: Ctx) -> list[dict[str, Any]]:
+    """S7 (T1.11): окно стопа на ребёнка. Как S6 (свежий бэкенд на повтор, slow=S6SlowChild со стопом 6,0 с, окно PM 5,0 с),
+    но запись ``slow`` в ``topology.apply`` несёт ``stop_window_s`` (10,0 с), а PM получает потолок ``max_stop_window_s``
+    (12,0 с). Контроль (``ctx.s7_control``): ключа в записи нет, потолок тот же, 1 повтор."""
+    scenario = "S7_control" if ctx.s7_control else "S7"
+    runs: list[dict[str, Any]] = []
+    for i in range(1, ctx.n["S7"] + 1):
+        be = Backend(ctx, f"s7c_r{i}" if ctx.s7_control else f"s7_r{i}")
+        be.stop_window_s = ctx.s7_pm_window_s
+        be.slow_stop_s = ctx.s7_slow_stop_s
+        be.ceiling_s = ctx.s7_ceiling_s
+        slow_extra = None if ctx.s7_control else {"stop_window_s": ctx.s7_window_s}
+        rec: dict[str, Any] = {
+            "run": i,
+            "precondition_ok": False,
+            "control": ctx.s7_control,
+            "slow_stop_s": ctx.s7_slow_stop_s,
+            "pm_window_s": ctx.s7_pm_window_s,
+            "child_window_s": None if ctx.s7_control else ctx.s7_window_s,
+            "ceiling_s": ctx.s7_ceiling_s,
+        }
+        try:
+            drv = be.start()
+            rec["boot_s"] = be.boot_s
+            rec["override_seen"] = be.override_seen
+            rec["ceiling_seen"] = be.ceiling_seen
+            rec["windows"] = be.windows
+            rec["apply"] = add_slow_fast(drv, be, S6_SLOW_CLASS, slow_extra)
+            rec["precondition_ok"] = bool(be.override_seen and be.ceiling_seen)
+            if not rec["precondition_ok"]:
+                rec["precondition_note"] = (
+                    "подмена orchestrator_config не сработала (нет строки [stand] в stdout): "
+                    f"stop_process_timeout={be.override_seen}, max_stop_window_s={be.ceiling_seen}"
+                )
+            else:
+                wait_s = ctx.s7_slow_stop_s + 30.0
+                p = send_async(drv, pm_msg("process.stop", {"process_name": SLOW}, ctx.door), wait_s)
+                p.ev.wait(wait_s)
+                rec["reply_s"] = p.latency()
+                rec["reply"] = leaf(p.result) if p.result is not None else None
+                rec["reply_raw"] = p.result
+                rec["waited_s"] = round(time.monotonic() - p.t_send, 2)
+                rec["supervision_stop_outcome"] = (Backend.supervision(drv, SLOW).get(SLOW) or {}).get("stop_outcome")
+        except Exception as exc:  # noqa: BLE001
+            rec["error"] = repr(exc)
+            rec["precondition_note"] = rec.get("precondition_note") or repr(exc)
+        finally:
+            be.stop()
+        logs = scan_log_dir(be.log_root)
+        rec.update({"lost": logs["lost"], "dns": logs["dns"], "dns_by_dir": logs["dns_by_dir"]})
+        write_run(ctx, scenario, i, rec)
+        runs.append(rec)
+        print(
+            f"[{scenario} r{i}] reply_s={rec.get('reply_s')} reply={rec.get('reply')} "
             f"supervision.stop_outcome={rec.get('supervision_stop_outcome')} dns={rec['dns']}",
             flush=True,
         )
@@ -1809,6 +1916,8 @@ THRESHOLD_TEXT = {
     "S4": "строка <= +1,2 с, выход PM <= +4,5 с, dns 0, system_stopping",
     "S5": "рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0",
     "S6": "outcome terminated, success True, ответ 5,0-5,3 с; 3 из 3",
+    "S7": "outcome exited, success True, ответ 6,0-6,6 с; 3 из 3",
+    "S7-контроль": "без ключа: outcome terminated, ответ 5,0-5,3 с (exited = стенд не различает)",
 }
 
 
@@ -1845,6 +1954,15 @@ def build_plan(args: argparse.Namespace) -> list[str]:
         f"S6 x{n['S6']}: свежий бэкенд на повтор; slow=S6SlowChild (стоп {args.s6_slow_stop_s} с), "
         f"stop_process_timeout={args.s6_window_s}; process.stop slow: время и ответ целиком "
         "(outcome terminated, success True, 5,0-5,3 с)",
+        (
+            f"S7 x1 КОНТРОЛЬ: как S7, но в записи slow НЕТ ключа stop_window_s (потолок {args.s7_ceiling_s} остаётся); "
+            "ожидается terminated, ответ 5,0-5,3 с; exited = стенд не различает, S7 не засчитывать"
+            if args.s7_control
+            else f"S7 x{n['S7']}: свежий бэкенд на повтор; slow=S6SlowChild (стоп {args.s7_slow_stop_s} с), "
+            f"stop_process_timeout={S7_PM_WINDOW_S}, ключ slow stop_window_s={args.s7_window_s}, "
+            f"max_stop_window_s={args.s7_ceiling_s} (stand_backend.py: orchestrator_config); process.stop slow: "
+            "время и ответ целиком (outcome exited, success True, 6,0-6,6 с)"
+        ),
         f"S5: свежий бэкенд x{n['S5']} (system.shutdown без slow, выход дерева по PID через tasklist); "
         f"в прогоне 1 ещё process_restart_verified x3 на {args.s5_restart} и recipe.activate",
         "пороги ПОСЛЕ (литералы THRESHOLDS): " + json.dumps(THRESHOLDS, ensure_ascii=False),
@@ -1864,7 +1982,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Стенд T1.9b: S1-S5 и контроль (патч И1). Подробности: README.md и докстринг."
     )
     ap.add_argument(
-        "--scenario", default="all", help="all (S1-S5) | список через запятую из S1..S6 (S6 - T1.10, только явно)"
+        "--scenario",
+        default="all",
+        help="all (S1-S5) | список через запятую из S1..S7 (S6 - T1.10, S7 - T1.11, только явно)",
     )
     ap.add_argument("--out", default=None, help="каталог результатов (по умолчанию <каталог стенда>/results/<время>)")
     ap.add_argument(
@@ -1885,6 +2005,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     ap.add_argument("--s6-slow-stop-s", type=float, default=S6_SLOW_STOP_S, help="S6: стоп медленного ребёнка, с")
     ap.add_argument("--s6-window-s", type=float, default=S6_WINDOW_S, help="S6: stop_process_timeout, с")
+    ap.add_argument("--s7-slow-stop-s", type=float, default=S7_SLOW_STOP_S, help="S7: стоп медленного ребёнка, с")
+    ap.add_argument("--s7-window-s", type=float, default=S7_WINDOW_S, help="S7: ключ stop_window_s записи slow, с")
+    ap.add_argument(
+        "--s7-ceiling-s", type=float, default=S7_CEILING_S, help="S7: max_stop_window_s в orchestrator_config PM, с"
+    )
+    ap.add_argument(
+        "--s7-control",
+        action="store_true",
+        help="контроль S7 (с --scenario S7): тот же стенд без ключа stop_window_s, 1 повтор; ждём terminated 5,0-5,3 с",
+    )
     ap.add_argument("--boot-timeout", type=float, default=90.0)
     ap.add_argument(
         "--quick", action="store_true", help="по 1 повтору (проверка самого стенда в окне перед полным прогоном)"
@@ -1906,12 +2036,16 @@ def scenarios_of(args: argparse.Namespace) -> list[str]:
     if args.control:
         allowed = ["S2", "S3", "S4"]
     if args.scenario.lower() == "all":
+        if args.s7_control:
+            raise SystemExit("--s7-control работает только с --scenario S7 (S7 не входит в all)")
         return allowed
     picked = [s.strip().upper() for s in args.scenario.split(",") if s.strip()]
-    valid = allowed if args.control else [*allowed, "S6"]  # S6 (T1.10) не входит в all
+    valid = allowed if args.control else [*allowed, "S6", "S7"]  # S6 (T1.10), S7 (T1.11) не входят в all
     bad = [s for s in picked if s not in valid]
     if bad:
         raise SystemExit(f"сценарии {bad} недоступны в этом режиме (допустимы {valid})")
+    if args.s7_control and picked != ["S7"]:
+        raise SystemExit("--s7-control работает только с --scenario S7 (контроль не смешивается с другими сценариями)")
     return picked
 
 
@@ -1946,6 +2080,14 @@ def run_set(ctx: Ctx, picked: list[str], restart_targets: list[str]) -> dict[str
         runs = run_s6(ctx)
         raw["S6"] = runs
         rows["S6"] = summarize("S6", judge_s6(runs), runs, "stats")
+    if "S7" in picked:
+        runs = run_s7(ctx)
+        if ctx.s7_control:
+            raw["S7_control"] = runs
+            rows["S7-контроль"] = summarize("S7-контроль", judge_s7_control(runs), runs, "stats")
+        else:
+            raw["S7"] = runs
+            rows["S7"] = summarize("S7", judge_s7(runs), runs, "stats")
     (ctx.out / "raw.json").write_text(json.dumps(raw, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return rows
 
