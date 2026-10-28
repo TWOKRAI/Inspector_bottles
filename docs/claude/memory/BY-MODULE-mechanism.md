@@ -482,7 +482,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (36)
+## live-stand (37)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
@@ -496,6 +496,7 @@
 - [feedback_backend_driver_needs_connect_before_shutdown](feedback_backend_driver_needs_connect_before_shutdown.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
+- [feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name](feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
 - [feedback_probe_liveness_is_not_render](feedback_probe_liveness_is_not_render.md)
 - [feedback_qt_mcp_flag_value_is_compared_verbatim](feedback_qt_mcp_flag_value_is_compared_verbatim.md)
@@ -631,11 +632,12 @@
 - [project_runtime_knob_expires_in_300s](project_runtime_knob_expires_in_300s.md)
 - [project_state_topology_gate](project_state_topology_gate.md)
 
-## qt (15)
+## qt (16)
 
 - [feedback_a_source_frame_shape_must_not_crash_the_display](feedback_a_source_frame_shape_must_not_crash_the_display.md)
 - [feedback_dialog_conventions](feedback_dialog_conventions.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
+- [feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name](feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name.md)
 - [feedback_modal_dialog_waits_instead_of_failing](feedback_modal_dialog_waits_instead_of_failing.md)
 - [feedback_mvp_pattern](feedback_mvp_pattern.md)
 - [feedback_no_qt_popups_offscreen](feedback_no_qt_popups_offscreen.md)
