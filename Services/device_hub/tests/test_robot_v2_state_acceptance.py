@@ -894,9 +894,15 @@ _RESET_TRANSITIONS = frozenset(
 )
 
 # Публичные методы ``RobotState`` (не свойства) вне таблицы: защёлку не сбрасывают, строки не нужно
-# (выписано из AST ``state.py`` базы 2667f8a5d: 63 публичных метода - 26 переходов строк = 37)
+# (выписано из AST ``state.py`` базы 2667f8a5d: 63 публичных метода - 26 переходов строк = 37; T5.3e: +5 park —
+# 68 - 26 = 42, защёлку не сбрасывают)
 _LATCH_EXEMPT = frozenset(
     {
+        "park_begin",
+        "park_cancel",
+        "park_end",
+        "park_view",
+        "servo_on_done",
         "activity_alive",
         "disconnect_stop_plan",
         "echo_check_plan",

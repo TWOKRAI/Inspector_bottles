@@ -286,6 +286,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `robot_param_apply` | Робот v2: применить параметры класса reinit {device_id} |  |
 | `robot_param_get_all` | Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev |  |
 | `robot_param_set` | Робот v2: записать параметр {device_id, name, value, base_rev} |  |
+| `robot_park` | Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id, timeout_s?}; ответ сразу, итог — devices.state.<id>.park |  |
 | `robot_point_capture` | Робот v2: запомнить текущую позу как точку {device_id, name, base_rev} |  |
 | `robot_point_delete` | Робот v2: удалить точку {device_id, name, base_rev} |  |
 | `robot_point_list` | Робот v2: список точек {device_id} -> points, rev |  |

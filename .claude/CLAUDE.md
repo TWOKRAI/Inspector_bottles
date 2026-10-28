@@ -87,8 +87,7 @@ the background** — for a verdict this project's rules will accept, drive `revi
 
 ## Shared machine — one coordinator session gives out load windows (owner, 2026-10-13, STRICT)
 
-- A **separate** coordinator session (skill `coordinator`) gives out load windows; its name and the windows are in
-  `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`. A lane session sends it its name first; signals and the start-prompt template — skill `coordinator` §4, §5.
+- A **separate** coordinator session (skill `coordinator`) owns `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`; a lane takes its own window and merge slot from the gate (owner, 2026-10-27): `machine_gate.sh request|wait|release|extend <session> …` (only when it can start NOW) and `merge-begin|merge-end <session> …`. No message for a window, a merge or a report, no «принято»; messages only for a question to the owner, ownership of a file, a finding in foreign code. Details and the start-prompt template — skill `coordinator` §2, §4, §5.
 - Every test or stand command (yours and your agents') goes through `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" [--timed] heavy|medium|light <session> <cmd...>`;
   classes (skill `coordinator` §3): `light` < ~2 min and `medium` ~2–5 min (one module's tests dir) need no window; `heavy` > ~5 min and a timed `medium` (`scripts/machine_gate_timed.txt`) — only in your window; exit 75 = skipped; with `machine.lock` a hook blocks bare pytest / make gate / run_sim_all and other classified commands.
 - No `machine.lock` → the gate falls back to `stand.lock`; `scripts/stand_gate` in live mode always takes `stand.lock` itself.

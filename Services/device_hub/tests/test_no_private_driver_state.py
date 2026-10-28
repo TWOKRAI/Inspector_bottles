@@ -41,7 +41,7 @@ _OTHER_DRIVER_TESTS = (
     "test_manager_template_1_2b_3.py",
 )
 # Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
-_SCANNED_FILES = 51
+_SCANNED_FILES = 54
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(
@@ -72,6 +72,13 @@ _STATE_FIELDS = frozenset(
         "_returns_done",
         "_returns_failed",
         "_flags_lock",
+        # T5.3e (park): поля RobotState
+        "_parking",
+        "_parked",
+        "_park_seq",
+        "_park_cancel",
+        "_program_kind",
+        "_park_home_outcome",
     }
 )
 

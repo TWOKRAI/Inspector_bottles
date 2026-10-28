@@ -74,8 +74,10 @@ from multiprocess_framework.modules.base_manager.interfaces import IHandle, Scop
 from Services.device_hub.drivers.base import BaseDeviceDriver, logger
 from Services.device_hub.drivers.exchange_log import TEXT_BAD_CONFIG, ExchangeLog, ExchangeLogTransport
 from Services.device_hub.drivers.robot_driver_v2.args import _StoreIOError
+from Services.device_hub.drivers.robot_driver_v2.park import ParkMachine
 from Services.device_hub.drivers.robot_driver_v2.state import RobotState
 from Services.device_hub.drivers.robot_driver_v2.texts import (
+    TEXT_DISCONNECTING,
     TEXT_NO_SPAWN,
     TEXT_QUEUE_DROPPED,
     TEXT_SCOPE_CLOSED,
@@ -180,6 +182,18 @@ class _RobotDriverCore(BaseDeviceDriver):
         # Задания CVT_JOB и возвраты (T3.7 DESIGN п.1): очереди — паритет v1, дренаж — тик, по одному действию
         maxlen = int(params.get("job_queue_maxlen", _JOB_QUEUE_MAXLEN))
         self._state = RobotState(clock=self._clock, queue_maxlen=maxlen)
+        # Основная остановка (T5.3e, В2): автомат в тике, единственный писатель devices.state.<id>.park
+        self._park = ParkMachine(
+            state=self._state,
+            clock=self._clock,
+            publish=lambda value: self._pub(f"devices.state.{self.entry.id}.park", value),
+            home_point=self._home_point,
+            launch_home=self.start_park_home,
+            servo_off=self._park_servo_off,
+            heartbeat=lambda: self._client.kick_heartbeat(),
+            record_err=self._record_err,
+            log_id=self.entry.id,
+        )
         self._pick_lead_mm = float(params.get("pick_lead_mm", 0.0))
         self.jobs_sent = 0
         self.jobs_done = 0
@@ -392,12 +406,17 @@ class _RobotDriverCore(BaseDeviceDriver):
         состояние не равно цели. Так переподключение во время jog прошивки, который ещё дожидается срока поводка,
         не получает NAK ``E_BUSY`` на SERVO (``busy: deny``).
         """
-        if self._servo_on is not None:
-            want = 1 if self._servo_on else 0
+        servo_on = self._servo_on
+        if servo_on is not None and self._state.park_view().parked:
+            # T5.3e (В-4): после park серво не включается и при реконнекте — до «серво ON» оператора. Контроллер после
+            # перезапуска поднимается с серво ON: «обеспечить состояние» здесь — серво OFF
+            servo_on = False
+        if servo_on is not None:
+            want = 1 if servo_on else 0
             if _w(self._read_tlm(), "TLM_SERVO") != want:
                 if self._sync_cancelled():
                     return False
-                client.servo(self._servo_on)
+                client.servo(servo_on)
                 if not self._await_tlm(lambda tlm: _w(tlm, "TLM_SERVO") == want, "TLM_SERVO"):
                     return False
         for ch, on in self._do_on_connect.items():
@@ -431,9 +450,12 @@ class _RobotDriverCore(BaseDeviceDriver):
         После ``request_stop()`` (фаза 4 остановки плагина) стоп не пишется и эхо не читается (проверено в фазе 1).
         """
         try:
+            self._park.abort(TEXT_DISCONNECTING)  # T5.3e: идущий park -> failed «идёт отключение»
             shutdown = self._state.disconnect_begin()  # не выключение — новое поколение защёлки
             if not shutdown:  # после request_stop стоп не пишется: эхо проверено в фазе 1 (H7)
                 self._request_stop(program_level=STOP_LEVEL["SOFT"])
+                # голый disconnect без «Отключить»: park_begin мог пройти до _stopping из _request_stop
+                self._park.abort(TEXT_DISCONNECTING)
             run, prog = self._state.threads_to_close()
             if run is not None and run.handle is not None:
                 self._close_thread(run.handle, _LEASE_JOIN_S)
@@ -526,7 +548,8 @@ class _RobotDriverCore(BaseDeviceDriver):
         return [int(v) for v in self._transport.read_registers(_TLM_BASE, _TLM_COUNT)]
 
     def tick(self, stop_event: Any = None) -> dict | None:
-        """Пульс -> телеметрия -> сверка метки -> ошибки -> snapshot (DESIGN п.4)."""
+        """Пульс -> телеметрия -> сверка метки -> ошибки -> шаг park -> snapshot (DESIGN п.4, T5.3e)."""
+        self._park.guard(self.is_connected)  # T5.3e: до выходов по связи, пульсу и TLM
         if not self._ensure_connected():
             return self.snapshot(quality="bad")
         client = self._client
@@ -565,6 +588,7 @@ class _RobotDriverCore(BaseDeviceDriver):
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: ошибки робота не прочитаны: {type(exc).__name__}: {exc}")
         if tlm is not None:
+            self._park.step(data["telemetry"], data["free"])  # T5.3e: до _dispatch
             self._dispatch(client, data["free"], stop_event)
         quality = "bad" if self._stats["tx_err"] > err_before else "good"
         return self.snapshot(data, quality=quality)
@@ -587,6 +611,17 @@ class _RobotDriverCore(BaseDeviceDriver):
         except Exception as exc:
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: сокет после обрыва не закрыт: {type(exc).__name__}: {exc}")
+
+    def _park_servo_off(self) -> bool:
+        """Шаг ``servo`` park: выключение -> False без записи; иначе SERVO 0 -> True.
+
+        Без ``_jog_tx_lock``: под ним стоп выключения ждал бы ACK серво (до ``res_timeout_s``). Остаток — одна запись
+        SERVO 0 после начала выключения роботу, который дома и стоит (безопасная сторона, T5.3e D6).
+        """
+        if self._state.is_shutdown():
+            return False
+        self._client.servo(False)
+        return True
 
     def _close_after_disconnect(self) -> None:
         """``disconnect()`` отработал, пока тик открывал транспорт: закрыть его и снять готовность. Не бросает."""

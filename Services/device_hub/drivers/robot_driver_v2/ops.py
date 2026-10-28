@@ -17,6 +17,7 @@ from Services.device_hub.drivers.robot_driver_v2.args import (
     _STORE_ERRORS,
     _BadArgs,
     _base_rev_arg,
+    _number_arg,
     _bool_arg,
     _int_in,
     _is_int,
@@ -32,9 +33,14 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
     TEXT_BAD_DO,
     TEXT_BAD_STOP_LEVEL,
     TEXT_NO_STORE,
+    TEXT_PARK_CANCELLED,
     _DO_CHANNELS,
+    _LEASE_JOIN_S,
     _NOT_CONNECTED,
     _OPERATOR_ECHO_BUDGET_S,
+    _PARK_TIMEOUT_DEFAULT_S,
+    _PARK_TIMEOUT_MAX_S,
+    _PARK_TIMEOUT_MIN_S,
     _STOP_NAMES,
 )
 from Services.device_hub.drivers.robot_driver_v2.tlm import _parse_tlm
@@ -93,6 +99,8 @@ class OpsMixin:
         if client is None:
             return dict(_NOT_CONNECTED)
         value = self._write_stop(level)  # ошибка записи — наружу: стоп не доставлен
+        # T5.3e: удачный стоп оператора любого уровня отменяет идущий park (итог ставит тик)
+        self._state.park_cancel(TEXT_PARK_CANCELLED)
         try:
             client.await_stop_echo(value, value & 3, deadline=t0 + _OPERATOR_ECHO_BUDGET_S)
         except RobotTimeout:
@@ -121,7 +129,54 @@ class OpsMixin:
         if not self.is_connected:
             return dict(_NOT_CONNECTED)
         self._client.servo(on)
+        if on:
+            self._state.servo_on_done()  # T5.3e (В-4): «серво ON» снимает запрет движения после park
         return {"status": "ok"}
+
+    def _op_park(self, args: dict) -> dict:
+        """Основная остановка {timeout_s?} (T5.3e, В2): ответ сразу ``{accepted, seq, timeout_s}``, ход — в тике.
+
+        Порядок: допуск ``park_begin`` -> стоп держащегося jog (тело ``jog_release``) -> SOFT программе
+        пользователя (В-1) -> ``accept`` автомата последним (до него тик дом не запустит). Сбой после допуска —
+        ``failed`` этого ``seq`` и ответ-ошибка.
+        """
+        try:
+            timeout_s = self._park_timeout(args)
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        begin = self._state.park_begin()
+        if begin.refusal is not None:
+            return begin.refusal
+        try:
+            run = begin.run
+            if run is not None:
+                try:
+                    handle = run.handle
+                    if handle is not None:
+                        self._close_thread(handle, _LEASE_JOIN_S)  # вне замков: поток поводка может ждать замок
+                    self._stop_jog(run)
+                finally:
+                    self._state.jog_release_done()
+            if begin.prog_soft:
+                self._write_stop(STOP_LEVEL["SOFT"])
+            self._park.accept(begin.seq, timeout_s)
+        except Exception as exc:
+            self._record_err()
+            self._park.fail(begin.seq, f"{type(exc).__name__}: {exc}")
+            return {"status": "error", "message": f"основная остановка не начата: {type(exc).__name__}: {exc}"}
+        return {"status": "ok", "accepted": True, "seq": begin.seq, "timeout_s": timeout_s}
+
+    def _park_timeout(self, args: dict) -> float:
+        """Срок park: аргумент, иначе ``entry.params["park_timeout_s"]``, иначе 30 с; число 1..60, bool — нет."""
+        if "timeout_s" in args:
+            value = _number_arg(args, "timeout_s")
+        elif "park_timeout_s" in self._params:
+            value = _number_arg(self._params, "park_timeout_s")
+        else:
+            value = _PARK_TIMEOUT_DEFAULT_S
+        if not _PARK_TIMEOUT_MIN_S <= value <= _PARK_TIMEOUT_MAX_S:
+            raise _BadArgs("timeout_s")
+        return value
 
     def _op_do_set(self, args: dict) -> dict:
         try:
@@ -237,3 +292,4 @@ OPS.update(
         "program_abort": ProgramMixin._op_program_abort,
     }
 )
+OPS["park"] = OpsMixin._op_park  # T5.3e: основная остановка (В2), последней — порядок ROBOT_V2_OPS

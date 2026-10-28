@@ -1723,6 +1723,10 @@ processes:
     - description: 'Робот v2: записать параметр {device_id, name, value, base_rev}'
       name: robot_param_set
       tags: []
+    - description: 'Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id,
+        timeout_s?}; ответ сразу, итог — devices.state.<id>.park'
+      name: robot_park
+      tags: []
     - description: 'Робот v2: запомнить текущую позу как точку {device_id, name, base_rev}'
       name: robot_point_capture
       tags: []

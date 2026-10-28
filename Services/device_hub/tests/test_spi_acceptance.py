@@ -201,7 +201,7 @@ def test_a11_hikvision_set_degraded_returns_false() -> None:
 # --------------------------------------------------------------------------------------------------
 
 _IMMEDIATE = {
-    "ROBOT_V2_OPS": {"stop", "abort", "jog_hold", "jog_release", "program_abort"},
+    "ROBOT_V2_OPS": {"stop", "abort", "jog_hold", "jog_release", "program_abort", "park"},
     "ROBOT_V1_OPS": {"abort", "jog_abort", "draw_abort", "clear_queue", "set_servo"},
     "VFD_OPS": {"stop"},
     "ROBOT_DATA_OPS": set(),

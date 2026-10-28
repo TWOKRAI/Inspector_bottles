@@ -28,6 +28,15 @@ __all__ = [
     "TEXT_NO_STORE",
     "TEXT_PARAM_DIVERGED",
     "TEXT_PARAM_NO_REPLY",
+    "TEXT_PARKED",
+    "TEXT_PARKING",
+    "TEXT_PARK_CANCELLED",
+    "TEXT_PARK_DROPPED",
+    "TEXT_PARK_HOME_ABORTED",
+    "TEXT_PARK_HOME_FAILED",
+    "TEXT_PARK_LINK",
+    "TEXT_PARK_NOT_HOME",
+    "TEXT_PARK_TIMEOUT",
     "TEXT_QUEUE_DROPPED",
     "TEXT_SCOPE_CLOSED",
     "TEXT_SPAWN_FAILED",
@@ -46,6 +55,8 @@ __all__ = [
     "_DISCONNECTING",
     "_DO_CHANNELS",
     "_HOLD_WINDOW_S",
+    "_HOME_TOL_DEG",
+    "_HOME_TOL_MM",
     "_HUB_POLL_DEFAULT_S",
     "_JOB_QUEUE_MAXLEN",
     "_LEASE_JOIN_S",
@@ -54,6 +65,12 @@ __all__ = [
     "_ON_CONNECT_DEADLINE_S",
     "_ON_CONNECT_POLL_S",
     "_OPERATOR_ECHO_BUDGET_S",
+    "_PARKED",
+    "_PARKING",
+    "_PARK_RETRY",
+    "_PARK_TIMEOUT_DEFAULT_S",
+    "_PARK_TIMEOUT_MAX_S",
+    "_PARK_TIMEOUT_MIN_S",
     "_PROCESS_STOP_DEFAULT_S",
     "_PROGRAM_JOIN_S",
     "_RECONNECT_THROTTLE_SEC",
@@ -135,8 +152,32 @@ _BUSY_JOG = {"status": "error", "message": "робот в режиме jog"}
 _BUSY_JOB = {"status": "error", "message": "робот выполняет задание"}
 _NOT_CONNECTED = {"status": "error", "message": "нет связи с роботом"}
 _DISCONNECTING = {"status": "error", "message": TEXT_DISCONNECTING}
-# Ответы «захват занят» исполнителя: возврат из очереди при таком ответе идёт обратно в её начало (DESIGN п.6)
-_BUSY_REPLIES = (_BUSY_PROGRAM, _BUSY_JOG, _BUSY_JOB, _DISCONNECTING)
+# T5.3e: основная остановка (park) — идёт и после неё до «серво ON» (В-4)
+TEXT_PARKING = "идёт основная остановка робота"
+TEXT_PARKED = "робот остановлен: включите серво"
+TEXT_PARK_TIMEOUT = "срок вышел"
+TEXT_PARK_LINK = "связь с роботом потеряна"
+TEXT_PARK_CANCELLED = "прервано стопом оператора"
+TEXT_PARK_HOME_ABORTED = "ход домой прерван"
+TEXT_PARK_HOME_FAILED = "ход домой не выполнен"
+TEXT_PARK_NOT_HOME = "после хода робот не дома"
+TEXT_PARK_DROPPED = "основная остановка: сняты задания: {jobs}, возвраты: {returns}"
+_PARKING = {"status": "error", "message": TEXT_PARKING}
+_PARKED = {"status": "error", "message": TEXT_PARKED}
+# Ответы «захват занят» исполнителя: возврат из очереди при таком ответе идёт обратно в её начало (DESIGN п.6).
+# _PARKING / _PARKED: возврат, снятый тиком до park_begin, остаётся в очереди и считается в dropped (T5.3e)
+_BUSY_REPLIES = (_BUSY_PROGRAM, _BUSY_JOG, _BUSY_JOB, _DISCONNECTING, _PARKING, _PARKED)
+# Отказы запуска хода домой, которые park повторяет следующим тиком (захват занят на миг); прочие — failed
+_PARK_RETRY = frozenset(
+    {_BUSY_PROGRAM["message"], _BUSY_JOG["message"], _BUSY_JOB["message"], TEXT_SYNCING, TEXT_PARKING}
+)
+# Срок park, с: умолчание и границы аргумента timeout_s / entry.params["park_timeout_s"]
+_PARK_TIMEOUT_DEFAULT_S = 30.0
+_PARK_TIMEOUT_MIN_S = 1.0
+_PARK_TIMEOUT_MAX_S = 60.0
+# Допуск «робот дома» по позе TLM
+_HOME_TOL_MM = 0.5
+_HOME_TOL_DEG = 0.5
 # Тексты отказа постановки — постоянные, без входного значения (R8)
 TEXT_BAD_JOB_ARGS = "неверные аргументы задания"
 TEXT_BAD_RETURN_ARGS = "неверные аргументы возврата"
