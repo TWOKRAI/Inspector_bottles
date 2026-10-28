@@ -416,6 +416,11 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
     ("R4", "multiprocess_prototype/frontend/widgets/tabs/services/neural/ml_train_section.py"): AllowEntry(
         1, "мегаплан GUI"
     ),
+    ("R4", "multiprocess_prototype/run.py"): AllowEntry(
+        1,
+        "лаунчер до sys.path-bootstrap (любой python, только stdlib): добой kill() только что порождённого "
+        "приостановленного ребёнка при сбое Job Object, не ребёнок PM; ChildProcessStop недоступен (C-76)",
+    ),
     ("R6", "multiprocess_framework/modules/frontend_module/core/window_registry.py"): AllowEntry(1, "мегаплан GUI"),
     ("R6", "multiprocess_framework/modules/frontend_module/tabs/lazy_tab.py"): AllowEntry(1, "мегаплан GUI"),
     ("R6", "multiprocess_framework/modules/frontend_module/widgets/chrome/side_panels/collapsible.py"): AllowEntry(

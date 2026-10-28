@@ -37,9 +37,9 @@ def test_real_allowlist_table_shape() -> None:
     for (rule, _), entry in tables.ALLOWLIST.items():
         per_rule_violations[rule] += entry.count
 
-    assert len(tables.ALLOWLIST) == 71
-    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 12, "R6": 20}
-    assert per_rule_violations == {"R1": 17, "R2": 9, "R3": 18, "R4": 18, "R6": 22}
+    assert len(tables.ALLOWLIST) == 72
+    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 13, "R6": 20}
+    assert per_rule_violations == {"R1": 17, "R2": 9, "R3": 18, "R4": 19, "R6": 22}
     assert all(len(e.reason.strip()) >= 10 for e in tables.ALLOWLIST.values())
     assert all("\\" not in path for _, path in tables.ALLOWLIST)
 
@@ -88,7 +88,7 @@ def test_real_tree_changed_allowlist_count_turns_g6_red() -> None:
 def test_real_tree_empty_allowlist_turns_g6_red() -> None:
     findings = check_g6(REPO_ROOT, {})
 
-    assert len(findings) == 84  # 18 + 9 + 18 + 17 + 22 нарушений после 1.2a и T5.1, ни одного разрешённого
+    assert len(findings) == 85  # 17 + 9 + 18 + 19 + 22 нарушений после 1.2a и T5.1, ни одного разрешённого
 
 
 def test_shim_marker_outside_real_table_turns_g10_red(tmp_path: Path) -> None:
@@ -252,4 +252,4 @@ def test_r8_single_dot_interfaces_is_a_finding_double_dot_is_clean(tmp_path: Pat
 def test_real_summary_line_literal() -> None:
     line = summary_line(run_all(REPO_ROOT), REPO_ROOT)
 
-    assert line.endswith("G2 pending: 41; allowlist: 71 entries")
+    assert line.endswith("G2 pending: 41; allowlist: 72 entries")
