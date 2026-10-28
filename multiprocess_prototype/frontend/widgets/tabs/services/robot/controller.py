@@ -155,8 +155,7 @@ class RobotWidgetController:
                 self._on_telemetry_push,
                 owner=self._widget,
             )
-        if hasattr(self._bindings, "bind_fanout"):
-            # ``**`` ловит и сам узел ``.park`` (первая публикация целым словарём), и проигрыш кэша
+            # ``**`` ловит и сам узел ``.park``, и вложенные листья, и проигрыш кэша при подписке
             self._bindings.bind_fanout(
                 f"{base}.park.**",
                 self._on_park_push,
@@ -210,14 +209,14 @@ class RobotWidgetController:
     def _on_send_job(self, x: float, y: float, z: float = 0.0) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} Z={z:.1f} отправлен.")
         self._presenter.send_test_job(self._device_id, x, y, z)
 
     def _on_stop(self, mode: int) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         labels = {1: "СТОП: домой, в цикле", 2: "СТОП: домой, выход", 3: "СТОП: на месте"}
         self._widget.set_status(labels.get(mode, "СТОП"))
         self._presenter.abort(self._device_id, mode)
@@ -225,28 +224,28 @@ class RobotWidgetController:
     def _on_mode(self, mode: str) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status(f"Режим {mode.upper()}.")
         self._presenter.set_mode(self._device_id, mode)
 
     def _on_servo(self, on: bool) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status(f"Серво {'ON' if on else 'OFF'}.")
         self._presenter.set_servo(self._device_id, on)
 
     def _on_manual(self, on: bool) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status("Ручной режим: авто-подача на паузе." if on else "Авто-подача возобновлена.")
         self._presenter.set_manual_mode(self._device_id, on)
 
     def _on_jog(self, dx: float, dy: float, spd: int, absolute: bool) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         kind = "абс" if absolute else "отн"
         self._widget.set_status(f"Jog dX={dx:.1f} dY={dy:.1f} @ {spd}% ({kind}).")
         self._presenter.jog(self._device_id, dx, dy, int(spd), bool(absolute))
@@ -254,7 +253,7 @@ class RobotWidgetController:
     def _on_jog_abort(self) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status("Jog: стоп.")
         self._presenter.jog_abort(self._device_id)
 
@@ -267,13 +266,19 @@ class RobotWidgetController:
         self._park_view = {}
         self._park_state_seq = None
         self._park_seq = None
+        self._clear_park_text()
+
+    def _clear_park_text(self) -> None:
+        """Снять липкий текст park (его снимают только обработчики кнопок робота)."""
         self._park_text = None
 
     def _on_park(self) -> None:
         if not self._device_id:
             return
-        self._park_text = None
-        self._park_seq = None  # итог прошлого запуска, лежащий в виде, не должен сработать до ответа
+        self._clear_park_text()
+        # state прошлого запуска, лежащий в виде, не должен сработать до свежего листа state;
+        # _park_seq не трогаем: клик с отказом («уже идёт») не должен терять итог первого park
+        self._park_state_seq = None
         device_id = self._device_id
         self._presenter.park(device_id, lambda data: self._on_park_result(device_id, data))
 
@@ -288,14 +293,13 @@ class RobotWidgetController:
             self._render_park()  # итог мог прийти раньше ответа
             return
         message = data.get("message") if isinstance(data, dict) else None
-        self._park_seq = None
         self._park_text = message or "Основная остановка не принята."
         self._widget.set_status(self._park_text)
 
     def _on_force_stop(self) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         device_id = self._device_id
         self._presenter.force_stop(device_id, lambda data: self._on_force_stop_result(device_id, data))
 
@@ -364,21 +368,21 @@ class RobotWidgetController:
     def _on_draw_circle(self, cx: float, cy: float, r: float, z: float) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status(f"Круг ({cx:.1f},{cy:.1f}) R={r:.1f} поставлен в очередь.")
         self._presenter.draw_circle(self._device_id, cx, cy, r, z)
 
     def _on_draw_square(self, x1: float, y1: float, x2: float, y2: float, z: float) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status("Квадрат поставлен в очередь.")
         self._presenter.draw_square(self._device_id, x1, y1, x2, y2, z)
 
     def _on_draw_abort(self) -> None:
         if not self._device_id:
             return
-        self._park_text = None
+        self._clear_park_text()
         self._widget.set_status("Рисование прервано.")
         self._presenter.abort_draw(self._device_id)
 
@@ -439,7 +443,8 @@ class RobotWidgetController:
         if not self._device_id:
             self._widget.set_status("Робот: устройство не выбрано.")
             return
-        self._widget.set_status("Опрос робота…")
+        if self._park_text is None:  # итог «Остановить» не затираем
+            self._widget.set_status("Опрос робота…")
         self._presenter.get_telemetry(self._device_id, self._on_telemetry_response)
         self._presenter.get_draw_progress(self._device_id, self._on_draw_progress)
 

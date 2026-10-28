@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+from multiprocess_framework.modules.telemetry_readmodel_module.telemetry_read_model import TelemetryReadModel
+from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
 from multiprocess_prototype.frontend.widgets.tabs.services.robot.controller import (
     RobotWidgetController,
 )
@@ -314,6 +319,176 @@ def test_force_stop_without_ok_shows_message(qtbot) -> None:
     widget.force_stop_requested.emit()
     presenter.force_stop.call_args.args[1]({"status": "error", "message": "нет связи с роботом"})
     assert widget._lbl_status.text() == "нет связи с роботом"
+
+
+# --- T5.3e.4, раунд 1 ---
+
+_STATUS = "devices.state.robot_main.status"
+
+
+def _accept(widget: RobotControlWidget, presenter: MagicMock, seq: int) -> None:
+    press_park(widget, presenter)({"status": "ok", "accepted": True, "seq": seq})
+
+
+def test_park_new_seq_drops_other_stale_leaves(qtbot) -> None:
+    """Правило 3 сбрасывает не только state, но и home прошлого запуска."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.home", "already")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    _accept(widget, presenter, 2)
+    controller._on_park_push(f"{_PARK}.seq", 2)
+    controller._on_park_push(f"{_PARK}.state", "done")  # home нового запуска ещё не пришёл
+    assert widget._lbl_status.text() == _TXT_DONE  # не «Робот уже дома…»
+
+
+def test_park_double_click_refusal_keeps_first_run_result(qtbot) -> None:
+    """Клик -> принято -> parking -> второй клик, отказ «уже идёт» -> итог первого запуска не теряется."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    _accept(widget, presenter, 1)
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.state", "parking")
+    press_park(widget, presenter)({"status": "error", "message": "основная остановка уже идёт"})
+    assert widget._lbl_status.text() == "основная остановка уже идёт"
+    controller._on_park_push(f"{_PARK}.home", "moved")
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_park_same_seq_after_restart_waits_for_fresh_state(qtbot) -> None:
+    """Вид {seq:1, state:done} от прошлой жизни devices; новый ответ seq=1 -> «принята…», а не сразу итог."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    controller._on_park_push(f"{_PARK}.seq", 1)
+    controller._on_park_push(f"{_PARK}.state", "done")
+    _accept(widget, presenter, 1)
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+    controller._on_park_push(f"{_PARK}.state", "parking")
+    assert widget._lbl_status.text() == _TXT_ACCEPTED
+    controller._on_park_push(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+_RELEASING = [
+    pytest.param(lambda c: c._on_send_job(1.0, 2.0, 3.0), id="send_job"),
+    pytest.param(lambda c: c._on_stop(1), id="stop"),
+    pytest.param(lambda c: c._on_mode("cvt"), id="mode"),
+    pytest.param(lambda c: c._on_servo(True), id="servo"),
+    pytest.param(lambda c: c._on_manual(True), id="manual"),
+    pytest.param(lambda c: c._on_jog(1.0, 2.0, 30, False), id="jog"),
+    pytest.param(lambda c: c._on_jog_abort(), id="jog_abort"),
+    pytest.param(lambda c: c._on_draw_circle(1.0, 2.0, 3.0, 4.0), id="draw_circle"),
+    pytest.param(lambda c: c._on_draw_square(1.0, 2.0, 3.0, 4.0, 5.0), id="draw_square"),
+    pytest.param(lambda c: c._on_draw_abort(), id="draw_abort"),
+    pytest.param(lambda c: c._on_park(), id="park"),
+    pytest.param(lambda c: c._on_force_stop(), id="force_stop"),
+]
+_KEEPING = [
+    pytest.param(lambda c: c._on_telemetry_push(_STATUS, _TELEMETRY), id="telemetry_push"),
+    pytest.param(lambda c: c._on_telemetry_response(_TELEMETRY), id="telemetry_response"),
+    pytest.param(lambda c: c._on_draw_progress({"state": "idle"}), id="draw_progress"),
+    pytest.param(lambda c: c._on_refresh(), id="refresh"),
+]
+
+
+def _park_done_controller(qtbot):
+    widget, controller, presenter = make_park_controller(qtbot)
+    _accept(widget, presenter, 1)
+    controller._on_park_push(_PARK, {"seq": 1, "state": "done", "home": "moved", "reason": ""})
+    assert widget._lbl_status.text() == _TXT_DONE
+    return widget, controller
+
+
+@pytest.mark.parametrize("handler", _RELEASING)
+def test_robot_button_handlers_release_sticky_park_text(qtbot, handler) -> None:
+    widget, controller = _park_done_controller(qtbot)
+    handler(controller)
+    controller._on_telemetry_push(_STATUS, _TELEMETRY)
+    assert widget._lbl_status.text() == _TXT_LINK
+
+
+@pytest.mark.parametrize("handler", _KEEPING)
+def test_refresh_and_telemetry_handlers_keep_sticky_park_text(qtbot, handler) -> None:
+    widget, controller = _park_done_controller(qtbot)
+    handler(controller)
+    assert widget._lbl_status.text() == _TXT_DONE  # «Опрос робота…» итог не затирает
+    controller._on_telemetry_push(_STATUS, _TELEMETRY)
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_set_device_subscribes_park_subtree_and_handler_drives_status(qtbot) -> None:
+    widget = RobotControlWidget()
+    qtbot.addWidget(widget)
+    presenter = make_presenter()
+    bindings = MagicMock()
+    controller = RobotWidgetController(widget, presenter, bindings=bindings)
+    controller.set_device("robot_main")
+    park_calls = [c for c in bindings.bind_fanout.call_args_list if c.args[0] == "devices.state.robot_main.park.**"]
+    assert len(park_calls) == 1
+    assert park_calls[0].kwargs["owner"] is widget
+    handler = park_calls[0].args[1]
+    _accept(widget, presenter, 1)
+    handler(f"{_PARK}.seq", 1)
+    handler(f"{_PARK}.home", "moved")
+    handler(f"{_PARK}.state", "done")
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+# --- реальная цепочка: TreeStore.merge -> дельты -> GuiStateBindings -> контроллер ---
+
+
+class _RealChain:
+    """Настоящие TreeStore / TelemetryReadModel / GuiStateBindings; презентер и мост — моки."""
+
+    def __init__(self, qtbot) -> None:
+        self.store = TreeStore()
+        self.read_model = TelemetryReadModel()
+        self.bindings = GuiStateBindings(MagicMock(), read_model=self.read_model)
+        self.widget = RobotControlWidget()
+        qtbot.addWidget(self.widget)
+        self.presenter = make_presenter()
+        self.controller = RobotWidgetController(self.widget, self.presenter, bindings=self.bindings)
+        self.controller.set_device("robot_main")
+
+    def hub_merge(self, value: dict) -> None:
+        """Как Plugins/hub/device_hub/plugin.py:_publish_state -> state_proxy.merge -> листовые дельты."""
+        for delta in self.store.merge(_PARK, value):
+            self.read_model.ingest(delta.path, delta.new_value)
+            self.bindings._on_state_msg({"data_type": "state_delta", "path": delta.path, "value": delta.new_value})
+
+
+def _hub_park(seq: int, state: str, step: str, home=None, servo=None, dropped=None, reason=None, elapsed=None) -> dict:
+    return {
+        "seq": seq,
+        "state": state,
+        "step": step,
+        "home": home,
+        "servo": servo,
+        "dropped": dropped,
+        "reason": reason,
+        "elapsed_s": elapsed,
+    }
+
+
+def test_real_chain_park_done_moved(qtbot) -> None:
+    chain = _RealChain(qtbot)
+    _accept(chain.widget, chain.presenter, 1)
+    chain.hub_merge(_hub_park(1, "parking", "activity"))
+    chain.hub_merge(_hub_park(1, "parking", "home"))
+    chain.hub_merge(_hub_park(1, "parking", "servo", home="moved"))
+    assert chain.widget._lbl_status.text() == _TXT_ACCEPTED
+    chain.hub_merge(
+        _hub_park(1, "done", "servo", home="moved", servo=False, dropped={"jobs": 0, "returns": 0}, elapsed=5.1)
+    )
+    assert chain.widget._lbl_status.text() == _TXT_DONE
+
+
+def test_real_chain_park_failed_with_reason(qtbot) -> None:
+    """В порядке листьев хаба state приходит раньше reason — итоговый текст всё равно с причиной."""
+    chain = _RealChain(qtbot)
+    _accept(chain.widget, chain.presenter, 1)
+    chain.hub_merge(_hub_park(1, "parking", "activity"))
+    chain.hub_merge(_hub_park(1, "failed", "home", dropped={"jobs": 0, "returns": 0}, reason="срок вышел", elapsed=5.1))
+    assert chain.widget._lbl_status.text() == "Основная остановка не выполнена: срок вышел."
 
 
 def test_jog_button_click_emits(qtbot) -> None:
