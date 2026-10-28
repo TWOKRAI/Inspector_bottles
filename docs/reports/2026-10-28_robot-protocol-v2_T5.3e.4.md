@@ -23,7 +23,7 @@
 | матрица инъекций р.2 (I1–I13) | все применились; у каждого свойства свой красный; вердикт `reports/T5.3e.4.injections-verdict.md` |
 | стенд GUI | клик → «принята…» ≤ 0,2 с; «Робот дома, серво выключено.» ≤ 2,2 с (хаб `elapsed_s 1.094`); HARD «Робот остановлен (HARD).» 0,6 с; отказ при отключённом устройстве — сообщение хаба; `reports/T5.3e.4.stand.md` |
 | `validate.py` | rc=0, «Ошибок нет» (дерево после слияния main) |
-| регрессия `frontend/widgets/tabs/services/**/tests` | 10 подкаталогов, 339 passed, 0 failed (окно heavy 13:25) |
+| регрессия на результате слияния с main (`3bd955091`, после Ф T1.11 и C-30), окно heavy 14:35–14:54 | `validate.py` rc=0; `backend/tests` 284 passed; `frontend/widgets/tabs/services/**/tests` 10 подкаталогов, 349 passed; `process_module` 3456 passed, 1 xfailed (181 с); `process_manager_module` 1455 passed, 32 skipped (400 с; первый прогон с потолком 400 с его срезал, красных не было); до слияния: остальные 25 модулей `modules/*/tests` зелёные, `frontend_module` 658 passed (из `modules`; из корня 2 красных `test_controls_v2_hooks` — артефакт cwd, 6 passed из `modules`) |
 
 ## Что нашла проверка (не в ТЗ)
 
@@ -52,8 +52,9 @@
   нет срока ожидания итога (F6, `OPEN_QUESTIONS.md`).
 - Лишние красные у I3/I4/I5 разобраны чтением тестов, не воспроизведением; часть тестов набора А строит вид целым узлом —
   путём, которым живой хаб не ходит.
-- Регрессия: подкаталоги `services/**/tests` и `validate.py`; полный `run_framework_tests` и Plugins/device_hub не гонялись
-  (правка только в `multiprocess_prototype/frontend/.../robot`, слой prototype).
+- Регрессия: `validate.py`, `backend/tests`, `services/**/tests`, `process_module`, `process_manager_module` — на результате слияния с main;
+  остальные модули framework — до слияния (main после этого принёс Ф T1.11 и C-30, их модули не перегонялись мной). Plugins и
+  device_hub не гонялись (правка только в `multiprocess_prototype/frontend/.../robot`, слой prototype).
 - Дескриптор `bind_fanout` по-прежнему не хранится: каждый `set_device` добавляет две подписки (раньше одну).
 - Шесть обработчиков вне списка ТЗ (`_on_pen`, `_on_camera_freeze`, `_on_camera_resume`, `_on_send_to_robot`) меняют статус, но не
   снимают липкий текст (совет ревью R2-1); пока пуши `.status` не доходят — не проявляется.
