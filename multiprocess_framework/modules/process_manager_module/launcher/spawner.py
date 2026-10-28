@@ -14,7 +14,14 @@ from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...shared_resources_module import SharedResourcesManager
-from ..core.stop_budget import DEFAULT_SHUTDOWN_TIMEOUT_S, SHUTDOWN_TIMEOUT_KEY, stop_budget
+from ..core.stop_budget import (
+    DEFAULT_SHUTDOWN_TIMEOUT_S,
+    MAX_STOP_WINDOW_KEY,
+    SHUTDOWN_TIMEOUT_KEY,
+    outer_graceful_s,
+    stop_budget,
+    valid_window_s,
+)
 from .process_tree_guard import ProcessTreeGuard
 
 _logger = FallbackLogger(__name__)
@@ -177,12 +184,31 @@ class ProcessSpawner:
             self._warn(f"stop: {exc} — взято {DEFAULT_SHUTDOWN_TIMEOUT_S}s")
             return DEFAULT_SHUTDOWN_TIMEOUT_S
 
+    def _stop_window_ceiling_s(self) -> float | None:
+        """``max_stop_window_s`` оркестратора в момент ``stop()`` (Task 1.11): годный — число, иначе ``None``.
+
+        Негодный — WARNING без значения, поведение без потолка. Не бросает (обработчик сигнала).
+        """
+        raw = self._orchestrator_config.get(MAX_STOP_WINDOW_KEY)
+        if raw is None:
+            return None
+        ceiling = valid_window_s(raw)
+        if ceiling is None:
+            self._warn(f"stop: {MAX_STOP_WINDOW_KEY} негоден — внешний срок без потолка окон")
+        return ceiling
+
     def stop(self, timeout: Optional[float] = None) -> None:
         # timeout — graceful-бюджет; join на PM выводится из него той же формулой
         # ``stop_budget``, что и бюджет PM (ADR-PMM-031, ADR-PMM-035). Явный timeout
         # меньше бюджета PM снова даёт внешнему join кончиться раньше внутренней
         # эскалации — тогда зависшего ребёнка добивает guard (группа PM), а не PM.
         graceful = self._stop_graceful_s(timeout)
+        # Task 1.11 (DESIGN 7): с годным потолком окон детей внешний срок — от max(X, G); без него — как прежде.
+        ceiling = self._stop_window_ceiling_s()
+        if ceiling is not None:
+            # g оркестратора: при timeout=None это уже посчитанный graceful (второй вызов дал бы WARNING дважды).
+            orchestrator_graceful = graceful if timeout is None else self._stop_graceful_s(None)
+            graceful = max(graceful, outer_graceful_s(orchestrator_graceful, ceiling))
         effective_timeout = stop_budget(graceful)["outer_s"]
 
         if self._logger:

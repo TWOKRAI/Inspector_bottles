@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from multiprocess_framework.modules.recipe import RecipeConflict
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.crud_actions import (
     DeviceCrudActions,
 )
@@ -29,11 +30,12 @@ class _ImmediateRunner:
 
 
 class _DictRecipeStore:
-    """In-memory RecipeStore (read_raw/save_raw/get_active) для тестов."""
+    """In-memory RecipeStore (read_canonical/save_raw/get_active) для тестов."""
 
     def __init__(self, active: str | None = "demo") -> None:
         self._active = active
         self._data: dict[str, dict] = {"demo": {"devices": []}}
+        self._revs: dict[str, int] = {}
 
     def get_active(self) -> str | None:
         return self._active
@@ -41,8 +43,17 @@ class _DictRecipeStore:
     def read_raw(self, slug: str) -> dict | None:
         return self._data.get(slug)
 
-    def save_raw(self, slug: str, data: dict) -> None:
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]:
+        doc = self._data.get(slug)
+        return doc, (None if doc is None else str(self._revs.get(slug, 0)))
+
+    def save_raw(self, slug: str, data: dict, *, expected_rev: str | None = None) -> str:
+        current = None if slug not in self._data else str(self._revs.get(slug, 0))
+        if expected_rev is not None and expected_rev != current:
+            raise RecipeConflict(slug, expected_rev, current)
         self._data.setdefault(slug, {}).update(data)
+        self._revs[slug] = self._revs.get(slug, 0) + 1
+        return str(self._revs[slug])
 
 
 def _make_crud(*, kind="robot", active="demo"):

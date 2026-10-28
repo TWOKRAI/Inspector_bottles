@@ -148,7 +148,9 @@ class PipelinePresenter:
         # (services/model/topo) инжектятся снимком (по образцу RuntimeController,
         # F.3); Qt-реакции presenter отдаёт через host-контракт PipelineHost (self).
         # Публичные методы presenter — тонкие делегаты в контроллеры.
-        self._layout = LayoutController(self, services=services, model=self._model, topo=self._topo)
+        self._layout = LayoutController(
+            self, services=services, model=self._model, topo=self._topo, topology_session=self._topology_session
+        )
         self._mutations = PipelineMutations(
             self,
             services=services,

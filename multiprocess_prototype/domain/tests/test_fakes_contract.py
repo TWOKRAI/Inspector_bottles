@@ -74,8 +74,8 @@ from ._fakes import (
 
 # Devices (RS-6, "минимум topology-store, displays, devices, recipes repositories"):
 # RecipeDevicesStore.__init__ типизирует свою зависимость как `recipe_store: Any`
-# (duck-typing, см. recipe_devices.py:29-31) — формального Protocol там нет. Реальный
-# контракт — подмножество RecipeStore (read_raw/save_raw/get_active), задокументированное
+# (duck-typing, см. docstring RecipeDevicesStore) — формального Protocol там нет. Реальный
+# контракт — подмножество RecipeStore (read_canonical/save_raw/get_active), задокументированное
 # только докстрингом. Фиксируем его здесь как Protocol и переиспользуем РЕАЛЬНЫЙ ad-hoc
 # фейк из devices-тестов (а не его копию), чтобы регресс в этом фейке тоже ловился.
 from ...frontend.widgets.tabs.services.devices_common.tests.test_recipe_devices import (
@@ -92,9 +92,9 @@ class _RecipeDevicesBackingStore(Protocol):
 
     def get_active(self) -> str | None: ...
 
-    def read_raw(self, slug: str) -> dict | None: ...
+    def read_canonical(self, slug: str) -> tuple[dict | None, str | None]: ...
 
-    def save_raw(self, slug: str, data: dict) -> None: ...
+    def save_raw(self, slug: str, data: dict, *, expected_rev: str | None) -> str: ...
 
 
 # ==============================================================================

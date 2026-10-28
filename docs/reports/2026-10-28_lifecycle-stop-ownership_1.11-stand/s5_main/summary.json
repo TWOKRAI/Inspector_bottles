@@ -1,0 +1,116 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    },
+    "S6": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 3
+    },
+    "S7": {
+      "outcome": "exited",
+      "success": true,
+      "reply_min_s": 6.0,
+      "reply_max_s": 6.6,
+      "pass_runs": 3
+    },
+    "S7_control": {
+      "outcome": "terminated",
+      "success": true,
+      "reply_min_s": 5.0,
+      "reply_max_s": 5.3,
+      "pass_runs": 1
+    }
+  },
+  "started": 1793181114.023023,
+  "rows": {
+    "S5": {
+      "verdict": "FAIL",
+      "reasons": [
+        "shutdown #8 (run 1): 2.92 с >= 2.0",
+        "shutdown #9 (run 2): 5.17 с >= 2.0",
+        "shutdown #10 (run 3): 5.23 с >= 2.0",
+        "shutdown #11 (run 4): 5.22 с >= 2.0",
+        "shutdown #12 (run 5): 5.01 с >= 2.0",
+        "shutdown #13 (run 6): 5.06 с >= 2.0",
+        "shutdown #14 (run 7): 4.94 с >= 2.0",
+        "shutdown #15 (run 8): 4.98 с >= 2.0",
+        "shutdown #16 (run 9): 4.56 с >= 2.0",
+        "shutdown #17 (run 10): 4.95 с >= 2.0"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "restart_stats": {
+        "n": 6,
+        "unanswered": 0,
+        "min": 1.563,
+        "median": 2.9915000000000003,
+        "max": 4.469,
+        "p99": 4.469
+      },
+      "activate_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 3.406,
+        "median": 3.406,
+        "max": 3.406,
+        "p99": 3.406
+      },
+      "tree_exit_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.922,
+        "median": 4.999499999999999,
+        "max": 5.234,
+        "p99": 5.234
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.922,
+        "median": 4.999499999999999,
+        "max": 5.234,
+        "p99": 5.234
+      },
+      "threshold_text": "рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0",
+      "lost_lines": 0,
+      "dns_lines": 0
+    }
+  },
+  "elapsed_s": 147.9
+}

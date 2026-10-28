@@ -111,9 +111,9 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.2: Recipes/Pipeline/closeEvent-Save через `topology_to_canonical`, раскладка той же записью; непарсимое — `RecipeValidationError` [DONE] (после 1.1c)
   - **Module contract:** impl-only
-- Task 1.8: базовый `rev` редактора в `TopologySession` (старт и активация), конфликт — «Рецепт изменён снаружи — перезагрузите его» [PENDING] (после 1.2)
+- Task 1.8: базовый `rev` редактора в `TopologySession` (старт и активация), конфликт — «Рецепт изменён снаружи — перезагрузите его» [DONE] (после 1.2; `12c4f906b`, `89d906923`; F1 — вердикт CTO, вариант d; отчёт `docs/reports/2026-10-27_task-1.8_C-30.md`)
   - **Module contract:** impl-only
-- Task 1.9: Устройства читают `read_canonical`, пишут с `rev`; локальные фейки вкладки [PENDING] (после 1.8)
+- Task 1.9: Устройства читают `read_canonical`, пишут с базой `TopologySession` и двигают её (вердикт CTO по F1); локальные фейки вкладки [DONE] (после 1.8; `e8a61ecfe`, `4584c8b45`; отчёт `docs/reports/2026-10-27_task-1.9_C-30.md`)
   - **Module contract:** impl-only
 - Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
   - **Module contract:** impl-only
@@ -158,6 +158,10 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 - Чистка 21 строки шума в HEAD `letter_robot_sim.yaml` и возврат комментариев, legacy top-level `gui_positions` в
   `camera_robot_calibration`, `dataset_circle_capture`, `letter_robot_sim` — отдельный коммит с полосой C.
+- F3 (решение владельца 2026-10-28; отдельная задача после merge 13/17, не в C-30): слоты Устройств не ловят
+  `RecipeLockTimeout` / `RecipeFormatError` / `YamlWriteRefused` — `docs/claude/OPEN_QUESTIONS.md`, `add_page.py:176`,
+  `crud_actions.py:93,179`.
+- Дисплеи (`display_catalog_recipe.py`) не двигают базу сессии: `unregister` с привязками — в 2.0 (владелец 2026-10-28); `register`/`update` с базой — задачи нет; окно принято (`amendments.md` №8).
 - Строка C-30 в `plans/queue/defects.md`, строка 3 `ORDER.md` — лид при закрытии.
 
 ## Связи с соседними планами

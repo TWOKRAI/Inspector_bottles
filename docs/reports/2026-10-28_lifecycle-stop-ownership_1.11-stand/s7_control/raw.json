@@ -1,0 +1,72 @@
+{
+  "S7_control": [
+    {
+      "run": 1,
+      "precondition_ok": true,
+      "control": true,
+      "slow_stop_s": 6.0,
+      "pm_window_s": 5.0,
+      "child_window_s": null,
+      "ceiling_s": 12.0,
+      "boot_s": 8.92,
+      "override_seen": true,
+      "ceiling_seen": true,
+      "windows": {
+        "mode": "override",
+        "stop_process_timeout": 5.0,
+        "shutdown_timeout": 8.0,
+        "override_line_in_stdout": true,
+        "max_stop_window_s": 12.0,
+        "ceiling_line_in_stdout": true
+      },
+      "apply": {
+        "apply_s": 2.99,
+        "diff_commands": [
+          "",
+          "camera_0",
+          "fast",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "slow",
+          "stitcher"
+        ],
+        "ready": {
+          "slow": true,
+          "fast": true
+        }
+      },
+      "reply_s": 5.062,
+      "reply": {
+        "success": true,
+        "process_name": "slow",
+        "outcome": "terminated"
+      },
+      "reply_raw": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "101efdc9-667a-4a09-967f-ca15325bfd0b",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "slow",
+          "outcome": "terminated"
+        }
+      },
+      "waited_s": 5.06,
+      "supervision_stop_outcome": "terminated",
+      "lost": 1,
+      "dns": 1,
+      "dns_by_dir": {
+        "ProcessManager": 1
+      }
+    }
+  ]
+}

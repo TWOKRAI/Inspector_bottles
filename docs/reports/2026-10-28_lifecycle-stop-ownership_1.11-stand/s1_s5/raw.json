@@ -1,0 +1,442 @@
+{
+  "S1": [
+    {
+      "run": 1,
+      "precondition_ok": true,
+      "boot_s": 7.92,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.391,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "312aca64-8de6-4981-9449-8db06ad1c387",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.39,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 2,
+      "precondition_ok": true,
+      "boot_s": 6.91,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.359,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "ae9d6597-b8f9-48ac-8c50-1899f86cb6b4",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.36,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 3,
+      "precondition_ok": true,
+      "boot_s": 9.67,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.406,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "ea11f41b-370d-420b-a147-22561d076a64",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.41,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 4,
+      "precondition_ok": true,
+      "boot_s": 7.39,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.468,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "603151f4-d121-4dcd-8ff8-3a8cdc23cc4d",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.47,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 5,
+      "precondition_ok": true,
+      "boot_s": 7.92,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.625,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "31c3e737-ba5c-4abe-adab-64192515dd5d",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.62,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 6,
+      "precondition_ok": true,
+      "boot_s": 8.45,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.688,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "12bfe073-bb69-40ea-803d-b48293135292",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.69,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 7,
+      "precondition_ok": true,
+      "boot_s": 8.44,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.625,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "97449280-c744-4f77-8148-12064492cc19",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.62,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 8,
+      "precondition_ok": true,
+      "boot_s": 7.94,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.625,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "63ee7ef1-a359-4341-9703-260cfdee4e33",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.62,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 9,
+      "precondition_ok": true,
+      "boot_s": 8.97,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.547,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "0138dfe4-c7ba-4b83-8c8d-511cfa5edfd6",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.55,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    },
+    {
+      "run": 10,
+      "precondition_ok": true,
+      "boot_s": 7.42,
+      "override_seen": true,
+      "precondition_note": "",
+      "reply_s": 0.36,
+      "reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "60b8b74a-6be9-4410-846c-a49f0f5be62a",
+        "success": true,
+        "result": {
+          "success": true,
+          "process_name": "devices",
+          "outcome": "exited"
+        }
+      },
+      "waited_s": 0.36,
+      "status": "stopped",
+      "lost": 0,
+      "dns": 0,
+      "dns_by_dir": {},
+      "hung": false
+    }
+  ],
+  "S5": [
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #1",
+      "elapsed_s": 4.125,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.125
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #2",
+      "elapsed_s": 4.141,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.141
+    },
+    {
+      "kind": "restart",
+      "target": "camera_0 (вместо renderer) #3",
+      "elapsed_s": 4.234,
+      "ok": true,
+      "note": "",
+      "waited_s": 4.234
+    },
+    {
+      "kind": "restart",
+      "target": "devices #1",
+      "elapsed_s": 1.578,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.578
+    },
+    {
+      "kind": "restart",
+      "target": "devices #2",
+      "elapsed_s": 1.875,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.875
+    },
+    {
+      "kind": "restart",
+      "target": "devices #3",
+      "elapsed_s": 1.797,
+      "ok": true,
+      "note": "",
+      "waited_s": 1.797
+    },
+    {
+      "kind": "activate",
+      "target": "region_pipeline",
+      "elapsed_s": 3.453,
+      "ok": true,
+      "note": "",
+      "waited_s": 3.45
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 1",
+      "elapsed_s": 2.469,
+      "waited_s": 2.47,
+      "survivors": [],
+      "n_pids": 11
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 2",
+      "elapsed_s": 5.14,
+      "waited_s": 5.14,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 3",
+      "elapsed_s": 4.922,
+      "waited_s": 4.92,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 4",
+      "elapsed_s": 5.578,
+      "waited_s": 5.58,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 5",
+      "elapsed_s": 5.172,
+      "waited_s": 5.17,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 6",
+      "elapsed_s": 5.078,
+      "waited_s": 5.08,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 7",
+      "elapsed_s": 5.485,
+      "waited_s": 5.49,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 8",
+      "elapsed_s": 5.406,
+      "waited_s": 5.41,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 9",
+      "elapsed_s": 5.265,
+      "waited_s": 5.26,
+      "survivors": [],
+      "n_pids": 10
+    },
+    {
+      "kind": "shutdown",
+      "target": "run 10",
+      "elapsed_s": 4.844,
+      "waited_s": 4.84,
+      "survivors": [],
+      "n_pids": 10
+    }
+  ]
+}

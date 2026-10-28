@@ -8,6 +8,8 @@
    ``system.yaml`` его нет, env он не читает; ``process_manager_process.py:1978,3829,4388`` берут ``... or 5.0``.
    ``shutdown_timeout`` этим входом НЕ задаётся: он едет из ``system.stop_timeout`` временного ``system.yaml``
    (``launch.py:786`` -> ``spawner.py:90-92``).
+3. ``STAND_MAX_STOP_WINDOW`` (если задан; S7, T1.11) кладёт ``max_stop_window_s`` в тот же ``orchestrator_config``
+   тем же патчем (потолок окон ``stop_window_s`` детей; PM читает ``get_config("max_stop_window_s")``).
 
 Подмена живёт только в этом процессе (временный патч атрибута пакета ``launcher``); закоммиченные файлы не меняются.
 Строка ``[stand] ...`` в stdout — доказательство, что подмена сработала (``stand_l9.py`` проверяет её наличие).
@@ -19,19 +21,29 @@ import os
 import sys
 
 
-def _install_stop_process_timeout(value: str) -> None:
+def _install_stop_process_timeout(value: str | None, max_window: str | None = None) -> None:
+    """Один патч ``assemble_launcher`` на два ключа: ``stop_process_timeout`` (S1-S7), ``max_stop_window_s`` (S7).
+
+    ``max_stop_window_s`` - потолок окон ``stop_window_s`` детей; PM читает его ``get_config("max_stop_window_s")``
+    из ``orchestrator_config``. Задан только он (R2-C) - ``stop_process_timeout`` не трогается.
+    """
     import multiprocess_framework.modules.process_manager_module.launcher as launcher_pkg
 
     original = launcher_pkg.assemble_launcher
-    timeout = float(value)
+    timeout = float(value) if value else None
+    ceiling = float(max_window) if max_window else None
 
     def patched(proc_dicts, *args, orchestrator_config=None, **kwargs):
         cfg = dict(orchestrator_config or {})
-        cfg["stop_process_timeout"] = timeout
-        print(
-            f"[stand] orchestrator_config.stop_process_timeout={timeout} stop_timeout={kwargs.get('stop_timeout')}",
-            flush=True,
-        )
+        if timeout is not None:
+            cfg["stop_process_timeout"] = timeout
+            print(
+                f"[stand] orchestrator_config.stop_process_timeout={timeout} stop_timeout={kwargs.get('stop_timeout')}",
+                flush=True,
+            )
+        if ceiling is not None:
+            cfg["max_stop_window_s"] = ceiling
+            print(f"[stand] orchestrator_config.max_stop_window_s={ceiling}", flush=True)
         return original(proc_dicts, *args, orchestrator_config=cfg, **kwargs)
 
     launcher_pkg.assemble_launcher = patched
@@ -39,8 +51,9 @@ def _install_stop_process_timeout(value: str) -> None:
 
 def main() -> int:
     value = os.environ.get("STAND_STOP_PROCESS_TIMEOUT")
-    if value:
-        _install_stop_process_timeout(value)
+    max_window = os.environ.get("STAND_MAX_STOP_WINDOW")
+    if value or max_window:
+        _install_stop_process_timeout(value, max_window)
     from multiprocess_prototype.main import main as app_main
 
     return app_main(None, headless=True)

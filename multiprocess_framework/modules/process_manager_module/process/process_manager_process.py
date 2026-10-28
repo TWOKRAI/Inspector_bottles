@@ -31,7 +31,14 @@ from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
-from ..core.stop_budget import KILL_RESERVE_S, SHUTDOWN_TIMEOUT_KEY, stop_budget
+from ..core.stop_budget import (
+    KILL_RESERVE_S,
+    MAX_STOP_WINDOW_KEY,
+    SHUTDOWN_TIMEOUT_KEY,
+    outer_graceful_s,
+    stop_budget,
+    valid_window_s,
+)
 from ..core.process_status import ProcessStatusMonitor
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
@@ -157,6 +164,9 @@ class ProcessManagerProcess(ProcessModule):
 
         platform_adapter = get_platform_adapter()
 
+        # Task 1.11 (DESIGN 2, 7): потолок окон стопа детей ``C`` — один раз, до реестра и ``_budget()``.
+        self._stop_window_ceiling_s = self._read_stop_window_ceiling()
+
         self._process_registry = ProcessRegistry(
             logger=self,
             queue_registry=queue_registry,
@@ -170,6 +180,8 @@ class ProcessManagerProcess(ProcessModule):
             # Task 1.1 (ADR-PMM-035): окна стопа ребёнку — словарь чисел из того же
             # shutdown_timeout, которым PM останавливает детей. Считается здесь один раз.
             child_stop_budget=stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY)),
+            # Task 1.11: потолок окон stop_window_s; None — потолок = g (числа те же, что без ключей).
+            max_stop_window_s=self._stop_window_ceiling_s,
         )
         # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
         self._process_registry.stop_wait_idle = self._stop_wait_idle
@@ -3685,12 +3697,42 @@ class ProcessManagerProcess(ProcessModule):
     # ========================================================================
 
     def _root_budget(self, budget: dict) -> tuple[float, float]:
-        """Корень PM: ``(pm_total_s, infra_s)`` (О6) — дети со сроком g и резервом эскалации."""
+        """Корень PM: ``(pm_total_s, infra_s)`` (О6) — дети со сроком ``G`` и резервом эскалации.
+
+        Task 1.11 (DESIGN 7): словарь раннера проходит через тот же потолок, что ``_budget()``.
+        """
+        budget = self._ceiled_budget(budget)
         return float(budget["pm_total_s"]), float(budget["infra_s"])
 
+    def _ceiled_budget(self, base: dict) -> dict:
+        """``stop_budget(G(g_att, C))`` из словаря ``base``; без потолка — ``base`` как есть (Task 1.11)."""
+        ceiling = getattr(self, "_stop_window_ceiling_s", None)
+        if ceiling is None:
+            return base
+        graceful = float(base["pm_graceful_s"])
+        outer = outer_graceful_s(graceful, ceiling)
+        return base if outer == graceful else stop_budget(outer)
+
     def _budget(self) -> dict:
-        """Словарь ``stop_budget`` PM: от раннера, иначе ``DEFAULT_STOP_BUDGET``. Конфиг не перечитывается."""
-        return self._stop_budget if self._stop_budget is not None else self.DEFAULT_STOP_BUDGET
+        """Словарь ``stop_budget`` PM: ``stop_budget(G(g_att, C))`` (Task 1.11, DESIGN 7).
+
+        ``g_att`` — ``pm_graceful_s`` словаря от раннера (иначе ``DEFAULT_STOP_BUDGET``), ``C`` —
+        годный ``max_stop_window_s`` PM. Без потолка — словарь раннера как есть. Конфиг не перечитывается.
+        """
+        base = self._stop_budget if self._stop_budget is not None else self.DEFAULT_STOP_BUDGET
+        return self._ceiled_budget(base)
+
+    def _read_stop_window_ceiling(self) -> float | None:
+        """``max_stop_window_s`` PM (Task 1.11, DESIGN 2): годный — число, иначе ``None`` (+ WARNING без значения)."""
+        raw = self.get_config(MAX_STOP_WINDOW_KEY)
+        if raw is None:
+            return None
+        ceiling = valid_window_s(raw)
+        if ceiling is None:
+            self._log_warning(
+                f"{MAX_STOP_WINDOW_KEY} негоден (нужно конечное число секунд > 0) — потолок окон стопа не задан"
+            )
+        return ceiling
 
     def _own_work(self, work) -> None:
         """``work`` PM: ``summary``, затем область ``children`` (LIFO: дети → сводка)."""
