@@ -93,6 +93,33 @@ RULE_KEYS: frozenset[str] = frozenset(
 _FIELD_RULE_KEYS: frozenset[str] = frozenset({"strip", "pattern", "value_pattern", "choices_map"})
 _DEFAULT_PATTERN_MESSAGE = "значение не соответствует требуемой форме"
 
+# Когда правка поля вступает в силу (ADR-DS-011). Закрытый набор: ядро ветвится по трём режимам.
+#   live    — применяется сразу, без перезапуска
+#   restart — после перезапуска процесса-владельца
+#   config  — только запись в конфиг, применяется при следующей загрузке
+APPLY_MODES: frozenset[str] = frozenset({"live", "restart", "config"})
+
+
+def _normalize_enabled_if(enabled_if: Any) -> dict[str, list[Any]] | None:
+    """Проверить форму ``enabled_if`` и вернуть копию ``{ключ: list}`` (``None``/``{}`` → ``None``).
+
+    Тексты отказа называют КЛЮЧ и не печатают значения (ADR-DS-010 п.3).
+    """
+    if enabled_if is None:
+        return None
+    if not isinstance(enabled_if, Mapping):
+        raise ValueError("FieldMeta: enabled_if должен быть словарём {имя_поля: [значения]}")
+    if not enabled_if:
+        return None
+    result: dict[str, list[Any]] = {}
+    for key, allowed in enabled_if.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("FieldMeta: ключ enabled_if должен быть непустой строкой")
+        if not isinstance(allowed, (list, tuple)) or not allowed:
+            raise ValueError(f"FieldMeta: enabled_if[{key!r}] должен быть непустым списком допустимых значений")
+        result[key] = list(allowed)
+    return result
+
 
 def _make_rules_validator(rules: dict[str, Any]):
     """Функция-валидатор поля по словарю правил (вызывается ПОСЛЕ проверки типа pydantic)."""
@@ -162,6 +189,11 @@ class FieldMeta:
         rules           — правила значения ДАННЫМИ (закрытый словарь RULE_KEYS, ADR-DS-010):
                           одинаково исполняются на исходном классе и на копии из каталога.
                           Неизвестный ключ → ValueError
+        apply           — когда правка поля вступает в силу: "live" | "restart" | "config"
+                          (APPLY_MODES, ADR-DS-011); None — не объявлено. Иное → ValueError
+        enabled_if      — поле активно, только если ВСЕ условия выполнены: {имя_другого_поля:
+                          [допустимые значения]} (И по ключам, ИЛИ по значениям, сравнение ==).
+                          None/{} — условий нет. Проверка ссылок на поля — в get_all_fields_meta
 
     Примечание про widget:
         Отдельного "ui_widget" нет — widget уже служит единственным источником
@@ -189,6 +221,8 @@ class FieldMeta:
         "ui_order",
         "ui_hidden",
         "rules",
+        "apply",
+        "enabled_if",
     )
 
     def __init__(
@@ -222,6 +256,10 @@ class FieldMeta:
         ui_hidden: bool = False,
         # Правила значения (см. RULE_KEYS). None/{} — правил нет, поле не платит ничего.
         rules: dict[str, Any] | None = None,
+        # Когда правка вступает в силу (APPLY_MODES) и при каких значениях других полей
+        # поле активно (ADR-DS-011). None — не объявлено.
+        apply: str | None = None,
+        enabled_if: dict[str, list[Any]] | None = None,
     ) -> None:
         self.description = description
         self.info = info
@@ -254,6 +292,13 @@ class FieldMeta:
         if unknown:
             raise ValueError(f"FieldMeta: неизвестные правила {sorted(unknown)}; допустимы {sorted(RULE_KEYS)}")
         self.rules: dict[str, Any] = rules
+        # apply — константа объявления схемы, не пользовательский ввод: значение в тексте
+        # допустимо (исключение из ADR-DS-010 п.3, записано в ADR-DS-011). isinstance ДО
+        # членства: список на `in frozenset` даёт TypeError, а не ValueError.
+        if apply is not None and (not isinstance(apply, str) or apply not in APPLY_MODES):
+            raise ValueError(f"FieldMeta: недопустимый apply {apply!r}; допустимы {sorted(APPLY_MODES)}")
+        self.apply = apply
+        self.enabled_if = _normalize_enabled_if(enabled_if)
 
     # =========================================================================
     # Интеграция с Pydantic v2
@@ -316,6 +361,20 @@ class FieldMeta:
         """True если поле должно быть показано при данном уровне доступа."""
         return not self.hidden and self.access_level <= access_level
 
+    def is_enabled(self, values: Mapping[str, Any]) -> bool:
+        """True, если поле активно при текущих значениях других полей (``enabled_if``).
+
+        И по ключам (все условия должны выполняться), ИЛИ по значениям (достаточно одного из
+        списка). Сравнение ``==``: ``1`` совпадает с ``True`` (``1 in [True]`` истинно).
+        Ключа нет в ``values`` — условие не выполнено. Без ``enabled_if`` — всегда True.
+        """
+        if self.enabled_if is None:
+            return True
+        for key, allowed in self.enabled_if.items():
+            if key not in values or values[key] not in allowed:
+                return False
+        return True
+
     # =========================================================================
     # Валидация и числовые операции
     # =========================================================================
@@ -368,7 +427,7 @@ class FieldMeta:
         При передаче lang — описания локализуются.
         Структура совместима со старым BaseField.to_metadata_dict().
         """
-        return {
+        result: dict[str, Any] = {
             "description": self.get_description(lang),
             "info": self.get_info(lang),
             "unit": self.unit,
@@ -388,6 +447,12 @@ class FieldMeta:
             # JSON-safe: строки, bool, dict строк. Копия, чтобы получатель не мутировал класс.
             "rules": {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.rules.items()},
         }
+        # Новые ключи — только когда заданы: снимок прежних 17 ключей не меняется.
+        if self.apply is not None:
+            result["apply"] = self.apply
+        if self.enabled_if is not None:
+            result["enabled_if"] = {k: list(v) for k, v in self.enabled_if.items()}
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "FieldMeta":
@@ -410,4 +475,20 @@ class FieldMeta:
 
                 get_std_logger(__name__).warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
                 kwargs["rules"] = {k: v for k, v in rules.items() if k in RULE_KEYS}
+        # Тот же приём для apply/enabled_if: хаб новее GUI не должен ронять копию регистра
+        # целиком из-за незнакомого режима. Конструктор остаётся строгим.
+        apply = kwargs.get("apply")
+        if apply is not None and (not isinstance(apply, str) or apply not in APPLY_MODES):
+            from ...logger_module import get_std_logger
+
+            get_std_logger(__name__).warning("FieldMeta.from_dict: отброшен недопустимый apply %r", apply)
+            kwargs["apply"] = None
+        try:
+            _normalize_enabled_if(kwargs.get("enabled_if"))
+        except ValueError as exc:
+            from ...logger_module import get_std_logger
+
+            # Текст исключения называет ключ, значения не печатает.
+            get_std_logger(__name__).warning("FieldMeta.from_dict: отброшен enabled_if: %s", exc)
+            kwargs["enabled_if"] = None
         return cls(**kwargs)
