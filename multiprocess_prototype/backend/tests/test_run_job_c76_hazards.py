@@ -34,6 +34,8 @@ _windows_only = pytest.mark.skipif(os.name != "nt", reason="C-76: Job Object л�
 _ROOT = Path(__file__).resolve().parents[3]
 # Переходник .venv основной копии: без него цепочка переходник -> приложение -> переходник потомка не воспроизводится.
 _PY = Path(r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Scripts\python.exe")
+if not _PY.exists():  # другая машина: под pytest из .venv sys.executable и есть переходник
+    _PY = Path(sys.executable)
 
 _STARTUP_DEADLINE_S = 30.0
 _EVENT_DEADLINE_S = 5.0
@@ -156,6 +158,25 @@ class _RecordingPopen:
         return proc
 
 
+@pytest.fixture
+def recorder(monkeypatch: pytest.MonkeyPatch) -> Iterator[_RecordingPopen]:
+    """Записывающий ``Popen`` вместо ``run.subprocess.Popen``; в teardown убивает всех записанных детей.
+
+    Красный прогон не должен оставлять приостановленного ребёнка: он сам не выходит никогда.
+    """
+    rec = _RecordingPopen()
+    monkeypatch.setattr(run.subprocess, "Popen", rec)
+    try:
+        yield rec
+    finally:
+        for proc in rec.procs:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+
 def _fail(exc: BaseException) -> Callable[..., None]:
     def _raiser(*_args: object, **_kwargs: object) -> None:
         raise exc
@@ -187,11 +208,9 @@ def test_hr1_job_create_failure_runs_app_unprotected_with_warning(
 @_windows_only
 @pytest.mark.parametrize("failing", ["_proc_resume", "_proc_open"])
 def test_hr2_resume_or_open_failure_kills_child_and_raises_oserror(
-    monkeypatch: pytest.MonkeyPatch, failing: str
+    monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPopen, failing: str
 ) -> None:
     """Сбой ``NtResumeProcess`` / ``OpenProcess``: приостановленный ребёнок убит, ``OSError`` проброшен."""
-    recorder = _RecordingPopen()
-    monkeypatch.setattr(run.subprocess, "Popen", recorder)
     monkeypatch.setattr(run, failing, _fail(OSError(f"отказ {failing}")))
 
     with pytest.raises(OSError, match=failing):
@@ -203,14 +222,14 @@ def test_hr2_resume_or_open_failure_kills_child_and_raises_oserror(
 
 @_windows_only
 def test_hr2b_nt_resume_process_nonzero_status_is_error() -> None:
-    """Полярность NTSTATUS: успех = 0, любой ненулевой статус (здесь — неверный handle) -> ``OSError``."""
+    """Полярность NTSTATUS: успех = 0, любой ненулевой статус (здесь — handle 0) -> ``OSError``."""
     with pytest.raises(OSError, match="NtResumeProcess"):
-        run._proc_resume(0xDEAD)
+        run._proc_resume(0)
 
 
 @_windows_only
 def test_hr3_assign_failure_resumes_child_and_warns(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPopen, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """Сбой назначения в job: ребёнок возобновлён и работает (метка, код 4), предупреждение в stderr."""
     marker = tmp_path / "ran.marker"
@@ -238,10 +257,10 @@ def test_hr3_assign_failure_resumes_child_and_warns(
 
 
 @_windows_only
-def test_hr6_keyboard_interrupt_before_resume_kills_child(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hr6_keyboard_interrupt_before_resume_kills_child(
+    monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPopen
+) -> None:
     """``KeyboardInterrupt`` между ``Popen`` и ``NtResumeProcess``: приостановленный ребёнок убит."""
-    recorder = _RecordingPopen()
-    monkeypatch.setattr(run.subprocess, "Popen", recorder)
     # Исключение бросает подмена прямо в вызывающем потоке: настоящий сигнал сорвал бы сессию pytest.
     monkeypatch.setattr(run, "_proc_resume", _fail(KeyboardInterrupt()))
 
@@ -250,6 +269,52 @@ def test_hr6_keyboard_interrupt_before_resume_kills_child(monkeypatch: pytest.Mo
 
     assert len(recorder.procs) == 1
     assert recorder.procs[0].poll() is not None, "ребёнок остался приостановленным (poll() is None)"
+
+
+@_windows_only
+def test_hr8_kill_failure_keeps_original_error_and_closes_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_proc_resume`` бросает ``OSError``, ``Popen.kill`` бросает ``PermissionError``: наружу исходный
+    ``OSError``, handle job закрыт (закрытие job убивает назначенного ребёнка и без ``kill``)."""
+    created: list[int] = []
+    closed: list[int | None] = []
+    procs: list[subprocess.Popen] = []
+    real_create, real_close = run._job_create, run._handle_close
+
+    def _create() -> int:
+        handle = real_create()
+        created.append(handle)
+        return handle
+
+    def _close(handle: int | None) -> None:
+        closed.append(handle)
+        real_close(handle)
+
+    class _KillRefusing(_REAL_POPEN):
+        def kill(self) -> None:
+            raise PermissionError("kill boom")
+
+    def _popen(*args: object, **kwargs: object) -> subprocess.Popen:
+        proc = _KillRefusing(*args, **kwargs)
+        procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(run.subprocess, "Popen", _popen)
+    monkeypatch.setattr(run, "_job_create", _create)
+    monkeypatch.setattr(run, "_handle_close", _close)
+    monkeypatch.setattr(run, "_proc_resume", _fail(OSError("resume boom")))
+    try:
+        with pytest.raises(OSError, match="resume boom") as info:
+            run._start_in_kill_job(sys.executable, _SLEEPER)
+
+        assert not isinstance(info.value, PermissionError), "kill заместил исходное исключение"
+        assert created and created[0] in closed, "handle job не закрыт после отказа kill"
+        assert _poll(lambda: procs[0].poll() is not None, _EVENT_DEADLINE_S), "ребёнок жив после закрытия job"
+    finally:
+        for proc in procs:
+            try:
+                _REAL_POPEN.kill(proc)
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------------------------
@@ -295,7 +360,7 @@ time.sleep(120)
 """
 )
 
-# HR5: лаунчер с обёрткой Popen: настоящий Popen, пауза 0.3 с, потом возврат объекта.
+# HR5: лаунчер с обёрткой Popen: настоящий Popen, пауза 1.0 с, потом возврат объекта.
 _SLOW_LAUNCHER = (
     _PRELUDE
     + """
@@ -305,7 +370,7 @@ import multiprocess_prototype.run as run
 _orig = run.subprocess.Popen
 def _slow(*a, **k):
     proc = _orig(*a, **k)
-    time.sleep(0.3)
+    time.sleep(1.0)
     return proc
 run.subprocess.Popen = _slow
 put(os.path.join(d, "launcher.pid"), str(os.getpid()))
@@ -336,7 +401,7 @@ def _chain_pids(d: Path) -> dict[str, int]:
 def test_hr5_child_is_suspended_until_in_job(tmp_path: Path, reaper: Callable[[int], _Proc]) -> None:
     """Порядок «до старта»: пауза между ``Popen`` и возвратом шва не даёт ребёнку выйти из job.
 
-    С ``CREATE_SUSPENDED`` ребёнок за паузу 0.3 с не стартует, потомок рождается уже внутри job и
+    С ``CREATE_SUSPENDED`` ребёнок за паузу 1.0 с не стартует, потомок рождается уже внутри job и
     умирает с лаунчером. Без него потомок успевает выйти (раньше назначения) и переживает убийство.
     """
     if not _PY.exists():

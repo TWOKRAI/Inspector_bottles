@@ -251,13 +251,14 @@ def _start_in_kill_job(exe: str, argv: list[str]) -> subprocess.Popen:
             job = None
         _proc_resume(process)  # job-ребёнок возобновлён, даже если назначение не удалось
     except BaseException:  # в том числе KeyboardInterrupt между Popen и NtResumeProcess
-        if proc is not None:
-            proc.kill()
-            try:
+        try:
+            if proc is not None:
+                proc.kill()
                 proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-        _handle_close(job)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # отказ kill не должен замещать исходное исключение
+        finally:
+            _handle_close(job)  # закрытие job убивает назначенного ребёнка и без kill
         raise
     finally:
         _handle_close(process)

@@ -24,6 +24,7 @@ import ctypes
 import json
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -36,6 +37,8 @@ _windows_only = pytest.mark.skipif(os.name != "nt", reason="C-76: Job Object л�
 _ROOT = Path(__file__).resolve().parents[3]
 # Переходник .venv основной копии (литерал из спеки): без него цепочка из трёх процессов не воспроизводится.
 _PY = Path(r"D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\.venv\Scripts\python.exe")
+if not _PY.exists():  # другая машина: под pytest из .venv sys.executable и есть переходник
+    _PY = Path(sys.executable)
 
 _STARTUP_DEADLINE_S = 30.0  # подъём цепочки: три запуска python + импорт run.py
 _EVENT_DEADLINE_S = 5.0  # исход события (смерть процессов, метка rc) — по спеке
