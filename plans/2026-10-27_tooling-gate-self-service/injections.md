@@ -27,3 +27,35 @@
 
 Не ловится и это известно: «`now` читается один раз до tmp» (тест через slow-date план отверг); реальный дедлайн
 `wait --timeout N>0`; остаточная гонка двух реклеймеров. Для этих свойств мутации в матрице нет.
+
+# Результат прогона (haiku-агент, gsi @ 0c7a96b7f; сырой вывод — `injections-run.md`)
+
+База: collected 246, passed 246, 0 красных. Каждая мутация: collected 246 (guard «не собрали» не сработал).
+Сверка: `✓` — все предсказанные имена красные; «+N» — красных больше предсказанного.
+
+| # | красных | предсказание | сверка |
+|---|---|---|---|
+| а | 5 | stranger[*] оба параметра | ✗ в части: красный только `foreign_window_s3_has_nothing`; +4 (cancel×2, mv_calls[release_refused], fast_paths[release_refused]) |
+| б | 4 | fifo, promotes_first_waiting | ✓ +2 (position_counts_own_line_after_promote, term_after_own_mv — оба зависят от «первая waiting») |
+| в | 13 | stale_read, fresh_foreign×5, hazards killed-holder | ✓ +6 (parallel, tmp_younger_60, tmp_wait_zero, busy_tmp_released, hazards three_parallel, request_during_release) |
+| г1 | 3 | merge_begin_refused «слот занят» | ✓ +1 (fast_paths[merge_begin_refused]) |
+| г2 | 2 | merge_begin_refused «открыт quiet» | ✓ точно (quiet, own_quiet) |
+| д | 9 | bad_merging[two_fields] | ✓ +8: патч д ослабил число полей до «≥2» и подставил `since` по умолчанию — краснеют four_fields, line_number_counts_stand и malformed_lock[merging_2_fields-*] ×6 |
+| е | 3 | extend_by_stranger | ✓ +2 (mv_calls[extend_refused], fast_paths[extend_refused]) |
+| ж | 10 | busy_tmp_until_released | ✓ +9 (подмножество в) |
+| з | 46 | promote_takes_minutes (N≠30), release_hands_window | ✓ +много: `request` выдаёт окно через `promote`, поэтому краснеют все тесты выдачи после `request` |
+| и | 9 | overdue/extend decimal_*, 0809, status_octal | ✓ +2 (wait_prints_overdue[one_minute_over], [plus_659_left]) |
+| к | 18 | wait_promotes, running_wait_promotes | ✓ +16 (все тесты, где окно выдаёт `wait`) |
+| л | 2 | release_of_queued... | ✓ +1 (cancel_removes_all_own_waiting_lines) |
+| м1 | 8 | fresh_foreign×5 | ✓ +3 (tmp_younger_60, tmp_wait_zero, hazards killed-holder) |
+| м2 | 1 | term_after_own_mv | ✓ точно |
+| н | 12 | request_prints_result_only_after_mv | ✓ +11 (отказ печатает до mv: parallel, stale_read, mv_busy_forever, fresh_foreign×5, hazards×3) |
+| о | 12 | tmp_younger_than_60 | ✓ +11 (набор как у в: без реального возраста tmp реклеймится свежий) |
+| п | 1 | close_does_not_promote | ✓ точно |
+
+Находки сверки (все — про предсказания, не про дыры в тестах):
+1. (а) Предсказание «оба параметра» ошибочно: второй параметр (`no_window_s3_has_nothing`) не заходит в мутированную ветку — окна нет, отказ идёт другим путём. Тест держит свойство через первый параметр; второй — отдельная проверка отказа.
+2. Предсказания по именам занижали охват в 14 из 17 мутаций (+2…+45 красных): я перечислял «главный» тест, а побочные (mv_calls, fast_paths, зависимые от выдачи) не учёл. Ни одна мутация не дала 0 красных и ни одно предсказанное имя не осталось зелёным (кроме п. 1).
+3. Мутация д была шире описанной (≥2 полей + дефолт `since`), поэтому покрыла и четыре поля; чистую «2 поля принимается» отдельно не ставили — свойство «ровно 3 поля» держат three/four/two_fields вместе.
+4. Не ловится и известно (см. выше): «now читается один раз до tmp», реальный дедлайн `wait --timeout N>0`, гонка двух реклеймеров.
+5. Операционное: прогон к — 288 с при таймауте Bash 300 с; в следующий раз ставить таймаут 600 с или резать запуск на два файла.
