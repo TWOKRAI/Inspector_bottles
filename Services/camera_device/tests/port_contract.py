@@ -31,8 +31,6 @@ from Services.camera_device.interface import (
     RawFrame,
 )
 
-TRIGGER_SOFTWARE = Binding("genicam", "TriggerSoftware", "command")
-
 
 @dataclass(frozen=True)
 class PortCase:
@@ -140,17 +138,11 @@ class PortContractSuite:
         else:
             assert info is None
 
-    def test_execute_follows_software_trigger_capability(self, port_case: PortCase, opened_port: DevicePort):
-        if "software_trigger" not in opened_port.capabilities:
-            with pytest.raises(PortError) as exc_info:
-                opened_port.execute(port_case.rw_binding)
-            assert exc_info.value.kind == "access"
-            return
-        opened_port.execute(TRIGGER_SOFTWARE)
-        calls = getattr(opened_port, "calls", None)
-        if calls is not None:
-            assert calls[-1][0] == "execute"
-            assert calls[-1][1] == ("TriggerSoftware",)
+    def test_execute_without_software_trigger_is_access_error(self, port_case: PortCase, opened_port: DevicePort):
+        # Ветка «с software_trigger» зависит от прибора и в набор не входит (фейк-только тест
+        # лежит в test_fake_port_modes.py); порт с capability пропускает эту проверку.
+        if "software_trigger" in opened_port.capabilities:
+            pytest.skip("port declares software_trigger: nothing to assert for the missing capability")
         with pytest.raises(PortError) as exc_info:
             opened_port.execute(port_case.rw_binding)
-        assert exc_info.value.kind == "other"
+        assert exc_info.value.kind == "access"

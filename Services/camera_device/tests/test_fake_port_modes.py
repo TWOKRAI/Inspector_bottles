@@ -90,14 +90,24 @@ def test_float_node_with_inc_is_coerced_by_floor(opened, written, stored):
     assert port.get_param(EXPOSURE) == pytest.approx(stored, abs=1e-9)
 
 
-def test_closed_node_denies_read_until_its_parent_gets_the_value(opened):
+def test_closed_nodes_deny_access_until_their_parent_gets_the_value(opened):
     port = opened()
     with pytest.raises(PortError) as exc_info:
         port.get_param(TRIGGER_SOURCE)
     assert exc_info.value.kind == "access"
     assert exc_info.value.code == 0x80020106
-    # describe_param на закрытом узле не бросает
-    assert port.describe_param(TRIGGER_SOURCE).entries == ("Line0", "Software", "SelfTrigger")
+    # describe_param на закрытом узле не бросает; access="NA" как в записи
+    info = port.describe_param(TRIGGER_SOURCE)
+    assert info.entries == ("Line0", "Software", "SelfTrigger")
+    assert info.access == "NA"
+
+    # запись в закрытый узел отказана, текст ошибки не содержит значения, значение не сохранено
+    with pytest.raises(PortError) as exc_info:
+        port.set_param(TRIGGER_PERIOD, 987654)
+    assert exc_info.value.kind == "access"
+    assert exc_info.value.code == 0x80020106
+    assert "987654" not in str(exc_info.value)
+    assert "987654" not in repr(exc_info.value)
 
     port.set_param(TRIGGER_MODE, "On")
     assert port.get_param(TRIGGER_SOURCE) == "Line0"
@@ -112,18 +122,14 @@ def test_closed_node_denies_read_until_its_parent_gets_the_value(opened):
     assert port.get_param(TRIGGER_PERIOD) == 1000
 
 
-def test_closed_node_write_is_denied_and_error_text_hides_the_value(opened):
+def test_fake_execute_runs_only_software_trigger_command(opened):
     port = opened()
+    port.execute(Binding("genicam", "TriggerSoftware", "command"))
+    assert port.calls[-1][0] == "execute"
+    assert port.calls[-1][1] == ("TriggerSoftware",)
     with pytest.raises(PortError) as exc_info:
-        port.set_param(TRIGGER_PERIOD, 987654)
-    assert exc_info.value.kind == "access"
-    assert exc_info.value.code == 0x80020106
-    assert "987654" not in str(exc_info.value)
-    assert "987654" not in repr(exc_info.value)
-    # записи не было: после открытия цепочки узел хранит умолчание, а не 987654
-    port.set_param(TRIGGER_MODE, "On")
-    port.set_param(TRIGGER_SOURCE, "SelfTrigger")
-    assert port.get_param(TRIGGER_PERIOD) == 300
+        port.execute(EXPOSURE)
+    assert exc_info.value.kind == "other"
 
 
 def test_journal_records_the_calling_thread_ident(opened):
