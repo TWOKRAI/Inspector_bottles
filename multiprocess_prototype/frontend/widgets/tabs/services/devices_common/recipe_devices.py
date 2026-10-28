@@ -17,12 +17,12 @@ Refs: plans/device-tree-recipe.md Фаза B
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_framework.modules.recipe import RecipeConflict, RecipeFormatError
 
-logger = logging.getLogger(__name__)
+logger = get_std_logger(__name__)
 
 
 class RecipeDevicesError(Exception):
