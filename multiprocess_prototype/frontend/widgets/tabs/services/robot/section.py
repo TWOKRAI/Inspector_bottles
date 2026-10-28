@@ -24,11 +24,11 @@ class _NullRecipeStore:
     def get_active(self) -> str | None:
         return None
 
-    def read_raw(self, _slug: str) -> dict | None:
-        return None
+    def read_canonical(self, _slug: str) -> tuple[dict | None, str | None]:
+        return None, None
 
-    def save_raw(self, _slug: str, _data: dict) -> None:  # pragma: no cover
-        pass
+    def save_raw(self, _slug: str, _data: dict, *, expected_rev: str | None = None) -> str | None:  # pragma: no cover
+        return None
 
 
 class _RobotSection:
@@ -85,7 +85,10 @@ class _RobotSection:
 
         self._bindings = getattr(self._runtime, "bindings", None)
         recipes = getattr(self._services, "recipes", None)
-        self._recipe_store = RecipeDevicesStore(recipes if recipes is not None else _NullRecipeStore())
+        self._recipe_store = RecipeDevicesStore(
+            recipes if recipes is not None else _NullRecipeStore(),
+            session=getattr(self._runtime, "topology_session", None),
+        )
 
         # Презентер CRUD/connect (общий runner для дискретных команд секции)
         self._devices_presenter = DevicesPresenter(

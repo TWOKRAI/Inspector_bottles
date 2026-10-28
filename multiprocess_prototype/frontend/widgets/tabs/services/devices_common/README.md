@@ -18,8 +18,8 @@
 ```
 
 - **`RecipeDevicesStore`** (`recipe_devices.py`) — чистый (без Qt) CRUD устройств в
-  секции `devices:` через `read_raw`/`save_raw` (ruamel round-trip, комментарии
-  сохраняются). Нет активного рецепта → `list()` пуст, `upsert/remove` →
+  секции `devices:` через `read_canonical` / `save_raw(expected_rev)` с базой
+  `TopologySession` (комментарии сохраняются). Нет активного рецепта → `list()` пуст, `upsert/remove` →
   `RecipeDevicesError`.
 - Активация рецепта зовёт hub-команду `device_sync_set` (идемпотентно: upsert набора
   + удаление чужих `recipe:*`-устройств; manual-устройства не трогаются).
