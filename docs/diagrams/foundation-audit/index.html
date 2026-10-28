@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Собрано из *.mmd этой папки (аудит фундамента 2026-10-26). Правят .mmd, затем пересобирают страницу. Mermaid грузится с CDN — нужен интернет. -->
+<title>Аудит фундамента — схемы</title>
+<style>
+:root { --bg:#ffffff; --fg:#1b1f24; --muted:#5b6470; --line:#d8dde3; --surface:#f6f8fa; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; } }
+:root[data-theme="dark"] { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:1200px; margin:0 auto; padding:24px 16px 64px; }
+h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:18px; margin:32px 0 4px; }
+p { color:var(--muted); margin:4px 0 12px; } code { font-size:13px; }
+.frame { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; }
+pre.mermaid { margin:0; background:#fff; border-radius:6px; }
+</style>
+</head>
+<body><main>
+<h1>Аудит фундамента framework — схемы</h1>
+<p>2026-10-26, HEAD 71bfc55fe (framework) / f63f68403 (Services, backend_ctl). Опись: <code>docs/reports/2026-10-26_foundation-audit-inventory.md</code>, сырьё карты: <code>docs/maps/framework-core.md</code>, опись 1б: <code>docs/reports/2026-10-26_foundation-audit-1b-*.md</code>.</p>
+<section><h2>Процессы системы (C4 L2)</h2><p>Что где живёт: PM, GUI, дочерние процессы по рецепту, процесс devices с драйверами Services, backend_ctl, устройства. Исходник: <code>system-containers.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — процессы системы и что в них живёт (C4 L2)
+%% Источники: docs/maps/framework-core.md (уровень 2), docs/reports/2026-10-26_foundation-audit-1b-services.md (хостинг),
+%% docs/reports/2026-10-26_foundation-audit-1b-backend-ctl-libs.md (backend_ctl). HEAD f63f68403.
+%% Состав дочерних процессов задаёт рецепт (recipe.activate → apply_topology), здесь — типы и постоянные процессы.
+flowchart LR
+    classDef proc fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef ext fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef lib fill:#f4f4f4,stroke:#888,stroke-dasharray:4 3,color:#333
+    classDef dev fill:#fde2e1,stroke:#b3261e,color:#111
+
+    op[&quot;Оператор / GUI-пользователь&quot;]:::ext
+    agent[&quot;Агент / инженер&lt;br/&gt;backend_ctl (MCP, 53 инструмента)&quot;]:::ext
+    recipe[(&quot;Рецепт YAML&lt;br/&gt;multiprocess_prototype/recipes&quot;)]:::lib
+
+    subgraph host[&quot;Компьютер стенда&quot;]
+        launcher[&quot;SystemLauncher&lt;br/&gt;главный процесс&quot;]:::proc
+        pm[&quot;ProcessManager&lt;br/&gt;реестр, монитор, супервизия,&lt;br/&gt;RecipeService, сокет backend_ctl&quot;]:::proc
+        gui[&quot;GUI (PySide6)&lt;br/&gt;frontend + bridge&quot;]:::proc
+        subgraph children[&quot;Дочерние процессы по рецепту (ProcessModule / GenericProcess + плагины)&quot;]
+            src[&quot;источники кадров&lt;br/&gt;camera_service / hikvision / code_reader / phone_gateway&quot;]:::proc
+            proc[&quot;обработка&lt;br/&gt;chain, ml_inference, word_layout, line_filter …&quot;]:::proc
+            devices[&quot;процесс devices&lt;br/&gt;DeviceHubPlugin: supervisor + поток на устройство&quot;]:::proc
+        end
+        mltrain[&quot;ml_train&lt;br/&gt;QProcess из GUI&quot;]:::proc
+        sdkapp[&quot;Hikvision SDK-app&lt;br/&gt;subprocess.Popen&quot;]:::proc
+        subgraph libs[&quot;Библиотеки Services внутри devices&quot;]
+            drv[&quot;драйверы robot v1 / v2, vfd,&lt;br/&gt;hikvision (нативный SDK), generic_modbus&quot;]:::lib
+            rc[&quot;robot_comm client v1 / v2&quot;]:::lib
+            mb[&quot;modbus (pymodbus)&quot;]:::lib
+        end
+    end
+
+    robot[&quot;Робот Delta&lt;br/&gt;Modbus TCP&quot;]:::dev
+    vfd[&quot;ПЧ GD20&lt;br/&gt;через носитель-робот&quot;]:::dev
+    cam[&quot;Камеры Hikvision / ID3000&lt;br/&gt;GigE, TCP&quot;]:::dev
+    phone[&quot;Телефон&lt;br/&gt;HTTP&quot;]:::dev
+
+    launcher -- &quot;spawn, system_stop_event&quot; --&gt; pm
+    pm -- &quot;create_and_register, stop_event&quot; --&gt; children
+    recipe -. &quot;recipe.activate → apply_topology&quot; .-&gt; pm
+    gui -- &quot;команды и подписки через Router&quot; --&gt; pm
+    gui -- &quot;robot_* команды (v1-имена)&quot; --&gt; devices
+    op --&gt; gui
+    agent -- &quot;TCP newline-JSON, канал backend_ctl&quot; --&gt; pm
+    src -- &quot;кадры: очереди + SHM&quot; --&gt; proc
+    proc -- &quot;события и задания&quot; --&gt; devices
+    devices --&gt; drv --&gt; rc --&gt; mb --&gt; robot
+    drv -. &quot;транспорт носителя&quot; .-&gt; vfd
+    src --&gt; cam
+    src --&gt; phone
+    gui --&gt; mltrain
+    src -.-&gt; sdkapp
+</pre></div></section><section><h2>Связи модулей по контурам (C4 L3)</h2><p>27 модулей framework, рёбра от 3 импортов, подпись «всего / вглубь». Пунктир — ярус optional. Исходник: <code>module-deps.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — связи модулей framework по контурам (C4 L3)
+%% Сгенерировано из ast-разбора импортов production-кода, HEAD 71bfc55fe; данные: docs/maps/framework-core.md
+%% Показаны рёбра от 3 импортов; подпись «всего / вглубь» (вглубь = мимо interfaces.py и корня пакета).
+%% Пунктирная рамка — ярус optional (MODULE_TIERS.md). Полная таблица 110 рёбер — в карте.
+flowchart LR
+    classDef core fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef opt fill:#f4f4f4,stroke:#888,stroke-dasharray:4 3,color:#333
+    subgraph foundation[&quot;Фундамент: базы и схемы&quot;]
+        base_manager[&quot;base_manager&quot;]:::core
+        data_schema[&quot;data_schema&quot;]:::core
+    end
+    subgraph ipc[&quot;IPC: сообщения, каналы, очереди, SHM&quot;]
+        message[&quot;message&quot;]:::core
+        dispatch[&quot;dispatch&quot;]:::core
+        channel_routing[&quot;channel_routing&quot;]:::core
+        router[&quot;router&quot;]:::core
+        command[&quot;command&quot;]:::core
+        shared_resources[&quot;shared_resources&quot;]:::core
+    end
+    subgraph obs[&quot;Наблюдаемость&quot;]
+        logger[&quot;logger&quot;]:::core
+        error[&quot;error&quot;]:::core
+        statistics[&quot;statistics&quot;]:::core
+        console[&quot;console&quot;]:::core
+        telemetry_readmodel[&quot;telemetry_readmodel&quot;]:::opt
+    end
+    subgraph life[&quot;Жизненный цикл и обработка&quot;]
+        process_manager[&quot;process_manager&quot;]:::core
+        process[&quot;process&quot;]:::core
+        worker[&quot;worker&quot;]:::core
+        chain[&quot;chain&quot;]:::core
+        service[&quot;service&quot;]:::opt
+        app[&quot;app&quot;]:::opt
+    end
+    subgraph state[&quot;Состояние и конфиг&quot;]
+        config[&quot;config&quot;]:::core
+        state_store[&quot;state_store&quot;]:::opt
+        registers[&quot;registers&quot;]:::opt
+        recipe[&quot;recipe&quot;]:::opt
+    end
+    subgraph ui[&quot;UI-слой&quot;]
+        frontend[&quot;frontend&quot;]:::opt
+        actions[&quot;actions&quot;]:::opt
+        event[&quot;event&quot;]:::opt
+        display[&quot;display&quot;]:::opt
+    end
+    process --&gt;|&quot;26 / 21&quot;| logger
+    frontend --&gt;|&quot;25 / 3&quot;| logger
+    process_manager --&gt;|&quot;23 / 21&quot;| process
+    process --&gt;|&quot;20 / 4&quot;| data_schema
+    process --&gt;|&quot;14 / 11&quot;| router
+    frontend --&gt;|&quot;13 / 0&quot;| data_schema
+    process_manager --&gt;|&quot;12 / 8&quot;| shared_resources
+    process --&gt;|&quot;12 / 9&quot;| statistics
+    app --&gt;|&quot;11 / 11&quot;| process
+    process --&gt;|&quot;11 / 9&quot;| config
+    statistics --&gt;|&quot;11 / 3&quot;| channel_routing
+    process_manager --&gt;|&quot;10 / 7&quot;| logger
+    logger --&gt;|&quot;9 / 4&quot;| channel_routing
+    process --&gt;|&quot;9 / 3&quot;| worker
+    process_manager --&gt;|&quot;8 / 0&quot;| data_schema
+    process --&gt;|&quot;8 / 5&quot;| base_manager
+    app --&gt;|&quot;7 / 7&quot;| process_manager
+    process --&gt;|&quot;7 / 7&quot;| channel_routing
+    router --&gt;|&quot;6 / 0&quot;| message
+    config --&gt;|&quot;5 / 3&quot;| data_schema
+    process --&gt;|&quot;5 / 0&quot;| message
+    process --&gt;|&quot;5 / 4&quot;| console
+    shared_resources --&gt;|&quot;5 / 1&quot;| base_manager
+    error --&gt;|&quot;4 / 4&quot;| logger
+    process_manager --&gt;|&quot;4 / 0&quot;| error
+    process_manager --&gt;|&quot;4 / 4&quot;| config
+    process_manager --&gt;|&quot;4 / 4&quot;| message
+    process --&gt;|&quot;4 / 1&quot;| state_store
+    router --&gt;|&quot;4 / 4&quot;| shared_resources
+    shared_resources --&gt;|&quot;4 / 2&quot;| logger
+    statistics --&gt;|&quot;4 / 2&quot;| logger
+    worker --&gt;|&quot;4 / 1&quot;| base_manager
+    actions --&gt;|&quot;3 / 0&quot;| logger
+    app --&gt;|&quot;3 / 3&quot;| state_store
+    base_manager --&gt;|&quot;3 / 3&quot;| logger
+    chain --&gt;|&quot;3 / 0&quot;| base_manager
+    channel_routing --&gt;|&quot;3 / 0&quot;| data_schema
+    channel_routing --&gt;|&quot;3 / 3&quot;| logger
+    command --&gt;|&quot;3 / 1&quot;| base_manager
+    console --&gt;|&quot;3 / 1&quot;| base_manager
+    error --&gt;|&quot;3 / 2&quot;| channel_routing
+    frontend --&gt;|&quot;3 / 1&quot;| message
+    frontend --&gt;|&quot;3 / 3&quot;| router
+    message --&gt;|&quot;3 / 0&quot;| data_schema
+    process_manager --&gt;|&quot;3 / 1&quot;| base_manager
+    process --&gt;|&quot;3 / 1&quot;| registers
+    process --&gt;|&quot;3 / 1&quot;| command
+    registers --&gt;|&quot;3 / 0&quot;| data_schema
+    worker --&gt;|&quot;3 / 0&quot;| data_schema
+</pre></div></section><section><h2>Иерархия базовых классов</h2><p>Из graphify: BaseManager → 20 наследников, ChannelRoutingManager → 4 (+ ErrorManager через LoggerCore). Исходник: <code>class-hierarchy.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — иерархия базовых классов ядра
+%% Источник: graphify (рёбра inherits, EXTRACTED), сверка: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.4
+%% Чтение: A --|&gt; B — A наследует B.
+classDiagram
+    direction BT
+
+    class BaseManager
+    class ObservableMixin
+    class IBaseManager
+    class ChannelRoutingManager
+    class IChannelRoutingManager
+    class ProcessModule
+    class IProcessModule
+
+    BaseManager --|&gt; IBaseManager
+
+    ChannelRoutingManager --|&gt; BaseManager
+    ChannelRoutingManager --|&gt; ObservableMixin
+    ChannelRoutingManager --|&gt; IChannelRoutingManager
+
+    LoggerCore --|&gt; ChannelRoutingManager
+    LoggerManager --|&gt; LoggerCore
+    ErrorManager --|&gt; LoggerCore
+    RouterManager --|&gt; ChannelRoutingManager
+    StatsManager --|&gt; ChannelRoutingManager
+    ObservationManager --|&gt; ChannelRoutingManager
+
+    ProcessModule --|&gt; BaseManager
+    ProcessModule --|&gt; ObservableMixin
+    ProcessModule --|&gt; IProcessModule
+    ProcessManagerProcess --|&gt; ProcessModule
+    GenericProcess --|&gt; ProcessModule
+
+    CommandManager --|&gt; BaseManager
+    SharedResourcesManager --|&gt; BaseManager
+    EventManager --|&gt; BaseManager
+    MemoryManager --|&gt; BaseManager
+    QueueRegistry --|&gt; BaseManager
+    StateStoreManager --|&gt; BaseManager
+    StateProxy --|&gt; BaseManager
+    WorkerManager --|&gt; BaseManager
+    ExecutorManager --|&gt; BaseManager
+    WorkerPoolExecutor --|&gt; BaseManager
+    WorkerPoolDispatcher --|&gt; BaseManager
+    LatencyTracker --|&gt; BaseManager
+    TopologyManager --|&gt; BaseManager
+    PluginManager --|&gt; BaseManager
+    RegistersManager --|&gt; BaseManager
+    ConsoleManager --|&gt; BaseManager
+    Dispatcher --|&gt; BaseManager
+
+    note for LoggerManager &quot;своих методов два: __init__, _on_shutdown (F14)&quot;
+    note for GenericProcess &quot;модуль помечен DEPRECATED, но это база generic-процессов&quot;
+    note for WorkerPoolDispatcher &quot;ни одного теста поведения (promises C1–C3)&quot;
+</pre></div></section><section><h2>Три сквозных пути</h2><p>Рестарт ребёнка, сообщение через Router, лог до файла. Серый пунктир — звено только пересылает вызов. Исходник: <code>paths-lifecycle-message-log.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — три сквозных пути по звеньям
+%% Источник: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.2 (HEAD 71bfc55fe)
+%% Цвет: серый пунктир — звено только пересылает вызов ([F] / [F+]); синий — своя логика ([L]).
+flowchart TB
+    classDef fwd fill:#eeeeee,stroke:#888,stroke-dasharray:4 3,color:#333
+    classDef logic fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef ext fill:#fff3d6,stroke:#b07d00,color:#111
+
+    subgraph P1[&quot;Путь 1 — рестарт / стоп ребёнка (8 звеньев, 3 пересылают)&quot;]
+        direction TB
+        a0[&quot;backend_ctl driver.py:1255&lt;br/&gt;cmd process.restart&quot;]:::ext
+        a1[&quot;PM._cmd_process_restart&lt;br/&gt;_merge_cmd_args&quot;]:::fwd
+        a2[&quot;PM.restart_process :3846&lt;br/&gt;stop · drain · incarnation? · start · instance_restarts+1&quot;]:::logic
+        a3[&quot;PM.stop_process :3827&lt;br/&gt;is_alive + таймаут&quot;]:::fwd
+        a4[&quot;ProcessRegistry.stop_one :339&lt;br/&gt;_stop_many([name])[name]&quot;]:::fwd
+        a5[&quot;ProcessRegistry._stop_many :455&lt;br/&gt;область pm/stop&quot;]:::logic
+        a6[&quot;ChildProcessStop&lt;br/&gt;request_stop · join_until · kill&quot;]:::logic
+        a7[&quot;ребёнок: _run_lifecycle :192&lt;br/&gt;stop_event ИЛИ system_stop_event&quot;]:::logic
+        a8[&quot;ProcessModule.stop :1394&quot;]:::logic
+        a0 --&gt; a1 --&gt; a2 --&gt; a3 --&gt; a4 --&gt; a5 --&gt; a6 -. &quot;stop_event.set()&quot; .-&gt; a7 --&gt; a8
+        s1[&quot;_ChildrenGroupStop&lt;br/&gt;process_registry.py:523&quot;]:::logic
+        s2[&quot;SystemLauncher.stop → ProcessSpawner.stop&lt;br/&gt;system_stop_event.set · terminate · kill&quot;]:::logic
+        s2 -. &quot;system_stop_event&quot; .-&gt; a7
+    end
+
+    subgraph P2[&quot;Путь 2 — сообщение процесс → Router → процесс (9 звеньев, 4 пересылают)&quot;]
+        direction TB
+        b1[&quot;ProcessIO.send_data/command/event&lt;br/&gt;собирает конверт&quot;]:::fwd
+        b2[&quot;ProcessModule.send_message :1187&quot;]:::fwd
+        b3[&quot;ProcessCommunication.send_message :290&lt;br/&gt;«алиас send_to_process»&quot;]:::fwd
+        b4[&quot;ProcessCommunication.send_to_process&lt;br/&gt;sender · targets&quot;]:::logic
+        b5[&quot;RouterManager.send :552&lt;br/&gt;_do_send(_to_dict)&quot;]:::fwd
+        b6[&quot;RouterManager._do_send&lt;br/&gt;middleware · учёт ошибок&quot;]:::logic
+        b7[&quot;_resolve_channels :2145&quot;]:::logic
+        b8[&quot;_deliver_by_targets :675&lt;br/&gt;выбор типа очереди&quot;]:::logic
+        b9[&quot;QueueRegistry.send_to_queue&lt;br/&gt;put_nowait&quot;]:::logic
+        b1 --&gt; b2 --&gt; b3 --&gt; b4 --&gt; b5 --&gt; b6 --&gt; b7 --&gt; b8 --&gt; b9
+    end
+
+    subgraph P3[&quot;Путь 3 — лог процесса → файл (9 звеньев, 4 пересылают)&quot;]
+        direction TB
+        c1[&quot;ProcessModule._log_info :1126&lt;br/&gt;setdefault module · возврат теряется&quot;]:::fwd
+        c2[&quot;ObservableMixin._log_info&quot;]:::fwd
+        c3[&quot;ObservableMixin._log_checked&quot;]:::fwd
+        c4[&quot;_call_manager_result&lt;br/&gt;is_enabled · ловит исключения&quot;]:::logic
+        c5[&quot;LoggerCore.info :1921&quot;]:::fwd
+        c6[&quot;LoggerCore.log :1478&lt;br/&gt;маршрут · процессоры · tap&quot;]:::logic
+        c7[&quot;ChannelRoutingManager&lt;br/&gt;._write_record_to_channels :1043&quot;]:::logic
+        c8[&quot;FileChannel.write&lt;br/&gt;log_channel.py:993&quot;]:::logic
+        c9[&quot;_SafeRotatingFileHandler&quot;]:::logic
+        c1 --&gt; c2 --&gt; c3 --&gt; c4 --&gt; c5 --&gt; c6 --&gt; c7 --&gt; c8 --&gt; c9
+    end
+</pre></div></section><section><h2>Счётчики рестарта</h2><p>Какое событие какой из четырёх счётчиков двигает; пунктир «нет» — место расхождения. Исходник: <code>restart-counters.mmd</code>.</p><div class="frame"><pre class="mermaid">
+%% Аудит фундамента 2026-10-26 — какое событие какой счётчик рестарта двигает
+%% Источник: docs/reports/2026-10-26_foundation-audit-inventory-layers.md §2.3 L1 (сверено по коду, HEAD 71bfc55fe)
+%% Сплошная стрелка — счётчик растёт; пунктир с «нет» — событие счётчик НЕ двигает (место расхождения).
+flowchart LR
+    classDef ev fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef cnt fill:#dbe9ff,stroke:#2f5fa7,color:#111
+    classDef rd fill:#e8f5e9,stroke:#2e7d32,color:#111
+
+    e1[&quot;ручной рестарт&lt;br/&gt;backend_ctl / GUI&quot;]:::ev
+    e2[&quot;краш-рестарт монитора&lt;br/&gt;(плановый, по RestartPolicy)&quot;]:::ev
+    e3[&quot;induced-рестарт группы&lt;br/&gt;rest_for_one / one_for_all&quot;]:::ev
+    e4[&quot;рестарт со сменой&lt;br/&gt;identity очередей&quot;]:::ev
+    e5[&quot;_topology_provision&lt;br/&gt;(apply_topology)&quot;]:::ev
+    e6[&quot;окно стабильности истекло&quot;]:::ev
+    e7[&quot;сбой потока-воркера&lt;br/&gt;внутри процесса&quot;]:::ev
+
+    inc[&quot;PM._incarnations&lt;br/&gt;incarnation&lt;br/&gt;pm_process.py:119&quot;]:::cnt
+    ir[&quot;PM._instance_restarts&lt;br/&gt;instance_restarts&lt;br/&gt;:136&quot;]:::cnt
+    rc[&quot;ProcessMonitor._restart_history&lt;br/&gt;restart_count = len()&lt;br/&gt;process_monitor.py:120&quot;]:::cnt
+    wrc[&quot;worker_info restart_count&lt;br/&gt;worker_registry.py:72&quot;]:::cnt
+
+    e1 --&gt; ir
+    e1 -. &quot;нет&quot; .-&gt; rc
+    e1 -. &quot;нет при reuse очередей (default)&quot; .-&gt; inc
+    e2 --&gt; ir
+    e2 --&gt; rc
+    e3 --&gt; ir
+    e3 -. &quot;нет (process_monitor.py:1426)&quot; .-&gt; rc
+    e4 --&gt; inc
+    e4 --&gt; ir
+    e5 --&gt; inc
+    e5 -. &quot;нет&quot; .-&gt; ir
+    e6 -- &quot;сброс в 0&quot; --&gt; rc
+    e7 --&gt; wrc
+
+    r1[&quot;fence / routing_incarnation&lt;br/&gt;otel_export · телеметрия&quot;]:::rd
+    r2[&quot;supervision_status&lt;br/&gt;backend_ctl process_restart_verified&quot;]:::rd
+    r3[&quot;worker_manager.py:321, 360&quot;]:::rd
+    inc --&gt; r1
+    inc --&gt; r2
+    ir --&gt; r2
+    rc --&gt; r2
+    wrc --&gt; r3
+</pre></div></section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", flowchart: { htmlLabels: true }, maxTextSize: 200000 });</script>
+</body></html>

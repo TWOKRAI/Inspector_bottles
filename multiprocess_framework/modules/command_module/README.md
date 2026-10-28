@@ -87,9 +87,43 @@ manager.shutdown()
 
 | Метод | Описание |
 |-------|----------|
-| `handle_command(message)` | Найти и вызвать обработчик. Вернуть результат или `{"status": "error", ...}`. |
+| `handle_command(message, *, reply=None)` | Найти и вызвать обработчик. Вернуть результат или `{"status": "error", ...}`. `reply` — только для команды с исполнителем (ниже). |
 
 **Обработка ошибок:** исключения внутри обработчика перехватываются `Dispatcher` → возвращается `{"status": "error", "reason": "..."}`.
+
+### Команды с исполнителем (Task 1.9a, ADR-CMD-006)
+
+`register_command(..., executor=None, key_from=None, targets=None)` — новые необязательные аргументы; умолчания
+прежние, команда без них синхронна, как всегда.
+
+- `executor` — `OrderedExecutor` (`worker_module`, например `KeyedExecutor`); с ним задаётся ровно одно из
+  `key_from="<поле data>"` (ключ `frozenset({data[поле]})`) или `targets="all"` (ключ `None` — «все ключи»).
+- Регистрация отклоняется (`False` + WARNING): `executor` не ровно с одним из `key_from`/`targets`; `targets` вне
+  `{None, "all"}`; `key_from`/`targets` без `executor`; `executor` при `metadata.manages_own_reply`.
+- Объект исполнителя хранится вне `metadata`; в `metadata` — только строки `executor` (имя), `key_from`, `targets`.
+- `handle_command(msg, reply=r)` для такой команды → `DEFERRED` (экспорт `command_module`), результат придёт в `r`
+  ровно один раз с потока исполнителя (или отказ `system_stopping` / `executor_busy`).
+- Без `reply` (консоль, тесты, вложенные вызовы) → исполнение на месте + один WARNING на имя «исполнено вне очереди
+  ключа». `DEFERRED` без `reply` не возвращается никогда.
+- Поля ключа нет / не непустая `str` → возврат `{"success": False, "error": "key_missing", "command": <имя>}` +
+  WARNING без значения поля; обработчик и `reply` не вызываются.
+- Роутер передаёт `reply` только командам с `metadata.executor` (ADR-RTR-015). `overwrite_command` снимает исполнителя.
+
+### Исполнитель по имени (Task 1.9m, ADR-CMD-007)
+
+`executor=` принимает объект `OrderedExecutor` или **имя** исполнителя из реестра процесса (`ExecutorManager`,
+`worker_module`): `register_command("camera.start", h, executor="io", key_from="camera")`. Сигнатуры
+`register_command` / `handle_command` не менялись, только расширен тип `executor`; объектная форма работает как раньше.
+
+- Реестр — kwarg конструктора `CommandManager(..., executors=<IExecutorRegistry>)` (умолчание `None`). Через `managers=`
+  не передаётся: тот словарь уходит наблюдателям миксина. `ProcessManagers` подставляет `ExecutorManager` процесса сам.
+- Имя разрешается **при регистрации** (fail fast), до прочих проверок исполнителя. Отказ (`False` + WARNING с именем,
+  метрика `registration.failed`): пустое имя; реестра нет (`executors=None`); имя не найдено. Команда, зарегистрированная
+  раньше, чем создан исполнитель, отклоняется — порядок «создать исполнитель, затем команды» лежит на вызывающем.
+- Объект фиксируется при регистрации (подмены под тем же именем в реестре нет); в `metadata["executor"]` кладётся строка,
+  переданная вызывающим (имя в реестре), а не `obj.name`.
+- Зависимость однонаправленная: `command_module` знает только протокол `worker_module.interfaces.IExecutorRegistry`
+  (под `TYPE_CHECKING`).
 
 ### Запросы
 

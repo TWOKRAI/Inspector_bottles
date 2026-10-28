@@ -308,3 +308,164 @@ class TestWriteRegistersValidation:
         result = mgr.write_registers("sensor", {"freq": 100.0})
         assert result["status"] == "error"
         assert "max" in result["message"]
+
+
+# --- SPI.c1b: допустимость вида = фабрика драйвера, зарегистрированная в менеджере ---
+
+_UNKNOWN_KIND_TEXT = "DeviceEntry.kind 'camera' не из ['generic_modbus', 'hikvision', 'robot', 'vfd']"
+
+
+class TestKindByFactory:
+    @pytest.mark.parametrize("kind", ["robot", "vfd", "hikvision", "generic_modbus"])
+    def test_builtin_kinds_accepted(self, mgr: DeviceManager, kind: str) -> None:
+        """Связка с ``VALID_KINDS`` через публичный путь: каждый из 4 встроенных видов принимается."""
+        assert mgr.upsert({"id": "d1", "name": "d", "kind": kind}).kind == kind
+
+    def test_unknown_kind_refused_with_literal_text(self, mgr: DeviceManager) -> None:
+        with pytest.raises(ValueError) as info:
+            mgr.upsert({"id": "c1", "name": "c", "kind": "camera"})
+        assert str(info.value) == _UNKNOWN_KIND_TEXT
+        assert [e.id for e in mgr.snapshot_registry()] == []
+
+    def test_registered_factory_admits_kind(self, mgr: DeviceManager) -> None:
+        mgr.register_driver_factory("camera", lambda entry, proto: None)
+        assert mgr.upsert({"id": "c1", "name": "c", "kind": "camera"}).kind == "camera"
+
+    def test_merge_checks_kind_too(self, mgr: DeviceManager) -> None:
+        mgr.upsert({"id": "d1", "name": "d", "kind": "robot"})
+        with pytest.raises(ValueError) as info:
+            mgr.upsert({"id": "d1", "kind": "camera"})
+        assert str(info.value) == _UNKNOWN_KIND_TEXT
+        assert mgr.get("d1").kind == "robot"
+
+    def test_unknown_kind_in_registry_file_fails_initialize(self, tmp_path: Path) -> None:
+        path = tmp_path / "devices.yaml"
+        path.write_text("devices:\n  - {id: c1, name: c, kind: camera}\n", encoding="utf-8")
+        manager = DeviceManager(RegistryStore(path))
+        with pytest.raises(ValueError) as info:
+            manager.initialize()
+        assert str(info.value) == _UNKNOWN_KIND_TEXT
+
+
+class TestDriverOptions:
+    """SPI.f2: опции конструктора драйверов вида — ``driver_options`` и ``set_driver_options``."""
+
+    @staticmethod
+    def _fake_transport() -> object:
+        from Services.robot_comm.server.sim_core import RobotSimCore
+        from Services.robot_comm.testing.fake_transport import FakeRobotTransport
+
+        return FakeRobotTransport(RobotSimCore())
+
+    def test_options_reach_driver_constructor(self) -> None:
+        """Опция вида из конструктора менеджера и из ``set_driver_options`` попадает в конструктор драйвера."""
+        fake = self._fake_transport()
+        mgr = DeviceManager(None, driver_options={"robot": {"transport": fake}})
+        mgr.upsert({"id": "r1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert mgr.connect("r1") is True  # без опции драйвер ушёл бы в настоящий tcp и не подключился
+
+        later = DeviceManager(None)
+        later.set_driver_options("robot", transport=self._fake_transport())
+        later.upsert({"id": "r2", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert later.connect("r2") is True
+
+    def test_options_do_not_touch_created_drivers_and_unknown_option_raises(self) -> None:
+        """Созданный драйвер не меняется; неизвестная опция — ``TypeError`` при создании следующего драйвера."""
+        mgr = DeviceManager(None, driver_options={"robot": {"transport": self._fake_transport()}})
+        mgr.upsert({"id": "r1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        assert mgr.connect("r1") is True
+        driver = mgr.get_driver("r1")
+
+        mgr.set_driver_options("robot", no_such_option=1)
+        assert mgr.get_driver("r1") is driver and driver.is_connected is True
+
+        mgr.upsert({"id": "r2", "name": "R", "kind": "robot", "transport": {"type": "tcp"}})
+        with pytest.raises(TypeError, match="no_such_option"):
+            mgr.connect("r2")
+
+
+class TestInitializeAllOrNothing:
+    """Ревью п.4: файл реестра с неизвестным видом — ``ValueError``, реестр пуст, менеджер не инициализирован."""
+
+    def test_unknown_kind_in_file_loads_nothing(self, tmp_path: Path) -> None:
+        import yaml
+
+        ok = {"id": "ok1", "name": "R", "kind": "robot", "transport": {"type": "tcp"}}
+        bad = {"id": "bad", "name": "C", "kind": "camera", "transport": {"type": "tcp"}}
+        path = tmp_path / "devices.yaml"
+        path.write_text(yaml.safe_dump({"devices": [ok, bad]}), encoding="utf-8")
+        mgr = DeviceManager(RegistryStore(path))
+
+        with pytest.raises(ValueError):
+            mgr.initialize()
+
+        assert mgr.snapshot_registry() == []
+        assert mgr.is_initialized is False
+
+
+class TestStopFanOutTargets:
+    """Свойство 16 SPI: стоп фазы 1 получает только ``stop_aware``; прочие драйверы — молча, без записей об ошибке."""
+
+    @staticmethod
+    def _drivers() -> tuple[type, type]:
+        from Services.device_hub.drivers.base import BaseDeviceDriver
+
+        class Plain(BaseDeviceDriver):
+            """Наследник базы без ``request_stop`` и со ``stop_aware = False`` (умолчание)."""
+
+            kind = "vfd"
+
+            def connect(self) -> bool:
+                self.up = True
+                return True
+
+            @property
+            def is_connected(self) -> bool:
+                return getattr(self, "up", False)
+
+        class StopAware(Plain):
+            kind = "robot"
+            stop_aware = True
+
+            def __init__(self, entry: object, protocol: object = None) -> None:
+                super().__init__(entry, protocol)
+                self.stops: list[float] = []
+
+            def request_stop(self, deadline: float) -> None:
+                self.stops.append(deadline)
+
+        return Plain, StopAware
+
+    def test_only_stop_aware_driver_gets_stop_and_plain_one_leaves_no_error_record(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+        from types import SimpleNamespace
+
+        plain_cls, stop_cls = self._drivers()
+        spawned: list[str] = []
+
+        def spawn(target, *, name: str):
+            spawned.append(name)
+            target(None)  # поток стопа — синхронно: порядок и итог те же
+            return SimpleNamespace(close=lambda _budget: SimpleNamespace(survivors=[], errors=[]))
+
+        mgr = DeviceManager(None, spawn=spawn)
+        mgr.register_driver_factory("robot", lambda entry, proto: stop_cls(entry, proto))
+        mgr.register_driver_factory("vfd", lambda entry, proto: plain_cls(entry, proto))
+        tcp = {"type": "tcp", "host": "127.0.0.1", "port": 50999, "unit_id": 2}
+        mgr.upsert({"id": "r1", "name": "r1", "kind": "robot", "protocol": "delta_universal3", "transport": tcp})
+        mgr.upsert({"id": "v1", "name": "v1", "kind": "vfd", "protocol": "gd20_bridge", "transport": tcp})
+        assert mgr.connect("r1") is True and mgr.connect("v1") is True
+
+        with caplog.at_level(logging.DEBUG):
+            mgr.request_stop_all(deadline=12345.0)
+
+        assert mgr.get_driver("r1").stops == [12345.0]
+        assert [name.split("-")[1] for name in spawned] == ["r1"], spawned
+        manager_errors = [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno >= logging.ERROR and "device_hub" in record.name
+        ]
+        assert manager_errors == [], manager_errors

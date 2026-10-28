@@ -1,0 +1,16 @@
+procs:
+  # --- A: comment above A (header of list) ---
+  - name: a
+    v: 1
+    # --- B: comment about item b (sits after a's last key) ---
+  - name: b
+    v: 2
+    sub:
+      k: 1
+      # --- C: comment about item c (after b's deepest leaf) ---
+  - name: c
+    v: 3
+  # --- D ---
+  - name: d
+    v: 4
+tail: 1

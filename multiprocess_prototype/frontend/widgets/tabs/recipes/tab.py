@@ -74,8 +74,8 @@ class RecipesTab(BaseListNavTab):
             services: типизированный DI-контейнер AppServices.
             process_manager_proxy: IPC-фасад управления живым backend (Этап 1).
                 None → активация рецепта только меняет state, без применения к backend.
-            persist_active_fn: колбэк persist активного рецепта в манифест (app.yaml).
-                None → persist отключён (активация не пишет app.yaml).
+            persist_active_fn: колбэк persist активного рецепта в файл состояния
+                ``<stem>.state.yaml``. None → persist отключён (активация не пишет состояние).
             command_sender: CommandSender для IPC-вызовов к процессам (device_upsert_many).
                 None → upsert устройств при активации рецепта пропускается.
             parent: родительский виджет.
@@ -138,7 +138,7 @@ class RecipesTab(BaseListNavTab):
                 apply_topology_fn=_apply_fn,
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
-                persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml
+                persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → <stem>.state.yaml
                 upsert_devices_fn=_upsert_fn,  # Фаза 3 device-hub: upsert устройств рецепта
                 topology_session=self._topology_session,  # RS-4: confirm-перед-активацией
             )

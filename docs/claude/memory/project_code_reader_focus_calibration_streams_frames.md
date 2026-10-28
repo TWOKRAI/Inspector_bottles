@@ -1,8 +1,8 @@
 ---
 name: project_code_reader_focus_calibration_streams_frames
-description: "Считыватель ID3013 даёт кадр только на скан/триггер; кнопка калибровки фокуса держит поток ~50 кадров/с — не путать с потерей режима триггера; в этот момент рисовалка не успевает"
+description: "Считыватель ID3013 даёт кадр только на скан/триггер; кнопка калибровки фокуса держит поток ~50 кадров/с — не путать с потерей режима триггера; в этот момент рисовалка не успевает / ID3013 sends a frame only per scan/trigger; holding focus calibration streams ~50 fps — not a lost trigger mode; the draw node falls behind"
 module: [services/code_reader, prototype/recipes]
-mechanism: [live-stand, observability]
+mechanism: [live-stand, probes]
 metadata:
   type: project
 ---

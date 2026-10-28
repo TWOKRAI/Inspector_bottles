@@ -107,11 +107,11 @@ class RuntimeDeps(FrameworkRuntime):
         image_panel: главная панель кадров (ImagePanelWidget) — runtime-объект. Нужен
             DisplaysTab для снимка дисплея (grab_frame). None → кнопка «Снимок» даёт
             статус «нет кадра».
-        persist_active_recipe: persist активного рецепта в манифест (app.yaml →
-            pipeline) при активации. Закрывает loop: активация в GUI → app.yaml
-            обновлён → следующий старт восстанавливает рецепт (см. app.py restore).
-            None → no-op (persist отключён). Запись через ruamel round-trip —
-            комментарии app.yaml сохраняются.
+        persist_active_recipe: persist активного рецепта в файл состояния
+            ``<stem>.state.yaml`` рядом с манифестом при активации. Закрывает loop:
+            активация в GUI → состояние обновлено → следующий старт восстанавливает
+            рецепт (см. app.py restore). None → no-op (persist отключён).
+            ``app.yaml`` не меняется: он хранит только умолчание.
     """
 
     plugin_manager: Any = None

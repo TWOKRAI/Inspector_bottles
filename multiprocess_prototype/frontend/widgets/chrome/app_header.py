@@ -4,18 +4,63 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPaintEvent, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStyle,
+    QStyleOption,
     QWidget,
 )
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.widgets.chrome.login_button import LoginButton
+
+
+class _OutlinedLabel(QLabel):
+    """QLabel с тонким контуром вокруг глифов (QSS не умеет text-stroke).
+
+    Фон и геометрию рисует QSS, текст — контуром и заливкой из палитры (цвет из QSS).
+    """
+
+    def __init__(self, text: str, outline: QColor, outline_width: float, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._outline = outline
+        self._outline_width = outline_width
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        opt = QStyleOption()
+        opt.initFrom(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
+        # Базовая линия по центру contentsRect (как у QLabel с AlignVCenter)
+        rect = QRectF(self.contentsRect())
+        metrics = QFontMetricsF(self.font())
+        baseline = rect.top() + (rect.height() + metrics.ascent() - metrics.descent()) / 2
+        # Контур строим из пути без stretch шрифта (path-текст с stretch даёт неверные шаги букв),
+        # растяжение применяем к самому пути — перо при этом не искажается.
+        flat = QFont(self.font())
+        flat.setStretch(100)
+        path = QPainterPath()
+        path.addText(QPointF(0, baseline), flat, self.text())
+        path = QTransform.fromScale(self.font().stretch() / 100, 1).map(path)
+        path.translate(rect.left(), 0)
+        painter.setPen(
+            QPen(
+                self._outline,
+                self._outline_width,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.setBrush(self.palette().windowText())
+        painter.drawPath(path)
+        painter.end()
 
 
 class AppHeaderWidget(QWidget):
@@ -34,14 +79,19 @@ class AppHeaderWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 0)
 
-        # Бренд-лейбл (логотип ИННОТЕХ, шрифт Bank Gothic — задаётся в QSS)
-        self._brand_label = QLabel("ИННОТЕХ")
+        # Бренд-лейбл (логотип ИННОТЕХ, шрифт Square721 BdEx BT — задаётся в QSS)
+        self._brand_label = _OutlinedLabel("ИННОТЕХ", QColor("#000000"), 0.65)
         self._brand_label.setObjectName("BrandLabel")
+        # Растяжение по горизонтали: QSS не умеет font-stretch. Шрифт с одним stretch,
+        # чтобы не перебить family/size/weight из QSS.
+        stretch = QFont()
+        stretch.setStretch(135)
+        self._brand_label.setFont(stretch)
         # Тень под логотипом (QSS не умеет text-shadow — делаем эффектом)
         shadow = QGraphicsDropShadowEffect(self._brand_label)
         shadow.setBlurRadius(8)
         shadow.setOffset(4, 4)
-        shadow.setColor(QColor(0, 0, 0, 130))
+        shadow.setColor(QColor(0, 0, 0, 70))
         self._brand_label.setGraphicsEffect(shadow)
         layout.addWidget(self._brand_label)
 

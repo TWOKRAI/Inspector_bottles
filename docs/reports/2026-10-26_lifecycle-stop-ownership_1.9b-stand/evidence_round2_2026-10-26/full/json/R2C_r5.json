@@ -1,0 +1,19 @@
+{
+  "tree": "branch",
+  "run": 3,
+  "seq": 5,
+  "pm_exit_s": 1.375,
+  "windows": {
+    "mode": "default",
+    "stop_process_timeout": null,
+    "shutdown_timeout": null,
+    "system_yaml_stop_timeout": 5.0,
+    "override_line_in_stdout": false
+  },
+  "full_boot_wait_s": 5.38,
+  "pm_pid": 20488,
+  "shutdown_reply_s": 0.016,
+  "launcher_exit_s": 1.969,
+  "pm_already_gone_at_open": false,
+  "tasklist_call_s": 0.735
+}

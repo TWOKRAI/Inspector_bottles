@@ -7,9 +7,135 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 from .types import WorkerStatus, WorkerType
+
+
+@runtime_checkable
+class OrderedExecutor(Protocol):
+    """Исполнитель с порядком по ключу (Task 1.9a, ADR-WRK-005). Реализация — ``keyed_executor.KeyedExecutor``.
+
+    Клиенты (``CommandManager``, ProcessManager) знают только этот протокол. Закрытие —
+    по ``Stoppable`` (``request_stop`` / ``join_until``) плюс ``shutdown(deadline)``.
+
+    Порядок: операции с пересекающимися ключами — строго в порядке подачи; с непересекающимися —
+    параллельно. ``key=None`` — «все ключи»: пересекается со всеми, в том числе с ещё не встречавшимися.
+    """
+
+    def submit(
+        self,
+        action: Callable[[], Any],
+        key: frozenset[str] | None,
+        reply: Callable[[Any], None],
+        *,
+        inline_if_idle: bool = False,
+    ) -> bool:
+        """Подать операцию; никогда не блокирует.
+
+        Pre: исполнитель не закрыт и потребитель не снимает очередь (``should_reject``); иначе
+            ``reply({"success": False, "error": "system_stopping"})`` сразу на вызывающем потоке, ``False``.
+        Post: ``reply`` зовётся ровно один раз: результат ``action``; исключение ``action`` →
+            ``{"success": False, "error": "<тип>: <текст>"}``; отказ → ``system_stopping`` /
+            ``executor_busy`` (очередь на потолке). Исключение в ``reply`` логируется, не пробрасывается.
+
+        Returns:
+            ``True`` — поставлено в очередь; ``False`` — ``reply`` уже вызван на вызывающем потоке
+            (исполнено на месте или отказ).
+
+        ``inline_if_idle=True``: ключ свободен (не пересекается ни с исполняемыми, ни с ждущими) →
+        ``action`` и ``reply`` на вызывающем потоке, ``False``. Повторный вход из ``action`` этого
+        исполнителя с ключом ⊆ ключа текущей операции — на месте, как часть родителя.
+        """
+        ...
+
+    def request_stop(self) -> None:
+        """Закрыть приём и снять очередь (каждой снятой — ``system_stopping``). Идемпотентен, не блокирует."""
+        ...
+
+    def join_until(self, deadline: float) -> bool:
+        """Ждать текущие операции и выход рабочих до ``deadline`` (``time.monotonic()``); ``False`` на сроке."""
+        ...
+
+    def shutdown(self, deadline: float) -> bool:
+        """``request_stop(); return join_until(deadline)``."""
+        ...
+
+
+@runtime_checkable
+class IExecutorRegistry(Protocol):
+    """Узкий вход для ``CommandManager``: исполнитель по имени (Task 1.9m, ADR-WRK-006)."""
+
+    def get(self, name: str) -> OrderedExecutor | None:
+        """Исполнитель по имени или ``None``. Не бросает."""
+        ...
+
+
+@runtime_checkable
+class IExecutorManager(IExecutorRegistry, Protocol):
+    """Менеджер именованных исполнителей процесса (Task 1.9m, ADR-WRK-006).
+
+    Реализация — ``executor_manager.ExecutorManager``.
+
+    Для владельцев: процессы, ProcessManager, ServiceHost. Имя исполнителя — по правилу имени записи
+    ``Scope`` (непустая ``str`` без ``/`` и без суффикса `` (self)``). Созданными менеджер владеет
+    (область менеджера, либо ``_on_shutdown`` без области); зарегистрированными — нет, только
+    маршрутизирует по имени.
+    """
+
+    def create(
+        self,
+        name: str,
+        spec: Mapping[str, Any] | None = None,
+        *,
+        should_reject: Callable[[], bool] | None = None,
+    ) -> OrderedExecutor:
+        """Создать ``KeyedExecutor`` по схеме ``ExecutorSpec`` (``None`` — умолчания).
+
+        Pre: имя верно и не занято; менеджер не закрыт.
+        Post: исполнитель создан, рабочие запущены, объект во владении менеджера; одна строка INFO.
+        Raises:
+            ValueError: занятое имя; неверный ``spec`` (текст: ``<loc>: <msg>`` через ``; `` без входных значений).
+            RuntimeError: менеджер закрыт (допустим ``ScopeClosedError``).
+        На любом провале резерв имени снят: ``name`` нет в ``names()``, ``get(name)`` — ``None``.
+        """
+        ...
+
+    def register(self, name: str, executor: OrderedExecutor) -> None:
+        """Готовый объект по имени. Менеджер им НЕ владеет: не зовёт ``request_stop`` / ``join_until``.
+
+        Pre: имя как у ``create``; у ``executor`` есть вызываемый ``submit``.
+        После закрытия менеджера ``register`` работает как раньше (запись принимается, ``RuntimeError`` нет):
+        владения нет, закрывать нечего; ``create`` же после закрытия — ``RuntimeError``.
+        Raises:
+            TypeError: нет ``submit``.
+            ValueError: имя занято.
+        """
+        ...
+
+    def load_config(self, section: Mapping[str, Mapping[str, Any]] | None) -> list[str]:
+        """Создать исполнители из секции конфига процесса; своя попытка на запись.
+
+        Неверная запись — одна строка ERROR (имя + причина), запись пропущена, соседние создаются.
+        ``None`` / ``{}`` — ``[]`` без строк лога; секция не ``Mapping`` — одна строка ERROR, ``[]``.
+
+        Returns:
+            Имена созданных.
+        """
+        ...
+
+    def names(self) -> list[str]:
+        """Все имена (созданные и зарегистрированные) в порядке появления."""
+        ...
+
+    def describe(self) -> dict[str, Any]:
+        """Снимок для интроспекции: ``{"executors": {<имя>: {...}}, "unavailable": [...]}`` (Dict at Boundary)."""
+        ...
+
+    def is_executor_thread(self, name: str) -> bool:
+        """Текущий поток — рабочий СОЗДАННОГО исполнителя ``name``; для зарегистрированного/неизвестного — ``False``."""
+        ...
 
 
 class IWorkerRegistry(ABC):
@@ -316,4 +442,7 @@ __all__ = [
     "IWorkerRegistry",
     "IWorkerLifecycle",
     "IWorkerManager",
+    "OrderedExecutor",
+    "IExecutorRegistry",
+    "IExecutorManager",
 ]

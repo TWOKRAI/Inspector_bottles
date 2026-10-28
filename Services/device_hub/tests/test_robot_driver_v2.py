@@ -23,8 +23,13 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import pytest
+
+from multiprocess_framework.modules.base_manager import open_scope
+
 from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2, _parse_tlm
 from Services.device_hub.registry.entry import DeviceEntry
+from Services.device_hub.tests.conftest import ClientRecorder
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.programs import Move, Point, Program
 from Services.robot_comm.tests.e2e_rig_v2 import E2eRig, bounded, pulse
@@ -35,6 +40,25 @@ _CONNECT_DEADLINE_S = 60.0
 _GATE_S = 2.0  # дедлайн ворот стопа release в гонке jog_hold (U2)
 _CMD_JOG = re.compile(r"\[v2\] CMD seq=(\d+) op=JOG_CONT")
 TEXT_JOG_LOST = "поводок jog прерван: нет связи с роботом"
+_SCOPE_BUDGET_S = 6.0
+
+
+# Область потоков теста (T5.3 круг 2: драйвер без spawn потоков не запускает). Открывается на каждый тест,
+# закрывается в teardown; выживших быть не должно.
+_SCOPE: Any = None
+
+
+@pytest.fixture(autouse=True)
+def driver_scope() -> Iterator[Any]:
+    global _SCOPE
+    scope = open_scope("rv2test", budget_s=_SCOPE_BUDGET_S)
+    _SCOPE = scope
+    try:
+        yield scope
+    finally:
+        _SCOPE = None
+        report = scope.close()
+        assert list(report.survivors) == [], f"выжившие потоки области теста: {list(report.survivors)}"
 
 
 class _Rec:
@@ -53,7 +77,9 @@ class _Rec:
 
 
 @contextmanager
-def _driver(rec: _Rec, port: int, params: dict | None = None) -> Iterator[RobotDriverV2]:
+def _driver(
+    rec: _Rec, port: int, params: dict | None = None, clients: ClientRecorder | None = None
+) -> Iterator[RobotDriverV2]:
     entry = DeviceEntry(
         id="rv2",
         name="rv2",
@@ -62,7 +88,7 @@ def _driver(rec: _Rec, port: int, params: dict | None = None) -> Iterator[RobotD
         transport={"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": ROBOT_UNIT_ID},
         params=dict(params or {}),
     )
-    drv = RobotDriverV2(entry, None, publish=rec)
+    drv = RobotDriverV2(entry, None, publish=rec, spawn=_SCOPE.spawn, client_factory=clients)
     try:
         assert bounded(drv.connect, _CONNECT_DEADLINE_S) is True
         drv.desired_connected = True
@@ -145,14 +171,15 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
     движется, пока удержание подтверждается. Плюс: ``jog_hold`` вернулся не раньше стопа release.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
         assert _call(drv, "jog_hold", _JOG)["status"] == "ok"
         _hold(drv, 0.4)
         assert _moving(rig) == 1
         n_cmd = len(_jog_cmds(rig))
 
-        client = drv._client
-        real_stop = client.stop
+        client = clients.last
+        real_stop = client.issue_stop
         real_jog_cont = client.jog_cont
         entered = threading.Event()
         gate = threading.Event()
@@ -175,7 +202,7 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
             gate.set()
             return result
 
-        client.stop = gated_stop  # type: ignore[method-assign]
+        client.issue_stop = gated_stop  # type: ignore[method-assign]
         client.jog_cont = jog_cont_then_open  # type: ignore[method-assign]
         try:
             box: dict[str, Any] = {}
@@ -187,7 +214,7 @@ def test_jog_hold_during_stop_in_flight_starts_new_jog_without_nak() -> None:
             releaser.join(_CALL_DEADLINE_S)
             assert not releaser.is_alive()
         finally:
-            client.stop = real_stop  # type: ignore[method-assign]
+            client.issue_stop = real_stop  # type: ignore[method-assign]
             client.jog_cont = real_jog_cont  # type: ignore[method-assign]
 
         assert box["rel"] == {"status": "ok"}
@@ -206,7 +233,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
     """Близнец U2 на пути истёкшего окна (Д3): стоп шлёт поток поводка, ``jog_hold`` застаёт его в полёте.
 
     Подтверждения удержания прекращены — окно истекает, поток поводка шлёт стоп под замком перехода. Шов — ТОЛЬКО
-    стоп из потока поводка (имя потока ``rv2-lease-...``): он ждёт ворота, ворота открывает возврат нового
+    стоп из потока поводка (имя потока содержит ``rv2-lease-``): он ждёт ворота, ворота открывает возврат нового
     ``JOG_CONT``. С замком ``jog_hold`` ждёт замок, стоп уходит по дедлайну ворот, затем ``JOG_CONT``. Без замка
     на стороне поводка ``jog_hold`` шлёт запасной стоп и ``JOG_CONT``, запоздалый стоп поводка обрывает новый jog,
     а тик публикует чужую ошибку обрыва (seq нового jog не в списке своих стопов).
@@ -215,15 +242,16 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
     ``last_error`` за гонку нет; ``jog_hold`` вернулся не раньше стопа поводка.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
         assert _call(drv, "jog_hold", _JOG)["status"] == "ok"
         _hold(drv, 0.4)
         assert _moving(rig) == 1
         n_cmd = len(_jog_cmds(rig))
         n_err = len(rec.at("rv2", "last_error"))
 
-        client = drv._client
-        real_stop = client.stop
+        client = clients.last
+        real_stop = client.issue_stop
         real_jog_cont = client.jog_cont
         entered = threading.Event()
         gate = threading.Event()
@@ -231,7 +259,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
         stamps: dict[str, float] = {}
 
         def gated_stop(level: int) -> Any:
-            if not threading.current_thread().name.startswith("rv2-lease-") or not first.acquire(blocking=False):
+            if "rv2-lease-" not in threading.current_thread().name or not first.acquire(blocking=False):
                 return real_stop(level)  # не стоп потока поводка — без задержки
             entered.set()
             gate.wait(_GATE_S)  # с замком ворота не откроются (JOG_CONT ждёт этот стоп) — отпускает дедлайн
@@ -244,7 +272,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
             gate.set()
             return result
 
-        client.stop = gated_stop  # type: ignore[method-assign]
+        client.issue_stop = gated_stop  # type: ignore[method-assign]
         client.jog_cont = jog_cont_then_open  # type: ignore[method-assign]
         try:
             # подтверждений нет: окно 0.2 с истекает, поток поводка сам шлёт стоп
@@ -252,7 +280,7 @@ def test_jog_hold_during_expired_window_stop_in_flight_starts_new_jog() -> None:
             hold = _call(drv, "jog_hold", _JOG)
             stamps["hold_returned"] = time.monotonic()
         finally:
-            client.stop = real_stop  # type: ignore[method-assign]
+            client.issue_stop = real_stop  # type: ignore[method-assign]
             client.jog_cont = real_jog_cont  # type: ignore[method-assign]
 
         assert hold["status"] == "ok", hold
@@ -285,8 +313,9 @@ def test_start_program_during_jog_hold_transition_returns_busy_jog() -> None:
     }
     program = Program(name="race", steps=tuple(Move(point="a" if i % 2 == 0 else "b", kind="JOINT") for i in range(4)))
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last
         real_jog_cont = client.jog_cont
         box: dict[str, Any] = {}
 
@@ -342,8 +371,9 @@ def test_lease_thread_exception_releases_jog_and_allows_reconnect() -> None:
     переподключается (флаг без живого потока переподключение не держит) и jog снова работает.
     """
     rec = _Rec()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last
         real_lease = client.jog_lease
         fired = threading.Event()
 
@@ -409,7 +439,7 @@ def test_disconnect_during_program_aborts_and_joins_threads() -> None:
                     "программа идёт",
                 )
             bounded(drv.disconnect, _CALL_DEADLINE_S)
-            alive = [t.name for t in threading.enumerate() if t.name.startswith("rv2-prog-") and t.is_alive()]
+            alive = [t.name for t in threading.enumerate() if "rv2-prog-" in t.name and t.is_alive()]
             assert alive == [], "поток исполнителя жив после disconnect"
             final = rec.at("rv2", "program")[-1]
             assert final["state"] == "aborted", final
@@ -486,7 +516,7 @@ class _FakeClient:
     def probe(self) -> None:
         self.probes += 1
 
-    def sync_params(self, _values: Any, _epoch: int) -> None:
+    def sync_params(self, _values: Any, _epoch: int, *, cancelled: Any = None) -> None:
         pass
 
     def kick_heartbeat(self) -> None:
@@ -508,6 +538,13 @@ class _FakeClient:
         self.stops.append(level)
         self.stopped.set()
 
+    def issue_stop(self, level: int) -> int:
+        self.stop(level)
+        return len(self.stops) * 4 + level
+
+    def await_stop_echo(self, _value: int, _level: int, *, deadline: float) -> None:
+        pass
+
     def run_chunks(self, _scenario: Any, *, params: Any, on_progress: Any) -> None:
         self.run()
 
@@ -522,9 +559,10 @@ def _fake_driver(rec: _Rec, **params: Any) -> tuple[RobotDriverV2, _FakeClient, 
         params=params,
     )
     transport = _FakeTransport()
-    drv = RobotDriverV2(entry, None, transport=transport, publish=rec)
     client = _FakeClient()
-    drv._client = client  # шов: клиент v2 без sim (транспорт внедряется публично, клиент — нет)
+    drv = RobotDriverV2(
+        entry, None, transport=transport, publish=rec, spawn=_SCOPE.spawn, client_factory=lambda _t, _c: client
+    )  # шов: клиент v2 без sim
     assert drv.connect() is True
     transport.closed = 0  # первый connect закрывает «подключённый» сокет до probe — счёт закрытий с нуля после него
     drv.desired_connected = True
@@ -726,6 +764,89 @@ def test_busy_reply_on_launch_requeues_return_at_head() -> None:
     drv.tick(None)
     _until(lambda: drv.snapshot()["returns_done"] == 1, 5.0, "возврат исполнен после повтора")
     assert drv.snapshot()["return_queued"] == 0
+    drv.disconnect()
+
+
+def test_return_refused_by_disconnecting_requeues_and_tail_counts_it() -> None:
+    """C-29 (инжекция 22): возврат, взятый тиком до «Отключить», отказан ``admit_launch`` после него (текст
+    «идёт отключение робота» входит в ``_BUSY_REPLIES``) -> возврат вернулся в очередь, не в ``returns_failed``;
+    хвост ``disconnect`` снимает его и считает в «возвраты: 1» (журнал и ``last_error``)."""
+    rec = _Rec()
+    drv, _client, _transport = _fake_driver(rec)
+    assert drv.call("return_job", {"x_mm": 350.0, "y_mm": -150.0, "z_mm": -90.0})["return_queue_len"] == 1
+
+    def refused_after_k(_slot: Any, **_kw: Any) -> dict:
+        drv.request_disconnect()  # «Отключить» пришло после взятия возврата тиком
+        return {"status": "error", "message": "идёт отключение робота"}
+
+    drv.start_return = refused_after_k  # шов: K между take_next_action и admit_launch
+    drv.tick(None)
+    snap = drv.snapshot()
+    assert (snap["return_queued"], snap["returns_failed"], snap["returns_done"]) == (1, 0, 0)
+    drv.disconnect()
+    assert drv.snapshot()["return_queued"] == 0
+    assert drv.disconnect_pending is False
+    assert rec.at("rv2", "last_error")[-1] == "при отключении сняты задания: 0, возвраты: 1"
+
+
+def test_resync_after_disconnect_request_is_cancelled() -> None:
+    """C-29: готовый робот, «Отключить», затем пересинхронизация тика: предикат отмены истинный до первой записи
+    (``sync_params`` не шлёт ``PARAM_SET``)."""
+    rec = _Rec()
+    drv, client, transport = _fake_driver(rec)
+    from Services.robot_comm.core.protocol_v2 import REG
+
+    transport.tlm[REG["TLM_CFG_EPOCH"] - REG["TLM_PROTO_VER"]] = 2  # метка робота расходится с меткой ПК (1)
+    seen: list[bool] = []
+    client.sync_params = lambda _values, _epoch, *, cancelled=None: seen.append(cancelled())
+    drv.request_disconnect()
+    drv.tick(None)  # тик: сверка метки -> пересинхронизация
+    assert seen == [True]
+    drv.disconnect()
+    assert drv.disconnect_pending is False
+
+
+def test_disconnect_publication_failure_does_not_stick_counter(tmp_path: Any) -> None:
+    """C-29: ``_publish_state("disconnecting")`` бросил -> ``manager.disconnect`` всё равно вызван, счётчик
+    «Отключить» драйвера снят (иначе ``connect`` отменялся бы навсегда), ошибка ушла в health."""
+    from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+    from Plugins.hub.device_hub.tests.conftest import make_ctx
+
+    rec = _Rec()
+    drv, _client, transport = _fake_driver(rec)
+    registry_file = tmp_path / "devices.yaml"
+    ctx = make_ctx({"registry_path": str(registry_file)}, tmp_registry=registry_file)
+    plugin = DeviceHubPlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    try:
+        res = plugin.cmd_device_upsert(
+            {
+                "id": "rv2",
+                "name": "rv2",
+                "kind": "robot",
+                "protocol": "delta_v2",
+                "transport": {"type": "tcp", "host": "127.0.0.1", "port": 1, "unit_id": ROBOT_UNIT_ID},
+            }
+        )
+        assert res["status"] == "ok", res
+        plugin._manager._drivers["rv2"] = drv  # как в test_lifecycle_regressions: драйвер уже создан
+        real_publish = plugin._publish_state
+
+        def publish(path: str, value: Any) -> None:
+            if isinstance(value, dict) and value.get("conn") == "disconnecting":
+                raise RuntimeError("публикация статуса упала")
+            real_publish(path, value)
+
+        plugin._publish_state = publish
+        assert plugin.cmd_device_disconnect({"device_id": "rv2"})["status"] == "ok"
+        assert drv.disconnect_pending is True
+        plugin._process_conn_queue()
+        assert drv.disconnect_pending is False
+        assert transport.closed >= 1 and drv.is_connected is False
+        assert ctx.health.report_error.call_count == 1
+    finally:
+        plugin.shutdown(ctx)
 
 
 def test_failed_return_program_counts_returns_failed() -> None:
@@ -742,6 +863,7 @@ def test_failed_return_program_counts_returns_failed() -> None:
     _until(lambda: drv.snapshot()["returns_failed"] == 1, 5.0, "отказ программы возврата посчитан")
     assert drv.snapshot()["returns_done"] == 0
     _until(lambda: rec.at("rv2", "program")[-1]["state"] == "failed", 5.0, "публикация failed")
+    drv.disconnect()
 
 
 # --------------------------------------------------------------------------------------------------
@@ -797,9 +919,10 @@ def test_job_waits_for_jog_release_stop_in_flight() -> None:
     """
     rec = _Rec()
     entered, release = threading.Event(), threading.Event()
-    with E2eRig() as rig, _driver(rec, rig.port) as drv, pulse(lambda: drv.tick(None), 0.1):
-        client = drv._client  # шов: стоп release — метод клиента драйвера
-        original_stop = client.stop
+    clients = ClientRecorder()
+    with E2eRig() as rig, _driver(rec, rig.port, clients=clients) as drv, pulse(lambda: drv.tick(None), 0.1):
+        client = clients.last  # шов: стоп release — метод клиента драйвера
+        original_stop = client.issue_stop
 
         def stop(level: int) -> Any:
             entered.set()
@@ -815,7 +938,7 @@ def test_job_waits_for_jog_release_stop_in_flight() -> None:
             time.sleep(0.05)
         assert _call(drv, "enqueue_job", _PICK) == {"status": "ok", "queue_len": 1}
         assert _call(drv, "jog_hold", hold_args)["status"] == "ok"
-        client.stop = stop
+        client.issue_stop = stop
         mark = len(rig.core.events())
         releaser = threading.Thread(target=lambda: drv.call("jog_release", {}), name="t37-release", daemon=True)
         releaser.start()
@@ -827,7 +950,7 @@ def test_job_waits_for_jog_release_stop_in_flight() -> None:
         finally:
             release.set()
             releaser.join(5.0)
-        client.stop = original_stop
+        client.issue_stop = original_stop
         assert not releaser.is_alive()
         _until(lambda: drv.snapshot()["jobs_done"] + drv.snapshot()["jobs_failed"] >= 1, 15.0, "исход задания")
         snap = drv.snapshot()

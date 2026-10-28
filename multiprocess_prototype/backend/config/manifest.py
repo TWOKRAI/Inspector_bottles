@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel
@@ -81,6 +82,8 @@ class AppManifest(BaseModel):
     recipes: Path
     base: tuple[Path, ...] = ()
     presentation: Path | None = None
+    pipeline_origin: Literal["manifest", "state"] = "manifest"
+    pipeline_note: str | None = None
 
 
 def _resolve_base(base_dir: Path, raw: object) -> tuple[Path, ...]:
@@ -123,10 +126,18 @@ def load_manifest(path: Path | str) -> AppManifest:
     Returns:
         ``AppManifest`` с абсолютными путями.
     """
+    # Импорт отложен до первого вызова load_manifest, а не устранён: импорт app_module.store
+    # выполняет app_module/__init__ и грузит builder (замер ~1,3 с). Сам модуль манифеста
+    # остаётся лёгким на импорте, цена уходит на первую загрузку.
+    from multiprocess_framework.modules.app_module.store import resolve_active_pipeline
+
     path = Path(path)
     base_dir = path.parent
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+
+    # Активный pipeline: валидное <stem>.state.yaml перебивает умолчание из app.yaml.
+    active = resolve_active_pipeline(path, raw["pipeline"])
 
     styles_raw = raw.get("styles")
     base_raw = raw.get("base")
@@ -151,8 +162,10 @@ def load_manifest(path: Path | str) -> AppManifest:
         source=path.resolve(),
         system=_resolve(base_dir, raw["system"]),
         styles=styles,
-        pipeline=_resolve(base_dir, raw["pipeline"]),
+        pipeline=active.path,
         recipes=_resolve(base_dir, raw["recipes"]),
         base=_resolve_base(base_dir, base_raw),
         presentation=_resolve(base_dir, presentation_raw) if presentation_raw else None,
+        pipeline_origin=active.origin,
+        pipeline_note=active.note,
     )

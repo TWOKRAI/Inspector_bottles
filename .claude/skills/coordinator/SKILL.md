@@ -31,17 +31,28 @@ coordinator: <session> | since <YYYY-MM-DD HH:MM>
 window: <session> | quiet|heavy|stand | <what runs> | until ~<HH:MM>
 waiting: <session> | quiet|heavy|stand | <what> | ~<N> min
 stand: free | <session> measure|functional <SHA> <ports>
+merging: <session> | <branch> | since <HH:MM>
 ```
 
 - `<session>` is the session name as `ListAgents` prints it, **without** the `[ref]` suffix (the first line reads
   «This session is inspector-bottles-84 [cfb773] …», or «This process's main session is …» inside a subagent).
+- After every hand edit of `machine.lock` run `machine_gate.sh status`: a malformed line returns rc=2 to every
+  lane's gate. `waiting:` and `window:` need all four fields; the kind is only quiet|heavy|stand (a timed
+  `medium` waits and runs as `heavy`).
 - One `window:` line at most. Kinds: **quiet** — only the holder runs anything (A/B, flaky-test
   discriminators, timing measurements); **heavy** — the holder runs one heavy process at a time, others run
   `light` and non-timed `medium` (§3); **stand** — `run_sim_all.ps1` / backend stand, plus the `stand:` line;
   others run `light` only.
 - `scripts/stand_gate` in live mode still requires `stand.lock` with its own line — the holder of a `quiet` or
   `stand` window takes `stand.lock` too; the `stand:` line here is the coordinator's record.
-- Rewrite the whole file on every change with the Write tool, or open and close a window with `machine_gate.sh grant|close <coordinator> …` (checks the format, writes atomically); never append from two sessions. `machine_gate.sh status` prints the lock with free RAM and CPU.
+- **Self-service (owner, 2026-10-27):** lanes queue, hold and hand over windows themselves through `machine_gate.sh`; the coordinator is not asked for a window and does not write `waiting:` / `window:` lines for them.
+  - `request <s> quiet|heavy|stand <min> <what…>` — a lane calls it only when it can start NOW; prints `GRANTED until ~HH:MM` or `QUEUED position N`; a repeated call does not duplicate the line.
+  - `wait <s> [--timeout <min>]` — blocks until the window is the caller's (rc 0; 124 = timeout); run it in the background, the harness notifies. It promotes the first `waiting:` when no window is open and prints `OVERDUE <s> +N min` for a foreign window past its `until`.
+  - `release <s>` — closes the caller's own window and opens the next `waiting:` (FIFO); on a queued request it cancels it (`CANCELLED`); a foreign window → rc 2. `extend <s> <min>` moves the caller's `until`.
+  - `merge-begin <s> <branch>` / `merge-end <s>` — one `merging:` slot per lock; refused while the slot is taken or a `quiet` window is open. These replace «сливаю» / «ок».
+  - An overdue window is never taken automatically (the holder may still run a process): only `grant` / `close` by the coordinator or the owner remove a foreign window. `promote` is not run by `grant`, `close` or `merge-end`: after a manual `close` the next `wait` or `request` promotes.
+  - The coordinator no longer holds a manual `waiting:` for a lane; before a lane merges it removes the stale ones (a `waiting:` left from the old protocol is promoted like any request).
+- Hand edits stay for the coordinator only (a broken lock gives rc=2 to every lane): `machine_gate.sh grant|close <coordinator> …` (checks the format, writes atomically); never append from two sessions. `machine_gate.sh status` prints the lock with free RAM and CPU.
 - Holder gone from `ListAgents` while the coordinator lives → the coordinator closes the window and tells the queue.
 - Coordinator gone from `ListAgents` → any session may delete the file after telling the peers; if a `stand:`
   line names a session, first check that ports 8765/8766 are free. No file = the old stand protocol.
@@ -79,16 +90,38 @@ bypasses the gate and prints the gated command to run instead.
 
 ## 4. Signals — fixed words, so a session can find them in its inbox
 
-- lane → coordinator: `ready for window: <what>, ~<N> min, <K> process(es), quiet|heavy|stand`
-  (a timed `medium` asks for a `heavy` window; `light` and non-timed `medium` ask for none)
-- coordinator → holder: `window <session> open (<HH:MM>), ~<N> min: <what>; close with numbers`
-- holder → coordinator: `window <session> closed (<HH:MM>): <numbers>`
-- coordinator → waiting lanes: the new order and an ETA, every time the order changes.
-- lane → coordinator: `ОТЧЁТ: … — <path> · решение нужно: да|нет` per finished task (template §5 REPORT); the
-  coordinator reads the file and folds it into the day table of `docs/sessions/<YYYY-MM-DD>.md` (lane, task, result, models, tokens, open) and plans from it.
+Windows and merges are not signals any more (owner, 2026-10-27): a lane takes them from the gate (§2 self-service) and no
+message is sent. Sessions are messaged only for: a question for the owner, ownership of a file outside the lane's
+boundary, a finding in code the lane does not own. A timed `medium` asks for a `heavy` window; `light` and non-timed
+`medium` ask for none.
+- lane: `request <s> quiet|heavy|stand <min> <what…>` when it can start NOW (not "to be in line early"), `wait` in the
+  background, `release` with the numbers in its own report file; `merge-begin` / `merge-end` around a merge.
+- coordinator → lane: only the order of the queue when it changes by a decision of the owner, never by the gate.
+- lane → coordinator: no report message. The result lives in the lane's report file (template §5 REPORT); the
+  coordinator reads the files and folds them into the day table of `docs/sessions/<YYYY-MM-DD>.md` (lane, task, result, models, tokens, open) and plans from it.
 A window can be split: a short lane slots in while a long lane pauses (2026-10-13: robot 10 min between
-lane Zh's radius and its matrix). The lane on the owner's priority («visible result first») goes first
-when two are ready. Update `machine.lock` before sending the signal, not after.
+lane Zh's radius and its matrix). The queue is FIFO by the gate; the owner's priority («visible result first») is
+applied by the coordinator with `grant` / `close`, not by messages.
+
+**Message economy (owner, 2026-10-25).** Every message wakes the receiver, which re-reads its whole context
+(a lead often holds 100k+), so a message costs the receiver's context, not its text. Lanes write only:
+a question for the owner, files outside their boundary before an edit, a finding in code they do not own. A window
+request, ОТЧЁТ and «сливаю» are gone (gate: `request` / `merge-begin`; report: the file); a registry line is a file
+in `plans/queue/inbox/` (format: its README), folded into the registry by the coordinator or any session about
+twice a day, which assigns the C-NN numbers. No acknowledgements («принял», «понял»). The coordinator replies
+only when the lane must act or wait; a question to every lane only when it cannot wait for that lane's next signal.
+
+**Session reset at a merge (owner, 2026-10-25).** A lane session that runs task after task re-reads every
+finished task on each request; the usage panel put this at 61 % of the day. The reset point is «влит <sha>»:
+by then the work lives in git, the plan, ORDER and the registry, and the task's agents are no longer
+re-summoned. Before «влит» the lane commits a short handoff (`docs/handoffs/<date>_<lane>-<task>-merged.md`,
+10–15 lines: next ORDER line, what stays open, findings for the coordinator). On «влит» the coordinator sends
+the owner one line: «<lane>: граница — /clear во вкладке <label>, затем вставить: `Ты полоса <X>, координатор
+<name>. Прочитай <handoff> и продолжай.`». Inside a task (stage 0 → tester → developer → injections → review)
+nobody clears — the lead holds the predictions and the agentId table; past ~150k there it is `/compact`
+(focus: files + tests + plan path). A pause to the next day is the same boundary. After a reset the session
+name may change: the lane sends its name first, as at any start. The coordinator itself resets once a day,
+after its evening handoff.
 
 ## 5. Start prompt template — every prompt the coordinator writes
 
@@ -110,16 +143,19 @@ LOAD: coordinator is <session> (name also in machine.lock). First message to it:
   line of your own ListAgents, never a name from a handoff. First line of every reply to the owner:
   the ВКЛАДКА label plus your session name — «Полоса <X> · <Task X.Y> · <session name>».
   Every test/stand command through the gate from project-rules §8 (absolute path); heavy only in your
-  window — request it in advance: `ready for window: …`. Pass the session name to every agent brief.
+  window — take it yourself with `request` / `wait` / `release` (§2), no message. Merge: `merge-begin` /
+  `merge-end` instead of «сливаю» / «ок». Pass the session name to every agent brief.
 COMMITS: Conventional Commits + Why:/Layer:/Refs: trailers (.claude/COMMIT_GUIDE.md); stage explicit paths;
-  plan open/close is its own docs(plans) commit.
+  plan open/close is its own docs(plans) commit. Before a merge into main (owner, 2026-10-21): rebase on main, then
+  validate.py + multiprocess_prototype/backend/tests + the framework suite (heavy, in your window); every red named
+  against plans/queue/defects.md — a red not in the registry blocks the merge until the coordinator registers it.
 LIMITS: 2 iterations per loop, escalate on the 3rd one level up; owner decisions you need → list them, do not guess.
 REPORT: Russian; numbers, not adjectives; a non-empty «what I left open / unreliable»; agentId table;
   at the end of the task — handoff and a new session (/clear), not /compact.
   Per finished task (not per step) — a report file `docs/reports/<YYYY-MM-DD>_<plan-slug>_<task>.md`, committed
-  with the task; to the coordinator only one line: `ОТЧЁТ: Полоса <X> · Task <Y> · <session> — <absolute path>
-  · решение нужно: да|нет` (owner, 2026-10-18). The file: ≤ ~15 lines, plain words first, no filler; the handoff
-  links it instead of retelling:
+  with the task; no message to the coordinator (owner, 2026-10-27; it reads the files). A decision needed from the
+  owner goes into the file's «Дальше» and, if it blocks, into one question to the owner. The file: ≤ ~15 lines,
+  plain words first, no filler; the handoff links it instead of retelling:
     ОТЧЁТ: Полоса <X> · Task <Y> · <session>
     Суть: what the task was — 1–2 sentences a non-programmer understands.
     Итог: what works or changed now; commits, branch, merged or not.
@@ -154,6 +190,12 @@ Red only on the branch → the branch's finding. Give the window as `quiet` for 
   `51` as `a4`, `5c` as `1c`); the gate then exits 75. Trust `from-name` of its message, not its signature.
 - The owner sees tab titles, not session names. In every report to the owner name a session by its lane and
   tab title, the session name in brackets; keep the lane ↔ tab ↔ name table current after each restart.
+- A lane may switch the shared main checkout to its own branch (2026-10-19: `checkout: moving from main to
+  fix/…` in the reflog) — the coordinator's next `git add` there rides in the lane's commit. Before every commit
+  in the main checkout run `git branch --show-current` (must be `main`); a lane works in its own worktree, and
+  every start prompt says so.
+- A session's own permission rules can block `git checkout -- <file>` even after the owner said yes; do not
+  route around it with another tool — give the owner the exact command to run.
 
 ## 8. Handoff
 

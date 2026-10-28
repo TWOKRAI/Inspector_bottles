@@ -21,9 +21,12 @@ import os
 import queue
 import threading
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from multiprocess_framework.modules.base_manager import open_scope
+from multiprocess_framework.modules.base_manager.interfaces import CloseReport, IScope
 from multiprocess_framework.modules.error_module.interfaces import SubsystemStartFailed
 from multiprocess_framework.modules.process_module.plugins import (
     ExecutionMode,
@@ -36,11 +39,27 @@ from multiprocess_framework.modules.process_module.plugins import (
 from Services.device_hub import DeviceHubError
 from Services.device_hub.manager import DeviceManager
 from Services.device_hub.registry.store import RegistryStore
+from Services.device_hub.kinds import DEFAULT_KINDS, DeviceKind, command_sources
+from Services.device_hub.spi import OpSource, OpSpec, command_table
+from Services.robot_comm.store import RobotDataStore
 
 from .registers import DeviceHubRegisters
 
 # Корень проекта — для резолва относительных путей
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# Бюджет корня области потоков хаба, с (О8): окно ``work`` процесса 3.0 с минус запас 0.5 с
+_SCOPE_BUDGET_S = 2.5
+# Срок остановки плагина (T5.3 круг 2): бюджет 3,0 с минус запас 0,5 с на фазу 4 и отчёт
+_SHUTDOWN_BUDGET_S = 3.0
+_SHUTDOWN_MARGIN_S = 0.5
+# Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
+TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
+TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
+
+
+class ScopeThreadSurvived(RuntimeError):
+    """Поток области ``device_hub`` пережил срок закрытия (путь — в ``survivors`` инцидента)."""
 
 
 def _resolve_registry_path(raw_path: str) -> Path:
@@ -80,10 +99,21 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     register_class = DeviceHubRegisters
 
+    # Корень области потоков хаба (T5.3a): None до configure, после упавшего configure и после shutdown
+    _scope: IScope | None = None
+    # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
+    _shutting_down = False
+    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55).
+    # Подкласс со своим device_kinds получает команды новых строк сам (__init_subclass__, install_kind_commands)
+    device_kinds: tuple[DeviceKind, ...] = DEFAULT_KINDS
+    # Команды из описаний операций: имя -> (источник, операция); заполняет install_op_commands (copy-on-write)
+    _op_commands: dict[str, tuple[OpSource, OpSpec]] = {}
+
     # ------------------------------------------------------------------ #
-    # Таблица команд (Р7): имя_команды -> имя_метода
+    # Таблица команд (Р7): имя_команды -> имя_метода. Команды robot_* / vfd_* (55) генерирует install_op_commands
+    # сразу после класса из OP_SPECS классов драйверов таблицы видов (command_sources(device_kinds)).
     # ------------------------------------------------------------------ #
-    commands = {
+    commands: dict[str, str] = {
         # Реестр
         "device_list": "cmd_device_list",
         "device_describe": "cmd_device_describe",
@@ -98,43 +128,6 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Универсальные регистры
         "device_read": "cmd_device_read",
         "device_write": "cmd_device_write",
-        # Робот (11)
-        "robot_enqueue_job": "cmd_robot_enqueue_job",
-        "robot_return_job": "cmd_robot_return_job",
-        "robot_send_test_job": "cmd_robot_send_test_job",
-        "robot_abort": "cmd_robot_abort",
-        "robot_set_mode": "cmd_robot_set_mode",
-        "robot_jog": "cmd_robot_jog",
-        "robot_jog_abort": "cmd_robot_jog_abort",
-        "robot_set_servo": "cmd_robot_set_servo",
-        "robot_set_robot_config": "cmd_robot_set_robot_config",
-        "robot_get_robot_config": "cmd_robot_get_robot_config",
-        "robot_get_telemetry": "cmd_robot_get_telemetry",
-        "robot_read_echo": "cmd_robot_read_echo",
-        "robot_set_manual_mode": "cmd_robot_set_manual_mode",
-        "robot_clear_queue": "cmd_robot_clear_queue",
-        "robot_set_encoder_offset": "cmd_robot_set_encoder_offset",
-        "robot_toolchange": "cmd_robot_toolchange",
-        "robot_exchange_log_get": "cmd_robot_exchange_log_get",
-        "robot_exchange_log_set": "cmd_robot_exchange_log_set",
-        # Рисование (8)
-        "robot_draw_polyline": "cmd_robot_draw_polyline",
-        "robot_draw_circle": "cmd_robot_draw_circle",
-        "robot_draw_square": "cmd_robot_draw_square",
-        "robot_draw_set_pen": "cmd_robot_draw_set_pen",
-        "robot_draw_set_speed": "cmd_robot_draw_set_speed",
-        "robot_draw_set_travel": "cmd_robot_draw_set_travel",
-        "robot_draw_set_accel": "cmd_robot_draw_set_accel",
-        "robot_draw_set_pass_size": "cmd_robot_draw_set_pass_size",
-        "robot_draw_set_overlap": "cmd_robot_draw_set_overlap",
-        "robot_draw_abort": "cmd_robot_draw_abort",
-        "robot_draw_progress": "cmd_robot_draw_progress",
-        # ПЧ (5)
-        "vfd_run": "cmd_vfd_run",
-        "vfd_set_freq": "cmd_vfd_set_freq",
-        "vfd_stop": "cmd_vfd_stop",
-        "vfd_reset_fault": "cmd_vfd_reset_fault",
-        "vfd_get_status": "cmd_vfd_get_status",
         # Hikvision (6)
         "hik_enum": "cmd_hik_enum",
         "hik_open": "cmd_hik_open",
@@ -151,43 +144,74 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
         return DeviceHubPluginConfig
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Подкласс, задавший свой ``device_kinds``, получает команды новых строк таблицы видов; без своего
+        ``device_kinds`` — команды родителя как есть (не перегенерируются)."""
+        super().__init_subclass__(**kwargs)
+        if "device_kinds" in cls.__dict__:
+            install_kind_commands(cls)
+
     # ------------------------------------------------------------------ #
     # LIFECYCLE
     # ------------------------------------------------------------------ #
 
     def configure(self, ctx: PluginContext) -> None:
-        """IDLE -> READY: создать DeviceManager, загрузить реестр, публикация."""
+        """IDLE -> READY: открыть корень области потоков, создать DeviceManager, загрузить реестр, публикация.
+
+        Упал код после ``open_scope`` — корень закрывается здесь же (фреймворк всё равно зовёт ``shutdown()``,
+        он при ``self._scope is None`` ничего не делает).
+        """
         self._ctx = ctx
-        self._reg: DeviceHubRegisters = self._init_register(ctx)
+        # Выжившие, о которых reporter уже сообщил в health (по пути): отчёты корня и ``handle.close`` повторяются
+        self._scope_seen: set[str] = set()
+        self._scope_seen_lock = threading.Lock()
+        # Счётчики команд (commands_ok / commands_err / last_error): команды данных идут на потоках исполнителя
+        # device_io параллельно потоку роутера (D6) — чтение и запись счётчика под одним замком
+        self._counters_lock = threading.Lock()
+        scope = open_scope("device_hub", budget_s=_SCOPE_BUDGET_S, reporter=self._on_scope_report)
+        try:
+            self._reg: DeviceHubRegisters = self._init_register(ctx)
 
-        # Резолв пути к реестру (У6)
-        resolved = _resolve_registry_path(self._reg.registry_path)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
+            # Резолв пути к реестру (У6)
+            resolved = _resolve_registry_path(self._reg.registry_path)
+            resolved.parent.mkdir(parents=True, exist_ok=True)
 
-        store = RegistryStore(resolved)
-        self._manager = DeviceManager(store=store, publish_cb=self._publish_state)
-        self._manager.initialize()
+            store = RegistryStore(resolved)
+            # Одно хранилище данных робота на процесс: каталог data/robot рядом с devices.yaml (T5.3c)
+            self._robot_store = RobotDataStore(resolved.parent / "robot")
+            self._manager = DeviceManager(
+                store=store,
+                publish_cb=self._publish_state,
+                spawn=scope.spawn,
+                robot_store=self._robot_store,
+                kinds=self.device_kinds,
+            )
+            self._manager.initialize()
 
-        # Очередь async connect/disconnect (Б2)
-        self._conn_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-        # Воркеры per-device: {device_id: worker_name}
-        self._device_workers: dict[str, str] = {}
-        # Lock для device_workers И desired_connected
-        # (модифицируется из supervisor и командного потока)
-        self._workers_lock = threading.Lock()
+            # Очередь async connect/disconnect (Б2)
+            self._conn_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+            # Воркеры per-device: {device_id: worker_name}
+            self._device_workers: dict[str, str] = {}
+            # Lock для device_workers И desired_connected
+            # (модифицируется из supervisor и командного потока)
+            self._workers_lock = threading.Lock()
 
-        # НР-1/НР-2 ревью Fable: desired-state соединения.
-        # Runtime-состояние сессии (НЕ persist в devices.yaml).
-        # True = пользователь/рецепт хотят устройство подключённым;
-        # False = пользователь явно отключил.
-        # Без desired=True supervisor НЕ создаёт воркер и драйвер НЕ реконнектит.
-        self._desired_connected: dict[str, bool] = {}
+            # НР-1/НР-2 ревью Fable: desired-state соединения.
+            # Runtime-состояние сессии (НЕ persist в devices.yaml).
+            # True = пользователь/рецепт хотят устройство подключённым;
+            # False = пользователь явно отключил.
+            # Без desired=True supervisor НЕ создаёт воркер и драйвер НЕ реконнектит.
+            self._desired_connected: dict[str, bool] = {}
 
-        # Публикация начального реестра
-        self._publish_full_registry()
-        self._update_counters()
+            # Публикация начального реестра
+            self._publish_full_registry()
+            self._update_counters()
 
-        ctx.log_info(f"DeviceHubPlugin: configured (registry={resolved})")
+            ctx.log_info(f"DeviceHubPlugin: configured (registry={resolved})")
+            self._scope = scope
+        except BaseException:
+            scope.close()
+            raise
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
@@ -225,23 +249,110 @@ class DeviceHubPlugin(ProcessModulePlugin):
         )
         ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
-    def shutdown(self, ctx: PluginContext) -> None:
-        """* -> STOPPED: отключить всех, сохранить реестр."""
-        # Остановить и удалить per-device воркеры (remove_worker освобождает имена)
-        with self._workers_lock:
-            for dev_id, wname in list(self._device_workers.items()):
-                try:
-                    if ctx.worker_manager is not None:
-                        remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
-                        if remove_fn:
-                            remove_fn(wname)
-                except Exception:  # no-health: defensive teardown воркеров на shutdown
-                    pass
-            self._device_workers.clear()
+    def command_options(self, command_name: str) -> dict[str, Any]:
+        """Опции регистрации команды из описания операции (хук ``ProcessModulePlugin``, SPI.d2).
 
-        # Disconnect всех + сохранить
+        Pre: ``command_name`` — ключ ``self.commands``. Post: для имён из ``_op_commands`` — ``metadata`` с непустыми
+        ``description`` / ``args`` (пустые ключи не кладутся); при ``spec.executor`` — плюс ``executor`` и ``key_from``
+        источника. Прочие команды (``device_*``, ``hik_*``) и операции без описания и исполнителя — ``{}``:
+        регистрация как без хука. Описание пишется при регистрации, а не в ``start()``: замена словаря ``metadata``
+        после регистрации стёрла бы ``executor``.
+        """
+        found = self._op_commands.get(command_name)
+        if found is None:
+            return {}
+        source, spec = found
+        metadata: dict[str, Any] = {}
+        if spec.description:
+            metadata["description"] = spec.description
+        if spec.args_schema:
+            metadata["args"] = list(spec.args_schema)
+        options: dict[str, Any] = {"metadata": metadata} if metadata else {}
+        if spec.executor:
+            options["executor"] = spec.executor
+            options["key_from"] = source.key_from
+        return options
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
+
+        Срок — абсолютный: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S`` в начале. Фаза 1: стоп всем роботам
+        параллельно (``request_stop_all(deadline)``) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда,
+        ``finally``) -> фаза 4 без записи стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
+        ``remove_worker`` фреймворка (до 5,0 с на поток) в срок НЕ входит: его время съедает остаток бюджета закрытия.
+        Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
+        """
+        scope = self._scope
+        if scope is None:
+            return
+        self._scope = None
+        deadline = time.monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S
+        try:
+            with self._workers_lock:
+                self._shutting_down = True
+
+            # Фаза 1: стоп роботам уходит до любых ожиданий, параллельно, до срока
+            self._manager.request_stop_all(deadline)
+            self._report_unconfirmed_stops(ctx)
+
+            # Остановить и удалить per-device воркеры (remove_worker освобождает имена; вне срока)
+            with self._workers_lock:
+                for dev_id, wname in list(self._device_workers.items()):
+                    try:
+                        if ctx.worker_manager is not None:
+                            remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
+                            if remove_fn:
+                                remove_fn(wname)
+                    except Exception as exc:  # no-health: teardown воркеров на shutdown — лог, следующий воркер
+                        ctx.log_warning(f"DeviceHubPlugin: воркер {wname!r} ({dev_id}) не удалён: {exc!r}")
+                self._device_workers.clear()
+        finally:
+            # Единственное ожидание потоков драйверов, остаток срока. Выжившие — в health через reporter корня
+            scope.close(budget_s=max(0.0, deadline - time.monotonic()))
+
+        # Фаза 4: disconnect каждого без записи стопа (потоков уже нет) + сохранить реестр
         self._manager.shutdown()
         ctx.log_info("DeviceHubPlugin: shutdown")
+
+    def _report_unconfirmed_stops(self, ctx: PluginContext) -> None:
+        """Роботы, чей стоп процесса не подтверждён (нет эха / запись не прошла), — в health (решение §2, H3)."""
+        for entry in self._manager.snapshot_registry():
+            driver = self._manager.get_driver(entry.id)
+            if driver is None:
+                continue
+            try:
+                # чтения свойств драйвера — внутри try: сбой одного драйвера не лишает отчёта соседей
+                if not driver.stop_unconfirmed:
+                    continue
+                # текст причины — свойство драйвера (T5.3c c3): «нет окна» отличается от «эхо не пришло»
+                text = driver.stop_unconfirmed_text or TEXT_STOP_UNCONFIRMED
+                ctx.health.report_error(RuntimeError(text), context="device_hub.stop_echo", device_id=entry.id)
+            except Exception as exc:  # no-health: свойство драйвера или сам health упали — лог, остановка идёт дальше
+                ctx.log_warning(f"DeviceHubPlugin: health для {entry.id!r} не принят: {exc!r}")
+
+    def _on_scope_report(self, report: CloseReport) -> None:
+        """Reporter корня ``device_hub``: выжившие и ошибки закрытия -> ``log_warning`` и ``health.report_error``.
+
+        Зовётся на каждое закрытие: ``scope.close()`` и ``IHandle.close`` записи (в том числе из ``disconnect``
+        драйвера, потоки supervisor и команд). Один путь выжившего сообщается один раз (``_scope_seen``).
+        Не бросает.
+        """
+        try:
+            with self._scope_seen_lock:
+                new = [p for p in report.survivors if p not in self._scope_seen]
+                self._scope_seen.update(new)
+            errors = list(report.errors)
+            if not new and not errors:
+                return
+            self._ctx.log_warning(f"device_hub.scope: выжившие {new}, ошибки {errors}")
+            self._ctx.health.report_error(
+                ScopeThreadSurvived(TEXT_SCOPE_SURVIVED),
+                context="device_hub.scope",
+                survivors=new,
+                errors=[f"{path}: {text}" for path, text in errors],
+            )
+        except Exception as exc:  # reporter не бросает (ADR-BM-007)
+            self._ctx.log_error(f"device_hub.scope: reporter упал: {type(exc).__name__}: {exc}")
 
     # ------------------------------------------------------------------ #
     # SUPERVISOR WORKER (Б2)
@@ -254,6 +365,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 time.sleep(0.1)
                 continue
             time.sleep(self._reg.supervisor_interval_s)
+            if self._shutting_down:
+                continue  # shutdown идёт: воркеры не пересоздаём, очередь connect не разбираем (К1)
 
             # 1. Разобрать очередь connect/disconnect
             self._process_conn_queue()
@@ -264,28 +377,51 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def _process_conn_queue(self) -> None:
         """Обработать все ожидающие connect/disconnect запросы."""
         while True:
+            if self._shutting_down:
+                return  # запрос остаётся в очереди
             try:
                 op, dev_id = self._conn_queue.get_nowait()
             except queue.Empty:  # no-health: control-flow — очередь разобрана
                 break
             try:
                 if op == "connect":
+                    # C-29 (а): «Отключить» уже нажато — этот connect не идёт и ничего не публикует.
+                    # Только `is False`: connect без записи в словаре (интеграционные тесты) идёт как раньше.
+                    with self._workers_lock:
+                        skip = self._desired_connected.get(dev_id) is False
+                    if skip:
+                        continue
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "connecting"})
                     ok = self._manager.connect(dev_id)
-                    conn = "connected" if ok else "error"
+                    # C-29 (б): «Отключить» пришло во время connect — desired True и сброс лимита не ставятся.
+                    # Проверка и запись под одним замком с cmd_device_disconnect (K): либо K раньше, либо позже.
+                    with self._workers_lock:
+                        driver = self._manager.get_driver(dev_id)
+                        stop = self._desired_connected.get(dev_id) is False or (
+                            driver is not None and driver.disconnect_pending is True
+                        )
+                        if driver is not None and not stop:
+                            # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
+                            driver.desired_connected = True
+                            # Ручной/повторный connect: сбросить лимит попыток, чтобы
+                            # после «сдался» (reconnect_exhausted) кнопка «Подключить»
+                            # дала драйверу заново полный лимит попыток.
+                            driver.reset_reconnect()
+                    if stop:
+                        conn = "disconnecting"
+                    else:
+                        conn = "connected" if ok else "error"
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
-                    # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
-                    driver = self._manager.get_driver(dev_id)
-                    if driver is not None:
-                        driver.desired_connected = True
-                        # Ручной/повторный connect: сбросить лимит попыток, чтобы
-                        # после «сдался» (reconnect_exhausted) кнопка «Подключить»
-                        # дала драйверу заново полный лимит попыток.
-                        reset = getattr(driver, "reset_reconnect", None)
-                        if callable(reset):
-                            reset()
                 elif op == "disconnect":
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    # C-29: сбой публикации статуса не отменяет disconnect — иначе счётчик «Отключить» драйвера
+                    # (request_disconnect) остался бы навсегда. Ошибка уходит в health, как у соседних веток.
+                    try:
+                        self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    except Exception as pub_exc:
+                        if self._ctx:
+                            self._ctx.health.report_error(
+                                pub_exc, context="device_hub.disconnect_publish", device_id=dev_id
+                            )
                     # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
                     driver = self._manager.get_driver(dev_id)
                     if driver is not None:
@@ -316,6 +452,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         ТОЛЬКО при True; при False — лог, retry на следующей итерации.
         """
         with self._workers_lock:
+            if self._shutting_down:
+                return
             # Остановить воркеры для desired=False (факт > desired)
             for dev_id in list(self._device_workers):
                 if not self._desired_connected.get(dev_id, False):
@@ -363,9 +501,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 # дедуплицируется StateStore, и поздние подписчики (список,
                                 # страница добавления) видят stale «disconnected». ts меняется
                                 # → дельта проходит. quality снапшота отражает живость чтений.
-                                if getattr(drv, "is_connected", False):
+                                if drv.is_connected:
                                     conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
-                                elif getattr(drv, "reconnect_exhausted", False):
+                                elif drv.reconnect_exhausted:
                                     # Драйвер исчерпал попытки и «сдался» — ждёт ручного
                                     # «Подключить». Отдельное состояние для GUI (не спам).
                                     conn = "failed"
@@ -374,7 +512,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
                                 # io_peek для панели «Вход/Выход» (если драйвер
                                 # накапливает wire-обмен — robot/generic_modbus).
-                                io = getattr(drv, "last_io", None)
+                                io = drv.last_io
                                 if io and (io.get("input") or io.get("output")):
                                     self._publish_state(
                                         f"devices.state.{did}.io_peek",
@@ -384,7 +522,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 if self._ctx:
                                     self._ctx.health.report_error(exc, context=f"device_hub.tick.{did}", throttle=30.0)
                                 self._publish_state(f"devices.state.{did}.last_error", str(exc))
-                            time.sleep(interval)
+                            stop_evt.wait(interval)
 
                     return tick_loop
 
@@ -473,7 +611,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Выполнить функцию, завернув ошибки в {"status": "error", "message": ...}."""
         try:
             result = fn(*args, **kwargs)
-            self._reg.commands_ok += 1
+            with self._counters_lock:
+                self._reg.commands_ok += 1
             if isinstance(result, dict):
                 if "status" not in result:
                     result["status"] = "ok"
@@ -482,8 +621,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         except Exception as exc:
             # no-health: ошибка не глотается — уходит вызывающему в dict-ответ команды
             # (учёт в commands_err/last_error; false-degrade от пользовательских ошибок не нужен)
-            self._reg.commands_err += 1
-            self._reg.last_error = str(exc)
+            with self._counters_lock:
+                self._reg.commands_err += 1
+                self._reg.last_error = str(exc)
             # error= дублирует message: CommandManager логирует reason/error, не message
             # (иначе все ошибки device-команд в консоли = «failed: None»).
             return {"status": "error", "message": str(exc), "error": str(exc)}
@@ -525,6 +665,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
             }
         args = {k: v for k, v in data.items() if k != "device_id"}
         return self._safe_call(self._manager.call, dev_id, op, args)
+
+    def _robot_data(self, data: dict, op: str) -> dict:
+        """Офлайн-данные робота v2: ``DeviceManager.robot_data`` (мимо ``call``, связь не нужна)."""
+        dev_id = data.get("device_id", "")
+        if not dev_id:
+            return {"status": "error", "message": "device_id обязателен"}
+        args = {k: v for k, v in data.items() if k != "device_id"}
+        return self._safe_call(self._manager.robot_data, dev_id, op, args)
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Реестр
@@ -713,7 +861,25 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
             self._desired_connected[dev_id] = False
-        self._conn_queue.put(("disconnect", dev_id))
+            # C-29: точка линеаризации «Отключить» (K) — до постановки в очередь, под _workers_lock; без ввода-вывода
+            # (у драйверов кроме робота v2 — умолчание базы, ничего). Замки: _workers_lock -> _registry_lock ->
+            # состояние. Исключение драйвера ловится здесь, в health уходит после выхода из замка (нет ребра
+            # _workers_lock -> health); постановка disconnect в очередь — всегда.
+            request_error: Exception | None = None
+            driver = self._manager.get_driver(dev_id)
+            if driver is not None:
+                try:
+                    driver.request_disconnect()
+                except Exception as exc:
+                    request_error = exc
+        try:
+            if request_error is not None and self._ctx:
+                self._ctx.health.report_error(request_error, context="device_hub.request_disconnect", device_id=dev_id)
+        except Exception as exc:  # no-health: сам health упал — лог, disconnect идёт дальше
+            if self._ctx:
+                self._ctx.log_warning(f"DeviceHubPlugin: health для {dev_id!r} не принят: {exc!r}")
+        finally:
+            self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
 
     # ------------------------------------------------------------------ #
@@ -733,152 +899,17 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return self._safe_call(self._manager.write_registers, dev_id, values)
 
     # ------------------------------------------------------------------ #
-    # КОМАНДЫ — Робот (11)
+    # КОМАНДЫ — robot_* / vfd_* из описаний операций (install_op_commands)
     # ------------------------------------------------------------------ #
 
-    def cmd_robot_enqueue_job(self, data: dict) -> dict:
-        """Поставить CVT-задание: {device_id, x_mm, y_mm, e_capture?}."""
-        return self._kind_call(data, "robot", "enqueue_job")
-
-    def cmd_robot_return_job(self, data: dict) -> dict:
-        """Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота)."""
-        return self._kind_call(data, "robot", "return_job")
-
-    def cmd_robot_send_test_job(self, data: dict) -> dict:
-        """Тестовое CVT-задание: {device_id, x, y}."""
-        return self._kind_call(data, "robot", "send_test_job")
-
-    def cmd_robot_abort(self, data: dict) -> dict:
-        """Стоп робота: {device_id, mode: 1|2|3}."""
-        return self._kind_call(data, "robot", "abort")
-
-    def cmd_robot_set_mode(self, data: dict) -> dict:
-        """Режим робота: {device_id, mode: cvt|draw|manual}."""
-        return self._kind_call(data, "robot", "set_mode")
-
-    def cmd_robot_jog(self, data: dict) -> dict:
-        """Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %."""
-        return self._kind_call(data, "robot", "jog")
-
-    def cmd_robot_jog_abort(self, data: dict) -> dict:
-        """Прервать ручной ход: {device_id}."""
-        return self._kind_call(data, "robot", "jog_abort")
-
-    def cmd_robot_set_servo(self, data: dict) -> dict:
-        """Серво: {device_id, on: bool}."""
-        return self._kind_call(data, "robot", "set_servo")
-
-    def cmd_robot_set_robot_config(self, data: dict) -> dict:
-        """Конфиг робота: {device_id, ...fields}."""
-        return self._kind_call(data, "robot", "set_robot_config")
-
-    def cmd_robot_get_robot_config(self, data: dict) -> dict:
-        """Прочитать конфиг-блок робота."""
-        return self._kind_call(data, "robot", "get_robot_config")
-
-    def cmd_robot_get_telemetry(self, data: dict) -> dict:
-        """Телеметрия робота."""
-        return self._kind_call(data, "robot", "get_telemetry")
-
-    def cmd_robot_read_echo(self, data: dict) -> dict:
-        """Эхо последнего задания."""
-        return self._kind_call(data, "robot", "read_echo")
-
-    def cmd_robot_set_manual_mode(self, data: dict) -> dict:
-        """Ручной режим: {device_id, on: bool}."""
-        return self._kind_call(data, "robot", "set_manual_mode")
-
-    def cmd_robot_clear_queue(self, data: dict) -> dict:
-        """Очистить очередь заданий."""
-        return self._kind_call(data, "robot", "clear_queue")
-
-    def cmd_robot_set_encoder_offset(self, data: dict) -> dict:
-        """Подстройка компенсации конвейера: {device_id, lead_mm} (мм вдоль ленты, знаковое)."""
-        return self._kind_call(data, "robot", "set_encoder_offset")
-
-    def cmd_robot_toolchange(self, data: dict) -> dict:
-        """Смена инструмента: {device_id, target: 0|1|2, timeout?}."""
-        return self._kind_call(data, "robot", "toolchange")
-
-    def cmd_robot_exchange_log_get(self, data: dict) -> dict:
-        """Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи (T5.6)."""
-        return self._driver_call(data, "robot", "exchange_log_get")
-
-    def cmd_robot_exchange_log_set(self, data: dict) -> dict:
-        """Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6)."""
-        return self._driver_call(data, "robot", "exchange_log_set")
-
-    # ------------------------------------------------------------------ #
-    # КОМАНДЫ — Рисование (8)
-    # ------------------------------------------------------------------ #
-
-    def cmd_robot_draw_polyline(self, data: dict) -> dict:
-        """Нарисовать полилинию: {device_id, points, ...}."""
-        return self._kind_call(data, "robot", "draw_polyline")
-
-    def cmd_robot_draw_circle(self, data: dict) -> dict:
-        """Нарисовать окружность: {device_id, cx, cy, r}."""
-        return self._kind_call(data, "robot", "draw_circle")
-
-    def cmd_robot_draw_square(self, data: dict) -> dict:
-        """Нарисовать квадрат: {device_id, cx, cy, side}."""
-        return self._kind_call(data, "robot", "draw_square")
-
-    def cmd_robot_draw_set_pen(self, data: dict) -> dict:
-        """Установить перо: {device_id, pen_z}."""
-        return self._kind_call(data, "robot", "draw_set_pen")
-
-    def cmd_robot_draw_set_speed(self, data: dict) -> dict:
-        """Установить скорость рисования (перо по бумаге): {device_id, pct}."""
-        return self._kind_call(data, "robot", "draw_set_speed")
-
-    def cmd_robot_draw_set_travel(self, data: dict) -> dict:
-        """Установить скорость переезда (перо вверх): {device_id, pct}."""
-        return self._kind_call(data, "robot", "draw_set_travel")
-
-    def cmd_robot_draw_set_accel(self, data: dict) -> dict:
-        """Установить ускорение рисования: {device_id, accel} (мм/с²)."""
-        return self._kind_call(data, "robot", "draw_set_accel")
-
-    def cmd_robot_draw_set_pass_size(self, data: dict) -> dict:
-        """Установить размер пачки рисования: {device_id, n} (точек на проход)."""
-        return self._kind_call(data, "robot", "draw_set_pass_size")
-
-    def cmd_robot_draw_set_overlap(self, data: dict) -> dict:
-        """Установить overlap: {device_id, overlap}."""
-        return self._kind_call(data, "robot", "draw_set_overlap")
-
-    def cmd_robot_draw_abort(self, data: dict) -> dict:
-        """Прервать рисование: {device_id}."""
-        return self._kind_call(data, "robot", "draw_abort")
-
-    def cmd_robot_draw_progress(self, data: dict) -> dict:
-        """Прогресс рисования: {device_id}."""
-        return self._kind_call(data, "robot", "draw_progress")
-
-    # ------------------------------------------------------------------ #
-    # КОМАНДЫ — ПЧ (5)
-    # ------------------------------------------------------------------ #
-
-    def cmd_vfd_run(self, data: dict) -> dict:
-        """Пуск ПЧ: {device_id, direction?, freq_hz?}."""
-        return self._kind_call(data, "vfd", "run")
-
-    def cmd_vfd_set_freq(self, data: dict) -> dict:
-        """Установить частоту: {device_id, freq_hz}."""
-        return self._kind_call(data, "vfd", "set_freq")
-
-    def cmd_vfd_stop(self, data: dict) -> dict:
-        """Стоп ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "stop")
-
-    def cmd_vfd_reset_fault(self, data: dict) -> dict:
-        """Сброс аварии ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "reset_fault")
-
-    def cmd_vfd_get_status(self, data: dict) -> dict:
-        """Статус ПЧ: {device_id}."""
-        return self._kind_call(data, "vfd", "get_status")
+    def _op_command(self, data: dict, source: OpSource, spec: OpSpec) -> dict:
+        """Тело сгенерированной команды: данные робота -> ``_robot_data``; операция без связи -> ``_driver_call``;
+        прочие -> ``_kind_call`` (тела и тексты отказов прежние)."""
+        if source.route == "data":
+            return self._robot_data(data, spec.name)
+        if spec.needs_link is False:
+            return self._driver_call(data, source.kind, spec.name)
+        return self._kind_call(data, source.kind, spec.name)
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Hikvision (6)
@@ -953,3 +984,72 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     # best-effort release-all: не прерываем обход, но отказ учитываем в health
                     self._ctx.health.report_error(exc, context="device_hub.hik_release")
         return {"status": "ok", "released": released}
+
+
+def _make_op_command(source: OpSource, spec: OpSpec) -> Callable[[DeviceHubPlugin, dict], dict]:
+    """Метод ``cmd_<префикс>_<операция>``: фабрика замыкания над ``(source, spec)``, не над переменной цикла (Т4)."""
+
+    def command(self: DeviceHubPlugin, data: dict) -> dict:
+        return self._op_command(data, source, spec)
+
+    command.__name__ = command.__qualname__ = f"cmd_{source.prefix}_{spec.name}"
+    command.__doc__ = spec.description or f"{source.prefix}: {spec.name}"
+    return command
+
+
+def install_op_commands(cls: type[DeviceHubPlugin], sources: Sequence[OpSource]) -> None:
+    """Сгенерировать команды из описаний операций: метод ``cmd_<имя>``, строка ``commands`` и ``_op_commands``.
+
+    Pre: ``cls`` — ``DeviceHubPlugin`` или его подкласс; ``sources`` — источники для ``command_table``.
+    Post: для каждой строки ``command_table(sources)`` у ``cls`` есть метод ``cmd_<имя>``,
+        ``cls.commands[<имя>] == "cmd_<имя>"`` и ``cls._op_commands[<имя>] == (source, spec)``. Словари ``commands`` и
+        ``_op_commands`` пишутся в собственные словари ``cls`` (copy-on-write: родитель не меняется).
+    Raises: ``ValueError`` — имя уже есть в ``cls.commands`` или атрибут ``cmd_<имя>`` уже есть у ``cls``, либо
+        конфликт описаний в ``command_table``; при отказе ``cls`` не меняется.
+    """
+    _install_table(cls, command_table(sources))
+
+
+def install_kind_commands(cls: type[DeviceHubPlugin]) -> None:
+    """Команды подкласса со своей таблицей видов ``device_kinds`` (зовёт ``DeviceHubPlugin.__init_subclass__``).
+
+    Pre: ``cls`` — подкласс ``DeviceHubPlugin``, ``device_kinds`` задан в его теле.
+    Post: у ``cls`` есть команда каждой строки ``command_table(command_sources(cls.device_kinds))``; новые имена
+        поставлены (copy-on-write, родитель не меняется), одноимённые команды родителя остались.
+    Raises: ``ValueError`` — одноимённая команда родителя с другим видом / путём / ключом / ``OpSpec``, или команда
+        родителя, которой нет в таблице подкласса (снять сгенерированную команду подклассом нельзя).
+    """
+    table = command_table(command_sources(cls.device_kinds))
+    inherited = cls._op_commands
+
+    def same(a: tuple[OpSource, OpSpec], b: tuple[OpSource, OpSpec]) -> bool:
+        return (a[0].kind, a[0].route, a[0].key_from, a[1]) == (b[0].kind, b[0].route, b[0].key_from, b[1])
+
+    dropped = sorted(set(inherited) - set(table))
+    changed = sorted(name for name in table if name in inherited and not same(table[name], inherited[name]))
+    if dropped or changed:
+        raise ValueError(
+            f"{cls.__name__}: таблица видов расходится с командами родителя: нет {dropped}, иначе {changed}"
+        )
+    _install_table(cls, {name: row for name, row in table.items() if name not in inherited})
+
+
+def _install_table(cls: type[DeviceHubPlugin], table: dict[str, tuple[OpSource, OpSpec]]) -> None:
+    """Поставить строки таблицы команд у ``cls`` (copy-on-write); занятое имя — ``ValueError``, ``cls`` не меняется."""
+    for name in table:
+        if name in cls.commands or hasattr(cls, f"cmd_{name}"):
+            raise ValueError(f"команда {name!r} уже есть у {cls.__name__}")
+    if not table:
+        return
+    if "commands" not in cls.__dict__:
+        cls.commands = dict(cls.commands)
+    if "_op_commands" not in cls.__dict__:
+        cls._op_commands = dict(cls._op_commands)
+    for name, (source, spec) in table.items():
+        method = f"cmd_{name}"
+        setattr(cls, method, _make_op_command(source, spec))
+        cls.commands[name] = method
+        cls._op_commands[name] = (source, spec)
+
+
+install_op_commands(DeviceHubPlugin, command_sources(DeviceHubPlugin.device_kinds))

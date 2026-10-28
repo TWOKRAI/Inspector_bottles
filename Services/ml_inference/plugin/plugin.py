@@ -25,6 +25,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 
+from Services.ml_inference.core.registry import ModelAssetError
 from Services.ml_inference.engine import InferenceEngine
 
 from .registers import MLInferenceRegisters
@@ -120,14 +121,16 @@ class MLInferencePlugin(ProcessModulePlugin):
         # load/unload из команд (поток message_processor) — иначе гонка по сессии.
         self._engine_lock = threading.Lock()
 
-        # Кэш для inference_every_n + телеметрия latency.
-        self._frame_idx: int = 0
-        self._last_predictions: list[dict] = []
+        # Телеметрия latency.
         self._latency_sum_ms: float = 0.0
         self._latency_count: int = 0
         self._last_latency_ms: float = 0.0  # мгновенное значение последнего инференса
         self._max_latency_ms: float = 0.0  # худший спайк за окно публикации
         self._last_publish: float = time.monotonic()
+
+        # Деградация health из-за ассетов модели (C-55b): ставим и снимаем только свою.
+        self._asset_degraded: bool = False
+        self._asset_reason: str = ""
 
         self._load_selected_model()
         ctx.log_info(
@@ -169,49 +172,32 @@ class MLInferencePlugin(ProcessModulePlugin):
         if not self._reg.model or not self._engine.is_ready:
             return {**item, "predictions": []}
 
-        every_n = max(1, self._reg.inference_every_n)
-        self._frame_idx += 1
-        run_now = (self._frame_idx % every_n) == 0 or not self._last_predictions
-
-        if run_now:
-            t0 = time.monotonic()
-            try:
-                # lock: команда set_model/reload на другом потоке может в этот момент
-                # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
-                with self._engine_lock:
-                    # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
-                    # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
-                    preds = self._mark_below_threshold(
-                        self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0)
-                    )
-            except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
-                self._reg.last_error = str(exc)
-                self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
-                logger.exception("MLInferencePlugin: inference error")  # traceback в лог
-                # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
-                # как «уверенное попадание»): пустой результат → fail-safe «не доверять».
-                # Кэш чистим тоже: иначе при inference_every_n>1 следующий кадр отдал бы
-                # предсказание ДО ошибки как «уверенное», а регистры остались бы fail-safe.
-                self._last_predictions = []
-                self._update_last_pred_telemetry([])
-                return {**item, "predictions": []}
-            # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
-            # висит в телеметрии до перезагрузки модели)
-            if self._reg.last_error:
-                self._reg.last_error = ""
-            dt_ms = (time.monotonic() - t0) * 1000
-            self._latency_sum_ms += dt_ms
-            self._latency_count += 1
-            self._last_latency_ms = dt_ms
-            self._max_latency_ms = max(self._max_latency_ms, dt_ms)
-            self._last_predictions = preds
-            self._update_last_pred_telemetry(preds)
-        else:
-            # кэш помечается ТЕКУЩИМ порогом: cmd_set_threshold между кадрами inference_every_n>1
-            # действует сразу (поднятый порог не оставит диск «уверенным» по устаревшему флагу)
-            preds = self._mark_below_threshold(self._last_predictions)
-            if preds:
-                self._reg.last_below_threshold = bool(preds[0]["below_threshold"])
+        t0 = time.monotonic()
+        try:
+            # lock: команда set_model/reload на другом потоке может в этот момент
+            # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
+            with self._engine_lock:
+                # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
+                # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
+                preds = self._mark_below_threshold(self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0))
+        except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
+            self._reg.last_error = str(exc)
+            self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
+            logger.exception("MLInferencePlugin: inference error")  # traceback в лог
+            # регистры не держат прошлый кадр (stale last_below_threshold=False выглядел бы
+            # как «уверенное попадание»): пустой результат → fail-safe «не доверять».
+            self._update_last_pred_telemetry([])
+            return {**item, "predictions": []}
+        # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
+        # висит в телеметрии до перезагрузки модели)
+        if self._reg.last_error:
+            self._reg.last_error = ""
+        dt_ms = (time.monotonic() - t0) * 1000
+        self._latency_sum_ms += dt_ms
+        self._latency_count += 1
+        self._last_latency_ms = dt_ms
+        self._max_latency_ms = max(self._max_latency_ms, dt_ms)
+        self._update_last_pred_telemetry(preds)
 
         result_frame = frame
         if self._reg.draw_overlay and preds:
@@ -265,7 +251,7 @@ class MLInferencePlugin(ProcessModulePlugin):
 
     def cmd_set_threshold(self, data: dict) -> dict:
         """Обновить порог/top_k без перезагрузки модели."""
-        for field in ("confidence_threshold", "top_k", "inference_every_n", "draw_overlay"):
+        for field in ("confidence_threshold", "top_k", "draw_overlay"):
             if field in data:
                 setattr(self._reg, field, data[field])
         return {"status": "ok"}
@@ -281,12 +267,12 @@ class MLInferencePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _load_selected_model(self) -> None:
-        """Загрузить self._reg.model в движок; ошибки → last_error (не падаем)."""
+        """Проверить ассеты выбранной модели и загрузить её; ошибки → last_error + health.
+
+        Старт не блокируется: исключение наружу не уходит, при error плагин остаётся в
+        pass-through. error → инцидент (`report_error`) + health `degraded`; warning/info → лог.
+        """
         self._reg.last_error = ""
-        # Сбросить кэш предсказаний/счётчик кадров — иначе при inference_every_n > 1
-        # первые кадры после смены модели вернут результаты предыдущей модели.
-        self._last_predictions = []
-        self._frame_idx = 0
         # сбросить угловую телеметрию — у новой модели может не быть angle_head
         self._reg.last_angle_deg = 0.0
         self._reg.last_angle_valid = False
@@ -294,9 +280,18 @@ class MLInferencePlugin(ProcessModulePlugin):
         self._reg.active_providers = ""
         # lock: не пересоздавать сессию, пока predict() на другом потоке её читает
         with self._engine_lock:
-            if not self._reg.model:
+            diagnosis = self._engine.registry.diagnose(self._reg.model)
+            if diagnosis.severity == "warning":
+                # модель не выбрана — штатный pass-through, не авария
                 self._engine.unload()
                 self._reg.loaded_model = ""
+                self._ctx.log_warning(diagnosis.message)
+                self._clear_asset_degraded()
+                return
+            if diagnosis.severity == "error":
+                self._engine.unload()
+                self._reg.loaded_model = ""
+                self._fail_assets(diagnosis.message, last_error=diagnosis.message)
                 return
             try:
                 self._engine.load_model(self._reg.model, device=self._reg.device)
@@ -304,9 +299,39 @@ class MLInferencePlugin(ProcessModulePlugin):
                 # фактические providers (показывает молчаливый CPU-fallback при device=cuda)
                 self._reg.active_providers = ", ".join(self._engine.active_providers)
             except Exception as exc:  # noqa: BLE001 — нет модели не должно ронять процесс
-                self._reg.last_error = str(exc)
                 self._reg.loaded_model = ""
-                self._ctx.log_error(f"MLInferencePlugin: не удалось загрузить '{self._reg.model}': {exc}")
+                # id уже прошёл белый список diagnose; в регистр идёт str(exc) — текст
+                # onnxruntime оператору полезен (это не pydantic)
+                self._fail_assets(
+                    f"не удалось загрузить '{self._reg.model}': {type(exc).__name__}",
+                    last_error=str(exc),
+                )
+                return
+            self._ctx.log_info(diagnosis.message)
+            self._clear_asset_degraded()
+
+    def _fail_assets(self, message: str, last_error: str) -> None:
+        """Ассеты модели непригодны: регистр, инцидент, health degraded. Зовётся под _engine_lock.
+
+        Одна дверь для инцидента — `report_error` (правило одного коннектора), `log_error` рядом
+        не ставим. Исключение не пробрасываем: старт системы не блокируется.
+        """
+        self._reg.last_error = last_error
+        self._asset_reason = f"ml_inference: {message}"
+        self._ctx.health.report_error(ModelAssetError(message), context="ml_inference.model")
+        self._ctx.health.degraded(self._asset_reason)
+        self._asset_degraded = True
+
+    def _clear_asset_degraded(self) -> None:
+        """Снять деградацию health, если её поставили мы и она ещё стоит. Под _engine_lock.
+
+        Сверка по строке: `HealthStatus` — str-Enum, импортировать его в плагин не нужно.
+        Чужую деградацию (breaker, другой плагин) не трогаем, пока сами не ставили свою.
+        """
+        if self._asset_degraded and self._ctx.health.status == "degraded":
+            self._ctx.health.set_status("ok")
+        self._asset_degraded = False
+        self._asset_reason = ""
 
     def _update_last_pred_telemetry(self, preds: list[dict]) -> None:
         """Обновить readonly-поля последнего предсказания (класс + угол + below_threshold).
@@ -340,8 +365,17 @@ class MLInferencePlugin(ProcessModulePlugin):
         """Опубликовать метрики инференса в StateStore.
 
         elapsed_s — длительность окна с прошлой публикации (для inference_fps =
-        число инференсов / окно; учитывает inference_every_n и простой).
+        число инференсов / окно; учитывает простой).
         """
+        # Обход C-66: breaker снимает чужую деградацию при закрытии; снять после исправления владения degraded в health
+        # Замок не блокирующий: идёт загрузка модели (команда держит его) — пропускаем этот тик,
+        # следующий не раньше чем через секунду. Только `ok`: `failed` в `degraded` не понижаем.
+        if self._engine_lock.acquire(blocking=False):
+            try:
+                if self._asset_degraded and self._ctx.health.status == "ok":
+                    self._ctx.health.degraded(self._asset_reason)
+            finally:
+                self._engine_lock.release()
         avg = self._latency_sum_ms / self._latency_count if self._latency_count else 0.0
         fps = self._latency_count / elapsed_s if elapsed_s > 0 else 0.0
         self._reg.avg_latency_ms = round(avg, 2)

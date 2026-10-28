@@ -1,0 +1,231 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-1.9b",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    }
+  },
+  "started": 1792999218.0155401,
+  "rows": {
+    "S1": {
+      "verdict": "FAIL",
+      "reasons": [
+        "r2: reply_s=0.516 вне [0.85; 1.2]",
+        "r3: reply_s=0.516 вне [0.85; 1.2]",
+        "r4: reply_s=0.469 вне [0.85; 1.2]",
+        "r5: reply_s=0.468 вне [0.85; 1.2]",
+        "r6: reply_s=0.313 вне [0.85; 1.2]",
+        "r7: reply_s=0.36 вне [0.85; 1.2]",
+        "r8: reply_s=0.469 вне [0.85; 1.2]",
+        "r9: reply_s=0.36 вне [0.85; 1.2]",
+        "r10: reply_s=0.36 вне [0.85; 1.2]"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 0.313,
+        "median": 0.4685,
+        "max": 0.859,
+        "p99": 0.859
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 0.313,
+        "median": 0.4685,
+        "max": 0.859,
+        "p99": 0.859
+      },
+      "threshold_text": "0 зависаний, ответ 0,85-1,20 с, lost 0",
+      "lost_lines": 0,
+      "dns_lines": 0
+    },
+    "S2": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "hangs": 0,
+      "stats": {
+        "n": 295,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      },
+      "primary_stats": {
+        "n": 295,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      },
+      "threshold_text": "каждый ответ <= 0,5 с, p99 <= 150 мс",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "max_latency_s": 0.016
+    },
+    "S3": {
+      "verdict": "PASS",
+      "reasons": [],
+      "invalid": false,
+      "hangs": 0,
+      "delivery_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 0.031,
+        "median": 0.032,
+        "max": 0.062,
+        "p99": 0.062
+      },
+      "relay_reply_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 0.0,
+        "median": 0.0,
+        "max": 0.016,
+        "p99": 0.016
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 0.031,
+        "median": 0.032,
+        "max": 0.062,
+        "p99": 0.062
+      },
+      "threshold_text": "доставка и ответ <= 0,5 с",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "max_delivery_s": 0.062
+    },
+    "S4": {
+      "verdict": "FAIL",
+      "reasons": [
+        "повтор 2: выход PM на +4.64 с > 4.5",
+        "повтор 3: выход PM на +4.92 с > 4.5",
+        "повтор 5: выход PM на +4.91 с > 4.5"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "shutdown_line_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 0.992,
+        "median": 1.0,
+        "max": 1.007,
+        "p99": 1.007
+      },
+      "pm_exit_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 4.422,
+        "median": 4.641,
+        "max": 4.922,
+        "p99": 4.922
+      },
+      "primary_stats": {
+        "n": 5,
+        "unanswered": 0,
+        "min": 0.992,
+        "median": 1.0,
+        "max": 1.007,
+        "p99": 1.007
+      },
+      "threshold_text": "строка <= +1,2 с, выход PM <= +4,5 с, dns 0, system_stopping",
+      "lost_lines": 0,
+      "dns_lines": 0,
+      "min_shutdown_line_s": 0.992
+    },
+    "S5": {
+      "verdict": "FAIL",
+      "reasons": [
+        "restart #1 (camera_0 (вместо renderer) #1): 5.02 с >= 5.0",
+        "restart #2 (camera_0 (вместо renderer) #2): 5.03 с >= 5.0",
+        "restart #3 (camera_0 (вместо renderer) #3): 5.03 с >= 5.0",
+        "shutdown #8 (run 1): 2.94 с >= 2.0",
+        "shutdown #9 (run 2): 5.50 с >= 2.0",
+        "shutdown #10 (run 3): 5.72 с >= 2.0",
+        "shutdown #11 (run 4): 5.58 с >= 2.0",
+        "shutdown #12 (run 5): 5.33 с >= 2.0",
+        "shutdown #13 (run 6): 5.20 с >= 2.0",
+        "shutdown #14 (run 7): 5.09 с >= 2.0",
+        "shutdown #15 (run 8): 5.92 с >= 2.0",
+        "shutdown #16 (run 9): 5.05 с >= 2.0",
+        "shutdown #17 (run 10): 5.88 с >= 2.0"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "restart_stats": {
+        "n": 6,
+        "unanswered": 0,
+        "min": 1.625,
+        "median": 3.5705,
+        "max": 5.031,
+        "p99": 5.031
+      },
+      "activate_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 3.75,
+        "median": 3.75,
+        "max": 3.75,
+        "p99": 3.75
+      },
+      "tree_exit_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.938,
+        "median": 5.414,
+        "max": 5.922,
+        "p99": 5.922
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 2.938,
+        "median": 5.414,
+        "max": 5.922,
+        "p99": 5.922
+      },
+      "threshold_text": "рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0",
+      "lost_lines": 0,
+      "dns_lines": 0
+    }
+  },
+  "elapsed_s": 564.0
+}

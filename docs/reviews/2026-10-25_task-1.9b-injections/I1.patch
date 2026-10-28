@@ -1,0 +1,26 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..216f388ea 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -605,7 +605,7 @@ class ProcessManagerProcess(ProcessModule):
+
+         for cmd_name, (handler, description) in commands.items():
+             if cmd_name in self._LIFECYCLE_COMMANDS:
+-                routing = {"executor": "pm-lifecycle-submit", **self._LIFECYCLE_COMMANDS[cmd_name]}
++                routing = {}  # INJ I1: class L without executor
+             elif cmd_name in self._TRANSITION_COMMANDS:
+                 routing = {"executor": "pm-transition-gate", **self._TRANSITION_COMMANDS[cmd_name]}
+             else:
+diff --git a/multiprocess_prototype/orchestrator.py b/multiprocess_prototype/orchestrator.py
+index fd5eed68a..af65a871c 100644
+--- a/multiprocess_prototype/orchestrator.py
++++ b/multiprocess_prototype/orchestrator.py
+@@ -78,7 +78,7 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
+         for cmd_name, handler in service.handlers().items():
+             # Task 1.9b (D2): recipe.activate — класс L (зовёт topology.apply, ждёт смерти детей): строкой
+             # на адаптер PM, чтобы relay во время активации видел переход. Остальные recipe.* — как были.
+-            routing = {"executor": "pm-lifecycle-submit", "targets": "all"} if cmd_name == "recipe.activate" else {}
++            routing = {}  # INJ I1
+             self.command_manager.register_command(
+                 cmd_name,
+                 handler,

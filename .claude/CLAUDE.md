@@ -46,14 +46,14 @@ answer; follow it and only speak up when deviating.
 |---|---|---|
 | 0. Spec review | `reviewer`, **synchronous, once on the Task text** (DESIGN / FILES / REDS), via `MODE: plan` on one Task file (`reviewer.md`) | before the tester: the tester's acceptance lines must be final. Verdict `APPROVED` / `CHANGES REQUESTED` with a list. Not run for solo-trivial work. Model by class (below). |
 | 1. Independent acceptance tests | `tester`, **once per mechanism, before the implementation** | synchronous, from acceptance criteria only. Runs in a **git worktree at the pre-implementation commit** — blindness is enforced by the tree, not by prose. Its tests are expected RED; they are the spec handed to stage 2. |
-| 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. Sonnet implements any task with a precise DESIGN, threaded ones included once stage 0 ran on Opus; `teamlead` keeps design-level concurrency decisions. I keep the spec, the acceptance and the measurements. |
+| 2. Implementation | `developer` (Middle) / `teamlead` (Senior+) | per the threshold rule in the global CLAUDE.md. Sonnet implements any task with a precise DESIGN, threaded ones included once stage 0 ran; `teamlead` keeps design-level concurrency decisions. I keep the spec, the acceptance and the measurements. |
 | 3. Break-injection | me for the predictions and the verdict; the mechanical run goes to an agent (owner 2026-10-12, section below) | against **both** test sets — the author's and the tester's. Predictions written before the run. |
 | 4. Live stand | me | numbers, not adjectives; `backend_ctl` over reading source. |
 | 5. Review | `reviewer`, **after every task with code** — no exceptions | synchronous (`run_in_background: false`), findings must carry input → observed output. Model by class (below). A plan may batch it into one review per wave on the combined diff, if nothing merges before that review. |
 | 6. Live defect that is not obvious | `investigator` | instead of digging in the main context; first a Haiku inventory of the run's logs (every directory, every process incarnation, first/last line, time gaps). |
 | 7. Mechanical runs and lookups | `haiku` agent (`junior` / `Explore` / `model: "haiku"`) | injection matrix from the lead's predictions, stand number collection, inventories; brief under ~100K context, effort ≥ medium, output pasted. |
 
-- **Model by class (owner, 2026-10-18), stages 0 and 5:** Opus — Senior+ tasks and anything with threads, IPC, process or device lifecycle, verdicts on live defects, plan reviews, and the branch review before merge (that is the phase review). Otherwise `reviewer` with `model: "sonnet"` — bounded changes: widget, recipe, config, pure function, docs. Repeat rounds go to the same agent via `SendMessage` (a fresh agent costs ~56k context; 25–29 % of one measured session). Evidence: `docs/reviews/2026-10-17_codereader-multicamera-opus-review.md` → «Оценка Sonnet» — the only real defect came from an unreviewed commit; Sonnet-reviewed commits added none; Opus at stage 0 would have saved a ~189k rework round.
+- **Model by class, stages 0 and 5:** Opus only for the branch review before merge and for verdicts on live defects. Everything else is `reviewer` with `model: "sonnet"`: per-task stage-5 review (threads, IPC, lifecycle included), stage 0 of every task, plan reviews, every repeat round — to the same agent via `SendMessage`. Senior+ stage 0 is under evaluation (owner, 2026-10-26): on the 6 Senior+ tasks the coordinator marks in its queue, run it twice in parallel — `sonnet` and `opus`, same brief; protocol, file names and the decision rule: `docs/reports/2026-10-26_stage0-eval.md` §2–§4. This sentence is removed when the 6th task is scored. History and evidence: `docs/claude/LEAD_RULES.md` → «Task launch convention».
 - Never run the tester twice on one mechanism: a second acceptance pass = my injection matrix plus `reviewer`.
 - Name the forbidden paths in the tester prompt too; carry its file back into the main tree afterwards.
 - Solo (no subagent for stage 2) only for trivial work — 1–3 files, under ~80 lines, no new mechanism — and it must be said out loud. Stages 1, 3 and 5 have no solo variant.
@@ -63,33 +63,31 @@ Refinements and history: `docs/claude/LEAD_RULES.md` → «Task launch conventio
 ## The lead coordinates and controls — it does not execute (owner's decision, 2026-10-12, STRICT)
 
 The main session keeps its context for decisions, not for work. Everything that takes more than a few calls goes to an agent.
-- Pick the agent by the work: `haiku` (junior, docs-writer, Explore, web-researcher) for mechanical and lookup work; `sonnet` (developer, tester, debugger, tech-writer) for ordinary code, tests, docs; `opus` (teamlead, reviewer, investigator) for design, concurrency, verdicts. Never the lead's own context for a run, a matrix of runs, a long read or a long edit.
+- Pick the agent by the work: `haiku` (junior, docs-writer, memory-classifier, Explore, web-researcher) for mechanical edits, lookups, greps, format checks, simple docs — never design, review verdicts, blind tests or concurrency; `sonnet` (developer, tester, debugger, tech-writer, spec-writer) for ordinary code, tests, docs; `opus` (teamlead, reviewer, investigator, manager, integrator, ai-judge) for design, concurrency, verdicts — `reviewer` runs on `sonnet` by class (above); `cto` = Fable. Never the lead's own context for a run, a matrix of runs, a long read or a long edit.
+- One executor per task (owner, 2026-10-26): the implementer owns its code, the diagnosis of every red against it (it never edits a blind tester's test: a red it judges a wrong test goes to the lead) and the injection patches on its files; re-summon it by agentId instead of adding a `debugger` or a second `developer` on the same files. `debugger` from the start for code no agent of the task wrote; on the author's 3rd iteration, one `debugger` diagnosis, still red → `teamlead`. `tester` and `reviewer` stay independent. A task past stage 2 when this text reaches your tree finishes under the old chain. If the author's agentId is lost or its spend passed the «Persistent agents» mark, a fresh developer briefed with the author's report file and the diff is the same executor. Rule: `project-rules` §5; reason: `docs/claude/LEAD_RULES.md` → «One executor per task».
 - A small fix (a few lines, one file) — the lead may do it itself. Larger — hand it to an agent that already holds the context of the topic (re-summon by agentId with `SendMessage`); a new agent only when none fits or the held context would bias the work (tester, round-1 reviewer stay fresh).
 - What stays with the lead: the spec and acceptance, the predictions written BEFORE any injection run, reading the verdict against them, merge decisions, the owner's questions. The mechanical run of an injection matrix, a stand measurement or a bulk edit is delegated with the lead's predictions in the prompt; the agent reports observed-versus-predicted in a short table.
 - Read agent reports as summaries: the full output lives in the report file the agent writes; the lead opens a file only to check a claim that decides something.
 - Keep the agentId table in the handoff; at a boundary prefer `/clear` + handoff over a long main context (`.claude/skills/project-rules/session-boundaries.md`).
 
-## Subagents are background by default (Claude Code 2.1.212+, STRICT)
+## Subagents are background by default (STRICT)
 
-Three Claude Code defaults changed underneath the rules above, and each one fails **silently** —
-nothing errors, the guarantee just stops holding.
+Three Claude Code behaviours sit underneath the rules above, and each one fails **silently** —
+nothing errors, the guarantee just stops holding. Rows 1 and 3 are in the docs (code.claude.com
+`sub-agents`, checked 2026-10-26); row 2 is a project observation the docs do not describe.
 
 | New default | What it breaks here | What to do |
 |---|---|---|
 | Subagents run in the **background** unless told otherwise | "Reviewers work synchronously" becomes a wish; the verdict arrives after the turn that needed it | Pass `run_in_background: false` for `reviewer`, `tester`, and any live-run check |
-| A finished background agent **commits, pushes, and opens a draft PR** on its own — it no longer asks | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
-| Nested subagents up to **depth 3** (was 1) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
-
-Roles → models (all 17): `cto` = Fable; `teamlead` / `reviewer` / `investigator` / `manager` / `integrator` / `ai-judge` = Opus (`reviewer` runs on `model: "sonnet"` by class — «Task launch convention»); `developer` / `tester` / `debugger` / `tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` / `memory-classifier` / `Explore` / `web-researcher` = Haiku.
-Haiku 5.5 (owner, 2026-10-11): upgraded — use it for simple work whenever it fits: mechanical edits, lookups, greps, format checks, simple docs (`junior` / `docs-writer`, or `model: "haiku"` on an Agent call). Not for design, review verdicts, blind tests or concurrency.
+| A finished background agent may **commit, push, and open a draft PR** on its own (observed, not documented) | Commits without `Why:`/`Layer:` trailers, pushes not gated by `/dev:ship`, plan checkboxes out of sync | Say so in the agent's prompt: diagnose and report only, never commit or push. `reviewer` and `investigator` do not write code — that already covers them; `developer`/`teamlead` need it said |
+| Nested subagents up to **depth 3** (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`; `1` disables nesting) | Director → Manager → Developer now really nests, so the 2-iteration failure-recovery limit can be spent three levels down without surfacing | Escalation still surfaces to the top on the 3rd iteration — state the limit in the spec handed down, not only at the top level |
 
 `/review` is a fast single-pass PR review; `/code-review` is the multi-agent one and **runs in
 the background** — for a verdict this project's rules will accept, drive `reviewer` directly instead.
 
 ## Shared machine — one coordinator session gives out load windows (owner, 2026-10-13, STRICT)
 
-- A **separate** coordinator session (skill `coordinator`) gives out load windows; its name and the windows are in
-  `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`. A lane session sends it its name first; signals and the start-prompt template — skill `coordinator` §4, §5.
+- A **separate** coordinator session (skill `coordinator`) owns `D:\PROJECT_INNOTECH\Inspector_vision\machine.lock`; a lane takes its own window and merge slot from the gate (owner, 2026-10-27): `machine_gate.sh request|wait|release|extend <session> …` (only when it can start NOW) and `merge-begin|merge-end <session> …`. No message for a window, a merge or a report, no «принято»; messages only for a question to the owner, ownership of a file, a finding in foreign code. Details and the start-prompt template — skill `coordinator` §2, §4, §5.
 - Every test or stand command (yours and your agents') goes through `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" [--timed] heavy|medium|light <session> <cmd...>`;
   classes (skill `coordinator` §3): `light` < ~2 min and `medium` ~2–5 min (one module's tests dir) need no window; `heavy` > ~5 min and a timed `medium` (`scripts/machine_gate_timed.txt`) — only in your window; exit 75 = skipped; with `machine.lock` a hook blocks bare pytest / make gate / run_sim_all and other classified commands.
 - No `machine.lock` → the gate falls back to `stand.lock`; `scripts/stand_gate` in live mode always takes `stand.lock` itself.
@@ -111,7 +109,7 @@ Escalation: the asker messages the higher role by name; outside a team it ends w
 Engine limits: re-check them after a Claude Code upgrade.
 Roles, hooks, git, engine limits: `docs/claude/LEAD_RULES.md` → «Team mode».
 
-## Persistent agents across a track — re-summon, don't respawn (pilot «Компания v2», 2026-10-02)
+## Persistent agents across a track — re-summon, don't respawn
 
 - Address = agentId, never the name; keep an `agentId` table in the handoff.
 - Developer: one per track; review fixes go to the author before its handoff; set the handoff threshold (~150k) after the review nits close.
@@ -144,16 +142,16 @@ Measurements: `docs/claude/LEAD_RULES.md` → «Persistent agents».
 
 ## Commands — quick reference
 
-Full list in the corresponding mode file. Key commands (recount: `find .claude/commands -name '*.md' | wc -l`):
+Names are the real paths under `.claude/commands/` (77 on 2026-10-26; recount: `find .claude/commands -name '*.md' | wc -l`):
 
 - **Dev:** `/dev:plan`, `/dev:implement`, `/dev:test`, `/dev:review`, `/dev:debug`, `/dev:ship`, `/dev:pipeline`, `/dev:team`, `/dev:adr`, `/dev:plan-status`
   (bare `/plan` and `/review` are Claude Code built-ins — plan mode and PR review)
-- **Spec:** `/spec`, `/spec-sync`
-- **Quality:** `/sentrux-health`, `/sentrux-dsm`, `/sentrux-gaps`, `/qex-status`, `/code-stats`, `/test-ratio`, `/arch-review`, `/doctor`, `/lint-agents`, `/lint-settings` (owner)
-- **Analysis:** `/channel-map`, `/message-contracts`, `/todo-inventory`, `/graph-slice`
-- **Memory:** `/memory:init` (owner), `/memory:search`, `/memory:status`
-- **Infra:** `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache` (owner), `/diagrams`
-- **Team:** `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up`
+- **Spec:** `/dev:spec:spec`, `/dev:spec:spec-sync`
+- **Quality:** `/mcp-sentrux:sentrux-{health,dsm,gaps,check}`, `/mcp-qex:qex-status`, `/core:quality:{code-stats,test-ratio,arch-review,doctor,lint-agents}`, `/core:quality:lint-settings` (owner)
+- **Analysis:** `/analysis:{channel-map,message-contracts,graph-slice}`, `/core:analysis:todo-inventory`
+- **Memory:** `/core:memory:init` (owner), `/core:memory:{search,status,remember}`
+- **Infra:** `/infra:validate`, `/core:infra:{fw-test,cold-start,run-proto,diagrams}`, `/core:infra:clean-cache` (owner)
+- **Team:** `/core:team:{team,hire,handoff,docs,wrap-up}`
 
 ## MCP routing (orchestrator + subagents)
 
@@ -169,7 +167,7 @@ Servers with docs: `docs/claude/LEAD_RULES.md` → «MCP routing».
 
 ## Token discipline (baseline & tool output)
 
-Never trade reasoning quality for tokens. Lean output at the source (`pytest -q --tb=short`, `ruff check -q`); debugger/tester get full output; read the 3 files that matter, not 20 (qex / targeted `Grep`); don't force `ENABLE_TOOL_SEARCH=true` (behind a proxy/Vertex); CLI over MCP for one-off ops; disable unused servers in `enabled.yaml`, audit with `/context`. Unavoidable `/compact` → focus files + tests + plan path; at a boundary prefer `/clear` + handoff. Details: `docs/claude/LEAD_RULES.md` → «Token discipline».
+Never trade reasoning quality for tokens. Lean output at the source (`pytest -q --tb=short`, `ruff check -q`); debugger/tester get full output; read the 3 files that matter, not 20 (qex / targeted `Grep`); MCP tool search is on by default — set `ENABLE_TOOL_SEARCH=false` only if a gateway rejects it; CLI over MCP for one-off ops; disable unused servers in `enabled.yaml`, audit with `/context`. Unavoidable `/compact` → focus files + tests + plan path; at a boundary prefer `/clear` + handoff. Details: `docs/claude/LEAD_RULES.md` → «Token discipline».
 
 ## Project layout — where to write and where to read
 

@@ -103,6 +103,15 @@ class FakeEngine:
         """Сброс активного рецепта (симметрично RecipeEngine.deactivate)."""
         self._active_name = None
 
+    def delete(self, name: str) -> bool:
+        """Как RecipeEngine.delete: True если файл был; удаление активного сбрасывает указатель."""
+        path = self.recipes_dir / f"{name}.yaml"
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        if self._active_name == name:
+            self._active_name = None
+        return existed
+
     def list(self) -> list[str]:
         return sorted(p.stem for p in self.recipes_dir.glob("*.yaml"))
 
@@ -798,7 +807,9 @@ def test_displays_is_top_level_in_yaml(
 
     first = raw["displays"][0]
     assert first["id"] == "main"
-    assert first["width"] == 1280
+    assert first["name"] == "Основной дисплей"
+    # Создание нового рецепта пишет минимальную форму (ревью 1.1c F2): width=1280 — умолчание модели, не пишется.
+    assert "width" not in first
 
     # Top-level displays — это ОПРЕДЕЛЕНИЯ (имеют ключ "id").
     # blueprint.displays — это ПРИВЯЗКИ (имеют ключ "node_id") — это отдельная секция.
@@ -859,3 +870,110 @@ def test_write_without_displays_does_not_break(
 
     assert loaded is not None
     assert loaded.displays == (), "Пустой рецепт должен иметь пустой кортеж displays"
+
+
+# ---------------------------------------------------------------------------
+# Ревью 1.1c, раунд 1 (C-30): F1 битый файл -> None, F2 создание в минимальной форме,
+# F3 пересылка expected_rev / layout, I4 каноническое чтение. Настоящий RecipeManager.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def hooked_store(fake_engine: FakeEngine, recipe_dir: Path) -> RecipeStoreFromManager:
+    """Стор над настоящим RecipeManager с настоящим хуком формата Inspector."""
+    from multiprocess_framework.modules.recipe import RecipeManager
+    from multiprocess_prototype.backend.recipe_format_hook import InspectorRecipeFormatHook
+
+    manager = RecipeManager(engine=fake_engine, state_proxy=None, logger=None, format_hook=InspectorRecipeFormatHook())
+    return RecipeStoreFromManager(recipe_manager=manager, recipe_dir=recipe_dir)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"a: [1, 2\n", b"- 1\n- 2\n"],
+    ids=["broken_yaml", "root_is_list"],
+)
+def test_read_broken_file_returns_none_not_raises(
+    hooked_store: RecipeStoreFromManager, fake_engine: FakeEngine, recipe_dir: Path, content: bytes
+) -> None:
+    """Активный рецепт с битым телом: read() -> None (контракт до 1.1c), RecipeFormatError наружу не идёт."""
+    (recipe_dir / "broken.yaml").write_bytes(content)
+    fake_engine.set_active("broken")
+
+    assert hooked_store.read("broken") is None
+
+
+def test_write_new_slug_writes_minimal_form(store: RecipeStoreFromManager, recipe_dir: Path) -> None:
+    """Создание нового рецепта: умолчания модели в файл не пишутся (design.md §10 п.5)."""
+    store.write("fresh", _make_recipe())
+
+    text = (recipe_dir / "fresh.yaml").read_text(encoding="utf-8")
+    assert "plugin_class: null" not in text
+    assert "config: {}" not in text
+    plugins = yaml.safe_load(text)["blueprint"]["processes"][0]["plugins"]
+    assert plugins == [{"plugin_name": "capture"}]
+
+
+def _stale_rev(store: RecipeStoreFromManager, recipe_dir: Path, slug: str) -> str:
+    """Положить рецепт, взять rev чтения и изменить файл вручную: возвращённый rev устарел."""
+    path = recipe_dir / f"{slug}.yaml"
+    _write_yaml(path, _minimal_recipe_dict())
+    _body, rev = store.read_raw_with_rev(slug)
+    assert rev is not None
+    path.write_text(path.read_text(encoding="utf-8").replace("Тестовый", "Правленый"), encoding="utf-8")
+    return rev
+
+
+def test_write_stale_expected_rev_raises_conflict(store: RecipeStoreFromManager, recipe_dir: Path) -> None:
+    from multiprocess_framework.modules.recipe import RecipeConflict
+
+    stale = _stale_rev(store, recipe_dir, "stale-write")
+    recipe = store.read("stale-write")
+    assert recipe is not None
+
+    with pytest.raises(RecipeConflict):
+        store.write("stale-write", recipe, expected_rev=stale)
+
+
+def test_save_layout_stale_expected_rev_raises_conflict(store: RecipeStoreFromManager, recipe_dir: Path) -> None:
+    from multiprocess_framework.modules.recipe import RecipeConflict
+
+    stale = _stale_rev(store, recipe_dir, "stale-layout")
+
+    with pytest.raises(RecipeConflict):
+        store.save_layout("stale-layout", {"capture_proc.capture": [1.0, 2.0]}, [], expected_rev=stale)
+
+
+def test_save_raw_layout_lands_in_file(store: RecipeStoreFromManager, recipe_dir: Path) -> None:
+    """save_raw(..., layout=(positions, locked)) пишет раскладку той же записью."""
+    slug = "with-layout"
+    path = recipe_dir / f"{slug}.yaml"
+    _write_yaml(path, _minimal_recipe_dict())
+    body, rev = store.read_raw_with_rev(slug)
+    assert body is not None
+
+    new_rev = store.save_raw(
+        slug,
+        {"blueprint": body["blueprint"]},
+        expected_rev=rev,
+        layout=({"capture_proc.capture": [1.0, 2.0]}, ["capture_proc.capture"]),
+    )
+
+    metadata = yaml.safe_load(path.read_text(encoding="utf-8"))["blueprint"]["metadata"]
+    assert metadata["gui_positions"] == {"capture_proc.capture": [1.0, 2.0]}
+    assert metadata["locked_nodes"] == ["capture_proc.capture"]
+    assert new_rev != rev
+
+
+def test_read_returns_normalized_recipe_from_legacy_top_level_gui_positions(
+    hooked_store: RecipeStoreFromManager, recipe_dir: Path
+) -> None:
+    """Файл с legacy top-level gui_positions: read() читает канон (хук убрал дубль), не raw-тело файла."""
+    data = _minimal_recipe_dict()
+    data["gui_positions"] = {"capture_proc.capture": [1.0, 2.0]}
+    _write_yaml(recipe_dir / "legacy.yaml", data)
+
+    recipe = hooked_store.read("legacy")
+
+    assert recipe is not None
+    assert recipe.gui_positions == {}

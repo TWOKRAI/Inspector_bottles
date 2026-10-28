@@ -7,20 +7,29 @@
 """
 
 from .detect import has_top_level_blueprint, is_v3_recipe, nested_blueprint_data
+from .file_lock import RecipeLockTimeout, recipe_file_lock
 from .format import normalize_recipe_v3_raw
 from .interfaces import (
     RecipeEngineProtocol,
     RecipeManagerProtocol,
     StoreProtocol,
 )
-from .manager import RecipeManager
+from .manager import RecipeConflict, RecipeFormatError, RecipeManager
 from .migrations import migration, registered_steps, run_chain
 from .recipe_engine import RecipeEngine
-from .yaml_io import update_blueprint_metadata_preserving, update_yaml_preserving
+from .yaml_io import (
+    YamlPatchConflict,
+    YamlWriteRefused,
+    apply_delta,
+    update_blueprint_metadata_preserving,
+    update_yaml_preserving,
+)
 
 __all__ = [
     "RecipeEngine",
     "RecipeManager",
+    "RecipeConflict",
+    "RecipeFormatError",
     "is_v3_recipe",
     "has_top_level_blueprint",
     "nested_blueprint_data",
@@ -30,6 +39,11 @@ __all__ = [
     "run_chain",
     "update_yaml_preserving",
     "update_blueprint_metadata_preserving",
+    "apply_delta",
+    "YamlPatchConflict",
+    "YamlWriteRefused",
+    "recipe_file_lock",
+    "RecipeLockTimeout",
     "StoreProtocol",
     "RecipeEngineProtocol",
     "RecipeManagerProtocol",

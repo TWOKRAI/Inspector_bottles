@@ -412,24 +412,28 @@ is_alive-liveness.
 
 **Статус:** принято
 **Дата:** 2026-07-12
-**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф4.7), `topology/blueprint.py::SystemBlueprint.infer_missing_collectors`
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф4.7), `topology/blueprint.py::SystemBlueprint.infer_missing_collectors`, plans/topology-port-join.md (п.7: `Port.join`, C-16/C-17; п.8: C-22; п.9: C-25; п.10: C-28)
 
 **Контекст:** GUI при сохранении рецепта кладёт `inspector` под `metadata` (домен-entity `Process` не имеет типизир. поля `inspector` → `_fold_extra_into_metadata` сворачивает туда), а бэкенд читает `ProcessConfig.inspector` (прямой ключ). До Ф4.7 разрыв чинил `_hoist_inspector_from_metadata` — raw-dict хак в `launch.py::unwrap_recipe`, поднимавший `inspector` из `metadata` в прямой ключ ДО `SystemBlueprint.model_validate` (`extra="ignore"` иначе молча роняет всю `metadata`). Хак — чистое перемещение поля: не знал ПОЧЕМУ узлу нужен join, не проверял его против графа, был вшит в один конкретный loader (`unwrap_recipe`), а не в сам сборщик (`BlueprintAssembler`).
 
 **Решение:**
-1. **Правило.** Процесс получает `{mode: join, inputs, primary}` автоматически, если получает REQUIRED-порт(ы) (`Port.optional is False`) от **≥2 разных процессов-источников** (считаем процессы, не wires/порты — один источник может слать несколько полей одним item, см. docstring `infer_missing_collectors`). Опциональные порты (триггеры/best-effort сигналы) в счёт не идут — иначе false-positive join там, где раньше был legitimate fanin (живой пример: `layout`/`points` — 2 источника, но входы optional → остаются fanin).
+1. **Правило.** Процесс получает `{mode: join, inputs, primary}` автоматически, если получает REQUIRED-порт(ы) (`Port.optional is False`) от **≥2 разных процессов-источников** (считаем процессы, не wires/порты — один источник может слать несколько полей одним item, см. docstring `infer_missing_collectors`). Опциональные порты (триггеры/best-effort сигналы) в счёт не идут — иначе false-positive join там, где раньше был legitimate fanin (живой пример: `layout`/`points` — 2 источника, но входы optional → остаются fanin). **Уточнено п.7:** «REQUIRED» заменено на `Port.effective_join` (по умолчанию `not optional`; `join=True` включает и необязательный вход).
    - **Граница правила:** это НЕОБХОДИМОЕ структурное условие «нужна корреляция по seq_id», но не гарантия семантической полноты — правило не знает, ПОЧЕМУ вход required, только ЧТО он required у ≥2 источников.
 2. **Escape-hatch: явный `collector` отключает вывод.** Прямой typed-ключ `inspector` ИЛИ `extras["collector"]` на процессе — приоритетнее и вывод из wires НЕ применяется (`infer_missing_collectors` проверяет это первым, до подсчёта источников). Выразительность fanin НЕ отрезана: легитимный multi-source fanin (например, узел с несколькими required-источниками, которым НЕ нужна join-корреляция, а нужен именно fanin) обязан объявить `inspector: {mode: fanin}` явным прямым ключом в рецепте — тогда структурный вывод не сработает.
 3. **Известный edge (a): тег входа = source-порт, совпадает с runtime `data_type` только по конвенции.** Тег входа берётся из имени SOURCE-порта wire (`item.setdefault("data_type", "frame")`, конкретные плагины переопределяют своим output-портом — `line_filter.overlay`), а не из target-порта получателя (см. `center_crop.trigger_in` ← источник `line_filter.overlay`, тег "overlay"). Это работает, ПОТОМУ ЧТО в кодовой базе действует конвенция «имя output-порта плагина == emitted `data_type`» — конвенция, не проверяемый инвариант. Плагин, чей output-порт называется иначе, чем `data_type`, который он реально ставит в item (например порт `"mask"`, но `item["data_type"] = "overlay"`), даст **расхождение** `inputs` ↔ реальная корреляция: `JoinInspectorManager` будет ждать `data_type`, который никогда не придёт под этим именем → вторичный вход НЕ сольётся. Деградация — НЕ крэш: по `timeout_sec` join эмитит то, что успел собрать (как минимум `primary`), т.е. молчаливый passthrough одного primary-входа вместо полного join — тот же класс тихой деградации, который Ф4.7 должен был устранить для «правильно расположенного» `inspector`, но здесь источник иной (несоблюдение конвенции именования портов у плагина, а не расположение поля в рецепте).
 4. **Известный edge (b): два источника с одинаковым тегом → join с ОДНИМ входом.** Если оба источника, feeding один target, дают ОДИНАКОВЫЙ тег (например, две камеры, у обеих source-порт `"frame"` — дефолт `data_type`), `unique_tags` схлопывается в один элемент (`{"frame"}` после `set()`). Узел всё равно получает `mode: join` (≥2 процессов-источников), но `inputs=["frame"]` — `JoinInspectorManager` эмитит, как только ПЕРВЫЙ прибывший item даёт `data_type="frame"`, не дожидаясь второго источника. **Это меняет runtime-поведение относительно прежнего дефолта:** раньше (без explicit inspector) такой узел был plain fanin — каждый item от каждого источника форвардился независимо, без seq_id-буферизации/ожидания. Теперь — join с вырожденным `inputs`, который ждёт (до `timeout_sec`) хотя бы один item с тегом `"frame"`, что по факту ближе к "любой из двух" вместо "оба". Митигация — тот же escape-hatch (п.2): рецепт с двумя одноимённо-тегированными источниками, которому НУЖЕН честный fanin, обязан объявить `inspector: {mode: fanin}` явно.
-5. **Escape-hatch должен переживать GUI round-trip: `inspector` едет через `extras`, не `metadata` (AU-2, 2026-07-12).** Escape-hatch из п.2 работает, только если явный `collector` доезжает до `SystemBlueprint` как прямой typed-ключ ИЛИ `extras["collector"]`. Домен-entity редактора (`multiprocess_prototype/domain/entities/process.py::Process`, `extra="forbid"` + `_fold_extra_into_metadata`) НЕ типизирует `inspector` и раньше сворачивал плоский `inspector:` в `metadata` — а `infer_missing_collectors` читает `metadata.inspector` только как источник ТОНКОЙ НАСТРОЙКИ (`timeout_sec`/…); `mode`/`inputs`/`primary` авторитетны из wires (п.3). Следствие: первый же GUI-save стирал авторитетность ручного `{mode: fanin}`, и узел деградировал в структурный вывод. **Фикс:** домен-entity `Process` получил typed-поле `extras` (симметрия `ProcessConfig.extras`, ADR-PM-014/рычаг C6a) и роутит framework-shorthand ключи (`inspector`/`source_target_fps`/`io_peek`) в `extras`, а не `metadata` — так `inspector` переживает `to_dict`/`from_dict` и остаётся escape-hatch'ем (`_EXTRAS_SHORTHAND_KEYS`, приоритет явного `extras`/`metadata` + conflict-warning). **Задокументированная деградация случая (б):** legacy-рецепт с `metadata.inspector: {mode: join}` на узле БЕЗ структурного join (< 2 required-источников — напр. один required + optional-порты) тихо остаётся `fanin`: вывод не срабатывает, а тонкая настройка подмешивается только внутри join-ветки, поэтому `mode` из `metadata` теряется целиком. `metadata`-mode НЕ авторитетен ни при наличии, ни при отсутствии структурного join — это граница, не баг; митигация — перенести `inspector` в прямой ключ/`extras` (после фикса AU-2 GUI делает это сам). **Escape-hatch = только конфиг с `mode` (F2, итер.2):** явный `collector` (typed ИЛИ `extras`) отключает вывод, ТОЛЬКО если содержит `mode`; mode-less конфиг (напр. `{timeout_sec: 5}`) трактуется как ТОНКАЯ НАСТРОЙКА — вывод `mode/inputs/primary` из wires срабатывает, а прочие ключи подмешиваются поверх skeleton (так же, как legacy `metadata.inspector`). Иначе mode-less inspector, доехавший через `extras`, молча гасил бы join, а фабрика падала в `fanin`-фоллбэк. **Симметрия для `restart_policy` (F1, итер.2):** `restart_policy` — четвёртое `_pick`/typed-поле `ProcessConfig`, читаемое framework ТОЛЬКО как typed (не из `extras`), поэтому в домен-`Process` оно добавлено отдельным typed-полем (как `chain_targets`), а НЕ в `_EXTRAS_SHORTHAND_KEYS` — иначе плоский `restart_policy` сворачивался бы в `metadata` и молча отключал per-process авто-рестарт при boot после GUI round-trip.
+5. **Escape-hatch должен переживать GUI round-trip: `inspector` едет через `extras`, не `metadata` (AU-2, 2026-07-12).** Escape-hatch из п.2 работает, только если явный `collector` доезжает до `SystemBlueprint` как прямой typed-ключ ИЛИ `extras["collector"]`. Домен-entity редактора (`multiprocess_prototype/domain/entities/process.py::Process`, `extra="forbid"` + `_fold_extra_into_metadata`) НЕ типизирует `inspector` и раньше сворачивал плоский `inspector:` в `metadata` — а `infer_missing_collectors` читает `metadata.inspector` только как источник ТОНКОЙ НАСТРОЙКИ (`timeout_sec`/…); `mode`/`inputs`/`primary` авторитетны из wires (п.3). Следствие: первый же GUI-save стирал авторитетность ручного `{mode: fanin}`, и узел деградировал в структурный вывод. **Фикс:** домен-entity `Process` получил typed-поле `extras` (симметрия `ProcessConfig.extras`, ADR-PM-014/рычаг C6a) и роутит framework-shorthand ключи (`inspector`/`source_target_fps`/`io_peek`) в `extras`, а не `metadata` — так `inspector` переживает `to_dict`/`from_dict` и остаётся escape-hatch'ем (`_EXTRAS_SHORTHAND_KEYS`, приоритет явного `extras`/`metadata` + conflict-warning). **Задокументированная деградация случая (б):** legacy-рецепт с `metadata.inspector: {mode: join}` на узле БЕЗ структурного join (< 2 required-источников — напр. один required + optional-порты) тихо остаётся `fanin`: вывод не срабатывает, а тонкая настройка подмешивается только внутри join-ветки, поэтому `mode` из `metadata` теряется целиком. `metadata`-mode НЕ авторитетен ни при наличии, ни при отсутствии структурного join — это граница, не баг; митигация — перенести `inspector` в прямой ключ/`extras` (после фикса AU-2 GUI делает это сам). **Escape-hatch = только конфиг с `mode` (F2, итер.2):** явный `collector` (typed ИЛИ `extras`) отключает вывод, ТОЛЬКО если содержит `mode`; mode-less конфиг (напр. `{timeout_sec: 5}`) трактуется как ТОНКАЯ НАСТРОЙКА — вывод `mode/inputs/primary` из wires срабатывает, а прочие ключи подмешиваются поверх skeleton (так же, как legacy `metadata.inspector`). Иначе mode-less inspector, доехавший через `extras`, молча гасил бы join, а фабрика падала в `fanin`-фоллбэк. **Симметрия для `restart_policy` (F1, итер.2):** `restart_policy` — четвёртое `_pick`/typed-поле `ProcessConfig`, читаемое framework ТОЛЬКО как typed (не из `extras`), поэтому в домен-`Process` оно добавлено отдельным typed-полем (как `chain_targets`), а НЕ в `_EXTRAS_SHORTHAND_KEYS` — иначе плоский `restart_policy` сворачивался бы в `metadata` и молча отключал per-process авто-рестарт при boot после GUI round-trip. **Уточнено п.7:** `metadata.inspector`/`metadata.collector` — deprecated; читаются как прежде, но с предупреждением в лог.
 6. **Известный edge (в): источник с ДВУМЯ РАЗНЫМИ тегами → берётся ОДИН тег на весь источник (AU-3, follow-up В1 аудита, 2026-07-12).** Если ОДИН источник шлёт ≥2 РАЗНЫХ source-порта одному target (например, живой `circle_detector` → `circle_draw.frame` + `circle_draw.detections` в `hikvision_letter_robot.yaml` — один и тот же кадр, два параметра соседнего плагина), тег на этот источник берётся ОДИН ("frame"-приоритет, иначе первый по алфавиту), а не по числу его target-портов — второй тег ("detections") в `inputs` не попадает. **Рассмотрена и отвергнута** группировка "1 источник = N тегов по числу target-портов, которые он кормит": она структурно неотличима от легитимного "несколько полей ОДНОГО item на разные параметры соседнего плагина" — граф `wires` не хранит информацию "это один runtime item или два независимых потока с разным timing"; попытка развести эти случаи по target-порту сломала бы живой `hikvision_letter_robot` (`circle_detector`→`circle_draw` — тест `test_build_characterization.py::test_build_matches_snapshot[hikvision_letter_robot]` и `test_join_inspector_from_wires.py::test_draw_inspector_equals_former_hoist_result` оба фиксируют текущий коллапс в один тег как корректный). Митигация — тот же escape-hatch (п.2): источнику, реально дающему ДВА независимых потока, нужен явный `collector` с полным списком `inputs`.
+7. **`Port.join`: вход объявляет участие в join отдельно от `optional`; `metadata` deprecated; C-17 — громкая ошибка (C-16/C-17, 2026-10-21).** Контекст: `7e1640c97` сделал `overlay_draw.overlay` необязательным (`optional=True`), п.1 перестал считать его join-источником, и у `draw` в `hikvision_letter_robot` остался один источник — join не выводился, рантайм получал fanin вместо корреляции кадра с оверлеем. Корень: `Port.optional` значил и «может быть не подключён», и неявно «не участвует в join». Решение владельца (2026-10-21): (а) `Port.join: bool | None = None` и свойство `Port.effective_join` = `join`, если оно задано, иначе `not optional`; `optional` описывает только подключение. Умолчание `None` сохраняет поведение всех нынешних плагинов; явно `join=True` ставит только `overlay_draw.overlay`. (б) Подсчёт источников (`SystemBlueprint._joining_sources`) идёт по `effective_join`; им пользуются и `infer_missing_collectors`, и `check()`. Порог ≥ 2 источников и теги (п.3, п.4, п.6) не меняются. (в) `metadata.collector`/`metadata.inspector` — deprecated: читаются как раньше (тонкая настройка `timeout_sec`/…), при непустой секции `infer_missing_collectors` пишет одно предупреждение на процесс за вызов (значение `metadata` в текст не попадает; `check()` не предупреждает). Штатное место — process-level `collector: {timeout_sec: …}` без `mode`, join выводится из портов; рецепты не задают `mode`/`inputs`/`primary`. (г) **C-17.** Если `metadata.<ключ>.mode == "join"`, а эффективный mode процесса не `join` (явный collector задаёт иной mode, например `fanin`, либо join-источников < 2), `check()` возвращает ошибку с именем процесса. Эффективный mode не зависит от того, вызывался ли `infer`. Обе секции, `metadata.collector` и `metadata.inspector`, проверяются независимо: `mode: join` в любой из них (в том числе при непустой другой секции) даёт ошибку, не более одной на процесс, с именем ключа (при обеих — `collector`). **Частичная отмена отклонённой альтернативы** «ошибка валидации вместо тихой деградации»: для случая `metadata.mode=join` при невыведенном join тихая деградация в fanin больше не допускается — владелец принял громкую ошибку; для остальных неоднозначных случаев (тег-коллизия п.4 и др.) альтернатива остаётся отклонённой. Каталог плагинов (`catalog.plugins`) отдаёт `join` каждого порта; `introspect.plugins` не менялся. **Уточнено п.8:** mode-less `collector` (process-level) при < 2 join-источниках — тоже громкая ошибка `check()` (C-22).
+8. **C-22: `collector` без `mode` при невыведенном join — ошибка `check()` (2026-10-21).** Решение владельца (2026-10-21, «да» на формулировку): «`collector` без `mode` = тонкая настройка выведенного join; join не выведен — ошибка `check()` с подсказкой; настройка fanin — только с явным `mode: fanin`». Владелец: «Не забываем что рецепты у нас универсальная вещь» — правило живёт во framework и действует для рецептов любого приложения. Контекст: `collector: {timeout_sec: …}` без `mode` у процесса, где join не вывелся (например, удалили провод), молча давал fanin с таймаутом — тонкая настройка терялась без следа. Решение: `SystemBlueprint.check()` (метод `_modeless_collector_errors`, после проверки C-17) возвращает по одной ошибке на процесс, у которого явная секция (typed `collector`, `extras.collector`, легаси `extras.inspector`; общий helper `_explicit_collector` — им же пользуются `infer_missing_collectors` и C-17) непуста, не содержит `mode` (нет ключа, `None`, `""` — как в escape-hatch п.2/п.5) и число join-источников (`_joining_sources`, п.7) < 2. Текст называет процесс, ключ секции (`collector` или `inspector`), ключи секции (без значений), число источников и лечение: вход, участвующий в join, объявляет `Port(join=True)` и подключён проводом; настройка fanin — `{mode: fanin, …}`; иначе секцию удалить. Эффективный режим тот же, что в п.7: явный `mode` секции, иначе `join` при ≥ 2 источниках; результат не зависит от того, вызывался ли `infer`. Проверка в `check()`, не в `check_structure()` (тот не зависит от PluginRegistry, а `_joining_sources` зависит). Порог ≥ 2, теги и вывод (п.3, п.4, п.6) не меняются. `metadata.collector`/`metadata.inspector` (deprecated, п.7) это правило не задевает — их неприменённую настройку ловит отдельное правило п.10 (C-28). **Частичная отмена отклонённой альтернативы** «ошибка валидации вместо тихой деградации»: для случая mode-less `collector` при < 2 join-источниках тихая деградация в fanin больше не допускается — владелец принял громкую ошибку; для остальных неоднозначных случаев (тег-коллизия п.4 и др.) альтернатива остаётся отклонённой. **Последствие:** рецепт вне репозитория с mode-less настройкой fanin при < 2 источниках перестаёт собираться; лечение — `mode: fanin` (подсказка в тексте ошибки).
+9. **C-25: точка в `process_name` — ошибка `check()` и `check_structure()` (2026-10-25).** Решение владельца (2026-10-25, вариант Б): «точка — разделитель адреса», громкая ошибка вместо поддержки имён с точкой. Причина — контракт адресации framework: `message_module/addressing/address.py` (`SEPARATOR = "."`) — первый сегмент адреса всегда процесс, доставка между процессами идёт по `process_of(target) = address[0]`; процесс `draw.a` роутер не адресует (`process_of("draw.a") == "draw"`), а блюпринт при этом считал `draw.a` отдельным процессом — дефект C-25: `_joining_sources` пропускал провод в `draw.a.…` (адрес из четырёх частей, join не выводился), бюджет «в полёте» и граф циклов относили его к `draw`. Второе основание — пути StateStore `processes.<имя>.…` режутся точкой. Решение: `SystemBlueprint._dotted_process_names` (одна ошибка на процесс; не зависит от `PluginRegistry`) вызывается первым после `_duplicate_process_names` в обоих гейтах — `check()` (boot/switch) и `check_structure()` (Save/load-gate GUI). Текст называет процесс, причину, имя, как его прочтёт роутер, пример переименования и этот пункт. Прочие разборы `split(".")` в `blueprint.py` (бюджет «в полёте», `_unaddressable_chain_targets`, циклы) при запрете точки корректны и не менялись; комментарий `check()` про «имя процесса может содержать точку» заменён. Процесс с точкой судит только C-25: C-17, C-22 и C-28 его пропускают (иначе к ошибке C-25 добавилась бы ложная «join-источников: 0»). Известный каскад со стороны источника: провод от процесса с точкой (`s2.x` → `P`) `_joining_sources` не засчитывает, и приёмник `P` без точки может получить вторую ошибку C-17/C-22/C-28 с заниженным числом источников; после переименования источника она уходит. Рецептов с точкой в репозитории 0 (46 YAML с `processes`, прогон по `git ls-files *.yaml *.yml`; сборка всех 22 рецептов `multiprocess_prototype/recipes/*.yaml` проходит). **Последствие:** рецепт вне репозитория с точкой в имени процесса перестаёт собираться и сохраняться; лечение — переименовать процесс (и адреса в `wires`/`chain_targets`).
+10. **C-28: `metadata.collector`/`metadata.inspector`, которые не применяются, — ошибка `check()` (2026-10-25).** Решение владельца (2026-10-21, через координатора: «да — ошибка `check()`, как C-22» — ничего не терять молча; рецепты универсальны) и вариант (б) (координатор по поручению владельца, 2026-10-25): **любая непустая неприменённая секция — ошибка, `{mode: fanin}` тоже.** Причина выбора: правило «ошибка только при потере настройки» опиралось бы на умолчание fanin — сменится умолчание, и `{mode: fanin}` начнёт теряться молча; плюс одно место настройки вместо двух. Контекст: п.7(в) оставил `metadata.<ключ>` читаемой, но `infer_missing_collectors` подмешивает её не-структурные ключи только при ≥ 2 join-источниках и явной секции без `mode`; иначе настройка молча пропадала. Условие применения (факт кода): `n >= 2` join-источников и `mode` явного collector (typed/`extras`, обе формы ключа — `_explicit_collector`) ложен или равен `"join"`. Равенство `"join"` нужно, чтобы результат не зависел от `infer`: после него выведенный join выглядит как явный `mode: join`. `SystemBlueprint._unapplied_metadata_errors` (в `check()` после `_modeless_collector_errors`; `check_structure()` не затрагивает, как п.8) даёт по одной ошибке на процесс, у которого секция (`_legacy_metadata_section`: `collector`, затем `inspector`; непустой dict) не применяется. Текст называет процесс, ключ, ключи секции (без значений; значение `mode` явного collector — только в причине: `mode=fanin`), причину (`join не выведен (join-источников: n, нужно ≥ 2)` либо `явный <ключ> задаёт mode=<mode>`) и лечение `collector: {<k1>: …, <k2>: …}`. **Исключение C-17:** процесс, по которому `_metadata_join_errors` (п.7(г), `metadata.<ключ>.mode=join`) уже вернул ошибку, второй ошибки не получает (исключение по имени процесса, эффективный режим не пересчитывается). Предупреждение deprecated в `infer` не менялось; `infer` читает легаси-секцию тем же `_legacy_metadata_section` (раньше truthy не-dict `metadata.collector` прятал от `infer` валидную `metadata.inspector`, а проверка её видела). **Затенение (C-28.2).** `infer` применяет одну секцию — `metadata.collector`, затем `metadata.inspector`; при ≥ 2 join-источниках непустая dict-секция `metadata.inspector` рядом с применённой `metadata.collector` теряла ключи молча. Теперь это ошибка о `metadata.inspector` с причиной «затенена metadata.collector (сборка применяет одну секцию: collector, затем inspector)», но только по ключам, которые `infer` подмешал бы: `lost` — ключи `inspector` вне `_STRUCTURAL_COLLECTOR_KEYS` (`mode`, `inputs`, `primary`; константа — единый источник для `infer` и затенения). Структурные ключи `infer` отбрасывает и из применённой секции, поэтому `inspector: {mode: join}` рядом с `collector` ничего не теряет и ошибки не даёт (как одиночная `inspector: {mode: join}`). Ошибка при непустом `lost`; `ключи:` и подсказка перечисляют ключи `lost`, хвост «Штатно» тот же. Порядок проверки в `_unapplied_metadata_errors`: пустая секция — пропуск; исключение C-17 по имени процесса — пропуск; секция применяется — проверка затенения — пропуск; иначе прежняя ошибка (одна ошибка на процесс). При < 2 источниках затенение не сообщается: ошибка про `metadata.collector`, а после её лечения `inspector` станет основной секцией и получит свою. Текст ошибки собирает общий helper `_unapplied_metadata_text`. **Известная граница:** явный пользовательский `collector: {mode: join, …}` при ≥ 2 источниках плюс `metadata`-настройка — секция не применяется, но ошибки нет (после `infer` неотличимо от выведенного join). Тот же случай при обеих непустых секциях `metadata`: не применяется ни одна; ошибка есть только про затенённую `metadata.inspector` (при непустом `lost`), и её причина («затенена metadata.collector») неточна; про `metadata.collector` ошибки нет — это та же граница, что и с одной секцией. Условие `not mode` вместо `not mode or mode == "join"` не годится: результат начал бы зависеть от `infer`. Вне правила: `metadata.<ключ>.mode=fanin` при ≥ 2 источниках без явного collector (вывод даёт join — противоречие, а не потеря; открыто для владельца); структурные ключи `inputs`/`primary` в `metadata` при ≥ 2 источниках (вывод их не подмешивает — противоречие, как `mode=fanin`, а не потеря). Рецептов с непустой `metadata.collector`/`metadata.inspector` в репозитории 0. **Частичная отмена отклонённой альтернативы** «ошибка валидации вместо тихой деградации» — для неприменённой `metadata`-настройки. **Последствие:** рецепт вне репозитория с такой секцией перестаёт собираться; лечение — перенести ключи в process-level `collector` (в тексте ошибки) и удалить `metadata.<ключ>`.
 
 **Отклонённые альтернативы:**
 - **Оставить `_hoist_inspector_from_metadata`.** Отвергнуто: (1) чинил СИМПТОМ (метаданные не там), не делал join самопроверяющимся свойством графа — рецепт без ЛЮБОЙ inspector-декларации (ни прямой ключ, ни metadata) молча оставался fanin, хотя wires однозначно требовали join; (2) жил в `launch.py::unwrap_recipe` — прототип-специфичном raw-dict loader'е, ВНЕ `BlueprintAssembler` (framework-чистого сборщика) — корректность зависела от того, что КАЖДЫЙ путь построения blueprint dict (boot, switch/hot-apply, будущие вызовы) не забудет вызвать именно эту функцию первой; assembler же гарантированно проходит через `SystemBlueprint.model_validate` независимо от вызывающей стороны; (3) чистое перемещение поля — не сверялось с графом wires, поэтому устаревший/неверный `metadata.inspector` (например, после правки топологии без пересохранения GUI) тихо переживал бы рассинхрон с реальными связями сколь угодно долго; структурный вывод самокорректируется при каждой сборке.
-- **Дропать неоднозначные случаи (например, тег-коллизию п.4) с ошибкой валидации вместо тихой деградации.** Отвергнуто для Ф4.7: усложнило бы `check()` эвристикой «это плохой join или нормальный» без доп. данных от рецепта; эскейп-хетч (явный `collector`) уже даёт автору рецепта детерминированный способ обойти вывод. Зафиксировано как известная граница (п.4), не как TODO — если понадобится строгая валидация, это отдельная задача.
+- **Дропать неоднозначные случаи (например, тег-коллизию п.4) с ошибкой валидации вместо тихой деградации.** Отвергнуто для Ф4.7: усложнило бы `check()` эвристикой «это плохой join или нормальный» без доп. данных от рецепта; эскейп-хетч (явный `collector`) уже даёт автору рецепта детерминированный способ обойти вывод. Зафиксировано как известная граница (п.4), не как TODO — если понадобится строгая валидация, это отдельная задача. **Частично отменено п.7:** для случая `metadata.<ключ>.mode=join` при невыведенном join `check()` теперь даёт ошибку (C-17). **Частично отменено п.8:** то же для mode-less `collector` при < 2 join-источниках (C-22).
 
-**Последствия:** join — структурный факт графа wires, не зависящий от того, куда/попал ли вообще `inspector` в рецепт; `_hoist_inspector_from_metadata` удалён (не закомментирован). Оба известных edge (п.3/п.4) — не баги, а задокументированные границы конвенции «имя source-порта == data_type»; выход за них требует явного `collector` в рецепте. Полный откат — не предусмотрен отдельным флагом (в отличие от ADR-PMM-010/014/015): вывод чисто аддитивен (срабатывает только при ОТСУТСТВИИ явного `collector`), откат для конкретного узла — явно объявить `inspector` в рецепте.
+**Последствия:** join — структурный факт графа wires, не зависящий от того, куда/попал ли вообще `inspector` в рецепт; `_hoist_inspector_from_metadata` удалён (не закомментирован). Оба известных edge (п.3/п.4) — не баги, а задокументированные границы конвенции «имя source-порта == data_type»; выход за них требует явного `collector` в рецепте. Полный откат — не предусмотрен отдельным флагом (в отличие от ADR-PMM-010/014/015): вывод чисто аддитивен (срабатывает только при ОТСУТСТВИИ явного `collector` с `mode`; mode-less секция — тонкая настройка, п.5/п.8), откат для конкретного узла — явно объявить `collector` с `mode` в рецепте. П.8 (C-22): рецепт с mode-less `collector` при < 2 join-источниках перестаёт собираться; лечение — `mode: fanin` или удалить секцию. П.9 (C-25): рецепт с точкой в `process_name` перестаёт собираться и сохраняться; лечение — переименовать процесс. П.10 (C-28): рецепт с неприменённой `metadata.collector`/`metadata.inspector` перестаёт собираться; лечение — перенести ключи в process-level `collector`.
 
 ## ADR-PMM-018: boot-порядок процессов по depends_on (readiness-волны, Ф5 3.9, 2026-07-26)
 
@@ -1734,3 +1738,291 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
 - Отдельная запись `monitor` в корне: пауза монитора обязана предшествовать первому `stop_event` — это
   внутренний порядок одной записи, не порядок двух.
 - Флаг `_children_stopped` и хук `_before_observability_teardown`: единственность даёт корень.
+
+## ADR-PMM-037: Ожидание стопа вычерпывает свои каналы (Task 1.8, L-9, 2026-10-19)
+
+**Статус:** superseded by ADR-PMM-039 (2026-10-25); страховка, не основной путь; код FROZEN, не удалять (стадия 0 — `docs/reviews/2026-10-19_lifecycle-1.8-stage0.md`; реализация — Task 1.8 плана `lifecycle-stop-ownership`).
+
+### Контекст
+
+Одиночный `process.stop` (и `process.restart`, рестарт супервизора живого ребёнка, `topology.apply`, откат switch,
+`recipe.activate`) исполняется синхронно внутри `router_manager.receive()` потока `message_processor` PM — единственного
+читателя каналов PM system/state/observability. Все пути сходятся в `ProcessRegistry._build_child_stop` →
+`ChildProcessStop.join_until`, где PM спал `time.sleep(pause)` до выхода ребёнка (до `stop_process_timeout` = 5 с).
+
+Ребёнок на выходе ждёт без срока (`release_feeders_at_exit`, ADR-SRM-016, `system_stop=False`), пока feeder каждой
+НЕмаркированной очереди сольёт буфер в pipe: очереди PM метки «читатель ушёл» не имеют и иметь не должны (PM жив).
+Pipe `mp.Queue` на Windows держит ~8 КБ; хвост больше — ребёнок ждёт читателя, читатель (PM) ждёт ребёнка. Развязка —
+`terminate` через 5 с (exitcode -15, отчёт ребёнка «lost»).
+
+Замеры. Проба на настоящем хуке: хвост 1,6 / 4,8 КБ — выход; 9,6 / 19 / 38 КБ — висит, пока читатель не вычерпает,
+после — exit 0. Проба ревьюера стадии 0 (K сообщений по 321 Б): K=15 — выход за 0,55 с независимо от вычерпывания;
+K=120 без вычерпывания — жив через 3 с (ожидание 3,03 с, только после ручного вычерпывания), с вычерпыванием —
+0,56 с, exit 0, 120 сообщений в буфере. Стенд T5.3 круг 2: 2 робота — 4 зависания из 5 (ответ PM 5,05 с,
+`not reported/lost: ['devices']`), 1 робот — 0 из 4. Замер на живом стенде (лид, 2026-10-19): переполнена
+очередь `ProcessManager.system` (не state и не observability); хвост devices после t0 — 12 сообщений / 3838 B;
+поток PM стоит в `child_process_stop.py:221` (`join_until`) под `_cmd_process_stop`.
+
+### Решение
+
+- `ChildProcessStop(..., idle=)` (D2): kwarg `idle: Callable[[float], None] | None`; по умолчанию `time.sleep`
+  (имя берётся в момент вызова). `join_until` ждёт между проходами `idle(pause)`. `idle` бросил — один WARNING на
+  объект и `time.sleep(pause)`; путь стопа не бросает. Эскалация, `_confirm`, метка ровно один раз, бюджеты
+  (5,0 + 1,0 + 1,0 = 7,0 с, ADR-PMM-031/035) не меняются.
+- `ProcessRegistry.stop_wait_idle` (D3): атрибут, по умолчанию `None`; `_build_child_stop` передаёт его в
+  `ChildProcessStop(idle=)` — покрыты `stop_one`, `stop_many`, `stop_all`, `children_stop`.
+- `ProcessManagerProcess._stop_wait_idle(pause_s)` (D4): `RouterManager.pump_inbound()` (ADR-RTR-014) переносит
+  входящее из pipe каналов текущего `receive` в FIFO-буфер роутера, затем досыпает остаток паузы. Ставится в реестр
+  сразу после его создания. Сбой `pump_inbound` — один `_log_error` за жизнь PM, ожидание продолжается сном.
+  Обработчики команд, `stop_process`, `restart_process`, топология не менялись.
+
+Ответ команды остаётся синхронным и приходит после подтверждённой смерти ребёнка — как сегодня; внутри ожидания не
+исполняется ни одна команда; порядок сообщений сохранён (меняется только момент ухода из pipe). Одна точка
+закрывает все пути.
+
+### Отвергнуто
+
+- **Вычерпывание с диспетчеризацией** (подвид «разбирать входящее в ожидании»): внутри `restart_process` между
+  stop и `create_and_register` исполнился бы `topology.apply` — дубли и сломанный реестр (реентерабельность).
+- **Ожидание в другом потоке** (отложенный ответ, `manages_own_reply` + `reply_to_request`): `message_processor`
+  сегодня неявно сериализует рестарт, switch и прочие команды PM (`process_monitor.py:1480-1481` на это опирается);
+  вынос ожидания требует FIFO жизненного цикла и разбора гонок со всеми командами PM.
+- **Отпуск feeder по таймауту** (`cancel_join_thread` по сроку): обрезает сообщение живому медленному читателю
+  (решение владельца, `project_graceful_stop_debt`).
+- **Метка «читатель ушёл» на очередях PM**: PM жив; метка нарушила бы правило ADR-PMM-030 «True ⇒ метка» и
+  ADR-SRM-016.
+
+### Следствия и пределы
+
+- Предел вычерпывания — 2 × 4096 − 1 сообщений на канал (потолок `POLL_DRAIN_CEILING`, ADR-RTR-014): при потопе в
+  окне стопа вычерпывание канала встаёт, блокировка может вернуться; об упоре — один WARNING за эпизод с именем
+  канала (без содержимого). На стенде не измерено.
+- Heartbeat и прочие сообщения, ушедшие в буфер, разбираются после возврата обработчика, а не во время ожидания;
+  окно короче прежнего, потому что ребёнок выходит быстро.
+- **Не покрыто — системный стоп** (`system.shutdown`): `message_processor` PM закрывается раньше детей (LIFO корня,
+  ADR-PMM-036), `pump_inbound` в потоке раннера не работает (`depth == 0`) — защиты на этом пути нет. Замер стенда
+  2026-10-19 до фикса: `system.shutdown` с 2 роботами — 0 зависаний из 7 (выход PM 1,47–1,92 с, exitcode 0, у devices
+  на входе в хук `buffered=0`). Почему ноль — не установлено; при воспроизведении — отдельная задача.
+- **Две политики одного класса.** Блокирующее ожидание на приёмном потоке для `request()` — громкий отказ
+  (`RouterReentrantRequestError`), для ожидания стопа — «ждать, вычерпывая». Какая политика фреймворка единая —
+  открытый вопрос (`docs/claude/OPEN_QUESTIONS.md`), конечное состояние — ожидание вне `message_processor` с FIFO
+  действий на ребёнка или протокол стопа (Task 3.1 `lifecycle-stop-ownership`).
+
+**Reversible:** yes (снять присвоение `stop_wait_idle` в PM — стоп вернётся к `time.sleep`).
+**Refs:** `plans/lifecycle-stop-ownership.md` (Task 1.8), `docs/reviews/2026-10-19_L-9_pm-stop-exit-hang.md`,
+`tests/test_child_stop_idle_acceptance.py`, `tests/test_pm_stop_drains_own_queue_acceptance.py`,
+`tests/test_stop_wait_idle_hazards.py`.
+
+## ADR-PMM-038: `system.shutdown mode=force` — срок стопа детей от команды, kill фазой 3 области, без таймера (Task 0.2 gui-graceful-close, 2026-10-20)
+
+**Статус:** accepted (стадия 0 — два раунда ревью Opus, решения лида; план `plans/2026-10-20_gui-graceful-close/plan.md`, Task 0.2).
+
+### Контекст
+
+`system.shutdown` взводит общий `system_stop_event` (Task 1.1 `lifecycle-stop-ownership`). Здоровая система гаснет за
+0,70–1,92 с, но зависший ребёнок получает `terminate` только через `work_s` 5,0 с от фазы 1, `kill` — ещё через 1,0 с,
+подтверждение — +1,0 с (`core/stop_budget.py`, ADR-PMM-035). Агенту и GUI нужен быстрый стоп без ручного убийства процессов.
+
+### Решение
+
+- `_cmd_system_shutdown` принимает `mode` (`graceful` по умолчанию | `force`) и `deadline_s` (только `force`, 0.1..5.0 с
+  включительно, по умолчанию 1.0). Ошибка — `{"error": "mode: graceful|force"}` / `{"error": "deadline_s: 0.1..5.0"}`
+  (в том числе `bool`, не число, NaN/inf, целое вне диапазона вроде `10**400`); ни одно событие при ошибке не
+  взводится. Без `mode` — прежний путь и прежний ответ; неизвестный `mode` (включая `None` и другой регистр) теперь
+  ошибка.
+- `force`: СНАЧАЛА `_ChildrenStop.set_force_deadline(time.monotonic() + deadline_s)`, затем те же события; INFO
+  `force: срок стопа детей <d> с`; ответ сразу, с `mode` и `deadline_s`. Повторный `force` срок не сдвигает: ответ
+  несёт ДЕЙСТВУЮЩИЙ (первый) `deadline_s` и `"already_set": true`, INFO `force: срок уже стоит (<d> с), повтор не
+  меняет`. Нет `_children_stop` (команда до `work`) — WARNING и graceful, в ответе `"mode": "graceful"`.
+- `_ChildrenStop` хранит срок (`_force_at`, первый вызов выигрывает) и флаг `_killed`. `join_until(deadline)` отдаёт
+  группе `min(deadline, _force_at)`, пока `kill()` не звали, — в том числе группе, созданной позже команды. `kill()`
+  ставит `_killed` ДО делегирования: фаза 3 области (`base_manager/core/lifetime.py`, `_phase3`) зовёт тот же
+  `join_until`, и там срок обрезаться не должен — иначе `kill` без окна `terminate` и ложные «ВЫЖИЛИ» (код 76).
+- Добивание — штатная фаза 3 области: `kill()` → `terminate` → `kill` по бюджету `ChildProcessStop`. Нового потока,
+  таймера и вызова `.kill()`/`.terminate()` в PM нет — правило R4 (`scripts/lifecycle_guards/tables.py`) не растёт.
+- `backend_ctl`: `BackendDriver.system_shutdown(mode, deadline_s, wait, wait_timeout)` (срок запроса 6,0 с, ожидание
+  закрытия сокета через `connection_lost`) и MCP-инструмент `system_shutdown` класса `escalated`.
+
+### Отвергнуто
+
+- **`threading.Timer`, зовущий `cs.kill()` по сроку**: новое нарушение R4 сверх лимита файла PM (лимит поднимает только
+  владелец), гонка опоздавшего таймера с фазой 3, лишний поток вне области.
+- **Обрезка срока и в фазе 3** (без флага `_killed`): фаза 3 получала уже прошедший срок — `kill` без окна `terminate`.
+- **Сокращение собственного срока детей** (`work_s`): это протокол стопа ребёнка (Task 3.1), не команда PM.
+
+### Пределы
+
+- (а) До LSO 1.9b команда ждёт в очереди до 5 с, если `message_processor` PM занят одиночным `process.stop`; поэтому
+  срок запроса драйвера 6,0 с. L-тесты этот случай не проверяют.
+- (б) Исходов по процессам нет до LSO 1.10 и Task 1.1/1.2: драйвер отдаёт `outcomes: None`; итог — строки PM
+  `Process '<name>' did not stop in <N>s, terminating...` и сводка `_stop_summary`.
+- (в) `force`, пришедший, когда фаза 2 детей уже идёт и `join_until` уже вызван с прежним сроком, срок не сокращает
+  (PM в стопе глух — отчёт остатка L-9). `force`, пришедший во время фазы 1 детей, ждёт в потоке команд PM до
+  `infra_s` (`request_stop` синхронно ставит монитор на паузу под тем же `_lock`). Предел до Task 1.1.
+- (г) `kill` — не раньше конца join воркеров PM: фаза 2 корня идёт LIFO (`process_module/core/process_module.py`,
+  порядок регистрации в `work`). Цену мерит L6 (`backend_ctl/tests/test_system_shutdown_force_live.py`).
+- (д) `force` с `deadline_s` меньше обычного стопа (0,7–1,8 с) обрывает и здоровых детей посреди их стопа. Срок самих
+  детей (`work_s` от 5,0 с, `stop_budget.py`) `force` не меняет.
+
+**Reversible:** yes (без `mode` команда идёт прежним путём; снять `set_force_deadline` — `force` станет graceful).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/0.2.md`, `tests/test_system_shutdown_force.py`,
+`backend_ctl/tests/test_system_shutdown_driver.py`, `backend_ctl/tests/test_system_shutdown_force_live.py`.
+
+## ADR-PMM-039: Команды жизненного цикла PM исполняет `KeyedExecutor` вне `message_processor`; ответ — после подтверждённой смерти (Task 1.9b, L-9, 2026-10-25)
+
+**Статус:** accepted (2026-10-25; стадия 0 — три раунда: `docs/reviews/2026-10-21_task-1.9b-stage0-opus.md`, `2026-10-25_task-1.9b-stage0-r2-opus.md`, `2026-10-25_task-1.9b-stage0-r3-teamlead.md`; реализация — Task 1.9b плана `lifecycle-stop-ownership`). Заменяет ADR-PMM-037 как основной путь.
+
+### Контекст
+
+ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `process.stop` исполнялся внутри `receive()` потока `message_processor`, и PM
+досыпал паузу, перенося входящее в буфер. Это обход, а не причина: пока стоп ждёт смерти ребёнка, PM глух к
+`supervision.status` и прочему; неявная сериализация «рестарт/switch/стоп» держалась на том, что поток один (допущение
+`monitor/process_monitor.py`, докстринг у `process.restart`). Task 1.9a дал механизм (`KeyedExecutor` ADR-WRK-005, развилка
+по регистрации ADR-CMD-006, `reply` ADR-RTR-015), Task 1.9m — владельца (`ExecutorManager`, ADR-WRK-006). Здесь — политика PM.
+
+### Решение
+
+- **D1. Один исполнитель, два адаптера.** `executor_manager.create("pm-lifecycle", {"kind": "keyed", "serial": True},
+  should_reject=_pm_stopping)`: ВСЕ операции жизненного цикла строго последовательно (параллельные стопы разных детей на
+  гонки реестра не проверены). Адаптеры — объекты с `submit(...)`, зарегистрированные в менеджере: `pm-lifecycle-submit`
+  (считает операции в полёте) и `pm-transition-gate` (класс T). Создание и обе `register` — в `initialize()` между
+  `super().initialize()` и регистрацией встроенных команд; `executor_manager is None` — ERROR и `initialize()` → `False`.
+  Обработчики `_cmd_*` не менялись.
+- **D2. Класс команды задаёт регистрация** (`executor=`, `key_from=`, `targets=`), а не отправитель и не роутер.
+  L (всегда исполнитель): `process.create/start/stop/restart`, `topology.apply`, `wire.setup/teardown`, `recipe.activate`.
+  T (исполнитель, только если цель в переходе, иначе на месте): `process.relay/pause/resume`, `telemetry.broadcast`,
+  `observability.tail.subscribe_all/unsubscribe_all`. R (читают сразу), S (`system.shutdown` — никогда исполнитель).
+  Полная таблица с `файл:строка` — [`docs/maps/pm-lifecycle-commands.md`](../../../docs/maps/pm-lifecycle-commands.md);
+  здесь не копируется. Вложенная дверь (`process.command`) отвечает через тот же `reply`.
+- **D2 (дополнение, вердикт CTO 2026-10-26, ревью ветки р.1 находка 1).** Классы L и T делят ОДИН FIFO `pm-lifecycle`, но
+  не один потолок. `max_pending = L_CAP + T_CAP` задан явно в `create(...)` (константы PM `_L_CAP = 64`, `_T_CAP = 64`;
+  `T_CAP` — оценка до замера S3, число владельцу после S3). Шлюз `_TransitionGate` ведёт СВОЙ счётчик отложенных T
+  (отдельно от счётчиков перехода `_LifecycleSubmit`): проверка и `+1` под `_routing_lock` ДО подачи; T сверх `T_CAP` —
+  ответ `{"success": False, "error": "executor_busy"}` из шлюза тем же `reply`; `-1` в `finally` вокруг `reply` (в том
+  числе при отказе исполнителя и при исключении). `telemetry.broadcast` (T, `targets="all"`) идёт через тот же шлюз и
+  счётчик. `executor_busy` пишет только `CommandManager` — одна строка WARNING на отказ; PM строку не дублирует. До этого
+  решения (`8254c6f57`) потолок 64 был общий, и поток `process.relay` под `topology.apply` вытеснял `process.stop`.
+- **D3. Чтение без нового лока.** `_routing_lock` как был (листовой, правило «лок не держится поверх ожидания, сна,
+  спавна, IPC»); `wire.status`, `supervision.status`, `topology.get` берут снимок словарей — единственное исключение из
+  «не менять обработчики».
+- **D4. Один владелец стопа.** Предикат `_pm_stopping() = system_stop_event or _children_stopping`.
+  `ChildProcessStop(should_abort=)` опрашивается каждый `STOP_POLL_S` и возвращается досрочно (`aborted`, без метки, без
+  `terminate`); `ProcessRegistry.stop_abort` передаётся ТОЛЬКО во временную область `_stop_many`. Группа детей корня
+  (`_ChildrenGroupStop`) не прерывается: она и есть стоп после прерывания, срок и эскалация прежние (ADR-PMM-036/038).
+  `_ChildrenStop.request_stop()` в фазе 1: `_children_stopping = True` → `executor.request_stop()` + `join_until` (один срок
+  `infra_s` на исполнитель и паузу монитора; на потоке самого исполнителя не ждёт) → стоп детей в `finally`.
+  Прерванный стоп — WARNING «стоп '<имя>' прерван системным стопом», не ERROR «жив после kill».
+  **Сиды `apply_topology` читают прерванный стоп так же (ревью р.1 п.1, исключение из «Не менять», согласовано лидом
+  2026-10-26; только два сида, `apply_topology` и `TopologyManager` не тронуты).** `False` из `stop_many` при
+  `_pm_stopping()` — не «зависший». `_topology_stop_all`: одна строка WARNING «system stop: children handed to the root
+  stop: [имена]», без ERROR и без `_publish_unstoppable_alert`; результат `False` прежний. Откат (фаза A): одна строка
+  WARNING «системный стоп … пересоздание пропущено», без ERROR и alert; фазы C–E (provision/create/start) при
+  `_pm_stopping()` не идут (`restore` пуст: `_topology_create` всё равно отказывает после системного стопа, Task 1.2).
+  Предикат тот же, что у `stop_abort`; один источник. Без системного стопа поведение прежнее (ERROR + alert). Причина:
+  до правки стоп посреди `topology.apply` публиковал в state/hub alert с именами, включая здорового ребёнка, и два
+  ERROR при штатном стопе; ответ нёс `unstoppable: [other, slow]`. Вариант «передавать `stop_abort` только из
+  `stop_process`» отвергнут: стоп снова получил бы двух владельцев.
+
+### Инварианты (контракт)
+
+- **I1 (условно): один владелец ребёнка — при `join_until=True`.** Системный стоп во время стопа в исполнителе: очередь
+  снимается, текущая операция возвращается за ≤ 0,2 с, потом дети. При `False` — ERROR в лог, I1 не заявлен. Не
+  прерываются участки: `process.start()`, `apply_priority` (0,1 с), `remove_process`, `_wait_started_ready`,
+  `_resume_monitor` в `finally` `apply_topology`.
+- **I2: опись полна.** У каждой команды и не-командного писателя есть решение и `файл:строка` (карта выше); relay в цель в
+  переходе идёт через исполнитель.
+- **I3: ответы прежние, кроме перечня.** (а) команда с `key_from` без ключа: `process.stop` и прочие получают
+  `{"success": False, "error": "key_missing", "command": <имя>}` вместо `{"error": "process_name required"}` и текста relay;
+  (б) новые отказы `system_stopping` (операция снята из очереди) и `executor_busy` (очередь на потолке);
+  (в) прерванный стоп — `success: False`. Литерал `system_stopping` — только для снятых из очереди; прерванная
+  текущая операция отвечает так, как `_cmd_process_stop` отвечает при `stop_process == False`.
+  (г) (Task 1.10) `outcome` — только в ответах `_cmd_process_stop` / `_cmd_process_restart`; отказы исполнителя
+  (`key_missing`, `system_stopping`, `executor_busy`) без него. У прерванного системным стопом одиночного стопа ключа
+  `error` по-прежнему нет: `{"success": False, "process_name", "outcome": "handed_over"}`. Исключение обработчика после
+  фазы стопа (например, в рестарте после `remove_process`) отвечает прежним конвертом ошибки без `outcome`: оно не ловится.
+- **I4: PM жив.** `message_processor` и `supervision.status` отвечают весь одиночный стоп и `topology.apply`.
+- **I5: L не отказывается из-за ждущего T; при `T_pending = T_CAP` у L не меньше `L_CAP` мест.** Следует из
+  `max_pending = L_CAP + T_CAP` и счётчика T в шлюзе: отказ по ёмкости получает T, не L. Проверка — H12
+  (`test_lifecycle_fifo_hazards.py`) и юнит счётчика (`test_transition_gate_counter.py`).
+
+### Дополнение (Task 1.10, 2026-10-27): честный итог стопа `outcome` рядом с `success`
+
+Источник — CTO §7 D3 (1): `success: True` и при `terminate`. `success` не меняется (смерть подтверждена; для рестарта —
+стоп подтверждён и новый инстанс создан). Спецификация и стадия 0 — `plans/lifecycle-stop-ownership/tasks/T1.10.md`.
+
+- **D1. Пять значений, источник — шаг эскалации, не exitcode.** `exited` — этому имени не доставлен ни `terminate()`, ни
+  `kill()`; `terminated` — смерть подтверждена после доставленного ему `terminate()`; `killed` — после доставленного ему
+  `proc.kill()`; `handed_over` — не подтверждена, стоп прерван системным стопом (D4 выше); `survived` — не подтверждена без
+  прерывания. Exitcode не годится (замер на Windows: сам — 0, `terminate()` и `kill()` — −15; ребёнок, вышедший сам с
+  кодом ≠ 0, неотличим от убитого).
+- **D2. `ChildProcessStop.outcomes() -> dict[str, str]`.** Множества `_terminated` и `_killed` на имя заполняются там,
+  где сигнал доставлен этому имени (не флаги группы `_kill_started_at` / `_real_kill_sent`). Метод начинает с
+  `_observe()` (последний проход, как `survivors()`), затем один снимок; `on_confirmed_dead` по-прежнему ровно один раз.
+- **D3. `ProcessRegistry`.** `_stop_many` строит `result` и итоги из ОДНОГО снимка `outcomes()` (`success` ⇔ итог в
+  `exited | terminated | killed`). `stop_outcome(name)` — итог последнего стопа текущего воплощения; `add_process` того же
+  имени сбрасывает в `None`; призраки и уже мёртвые запись не трогают. `call_stop_outcome(name)` — итог в последнем
+  `_stop_many` этого потока (для PM). Без нового лока. `IProcessRegistry` не меняется (оба метода — у конкретного реестра).
+- **D4. Ответ PM.** `_cmd_process_stop` / `_cmd_process_restart` отвечают `{"success", "process_name", "outcome"}`;
+  `outcome` — итог стопа ЭТОГО вызова. Один боковой канал — в реестре: `ProcessRegistry.call_stop_outcome(name)` отдаёт
+  итог последнего `_stop_many` этого потока (`threading.local`; имя, не дошедшее до `ChildProcessStop`, — `None`),
+  `reset_call_stop_outcomes()` сбрасывает его. Сбрасывают читатели: оба обработчика сбрасывают канал до вызова и
+  читают после (поток исполнителя переиспользуется — без сброса короткий путь или отказанный рестарт вернули бы итог
+  прошлой операции); `stop_process` канал не трогает, `add_process` сбрасывает только `stop_outcome`, не канал вызова.
+  Канала в PM нет. Публичные `stop_process` / `restart_process -> bool` и `interfaces.py` не менялись.
+  `supervision.status` — поле `stop_outcome` на запись процесса = `registry.stop_outcome(name)`.
+
+| Путь | `success` | `outcome` |
+|---|---|---|
+| стоп живого ребёнка | как раньше | D1 |
+| имени нет в реестре / процесс уже мёртв | как раньше | `None` |
+| рестарт: стоп подтверждён, `create_and_register` упал | `False` | итог фазы стопа |
+| рестарт отказан до фазы стопа | как раньше | `None` |
+| стоп прерван системным стопом | `False` | `handed_over`, ключа `error` нет |
+| отказ исполнителя | как раньше | ключа нет |
+
+Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня (`_ChildrenGroupStop` `stop_outcome` не пишет);
+код 76; GUI; парсеры `backend_ctl`.
+
+### Альтернативы
+
+**A. Исполнитель вне `message_processor` (выбрано).** Плюс: причина L-9 устранена (поток читает всегда), одно
+место сериализации, ответ после смерти ребёнка. Минус: класс команд надо описать по регистрации, ответы при ошибке
+меняются (I3), I1 условен.
+
+**A1. Ёмкость L и T (вердикт CTO 2026-10-26): один FIFO, `max_pending = L_CAP + T_CAP`, счётчик T в шлюзе (выбрано, вариант
+(д)).** Порядок на одной цели прежний (R8/R9), L защищён по построению, слой — PM, `worker_module` не тронут. Отвергнуты:
+(а) паркование T в шлюзе и слив после L — меняет порядок T/L на одной цели и заводит вторую очередь со своим потолком:
+больше механизма, слабее гарантия; (б) резерв ёмкости под L внутри `KeyedExecutor` — тащит политику PM в `worker_module` и
+трогает API исполнителя, общий с полосой Р2 (`register_command(executor=)`); (в) ключ `topology.apply` — имена diff вместо
+`"all"` — только снижает частоту (64 relay в `slow` при стопе `slow` дают тот же отказ `process.stop other`), ключи diff на
+подаче неизвестны; улучшение потом, `docs/claude/OPEN_QUESTIONS.md`.
+
+**B. Оставить вычерпывание (ADR-PMM-037).** Плюс: уже работает, ноль нового кода. Минус: PM глух на время стопа; не
+покрывает системный стоп; две политики ожидания на одном классе.
+
+**C. FIFO на каждого ребёнка (параллель по ключам).** Отвергнуто: гонки реестра при параллельных стопах не проверены; один
+исполнитель сегодня, параллель потом одной настройкой по замеру.
+
+**D. Ожидание как политика `request()` ((в), решение CTO D2).** Отвергнуто: меняет контракт ADR-RTR-011 для всех.
+
+**E. `manages_own_reply` для класса T.** Несовместимо с контрактом 1.9a: у T ответ на вызывающем потоке при простое.
+
+### Следствия и пределы
+
+- **Заморозка (принцип 3).** `RouterManager.pump_inbound`, `ProcessRegistry.stop_wait_idle`, `ChildProcessStop(idle=)`,
+  `ProcessManagerProcess._stop_wait_idle` не удаляются и не меняются. Присвоение `stop_wait_idle` в PM остаётся: на потоке
+  исполнителя `pump_inbound` возвращает 0 (вне `receive`, ADR-RTR-014 pre) — ноль затрат; страховка сработает, если опись
+  пропустила путь стопа на приёмном потоке. Тесты замороженного API остаются зелёными без правок. Снятие заморозки —
+  решением владельца.
+- Ответ на стоп по-прежнему приходит после подтверждённой смерти — поэтому `backend_ctl` (ответ 5 с) стоп дольше 5 с видит
+  таймаутом на своей стороне; предел сохранён, таймаут драйвера не менялся.
+- Срок `force` (ADR-PMM-038) фазу 1 не укорачивает: блок ≤ `infra_s`, как сегодня у паузы монитора. ADR-RTR-011 не меняется.
+- Ожидание готовности ребёнка (`_run_when_child_ready`) перенесено в Task 1.9c (в ADR-WRK-005 «Следствия» оно значилось за 1.9b); в 1.9b не менялось.
+- Не покрыто: загрузка PM (до приёма команд); ребёнок с `request()` к PM до готовности — `docs/claude/OPEN_QUESTIONS.md`.
+
+**Reversible:** yes (снять `executor=` у зарегистрированных команд — они вернутся на `message_processor`; присвоение
+`stop_wait_idle` вернёт вычерпывание).
+**Refs:** `plans/lifecycle-stop-ownership.md`, `plans/lifecycle-stop-ownership/tasks/T1.9b.md`, `T1.9b_context.md`,
+`docs/maps/pm-lifecycle-commands.md`, ADR-PMM-037, ADR-PMM-038, ADR-WRK-005, ADR-WRK-006, ADR-CMD-006, ADR-RTR-014,
+ADR-RTR-015, `tests/test_child_stop_idle_acceptance.py`, `tests/test_stop_wait_idle_hazards.py`,
+`tests/test_pm_stop_drains_own_queue_acceptance.py`.

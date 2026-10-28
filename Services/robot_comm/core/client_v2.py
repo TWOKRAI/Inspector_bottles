@@ -74,6 +74,7 @@ from Services.robot_comm.core.protocol_v2 import (
 from Services.robot_comm.errors import (
     RobotAborted,
     RobotCommandError,
+    RobotCommError,
     RobotNak,
     RobotNotConnectedError,
     RobotSyncError,
@@ -92,6 +93,7 @@ __all__ = [
     "RobotClientV2",
     "RunReport",
     "StopResult",
+    "SyncCancelled",
     "SyncReport",
 ]
 
@@ -225,6 +227,10 @@ class StopResult(Enum):
     SUPERSEDED = "superseded"  # эхо уже новее нашего стопа (его перекрыл другой)
 
 
+class SyncCancelled(RobotCommError):
+    """``sync_params`` прерван предикатом ``cancelled`` перед очередной записью: метка не записана."""
+
+
 @dataclass(frozen=True, slots=True)
 class SyncReport:
     """Итог ``sync_params``: ``sent`` — число отправленных ``PARAM_SET`` значений (без метки);
@@ -328,6 +334,7 @@ class RobotClientV2:
         self._stop_seq = 0
         self._stop_generation = 0  # растёт ПОСЛЕ записи STOP_REQ, под _stop_lock
         self._stop_base_gen = 0  # растёт при каждом изменении _stop_seq (запись стопа, probe)
+        self._run_stop_base: int | None = None  # поколение стопа на старте последнего run_chunks (g0)
         self._echo_log: deque[int] = deque(maxlen=16)  # недавние различные значения TLM_STOP_ACK (кто бы ни читал)
         self._stop_pending: tuple[int, int] | None = None  # (уровень, seq) сильнейшего неподтверждённого стопа
         self._last_halt_gen = 0
@@ -705,13 +712,35 @@ class RobotClientV2:
         Raises: ``RobotTimeout("stop_echo")``, ошибка транспорта (стоп не доставлен). ``_mailbox_lock`` не берёт:
         стоп проходит, пока ``cmd()`` ждёт ответ.
         """
+        value = self.issue_stop(level)
+        written_level = value & 3
+        soft = written_level == STOP_LEVEL["SOFT"]
+        timeout = self._cfg.soft_echo_timeout_s if soft else self._cfg.stop_echo_timeout_s
+        return self.await_stop_echo(value, written_level, deadline=self._clock() + timeout)
+
+    def issue_stop(self, level: int) -> int:
+        """Только запись стопа (T5.3 круг 2): ``stop_seq`` + одна запись FC6 ``STOP_REQ``, без ожидания эха.
+
+        Pre/Raises — как у ``stop`` до записи: ``ValueError`` вне 1..3, непроверенный клиент проверяет прошивку;
+        ошибка транспорта — наружу (стоп не доставлен). Post: возвращает записанное значение
+        ``stop_seq * 4 + уровень``; записанный уровень = ``значение & 3`` (не ниже сильнейшего неподтверждённого).
+        """
         if not isinstance(level, int) or isinstance(level, bool) or level not in STOP_LEVEL.values():
             raise ValueError("level стопа вне 1..3")
         if not self._probed:
             self._ensure_probed()  # только непроверенный клиент: проверенный пишет стоп без оглядки на is_connected
         with self._stop_lock:
-            value, written_level = self._issue_stop_locked(level)
-        return self._wait_stop_echo(value, written_level)
+            value, _written_level = self._issue_stop_locked(level)
+        return value
+
+    def await_stop_echo(self, value: int, level: int, *, deadline: float) -> StopResult:
+        """Только ожидание эха стопа ``value`` до абсолютного срока ``deadline`` (часы клиента, монотонные).
+
+        Записей нет. ``ACKED`` — эхо равно ``value``; ``SUPERSEDED`` — эхо новее с уровнем не ниже ``level``.
+        Хотя бы одно чтение эха делается и при уже прошедшем сроке. Raises: ``RobotTimeout("stop_echo")`` после
+        срока, ошибка транспорта чтения.
+        """
+        return self._wait_stop_echo(value, max(level, value & 3), deadline)
 
     def _issue_stop_locked(self, level: int) -> tuple[int, int]:
         """Под ``_stop_lock``: следующий ``stop_seq`` + одна запись FC6. Поколение растёт ПОСЛЕ записи, в finally.
@@ -742,9 +771,7 @@ class RobotClientV2:
             if pending is not None and _echo_covers(echo, pending[1], pending[0]):
                 self._stop_pending = None
 
-    def _wait_stop_echo(self, value: int, level: int) -> StopResult:
-        timeout = self._cfg.soft_echo_timeout_s if level == STOP_LEVEL["SOFT"] else self._cfg.stop_echo_timeout_s
-        deadline = self._clock() + timeout
+    def _wait_stop_echo(self, value: int, level: int, deadline: float) -> StopResult:
         ours = value >> 2
         while True:
             self._note_echo(int(self._rd(REG["TLM_STOP_ACK"], 1)[0]))
@@ -762,14 +789,18 @@ class RobotClientV2:
     # синхронизация параметров
     # ------------------------------------------------------------------ #
 
-    def sync_params(self, values: Mapping[str, int], epoch: int) -> SyncReport:
+    def sync_params(
+        self, values: Mapping[str, int], epoch: int, *, cancelled: Callable[[], bool] | None = None
+    ) -> SyncReport:
         """Синхронизация по метке (params.md §11.4 п.3). Значения сырые (§11.1).
 
         Pre: ``values`` содержит все имена ``PARAM_ID`` кроме ``P_CONFIG_EPOCH`` (лишнего и неизвестного нет);
         ``epoch`` в 1..65535 (иначе ``ValueError`` без записи). Post: метка и отпечаток словаря совпали ->
         ни одной записи, ``SyncReport(0, False, epoch)``; иначе все ``PARAM_SET``, ``PARAM_APPLY`` при
         ``TLM_CFG_PENDING == 1``, сверка ``PMIR`` и ``PARAM_SET P_CONFIG_EPOCH`` ПОСЛЕДНЕЙ записью.
-        Raises: ``RobotNak`` (метка не пишется), ``RobotSyncError`` (метка не пишется).
+        ``cancelled`` — необязательный предикат, проверяется перед каждой записью (``PARAM_SET``, ``PARAM_APPLY``,
+        метка); истина -> ``SyncCancelled`` без дальнейших записей (метка не записана). Без него поведение прежнее.
+        Raises: ``RobotNak`` (метка не пишется), ``RobotSyncError`` (метка не пишется), ``SyncCancelled``.
         """
         expected_names = set(PARAM_ID) - {"P_CONFIG_EPOCH"}
         if set(values) != expected_names:
@@ -788,13 +819,20 @@ class RobotClientV2:
         if robot_epoch == epoch and robot_dict == DICT_FINGERPRINT:
             return SyncReport(0, False, epoch)
 
+        def check_cancelled() -> None:
+            if cancelled is not None and cancelled():
+                raise SyncCancelled
+
         for pid, raw in raw_by_id.items():
+            check_cancelled()
             self.cmd("PARAM_SET", [pid, raw])
         applied = False
         if int(self._rd(REG["TLM_CFG_PENDING"], 1)[0]) == 1:
+            check_cancelled()
             self.cmd("PARAM_APPLY", [])
             applied = True
         self._verify_mirror(raw_by_id)
+        check_cancelled()
         self.cmd("PARAM_SET", [PARAM_ID["P_CONFIG_EPOCH"], epoch])
         with self._state_lock:
             self._wdg_raw = raw_by_id[PARAM_ID["P_WDG_TIMEOUT_MS"]]
@@ -905,6 +943,14 @@ class RobotClientV2:
     # ------------------------------------------------------------------ #
 
     @property
+    def run_stop_base(self) -> int | None:
+        """Поколение стопа, взятое последним ``run_chunks`` на старте (g0); None — прогона не было. Только чтение.
+
+        ``stop_generation != run_stop_base`` во время прогона — стоп записан после g0, прогон видит его сам.
+        """
+        return self._run_stop_base
+
+    @property
     def stop_generation(self) -> int:
         """Поколение стопа клиента: растёт после каждой записи ``STOP_REQ`` (своей или повтора О5). Только чтение."""
         return self._stop_generation
@@ -996,6 +1042,7 @@ class RobotClientV2:
         total = len(words)
         self._ensure_probed()
         g0 = self._stop_generation
+        self._run_stop_base = g0
         ack0 = self._read_stop_ack()
 
         def by_generation() -> bool:

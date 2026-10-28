@@ -909,7 +909,7 @@ requires-dist = [
     { name = "qdarkstyle", specifier = ">=3.2" },
     { name = "qt-py", specifier = ">=1.4" },
     { name = "requests", specifier = ">=2.32" },
-    { name = "ruamel-yaml", specifier = ">=0.18" },
+    { name = "ruamel-yaml", specifier = ">=0.19.1,<0.20" },
     { name = "seaborn", specifier = ">=0.13" },
     { name = "setuptools", specifier = ">=82.0.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.49" },

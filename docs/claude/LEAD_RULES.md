@@ -50,7 +50,7 @@ Rules:
 - **A review verdict without a reproduction is advisory only.** Findings must carry
   input → observed output. Reviewers work **synchronously** — no background offload,
   no long waits; on a hang, skip that check and say so, but always issue the verdict.
-  Since Claude Code 2.1.212 subagents are **background by default**, so synchronous is
+  Subagents are **background by default** (code.claude.com `sub-agents`), so synchronous is
   no longer what you get by omission — pass `run_in_background: false` explicitly for
   `reviewer` and `tester`. See "Subagents are background by default" below.
 - A test that derives its expected value from the code under test agrees with any answer,
@@ -109,6 +109,17 @@ not the default. Stages 1, 3 and 5 have no solo variant.
 The owner's multi-select on 2026-08-13 picked the full roster *and* "tester only, rest solo";
 the two are incompatible, and this table is how it was resolved — full roster as the default,
 solo as the named exception. The owner was asked to say so if they meant the opposite (history, not a rule).
+
+**Model by class — history (moved from `.claude/CLAUDE.md` on 2026-10-26).** Set by the owner on
+2026-10-18, narrowed on 2026-10-21 and again on 2026-10-25 (pilot, to save the 5-hour limit: 59 % of
+it spent in 3 hours, reviewer subagents the main consumer). On 2026-10-25 stage 0 of Senior+ tasks
+moved to Sonnet; a design defect that the Opus branch review finds and stage 0 should have caught is
+recorded as evidence for returning it to Opus (ledger:
+`docs/claude/memory/feedback_sonnet_implements_opus_designs_and_reviews.md`; evaluation:
+`docs/reports/2026-10-26_stage0-eval.md`). A fresh reviewer costs ~56k context against a re-summon
+(25–29 % of one measured session). Evidence: `docs/reviews/2026-10-17_codereader-multicamera-opus-review.md`
+→ «Оценка Sonnet» — the only real defect came from an unreviewed commit; Sonnet-reviewed commits added
+none; Opus at stage 0 would have saved a ~189k rework round.
 
 ## ponytail — when the laziness ladder applies
 
@@ -173,10 +184,9 @@ conversation history, an agent would not. Protocol: `.claude/commands/dev/team.m
 (Russian): [`docs/claude/AGENT_TEAMS_GUIDE.md`](AGENT_TEAMS_GUIDE.md). Brief template
 with per-model prompting notes: `.claude/plugins/dev/templates/team-brief.md`.
 
-Roles → models (all 14): `cto` = Fable (verdicts only: phase acceptance, merge gate, arbitration,
-answers to escalations from Opus roles — once per phase, never per task); `teamlead` / `reviewer` /
-`investigator` / `manager` / `integrator` / `ai-judge` = Opus; `developer` / `tester` / `debugger` /
-`tech-writer` / `spec-writer` = Sonnet; `junior` / `docs-writer` = Haiku. `junior` never commits. No role exists without a task: spawn the minimal roster.
+Roles → models: the single list is `.claude/CLAUDE.md` → «The lead coordinates» (17 roles). `cto` gives
+verdicts only: phase acceptance, merge gate, arbitration, answers to escalations from Opus roles — once
+per phase, never per task. `junior` never commits. No role exists without a task: spawn the minimal roster.
 
 **Escalation ladder (owner's decision 2026-09-02, `project-rules` §7).** A question goes one level up,
 never sideways, never into a guess: `junior`/`docs-writer` → `developer`/`tech-writer` →
@@ -186,7 +196,8 @@ outside a team it ends its report with `ESCALATION -> <role>` (question / tried 
 and the lead spawns that role. The lead relays; it does not answer in place of the higher role.
 
 What does NOT change in team mode: tester once per mechanism BEFORE the code, in a worktree at the
-pre-implementation commit; break-injection by the lead, never delegated; reviewer synchronous after
+pre-implementation commit; break-injection predictions and the verdict by the lead, the mechanical run
+delegated with those predictions (owner, 2026-10-12); reviewer synchronous after
 every task; Fable only at phase acceptance / merge gate / arbitration / escalation.
 
 Hooks as gates (fail-open after two blocks on the same task or agent; `TEAM_GATES=off` disables):
@@ -232,6 +243,45 @@ until one re-summoned subtask is measured in cache_read tokens, re-summon for re
   existed. Anyone re-summoned after a spec change gets the spec SHA and an order to re-read the section.
 - **The live stand stays mandatory before merge.** It found two things no review predicted, one of them
   contradicting the CTO's own forecast (4.7d-5: `reject_delay_ms=100` under `every` → zero verdicts).
+
+## One executor per task (owner, 2026-10-26)
+
+Rule: `project-rules` §5 «One executor per task»; pointer in `.claude/CLAUDE.md` «The lead coordinates».
+In force in a lane once this text reaches its tree (merge to `main`, then the lane's next `/clear`; a lane
+worktree cut earlier gets it at its next sync with `main`); a task past stage 2 finishes under the old chain.
+
+**Source.** Anthropic, «Building agents: When to fold subagents into your main agent loop»
+(claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop),
+read twice by the lead on 2026-10-26 (WebFetch gives an extract, so the quotes are short and were
+checked by a second request). What it keeps for subagents: they «are effective at verification,
+parallel work, and modular permissioning»; good split points include «black-box verification».
+What it warns against: agents «split by problem type» play a «telephone game», each handoff losing
+fidelity; it advises «dividing by context» — a piece of work that needs little from the rest of the
+system and hands back a compact result. There is no section titled «When to keep subagents»: that
+list sits in the introduction.
+
+**Mapping to this project.** Blind `tester`, fresh `reviewer`, lanes and the coordinating lead are
+verification, parallel work and fresh context — they stay. What breaks is the role relay inside one
+task over the same files: `developer` → `debugger` → a new `developer` for injection patches.
+
+**Measured cost of the relay.** Task 1.9b (`docs/handoffs/2026-10-25_lane-F-T1.9b-pause2.md`,
+agentId table): developer 221k → debugger 146k (cause of R8: the tester's harness, not the code) →
+a fresh developer for 14 injection patches 124k = **491k** on one set of files. A re-summon costs
++3…56k against 107–228k for a fresh entry («Persistent agents» above), so the two fresh entries
+would have been roughly +60…110k for the author (estimate, not a measurement). Related measurement
+Д47 (`team-protocol` §3): one developer writing its own reds 92–105k per piece against 210–237k for
+a `tester` → `developer` pair at the same quality.
+
+**What changed.** The author diagnoses every red against its code — a blind tester's red too, with
+evidence of whether the code or the test is wrong — and writes the injection patches on its files
+from the lead's predictions. `debugger` remains for code no agent of the task wrote (a neighbour's
+regression, an old red), and for one diagnosis on the author's 3rd iteration before `teamlead`. The author
+never edits the blind tester's test: a red it judges a wrong test goes to the lead with the evidence
+(review finding, 2026-10-26). The `tester FAIL → debugger`
+loop was rewritten in `/dev:pipeline`, `/dev:team`, `/dev:debug` and `team-protocol` (S5 and the
+«Regression FAIL» chain). Unchanged: the three test-authorship roles, the lead's predictions before
+any injection run, stage 6 (`investigator` for live defects), `backend_ctl` access for every role
+that had it.
 
 ## Commands — history
 
@@ -309,8 +359,8 @@ Gaps the default system prompt covers weakly. Apply on non-trivial tasks.
 Lossless habits that shrink baseline + per-command cost (never trade reasoning quality for
 tokens — that's what `caveman` is for, trigger-based, user-facing only).
 
-- MCP tool-search is default-on (schemas load on demand) — don't force `ENABLE_TOOL_SEARCH=true`
-  behind a proxy/Vertex; tune via `ENABLE_TOOL_SEARCH=auto:N` in `settings.json` → `env` if needed.
+- MCP tool-search is default-on (schemas load on demand); `ENABLE_TOOL_SEARCH=false` only if a gateway
+  rejects it, `auto:N` tunes the threshold (`settings.json` → `env`).
 - Prefer CLI (`gh`/`git`/`sentrux`/`qex` via `Bash`) over MCP for one-off ops; disable unused
   servers in `enabled.yaml`. Audit the baseline with `/context` or skill **context-budget**.
 - Lean tool output at the source — hooks can't rewrite it after the fact: `pytest -q --tb=short`,

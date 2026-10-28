@@ -47,7 +47,7 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
 ## 5. Subagents and scope
 
 - Default output: a report, no commit, no push.
-- Spawning an agent: `model` explicitly as a tier alias (reviewer/teamlead `opus`, developer/tester
+- Spawning an agent: `model` explicitly as a tier alias (teamlead `opus`, reviewer by class — `.claude/CLAUDE.md` «Model by class», developer/tester
   `sonnet`, cto `fable`, junior/docs-writer/Explore/web-researcher `haiku`), `run_in_background: false`
   for reviewer/tester, and its prompt says: do not commit, do not push. Only for a sizeable independent
   track, never to verify your own work.
@@ -66,6 +66,18 @@ Index-building MCP ops (qex index, sentrux baseline, graphify build) — lead on
   Grep / qex / sentrux before a helper. The helper's output is a map, not evidence: you read the decisive
   lines and run the reproduction yourself before a verdict. Helpers run `run_in_background: false`, stay
   inside your FILES and boundaries, never commit; a reviewer's helper never fixes code.
+- **One executor per task** (owner, 2026-10-26). The implementer (`developer` / `teamlead`) owns
+  its files end to end: the code, the diagnosis of every red against it (a blind tester's red too:
+  it works out whether the code or the test is wrong and shows the evidence: failing assertion, spec
+  line; it changes its own code and tests only and never edits, deletes, skips or xfails a blind
+  tester's test or `interface.py`; a red it judges a wrong test goes to the lead, who decides), and the
+  injection patches on its files from the lead's predictions. The lead re-summons the author by
+  agentId (`SendMessage`); no second role on the same files. `debugger` from the start for code no agent
+  of this task wrote; on the author's 3rd iteration on the same red, one `debugger` diagnosis (report
+  only), still red → `teamlead` (§7). A task past stage 2 when this text reaches your tree finishes
+  under the old chain. `tester` and
+  `reviewer` stay independent and fresh. Split agents by context (a self-contained piece that
+  returns a compact result), never by role over the same files.
 - **Brief = form** (DESIGN / FILES / REDS): first edit within 5 tool calls, never re-derive DESIGN,
   a file outside FILES → stop and ask. Apply every instruction to every listed file; targeted edits,
   not whole-file rewrites. A pre-existing bug is a report line, not a change.
@@ -121,7 +133,12 @@ Files: <paths>
   in someone's `quiet` window. The gate raises your claim to the command's class, never lowers it; no `machine.lock` → the
   old `stand.lock` rule. Exit 75 = skipped by the gate, not a red run. `<session>` = the name your brief gives (no `[ref]`);
   no name in the brief → ask the lead, do not guess. Skipped as a subagent → say «NO WINDOW» in your
-  report and finish it; never loop waiting — the lane session asks the coordinator for a window. While `machine.lock` exists
+  report and finish it; never loop waiting — the lane session takes the window itself: `machine_gate.sh request <session>
+  quiet|heavy|stand <min> <what…>` only when it can start NOW (prints `GRANTED until ~HH:MM` or `QUEUED position N`), then
+  `wait <session>` in the background and `release <session>` when done (it also cancels a queued request); `extend
+  <session> <min>` moves its own `until`; `merge-begin <session> <branch>` / `merge-end <session>` replace «сливаю» /
+  «ок». No message to the coordinator for a window, a merge or a report, and no «принято» (owner, 2026-10-27); a manual
+  `waiting:` of the coordinator is dropped before the merge. No `machine.lock` → `request` and the other new subcommands exit 2 («no machine.lock»): there is no coordinator, take no window, use the old `stand.lock` rule. While `machine.lock` exists
   the hook `machine-gate-guard.sh` blocks any command `classify` marks (bare `pytest`, `make gate` / `make test`,
   `run_framework_tests.py`, `run_sim_all`, …) that bypasses the gate (its message shows the gated command to run).
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.

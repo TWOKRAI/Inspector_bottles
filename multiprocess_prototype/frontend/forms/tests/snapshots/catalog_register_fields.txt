@@ -187,7 +187,6 @@ ml_inference.avg_latency_ms
 ml_inference.confidence_threshold
 ml_inference.device
 ml_inference.draw_overlay
-ml_inference.inference_every_n
 ml_inference.inference_fps
 ml_inference.last_angle_deg
 ml_inference.last_angle_valid

@@ -185,7 +185,7 @@ pytest multiprocess_framework/modules/shared_resources_module/tests/ -v
 
 - **shared_resources_module** — runtime: ProcessData, Queue, Event, SharedMemory, ConfigStore (dict)
 - **data_schema_module** — схемы, валидация, RegisterBase, ProcessDataContainer (использует ProcessData.custom)
-- **DataSchemaAdapter** — тонкий мост: `srm.data_manager` → `StorageManager(shared_resources=srm)` из data_schema_module
+- **DataSchemaAdapter** — тонкий мост: `DataSchemaAdapter(srm).data_manager` → `StorageManager(shared_resources=srm)` из data_schema_module; вызывающих в коде нет (FREEZE, C-54)
 
 Валидация конфигов — в config_module через data_schema_module. ConfigStore хранит только dict (Dict at Boundary).
 

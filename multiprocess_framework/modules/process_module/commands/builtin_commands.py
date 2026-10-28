@@ -694,6 +694,11 @@ class BuiltinCommands:
                 "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
             ),
             (
+                "introspect.executors",
+                self._cmd_introspect_executors,
+                "Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие потоки",
+            ),
+            (
                 "introspect.telemetry",
                 self._cmd_introspect_telemetry,
                 "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
@@ -952,6 +957,18 @@ class BuiltinCommands:
             "failed_imports": dict(sorted(failed.items())),
         }
 
+    def _cmd_introspect_executors(self, data=None, **kwargs) -> dict:
+        """Именованные исполнители ЭТОГО процесса (Task 1.9m, D6): ответ — ``ExecutorManager.describe()``.
+
+        Менеджер берётся атрибутом ``executor_manager`` (не ``_safe_get_manager``: он отдаёт сентинел,
+        а не ``None``). Нет менеджера — пустой ответ.
+        """
+        svc = self._services
+        manager = getattr(svc, "executor_manager", None)
+        if manager is None:
+            return {"success": True, "process": svc.name, "executors": {}, "unavailable": []}
+        return {"success": True, "process": svc.name, **manager.describe()}
+
     def _cmd_catalog_plugins(self, data=None, **kwargs) -> dict:
         """Каталог плагинов для GUI-стороны (Task 1b.2a) — форма регистра БЕЗ plugin-кода.
 
@@ -1000,11 +1017,11 @@ class BuiltinCommands:
                     "api_version": entry.api_version,
                     "requires": list(entry.requires),
                     "inputs": [
-                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "join": p.join, "shape": p.shape}
                         for p in entry.inputs
                     ],
                     "outputs": [
-                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "shape": p.shape}
+                        {"name": p.name, "dtype": p.dtype, "optional": p.optional, "join": p.join, "shape": p.shape}
                         for p in entry.outputs
                     ],
                     "commands": list(getattr(entry.plugin_class, "commands", {}) or {}),

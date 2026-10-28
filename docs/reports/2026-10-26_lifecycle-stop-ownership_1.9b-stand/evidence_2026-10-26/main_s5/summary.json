@@ -1,0 +1,95 @@
+{
+  "mode": "main",
+  "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles",
+  "python": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.venv\\Scripts\\python.exe",
+  "stop_process_timeout": 8.0,
+  "shutdown_timeout": 8.0,
+  "door": "direct",
+  "thresholds": {
+    "S1": {
+      "reply_min_s": 0.85,
+      "reply_max_s": 1.2,
+      "hang_s": 4.5,
+      "max_hangs": 0,
+      "max_lost": 0
+    },
+    "S2": {
+      "max_latency_s": 0.5,
+      "p99_s": 0.15,
+      "min_samples_per_stop": 20,
+      "min_stop_reply_s": 2.5
+    },
+    "S3": {
+      "max_delivery_s": 0.5,
+      "max_relay_reply_s": 0.5,
+      "min_stop_reply_s": 2.5
+    },
+    "S4": {
+      "max_shutdown_line_s": 1.2,
+      "max_pm_exit_s": 4.5,
+      "max_dns": 0
+    },
+    "S5": {
+      "max_restart_s": 5.0,
+      "max_tree_exit_s": 2.0,
+      "max_activate_s": 5.0,
+      "shutdown_runs": 10
+    }
+  },
+  "started": 1793000093.0714636,
+  "rows": {
+    "S5": {
+      "verdict": "FAIL",
+      "reasons": [
+        "shutdown #8 (run 1): 3.23 с >= 2.0",
+        "shutdown #9 (run 2): 9.27 с >= 2.0",
+        "shutdown #10 (run 3): 8.33 с >= 2.0",
+        "shutdown #11 (run 4): 10.66 с >= 2.0",
+        "shutdown #12 (run 5): 9.62 с >= 2.0",
+        "shutdown #13 (run 6): 9.88 с >= 2.0",
+        "shutdown #14 (run 7): 9.41 с >= 2.0",
+        "shutdown #15 (run 8): 9.11 с >= 2.0",
+        "shutdown #16 (run 9): 8.98 с >= 2.0",
+        "shutdown #17 (run 10): 10.03 с >= 2.0"
+      ],
+      "invalid": false,
+      "hangs": 0,
+      "restart_stats": {
+        "n": 6,
+        "unanswered": 0,
+        "min": 1.672,
+        "median": 3.156,
+        "max": 4.484,
+        "p99": 4.484
+      },
+      "activate_stats": {
+        "n": 1,
+        "unanswered": 0,
+        "min": 3.843,
+        "median": 3.843,
+        "max": 3.843,
+        "p99": 3.843
+      },
+      "tree_exit_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 3.234,
+        "median": 9.336,
+        "max": 10.656,
+        "p99": 10.656
+      },
+      "primary_stats": {
+        "n": 10,
+        "unanswered": 0,
+        "min": 3.234,
+        "median": 9.336,
+        "max": 10.656,
+        "p99": 10.656
+      },
+      "threshold_text": "рестарт < 5,0; выход дерева < 2,0 (10/10); activate < 5,0",
+      "lost_lines": 0,
+      "dns_lines": 0
+    }
+  },
+  "elapsed_s": 201.8
+}

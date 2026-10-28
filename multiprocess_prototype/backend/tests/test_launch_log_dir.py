@@ -65,3 +65,63 @@ class TestOverrideIsSnappedOnceNotReadLive:
         monkeypatch.setenv("INSPECTOR_LOG_DIR", "d:/абсолютный/след/прошлого/build")
 
         assert resolve_log_dir_root("logs/prototype_2") == "logs/prototype_2"
+
+
+class TestBuildPinsExplicitLogDirInEnv:
+    """Task 0.2 (gui-graceful-close): явный каталог сборки обязан доходить до env.
+
+    PM и лаунчер берут каталог из ``INSPECTOR_LOG_DIR`` (``resolve_base_log_dir``). При
+    ``setdefault`` первый ``build()`` процесса закреплял СВОЙ каталог навсегда: второй прогон
+    харнесса с другим ``log_dir`` писал логи PM в каталог первого. Сборка настоящая
+    (``build_headless_launcher``), бэкенд не стартует.
+    """
+
+    @staticmethod
+    def _clean_env(monkeypatch, *, snapshot: "str | None" = None) -> None:
+        monkeypatch.delenv("MULTIPROCESS_LOG_DIR", raising=False)
+        monkeypatch.delenv("INSPECTOR_LOG_DIR", raising=False)
+        monkeypatch.setattr(launch, "_ENV_LOG_DIR_OVERRIDE", snapshot)
+
+    @staticmethod
+    def _build(log_dir) -> None:
+        from backend_ctl.harness import build_headless_launcher
+
+        build_headless_launcher(log_dir=log_dir)
+
+    def test_second_build_with_other_explicit_dir_moves_env(self, monkeypatch, tmp_path) -> None:
+        import os
+
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            resolve_base_log_dir,
+        )
+
+        self._clean_env(monkeypatch)
+        first, second = tmp_path / "run_0", tmp_path / "run_1"
+        self._build(first)
+        self._build(second)
+
+        expected = str(second.resolve())
+        assert os.environ.get("INSPECTOR_LOG_DIR") == expected
+        assert resolve_base_log_dir() == expected
+
+    def test_operator_env_without_explicit_dir_stays(self, monkeypatch) -> None:
+        """Env оператора (снят при импорте) — хозяин: сборка его не трогает."""
+        import os
+
+        operator_dir = "d:/оператор/логи"
+        self._clean_env(monkeypatch, snapshot=operator_dir)
+        monkeypatch.setenv("INSPECTOR_LOG_DIR", operator_dir)
+        self._build(None)
+
+        assert os.environ.get("INSPECTOR_LOG_DIR") == operator_dir
+
+    def test_explicit_dir_beats_env_written_after_import(self, monkeypatch, tmp_path) -> None:
+        """Env, появившийся после импорта (запись прошлой сборки, сосед-тест), — не воля оператора."""
+        import os
+
+        self._clean_env(monkeypatch)
+        monkeypatch.setenv("INSPECTOR_LOG_DIR", "d:/чужой/след")
+        target = tmp_path / "explicit"
+        self._build(target)
+
+        assert os.environ.get("INSPECTOR_LOG_DIR") == str(target.resolve())

@@ -1,0 +1,15 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/core/process_registry.py b/multiprocess_framework/modules/process_manager_module/core/process_registry.py
+index 4f4c6a064..8429f5f60 100644
+--- a/multiprocess_framework/modules/process_manager_module/core/process_registry.py
++++ b/multiprocess_framework/modules/process_manager_module/core/process_registry.py
+@@ -549,7 +549,9 @@ class _ChildrenGroupStop:
+             names: List[str] = []
+             try:
+                 names = [p.name for p in self._registry.os_processes]
+-                done, group = self._registry._build_child_stop(list(names), self._mark_reader_gone)
++                done, group = self._registry._build_child_stop(
++                    list(names), self._mark_reader_gone, should_abort=self._registry.stop_abort
++                )  # INJ I13
+             except Exception:
+                 self._build_failed = True
+                 self._failed_names = list(dict.fromkeys(names))

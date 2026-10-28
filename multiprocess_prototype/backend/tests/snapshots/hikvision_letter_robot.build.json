@@ -218,6 +218,8 @@
                   "angle": 90,
                   "center_x": 376,
                   "center_y": 262,
+                  "max_age": 2,
+                  "max_match_distance": 140,
                   "mode": "zone_edge",
                   "rearm_frames": 2,
                   "zone_width": 250
@@ -349,7 +351,6 @@
                   "confidence_threshold": 0.5,
                   "device": "cpu",
                   "draw_overlay": true,
-                  "inference_every_n": 1,
                   "model": "mobilenet_v3_large_20260616_050828",
                   "top_k": 3
                 },
@@ -535,6 +536,11 @@
           "name_max_len": 20,
           "type": "file"
         },
+        "robot_exchange_file": {
+          "file_path": "robot_exchange.log",
+          "name_max_len": 20,
+          "type": "file"
+        },
         "trace_file": {
           "file_path": "trace.log",
           "name_max_len": 20,
@@ -568,6 +574,12 @@
         ]
       },
       "loggers": {
+        "Services.device_hub.drivers.exchange_log": {
+          "channels": [
+            "robot_exchange_file"
+          ],
+          "level": "INFO"
+        },
         "gui": {
           "channels_extra": [
             "gui_file"
@@ -648,6 +660,11 @@
             "name_max_len": 20,
             "type": "file"
           },
+          "robot_exchange_file": {
+            "file_path": "robot_exchange.log",
+            "name_max_len": 20,
+            "type": "file"
+          },
           "trace_file": {
             "file_path": "trace.log",
             "name_max_len": 20,
@@ -681,6 +698,12 @@
           ]
         },
         "loggers": {
+          "Services.device_hub.drivers.exchange_log": {
+            "channels": [
+              "robot_exchange_file"
+            ],
+            "level": "INFO"
+          },
           "gui": {
             "channels_extra": [
               "gui_file"
@@ -764,6 +787,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -797,6 +825,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -975,6 +1009,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1013,6 +1052,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -1126,6 +1171,12 @@
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "executors": {
+          "device_io": {
+            "max_pending": 64,
+            "max_workers": 4
+          }
+        },
         "frame_ring_depth": 0,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -1138,6 +1189,11 @@
             },
             "gui_file": {
               "file_path": "gui.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
               "name_max_len": 20,
               "type": "file"
             },
@@ -1174,6 +1230,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -1372,6 +1434,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1410,6 +1477,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -1536,6 +1609,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -1569,6 +1647,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -1745,6 +1829,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -1783,6 +1872,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -1899,6 +1994,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -1932,6 +2032,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2087,6 +2193,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -2125,6 +2236,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -2241,6 +2358,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -2274,6 +2396,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2470,6 +2598,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -2508,6 +2641,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -2627,6 +2766,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -2660,6 +2804,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -2694,6 +2844,8 @@
               "angle": 90,
               "center_x": 376,
               "center_y": 262,
+              "max_age": 2,
+              "max_match_distance": 140,
               "mode": "zone_edge",
               "rearm_frames": 2,
               "zone_width": 250
@@ -2829,6 +2981,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -2867,6 +3024,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -2985,6 +3148,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -3018,6 +3186,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -3183,6 +3357,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -3221,6 +3400,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -3339,6 +3524,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -3372,6 +3562,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -3554,6 +3750,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -3592,6 +3793,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -3727,6 +3934,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -3760,6 +3972,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -3835,7 +4053,6 @@
               "confidence_threshold": 0.5,
               "device": "cpu",
               "draw_overlay": true,
-              "inference_every_n": 1,
               "model": "mobilenet_v3_large_20260616_050828",
               "top_k": 3
             },
@@ -3974,6 +4191,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -4012,6 +4234,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {
@@ -4133,6 +4361,11 @@
               "name_max_len": 20,
               "type": "file"
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "trace_file": {
               "file_path": "trace.log",
               "name_max_len": 20,
@@ -4166,6 +4399,12 @@
             ]
           },
           "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
             "gui": {
               "channels_extra": [
                 "gui_file"
@@ -4390,6 +4629,11 @@
               "url": null,
               "write_deadline_sec": 0.25
             },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
             "system_file": {
               "backup_count": 5,
               "capacity": null,
@@ -4428,6 +4672,12 @@
             "": {
               "channels": null,
               "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
               "level": "INFO"
             },
             "gui": {

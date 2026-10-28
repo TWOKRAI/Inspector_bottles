@@ -3,7 +3,7 @@
 > **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** Task 1.7 (T14) того плана — выход приложения (`shutdown()` детей до `kill_tree`, `process_manager_module/launcher/spawner.py:180-230`) и `INSPECTOR_LOG_DIR` после full-replace; файлы `process_manager_module` общие — один писатель, стадия 0 Task 1.7 сверяется с Ф1 этого плана.
 
 - **Slug:** `lifecycle-stop-ownership` · **Ветка:** `fix/lifecycle-stop-ownership` (создать при старте Ф1) · **Дата:** 2026-09-24
-- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26. **Ф1 принята CTO 2026-09-26 — ACCEPT WITH CONDITIONS** ([отчёт](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)); Ф2 ждёт условий ниже и Ф1 плана [`lifecycle-owner-scope`](2026-10-03_lifecycle-owner-scope/plan.md) (L-6 по тексту выполнено — транспорт 4.1 в `main`). **2026-10-03:** внутрипроцессная половина Task 3.1 и хук `_before_observability_teardown` переданы `lifecycle-owner-scope` (П3), Task 3.1 сужена до межпроцессного quiesce → ack — см. «Соседи» и Task 3.1
+- **Статус:** IN PROGRESS — Ф1 начата 2026-09-24 (запуск Task 1.1 владельцем = одобрение Ф1); Task 1.1, 1.3, 1.2, 1.4 DONE, 1.5 DONE кроме Linux-пункта (срок-якорь gui-service 1.3a выполнен); 1.6 DONE 2026-09-26; 1.7 PENDING; 1.8 DONE 2026-10-19; **1.9a, 1.9b, 1.10, 1.11 — DRAFT 2026-10-20** (решение владельца, ждут стадии 0). **Ф1 принята CTO 2026-09-26 — ACCEPT WITH CONDITIONS** ([отчёт](../docs/reviews/2026-09-26_lifecycle-phase-1-cto.md)); Ф2 ждёт условий ниже и Ф1 плана [`lifecycle-owner-scope`](2026-10-03_lifecycle-owner-scope/plan.md) (L-6 по тексту выполнено — транспорт 4.1 в `main`). **2026-10-03:** внутрипроцессная половина Task 3.1 и хук `_before_observability_teardown` переданы `lifecycle-owner-scope` (П3), Task 3.1 сужена до межпроцессного quiesce → ack — см. «Соседи» и Task 3.1
 - **Полоса:** B (фреймворк). **Срок-якорь:** Ф1 закрыть **до gui-service Task 1.3a** (у Пульта появится кнопка
   «стоп» по сокету — сегодня она идёт незащищённым путём, см. Task 1.1).
 - **Слой:** framework (`process_manager_module`, `shared_resources_module`), `backend_ctl` (harness)
@@ -11,6 +11,16 @@
   [`docs/reviews/2026-09-24_lifecycle-graceful-stop-cto.md`](../docs/reviews/2026-09-24_lifecycle-graceful-stop-cto.md)
   (ACCEPT_WITH_DEBT), строки L-5 и L-6 в [`QUEUE.md`](QUEUE.md), долги в
   [`lifecycle-graceful-stop.md`](lifecycle-graceful-stop.md) (раздел «Долги», пункты 1–6).
+
+- **2026-10-19:** открыта Task 1.8 (L-9, одиночный `process.stop` — PM и ребёнок ждут друг друга), полоса Р2, гейт CTO
+  «до стенда T4.x с настоящим роботом».
+- **2026-10-20:** остаток L-9 после Task 1.8 разобран ([отчёт](../docs/reports/2026-10-20_lifecycle-stop-ownership_L-9-residual.md),
+  вердикт CTO §7 — ACCEPT WITH CONDITIONS). Решения владельца 2026-10-20: конечное состояние (б) делать сейчас —
+  **Task 1.9** (исполнение команд жизненного цикла вне `message_processor`, отложенный ответ; разделена на **1.9a** —
+  примитив `KeyedExecutor` и развилка в `CommandManager`, **1.9b** — PM первый потребитель); малые задачи рядом — **Task 1.10**
+  (честный итог стопа `outcome`) и **Task 1.11** (окно стопа на ребёнка). Полоса Ф (сессия inspector-bottles-07). План
+  закрытия окна GUI — отдельный, `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент; здесь только
+  потребитель Task 1.9). Статус: 1.9a DONE 2026-10-21 (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9a.md`); 1.9m DONE 2026-10-21 — `ExecutorManager` (`docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9m.md`); 1.9b IN PROGRESS 2026-10-21 (стадия 0 р.1 CHANGES REQUESTED, правки внесены, р.2 — после 1.9m); 1.9c DRAFT 2026-10-21 — выделена из 1.9b стадией 0; 1.10–1.11 DRAFT → ждут стадии 0 (reviewer Opus).
 
 ## Зачем — одной фразой
 
@@ -41,12 +51,14 @@
 |---|---|---|---|---|
 | [`lifecycle-owner-scope`](2026-10-03_lifecycle-owner-scope/plan.md) (Ф0 начата 2026-10-03, первый приоритет очереди) | один владелец ресурсов **внутри** процесса: подписки, потоки, окна; корень процесса с сегментами `planes \| transport \| work` ([DESIGN §2.2–2.3](2026-10-03_lifecycle-owner-scope/DESIGN.md)) | — | **П1:** эскалация `_stop_many` и метка ReaderGone становятся адаптером `ChildProcessStop` — семантика и ADR остаются здесь (ADR-SRM-016, ADR-PMM-031), код живёт в одном месте, тесты Task 1.2 обязаны остаться зелёными. **П2:** формула бюджета (`outer_stop_budget`, `_pm_graceful_budget`) — в один `stop_budget.py`, продолжение ADR-PMM-031 на уровень ребёнка. **П3:** внутрипроцессная половина Task 3.1 (именованные фазы `stop()`) и удаление хука `_before_observability_teardown` — их Task 1.2 | у нас остаются: межпроцессный quiesce → ack (сужённая Task 3.1), Ф2-перемер, `ProcessTreeGuard` и досъём дерева в `harness.py` (**П4**), D1/L-7. Ф2 — после их Ф1 (меняет времена стопа) |
 | [`lifecycle-graceful-stop`](lifecycle-graceful-stop.md) (DONE) | ReaderGoneQueue, хук выхода, ADR-SRM-015/016, долги 1–6 | долги 4–6 и L-5 (1)–(3) | ADR-SRM-016 дополняется, не переписывается | закрыт — сюда только ссылки |
-| [`transport-single-policy`](transport-single-policy.md) (не начат) | двери транспорта кадров, loan/reclaim, `frame_shm_middleware` | — | **L-6 (кадры и маски 0.3–1.2 МБ через pipe) — туда, не сюда**: это корень окна зависания, но домен — транспорт кадров | этот план не трогает `frame_shm_middleware`, `loan_ledger`, `router_manager` |
+| [`transport-single-policy`](transport-single-policy/plan.md) (не начат) | двери транспорта кадров, loan/reclaim, `frame_shm_middleware` | — | **L-6 (кадры и маски 0.3–1.2 МБ через pipe) — туда, не сюда**: это корень окна зависания, но домен — транспорт кадров | этот план не трогает `frame_shm_middleware`, `loan_ledger`, `router_manager` |
 | [`2026-09-22_gui-service`](2026-09-22_gui-service/plan.md) (APPROVED ред. 2) | Task 1.3a — серверный `SocketChannel`; кнопка «стоп» Пульта | — | чистый путь `system.shutdown` к старту 1.3a | срок-якорь Ф1 |
 | [`observability-closure`](observability-closure/plan.md) (в работе, сессия A) | 4.3b и дальше правят `process_manager_process.py` (форвардеры, хаб); 4.8 — «останов стенда через terminate» | — | закрываем «terminate на `system.shutdown`» | **общий файл `process_manager_process.py`**: правка Ф1 — одна функция `_cmd_system_shutdown` + вызов метки в `stop_many`; мержить маленькими коммитами, перед мержем — `git log main..` соседа |
 | [`otel-export`](otel-export.md) (сессия B) | числа останова `otel flush` | — | после Ф1 путь через команду тоже чистый | их числа через команду сдвинутся — предупредить в handoff |
 | [`framework-architecture-rework`](framework-architecture-rework/plan.md) (DRAFT ред. 3) | одно окно codemod (Р-9), перенос файлов | — | — | Ф1 файлов не переносит; если окно codemod откроется раньше — Ф1 ждёт или идёт первой |
 | `line-sim` (сессия line-sim-5.4, стенд 8765/8766) | живой стенд двух приложений | — | более чистый останов их стенда | порты не пересекаются (наши 8850–8859) |
+| `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`) (пишет другой агент, 2026-10-20) | закрытие окна GUI с ходом остановки; правка корня PM: приёмный поток и сокет переживают фазу детей (CTO D4, сегодня ADR-PMM-036 LIFO закрывает `message_processor` раньше детей) | — | Task 1.9b: стоп вне `message_processor`, `supervision.status` без FIFO и без лока поверх ожидания, `OrderedExecutor.shutdown(deadline)` из `_ChildrenStop`; Task 1.10: `stop_outcome` в `supervision.status` для показа хода | правка корня PM (порядок `workers`/`children`/`transport`) — их задача, не 1.9b; общий файл `process_manager_process.py` — один писатель через координатора, их правка корня — после слияния 1.9b |
+| полоса Р2, T5.3e (возврат робота домой) | штатный стоп робота | — | ничего: «домой» — команда устройству ДО `process.stop` (CTO D3 (3)), не длинный стоп процесса | Task 1.11 — НЕ носитель возврата домой; до 1.9b + 1.11 возврат домой внутрь `process.stop` не класть (CTO D1) |
 
 ## Ф1 — PM владеет остановкой (цена S–M, до gui-service 1.3a)
 
@@ -328,9 +340,249 @@ Ctrl+C получает вся консольная группа, ребёнок
 **Направление:** первым шагом — воспроизведение и порядок событий в журнале PM; кто решает «остановлен, не падение» — PM
 (эта полоса, межпроцессная половина). Родственник L-7 (сторож родителя шлёт Ctrl+C на Windows) — смотреть вместе.
 
+### Task 1.8 — одиночный `process.stop`: PM не блокирует свой читающий поток ожиданием выхода ребёнка (L-9)
+
+**Статус:** DONE 2026-10-19 на ветке `fix/lifecycle-stop-l9` (слияние — по «да» владельца); [отчёт](../docs/reports/2026-10-19_lifecycle-stop-ownership_Task-1.8.md): process.stop 2 робота 0/6 (было 3/5), 0,78–1,02 с; suite 0 новых красных · **Level:** Senior+ · **Layer:** framework
+**Assignee:** стадия 0 — `reviewer` (Opus, класс: потоки, IPC, жизненный цикл процесса); тестер — слепой, в worktree на
+коммите открытия задачи; реализация — `teamlead` (решения о потоках PM) или `developer` (Sonnet) по точному DESIGN после
+стадии 0; опись логов и матрица инъекций — Haiku. Лид полосы Р2 — сессия `inspector-bottles-59`.
+**Источник:** дефект **L-9** (`plans/queue/defects.md`), расследование
+[`docs/reviews/2026-10-19_L-9_pm-stop-exit-hang.md`](../docs/reviews/2026-10-19_L-9_pm-stop-exit-hang.md).
+**Гейт:** условие CTO 2026-10-19 (приёмка T5.3a+b) — чинить до любого стенда T4.x с настоящим роботом
+(`plans/queue/ORDER.md`, строка 14, перед T4.0).
+**Goal:** любой стоп, который PM ждёт синхронно, не даёт взаимной блокировки «PM ждёт ребёнка — ребёнок ждёт, пока PM
+прочитает его хвост»; ребёнок выходит сам, без terminate PM через 5 с, даже когда pipe канала PM забит (его хвост плюс
+сообщения других писателей за время ожидания > ~8 КБ).
+
+**Факт (по коду `main` = `59de07c8e`; номера строк — `process_manager_module/process/process_manager_process.py`):**
+- Поток `message_processor` (`process_module/threads/system_threads.py:51-88`) — единственный, кто читает каналы PM
+  system/state/observability; команды исполняются синхронно внутри `router_manager.receive()`.
+- Из этого потока PM ждёт выхода ребёнка до `stop_process_timeout` (5 с):
+  `_cmd_process_stop` (:628) → `stop_process` → `stop_one` (:3671); `restart_process` (:3693, команда `process.restart` и
+  супервизор — `monitor/process_monitor.py:1479`); остановка при переключении топологии и её откат —
+  `stop_many` (:1847, :4227); `recipe.activate` (`recipe/service.py:356` → `apply_topology`). Все — на `message_processor`
+  (стадия 0, чтением); рестарт супервизора опасен только для живого ребёнка (мёртвый возвращается сразу, :3668). Все пути
+  сходятся в `ProcessRegistry._build_child_stop` → `ChildProcessStop.join_until` (`time.sleep(pause)`, `child_process_stop.py:221`).
+- Ребёнок на выходе в `release_feeders_at_exit` (`shared_resources_module/queues/core/reader_gone.py:139-174`) ждёт без
+  срока, пока feeder каждой НЕмаркированной очереди сольёт буфер в pipe (ADR-SRM-016: так защищён медленный живой читатель).
+  На одиночном стопе `system_stop=False`, очереди PM метки «читатель ушёл» не имеют и иметь не должны (PM жив).
+- Pipe mp.Queue на Windows ~8 КБ. Проба на настоящем хуке: хвост 1,6 / 4,8 КБ — выход; 9,6 / 19 / 38 КБ — висит, пока
+  читатель не вычерпает, после — exit 0. Стенд T5.3 круг 2: 2 робота — 4 зависания из 5 (ответ PM 5,05 с,
+  `not reported/lost: ['devices']`), 1 робот — 0 из 4.
+- **Замер стенда 2026-10-19 (шаг 1, до фикса):** `process.stop devices`, 2 робота — 3 из 5 и 3 из 5 зависаний (5,047–5,063 с),
+  1 робот — 0 из 3 (0,81–0,92 с); `system.shutdown`, 2 робота — 0 из 7 (выход PM 1,47–1,92 с, exitcode 0). Застревает
+  `ProcessManager.system` (state/observability — 0 байт во всех точках). Стеки на +2,5 с: devices — `reader_gone.py:153` +
+  feeder в `_send_bytes`; PM `message_processor` — `child_process_stop.py:221` `join_until` из `_cmd_process_stop`.
+  **Pipe общий для всех писателей:** непрочитанное (PeekNamedPipe) растёт с 0 до 5,7–6,5 КБ за 0,25 с после t0 и до
+  8,2–9,3 КБ к входу devices в хук (+0,58…0,73 с), у зависших — до 12,6–13,4 КБ к terminate. Свой хвост devices после t0 —
+  12 сообщений / 3,8 КБ; в зависших прогонах devices лишь 4-й по объёму отправитель (region_splitter, preprocessor,
+  camera_0 — по 4,4–6,4 КБ). Один порог прогоны не разделяет — гонка: успеет ли хвост devices лечь в pipe до того, как его
+  забьют соседи. Что именно шлют соседи в PM.system на стопе devices — не смотрели.
+- Отложенный ответ во фреймворке есть (`manages_own_reply` + `reply_to_request` с любого потока, `router_manager.py:1343`,
+  PM :3322-3328); прецедент «ждать вне `message_processor`» — `_run_when_child_ready` (:1496, FIFO действий на ребёнка).
+
+**Решение стадии 0 (Opus, 2026-10-19, [отчёт](../docs/reviews/2026-10-19_lifecycle-1.8-stage0.md)) — (в): ожидание
+вычерпывает свои каналы в буфер, без диспетчеризации.** Пока `join_until` ждёт ребёнка, поток переносит сообщения из pipe
+своих каналов (фильтр текущего `receive`: system/state/observability) в FIFO-буфер роутера; разбор и диспетчеризация —
+в следующем `receive()`, после возврата обработчика. Ответ команд синхронный, после подтверждённой смерти — как сегодня;
+внутри ожидания не исполняется ни одна команда; порядок сохраняется; одна точка закрывает все пути «Факта».
+Отвергнуто: (а) с диспетчеризацией — реентерабельность (`topology.apply` внутри `restart_process` между stop и
+`create_and_register`); (б) ожидание в другом потоке — теряется неявная сериализация команд PM (`process_monitor.py:1480`);
+отпуск feeder по таймауту; метка «ушёл» на очередях PM.
+
+**DESIGN (кратко; полный — отчёт стадии 0, §4):**
+- D1 `router_module/core/router_manager.py`: `receive()` запоминает свой фильтр каналов в `_recv_local`; публичный
+  `pump_inbound() -> int` — при `depth == 0` возвращает 0, иначе `poll(0.0)` каналов фильтра в `_inbound_stash`
+  (FIFO на канал, потолок `POLL_DRAIN_CEILING`, WARNING один раз за эпизод, не бросает); `_poll_all_channels` отдаёт
+  буфер канала раньше pipe; пустой буфер — ноль затрат.
+- D2 `core/child_process_stop.py`: kwarg `idle` (по умолчанию `time.sleep`), `join_until` зовёт `idle(pause)`; сбой idle —
+  один WARNING и `time.sleep`.
+- D3 `core/process_registry.py`: `stop_wait_idle`, `_build_child_stop` передаёт его в `ChildProcessStop`.
+- D4 `process_manager_process.py`: `_stop_wait_idle(pause_s)` = `pump_inbound()` + сон остатка; ставится в реестр после
+  его создания. Обработчики, `stop_process`, `restart_process`, топология — без правок.
+- ADR-PMM-037 «Ожидание стопа вычерпывает свои каналы» + ADR в `router_module/DECISIONS.md` (контракт `pump_inbound`) +
+  `python -m scripts.sync`.
+
+**Module contract:** `RouterManager.pump_inbound()`, `ChildProcessStop(idle=)`, `ProcessRegistry.stop_wait_idle`;
+ответы команд PM не меняются (синхронные, после подтверждённой смерти).
+
+**Files:** `multiprocess_framework/modules/router_module/{core/router_manager.py, README.md, DECISIONS.md, tests/}`,
+`multiprocess_framework/modules/process_manager_module/{core/child_process_stop.py, core/process_registry.py,
+process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать: `process_module/threads/system_threads.py`,
+`shared_resources_module/queues/core/reader_gone.py`.
+
+**Steps:**
+1. Замер до фикса (стенд, своё окно): дамп стеков devices и PM через ~2,5 с после `process.stop`
+   (`faulthandler.dump_traceback_later` из `sitecustomize`); имя переполненной очереди PM (`pending` и `_buffered(q)` перед
+   циклом ожидания) и объём хвоста после t0. Отладочный код — в worktree, не в коммит. Идёт параллельно со стадией 0.
+2. Стадия 0 — `reviewer` (Opus) на текст задачи: выбор (а)/(б), DESIGN, FILES, REDS; сверка с П1 `lifecycle-owner-scope`.
+3. Слепой тестер — acceptance ниже, в worktree на коммите открытия задачи; ожидаемо RED.
+4. Реализация по DESIGN; инъекции (прогнозы — до прогона); стенд; ревью (Opus).
+
+**Acceptance (числа ДО — прогноз, ПОСЛЕ — факт):**
+- [x] Проба из расследования (ребёнок с хвостом 9,6 / 19 / 38 КБ, живой, но занятый читатель — путь PM): до фикса жив
+  через 3,0 с; после — выходит с exitcode 0 без terminate. Хвост 1,6 / 4,8 КБ — выход, как раньше.
+- [x] Тест-сторож на механизм (вызов в daemon-потоке, дедлайн join 12 с; REDS R1–R11 отчёта стадии 0): стоп ребёнка с
+  хвостом 120×321 Б в канал PM отвечает за ≤ 3,0 с (до фикса ≥ 5,0 с), exitcode 0 (до фикса -15), флаг отчёта ребёнка 1
+  (`exit_report` «reported», не «lost»), все 120 сообщений приходят по порядку, очередь PM не помечена «ушёл».
+  Для `restart_process` — exitcode 0 у старого экземпляра (слот `exit_report` снимает `remove_process`, :3695).
+  **R10b — реальное условие стенда:** сосед непрерывно пишет в ту же очередь PM, у останавливаемого хвост 12×321 Б — до
+  фикса ≥ 5,0 с / -15, после ≤ 3,0 с / exitcode 0 / 12 из 12 по порядку; без соседа — зелёный и до, и после.
+- [x] Стенд: 2 робота (сим) через PM / backend_ctl, ≥ 5 остановок — 0 зависаний, ответ ≤ 2,0 с, нет `not reported/lost`
+  (было 4 из 5, ответ PM 5,05 с); 1 робот — без регресса (ответ PM 0,81–0,95 с); по одному `process_restart_verified` и
+  `recipe.activate` — ответ < 5,0 с.
+- [x] Тесты Task 1.2 (метка ReaderGone) и Task 1.3 зелёные (П1 соседнего плана); framework suite в своём окне — 0 новых
+  красных против базы.
+- [x] Инъекции: вернуть синхронное ожидание → сторож красный; сломать вычерпывание / отдельный поток → красный. Прогноз
+  красного набора — до прогона, поимённо.
+
+**Out of scope / НЕ делать:**
+- Отпускать feeder ребёнка по таймауту (`cancel_join_thread` по сроку) — отвергнуто владельцем
+  (`docs/claude/memory/project_graceful_stop_debt.md`: обрезает сообщение живому медленному читателю).
+- «Уменьшить шум хаба на останове» — отодвигает порог, не чинит. Решение — одно для всех процессов, не только devices.
+- Системный стоп (`system.shutdown`): message_processor PM закрывается раньше детей (LIFO корня), pump там не работает —
+  возможна та же блокировка (вывод стадии 0 чтением, не воспроизведён). Сначала замер на стенде (шаг 1); воспроизведётся —
+  отдельная задача, к CTO с числами.
+- Не трогать: `Services/device_hub/**`, `Plugins/hub/**` (T5.3c/d — следующая работа полосы Р2),
+  `Services/hikvision_camera/**`, `Services/code_reader/**` (полоса К), `robot/pc_platform_probe/**` (полоса Р).
+- Соседи: `lifecycle-owner-scope` П1 — тесты не ломать, DESIGN сверить; `2026-10-18_camera-device-service` Task 1.7 —
+  те же файлы `process_manager_module` (`launcher/spawner.py`), один писатель; на 2026-10-19 она не начата.
+
+### Файлы полосы Ф для Task 1.9a–1.11 (2026-10-20)
+
+- **Граница файлов полосы Ф** — дословно из [передачи](../docs/handoffs/2026-10-20_lane-F-L9-residual-to-T1.9.md)
+  (координатор inspector-bottles-fb, 2026-10-20):
+
+  - `multiprocess_framework/modules/process_manager_module/**`, `multiprocess_framework/modules/process_module/**`;
+  - `router_module` — ADR-RTR-014 и `pump_inbound`; в `router_module/core/router_manager.py` — только `_dispatch_command`
+    (передача reply-колбэка);
+  - `command_module` — `register_command` и метаданные регистрации, `CommandManager.handle_command`;
+  - `multiprocess_framework/modules/worker_module/keyed_executor.py` (новый) с тестами.
+  - Развилку «сам / исполнителю» делает CommandManager по ключу из регистрации (`key_from`), отправители не меняются.
+  - Чужие, не трогать: `Services/device_hub/**`, `Plugins/hub/device_hub/**`, `Services/robot_comm/**`,
+    `plans/robot-protocol-v2/**` (полоса Р2); `plans/queue/ORDER.md`, строки `defects.md` (координатор).
+  - Ловушка: camera-device-service Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`; Р2 позже («SPI хаба»,
+    OpSpec) заденет регистрацию команд — один писатель, при смене сигнатуры/умолчаний `register_command` предупредить
+    координатора до слияния.
+
+- **Вне полосы, по одной правке, через координатора:** `multiprocess_prototype/orchestrator.py` (Task 1.9b: регистрация
+  `recipe.activate` с исполнителем жизненного цикла).
+- **Карта инструментов фреймворка для `KeyedExecutor`** (что переиспользовать, что не годится, какие дубли сводить и в
+  какой задаче): [`docs/maps/keyed-executor-tools.md`](../docs/maps/keyed-executor-tools.md).
+- **Ловушка:** `2026-10-18_camera-device-service` Task 1.7 тоже правит `process_manager_module/launcher/spawner.py`
+  (Task 1.11 — тоже). Один писатель: перед стартом 1.11 координатор сверяет, начата ли их 1.7; если да — 1.11 ждёт её
+  слияния или берёт `spawner.py` после неё. То же для `process_manager_process.py` и плана `gui-graceful-close`.
+- **Порядок и зависимости:** 1.9a → 1.9m → 1.9b → 1.10 → 1.11 → 1.9c → (полоса Services) сведение `ServiceHost._cmd_start` к
+  `KeyedExecutor` (дубль №2 карты). 1.9b, 1.10, 1.11 — общие `process_manager_process.py`, `child_process_stop.py`,
+  `process_registry.py`, параллельно не идут; 1.9a поведения PM не меняет. Правка корня PM из `gui-graceful-close` — после слияния 1.9b; с 1.10/1.11
+  в одной волне не идёт (общий файл), очередь решает координатор. T4.x не ждёт ни одной из трёх (CTO D4).
+- **Исполнение каждой задачи (Task launch convention):** стадия 0 — `reviewer` (Opus, класс: потоки, IPC, жизненный цикл
+  процесса) синхронно на текст задачи; слепой `tester` (Sonnet) — в worktree на коммите открытия задачи, только по
+  Acceptance, запрещённые пути названы; реализация — `teamlead` (Opus; решения о потоках PM — Senior+); прогон матрицы
+  инъекций и сбор чисел стенда — Haiku по прогнозам лида; ревью — `reviewer` (Opus) после кода. Предел — 2 итерации на
+  петлю; третья — эскалация `teamlead` → `cto` → владелец. Агенты не коммитят и не пушат — коммитит лид.
+
+### Task 1.9a — примитив `KeyedExecutor` и развилка в `CommandManager`
+
+**Статус:** DRAFT 2026-10-20 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** общий исполнитель с порядком по ключу `worker_module/keyed_executor.py` (обобщение `_run_when_child_ready`) и развилка «на месте / исполнителю» в `CommandManager` по регистрации (`executor=`, `key_from=`, `targets=`, `reply`, `DEFERRED`); поведения PM не меняет.
+**Зависит от:** нет (первая). Карта: [`docs/maps/keyed-executor-tools.md`](../docs/maps/keyed-executor-tools.md)
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9a.md`](lifecycle-stop-ownership/tasks/T1.9a.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.9m — `ExecutorManager`: исполнители как сотрудник процесса (решение владельца 2026-10-21)
+
+**Статус:** DONE 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — по брифу; инъекции — Haiku; ревью задачи — `reviewer` (Sonnet), ревью ветки — Opus
+**Goal:** `ExecutorManager(BaseManager)` внутри любого процесса: именованные исполнители из конфига процесса и регистрацией готового `OrderedExecutor`, жизнь в scope процесса, интроспекция `introspect.executors`; `register_command(executor=)` принимает объект или имя. Ядро `KeyedExecutor` 1.9a — без правок.
+**Зависит от:** Task 1.9a. **Даёт:** Task 1.9b (PM — первый потребитель менеджера). Слова владельца: «отдельный помощник наподобие nginx, чтобы не только PM, но и другие процессы при необходимости себе сделали; новый сотрудник на базе фреймворка (наследующий от base_manager)»; форма «внутри процесса, не отдельный процесс» согласована.
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9m.md`](lifecycle-stop-ownership/tasks/T1.9m.md) (+ [`T1.9m_facts.md`](lifecycle-stop-ownership/tasks/T1.9m_facts.md))
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → исполнитель (GREEN + hazard) → лид (инъекции) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+
+### Хвосты Task 1.9m — закрыть отдельным циклом в новом чате (решение владельца 2026-10-21)
+
+**Статус:** TODO · владелец при слиянии 1.9m: «все нюансы надо позже закрыть в новом чате». Источник — «Что осталось открытым»
+[отчёта 1.9m](../docs/reports/2026-10-21_lifecycle-stop-ownership_T1.9m.md) и разборы ревью (`docs/reviews/2026-10-21_task-1.9m-*`,
+`2026-10-21_branch-1.9m-review-opus.md`). Каждый пункт — тест или правка с инъекцией, либо явное решение «оставить» с причиной.
+
+1. H2 слабый (`reply` зовётся напрямую, роутер не участвует) — переписать через роутер или снять в пользу
+   `test_real_process_command_by_executor_name_runs_on_executor_thread`.
+2. H5 вероятностный (5/5 и 3/3 на одной машине) — детерминировать или записать предел.
+3. Поздний `load_config` (мутант M2) ловит только тест наследника; регистрация после `initialize()` порядок не проверяет.
+4. И7: в слепом наборе нет теста `describe()` для исполнителя не из конфига (поломку ловят только H3/H5 автора).
+5. Автор видел матрицу И до написания H-тестов — независимая перепроверка H1–H9 (tester вслепую или инъекции reviewer).
+6. Процесс без корня (`work is None`): после `shutdown()` живы `keyed-*` и `message_processor` (воспроизведено ревью ветки) —
+   общий путь, в продукте недостижим; решить: исправить или записать в реестр.
+7. Хвост 1.9a: провал на втором рабочем `KeyedExecutor` оставляет первый в `WorkerManager` (найдено чтением).
+8. `_OwnedExecutor(...)` между конструктором и `try` в `create()`: синтетический бросок оставляет резерв и живые потоки
+   (реально не бросает) — закрыть построением или тестом.
+9. Гонка `create`/`register` одного имени не воспроизведена (register выиграл 200/200 из-за валидации до лока).
+10. Публичный `stats()` у `KeyedExecutor` (глубина очереди, ключи в работе, счётчики) → `introspect.executors` без
+    `unavailable` (строка в `docs/claude/OPEN_QUESTIONS.md`).
+11. Совет ревью задачи `assert spec` — не взят; решить.
+12. `T1.9m.md` 33 КБ — выше лимита doc-size-guard (32 КБ); вынести часть в `_facts.md`.
+13. Красные suite не от 1.9m — C-26 (`test_event_manager_exit` под нагрузкой), C-27 (`test_line_sim_overview_lists_robot`
+    setup под нагрузкой) — ведёт координатор; здесь только ссылка.
+
+### Task 1.9b — PM первый потребитель: стоп вне `message_processor`, отложенный ответ (конечное состояние L-9)
+
+**Статус:** DONE 2026-10-26 — влит `4d2a2f522`; гейт CTO MERGE на `d23dc31ab`; отчёт [`docs/reports/2026-10-26_lifecycle-stop-ownership_1.9b.md`](../docs/reports/2026-10-26_lifecycle-stop-ownership_1.9b.md) (был DRAFT 2026-10-20) · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** PM не глохнет, пока ждёт смерти ребёнка: команды жизненного цикла помечены в регистрации и идут в `KeyedExecutor` (последовательно), ответ после подтверждённой смерти через обе двери, `system.shutdown` мимо очереди, один владелец стопа (I1–I4); `_run_when_child_ready` — Task 1.9c.
+**Зависит от:** Task 1.9a, Task 1.9m (исполнители PM — через `ExecutorManager`); потребитель — план `gui-graceful-close` (`plans/2026-10-20_gui-graceful-close/`, ветка `docs/gui-graceful-close-plan`)
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9b.md`](lifecycle-stop-ownership/tasks/T1.9b.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции, стенд) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.9c — `_run_when_child_ready` поверх `KeyedExecutor` (выделена из 1.9b стадией 0)
+
+**Статус:** DRAFT 2026-10-21 · **Level:** Senior+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet) в worktree на коммите открытия; реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** ядро `_run_when_child_ready` — `KeyedExecutor` вместо daemon-потока на адресата (дубль №1 карты); семантика ADR-PMM-024 прежняя; стоп PM не ждёт ждущие действия гейта.
+**Зависит от:** Task 1.9b, Task 1.11. Причина выделения: D5 ломал тесты ADR-PMM-024 «без правок» и добавлял hazard `_WorkersStop` (стадия 0 1.9b, п.2–5).
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.9c.md`](lifecycle-stop-ownership/tasks/T1.9c.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED, worktree) → `teamlead`(GREEN + hazard) → лид (инъекции) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.10 — честный итог стопа: `outcome` рядом с `success`
+
+**Статус:** DONE 2026-10-27 (ветка `feat/lifecycle-stop-outcome`; ревью ветки Opus APPROVED — [`2026-10-27_T1.10_branch-review.md`](../docs/reviews/2026-10-27_T1.10_branch-review.md); стенд S1/S6/L-9 R2-C — `T1.10_tests.md` «Стенд — факт») · **Level:** Middle+ · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `developer` (Sonnet), эскалация — `teamlead`; инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** ответ `process.stop`/`process.restart` и `supervision.status` несут `outcome` = exited | terminated | killed | survived | handed_over; `success` по-прежнему «смерть подтверждена».
+**Зависит от:** Task 1.9b; О1
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.10.md`](lifecycle-stop-ownership/tasks/T1.10.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED) → `developer`(GREEN) → лид (инъекции, стенд) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Task 1.11 — окно стопа на ребёнка: ключ конфига процесса, внешние сроки — из максимума
+
+**Статус:** DRAFT 2026-10-20 · **Level:** Senior · **Assignee:** стадия 0 — `reviewer` (Opus); тестер — слепой (Sonnet); реализация — `teamlead` (Opus); инъекции — Haiku; ревью — `reviewer` (Opus)
+**Goal:** окно стопа на ребёнка (`stop_window_s`) на всех путях стопа, потолок `max_stop_window_s`, внешние сроки PM и спавнера — из потолка; не носитель возврата робота домой.
+**Зависит от:** Task 1.9b, Task 1.10; ловушка `launcher/spawner.py` (camera-device-service 1.7)
+**Полный текст:** [`lifecycle-stop-ownership/tasks/T1.11.md`](lifecycle-stop-ownership/tasks/T1.11.md)
+**Handoff:** `reviewer`(стадия 0) → `tester`(RED) → `teamlead`(GREEN) → лид (инъекции, стенд) → `reviewer`
+**Files:** — раздел «Files» файла задачи
+**Acceptance:** — раздел «Acceptance» файла задачи
+
+### Открытые решения Task 1.9a–1.11 (владельцу / CTO, не догадки менеджера)
+
+Вердикт CTO 2026-10-20 по «отделу вместо одного телефона» и О1–О5 — ACCEPT WITH CONDITIONS; решения внесены в T1.9/T1.10.
+
+- **О1 — решено CTO:** пятое значение `outcome = "handed_over"` для стопа, прерванного системным стопом (ребёнка
+  добивает `_ChildrenStop`); `survived` значит только «пережил kill» — не смешивать.
+- **О2 — решено CTO:** присвоение `stop_wait_idle` остаётся страховкой (цена ноль: `depth == 0` → 0); ADR-PMM-037 —
+  «страховка, не основной путь».
+- **О3 (владелец, открыто).** Как приложение помечает свои команды жизненного цикла (`recipe.activate` прототипа). Совет
+  CTO — метаданные регистрации (`executor=`, `targets=`), так и записано в T1.9a D3 / T1.9b D2; альтернатива — список имён в конфиге PM.
+- **О4 — решено CTO:** `targets="all"` остаётся; сужение до diff потом станет вычислением ключа исполнителя.
+- **О5 — решено CTO:** 1.9 — первый потребитель общего примитива `worker_module/keyed_executor.py` (T1.9a D1, потребитель — T1.9b). Роли-потоки
+  по видам почты отвергнуты замером (T1.9a «Почему так»).
+
 ## Ф2 — перемерить после L-6 и решить судьбу ReaderGoneQueue
 
-Зависит от L-6 = Фаза 4 [`transport-single-policy`](transport-single-policy.md) (Task 4.0 разведка → 4.1 claim check). Когда сообщения в data-очередях станут ~1 КБ: 20 циклов стопа по всем путям,
+Зависит от L-6 = Фаза 4 [`transport-single-policy`](transport-single-policy/plan.md) (Task 4.0 разведка → 4.1 claim check). Когда сообщения в data-очередях станут ~1 КБ: 20 циклов стопа по всем путям,
 число срабатываний отпуска и `buffered_dropped`. Если отпуск не срабатывает ни разу — ReaderGoneQueue остаётся
 страховкой (ADR фиксирует это числом), если срабатывает — искать, какой ещё крупный груз едет через pipe.
 **Не делать до L-6** (выполнено по тексту: транспорт 4.1 claim check в `main`) **и до Ф1

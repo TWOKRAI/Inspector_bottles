@@ -64,7 +64,7 @@ executor by task level — §2 above. Here, only what gets decided when assembli
 
 - Always: you (lead/PM) and `reviewer` — once on the Task spec before the tester, and synchronously after every task.
 - `tester` — **once per mechanism, before implementation**, in a worktree on a pre-impl commit.
-- `debugger` — on a FAIL from the tester. `cto` — phase acceptance, merge gate, `teamlead` ↔
+- A FAIL from the tester goes to the author (the same teammate), not to a new role; `debugger` from the start for code no agent of this task wrote, and one diagnosis on the 3rd iteration (`project-rules` §5 «One executor per task»). `cto` — phase acceptance, merge gate, `teamlead` ↔
   `reviewer` dispute; **not** per task.
 - `teamlead` — when you expect escalations (why exactly — `team-protocol` §4).
 
@@ -121,17 +121,18 @@ Don't spawn "just in case": an idle participant costs the same as a busy one.
 While work is delegated, you don't write code. Exception — something trivial (under 30 lines, one
 file), and say so out loud.
 
-## 7. Injections — you only
+## 7. Injections — predictions and verdict are yours
 
 After every mechanism: predict the set → revert each guarantee one at a time → the fact.
-Against both test sets, the author's and the tester's. Not delegated. Record it, if the project
+Against both test sets, the author's and the tester's. The predictions and the verdict are yours; the
+mechanical run may go to an agent with your predictions in the prompt. Record it, if the project
 keeps an injection log (format and path — per project convention).
 
 ## 8. Review and escalation — questions go up a level, like in a company
 
 - `reviewer` after every task, synchronously (`run_in_background: false` if via Agent);
   a finding is an input → observable output.
-- Two iterations per loop; on the third — one level up. One chain for everyone, recorded once in
+- Two iterations per loop; on the third — one level up (for a red: the third is one `debugger` diagnosis, then `teamlead`). One chain for everyone, recorded once in
   skill `project-rules` §7 (not duplicated here), agents know it.
 - In the team, a participant writes to the level above by name (`SendMessage`), if that role is
   in the team; otherwise — to you, in the same text, and you spawn the needed role. Message

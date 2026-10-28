@@ -15,6 +15,8 @@
 `JoinInspectorManager` по `(seq_id, data_type)`. Stateless, `thread_safe=True`. Кадр не
 мутируется (рисуем на `frame.copy()`).
 
+Вход `overlay` объявлен `optional=True, join=True`: может быть не подключён (qr-рецепты рисуют кадр без оверлея), а подключённый участвует в join с `frame` (`Port.join`, ADR-PMM-017 п.7) — рецепту `collector: {mode, inputs}` задавать не нужно.
+
 ## overlay-форматы
 
 - `vlines: [{cx, cy, angle, zone_width, group, type}]` — семантика виртуальной линии;

@@ -1,0 +1,171 @@
+[
+ {
+  "seed": 13,
+  "src": "# c0\nkuruq:\n  # c1\n  - []\n  - []\n  -\n    k: null\n    kr: \"s\"\n    # c2\n    kwdqc:  # e3\n      # c4\n      kf: false  # e5\n# c6\nk:  # e7\n  - -22.625\n  - []\n# c8\nkt:  # e9\n  k: null  # e10\n  kahx: \"sw0f\"  # e11\n  kzv: false  # e12\n  kjgk: -19.5\nku: true  # e13\n",
+  "before": {
+   "kuruq": [
+    [],
+    [],
+    {
+     "k": null,
+     "kr": "s",
+     "kwdqc": {
+      "kf": false
+     }
+    }
+   ],
+   "k": [
+    -22.625,
+    []
+   ],
+   "kt": {
+    "k": null,
+    "kahx": "sw0f",
+    "kzv": false,
+    "kjgk": -19.5
+   },
+   "ku": true
+  },
+  "after": {
+   "kuruq": [
+    {
+     "k": null,
+     "kr": "s"
+    }
+   ],
+   "kt": {
+    "k": null,
+    "kahx": "sw0f",
+    "kzv": false,
+    "kjgk": -19.5
+   }
+  },
+  "msg": "r.yaml: дамп не читается PyYAML — запись отменена, файл цел: mapping values are "
+ },
+ {
+  "seed": 2,
+  "src": "# c0\nkadk:\n  # c1\n  krokx: -38\nkvmco:  # e2\n  k:\n    # c3\n    - 122  # e4\n  # c5\n  krbq: 181\n  khlat: {}\n  kifc:\n    # c6\n    -  # e7\n      kq: 499.875  # e8\n# c9\nk:\n  khgrb: \"srxgm\"  # e10\n  # c11\n  k:\n    # c12\n    kuz: null\n  kde:\n    kukih: -9.375  # e13\n    # c14\n    kjf: false  # e15\n  # c16\n  kws: null  # e17\nkxena:  # e18\n  -\n    # c19\n    ko: 187\n    # c20\n    k: false  # e21\n  # c22\n  -\n    # c23\n    kxuxe: 111.0\n",
+  "before": {
+   "kadk": {
+    "krokx": -38
+   },
+   "kvmco": {
+    "k": [
+     122
+    ],
+    "krbq": 181,
+    "khlat": {},
+    "kifc": [
+     {
+      "kq": 499.875
+     }
+    ]
+   },
+   "k": {
+    "khgrb": "srxgm",
+    "k": {
+     "kuz": null
+    },
+    "kde": {
+     "kukih": -9.375,
+     "kjf": false
+    },
+    "kws": null
+   },
+   "kxena": [
+    {
+     "ko": 187,
+     "k": false
+    },
+    {
+     "kxuxe": 111.0
+    }
+   ]
+  },
+  "after": {
+   "k": {
+    "khgrb": "srxgm",
+    "k": {
+     "kuz": null,
+     "knew": 1
+    },
+    "kde": {
+     "kukih": -9.375,
+     "kjf": false
+    },
+    "kws": null,
+    "knew": 1
+   },
+   "kxena": [
+    {
+     "kxuxe": 111.0,
+     "knew": 1
+    }
+   ]
+  },
+  "msg": "r.yaml: дамп не читается PyYAML — запись отменена, файл цел: mapping values are "
+ },
+ {
+  "seed": 2,
+  "src": "# c0\nkadk:\n  # c1\n  krokx: -38\nkvmco:  # e2\n  k:\n    # c3\n    - 122  # e4\n  # c5\n  krbq: {}\n  khlat: {}\n  kifc:\n    -  # e6\n      # c7\n      kq: 499.875\n# c8\nk:  # e9\n  khgrb: \"srxgm\"\n  # c10\n  k:  # e11\n    kuz: null  # e12\n  kde:\n    kukih: -9.375\n    # c13\n    kjf: false  # e14\n  # c15\n  kws: null  # e16\n# c17\nkxena:\n  # c18\n  -\n    ko: 187  # e19\n    k: false  # e20\n  # c21\n  -  # e22\n    kxuxe: 111.0  # e23\n",
+  "before": {
+   "kadk": {
+    "krokx": -38
+   },
+   "kvmco": {
+    "k": [
+     122
+    ],
+    "krbq": {},
+    "khlat": {},
+    "kifc": [
+     {
+      "kq": 499.875
+     }
+    ]
+   },
+   "k": {
+    "khgrb": "srxgm",
+    "k": {
+     "kuz": null
+    },
+    "kde": {
+     "kukih": -9.375,
+     "kjf": false
+    },
+    "kws": null
+   },
+   "kxena": [
+    {
+     "ko": 187,
+     "k": false
+    },
+    {
+     "kxuxe": 111.0
+    }
+   ]
+  },
+  "after": {
+   "k": {
+    "khgrb": "srxgm",
+    "k": {
+     "kuz": null,
+     "knew": 1
+    },
+    "kde": {
+     "kukih": -9.375,
+     "kjf": false
+    },
+    "kws": null,
+    "knew": 1
+   },
+   "kxena": [
+    {
+     "kxuxe": 111.0,
+     "knew": 1
+    }
+   ]
+  },
+  "msg": "r.yaml: дамп не читается PyYAML — запись отменена, файл цел: mapping values are "
+ }
+]

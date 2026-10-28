@@ -71,7 +71,7 @@ Rules:
 2. Determine scope of regression: same module + immediate callers (via `codegraph_explore` if MCP available).
 3. Run `pytest <scope> -v`.
 4. If green → report PASS with summary (N tests, X seconds).
-5. If red → report FAIL with the exact failing test + error. **Do not fix.** Hand back to debugger/developer.
+5. If red → report FAIL with the exact failing test + error. **Do not fix.** Hand back to the lead; a red against the task's code goes to its author (`project-rules` §5).
 
 ### Property-based testing (both modes)
 

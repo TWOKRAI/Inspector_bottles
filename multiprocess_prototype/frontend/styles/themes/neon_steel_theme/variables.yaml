@@ -148,7 +148,7 @@ slot_occupied_bg: "#245c3c"
 slot_selected_bg: "#14507e"
 
 # --- Бренд / каналы ---
-brand_color: "#3f97ff"
+brand_color: "#3002e6"
 accent_light: "#cfe0ff"
 ch_red: "#ff85a0"
 ch_green: "#74ecb4"

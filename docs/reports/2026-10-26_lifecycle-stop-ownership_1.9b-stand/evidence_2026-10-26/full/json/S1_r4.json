@@ -1,0 +1,29 @@
+{
+  "run": 4,
+  "precondition_ok": true,
+  "boot_s": 7.94,
+  "override_seen": true,
+  "precondition_note": "",
+  "reply_s": 0.469,
+  "reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "8dc25e83-1b99-4bfd-a723-6fee1cda3827",
+    "success": true,
+    "result": {
+      "success": true,
+      "process_name": "devices"
+    }
+  },
+  "waited_s": 0.47,
+  "status": "stopped",
+  "lost": 0,
+  "dns": 0,
+  "dns_by_dir": {},
+  "hung": false
+}

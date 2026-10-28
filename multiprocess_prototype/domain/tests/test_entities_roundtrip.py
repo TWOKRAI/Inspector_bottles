@@ -748,10 +748,9 @@ class TestTopologyFromDictWhitelist:
             Topology.from_dict({"proceses": [], "wires": [], "displays": []})
 
     def test_topology_meta_field_normalizes(self) -> None:
-        """SystemBlueprint-поля name/description помещаются в metadata.
+        """SystemBlueprint-поля name/description — типизированные поля Topology (Task 1.7).
 
-        Whitelist {"name", "description"} перемещается в Topology.metadata,
-        не вызывая extra='forbid'.
+        Они читаются полями модели и в Topology.metadata не переносятся.
         """
         topo = Topology.from_dict(
             {
@@ -762,8 +761,10 @@ class TestTopologyFromDictWhitelist:
                 "description": "y",
             }
         )
-        assert topo.metadata.get("name") == "x"
-        assert topo.metadata.get("description") == "y"
+        assert topo.name == "x"
+        assert topo.description == "y"
+        assert "name" not in topo.metadata
+        assert "description" not in topo.metadata
 
     def test_topology_known_keys_no_metadata_shuffle(self) -> None:
         """Только known_keys → from_dict не трогает metadata."""

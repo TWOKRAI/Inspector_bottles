@@ -97,3 +97,6 @@ class ManagersBundle:
     observation: Any | None = None
     config_manager: Any | None = None
     console_enabled: bool = False
+    #: Менеджер именованных исполнителей (Task 1.9m). Дефолт ``None``: bundle, собранный вручную
+    #: в тестах соседей, поля не имеет; сборка заполняет его всегда.
+    executors: Any | None = None

@@ -61,8 +61,10 @@ topology_dict»), применение топологии и запись «по
       ``current_rev: str | None``.
     * ``hook.validate(hook.normalize(body))`` непуст → ``invalid`` с ``errors``.
     * ``OSError`` при записи → ``io_error``.
-    Инвариант: сравнение ``rev`` и запись идут под одним локом на имя —
-    из двух ``save`` с одним ``base_rev`` успешен ровно один.
+    Инвариант: сравнение ``rev`` и запись идут под одним локом на имя (потоковый,
+    затем межпроцессный ``recipe_file_lock``) — из двух ``save`` с одним ``base_rev``
+    успешен ровно один, в том числе из разных процессов. Лок не взят за 5 с →
+    ``io_error``. То же для ``recipe.delete``.
 
 ``recipe.validate`` — ``{"body"}`` или ``{"name"}`` (ровно одно из двух)
     Post: ``{"success": True, "valid": bool, "errors": [...]}``,
@@ -102,16 +104,23 @@ ADR-RCP-006 (сегодня единица — один файл); права н
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import yaml
+
+from .file_lock import recipe_file_lock
+from .format import compute_rev  # единственное определение (design.md §9.1); имя остаётся публичным путём service
+
+# Повтор os.replace при PermissionError (Windows: файл открыт читателем) — _atomic_write.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_PAUSE_S = 0.02
 
 # Имена команд — ровно как их регистрирует хаб в CommandManager.
 COMMANDS: tuple[str, ...] = (
@@ -210,12 +219,14 @@ class RecipeService:
             (на хабе — ``_cmd_topology_apply``); ``args`` —
             ``{"topology_dict": dict, "recipe_path": str}``.
         persist_active: записать «последний активный» (на хабе —
-            ``ManifestStore.set_pipeline`` через адаптер пути); получает
-            абсолютный путь файла рецепта.
+            ``ManifestStore.set_pipeline`` через адаптер пути: запись идёт в
+            ``<stem>.state.yaml``, а не в ``app.yaml``); получает абсолютный путь
+            файла рецепта.
         read_active: имя активного рецепта или ``None``.
 
     Потокобезопасность: обработчики могут звать с разных потоков; CAS на
-    ``save``/``delete`` — под локом на имя (в пределах одного процесса-хаба).
+    ``save``/``delete`` — под потоковым локом на имя и межпроцессным
+    ``recipe_file_lock`` (lock-файл ``<имя>.yaml.lock`` рядом с рецептом).
     """
 
     def __init__(
@@ -321,7 +332,8 @@ class RecipeService:
         except yaml.YAMLError as exc:
             raise _Reply("bad_request", f"body не сериализуется в YAML: {exc}")
 
-        with self._lock(name):
+        # Порядок: потоковый лок, затем межпроцессный; сверка rev и запись — внутри обоих.
+        with self._lock(name), recipe_file_lock(path):
             current = self._read_bytes(path)
             current_rev = None if current is None else compute_rev(current)
             if base_rev != current_rev:
@@ -366,7 +378,7 @@ class RecipeService:
     def delete(self, args: dict[str, Any]) -> dict[str, Any]:
         """``recipe.delete`` — см. модульный докстринг."""
         name, path = self._path(args)
-        with self._lock(name):
+        with self._lock(name), recipe_file_lock(path):
             current = self._read_bytes(path)
             if current is None:
                 raise _Reply("not_found", f"рецепт {name!r} не найден")
@@ -379,22 +391,29 @@ class RecipeService:
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
-    """tmp в том же каталоге + ``os.replace``; при сбое tmp убирается, старый файл цел."""
+    """tmp в том же каталоге + ``os.replace``; при сбое tmp убирается, старый файл цел.
+
+    Windows: ``os.replace`` падает ``PermissionError`` (WinError 5/32), пока файл открыт
+    читателем без ``FILE_SHARE_DELETE`` (так открывает ``open()`` Python). Повтор — до
+    ``_REPLACE_ATTEMPTS`` попыток с паузой ``_REPLACE_PAUSE_S``, затем исключение наружу.
+    """
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(_REPLACE_PAUSE_S)
     except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
-
-
-def compute_rev(raw: bytes) -> str:
-    """Ревизия байтов файла (непрозрачна для клиента; сегодня sha256 hex)."""
-    return hashlib.sha256(raw).hexdigest()

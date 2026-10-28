@@ -117,7 +117,7 @@ class LauncherFactory(Protocol):
 
 @runtime_checkable
 class ManifestStoreProtocol(Protocol):
-    """Единственная точка read/write манифеста (закрывает гонку backend↔GUI, NEW-1)."""
+    """Сериализованная точка записи манифеста и файла состояния (закрывает гонку backend↔GUI, NEW-1)."""
 
     def read_raw(self) -> Dict[str, Any]: ...
 

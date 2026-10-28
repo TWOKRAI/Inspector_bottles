@@ -1,0 +1,24 @@
+{
+  "repeat": 1,
+  "stop_reply_s": 3.141,
+  "waited_s": 3.14,
+  "relay_sent_at_s": 1.0,
+  "relay_reply_s": 2.156,
+  "relay_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "c52c7f3e-2a43-457e-935b-e5a01219c5ba",
+    "success": true,
+    "result": {
+      "success": true,
+      "target_process": "devices"
+    }
+  },
+  "delivery_s": 2.203,
+  "relay_inside_stop": false
+}

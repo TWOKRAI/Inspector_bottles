@@ -18,7 +18,7 @@ import pytest
 from Services.modbus.core.config import ModbusConfig
 from Services.modbus.core.device import ModbusDevice
 from Services.modbus.sdk.errors import ModbusIOError
-from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2, StopResult
+from Services.robot_comm.core.client_v2 import ClientV2Config, RobotClientV2, StopResult, SyncCancelled
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
 from Services.robot_comm.core.registers import ROBOT_UNIT_ID
 from Services.robot_comm.errors import (
@@ -1547,3 +1547,36 @@ def test_waiter_completes_from_echo_log_when_other_reader_saw_its_echo_before_it
 
     rig.transport.read_filter = overwritten_echo
     assert rig.client.stop(2) is StopResult.ACKED
+
+
+def test_sync_params_cancelled_before_first_write_writes_nothing() -> None:
+    """``cancelled`` истинен сразу: ``SyncCancelled``, ни одного ``PARAM_SET`` / ``PARAM_APPLY``, метка прежняя."""
+    rig = Rig()
+    epoch_before = rig.core.regs[TLM_CFG_EPOCH]
+    with pytest.raises(SyncCancelled):
+        rig.client.sync_params(all_values(), 7, cancelled=lambda: True)
+    assert [c[1] for c in rig.cmds() if c[1] in (OP_PARAM_SET, OP_PARAM_APPLY)] == []
+    assert rig.core.regs[TLM_CFG_EPOCH] == epoch_before
+
+
+@pytest.mark.parametrize("after", [3, len(PARAM_ID) - 1, len(PARAM_ID)], ids=["3-sets", "before-apply", "before-epoch"])
+def test_sync_params_cancelled_midway_never_writes_epoch(after: int) -> None:
+    """Предикат истинен с проверки номер ``after`` (0-based: по одной перед каждым ``PARAM_SET``, затем перед
+    ``PARAM_APPLY``, затем перед меткой): ``SyncCancelled``, метка НЕ записана последней, дальше записей нет."""
+    rig = Rig()
+    epoch_before = rig.core.regs[TLM_CFG_EPOCH]
+    calls = [0]
+
+    def cancelled() -> bool:
+        calls[0] += 1
+        return calls[0] > after
+
+    with pytest.raises(SyncCancelled):
+        rig.client.sync_params(all_values(), 7, cancelled=cancelled)
+    ops = [(c[1], c[2]) for c in rig.cmds()]
+    sets = [a for o, a in ops if o == OP_PARAM_SET]
+    assert len(sets) == min(after, len(PARAM_ID) - 1)
+    assert [a for a in sets if a[0] == P_EPOCH_ID] == []  # метка не записана
+    assert rig.core.regs[TLM_CFG_EPOCH] == epoch_before
+    if after <= len(PARAM_ID) - 1:
+        assert [o for o, _ in ops].count(OP_PARAM_APPLY) == 0

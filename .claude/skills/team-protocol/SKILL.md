@@ -19,9 +19,9 @@ in the brief: `Handoff:` is per-task and no preload carries it.
 | S1 | Plan | `manager` (4+ files), else lead | `plans/<date>_<slug>.md` with Task X.Y | frontmatter complete |
 | S1′ | Plan review | `reviewer` in `MODE: plan` | checklist verdict | **owner** approves → branch + plan commit |
 | S2 | Team assembly | lead | transport §8, sandbox mode §6, briefs, worktrees | clean tree; no second session in it; branch ≠ `main` |
-| S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 iterations → `teamlead` |
-| S4 | Injections | lead, never delegated | predicted red set vs the fact | recorded in the plan |
-| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → debugger loop |
+| S3 | Execute by chains | roles on `Handoff` | a commit per Task | §5; 2 author iterations → one `debugger` diagnosis → `teamlead` |
+| S4 | Injections | lead: predictions + verdict; the run → an agent with those predictions | predicted red set vs the fact | recorded in the plan |
+| S5 | Regression + live smoke | `tester` | full suite green, the app starts | FAIL → back to the author |
 | S6 | Integration | `integrator` | dsm-delta, coverage, god nodes | `integration_gate.py` |
 | S7 | Phase acceptance | `cto` | ACCEPT / WITH CONDITIONS / BLOCK | three lenses, reproduction |
 | S8 | Merge-back and close | lead → `cto` → owner | branches merged, plan DONE, session log, team stopped | push only on the owner's word |
@@ -44,12 +44,12 @@ message buys nothing. Full role ↔ agent roster: `.claude/plugins/dev/modes/dev
 
 | Task type | Chain |
 |---|---|
-| New module / public API | `developer`(INTERFACE) → `tester`(RED) → `developer`\|`teamlead`(GREEN) → `reviewer` |
+| New module / public API | `developer`(INTERFACE) → `tester`(RED) → `developer`\|`teamlead`(GREEN; the INTERFACE author when the role is the same) → `reviewer` |
 | Unclear contract | `tester`(RED) → `developer`(GREEN) → `reviewer` |
 | impl-only / bugfix / review fix / wiring, design by the lead | `developer`(REDS in the brief: red run before the `src` edit, break-injection) → `reviewer` |
 | Mechanical, diff already written | `junior` → `developer`(check, commit) |
 | Documentation | `docs-writer`\|`tech-writer` → `reviewer`(express) |
-| Regression FAIL | `tester`(FAIL) → `debugger` → `developer` → `tester`(retry); 2 iterations → `teamlead` |
+| Regression FAIL | `tester`(FAIL) → the same author re-summoned (diagnosis + fix) → `tester`(retry); 3rd iteration: one `debugger` diagnosis, still red → `teamlead`; code no agent of the task wrote → `debugger` from the start (`project-rules` §5) |
 | Cross-module defect | `investigator`(diagnosis) → `teamlead` → `reviewer` |
 
 Chain by size (Д47): with the lead's line-by-line design a `tester` → `developer` pair cost
@@ -104,7 +104,7 @@ on the team whenever you expect escalations.
 | Mutation probe on the diff (S5) | script | `mutation_gate.py`; survivors are killed by a test or named equivalent — adds to break-injection |
 | Task closed (live team) | hook | `TaskCompleted`: ruff + pytest; 2 blocks → pass with a warning |
 | Went idle with uncommitted work | hook | `TeammateIdle` in the worktree |
-| Task review | `reviewer` | reproduction (break-injection is run by the lead); 2 iterations → `teamlead` |
+| Task review | `reviewer` | reproduction (break-injection: the lead predicts and judges; the run is mechanical); 2 iterations → `teamlead` |
 | Integration (S6) | `integrator` + script | `integration_gate.py`; advisory without a baseline |
 | Intake wording (S0) | **owner** | confirms goal / acceptance / out-of-scope before anything is built |
 | Plan approved (S1′) | `reviewer` `MODE: plan` → **owner** | the plan checklist |

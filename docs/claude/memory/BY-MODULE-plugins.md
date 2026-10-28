@@ -6,6 +6,10 @@
 
 - [project_calibration_gui_progress](project_calibration_gui_progress.md) — Калибровка камера↔робот — баг прогресса визарда (GUI не подписан на calibration…
 
+## plugins/filter (1)
+
+- [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md) — Порог в пикселях (pixel threshold: радиус ассоциации, окно кадров) ставить от с…
+
 ## plugins/hub (1)
 
 - [project_device_hub](project_device_hub.md) — device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и след…
@@ -15,9 +19,14 @@
 - [feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub](feedback_numba_without_boundscheck_turns_a_broken_invariant_into_ub.md) — numba @njit без boundscheck: нарушенный инвариант пишет за буфер → полный набор…
 - [project_strokes_points_perf](project_strokes_points_perf.md) — webcam_sketch FPS-просадка на детальных кадрах = O(n²) sort + пересчёт каждый к…
 
-## plugins/sim (1)
+## plugins/render (1)
+
+- [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md) — Тест рецепта звал validate_recipe_blueprint и был зелёным, а загрузчик (SystemB…
+
+## plugins/sim (2)
 
 - [feedback_import_guard_substring_vs_ast](feedback_import_guard_substring_vs_ast.md) — A "modules don't import each other" guard test must parse imports via AST, not …
+- [project_robot_view_as_display_service](project_robot_view_as_display_service.md) — Идея владельца 2026-10-18: вид робота — сервис-дисплей как камера и web-симулят…
 
 ## plugins/sources (2)
 

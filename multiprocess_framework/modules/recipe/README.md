@@ -104,8 +104,8 @@ migrated = run_chain("recipe.config_snapshot", data, from_version=1, to_version=
   байтов: правка мимо `recipe.save` рвёт ревизию редактора → `conflict`.
 * Запись — tmp в том же каталоге + `os.replace`; CAS под локом на имя (в пределах хаба).
 * `recipe.activate` синхронная: `normalize → validate → topology.apply(recipe_path=абс.
-  путь) → ManifestStore.set_pipeline("recipes/<slug>.yaml")`; манифест пишется только
-  после успешного apply.
+  путь) → ManifestStore.set_pipeline("recipes/<slug>.yaml")`; активный рецепт пишется (в
+  `<stem>.state.yaml`, `app.yaml` — умолчание, ADR-APP-008) только после успешного apply.
 * Живой ответ приходит в конверте: полезная нагрузка — в `reply["result"]`,
   `reply["success"]` выводится из неё.
 * Команды регистрируются, только если в конфиге хаба есть `manifest_path` и в

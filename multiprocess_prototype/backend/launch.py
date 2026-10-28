@@ -55,11 +55,14 @@ def _env_log_dir_override(env: "dict | Any") -> "str | None":
 
 #: Снято ОДИН раз при импорте, а не читается живьём на каждом build().
 #: Причина: ``build()`` сам пишет резолвнутый АБСОЛЮТНЫЙ путь в
-#: ``INSPECTOR_LOG_DIR`` (setdefault — для hot-swap и детей), и живое чтение env
+#: ``INSPECTOR_LOG_DIR`` (для hot-swap, детей и PM), и живое чтение env
 #: на втором build() того же процесса принимало бы СВОЮ ЖЕ запись за волю
 #: оператора. Поймано характеризацией сборки: снапшот менялся от того, какой
 #: build в процессе был первым. env фиксируется на старте процесса — снимок при
-#: импорте и есть то, что задал оператор.
+#: импорте и есть то, что задал оператор. Есть снимок — env хозяин, build() его
+#: не перезаписывает; нет снимка — build() ПРИСВАИВАЕТ свой каталог (Task 0.2
+#: gui-graceful-close: при setdefault второй прогон харнесса с другим log_dir
+#: писал логи PM в каталог первого).
 _ENV_LOG_DIR_OVERRIDE: "str | None" = _env_log_dir_override(os.environ)
 
 
@@ -404,12 +407,14 @@ def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
     p = Path(override)
     if p.is_absolute() or p.suffix or ("/" in override) or ("\\" in override):
         return p
-    # Голое имя ('inspection_basic') — резолвим в каталоге pipeline-ов
-    return app.pipeline.parent / f"{override}.yaml"
+    # Голое имя ('inspection_basic') — резолвим в каталоге рецептов манифеста, а не от
+    # app.pipeline.parent: активный pipeline может прийти из состояния (<stem>.state.yaml)
+    # и лежать вне recipes/ — иначе голые имена ломались бы от невидимого в git файла.
+    return app.recipes / f"{override}.yaml"
 
 
 def _manifest_pipeline_value(override: str) -> str:
-    """Нормализовать CLI-override к строке для записи в ``app.yaml: pipeline``.
+    """Нормализовать CLI-override к строке ``pipeline`` для файла состояния.
 
     Голое имя рецепта → ``recipes/<name>.yaml`` (та же форма, что пишет GUI при
     активации рецепта, см. ``app.py::_persist_active_recipe``). Явный путь — как
@@ -422,17 +427,18 @@ def _manifest_pipeline_value(override: str) -> str:
 
 
 def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
-    """Записать выбранный CLI-рецепт в манифест (``app.yaml: pipeline``).
+    """Записать выбранный CLI-рецепт в файл состояния ``<stem>.state.yaml``.
 
     Делает CLI-override (`run.py <recipe>`) «последним активным рецептом»: и
     бэкенд (``main`` → ``build_launcher``), и дочерний GUI-процесс
     (``frontend/app.py`` читает ``resolve_manifest_path().pipeline``) после записи
-    видят ОДИН и тот же рецепт из конфига. Без этой записи override доходил только
-    до бэкенда, а GUI читал старый ``app.yaml`` — рецепты расходились (маршрутизация
-    дисплеев не совпадала, дисплеи пустые).
+    видят ОДИН и тот же рецепт. Без этой записи override доходил только
+    до бэкенда, а GUI читал прежний активный рецепт — рецепты расходились
+    (маршрутизация дисплеев не совпадала, дисплеи пустые).
 
-    Запись через ruamel round-trip — комментарии ``app.yaml`` сохраняются. Если
-    значение уже совпадает с текущим — файл не трогаем (не дёргаем mtime/git).
+    ``app.yaml`` не меняется (байты и mtime): там остаётся умолчание (ADR-APP-008).
+    Файл состояния лежит рядом с манифестом (``app.state.yaml``) и в ``.gitignore``.
+    Если он уже равен записываемому значению — его не трогаем (не дёргаем mtime).
 
     Args:
         manifest_path: путь к ``app.yaml``.
@@ -460,10 +466,11 @@ def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
             f"(проверьте имя: run.py <recipe> ищет recipes/<recipe>.yaml)"
         )
 
-    # NEW-1 (Ф5.11): запись через ManifestStore — единственная точка read/write
-    # app.yaml, сериализованная межпроцессным локом (закрывает гонку backend↔GUI:
-    # тот же store использует GUI ``_persist_active_recipe``). set_pipeline сам
-    # пропускает запись, если значение уже совпадает (не дёргаем mtime/git).
+    # NEW-1 (Ф5.11): запись через ManifestStore — единственная сериализованная точка
+    # записи манифеста, под межпроцессным локом (закрывает гонку backend↔GUI: тот же
+    # store использует GUI ``_persist_active_recipe``). set_pipeline пишет в
+    # <stem>.state.yaml, а не в app.yaml, и сам пропускает запись, если значение
+    # уже совпадает (не дёргаем mtime).
     from multiprocess_framework.modules.app_module import ManifestStore
 
     return ManifestStore(manifest_path).set_pipeline(value)
@@ -666,7 +673,14 @@ class SystemBuilder:
         # через INSPECTOR_LOG_DIR (process_launch_config._resolve_log_dir) → пишут
         # в ту же папку, а не в ./logs (fallback). Обратного влияния на build() нет:
         # env-переопределение снято при импорте (см. _ENV_LOG_DIR_OVERRIDE).
-        os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
+        # Каталог задан явно (system.log_dir: yaml или харнесс), а env оператора при
+        # импорте не было — ПРИСВОИТЬ: PM и лаунчер читают env, и setdefault оставлял
+        # бы каталог первого build() процесса. Env оператора есть — он хозяин, setdefault.
+        resolved_log_dir = str(Path(log_dir).resolve())
+        if _ENV_LOG_DIR_OVERRIDE is None and sys_config.system.log_dir:
+            os.environ["INSPECTOR_LOG_DIR"] = resolved_log_dir
+        else:
+            os.environ.setdefault("INSPECTOR_LOG_DIR", resolved_log_dir)
 
         # Слой L1 — секция observability из system.yaml, СЫРАЯ. Раскладку делает
         # assembler per-process, поверх слоя L2 рецепта (Task 5.12).

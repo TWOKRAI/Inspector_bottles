@@ -17,6 +17,10 @@ channels:
 processes:
   ProcessManager:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -56,6 +60,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -94,6 +122,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -136,7 +169,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -285,6 +319,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -306,6 +343,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -403,6 +443,26 @@ processes:
       - name: ts
         required: false
         type: float
+      tags:
+      - system
+    - description: 'Хост сервисов (ADR-SVC-004): service.list'
+      name: service.list
+      tags:
+      - system
+    - description: 'Хост сервисов (ADR-SVC-004): service.restart'
+      name: service.restart
+      tags:
+      - system
+    - description: 'Хост сервисов (ADR-SVC-004): service.start'
+      name: service.start
+      tags:
+      - system
+    - description: 'Хост сервисов (ADR-SVC-004): service.status'
+      name: service.status
+      tags:
+      - system
+    - description: 'Хост сервисов (ADR-SVC-004): service.stop'
+      name: service.stop
       tags:
       - system
     - description: Удалить узел/поддерево по пути
@@ -644,6 +704,10 @@ processes:
     - heartbeat
   camera_0:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -682,6 +746,30 @@ processes:
         required: false
         type: float
       tags:
+      - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
       - system
     - description: ''
       name: flush_stats
@@ -726,6 +814,11 @@ processes:
       name: introspect.capabilities
       tags:
       - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
+      tags:
+      - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
       tags:
@@ -766,7 +859,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -915,6 +1009,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -923,6 +1020,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -1155,6 +1255,10 @@ processes:
     - state.changed
   devices:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -1227,6 +1331,30 @@ processes:
     - description: ''
       name: device_write
       tags: []
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -1285,6 +1413,11 @@ processes:
       name: introspect.capabilities
       tags:
       - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
+      tags:
+      - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
       tags:
@@ -1325,7 +1458,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -1474,6 +1608,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -1482,6 +1619,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -1495,85 +1635,159 @@ processes:
       name: reset_metrics
       tags:
       - stats
-    - description: ''
+    - description: 'Стоп робота: {device_id, mode: 1|2|3}.'
       name: robot_abort
       tags: []
-    - description: ''
+    - description: Очистить очередь заданий.
       name: robot_clear_queue
       tags: []
-    - description: ''
+    - description: 'Робот v2: дискретный выход {device_id, ch: 1..16, on: bool}'
+      name: robot_do_set
+      tags: []
+    - description: 'Прервать рисование: {device_id}.'
       name: robot_draw_abort
       tags: []
-    - description: ''
+    - description: 'Нарисовать окружность: {device_id, cx, cy, r}.'
       name: robot_draw_circle
       tags: []
-    - description: ''
+    - description: 'Нарисовать полилинию: {device_id, points, ...}.'
       name: robot_draw_polyline
       tags: []
-    - description: ''
+    - description: 'Прогресс рисования: {device_id}.'
       name: robot_draw_progress
       tags: []
-    - description: ''
+    - description: 'Установить ускорение рисования: {device_id, accel} (мм/с²).'
       name: robot_draw_set_accel
       tags: []
-    - description: ''
+    - description: 'Установить overlap: {device_id, mm}.'
       name: robot_draw_set_overlap
       tags: []
-    - description: ''
+    - description: 'Установить размер пачки рисования: {device_id, n} (точек на проход).'
       name: robot_draw_set_pass_size
       tags: []
-    - description: ''
+    - description: 'Установить перо: {device_id, down?, up?} (мм, можно одно из двух).'
       name: robot_draw_set_pen
       tags: []
-    - description: ''
+    - description: 'Установить скорость рисования (перо по бумаге): {device_id, pct}.'
       name: robot_draw_set_speed
       tags: []
-    - description: ''
+    - description: 'Установить скорость переезда (перо вверх): {device_id, pct}.'
       name: robot_draw_set_travel
       tags: []
-    - description: ''
+    - description: 'Нарисовать квадрат по двум углам: {device_id, x1, y1, x2, y2, z?}.'
       name: robot_draw_square
       tags: []
-    - description: ''
+    - description: 'Поставить CVT-задание: {device_id, x_mm, y_mm, e_capture?}.'
       name: robot_enqueue_job
       tags: []
-    - description: ''
+    - description: 'Журнал обмена драйвера: {device_id, since_seq?, limit?}. Работает и при разрыве связи
+        (T5.6).'
+      name: robot_exchange_log_get
+      tags: []
+    - description: 'Ручки журнала обмена: {device_id, enabled?, periodic?, clear?} (T5.6).'
+      name: robot_exchange_log_set
+      tags: []
+    - description: 'Робот v2: список систем координат {device_id} -> frames, rev'
+      name: robot_frame_list
+      tags: []
+    - description: 'Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev}'
+      name: robot_frame_teach
+      tags: []
+    - description: Прочитать конфиг-блок робота.
       name: robot_get_robot_config
       tags: []
-    - description: ''
+    - description: Телеметрия робота.
       name: robot_get_telemetry
       tags: []
-    - description: ''
+    - description: 'Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %.'
       name: robot_jog
       tags: []
-    - description: ''
+    - description: 'Прервать ручной ход: {device_id}.'
       name: robot_jog_abort
       tags: []
-    - description: ''
+    - description: 'Робот v2: удержание jog {device_id, dir: 1..8, spd: 1..100}'
+      name: robot_jog_hold
+      tags: []
+    - description: 'Робот v2: отпустить jog {device_id}'
+      name: robot_jog_release
+      tags: []
+    - description: 'Робот v2: шаг jog {device_id, dx, dy, dz?, drz?, spd: 1..100}'
+      name: robot_jog_step
+      tags: []
+    - description: 'Робот v2: применить параметры класса reinit {device_id}'
+      name: robot_param_apply
+      tags: []
+    - description: 'Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev'
+      name: robot_param_get_all
+      tags: []
+    - description: 'Робот v2: записать параметр {device_id, name, value, base_rev}'
+      name: robot_param_set
+      tags: []
+    - description: 'Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id,
+        timeout_s?}; ответ сразу, итог — devices.state.<id>.park'
+      name: robot_park
+      tags: []
+    - description: 'Робот v2: запомнить текущую позу как точку {device_id, name, base_rev}'
+      name: robot_point_capture
+      tags: []
+    - description: 'Робот v2: удалить точку {device_id, name, base_rev}'
+      name: robot_point_delete
+      tags: []
+    - description: 'Робот v2: список точек {device_id} -> points, rev'
+      name: robot_point_list
+      tags: []
+    - description: 'Робот v2: сохранить точку {device_id, point{name, x, y, z, rz, hand, frame?}, base_rev}'
+      name: robot_point_save
+      tags: []
+    - description: 'Робот v2: прервать программу {device_id}'
+      name: robot_program_abort
+      tags: []
+    - description: 'Робот v2: удалить программу {device_id, name, base_rev}'
+      name: robot_program_delete
+      tags: []
+    - description: 'Робот v2: прочитать программу {device_id, name} -> program, rev'
+      name: robot_program_get
+      tags: []
+    - description: 'Робот v2: имена программ {device_id} -> programs'
+      name: robot_program_list
+      tags: []
+    - description: 'Робот v2: запустить программу {device_id, name}'
+      name: robot_program_run
+      tags: []
+    - description: 'Робот v2: сохранить программу {device_id, program{name, steps}, base_rev}'
+      name: robot_program_save
+      tags: []
+    - description: Эхо последнего задания.
       name: robot_read_echo
       tags: []
-    - description: ''
+    - description: 'Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота).'
       name: robot_return_job
       tags: []
-    - description: ''
+    - description: 'Тестовое CVT-задание: {device_id, x, y}.'
       name: robot_send_test_job
       tags: []
-    - description: ''
+    - description: 'Робот v2: серво {device_id, on: bool}'
+      name: robot_servo
+      tags: []
+    - description: 'Подстройка компенсации конвейера: {device_id, lead_mm} (мм вдоль ленты, знаковое).'
       name: robot_set_encoder_offset
       tags: []
-    - description: ''
+    - description: 'Ручной режим: {device_id, on: bool}.'
       name: robot_set_manual_mode
       tags: []
-    - description: ''
+    - description: 'Режим робота: {device_id, mode: cvt|draw|manual}.'
       name: robot_set_mode
       tags: []
-    - description: ''
+    - description: 'Конфиг робота: {device_id, ...fields}.'
       name: robot_set_robot_config
       tags: []
-    - description: ''
+    - description: 'Серво: {device_id, on: bool}.'
       name: robot_set_servo
       tags: []
-    - description: ''
+    - description: 'Робот v2: стоп {device_id, level: SOFT|HARD|HALT}'
+      name: robot_stop
+      tags: []
+    - description: 'Смена инструмента: {device_id, target: 0|1|2, timeout?}.'
       name: robot_toolchange
       tags: []
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
@@ -1644,19 +1858,19 @@ processes:
         type: float
       tags:
       - system
-    - description: ''
+    - description: 'Статус ПЧ: {device_id}.'
       name: vfd_get_status
       tags: []
-    - description: ''
+    - description: 'Сброс аварии ПЧ: {device_id}.'
       name: vfd_reset_fault
       tags: []
-    - description: ''
+    - description: 'Пуск ПЧ: {device_id, direction?, freq_hz?}.'
       name: vfd_run
       tags: []
-    - description: ''
+    - description: 'Установить частоту: {device_id, freq_hz}.'
       name: vfd_set_freq
       tags: []
-    - description: ''
+    - description: 'Стоп ПЧ: {device_id}.'
       name: vfd_stop
       tags: []
     - description: Настроить wire middleware (SHM sender/receiver)
@@ -1810,6 +2024,10 @@ processes:
     - state.changed
   gui:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -1849,6 +2067,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -1887,6 +2129,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -1929,7 +2176,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -2078,6 +2326,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2086,6 +2337,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2296,6 +2550,10 @@ processes:
     router_handlers: []
   preprocessor:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -2335,6 +2593,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -2373,6 +2655,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -2415,7 +2702,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -2564,6 +2852,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2572,6 +2863,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -2800,6 +3094,10 @@ processes:
     - state.changed
   process_flip:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -2839,6 +3137,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -2877,6 +3199,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -2919,7 +3246,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -3068,6 +3396,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3076,6 +3407,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3293,6 +3627,10 @@ processes:
     - state.changed
   process_grayscale:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -3332,6 +3670,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -3370,6 +3732,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -3412,7 +3779,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -3561,6 +3929,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3569,6 +3940,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -3786,6 +4160,10 @@ processes:
     - state.changed
   process_negative:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -3825,6 +4203,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -3863,6 +4265,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -3905,7 +4312,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -4054,6 +4462,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -4062,6 +4473,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -4279,6 +4693,10 @@ processes:
     - state.changed
   region_splitter:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -4318,6 +4736,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -4356,6 +4798,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -4398,7 +4845,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -4547,6 +4995,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -4555,6 +5006,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -4772,6 +5226,10 @@ processes:
     - state.changed
   stitcher:
     commands:
+    - description: 'Каталог плагинов для GUI: форма регистра (FieldInfo dict) + порты + команды, без plugin-кода'
+      name: catalog.plugins
+      tags:
+      - system
     - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
         на лету
       name: config.reload
@@ -4811,6 +5269,30 @@ processes:
         type: float
       tags:
       - system
+    - description: 'Диагностика: поднять поток, бросающий RuntimeError — проверка threading.excepthook'
+      name: diag.thread_raise
+      params_schema:
+      - name: message
+        required: false
+        type: str
+      - name: thread_name
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
+    - description: 'Диагностика: позвать warnings.warn — проверка warnings.showwarning'
+      name: diag.warn
+      params_schema:
+      - name: category
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      tags:
+      - diagnostics
+      - system
     - description: ''
       name: flush_stats
       tags:
@@ -4849,6 +5331,11 @@ processes:
     - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
         router-handlers'
       name: introspect.capabilities
+      tags:
+      - system
+    - description: 'Именованные исполнители процесса (ExecutorManager): тип, источник, владение, рабочие
+        потоки'
+      name: introspect.executors
       tags:
       - system
     - description: Router message-handlers + команды CommandManager процесса
@@ -4891,7 +5378,8 @@ processes:
       name: introspect.router_stats
       tags:
       - system
-    - description: Имя процесса, статус, воркеры (имена + статусы)
+    - description: Имя процесса, статус, воркеры (имена + статусы), cv_threads (потоки OpenCV, None без
+        cv2)
       name: introspect.status
       tags:
       - system
@@ -5040,6 +5528,9 @@ processes:
       - name: level
         required: false
         type: str
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str
@@ -5048,6 +5539,9 @@ processes:
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
       params_schema:
+      - name: scope
+        required: false
+        type: str
       - name: subscriber
         required: false
         type: str

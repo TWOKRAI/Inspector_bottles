@@ -1,0 +1,46 @@
+{
+  "tree": "branch",
+  "seq": 1,
+  "session": 1,
+  "target": "camera_0",
+  "rep": 2,
+  "elapsed_s": 5.03,
+  "ok": true,
+  "note": "",
+  "full_boot_wait_s": 10.05,
+  "windows": {
+    "mode": "override",
+    "stop_process_timeout": 8.0,
+    "shutdown_timeout": 8.0,
+    "override_line_in_stdout": true
+  },
+  "res": {
+    "restarted": true,
+    "replaced": true,
+    "process": "camera_0",
+    "pid_before": 24844,
+    "pid_after": 32952,
+    "instance_restarts_before": 1,
+    "instance_restarts_after": 2,
+    "alive": true,
+    "elapsed": 5.03,
+    "polls": 1,
+    "restart_reply": {
+      "success": false,
+      "error": "timeout",
+      "correlation_id": "fea6c298-caf3-492f-b745-f6debd7955cd"
+    }
+  },
+  "t_send_wall": 1793018385.4659228,
+  "t_reply_wall": 1793018389.9703102,
+  "request_s": 4.516,
+  "request_error": "timeout",
+  "request_reply": {
+    "success": false,
+    "error": "timeout",
+    "correlation_id": "fea6c298-caf3-492f-b745-f6debd7955cd"
+  },
+  "restarted_ts": 1793018390.309,
+  "reply_minus_restarted_s": -0.339,
+  "early": true
+}

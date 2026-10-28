@@ -305,6 +305,15 @@ def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.process_restart_verified(args["process"], **kw, **_kw_timeout(args))
 
 
+def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    # Только mode/deadline_s: wait/wait_timeout — дефолты драйвера (ждать закрытия сокета до 20 с).
+    # deadline_s — как есть, без float(): диапазон и тип проверяет PM и отвечает названной ошибкой.
+    kw: dict[str, Any] = {"mode": str(args.get("mode", "graceful"))}
+    if args.get("deadline_s") is not None:
+        kw["deadline_s"] = args["deadline_s"]
+    return _jsonable(drv.system_shutdown(**kw))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -840,6 +849,31 @@ TOOLS: List[ToolSpec] = [
             ["process"],
         ),
         _process_restart_verified,
+    ),
+    ToolSpec(
+        "system_shutdown",
+        "Остановить ВСЮ систему (system.shutdown) и дождаться, пока PM закроет сокет backend_ctl. "
+        "mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s (0.1..5.0 с, "
+        "дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
+        "{accepted (None — ответ timeout, команда могла дойти), mode, elapsed_s, pm_gone, outcomes=null}. "
+        "pm_gone=true — сокет закрыт (в том числе раньше ответа: тогда accepted=None); "
+        "процесс PM в этот момент может быть ещё жив. "
+        "Разрушающий: после вызова бэкенда нет.",
+        _obj(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["graceful", "force"],
+                    "description": "graceful (дефолт) | force",
+                },
+                "deadline_s": {
+                    "type": "number",
+                    "description": "Только для force: срок стопа детей, сек (0.1..5.0, дефолт 1.0).",
+                },
+            },
+            [],
+        ),
+        _system_shutdown,
     ),
     ToolSpec(
         "set_register",
@@ -1536,6 +1570,8 @@ TOOL_SAFETY: Dict[str, str] = {
     # Ф4 Task 4.4: обёртка над той же system-командой process.restart — класс тот же
     # (перезапуск процесса разрушителен), сужение аргументов класса не меняет.
     "process_restart_verified": SAFETY_ESCALATED,
+    # Task 0.2 gui-graceful-close: стоп всей системы — разрушительнее рестарта одного процесса.
+    "system_shutdown": SAFETY_ESCALATED,
 }
 
 # Префиксы команд, безопасных для чтения через escalated send_command в read-only

@@ -77,12 +77,14 @@ QWidget#AppHeader {
     max-height: @header_height;
 }
 
+/* Square721 BdEx BT [Rus by me] Bold — имя семейства из name-таблицы TTF; без фона */
 QLabel#BrandLabel {
     color: @brand_color;
-    font-family: "Bank Gothic(RUS BY LYAJKA)", "Square721 BdEx BT";
+    font-family: "Square721 BdEx BT [Rus by me]", "Square721 BdEx BT";
     font-size: @font_brand;
-    font-weight: 900;
+    font-weight: bold;
     padding-left: 8px;
+    background: transparent;
 }
 
 QLabel#BrandSub {

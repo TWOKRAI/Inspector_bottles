@@ -52,17 +52,6 @@ class MLInferenceRegisters(SchemaBase):
         FieldMeta("Top-K", info="Сколько верхних классов возвращать", min=1, max=20),
     ] = 5
 
-    # --- Производительность ---
-    inference_every_n: Annotated[
-        int,
-        FieldMeta(
-            "Инференс каждый N-й кадр",
-            info="1 = каждый кадр; >1 снижает нагрузку, между — reuse результата",
-            min=1,
-            max=60,
-        ),
-    ] = 1
-
     # --- Отрисовка ---
     draw_overlay: Annotated[
         bool,

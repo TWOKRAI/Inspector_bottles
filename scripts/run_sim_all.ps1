@@ -21,8 +21,9 @@
 #    multiprocess_prototype/run.py — бэкенд без окна (урок памяти «GUI-стенд боевым входом»);
 #  - окно робота v2 — отдельный симулятор в своём процессе; робот линии (Modbus 5021),
 #    которым управляет прототип, на протоколе v2 (T3.7), но в этом окне не виден (T3.8);
-#  - запуск и выбор рецепта в GUI записывают рецепт в multiprocess_prototype/app.yaml —
-#    вернуть: git checkout -- multiprocess_prototype/app.yaml
+#  - запуск и выбор рецепта в GUI записывают рецепт в multiprocess_prototype/app.state.yaml
+#    (вне git; app.yaml не меняется, возвращать ничего не нужно). Чтобы вернуться к умолчанию
+#    из app.yaml, удалить app.state.yaml
 param(
     [string]$Recipe = "letter_robot_sim",
     [switch]$NoPrototype,

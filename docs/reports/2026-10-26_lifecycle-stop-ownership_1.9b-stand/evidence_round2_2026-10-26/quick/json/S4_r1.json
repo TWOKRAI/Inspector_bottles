@@ -1,0 +1,79 @@
+{
+  "run": 1,
+  "precondition_ok": true,
+  "boot_s": 9.69,
+  "override_seen": true,
+  "windows": {
+    "mode": "override",
+    "stop_process_timeout": 8.0,
+    "shutdown_timeout": 8.0,
+    "override_line_in_stdout": true
+  },
+  "setup": {
+    "apply_s": 3.26,
+    "diff_commands": [
+      "",
+      "camera_0",
+      "fast",
+      "preprocessor",
+      "process_flip",
+      "process_grayscale",
+      "process_negative",
+      "region_splitter",
+      "slow",
+      "stitcher"
+    ],
+    "ready": {
+      "fast": true,
+      "slow": true
+    }
+  },
+  "shutdown_sent_at_s": 1.0,
+  "launcher_exit_s": 4.438,
+  "pm_exit_s": 3.875,
+  "tasklist_call_s": 0.657,
+  "exit_probe": "WaitForSingleObject",
+  "pm_pid": 21592,
+  "waited_s": 4.45,
+  "shutdown_reply_s": 0.0,
+  "stop_slow_reply_s": 1.016,
+  "stop_slow_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "449c833f-792d-4a39-8967-e6dc94e2ef05",
+    "success": false,
+    "result": {
+      "success": false,
+      "process_name": "slow"
+    }
+  },
+  "queued_reply_s": 0.922,
+  "queued_error": "system_stopping",
+  "queued_reply": {
+    "type": "response",
+    "command": "command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "57db913b-da2f-405a-bd8f-32893f62e382",
+    "success": false,
+    "result": {
+      "success": false,
+      "error": "system_stopping"
+    }
+  },
+  "t0_wall": 1793018464.8316102,
+  "dns": 0,
+  "dns_by_dir": {},
+  "lost": 0,
+  "terminating": 0,
+  "survived": 0,
+  "shutdown_line_s": 1.008
+}

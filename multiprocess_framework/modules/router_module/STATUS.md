@@ -91,3 +91,7 @@ register_route("order", "queue_channel")
 | 2026-08-23 | ADR-RTR-011: контракт `request()` стал исполняемым — вызов с приёмного потока бросает `RouterReentrantRequestError` (было: тихие 5 с до таймаута), отсутствие приёмного цикла даёт быстрый отказ `reason="no_receive_pump"` через 0.5 с. Добавлен `request_async(on_response=…)` — неблокирующий запрос с колбэком на приёмном потоке, «ровно один раз» через снятие слота под локом, подметание просроченных на приёмном такте | 5 |
 | 2026-09-30 | Task 4.5c/4.5e: `FrameShmMiddleware` считает `bytes_written` / `bytes_read` (копии) / `bytes_mapped` (view) под замком; `get_shm_stats` +`shm_bytes_written\|read\|mapped`, `frame_restore_failures`; новый `get_ring_info()` → `[{key, name, depth}]` | 5 |
 | 2026-10-02 | Task 4.7d-3 (ADR-174): дверь отправителя под `overflow: every` рождает маркер `not_inspected` вместо дропа; `get_shm_stats` +`door_drops`, `not_inspected_door`; модуль `not_inspected_marker.py` | 5 |
+
+## Заморозка `pump_inbound` (2026-10-25, Task 1.9b, ADR-PMM-039)
+
+- **Замороженный API (принцип 3):** `RouterManager.pump_inbound`, `ProcessRegistry.stop_wait_idle`, `ChildProcessStop(idle=)`, `ProcessManagerProcess._stop_wait_idle` — не удалять и не менять (ADR-PMM-039, ADR-RTR-014 FROZEN): штатные стопы PM идут вне `receive`, вычерпывание не срабатывает; контракт и тесты (`tests/test_pump_inbound_*.py`) живы. Снятие — только решением владельца.

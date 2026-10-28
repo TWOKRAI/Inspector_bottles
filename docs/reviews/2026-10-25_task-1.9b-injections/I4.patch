@@ -1,0 +1,13 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..11a8f87f7 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -4648,6 +4648,9 @@ class _LifecycleSubmit:
+     def submit(self, action, key, reply, *, inline_if_idle: bool = False) -> bool:
+         if key is not None:
+             key = frozenset(key)
++        # INJ I4: immediate success reply, executor gets a no-op reply
++        reply({"success": True, "process_name": (next(iter(key)) if key else None)})
++        reply = lambda _result: None  # noqa: E731
+         self._shift(key, +1)
+         released = [False]

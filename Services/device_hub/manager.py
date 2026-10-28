@@ -3,8 +3,8 @@
 CRUD реестра + lifecycle (connect/disconnect) + dispatch (call) + describe.
 Наследует BaseManager + ObservableMixin (правило владельца).
 
-Драйверы создаются лениво через register_driver_factory(kind, factory).
-Дефолтные фабрики (robot/vfd/hikvision/generic_modbus) регистрируются в __init__.
+Драйверы создаются лениво фабриками видов. Фабрики по умолчанию — из таблицы видов (``kinds.DEFAULT_KINDS``,
+параметр ``kinds``); ``register_driver_factory(kind, factory)`` — шов прямого использования менеджера (тесты).
 
 publish_cb — инъекция конструктора: ``(path, dict) -> None``.
 В тестах — фейк; в продакшене — state-публикация.
@@ -12,19 +12,43 @@ publish_cb — инъекция конструктора: ``(path, dict) -> None
 
 from __future__ import annotations
 
+import itertools
 import threading
-from collections.abc import Callable
-from typing import Any
+import time
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
+from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from Services.device_hub.errors import (
     DeviceHubError,
     DeviceNotFoundError,
+    RegisterTransportUnavailable,
     RegistryIntegrityError,
 )
+from Services.device_hub.kinds import DEFAULT_KINDS, DeviceKind, DriverContext
 from Services.device_hub.registry.entry import DeviceEntry
 from Services.device_hub.registry.store import RegistryStore
+from Services.device_hub.robot_data_ops import STORE_ERRORS, run_op, store_error_for_operator
+from Services.device_hub.spi import DeviceDriver
+
+if TYPE_CHECKING:
+    from Services.device_hub.robot_data_ops import RobotDataStore
+
+logger = get_std_logger(__name__)
+
+# Срок рассылки стопа, если request_stop_all() позван без срока (не из плагина), с
+_STOP_ALL_DEFAULT_S = 2.5
+# Номер потока рассылки стопа: имя ``stop-<id>-<k>`` уникально в области
+_STOP_SEQ = itertools.count(1)
+_STOP_SEQ_LOCK = threading.Lock()
+
+
+def _next_stop_k() -> int:
+    with _STOP_SEQ_LOCK:
+        return next(_STOP_SEQ)
 
 
 class DeviceManager(BaseManager, ObservableMixin):
@@ -35,23 +59,47 @@ class DeviceManager(BaseManager, ObservableMixin):
                     in-memory (источник истины — рецепт, план device-tree-recipe
                     Фаза B; полное удаление файлового стора — Фаза E + ADR-DH-007).
         publish_cb: Callback публикации ``(path, data_dict) -> None``.
+        spawn:      ``(target, *, name) -> IHandle`` — ``IScope.spawn`` области плагина (T5.3a); получает драйвер
+                    робота v2 (его потоки живут в этой области) и рассылка стопа ``request_stop_all``. ``None`` —
+                    робот ``delta_v2`` не создаётся (``RuntimeError`` фабрики), драйверы v1 работают как прежде.
+        robot_store: Единственное на процесс ``RobotDataStore`` данных робота v2 (T5.3c): им пользуется ``robot_data``;
+                    ``None`` — ``robot_data`` отвечает отказом «хранилище данных робота не задано».
+        driver_options: ``{kind | (kind, protocol): {имя: значение}}`` — именованные аргументы конструктора драйверов,
+                    создаваемых таблицей видов (шов тестов: у робота v2 — ``client_factory`` по ключу
+                    ``("robot", "delta_v2")``). Ключ ``kind`` — все протоколы вида; ключ ``(kind, protocol)`` — только
+                    записи с этим протоколом, его опции перекрывают видовые. ``None`` — без опций (прод). Неизвестная
+                    драйверу опция — ``TypeError`` его конструктора при создании.
+        kinds:      Таблица видов (``Services/device_hub/kinds.py``): фабрики драйверов по умолчанию; допустимый вид
+                    записи — вид с фабрикой. По умолчанию ``DEFAULT_KINDS``; повтор вида — ``ValueError``.
     """
 
     def __init__(
         self,
         store: RegistryStore | None,
         publish_cb: Callable[[str, dict], None] | None = None,
+        *,
+        spawn: Callable[..., Any] | None = None,
+        robot_store: RobotDataStore | None = None,
+        driver_options: Mapping[str | tuple[str, str], Mapping[str, Any]] | None = None,
+        kinds: Sequence[DeviceKind] = DEFAULT_KINDS,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
+        self._spawn = spawn
+        self._robot_store = robot_store
+        # Ключ — вид (все протоколы) или (вид, протокол)
+        self._driver_options: dict[str | tuple[str, str], dict[str, Any]] = {
+            key: dict(opts) for key, opts in (driver_options or {}).items()
+        }
+        self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
 
         # Живые драйверы: id -> BaseDeviceDriver
-        self._drivers: dict[str, Any] = {}
+        self._drivers: dict[str, DeviceDriver] = {}
 
         # RLock на _entries/_drivers: мутируются из командного потока
         # (upsert/remove) и supervisor (connect→_get_or_create_driver).
@@ -61,8 +109,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         # Фабрики драйверов: kind -> callable(entry, protocol) -> driver
         self._factories: dict[str, Callable] = {}
 
-        # Регистрация дефолтных фабрик
-        self._register_defaults()
+        # Фабрики по умолчанию — из таблицы видов
+        self._register_kinds(kinds)
 
     # ------------------------------------------------------------------ #
     # BaseManager
@@ -71,20 +119,86 @@ class DeviceManager(BaseManager, ObservableMixin):
     def initialize(self) -> bool:
         """Загрузить реестр из store (store=None — пустой in-memory реестр)."""
         if self._store is not None:
-            for e in self._store.load():
+            loaded = self._store.load()
+            for e in loaded:  # все записи проверяются до первого присваивания: неизвестный вид — реестр пуст
+                self._check_kind(e.kind)  # ValueError при загрузке, как до SPI.c1b
+            for e in loaded:
                 self._entries[e.id] = e
         self.is_initialized = True
         return True
 
+    def request_stop_all(self, deadline: float | None = None) -> None:
+        """Фаза 1 остановки (T5.3a К1, T5.3 круг 2): стоп-запрос всем драйверам с ``request_stop`` ПАРАЛЛЕЛЬНО.
+
+        ``deadline`` — абсолютный срок по ``time.monotonic()`` (None — сейчас + ``_STOP_ALL_DEFAULT_S``); он же уходит
+        каждому драйверу. Каждый драйвер — свой поток из ``spawn`` (``stop-<id>-<k>``): молчащий робот не задерживает
+        стоп соседа. Ожидание потоков — до общего срока; не вышедший поток виден в отчёте закрытия его записи.
+        Драйверы v1 и прочих kind метода ``request_stop`` не имеют — не трогаются. Не бросает. Отказ ``spawn``
+        (область закрыта — второй вызов после ``scope.close``; любое исключение) — стоп этому роботу идёт в
+        вызывающем потоке (fail-closed), следующие роботы не пропускаются; лишней записи нет — её отсекает защёлка
+        драйвера. Исключение одного драйвера логируется.
+        Без ``spawn`` (менеджер без области: роботов ``delta_v2`` нет) — вызовы по очереди в этом потоке.
+        """
+        with self._registry_lock:
+            if deadline is None:  # повторный вызов без срока (фаза 4 через _on_shutdown) — срок первого вызова
+                deadline = (
+                    self._stop_deadline if self._stop_deadline is not None else time.monotonic() + _STOP_ALL_DEFAULT_S
+                )
+            if self._stop_deadline is None:
+                self._stop_deadline = deadline
+            drivers = list(self._drivers.items())
+        targets: list[tuple[str, Callable[..., object]]] = []
+        for dev_id, drv in drivers:
+            # Отбор — внутри try на драйвер: флаг stop_aware без метода request_stop (AttributeError) или сбойное
+            # свойство одного драйвера пишется в лог, соседи стоп получают
+            try:
+                if drv.stop_aware:
+                    targets.append((dev_id, drv.request_stop))
+            except Exception:
+                logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+        if self._spawn is None:
+            for dev_id, request in targets:
+                self._stop_one(dev_id, request, deadline)
+            return
+        handles = []
+        inline: list[tuple[str, Callable[..., object]]] = []  # spawn отказал: стоп этим роботам — в этом потоке
+        for dev_id, request in targets:
+            name = f"stop-{dev_id}-{_next_stop_k()}"
+            try:
+                handles.append(self._spawn(lambda _ev, d=dev_id, r=request: self._stop_one(d, r, deadline), name=name))
+            except Exception as exc:  # ScopeClosedError (второй вызов после scope.close) и любой отказ spawn
+                inline.append((dev_id, request))
+                if len(inline) == 1:
+                    text = f"device_hub: поток стоп-запроса не запущен ({type(exc).__name__}) — стоп идёт в этом потоке"
+                    (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
+        for dev_id, request in inline:  # fail-closed: отказ spawn не лишает робота стопа (защёлка — в драйвере)
+            self._stop_one(dev_id, request, deadline)
+        for handle in handles:
+            try:
+                report = handle.close(max(0.0, deadline - time.monotonic()))
+            except Exception:
+                logger.exception("device_hub: запись потока стоп-запроса не закрыта")
+                continue
+            if report.survivors:
+                logger.warning(f"device_hub: поток стоп-запроса не вышел к сроку: {list(report.survivors)}")
+
+    @staticmethod
+    def _stop_one(dev_id: str, request: Callable[..., object], deadline: float) -> None:
+        try:
+            request(deadline)
+        except Exception:
+            logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+
     def _on_shutdown(self) -> bool:
-        """Отключить все устройства и сохранить реестр."""
+        """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""
+        self.request_stop_all()  # стоп робота уходит до любых ожиданий потоков
         with self._registry_lock:
             driver_ids = list(self._drivers)
         for dev_id in driver_ids:
             try:
                 self.disconnect(dev_id)
             except Exception:
-                pass
+                logger.exception(f"device_hub: disconnect {dev_id!r} при остановке не прошёл")
         self._save()
         self.is_initialized = False
         return True
@@ -99,28 +213,60 @@ class DeviceManager(BaseManager, ObservableMixin):
         Args:
             kind:    Тип устройства (``robot``, ``vfd``, ...).
             factory: ``(entry, protocol) -> BaseDeviceDriver``.
+
+        Фабрику нового вида регистрировать ДО ``initialize()``: вид записи реестра проверяется по фабрикам при загрузке.
+        Шов прямого использования ``DeviceManager`` (тесты): процесс хаба создаёт менеджер в ``configure`` плагина и
+        сразу зовёт ``initialize()``, его виды — таблица видов (``kinds.py``).
         """
         self._factories[kind] = factory
 
-    def _register_defaults(self) -> None:
-        """Зарегистрировать дефолтные фабрики драйверов."""
-        from Services.device_hub.drivers.robot_driver import RobotDriver
-        from Services.device_hub.drivers.vfd_driver import VfdDriver
-        from Services.device_hub.drivers.hikvision_driver import HikvisionDriver
-        from Services.device_hub.drivers.generic_modbus_driver import GenericModbusDriver
+    def set_driver_options(self, kind: str, protocol: str | None = None, **options: Any) -> None:
+        """Задать опции конструктора драйверов вида ``kind`` или только его протокола ``protocol`` (заменяют прежние
+        опции того же ключа).
 
-        def _robot_factory(entry: DeviceEntry, proto: Any) -> Any:
-            # Робот протокола v2 — свой драйвер (T5.1); импорт ленивый: v1-хаб не тянет клиент v2.
-            if entry.protocol == "delta_v2":
-                from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+        ``protocol=None`` — опции всех протоколов вида; иначе — только записей с ``entry.protocol == protocol``, они
+        перекрывают видовые по имени. Действует на драйверы, создаваемые ПОСЛЕ вызова: уже созданные не меняются.
+        Опции получают только фабрики таблицы видов; неизвестная драйверу опция — ``TypeError`` его конструктора.
+        Пустой вызов снимает опции ключа.
+        """
+        key: str | tuple[str, str] = kind if protocol is None else (kind, protocol)
+        with self._registry_lock:
+            if options:
+                self._driver_options[key] = dict(options)
+            else:
+                self._driver_options.pop(key, None)
 
-                return RobotDriverV2(entry, proto, publish=self._publish)
-            return RobotDriver(entry, proto)
+    def _options_for(self, kind: str, protocol: str) -> dict[str, Any]:
+        """Опции конструктора драйвера записи: видовые, перекрытые опциями (вид, протокол); снимок под замком."""
+        with self._registry_lock:
+            return {**self._driver_options.get(kind, {}), **self._driver_options.get((kind, protocol), {})}
 
-        self._factories["robot"] = _robot_factory
-        self._factories["vfd"] = lambda entry, proto: VfdDriver(entry, proto, resolve_device=self._get_driver)
-        self._factories["hikvision"] = lambda entry, proto: HikvisionDriver(entry, proto)
-        self._factories["generic_modbus"] = lambda entry, proto: GenericModbusDriver(entry, proto)
+    def _check_kind(self, kind: str) -> None:
+        """Вид допустим, если для него зарегистрирована фабрика драйвера (один источник истины, SPI.c1b)."""
+        if kind not in self._factories:
+            raise ValueError(f"DeviceEntry.kind {kind!r} не из {sorted(self._factories)}")
+
+    def _register_kinds(self, kinds: Sequence[DeviceKind]) -> None:
+        """Фабрики драйверов по умолчанию — из таблицы видов (``Services/device_hub/kinds.py``)."""
+        for row in kinds:
+            if row.kind in self._factories:
+                raise ValueError(f"вид {row.kind!r} повторён в таблице видов")
+            self._factories[row.kind] = self._kind_factory(row)
+
+    def _kind_factory(self, row: DeviceKind) -> Callable[[DeviceEntry, Any], DeviceDriver]:
+        """Фабрика ``(entry, protocol) -> драйвер`` строки таблицы видов; контекст сборки — на момент создания."""
+
+        def factory(entry: DeviceEntry, proto: Any) -> DeviceDriver:
+            ctx = DriverContext(
+                publish=self._publish,
+                spawn=self._spawn,
+                robot_store=self._robot_store,
+                options=self._options_for(row.kind, entry.protocol),
+                resolve_device=self._get_driver,
+            )
+            return row.create(entry, proto, ctx)
+
+        return factory
 
     # ------------------------------------------------------------------ #
     # CRUD реестра
@@ -162,7 +308,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         with self._registry_lock:
             return list(self._entries.values())
 
-    def get_driver(self, dev_id: str) -> Any:
+    def get_driver(self, dev_id: str) -> DeviceDriver | None:
         """Живой драйвер по id под локом (``None`` если ещё не создан)."""
         with self._registry_lock:
             return self._drivers.get(dev_id)
@@ -235,6 +381,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             if origin is not None:
                 entry_dict = {**entry_dict, "origin": origin}
             entry = DeviceEntry.from_dict(entry_dict)
+        self._check_kind(entry.kind)
 
         with self._registry_lock:
             self._entries[entry.id] = entry
@@ -295,7 +442,20 @@ class DeviceManager(BaseManager, ObservableMixin):
             DeviceHubError: Носитель bridge не подключён.
         """
         entry = self.get(dev_id)
-        driver = self._get_or_create_driver(entry)
+        try:
+            driver = self._get_or_create_driver(entry)
+        except STORE_ERRORS as exc:
+            # OSError не у робота v2 -> None: пробрасываем; у робота v2 путь диска и имя файла — в лог, в last_error —
+            # константа (robot_data_ops.store_error_for_operator)
+            translated = store_error_for_operator(exc, dev_id, entry.protocol, log=logger)
+            if translated is None:
+                raise
+            exc = translated
+            # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
+            # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
+            self._publish(f"devices.state.{dev_id}.last_error", str(exc))
+            self._publish(f"devices.state.{dev_id}.conn", {"conn": "error"})
+            return False
 
         # Bridge: проверить connected-носителя
         if entry.transport.get("type") == "bridge":
@@ -307,7 +467,10 @@ class DeviceManager(BaseManager, ObservableMixin):
                 )
 
         ok = driver.connect()
-        self._publish(f"devices.state.{dev_id}.conn", {"conn": "connected" if ok else "error"})
+        # C-29 (В3): connect, прерванный «Отключить», — не ошибка (`is True`: подмены MagicMock дают истинный объект)
+        aborted = not ok and driver.disconnect_pending is True
+        conn = "connected" if ok else ("disconnecting" if aborted else "error")
+        self._publish(f"devices.state.{dev_id}.conn", {"conn": conn})
         return ok
 
     def disconnect(self, dev_id: str) -> None:
@@ -332,10 +495,13 @@ class DeviceManager(BaseManager, ObservableMixin):
         # реестр может мутироваться параллельно; сам disconnect-IO вне лока).
         for e in self.snapshot_registry():
             if e.transport.get("type") == "bridge" and e.transport.get("bridge") == dev_id:
-                dep_driver = self.get_driver(e.id)
-                if dep_driver is not None and hasattr(dep_driver, "set_degraded"):
-                    dep_driver.set_degraded()
-                    self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                # Сбой одного зависимого не лишает деградации остальных (А20)
+                try:
+                    dep_driver = self.get_driver(e.id)
+                    if dep_driver is not None and dep_driver.set_degraded():
+                        self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                except Exception:
+                    logger.exception(f"device_hub: деградация зависимого {e.id!r} при отключении носителя не прошла")
 
     # ------------------------------------------------------------------ #
     # Dispatch: call
@@ -360,6 +526,25 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": msg, "error": msg}
 
         return driver.call(op, args)
+
+    def robot_data(self, dev_id: str, op: str, args: dict | None = None) -> dict:
+        """Офлайн-данные робота v2 (путь О4 мимо ``call``): параметры, точки, СК, программы (T5.3c).
+
+        Pre: устройство в реестре, ``kind == "robot"`` и ``protocol == "delta_v2"``, хранилище задано; связь с
+        роботом не нужна. Операции — ``robot_data_ops.OPS``; запись требует ключ ``base_rev``.
+        Post: успех -> ``{"status": "ok", ...}``. Ошибка -> ``{"status": "error", "message": <постоянный текст без
+        входных значений>}``; ``RevisionConflict`` добавляет ``current_rev``; плохие аргументы — ``TEXT_BAD_ARGS``.
+        ``OSError`` хранилища -> постоянный ``TEXT_STORE_ERROR``; полный текст ошибки (путь, имя) — в лог.
+        """
+        try:
+            entry = self.get(dev_id)
+        except DeviceNotFoundError as exc:
+            return {"status": "error", "message": str(exc)}
+        if entry.kind != "robot" or entry.protocol != "delta_v2":
+            return {"status": "error", "message": "данные робота — только для протокола delta_v2"}
+        if self._robot_store is None:
+            return {"status": "error", "message": "хранилище данных робота не задано"}
+        return run_op(self._robot_store, dev_id, op, args, entry.params, log=logger)
 
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers
@@ -425,7 +610,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": f"Регистр {name!r} доступен только на запись"}
 
         try:
-            transport = getattr(driver, "transport", None) or driver._client
+            transport = self._register_transport(driver)
             val = driver.protocol.register_map.read(transport, name)
             return {"status": "ok", "name": name, "value": val}
         except Exception as exc:
@@ -438,6 +623,9 @@ class DeviceManager(BaseManager, ObservableMixin):
             dev_id: ID устройства.
             values: {name: value, ...}
         """
+        # Д2 (T5.3c): регистры робота v2 пишут только команды robot_*; отказ не зависит от связи (до проверки драйвера)
+        if self.get(dev_id).protocol == "delta_v2":
+            return {"status": "error", "message": "запись регистров робота v2 — только командами robot_*"}
         driver = self._get_connected_driver(dev_id)
         if driver.protocol is None:
             return {"status": "error", "message": f"Устройство {dev_id!r} без протокола"}
@@ -455,7 +643,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 return {"status": "error", "message": f"{name}={value} > max={meta.max}"}
 
         try:
-            transport = getattr(driver, "transport", None) or driver._client
+            transport = self._register_transport(driver)
             ops = driver.protocol.register_map.write_ops(values)
             transport.transaction(ops)
             return {"status": "ok", "written": list(values.keys())}
@@ -466,14 +654,22 @@ class DeviceManager(BaseManager, ObservableMixin):
     # Служебное
     # ------------------------------------------------------------------ #
 
-    def _get_driver(self, dev_id: str) -> Any:
+    @staticmethod
+    def _register_transport(driver: DeviceDriver) -> Any:
+        """Транспорт регистров драйвера (``driver.transport``); нет — ``RegisterTransportUnavailable``."""
+        transport = driver.transport
+        if transport is None:
+            raise RegisterTransportUnavailable(driver.entry.id)
+        return transport
+
+    def _get_driver(self, dev_id: str) -> DeviceDriver | None:
         """Получить драйвер по id (для resolve_device в VfdDriver и transports).
 
         Внутренний алиас публичного :meth:`get_driver` (лукап под локом).
         """
         return self.get_driver(dev_id)
 
-    def _get_connected_driver(self, dev_id: str) -> Any:
+    def _get_connected_driver(self, dev_id: str) -> DeviceDriver:
         """Получить подключённый драйвер; raise при ошибке."""
         self.get(dev_id)  # проверка существования (DeviceNotFoundError)
         driver = self.get_driver(dev_id)
@@ -481,7 +677,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             raise DeviceHubError(f"Устройство {dev_id!r} не подключено")
         return driver
 
-    def _get_or_create_driver(self, entry: DeviceEntry) -> Any:
+    def _get_or_create_driver(self, entry: DeviceEntry) -> DeviceDriver:
         """Получить или лениво создать драйвер (потокобезопасно)."""
         with self._registry_lock:
             driver = self._drivers.get(entry.id)

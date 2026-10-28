@@ -29,6 +29,11 @@ from .registers import WordLayoutRegisters
 _PUBLISH_PERIOD_S = 1.0
 
 
+def _norm(w: str) -> str:
+    """Слово в виде, по которому строятся ячейки: верхний регистр, пробелы схлопнуты."""
+    return " ".join(w.upper().split())
+
+
 @register_plugin(
     "word_layout",
     category="processing",
@@ -48,7 +53,12 @@ class WordLayoutPlugin(ProcessModulePlugin):
             shape="N",
             description="Топ-K от ml_inference: label, confidence, angle_deg, angle_valid, below_threshold",
         ),
-        Port(name="word", dtype="any", optional=True, description="Целевое слово (строка/dict); иначе register"),
+        Port(
+            name="word",
+            dtype="any",
+            optional=True,
+            description="Целевое слово (строка/dict); пишется в «Слово», действует последнее",
+        ),
         Port(name="trigger", dtype="any", optional=True, description="Сигнал «взять диск» (если use_trigger)"),
         Port(name="pick_xy", dtype="dict", optional=True, description="{x_mm,y_mm} забор с ленты (от pixel_to_robot)"),
         Port(name="return_trigger", dtype="any", optional=True, description="Сигнал «вернуть всё на ленту» (пульт)"),
@@ -84,14 +94,24 @@ class WordLayoutPlugin(ProcessModulePlugin):
 
         self._assembler: WordAssembler | None = None
         self._sig: tuple | None = None  # подпись (слово+геометрия) — пересборка при смене
-        # Латч слова: слово приходит ОДНИМ item (сигнал пульта/телефона), распознавание —
-        # другими items (без слова). Держим последнее непустое, пока не придёт новое.
-        self._latched_word = ""
-        # Детект «нового диска»: новый диск = сменилась буква ИЛИ была пауза (нет диска).
-        # Дедуп по БУКВЕ (не углу — угол дрожит на ±1-2° и плодил бы ложные «новые диски»).
+        # Одно хранилище слова — регистр target_word. Слово с порта пишется в него же;
+        # действует последнее пришедшее (оператор или порт). _own_word — слово, которое
+        # плагин принял в последний раз (по нему видно, что регистр изменили снаружи),
+        # _word_src — откуда оно пришло (для журнала).
+        self._own_word = self._reg.target_word
+        self._word_src = "регистр" if self._reg.target_word.strip() else ""
+        # Пустое значение регистра, которое откатить не удалось: об отказе пишем один раз на значение.
+        self._failed_val: str | None = None
+        # Детект «нового диска», два режима. 1) Есть sidecar.track_id (center_crop): новый диск =
+        # новый id; _cur_track — id текущего диска, _taken_track — id последнего взятого (после
+        # сброса слова не обнуляется: тот же id = то же событие линии), _armed не читается.
+        # 2) Нет id: новый диск = сменилась буква ИЛИ была пауза (нет диска). Дедуп по БУКВЕ
+        # (не углу — угол дрожит на ±1-2° и плодил бы ложные «новые диски»).
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        self._cur_track: object | None = None
+        self._taken_track: object | None = None
         # Триггер-режим: взвод по сигналу trigger.
         self._trig_armed = False
         # Возврат: фронт сигнала «вернуть на ленту» (срабатывает раз на нажатие).
@@ -138,7 +158,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         word = self._resolve_word(item)
         if not word.strip():
             return item
-        self._ensure_assembler(word)
+        self._ensure_assembler(word, self._word_src)
         assert self._assembler is not None
 
         # ВОЗВРАТ: сигнал с пульта → вернуть ВСЕ выложенные буквы на ленту, затем сброс.
@@ -158,7 +178,8 @@ class WordLayoutPlugin(ProcessModulePlugin):
                 self._trig_armed = True
 
         pred = self._top_pred(item)
-        if not self._should_take(pred):
+        tid = self._disk_id(item)
+        if not self._should_take(pred, tid):
             return item
         assert pred is not None
 
@@ -217,22 +238,45 @@ class WordLayoutPlugin(ProcessModulePlugin):
     # Внутреннее
     # ------------------------------------------------------------------ #
 
-    def _resolve_word(self, item: dict) -> str:
-        """Слово: входной порт (приоритет) → латч последнего → register «Слово».
+    def _write_word(self, w: str, log: bool = True) -> bool:
+        """Записать слово в регистр «Слово» (единственное хранилище). False — регистр отказал."""
+        ok, err = self._reg.update_field("target_word", w)
+        if not ok and log:
+            self._ctx.log_error(f"WordLayoutPlugin: слово '{_norm(w)}' не записано в регистр: {err}")
+        return ok
 
-        Слово приходит ОДНИМ item (сигнал пульта signal_2 / телефон), а распознавание —
-        другими items (без слова). Латчим последнее непустое слово и держим его, пока не
-        придёт новое — иначе target_word терялся бы на следующем же кадре предсказаний.
+    def _resolve_word(self, item: dict) -> str:
+        """Слово: регистр «Слово» и входной порт равноправны — действует последнее пришедшее.
+
+        Сначала смотрим регистр: изменился снаружи (оператор, set_config) — это новое слово.
+        Пустую запись в регистр не принимаем: возвращаем прежнее слово обратно в регистр.
+        Затем порт: слово с порта пишется в регистр (одно хранилище), порт после регистра —
+        на одном item побеждает порт. Слово приходит ОДНИМ item, распознавание — другими.
         """
+        val = self._reg.target_word
+        if val != self._own_word:
+            if val.strip():
+                self._own_word = val
+                self._word_src = "регистр"
+                self._failed_val = None
+            elif self._own_word.strip():
+                # Отказ регистра: повторяем запись на каждом item, но в журнал — один раз на значение.
+                if self._write_word(self._own_word, log=val != self._failed_val):
+                    self._failed_val = None
+                    self._ctx.log_info(
+                        f"WordLayoutPlugin: пустое слово в регистре не принято — действует '{_norm(self._own_word)}'"
+                    )
+                else:
+                    self._failed_val = val
         src = self._reg.word_source
         if src:
             w = item.get(src)
             if isinstance(w, dict):
                 w = w.get("word") or w.get("value") or ""
-            if isinstance(w, str) and w.strip():
-                self._latched_word = w
-                return w
-        return self._latched_word or self._reg.target_word
+            if isinstance(w, str) and w.strip() and self._write_word(w):
+                self._own_word = w
+                self._word_src = f"порт {src}"
+        return self._own_word
 
     def _resolve_pick(self, item: dict) -> tuple[float, float] | None:
         """Координата забора с ленты (мм робота) из item[pick_source] = {x_mm, y_mm}."""
@@ -319,10 +363,10 @@ class WordLayoutPlugin(ProcessModulePlugin):
         slots = [Slot(ch, x, y) for ch, (x, y) in zip(letters, positions)]
         return WordAssembler(slots), positions
 
-    def _ensure_assembler(self, word: str) -> None:
-        """Пересобрать матчер при смене слова или геометрии линии."""
+    def _ensure_assembler(self, word: str, src: str = "") -> None:
+        """Пересобрать матчер при смене слова или геометрии линии. ``src`` — источник слова (журнал)."""
         sig = (
-            word,
+            _norm(word),
             self._reg.use_pitch,
             self._reg.first_x,
             self._reg.first_y,
@@ -335,6 +379,11 @@ class WordLayoutPlugin(ProcessModulePlugin):
         )
         if sig == self._sig:
             return
+        # Старые значения — ДО пересборки: нужны для строки журнала о смене слова.
+        old_sig = self._sig
+        old_norm = self._reg.word_norm
+        old_filled = self._reg.slots_filled
+        old_total = self._reg.slots_total
         self._sig = sig
         self._assembler, positions = self._build_assembler(word)
         self._reg.word_norm = "".join(s.char for s in self._assembler.slots)
@@ -347,6 +396,14 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        # Первая сборка и смена слова — в журнал (с источником); пересборка по геометрии — без строки.
+        if old_sig is None:
+            self._ctx.log_info(f"WordLayoutPlugin: слово '{self._reg.word_norm}' (источник: {src})")
+        elif sig[0] != old_sig[0]:
+            self._ctx.log_info(
+                f"WordLayoutPlugin: смена слова '{old_norm}' → '{self._reg.word_norm}' "
+                f"(источник: {src}) — ячейки с нуля (было заполнено {old_filled}/{old_total})"
+            )
         if self._reg.spacing_warn:
             self._ctx.log_info(
                 f"WordLayoutPlugin: ВНИМАНИЕ — слоты теснее диаметра диска "
@@ -372,18 +429,50 @@ class WordLayoutPlugin(ProcessModulePlugin):
             "angle_valid": bool(top.get("angle_valid", False)),
         }
 
-    def _should_take(self, pred: dict | None) -> bool:
+    def _disk_id(self, item: dict) -> object | None:
+        """Идентичность диска: ``sidecar.track_id`` (ставит center_crop) или None."""
+        sidecar = item.get("sidecar")
+        if isinstance(sidecar, dict):
+            return sidecar.get("track_id")
+        return None
+
+    def _should_take(self, pred: dict | None, tid: object | None) -> bool:
         """Брать ли этот диск сейчас. Триггер-режим — по сигналу; авто — новый диск.
 
-        Авто: «новый диск» = сменилась буква ИЛИ перед ним была пауза (нет диска).
-        Дедуп по букве защищает от повтора одного диска во многих кадрах (непрерывный
-        тракт); смена буквы взводит сразу (триггерный тракт даёт ~1 кадр на диск, без
-        пауз между разными буквами). settle_frames>1 — подавить разовый misread
-        (ОСТОРОЖНО: в тракте «1 кадр на диск» ставь 1, иначе диск не возьмётся).
+        Авто, два режима. С ``tid`` (sidecar.track_id): новый диск = новый id, дедуп по id —
+        два одинаковых диска подряд берутся оба. Без ``tid``: «новый диск» = сменилась буква
+        ИЛИ перед ним была пауза (нет диска). Дедуп по букве защищает от повтора одного диска
+        во многих кадрах (непрерывный тракт); смена буквы взводит сразу (триггерный тракт даёт
+        ~1 кадр на диск, без пауз между разными буквами). settle_frames>1 — подавить разовый
+        misread (ОСТОРОЖНО: в тракте «1 кадр на диск» ставь 1, иначе диск не возьмётся).
+        В id-режиме ``_armed`` не читается; пауза без id ``_taken_track`` не трогает.
         """
         if self._reg.use_trigger:
             if self._trig_armed and pred is not None:
                 self._trig_armed = False
+                return True
+            return False
+
+        # id-режим: сравнение `is not None`, а не по истинности — id 0 допустим.
+        if tid is not None:
+            if tid != self._cur_track:  # новый диск
+                self._cur_track = tid
+                self._settle = 0
+                self._cur_label = ""
+            if tid == self._taken_track:  # этот диск уже взят (задание выдано или пропуск)
+                return False
+            if pred is None:
+                self._settle = 0
+                self._cur_label = ""
+                return False
+            if pred["label"] != self._cur_label:  # смена буквы внутри диска — без перевзвода
+                self._cur_label = pred["label"]
+                self._settle = 1
+            else:
+                self._settle += 1
+            if self._settle >= max(1, int(self._reg.settle_frames)):
+                self._taken_track = tid
+                self._settle = 0
                 return True
             return False
 

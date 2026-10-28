@@ -1,0 +1,10 @@
+ОТЧЁТ: Полоса Д · Task C22.1 (C-22) · inspector-bottles-66
+
+Суть: в рецепте можно было задать настройку «ждать кадры вместе» (`collector: {timeout_sec: …}` без `mode`) у процесса, где совместного ожидания нет; настройка молча терялась. Теперь проверка рецепта (`check()` во framework) выдаёт понятную ошибку с подсказкой — для рецептов любого приложения.
+Итог: ветка `fix/c22-collector-modeless` — план `6f904b26b`, слепые тесты `6b54d02c2`, правка `72d36ff5e`, ADR `c40e295c2`. Правило в `blueprint.py` (`_modeless_collector_errors`, общий helper `_explicit_collector`), ADR-PMM-017 п.8. Рецепты не менялись.
+Проверка: новый файл 14/14; инъекции I1–I7 — 7/7 совпали с предсказаниями плана; `process_manager_module/tests` 1267 passed; `multiprocess_prototype/backend/tests` 237 passed (после rebase, `robot_demo` собирается); backend/topology 78, assembly 100, fanin 36; `recipes/tests` — красный только C-24; framework suite 12012 passed / 2 failed (C-4, C-5 — в реестре); `validate.py` 0/0; `sentrux check` pass; снимки не изменены.
+Проблемы → решение: ревью ветки (Opus) нашло дефект вне задачи — имена процессов с точкой ломают подсчёт join-источников → реестр C-25. Старая фраза в «Последствиях» ADR-PMM-017 исправлена.
+Агенты: reviewer стадии 0 · sonnet · 222k; Explore (C-21) · haiku · 61k; tester · sonnet · 80k; developer · sonnet · 92k; reviewer задачи · sonnet · 132k; reviewer ветки · opus · 130k; всего ~717k. Контекст лида ~90k (оценка).
+Открыто: `metadata.collector/inspector` без `mode` у процесса без join по-прежнему теряется молча (путь deprecated) — вопрос владельцу; GUI-сохранение идёт через `check_structure()`, нарушение C-22 видно только при сборке; `MODULE_CONTRACTS.md:567`, `MODULES_OVERVIEW.md:275` называют явный `collector` escape-hatch без оговорки о mode-less; живой стенд не запускался (правило меняет только `check()`, рабочие рецепты C-22 = 0 на 36 YAML).
+Дальше: слияние после «ок» координатора; затем C-19, C-20, C-24, C-25, C-21(б).
+Подробно: `plans/topology-port-join.md` (фаза C-22), `docs/reviews/2026-10-21_task-C22.1-tester.md`, `docs/reviews/2026-10-21_task-C22.1-developer.md`.

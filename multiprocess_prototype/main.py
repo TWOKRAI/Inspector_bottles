@@ -106,7 +106,18 @@ def _prototype_launcher_factory(manifest, pipeline_override: str | None, *, head
     """
     from multiprocess_prototype.backend.config.manifest import load_manifest
 
+    from multiprocess_framework.modules.app_module import state_path_for
+
     app = load_manifest(manifest.source)
+    # Видимость выбора: битое состояние молча подменило бы рецепт умолчанием, валидное —
+    # рецептом из состояния; в обоих случаях оператору нужна строка в stderr.
+    if app.pipeline_note:
+        print(f"[run] {app.pipeline_note}", file=sys.stderr)
+    if app.pipeline_origin == "state":
+        print(
+            f"[run] pipeline: {app.pipeline} (источник: состояние {state_path_for(manifest.source)})",
+            file=sys.stderr,
+        )
     return build_launcher(app, pipeline_override, include_presentation=not headless)
 
 
@@ -114,10 +125,12 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
     """Запуск приложения через ``app_module.run_app`` (Ф5.11).
 
     CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
-    активным»: он пишется в манифест (``app.yaml: pipeline``) через ``ManifestStore``
-    (NEW-1 — единая сериализованная точка, гонка backend↔GUI закрыта) ДО сборки.
-    Тогда и бэкенд, и дочерний GUI-процесс читают ОДИН активный рецепт. При ошибке
-    записи — graceful fallback (override только в бэкенд).
+    активным»: он пишется в файл состояния ``<stem>.state.yaml`` рядом с манифестом
+    (``app.state.yaml``, вне git) через ``ManifestStore`` (NEW-1 — единая
+    сериализованная точка, гонка backend↔GUI закрыта) ДО сборки; ``app.yaml`` хранит
+    только умолчание и не меняется (ADR-APP-008). Тогда и бэкенд, и дочерний
+    GUI-процесс читают ОДИН активный рецепт. При ошибке записи — graceful fallback
+    (override только в бэкенд).
 
     ``headless`` (Ф2 T2.2) — явный backend-only режим (см. ``_is_headless``): ``None``
     смотрит env ``INSPECTOR_HEADLESS``; явный ``True``/``False`` (CLI ``--headless``,
@@ -125,7 +138,7 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
     """
     from functools import partial
 
-    from multiprocess_framework.modules.app_module import AppSpec, apply_env_aliases, run_app
+    from multiprocess_framework.modules.app_module import AppSpec, apply_env_aliases, run_app, state_path_for
 
     # Env-алиасы ПЕРВЫМ делом (до resolve_manifest_path/persist): resolve_manifest_path
     # читает только INSPECTOR_MANIFEST, а persist пишет по нему же — при заданном лишь
@@ -142,12 +155,12 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
 
         try:
             written = persist_pipeline_choice(manifest_path, pipeline_override)
-            print(f"[run] активный рецепт записан в манифест: pipeline: {written}")
-            effective_override = None  # манифест уже указывает на нужный рецепт
+            print(f"[run] активный рецепт записан в состояние: {state_path_for(manifest_path)} (pipeline: {written})")
+            effective_override = None  # файл состояния уже указывает на нужный рецепт
         except Exception as exc:  # noqa: BLE001 — persist не должен валить запуск
             print(
-                f"[run] не удалось записать рецепт в манифест ({exc}); запускаю бэкенд "
-                "с CLI-override (GUI может взять рецепт из старого app.yaml)",
+                f"[run] не удалось записать рецепт в файл состояния {state_path_for(manifest_path)} ({exc}); "
+                "запускаю бэкенд с CLI-override",
                 file=sys.stderr,
             )
 

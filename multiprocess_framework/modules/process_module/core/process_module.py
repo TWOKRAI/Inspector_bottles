@@ -171,6 +171,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         # Менеджеры (создаются в initialize() через ManagersBundle, ADR-PM-009)
         self.worker_manager = None
+        # Task 1.9m: именованные исполнители процесса (ExecutorManager); None — bundle без поля.
+        self.executor_manager = None
         self.logger_manager = None
         self.error_manager = None
         self.command_manager = None
@@ -510,6 +512,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         затем регистрирует их через ObservableMixin и подключает адаптеры.
         """
         self.worker_manager = bundle.worker
+        self.executor_manager = bundle.executors
         self.logger_manager = bundle.logger
         self.error_manager = bundle.error
         self.router_manager = bundle.router
@@ -531,6 +534,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if work is not None:
             work.own(self._self_call("_uninstall_process_hooks"), name="hooks", kind="callable")
             work.own(self._attr_call("_orchestrator", "shutdown"), name="plugins", kind="callable")
+            # Task 1.9m: после плагинов, до записей наследника и ``workers`` — фаза 1 закрывает приём
+            # исполнителей раньше остальных; фаза 2 (обратная) ждёт их после ``workers``.
+            work.own(self._attr_call("executor_manager", "shutdown"), name="executors", kind="callable")
+            self._attach_manager_scope(work, "executor_manager")
+        if self.executor_manager is not None:
+            # Исполнители из config["executors"] нужны до любой регистрации команды, которая их назовёт.
+            self.executor_manager.load_config((self.get_config("config") or {}).get("executors"))
 
     def _register_planes(self, planes) -> None:
         """Записи ``planes`` (Task 1.2a) в порядке регистрации; закрытие обратное:

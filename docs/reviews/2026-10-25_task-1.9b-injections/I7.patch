@@ -1,0 +1,62 @@
+diff --git a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+index 178cca8ae..235824877 100644
+--- a/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
++++ b/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py
+@@ -117,7 +117,7 @@ class ProcessManagerProcess(ProcessModule):
+         # lifecycle-путей). См. _bump_routing_epoch / _broadcast_routing_refresh.
+         self._routing_epoch: int = 0
+         self._incarnations: dict[str, int] = {}
+-        self._routing_lock = threading.Lock()
++        self._routing_lock = threading.RLock()  # INJ I7
+         # Поколения рассылок (R4/ревью-1): «этот конверт ещё последний?». Здесь же,
+         # а не только лениво, чтобы первое касание было заведомо однопоточным.
+         self.__dict__["_broadcast_generations_map"] = {}
+@@ -1054,7 +1054,9 @@ class ProcessManagerProcess(ProcessModule):
+         """
+         if self._topology_manager is None:
+             return {"error": "TopologyManager not initialized"}
+-        result = self._topology_manager.get()
++        self._ensure_routing_state()
++        with self._routing_lock:  # INJ I7
++            result = self._topology_manager.get()
+         # D3: менеджер отдаёт живой словарь; писатель класса L меняет его на потоке исполнителя.
+         topology = result.get("topology") if isinstance(result, dict) else None
+         if isinstance(topology, dict):
+@@ -1220,7 +1222,10 @@ class ProcessManagerProcess(ProcessModule):
+         """
+         result = {}
+         # D3: снимок без лока — wire.setup/teardown мутируют словарь на потоке исполнителя.
+-        for wire_key, info in list(self._active_wires.items()):
++        self._ensure_routing_state()
++        with self._routing_lock:  # INJ I7
++            _inj_snap = list(self._active_wires.items())
++        for wire_key, info in _inj_snap:
+             result[wire_key] = {
+                 "status": info.get("status", "idle"),
+                 "source_process": info.get("source_process", ""),
+@@ -2046,7 +2051,7 @@ class ProcessManagerProcess(ProcessModule):
+         методы безопасными в таких PM (та же философия, что communication/mock=None).
+         """
+         if not hasattr(self, "_routing_lock"):
+-            self._routing_lock = threading.Lock()
++            self._routing_lock = threading.RLock()  # INJ I7
+             self._routing_epoch = getattr(self, "_routing_epoch", 0)
+             self._incarnations = getattr(self, "_incarnations", {})
+
+@@ -4663,8 +4668,15 @@ class _LifecycleSubmit:
+             finally:
+                 release()
+
++        inner_action = action
++
++        def locked_action() -> Any:  # INJ I7: whole operation under _routing_lock
++            with self._pm._routing_lock:
++                return inner_action()
++
++        locked_action.__name__ = getattr(inner_action, "__name__", "action")
+         try:
+-            return self._executor.submit(action, key, counted_reply, inline_if_idle=inline_if_idle)
++            return self._executor.submit(locked_action, key, counted_reply, inline_if_idle=inline_if_idle)
+         except BaseException:
+             release()
+             raise

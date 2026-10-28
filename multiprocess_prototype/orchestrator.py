@@ -76,11 +76,15 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
             self._log_warning(f"[recipe] в манифесте нет recipes: ({manifest_path}) — recipe.* не зарегистрированы")
             return
         for cmd_name, handler in service.handlers().items():
+            # Task 1.9b (D2): recipe.activate — класс L (зовёт topology.apply, ждёт смерти детей): строкой
+            # на адаптер PM, чтобы relay во время активации видел переход. Остальные recipe.* — как были.
+            routing = {"executor": "pm-lifecycle-submit", "targets": "all"} if cmd_name == "recipe.activate" else {}
             self.command_manager.register_command(
                 cmd_name,
                 handler,
                 metadata={"description": f"Сервис рецептов (ADR-RCP-007): {cmd_name}"},
                 tags=["system"],
+                **routing,
             )
 
     def _register_service_commands(self) -> None:
@@ -129,7 +133,9 @@ def build_recipe_service(pm, manifest_path: Path):
       (debounce, ретаргет L2, откат — не обходятся);
     * ``persist_active`` — ``ManifestStore.set_pipeline`` значением относительно
       каталога манифеста (``recipes/<slug>.yaml`` — как ``persist_pipeline_choice``);
-    * ``read_active`` — stem ``pipeline:``, если он лежит в каталоге рецептов.
+      пишет в ``<stem>.state.yaml``, ``app.yaml`` (умолчание) не меняется;
+    * ``read_active`` — stem активного pipeline (состояние, иначе умолчание ``app.yaml``),
+      если он лежит в каталоге рецептов.
     """
     from multiprocess_framework.modules.app_module import ManifestStore
     from multiprocess_framework.modules.recipe.service import RecipeService

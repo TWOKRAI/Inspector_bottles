@@ -9,7 +9,8 @@ Purpose:
 
 Public API:
     ``DOCS``, ``StoredDoc(body, rev)``, ``compute_rev(raw)``,
-    ``RobotDataStore(root)``: ``read``, ``write``, ``read_program``, ``write_program``, ``list_programs``.
+    ``RobotDataStore(root)``: ``read``, ``write``, ``read_program``, ``write_program``, ``list_programs``,
+    ``delete_program`` (T5.3b).
     Ошибки — ``Services.robot_comm.errors``: ``RevisionConflict``, ``InvalidStoreKey``, ``StoreDocumentInvalid``.
 
 Stability: lite (новый модуль без Protocol-интерфейса; контракт держат ``Pre:``/``Post:`` методов и тесты).
@@ -18,6 +19,7 @@ Test seam:
     Модульная функция ``_replace_file(src, dst)``. Хранилище зовёт её ТОЛЬКО по имени модуля в момент
     вызова (каждая попытка — новый поиск имени): тест подменяет ``monkeypatch.setattr(store, "_replace_file", fake)``.
     Раннюю привязку (поле экземпляра, умолчание аргумента, ``from os import replace``) делать нельзя.
+    Так же устроены ``_remove_file(path)`` (удаление программы) и ``_new_lock`` (фабрика замка документа, T5.3b).
 
 Гарантии потоков:
     ОДИН экземпляр ``RobotDataStore`` в одном процессе, любое число потоков. Два экземпляра на один ``root``
@@ -27,23 +29,24 @@ Test seam:
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import re
 import tempfile
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, StoreDocumentInvalid
 
 __all__ = ["DOCS", "RobotDataStore", "StoredDoc", "compute_rev"]
 
-log = logging.getLogger(__name__)
+log = get_std_logger(__name__)
 
 DOCS = ("params", "points", "frames", "calibration")
 
@@ -76,6 +79,16 @@ def _replace_file(src: str, dst: str) -> None:
     os.replace(src, dst)
 
 
+def _remove_file(path: str) -> None:
+    """Шов теста: удалить файл ``path`` (``delete_program``)."""
+    os.unlink(path)
+
+
+#: Шов теста (T5.3b): фабрика замка документа. ``_doc_lock`` читает это имя модуля при каждом вызове,
+#: поэтому подмена ``Services.robot_comm.store._new_lock`` действует без правки файла.
+_new_lock = threading.Lock
+
+
 def _replace_with_retry(src: str, dst: str) -> None:
     """Заменить ``dst`` на ``src``; ``PermissionError`` повторяется по ``_REPLACE_PAUSES``.
 
@@ -90,6 +103,22 @@ def _replace_with_retry(src: str, dst: str) -> None:
             log.warning("robot_comm.store: замена %s отклонена (PermissionError), повтор через %s с", dst, pause)
             time.sleep(pause)
     _replace_file(src, dst)
+
+
+def _remove_with_retry(path: str) -> None:
+    """Удалить ``path``; ``PermissionError`` повторяется по ``_REPLACE_PAUSES`` (как у замены).
+
+    Каждая попытка — новый вызов ``_remove_file`` по имени модуля. После последней паузы — одна попытка
+    без перехвата: стойкая блокировка поднимает исходный ``PermissionError``. Прочие ``OSError`` не повторяются.
+    """
+    for pause in _REPLACE_PAUSES:
+        try:
+            _remove_file(path)
+            return
+        except PermissionError:
+            log.warning("robot_comm.store: удаление %s отклонено (PermissionError), повтор через %s с", path, pause)
+            time.sleep(pause)
+    _remove_file(path)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -108,6 +137,28 @@ def _atomic_write(path: Path, data: bytes) -> None:
         except OSError:
             log.warning("robot_comm.store: не удалось удалить временный файл %s", tmp, exc_info=True)
         raise
+
+
+# Префикс расширенного пути Windows и его UNC-форма (см. ``_resolved``)
+_EXT_PREFIX = "\\\\?\\"
+_EXT_UNC_PREFIX = "\\\\?\\UNC\\"
+
+
+def _resolved(path: Path) -> Path:
+    """``path.resolve()`` без префикса расширенного пути Windows.
+
+    Post: пока каталог создаётся другим потоком, ``os.path.realpath`` Windows изредка отдаёт тот же путь с префиксом
+    расширенного пути (``_getfinalpathname`` на ещё не созданном пути отказывает, префикс не снимается) — сравнение
+    с путём без префикса давало ложный ``InvalidStoreKey`` на допустимом ключе (T5.3c c2). Префикс снимается у обеих
+    сторон сравнения; строгость проверки (выход из каталога по ссылке или ``..``) не меняется.
+    """
+    resolved = path.resolve()
+    text = str(resolved)
+    if text.startswith(_EXT_UNC_PREFIX):
+        return Path("\\\\" + text[len(_EXT_UNC_PREFIX) :])
+    if text.startswith(_EXT_PREFIX):
+        return Path(text[len(_EXT_PREFIX) :])
+    return resolved
 
 
 def _is_reserved(name: str) -> bool:
@@ -140,11 +191,14 @@ class RobotDataStore:
     Потоки: один экземпляр на ``root`` в одном процессе, любое число потоков (замок на документ). Два экземпляра
     на один ``root`` или два процесса НЕ гарантируются. ``read``/``read_program`` берут замок документа, поэтому
     могут ждать до ~1.6 с, пока запись повторяет замену при ``PermissionError``.
+
+    Замки документов лежат в ``WeakValueDictionary`` (T5.3b): запись живёт, пока операция держит замок, без операций
+    словарь пуст. Экземпляр создаёт вызывающий и держит один на процесс (T5.3c — плагин хаба).
     """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self._root = Path(root)
-        self._locks: dict[tuple[str, str], threading.Lock] = {}
+        self._locks: weakref.WeakValueDictionary[tuple[str, str], threading.Lock] = weakref.WeakValueDictionary()
         self._locks_guard = threading.Lock()
 
     # ------------------------------------------------------------------ #
@@ -152,19 +206,24 @@ class RobotDataStore:
     # ------------------------------------------------------------------ #
 
     def _doc_lock(self, device_id: str, rel: str) -> threading.Lock:
-        """Замок документа; ключ по ``casefold``: на Windows ``Prog.yaml`` и ``prog.yaml`` — один файл."""
+        """Замок документа; ключ по ``casefold``: на Windows ``Prog.yaml`` и ``prog.yaml`` — один файл.
+
+        Invariant: в ``_locks`` только документы с операцией в полёте; без операций — пусто.
+        Вызывающий держит возвращённую сильную ссылку до конца операции: ``with self._doc_lock(...):``.
+        """
         key = (device_id, rel.casefold())
         with self._locks_guard:
             lock = self._locks.get(key)
             if lock is None:
-                lock = self._locks[key] = threading.Lock()
+                lock = _new_lock()
+                self._locks[key] = lock
             return lock
 
     def _check_device(self, device_id: object) -> str:
         if not isinstance(device_id, str) or not _DEVICE_RE.fullmatch(device_id) or _is_reserved(device_id):
             raise InvalidStoreKey(device_id)
-        root = self._root.resolve()
-        if (root / device_id).resolve().parent != root:
+        root = _resolved(self._root)
+        if _resolved(root / device_id).parent != root:
             raise InvalidStoreKey(device_id)
         return device_id
 
@@ -186,8 +245,8 @@ class RobotDataStore:
             or _is_reserved(name)
         ):
             raise InvalidStoreKey(name)
-        expected_dir = self._root.resolve() / dev / "programs"
-        if (expected_dir / f"{name}{_SUFFIX}").resolve().parent != expected_dir:
+        expected_dir = _resolved(self._root) / dev / "programs"
+        if _resolved(expected_dir / f"{name}{_SUFFIX}").parent != expected_dir:
             raise InvalidStoreKey(name)
         rel = f"programs/{name}{_SUFFIX}"
         return dev, rel, self._root / dev / "programs" / f"{name}{_SUFFIX}"
@@ -270,6 +329,28 @@ class RobotDataStore:
         """
         dev, rel, path = self._program_path(device_id, name)
         return self._write(dev, rel, path, body, base_rev)
+
+    def delete_program(self, device_id: str, name: str, *, base_rev: str | None) -> None:
+        """Удалить программу устройства, если на диске всё ещё ревизия ``base_rev``.
+
+        Pre: ключи как у ``read_program``; ``base_rev`` — ревизия, с которой клиент читал программу. Экземпляр один
+        на ``root`` в процессе. Замок документа общий с ``write_program``: из удаления и записи с одной ``base_rev``
+        успешно ровно одно.
+        Post: успех -> файл удалён, ``read_program`` даёт ``StoredDoc(None, None)``. Отказ -> диск не тронут.
+        Файла нет -> ``RevisionConflict(None)`` при любой ``base_rev`` (в том числе None: удалять нечего).
+        Raises: ``InvalidStoreKey`` (до обращения к диску); ``RevisionConflict(current_rev)`` — ``base_rev`` не
+        равна текущей ревизии (в том числе None при существующем файле); ``OSError`` — сбой удаления, не
+        оборачивается (``PermissionError`` повторяется ~1.6 с под замком, как на замене).
+        """
+        dev, rel, path = self._program_path(device_id, name)
+        with self._doc_lock(dev, rel):
+            raw = _read_bytes(path)
+            if raw is None:
+                raise RevisionConflict(None)
+            current_rev = compute_rev(raw)
+            if base_rev != current_rev:
+                raise RevisionConflict(current_rev)
+            _remove_with_retry(str(path))
 
     def list_programs(self, device_id: str) -> list[str]:
         """Имена программ устройства по возрастанию.

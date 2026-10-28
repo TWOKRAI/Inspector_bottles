@@ -1,0 +1,28 @@
+{
+  "S3": [
+    {
+      "repeat": 1,
+      "stop_reply_s": 3.203,
+      "waited_s": 3.2,
+      "relay_sent_at_s": 1.0,
+      "relay_reply_s": 0.0,
+      "relay_reply": {
+        "type": "response",
+        "command": "command.response",
+        "sender": "ProcessManager",
+        "targets": [
+          "ProcessManager"
+        ],
+        "queue_type": "system",
+        "request_id": "9c38cfc8-0018-4cfd-b0e6-a1bef047bb09",
+        "success": true,
+        "result": {
+          "success": true,
+          "target_process": "devices"
+        }
+      },
+      "delivery_s": 0.046,
+      "relay_inside_stop": true
+    }
+  ]
+}

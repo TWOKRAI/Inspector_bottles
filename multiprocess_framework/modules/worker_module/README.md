@@ -171,6 +171,129 @@ config = ThreadConfig(priority=ThreadPriority.REALTIME)
 
 ---
 
+## KeyedExecutor — исполнитель с порядком по ключу (Task 1.9a, ADR-WRK-005)
+
+**Stability:** lite. Контракт — протокол `OrderedExecutor` (`interfaces.py`), реализация —
+`keyed_executor.KeyedExecutor`. Клиенты (`CommandManager`, ProcessManager) знают только протокол.
+
+**Purpose.** Операции, которые ждут другой процесс, не должны занимать приёмный поток. Исполнитель берёт их на
+свои потоки и сохраняет порядок там, где он важен: операции с пересекающимися ключами идут строго в порядке подачи,
+с непересекающимися — параллельно. `key=None` — «все ключи».
+
+**Public API.**
+
+| Член | Контракт |
+|---|---|
+| `KeyedExecutor(name, *, worker_manager, max_pending=64, serial=False, max_workers=4, should_reject=None, log=None)` | Создаёт `max_workers` (при `serial=True` — 1) постоянных SYSTEM-воркеров `keyed-<name>-<i>` через `worker_manager.create_worker(auto_start=True)`. Имя занято → `ValueError`. Отдельного `start()` нет. |
+| `submit(action, key, reply, *, inline_if_idle=False) -> bool` | **Pre:** не закрыт и `should_reject()` не `True`, иначе `reply(system_stopping)` на вызывающем потоке, `False`. **Post:** `reply` ровно раз — результат / `{"success": False, "error": "<тип>: <текст>"}` / `system_stopping` / `executor_busy`. `True` — в очереди; `False` — `reply` уже вызван. Никогда не блокирует. |
+| `request_stop()` | Закрыть приём, снять очередь (каждой — `system_stopping`). Идемпотентен. |
+| `join_until(deadline) -> bool` | Ждать текущие операции и выход рабочих до `time.monotonic()`-срока; `False` + WARNING с именами операций. |
+| `shutdown(deadline) -> bool` | `request_stop(); return join_until(deadline)`. |
+
+Правила:
+- `max_pending` считает только **ждущие** операции; исполняемые не считаются. На потолке — `executor_busy`,
+  один WARNING на эпизод (эпизод кончается, когда очередь опустела).
+- `inline_if_idle=True`: ключ не пересекается ни с исполняемыми, ни с ждущими → `action` и `reply` на вызывающем
+  потоке, `False`. Решение и захват ключа — под одним локом.
+- Повторный вход (`submit` из `action` этого исполнителя): ключ ⊆ ключа текущей операции (при `serial=True` — любой)
+  → на месте, как часть родителя; иначе обычная постановка. `action` не вправе ждать `reply` вложенной.
+- `should_reject` зовётся в `submit` и свободными рабочими на каждом пробуждении (раз в 0,1 с) при непустой очереди —
+  и когда ничего не исполнимо (ждущие за занятым ключом снимаются, не дожидаясь его); вне лока, без защёлки;
+  исключение → `True`. При `serial=True` единственный рабочий занят операцией — очередь снимется после неё.
+- `stop_event` воркера (`stop_all_workers`) → `request_stop()` всего исполнителя: очередь получает отказ, а не тишину.
+- `BaseException` в `action` (`SystemExit`, `KeyboardInterrupt`): `reply` ровно раз (`"<тип>: <текст>"`), исключение
+  идёт дальше, рабочий выходит и закрывает исполнитель — очередь получает `system_stopping`.
+- После `shutdown` имя исполнителя остаётся занятым в этом `WorkerManager` (STOPPED-воркеры остаются в реестре):
+  новый исполнитель на живом менеджере — с новым именем.
+- Лок исполнителя не держится поверх `action`, `reply` и `should_reject`. Логи — через `logger_module.get_std_logger`
+  (без LoggerManager — stdlib-логгер `multiprocess_framework.worker_module.keyed_executor.<name>`) или переданный `log`.
+
+**Usage.**
+
+```python
+from multiprocess_framework.modules.worker_module.keyed_executor import KeyedExecutor
+
+ex = KeyedExecutor("pm_ops", worker_manager=wm, max_workers=8)
+ex.submit(lambda: start("cam1"), frozenset({"cam1"}), reply)   # параллельно с cam2
+ex.submit(lambda: start("cam2"), frozenset({"cam2"}), reply)
+ex.submit(lambda: apply_topology(), None, reply)               # после обеих, до всех следующих
+ex.shutdown(time.monotonic() + 2.0)                            # очередь → system_stopping
+```
+
+**Boundaries.** Не знает про команды, роутер и PM; особенности PM (ожидание готовности, `still_relevant`) живут
+внутри `action`. Зависит от `WorkerManager`, `ThreadConfig`. Тесты: `tests/test_keyed_executor_acceptance.py`
+(слепые R1–R12b), `tests/test_keyed_executor_hazards.py` (H1a, H1b, H2, H5, H7 + контракт).
+
+---
+
+## ExecutorManager — именованные исполнители процесса (Task 1.9m, ADR-WRK-006)
+
+**Stability:** lite. Контракт — протоколы `IExecutorRegistry` / `IExecutorManager` (`interfaces.py`), реализация —
+`executor_manager.ExecutorManager(BaseManager, ObservableMixin)`. Экспорта из `worker_module/__init__.py` нет
+(как у `KeyedExecutor`): `from ...worker_module.executor_manager import ExecutorManager, ExecutorSpec`.
+
+**Purpose.** Один сотрудник процесса, который создаёт `KeyedExecutor` из конфига или по вызову кода, принимает готовые
+объекты `OrderedExecutor` по имени, отдаёт их `CommandManager` (`register_command(executor="io")`), владеет созданными и
+показывает их в интроспекции. Не только ProcessManager: любой процесс на фреймворке получает такого же помощника.
+
+**Как подключить.**
+- *Из конфига процесса* — ключ `executors` в `proc_dict["config"]` (в `ProcessLaunchConfig` — поле `executors`; пустое
+  значение из `proc_dict` снимается). `ProcessModule` вызывает `load_config` при сборке менеджеров, до любой регистрации
+  команд. На запись — своя попытка: неверная запись даёт одну строку ERROR и пропускается, соседние создаются.
+  Схема записи `ExecutorSpec`: `kind="keyed"`, `serial=False`, `max_workers=4` (≥ 1), `max_pending=64` (≥ 1);
+  лишний ключ — отказ записи (`extra="forbid"`), а не тихий исполнитель с умолчаниями.
+- *Из кода* — `create(name, spec=None, *, should_reject=None)` (`should_reject` — код, в конфиг не кладётся) или
+  `register(name, executor)` для готового объекта (адаптеры-политики). Менеджер процесса лежит в
+  `process.executor_manager` (слот `executors` в `ManagersBundle`; `None`, если bundle собран вручную).
+
+```python
+# конфиг процесса (ProcessLaunchConfig.executors / proc_dict["config"]["executors"])
+executors = {"io": {"kind": "keyed", "max_workers": 8, "max_pending": 32}}
+
+# из кода: после super().initialize(), до регистрации команд, которые назовут исполнитель
+ex = self.executor_manager.create("lifecycle", {"serial": True}, should_reject=self._stopping)
+self.executor_manager.register("submit-adapter", my_adapter)       # владелец остаётся у вызывающего
+self.command_manager.register_command("camera.start", handler, executor="io", key_from="camera")
+```
+
+**Public API.**
+
+| Член | Контракт |
+|---|---|
+| `get(name) -> OrderedExecutor \| None` | Объект по имени; не бросает. Это весь `IExecutorRegistry`. |
+| `create(name, spec=None, *, should_reject=None)` | Имя занято → `ValueError`; неверный `spec` → `ValueError` (`<loc>: <msg>` через `; `, без входных значений); после закрытия → `RuntimeError` (допустим `ScopeClosedError`). На любом провале имя не остаётся занятым. Одна строка INFO на созданный. |
+| `register(name, executor)` | Нет вызываемого `submit` → `TypeError`; имя занято → `ValueError`. Только маршрутизация по имени. |
+| `load_config(section) -> list[str]` | Имена созданных. `None` / `{}` → `[]`, ни строки лога; не `Mapping` → одна строка ERROR, `[]`. |
+| `names()` / `is_executor_thread(name)` | Все имена в порядке появления / текущий поток — рабочий **созданного** `name` (точное имя потока; для зарегистрированного и неизвестного — `False`). |
+| `describe()` | Снимок для интроспекции (ниже). |
+
+Имя — по правилу имени записи `Scope`: непустая `str`, без `/`, без суффикса ` (self)`.
+
+**Владение и остановка.**
+- *Созданные* менеджер отдаёт своей области (`scope.own(..., kind="executor")`); в `ProcessModule` это область
+  `executor_manager-scope` внутри сегмента `work`, запись `executors` стоит сразу после `plugins`. Исполнители
+  закрываются общим сроком области: сначала `request_stop` (очередь получает `system_stopping`), затем `join_until`.
+  Закрытие со своего рабочего потока ждать не станет: WARNING и `False` сразу. Без области (менеджер вне `ProcessModule`)
+  созданные лежат в `_unowned` и закрываются в `shutdown()` менеджера общим сроком 2,0 с.
+- *Зарегистрированные* менеджер не закрывает (ни `request_stop`, ни `join_until`, даже если объект `Stoppable`): владелец
+  остаётся у регистрирующего. `register` после закрытия менеджера принимается; `create` — нет.
+- Процесс без исполнителей платит ноль: ни потоков, ни строк лога (объект менеджера, пустая область и одна запись в `work`).
+
+**Интроспекция.** Команда `introspect.executors` (процесс отвечает за себя; через backend_ctl —
+`send_command(<процесс>, "introspect.executors")`) возвращает `ExecutorManager.describe()`:
+`{"executors": {<имя>: {...}}, "unavailable": ["pending_depth", "running_keys"]}`. Созданный: `kind`, `source`
+(`config` / `code`), `serial`, `max_workers`, `max_pending`, `owned` (принят областью), `workers`
+(`{<имя воркера>: {"is_alive", "status"}}`; снятый воркер — `"absent"`; при `serial=True` `max_workers` — значение спеки, реальных рабочих 1). Зарегистрированный: `kind="registered"`,
+`source="code"`, `type`. Глубины очереди и ключей в работе нет: у `KeyedExecutor` нет публичного чтения, ядро не правилось
+(`docs/claude/OPEN_QUESTIONS.md`).
+
+**Boundaries.** `worker_module` о `command_module` не знает: `CommandManager` видит только `IExecutorRegistry` под
+`TYPE_CHECKING`. Рабочие исполнителя — SYSTEM-воркеры, `worker.stop/remove/...` по IPC отвечают `protected`. Тесты:
+`tests/test_executor_manager_acceptance.py`, `tests/test_executor_manager_hazards.py`; проводка процесса —
+`process_module/tests/test_process_executors_acceptance.py`.
+
+---
+
 ## ThreadConfig — Конфигурация потока
 
 ### Основные параметры
@@ -387,7 +510,7 @@ self.process.router_manager.register_message_handler(on_message)
 class DataProcessor:
     def __init__(self, interval=1.0):
         self.interval = interval
-    
+
     def run(self, stop_event, pause_event):
         while not stop_event.is_set():
             if pause_event.is_set():
@@ -395,7 +518,7 @@ class DataProcessor:
                 continue
             self.process_batch()
             time.sleep(self.interval)
-    
+
     def process_batch(self):
         print("Обработка партии данных...")
 

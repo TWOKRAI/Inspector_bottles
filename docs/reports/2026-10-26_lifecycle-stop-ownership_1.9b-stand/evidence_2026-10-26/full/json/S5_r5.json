@@ -1,0 +1,8 @@
+{
+  "kind": "restart",
+  "target": "devices #2",
+  "elapsed_s": 2.125,
+  "ok": true,
+  "note": "",
+  "waited_s": 2.125
+}

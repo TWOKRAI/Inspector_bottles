@@ -1,0 +1,4 @@
+R2-C quiet window inspector-bottles-90 16:51-17:10
+CPU before (wmic LoadPercentage): 51
+CPU after: 74 (16:58:24, after the run exited; other sessions)
+stand.lock taken 16:52, removed 16:58

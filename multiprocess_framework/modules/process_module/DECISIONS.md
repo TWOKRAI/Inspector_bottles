@@ -4157,3 +4157,79 @@ Free-threaded Python — пересмотреть.
 - *Ограничение до 1.3.* Воркер, блокированный ресурсом плагина, на штатном стопе не встаёт к сроку `work`:
   `workers` закрывается раньше `plugins`, запись `.../work/workers` попадает в `survivors`, ребёнок выходит
   с 76, хотя до 1.2a выходил с 0 (daemon-поток). Снимает 1.3 (камера и воркер в одной области, G8).
+
+### ADR-PM-055 — `ExecutorManager` в каждом процессе: слот `executors`, запись в `work` после `plugins`, ключ конфига `executors`, команда `introspect.executors` (2026-10-21, Task 1.9m)
+
+Менеджер именованных исполнителей (ADR-WRK-006) собирается в каждом процессе; исполнители — из `config["executors"]`.
+Парный ADR-CMD-007 (`CommandManager(executors=...)`, `executor="<имя>"`). Корень процесса — ADR-PM-054.
+
+- *Решение.* `ProcessManagers.create_all`: сразу после `worker` и `logger` — `_create_executor_manager` (имя
+  `executors_<процесс>`, `managers={"logger": logger}`); порядок `worker → logger → executors → error → router → stats →
+  observation → command → console`. Менеджер идёт в `CommandManager(executors=...)` и в `ManagersBundle.executors`
+  (умолчание `None`: bundle, собранный вручную в тестах соседей, поля не имеет). `register_all`:
+  `if bundle.executors is not None: process.register_manager("executors", ...)` — условно, как у `error`.
+- *Нулевая цена без исполнителей.* Объект менеджера, пустая дочерняя область и одна запись-вызов в `work`; потоков 0,
+  строк лога 0. Единственная новая команда — `introspect.executors`.
+- *Место в `work`.* `ProcessModule._apply_managers_bundle`: сразу после записи `plugins` —
+  `work.own(_attr_call("executor_manager", "shutdown"), name="executors", kind="callable")`, затем
+  `_attach_manager_scope(work, "executor_manager")` (область `executor_manager-scope`), затем
+  `executor_manager.load_config(config["executors"])` (если менеджер не `None`). Атрибут `ProcessModule.executor_manager`
+  (`None` до сборки). Почему здесь: (1) исполнители из конфига есть до любой регистрации команды, которая их назовёт
+  (плагины, встроенные, наследники после `super().initialize()`); (2) фаза 1 `work` идёт по порядку регистрации —
+  приём исполнителей закрывается раньше записей наследника и `workers`; (3) фаза 2 обратная: `workers` (ждёт и текущую
+  операцию) → записи наследника → `executor_manager-scope` → `executors` → `plugins` → `hooks`; `transport` — после `work`.
+- *Ключ конфига `executors`.* В `proc_dict["config"]` (тот же путь, что `plugins`):
+  `{"<имя>": {"kind": "keyed", "serial": ..., "max_workers": ..., "max_pending": ...}}`.
+  `ProcessLaunchConfig.executors: dict[str, dict[str, Any]] = {}`; в `build()` пустое значение **снимается** — форма
+  `proc_dict` у процессов без исполнителей прежняя (как `restart_policy`). Наверх `proc_dict` (как `workers`) не
+  выносится: путь `config` уже доставляет вложенные dict.
+- *Команда `introspect.executors`* (`builtin_commands.py`, рядом с `introspect.plugins`): ответ
+  `{"success": True, "process": <имя>, **ExecutorManager.describe()}`; менеджера нет — `executors: {}`, `unavailable: []`.
+  Менеджер берётся атрибутом `executor_manager`, не `_safe_get_manager` (ADR-PM-043: тот отдаёт сентинел, а не `None`).
+  Поля созданного: `kind`, `source` (`config` / `code`), `serial`, `max_workers`, `max_pending`, `owned`, `workers`
+  (`is_alive`, `status`; снятый — `absent`); зарегистрированного: `kind="registered"`, `source`, `type`. Список
+  `unavailable = ["pending_depth", "running_keys"]` — у `KeyedExecutor` нет публичного чтения глубины очереди и ключей в
+  работе; ядро не правится (OPEN_QUESTIONS). В `introspect.status` поле не добавлено — форма его ответа чужой контракт.
+  Через backend_ctl: `driver.send_command(<процесс>, "introspect.executors")`.
+- *Отвергнуто.* Ключ `executors` наверх `proc_dict` (как `workers`) — лишняя ветка в `build()` и `ProcessModule` при
+  готовом пути `config`. Менеджер без записи в `work` (полагаться на `_WorkersStop`) — исполнитель остановится, но очередь
+  получит отказ только в фазе 2, после всех `request_stop` записей `work`. Передача менеджера через `managers=` в
+  `CommandManager` — словарь уходит наблюдателям миксина (ADR-CMD-007).
+- *Следствия и риски.* Перестановка `executors` в `create_all` после `command` ломает подъём (`NameError` на
+  `executors=`) — видно сразу. Запись `executors` в `work` должна стоять после `plugins` и до записей наследника и
+  `workers`; смена порядка меняет момент закрытия приёма. Ограничение: запись конфига с опечаткой (`extra="forbid"`)
+  даёт ERROR, процесс поднимается без этого исполнителя, команды, названные им, отклоняются при регистрации. Порядок
+  создания и регистрации исполнителей PM — Task 1.9b.
+
+**Reversible:** yes (убрать слот `executors`, запись в `work`, ключ конфига и команду; исполнителей из конфига пока не
+использует ни один процесс прототипа).
+**Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9m.md` (D3, D6), ADR-WRK-006, ADR-CMD-007, ADR-PM-054, ADR-PM-043,
+`process_module/tests/test_process_executors_acceptance.py`.
+
+
+### ADR-PM-056 — Хук `ProcessModulePlugin.command_options`: опции регистрации команды плагина (2026-10-26, SPI.d1)
+
+Плагину нужен публичный путь зарегистрировать свою команду с исполнителем (`executor`, `key_from`, ADR-CMD-007) и
+описанием (`metadata`). `_auto_register_commands` звал `register_command(имя, метод)` без опций; иного пути не было:
+повторная регистрация имени отклоняется, `overwrite_command` снимает исполнителя, `update_command_metadata` заменяет
+словарь и стирает `metadata.executor` — команда молча шла бы на потоке роутера.
+
+- *Решение.* Публичный хук `command_options(command_name) -> Mapping[str, Any] | None`, умолчание `{}`. Правка только в
+  цикле `_auto_register_commands`; `set_config` / `cmd_set_config` не тронуты. Пустые опции — вызов байт в байт как
+  раньше (`register_command(имя, метод)`, два позиционных) — для всех плагинов без хука и для `process_manager_module`
+  ничего не меняется.
+- *Белый список* `{"executor", "key_from", "targets", "metadata"}`; чужие ключи — одна строка ERROR и регистрация без них
+  (опечатка не роняет конфигурацию).
+- *Имя занято* — проверка `get_command_info` до регистрации (через `getattr`: у заглушек менеджера метода может не быть);
+  одна строка ERROR, повтора нет — чужая команда не перехватывается.
+- *Исполнитель не принят* — `result is False` (не `not result`: заглушка `testing` отвечает `None`). Если имя заняли между
+  проверкой и вызовом — ERROR без повтора; иначе одна строка INFO и повтор с одним `metadata` (запасной путь: команда
+  синхронная). WARNING об отказе уже пишет `CommandManager.register_command` — второго WARNING нет.
+- *Отвергнуто.* Подмена `self.commands` или переопределение приватного `_auto_register_commands` в плагине — костыль;
+  `update_command_metadata` после регистрации — стирает `executor`; регистрация с опциями для всех плагинов (пустые
+  именованные аргументы) — меняет вызов у плагинов без хука и у двойников с узкой сигнатурой.
+- *Следствия и риски.* Хук зовётся при `configure`; опции, зависящие от состояния, должны быть готовы до него. Двойники
+  `testing.MockCommandManager` и `PluginTestBench` принимают и хранят именованные опции.
+
+**Refs:** `plans/robot-protocol-v2/tasks/SPI.framework.md` (D7, правка framework), ADR-CMD-007, ADR-PM-055,
+`process_module/tests/test_plugin_command_options.py`, `process_module/tests/test_plugin_command_options_acceptance.py`.

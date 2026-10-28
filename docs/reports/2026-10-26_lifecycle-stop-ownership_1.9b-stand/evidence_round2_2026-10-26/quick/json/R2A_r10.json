@@ -1,0 +1,66 @@
+{
+  "tree": "main",
+  "seq": 2,
+  "session": 1,
+  "target": "devices",
+  "rep": 1,
+  "elapsed_s": 1.67,
+  "ok": true,
+  "note": "",
+  "full_boot_wait_s": 8.25,
+  "windows": {
+    "mode": "override",
+    "stop_process_timeout": 8.0,
+    "shutdown_timeout": 8.0,
+    "override_line_in_stdout": true
+  },
+  "res": {
+    "restarted": true,
+    "replaced": true,
+    "process": "devices",
+    "pid_before": 37360,
+    "pid_after": 16636,
+    "instance_restarts_before": 0,
+    "instance_restarts_after": 1,
+    "alive": true,
+    "elapsed": 1.67,
+    "polls": 1,
+    "restart_reply": {
+      "type": "response",
+      "command": "process.command.response",
+      "sender": "ProcessManager",
+      "targets": [
+        "ProcessManager"
+      ],
+      "queue_type": "system",
+      "request_id": "cbc5fdf1-df23-4a3d-82a1-cbabcd8ce15e",
+      "success": true,
+      "result": {
+        "success": true,
+        "process_name": "devices"
+      }
+    }
+  },
+  "t_send_wall": 1793018434.388428,
+  "t_reply_wall": 1793018435.5553908,
+  "request_s": 1.172,
+  "request_error": null,
+  "request_reply": {
+    "type": "response",
+    "command": "process.command.response",
+    "sender": "ProcessManager",
+    "targets": [
+      "ProcessManager"
+    ],
+    "queue_type": "system",
+    "request_id": "cbc5fdf1-df23-4a3d-82a1-cbabcd8ce15e",
+    "success": true,
+    "result": {
+      "success": true,
+      "process_name": "devices"
+    }
+  },
+  "restarted_ts": 1793018435.554,
+  "reply_minus_restarted_s": 0.001,
+  "early": false
+}

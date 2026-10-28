@@ -515,15 +515,29 @@ config = {
 
 `ProcessManagerProcess` регистрирует встроенные команды при инициализации:
 
-| Команда | Аргументы | Описание |
-|---------|-----------|----------|
-| `process.list` | — | Список всех процессов и статусов |
-| `process.start` | `process_name` | Запустить именованный процесс |
-| `process.stop` | `process_name` | Остановить именованный процесс |
-| `process.restart` | `process_name` | Перезапустить процесс |
-| `process.status` | `process_name` | Статус именованного процесса |
-| `system.shutdown` | — | Завершить систему (stop_event.set()) |
-| `system.stats` | — | Статистика: monitor + processes |
+| Команда | Аргументы | Класс и исполнитель (D2) | Описание |
+|---------|-----------|--------------------------|----------|
+| `process.list` | — | R, сразу | Список всех процессов и статусов |
+| `process.create` | `process_name`, конфиг | L, `pm-lifecycle-submit`, ключ `process_name` | Создать процесс из inline-конфига |
+| `process.start` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Запустить именованный процесс |
+| `process.stop` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Остановить именованный процесс (ответ после подтверждённой смерти); ответ `{"success", "process_name", "outcome"}`, `outcome` — `exited \| terminated \| killed \| handed_over \| survived` или `None` (стопать было нечего) |
+| `process.restart` | `process_name` | L, `pm-lifecycle-submit`, ключ `process_name` | Перезапустить процесс; ответ `{"success", "process_name", "outcome"}`, `outcome` — итог фазы стопа этого вызова |
+| `process.pause` / `process.resume` | `process_name` | T, `pm-transition-gate`, ключ `process_name` | Пауза / возобновление: в исполнитель, только если процесс в переходе |
+| `process.relay` | `target_process`, команда | T, `pm-transition-gate`, ключ `target_process` | Доставить команду в цель через свежий PSR PM |
+| `process.status` | `process_name` | R, сразу | Статус именованного процесса |
+| `topology.apply` | `topology_dict` | L, `pm-lifecycle-submit`, все ключи | Применить топологию |
+| `wire.setup` / `wire.teardown` | параметры wire | L, `pm-lifecycle-submit`, все ключи | Настроить / разобрать wire-канал |
+| `telemetry.broadcast`, `observability.tail.subscribe_all` / `unsubscribe_all` | см. описания | T, `pm-transition-gate`, все ключи | В исполнитель, если идёт операция жизненного цикла, иначе сразу |
+| `supervision.status`, `topology.get`, `topology.diff`, `wire.status` | — | R, сразу | Чтение (снимки словарей без лока, D3) |
+| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}`. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
+| `system.stats` | — | R, сразу | Статистика: monitor + processes |
+
+Класс задаёт **регистрация** команды (`executor=`, `key_from=`, `targets=`), а не отправитель. Ответ на команду
+класса L приходит **после** выполнения (отложенный ответ, `DEFERRED`); новые формы отказа (I3): `key_missing`
+(нет ключа в `data`), `system_stopping` (операция снята из очереди при системном стопе), `executor_busy` (очередь
+исполнителя на потолке); отказы исполнителя ключа `outcome` не несут. `supervision.status` отдаёт на запись процесса
+`stop_outcome` — итог последнего стопа текущего воплощения (`None` у нового инстанса и у не стопавшегося). Значения
+`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
 
 Все команды помечены тегом `"system"`.
 

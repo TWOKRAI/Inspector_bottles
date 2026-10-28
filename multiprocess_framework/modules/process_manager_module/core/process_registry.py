@@ -18,6 +18,9 @@ from ..runner import run_process_function
 from ...base_manager import open_scope
 from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
+# Task 1.10 (D1/D3): итоги стопа, при которых смерть ребёнка подтверждена.
+_CONFIRMED_OUTCOMES = frozenset({"exited", "terminated", "killed"})
+
 # Окна эскалации стопа детей (STOP_POLL_S, TERMINATE_GRACE_S, KILL_CONFIRM_S) и формула
 # бюджета живут в ``core/stop_budget.py`` (Task 1.1, ADR-PMM-035): реестр, спавнер и
 # ребёнок читают одни числа.
@@ -44,6 +47,14 @@ class ProcessRegistry:
         self._child_stop_budget: Optional[Dict[str, float]] = (
             dict(child_stop_budget) if child_stop_budget is not None else None
         )
+        # Task 1.8 (L-9, ADR-PMM-037): чем ждать между проходами опроса остановки детей.
+        # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
+        # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
+        self.stop_wait_idle: Optional[Callable[[float], None]] = None
+        # Task 1.9b (D4, I1): «системный стоп идёт» — прерывает ожидание стопа во временной области
+        # ``_stop_many`` (стоп ребёнка по одному). Группа корня (``_ChildrenGroupStop``) его НЕ получает:
+        # она и есть стоп после прерывания. None — не прерывается.
+        self.stop_abort: Callable[[], bool] | None = None
         self.queue_registry = queue_registry
         self.config_manager = config_manager
         self.shared_resources = shared_resources
@@ -59,6 +70,14 @@ class ProcessRegistry:
         # выхода ребёнка (release_queues_at_exit) для PM. Свежий на каждый (пере)спавн,
         # как и ready_event: старый инстанс не может подложить отчёт новому.
         self._exit_reports: Dict[str, Any] = {}
+        # Task 1.10 (D3): итог последнего стопа ТЕКУЩЕГО воплощения по имени (D1: exited | terminated |
+        # killed | handed_over | survived). Пишет ``_stop_many``; ``add_process`` того же имени сбрасывает.
+        self._stop_outcomes: Dict[str, str] = {}
+        # Единственный канал итога стопа ДЛЯ ОТВЕТА PM (Task 1.10, D4): итоги ТЕКУЩЕГО вызова ``_stop_many``
+        # на этом потоке. Отличает «стоп прошёл и записал итог» от «имя не дошло до ChildProcessStop» (запись
+        # ``_stop_outcomes`` тогда от прошлого стопа). Поток исполнителя переиспользуется, поэтому читатель
+        # сбрасывает канал ДО вызова (``reset_call_stop_outcomes``). ``add_process`` канал не трогает. Без лока.
+        self._stop_call = threading.local()
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
@@ -73,6 +92,22 @@ class ProcessRegistry:
 
     def add_process(self, process: Process) -> None:
         self.os_processes.append(process)
+        # Новое воплощение — итога стопа у него ещё нет (двойники без ``name`` терпим).
+        name = getattr(process, "name", None)
+        if name is not None:
+            self._stop_outcomes.pop(name, None)
+
+    def stop_outcome(self, name: str) -> str | None:
+        """Итог последнего стопа текущего воплощения ``name`` (D1) или ``None`` — не стопался."""
+        return self._stop_outcomes.get(name)
+
+    def reset_call_stop_outcomes(self) -> None:
+        """Сбросить канал итога вызова на этом потоке: читатель зовёт ДО стопа и читает после."""
+        self._stop_call.outcomes = {}
+
+    def call_stop_outcome(self, name: str) -> str | None:
+        """Итог ``name`` в последнем ``_stop_many`` ЭТОГО потока; ``None`` — имя до ребёнка не дошло."""
+        return getattr(self._stop_call, "outcomes", {}).get(name)
 
     def get_process_by_name(self, name: str) -> Optional[Process]:
         for p in self.os_processes:
@@ -394,7 +429,11 @@ class ProcessRegistry:
         return float(timeout) if timeout > 0 else 0.0
 
     def _build_child_stop(
-        self, names: List[str], mark_reader_gone: bool
+        self,
+        names: List[str],
+        mark_reader_gone: bool,
+        *,
+        should_abort: Callable[[], bool] | None = None,
     ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
         """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
 
@@ -426,6 +465,8 @@ class ProcessRegistry:
             self._stop_events,
             on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
             logger=self.logger,
+            idle=self.stop_wait_idle,
+            should_abort=should_abort,
         )
         return result, stop
 
@@ -446,7 +487,8 @@ class ProcessRegistry:
         подтверждения смерти каждого имени (``on_confirmed_dead``), выжившие — без метки.
         """
         timeout_s = self._stop_timeout_s(timeout)
-        result, stop = self._build_child_stop(names, mark_reader_gone)
+        self.reset_call_stop_outcomes()
+        result, stop = self._build_child_stop(names, mark_reader_gone, should_abort=self.stop_abort)
         if stop is None:
             return result
 
@@ -462,11 +504,20 @@ class ProcessRegistry:
             for path, error in report.errors:
                 self.logger._log_error(f"stop_many: {path}: {error}")
 
-        survivors = stop.survivors()
+        outcomes = stop.outcomes()
         for name in group:
-            result[name] = name not in survivors
+            outcome = outcomes[name]
+            self._stop_outcomes[name] = outcome
+            self._stop_call.outcomes[name] = outcome
+            result[name] = outcome in _CONFIRMED_OUTCOMES
+        survivors = [name for name in group if not result[name]]
         for name in survivors:
-            if self.logger:
+            if not self.logger:
+                continue
+            if stop.aborted:
+                # Task 1.9b (D4): ребёнка ведёт стоп корня — это не отказ эскалации.
+                self.logger._log_warning(f"стоп '{name}' прерван системным стопом")
+            else:
                 self.logger._log_error(f"stop_many: '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
         return result
 

@@ -341,6 +341,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 | `write(device_id, doc, body, *, base_rev) -> str` | запись при совпавшей ревизии, возвращает новую ревизию |
 | `read_program(device_id, name)` / `write_program(device_id, name, body, *, base_rev)` | то же для `programs/<name>.yaml` |
 | `list_programs(device_id) -> list[str]` | отсортированные имена `*.yaml`, проходящие проверку имени; нет каталога -> `[]` |
+| `delete_program(device_id, name, *, base_rev) -> None` | T5.3b: удаление при совпавшей ревизии; файла нет -> `RevisionConflict(None)` |
 
 - **Ревизия** — `sha256(байты файла).hexdigest()` от ТЕКУЩИХ байтов на диске, кэша нет; клиент сравнивает её на
   равенство. `base_rev` — keyword-only, без умолчания: `None` = создание (файла быть не должно), строка = «я читал
@@ -371,6 +372,54 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 - Ошибки — `Services/robot_comm/errors.py`: `RobotStoreError` -> `RevisionConflict`, `InvalidStoreKey`,
   `StoreDocumentInvalid`; тексты без входных значений, значения — в полях.
 
+## Форматы данных робота (T5.3b, `robot_data.py`)
+
+Библиотека над `RobotDataStore`: читает и пишет документы робота v2 с проверкой содержимого. Хранилище схем не
+знает, этот модуль знает. Импорт: `from Services.robot_comm import robot_data` (в `__init__.py` не экспортируется).
+Потоков, процессов, команд хаба и GUI здесь нет. Не прошло проверку -> `RobotDataInvalid(rev)` (`errors.py`,
+подкласс `RobotStoreError`): `rev` — ревизия байтов файла, по ней можно сознательно перезаписать; `None` — отвергнут
+вход вызывающего (`overrides`, тело на запись). Текст постоянный, без входных значений. Ошибки хранилища
+(`InvalidStoreKey`, `StoreDocumentInvalid`, `RevisionConflict`) проходят наружу как есть.
+
+| документ | формат (верхний уровень — словарь, `version: 1`, лишние ключи — отказ) |
+|---|---|
+| `params.yaml` | `{"version": 1, "epoch": <int 1..65535>, "values": {<имя>: <сырое int>}}`; имя ∈ `PARAM_ID` без `P_CONFIG_EPOCH`, сырое в `min..max` таблицы `params_v2.PARAMS` |
+| `points.yaml` | `{"version": 1, "points": [Point.to_dict(), ...]}`, имена уникальны |
+| `frames.yaml` | `{"version": 1, "frames": [FrameDef.to_dict(), ...]}`, имена уникальны |
+| `programs/<имя>.yaml` | `Program.to_dict()`; имя в теле равно имени файла, иначе `RobotDataInvalid(rev)` |
+
+| функция | что делает |
+|---|---|
+| `load_params(store, id, *, overrides=None, epoch_default=1) -> ParamsDoc(values, epoch, rev)` | файла нет -> умолчания `PARAMS[id]["default"]` (без `P_CONFIG_EPOCH`), поверх `overrides`, метка `epoch_default`, `rev=None`; файл есть -> умолчания, поверх `values` файла, метка файла; `overrides` при файле не применяются (источник истины — файл) |
+| `save_params(store, id, values, epoch, *, base_rev) -> str` | полная карта значений и метка; проверка до диска |
+| `make_param_source(store, id, *, overrides=None, epoch_default=1)` | `() -> (values, epoch)` для `param_source=` драйвера v2; файл читается при каждом вызове |
+| `load_points` / `save_points(store, id, points, *, base_rev)` | `({имя: Point}, rev)`; файла нет -> `({}, None)`; ключ карты равен `Point.name` |
+| `load_frames` / `save_frames` | то же для `FrameDef` |
+| `load_program(store, id, name)` / `save_program(store, id, program, *, base_rev)` | `(Program \| None, rev)`; имя файла = `program.name` |
+| `delete_program(store, id, name, *, base_rev)` | проход в `RobotDataStore.delete_program` |
+
+- **Неизвестное имя в `overrides`** (файла нет) -> `RobotDataInvalid(None)`: драйвер с `param_source` прежнюю проверку
+  `ValueError` (`robot_driver_v2.py`) не делает, поведение при подключении то же, что для плохого файла.
+- **Значения** — целые (не `bool`, не дробные), метка — целое `1..65535`; те же проверки при записи (`save_params`).
+
+### Удаление программы и замки документов (T5.3b, `store.py`)
+
+- **`RobotDataStore.delete_program(device_id, name, *, base_rev) -> None`.** Проверка ключей как у `read_program`
+  (до диска). Под замком документа: байты -> ревизия; файла нет -> `RevisionConflict(None)` (при любой `base_rev`);
+  `base_rev` не равна текущей (в том числе `None` при существующем файле) -> `RevisionConflict(current_rev)`, диск не
+  тронут; иначе удаление. Замок общий с `write_program`: из удаления и записи с одной `base_rev` успешно ровно одно.
+  `PermissionError` при удалении повторяется по тем же паузам, что на замене (до ~1.6 с под замком); прочие `OSError`
+  наружу.
+- **Замки документов — `weakref.WeakValueDictionary`.** Инвариант: в `_locks` только документы с операцией в полёте;
+  без операций словарь пуст (рост памяти от числа разных документов нулевой). `_doc_lock` отдаёт сильную ссылку,
+  вызывающий держит её до конца операции (`with self._doc_lock(...):`); поиск, создание и вставка — одна секция
+  `_locks_guard`. По ключу в один момент не более одного живого замка.
+- **Один экземпляр на процесс — гарантия вызывающего** (T5.3c создаёт его в плагине хаба). Два экземпляра на один
+  `root` дают два словаря и два замка на документ — это не поддерживается и не проверяется.
+- **Швы теста** (хранилище зовёт их только по имени модуля в момент вызова): `store._remove_file(path)` — удаление
+  файла; `store._new_lock` (`= threading.Lock`) — фабрика замка документа, подмена
+  `monkeypatch.setattr(store, "_new_lock", fake)` действует без правки файла.
+
 ## Тесты
 
 ```bash
@@ -381,4 +430,6 @@ pytest Services/robot_comm/tests/test_client_v2_chunks.py         # T3.2: пор
 pytest Services/robot_comm/tests/test_client_v2_chunks_acceptance.py  # T3.2: слепая приёмка, golden tests/golden/t32_run_chunks.log
 pytest Services/robot_comm/tests/test_store_acceptance.py         # T5.2: слепая приёмка хранилища (ревизия, шов замены, ключи)
 pytest Services/robot_comm/tests/test_store.py                    # T5.2: тесты автора (замки, читатель против записи, битые файлы)
+pytest Services/robot_comm/tests/test_robot_data_acceptance.py  # T5.3b: слепая приёмка (удаление, предел замков, один замок на документ, форматы)
+pytest Services/robot_comm/tests/test_robot_data.py               # T5.3b: тесты автора (шов удаления, замок после отказа, отказы форматов)
 ```

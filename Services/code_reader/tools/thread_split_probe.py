@@ -34,6 +34,7 @@ import threading
 import time
 import traceback
 
+from multiprocess_framework.modules.base_manager import open_scope
 from Services.code_reader.sdk.errors import SdkError
 
 M, S, P = "TriggerMode", "TriggerSource", "TriggerSelfTriggerPeriod"
@@ -42,6 +43,10 @@ PARENT = {M: None, S: M, P: S}
 # узел -> (тип: e=enum, i=int; значение режима). ТОЛЬКО эти три узла разрешено писать (UserSetSave -- никогда).
 NODES = {M: ("e", "On"), S: ("e", "SelfTrigger"), P: ("i", 40)}
 NETER = 0x80020206
+# Бюджет закрытия области потоков: finish() уже ждал каждый поток по done до 30 с, поток, живой после этого,
+# завис -- close его только собирает. Итого граница ожидания около 30 с + бюджет (прежний не-daemon поток
+# при зависшем вызове SDK держал процесс бесконечно).
+_SCOPE_BUDGET_S = 5.0
 
 
 def code_of(exc: BaseException) -> str:
@@ -90,6 +95,7 @@ class Probe:
         self.failed = None
         self.completed = False
         self.threads: list[threading.Event] = []  # done-события потоков
+        self.scope = open_scope("code_reader.thread_split_probe", budget_s=_SCOPE_BUDGET_S)
         self.cleanup_note = "не запускался"
 
     # ------------------------------------------------------------------ примитивы
@@ -207,9 +213,8 @@ class Probe:
             finally:
                 done.set()
 
-        t = threading.Thread(target=target, name=name)
         self.threads.append(done)
-        t.start()
+        self.scope.spawn(lambda _stop: target(), name=name)
         interrupted, deadline = False, None
         while not done.is_set():
             try:
@@ -360,6 +365,12 @@ class Probe:
                     done.wait(0.2)
                 except KeyboardInterrupt:
                     self.abort.set()
+        print(f"жду закрытия области потоков до {_SCOPE_BUDGET_S:g} с", flush=True)
+        # _step: Ctrl+C, пришедший в ожидании внутри close, не должен пропустить возврат узлов и сводку
+        report = self._step(self.scope.close)
+        if report is not None and (report.survivors or not report.complete):
+            left = ", ".join(report.survivors)
+            print(f"Поток зонда не завершился за бюджет {_SCOPE_BUDGET_S:g} с: {left}", flush=True)
         self._step(self.cleanup)
         self.summary()
 

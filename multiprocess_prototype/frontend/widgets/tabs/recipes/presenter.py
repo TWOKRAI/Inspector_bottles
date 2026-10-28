@@ -122,7 +122,7 @@ class RecipesPresenter:
         # Этап 1 pipeline-live-control: источник текущей топологии (TopologyRepository
         # с .load()) для кнопки «Сохранить» (живой граф → выбранный рецепт). None → no-op.
         self._topology_store = topology_store
-        # persist активного рецепта в манифест (app.yaml). None → no-op.
+        # persist активного рецепта в файл состояния <stem>.state.yaml. None → no-op.
         self._persist_active_fn = persist_active_fn
         # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
         self._upsert_devices_fn = upsert_devices_fn
@@ -471,7 +471,7 @@ class RecipesPresenter:
         """Обработать РЕАЛЬНЫЙ результат PM (command-result-bridge, Qt main-thread).
 
         Раньше здесь был optimistic-ack fire-and-forget: GUI активировал slug и
-        персистил рецепт в app.yaml, даже если backend откатился (rolled_back)
+        персистил рецепт в файл состояния, даже если backend откатился (rolled_back)
         или молча съел запрос (debounce) — состояние GUI расходилось с backend.
 
         Args:

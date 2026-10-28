@@ -558,6 +558,8 @@ _EXPECTED_INTROSPECT_COMMANDS = frozenset(
         "introspect.plugins",
         "introspect.telemetry",
         "introspect.observability",
+        # Task 1.9m: добавлена намеренно — интроспекция ExecutorManager (ADR-PM-055).
+        "introspect.executors",
     }
 )
 
@@ -609,7 +611,7 @@ class TestIntrospectCommandDictionaryStaysAtExactlyTenNames:
 
         registered = set(services.command_manager.handlers)
         assert registered == _EXPECTED_INTROSPECT_COMMANDS, (
-            f"словарь introspect.* разошёлся с ожидаемыми 10 именами: "
+            f"словарь introspect.* разошёлся с ожидаемыми {len(_EXPECTED_INTROSPECT_COMMANDS)} именами: "
             f"лишние={sorted(registered - _EXPECTED_INTROSPECT_COMMANDS)!r}, "
             f"пропавшие={sorted(_EXPECTED_INTROSPECT_COMMANDS - registered)!r}"
         )
