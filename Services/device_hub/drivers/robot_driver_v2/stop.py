@@ -14,6 +14,7 @@ from Services.device_hub.drivers.base import logger
 from Services.device_hub.drivers.robot_driver_v2.state import _JogRun
 from Services.device_hub.drivers.robot_driver_v2.texts import (
     TEXT_NO_ECHO_WINDOW,
+    TEXT_STOPPING,
     TEXT_STOP_UNCONFIRMED,
     _PROCESS_STOP_DEFAULT_S,
 )
@@ -59,6 +60,12 @@ class StopMixin:
         finally:
             if locked:
                 self._jog_tx_lock.release()
+        try:
+            # T5.3e: идущий park -> failed «драйвер останавливается» — после записи стопа (D5 «Гарантия выключения»)
+            self._park.abort(TEXT_STOPPING, stop=True)
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: итог основной остановки не записан: {type(exc).__name__}: {exc}")
         try:
             self._check_stop_echo(deadline)
         except Exception as exc:
