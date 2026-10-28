@@ -133,7 +133,12 @@ Files: <paths>
   in someone's `quiet` window. The gate raises your claim to the command's class, never lowers it; no `machine.lock` → the
   old `stand.lock` rule. Exit 75 = skipped by the gate, not a red run. `<session>` = the name your brief gives (no `[ref]`);
   no name in the brief → ask the lead, do not guess. Skipped as a subagent → say «NO WINDOW» in your
-  report and finish it; never loop waiting — the lane session asks the coordinator for a window. While `machine.lock` exists
+  report and finish it; never loop waiting — the lane session takes the window itself: `machine_gate.sh request <session>
+  quiet|heavy|stand <min> <what…>` only when it can start NOW (prints `GRANTED until ~HH:MM` or `QUEUED position N`), then
+  `wait <session>` in the background and `release <session>` when done (it also cancels a queued request); `extend
+  <session> <min>` moves its own `until`; `merge-begin <session> <branch>` / `merge-end <session>` replace «сливаю» /
+  «ок». No message to the coordinator for a window, a merge or a report, and no «принято» (owner, 2026-10-27); a manual
+  `waiting:` of the coordinator is dropped before the merge. While `machine.lock` exists
   the hook `machine-gate-guard.sh` blocks any command `classify` marks (bare `pytest`, `make gate` / `make test`,
   `run_framework_tests.py`, `run_sim_all`, …) that bypasses the gate (its message shows the gated command to run).
 - `PYTHONUTF8=1` for Russian output. Prose in Bash breaks on apostrophes — write it to a file.
