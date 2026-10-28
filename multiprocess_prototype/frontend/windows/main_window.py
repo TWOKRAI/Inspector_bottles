@@ -313,17 +313,25 @@ class MainWindow(QMainWindow):
             False — действие отменено пользователем (или провал Save).
         """
         session = self._topology_session
-        if session is None or not getattr(session, "dirty", False):
+        dirty = session is not None and getattr(session, "dirty", False)
+        layout_unsaved = session is not None and getattr(session, "layout_unsaved", False)
+        if not (dirty or layout_unsaved):
             return True
 
         from PySide6.QtWidgets import QMessageBox
 
         from ..widgets.dialogs import confirm_unsaved_changes
 
+        if dirty:
+            text = f"В редакторе топологии есть несохранённые правки.\n{reason}"
+        else:
+            # Только раскладка (C-30, 1.12): Save сверился бы с той же устаревшей базой и
+            # дал бы конфликт — кнопку «Сохранить» не предлагаем.
+            text = f"Позиции узлов не сохранены: рецепт в файле изменился после загрузки.\n{reason}"
         choice = confirm_unsaved_changes(
             self,
-            allow_save=self._save_topology_fn is not None,
-            text=f"В редакторе топологии есть несохранённые правки.\n{reason}",
+            allow_save=self._save_topology_fn is not None and dirty,
+            text=text,
         )
         if choice == "cancel":
             return False

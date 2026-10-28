@@ -320,6 +320,9 @@ class LayoutController:
         except RecipeConflict:
             # Рецепт изменён снаружи: тихо не затираем, окна нет (автосохранение не дёргает пользователя).
             logger.warning("%s (рецепт '%s')", _CONFLICT_MESSAGE, active_slug)
+            # Не тихо до конца: сессия запомнит «позиции не сохранены» — диалог закрытия спросит (C-30, 1.12).
+            if session is not None:
+                session.mark_layout_unsaved()
         except Exception:
             logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
 
