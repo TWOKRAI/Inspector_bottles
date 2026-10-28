@@ -24,11 +24,15 @@ __all__ = [
     "INFRA_STOP_S",
     "KILL_CONFIRM_S",
     "KILL_RESERVE_S",
+    "MAX_STOP_WINDOW_KEY",
     "PM_TEARDOWN_MARGIN_S",
     "SHUTDOWN_TIMEOUT_KEY",
     "STOP_POLL_S",
+    "STOP_WINDOW_KEY",
     "TERMINATE_GRACE_S",
+    "outer_graceful_s",
     "stop_budget",
+    "valid_window_s",
 ]
 
 # Шаг опроса смерти при остановке группы: задержка реакции, не бюджет.
@@ -49,6 +53,9 @@ CHILD_STOP_FRACTION = 0.8
 KILL_RESERVE_S = TERMINATE_GRACE_S + KILL_CONFIRM_S
 # Ключ конфига PM/спавнера с graceful-бюджетом — единственное место строки в коде.
 SHUTDOWN_TIMEOUT_KEY = "shutdown_timeout"
+# Task 1.11: окно стопа ребёнка (верхний уровень конфига процесса) и потолок окон (конфиг PM/оркестратора).
+STOP_WINDOW_KEY = "stop_window_s"
+MAX_STOP_WINDOW_KEY = "max_stop_window_s"
 
 #: Код выхода ребёнка, у которого после закрытия корня остались выжившие записи
 #: (Task 1.2a, ADR-PMM-036). Занятые коды: 0 (штатно), 1 (исключение), -N (сигнал),
@@ -94,3 +101,32 @@ def stop_budget(shutdown_timeout: object) -> dict[str, float]:
         "pm_total_s": pm_total_s,
         "outer_s": outer_s,
     }
+
+
+def valid_window_s(value: object) -> float | None:
+    """Окно стопа (``stop_window_s`` / ``max_stop_window_s``, Task 1.11): годное — ``float``, иначе ``None``.
+
+    Годно: ``int``/``float`` (не ``bool``), конечное, ``> 0``. ``0`` негоден: у нуля два смысла
+    (``stop_budget(0)`` — умолчание 5,0, ``_stop_timeout_s(0)`` — немедленная эскалация), ни один не «окно».
+    Не бросает: зовётся на пути создания процесса и из ``stop()`` спавнера (обработчик сигнала).
+    """
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(result) or result <= 0:
+        return None
+    return result
+
+
+def outer_graceful_s(graceful_s: float, ceiling_s: float | None) -> float:
+    """Внешний graceful-срок ``G`` (Task 1.11, ADR-PMM-031): ``max(graceful_s, ceiling_s)``.
+
+    ``ceiling_s`` ``None`` (потолок не задан или негоден) — ``graceful_s`` как есть: числа PM и
+    спавнера те же, что без Task 1.11. Одна функция для PM (``_budget()``) и спавнера (``stop()``).
+    """
+    if ceiling_s is None:
+        return float(graceful_s)
+    return max(float(graceful_s), float(ceiling_s))

@@ -1,0 +1,13 @@
+[S7 r1] reply_s=6.172 reply={'success': True, 'process_name': 'slow', 'outcome': 'exited'} supervision.stop_outcome=exited dns=0
+[S7 r2] reply_s=6.125 reply={'success': True, 'process_name': 'slow', 'outcome': 'exited'} supervision.stop_outcome=exited dns=0
+[S7 r3] reply_s=6.203 reply={'success': True, 'process_name': 'slow', 'outcome': 'exited'} supervision.stop_outcome=exited dns=0
+## Основной прогон: числа «ПОСЛЕ»
+
+| сценарий | N | min | median | max | p99 | зависаний | not reported/lost | did not stop in | порог ПОСЛЕ | вердикт |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S7 | 3 | 6.125 | 6.172 | 6.203 | 6.203 | - | 0 | 0 | outcome exited, success True, ответ 6,0-6,6 с; 3 из 3 | **PASS** |
+
+Итоги стопа (`outcome` из ответа; наблюдение, S1 - прогноз exited 10 из 10):
+- S7: {'exited': 3}
+
+rc=0

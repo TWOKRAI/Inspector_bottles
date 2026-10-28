@@ -28,6 +28,7 @@ from pydantic import field_validator, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...logger_module import get_std_logger
+from ..core.stop_budget import STOP_WINDOW_KEY
 from ...process_module.generic.collector_registry import (
     COLLECTOR_CONFIG_KEY,
     LEGACY_COLLECTOR_CONFIG_KEY,
@@ -157,6 +158,15 @@ class ProcessConfig(SchemaBase):
             "по членам группы. Пусто → процесс сам по себе (one_for_one).",
         ),
     ] = ""
+
+    stop_window_s: Annotated[
+        Any,
+        FieldMeta(
+            "Stop window",
+            info="Окно стопа процесса, с (Task 1.11). Тип Any — значение идёт сырым до реестра PM: нестрогий "
+            "pydantic иначе сделал бы '8' → 8.0 и True → 1.0 до проверки. Иначе — extras.stop_window_s.",
+        ),
+    ] = None
 
     # --- Data Pipeline routing (Phase 5) ---
 
@@ -310,6 +320,10 @@ class ProcessConfig(SchemaBase):
                 return getattr(self, key)
             return extras.get(key, default)
 
+        # Task 1.11: окно стопа — typed-поле или extras, сырым (проверка — в реестре PM).
+        stop_window_s = _pick(STOP_WINDOW_KEY, None)
+        if stop_window_s is not None:
+            base_kwargs[STOP_WINDOW_KEY] = stop_window_s
         chain_targets = _pick("chain_targets", [])
         source_fps = _pick("source_target_fps", 25.0)
         # Легаси-ключ в extras: typed-поле уже канонизировано before-валидатором, но
