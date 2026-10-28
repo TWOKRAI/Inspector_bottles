@@ -24,7 +24,8 @@ from __future__ import annotations
 
 
 from multiprocess_framework.modules.logger_module import get_std_logger
-from typing import TYPE_CHECKING, Callable
+from multiprocess_framework.modules.recipe import RecipeConflict
+from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import ValidationError
 
@@ -73,19 +74,47 @@ class DisplayCatalogFromRecipe:
         self,
         recipe_store: "RecipeStoreFromManager",
         get_active_slug: Callable[[], str | None],
+        *,
+        session: Any = None,
     ) -> None:
         """Инициализировать recipe-scoped адаптер.
 
         Args:
             recipe_store: RecipeStore adapter для CRUD рецептов.
             get_active_slug: Callable, возвращающий slug активного рецепта (или None).
+            session: duck с ``base_rev_for(slug)`` и ``rebase(slug, rev)``
+                (``TopologySession``). Запись дисплеев идёт с ``expected_rev`` =
+                база сессии и сдвигает её (чтобы Save редактора и Устройств не
+                видел собственную запись Дисплеев как чужую правку). ``None`` —
+                прежнее поведение (без базы).
         """
         self._store = recipe_store
         self._get_active_slug = get_active_slug
+        self._session = session
 
     # ------------------------------------------------------------------ #
     #  Внутренние хелперы                                                  #
     # ------------------------------------------------------------------ #
+
+    def _write(self, slug: str, updated: "Recipe") -> None:
+        """Записать рецепт с базой сессии и сдвинуть её.
+
+        ``expected_rev`` передаётся только при известной базе (локальные фейки
+        стора ``write(slug, recipe)`` его не принимают). При базе ``None``
+        ``rebase`` не зовётся: иначе rev собственного чтения поглотил бы чужую
+        правку файла.
+
+        Raises:
+            ValueError: рецепт изменён снаружи после базы сессии (RecipeConflict).
+        """
+        base = self._session.base_rev_for(slug) if self._session is not None else None
+        kwargs = {"expected_rev": base} if base is not None else {}
+        try:
+            new_rev = self._store.write(slug, updated, **kwargs)
+        except RecipeConflict as exc:
+            raise ValueError("Рецепт изменён снаружи — перезагрузите его") from exc
+        if base is not None:
+            self._session.rebase(slug, new_rev)
 
     def _read_active_recipe_or_none(self, slug: str) -> "Recipe | None":
         """Прочитать рецепт по slug, деградируя на ``ValidationError`` (RS-5, A-7).
@@ -198,7 +227,7 @@ class DisplayCatalogFromRecipe:
         # Обновить рецепт (frozen → пересобрать)
         new_displays = list(recipe.displays) + [new_defn]
         updated = recipe.model_copy(update={"displays": tuple(new_displays)})
-        self._store.write(slug, updated)
+        self._write(slug, updated)
 
     def update(self, spec: DisplaySpec) -> bool:
         """Обновить существующее определение дисплея in-place (по display_id).
@@ -236,7 +265,7 @@ class DisplayCatalogFromRecipe:
             return False
 
         updated = recipe.model_copy(update={"displays": tuple(new_displays)})
-        self._store.write(slug, updated)
+        self._write(slug, updated)
         return True
 
     def unregister(self, display_id: str) -> bool:
@@ -271,7 +300,13 @@ class DisplayCatalogFromRecipe:
                 "blueprint": new_blueprint,
             }
         )
-        self._store.write(slug, updated)
+        if len(new_bindings) == len(recipe.blueprint.displays):
+            self._write(slug, updated)
+        else:
+            # Каскад снял привязки (секция редактора): запись без базы и без rebase,
+            # иначе rebase поглотил бы изменение секции и следующий Save откатил
+            # бы привязку. Полная поддержка — в 2.0 (решение владельца 2026-10-28).
+            self._store.write(slug, updated)
         return True
 
     def has(self, display_id: str) -> bool:

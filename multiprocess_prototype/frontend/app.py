@@ -754,6 +754,11 @@ def run_gui(process: "GuiProcess") -> None:
     # AppServicesDeps из локалов run_gui() (не ctx.extras) — coupling factory→AppContext снят.
     # Failure = sys.exit(1) с понятным логом (аналог startup-checks).
     from .app_services_factory import build_app_services, AppServicesDeps
+    from multiprocess_prototype.domain import TopologySession
+
+    # C-30 (Task 1.11): сессия создаётся ДО deps — один объект идёт и в AppServices
+    # (Дисплеи пишут рецепт с её базой), и во вкладки (RuntimeDeps ниже).
+    topology_session = TopologySession()
 
     _services_deps = AppServicesDeps(
         event_bus=event_bus,
@@ -765,6 +770,7 @@ def run_gui(process: "GuiProcess") -> None:
         config={},
         recipe_manager=_recipe_manager,
         auth_state=_auth_state,
+        topology_session=topology_session,
     )
 
     try:
@@ -796,10 +802,8 @@ def run_gui(process: "GuiProcess") -> None:
     # из файла и стартовая load_topology_from_config идут МИМО store (не публикуют
     # TopologyReplaced) — поэтому старт остаётся чистым, а load-from-file презентер
     # помечает сам. ADR-PMM-014 (fencing-token топологии) сюда не относится (это редактор, не IPC).
-    from multiprocess_prototype.domain import TopologySession
     from multiprocess_prototype.domain.events import RecipeActivated as _RecipeActivated
 
-    topology_session = TopologySession()
     # C-30 (Task 1.8): база правок редактора. Со старта — rev единственного чтения рецепта (выше);
     # на активации — rev файла активированного рецепта (второе чтение после Project._apply_activate_recipe:
     # окно между записью проекта и этим чтением остаётся, design.md §7, Р6).
