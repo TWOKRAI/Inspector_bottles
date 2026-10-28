@@ -69,7 +69,7 @@ teamlead сверх 1.1a/1.1h — только эскалация. Пересч�
 ## Конвейер (`.claude/CLAUDE.md` «Task launch convention»)
 
 стадия 0 reviewer → слепой тестер (один раз на механизм, worktree на коммите до реализации) → исполнители по одному,
-режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
+режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.11 → 1.12 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
 INJECT задач) → стадия 5 reviewer на задачу → tech-writer 1.3 → ревью ветки (Opus) перед merge. Лимит — 2 итерации на
 цикл, третья → `teamlead`, затем `cto`. Порядок 1.1g → 1.7 → 1.1c: стор пишется один раз против финального Protocol.
 
@@ -117,6 +117,10 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
   - **Module contract:** impl-only
+- Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [PENDING] (после 1.9; поправка №9)
+  - **Module contract:** impl-only
+- Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [PENDING] (после 1.11; F2 ревью ветки)
+  - **Module contract:** impl-only
 - Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [PENDING] (после 1.10)
   - **Module contract:** impl-only
 - Task 1.5: страж — AST R1/R2/R3/R4 с allowlist, `canonicalize_gui_positions` через движок [PENDING] (после 1.4)
@@ -147,6 +151,8 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.8 | 6 | `pipeline/tests/test_save_conflict_rev.py` | |
 | 1.9 | 3 | `devices_common/tests/test_recipe_devices.py`, `domain/tests/test_fakes_contract.py` | |
 | 1.10 | 3 | `camera/tests/test_camera_presenter.py` | |
+| 1.11 | 8 | `adapters/tests/test_display_catalog_session.py`, `tabs/displays/tests/test_presenter_multidisplay.py` | |
+| 1.12 | 7 | `domain/tests/test_topology_session.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_topology_dirty_indicator.py` | |
 | 1.4 | 7 | `recipe/tests/test_backend_writers_patch.py` | |
 | 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
@@ -161,7 +167,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 - F3 (решение владельца 2026-10-28; отдельная задача после merge 13/17, не в C-30): слоты Устройств не ловят
   `RecipeLockTimeout` / `RecipeFormatError` / `YamlWriteRefused` — `docs/claude/OPEN_QUESTIONS.md`, `add_page.py:176`,
   `crud_actions.py:93,179`.
-- Дисплеи (`display_catalog_recipe.py`) не двигают базу сессии: `unregister` с привязками — в 2.0 (владелец 2026-10-28); `register`/`update` с базой — задачи нет; окно принято (`amendments.md` №8).
+- `unregister` Дисплеев с привязками — в 2.0 (владелец 2026-10-28); `register`/`update` с базой — Task 1.11 (поправка №9).
 - Строка C-30 в `plans/queue/defects.md`, строка 3 `ORDER.md` — лид при закрытии.
 
 ## Связи с соседними планами
