@@ -176,6 +176,18 @@ from   = "Services/dataset_gen/*"
 to     = "Services/line_sim/*"
 reason = "dataset_gen лежит ниже line_sim (общее ядро — layer_render); line_sim импортирует dataset_gen, не наоборот (layer-render LR-001)"
 
+# Services/camera_device — ядро камер ниже вендорских драйверов (ADR-CAM-001):
+# драйвер импортирует ядро, ядро вендора не импортирует (только строки реестра, Р11).
+[[boundaries]]
+from   = "Services/camera_device/*"
+to     = "Services/code_reader/*"
+reason = "ядро камер не импортирует вендора code_reader: драйвер mvcr подключается строкой реестра, DLL чужого вендора в процесс не грузится (ADR-CAM-001)"
+
+[[boundaries]]
+from   = "Services/camera_device/*"
+to     = "Services/hikvision_camera/*"
+reason = "ядро камер не импортирует вендора hikvision_camera: драйвер mvs подключается строкой реестра, DLL чужого вендора в процесс не грузится (ADR-CAM-001)"
+
 # Plugins → не знают про конкретное приложение
 [[boundaries]]
 from   = "Plugins/*"
