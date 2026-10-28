@@ -1,0 +1,290 @@
+# Результаты механического прогона матрицы инъекций (task 1.1)
+
+Дерево: worktree gsi, detached, HEAD 0c7a96b7f. Команда: гейт `medium inspector-bottles-dd`, оба файла тестов, `-q --tb=no -p no:cacheprovider`.
+Collected = число из строки `collected N items`. Exit 75 = SKIPPED (гейт), TIMEOUT / APPLY_FAILED — см. секцию.
+
+## base (без патча)
+- collected: 246
+- passed: 246
+- failed: 0
+- exit: 0
+- FAILED: нет
+- итог: `246 passed, 1 warning in 98.69s`
+
+## a
+- collected: 246
+- passed: 241
+- failed: 5
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_by_stranger_is_refused_and_keeps_everything[foreign_window_s3_has_nothing]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_of_queued_request_cancels_it_and_keeps_foreign_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_cancel_removes_all_own_waiting_lines
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_mv_calls_per_invocation[release_refused]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fast_paths_and_refusals_do_not_take_tmp[release_refused]
+- ОСТАНОВКА: откат (git checkout -- scripts/machine_gate.sh) отклонён разрешениями; дерево gsi грязное (M scripts/machine_gate.sh), патч a не снят. Шаги 2..17 не выполнялись.
+
+## b
+- collected: 246
+- passed: 242
+- failed: 4
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_position_counts_own_line_after_promote
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_queue_is_fifo_on_release
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_promotes_first_waiting_by_order_when_no_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_term_after_own_mv_does_not_remove_foreign_tmp
+
+## v
+- collected: 246
+- passed: 233
+- failed: 13
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_parallel_requests_keep_lock_valid_and_both_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_stale_read_is_not_written_back
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-end]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_younger_than_60_seconds_is_not_reclaimed
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_wait_zero_refuses_at_once
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_waits_for_busy_tmp_until_it_is_released
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_three_parallel_requests_keep_one_window_and_all_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_killed_tmp_holder_is_recovered_by_reclaim_after_60_seconds
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_new_request_during_release_sees_fresh_lock_after_the_write
+
+## g1
+- collected: 246
+- passed: 243
+- failed: 3
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_begin_refused[taken_by_other]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_begin_refused[taken_by_self]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fast_paths_and_refusals_do_not_take_tmp[merge_begin_refused]
+
+## g2
+- collected: 246
+- passed: 244
+- failed: 2
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_begin_refused[quiet]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_begin_refused[own_quiet]
+
+## d
+- collected: 246
+- passed: 237
+- failed: 9
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_bad_merging_line_is_malformed[two_fields]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_bad_merging_line_is_malformed[four_fields]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_bad_merging_line_is_malformed[line_number_counts_stand]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-wait]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_malformed_lock_is_refused_by_every_new_command[merging_2_fields-merge-end]
+
+## e
+- collected: 246
+- passed: 243
+- failed: 3
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_mv_calls_per_invocation[extend_refused]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_extend_by_stranger_is_refused
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fast_paths_and_refusals_do_not_take_tmp[extend_refused]
+
+## zh
+- collected: 246
+- passed: 236
+- failed: 10
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_parallel_requests_keep_lock_valid_and_both_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_stale_read_is_not_written_back
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-end]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_waits_for_busy_tmp_until_it_is_released
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_three_parallel_requests_keep_one_window_and_all_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_new_request_during_release_sees_fresh_lock_after_the_write
+
+## z
+- collected: 246
+- passed: 200
+- failed: 46
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_grants_window_right_after_coordinator[heavy]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_grants_window_right_after_coordinator[quiet]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_grants_window_right_after_coordinator[stand]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_r1_chain_grant_then_queue_keeps_lock_valid
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_joins_what_words_with_single_space
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_minutes_boundaries[1-00:01]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_minutes_boundaries[59-00:59]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_minutes_boundaries[60-01:00]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_minutes_boundaries[600-10:00]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_until_follows_substituted_clock
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_until_wraps_past_midnight
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_at_0809_uses_decimal_arithmetic
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_position_counts_own_line_after_promote
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_hands_window_to_next_in_queue
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_queue_is_fifo_on_release
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_promotes_first_waiting_by_order_when_no_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[no_minutes_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[over_600_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[601_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[600_kept]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[3]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[25]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[zero_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[leading_zero_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[four_digits_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_until_wraps_past_midnight
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_promotes_when_no_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_with_own_waiting_and_no_window_grants
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_end_does_not_promote_but_wait_does
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_inserts_window_before_merging_line
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_parallel_requests_keep_lock_valid_and_both_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_stale_read_is_not_written_back
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_prints_result_only_after_mv
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_mv_busy_is_retried_then_succeeds
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_quiet_window_can_be_granted_while_merge_slot_is_open
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_running_wait_ends_with_0_after_release_by_another_process
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_running_wait_promotes_itself_after_close
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_running_wait_prints_overdue_once_while_minutes_do_not_change
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_leftover_tmp_older_than_60_seconds_is_reclaimed[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_waits_for_busy_tmp_until_it_is_released
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_term_after_own_mv_does_not_remove_foreign_tmp
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_three_parallel_requests_keep_one_window_and_all_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_killed_tmp_holder_is_recovered_by_reclaim_after_60_seconds
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_wait_gets_window_after_coordinator_close_and_leaves_clean_dir
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_new_request_during_release_sees_fresh_lock_after_the_write
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_same_session_request_during_release_leaves_no_duplicate
+
+## i
+- collected: 246
+- passed: 237
+- failed: 9
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_at_0809_uses_decimal_arithmetic
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_status_overdue_survives_octal_looking_digits
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_prints_overdue_for_foreign_window[one_minute_over]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_prints_overdue_for_foreign_window[plus_659_left]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_prints_overdue_for_foreign_window[decimal_08_50]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_prints_overdue_for_foreign_window[decimal_09_00]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_prints_overdue_for_foreign_window[decimal_equal_09_08]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_extend_moves_until[decimal_09_08]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_extend_moves_until[decimal_overdue_08_50]
+
+## k
+- collected: 246
+- passed: 228
+- failed: 18
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[no_minutes_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[over_600_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[601_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[600_kept]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[3]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[25]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[zero_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[leading_zero_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_takes_minutes_from_fourth_field[four_digits_default_60]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_until_wraps_past_midnight
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_wait_promotes_when_no_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_merge_end_does_not_promote_but_wait_does
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_promote_inserts_window_before_merging_line
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_mv_calls_per_invocation[wait_promote]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_running_wait_promotes_itself_after_close
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_running_wait_prints_overdue_once_while_minutes_do_not_change
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_term_after_own_mv_does_not_remove_foreign_tmp
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_wait_gets_window_after_coordinator_close_and_leaves_clean_dir
+
+## l
+- collected: 246
+- passed: 244
+- failed: 2
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_of_queued_request_cancels_it_and_keeps_foreign_window
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_release_cancel_removes_all_own_waiting_lines
+
+## m1
+- collected: 246
+- passed: 238
+- failed: 8
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-end]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_younger_than_60_seconds_is_not_reclaimed
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_wait_zero_refuses_at_once
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_killed_tmp_holder_is_recovered_by_reclaim_after_60_seconds
+
+## m2
+- collected: 246
+- passed: 245
+- failed: 1
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_term_after_own_mv_does_not_remove_foreign_tmp
+
+## n
+- collected: 246
+- passed: 234
+- failed: 12
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_parallel_requests_keep_lock_valid_and_both_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_stale_read_is_not_written_back
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_prints_result_only_after_mv
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_mv_busy_forever_is_refused_cleanly
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-end]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_three_parallel_requests_keep_one_window_and_all_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_killed_tmp_holder_is_recovered_by_reclaim_after_60_seconds
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_new_request_during_release_sees_fresh_lock_after_the_write
+
+## o
+- collected: 246
+- passed: 234
+- failed: 12
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_parallel_requests_keep_lock_valid_and_both_sessions
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_stale_read_is_not_written_back
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[request]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[release]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[extend]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-begin]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_fresh_foreign_tmp_is_waited_for_then_refused_and_kept[merge-end]
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_younger_than_60_seconds_is_not_reclaimed
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_tmp_wait_zero_refuses_at_once
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_request_waits_for_busy_tmp_until_it_is_released
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_killed_tmp_holder_is_recovered_by_reclaim_after_60_seconds
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service_hazards.py::test_new_request_during_release_sees_fresh_lock_after_the_write
+
+## p
+- collected: 246
+- passed: 245
+- failed: 1
+- exit: 1
+- FAILED:
+FAILED scripts/machine_gate_tests/test_machine_gate_self_service.py::test_close_does_not_promote
