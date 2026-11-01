@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
@@ -45,6 +46,19 @@ class PortCase:
     ident: DeviceIdentity
     rw_binding: Binding
     frame_byte0: int | None
+    # Необязательная подготовка порта после open(ident): например, TriggerMode=Off (free-run).
+    prepare: Callable[[DevicePort], None] | None = None
+
+
+def _next_frame(port: DevicePort, deadline_s: float = 3.0) -> RawFrame:
+    """Опрашивать `get_frame(500)` до `RawFrame` или дедлайна. `None` по таймауту контракту не противоречит."""
+    deadline = time.monotonic() + deadline_s
+    while True:
+        frame = port.get_frame(500)
+        if isinstance(frame, RawFrame):
+            return frame
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"порт не отдал кадр за {deadline_s} с (get_frame(500) возвращает None)")
 
 
 def _journal_names(port) -> list[str] | None:
@@ -56,7 +70,12 @@ def _journal_names(port) -> list[str] | None:
 
 
 class PortContractSuite:
-    """9 проверок. Подкласс обязан переопределить фикстуру `port_case`."""
+    """9 проверок. Подкласс обязан переопределить фикстуру `port_case`.
+
+    Предусловие: порт после `open(ident)` в free-run (TriggerMode=Off / без внешнего триггера);
+    иначе кадров не будет, и `PortCase.prepare` обязан выставить режим. Первый кадр может прийти
+    позже 100 мс (GigE), поэтому ожидание кадра идёт опросом `_next_frame`, а не одним вызовом.
+    """
 
     @pytest.fixture
     def port_case(self) -> PortCase:
@@ -64,10 +83,12 @@ class PortContractSuite:
 
     @pytest.fixture
     def opened_port(self, port_case: PortCase) -> Iterator[DevicePort]:
-        """Свежий порт после `open(ident)`; на выходе `stop_grabbing()` и `close()` (идемпотентны)."""
+        """Свежий порт после `open(ident)` и `prepare`; на выходе `stop_grabbing()` и `close()` (идемпотентны)."""
         port = port_case.make()
         port.open(port_case.ident)
         try:
+            if port_case.prepare is not None:
+                port_case.prepare(port)
             yield port
         finally:
             port.stop_grabbing()
@@ -84,8 +105,7 @@ class PortContractSuite:
 
     def test_get_frame_while_grabbing_returns_raw_frame(self, opened_port: DevicePort):
         opened_port.start_grabbing()
-        frame = opened_port.get_frame(100)
-        assert isinstance(frame, RawFrame)
+        frame = _next_frame(opened_port)
         assert frame.width > 0
         assert frame.height > 0
         assert len(frame.data) > 0
@@ -93,13 +113,11 @@ class PortContractSuite:
 
     def test_frame_is_a_copy_of_the_sdk_buffer(self, port_case: PortCase, opened_port: DevicePort):
         opened_port.start_grabbing()
-        f1 = opened_port.get_frame(100)
-        assert isinstance(f1, RawFrame)
+        f1 = _next_frame(opened_port)
         if port_case.frame_byte0 is not None:
             assert f1.data[0] == port_case.frame_byte0
         f1.data[0] = 255
-        f2 = opened_port.get_frame(100)
-        assert isinstance(f2, RawFrame)
+        f2 = _next_frame(opened_port)
         if port_case.frame_byte0 is None:
             assert f2.data is not f1.data
         else:
@@ -126,7 +144,7 @@ class PortContractSuite:
     def test_start_grabbing_in_grabbing_is_idempotent(self, opened_port: DevicePort):
         opened_port.start_grabbing()
         opened_port.start_grabbing()
-        assert isinstance(opened_port.get_frame(100), RawFrame)
+        assert isinstance(_next_frame(opened_port), RawFrame)
         names = _journal_names(opened_port)
         if names is not None:
             assert names.count("open") == 1
