@@ -92,8 +92,9 @@
 - [project_topology_event_ordering](project_topology_event_ordering.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 
-## break-injection (41)
+## break-injection (42)
 
+- [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
 - [feedback_a_guard_that_counts_at_least_once_is_blind](feedback_a_guard_that_counts_at_least_once_is_blind.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
@@ -825,8 +826,9 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (22)
+## windows-env (23)
 
+- [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
 - [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
