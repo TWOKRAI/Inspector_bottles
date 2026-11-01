@@ -340,7 +340,7 @@ def test_unregister_bound_file_valid_binding_removed_base_not_moved(tmp_path: Pa
     assert session.base_rev_for(_SLUG) == base_before
 
 
-def test_unregister_bound_then_editor_save_conflicts_binding_not_restored(tmp_path: Path) -> None:
+def test_unregister_bound_then_editor_save_rejected_binding_not_restored(tmp_path: Path) -> None:
     """unregister(phone) -> Save редактора со старой моделью отказан, привязка phone в файле не вернулась.
 
     Отказ — RecipeConflict (база устарела) либо RecipeValidationError (1.13: привязка к дисплею без определения

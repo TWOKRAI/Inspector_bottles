@@ -62,7 +62,9 @@ class RecipeValidationError(ValueError):
     """Blueprint не прошёл структурную валидацию (RS-5, C-4).
 
     ``errors`` — список сообщений из ``SystemBlueprint.check_structure()``
-    (дубли имён процессов, циклы графа wires). Это НЕ полный ``check()``: тот
+    (дубли имён процессов, циклы графа wires). Save редактора бросает её же, если привязка
+    ``blueprint.displays`` ссылается на ``display_id`` без определения в ``displays``
+    (C-30, Task 1.13). Это НЕ полный ``check()``: тот
     дополнительно проверяет совместимость портов и обязательные входы, что
     зависит от состояния PluginRegistry — в разреженном окружении (headless/
     тесты) даёт ложные срабатывания и непригоден как gate на запись (см.
@@ -201,14 +203,21 @@ def _validate_display_refs(after: dict[str, Any]) -> None:
         RecipeValidationError: есть привязка с неопределённым ``display_id``.
     """
     defined = after.get("displays")
-    ids = {d.get("id") for d in defined if isinstance(d, dict)} if isinstance(defined, list) else set()
+    # Только строковые id: нехешируемый id в файле (``- id: [main]``) не должен давать TypeError.
+    ids = (
+        {d["id"] for d in defined if isinstance(d, dict) and isinstance(d.get("id"), str)}
+        if isinstance(defined, list)
+        else set()
+    )
     bindings = (after.get("blueprint") or {}).get("displays")
     if not isinstance(bindings, list):
         return
     messages = [
         f"blueprint.displays: ссылка на несуществующий display_id '{b['display_id']}'"
         for b in bindings
-        if isinstance(b, dict) and "display_id" in b and b["display_id"] not in ids
+        if isinstance(b, dict)
+        and "display_id" in b
+        and not (isinstance(b["display_id"], str) and b["display_id"] in ids)
     ]
     if messages:
         raise RecipeValidationError(messages)
@@ -261,7 +270,8 @@ def save_editor_topology_to_recipe(
         RecipeNotFoundError: рецепт ``slug`` не читается.
         RecipeFormatError: файл рецепта не разбирается (битый YAML / корень не mapping).
         RecipeValidationError: топология или blueprint (в т.ч. не-mapping ``blueprint`` в файле) не
-            разбираются / не прошли структурную валидацию.
+            разбираются / не прошли структурную валидацию; привязка ``blueprint.displays`` ссылается
+            на ``display_id`` без определения в ``displays``.
         RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения).
     """
     # Ленивый импорт: цикла recipes.save <-> adapters.recipe_canonical сегодня нет; импорт в теле
