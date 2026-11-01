@@ -19,6 +19,7 @@
 
 import json
 import logging
+from enum import Enum
 from typing import Annotated, Any
 
 import pytest
@@ -122,6 +123,48 @@ def test_constructor_rejects_non_string_or_empty_key(bad_key: Any) -> None:
 def test_constructor_rejects_non_mapping_enabled_if() -> None:
     with pytest.raises(ValueError):
         FieldMeta(enabled_if=[("mode", ["a"])])  # type: ignore[arg-type]
+
+
+class _Mode(Enum):
+    AUTO = "auto"
+
+
+class _StrMode(str, Enum):
+    AUTO = "auto"
+
+
+@pytest.mark.parametrize(
+    "item",
+    [[1], {"k": 1}, (1,), _Mode.AUTO, _StrMode.AUTO, object()],
+    ids=["list", "dict", "tuple", "enum", "str-enum", "object"],
+)
+def test_constructor_rejects_non_scalar_list_items_naming_key_not_values(item: Any) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        FieldMeta(enabled_if={"mode": [item]})
+    assert "mode" in str(exc_info.value)
+    assert "auto" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("item", [True, 0, 1.5, "auto", None], ids=["bool", "int", "float", "str", "none"])
+def test_constructor_accepts_scalar_list_items(item: Any) -> None:
+    assert FieldMeta(enabled_if={"mode": [item]}).enabled_if == {"mode": [item]}
+
+
+def test_nested_list_item_is_rejected_so_to_dict_copy_cannot_alias_class_meta() -> None:
+    """Воспроизведение ревью: вложенный список делал копию ``to_dict`` поверхностной."""
+    with pytest.raises(ValueError):
+        FieldMeta(enabled_if={"a": [[1]]})
+
+
+def test_from_dict_nested_list_item_drops_enabled_if_with_warning_naming_key(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        back = FieldMeta.from_dict({"description": "x", "enabled_if": {"mode": [["secret-nested"]]}})
+    assert back.enabled_if is None
+    assert back.description == "x"
+    assert "mode" in caplog.text
+    assert "secret-nested" not in caplog.text
 
 
 def test_to_dict_enabled_if_mutation_does_not_touch_the_class_meta() -> None:

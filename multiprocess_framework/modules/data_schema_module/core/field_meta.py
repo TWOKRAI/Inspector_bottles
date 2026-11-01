@@ -98,6 +98,8 @@ _DEFAULT_PATTERN_MESSAGE = "значение не соответствует т�
 #   restart — после перезапуска процесса-владельца
 #   config  — только запись в конфиг, применяется при следующей загрузке
 APPLY_MODES: frozenset[str] = frozenset({"live", "restart", "config"})
+# Допустимые типы элементов списка enabled_if (ADR-DS-011 п.4).
+_ENABLED_IF_ITEM_TYPES: tuple[type, ...] = (bool, int, float, str, type(None))
 
 
 def _normalize_enabled_if(enabled_if: Any) -> dict[str, list[Any]] | None:
@@ -117,6 +119,10 @@ def _normalize_enabled_if(enabled_if: Any) -> dict[str, list[Any]] | None:
             raise ValueError("FieldMeta: ключ enabled_if должен быть непустой строкой")
         if not isinstance(allowed, (list, tuple)) or not allowed:
             raise ValueError(f"FieldMeta: enabled_if[{key!r}] должен быть непустым списком допустимых значений")
+        # Только скаляры, переживающие JSON без потерь (ADR-DS-011 п.4). type(), не isinstance:
+        # подклассы (Enum, IntEnum, str-Enum) после провода стали бы строкой/числом.
+        if any(type(item) not in _ENABLED_IF_ITEM_TYPES for item in allowed):
+            raise ValueError(f"FieldMeta: enabled_if[{key!r}]: элементы должны быть bool/int/float/str/None")
         result[key] = list(allowed)
     return result
 
