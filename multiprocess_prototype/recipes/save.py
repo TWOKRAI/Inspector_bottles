@@ -190,6 +190,30 @@ def _validation_messages(exc: ValidationError) -> list[str]:
     ]
 
 
+def _validate_display_refs(after: dict[str, Any]) -> None:
+    """Привязки ``blueprint.displays`` должны ссылаться на определения top-level ``displays``.
+
+    ``after`` — результат ``topology_to_canonical``: top-level ``displays`` взят из файла,
+    ``blueprint.displays`` — из модели редактора. Привязка к дисплею, которого в файле уже нет
+    (его убрала вкладка «Дисплеи»), дала бы нечитаемый рецепт (C-30, Task 1.13).
+
+    Raises:
+        RecipeValidationError: есть привязка с неопределённым ``display_id``.
+    """
+    defined = after.get("displays")
+    ids = {d.get("id") for d in defined if isinstance(d, dict)} if isinstance(defined, list) else set()
+    bindings = (after.get("blueprint") or {}).get("displays")
+    if not isinstance(bindings, list):
+        return
+    messages = [
+        f"blueprint.displays: ссылка на несуществующий display_id '{b['display_id']}'"
+        for b in bindings
+        if isinstance(b, dict) and "display_id" in b and b["display_id"] not in ids
+    ]
+    if messages:
+        raise RecipeValidationError(messages)
+
+
 def save_editor_topology_to_recipe(
     recipes: Any,
     slug: str,
@@ -254,6 +278,7 @@ def save_editor_topology_to_recipe(
         validate_recipe_blueprint(after.get("blueprint", {}))
     except ValidationError as exc:
         raise RecipeValidationError(_validation_messages(exc)) from None
+    _validate_display_refs(after)
     layout = None
     if gui_positions is not None or locked_nodes is not None:
         metadata = (after.get("blueprint") or {}).get("metadata") or {}
