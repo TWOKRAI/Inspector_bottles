@@ -115,13 +115,13 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.9: Устройства читают `read_canonical`, пишут с базой `TopologySession` и двигают её (вердикт CTO по F1); локальные фейки вкладки [DONE] (после 1.8; `e8a61ecfe`, `4584c8b45`; отчёт `docs/reports/2026-10-27_task-1.9_C-30.md`)
   - **Module contract:** impl-only
-- Task 1.13: Save редактора отказывает на привязках дисплеев без определения (`RecipeValidationError`); находка 1 ревью 1.11/1.12 [PENDING] (после 1.12; поправка №10)
+- Task 1.13: Save редактора отказывает на привязках дисплеев без определения (`RecipeValidationError`); находка 1 ревью 1.11/1.12 [DONE] (`ede3bf90e`, `9a1e87af9`; отчёт `docs/reviews/2026-11-01_task-1.13-developer.md`) (после 1.12; поправка №10)
   - **Module contract:** impl-only
 - Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
   - **Module contract:** impl-only
-- Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [PENDING] (после 1.9; поправка №9)
+- Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [DONE] (`9e94f1245`, `f6726317e`; отчёт `docs/reviews/2026-10-28_task-1.11-developer.md`) (после 1.9; поправка №9)
   - **Module contract:** impl-only
-- Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [PENDING] (после 1.11; F2 ревью ветки)
+- Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [DONE] (`59c7ce66e`; отчёт `docs/reviews/2026-10-28_task-1.12-developer.md`) (после 1.11; F2 ревью ветки)
   - **Module contract:** impl-only
 - Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [PENDING] (после 1.10)
   - **Module contract:** impl-only
