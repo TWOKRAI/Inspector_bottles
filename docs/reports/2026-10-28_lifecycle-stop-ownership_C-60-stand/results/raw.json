@@ -1,0 +1,728 @@
+{
+  "S8": [
+    {
+      "scenario": "S8",
+      "tree": "base",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60-base",
+      "run": 1,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_base_r1\\c60.marks",
+      "boot_s": 11.95,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.38,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 15680,
+        "alive": true,
+        "started_at": 1793540459.535439,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.016,
+      "pause_slept_s": 0.484,
+      "waited_s": 3.094,
+      "reply_s": 3.094,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540462.203488,
+      "marks_abs": {
+        "op_start": 160424.343,
+        "shutdown": 160427.859
+      },
+      "t_send": 160424.843,
+      "request_stop_s": null,
+      "shutdown_s": 3.016,
+      "op_start_s": -0.5,
+      "op_end_s": null,
+      "op_running_at_request_stop": false,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.023,
+          "text": "#50 2026-11-01 16:41:05,226 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:40:39"
+    },
+    {
+      "scenario": "S8",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 1,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_after_r1\\c60.marks",
+      "boot_s": 7.86,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.12,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 14260,
+        "alive": true,
+        "started_at": 1793540482.7448921,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.031,
+      "pause_slept_s": 0.469,
+      "waited_s": 3.203,
+      "reply_s": 3.203,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540485.428748,
+      "marks_abs": {
+        "op_start": 160447.578,
+        "request_stop": 160448.156,
+        "shutdown": 160451.171
+      },
+      "t_send": 160448.062,
+      "request_stop_s": 0.094,
+      "shutdown_s": 3.109,
+      "op_start_s": -0.484,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.104,
+          "text": "#50 2026-11-01 16:41:28,533 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:41:08"
+    },
+    {
+      "scenario": "S8",
+      "tree": "base",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60-base",
+      "run": 2,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_base_r2\\c60.marks",
+      "boot_s": 9.19,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.2,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 25952,
+        "alive": true,
+        "started_at": 1793540506.9717069,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.032,
+      "pause_slept_s": 0.468,
+      "waited_s": 3.094,
+      "reply_s": 3.094,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540509.6562812,
+      "marks_abs": {
+        "op_start": 160471.812,
+        "shutdown": 160475.312
+      },
+      "t_send": 160472.296,
+      "request_stop_s": null,
+      "shutdown_s": 3.016,
+      "op_start_s": -0.484,
+      "op_end_s": null,
+      "op_running_at_request_stop": false,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.021,
+          "text": "#50 2026-11-01 16:41:52,677 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:41:31"
+    },
+    {
+      "scenario": "S8",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 2,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_after_r2\\c60.marks",
+      "boot_s": 7.41,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.25,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 8384,
+        "alive": true,
+        "started_at": 1793540529.0078328,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.016,
+      "pause_slept_s": 0.484,
+      "waited_s": 3.203,
+      "reply_s": 3.203,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540531.671031,
+      "marks_abs": {
+        "op_start": 160493.812,
+        "request_stop": 160494.406,
+        "shutdown": 160497.421
+      },
+      "t_send": 160494.312,
+      "request_stop_s": 0.094,
+      "shutdown_s": 3.109,
+      "op_start_s": -0.5,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.11,
+          "text": "#50 2026-11-01 16:42:14,781 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:41:55"
+    },
+    {
+      "scenario": "S8",
+      "tree": "base",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60-base",
+      "run": 3,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_base_r3\\c60.marks",
+      "boot_s": 7.86,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.16,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 22264,
+        "alive": true,
+        "started_at": 1793540551.3058677,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.062,
+      "pause_slept_s": 0.438,
+      "waited_s": 3.156,
+      "reply_s": 3.156,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540553.990864,
+      "marks_abs": {
+        "op_start": 160516.14,
+        "shutdown": 160519.703
+      },
+      "t_send": 160516.625,
+      "request_stop_s": null,
+      "shutdown_s": 3.078,
+      "op_start_s": -0.485,
+      "op_end_s": null,
+      "op_running_at_request_stop": false,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.079,
+          "text": "#50 2026-11-01 16:42:37,070 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:42:17"
+    },
+    {
+      "scenario": "S8",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 3,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_after_r3\\c60.marks",
+      "boot_s": 7.84,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.3,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 28984,
+        "alive": true,
+        "started_at": 1793540573.6460276,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.016,
+      "pause_slept_s": 0.484,
+      "waited_s": 3.109,
+      "reply_s": 3.109,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540576.357722,
+      "marks_abs": {
+        "op_start": 160538.5,
+        "request_stop": 160539.015,
+        "shutdown": 160542.031
+      },
+      "t_send": 160538.984,
+      "request_stop_s": 0.031,
+      "shutdown_s": 3.047,
+      "op_start_s": -0.484,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.039,
+          "text": "#50 2026-11-01 16:42:59,397 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:42:39"
+    },
+    {
+      "scenario": "S8",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 4,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_after_r4\\c60.marks",
+      "boot_s": 7.88,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.25,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 30096,
+        "alive": true,
+        "started_at": 1793540597.5037763,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.032,
+      "pause_slept_s": 0.468,
+      "waited_s": 3.109,
+      "reply_s": 3.109,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540600.155138,
+      "marks_abs": {
+        "op_start": 160562.296,
+        "request_stop": 160562.812,
+        "shutdown": 160565.828
+      },
+      "t_send": 160562.781,
+      "request_stop_s": 0.031,
+      "shutdown_s": 3.047,
+      "op_start_s": -0.485,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.042,
+          "text": "#50 2026-11-01 16:43:23,197 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:43:02"
+    },
+    {
+      "scenario": "S8",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 5,
+      "precondition_ok": true,
+      "window": {},
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8_after_r5\\c60.marks",
+      "boot_s": 8.41,
+      "override_seen": true,
+      "ceiling_seen": null,
+      "apply": {
+        "apply_s": 3.25,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 6024,
+        "alive": true,
+        "started_at": 1793540622.8116539,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.515,
+      "pause_slept_s": 0.0,
+      "waited_s": 3.156,
+      "reply_s": 3.156,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540625.5080025,
+      "marks_abs": {
+        "op_start": 160588.14,
+        "request_stop": 160588.234,
+        "shutdown": 160591.234
+      },
+      "t_send": 160588.14,
+      "request_stop_s": 0.094,
+      "shutdown_s": 3.094,
+      "op_start_s": 0.0,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 3.094,
+          "text": "#43 2026-11-01 16:43:48,602 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:43:26"
+    }
+  ],
+  "S8w": [
+    {
+      "scenario": "S8w",
+      "tree": "base",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60-base",
+      "run": 1,
+      "precondition_ok": true,
+      "window": {
+        "stop_window_s": 10.0,
+        "max_stop_window_s": 12.0,
+        "base_n": 1,
+        "after_n": 1,
+        "base_shutdown_min_s": 7.0,
+        "base_shutdown_max_s": 7.6,
+        "after_request_stop_max_s": 0.6
+      },
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8w_base_r1\\c60.marks",
+      "boot_s": 8.45,
+      "override_seen": true,
+      "ceiling_seen": true,
+      "apply": {
+        "apply_s": 3.31,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 21444,
+        "alive": true,
+        "started_at": 1793540648.0323594,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.109,
+      "pause_slept_s": 0.391,
+      "waited_s": 7.203,
+      "reply_s": 7.203,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540650.7008681,
+      "marks_abs": {
+        "op_start": 160612.921,
+        "shutdown": 160620.421
+      },
+      "t_send": 160613.328,
+      "request_stop_s": null,
+      "shutdown_s": 7.093,
+      "op_start_s": -0.407,
+      "op_end_s": null,
+      "op_running_at_request_stop": false,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 7.085,
+          "text": "#50 2026-11-01 16:44:17,786 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:43:51"
+    },
+    {
+      "scenario": "S8w",
+      "tree": "after",
+      "root": "D:\\PROJECT_INNOTECH\\Inspector_vision\\Inspector_bottles\\.claude\\worktrees\\lso-c60",
+      "run": 1,
+      "precondition_ok": true,
+      "window": {
+        "stop_window_s": 10.0,
+        "max_stop_window_s": 12.0,
+        "base_n": 1,
+        "after_n": 1,
+        "base_shutdown_min_s": 7.0,
+        "base_shutdown_max_s": 7.6,
+        "after_request_stop_max_s": 0.6
+      },
+      "marks_file": "C:\\Users\\INNOTECH\\AppData\\Local\\Temp\\claude\\d--PROJECT-INNOTECH-Inspector-vision-Inspector-bottles\\06552cd7-4f9e-4751-8346-c77d32de826d\\scratchpad\\c60run\\full\\runs\\s8w_after_r1\\c60.marks",
+      "boot_s": 9.16,
+      "override_seen": true,
+      "ceiling_seen": true,
+      "apply": {
+        "apply_s": 3.25,
+        "diff_commands": [
+          "",
+          "c60",
+          "camera_0",
+          "preprocessor",
+          "process_flip",
+          "process_grayscale",
+          "process_negative",
+          "region_splitter",
+          "stitcher"
+        ]
+      },
+      "child_before_stop": {
+        "incarnation": 1,
+        "restart_count": 0,
+        "last_exit": null,
+        "status": "running",
+        "pid": 3496,
+        "alive": true,
+        "started_at": 1793540677.9148688,
+        "instance_restarts": 0,
+        "stop_outcome": null
+      },
+      "op_start_delay_s": 0.031,
+      "pause_slept_s": 0.469,
+      "waited_s": 7.14,
+      "reply_s": 7.14,
+      "reply": {
+        "success": true,
+        "process_name": "c60",
+        "outcome": "exited"
+      },
+      "wall_send": 1793540680.5696864,
+      "marks_abs": {
+        "op_start": 160642.718,
+        "request_stop": 160643.265,
+        "shutdown": 160650.281
+      },
+      "t_send": 160643.203,
+      "request_stop_s": 0.062,
+      "shutdown_s": 7.078,
+      "op_start_s": -0.485,
+      "op_end_s": null,
+      "op_running_at_request_stop": true,
+      "outcome": "exited",
+      "success": true,
+      "op_reply_arrived": false,
+      "leftover_pids_before_kill": [],
+      "leftover_pids_after_kill": [],
+      "executor_warn": [
+        {
+          "file": "c60\\system.log",
+          "rel_send_s": 7.075,
+          "text": "#50 2026-11-01 16:44:47,645 [WARNING] [c60] worker: KeyedExecutor 'io': не остановлен к сроку — исполняются ['c60.slow_io'], живых рабочих 1"
+        }
+      ],
+      "started_at": "2026-11-01T16:44:21"
+    }
+  ]
+}
