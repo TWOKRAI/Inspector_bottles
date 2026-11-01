@@ -594,3 +594,44 @@ def test_h8_hook_failure_is_logged_as_error(capfd: pytest.CaptureFixture[str]) -
     hits = [ln for ln in lines if expected in ln]
     assert len(hits) == 1, lines
     assert "[ERROR]" in hits[0], hits[0]
+
+
+# ---------------------------------------------------------------------------
+# H9 — сторож умолчаний базового класса (регрессия C-60: удалённый штатный shutdown)
+# ---------------------------------------------------------------------------
+
+
+class BarePlugin(ProcessModulePlugin):
+    """Плагин без своих ``shutdown`` и ``request_stop``: живёт на умолчаниях базового класса."""
+
+    name = "bare"
+
+    def configure(self, ctx: PluginContext) -> None:
+        pass
+
+
+def test_h9_plugin_on_base_defaults_closes_clean() -> None:
+    """H9: плагин без своих ``shutdown``/``request_stop`` — закрытие ``True``, ошибок нет, плагин STOPPED."""
+    name = _unique("c60h9")
+    proc = _make_process(name, [_entry("bare", BarePlugin)])
+    try:
+        assert [p.state for p in proc._orchestrator.plugins] == [PluginState.RUNNING]
+        m = _bounded(proc.shutdown, 20.0)
+        report = proc.close_root()
+    finally:
+        _bounded(proc.shutdown, 20.0)
+    assert m["done"], "shutdown() завис"
+    assert m.get("error") is None, repr(m.get("error"))
+    assert m["result"] is True
+    assert list(report.errors) == []
+    assert list(report.survivors) == []
+    assert [p.state for p in proc._orchestrator.plugins] == [PluginState.STOPPED]
+
+
+def test_h9_base_class_lifecycle_defaults_are_noops() -> None:
+    """H9: ``ProcessModulePlugin.shutdown`` и ``.request_stop`` объявлены в базе и по умолчанию возвращают ``None``."""
+    plugin = BarePlugin()
+    assert "shutdown" in vars(ProcessModulePlugin)
+    assert "request_stop" in vars(ProcessModulePlugin)
+    assert plugin.shutdown(None) is None  # type: ignore[arg-type]
+    assert plugin.request_stop(None) is None  # type: ignore[arg-type]
