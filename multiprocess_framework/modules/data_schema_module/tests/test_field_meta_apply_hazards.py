@@ -141,8 +141,14 @@ class _StrMode(str, Enum):
 def test_constructor_rejects_non_scalar_list_items_naming_key_not_values(item: Any) -> None:
     with pytest.raises(ValueError) as exc_info:
         FieldMeta(enabled_if={"mode": [item]})
-    assert "mode" in str(exc_info.value)
-    assert "auto" not in str(exc_info.value)
+    text = str(exc_info.value)
+    assert "mode" in text
+    # Ни repr, ни str элемента, ни (для Enum) его значение в текст не попадают.
+    forbidden = {repr(item), str(item)}
+    if isinstance(item, Enum):
+        forbidden.add(str(item.value))
+    for fragment in forbidden:
+        assert fragment not in text
 
 
 @pytest.mark.parametrize("item", [True, 0, 1.5, "auto", None], ids=["bool", "int", "float", "str", "none"])
