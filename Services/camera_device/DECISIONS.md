@@ -192,7 +192,7 @@ Chose B. Переименование без алиасов (Р8): `open`+`start
 `open_sdk_app`/`close_sdk_app` удаляются. Хаб: новые `camera_list_devices`, `camera_owner`, `camera_read_params`; `hik_release` остаётся no-op
 `{"status": "ok", "released": []}` (живой вызывающий `Plugins/sources/camera_service/plugin.py:262`); `hik_enum`, `hik_open`, `hik_close`, `hik_get_params`,
 `hik_set_params` — отказ с текстом, какая команда заменяет. `sdk_app` — отдельный инструмент диагностики, FROZEN: ручной запуск
-`python -m Services.hikvision_camera` при остановленном стенде; оба пути запуска из приложения удаляются (`plugin.py:400-422`,
+`python -m Services.hikvision_camera` при остановленном стенде; оба пути запуска из приложения удаляются (`Services/hikvision_camera/plugin/plugin.py:447` `cmd_open_sdk_app`, таблица команд `:97`,
 `presenter.py:130-144`, `controller.py:90`) — запуск из приложения был вторым открывателем камеры (F14) и запуском процесса из GUI (принцип №6). Конверт item (Р10) сохраняет
 межисточниковые ключи `frame`, `camera_id: int`, `seq_id`, `frame_id`, `timestamp` и добавляет `device_id`, `ts`, `pixel_format`, `width`, `height`, `device_frame_num`.
 
