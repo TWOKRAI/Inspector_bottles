@@ -41,3 +41,11 @@ I10 — R3/R4 в журнале могут стать недетерминиро
 | I5 (повтор) | 4 | убрать `try/except` | R4, h8 |
 | I4 (повтор) | 3 | каждого плагина дважды | R3, R4, h1, h2, h2b, h3, h4_ready, h4_paused, h6, h7, h8 |
 | I8 (повтор) | 1–3 | убрать запись `plugins-stop` | R1, R1b, R3, R4, h1, h2, h2b, h3, h4_ready, h4_paused, h6, h7, h8 |
+
+## Дополнение после регрессии shutdown (записано ДО прогона, 2026-11-01)
+
+Набор для I14: acceptance + hazards + `test_process_root_acceptance.py` + `test_f2_acceptance_writer_retraction.py`; ожидаемо 37 collected (30 + 2 новых H9 + 5 f2), база зелёная.
+
+| # | Свойство | Инъекция | Прогноз красных |
+|---|---|---|---|
+| I14 | базовый `shutdown` на месте | удалить метод `ProcessModulePlugin.shutdown` из `plugins/base.py` (4 строки def + docstring) | h9_plugin_on_base_defaults_closes_clean, h9_base_class_lifecycle_defaults_are_noops, 5 тестов `test_f2_acceptance_writer_retraction.py` (C1, C2×2, C3, C4); оговорка: плагины других тестов набора без своего shutdown тоже могут краснеть — тогда лишние красные разобрать поимённо |
