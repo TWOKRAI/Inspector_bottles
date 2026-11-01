@@ -212,6 +212,8 @@ classDiagram
         +description, info, unit
         +min, max, transfer_k, round_k
         +routing, access_level, readonly
+        +apply, enabled_if
+        +is_enabled(values)
         +validate_value(value, access_level)
         +clamp(value), round_value(value)
         +to_dict(lang)
@@ -500,8 +502,22 @@ FieldMeta(
 
     # Примеры значений
     examples=[1.0, 2.0, 5.0],
+
+    # Когда правка вступает в силу: "live" | "restart" | "config" (APPLY_MODES, ADR-DS-011)
+    apply="restart",
+
+    # Поле активно, только если ВСЕ условия выполнены (И по ключам, ИЛИ по значениям, ==):
+    # {имя_другого_поля: [допустимые значения]}. Элементы — bool/int/float/str/None.
+    enabled_if={"trigger_managed": [True]},
 )
 ```
+
+`apply` и `enabled_if` попадают в `to_dict()` только когда заданы. Конструктор строг
+(`ValueError`), `from_dict()` недопустимые значения отбрасывает со строкой в журнал.
+`meta.is_enabled(values)` отвечает, активно ли поле при текущих значениях других полей.
+Ссылки `enabled_if` проверяет `get_all_fields_meta()`: ключ обязан быть полем класса
+(опечатка и самоссылка → `ValueError` при первом создании экземпляра). Потолки и причины —
+ADR-DS-011.
 
 ### SchemaBase (RegisterBase) — Базовый класс схемы
 
