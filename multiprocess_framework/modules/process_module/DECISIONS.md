@@ -4233,3 +4233,46 @@ Free-threaded Python — пересмотреть.
 
 **Refs:** `plans/robot-protocol-v2/tasks/SPI.framework.md` (D7, правка framework), ADR-CMD-007, ADR-PM-055,
 `process_module/tests/test_plugin_command_options.py`, `process_module/tests/test_plugin_command_options_acceptance.py`.
+
+
+### ADR-PM-057 — Хук `ProcessModulePlugin.request_stop`: весть плагину о стопе до ожиданий `work` (2026-10-28, C-60)
+
+Плагин узнавал о стопе процесса только в `shutdown` — записи `plugins` сегмента `work`, которая в фазе 2 идёт после
+`workers` (ждёт и текущую операцию исполнителя: рабочие `KeyedExecutor` — SYSTEM-воркеры того же `WorkerManager`),
+`executor_manager-scope` и `executors` (ADR-PM-055, порядок фазы 2). Первая весть плагину приходила через
+`min(L_ост, W) + ε` после начала закрытия (`W` — срок `work`; воспроизведено: 1,016 с при `W` = 1,0). Плагин, который
+должен сам начать остановку (стоп роботов у `DeviceHubPlugin`), начинал её на `W` позже.
+
+- *Решение.* Необязательный хук `request_stop(ctx)`, умолчание пусто. `ProcessModule.initialize()` регистрирует запись
+  `plugins-stop` (`_attr_call("_orchestrator", "request_stop")`, `kind="callable"`) сразу после `workers` — последней,
+  значит первой в фазе 2 (LIFO). Новый порядок фазы 2 `work`: `plugins-stop` → `workers` → записи наследника →
+  `executor_manager-scope` → `executors` → `plugins` → `hooks` (дополняет ADR-PM-055, где `workers` был первым).
+  `PluginOrchestrator.request_stop()` обходит плагины в порядке, обратном загрузке (как `shutdown`); исключение
+  плагина — одна строка ERROR, хук соседа идёт; наружу не выходит. Процесс без плагинов (`_orchestrator is None`) и
+  двойник оркестратора без метода — запись пропускается (`_attr_call`), цена ноль.
+- *Контракт хука* (docstring `plugins/base.py`). Хук ЗАПУСКАЕТ остановку и возвращается, ждать — в `shutdown`. Зовётся на
+  потоке закрытия, до ожидания воркеров и исполнителей и до `shutdown`; параллельно ещё идут `process()`/`produce()` и
+  операции исполнителя — потокобезопасность на плагине. Идемпотентен (может быть вызван повторно). Блокировка ест срок
+  `work`: хук дольше срока оставляет `workers` выжившими (`survivors == [proc/<имя>/work/workers]`, ребёнок под раннером
+  выходит с кодом 76) — принятое следствие, фреймворк хук не ограничивает. Приём исполнителей к моменту хука уже закрыт
+  фазой 1: подача операции из хука получает `system_stopping` синхронно. Best effort: только кооперативное закрытие
+  (`process.stop`, системный стоп); не зовётся при убийстве процесса и при сбое сборки до шага 6а `initialize()`.
+- *Фильтр состояний* (`_do_request_stop`): хук только в `READY`/`RUNNING`/`PAUSED`. `IDLE` (брошенный `configure`) —
+  нет `start`, воркеров и команд, останавливать нечего; `_do_shutdown` зовёт и `IDLE`, чтобы освободить захваченное до
+  броска — хук этим не занимается. `STOPPED` — уже закрыт. Плагин с упавшим `start` остаётся `READY` и хук получает.
+  Флага «уже звали» нет: один вызов на закрытие даёт запись области (второй `close()` корня возвращает отчёт первого);
+  прямой повторный вызов оркестратора повторяет хук.
+- *Не тронуто.* `lifetime.py`, `KeyedExecutor`, `ExecutorManager`, `WorkerManager`, `PluginOrchestrator.shutdown`,
+  `_do_shutdown`, порядок `hooks/plugins/executors`, `PLUGIN_API_VERSION` (хук аддитивный).
+- *Отвергнуто.* Ф2 — `plugins` после `workers` (`shutdown` плагина под живыми `process()`/операциями; меняет всех и
+  `GOLDEN_ORDER`). Ф3 — запись `Stoppable` в фазе 1 (`stop()` = `cancel()`): фаза 1 не блокирует, ждущему плагину нужен
+  свой поток; выигрыша нет — раннер зовёт `close_root()` сразу после `stop()`. Ф4 — порядок фаз в `lifetime.py` или
+  ожидание в `KeyedExecutor` после `plugins`: вне границы полосы и не чинит (`workers` ждёт первым). Ф5 — перенести
+  `executors` после `plugins`: та же причина.
+- *Следствия и риски.* Поведение плагинов без хука не меняется (умолчание пусто). Зависший навсегда хук не даёт
+  `workers` даже `stop_event` (вызываемое сроком не прерывается) — защищает только контракт; под PM ребёнка добивает
+  `terminate` по окну. Перенос стопа роботов `DeviceHubPlugin` в хук — C-60.b (полоса Р2): хук должен запускать стоп,
+  а не ждать `request_stop_all` до срока.
+
+**Refs:** `plans/lifecycle-stop-ownership/tasks/C-60.md`, `C-60_design_notes.md`, ADR-PM-055, ADR-PM-054,
+`process_module/tests/test_plugin_stop_request_acceptance.py`, `process_module/tests/test_plugin_stop_request_hazards.py`.

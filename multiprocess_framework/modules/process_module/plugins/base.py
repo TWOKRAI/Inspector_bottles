@@ -1560,10 +1560,24 @@ class ProcessModulePlugin(ABC):
         Не путать с configure() — тот для SHM, middleware, воркеров.
         """
 
-    def shutdown(self, ctx: PluginContext) -> None:
-        """Очистка ресурсов. Default: no-op.
+    def request_stop(self, ctx: PluginContext) -> None:
+        """Стоп процесса начат. Default: no-op (C-60).
 
-        Transition: * → STOPPED.
+        Хук ЗАПУСКАЕТ остановку и возвращается, не ждёт: ждать — в
+        :meth:`shutdown`. Зовётся на потоке закрытия процесса, ДО ожидания
+        воркеров и исполнителей процесса и ДО :meth:`shutdown`; плагины — в
+        порядке, обратном загрузке (как ``shutdown``). В это время ещё могут
+        идти ``process()``/``produce()`` и команды на исполнителях —
+        потокобезопасность на плагине.
+
+        Может быть вызван более одного раза — должен быть идемпотентным.
+        Блокировка хука съедает срок сегмента ``work``: хук дольше срока
+        оставляет воркеров процесса выжившими. Исключение не роняет остановку.
+
+        Best effort: зовётся только на кооперативном закрытии процесса
+        (``process.stop``, системный стоп); не зовётся при убийстве процесса и
+        при сбое сборки процесса. Состояние плагина не меняет; плагин в
+        ``IDLE`` (упавший ``configure``) и ``STOPPED`` хук не получает.
         """
 
     # --- State transitions (вызываются GenericProcess) ---
@@ -1612,6 +1626,20 @@ class ProcessModulePlugin(ABC):
             return
         self.resume(ctx)
         self.state = PluginState.RUNNING
+
+    def _do_request_stop(self, ctx: PluginContext) -> None:
+        """Весть о стопе (C-60): зовёт :meth:`request_stop` в READY/RUNNING/PAUSED.
+
+        IDLE пропускается: после брошенного ``configure`` у плагина нет
+        ``start``, воркеров и команд — останавливать нечего (в отличие от
+        ``_do_shutdown``, который IDLE зовёт, чтобы освободить захваченное до
+        броска). STOPPED — плагин уже закрыт. Флага «уже звали» нет: один
+        вызов на закрытие даёт запись области корня, идемпотентность — на
+        плагине. Состояние не меняет.
+        """
+        if self.state not in (PluginState.READY, PluginState.RUNNING, PluginState.PAUSED):
+            return
+        self.request_stop(ctx)
 
     def _do_shutdown(self, ctx: PluginContext) -> None:
         """* → STOPPED.

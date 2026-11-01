@@ -278,6 +278,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             if work is not None:
                 self._own_work(work)
                 work.own(_WorkersStop(self), name="workers", kind="workers")
+                # C-60: весть плагинам о стопе — последней в регистрации, значит
+                # первой в фазе 2 (LIFO): до ожидания воркеров и исполнителей и до
+                # ``plugins`` (shutdown плагинов). Без оркестратора — пропуск.
+                work.own(self._attr_call("_orchestrator", "request_stop"), name="plugins-stop", kind="callable")
 
             # 6b. P4.4.1 (B2): команды НЕ копируются в event_dispatcher — kind-router
             # в receive() диспатчит type=="command" напрямую в CommandManager.

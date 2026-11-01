@@ -1004,3 +1004,28 @@ Task 1.1).
 Двойники: `testing.MockCommandManager.command_options` и `PluginTestBench.registered_command_options` хранят
 именованные опции. Тесты: `tests/test_plugin_command_options.py` (автор), `tests/test_plugin_command_options_acceptance.py`
 (слепая приёмка А26, А27).
+
+## Хук плагина `request_stop`: весть о стопе процесса (C-60, ADR-PM-057)
+
+`ProcessModulePlugin.request_stop(ctx) -> None` — необязательный хук; умолчание пусто. Жизненный цикл плагина на
+закрытии процесса (`shutdown()` / `close_root()`):
+
+```
+initialize: configure → start            (IDLE → READY → RUNNING)
+закрытие, фаза 2 work: request_stop       ← plugins-stop, первым
+                       ожидание воркеров и исполнителей (срок W = work_s)
+                       shutdown            ← plugins           (* → STOPPED)
+```
+
+* Хук **запускает** остановку и возвращается; ждать — в `shutdown`. Идёт на потоке закрытия, параллельно ещё
+  работают `process()`/`produce()` и операции исполнителя — потокобезопасность на плагине.
+* Порядок между плагинами — обратный загрузке (как `shutdown`). Исключение хука — строка ERROR, сосед получает хук,
+  остановка идёт дальше, `shutdown()` процесса возвращает `True`.
+* Состояния: хук получают `READY` (в т.ч. упавший `start`), `RUNNING`, `PAUSED`; `IDLE` (упавший `configure`) и
+  `STOPPED` — нет. Повторный вызов возможен — хук идемпотентен. `stop()` (отмена корня) хук не зовёт.
+* Время хука ест срок `work`: хук дольше `W` оставляет `workers` выжившими (`proc/<имя>/work/workers` в
+  `close_root().survivors`). Приём исполнителей уже закрыт: подача операции из хука получает `system_stopping`.
+* Best effort: не зовётся при убийстве процесса и при сбое сборки процесса.
+
+Тесты: `tests/test_plugin_stop_request_acceptance.py` (слепая приёмка R1–R5), `tests/test_plugin_stop_request_hazards.py`
+(автор, H1–H7, H2b).
