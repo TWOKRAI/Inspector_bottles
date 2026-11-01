@@ -6,8 +6,9 @@ WindowsConsole — реализация IPlatformConsole для Windows.
   - AllocConsole / FreeConsole для дополнительных окон (subprocess-подход)
   - WriteConsoleW для записи в основной терминал
 """
+
 import sys
-import subprocess
+import subprocess  # nosec B404 - только тип Popen для _extra_proc, процессы здесь не запускаются
 from typing import Optional
 
 from .base import IPlatformConsole
@@ -30,12 +31,16 @@ class WindowsConsole(IPlatformConsole):
     def create(self, title: str) -> bool:
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             # Если консоль уже есть — ничего не делаем
             hwnd = kernel32.GetConsoleWindow()
             if not hwnd:
-                kernel32.AllocConsole()
-                self._allocated_console = True
+                # AllocConsole отказывает (0), если процесс уже присоединён к консоли без окна
+                # (ConPTY, Claude Code). Тогда консоль не наша: close() не должен звать
+                # FreeConsole, иначе процесс отсоединится от своей консоли, и каждый его
+                # ребёнок получит собственное видимое окно.
+                self._allocated_console = bool(kernel32.AllocConsole())
             if title:
                 ctypes.windll.kernel32.SetConsoleTitleW(title)  # type: ignore[attr-defined]
             self._title = title
@@ -60,6 +65,7 @@ class WindowsConsole(IPlatformConsole):
     def show(self) -> bool:
         try:
             import ctypes
+
             SW_SHOW = 5
             hwnd = ctypes.windll.kernel32.GetConsoleWindow()  # type: ignore[attr-defined]
             if hwnd:
@@ -73,6 +79,7 @@ class WindowsConsole(IPlatformConsole):
     def hide(self) -> bool:
         try:
             import ctypes
+
             SW_HIDE = 0
             hwnd = ctypes.windll.kernel32.GetConsoleWindow()  # type: ignore[attr-defined]
             if hwnd:
@@ -93,6 +100,7 @@ class WindowsConsole(IPlatformConsole):
                 self._extra_proc = None
             if self._allocated_console:
                 import ctypes
+
                 ctypes.windll.kernel32.FreeConsole()  # type: ignore[attr-defined]
                 self._allocated_console = False
         except Exception:
