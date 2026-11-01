@@ -221,6 +221,22 @@ class PluginOrchestrator:
             except Exception as e:
                 self._services.log_error(f"PluginOrchestrator[{self._services.name}]: shutdown '{plugin.name}': {e}")
 
+    def request_stop(self) -> None:
+        """Весть о стопе процесса всем плагинам (C-60), в обратном порядке загрузки.
+
+        Зовётся записью ``plugins-stop`` сегмента ``work`` первой в фазе 2 —
+        до ожидания воркеров и исполнителей и до :meth:`shutdown`. Исключение
+        одного плагина логируется и не отменяет хук соседа; наружу не выходит.
+        Фильтр состояний — в ``ProcessModulePlugin._do_request_stop``.
+        """
+        for plugin, ctx in reversed(list(zip(self._plugins, self._contexts))):
+            try:
+                plugin._do_request_stop(ctx)
+            except Exception as e:
+                self._services.log_error(
+                    f"PluginOrchestrator[{self._services.name}]: request_stop '{plugin.name}': {e}"
+                )
+
     # --- Properties ---
 
     @property
