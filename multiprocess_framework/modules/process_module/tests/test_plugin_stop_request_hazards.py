@@ -18,6 +18,8 @@ import time
 import uuid
 from typing import Any, Callable
 
+import pytest
+
 from multiprocess_framework.modules.process_module import ProcessModule
 from multiprocess_framework.modules.process_module.generic.generic_process import GenericProcess
 from multiprocess_framework.modules.process_module.plugins.base import (
@@ -263,6 +265,7 @@ def test_h1_stop_races_task_submit_hook_once_no_silence() -> None:
     отказ ``system_stopping`` синхронно: приём исполнителя закрыт фазой 1 ``work`` раньше хука (фаза 2).
     """
     failures: list[str] = []
+    outcomes = {"ok": 0, "refusal": 0, "silent": 0, "other": 0}
     for i in range(50):
         _start_fresh()
         name = _unique("c60h1")
@@ -298,9 +301,16 @@ def test_h1_stop_races_task_submit_hook_once_no_silence() -> None:
                 continue
             if m.get("error") is not None or m.get("result") is not True:
                 failures.append(f"{name}: shutdown() -> {m.get('result')!r}, ошибка {m.get('error')!r}")
-            if not replied.wait(5.0):
-                failures.append(f"{name}: операция соседа без ответа (тишина)")
-            elif len(replies) != 1 or replies[0] not in (OK, REFUSAL):
+            replied.wait(5.0)
+            time.sleep(0.02)  # второй (лишний) ответ, если бы он был, успевает прийти
+            if replies == [OK]:
+                outcomes["ok"] += 1
+            elif replies == [REFUSAL]:
+                outcomes["refusal"] += 1
+            elif not replies:
+                outcomes["silent"] += 1
+            else:
+                outcomes["other"] += 1
                 failures.append(f"{name}: ответы операции соседа {replies!r}")
             if JOURNAL.names().count("hk.request_stop") != 1:
                 failures.append(f"{name}: хук вызван {JOURNAL.names().count('hk.request_stop')} раз; {JOURNAL.names()}")
@@ -309,6 +319,9 @@ def test_h1_stop_races_task_submit_hook_once_no_silence() -> None:
         finally:
             _bounded(proc.shutdown, 20.0)
     assert not failures, "\n".join(failures)
+    # Сколько подач успели исполниться, а сколько сняты, — гонка, не утверждается; утверждается счёт:
+    # каждая из 50 подач получила ровно один ответ (результат или отказ), ни одной тишины.
+    assert outcomes["ok"] + outcomes["refusal"] == 50, outcomes
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +441,17 @@ def test_h4_stopped_plugin_gets_no_hook() -> None:
     assert _close_and_journal(proc) == ["hk.shutdown"]
 
 
+def test_h4_paused_plugin_gets_hook() -> None:
+    """H4 PAUSED (ревью r1): RUNNING → ``_do_pause`` → закрытие процесса — хук получает до ``shutdown``."""
+    _start_fresh()
+    proc = _make_process(_unique("c60h4p"), [_entry("hk", HookPlugin)])
+    orch = proc._orchestrator
+    plugin, ctx = orch.plugins[0], orch._contexts[0]
+    plugin._do_pause(ctx)
+    assert [p.state for p in orch.plugins] == [PluginState.PAUSED]
+    assert _close_and_journal(proc) == ["hk.request_stop", "hk.shutdown"]
+
+
 # ---------------------------------------------------------------------------
 # H5 — процесс без плагинов
 # ---------------------------------------------------------------------------
@@ -523,3 +547,50 @@ def test_h7_direct_double_request_stop_repeats_hook_state_unchanged() -> None:
     finally:
         names = _close_and_journal(proc)
     assert names == ["hk.request_stop", "hk.request_stop", "hk.request_stop", "hk.shutdown"]
+
+
+# ---------------------------------------------------------------------------
+# H8 — исключение хука видно в журнале ошибок процесса (ревью r1)
+# ---------------------------------------------------------------------------
+
+
+class RaisingHookPlugin(ProcessModulePlugin):
+    """``request_stop`` бросает ``RuntimeError("boom")``."""
+
+    name = "rb"
+
+    def configure(self, ctx: PluginContext) -> None:
+        pass
+
+    def request_stop(self, ctx: PluginContext) -> None:
+        JOURNAL.add("rb.request_stop")
+        raise RuntimeError("boom")
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        JOURNAL.add("rb.shutdown")
+
+
+def test_h8_hook_failure_is_logged_as_error(capfd: pytest.CaptureFixture[str]) -> None:
+    """H8: бросок хука — ровно одна строка ERROR с именем процесса, плагина и текстом; закрытие ``True``.
+
+    Наблюдается настоящий сток журнала процесса (поток stderr, захват на уровне дескриптора): логгер процесса
+    в корневой ``logging`` не распространяется, поэтому ``caplog`` строку не видит.
+    """
+    _start_fresh()
+    name = _unique("c60h8")
+    proc = _make_process(name, [_entry("rb", RaisingHookPlugin)])
+    capfd.readouterr()  # сбросить строки сборки процесса
+    try:
+        m = _bounded(proc.shutdown, 20.0)
+    finally:
+        _bounded(proc.shutdown, 20.0)
+    captured = capfd.readouterr()
+    assert m["done"], "shutdown() завис"
+    assert m.get("error") is None, repr(m.get("error"))
+    assert m["result"] is True
+    assert JOURNAL.names() == ["rb.request_stop", "rb.shutdown"]
+    expected = f"PluginOrchestrator[{name}]: request_stop 'rb': boom"
+    lines = (captured.err + captured.out).splitlines()
+    hits = [ln for ln in lines if expected in ln]
+    assert len(hits) == 1, lines
+    assert "[ERROR]" in hits[0], hits[0]
