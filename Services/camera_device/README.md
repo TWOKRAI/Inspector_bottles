@@ -81,8 +81,9 @@ class TestMyVendorContract(PortContractSuite):
 - Вендорские пакеты импортируют ядро, не наоборот. Services не импортируют `Plugins` и `multiprocess_prototype`.
 - Один экземпляр плагина камеры на процесс (путь состояния `processes.<p>.state.<плагин>` и register по имени плагина).
 - Фейк не проверяет границы min/max и принадлежность enum списку entries (потолок честности: `kind="range"` не вводится).
-- Умолчания узлов фейка и закрытые (NA) узлы взяты по записи `mvcr`; в записи MVS `TriggerMode` при захвате остаётся RW,
-  у фейка по умолчанию он RO.
+- Умолчания узлов фейка — гибрид: диапазон ExposureTime — запись MVS; закрытые узлы и PARENTS — запись `mvcr` и 6.2;
+  значения (в т.ч. 10000.0) — решение лида, ни одной записи не соответствуют. В записи MVS `TriggerMode` при захвате
+  остаётся RW, у фейка по умолчанию он RO.
 - Ядро ветвится только по пяти `capabilities`: `read_back`, `live_write`, `node_describe`, `software_trigger`, `restart_regrab`.
 
 ## Stability

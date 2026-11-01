@@ -164,17 +164,25 @@ def _is_forbidden(module: str) -> bool:
     return any(module == root or module.startswith(root + ".") for root in _FORBIDDEN_ROOTS)
 
 
-def _vendor_import_violations(source: str) -> list[str]:
+def _vendor_import_violations(source: str, package: str = "Services.camera_device") -> list[str]:
     """Импорты вендорских пакетов: `import Services.code_reader...`, `from Services.hikvision_camera... import`,
-    `from Services import code_reader|hikvision_camera`."""
+    `from Services import code_reader|hikvision_camera` и относительные формы тех же.
+
+    `package` — пакет файла-источника (для разрешения `from ..code_reader import x`).
+    """
     found: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             found.extend(alias.name for alias in node.names if _is_forbidden(alias.name))
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            if _is_forbidden(node.module):
-                found.append(node.module)
-            elif node.module == "Services":
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > 0:
+                base_parts = package.split(".")[: len(package.split(".")) - (node.level - 1)]
+                module = ".".join([*base_parts, *([node.module] if node.module else [])])
+            else:
+                module = node.module or ""
+            if _is_forbidden(module):
+                found.append(module)
+            elif module == "Services":
                 found.extend(f"Services.{a.name}" for a in node.names if a.name in _FORBIDDEN_NAMES)
     return found
 
@@ -187,6 +195,18 @@ def test_layer_detector_finds_vendor_imports_in_synthetic_sources():
     assert _vendor_import_violations("import Services.code_reader.core") == ["Services.code_reader.core"]
     assert _vendor_import_violations("from Services import code_reader") == ["Services.code_reader"]
     assert _vendor_import_violations("from Services.camera_device import interface\nimport json") == []
+    # относительные формы из Services/camera_device/x.py (пакет Services.camera_device)
+    assert _vendor_import_violations("from ..code_reader import driver", "Services.camera_device") == [
+        "Services.code_reader"
+    ]
+    assert _vendor_import_violations("from .. import hikvision_camera", "Services.camera_device") == [
+        "Services.hikvision_camera"
+    ]
+    # из подпакета Services/camera_device/testing/x.py: уровень 3 -> Services
+    assert _vendor_import_violations("from ... import code_reader", "Services.camera_device.testing") == [
+        "Services.code_reader"
+    ]
+    assert _vendor_import_violations("from . import interface", "Services.camera_device") == []
 
 
 def test_core_package_does_not_import_vendor_packages():
@@ -194,7 +214,8 @@ def test_core_package_does_not_import_vendor_packages():
     files = [p for p in core.rglob("*.py") if "recordings" not in p.relative_to(core).parts]
     assert len(files) >= 6  # обход действительно что-то нашёл
     for path in files:
-        assert _vendor_import_violations(path.read_text(encoding="utf-8")) == [], str(path)
+        package = ".".join(path.parent.relative_to(REPO_ROOT).parts)
+        assert _vendor_import_violations(path.read_text(encoding="utf-8"), package) == [], str(path)
 
 
 def _write_recording(tmp_path, nodes, *, bom=False):
