@@ -1560,6 +1560,12 @@ class ProcessModulePlugin(ABC):
         Не путать с configure() — тот для SHM, middleware, воркеров.
         """
 
+    def shutdown(self, ctx: PluginContext) -> None:
+        """Очистка ресурсов. Default: no-op.
+
+        Transition: * → STOPPED.
+        """
+
     def request_stop(self, ctx: PluginContext) -> None:
         """Стоп процесса начат. Default: no-op (C-60).
 
