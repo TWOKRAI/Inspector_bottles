@@ -80,7 +80,9 @@ class TestMyVendorContract(PortContractSuite):
   Запрет держат две записи `[[boundaries]]` в `.sentrux/rules.toml`; проверка — `sentrux check .`.
 - Вендорские пакеты импортируют ядро, не наоборот. Services не импортируют `Plugins` и `multiprocess_prototype`.
 - Один экземпляр плагина камеры на процесс (путь состояния `processes.<p>.state.<плагин>` и register по имени плагина).
-- Фейк не ограничивает значения границами узла (`kind="range"` не вводится) и не проверяет принадлежность enum списку.
+- Фейк не проверяет границы min/max и принадлежность enum списку entries (потолок честности: `kind="range"` не вводится).
+- Умолчания узлов фейка и закрытые (NA) узлы взяты по записи `mvcr`; в записи MVS `TriggerMode` при захвате остаётся RW,
+  у фейка по умолчанию он RO.
 - Ядро ветвится только по пяти `capabilities`: `read_back`, `live_write`, `node_describe`, `software_trigger`, `restart_regrab`.
 
 ## Stability

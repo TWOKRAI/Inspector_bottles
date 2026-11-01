@@ -68,7 +68,10 @@ class _Node:
 
 
 def _default_nodes() -> dict[str, _Node]:
-    """Узлы по умолчанию (литерал; значения — решение лидера по записи MVS `mvs_MV-CS020-10GC.json`)."""
+    """Узлы по умолчанию (литерал). Значения и закрытые узлы (NA) взяты по записи `mvcr_ID3013.json`, а не MVS.
+
+    В записи MVS `TriggerMode` при захвате остаётся RW; здесь он RO (запись при захвате отказана).
+    """
     nodes = [
         _Node("TriggerMode", "enum", None, None, None, ("Off", "On"), "Off", grab_access="RO"),
         _Node(
@@ -100,10 +103,12 @@ def _parse_rc(rc: object) -> int:
 
 def _load_nodes(path: str | Path) -> dict[str, _Node]:
     """Загрузчик записи `schema_version: 1`. Проверка версии — первая операция."""
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         data = json.load(fh)
     if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("recording: unsupported schema_version")
+    if not isinstance(data.get("nodes"), dict):
+        raise ValueError("recording: missing nodes")
 
     nodes: dict[str, _Node] = {}
     for key, raw in data["nodes"].items():
@@ -196,11 +201,16 @@ class FakePort:
     def _access(self, node: _Node) -> str:
         """Текущий доступ узла: закрытый узел открывается родителем; при захвате — `grab_access`."""
         base = node.idle_access
+        opened_by_parent = False
         if base == "NA":
             if not self._parent_open(node.key):
                 return "NA"
             base = "RW"
+            opened_by_parent = True
         if self._state == "grabbing" and node.grab_access is not None:
+            # открытый родителем узел не закрывается снова записью «grabbing: NA» (она снята при закрытом родителе)
+            if opened_by_parent and node.grab_access == "NA":
+                return "RO"
             return node.grab_access
         return base
 
