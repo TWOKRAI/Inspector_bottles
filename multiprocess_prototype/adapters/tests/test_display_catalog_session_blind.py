@@ -341,14 +341,19 @@ def test_unregister_bound_file_valid_binding_removed_base_not_moved(tmp_path: Pa
 
 
 def test_unregister_bound_then_editor_save_conflicts_binding_not_restored(tmp_path: Path) -> None:
-    """unregister(phone) -> Save редактора со старой моделью: RecipeConflict, привязка phone в файле не вернулась."""
+    """unregister(phone) -> Save редактора со старой моделью отказан, привязка phone в файле не вернулась.
+
+    Отказ — RecipeConflict (база устарела) либо RecipeValidationError (1.13: привязка к дисплею без определения
+    проверяется раньше записи); правка лида после 1.13, тестер ожидал только RecipeConflict.
+    """
     from multiprocess_framework.modules.recipe import RecipeConflict
+    from multiprocess_prototype.recipes.save import RecipeValidationError
     from multiprocess_prototype.recipes.tests.test_save_noise_store import _within
 
     store, path, session = _chain(tmp_path)
     _within(60, _catalog(store, session).unregister, "phone")
 
-    with pytest.raises(RecipeConflict):
+    with pytest.raises((RecipeConflict, RecipeValidationError)):
         _editor_save(store, session)
 
     assert _bindings(path) == _BINDINGS_WITHOUT_PHONE

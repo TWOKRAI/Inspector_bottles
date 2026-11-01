@@ -375,7 +375,8 @@ def test_recipes_save_into_other_slug_uses_own_read_rev(tmp_path: Path) -> None:
     session = _session_with_base(store, _SLUG)
     base_before = session.base_rev_for(_SLUG)
     session.mark_edited()
-    presenter, view = _recipes_presenter(store, _Repo(_topology_of_a()), session)
+    # B без определений дисплеев: привязки A сюда не переносим (1.13 отказывает на висячих привязках)
+    presenter, view = _recipes_presenter(store, _Repo({**_topology_of_a(), "displays": []}), session)
 
     ok = _within(60, presenter.on_save, "b_recipe")
 
