@@ -1,0 +1,2 @@
+registry: defects.md
+| C-65 (поправка, при свёртке заменить статус в существующей строке) | закрыт: замер 2 красных из 20 (`stop_many` 2,032 с при пороге 2,0 с; `assert None is False` у `_MarkWatcher`), правка только в тестах, мера по сроку вызова и `stop_outcome`, замер после 0 красных из 20, инъекции J1–J3 красят. `test_stop_many_marks_already_dead_child` порога времени не имеет и в замере не краснел, причина его старого красного не установлена. Отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md` |

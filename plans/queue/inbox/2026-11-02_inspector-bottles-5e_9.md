@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Гонка размера словаря в `ProcessMonitor._publish_wires`** — `monitor/process_monitor.py:647` итерирует `wires.items()` без копии на потоке монитора, а `wire.setup` и `wire.teardown` меняют ключи на исполнителе `pm-lifecycle`. По чтению; механизм воспроизведён только на соседе с искусственным писателем | ревью C-64, inspector-bottles-5e, 2026-11-02 | открыт, не воспроизведён на мониторе; проверить, ловит ли `_run_iteration` исключение; правка — `list(...)` |
