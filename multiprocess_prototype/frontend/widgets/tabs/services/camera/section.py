@@ -58,6 +58,8 @@ class _CameraSection:
             bridge=getattr(self._runtime, "topology_bridge", None),
             topology=getattr(self._services, "topology", None),
             recipes=getattr(self._services, "recipes", None),
+            commands=getattr(self._services, "commands", None),
+            save_active=getattr(self._runtime, "save_active_topology", None),
         )
         w, p = self._widget, self._presenter
         w.param_changed.connect(p.apply_param)
@@ -71,9 +73,11 @@ class _CameraSection:
         if self._presenter is None or self._widget is None:
             return
         ok = self._presenter.save()
-        self._widget.set_status(
-            "Сохранено в активный рецепт." if ok else "Не удалось сохранить (нет активного рецепта или изменений)."
-        )
+        if ok:
+            status = "Сохранено в активный рецепт."
+        else:
+            status = self._presenter.last_error or "Не удалось сохранить (нет активного рецепта или изменений)."
+        self._widget.set_status(status)
 
     def _refresh_live(self) -> None:
         """Обновить статус live и (пере)привязать actual-метки к state store."""

@@ -28,6 +28,7 @@ _APP_EXTRA_FIELDS = {
     # поллер собирается из прикладного command_sender'а и живёт рядом с
     # telemetry (тот же read-model), а minimal_app обходится без него.
     "telemetry_poller",
+    "save_active_topology",  # Task 1.10: общий Save активной топологии для Camera Save
 }
 
 

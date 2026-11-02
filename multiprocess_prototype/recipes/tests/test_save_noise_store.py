@@ -248,23 +248,49 @@ def _camera_recipe_bytes() -> bytes:
     ).encode("utf-8")
 
 
-def _camera_presenter(store: Any) -> Any:
+def _camera_presenter(store: Any, src: bytes) -> Any:
+    """Презентер камеры на настоящей цепочке: модель из blueprint файла, SetPluginConfig, общий Save (1.10)."""
+    import functools
+
+    import yaml
+
+    from multiprocess_prototype.adapters.dispatch.command_dispatcher import CommandDispatcherOrchestrator
+    from multiprocess_prototype.adapters.dispatch.project_holder import ProjectHolder
+    from multiprocess_prototype.domain import TopologySession
+    from multiprocess_prototype.domain.entities import Topology
+    from multiprocess_prototype.domain.entities.project import ApplyContext, Project
+    from multiprocess_prototype.domain.tests._fakes import FakeEventBus, FakeTopologyRepository
+    from multiprocess_prototype.frontend.app import _save_active_topology
     from multiprocess_prototype.frontend.widgets.tabs.services.camera.presenter import CameraSettingsPresenter
 
-    return CameraSettingsPresenter(recipes=store)
+    topology = Topology.from_dict(yaml.safe_load(src)["blueprint"])
+    repo = FakeTopologyRepository(topology)
+    holder = ProjectHolder(Project.from_topology(topology))
+    commands = CommandDispatcherOrchestrator(holder, repo, FakeEventBus(), lambda: ApplyContext())
+    session = TopologySession()
+    session.capture_base(_SLUG, store.read_raw_with_rev(_SLUG)[1])
+    return CameraSettingsPresenter(
+        topology=repo,
+        recipes=store,
+        commands=commands,
+        save_active=functools.partial(_save_active_topology, session, store, repo),
+    )
 
 
 def test_camera_save_no_edit_byte_identical(tmp_path: Path) -> None:
     """save() с pending, равным значениям файла (brightness/fps/mjpg): байты и st_mtime_ns прежние."""
-    path = _put(tmp_path, _SLUG, _camera_recipe_bytes())
+    src = _camera_recipe_bytes()
+    path = _put(tmp_path, _SLUG, src)
     raw_before = path.read_bytes()
     mtime_before = path.stat().st_mtime_ns
-    presenter = _camera_presenter(build_chain(tmp_path, _SLUG))
+    presenter = _camera_presenter(build_chain(tmp_path, _SLUG), src)
     presenter.apply_param("brightness", 128)
     presenter.apply_fps(25)
     presenter.apply_mjpg(True)
 
-    _within(60, presenter.save)
+    ok = _within(60, presenter.save)
+
+    assert ok is True
 
     assert path.read_bytes() == raw_before
     assert path.stat().st_mtime_ns == mtime_before
@@ -274,7 +300,7 @@ def test_camera_save_one_param_keeps_flow_style(tmp_path: Path) -> None:
     """save() с одним изменённым параметром: дифф ровно одна строка; flow-карта restart_policy на месте."""
     src = _camera_recipe_bytes()
     path = _put(tmp_path, _SLUG, src)
-    presenter = _camera_presenter(build_chain(tmp_path, _SLUG))
+    presenter = _camera_presenter(build_chain(tmp_path, _SLUG), src)
     presenter.apply_param("brightness", 130)
     presenter.apply_fps(25)
     presenter.apply_mjpg(True)
@@ -282,7 +308,8 @@ def test_camera_save_one_param_keeps_flow_style(tmp_path: Path) -> None:
     _within(60, presenter.save)
 
     after = path.read_bytes()
-    assert _diff(src, after) == ["-            brightness: 128", "+            brightness: 130"]
+    # Плоский params файла остаётся рядом с новым config.params (дубль принят, Task 1.10 TRAPS).
+    assert _diff(src, after) == ["+            params:", "+              brightness: 130"]
     assert b"restart_policy: {enabled: true, max_retries: 3, window_sec: 60}\n" in after
 
 

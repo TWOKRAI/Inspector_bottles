@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from multiprocess_prototype.domain.commands import SetPluginConfig
 from multiprocess_prototype.frontend.widgets.tabs.services.camera.presenter import (
     CameraSettingsPresenter,
     _merge_camera_params,
@@ -29,19 +30,29 @@ class _FakeTopology:
 
 
 class _FakeRecipes:
-    def __init__(self, active: str | None, raw: dict | None) -> None:
+    def __init__(self, active: str | None) -> None:
         self._active = active
-        self._raw = raw
-        self.saved: tuple | None = None
 
     def get_active(self):
         return self._active
 
-    def read_raw(self, slug):
-        return self._raw
 
-    def save_raw(self, slug, data):
-        self.saved = (slug, data)
+class _FakeCommands:
+    def __init__(self) -> None:
+        self.dispatched: list = []
+
+    def dispatch(self, command):
+        self.dispatched.append(command)
+
+
+class _FakeSave:
+    def __init__(self, result: bool = True) -> None:
+        self.result = result
+        self.calls = 0
+
+    def __call__(self) -> bool:
+        self.calls += 1
+        return self.result
 
 
 _TOPO = {
@@ -93,37 +104,46 @@ class TestLiveCommands:
 
 
 class TestPersist:
-    def test_save_merges_into_recipe(self):
-        raw = {
-            "data": {
-                "blueprint": {
-                    "processes": [
-                        {"process_name": "camera_0", "plugins": [{"plugin_name": "camera_service"}]},
-                    ]
-                }
-            }
-        }
-        recipes = _FakeRecipes("recipe_a", raw)
-        p = CameraSettingsPresenter(recipes=recipes)
+    def test_save_dispatches_set_plugin_config_then_save_active(self):
+        commands, save = _FakeCommands(), _FakeSave(True)
+        p = CameraSettingsPresenter(
+            topology=_FakeTopology(_TOPO), recipes=_FakeRecipes("recipe_a"), commands=commands, save_active=save
+        )
         p._pending = {"gain": 100, "fps": 30, "mjpg": True}
         assert p.save() is True
-        slug, data = recipes.saved
-        assert slug == "recipe_a"
-        plugin = data["data"]["blueprint"]["processes"][0]["plugins"][0]
-        assert plugin["params"]["gain"] == 100
-        assert plugin["fps"] == 30
-        assert plugin["mjpg"] is True
+        assert commands.dispatched == [
+            SetPluginConfig("camera_0", 0, "fps", 30),
+            SetPluginConfig("camera_0", 0, "mjpg", True),
+            SetPluginConfig("camera_0", 0, "params", {"gain": 100}),
+        ]
+        assert save.calls == 1
+        assert p._pending == {}
 
     def test_save_no_active_recipe(self):
-        recipes = _FakeRecipes(None, None)
-        p = CameraSettingsPresenter(recipes=recipes)
+        commands, save = _FakeCommands(), _FakeSave(True)
+        p = CameraSettingsPresenter(
+            topology=_FakeTopology(_TOPO), recipes=_FakeRecipes(None), commands=commands, save_active=save
+        )
         p._pending = {"gain": 1}
         assert p.save() is False
+        assert commands.dispatched == []
+        assert save.calls == 0
 
     def test_save_nothing_pending(self):
-        recipes = _FakeRecipes("r", {})
-        p = CameraSettingsPresenter(recipes=recipes)
+        commands, save = _FakeCommands(), _FakeSave(True)
+        p = CameraSettingsPresenter(
+            topology=_FakeTopology(_TOPO), recipes=_FakeRecipes("r"), commands=commands, save_active=save
+        )
         assert p.save() is False
+        assert commands.dispatched == []
+        assert save.calls == 0
+
+    def test_save_without_save_active_is_false(self):
+        commands = _FakeCommands()
+        p = CameraSettingsPresenter(topology=_FakeTopology(_TOPO), recipes=_FakeRecipes("r"), commands=commands)
+        p._pending = {"gain": 1}
+        assert p.save() is False
+        assert commands.dispatched == []
 
 
 class TestMergeHelper:

@@ -997,6 +997,7 @@ def run_gui(process: "GuiProcess") -> None:
         topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
         telemetry=telemetry_view_model,  # Ф1: локальный read-model телеметрии
         telemetry_poller=telemetry_poller,  # Task 3.3: опрос уровней по видимости вкладки
+        save_active_topology=_save_active_topology_cb,  # Task 1.10: Camera Save через общий Save
     )
 
     tab_factory = TabFactory(
