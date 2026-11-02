@@ -81,7 +81,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 **Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
-`scripts/machine_gate.sh`, сессия `inspector-bottles-d8`.
+`scripts/machine_gate.sh`, сессия `inspector-bottles-75` (полоса Д; прежняя `-d8` устарела).
 
 ## Порядок выполнения
 
@@ -121,7 +121,8 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.14b: фундамент (правило 1.14) определяется по именам `manifest.base`, не по флагу `protected`; закрывает F2 ревью 1.14 [DONE] (`5bdf8a2d8`, `96d1b689b`; ревью APPROVED, `docs/reviews/2026-11-02_task-1.14b-review.md`; поправка №12, вердикт CTO F2)
   - **Module contract:** impl-only
-- Task 1.10: Камера пишет параметры в модель редактора (`SetPluginConfig`, форма `config:`) и сохраняет общим Save [PENDING] (после 1.14; DESIGN пересмотрен, поправка №11)
+- Task 1.10: Камера пишет параметры в модель редактора (`SetPluginConfig`, форма `config:`) и сохраняет общим Save [DONE] (после 1.14; DESIGN пересмотрен, поправка №11; ревью APPROVED 2026-11-02)
+- Task 1.15: успешный автосейв раскладки снимает залипший `layout_unsaved` (`TopologySession.mark_layout_saved`; решение владельца 2026-11-02, находка 3 ревью 1.12) [DONE] (после 1.12; ревью APPROVED 2026-11-02)
   - **Module contract:** impl-only
 - Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [DONE] (`9e94f1245`, `f6726317e`; отчёт `docs/reviews/2026-10-28_task-1.11-developer.md`) (после 1.9; поправка №9)
   - **Module contract:** impl-only
@@ -139,7 +140,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 97 правок.
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; 101 правка (поправка 2026-11-02: +4 к 1.4).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -156,13 +157,14 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.2 | 8 | `recipes/tests/test_save_noise_save.py` | |
 | 1.8 | 6 | `pipeline/tests/test_save_conflict_rev.py` | |
 | 1.9 | 3 | `devices_common/tests/test_recipe_devices.py`, `domain/tests/test_fakes_contract.py` | |
-| 1.10 | 5 | `camera/tests/test_camera_save_blind.py`, `camera/tests/test_camera_presenter.py` | |
+| 1.10 | 17 | `camera/tests/test_camera_save_blind.py`, `camera/tests/test_camera_presenter.py` | 15 из 17 совпали (`docs/reviews/2026-11-02_task-1.10-injection.md`) |
+| 1.15 | 8 | `domain/tests/test_topology_session_layout_saved_blind.py`, `pipeline/tests/test_layout_saved_blind.py` | 7 из 8 совпали (`docs/reviews/2026-11-02_task-1.15-injection.md`) |
 | 1.11 | 8 | `adapters/tests/test_display_catalog_session.py`, `tabs/displays/tests/test_presenter_multidisplay.py` | |
 | 1.12 | 7 | `domain/tests/test_topology_session.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_topology_dirty_indicator.py` | |
 | 1.13 | 5 | `recipes/tests/test_save_display_refs.py` | |
 | 1.14 | 12 | `recipes/tests/test_save_protected_owner.py`, `…_extra.py` | 12/12 совпали (`docs/reviews/2026-11-02_task-1.14-injection.md`) |
 | 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
-| 1.4 | 7 | `recipe/tests/test_backend_writers_patch.py` | |
+| 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
 | 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
 ## Открытые вопросы (владельцу)
