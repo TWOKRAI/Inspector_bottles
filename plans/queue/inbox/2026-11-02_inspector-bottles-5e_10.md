@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **`source_target_fps=NaN` проходит без проверки; тот же приём `!=` в прототипе** — `ProcessConfig.source_target_fps`: `min=1.0` только метаданные, NaN доходит до `GenericProcessConfig`. `multiprocess_prototype/domain/entities/process.py:165`: сравнение `!=` даёт ложный конфликт при NaN, как было в C-79 | бриф C-79, inspector-bottles-5e, 2026-11-02 | открыт, по чтению и зонду бриф `p_c79`; прототип вне задачи C-79 |

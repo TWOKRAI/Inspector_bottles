@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Частичный diff топологии оставляет живой провод `broken`** — `apply_topology`: пометка по всему `snapshot`, переигровка только по запущенным. Вход: `commands_fn` даёт одну команду `register_update`; выход: `success` True, `applied` 1, `broken`, `broken_wires` 1, процессы живы. Живого planner с таким diff нет: `FullReplacePlanner` всегда `has_changes: True` | ревью C-64, inspector-bottles-5e, 2026-11-02 | открыт, дремлющий путь, ADR-PMM-012 «Вне задачи» |

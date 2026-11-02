@@ -566,6 +566,13 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 **Files:** — раздел «Files» файла задачи
 **Acceptance:** — раздел «Acceptance» файла задачи
 
+### Дефекты полосы Ф к приёмке 6а — ветка `fix/lifecycle-6a-defects`, отдельные коммиты, порядок сверху вниз
+
+- **C-64** [DONE 2026-11-02, отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md`] — отказ или пустое переключение не оставляет живые провода broken, откат возвращает провода · **Полный текст:** [`tasks/C-64.md`](lifecycle-stop-ownership/tasks/C-64.md)
+- **C-66** [DONE 2026-11-02, отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md`] — у деградации несколько владельцев, обход C-55b снят · **Полный текст:** [`tasks/C-66.md`](lifecycle-stop-ownership/tasks/C-66.md)
+- **C-79** [DONE 2026-11-02, отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md`] — `_pick` считает NaN равным NaN, в том числе внутри контейнеров · **Полный текст:** [`tasks/C-79.md`](lifecycle-stop-ownership/tasks/C-79.md)
+- **C-65** [DONE 2026-11-02, отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md`] — дискриминатор флейка на тихой машине, правка только после развилки · **Полный текст:** [`tasks/C-65.md`](lifecycle-stop-ownership/tasks/C-65.md)
+
 ### Открытые решения Task 1.9a–1.11 (владельцу / CTO, не догадки менеджера)
 
 Вердикт CTO 2026-10-20 по «отделу вместо одного телефона» и О1–О5 — ACCEPT WITH CONDITIONS; решения внесены в T1.9/T1.10.

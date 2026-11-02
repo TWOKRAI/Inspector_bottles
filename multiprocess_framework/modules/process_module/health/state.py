@@ -63,6 +63,9 @@ LEGACY_BREAKER_THRESHOLD_ENV = "INSPECTOR_HEALTH_BREAKER_THRESHOLD"
 BREAKER_COOLDOWN_ENV = "MULTIPROCESS_HEALTH_BREAKER_COOLDOWN"
 LEGACY_BREAKER_COOLDOWN_ENV = "INSPECTOR_HEALTH_BREAKER_COOLDOWN"
 
+#: Владелец заявки деградации, которую ставит и снимает сам breaker (ADR-PM-058).
+_BREAKER_OWNER = "__breaker__"
+
 
 def _env_first(*keys: str) -> str:
     """Первое непустое значение из пары «каноничная ручка, легаси-алиас»."""
@@ -133,7 +136,11 @@ class IHealthReporter(Protocol):
         ...
 
     def set_status(self, status: "HealthStatus | str", reason: str | None = ...) -> None:
-        """Явно выставить статус здоровья."""
+        """Заявить статус здоровья от имени этого плагина.
+
+        Статус ``ok`` снимает заявку этого плагина и не отменяет заявки других владельцев
+        (breaker, соседний плагин): статус процесса может остаться ``degraded`` или ``failed``.
+        """
         ...
 
     def degraded(self, reason: str) -> None:
@@ -210,9 +217,9 @@ class HealthState:
                 clock=clock,
             )
         )
-        # Владеет ли breaker текущей деградацией: снимаем degraded по восстановлению
-        # ТОЛЬКО если её выставил breaker (не затираем чужой явный degraded/failed).
-        self._breaker_owns_degraded = False
+        # Заявки владельцев на статус не-ok (ADR-PM-058): порядок вставки = порядок постановки.
+        # Эффективный статус считается из них, breaker — один из владельцев.
+        self._claims: dict[str, tuple[HealthStatus, str | None]] = {}
 
     # --- свойства (для breaker/тестов) ---
 
@@ -332,9 +339,7 @@ class HealthState:
         transition = self._breaker.record_failure()
         if transition == BreakerState.OPEN:
             reason = f"breaker open: {etype}{where} ×{self._breaker.threshold} подряд"
-            self.set_status(HealthStatus.DEGRADED, reason)
-            with self._lock:
-                self._breaker_owns_degraded = True
+            self.set_status(HealthStatus.DEGRADED, reason, owner=_BREAKER_OWNER)
 
         voice_key = f"{etype}|{ctx}"
         voiced, suppressed = self._voices.take(voice_key, throttle)
@@ -368,7 +373,7 @@ class HealthState:
         """Сигнал успешной итерации loop-раннера (produce/process удались).
 
         Сбрасывает подряд-счётчик breaker и — при переходе в ``closed`` — снимает
-        деградацию, если её владелец breaker. Сайты, умеющие только report_error,
+        заявку breaker. Сайты, умеющие только report_error,
         не зовут это: их breaker восстанавливается пассивно через :meth:`poll`.
         """
         if self._breaker.record_success() == BreakerState.CLOSED:
@@ -379,10 +384,12 @@ class HealthState:
         """Пассивный шаг восстановления breaker (зовёт heartbeat каждый такт).
 
         Любой переход breaker меняет публикуемое поле ``health.breaker`` → поднимаем
-        dirty; закрытие снимает breaker-owned деградацию.
+        dirty; закрытие снимает заявку breaker. Такт без перехода снимает заявку breaker,
+        которую гонка оставила при закрытом breaker (ADR-PM-058).
         """
         transition = self._breaker.poll()
         if transition is None:
+            self._clear_breaker_degraded()
             return
         self._mark_dirty()
         if transition == BreakerState.CLOSED:
@@ -394,42 +401,91 @@ class HealthState:
                 self._dirty = True
 
     def _clear_breaker_degraded(self) -> None:
-        """Снять деградацию, выставленную breaker'ом (не трогая чужой degraded/failed)."""
-        with self._lock:
-            owns = self._breaker_owns_degraded and self._status == HealthStatus.DEGRADED
-            self._breaker_owns_degraded = False
-        if owns:
-            self.ok(None)
+        """Снять заявку breaker, если breaker закрыт; заявки других владельцев остаются (ADR-PM-058).
 
-    def set_status(self, status: HealthStatus | str, reason: str | None = None) -> None:
-        """Явно выставить статус (ok/degraded/failed) + причину. Идемпотентно."""
+        Проверка и снятие идут под одним ``_lock``: трип другого потока в щели снёс бы настоящую
+        заявку и дал ``ok`` при ``open``. Теперь его ``set_status`` ждёт замок и ставит заявку после
+        снятия. Вложения замков нет: ``state`` breaker читается без его замка (как в
+        ``_snapshot_locked``), а ``record_failure`` идёт вне ``_lock``. ``breaker.snapshot()`` берёт
+        замок breaker, под ``_lock`` его не звать.
+
+        Без заявки ничего не пишет: холостой такт ``poll`` не стирает текст ``ok("текст")``.
+        Щель остаётся одна: ``record_success`` между возвратом ``record_failure`` и ``set_status``
+        оставляет заявку при ``closed``; чужой ``ok`` её не снимает, снимает следующий такт ``poll``.
+        """
+        now = self._clock()
+        with self._lock:
+            if _BREAKER_OWNER not in self._claims or self._breaker.state != BreakerState.CLOSED:
+                return
+            change = self._apply_claim_locked(HealthStatus.OK, None, _BREAKER_OWNER, now)
+        self._log_status_change(change)
+
+    def set_status(self, status: HealthStatus | str, reason: str | None = None, *, owner: str = "") -> None:
+        """Записать заявку владельца и пересчитать эффективный статус (ADR-PM-058).
+
+        ``ok`` снимает заявку этого владельца, чужие заявки остаются. Статус ``degraded``
+        или ``failed`` заменяет заявку владельца целиком и делает её самой поздней. Повтор
+        тех же ``(status, reason)`` позицию не меняет: иначе две заявки на тике чередовали
+        бы причину и шумели журналом и публикацией.
+
+        Журнал, dirty и ``updated_at`` меняются только при изменении эффективного значения.
+        """
         st = status if isinstance(status, HealthStatus) else HealthStatus(str(status))
         rsn = str(reason) if reason is not None else None
         now = self._clock()
 
-        changed = False
         with self._lock:
-            if self._status != st or self._degraded_reason != rsn:
-                changed = True
-                self._status = st
-                self._degraded_reason = rsn
-                if not self._log_only:
-                    self._updated_at = now
-                    self._dirty = True
+            change = self._apply_claim_locked(st, rsn, owner, now)
+        self._log_status_change(change)
 
-        if changed:
-            suffix = f": {rsn}" if rsn else ""
-            self._safe_log(f"[health] status → {st.value}{suffix}")
+    def _apply_claim_locked(
+        self, status: HealthStatus, reason: str | None, owner: str, now: float
+    ) -> tuple[HealthStatus, str | None] | None:
+        """Тело :meth:`set_status` под взятым ``_lock``. Вернуть новое эффективное значение или None."""
+        if status == HealthStatus.OK:
+            self._claims.pop(owner, None)
+        elif self._claims.get(owner) != (status, reason):
+            self._claims.pop(owner, None)
+            self._claims[owner] = (status, reason)
+        effective, effective_reason = self._effective_locked(reason)
+        if self._status == effective and self._degraded_reason == effective_reason:
+            return None
+        self._status = effective
+        self._degraded_reason = effective_reason
+        if not self._log_only:
+            self._updated_at = now
+            self._dirty = True
+        return effective, effective_reason
 
-    def degraded(self, reason: str) -> None:
-        self.set_status(HealthStatus.DEGRADED, reason)
+    def _log_status_change(self, change: tuple[HealthStatus, str | None] | None) -> None:
+        """Строка журнала о смене эффективного значения. Звать вне ``_lock``."""
+        if change is None:
+            return
+        effective, effective_reason = change
+        suffix = f": {effective_reason}" if effective_reason else ""
+        self._safe_log(f"[health] status → {effective.value}{suffix}")
 
-    def failed(self, reason: str) -> None:
-        self.set_status(HealthStatus.FAILED, reason)
+    def _effective_locked(self, ok_reason: str | None) -> tuple[HealthStatus, str | None]:
+        """Эффективный статус и причина: самая поздняя FAILED, иначе самая поздняя DEGRADED, иначе OK.
 
-    def ok(self, reason: str | None = None) -> None:
-        """Восстановление: вернуть статус ok (сбрасывает degraded_reason)."""
-        self.set_status(HealthStatus.OK, reason)
+        ``ok_reason`` — текст текущего вызова, он сохраняет прежний контракт ``ok("текст")``,
+        когда заявок не осталось.
+        """
+        for severity in (HealthStatus.FAILED, HealthStatus.DEGRADED):
+            for claim_status, claim_reason in reversed(self._claims.values()):
+                if claim_status == severity:
+                    return severity, claim_reason
+        return HealthStatus.OK, ok_reason
+
+    def degraded(self, reason: str, *, owner: str = "") -> None:
+        self.set_status(HealthStatus.DEGRADED, reason, owner=owner)
+
+    def failed(self, reason: str, *, owner: str = "") -> None:
+        self.set_status(HealthStatus.FAILED, reason, owner=owner)
+
+    def ok(self, reason: str | None = None, *, owner: str = "") -> None:
+        """Снять заявку этого владельца; статус ``ok`` — только когда заявок не осталось."""
+        self.set_status(HealthStatus.OK, reason, owner=owner)
 
     # --- чтение/публикация ---
 
@@ -565,7 +621,8 @@ class HealthReporter:
 
     Один HealthState на процесс (агрегат уровня процесса, путь
     ``processes.<name>.health.*``); reporter лишь подставляет дефолтный ``source``
-    (имя плагина) как context, если сайт не передал свой.
+    (имя плагина) как context, если сайт не передал свой, и как владельца заявки
+    статуса (ADR-PM-058).
     """
 
     def __init__(self, state: HealthState, source: str = "") -> None:
@@ -588,16 +645,16 @@ class HealthReporter:
         self._state.report_error(exc, context=ctx, throttle=throttle, **fields)
 
     def set_status(self, status: HealthStatus | str, reason: str | None = None) -> None:
-        self._state.set_status(status, reason)
+        self._state.set_status(status, reason, owner=self._source)
 
     def degraded(self, reason: str) -> None:
-        self._state.degraded(reason)
+        self._state.degraded(reason, owner=self._source)
 
     def failed(self, reason: str) -> None:
-        self._state.failed(reason)
+        self._state.failed(reason, owner=self._source)
 
     def ok(self, reason: str | None = None) -> None:
-        self._state.ok(reason)
+        self._state.ok(reason, owner=self._source)
 
     def record_success(self) -> None:
         """Сигнал успешной итерации loop-раннеру (produce/process удались) — Task 2.2."""

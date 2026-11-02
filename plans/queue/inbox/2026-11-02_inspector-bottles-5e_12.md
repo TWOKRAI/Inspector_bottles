@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **После `health.report status=ok` в дереве состояния остаётся старая причина** — вход: живой стенд, процесс `devices`, `health.report status=degraded message=x`, затем `status=ok message=ok`; выход: снимок `ok`, причина `health.report: ok`; в state-дереве `ok`, причина `health.report: x`. На базе `dcf7bc22c` то же, не регресс C-66. Команда `health.report` детям стенда (`cam`) не дошла, timeout | стенд ветки 6а S10, inspector-bottles-5e, 2026-11-02 | открыт, причина не разобрана, 6а не держит |

@@ -1,0 +1,2 @@
+registry: defects.md
+| C-55 (поправка, при свёртке дописать в статус существующей строки) | обход C-55b снят в C-66: блок в `_publish_state` удалён, изменённые тесты: убран `test_g7_publish_tick_keeps_failed`, `test_g4_asset_degraded_returns_after_breaker_closes` заменён на `test_g4_asset_degraded_survives_breaker_close`, добавлен `test_g10_own_claim_released_under_foreign_failed`. Отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md` |
