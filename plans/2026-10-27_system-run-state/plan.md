@@ -2,8 +2,8 @@
 
 - **Slug:** system-run-state
 - **Дата:** 2026-10-27
-- **Статус:** DRAFT
-- **Plan review:** PENDING
+- **Статус:** APPROVED 2026-11-02 (лид, по вердикту cto Task 0.1: ACCEPT WITH CONDITIONS, условия внесены)
+- **Plan review:** reviewer ×2 — CHANGES REQUESTED (18 + 5, внесены); teamlead express (эскалация) — Б1–Б4 внесены; cto Task 0.1 — ACCEPT WITH CONDITIONS, условия внесены; формального APPROVED третьего раунда reviewer нет (cto: не нужен, правки текстовые)
 - **Ветка:** `feat/system-run-state` (предложение; заводит лид)
 
 ## Что где живёт
@@ -53,12 +53,13 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 | 1.1, 1.2, 1.3 | tester (sonnet, слепой) + teamlead (opus) + reviewer (sonnet) | ~0,7–0,9M на задачу |
 | 1.4, 1.5, 1.6 | teamlead/developer + reviewer (sonnet) | ~0,4–0,6M на задачу |
 | 1.7, 1.8 | tester (sonnet, слепой) + teamlead (opus) + reviewer (sonnet) | ~0,4–0,6M на задачу |
+| 1.9 | tester (sonnet, слепой) + developer (sonnet) + reviewer (sonnet) | ~0,3–0,5M |
 | 2.1, 2.2, 2.3 | developer (sonnet) + reviewer (sonnet) | ~0,3–0,5M на задачу |
 | 2.4 | tester + стенд heavy, опись — haiku | ~0,3M |
 | 2.5 | tech-writer + reviewer(express) | ~0,15M |
 | Стартовый контекст | ~32 участника × ~56k | ~1,8M (в строки выше не входит) |
 | Ревью ветки перед merge | reviewer (opus) | ~0,4M |
-| **Итого** | 14 задач | **~7,9–10,0M токенов** (строки 5,65–7,85M + 1,8M + 0,4M), Opus ~8 запусков: teamlead ×7 (1.1–1.4, 1.6–1.8) + ревью ветки ×1 (оценка) |
+| **Итого** | 15 задач | **~8,2–10,6M токенов** (строки 5,95–8,35M + 1,9M + 0,4M), Opus ~8 запусков: teamlead ×7 (1.1–1.4, 1.6–1.8) + ревью ветки ×1 (оценка) |
 
 ## Порядок выполнения
 
@@ -67,9 +68,10 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 влитие полос Ф (C-64/C-79, `process_manager_process.py`) и Д (1.10, `frontend/app.py`) для кода Ф1 и 2.3. Код стартует
 только после перечисленных merge, номера строк в design и tasks сверять по HEAD.
 
-**Порядок на файле PM — строго последовательно, один писатель:** 1.1 → 1.2 → 1.3 → 1.4 → 1.7 → 1.5 → 1.6 → 1.8.
-Критический путь: gui-graceful-close (0.1 → 1.1 → 1.2, 1.3 → 1.4) → наша 1.4 → 1.7 → 1.8, 2.3, 2.4. После вердикта К6
-лид заводит Task 1.9 (резка потока обработки/записи/робота в `ready` при `run_gated: false`) и строку в 2.1.
+**Порядок на файле PM — строго последовательно, один писатель:** 1.1 → 1.2 → 1.9 → 1.3 → 1.4 → 1.7 → 1.5 → 1.6 → 1.8
+(1.9 не трогает файлы PM).
+Критический путь: gui-graceful-close (0.1 → 1.1 → 1.2, 1.3 → 1.4) → наша 1.4 → 1.7 → 1.8, 2.3, 2.4. Task 1.9 заведена по вердикту К6
+(резка потока на потребителе); строка про `run_gated: false` у камеры — в 2.1.
 Заметки о владельцах: Task 2.1 (`app.yaml`, драйвер `backend_ctl`) и 2.3 (главное окно, `frontend/app.py`) — через
 координатора и полосу Д; 2.2 пишет в `Plugins/hub/device_hub` (Р2, один файл на шаги 1 и 4) и `word_layout` (С) — через
 координатора.
@@ -82,7 +84,9 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public-api-change
 - Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [PENDING] (после 1.1, merge C-55b и C-60)
   - **Module contract:** public-api-change
-- Task 1.3: агрегат PM — набор рецепта, молчание = не готов, причины, `booting/not_ready/fault`, непрерывная оценка [PENDING] (после 1.2)
+- Task 1.9: `PluginRunner.call_process` в `PAUSED` — bypass; `PAUSED` перестаёт быть ярлыком (вердикт cto К6) [PENDING] (после 1.2; до 1.3)
+  - **Module contract:** impl-only
+- Task 1.3: агрегат PM — набор рецепта, молчание = не готов, причины, `booting/not_ready/fault`, непрерывная оценка [PENDING] (после 1.2, 1.9)
   - **Module contract:** impl-only
 - Task 1.4: STOP — `pre_stop` → снять событие → ждать `paused`; авария без `pre_stop` [PENDING] (после 1.3, gui-graceful-close 1.4)
   - **Module contract:** impl-only
@@ -153,7 +157,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - К1. Умолчание `run_gate` в framework `false` (совместимость), включение в прототипе — верно?
 - К2. Отдельный сигнал готовности (лист `readiness` по heartbeat) рядом с барьером `ready_event` — два понятия «готов» допустимы?
 - К3. `check_function` (NE 107 C) блокирует START?
-- К4. Порог дребезга потери готовности `readiness_grace_s` (умолчание 0) — нужен ли в 1.0?
+- К4. Порог дребезга потери готовности `readiness_grace_s` (умолчание 0) — нужен ли в 1.0? **Ответ cto: нет** (ключ убран).
 - К5. Хуки `pause/resume` из потока-наблюдателя параллельно `process()` — приемлемый контракт или звать через исполнитель процесса?
 - К6. Превью (В2): где резать поток в `ready` при `run_gated: false` у источника — на потребителе (плагин в `PAUSED`
   не получает `process()`) или на маршруте источника (в `ready` только канал display)?
