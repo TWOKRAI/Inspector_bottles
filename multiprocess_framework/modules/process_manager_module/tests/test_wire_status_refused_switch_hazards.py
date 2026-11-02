@@ -230,3 +230,47 @@ def test_h8_success_with_commands_keeps_broken_until_reissue() -> None:
         event.set()
 
     assert _wait_until(lambda: _wire_status(pm) == "active", POLL_DEADLINE_S), f"wire.status={_wire_status(pm)!r}"
+
+
+def test_h9_rollback_reissues_only_started_names() -> None:
+    """H9: ``start`` ``cam`` в откате вернул ``False`` (создан, но не запущен) -> ``wire.configure`` только в ``proc``.
+
+    Различает «запущенные» и «созданные» имена в фазе E отката."""
+    pm = _pm_with_wire()
+    real_start = pm._topology_start
+    pm._topology_start = lambda name: False if name == "cam" else real_start(name)
+    _fail_in_apply(pm)
+
+    result = _apply(pm)
+
+    assert result["rolled_back"] is True
+    assert _configure_calls(pm) == [("proc", "receiver")], f"wire.configure: {_configure_calls(pm)}"
+
+
+class _RaisingGetDict(dict):
+    """``_active_wires``, у которого ``get`` бросает: ломает тело ``_restore_wire_statuses``."""
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        raise RuntimeError("get broke")
+
+
+def test_h10_restore_failure_does_not_replace_live_processes() -> None:
+    """H10: сбой возврата статусов при отказе до команд не запускает откат живых процессов: те же объекты ``cam`` и
+    ``proc``, ответ ``rolled_back`` True, ошибка в журнале дословно."""
+    pm = _pm_with_wire()
+    cam = pm._process_registry.get_process_by_name("cam")
+    proc = pm._process_registry.get_process_by_name("proc")
+    pm._active_wires = _RaisingGetDict(pm._active_wires)
+
+    def commands_fn(diff_result: dict, desired: dict) -> list[dict]:
+        raise RuntimeError("BlueprintInvalid")
+
+    _set_commands_fn(pm, commands_fn)
+
+    result = _apply(pm)
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert pm._process_registry.get_process_by_name("cam") is cam
+    assert pm._process_registry.get_process_by_name("proc") is proc
+    assert "apply_topology: возврат статусов проводов не удался: get broke" in _error_lines(pm), _error_lines(pm)

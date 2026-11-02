@@ -1317,7 +1317,13 @@ class ProcessManagerProcess(ProcessModule):
             if not isinstance(info, dict):
                 continue
             if info.get("source_process") in snapshot or info.get("target_process") in snapshot:
-                before[key] = info.get("status")
+                status = info.get("status")
+                # Возвращать нечего: статуса нет или провод уже broken до вызова
+                # (так «проверка broken + запись» в возврате не может ни записать
+                # None, ни затереть чужой active прежним broken).
+                if status in (None, "broken"):
+                    continue
+                before[key] = status
         return before
 
     def _restore_wire_statuses(self, before: dict[str, str]) -> None:
@@ -1330,14 +1336,21 @@ class ProcessManagerProcess(ProcessModule):
         провод (``wire.teardown``) не воскрешается, новый — не трогается.
         Замка нет: topology.apply / wire.setup / wire.teardown идут одним
         последовательным исполнителем.
+
+        Сбой возврата не должен запускать откат живых процессов (урок
+        ``feedback_side_effect_must_not_undo_the_transaction``): тело в своём
+        try/except, ошибка уходит в журнал.
         """
-        wires = getattr(self, "_active_wires", None)
-        if not isinstance(wires, dict):
-            return
-        for key, status in before.items():
-            info = wires.get(key)
-            if isinstance(info, dict) and info.get("status") == "broken":
-                info["status"] = status
+        try:
+            wires = getattr(self, "_active_wires", None)
+            if not isinstance(wires, dict):
+                return
+            for key, status in before.items():
+                info = wires.get(key)
+                if isinstance(info, dict) and info.get("status") == "broken":
+                    info["status"] = status
+        except Exception as exc:
+            self._log_error(f"apply_topology: возврат статусов проводов не удался: {exc}")
 
     def _reissue_wires_for(self, process_name: str) -> int:
         """Переиграть ``wire.configure`` для проводов, задевающих ``process_name``.
