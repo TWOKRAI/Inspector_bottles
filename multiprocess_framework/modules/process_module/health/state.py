@@ -389,23 +389,10 @@ class HealthState:
         """
         transition = self._breaker.poll()
         if transition is None:
-            self._release_stale_breaker_claim()
+            self._clear_breaker_degraded()
             return
         self._mark_dirty()
         if transition == BreakerState.CLOSED:
-            self._clear_breaker_degraded()
-
-    def _release_stale_breaker_claim(self) -> None:
-        """Снять заявку breaker при закрытом breaker; без заявки ничего не пишет.
-
-        ``record_success`` между возвратом ``record_failure`` и ``set_status`` оставляет
-        заявку при ``closed``, и чужой ``ok`` её не снимает. Проверка заявки нужна и для
-        холостого такта: иначе ``set_status(OK, None)`` стёр бы текст ``ok("текст")``.
-        Заявка читается раньше состояния: открытие breaker всегда идёт раньше заявки.
-        """
-        with self._lock:
-            has_claim = _BREAKER_OWNER in self._claims
-        if has_claim and self._breaker.state == BreakerState.CLOSED:
             self._clear_breaker_degraded()
 
     def _mark_dirty(self) -> None:
@@ -414,8 +401,24 @@ class HealthState:
                 self._dirty = True
 
     def _clear_breaker_degraded(self) -> None:
-        """Снять заявку breaker'а; заявки других владельцев остаются (ADR-PM-058)."""
-        self.set_status(HealthStatus.OK, None, owner=_BREAKER_OWNER)
+        """Снять заявку breaker, если breaker закрыт; заявки других владельцев остаются (ADR-PM-058).
+
+        Проверка и снятие идут под одним ``_lock``: трип другого потока в щели снёс бы настоящую
+        заявку и дал ``ok`` при ``open``. Теперь его ``set_status`` ждёт замок и ставит заявку после
+        снятия. Вложения замков нет: ``state`` breaker читается без его замка (как в
+        ``_snapshot_locked``), а ``record_failure`` идёт вне ``_lock``. ``breaker.snapshot()`` берёт
+        замок breaker, под ``_lock`` его не звать.
+
+        Без заявки ничего не пишет: холостой такт ``poll`` не стирает текст ``ok("текст")``.
+        Щель остаётся одна: ``record_success`` между возвратом ``record_failure`` и ``set_status``
+        оставляет заявку при ``closed``; чужой ``ok`` её не снимает, снимает следующий такт ``poll``.
+        """
+        now = self._clock()
+        with self._lock:
+            if _BREAKER_OWNER not in self._claims or self._breaker.state != BreakerState.CLOSED:
+                return
+            change = self._apply_claim_locked(HealthStatus.OK, None, _BREAKER_OWNER, now)
+        self._log_status_change(change)
 
     def set_status(self, status: HealthStatus | str, reason: str | None = None, *, owner: str = "") -> None:
         """Записать заявку владельца и пересчитать эффективный статус (ADR-PM-058).
@@ -431,25 +434,36 @@ class HealthState:
         rsn = str(reason) if reason is not None else None
         now = self._clock()
 
-        changed = False
         with self._lock:
-            if st == HealthStatus.OK:
-                self._claims.pop(owner, None)
-            elif self._claims.get(owner) != (st, rsn):
-                self._claims.pop(owner, None)
-                self._claims[owner] = (st, rsn)
-            effective, effective_reason = self._effective_locked(rsn)
-            if self._status != effective or self._degraded_reason != effective_reason:
-                changed = True
-                self._status = effective
-                self._degraded_reason = effective_reason
-                if not self._log_only:
-                    self._updated_at = now
-                    self._dirty = True
+            change = self._apply_claim_locked(st, rsn, owner, now)
+        self._log_status_change(change)
 
-        if changed:
-            suffix = f": {effective_reason}" if effective_reason else ""
-            self._safe_log(f"[health] status → {effective.value}{suffix}")
+    def _apply_claim_locked(
+        self, status: HealthStatus, reason: str | None, owner: str, now: float
+    ) -> tuple[HealthStatus, str | None] | None:
+        """Тело :meth:`set_status` под взятым ``_lock``. Вернуть новое эффективное значение или None."""
+        if status == HealthStatus.OK:
+            self._claims.pop(owner, None)
+        elif self._claims.get(owner) != (status, reason):
+            self._claims.pop(owner, None)
+            self._claims[owner] = (status, reason)
+        effective, effective_reason = self._effective_locked(reason)
+        if self._status == effective and self._degraded_reason == effective_reason:
+            return None
+        self._status = effective
+        self._degraded_reason = effective_reason
+        if not self._log_only:
+            self._updated_at = now
+            self._dirty = True
+        return effective, effective_reason
+
+    def _log_status_change(self, change: tuple[HealthStatus, str | None] | None) -> None:
+        """Строка журнала о смене эффективного значения. Звать вне ``_lock``."""
+        if change is None:
+            return
+        effective, effective_reason = change
+        suffix = f": {effective_reason}" if effective_reason else ""
+        self._safe_log(f"[health] status → {effective.value}{suffix}")
 
     def _effective_locked(self, ok_reason: str | None) -> tuple[HealthStatus, str | None]:
         """Эффективный статус и причина: самая поздняя FAILED, иначе самая поздняя DEGRADED, иначе OK.

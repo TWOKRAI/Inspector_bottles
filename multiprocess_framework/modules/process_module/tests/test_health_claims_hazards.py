@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Сторожа автора C-66: заявки владельцев деградации, H1–H11 (ADR-PM-058).
+"""Сторожа автора C-66: заявки владельцев деградации, H1–H12 (ADR-PM-058).
 
 Слепая приёмка — ``test_health_claims_acceptance.py``. Здесь то, что она не видит: гонка,
 режим ``log_only``, журнал и dirty при неизменном эффективном значении, порядок заявок.
@@ -17,6 +17,7 @@ from collections.abc import Callable
 import pytest
 
 from multiprocess_framework.modules.process_module.health import HealthReporter, HealthState
+from multiprocess_framework.modules.process_module.health.breaker import CircuitBreaker
 
 _DEADLINE_S = 10.0
 _ITERATIONS = 1000
@@ -60,6 +61,21 @@ def _count_opens(state: HealthState) -> list[int]:
 
     state._breaker.record_failure = _counting  # type: ignore[method-assign]
     return opens
+
+
+def _leave_stale_claim(state: HealthState) -> None:
+    """Гонка: `record_success` сразу после открытия, до `set_status`; заявка остаётся при `closed`."""
+    real_record_failure = state._breaker.record_failure
+
+    def _success_right_after_open() -> str | None:
+        transition = real_record_failure()
+        if transition == "open":
+            state.record_success()
+        return transition
+
+    state._breaker.record_failure = _success_right_after_open  # type: ignore[method-assign]
+    _trip(state)
+    state._breaker.record_failure = real_record_failure  # type: ignore[method-assign]
 
 
 def _status_lines(lines: list[str]) -> list[str]:
@@ -255,16 +271,7 @@ def test_h8_stale_breaker_claim_released_by_next_poll() -> None:
     """Гонка: `record_success` между возвратом `record_failure` и `set_status` оставляет заявку;
     снять её может только breaker, и делает это следующий такт `poll`."""
     state, _clock, a, _b, _lines = _make()
-    real_record_failure = state._breaker.record_failure
-
-    def _success_right_after_open() -> str | None:
-        transition = real_record_failure()
-        if transition == "open":
-            state.record_success()
-        return transition
-
-    state._breaker.record_failure = _success_right_after_open  # type: ignore[method-assign]
-    _trip(state)
+    _leave_stale_claim(state)
 
     stale = ("degraded", "breaker open: RuntimeError @ load ×5 подряд", "closed")
     assert _view(state) == stale
@@ -280,17 +287,8 @@ def test_h8_stale_breaker_claim_released_by_next_poll() -> None:
 def test_h8_poll_keeps_plugin_claim_when_releasing_stale_breaker_claim() -> None:
     """Такт `poll` снимает только заявку breaker: заявка плагина остаётся на виду."""
     state, _clock, a, _b, _lines = _make()
-    real_record_failure = state._breaker.record_failure
-
-    def _success_right_after_open() -> str | None:
-        transition = real_record_failure()
-        if transition == "open":
-            state.record_success()
-        return transition
-
     a.degraded("assets")
-    state._breaker.record_failure = _success_right_after_open  # type: ignore[method-assign]
-    _trip(state)
+    _leave_stale_claim(state)
 
     state.poll()
 
@@ -378,3 +376,109 @@ def test_h11_plugin_failed_survives_breaker_cycle_and_released_by_own_ok() -> No
     a.ok()
 
     assert _view(state) == ("ok", None, "closed")
+
+
+# --- H12: трип в щели между проверкой и снятием ---------------------------------
+
+
+class _ReadHookBreaker(CircuitBreaker):
+    """Первое чтение `state` после взвода зовёт `on_read` и отдаёт `closed`, прочитанное до трипа."""
+
+    on_read: Callable[[], None] | None = None
+
+    @property
+    def state(self) -> str:
+        hook, self.on_read = self.on_read, None
+        if hook is None:
+            return self._state
+        hook()
+        return "closed"
+
+
+def test_h12_trip_between_check_and_release_keeps_breaker_claim() -> None:
+    """Залипшая заявка, breaker закрыт, такт `poll` прочитал `closed`, другой поток трипнул в щели.
+
+    Снятие без замка давало `ok` при `open`, и шторм ошибок держал этот ложно-здоровый статус:
+    `poll` не доходил до `half_open`, заявка не возвращалась.
+    """
+    clock = _Clock()
+    in_track = threading.Event()
+    go = threading.Event()
+    claim_done = threading.Event()
+    tripper: list[threading.Thread] = []
+    tracked = [0]
+
+    def _track(_exc: BaseException, _payload: object = None) -> None:
+        if threading.current_thread() is not tripper[0]:
+            return
+        tracked[0] += 1
+        if tracked[0] == 5:  # пятая ошибка: `_safe_track` идёт раньше `record_failure`
+            in_track.set()
+            go.wait(_DEADLINE_S)
+
+    breaker = _ReadHookBreaker(fail_threshold=5, cooldown_sec=30.0, clock=clock)
+    state = HealthState(clock=clock, track=_track, breaker=breaker, log_only=False)
+    tripper.append(threading.Thread(target=_trip, args=(state,), daemon=True))  # счёт `_track` только его
+    _leave_stale_claim(state)
+    assert _view(state) == ("degraded", "breaker open: RuntimeError @ load ×5 подряд", "closed")
+
+    real_set_status = state.set_status
+
+    def _set_status(status: object, reason: str | None = None, *, owner: str = "") -> None:
+        real_set_status(status, reason, owner=owner)
+        if status == "degraded":
+            claim_done.set()
+
+    state.set_status = _set_status  # type: ignore[method-assign,assignment]
+
+    def _on_read() -> None:
+        go.set()
+        deadline = time.monotonic() + _DEADLINE_S
+        while breaker._state != "open" and time.monotonic() < deadline:
+            time.sleep(0.001)
+        # Снятие без замка: заявка трипа успевает встать, и снятие сносит её. Под замком `set_status`
+        # трипа ждёт конца снятия, поэтому ждать его нельзя: срок, а не бесконечное ожидание.
+        claim_done.wait(0.3)
+
+    tripper[0].start()
+    assert in_track.wait(_DEADLINE_S), "поток-трип не дошёл до пятой ошибки"
+    breaker.on_read = _on_read
+    poller = threading.Thread(target=state.poll, daemon=True)
+    poller.start()
+
+    deadline = time.monotonic() + _DEADLINE_S
+    for thread in (poller, tripper[0]):
+        thread.join(max(0.0, deadline - time.monotonic()))
+    if poller.is_alive() or tripper[0].is_alive():
+        pytest.fail(f"потоки не завершились за {_DEADLINE_S} с (взаимная блокировка?)")
+
+    assert _view(state) == ("degraded", "breaker open: RuntimeError @ load ×5 подряд", "open")
+
+
+@pytest.mark.parametrize("close", ["record_success", "poll"])
+def test_h12_trip_during_close_keeps_breaker_claim(close: str) -> None:
+    """`fail_threshold=1`: ошибка между переходом в `closed` и снятием заново открывает breaker."""
+    clock = _Clock()
+    breaker = CircuitBreaker(fail_threshold=1, cooldown_sec=30.0, clock=clock)
+    state = HealthState(clock=clock, breaker=breaker, log_only=False)
+    state.report_error(RuntimeError("x"), context="load")
+    if close == "poll":
+        clock.advance(62.0)
+        state.poll()
+        assert state.snapshot()["breaker"] == "half_open"
+
+    real_mark_dirty = state._mark_dirty
+
+    def _trip_in_the_gap() -> None:  # `_mark_dirty` идёт между переходом и снятием заявки
+        state._mark_dirty = real_mark_dirty  # type: ignore[method-assign]
+        real_mark_dirty()
+        state.report_error(RuntimeError("x"), context="load")
+
+    state._mark_dirty = _trip_in_the_gap  # type: ignore[method-assign]
+    if close == "poll":
+        clock.advance(62.0)
+        state.poll()
+    else:
+        state.record_success()
+
+    assert _view(state) == ("degraded", "breaker open: RuntimeError @ load ×1 подряд", "open")
