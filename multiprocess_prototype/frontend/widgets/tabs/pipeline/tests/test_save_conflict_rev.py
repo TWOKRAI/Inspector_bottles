@@ -28,9 +28,11 @@ _SLUG = "letter_robot_sim"
 _OLD_MTIME_NS = 1_700_000_000_000_000_000
 _CONFLICT_TEXT = "Рецепт изменён снаружи — перезагрузите его"
 
-# Строка ``protected: false`` процесса camera_0 в LF-копии фикстуры A (1-based).
-_CAMERA_0_PROTECTED_LINE = 154
+# Строка ``priority: high`` процесса camera_0 в LF-копии фикстуры A (1-based).
+_CAMERA_0_PRIORITY_LINE = 149
 
+# ``gui`` с ``protected: true`` — фундамент: Save его не пишет (Task 1.14), но ``chain_targets`` процессов A
+# адресуют ``gui``, и без него в файле B проверка топологии отказала бы.
 _B_RECIPE = (
     "name: b_recipe\n"
     "version: 3\n"
@@ -39,6 +41,8 @@ _B_RECIPE = (
     "  name: default\n"
     "  description: ''\n"
     "  processes:\n"
+    "    - process_name: gui\n"
+    "      protected: true\n"
     "    - process_name: camera\n"
     "      plugins:\n"
     "        - plugin_name: capture\n"
@@ -147,8 +151,9 @@ def _topology_of_a() -> dict:
     return Topology.from_dict(blueprint).to_dict()
 
 
-def _set_protected(topology: dict, value: bool) -> dict:
-    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["protected"] = value
+def _set_priority(topology: dict, value: str) -> dict:
+    """Правка редактора: ``camera_0.priority`` (``protected`` Save не пишет — правило Task 1.14)."""
+    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["priority"] = value
     return topology
 
 
@@ -290,7 +295,7 @@ def test_recipes_save_after_hand_edit_conflict_bytes_intact(tmp_path: Path) -> N
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    presenter, view = _recipes_presenter(store, _Repo(_set_protected(_topology_of_a(), True)), session)
+    presenter, view = _recipes_presenter(store, _Repo(_set_priority(_topology_of_a(), "normal")), session)
     hand_edited = _hand_edited(src)
     path.write_bytes(hand_edited)
 
@@ -340,23 +345,23 @@ def test_save_then_save_again_uses_returned_rev(tmp_path: Path) -> None:
     """Два Recipes Save подряд без внешних правок: оба проходят, второй возвращает файл к исходным байтам."""
     src = _fixture_a_lf()
     lines = src.split(b"\n")
-    assert lines[_CAMERA_0_PROTECTED_LINE - 1] == b"      protected: false"
-    protected_true = b"\n".join(
-        [*lines[: _CAMERA_0_PROTECTED_LINE - 1], b"      protected: true", *lines[_CAMERA_0_PROTECTED_LINE:]]
+    assert lines[_CAMERA_0_PRIORITY_LINE - 1] == b"      priority: high"
+    priority_normal = b"\n".join(
+        [*lines[: _CAMERA_0_PRIORITY_LINE - 1], b"      priority: normal", *lines[_CAMERA_0_PRIORITY_LINE:]]
     )
     path = _put(tmp_path, _SLUG, src)
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
     presenter, view = _recipes_presenter(store, repo, session)
 
     first = _within(60, presenter.on_save, _SLUG)
     after_first = path.read_bytes()
-    repo.topology = _set_protected(_topology_of_a(), False)
+    repo.topology = _set_priority(_topology_of_a(), "high")
     second = _within(60, presenter.on_save, _SLUG)
 
     assert first is True
-    assert after_first == protected_true
+    assert after_first == priority_normal
     assert second is True
     assert path.read_bytes() == src
     view.show_error.assert_not_called()
@@ -470,7 +475,7 @@ def test_close_save_after_hand_edit_runtime_error_bytes_intact(tmp_path: Path) -
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
     hand_edited = _hand_edited(src)
     path.write_bytes(hand_edited)
 
@@ -491,7 +496,7 @@ def test_close_save_without_edit_succeeds_and_rebases(tmp_path: Path) -> None:
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
 
     ok = _within(60, _save_active_topology, session, store, repo)
 

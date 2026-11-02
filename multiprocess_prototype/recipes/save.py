@@ -43,6 +43,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from multiprocess_framework.modules.recipe import RecipeConflict
 from multiprocess_framework.modules.recipe.format import normalize_recipe_v3_raw
 
 __all__ = [
@@ -223,6 +224,59 @@ def _validate_display_refs(after: dict[str, Any]) -> None:
         raise RecipeValidationError(messages)
 
 
+def _is_protected(process: Any) -> bool:
+    """Процесс-mapping с truthy ``protected``; не-mapping — непротектед."""
+    return isinstance(process, dict) and bool(process.get("protected"))
+
+
+def _name(process: Any) -> str | None:
+    """``process_name`` процесса-mapping, если это строка (нехешируемое имя не должно давать TypeError)."""
+    name = process.get("process_name") if isinstance(process, dict) else None
+    return name if isinstance(name, str) else None
+
+
+def _editor_owned_topology(topology: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
+    """Топология на запись: Save владеет только непротектед-процессами, protected остаются как в файле.
+
+    Процессы фундамента (``manifest.base``, ``protected: true``) GUI подмешивает к рецепту при старте;
+    в рецепт они не пишутся. Protected-процессы файла остаются теми же элементами файла и на своих
+    местах: позиция — по ближайшему более раннему процессу файла, уже стоящему в результате
+    (якорь по предшественнику, не по индексу), иначе — в начало. Вставка или удаление непротектед-процесса
+    перед protected-блоком его не сдвигает.
+
+    Файловый процесс — фундамент, если у него truthy ``protected`` ИЛИ его имя совпадает с protected-процессом
+    топологии (старый рецепт, где ``devices`` записан без флага). Поэтому: ``protected`` редактора игнорируется
+    (берётся версия файла); protected редактора, которых нет в файле, не пишутся; protected файла, которых нет
+    в топологии, остаются. ``protected`` читается по truthy (``"yes"``/``1`` тоже protected), как ``graph_codec.py``.
+
+    Pre:
+      - ``topology`` — dict редактора; ``doc`` — канон файла, ``doc["blueprint"]`` — mapping или отсутствует.
+    Post:
+      - без ключа ``processes`` в ``topology`` или при не-списке — ``topology`` как есть (ошибку, если она
+        есть, даёт ``Topology``);
+      - иначе новый dict ``{**topology, "processes": ...}``; ``topology`` и ``doc`` не мутируются.
+    """
+    processes = topology.get("processes")
+    if not isinstance(processes, list):
+        return topology
+    protected_names = {_name(p) for p in processes if _is_protected(p)} - {None}
+    result = [p for p in processes if not _is_protected(p)]
+    file_procs = (doc.get("blueprint") or {}).get("processes")
+    file_procs = [p for p in file_procs if isinstance(p, dict)] if isinstance(file_procs, list) else []
+    for index, file_proc in enumerate(file_procs):
+        if not (_is_protected(file_proc) or _name(file_proc) in protected_names):
+            continue
+        # Якорь: ближайший более ранний процесс файла, уже стоящий в результате; иначе — начало.
+        position = 0
+        for earlier in reversed(file_procs[:index]):
+            names = [_name(p) for p in result]
+            if _name(earlier) is not None and _name(earlier) in names:
+                position = names.index(_name(earlier)) + 1
+                break
+        result.insert(position, file_proc)
+    return {**topology, "processes": result}
+
+
 def save_editor_topology_to_recipe(
     recipes: Any,
     slug: str,
@@ -245,6 +299,15 @@ def save_editor_topology_to_recipe(
     (design.md §9.5), второго вызова ``save_layout`` нет. :func:`build_recipe_v3_raw` здесь не
     используется (FREEZE).
 
+    Владение процессами (C-30, Task 1.14): редактор владеет только непротектед-процессами. Протектед-процессы
+    (фундамент ``manifest.base``, которые GUI подмешивает к рецепту при старте) в рецепт не пишутся, а protected
+    из файла остаются как в файле и на своих местах — Save без правок не меняет файл (:func:`_editor_owned_topology`).
+
+    Порядок проверок: рецепт читается -> ``RecipeNotFoundError``; ``expected_rev`` не равен ``rev`` чтения ->
+    ``RecipeConflict`` (раньше любой проверки содержимого; при ``expected_rev=None`` не срабатывает); не-mapping
+    ``blueprint`` -> ``RecipeValidationError``; правило владения; адаптер и структурная валидация; проверка ссылок
+    на дисплеи; запись (авторитетная сверка ``expected_rev`` под локом — в ``save_raw``).
+
     Исключения (RecipeNotFoundError/RecipeValidationError/RecipeConflict) НЕ глотает — вызывающий сам
     решает, как показать пользователю и не помечает ли сессию сохранённой.
 
@@ -254,7 +317,8 @@ def save_editor_topology_to_recipe(
         topology: плоский topology-dict (processes/wires/displays).
         gui_positions: позиции узлов (Pipeline-путь); None → раскладка файла не меняется.
         locked_nodes: фиксация узлов (Pipeline-путь); None → раскладка файла не меняется.
-        expected_rev: ревизия, на которой строилась правка редактора; None → ревизия этого чтения.
+        expected_rev: ревизия, на которой строилась правка редактора; None → ревизия этого чтения. Не равна
+            ревизии текущего чтения (в т.ч. пустая строка) → ``RecipeConflict`` до проверки содержимого.
 
     Returns:
         ``rev`` единственной записи.
@@ -272,7 +336,8 @@ def save_editor_topology_to_recipe(
         RecipeValidationError: топология или blueprint (в т.ч. не-mapping ``blueprint`` в файле) не
             разбираются / не прошли структурную валидацию; привязка ``blueprint.displays`` ссылается
             на ``display_id`` без определения в ``displays``.
-        RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения).
+        RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения): при чтении — сразу после поиска
+            рецепта, и ещё раз под локом в ``save_raw``.
     """
     # Ленивый импорт: цикла recipes.save <-> adapters.recipe_canonical сегодня нет; импорт в теле
     # функции — в стиле файла и страхует от будущего цикла.
@@ -281,8 +346,12 @@ def save_editor_topology_to_recipe(
     doc, rev = recipes.read_canonical(slug)
     if doc is None:
         raise RecipeNotFoundError(slug)
+    # Устаревшая база — конфликт, а не ошибка валидации: проверка ссылок на устаревшем файле дала бы ложный отказ.
+    if expected_rev is not None and rev != expected_rev:
+        raise RecipeConflict(slug, expected_rev, rev)
     if "blueprint" in doc and not isinstance(doc["blueprint"], dict):
         raise RecipeValidationError(["blueprint: ожидался mapping"])
+    topology = _editor_owned_topology(topology, doc)
     try:
         after = topology_to_canonical(topology, doc)
         validate_recipe_blueprint(after.get("blueprint", {}))

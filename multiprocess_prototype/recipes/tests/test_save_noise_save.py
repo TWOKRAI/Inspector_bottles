@@ -34,8 +34,8 @@ _FIXTURE_A = _HERE / "fixtures" / "letter_robot_sim_pre_c30.yaml"
 _SLUG = "letter_robot_sim"
 _OLD_MTIME_NS = 1_700_000_000_000_000_000
 
-# Строка ``protected: false`` процесса camera_0 в LF-копии фикстуры A (1-based).
-_CAMERA_0_PROTECTED_LINE = 154
+# Строка ``priority: high`` процесса camera_0 в LF-копии фикстуры A (1-based).
+_CAMERA_0_PRIORITY_LINE = 149
 
 _B_RECIPE = (
     "name: b_recipe\n"
@@ -186,24 +186,28 @@ def test_recipes_save_no_edit_is_byte_identical(tmp_path: Path) -> None:
 
 
 def test_recipes_save_protected_diff_literal(tmp_path: Path) -> None:
-    """Save с protected=True у camera_0: дифф ровно ``protected: false`` -> ``protected: true`` в строке camera_0."""
+    """Save с правкой поля camera_0 (priority): дифф ровно ``priority: high`` -> ``priority: normal`` в его строке.
+
+    Правка ``protected`` редактора отброшена правилом Task 1.14 (Save владеет только непротектед-процессами),
+    поэтому правится непротектед-поле процесса.
+    """
     src = _fixture_a_lf()
     lines = src.split(b"\n")
-    assert lines[_CAMERA_0_PROTECTED_LINE - 1] == b"      protected: false"
+    assert lines[_CAMERA_0_PRIORITY_LINE - 1] == b"      priority: high"
     expected = b"\n".join(
-        [*lines[: _CAMERA_0_PROTECTED_LINE - 1], b"      protected: true", *lines[_CAMERA_0_PROTECTED_LINE:]]
+        [*lines[: _CAMERA_0_PRIORITY_LINE - 1], b"      priority: normal", *lines[_CAMERA_0_PRIORITY_LINE:]]
     )
     path = _put(tmp_path, _SLUG, src)
     store, _ = _build_store(tmp_path, _SLUG)
     topology = _topology_of_a()
     camera = next(p for p in topology["processes"] if p["process_name"] == "camera_0")
-    assert camera["protected"] is False
-    camera["protected"] = True
+    assert camera["priority"] == "high"
+    camera["priority"] = "normal"
 
     _save(store, _SLUG, topology)
 
     after = path.read_bytes()
-    assert _diff(src, after) == ["-      protected: false", "+      protected: true"]
+    assert _diff(src, after) == ["-      priority: high", "+      priority: normal"]
     assert after == expected
 
 
@@ -353,7 +357,7 @@ def test_save_editor_topology_stale_rev_conflict_no_write(tmp_path: Path) -> Non
     assert hand_edited != src
     path.write_bytes(hand_edited)
     topology = _topology_of_a()
-    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["protected"] = True
+    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["priority"] = "normal"
 
     with pytest.raises(recipe_pkg.RecipeConflict):
         _save(store, _SLUG, topology, expected_rev=rev)

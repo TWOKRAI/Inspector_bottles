@@ -86,7 +86,7 @@ def _hand_edit(path: Path) -> bytes:
 
 
 def _editor_topology() -> dict:
-    """Топология фикстуры A, как её отдаёт редактор, с правкой ``camera_0.protected = True`` (прежняя модель)."""
+    """Топология фикстуры A, как её отдаёт редактор, с правкой ``camera_0.priority = "normal"`` (маркер записи)."""
     import yaml
 
     from multiprocess_prototype.domain.entities import Topology
@@ -94,7 +94,7 @@ def _editor_topology() -> dict:
 
     blueprint = yaml.safe_load(fixture_a_lf().decode("utf-8"))["blueprint"]
     topology = Topology.from_dict(blueprint).to_dict()
-    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["protected"] = True
+    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["priority"] = "normal"
     return topology
 
 
@@ -113,9 +113,9 @@ def _editor_save(store: Any, session: Any) -> str:
     )
 
 
-def _camera_protected(path: Path) -> Any:
+def _camera_priority(path: Path) -> Any:
     doc = _file_doc(path)
-    return next(p for p in doc["blueprint"]["processes"] if p["process_name"] == "camera_0")["protected"]
+    return next(p for p in doc["blueprint"]["processes"] if p["process_name"] == "camera_0")["priority"]
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_register_then_editor_save_no_false_conflict(tmp_path: Path) -> None:
 
     _editor_save(store, session)
 
-    assert _camera_protected(path) is True
+    assert _camera_priority(path) == "normal"
     assert _display_ids(path) == ["main", "recog", "mask", "phone", "probe_disp"]
 
 
@@ -231,7 +231,7 @@ def test_update_then_editor_save_no_false_conflict(tmp_path: Path) -> None:
 
     _editor_save(store, session)
 
-    assert _camera_protected(path) is True
+    assert _camera_priority(path) == "normal"
     assert {d["id"]: d["enabled"] for d in _file_doc(path)["displays"]}["main"] is False
 
 
@@ -316,7 +316,7 @@ def test_unregister_unbound_then_editor_save_no_false_conflict(tmp_path: Path) -
 
     _editor_save(store, session)
 
-    assert _camera_protected(path) is True
+    assert _camera_priority(path) == "normal"
     assert _display_ids(path) == ["main", "recog", "mask", "phone", "probe_two"]
 
 
@@ -357,7 +357,7 @@ def test_unregister_bound_then_editor_save_rejected_binding_not_restored(tmp_pat
         _editor_save(store, session)
 
     assert _bindings(path) == _BINDINGS_WITHOUT_PHONE
-    assert _camera_protected(path) is not True
+    assert _camera_priority(path) == "high"
 
 
 # ---------------------------------------------------------------------------

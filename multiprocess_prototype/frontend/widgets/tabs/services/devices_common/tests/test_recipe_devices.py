@@ -219,8 +219,8 @@ def _file_doc(path: Path) -> dict:
     return yaml.safe_load(path.read_bytes().decode("utf-8"))
 
 
-def _editor_topology_camera_protected() -> dict:
-    """Топология фикстуры A, как её отдаёт редактор, с правкой ``camera_0.protected = True``."""
+def _editor_topology_camera_edited() -> dict:
+    """Топология фикстуры A, как её отдаёт редактор, с правкой ``camera_0.priority = "normal"``."""
     import yaml
 
     from multiprocess_prototype.domain.entities import Topology
@@ -228,7 +228,7 @@ def _editor_topology_camera_protected() -> dict:
 
     blueprint = yaml.safe_load(fixture_a_lf().decode("utf-8"))["blueprint"]
     topology = Topology.from_dict(blueprint).to_dict()
-    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["protected"] = True
+    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["priority"] = "normal"
     return topology
 
 
@@ -241,7 +241,7 @@ def _editor_save(store: Any, session: Any, slug: str = _SLUG) -> str:
         save_editor_topology_to_recipe,
         store,
         slug,
-        _editor_topology_camera_protected(),
+        _editor_topology_camera_edited(),
         expected_rev=session.base_rev_for(slug),
     )
 
@@ -293,7 +293,7 @@ def test_devices_upsert_then_editor_save_no_false_conflict(tmp_path: Path) -> No
     doc = _file_doc(path)
     assert [d["id"] for d in doc["devices"]] == ["robot_main", "vfd_belt", "probe_dev"]
     camera = next(p for p in doc["blueprint"]["processes"] if p["process_name"] == "camera_0")
-    assert camera["protected"] is True
+    assert camera["priority"] == "normal"
 
 
 def test_devices_remove_then_editor_save_no_false_conflict(tmp_path: Path) -> None:
@@ -308,7 +308,7 @@ def test_devices_remove_then_editor_save_no_false_conflict(tmp_path: Path) -> No
     doc = _file_doc(path)
     assert [d["id"] for d in doc["devices"]] == ["robot_main"]
     camera = next(p for p in doc["blueprint"]["processes"] if p["process_name"] == "camera_0")
-    assert camera["protected"] is True
+    assert camera["priority"] == "normal"
 
 
 def test_devices_write_other_slug_uses_own_read_rev_base_untouched(tmp_path: Path) -> None:

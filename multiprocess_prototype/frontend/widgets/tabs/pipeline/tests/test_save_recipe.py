@@ -27,6 +27,7 @@ def _make_recipe_raw(slug: str = "test_recipe") -> dict:
         "name": slug,
         "version": 3,
         "description": "",
+        "displays": [{"id": "main_output"}],
         "blueprint": {"processes": [], "wires": [], "displays": []},
         "active_services": ["camera_service"],
     }

@@ -231,7 +231,7 @@ def test_return_value_is_the_rev_of_the_single_write() -> None:
     store = _RecordingStore(_raw_with_layout())
     rev_before = store.current_rev()
     edited = {
-        "processes": [{"process_name": "producer", "plugins": [], "protected": True}],
+        "processes": [{"process_name": "producer", "plugins": [], "description": "правка"}],
         "wires": [],
         "displays": [],
     }
@@ -265,14 +265,17 @@ def test_only_positions_given_keeps_locked_nodes_of_the_file() -> None:
     assert only_locked.calls[0][3] == ({"producer": [1.0, 2.0]}, ["y"])
 
 
-def test_empty_expected_rev_reaches_save_raw_as_given() -> None:
-    """``expected_rev=""`` — заданное значение: в ``save_raw`` уходит "", а не rev чтения."""
+def test_empty_expected_rev_is_a_stale_base_conflict_without_write() -> None:
+    """``expected_rev=""`` — заданное значение, не равное ревизии чтения: ``RecipeConflict`` до записи (Task 1.14)."""
+    from multiprocess_framework.modules.recipe import RecipeConflict
     from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
     store = _RecordingStore(_raw_with_layout())
-    save_editor_topology_to_recipe(store, "cup", _topo_same_as_raw(), expected_rev="")
 
-    assert store.calls[0][2] == ""
+    with pytest.raises(RecipeConflict):
+        save_editor_topology_to_recipe(store, "cup", _topo_same_as_raw(), expected_rev="")
+
+    assert store.calls == []
 
     default = _RecordingStore(_raw_with_layout())
     save_editor_topology_to_recipe(default, "cup", _topo_same_as_raw())
