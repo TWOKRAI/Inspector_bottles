@@ -68,6 +68,6 @@ Suspended, Unsuspending, Holding, Held, Unholding, Completing, Complete; реж�
 ### 9.5. ISA-18.2-2016 (аварийная сигнализация) и ISA-101.01 (HMI, издание не подтверждено)
 
 Состояния аварии ISA-18.2 (по вторичному источнику): Normal, Unacknowledged, Acknowledged, RTN Unacknowledged, Shelved,
-Suppressed by Design, Out of Service. Берём только Unacknowledged → Acknowledged. Берём: авария имеет состояние подтверждения (у нас `last_fault` гасится нажатием START — подтверждение действием;
-отдельная кнопка «Квитировать» — **В4**); неактивная кнопка показывает почему (первая причина `failure`, список — по
+Suppressed by Design, Out of Service. Берём только Unacknowledged → Acknowledged: авария подтверждается отдельной командой `system.run.ack` и кнопкой
+«Квитировать» (**В4**, Task 1.7); START её не подтверждает, `last_fault` остаётся видимым до следующего START; неактивная кнопка показывает почему (первая причина `failure`, список — по
 наведению/раскрытию). Не берём: приоритеты, shelving, рационализацию аварий.
