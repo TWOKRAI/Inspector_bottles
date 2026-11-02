@@ -145,6 +145,21 @@ class TestPersist:
         assert p.save() is False
         assert commands.dispatched == []
 
+    def test_save_active_returns_false_keeps_pending(self):
+        """save_active вернул False без исключения (напр. активный рецепт пропал): False, pending цел."""
+        commands, save = _FakeCommands(), _FakeSave(False)
+        p = CameraSettingsPresenter(
+            topology=_FakeTopology(_TOPO), recipes=_FakeRecipes("r"), commands=commands, save_active=save
+        )
+        p._pending = {"fps": 30}
+        assert p.save() is False
+        assert save.calls == 1
+        assert p._pending == {"fps": 30}
+        assert p.last_error == ""
+        save.result = True  # повтор после «исправления» причины: pending не потерян, запись идёт
+        assert p.save() is True
+        assert p._pending == {}
+
 
 class TestMergeHelper:
     def test_merge_recursive_finds_block(self):
