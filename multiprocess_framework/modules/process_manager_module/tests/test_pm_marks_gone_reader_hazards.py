@@ -111,10 +111,16 @@ class _MarkWatcher:
     def _run(self) -> None:
         while not self._stop.is_set():
             if self._q.is_reader_gone():
-                self.seen_mark = True
+                # Сперва результат пробы, потом флаг: кто увидел seen_mark, читает готовую запись.
                 self.pid_present_at_mark = _pid_present(self._pid)
+                self.seen_mark = True
                 return
             time.sleep(0.001)
+
+    def wait_mark(self, timeout: float) -> bool:
+        """Дождаться, пока поток увидит метку и допишет запись; ``True`` — запись полная."""
+        self._t.join(timeout)
+        return (not self._t.is_alive()) and self.seen_mark
 
     def close(self) -> None:
         self._stop.set()
@@ -206,14 +212,29 @@ def test_mark_only_after_confirmed_death() -> None:
         assert _pid_present(reader.pid) is True, "проба не видит живой процесс читателя"
         watcher = _MarkWatcher(q, reader.pid)
         assert _bounded(lambda: registry.stop_one("Reader", timeout=0.3), 10.0) is True
-        time.sleep(0.05)
-        assert watcher.seen_mark is True
+        assert watcher.wait_mark(5.0) is True
         assert watcher.pid_present_at_mark is False, "метка стала видна, пока pid читателя ещё существовал"
     finally:
         if watcher:
             watcher.close()
         _kill(reader)
         _close(q)
+
+
+def test_mark_watcher_record_is_complete_under_slow_probe() -> None:
+    """Гонка самого теста: наблюдатель обязан дописать ``pid_present_at_mark`` раньше, чем
+    выставит ``seen_mark``, и ``wait_mark`` отдаёт управление только по готовой записи.
+    Ломается, если флаг пишется раньше пробы: медленная проба (0,3 с) оставляет читателю
+    ``None`` вместо ``False``. Очередь подставная, ОС-процесса нет."""
+    q = MagicMock()
+    q.is_reader_gone.return_value = True
+    with patch(f"{__name__}._pid_present", side_effect=lambda pid: time.sleep(0.3) or False):
+        watcher = _MarkWatcher(q, 0)
+        try:
+            assert watcher.wait_mark(5.0) is True
+            assert watcher.pid_present_at_mark is False
+        finally:
+            watcher.close()
 
 
 def test_survivor_is_not_marked_by_stop_one() -> None:
@@ -347,7 +368,12 @@ def test_stop_many_unblocks_writer_of_dead_reader_gracefully(reader_kind: str, r
     эскалации graceful→terminate→kill: писатель не выходит в graceful-окне, его терминируют
     (exitcode -15), а ``stop_many`` длится ≥ timeout. Вариант «читатель выходит по stop, стоит
     ПОСЛЕДНИМ» ловит последовательный блокирующий join на писателе: смерть читателя в том же
-    окне не замечается, пока не истечёт дедлайн."""
+    окне не замечается, пока не истечёт дедлайн.
+
+    Мера — срок вызова, а не секунды: вызов с ``timeout=10.0`` обязан вернуться раньше срока,
+    писатель выходит по метке читателя (exitcode 0, исход ``exited``). Без метки он висит до
+    дедлайна и его добивают. Порог в 2 с мерил стенные часы машины (замер 2/20: 2,032 с при
+    свободной машине), а не свойство."""
     ctx = multiprocessing.get_context("spawn")
     srm = _srm_with("Reader")
     q = _q(srm, "Reader")
@@ -382,11 +408,12 @@ def test_stop_many_unblocks_writer_of_dead_reader_gracefully(reader_kind: str, r
             reader.join(5.0)
             assert not reader.is_alive(), "подготовка: читатель не вышел сам"
         t0 = time.monotonic()
-        results = _bounded(lambda: registry.stop_many(names, timeout=5.0), 20.0)
+        results = _bounded(lambda: registry.stop_many(names, timeout=10.0), 30.0)
         elapsed = time.monotonic() - t0
         assert results == {"Reader": True, "Writer": True}
         assert writer.exitcode == 0, f"писатель не вышел штатно (exitcode={writer.exitcode}) — его добивали"
-        assert elapsed < 2.0, f"stop_many длился {elapsed:.3f}s при timeout=5.0"
+        assert elapsed < 10.0, f"stop_many дошёл до срока timeout=10.0 ({elapsed:.3f}s): писателя не отпустила метка"
+        assert registry.stop_outcome("Writer") == "exited"
     finally:
         _kill(reader)
         _kill(writer)
