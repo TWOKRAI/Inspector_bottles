@@ -69,7 +69,7 @@ teamlead сверх 1.1a/1.1h — только эскалация. Пересч�
 ## Конвейер (`.claude/CLAUDE.md` «Task launch convention»)
 
 стадия 0 reviewer → слепой тестер (один раз на механизм, worktree на коммите до реализации) → исполнители по одному,
-режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.11 → 1.12 → 1.13 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
+режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.11 → 1.12 → 1.13 → 1.14 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
 INJECT задач) → стадия 5 reviewer на задачу → tech-writer 1.3 → ревью ветки (Opus) перед merge. Лимит — 2 итерации на
 цикл, третья → `teamlead`, затем `cto`. Порядок 1.1g → 1.7 → 1.1c: стор пишется один раз против финального Protocol.
 
@@ -117,7 +117,9 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.13: Save редактора отказывает на привязках дисплеев без определения (`RecipeValidationError`); находка 1 ревью 1.11/1.12 [DONE] (`ede3bf90e`, `9a1e87af9`; отчёт `docs/reviews/2026-11-01_task-1.13-developer.md`) (после 1.12; поправка №10)
   - **Module contract:** impl-only
-- Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
+- Task 1.14: Save редактора владеет только непротектед-процессами (protected из файла — как в файле и на месте; из сессии — не пишутся); `RecipeConflict` раньше `RecipeValidationError` [PENDING] (после 1.13; поправка №11, вердикт CTO)
+  - **Module contract:** impl-only
+- Task 1.10: Камера пишет параметры в модель редактора (`SetPluginConfig`, форма `config:`) и сохраняет общим Save [PENDING] (после 1.14; DESIGN пересмотрен, поправка №11)
   - **Module contract:** impl-only
 - Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [DONE] (`9e94f1245`, `f6726317e`; отчёт `docs/reviews/2026-10-28_task-1.11-developer.md`) (после 1.9; поправка №9)
   - **Module contract:** impl-only
@@ -152,10 +154,11 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.2 | 8 | `recipes/tests/test_save_noise_save.py` | |
 | 1.8 | 6 | `pipeline/tests/test_save_conflict_rev.py` | |
 | 1.9 | 3 | `devices_common/tests/test_recipe_devices.py`, `domain/tests/test_fakes_contract.py` | |
-| 1.10 | 3 | `camera/tests/test_camera_presenter.py` | |
+| 1.10 | 5 | `camera/tests/test_camera_save_blind.py`, `camera/tests/test_camera_presenter.py` | |
 | 1.11 | 8 | `adapters/tests/test_display_catalog_session.py`, `tabs/displays/tests/test_presenter_multidisplay.py` | |
 | 1.12 | 7 | `domain/tests/test_topology_session.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_topology_dirty_indicator.py` | |
 | 1.13 | 5 | `recipes/tests/test_save_display_refs.py` | |
+| 1.14 | 8 | `recipes/tests/test_save_protected_owner.py` | |
 | 1.4 | 7 | `recipe/tests/test_backend_writers_patch.py` | |
 | 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
