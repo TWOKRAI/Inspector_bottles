@@ -1299,6 +1299,46 @@ class ProcessManagerProcess(ProcessModule):
             if process_name in (info.get("source_process"), info.get("target_process")):
                 info["status"] = "broken"
 
+    def _wire_statuses_for(self, snapshot: dict) -> dict[str, str]:
+        """Запомнить статусы проводов, задетых процессами ``snapshot`` (C-64).
+
+        Снимок берётся ПЕРЕД ``_mark_wires_broken_for``: если switch отказал или
+        оказался пустым, процессы живы и провода надо вернуть в прежний статус
+        (``_restore_wire_statuses``). При выключенном ``wire_reissue_enabled``
+        пометки нет — возвращать нечего, словарь пуст.
+        """
+        if not self._wire_reissue_enabled():
+            return {}
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return {}
+        before: dict[str, str] = {}
+        for key, info in wires.items():
+            if not isinstance(info, dict):
+                continue
+            if info.get("source_process") in snapshot or info.get("target_process") in snapshot:
+                before[key] = info.get("status")
+        return before
+
+    def _restore_wire_statuses(self, before: dict[str, str]) -> None:
+        """Вернуть проводам статусы, снятые ``_wire_statuses_for`` (C-64).
+
+        Возврат только если текущее значение всё ещё ``"broken"``: у ключа
+        ``status`` есть писатель вне исполнителя (поток ``ready-gate-<имя>`` в
+        ``_send_wire_configure``); если отложенная переигровка уже поставила
+        ``active``, возврат прежнего ``broken`` затёр бы её. Разобранный в окне
+        провод (``wire.teardown``) не воскрешается, новый — не трогается.
+        Замка нет: topology.apply / wire.setup / wire.teardown идут одним
+        последовательным исполнителем.
+        """
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict):
+            return
+        for key, status in before.items():
+            info = wires.get(key)
+            if isinstance(info, dict) and info.get("status") == "broken":
+                info["status"] = status
+
     def _reissue_wires_for(self, process_name: str) -> int:
         """Переиграть ``wire.configure`` для проводов, задевающих ``process_name``.
 
@@ -2048,14 +2088,27 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:
                 self._log_error(f"rollback: create '{name}' не удался: {exc}")
 
+        started: list[str] = []
         for name in created:
             try:
                 if self._topology_start(name):
+                    started.append(name)
                     self._log_info(f"rollback: процесс '{name}' восстановлен")
                 else:
                     self._log_error(f"rollback: start '{name}' не удался")
             except Exception as exc:
                 self._log_error(f"rollback: start '{name}' не удался: {exc}")
+
+        # C-64: пересозданные откатом инстансы не имеют wire-middleware (провода
+        # помечены broken до apply) — переиграть wire.configure, как в success-
+        # ветке apply_topology. Отправка откладывается до готовности ребёнка
+        # (_run_when_child_ready), ожидания здесь нет; откат best-effort.
+        if self._wire_reissue_enabled():
+            for name in started:
+                try:
+                    self._reissue_wires_for(name)
+                except Exception as exc:
+                    self._log_error(f"rollback: wire re-issue '{name}' не удался: {exc}")
 
     def _resume_monitor(self, was_running: bool) -> None:
         """Безопасно возобновить ProcessMonitor если он был запущен."""
@@ -4105,6 +4158,9 @@ class ProcessManagerProcess(ProcessModule):
             # wire-провода на время замены оборваны. Помечаем broken ДО apply
             # (honest broken_wires в окне switch); success-ветка ниже переиграет
             # wire.configure в пересозданные инстансы и вернёт «active».
+            # C-64: прежние статусы запоминаем ДО пометки — отказ до команд и
+            # пустое переключение вернут их (процессы живы, провода не мертвы).
+            wire_status_before = self._wire_statuses_for(snapshot)
             if self._wire_reissue_enabled():
                 for _sname in snapshot:
                     self._mark_wires_broken_for(_sname)
@@ -4136,6 +4192,9 @@ class ProcessManagerProcess(ProcessModule):
                         self._log_info(
                             "apply_topology: провал до исполнения команд — топология не тронута, откат не требуется"
                         )
+                        # C-64: процессы живы, middleware в детях целы — пометка
+                        # broken была ложной, вернуть прежние статусы проводов.
+                        self._restore_wire_statuses(wire_status_before)
                     resp = {
                         "success": False,
                         "rolled_back": True,
@@ -4150,6 +4209,11 @@ class ProcessManagerProcess(ProcessModule):
                     if epoch is not None:
                         resp["routing_epoch"] = epoch
                     return resp
+
+                # C-64: успех без исполненных команд (diff без изменений) — процессы
+                # не тронуты, пометка broken ложна: вернуть прежние статусы.
+                if not result.get("results"):
+                    self._restore_wire_statuses(wire_status_before)
 
                 # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
                 ready = self._wait_started_ready(result.get("results") or [])
