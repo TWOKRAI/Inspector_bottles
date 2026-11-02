@@ -222,10 +222,10 @@ def test_mark_only_after_confirmed_death() -> None:
 
 
 def test_mark_watcher_record_is_complete_under_slow_probe() -> None:
-    """Гонка самого теста: наблюдатель обязан дописать ``pid_present_at_mark`` раньше, чем
-    выставит ``seen_mark``, и ``wait_mark`` отдаёт управление только по готовой записи.
-    Ломается, если флаг пишется раньше пробы: медленная проба (0,3 с) оставляет читателю
-    ``None`` вместо ``False``. Очередь подставная, ОС-процесса нет."""
+    """Гонка самого теста: ``wait_mark`` отдаёт полную запись даже при медленной пробе (0,3 с).
+    Ломается, если ``wait_mark`` не ждёт конца записи и наблюдатель пишет флаг раньше пробы:
+    читатель получит ``None`` вместо ``False``. Одна перестановка записи тест не красит: ``join``
+    ждёт поток целиком. Очередь подставная, ОС-процесса нет."""
     q = MagicMock()
     q.is_reader_gone.return_value = True
     with patch(f"{__name__}._pid_present", side_effect=lambda pid: time.sleep(0.3) or False):

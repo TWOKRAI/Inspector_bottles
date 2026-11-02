@@ -4299,7 +4299,7 @@ Free-threaded Python — пересмотреть.
   открытие ставит его заявку, закрытие снимает. `HealthReporter` передаёт `owner=source`, сигнатура `IHealthReporter` прежняя.
   Наружу уходит прежняя одна строка `degraded_reason`. Журнал, dirty и `updated_at` — только при изменении эффективного
   значения. Обход C-55b (`Services/ml_inference/plugin/plugin.py`, `_publish_state`) снят этим же коммитом.
-- *Не тронуто.* Счёт `errors`, `last_error`, плоскость ошибок и голос в `report_error`; `record_success`, `poll`, `_mark_dirty`;
+- *Не тронуто.* Счёт `errors`, `last_error`, плоскость ошибок и голос в `report_error`; `record_success`, `_mark_dirty`;
   `snapshot`, `take_dirty`, `mark_dirty`, `publish_health`; `HealthField`, `HEALTH_FIELDS`, `schema.py`; `log_only`;
   `CircuitBreaker`; `SourceProducer`; `builtin_commands.py`; `plugins/base.py`.
 - *Отвергнуто.* Второй флаг владения: не покрывает двух плагинов и `failed` под breaker. Список причин в схеме (`degraded_reasons`):
