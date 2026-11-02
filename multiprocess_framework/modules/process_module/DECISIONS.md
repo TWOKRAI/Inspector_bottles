@@ -163,6 +163,7 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 **Решение:**
 1. **`CircuitBreaker`** (`health/breaker.py`): состояния `closed`/`open`/`half_open`, подряд-счётчик отказов, ОТДЕЛЬНЫЙ от кумулятивного `errors` (тот монотонный). `record_failure()` → open по `fail_threshold`; `record_success()` → сброс/закрытие; `poll()` → пассивное восстановление по тишине (`cooldown_sec`): open → half_open → closed. Два пути восстановления осознанно: явный успех — для loop-раннеров, тишина — для сайтов, умеющих только `report_error`.
 2. **Интеграция в `HealthState`**: каждый `report_error` кормит breaker; переход в open → `set_status(degraded, "breaker open: …")`. Деградацию снимает ТОЛЬКО breaker-owned восстановление (`_breaker_owns_degraded`) — чужой явный `degraded`/`failed` не затирается.
+   *Владение дополнено ADR-PM-058 (C-66): флаг заменён заявками владельцев, закрытие breaker снимает только свою заявку.*
 3. **Контракт-поле `health.breaker`** (`closed|open|half_open`) — аддитивно, В КОНЦЕ `HEALTH_FIELDS` (порядок прежних пяти неизменен, дампы стабильны); heartbeat зовёт `poll()` на такте перед публикацией — пассивное восстановление попадает в снапшот.
 4. **produce()-breaker в `SourceProducer`**: подряд-фейлы `produce()` кормят тот же счётчик; при открытом breaker источник спит `breaker_backoff_sec` вместо горячего цикла ошибок.
 5. **Пороги** — env `INSPECTOR_HEALTH_BREAKER_THRESHOLD` (дефолт 5) / `INSPECTOR_HEALTH_BREAKER_COOLDOWN` (дефолт 30с); clock инъектируется (детерминизм тестов).
@@ -4281,3 +4282,36 @@ Free-threaded Python — пересмотреть.
 
 **Refs:** `plans/lifecycle-stop-ownership/tasks/C-60.md`, `C-60_design_notes.md`, ADR-PM-055, ADR-PM-054,
 `process_module/tests/test_plugin_stop_request_acceptance.py`, `process_module/tests/test_plugin_stop_request_hazards.py`.
+
+### ADR-PM-058 — Заявки владельцев деградации (2026-11-02, C-66)
+
+На одной ячейке `_status`/`_degraded_reason` лежали разные владельцы, флаг `_breaker_owns_degraded` их не различал.
+Замер на настоящих `HealthState`/`HealthReporter` (`dcf7bc22c`): закрытие breaker стирало `degraded` плагина (`ok`, `None`);
+`failed` понижался открытием breaker и затем становился `ok`; `ok` плагина при открытом breaker давал статус `ok` рядом с
+`breaker: open`; `ok` плагина B снимал деградацию плагина A. Отсюда же обход C-55b в `ml_inference` (тик ставил причину заново).
+
+- *Решение.* `HealthState._claims: dict[str, tuple[HealthStatus, str | None]]`, порядок вставки = порядок постановки;
+  `set_status/degraded/failed/ok` получают `*, owner: str = ""`. `ok` снимает только заявку этого владельца. Статус не-`ok`
+  заменяет заявку владельца целиком и делает её самой поздней; повтор тех же `(status, reason)` позицию не меняет (две заявки
+  на тике иначе чередуют причину и шумят журналом и публикацией). Эффективный статус: самая поздняя `failed`, иначе самая
+  поздняя `degraded`, иначе `ok`; причина — из выбранной заявки, при `ok` — текст вызова. Выбор «самая поздняя»: оператор видит
+  самый свежий факт, как и раньше при открытии breaker. `failed` breaker'ом не понижается. Breaker — владелец `__breaker__`:
+  открытие ставит его заявку, закрытие снимает. `HealthReporter` передаёт `owner=source`, сигнатура `IHealthReporter` прежняя.
+  Наружу уходит прежняя одна строка `degraded_reason`. Журнал, dirty и `updated_at` — только при изменении эффективного
+  значения. Обход C-55b (`Services/ml_inference/plugin/plugin.py`, `_publish_state`) снят этим же коммитом.
+- *Не тронуто.* Счёт `errors`, `last_error`, плоскость ошибок и голос в `report_error`; `record_success`, `poll`, `_mark_dirty`;
+  `snapshot`, `take_dirty`, `mark_dirty`, `publish_health`; `HealthField`, `HEALTH_FIELDS`, `schema.py`; `log_only`;
+  `CircuitBreaker`; `SourceProducer`; `builtin_commands.py`; `plugins/base.py`.
+- *Отвергнуто.* Второй флаг владения: не покрывает двух плагинов и `failed` под breaker. Список причин в схеме (`degraded_reasons`):
+  потребителя нет, контракт полей меняется; при появлении потребителя решает план 14а.
+- *Следствия и риски.* `ctx.health.ok()` больше не значит «у процесса всё хорошо». При открытом breaker причина плагина,
+  поставленная раньше открытия, наверх не выходит: оператор видит `breaker open…` до закрытия. Повторное открытие из `half_open`
+  с той же причиной заявку не двигает: более поздняя причина плагина остаётся на виду. Заявка владельца заменяется целиком.
+  H4 монитора теперь видит `failed` и там, где раньше его скрывал breaker (за флагом `FW_HEALTH_RESTART`, по умолчанию выключен).
+  Остаточная гонка: `record_success` между возвратом `record_failure` и `set_status` оставляет заявку breaker при закрытом
+  breaker, форма та же, что у старого флага. Утечка: плагин, ушедший без `ok`, оставляет заявку до конца процесса; выгрузка
+  плагина из живого процесса не проверялась. Принятый предел: «владелец = имя экземпляра, уникальность не проверяется; плагин, тронувший ctx.health до boot, получит владельца ''»
+  (сейчас таких плагинов нет; `plugins/base.py:257` не меняем).
+
+**Refs:** `plans/lifecycle-stop-ownership/tasks/C-66.md`, `plans/lifecycle-stop-ownership/reports/C-66.stage0.md`, ADR-PM-011,
+`process_module/tests/test_health_claims_acceptance.py`, `process_module/tests/test_health_claims_hazards.py`.
