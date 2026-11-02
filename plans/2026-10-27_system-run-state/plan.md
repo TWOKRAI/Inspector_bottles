@@ -96,7 +96,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public-api-change
 
 ### Ф2 — прототип
-- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [PENDING] (после 1.3)
+- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [PENDING] (после 1.3, 1.5)
   - **Module contract:** n/a
 - Task 2.2: `readiness()`/`pause()` у устройств, камеры, модели, ленты [PENDING] (после 1.2, T5.3e)
   - **Module contract:** impl-only

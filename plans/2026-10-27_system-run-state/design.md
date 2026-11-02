@@ -67,9 +67,11 @@
 
 Правила таблицы. (1) Авария **не** проходит через `stopping`: `fault` сразу снимает `run_event`, ждёт `paused` и ставит
 внутренний признак `fault_stop_done`; состояние остаётся `fault` до `ack`; готовность вернулась — всё равно `fault`.
-(2) Потеря готовности в `stopping` состояние не меняет. (3) Для ожидания `paused` (STOP и авария) мёртвый процесс или
-процесс без свежего отчёта считается остановленным — ожидание не висит `run_stop_timeout_s` на нём, причина «процесс не
-жив» остаётся в `reasons`. (4) Все переходы — под одним замком держателя состояния: тик монитора (оценка готовности) и
+(2) Потеря готовности в `stopping` состояние не меняет. (3) Для ожидания `paused` (STOP и авария) остановленным считается только мёртвый процесс (`alive == False`) —
+ожидание не висит `run_stop_timeout_s` на нём, причина «процесс не жив» остаётся в `reasons`. Живой, но без свежего
+отчёта (завис) процесс ждёт `paused` до срока: срок истёк — в STOP `not_ready` + `failure` «не подтвердил остановку», в
+аварии та же причина пишется в `last_fault.reasons`, а `fault_stop_done` не ставится до подтверждения или срока;
+после срока `ack` разрешён, но причина остаётся видимой и блокирует START до следующего подтверждённого `paused`. (4) Все переходы — под одним замком держателя состояния: тик монитора (оценка готовности) и
 `message_processor` (команды) пишут состояние только через него. (5) Классы команд PM (README модуля): `status`,
 `start`, `ack` — быстрые, без ожиданий; `stop` принимается мгновенно, последовательность идёт на L-исполнителе (Task 1.4).
 (6) Автоперезапуск (§3.5): процесс с флагом вне окна `run_restart_grace_s` ведёт себя как без флага — `fault`.
@@ -206,14 +208,14 @@ restart; liveness-фолбэк там сознателен (медленный �
 
 ```
 {"state": "ready", "since": 1793000000.0,
- "start_allowed": true,
+ "start_allowed": true, "ack_allowed": false,
  "reasons": [{"node": "recog.ml_inference", "severity": "out_of_spec", "reason": "…", "source": "preflight"}],
  "last_fault": null | {"at": t, "reasons": [...], "acknowledged_at": null | t}}
 ```
 
 Кнопка ЗАПУСТИТЬ активна ⇔ `start_allowed`; «Квитировать» активна ⇔ `ack_allowed` (`state == "fault"` и `fault_stop_done`;
 в первые секунды аварии, пока идёт остановка, неактивна, подпись «идёт остановка»); неактивная показывает первую причину `failure` (ISA-101, §9.5).
-ОСТАНОВИТЬ активна ⇔ `state == "running"`. «Квитировать» активна ⇔ `state == "fault"`. Ответы команд:
+ОСТАНОВИТЬ активна ⇔ `state == "running"`. «Квитировать» активна ⇔ `ack_allowed`. Ответы команд:
 `system.run.start` → `{"success": bool, "state": ..., "error": "not_ready|already_running|stopping|fault_unacknowledged|shutting_down",
 "reasons": [...]}`; `system.run.ack` → `{"success": bool, "state": ..., "error": "no_fault|fault_stopping"}` (Task 1.7).
 
@@ -221,7 +223,7 @@ restart; liveness-фолбэк там сознателен (медленный �
 
 | сосед | что берём | что даём | конфликт |
 |---|---|---|---|
-| `lifecycle-stop-ownership` 1.10/1.11, C-60 (полоса Ф) | исполнитель L-команд (`pm-lifecycle-submit`), честный стоп | — | `process_manager_process.py`, `process_registry.py`, `process_runner.py` у Ф до merge 1.10 (C-60 — `plugins/base.py`) → Ф1 после merge 1.10 и C-60 |
+| `lifecycle-stop-ownership` 1.10/1.11, C-60 (полоса Ф) | исполнитель L-команд (`pm-lifecycle-submit`), честный стоп | — | `process_manager_process.py`, `process_registry.py`, `process_runner.py` у Ф до merge 1.10 (C-60 — `plugins/base.py`) → 1.10, 1.11 и C-60 уже влиты; Ф1 после влития C-64/C-79 (полоса Ф) |
 | C-55b (полоса С) | `PreflightFinding`, сборщик, вызов в launcher | причины `preflight` → `not_ready` | `plugins/base.py`, `plugins/manifest.py`, `system_launcher.py` у С до merge C-55b → Task 1.2, 1.6 после |
 | `gui-graceful-close` 1.4 | точка `pre_stop` (шаги «домой») | STOP переиспользует её | `process_manager_process.py`; один `pre_stop` на STOP и shutdown |
 | `robot-protocol-v2` T5.3e (Р2) | команда «домой» как шаг `pre_stop` | — | `Plugins/hub/device_hub/plugin.py` — Р2; Task 2.2 через координатора |
@@ -241,8 +243,8 @@ restart; liveness-фолбэк там сознателен (медленный �
   рестарт с флагом может уйти в `fault`; срок подбирает 2.4 по измеренному подъёму (Task 1.8).
 - Процесс робота (`device_hub`) с `run_auto_restart` встаёт в работу сам, без оператора (против В3): в рецепте 1.0 флаг
   у процессов с `device_hub` не ставится (Task 2.1).
-- `ack` в `fault` ждёт `fault_stop_done` до `run_stop_timeout_s` (10 с), если процесс завис; мёртвый процесс срок не
-  держит (правило 3 в §3.2). `ack_allowed` в §4 не даёт нажать раньше.
+- `ack` в `fault` ждёт `fault_stop_done` до `run_stop_timeout_s` (10 с), если процесс жив, но завис; мёртвый процесс
+  срок не держит (правило 3 в §3.2). `ack_allowed` в §4 не даёт нажать раньше.
 - Два потока пишут состояние (тик монитора и `message_processor`): гонки «ack с завершением аварийной остановки» и
   «start с потерей готовности» закрываются замком держателя; hazard-тесты в 1.7 (project-rules §9).
 - Превью (В2): предпосылка «плагин в `PAUSED` не получает `process()`» не проверена (§8); без неё К6 не решить.
