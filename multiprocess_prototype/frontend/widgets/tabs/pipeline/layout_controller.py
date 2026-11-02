@@ -316,6 +316,8 @@ class LayoutController:
             )
             if session is not None and new_rev is not None:
                 session.rebase(active_slug, new_rev)
+                # Запись подтверждена ревизией: залипший после конфликта флаг больше не нужен (C-30, 1.15).
+                session.mark_layout_saved()
             logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
         except RecipeConflict:
             # Рецепт изменён снаружи: тихо не затираем, окна нет (автосохранение не дёргает пользователя).

@@ -207,6 +207,13 @@ class TopologySession:
         """Автосейв раскладки не записал позиции (конфликт рецепта). ``dirty``/``diverged`` не трогает."""
         self._set(layout_unsaved=True)
 
+    def mark_layout_saved(self) -> None:
+        """Автосейв раскладки записал позиции (C-30, 1.15). Снимает только ``layout_unsaved``.
+
+        ``dirty``/``diverged`` не трогает (``mark_saved`` гасит ``dirty`` — здесь не подходит).
+        """
+        self._set(layout_unsaved=False)
+
     def reset(self) -> None:
         """Сбросить все флаги (чистый baseline). Использует composition root на старте."""
         self._set(dirty=False, diverged=False, layout_unsaved=False)
