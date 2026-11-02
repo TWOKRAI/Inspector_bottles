@@ -186,7 +186,10 @@ def test_h6_system_stop_during_rollback_sends_nothing_and_wire_stays_broken() ->
 
 def test_h7_foreign_active_write_in_window_is_not_overwritten() -> None:
     """H7: статус до вызова ``broken``; внутри ``commands_fn`` чужой поток (``ready-gate``) ставит ``active``, затем
-    отказ -> возврат прежнего ``broken`` не затирает ``active``: ``wire.status`` ``active``, ``broken_wires`` 0."""
+    отказ -> возврат прежнего ``broken`` не затирает ``active``: ``wire.status`` ``active``, ``broken_wires`` 0.
+
+    Прежний ``broken`` снимок не запоминает вовсе (фильтр в ``_wire_statuses_for``), поэтому условие «только если
+    ещё broken» в ``_restore_wire_statuses`` сторожит H7b."""
     pm = _pm_with_wire()
     pm._active_wires[WIRE_KEY]["status"] = "broken"
 
@@ -200,6 +203,40 @@ def test_h7_foreign_active_write_in_window_is_not_overwritten() -> None:
 
     assert _wire_status(pm) == "active"
     assert _published(pm).get(STATE_BROKEN_PATH) == 0
+
+
+def test_h7b_foreign_active_write_over_pending_is_not_overwritten() -> None:
+    """H7b: статус до вызова ``pending``; внутри ``commands_fn`` чужой поток ставит ``active``, затем отказ ->
+    возврат ``pending`` не затирает ``active``: ``wire.status`` ``active``.
+    Сторожит условие «только если ещё broken»."""
+    pm = _pm_with_wire()
+    pm._active_wires[WIRE_KEY]["status"] = "pending"
+
+    def commands_fn(diff_result: dict, desired: dict) -> list[dict]:
+        pm._active_wires[WIRE_KEY]["status"] = "active"
+        raise RuntimeError("BlueprintInvalid")
+
+    _set_commands_fn(pm, commands_fn)
+
+    _apply(pm)
+
+    assert _wire_status(pm) == "active"
+
+
+def test_h11_wire_without_status_is_not_written_none() -> None:
+    """H11: у провода нет ключа ``status``; отказ до команд -> ``wire.status`` ``broken`` (пометка осталась), не
+    ``None``: возвращать нечего, снимок такой провод не запоминает."""
+    pm = _pm_with_wire()
+    del pm._active_wires[WIRE_KEY]["status"]
+
+    def commands_fn(diff_result: dict, desired: dict) -> list[dict]:
+        raise RuntimeError("BlueprintInvalid")
+
+    _set_commands_fn(pm, commands_fn)
+
+    _apply(pm)
+
+    assert _wire_status(pm) == "broken", f"wire.status={_wire_status(pm)!r}"
 
 
 def test_h8_success_with_commands_keeps_broken_until_reissue() -> None:
