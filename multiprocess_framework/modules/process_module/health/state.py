@@ -373,7 +373,7 @@ class HealthState:
         """Сигнал успешной итерации loop-раннера (produce/process удались).
 
         Сбрасывает подряд-счётчик breaker и — при переходе в ``closed`` — снимает
-        деградацию, если её владелец breaker. Сайты, умеющие только report_error,
+        заявку breaker. Сайты, умеющие только report_error,
         не зовут это: их breaker восстанавливается пассивно через :meth:`poll`.
         """
         if self._breaker.record_success() == BreakerState.CLOSED:
@@ -384,13 +384,28 @@ class HealthState:
         """Пассивный шаг восстановления breaker (зовёт heartbeat каждый такт).
 
         Любой переход breaker меняет публикуемое поле ``health.breaker`` → поднимаем
-        dirty; закрытие снимает breaker-owned деградацию.
+        dirty; закрытие снимает заявку breaker. Такт без перехода снимает заявку breaker,
+        которую гонка оставила при закрытом breaker (ADR-PM-058).
         """
         transition = self._breaker.poll()
         if transition is None:
+            self._release_stale_breaker_claim()
             return
         self._mark_dirty()
         if transition == BreakerState.CLOSED:
+            self._clear_breaker_degraded()
+
+    def _release_stale_breaker_claim(self) -> None:
+        """Снять заявку breaker при закрытом breaker; без заявки ничего не пишет.
+
+        ``record_success`` между возвратом ``record_failure`` и ``set_status`` оставляет
+        заявку при ``closed``, и чужой ``ok`` её не снимает. Проверка заявки нужна и для
+        холостого такта: иначе ``set_status(OK, None)`` стёр бы текст ``ok("текст")``.
+        Заявка читается раньше состояния: открытие breaker всегда идёт раньше заявки.
+        """
+        with self._lock:
+            has_claim = _BREAKER_OWNER in self._claims
+        if has_claim and self._breaker.state == BreakerState.CLOSED:
             self._clear_breaker_degraded()
 
     def _mark_dirty(self) -> None:
