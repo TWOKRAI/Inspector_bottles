@@ -118,7 +118,11 @@ def test_file_foundation_process_stays_when_editor_lacks_it() -> None:
 
 @pytest.mark.parametrize("devices_flag", [False, True])
 def test_protected_flag_is_not_read_by_the_rule(devices_flag: bool) -> None:
-    """Флаг ``protected`` правило не читает: процесс редактора с флагом, не из foundation, пишется как обычный."""
+    """Флаг ``protected`` правило не читает: процесс редактора с флагом, не из foundation, пишется как обычный.
+
+    ``foundation`` непуст: при пустом правило no-op и тест не отличил бы чтение флага от его отсутствия
+    (K2 инъекций 1.14b). Файловый ``devices`` — фундамент по имени (с флагом или без), встаёт после ``gui``.
+    """
     store = _Store(_raw(devices_flag))
     topology = _topology(
         {"process_name": "gui", "plugins": [], "protected": True},
@@ -126,9 +130,9 @@ def test_protected_flag_is_not_read_by_the_rule(devices_flag: bool) -> None:
         {"process_name": "a", "plugins": []},
     )
 
-    save_editor_topology_to_recipe(store, "cup", topology, foundation=frozenset())
+    save_editor_topology_to_recipe(store, "cup", topology, foundation=_FOUNDATION)
 
-    assert _names(store.saved[0]) == ["gui", "probe", "a"]
+    assert _names(store.saved[0]) == ["gui", "devices", "probe", "a"]
 
 
 def test_empty_foundation_leaves_topology_untouched() -> None:
