@@ -47,7 +47,7 @@ conflicts = [m for m in msgs if "перекрывает" in m]
 - **`test_nan_against_number_is_conflict`** — `source_target_fps=30.0`, `extras` NaN: ровно 1, текст дословно `ProcessConfig[pc]: typed-поле 'source_target_fps'=30.0 перекрывает extras['source_target_fps']=nan (typed-приоритет).`; и обратный случай: typed NaN, `extras` 30.0: ровно 1.
 - **`test_list_against_tuple_stays_conflict`** — `chain_targets=["a"]`, `extras` `("a",)`: ровно 1.
 - **`test_equal_values_no_warning`** — parametrize: `source_target_fps` 30.0/30.0; `io_peek` `{"a":1}`/`{"a":1.0}`; `stop_window_s` 1/`True`; `chain_targets` `["a"]`/`["a"]`: 0.
-- **`test_typed_value_wins_and_nan_passes_through`** — `source_target_fps=n1`, `extras` `n2`: `as_generic_config()` не бросает, значение `source_target_fps` в результате — NaN (`math.isnan`).
+- **`test_typed_value_wins`** — `source_target_fps=30.0`, `extras` `40.0`: `as_generic_config().source_target_fps == 30.0`; WARNING с «перекрывает» ровно 1.
 
 Команда (cwd и `PYTHONPATH` — корень worktree, основной `.venv`, без `uv sync`):
 `bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" light inspector-bottles-5e
@@ -58,6 +58,6 @@ Python subprocess с `"bash"` уходит в WSL: при необходимос
 ## Запрещено читать
 
 `plans/lifecycle-stop-ownership/tasks/C-79*.md` (кроме этой выжимки), строку C-79 в `plans/queue/defects.md`,
-`plans/lifecycle-stop-ownership/tasks/T1.11_tests.md`; реализацию: тело `as_generic_config` и окружение в
+`plans/lifecycle-stop-ownership/tasks/T1.11_tests.md`, `docs/reports/2026-10-28_lifecycle-stop-ownership_1.11.md`, `docs/handoffs/2026-10-28_Ф-T1.11-merged.md`; реализацию: тело `as_generic_config` и окружение в
 `multiprocess_framework/modules/process_manager_module/topology/blueprint.py`. Можно: объявления полей `ProcessConfig` в том же файле, `process_module/tests/test_blueprint_extras.py`.
 Не коммитить, не пушить.

@@ -38,7 +38,7 @@ state `system.health.broken_wires` и `system.wires.<key>.status`.
 - **R3 `test_exception_in_apply_rollback_reissues_wire`** — исключение. Те же ожидания, что R2. На main красный: то же.
 - **R4 `test_no_changes_wire_stays_active`** — изменений нет. Ждём: `success` True, `applied` 0; `active`, 0, `active`; `wire.configure` — 0. На main красный: `broken`, 1.
 - **R5 `test_refused_before_commands_keeps_pending_status`** — вход: статус провода перед вызовом задан тестом `pending` (`pm._active_wires["cam->proc"]["status"] = "pending"`), отказ до команд. Ждём: `wire.status` `pending`, `broken_wires` 0. На main красный: `broken`.
-- **R6 `test_real_child_rollback_wire_returns`** — настоящие процессы: обвязка `running_rig`/`StopRig` из `tests/test_per_child_stop_window_acceptance.py:185-400`, команды `wire.setup` (`transport` `direct`), `topology.apply` с рецептом, в котором второй процесс задан непригодным классом, затем `wire.status`. Ждём: ответ `topology.apply` — `success` False; `wire.status` = `active` при опросе до 10,0 с. На main красный: `broken` на дедлайне. Вызов — в daemon-потоке с `join` и дедлайном. **Если обвязка не даёт такого входа — стоп и вопрос лиду, тест не подменять.**
+- **R6 `test_real_child_rollback_wire_returns`** — настоящие процессы: обвязка `running_rig`/`StopRig` из `tests/test_per_child_stop_window_acceptance.py:185-400`, команды `wire.setup` (`transport` `direct`); перед `topology.apply`: `rig.pm._topology_manager.configure(create_process_fn=<обёртка над rig.pm._topology_create, бросает на 2-м вызове>)` (шов как в R10 `tests/test_lifecycle_fifo_acceptance.py`); затем `wire.status`. Непригодный класс в рецепте откат не вызывает: ответ будет `success` True. Ждём: ответ `topology.apply` — `success` False, `rolled_back` True; `wire.status` = `active` при опросе до 10,0 с. На main красный: `broken` во всех опросах. Вызов — в daemon-потоке с `join` и дедлайном.
 
 Стражи (зелёные до и после):
 
@@ -55,6 +55,6 @@ Python subprocess с `"bash"` уходит в WSL: при необходимос
 ## Запрещено читать
 
 `plans/lifecycle-stop-ownership/tasks/C-64*.md` (кроме этой выжимки), `plans/lifecycle-stop-ownership/reports/C-64*`,
-строку C-64 в `plans/queue/defects.md`; реализацию: `process_manager_module/process/process_manager_process.py`,
+строку C-64 в `plans/queue/defects.md`, `docs/reports/2026-10-27_word-layout_C-5x.md`, `docs/handoffs/2026-11-01_Ф-C60-merged.md`, `plans/word-layout/tasks/C-55b.md`; реализацию: `process_manager_module/process/process_manager_process.py`,
 `process_manager_module/process/topology_manager.py`. Можно: `process_manager_module/tests/**`, `process_manager_module/README.md`, ADR-PMM-012 в `process_manager_module/DECISIONS.md`.
 Не коммитить, не пушить.
