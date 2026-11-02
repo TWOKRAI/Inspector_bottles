@@ -117,9 +117,9 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.13: Save редактора отказывает на привязках дисплеев без определения (`RecipeValidationError`); находка 1 ревью 1.11/1.12 [DONE] (`ede3bf90e`, `9a1e87af9`; отчёт `docs/reviews/2026-11-01_task-1.13-developer.md`) (после 1.12; поправка №10)
   - **Module contract:** impl-only
-- Task 1.14: Save редактора владеет только непротектед-процессами (protected из файла — как в файле и на месте; из сессии — не пишутся); `RecipeConflict` раньше `RecipeValidationError` [PENDING] (после 1.13; поправка №11, вердикт CTO)
+- Task 1.14: Save редактора владеет только непротектед-процессами (protected из файла — как в файле и на месте; из сессии — не пишутся); `RecipeConflict` раньше `RecipeValidationError` [DONE] (`4e533123f`; ревью APPROVED, `docs/reviews/2026-11-02_task-1.14-review.md`; поправка №11)
   - **Module contract:** impl-only
-- Task 1.14b: фундамент (правило 1.14) определяется по именам `manifest.base`, не по флагу `protected`; закрывает F2 ревью 1.14 [PENDING] (после 1.14; поправка №12, вердикт CTO F2)
+- Task 1.14b: фундамент (правило 1.14) определяется по именам `manifest.base`, не по флагу `protected`; закрывает F2 ревью 1.14 [DONE] (`5bdf8a2d8`, `96d1b689b`; ревью APPROVED, `docs/reviews/2026-11-02_task-1.14b-review.md`; поправка №12, вердикт CTO F2)
   - **Module contract:** impl-only
 - Task 1.10: Камера пишет параметры в модель редактора (`SetPluginConfig`, форма `config:`) и сохраняет общим Save [PENDING] (после 1.14; DESIGN пересмотрен, поправка №11)
   - **Module contract:** impl-only
