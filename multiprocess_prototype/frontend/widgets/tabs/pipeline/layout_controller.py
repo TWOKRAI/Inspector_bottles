@@ -474,6 +474,7 @@ class LayoutController:
                 gui_positions=gui_positions,
                 locked_nodes=sorted(self._locked_nodes),
                 expected_rev=session.base_rev_for(active_slug) if session is not None else None,
+                foundation=session.foundation_names if session is not None else frozenset(),
             )
             if session is not None:
                 session.rebase(active_slug, new_rev)

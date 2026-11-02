@@ -31,8 +31,6 @@ _CONFLICT_TEXT = "Рецепт изменён снаружи — перезаг�
 # Строка ``priority: high`` процесса camera_0 в LF-копии фикстуры A (1-based).
 _CAMERA_0_PRIORITY_LINE = 149
 
-# ``gui`` с ``protected: true`` — фундамент: Save его не пишет (Task 1.14), но ``chain_targets`` процессов A
-# адресуют ``gui``, и без него в файле B проверка топологии отказала бы.
 _B_RECIPE = (
     "name: b_recipe\n"
     "version: 3\n"
@@ -41,8 +39,6 @@ _B_RECIPE = (
     "  name: default\n"
     "  description: ''\n"
     "  processes:\n"
-    "    - process_name: gui\n"
-    "      protected: true\n"
     "    - process_name: camera\n"
     "      plugins:\n"
     "        - plugin_name: capture\n"
@@ -378,6 +374,7 @@ def test_recipes_save_into_other_slug_uses_own_read_rev(tmp_path: Path) -> None:
     other = _put(tmp_path, "b_recipe", _B_RECIPE)
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
+    session.capture_foundation(["devices"])
     base_before = session.base_rev_for(_SLUG)
     session.mark_edited()
     # B без определений дисплеев: привязки A сюда не переносим (1.13 отказывает на висячих привязках)
@@ -387,6 +384,10 @@ def test_recipes_save_into_other_slug_uses_own_read_rev(tmp_path: Path) -> None:
 
     assert ok is True
     assert b"camera_0" in other.read_bytes()
+    # B не имеет ни gui, ни devices: gui (узел рецепта) переезжает вместе с графом, фундамент devices — нет (1.14b, F2).
+    names = [p["process_name"] for p in yaml.safe_load(other.read_bytes().decode("utf-8"))["blueprint"]["processes"]]
+    assert "gui" in names
+    assert "devices" not in names
     assert session.dirty is False
     assert session.base_rev_for(_SLUG) == base_before
     view.show_error.assert_not_called()
@@ -621,3 +622,36 @@ def test_load_boot_topology_broken_base_fragment_gives_no_rev(tmp_path: Path) ->
     assert rev is None
     assert len(warnings) == 1
     assert warnings[0].startswith("Не удалось загрузить topology")
+
+
+# ---------------------------------------------------------------------------
+# Task 1.14b: все три вызывающих передают имена фундамента сессии
+# ---------------------------------------------------------------------------
+
+
+def test_callers_pass_session_foundation(
+    tmp_path: Path, boxes: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1: closeEvent-, Pipeline- и Recipes-Save зовут helper с ``foundation == session.foundation_names``."""
+    import multiprocess_prototype.recipes.save as save_module
+    from multiprocess_prototype.frontend.app import _save_active_topology
+
+    _put(tmp_path, _SLUG, _fixture_a_lf())
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    session.capture_foundation(["devices", "probe_infra"])
+    calls: list[Any] = []
+
+    def spy(*args: Any, **kwargs: Any) -> str:
+        calls.append(kwargs.get("foundation", "<не передан>"))
+        return "rev-spy"
+
+    monkeypatch.setattr(save_module, "save_editor_topology_to_recipe", spy)
+    repo = _Repo(_topology_of_a())
+
+    _within(60, _save_active_topology, session, store, repo)
+    _pipeline_presenter(store, session).save_to_active_recipe(parent=None)
+    presenter, _view = _recipes_presenter(store, repo, session)
+    _within(60, presenter.on_save, _SLUG)
+
+    assert calls == [frozenset({"devices", "probe_infra"})] * 3

@@ -160,7 +160,9 @@ def _start(tmp_path: Path, src: bytes) -> tuple[Path, Any, str | None]:
 def _save(store: Any, topology: dict, **kwargs: Any) -> Any:
     from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
-    return _within(60, save_editor_topology_to_recipe, store, _SLUG, topology, **kwargs)
+    return _within(
+        60, save_editor_topology_to_recipe, store, _SLUG, topology, foundation=frozenset({"devices"}), **kwargs
+    )
 
 
 def _save_no_edit_unchanged(tmp_path: Path, src: bytes, topology: dict) -> None:

@@ -42,6 +42,7 @@ Refs: plans/2026-07-06_constructor-master/plan.md (RS-4),
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Callable
 
 
@@ -72,11 +73,16 @@ class TopologySession:
     снимают ``mark_saved`` / ``mark_activated`` / ``reset``; ``mark_edited`` и
     ``mark_applied`` его не трогают.
 
+    Четвёртое — **foundation_names** (C-30, Task 1.14b): имена процессов фундамента (фрагменты ``manifest.base``),
+    которые GUI подмешивает к рецепту при старте. Save их в рецепт не пишет. Это не флаг, а статичный набор на
+    жизнь приложения: ставит ``capture_foundation`` composition root один раз; ``mark_*``/``reset``/``rebase``
+    его не трогают, callbacks не уведомляются.
+
     Thread-safety: НЕ потокобезопасен — как и остальной editor-state, живёт на Qt
     main thread (EventBus публикует синхронно там же).
     """
 
-    __slots__ = ("_dirty", "_diverged", "_layout_unsaved", "_callbacks", "_base")
+    __slots__ = ("_dirty", "_diverged", "_layout_unsaved", "_callbacks", "_base", "_foundation_names")
 
     def __init__(self) -> None:
         self._dirty: bool = False
@@ -86,6 +92,8 @@ class TopologySession:
         # База правок редактора: (slug рецепта, rev его файла на момент загрузки в редактор).
         # None — базы нет (рецепт загружен не из каталога рецептов / активации ещё не было).
         self._base: tuple[str, str | None] | None = None
+        # Имена процессов фундамента (manifest.base); пусто — правило «Save не пишет фундамент» ничего не делает.
+        self._foundation_names: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------ #
     #  Чтение состояния                                                    #
@@ -106,6 +114,11 @@ class TopologySession:
         """Позиции узлов не сохранены: автосейв раскладки упёрся в конфликт рецепта."""
         return self._layout_unsaved
 
+    @property
+    def foundation_names(self) -> frozenset[str]:
+        """Имена процессов фундамента (``manifest.base``): Save их в рецепт не пишет."""
+        return self._foundation_names
+
     # ------------------------------------------------------------------ #
     #  База правок (C-30, Task 1.8)                                        #
     # ------------------------------------------------------------------ #
@@ -117,6 +130,10 @@ class TopologySession:
         (``RecipeActivated``). Заменяет прежнюю базу целиком.
         """
         self._base = (slug, rev)
+
+    def capture_foundation(self, names: Iterable[str]) -> None:
+        """Запомнить имена процессов фундамента (Task 1.14b). Зовёт composition root один раз на старте."""
+        self._foundation_names = frozenset(names)
 
     def base_rev_for(self, slug: str) -> str | None:
         """``rev`` базы, если она относится к ``slug``; иначе ``None`` (стор возьмёт rev своего чтения).
