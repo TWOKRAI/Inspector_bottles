@@ -81,7 +81,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 **Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
-`scripts/machine_gate.sh`, сессия `inspector-bottles-75` (полоса Д; прежняя `-d8` устарела).
+`scripts/machine_gate.sh`, сессия `inspector-bottles-c7` (полоса Д, 2026-11-06; прежние `-75`, `-d8` устарели: `-75` занято другой сессией).
 
 ## Порядок выполнения
 
@@ -140,7 +140,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 101 правка (поправка 2026-11-02: +4 к 1.4).
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; 105 правок (поправки: 2026-11-02 +4 к 1.4; 2026-11-06 +4 к 1.5, стадия 0 р1).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -165,7 +165,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.14 | 12 | `recipes/tests/test_save_protected_owner.py`, `…_extra.py` | 12/12 совпали (`docs/reviews/2026-11-02_task-1.14-injection.md`) |
 | 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
 | 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
-| 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
+| 1.5 | 14 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
 ## Открытые вопросы (владельцу)
 
