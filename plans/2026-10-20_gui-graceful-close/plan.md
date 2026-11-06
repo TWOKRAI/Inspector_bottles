@@ -57,10 +57,10 @@
 |---|---|---|
 | 0.1 | tester (sonnet), стенд heavy | ~0,3M токенов |
 | 0.2 | teamlead (opus) + reviewer (opus), стенд light/medium | ~0,4–0,5M |
-| 1.1, 1.3, 1.4 | tester (sonnet, слепой) + teamlead (opus) + reviewer (opus) на каждую | ~0,7–0,9M на задачу |
+| 1.1a, 1.1, 1.3, 1.4 | tester (sonnet, слепой) + teamlead (opus) + reviewer (opus) на каждую | ~0,7–0,9M на задачу |
 | 1.2, 2.1, 2.2, 2.4 | developer (sonnet) + reviewer (opus) | ~0,4–0,5M на задачу |
 | 2.3 | tester (sonnet) живьём + инъекции лида; стенд heavy ~1,5 ч окна | ~0,5M |
-| Итого | 11 задач (3.1 — строка в чужом плане) | ~6–7M токенов, Opus ~12 запусков (оценка по LSO 1.1–1.8) |
+| Итого | 12 задач (3.1 — строка в чужом плане) | ~6–7M токенов, Opus ~12 запусков (оценка по LSO 1.1–1.8) |
 
 ## Порядок выполнения
 
@@ -71,8 +71,10 @@
   - **Module contract:** n/a
 
 ### Ф1 — бэкенд
-- Task 1.1: **[VERTICAL SLICE]** PM отвечает во время стопа детей + крестик ждёт систему [PENDING] (после 0.1; после слияния LSO 1.9b — общий файл, порядок `lifecycle-stop-ownership.md:477`)
-  - **Module contract:** impl-only (защищённый крюк корня `_own_work_late` — внутренний)
+- Task 1.1a: PM отвечает во время стопа детей — крюк корня `_own_work_late`, `children` закрываются раньше `message_processor` [PENDING] (выделена из 1.1 по стадии 0, 2026-11-06; LSO 1.9b влит; общий файл PM — писатель один)
+  - **Module contract:** impl-only (защищённый крюк корня `_own_work_late` — контракт для наследников, строка в ADR-PM)
+- Task 1.1: **[VERTICAL SLICE]** крестик ждёт остановки системы — `CloseCoordinator`, окно хода, рестарт UI без `system.shutdown` [PENDING] (после 0.1 [DONE] и 1.1a)
+  - **Module contract:** new-lite (`frontend/shutdown/close_coordinator.py`)
 - Task 1.2: контракт хода — `system_stop`, `outcome`, `stop_deadline_at` в `supervision.status`, фаза в сторе [PENDING] (после 1.1, LSO 1.10, LSO 1.11)
   - **Module contract:** public-api-change (ответ команды PM)
 - Task 1.3: волна «последними» — GUI гаснет после всех [PENDING] (после 1.1; бюджет — поверх LSO 1.11)
@@ -95,7 +97,7 @@
   - **Module contract:** n/a
 
 Цепочки (`team-protocol` §3): 0.1 — tester(RED) → лид; 0.2 — teamlead(REDS в брифе, красный прогон до правки `src`) →
-reviewer; 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) → reviewer; 1.2, 2.1, 2.2, 2.4 — developer(REDS в брифе)
+reviewer; 1.1a, 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) → reviewer; 1.2, 2.1, 2.2, 2.4 — developer(REDS в брифе)
 → reviewer; 2.3 — tester(живой) → лид (S4); 3.1 — docs-writer → reviewer(express).
 
 Гейты: каждая задача — `pytest -q --tb=short` радиуса через `machine_gate.sh`; Ф1 — `sentrux check .` (слои);
@@ -135,3 +137,4 @@ reviewer; 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) → re
   нужен для хода) — 1.9b; `outcome` дополнен значением `handed_over` (решение CTO О1 в LSO).
 - 2026-11-02 — замеры Task 0.1 сняты частично (полоса «Оператор», inspector-bottles-40; отчёт `docs/reports/2026-11-02_system-run-state_smoke-h1h2.md`): H1 — `closeEvent` вызван 1 раз, `exec()` при `ignore()` не вернулся за 2,000 с (PySide6 6.10.3, offscreen), настоящий `MainWindow` вызвал `confirm_unsaved_changes` 1 раз; H2 — 5 из 5 `Process 'gui' did not stop in 5.2–5.5s, terminating`, команда → выход PM 5,34–5,64 с; базовая линия — строка `gui` «взведён общий system_stop_event» на 13–93 мс раньше `Stop signal received` PM (5 из 5). **Не измерено:** exitcode `gui` (PM его не пишет), метка выхода детей в журнале PM, живость PID детей в H2/БЛ. Статус 0.1 остаётся [PENDING] до закрытия этих трёх пунктов.
 - 2026-11-06 — Task 0.1 закрыта (полоса «Оператор»). Цель задачи — «две гипотезы подтверждены или сняты тестом с числами» — выполнена: H1 (`closeEvent` 1 раз, `exec()` при `ignore()` не вернулся за 2,000 с) и H2 (5 из 5 `did not stop in`, команда → выход PM 5,34–5,64 с). Три пункта из 11-02 не закрывались в этой задаче, потому что их нечем измерить без правки кода, а обход (`tasklist`, последняя строка лога ребёнка) дал ненадёжные числа (PID переиспользуются, 3,5 с на вызов): (а) exitcode `gui` и метка выхода детей — PM их не пишет, заявка к полосе Ф (правка PM, fix forward), потребитель — Task 2.3 шаг 2; (б) живость PID — зонд `probe_gui_close_order_live.py` с проверкой «PID + имя образа» переезжает в Task 1.1 (первое место, где он нужен для «окно скрыто позже выхода каждого ребёнка», 5 из 5), 2.3 берёт зонд оттуда; (в) автостарт источников без START — проверка в system-run-state на стенде с `line_sim`. Базовая линия «как сейчас» — H2 и 2 из 3 прогонов крестика (`docs/reports/2026-11-02_gui-graceful-close_0.1-tails.md`): окно и 9–10 детей уходят к 3,4–4,8 с, PM — к 6,1 с.
+- 2026-11-06 — стадия 0 Task 1.1 (reviewer sonnet, раунд 1 — CHANGES REQUESTED, 13 пунктов; отчёт `docs/reports/2026-11-06_gui-graceful-close_1.1_stage0-review.md`). Решение лида: 1.1 разрезана на 1.1a (framework: `_own_work_late`, PM отвечает) и 1.1 (prototype: координатор закрытия) — два слоя, два набора правил, горячий файл PM уходит в `main` малым коммитом; номер 1.1 и метка `[VERTICAL SLICE]` остаются у среза, чтобы не ломать ссылки в 1.2, 1.3, system-run-state. `summary` остаётся в `_own_work` (меняется только место `children`). Рестарт UI не гасит бэкенд. Порог «окно скрыто ≤ 3,0 с» снят: база 3,4–4,8 с, порог — по замеру `main`. Раунд 2 ревью — тем же агентом.
