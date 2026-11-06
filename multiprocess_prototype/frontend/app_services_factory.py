@@ -91,6 +91,8 @@ class AppServicesDeps:
     config: dict = field(default_factory=dict)
     recipe_manager: Any = None
     auth_state: "AuthState | None" = None
+    # C-30 (Task 1.11): TopologySession — база правок; Дисплеи пишут рецепт с её базой.
+    topology_session: Any = None
 
 
 def build_app_services(deps: AppServicesDeps) -> AppServices:
@@ -146,6 +148,7 @@ def build_app_services(deps: AppServicesDeps) -> AppServices:
     displays = DisplayCatalogFromRecipe(
         recipe_store=recipes,
         get_active_slug=recipes.get_active,
+        session=deps.topology_session,
     )
 
     # ServiceManager: read + lifecycle управление сервисами

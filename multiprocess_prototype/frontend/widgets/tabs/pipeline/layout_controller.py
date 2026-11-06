@@ -316,10 +316,15 @@ class LayoutController:
             )
             if session is not None and new_rev is not None:
                 session.rebase(active_slug, new_rev)
+                # Запись подтверждена ревизией: залипший после конфликта флаг больше не нужен (C-30, 1.15).
+                session.mark_layout_saved()
             logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
         except RecipeConflict:
             # Рецепт изменён снаружи: тихо не затираем, окна нет (автосохранение не дёргает пользователя).
             logger.warning("%s (рецепт '%s')", _CONFLICT_MESSAGE, active_slug)
+            # Не тихо до конца: сессия запомнит «позиции не сохранены» — диалог закрытия спросит (C-30, 1.12).
+            if session is not None:
+                session.mark_layout_unsaved()
         except Exception:
             logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
 
@@ -471,6 +476,7 @@ class LayoutController:
                 gui_positions=gui_positions,
                 locked_nodes=sorted(self._locked_nodes),
                 expected_rev=session.base_rev_for(active_slug) if session is not None else None,
+                foundation=session.foundation_names if session is not None else frozenset(),
             )
             if session is not None:
                 session.rebase(active_slug, new_rev)

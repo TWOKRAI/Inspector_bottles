@@ -137,3 +137,7 @@ class RuntimeDeps(FrameworkRuntime):
     # владение и частота — здесь, в runtime-слое (ADR-136). None → опроса нет,
     # вкладка работает на одном push (полный откат к поведению до 3.3).
     telemetry_poller: Any = None
+    # Общий Save активной топологии в рецепт (тот же путь, что у Pipeline-Save): callable() -> bool,
+    # конфликт с внешней правкой файла = RuntimeError. Нужен Camera Save (Task 1.10). None → Save камеры
+    # недоступен (вкладка показывает «Не удалось сохранить»). Заполняется в app.py (composition root).
+    save_active_topology: "Callable[[], bool] | None" = None

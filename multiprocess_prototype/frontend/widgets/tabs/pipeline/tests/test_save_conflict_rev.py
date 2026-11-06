@@ -28,8 +28,8 @@ _SLUG = "letter_robot_sim"
 _OLD_MTIME_NS = 1_700_000_000_000_000_000
 _CONFLICT_TEXT = "Рецепт изменён снаружи — перезагрузите его"
 
-# Строка ``protected: false`` процесса camera_0 в LF-копии фикстуры A (1-based).
-_CAMERA_0_PROTECTED_LINE = 154
+# Строка ``priority: high`` процесса camera_0 в LF-копии фикстуры A (1-based).
+_CAMERA_0_PRIORITY_LINE = 149
 
 _B_RECIPE = (
     "name: b_recipe\n"
@@ -147,8 +147,9 @@ def _topology_of_a() -> dict:
     return Topology.from_dict(blueprint).to_dict()
 
 
-def _set_protected(topology: dict, value: bool) -> dict:
-    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["protected"] = value
+def _set_priority(topology: dict, value: str) -> dict:
+    """Правка редактора: ``camera_0.priority`` (``protected`` Save не пишет — правило Task 1.14)."""
+    next(p for p in topology["processes"] if p["process_name"] == "camera_0")["priority"] = value
     return topology
 
 
@@ -290,7 +291,7 @@ def test_recipes_save_after_hand_edit_conflict_bytes_intact(tmp_path: Path) -> N
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    presenter, view = _recipes_presenter(store, _Repo(_set_protected(_topology_of_a(), True)), session)
+    presenter, view = _recipes_presenter(store, _Repo(_set_priority(_topology_of_a(), "normal")), session)
     hand_edited = _hand_edited(src)
     path.write_bytes(hand_edited)
 
@@ -340,23 +341,23 @@ def test_save_then_save_again_uses_returned_rev(tmp_path: Path) -> None:
     """Два Recipes Save подряд без внешних правок: оба проходят, второй возвращает файл к исходным байтам."""
     src = _fixture_a_lf()
     lines = src.split(b"\n")
-    assert lines[_CAMERA_0_PROTECTED_LINE - 1] == b"      protected: false"
-    protected_true = b"\n".join(
-        [*lines[: _CAMERA_0_PROTECTED_LINE - 1], b"      protected: true", *lines[_CAMERA_0_PROTECTED_LINE:]]
+    assert lines[_CAMERA_0_PRIORITY_LINE - 1] == b"      priority: high"
+    priority_normal = b"\n".join(
+        [*lines[: _CAMERA_0_PRIORITY_LINE - 1], b"      priority: normal", *lines[_CAMERA_0_PRIORITY_LINE:]]
     )
     path = _put(tmp_path, _SLUG, src)
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
     presenter, view = _recipes_presenter(store, repo, session)
 
     first = _within(60, presenter.on_save, _SLUG)
     after_first = path.read_bytes()
-    repo.topology = _set_protected(_topology_of_a(), False)
+    repo.topology = _set_priority(_topology_of_a(), "high")
     second = _within(60, presenter.on_save, _SLUG)
 
     assert first is True
-    assert after_first == protected_true
+    assert after_first == priority_normal
     assert second is True
     assert path.read_bytes() == src
     view.show_error.assert_not_called()
@@ -373,14 +374,20 @@ def test_recipes_save_into_other_slug_uses_own_read_rev(tmp_path: Path) -> None:
     other = _put(tmp_path, "b_recipe", _B_RECIPE)
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
+    session.capture_foundation(["devices"])
     base_before = session.base_rev_for(_SLUG)
     session.mark_edited()
-    presenter, view = _recipes_presenter(store, _Repo(_topology_of_a()), session)
+    # B без определений дисплеев: привязки A сюда не переносим (1.13 отказывает на висячих привязках)
+    presenter, view = _recipes_presenter(store, _Repo({**_topology_of_a(), "displays": []}), session)
 
     ok = _within(60, presenter.on_save, "b_recipe")
 
     assert ok is True
     assert b"camera_0" in other.read_bytes()
+    # B не имеет ни gui, ни devices: gui (узел рецепта) переезжает вместе с графом, фундамент devices — нет (1.14b, F2).
+    names = [p["process_name"] for p in yaml.safe_load(other.read_bytes().decode("utf-8"))["blueprint"]["processes"]]
+    assert "gui" in names
+    assert "devices" not in names
     assert session.dirty is False
     assert session.base_rev_for(_SLUG) == base_before
     view.show_error.assert_not_called()
@@ -469,7 +476,7 @@ def test_close_save_after_hand_edit_runtime_error_bytes_intact(tmp_path: Path) -
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
     hand_edited = _hand_edited(src)
     path.write_bytes(hand_edited)
 
@@ -490,7 +497,7 @@ def test_close_save_without_edit_succeeds_and_rebases(tmp_path: Path) -> None:
     store = _build_store(tmp_path, _SLUG)
     session = _session_with_base(store, _SLUG)
     session.mark_edited()
-    repo = _Repo(_set_protected(_topology_of_a(), True))
+    repo = _Repo(_set_priority(_topology_of_a(), "normal"))
 
     ok = _within(60, _save_active_topology, session, store, repo)
 
@@ -615,3 +622,36 @@ def test_load_boot_topology_broken_base_fragment_gives_no_rev(tmp_path: Path) ->
     assert rev is None
     assert len(warnings) == 1
     assert warnings[0].startswith("Не удалось загрузить topology")
+
+
+# ---------------------------------------------------------------------------
+# Task 1.14b: все три вызывающих передают имена фундамента сессии
+# ---------------------------------------------------------------------------
+
+
+def test_callers_pass_session_foundation(
+    tmp_path: Path, boxes: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1: closeEvent-, Pipeline- и Recipes-Save зовут helper с ``foundation == session.foundation_names``."""
+    import multiprocess_prototype.recipes.save as save_module
+    from multiprocess_prototype.frontend.app import _save_active_topology
+
+    _put(tmp_path, _SLUG, _fixture_a_lf())
+    store = _build_store(tmp_path, _SLUG)
+    session = _session_with_base(store, _SLUG)
+    session.capture_foundation(["devices", "probe_infra"])
+    calls: list[Any] = []
+
+    def spy(*args: Any, **kwargs: Any) -> str:
+        calls.append(kwargs.get("foundation", "<не передан>"))
+        return "rev-spy"
+
+    monkeypatch.setattr(save_module, "save_editor_topology_to_recipe", spy)
+    repo = _Repo(_topology_of_a())
+
+    _within(60, _save_active_topology, session, store, repo)
+    _pipeline_presenter(store, session).save_to_active_recipe(parent=None)
+    presenter, _view = _recipes_presenter(store, repo, session)
+    _within(60, presenter.on_save, _SLUG)
+
+    assert calls == [frozenset({"devices", "probe_infra"})] * 3

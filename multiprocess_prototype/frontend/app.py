@@ -78,6 +78,31 @@ def _load_boot_topology(manifest: Any, warn: "Callable[[str], None]") -> tuple[d
     return topology, rev
 
 
+def _foundation_names(manifest: Any, warn: "Callable[[str], None] | None" = None) -> frozenset[str]:
+    """Имена процессов фундамента (фрагменты ``manifest.base``): Save их в рецепт не пишет (C-30, Task 1.14b).
+
+    Читает те же фрагменты тем же способом, что слияние в :func:`_load_boot_topology` (``unwrap_recipe``);
+    берутся только строковые ``process_name``. Сбой чтения фрагмента -> ``frozenset()`` и предупреждение
+    (``warn``; по умолчанию — лог модуля), как у слияния: без имён правило Save ничего не делает.
+    """
+    import yaml
+
+    names: set[str] = set()
+    try:
+        from multiprocess_prototype.backend.launch import unwrap_recipe
+
+        for fragment in manifest.base:
+            base_dict = unwrap_recipe(yaml.safe_load(fragment.read_text(encoding="utf-8")) or {})
+            for proc in base_dict.get("processes") or []:
+                name = proc.get("process_name") if isinstance(proc, dict) else None
+                if isinstance(name, str):
+                    names.add(name)
+    except Exception as e:
+        (warn or _log.warning)(f"Не удалось прочитать имена фундамента: {e}")
+        return frozenset()
+    return frozenset(names)
+
+
 def _make_recipe_activated_handler(session: "TopologySession", recipes: Any) -> "Callable[[Any], None]":
     """Обработчик ``RecipeActivated``: новый baseline сессии + база правок = rev файла активированного рецепта.
 
@@ -117,7 +142,9 @@ def _save_active_topology(session: "TopologySession", recipes: Any, topology_rep
         return False
     topo = topology_repo.load().to_dict()
     try:
-        new_rev = save_editor_topology_to_recipe(recipes, slug, topo, expected_rev=session.base_rev_for(slug))
+        new_rev = save_editor_topology_to_recipe(
+            recipes, slug, topo, expected_rev=session.base_rev_for(slug), foundation=session.foundation_names
+        )
     except RecipeConflict:
         raise RuntimeError("Рецепт изменён снаружи — перезагрузите его") from None
     session.rebase(slug, new_rev)
@@ -754,6 +781,11 @@ def run_gui(process: "GuiProcess") -> None:
     # AppServicesDeps из локалов run_gui() (не ctx.extras) — coupling factory→AppContext снят.
     # Failure = sys.exit(1) с понятным логом (аналог startup-checks).
     from .app_services_factory import build_app_services, AppServicesDeps
+    from multiprocess_prototype.domain import TopologySession
+
+    # C-30 (Task 1.11): сессия создаётся ДО deps — один объект идёт и в AppServices
+    # (Дисплеи пишут рецепт с её базой), и во вкладки (RuntimeDeps ниже).
+    topology_session = TopologySession()
 
     _services_deps = AppServicesDeps(
         event_bus=event_bus,
@@ -765,6 +797,7 @@ def run_gui(process: "GuiProcess") -> None:
         config={},
         recipe_manager=_recipe_manager,
         auth_state=_auth_state,
+        topology_session=topology_session,
     )
 
     try:
@@ -796,14 +829,16 @@ def run_gui(process: "GuiProcess") -> None:
     # из файла и стартовая load_topology_from_config идут МИМО store (не публикуют
     # TopologyReplaced) — поэтому старт остаётся чистым, а load-from-file презентер
     # помечает сам. ADR-PMM-014 (fencing-token топологии) сюда не относится (это редактор, не IPC).
-    from multiprocess_prototype.domain import TopologySession
     from multiprocess_prototype.domain.events import RecipeActivated as _RecipeActivated
 
-    topology_session = TopologySession()
     # C-30 (Task 1.8): база правок редактора. Со старта — rev единственного чтения рецепта (выше);
     # на активации — rev файла активированного рецепта (второе чтение после Project._apply_activate_recipe:
     # окно между записью проекта и этим чтением остаётся, design.md §7, Р6).
     _capture_boot_base(topology_session, _manifest.pipeline, _recipes_dir, _boot_rev)
+    # C-30 (Task 1.14b): имена фундамента (manifest.base) — Save их в рецепт не пишет.
+    topology_session.capture_foundation(
+        _foundation_names(_manifest, lambda msg: process._log_warning(msg, module="startup"))
+    )
 
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_session.mark_edited())
     event_bus.subscribe(_RecipeActivated, _make_recipe_activated_handler(topology_session, app_services.recipes))
@@ -962,6 +997,7 @@ def run_gui(process: "GuiProcess") -> None:
         topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
         telemetry=telemetry_view_model,  # Ф1: локальный read-model телеметрии
         telemetry_poller=telemetry_poller,  # Task 3.3: опрос уровней по видимости вкладки
+        save_active_topology=_save_active_topology_cb,  # Task 1.10: Camera Save через общий Save
     )
 
     tab_factory = TabFactory(

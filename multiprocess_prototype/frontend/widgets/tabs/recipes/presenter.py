@@ -603,6 +603,7 @@ class RecipesPresenter:
                 target_slug,
                 topo,
                 expected_rev=session.base_rev_for(target_slug) if session is not None else None,
+                foundation=session.foundation_names if session is not None else frozenset(),
             )
             # RS-4: граф записан в рецепт-файл → снять dirty (diverged держится, если был:
             # запись в файл живую систему не тронула).

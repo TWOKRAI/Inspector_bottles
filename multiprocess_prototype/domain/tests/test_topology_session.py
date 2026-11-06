@@ -108,3 +108,21 @@ def test_reset_clears_both_and_notifies() -> None:
     s.reset()
     assert s.dirty is False and s.diverged is False
     assert seen == [(False, False)]
+
+
+# --- фундамент (C-30, Task 1.14b): имена процессов manifest.base ---
+
+
+def test_session_foundation_names_default_empty_and_captured() -> None:
+    """По умолчанию пусто; ``capture_foundation`` хранит frozenset; ``reset``/``mark_saved`` имён не трогают."""
+    s = TopologySession()
+    assert s.foundation_names == frozenset()
+
+    s.capture_foundation(["devices"])
+
+    assert s.foundation_names == frozenset({"devices"})
+    assert isinstance(s.foundation_names, frozenset)
+    s.mark_edited()
+    s.mark_saved()
+    s.reset()
+    assert s.foundation_names == frozenset({"devices"})

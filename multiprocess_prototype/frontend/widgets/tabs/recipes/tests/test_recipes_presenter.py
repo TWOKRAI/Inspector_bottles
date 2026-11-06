@@ -575,7 +575,8 @@ def test_on_save_persists_topology(mock_view: MagicMock) -> None:
     RS-1: источник — ``TopologyRepository.load() -> Topology`` (реальная entity), on_save
     берёт ``.to_dict()``. Проверяет round-trip processes/wires/displays через реальный контракт.
     """
-    store = _make_store(slugs=["cup"])
+    # Привязка ``main`` требует определения дисплея в рецепте (проверка ссылок, Task 1.13).
+    store = FakeRecipeStore(raw={"cup": {**_make_recipe_raw("cup"), "displays": [{"id": "main"}]}})
     topology_store = _make_topology_store(
         {
             "processes": [{"process_name": "p1", "plugins": []}],

@@ -281,7 +281,11 @@ class DisplaysPresenter:
         Args:
             display_id: id дисплея для удаления.
         """
-        removed = self._store.unregister(display_id)
+        try:
+            removed = self._store.unregister(display_id)
+        except ValueError as exc:  # рецепт изменён снаружи (C-30)
+            self._view.show_error(str(exc))
+            return
         if not removed:
             logger.warning("DisplaysPresenter: дисплей '%s' не найден для удаления", display_id)
             return
@@ -370,7 +374,13 @@ class DisplaysPresenter:
         from dataclasses import replace
 
         new_spec = replace(spec, enabled=enabled)
-        ok = update(new_spec)
+        try:
+            ok = update(new_spec)
+        except ValueError as exc:  # рецепт изменён снаружи (C-30)
+            self._view.show_error(str(exc))
+            # Вернуть форму/чекбокс к состоянию рецепта: запись не прошла, UI уже показывает новое.
+            self._view.show_entry(self._store.resolve(display_id))
+            return
         if not ok:
             logger.warning("DisplaysPresenter: update enabled для '%s' не прошёл", display_id)
             return

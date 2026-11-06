@@ -69,7 +69,7 @@ teamlead сверх 1.1a/1.1h — только эскалация. Пересч�
 ## Конвейер (`.claude/CLAUDE.md` «Task launch convention»)
 
 стадия 0 reviewer → слепой тестер (один раз на механизм, worktree на коммите до реализации) → исполнители по одному,
-режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.10 → 1.4 → 1.5 → инъекции лида (блок
+режим A: 1.1a → 1.6 → 1.1b → 1.1h → 1.1e → 1.1f → 1.1i → 1.1g → 1.7 → 1.1c → 1.2 → 1.8 → 1.9 → 1.11 → 1.12 → 1.13 → 1.14 → 1.14b → 1.10 → 1.4 → 1.5 → инъекции лида (блок
 INJECT задач) → стадия 5 reviewer на задачу → tech-writer 1.3 → ревью ветки (Opus) перед merge. Лимит — 2 итерации на
 цикл, третья → `teamlead`, затем `cto`. Порядок 1.1g → 1.7 → 1.1c: стор пишется один раз против финального Protocol.
 
@@ -81,7 +81,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 **Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
-`scripts/machine_gate.sh`, сессия `inspector-bottles-d8`.
+`scripts/machine_gate.sh`, сессия `inspector-bottles-75` (полоса Д; прежняя `-d8` устарела).
 
 ## Порядок выполнения
 
@@ -115,7 +115,18 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.9: Устройства читают `read_canonical`, пишут с базой `TopologySession` и двигают её (вердикт CTO по F1); локальные фейки вкладки [DONE] (после 1.8; `e8a61ecfe`, `4584c8b45`; отчёт `docs/reports/2026-10-27_task-1.9_C-30.md`)
   - **Module contract:** impl-only
-- Task 1.10: Камера читает `read_canonical`, пишет с `rev`; конфликт виден в логе [PENDING] (после 1.9)
+- Task 1.13: Save редактора отказывает на привязках дисплеев без определения (`RecipeValidationError`); находка 1 ревью 1.11/1.12 [DONE] (`ede3bf90e`, `9a1e87af9`; отчёт `docs/reviews/2026-11-01_task-1.13-developer.md`) (после 1.12; поправка №10)
+  - **Module contract:** impl-only
+- Task 1.14: Save редактора владеет только непротектед-процессами (protected из файла — как в файле и на месте; из сессии — не пишутся); `RecipeConflict` раньше `RecipeValidationError` [DONE] (`4e533123f`; ревью APPROVED, `docs/reviews/2026-11-02_task-1.14-review.md`; поправка №11)
+  - **Module contract:** impl-only
+- Task 1.14b: фундамент (правило 1.14) определяется по именам `manifest.base`, не по флагу `protected`; закрывает F2 ревью 1.14 [DONE] (`5bdf8a2d8`, `96d1b689b`; ревью APPROVED, `docs/reviews/2026-11-02_task-1.14b-review.md`; поправка №12, вердикт CTO F2)
+  - **Module contract:** impl-only
+- Task 1.10: Камера пишет параметры в модель редактора (`SetPluginConfig`, форма `config:`) и сохраняет общим Save [DONE] (после 1.14; DESIGN пересмотрен, поправка №11; ревью APPROVED 2026-11-02)
+- Task 1.15: успешный автосейв раскладки снимает залипший `layout_unsaved` (`TopologySession.mark_layout_saved`; решение владельца 2026-11-02, находка 3 ревью 1.12) [DONE] (после 1.12; ревью APPROVED 2026-11-02)
+  - **Module contract:** impl-only
+- Task 1.11: Дисплеи (`register`/`update`, `unregister` без привязок) пишут с базой `TopologySession` и двигают её; конфликт — `ValueError` с текстом, презентер показывает [DONE] (`9e94f1245`, `f6726317e`; отчёт `docs/reviews/2026-10-28_task-1.11-developer.md`) (после 1.9; поправка №9)
+  - **Module contract:** impl-only
+- Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [DONE] (`59c7ce66e`; отчёт `docs/reviews/2026-10-28_task-1.12-developer.md`) (после 1.11; F2 ревью ветки)
   - **Module contract:** impl-only
 - Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [PENDING] (после 1.10)
   - **Module contract:** impl-only
@@ -129,7 +140,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 97 правок.
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; 101 правка (поправка 2026-11-02: +4 к 1.4).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -146,8 +157,14 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.2 | 8 | `recipes/tests/test_save_noise_save.py` | |
 | 1.8 | 6 | `pipeline/tests/test_save_conflict_rev.py` | |
 | 1.9 | 3 | `devices_common/tests/test_recipe_devices.py`, `domain/tests/test_fakes_contract.py` | |
-| 1.10 | 3 | `camera/tests/test_camera_presenter.py` | |
-| 1.4 | 7 | `recipe/tests/test_backend_writers_patch.py` | |
+| 1.10 | 17 | `camera/tests/test_camera_save_blind.py`, `camera/tests/test_camera_presenter.py` | 15 из 17 совпали (`docs/reviews/2026-11-02_task-1.10-injection.md`) |
+| 1.15 | 8 | `domain/tests/test_topology_session_layout_saved_blind.py`, `pipeline/tests/test_layout_saved_blind.py` | 7 из 8 совпали (`docs/reviews/2026-11-02_task-1.15-injection.md`) |
+| 1.11 | 8 | `adapters/tests/test_display_catalog_session.py`, `tabs/displays/tests/test_presenter_multidisplay.py` | |
+| 1.12 | 7 | `domain/tests/test_topology_session.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_topology_dirty_indicator.py` | |
+| 1.13 | 5 | `recipes/tests/test_save_display_refs.py` | |
+| 1.14 | 12 | `recipes/tests/test_save_protected_owner.py`, `…_extra.py` | 12/12 совпали (`docs/reviews/2026-11-02_task-1.14-injection.md`) |
+| 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
+| 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
 | 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
 ## Открытые вопросы (владельцу)
@@ -161,7 +178,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 - F3 (решение владельца 2026-10-28; отдельная задача после merge 13/17, не в C-30): слоты Устройств не ловят
   `RecipeLockTimeout` / `RecipeFormatError` / `YamlWriteRefused` — `docs/claude/OPEN_QUESTIONS.md`, `add_page.py:176`,
   `crud_actions.py:93,179`.
-- Дисплеи (`display_catalog_recipe.py`) не двигают базу сессии: `unregister` с привязками — в 2.0 (владелец 2026-10-28); `register`/`update` с базой — задачи нет; окно принято (`amendments.md` №8).
+- `unregister` Дисплеев с привязками — в 2.0 (владелец 2026-10-28); `register`/`update` с базой — Task 1.11 (поправка №9).
 - Строка C-30 в `plans/queue/defects.md`, строка 3 `ORDER.md` — лид при закрытии.
 
 ## Связи с соседними планами

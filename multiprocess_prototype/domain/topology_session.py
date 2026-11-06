@@ -42,6 +42,7 @@ Refs: plans/2026-07-06_constructor-master/plan.md (RS-4),
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Callable
 
 
@@ -63,19 +64,36 @@ class TopologySession:
     RecipeSession (целевая архитектура аудита 2026-07-12, раздел C), отложено в
     отдельную волну; TopologySession — первый, намеренно частичный шаг.
 
+    Третий флаг, **layout_unsaved** (C-30, Task 1.12), — отдельный от ``dirty``:
+    «позиции узлов не сохранены, потому что автосейв раскладки наткнулся на
+    конфликт (рецепт в файле изменён после загрузки)». ``dirty`` гасит индикаторы
+    и «несохранённое» в UI структуры; раскладка с живой системой не расходится,
+    поэтому флаг не трогает ``diverged``, индикаторы и Save-путь, а только заставляет
+    диалог закрытия/рестарта спросить пользователя. Ставит ``mark_layout_unsaved``;
+    снимают ``mark_saved`` / ``mark_activated`` / ``reset``; ``mark_edited`` и
+    ``mark_applied`` его не трогают.
+
+    Четвёртое — **foundation_names** (C-30, Task 1.14b): имена процессов фундамента (фрагменты ``manifest.base``),
+    которые GUI подмешивает к рецепту при старте. Save их в рецепт не пишет. Это не флаг, а статичный набор на
+    жизнь приложения: ставит ``capture_foundation`` composition root один раз; ``mark_*``/``reset``/``rebase``
+    его не трогают, callbacks не уведомляются.
+
     Thread-safety: НЕ потокобезопасен — как и остальной editor-state, живёт на Qt
     main thread (EventBus публикует синхронно там же).
     """
 
-    __slots__ = ("_dirty", "_diverged", "_callbacks", "_base")
+    __slots__ = ("_dirty", "_diverged", "_layout_unsaved", "_callbacks", "_base", "_foundation_names")
 
     def __init__(self) -> None:
         self._dirty: bool = False
         self._diverged: bool = False
+        self._layout_unsaved: bool = False
         self._callbacks: list[Callable[[], None]] = []
         # База правок редактора: (slug рецепта, rev его файла на момент загрузки в редактор).
         # None — базы нет (рецепт загружен не из каталога рецептов / активации ещё не было).
         self._base: tuple[str, str | None] | None = None
+        # Имена процессов фундамента (manifest.base); пусто — правило «Save не пишет фундамент» ничего не делает.
+        self._foundation_names: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------ #
     #  Чтение состояния                                                    #
@@ -91,6 +109,16 @@ class TopologySession:
         """Граф редактора расходится с живой системой (backend)."""
         return self._diverged
 
+    @property
+    def layout_unsaved(self) -> bool:
+        """Позиции узлов не сохранены: автосейв раскладки упёрся в конфликт рецепта."""
+        return self._layout_unsaved
+
+    @property
+    def foundation_names(self) -> frozenset[str]:
+        """Имена процессов фундамента (``manifest.base``): Save их в рецепт не пишет."""
+        return self._foundation_names
+
     # ------------------------------------------------------------------ #
     #  База правок (C-30, Task 1.8)                                        #
     # ------------------------------------------------------------------ #
@@ -102,6 +130,10 @@ class TopologySession:
         (``RecipeActivated``). Заменяет прежнюю базу целиком.
         """
         self._base = (slug, rev)
+
+    def capture_foundation(self, names: Iterable[str]) -> None:
+        """Запомнить имена процессов фундамента (Task 1.14b). Зовёт composition root один раз на старте."""
+        self._foundation_names = frozenset(names)
 
     def base_rev_for(self, slug: str) -> str | None:
         """``rev`` базы, если она относится к ``slug``; иначе ``None`` (стор возьмёт rev своего чтения).
@@ -156,8 +188,9 @@ class TopologySession:
         """Граф сохранён в рецепт-файл. Снимает только dirty.
 
         Живая система записью в файл не тронута — ``diverged`` держится (если был).
+        Снимает и ``layout_unsaved``.
         """
-        self._set(dirty=False)
+        self._set(dirty=False, layout_unsaved=False)
 
     def mark_applied(self) -> None:
         """Граф применён к живой системе (Apply / «Перезапустить»). Снимает diverged.
@@ -167,20 +200,40 @@ class TopologySession:
         self._set(diverged=False)
 
     def mark_activated(self) -> None:
-        """Активирован рецепт: новый baseline (файл == редактор == live). Снимает оба."""
-        self._set(dirty=False, diverged=False)
+        """Активирован рецепт: новый baseline (файл == редактор == live). Снимает все флаги."""
+        self._set(dirty=False, diverged=False, layout_unsaved=False)
+
+    def mark_layout_unsaved(self) -> None:
+        """Автосейв раскладки не записал позиции (конфликт рецепта). ``dirty``/``diverged`` не трогает."""
+        self._set(layout_unsaved=True)
+
+    def mark_layout_saved(self) -> None:
+        """Автосейв раскладки записал позиции (C-30, 1.15). Снимает только ``layout_unsaved``.
+
+        ``dirty``/``diverged`` не трогает (``mark_saved`` гасит ``dirty`` — здесь не подходит).
+        """
+        self._set(layout_unsaved=False)
 
     def reset(self) -> None:
-        """Сбросить оба флага (чистый baseline). Использует composition root на старте."""
-        self._set(dirty=False, diverged=False)
+        """Сбросить все флаги (чистый baseline). Использует composition root на старте."""
+        self._set(dirty=False, diverged=False, layout_unsaved=False)
 
     # ------------------------------------------------------------------ #
     #  Внутреннее                                                          #
     # ------------------------------------------------------------------ #
 
-    def _set(self, *, dirty: bool | None = None, diverged: bool | None = None) -> None:
+    def _set(
+        self,
+        *,
+        dirty: bool | None = None,
+        diverged: bool | None = None,
+        layout_unsaved: bool | None = None,
+    ) -> None:
         """Применить частичное обновление флагов; уведомить только при реальном изменении."""
         changed = False
+        if layout_unsaved is not None and layout_unsaved != self._layout_unsaved:
+            self._layout_unsaved = layout_unsaved
+            changed = True
         if dirty is not None and dirty != self._dirty:
             self._dirty = dirty
             changed = True

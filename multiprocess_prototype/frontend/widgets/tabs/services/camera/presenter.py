@@ -4,35 +4,57 @@
   desired — рецепт (plugin_config) + live в работающем плагине через IPC;
   actual  — state store (читает GUI-виджет через bindings, presenter не трогает).
 
-Persist: «Сохранить» пишет desired в активный рецепт (RecipeStore.read_raw/save_raw).
+Persist: «Сохранить» кладёт desired в модель редактора командами SetPluginConfig
+(PluginInstance.config камеры), затем сохраняет общим Save активной топологии (save_active).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
 
 from multiprocess_framework.modules.logger_module import get_std_logger
-from typing import Any
+from multiprocess_prototype.domain.commands import SetPluginConfig
 
 logger = get_std_logger(__name__)
 
 _PLUGIN = "camera_service"
+# Точный текст, которым _save_active_topology сообщает о конфликте с внешней правкой файла.
+_CONFLICT_TEXT = "Рецепт изменён снаружи — перезагрузите его"
+# Поля регистра CameraServiceRegisters: по команде на ключ; остальные CAP_PROP уходят в config["params"].
+_REGISTER_KEYS = ("fps", "mjpg")
 
 
 class CameraSettingsPresenter:
-    """Презентер камеры: live-команды через bridge + persist в рецепт.
+    """Презентер камеры: live-команды через bridge + persist через модель редактора и общий Save.
 
     Зависимости через DI (Protocol-совместимые duck-typed объекты):
         bridge   — TopologyBridge: on_action_command(plugin, cmd, args).
         topology — TopologyRepository: load().to_dict() для поиска процесса камеры.
-        recipes  — RecipeStore: get_active/read_raw/save_raw (persist).
+        recipes  — RecipeStore: get_active() (есть ли активный рецепт).
+        commands — CommandDispatcher: dispatch(SetPluginConfig) в модель редактора.
+        save_active — общий Save редактора (callable() -> bool; конфликт = RuntimeError).
+    Persist = SetPluginConfig в модель + save_active; файл рецепта презентер не трогает.
     Любая зависимость может быть None → соответствующая операция деградирует
     в no-op с логом (backend/recipe недоступны).
     """
 
-    def __init__(self, *, bridge: Any = None, topology: Any = None, recipes: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        bridge: Any = None,
+        topology: Any = None,
+        recipes: Any = None,
+        commands: Any = None,
+        save_active: Callable[[], bool] | None = None,
+    ) -> None:
         self._bridge = bridge
         self._topology = topology
         self._recipes = recipes
+        self._commands = commands
+        self._save_active = save_active
+        # Текст конфликта последнего save() (пусто, если конфликта не было).
+        self._last_error = ""
         # desired-параметры, накопленные в этой сессии (для persist).
         self._pending: dict[str, Any] = {}
 
@@ -86,30 +108,68 @@ class CameraSettingsPresenter:
             logger.warning("CameraSettings: команда %s провалилась: %s", command, exc)
             return False
 
-    # --- persist в рецепт ---
+    # --- persist через модель редактора ---
+
+    @property
+    def last_error(self) -> str:
+        """Текст конфликта последнего save() или "" (иные ошибки сюда не попадают)."""
+        return self._last_error
+
+    def _find_camera(self) -> tuple[str, int, dict] | None:
+        """Первый процесс с camera_service: (process_name, индекс в plugins, config плагина)."""
+        if self._topology is None:
+            return None
+        topo = self._topology.load().to_dict()
+        for proc in topo.get("processes", []):
+            for idx, p in enumerate(proc.get("plugins", [])):
+                name = p.get("plugin_name") if isinstance(p, dict) else str(p)
+                if name == _PLUGIN:
+                    config = p.get("config") if isinstance(p, dict) else None
+                    return proc.get("process_name"), idx, config if isinstance(config, dict) else {}
+        return None
 
     def save(self) -> bool:
-        """Сохранить desired-параметры в активный рецепт (plugin_config.params).
+        """Положить desired-параметры в модель редактора (SetPluginConfig) и сохранить общим Save.
+
+        fps/mjpg — по команде на ключ; остальные CAP_PROP — одна команда ``params`` со
+        значением «текущий config.params модели + pending» (слияние в backend неглубокое).
+        pending сбрасывается только после успешного save_active (при конфликте нужен для повтора).
 
         Returns:
-            True если рецепт обновлён и сохранён.
+            True если save_active вернул True. Конфликт -> False + last_error; иная ошибка -> False.
         """
-        if self._recipes is None or not self._pending:
+        self._last_error = ""
+        if self._recipes is None or self._commands is None or self._save_active is None or not self._pending:
             return False
         try:
-            slug = self._recipes.get_active()
-            if not slug:
+            if not self._recipes.get_active():
                 return False
-            raw = self._recipes.read_raw(slug)
-            if not isinstance(raw, dict):
+            found = self._find_camera()
+            if found is None:
                 return False
-            if not _merge_camera_params(raw, dict(self._pending)):
-                return False
-            self._recipes.save_raw(slug, raw)
-            return True
-        except Exception as exc:
-            logger.warning("CameraSettings: persist в рецепт провалился: %s", exc)
+            process, idx, config = found
+            pending = dict(self._pending)
+            for key in _REGISTER_KEYS:
+                if key in pending:
+                    self._commands.dispatch(SetPluginConfig(process, idx, key, pending.pop(key)))
+            if pending:
+                current = config.get("params")
+                merged = {**current, **pending} if isinstance(current, dict) else pending
+                self._commands.dispatch(SetPluginConfig(process, idx, "params", merged))
+            ok = bool(self._save_active())
+        except RuntimeError as exc:
+            if str(exc) == _CONFLICT_TEXT:
+                logger.warning("CameraSettings: %s", _CONFLICT_TEXT)
+                self._last_error = _CONFLICT_TEXT
+            else:
+                logger.warning("CameraSettings: сохранение не удалось (%s)", type(exc).__name__)
             return False
+        except Exception as exc:
+            logger.warning("CameraSettings: сохранение не удалось (%s)", type(exc).__name__)
+            return False
+        if ok:
+            self._pending.clear()
+        return ok
 
 
 def _merge_camera_params(node: Any, pending: dict[str, Any]) -> bool:
