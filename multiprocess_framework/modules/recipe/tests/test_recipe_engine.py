@@ -591,6 +591,23 @@ class TestSaveOverExistingFile:
         assert loaded["meta"]["version"] == 2
         assert loaded["meta"]["description"] == "keep-me"
 
+    def test_save_over_newer_meta_version_keeps_version(self, recipes_dir: Path) -> None:
+        path = recipes_dir / "p.yaml"
+        path.write_text(
+            'meta: {name: p, version: 5, created_at: "2020-01-01T00:00:00+00:00", description: keep-me}\n'
+            'data:\n  cameras:\n    "0": {config: {fps: 30}}\n',
+            encoding="utf-8",
+        )
+        engine = RecipeEngine(
+            store=TreeStore({"cameras": {"0": {"config": {"fps": 25}}}}), recipes_dir=recipes_dir, recipe_version=2
+        )
+
+        engine.save("p", paths=["cameras.0.config.fps"])
+
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert loaded["meta"]["version"] == 5
+        assert loaded["data"]["cameras"]["0"]["config"]["fps"] == 25
+
     def test_save_unchanged_store_writes_nothing(self, recipes_dir: Path) -> None:
         engine = RecipeEngine(store=TreeStore({"cameras": {"0": {"config": {"fps": 30}}}}), recipes_dir=recipes_dir)
         engine.save("p", paths=["cameras.0.config.fps"])

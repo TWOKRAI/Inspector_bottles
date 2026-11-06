@@ -193,7 +193,8 @@ class RecipeEngine:
         Записывает YAML: recipes_dir/{name}.yaml. Файла нет — создаётся целиком. Файл есть —
         пишется только дельта через движок ``yaml_io`` (ADR-RCP-009): комментарии и стиль
         сохраняются; ``meta`` не переписывается (``created_at``, ``name``, ``description`` как в
-        файле), кроме ``meta.version`` — он приводится к текущей ``recipe_version``; ветви ``data``
+        файле), кроме ``meta.version`` — он поднимается до текущей ``recipe_version``, если в файле
+        меньше или не число (более новая метка не понижается); ветви ``data``
         вне ``paths`` не трогаются; путь, которого нет в store, удаляется из ``data`` вместе с
         предками, ставшими пустыми. Дельта пуста — файл не открывается на запись.
 
@@ -236,7 +237,11 @@ class RecipeEngine:
                 _set_nested(after["data"], p, self._store.get(p))
             else:
                 _delete_nested_pruning(after["data"], p)
-        if after["meta"].get("version") != self._recipe_version:
+        # Версию поднимаем (устаревшая или не число), более новую метку не понижаем.
+        file_version = after["meta"].get("version")
+        if isinstance(file_version, bool) or not isinstance(file_version, (int, float)):
+            after["meta"]["version"] = self._recipe_version
+        elif file_version < self._recipe_version:
             after["meta"]["version"] = self._recipe_version
 
         patch_yaml_preserving(file_path, before, after)
