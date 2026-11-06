@@ -1,6 +1,6 @@
 """Hazard-тесты автора: корень PM (lifecycle-owner-scope, Task 1.2a, ADR-PMM-036).
 
-Порядок (монитор раньше сигнала детям, watcher'ы и SSM раньше конца детей и сводки),
+Порядок (монитор раньше сигнала детям, watcher'ы и SSM после конца детей и раньше сводки — ADR-PMM-040),
 сводка с выжившими, код выхода 76 у монитора, бюджеты корня. Числа — литералы.
 Вызовы, которые могут зависнуть, идут в daemon-потоке с дедлайном join.
 """
@@ -23,6 +23,7 @@ from ..monitor.process_monitor import ProcessMonitor
 from ..process import process_manager_process as pm_process
 from ..process.process_manager_process import ProcessManagerProcess, _ChildrenStop
 from ..runner.process_runner import _resolve_stop_budget
+from . import test_pm_responsive_during_children_stop as _blind
 
 
 def _call_bounded(fn, timeout_s: float = 15.0):
@@ -505,7 +506,8 @@ def test_resolve_stop_budget_warning_names_defect_not_value(config, must_say) ->
 # --------------------------------------------------------------------------- #
 
 
-def test_app_watchers_and_state_store_close_before_children_end_and_summary() -> None:
+def test_app_watchers_and_state_store_close_after_children_end_before_summary() -> None:
+    """Task 1.1a (ADR-PMM-040): дети закрываются раньше watcher'ов и SSM, сводка — последней."""
     journal: list[str] = []
     app = GenericProcessManagerApp(config={"shutdown_timeout": 1.0, "initial_state": {"system": {"x": 1}}})
     app.attach_stop_budget(stop_budget(1.0))
@@ -531,9 +533,59 @@ def test_app_watchers_and_state_store_close_before_children_end_and_summary() ->
         _call_bounded(app.shutdown)
     assert journal == [
         "stop_event.set",
+        "children.join_until",
         "observability_watcher",
         "recipe_watcher",
         "state_store",
-        "children.join_until",
         "summary",
     ], journal
+
+
+# --------------------------------------------------------------------------- #
+# Известное ограничение ADR-PMM-040: у хвоста work нет своей доли бюджета
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def pm_rig():
+    """Живой PM + фейковые дети из слепой обвязки 1.1a (``_blind.Rig``); уборка — как у её фикстуры."""
+    rigs: list = []
+
+    def factory(graceful_s: float):
+        rig = _blind.Rig(graceful_s)
+        rigs.append(rig)
+        rig.start()
+        return rig
+
+    try:
+        yield factory
+    finally:
+        for rig in rigs:
+            rig.close()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "ADR-PMM-040, «Известное ограничение»: после переноса children в _own_work_late хвост work "
+        "(workers/watcher'ы/SSM) не имеет своей доли бюджета; ребёнок, не умерший и на kill, съедает "
+        "весь pm_total_s, и message_processor остаётся выжившим. Перераспределение долей — отдельная "
+        "задача Ф, docs/claude/OPEN_QUESTIONS.md 2026-11-06. Станет XPASS (красным), когда бюджет починят."
+    ),
+)
+@pytest.mark.timeout(90)
+def test_workers_not_survivor_when_child_outlives_kill_window(pm_rig) -> None:
+    """G = 1,0: ребёнок игнорирует сигнал, terminate и kill (умирает только при уборке теста).
+
+    Дети занимают весь сегмент work (G + 2,0 = pm_total_s). Ожидание контракта: выживший — только
+    ребёнок, ``work/workers`` (message_processor) в выживших нет. Сейчас — есть (xfail).
+    """
+    rig = pm_rig(1.0)
+    child = rig.add_child("immortal", mode="killonly")
+    child.kill = lambda: None  # kill() не подтверждается за окно резерва
+    rig.pm.stop_event.set()
+    assert rig.wait_root_closed(40.0), "корень PM не закрылся за дедлайн"
+
+    survivors = rig.report.survivors
+    assert "proc/ProcessManager/work/children/processes" in survivors, survivors  # предусловие
+    assert "proc/ProcessManager/work/workers" not in survivors, survivors

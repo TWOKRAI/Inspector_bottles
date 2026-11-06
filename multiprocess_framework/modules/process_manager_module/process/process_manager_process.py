@@ -3801,9 +3801,17 @@ class ProcessManagerProcess(ProcessModule):
         return ceiling
 
     def _own_work(self, work) -> None:
-        """``work`` PM: ``summary``, затем область ``children`` (LIFO: дети → сводка)."""
+        """``work`` PM: ``summary`` (закрывается после детей, воркеров, watcher'ов и SSM — LIFO)."""
         super()._own_work(work)
         work.own(self._self_call("_stop_summary"), name="summary", kind="callable")
+
+    def _own_work_late(self, work) -> None:
+        """``work`` PM, поздние записи: область ``children`` (Task 1.1a, ADR-PMM-040).
+
+        Регистрация после ``workers`` — закрытие раньше них (LIFO): ``message_processor``
+        PM отвечает на команды всё окно остановки детей.
+        """
+        super()._own_work_late(work)
         self._children_stop = _ChildrenStop(self)
         children = work.child("children", budget_s=self._budget()["pm_graceful_s"], kill_reserve_s=KILL_RESERVE_S)
         children.own(self._children_stop, name="processes", kind="process")
