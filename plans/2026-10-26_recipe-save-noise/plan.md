@@ -140,7 +140,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 101 правка (поправка 2026-11-02: +4 к 1.4).
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; 166 правок по таблице (поправка 2026-11-06: 1.4 — 13, 1.5 — 14 по стадии 0 р1; прежнее «101» не сходилось с таблицей).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -164,8 +164,8 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.13 | 5 | `recipes/tests/test_save_display_refs.py` | |
 | 1.14 | 12 | `recipes/tests/test_save_protected_owner.py`, `…_extra.py` | 12/12 совпали (`docs/reviews/2026-11-02_task-1.14-injection.md`) |
 | 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
-| 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
-| 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
+| 1.4 | 13 | `recipe/tests/test_backend_writers_patch.py` | |
+| 1.5 | 14 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
 
 ## Открытые вопросы (владельцу)
 
