@@ -62,3 +62,28 @@
 ## Что осталось открытым / ненадёжно (ревью р.2)
 
 - Отчёт раунда 1 с таблицей решений ревьюер не читал. B2 — по комментарию кода, `previous_states` монитора не читал. B1 — сторож родителя на Windows по одной строке `process_runner.py:166`; Job Object launcher'а не читал. Формат ответа `request_system_command` и живой стенд не проверялись. A3 — гипотеза до написания PM 3. Писатели `_stop_requested` проверены только в `process_module`, `app.py`, `process.py`. Бюджет (PM 5) — гипотеза. `team-protocol` §1, §3, §5 и `.rules/*` не читались. Существование строки `shut down successfully` ревьюер не проверял — лид видел её в `2026-11-02_system-run-state_smoke-h1h2.md` (таблица БЛ).
+
+---
+
+# Express-проверка teamlead (opus, `af6f5d23264ffee05`) — NOT READY → исправлено лидом
+
+Прецедент system-run-state: два раунда reviewer + express teamlead. Вердикт: 1.1a берётся после правки одного прогноза инъекции; в 1.1 три места «гадать». Лид принял все 11 пунктов.
+
+| № | Суть | Решение лида |
+|---|---|---|
+| 1 | I4a/PM 3: в фазе детей отказ L дублирует закрытие `KeyedExecutor` (`system_stopping`) — PM 3 при I4a остаётся зелёным | I4a помечена «НЕ инъекция», teamlead подтверждает чтением |
+| 2 | TESTS 1.1a без `test_lifecycle_fifo_hazards.py:412`, `test_system_shutdown_force*`, `test_process_manager_process.py:172` | TESTS = весь каталог `process_manager_module/tests` |
+| 3 | подтверждённая блокировка `process.relay` требует правки вне FILES | = строка отчёта и ESCALATION лиду |
+| 4 | `ask_force_stop -> bool` синхронен, закрыть открытый вопрос нечем | `ask_force_stop(on_answer) -> Closable`, неблокирующий |
+| 5 | не задано единое правило сторожа тишины | формула `last = max(t_send, t_last_success, t_wait_click, t_force)` на каждом тике |
+| 6 | `alive: None` для убранного топологией процесса → ждать вечно (гипотеза) | ждём только `alive is True`; пустой/не-success ответ не засчитывается |
+| 7 | кто задаёт вопрос при рестарте UI | `request_restart()` сам зовёт `confirm_discard`; не в `RUNNING` — ничего |
+| 8 | повторный вход: таймер переводит в `CLOSING` во время модального вопроса | перепроверка `state` после `confirm_discard`; случай в CC 5 |
+| 9 | `RequestRunner` не внедряется — потоки реальные | параметр `request_runner`; блокирующий фейк на `threading.Event` |
+| 10 | живая сверка формы ответа на Darwin невозможна | форма закреплена кодом `:896`; сверка — в приёмке heavy |
+| 11 | в TESTS 1.1 нет двух файлов, на которых держится fallback `MainWindow` | добавлены |
+
+## Что осталось открытым / ненадёжно (teamlead)
+
+- П. 1 выведен чтением: не проверено, что `_LifecycleSubmit`/`_TransitionGate` не отдают свой литерал раньше исполнителя, и что фаза 1 `Scope` спускается в дочерние области. П. 6 — гипотеза (`get_process_by_name` для удалённого процесса не читался). Поведение Qt 6 «`quit()` шлёт `closeEvent`» — из ревью и знания API. Блокировка `process.relay` не проверялась.
+- Только Windows: `harness`, стенд `inspection_full`, зонд (`IsWindowVisible`), порог «база + 0,5 с», сторож родителя, код выхода PM, живая сверка формы ответа. Тайминг PM 1 на Darwin — не доказательство для Windows.
