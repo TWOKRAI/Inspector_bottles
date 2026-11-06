@@ -205,10 +205,11 @@ def test_import_kinds_hard_lazy_tc():
 
     # решение лида (R9): под TYPE_CHECKING внутри def -> tc
     only = _imports("from typing import TYPE_CHECKING\ndef f():\n    if TYPE_CHECKING:\n        import a\n")
-    assert [(r.module, r.kind, r.line) for r in only] == [("a", "tc", 4)]
+    # правка лида 2026-11-06: строка 1 — тоже импорт (typing, hard); в тексте задачи было «одна запись»
+    assert [(r.module, r.kind, r.line) for r in only] == [("typing", "hard", 1), ("a", "tc", 4)]
     # решение лида (R9): def в теле if TYPE_CHECKING -> tc
     only = _imports("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    def g():\n        import b\n")
-    assert [(r.module, r.kind, r.line) for r in only] == [("b", "tc", 4)]
+    assert [(r.module, r.kind, r.line) for r in only] == [("typing", "hard", 1), ("b", "tc", 4)]
 
     qualified = _imports("import typing\nif typing.TYPE_CHECKING:\n    import k\n")
     assert [(r.module, r.kind, r.line) for r in qualified] == [("typing", "hard", 1), ("k", "tc", 3)]
