@@ -81,7 +81,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 **Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
-`scripts/machine_gate.sh`, сессия `inspector-bottles-75` (полоса Д; прежняя `-d8` устарела).
+`scripts/machine_gate.sh`, сессия `SESSION` — имя лида из `ListAgents`, передаётся в бриф агенту (имена меняются при перезапуске: `-d8`, `-75`, `-f4`).
 
 ## Порядок выполнения
 
