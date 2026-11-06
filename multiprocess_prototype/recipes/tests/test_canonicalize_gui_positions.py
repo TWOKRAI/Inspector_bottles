@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import difflib
+import os
 import textwrap
 from pathlib import Path
 
@@ -315,3 +317,64 @@ def test_run_migration_skips_recipe_without_duplicate(tmp_path):
 def test_run_migration_raises_on_missing_dir(tmp_path):
     with pytest.raises(FileNotFoundError):
         run_migration(tmp_path / "does_not_exist")
+
+
+# ---------------------------------------------------------------------------
+# Запись дельтой через движок (Task 1.5): EOL файла сохраняется, пустая дельта
+# и не-словарь файл не трогают.
+# ---------------------------------------------------------------------------
+
+
+def _line_diff(before: str, after: str) -> list[str]:
+    """Построчный дифф без заголовков: только строки ``-...`` и ``+...``."""
+    lines = difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
+    return [line for line in lines if line[:1] in "+-" and not line.startswith(("---", "+++"))]
+
+
+@pytest.mark.parametrize("eol", ["lf", "crlf"])
+def test_migration_preserves_eol(tmp_path: Path, eol: str) -> None:
+    """EOL входа сохраняется, дифф — ровно удалённая top-level секция."""
+    text = _recipe_with_drifted_duplicate()
+    source = text.replace("\n", "\r\n") if eol == "crlf" else text
+    path = tmp_path / "demo.yaml"
+    path.write_bytes(source.encode("utf-8"))
+
+    changed = run_migration(tmp_path)
+
+    assert changed == [path]
+    out = path.read_bytes()
+    assert (b"\r\n" in out) == (eol == "crlf")
+    if eol == "crlf":
+        assert out.count(b"\n") == out.count(b"\r\n")  # одиноких LF нет
+    assert _line_diff(text, out.decode("utf-8").replace("\r\n", "\n")) == [
+        "-gui_positions:",
+        "-  camera_0.capture: [1.0, 2.0]",
+    ]
+
+
+@pytest.mark.parametrize("content", [b"", b"- a\n"], ids=["empty", "list"])
+def test_migration_skips_non_mapping_file(tmp_path: Path, content: bytes) -> None:
+    """Не-словарь (пустой файл, список) пропускается: байты и mtime прежние."""
+    path = tmp_path / "odd.yaml"
+    path.write_bytes(content)
+    os.utime(path, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
+    mtime_before = path.stat().st_mtime_ns
+
+    assert run_migration(tmp_path) == []
+
+    assert path.read_bytes() == content
+    assert path.stat().st_mtime_ns == mtime_before
+
+
+def test_migration_noop_does_not_touch_mtime(tmp_path: Path) -> None:
+    """Файл без дубля не перезаписывается: байты и mtime прежние."""
+    content = b"name: clean\nblueprint:\n  metadata:\n    gui_positions:\n      node_a: [1.0, 1.0]\n"
+    path = tmp_path / "clean.yaml"
+    path.write_bytes(content)
+    os.utime(path, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
+    mtime_before = path.stat().st_mtime_ns
+
+    assert run_migration(tmp_path) == []
+
+    assert path.read_bytes() == content
+    assert path.stat().st_mtime_ns == mtime_before
