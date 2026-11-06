@@ -20,8 +20,27 @@ Allowlist — «файл → причина» (что именно пишетс�
 ``logger_module/tests/test_std_logger_guard.py``. Мёртвая строка allowlist'а —
 такой же красный, как новое нарушение. Файлы читаются как текст, не импортируются.
 
-Обход репозитория — ОДИН раз на сессию (``_repo_hits``, кэш): четыре прохода
-по дереву стоят около 75 с.
+Обход репозитория — ОДИН раз на сессию (``_scan_repo``, кэш): четыре прохода
+по дереву стоят около 75 с. Файл, который не читается как UTF-8 или не разбирается
+как Python, не пропускается молча: он попадает в список и краснит
+``test_no_unscannable_files``.
+
+Предфильтр ``_PREFILTER`` отбрасывает файл без подстрок ``yaml`` / ``recipe`` /
+``canonicalize_gui_positions`` ДО разбора AST. Источник каждой самопроверки
+ignores обязан содержать такую подстроку, иначе проверка зелёная вхолостую
+(находка доп. матрицы 2026-11-06: ``json_dump`` и ``r4_other_from_dict``).
+
+Известные неохраняемые формы (тестом не покрыты, мутация их не краснит; решение
+лида — не добавлять, оставить явно):
+
+- импорт ``_make_yaml`` как признак «файл с ruamel» для R2 (нет живой точки);
+- структурные исключения: модуль ``recipe`` для R4 и движок ``recipe/yaml_io.py``
+  для R1/R2 (в них нет форм правил — без исключения тест не краснеет);
+- R1: цепочка ``import a.b.c`` без ``as`` (``a.b.c.patch_yaml_preserving``);
+- R1: относительный импорт уровня > 1 к движку;
+- ``ruamel_alias``: сам ``as Y`` сканером не различается, отличима только форма
+  приёмника (``Y().dump`` против переменной);
+- условия обхода (``_is_test_file``, пропуск ``.claude/worktrees/``) мутациями не проверялись.
 """
 
 from __future__ import annotations
@@ -372,10 +391,7 @@ def scan_source(source: str, rel: str) -> list[Hit]:
     lowered = source.lower()
     if not any(key in lowered for key in _PREFILTER):
         return []
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:  # pragma: no cover — битый файл не наше дело
-        return []
+    tree = ast.parse(source)  # SyntaxError не глотаем: обход называет такой файл (test_no_unscannable_files)
 
     is_engine = rel == ENGINE_PATH
     in_recipe_module = rel.startswith(RECIPE_MODULE_DIR + "/")
@@ -477,9 +493,13 @@ def _tracked_py_files() -> list[str]:
 
 
 @functools.cache
-def _repo_hits() -> tuple[Hit, ...]:
-    """Все точки R1–R4 по репозиторию без allowlist'ов; тесты не сканируются. Кэш на сессию."""
+def _scan_repo() -> tuple[tuple[Hit, ...], tuple[str, ...]]:
+    """Один обход репозитория: ``(попадания R1–R4 без allowlist'ов, не прочитанные/не разобранные файлы)``.
+
+    Тесты не сканируются. Кэш на сессию: все охранные и стейл-тесты читают один результат.
+    """
     hits: list[Hit] = []
+    unscannable: list[str] = []
     for rel in _tracked_py_files():
         if _is_test_file(rel) or rel.startswith(".claude/worktrees/"):
             continue
@@ -487,11 +507,14 @@ def _repo_hits() -> tuple[Hit, ...]:
         if not path.is_file():  # удалён, но ещё в индексе
             continue
         try:
-            source = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:  # pragma: no cover — не наш файл
-            continue
-        hits.extend(scan_source(source, rel))
-    return tuple(hits)
+            hits.extend(scan_source(path.read_text(encoding="utf-8"), rel))
+        except (UnicodeDecodeError, SyntaxError, ValueError):  # ValueError: нулевой байт в исходнике
+            unscannable.append(rel)
+    return tuple(hits), tuple(unscannable)
+
+
+def _repo_hits() -> tuple[Hit, ...]:
+    return _scan_repo()[0]
 
 
 def _under(rel: str, directory: str) -> bool:
@@ -520,6 +543,14 @@ def _report(rule: str, advice: str) -> str:
 # ==============================================================================
 # Охрана на репозитории
 # ==============================================================================
+
+
+def test_no_unscannable_files() -> None:
+    """Файл, который не читается или не разбирается, не пропускается молча: в нём мог быть писатель."""
+    unscannable = _scan_repo()[1]
+    assert unscannable == (), "страж не смог разобрать файлы (не UTF-8 или синтаксис):\n" + "\n".join(
+        f"  {rel}" for rel in unscannable
+    )
 
 
 def test_no_yaml_dump_outside_allowlist() -> None:
@@ -635,15 +666,17 @@ _DETECT: dict[str, tuple[str, str, str]] = {
     "r4_normalize": (_PROTO, "raw = normalize_recipe_v3_raw(data)\n", "R4"),
     "r4_canonicalize": (_PROTO, "raw = canonicalize_gui_positions(data)\n", "R4"),
     "r4_recipe_from_dict": (_PROTO, "recipe = Recipe.from_dict(data)\n", "R4"),
+    "r4_attr_call": (_PROTO, "import m\nraw = m.build_recipe_v3_raw(data)\n", "R4"),
+    "r1_star_import_engine": (_PROTO, "from multiprocess_framework.modules.recipe.yaml_io import *\n", "R1"),
 }
 
 #: id -> (rel, source): форма, которую страж видеть НЕ должен (ложное срабатывание).
 _IGNORE: dict[str, tuple[str, str]] = {
     "other_yaml_io_writer_name": (_SETTINGS, "from .yaml_io import update_yaml_preserving"),
     "other_yaml_io_load_settings": (_SETTINGS, "from ..yaml_io import load_settings"),
-    "json_dump": (_PROTO, "import json\njson.dump({}, f)\n"),
+    "json_dump": (_PROTO, "import json\nimport yaml\njson.dump({}, f)\n"),
     "r3_in_docstring": (_PROTO, '"""путь recipes/x.yaml"""\n'),
-    "r4_other_from_dict": (_PROTO, "topology = Topology.from_dict(x)\n"),
+    "r4_other_from_dict": (_PROTO, "import recipe\ntopology = Topology.from_dict(x)\n"),
 }
 
 
