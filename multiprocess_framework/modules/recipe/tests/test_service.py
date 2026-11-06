@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from multiprocess_framework.modules.recipe.service import RecipeService
 
@@ -161,6 +162,36 @@ def test_invalid_body_returns_path_message_errors_file_unchanged(tmp_path: Path)
     assert res["error"] == "invalid"
     assert res["errors"] == [{"path": "bad", "message": "marker true"}]
     assert not (tmp_path / "bad.yaml").exists()  # невалидный save ничего не создал
+
+
+class _MovingHook(FakeHook):
+    """normalize переносит top-level ``gui_positions`` в ``blueprint.metadata`` (как хук прототипа)."""
+
+    def normalize(self, body: dict) -> dict:
+        out = {k: v for k, v in body.items() if k != "gui_positions"}
+        if "gui_positions" in body:
+            out["blueprint"] = {"metadata": {"gui_positions": body["gui_positions"]}}
+        return out
+
+
+def test_save_keeps_key_moved_by_normalize(tmp_path: Path) -> None:
+    """before = normalize(файла), не ``{}``: ключ, который нормализатор переносит, остаётся в файле."""
+    recipe_path = tmp_path / "moved.yaml"
+    recipe_path.write_text("gui_positions:\n  p: [1, 2]\nname: old\n", encoding="utf-8")
+
+    service = make_service(tmp_path, hook=_MovingHook())
+    res = service.save(
+        {
+            "name": "moved",
+            "base_rev": _sha(recipe_path.read_bytes()),
+            "body": {"gui_positions": {"p": [1, 2]}, "name": "new"},
+        }
+    )
+
+    assert res["success"] is True
+    saved = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
+    assert saved["gui_positions"] == {"p": [1, 2]}
+    assert saved["name"] == "new"
 
 
 def test_crash_mid_write_leaves_old_file_intact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

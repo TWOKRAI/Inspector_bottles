@@ -551,3 +551,58 @@ class TestDocTypeDefaultMigration:
         reloaded = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert reloaded["meta"]["version"] == 1
         assert "migrated_from_v1" not in reloaded["meta"]
+
+    def test_load_migration_rewrite_keeps_comments_and_stamps_version(self, recipes_dir: Path) -> None:
+        # Task 1.4: миграция в load пишет дельту — комментарии целы, meta.version обновлён
+        path = recipes_dir / "m.yaml"
+        path.write_text("# keep\nmeta: {name: m, version: 1}\ndata:\n  a: {b: 1}  # eol\n", encoding="utf-8")
+        engine = RecipeEngine(
+            store=TreeStore({"a": {}}),
+            recipes_dir=recipes_dir,
+            recipe_version=2,
+            doc_type=_TEST_DOC_TYPE,
+        )
+
+        engine.load("m")
+
+        text = path.read_text(encoding="utf-8")
+        assert "# keep" in text
+        assert "# eol" in text
+        reloaded = yaml.safe_load(text)
+        assert reloaded["meta"]["version"] == 2
+        assert reloaded["meta"]["migrated_from_v1"] is True
+        assert (recipes_dir / "m.yaml.bak").exists()
+
+
+# =====================================================================
+# save — дельта поверх существующего файла (Task 1.4, C-30)
+# =====================================================================
+
+
+class TestSaveDelta:
+    def test_save_over_older_meta_version_stamps_current_version(self, recipes_dir: Path) -> None:
+        path = recipes_dir / "old.yaml"
+        path.write_text(
+            'meta: {name: old, version: 1, created_at: "2020-01-01T00:00:00+00:00", description: keepme}\n'
+            "data:\n  a: 1\n",
+            encoding="utf-8",
+        )
+        engine = RecipeEngine(store=TreeStore({"a": 2}), recipes_dir=recipes_dir, recipe_version=2, default_paths=["a"])
+
+        engine.save("old")
+
+        meta = yaml.safe_load(path.read_text(encoding="utf-8"))["meta"]
+        assert meta["version"] == 2
+        assert meta["description"] == "keepme"
+
+    def test_save_unchanged_store_writes_nothing(self, recipes_dir: Path) -> None:
+        engine = RecipeEngine(store=TreeStore({"a": 2}), recipes_dir=recipes_dir, default_paths=["a"])
+        engine.save("same")
+        path = recipes_dir / "same.yaml"
+        raw = path.read_bytes()
+        mtime = path.stat().st_mtime_ns
+
+        engine.save("same")
+
+        assert path.read_bytes() == raw
+        assert path.stat().st_mtime_ns == mtime

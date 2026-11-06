@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 
+import copy
 from multiprocess_framework.modules.logger_module import get_std_logger
 import shutil
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ import yaml
 from .detect import is_v3_recipe
 from .interfaces import StoreProtocol
 from .migrations import run_chain
+from .yaml_io import patch_yaml_preserving
 
 logger = get_std_logger(__name__)
 
@@ -87,6 +89,28 @@ def _set_nested(target: dict, path: str, value: Any) -> None:
             node[key] = {}
         node = node[key]
     node[keys[-1]] = value
+
+
+def _delete_pruning(target: dict, path: str) -> None:
+    """Удаляет значение по dot-пути; предки, ставшие пустыми от удаления, удаляются тоже.
+
+    Прунинг останавливается на ``target`` (корень остаётся, даже пустой). Путь, которого
+    в ``target`` нет, ничего не меняет (в том числе не удаляет уже пустых предков).
+    """
+    keys = path.split(".")
+    chain: list[dict] = [target]
+    for key in keys[:-1]:
+        child = chain[-1].get(key)
+        if not isinstance(child, dict):
+            return
+        chain.append(child)
+    if keys[-1] not in chain[-1]:
+        return
+    del chain[-1][keys[-1]]
+    for depth in range(len(chain) - 1, 0, -1):
+        if chain[depth]:
+            break
+        del chain[depth - 1][keys[depth - 1]]
 
 
 class RecipeEngine:
@@ -166,30 +190,48 @@ class RecipeEngine:
         paths=None → snapshot ветвей default_paths (пустой набор → пустой data).
         paths=["cameras.0.regions"] → частичный snapshot.
 
-        Записывает YAML: recipes_dir/{name}.yaml
+        Пишет YAML: recipes_dir/{name}.yaml дельтой через движок yaml_io (ADR-RCP-009).
+        Файла нет -> создаётся весь конверт. Файл есть -> меняются только ветви
+        ``data`` по ``snapshot_paths`` (значение стора или удаление пути с прунингом
+        пустых предков); комментарии, ``meta`` (кроме ``meta.version`` -> текущая
+        версия) и ветви ``data`` вне путей остаются как в файле; без изменений файл
+        не трогается. Файл не YAML -> ``yaml.YAMLError``; корень не mapping или нет
+        ``meta`` (не snapshot-рецепт) -> ``ValueError``; файл в обоих случаях цел.
         """
         snapshot_paths = paths if paths is not None else self._default_paths
-
-        # Собираем данные из store
-        data: dict[str, Any] = {}
-        for p in snapshot_paths:
-            if self._store.has(p):
-                value = self._store.get(p)
-                _set_nested(data, p, value)
-
-        recipe = {
-            "meta": {
-                "name": name,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "description": "",
-                "version": self._recipe_version,
-            },
-            "data": data,
-        }
-
         file_path = self._recipes_dir / f"{name}.yaml"
-        with open(file_path, "w", encoding="utf-8") as f:
-            yaml.dump(recipe, f, default_flow_style=False, allow_unicode=True)
+
+        if not file_path.exists():
+            data: dict[str, Any] = {}
+            for p in snapshot_paths:
+                if self._store.has(p):
+                    _set_nested(data, p, self._store.get(p))
+            recipe = {
+                "meta": {
+                    "name": name,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "description": "",
+                    "version": self._recipe_version,
+                },
+                "data": data,
+            }
+            patch_yaml_preserving(file_path, {}, recipe)
+        else:
+            with open(file_path, "r", encoding="utf-8") as f:
+                before = yaml.safe_load(f)  # YAMLError наружу, файл цел
+            if not isinstance(before, dict) or not isinstance(before.get("meta"), dict):
+                raise ValueError(f"{name}: не snapshot-рецепт")
+            after = copy.deepcopy(before)
+            if after["meta"].get("version") != self._recipe_version:
+                after["meta"]["version"] = self._recipe_version
+            if not isinstance(after.get("data"), dict):
+                after["data"] = {}
+            for p in snapshot_paths:
+                if self._store.has(p):
+                    _set_nested(after["data"], p, copy.deepcopy(self._store.get(p)))
+                else:
+                    _delete_pruning(after["data"], p)
+            patch_yaml_preserving(file_path, before, after)
 
         logger.info("Рецепт '%s' сохранён: %s", name, file_path)
 
@@ -257,6 +299,9 @@ class RecipeEngine:
                 return run_chain(doc_type, payload, from_v, to_v)
 
         if (version_outdated or domain_check) and migrate_fn is not None:
+            # recipe/data мутируются на месте (ниже и в migrate_fn): before — копия ДО миграции,
+            # иначе дельта пуста, файл не пишется и meta.version остаётся устаревшей.
+            before = copy.deepcopy(recipe)
             bak_path = file_path.with_suffix(".yaml.bak")
             shutil.copy2(file_path, bak_path)
             logger.info(
@@ -273,8 +318,7 @@ class RecipeEngine:
             recipe["meta"]["migrated_from_v1"] = True
             recipe["data"] = migrated_data
 
-            with open(file_path, "w", encoding="utf-8") as f:
-                yaml.dump(recipe, f, default_flow_style=False, allow_unicode=True)
+            patch_yaml_preserving(file_path, before, recipe)
 
             logger.info(
                 "Рецепт '%s' мигрирован → v%d, backup: %s",
