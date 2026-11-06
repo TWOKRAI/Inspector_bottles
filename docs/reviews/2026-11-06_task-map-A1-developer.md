@@ -9,7 +9,7 @@
 
 - (a) `pytest scripts/atlas/tests/test_scan.py scripts/atlas/tests/test_scan_hazards.py`: `24 passed` (14 тестера + 10 автора; после правки лидом двух литералов `typing` в красном 2).
 - (b) Тесты автора зелёные: два скана в одну базу, база занята писателем, битое тело, круг JSON, пути (пробел, кириллица, перевод строки), патологические исходники, усечённый `cat-file`, порции `get_scans`, блоб больше предела, плюс якорь на `run_with_deadline`.
-- (c) Весь `scripts/atlas/tests`: @@FULL@@
+- (c) Весь `scripts/atlas/tests`: `5 failed, 373 passed, 2 skipped, 1 warning in 1079.09s (0:17:59)` (через gate `medium`, exit 1). Красные: `test_modules_map.py::test_every_source_file_has_a_module` и `::test_ids_unique_and_parents_valid` (`Services/camera_device/` нет в `modules.yaml`; ни `Services/camera_device`, ни `modules.yaml` не менялись между `1dc6c71b7` и HEAD, тест не читает ни один мой файл: красный до моей правки — по выводу, не по прогону на `1dc6c71b7`); `test_views_pinned.py::test_card_on_origin_main_pin`, `::test_pack_on_origin_main_pin`, `::test_log_on_origin_main_pin` (`вызов завис: нет ответа за 60.0 с` на загруженной машине; прогон на `1dc6c71b7` не делался). Тесты `test_scan*`, `test_core_store_tree`, `test_cache_1_6e*`, `test_ref_code`, `test_reference*`, `test_rules` — зелёные. По просьбе лида красные не чинились.
 - (d) `ruff check -q scripts/atlas` — пусто; `ruff format --check` на 5 изменённых файлах — «already formatted».
 - (e) Разовые сверки (скрипт — `scratchpad/oneoff.py`, состояние `scripts/arch_map/build.py`: sha256 `8c95fbd5188ba7c4…`, коммит 739394c47):
   - набор — `.py` пяти слоёв без `tests/`, `docs/`, `test_*`, `conftest.py` на HEAD: 1858 файлов; в картe тот же набор (расхождений набора 0 в обе стороны);
