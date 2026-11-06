@@ -17,6 +17,18 @@ sha256, CAS под локом на имя, атомарная запись). П�
 live (`backend_ctl/tests/test_recipe_service_live.py`, `..._restart_live.py`).
 Открыто: лок имени — внутрипроцессный (два хаба на один каталог не сериализуются);
 комментарии YAML при `recipe.save` не сохраняются (PyYAML dump, вне контракта).
+Устарело после C-30 (ниже): `recipe.save` пишет дельту, комментарии сохраняются; запись идёт под
+межпроцессным `recipe_file_lock`.
+
+## C-30 — один дельта-движок записи рецепта (2026-10-26 — 2026-11-06)
+
+План `plans/2026-10-26_recipe-save-noise`, ADR-RCP-009 (движок, ревизия `rev`, лок, страж) и ADR-RCP-010
+(каноническая форма). Сделано: `patch_yaml_preserving`/`apply_delta`/`YamlPatchConflict` в `yaml_io`,
+`RecipeManager.patch_recipe`/`read_canonical`/`save_layout` с `expected_rev` и `RecipeConflict`,
+`recipe_file_lock`, `_ruamel_doc.py` (ruamel `<0.20`), `recipe.save` и `RecipeEngine.save` пишут дельту
+(Task 1.4), страж одного писателя `tests/test_single_writer_guard.py` R1–R4 (Task 1.5). Открыто (см.
+`docs/claude/OPEN_QUESTIONS.md`): 3-way merge вместо отказа при `RecipeConflict`, литерал `topology` в
+`service.py`, дубль ключа в файле даёт `bad_request` с текстом про body, два лока-близнеца.
 
 ## Оценки (0-10)
 
@@ -24,7 +36,7 @@ live (`backend_ctl/tests/test_recipe_service_live.py`, `..._restart_live.py`).
 |----------|--------|-------------|
 | Код (читаемость, стандарты) | 9 | Движок ~360 LOC, менеджер ~320 LOC, migrations.py ~120 LOC |
 | Тесты (покрытие) | 9 | Contract + detect + migrations (property round-trip) + yaml_io (home 7) + engine doc_type-wiring (6); прототип зелёный через шимы |
-| Документация (README, interfaces) | 9 | README + interfaces.py (3 Protocol, +doc_type) + DECISIONS (RCP-001..005) |
+| Документация (README, interfaces) | 9 | README + interfaces.py (3 Protocol, +doc_type) + DECISIONS (RCP-001..010) |
 | Связанность (меньше = лучше) | 9 | Store через StoreProtocol → нет импорта state_store (нет цикла) |
 | Дублирование | 9 | `"blueprint" in raw` унифицирован (C2); yaml-writer сведён в модуль (C3); duplicate() через единый detect |
 | Работоспособность | 9 | Зона recipe+recipes+backend+assembly 214 passed; снапшот 5.1 зелёный; frontend recipes+pipeline 598 passed |
