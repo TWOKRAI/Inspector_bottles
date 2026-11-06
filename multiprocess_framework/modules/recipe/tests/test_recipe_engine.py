@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import yaml
 import pytest
 from pathlib import Path
@@ -551,3 +553,53 @@ class TestDocTypeDefaultMigration:
         reloaded = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert reloaded["meta"]["version"] == 1
         assert "migrated_from_v1" not in reloaded["meta"]
+
+    def test_load_migration_rewrite_keeps_comments_and_stamps_version(self, recipes_dir: Path) -> None:
+        # given v1-файл с комментариями, движок с doc_type
+        path = recipes_dir / "m.yaml"
+        path.write_text("# keep\nmeta: {name: m, version: 1}\ndata:\n  a: {b: 1}  # eol\n", encoding="utf-8")
+        engine = RecipeEngine(
+            store=TreeStore({"a": {}}), recipes_dir=recipes_dir, recipe_version=2, doc_type=_TEST_DOC_TYPE
+        )
+
+        engine.load("m")
+
+        text = path.read_text(encoding="utf-8")
+        assert "# keep" in text
+        assert "# eol" in text
+        reloaded = yaml.safe_load(text)
+        assert reloaded["meta"]["version"] == 2
+        assert reloaded["meta"]["migrated_from_v1"] is True
+        assert (recipes_dir / "m.yaml.bak").exists()
+
+
+class TestSaveOverExistingFile:
+    """save() поверх существующего файла: дельта через движок yaml_io."""
+
+    def test_save_over_older_meta_version_stamps_current_version(self, recipes_dir: Path) -> None:
+        path = recipes_dir / "p.yaml"
+        path.write_text(
+            'meta: {name: p, version: 1, created_at: "2020-01-01T00:00:00+00:00", description: keep-me}\n'
+            'data:\n  cameras:\n    "0": {config: {fps: 30}}\n',
+            encoding="utf-8",
+        )
+        engine = RecipeEngine(store=TreeStore({"cameras": {"0": {"config": {"fps": 30}}}}), recipes_dir=recipes_dir)
+
+        engine.save("p", paths=["cameras.0.config.fps"])
+
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert loaded["meta"]["version"] == 2
+        assert loaded["meta"]["description"] == "keep-me"
+
+    def test_save_unchanged_store_writes_nothing(self, recipes_dir: Path) -> None:
+        engine = RecipeEngine(store=TreeStore({"cameras": {"0": {"config": {"fps": 30}}}}), recipes_dir=recipes_dir)
+        engine.save("p", paths=["cameras.0.config.fps"])
+        path = recipes_dir / "p.yaml"
+        os.utime(path, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
+        raw = path.read_bytes()
+        mtime = path.stat().st_mtime_ns
+
+        engine.save("p", paths=["cameras.0.config.fps"])
+
+        assert path.read_bytes() == raw
+        assert path.stat().st_mtime_ns == mtime

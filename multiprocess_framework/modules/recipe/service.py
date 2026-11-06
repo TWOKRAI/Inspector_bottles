@@ -49,17 +49,25 @@ topology_dict»), применение топологии и запись «по
 
 ``recipe.save`` — ``{"name", "base_rev": str | None, "body": dict}``
     ``body`` — ПОЛНЫЙ документ (не merge): ключи, которых нет в ``body``, из
-    файла исчезают. ``base_rev is None`` — создание: файла быть не должно.
+    файла исчезают (кроме ключей, которые нормализатор переносит, напр. legacy
+    gui_positions: они остаются в файле). ``base_rev is None`` — создание: файла
+    быть не должно.
     Pre: ``body`` — ``dict``, ключ ``base_rev`` присутствует; иначе ``bad_request``.
-    Post (успех): ``{"success": True, "name", "rev"}``; на диске лежит
-    ``hook.normalize(body)``, ``rev`` == ``rev`` новых байтов; замена атомарна
-    (tmp в том же каталоге + ``os.replace``) — упавшая запись оставляет старый
-    файл целым, полуфайла нет.
+    Post (успех): ``{"success": True, "name", "rev"}``;
+    ``hook.normalize(YAML файла после записи) == hook.normalize(body)``;
+    комментарии, порядок и стиль исходника сохраняются; умолчания, которых нет в
+    файле, не создаются; ``rev`` == ``rev`` новых байтов (дельта пуста — файл не
+    тронут, ``rev`` прежний); замена атомарна (tmp в том же каталоге +
+    ``os.replace``) — упавшая запись оставляет старый файл целым, полуфайла нет.
     Post (отказ): байты файла на диске НЕ изменились.
     * ``base_rev`` не равен ``rev`` текущих байтов (или ``None`` при
       существующем файле, или строка при отсутствующем) → ``conflict`` с
       ``current_rev: str | None``.
-    * ``hook.validate(hook.normalize(body))`` непуст → ``invalid`` с ``errors``.
+    * ``hook.validate(hook.normalize(body))`` непуст → ``invalid`` с ``errors``;
+      текущий файл не разбирается как YAML-mapping → ``invalid`` с ``errors``.
+    * ``bad_request``: body не записывается (несериализуем, страховка записи,
+      конфликт якорей); текущий файл — рецепт v1 (top-level ``topology:``) —
+      сначала миграция; сверка ``base_rev`` идёт раньше записи.
     * ``OSError`` при записи → ``io_error``.
     Инвариант: сравнение ``rev`` и запись идут под одним локом на имя (потоковый,
     затем межпроцессный ``recipe_file_lock``) — из двух ``save`` с одним ``base_rev``
@@ -95,9 +103,10 @@ topology_dict»), применение топологии и запись «по
     с ``current_rev``; ``name == read_active()`` → ``active`` (удалять активный
     нельзя), файл цел; ``OSError`` → ``io_error``.
 
-Комментарии YAML при ``save`` ТЕРЯЮТСЯ: файл пишется ``yaml.safe_dump``
-нормализованного тела, комментарии и стиль исходника не сохраняются
-(comment-preserving запись — предусловие Task 1b.3). Вне контракта: рецепт-папка
+Комментарии и стиль YAML при ``save`` сохраняются: пишется дельта между
+нормализованным текущим файлом и нормализованным ``body`` (движок ``yaml_io``,
+ADR-RCP-009). Непарсимый файл -> ``invalid``, рецепт v1 (top-level ``topology:``)
+-> ``bad_request``, файл цел. Вне контракта: рецепт-папка
 ADR-RCP-006 (сегодня единица — один файл); права на
 команды (Task 1b.4); история глубже одной ревизии.
 """
@@ -117,6 +126,7 @@ import yaml
 
 from .file_lock import recipe_file_lock
 from .format import compute_rev  # единственное определение (design.md §9.1); имя остаётся публичным путём service
+from .yaml_io import YamlPatchConflict, YamlWriteRefused, patch_yaml_preserving
 
 # Повтор os.replace при PermissionError (Windows: файл открыт читателем) — _atomic_write.
 _REPLACE_ATTEMPTS = 5
@@ -278,6 +288,10 @@ class RecipeService:
             return None
 
     def _parse(self, raw: bytes) -> dict:
+        return self._hook.normalize(self._parse_mapping(raw))
+
+    @staticmethod
+    def _parse_mapping(raw: bytes) -> dict:
         try:
             doc = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
@@ -288,7 +302,21 @@ class RecipeService:
                 "файл рецепта — не YAML-mapping",
                 errors=[{"path": "", "message": f"ожидался mapping, получено {type(doc).__name__}"}],
             )
-        return self._hook.normalize(doc)
+        return doc
+
+    def _current_normalized(self, current: bytes | None) -> dict:
+        """Нормализованный текущий файл для дельты save; нет файла -> ``{}``.
+
+        Непарсимый файл или не mapping -> ``invalid``; рецепт v1 -> ``bad_request`` (файл цел).
+        """
+        if current is None:
+            return {}
+        parsed = self._parse_mapping(current)
+        # v1: критерий дублирует InspectorRecipeFormatHook.normalize; убрать, когда
+        # Protocol хука получит признак legacy (Task 1.4, R1-9).
+        if "topology" in parsed:
+            raise _Reply("bad_request", "рецепт v1: сначала миграция")
+        return self._hook.normalize(parsed)
 
     def _load(self, name: str, path: Path) -> tuple[bytes, dict]:
         raw = self._read_bytes(path)
@@ -327,10 +355,7 @@ class RecipeService:
         errors = self._hook.validate(normalized)
         if errors:
             raise _Reply("invalid", "рецепт не прошёл валидацию", errors=errors)
-        try:
-            new_bytes = yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True).encode("utf-8")
-        except yaml.YAMLError as exc:
-            raise _Reply("bad_request", f"body не сериализуется в YAML: {exc}")
+        from ruamel.yaml.error import YAMLError  # ленивый импорт: ruamel нужен только записи
 
         # Порядок: потоковый лок, затем межпроцессный; сверка rev и запись — внутри обоих.
         with self._lock(name), recipe_file_lock(path):
@@ -338,8 +363,14 @@ class RecipeService:
             current_rev = None if current is None else compute_rev(current)
             if base_rev != current_rev:
                 raise _Reply("conflict", "рецепт изменён с момента чтения", current_rev=current_rev)
-            _atomic_write(path, new_bytes)
-        return {"success": True, "name": name, "rev": compute_rev(new_bytes)}
+            before = self._current_normalized(current)
+            try:
+                written = patch_yaml_preserving(path, before, normalized)
+            except (YAMLError, YamlWriteRefused, YamlPatchConflict) as exc:
+                # Текст исключения в ответ не кладём: RepresenterError несёт repr значения.
+                raise _Reply("bad_request", f"body не записывается: {type(exc).__name__}")
+            new_rev = compute_rev(path.read_bytes()) if written else current_rev
+        return {"success": True, "name": name, "rev": new_rev}
 
     @_guarded
     def validate(self, args: dict[str, Any]) -> dict[str, Any]:
