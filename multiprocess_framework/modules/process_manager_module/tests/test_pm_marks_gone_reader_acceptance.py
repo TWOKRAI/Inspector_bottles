@@ -173,8 +173,11 @@ def _close_queue(q) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestKilledReaderWriterExitsUnder2s:
-    def test_killed_reader_writer_exits_under_2s(self) -> None:
+class TestKilledReaderWriterExitsBeforeDeadline:
+    def test_killed_reader_writer_exits_before_deadline(self) -> None:
+        """Писатель выходит по метке «читатель ушёл»; без метки он висит в exit-hook до
+        дедлайна. Поэтому свойство — выход до срока (10 с), а не «за 2 секунды»: секунды
+        меряли стенные часы машины, а не наличие метки."""
         ctx = multiprocessing.get_context("spawn")
         srm = SharedResourcesManager()
         assert srm.initialize()
@@ -223,12 +226,12 @@ class TestKilledReaderWriterExitsUnder2s:
 
             start = time.monotonic()
             writer_stop.set()
-            writer.join(timeout=2.0)
+            writer.join(timeout=10.0)
             elapsed = time.monotonic() - start
             alive = writer.is_alive()
 
-            assert not alive, f"writer не вышел за 2.0s после убийства reader'а регистром; elapsed={elapsed:.3f}s"
-            assert elapsed < 2.0, f"writer вышел за {elapsed:.3f}s (>= 2.0s)"
+            assert not alive, f"writer не вышел до срока 10.0s после убийства reader'а; elapsed={elapsed:.3f}s"
+            assert elapsed < 10.0, f"writer вышел только за {elapsed:.3f}s (>= срока 10.0s)"
         finally:
             _cleanup(reader, writer)
             _close_queue(q)

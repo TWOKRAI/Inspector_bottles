@@ -304,6 +304,7 @@ markers = [
     #   python -m pytest backend_ctl -m harness_smoke
     "harness_smoke: live-тесты, поднимающие headless-бэкенд прототипа через BackendHarness",
     "slow: тесты scripts/atlas/tests дольше минуты (пины на origin/main); по умолчанию пропускаются, полный набор — ATLAS_SLOW=1",
+    "hardware: тесты против реального прибора камеры; пропускаются без CAMERA_HARDWARE=1",
 ]
 filterwarnings = [
     # Task F.7 (Phase F / cross-tab): forcing-функция против регрессии. Прямой

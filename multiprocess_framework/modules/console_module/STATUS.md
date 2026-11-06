@@ -55,3 +55,4 @@
 | 2026-04-03 | `ConsoleProcessConfig` наследует `ProcessLaunchConfig`; убран дублирующий `build()` (ADR-114) | 9 |
 | 2026-04-12 | Добавлены RegisterCommandHandler (reg list/get/set/info) и SystemCommandHandler (help/status/ps/stats) в commands/ | 13-14 |
 | 2026-04-12 | Обновлены README.md (Console Commands секция, God Mode примеры) и STATUS.md | 15-16 |
+| 2026-11-01 | `WindowsConsole.create()`: флаг `_allocated_console` — по результату `AllocConsole`, не безусловно. Раньше при отказе (консоль без окна, ConPTY) `close()` звал `FreeConsole` и отсоединял процесс от консоли; каждый следующий ребёнок получал своё окно (~45 окон за полный прогон тестов). Приёмочные тесты: `tests/test_windows_console_detach_acceptance.py` | — |

@@ -323,12 +323,11 @@ class MLInferencePlugin(ProcessModulePlugin):
         self._asset_degraded = True
 
     def _clear_asset_degraded(self) -> None:
-        """Снять деградацию health, если её поставили мы и она ещё стоит. Под _engine_lock.
+        """Снять свою заявку деградации health, если её ставили мы. Под _engine_lock.
 
-        Сверка по строке: `HealthStatus` — str-Enum, импортировать его в плагин не нужно.
-        Чужую деградацию (breaker, другой плагин) не трогаем, пока сами не ставили свою.
+        Чужие заявки (breaker, другой плагин) этот вызов не снимает.
         """
-        if self._asset_degraded and self._ctx.health.status == "degraded":
+        if self._asset_degraded:
             self._ctx.health.set_status("ok")
         self._asset_degraded = False
         self._asset_reason = ""
@@ -367,15 +366,6 @@ class MLInferencePlugin(ProcessModulePlugin):
         elapsed_s — длительность окна с прошлой публикации (для inference_fps =
         число инференсов / окно; учитывает простой).
         """
-        # Обход C-66: breaker снимает чужую деградацию при закрытии; снять после исправления владения degraded в health
-        # Замок не блокирующий: идёт загрузка модели (команда держит его) — пропускаем этот тик,
-        # следующий не раньше чем через секунду. Только `ok`: `failed` в `degraded` не понижаем.
-        if self._engine_lock.acquire(blocking=False):
-            try:
-                if self._asset_degraded and self._ctx.health.status == "ok":
-                    self._ctx.health.degraded(self._asset_reason)
-            finally:
-                self._engine_lock.release()
         avg = self._latency_sum_ms / self._latency_count if self._latency_count else 0.0
         fps = self._latency_count / elapsed_s if elapsed_s > 0 else 0.0
         self._reg.avg_latency_ms = round(avg, 2)

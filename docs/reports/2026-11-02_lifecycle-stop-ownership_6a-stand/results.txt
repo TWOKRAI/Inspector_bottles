@@ -1,0 +1,22 @@
+# Стенд ветки 6а, 2026-11-02 (stand_6a.py), полный вывод
+
+## Ветка fix/lifecycle-6a-defects @101f64887, 3 повтора (свежий бэкенд на каждый)
+S9a 1 err= None variant= A1_duplicate_name resp= {'success': False, 'rolled_back': True, 'error': 'Blueprint validation failed: ["Дублирование имени процесса: \'cam\'"]', '_elapsed_s': 0.06} wire= {'first': 'active', 'last': 'active', 't_to_active_s': 0.0} broken= 0 same_pids= True S11= {'tree_exit_s': 2.14, 'n_pids': 6, 'survivors': [], 'did_not_stop_in': 0}
+S9b 1 err= None variant= None resp= {} wire= None broken= None same_pids= None S11= None
+   tried: {'B1_no_such_module': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 1.88}, 'B2_no_such_class': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 1.92}}
+S10 1 err= None {'snapshot_degraded': {'status': 'degraded', 'degraded_reason': 'health.report: x'}, 'tree_degraded': {'status': 'ok', 'degraded_reason': 'health.report: x'}, 'snapshot_ok': {'status': 'ok', 'degraded_reason': 'health.report: ok'}, 'tree_ok': {'status': 'ok', 'degraded_reason': 'health.report: x'}}
+S9a 2 err= None variant= A1_duplicate_name resp= {'success': False, 'rolled_back': True, 'error': 'Blueprint validation failed: ["Дублирование имени процесса: \'cam\'"]', '_elapsed_s': 0.03} wire= {'first': 'active', 'last': 'active', 't_to_active_s': 0.0} broken= 0 same_pids= True S11= {'tree_exit_s': 2.657, 'n_pids': 6, 'survivors': [], 'did_not_stop_in': 0}
+S9b 2 err= None variant= None resp= {} wire= None broken= None same_pids= None S11= None
+   tried: {'B1_no_such_module': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 1.92}, 'B2_no_such_class': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 1.89}}
+S10 2 err= None {'snapshot_degraded': {'status': 'degraded', 'degraded_reason': 'health.report: x'}, 'tree_degraded': {'status': 'ok', 'degraded_reason': 'health.report: x'}, 'snapshot_ok': {'status': 'ok', 'degraded_reason': 'health.report: ok'}, 'tree_ok': {'status': 'ok', 'degraded_reason': 'health.report: x'}}
+S9a 3 err= None variant= A1_duplicate_name resp= {'success': False, 'rolled_back': True, 'error': 'Blueprint validation failed: ["Дублирование имени процесса: \'cam\'"]', '_elapsed_s': 0.03} wire= {'first': 'active', 'last': 'active', 't_to_active_s': 0.0} broken= 0 same_pids= True S11= {'tree_exit_s': 2.125, 'n_pids': 6, 'survivors': [], 'did_not_stop_in': 0}
+S9b 3 err= None variant= None resp= {} wire= None broken= None same_pids= None S11= None
+   tried: {'B1_no_such_module': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 2.0}, 'B2_no_such_class': {'success': True, 'rolled_back': False, 'applied': 15, '_elapsed_s': 2.22}}
+S10 3 err= None {'snapshot_degraded': {'status': 'degraded', 'degraded_reason': 'health.report: x'}, 'tree_degraded': {'status': 'ok', 'degraded_reason': 'health.report: x'}, 'snapshot_ok': {'status': 'ok', 'degraded_reason': 'health.report: ok'}, 'tree_ok': {'status': 'ok', 'degraded_reason': 'health.report: x'}}
+
+## База dcf7bc22c (дерево lso-6a-t64), 1 повтор; S9b не гонялся (вход не получен на ветке)
+S9a 1 err= None variant= A1_duplicate_name resp= {'success': False, 'rolled_back': True, 'error': 'Blueprint validation failed: ["Дублирование имени процесса: \'cam\'"]', '_elapsed_s': 0.05} wire= {'first': 'broken', 'last': 'broken', 't_to_active_s': None} broken= 1 same_pids= True S11= {'tree_exit_s': 2.141, 'n_pids': 6, 'survivors': [], 'did_not_stop_in': 0}
+S10 1 err= None {'snapshot_degraded': {'status': 'degraded', 'degraded_reason': 'health.report: x'}, 'tree_degraded': {'status': 'ok', 'degraded_reason': 'health.report: x'}, 'snapshot_ok': {'status': 'ok', 'degraded_reason': 'health.report: ok'}, 'tree_ok': {'status': 'ok', 'degraded_reason': 'health.report: x'}}
+
+Вход S9a: topology.apply с дублем имени процесса cam (настоящая валидация, до команд). S9b: B1/B2 (несуществующий модуль/класс у двух процессов) дали success True, applied 15, rolled_back False - отказа нет, S9b живьём НЕ покрыт.
+S10: health.report идёт в devices (детям стенда команда не доходит, timeout); причина в команде = 'health.report: <message>'.

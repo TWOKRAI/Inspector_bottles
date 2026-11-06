@@ -92,8 +92,9 @@
 - [project_topology_event_ordering](project_topology_event_ordering.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 
-## break-injection (41)
+## break-injection (42)
 
+- [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
 - [feedback_a_guard_that_counts_at_least_once_is_blind](feedback_a_guard_that_counts_at_least_once_is_blind.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
@@ -136,9 +137,10 @@
 - [feedback_yaml_safe_load_raises_more_than_yamlerror](feedback_yaml_safe_load_raises_more_than_yamlerror.md)
 - [project_metrics_freeze_s27](project_metrics_freeze_s27.md)
 
-## concurrency (28)
+## concurrency (29)
 
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
+- [feedback_blocking_first_lifo_entry_steals_segment_budget](feedback_blocking_first_lifo_entry_steals_segment_budget.md)
 - [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
 - [feedback_dedup_by_name_loses_content](feedback_dedup_by_name_loses_content.md)
 - [feedback_drop_oldest_reports_success](feedback_drop_oldest_reports_success.md)
@@ -373,7 +375,7 @@
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
 - [project_shared_tree_provenance_forensics](project_shared_tree_provenance_forensics.md)
 
-## guards (38)
+## guards (39)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
 - [feedback_a_degenerate_value_is_not_zero_it_is_unknown](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md)
@@ -385,6 +387,7 @@
 - [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
 - [feedback_a_sampling_watcher_misses_a_fast_overwrite](feedback_a_sampling_watcher_misses_a_fast_overwrite.md)
 - [feedback_an_absence_assertion_needs_a_reachability_check](feedback_an_absence_assertion_needs_a_reachability_check.md)
+- [feedback_an_edit_that_replaces_a_neighbour_drops_it](feedback_an_edit_that_replaces_a_neighbour_drops_it.md)
 - [feedback_base_guard_dead_in_heir](feedback_base_guard_dead_in_heir.md)
 - [feedback_check_belongs_to_the_seam](feedback_check_belongs_to_the_seam.md)
 - [feedback_deep_merge_is_not_associative](feedback_deep_merge_is_not_associative.md)
@@ -457,8 +460,9 @@
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 
-## lifecycle (22)
+## lifecycle (23)
 
+- [feedback_blocking_first_lifo_entry_steals_segment_budget](feedback_blocking_first_lifo_entry_steals_segment_budget.md)
 - [feedback_born_wrong_then_fixed_looks_like_working](feedback_born_wrong_then_fixed_looks_like_working.md)
 - [feedback_cleanup_must_survive_abnormal_disconnect](feedback_cleanup_must_survive_abnormal_disconnect.md)
 - [feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop](feedback_do_shutdown_on_unbooted_plugin_is_a_silent_noop.md)
@@ -705,7 +709,7 @@
 - [project_storage_stack_verdict](project_storage_stack_verdict.md)
 - [reference_tech_stack_2026](reference_tech_stack_2026.md)
 
-## test-assertions (62)
+## test-assertions (63)
 
 - [feedback_a_criterion_that_transforms_observes_the_library](feedback_a_criterion_that_transforms_observes_the_library.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
@@ -713,6 +717,7 @@
 - [feedback_absence_of_news_is_not_evidence](feedback_absence_of_news_is_not_evidence.md)
 - [feedback_an_absence_assertion_needs_a_reachability_check](feedback_an_absence_assertion_needs_a_reachability_check.md)
 - [feedback_an_applying_command_cannot_measure_what_it_reapplies](feedback_an_applying_command_cannot_measure_what_it_reapplies.md)
+- [feedback_an_edit_that_replaces_a_neighbour_drops_it](feedback_an_edit_that_replaces_a_neighbour_drops_it.md)
 - [feedback_angle_boundary_rounds_outward_at_raw_precision](feedback_angle_boundary_rounds_outward_at_raw_precision.md)
 - [feedback_base_outlives_the_layer](feedback_base_outlives_the_layer.md)
 - [feedback_baseline_taken_after_the_act_proves_nothing](feedback_baseline_taken_after_the_act_proves_nothing.md)
@@ -825,8 +830,9 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (22)
+## windows-env (23)
 
+- [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
 - [feedback_a_silent_fallback_hides_a_tool_that_always_fails](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md)
 - [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)

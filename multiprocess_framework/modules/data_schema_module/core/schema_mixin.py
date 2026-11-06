@@ -33,6 +33,25 @@ _ALL_FIELDS_META_CACHE: dict[type, dict] = {}
 _FIELD_META_CACHE: dict[tuple[type, str], Any] = {}
 
 
+def _check_enabled_if_refs(cls: type, metas: dict[str, Any]) -> None:
+    """Каждый ключ ``enabled_if`` обязан быть полем самого класса (ADR-DS-011).
+
+    Опечатка в ссылке дала бы вечно погашенное поле, поэтому ``ValueError`` при первом же
+    обращении к метаданным. Ссылку проверяем по ``model_fields`` (а не по ``metas``: поле без
+    FieldMeta и поле родителя в ``metas`` не входят, но ссылаться на них можно). Тексты
+    называют класс, поле и ссылку; значения условий не печатаются.
+    """
+    known = cls.model_fields  # type: ignore[attr-defined]
+    for name, meta in metas.items():
+        if meta.enabled_if is None:
+            continue
+        for ref in meta.enabled_if:
+            if ref == name:
+                raise ValueError(f"{cls.__name__}.{name}: enabled_if ссылается на само поле")
+            if ref not in known:
+                raise ValueError(f"{cls.__name__}.{name}: enabled_if ссылается на несуществующее поле {ref!r}")
+
+
 class SchemaMixin:
     """
     Миксин для SchemaBase.
@@ -86,6 +105,8 @@ class SchemaMixin:
                 )
                 if meta is not None:
                     result[name] = meta
+            # ДО записи в кэш: иначе первый вызов бросит, а второй вернёт отравленный кэш.
+            _check_enabled_if_refs(cls, result)
             _ALL_FIELDS_META_CACHE[cls] = result
         return _ALL_FIELDS_META_CACHE[cls]
 

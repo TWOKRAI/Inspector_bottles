@@ -3,8 +3,12 @@
 Г1 — `scan()` и `diagnose()` выбирают один и тот же файл весов.
 Г2 — своя деградация health снимается, чужая — нет.
 Г3 — пустая модель (штатный pass-through) health не портит.
-Г4 — обход C-66: деградация из-за ассетов возвращается после закрытия breaker.
+Г4 — заявка плагина переживает закрытие breaker без вызова `process` (C-66).
 Г5 — смена модели из команды против идущего `process` не рвёт ни один поток.
+Г6 — тик метрик не ставит деградацию обратно, пока команда её снимает.
+Г8 — файл меток не UTF-8: error, в тексте только имя типа исключения.
+Г9 — тик метрик не ждёт загрузку модели.
+Г10 — своя заявка снимается и при чужом `failed`.
 
 Харнес (`_write_assets`, `_FakeBackend`, `_make_plugin`) скопирован из слепого
 `test_preflight_c55b.py` (его не импортируем и не правим). Вызовы, способные повиснуть,
@@ -170,12 +174,12 @@ def test_g3_empty_model_is_not_a_degradation(tmp_path: Path, monkeypatch: pytest
 
 
 # --------------------------------------------------------------------------- #
-# Г4: обход C-66
+# Г4: заявка плагина переживает закрытие breaker
 # --------------------------------------------------------------------------- #
 
 
-def test_g4_asset_degraded_returns_after_breaker_closes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """5 провалов загрузки открывают breaker; его закрытие стирает причину; `process` ставит её снова."""
+def test_g4_asset_degraded_survives_breaker_close(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """5 провалов загрузки открывают breaker; закрытие снимает его заявку, заявка плагина остаётся."""
     now = [1000.0]
     plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch, clock=lambda: now[0])
 
@@ -190,12 +194,8 @@ def test_g4_asset_degraded_returns_after_breaker_closes(tmp_path: Path, monkeypa
     state.poll()
     now[0] += 62.0
     state.poll()
-    # Предпосылка обхода (C-66): breaker закрылся и вместе со своей деградацией снял чужую причину.
-    assert state.snapshot()["status"] == "ok"
 
-    plugin._last_publish -= 2.0
-    plugin.process([{"frame": _FRAME}])
-
+    # Без вызова `process`: причину держит заявка плагина, тик её больше не ставит.
     snap = state.snapshot()
     assert snap["status"] == "degraded"
     assert "m1" in snap["degraded_reason"]
@@ -301,26 +301,6 @@ def test_g6_publish_tick_cannot_reassert_during_recovery(tmp_path: Path, monkeyp
 
 
 # --------------------------------------------------------------------------- #
-# Г7: обход C-66 не понижает failed
-# --------------------------------------------------------------------------- #
-
-
-def test_g7_publish_tick_keeps_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Статус `failed` выставил кто-то другой -> тик с поднятым флагом ассетов его не понижает."""
-    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch)
-    plugin.configure(ctx)  # ассетов нет -> флаг поднят
-    assert plugin._asset_degraded is True
-    state.failed("fatal elsewhere")
-
-    plugin._last_publish -= 2.0
-    plugin.process([{"frame": _FRAME}])
-
-    snap = state.snapshot()
-    assert snap["status"] == "failed"
-    assert snap["degraded_reason"] == "fatal elsewhere"
-
-
-# --------------------------------------------------------------------------- #
 # Г8: файл меток не UTF-8
 # --------------------------------------------------------------------------- #
 
@@ -384,3 +364,29 @@ def test_g9_publish_tick_does_not_wait_for_model_load(tmp_path: Path, monkeypatc
     for key in ("command", "tick"):
         kind, value = box[key]
         assert kind == "ok", f"{key}: {value!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Г10: своя заявка снимается и при чужом failed
+# --------------------------------------------------------------------------- #
+
+
+def test_g10_own_claim_released_under_foreign_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Чужой `failed` не мешает снять свою заявку; проверка статуса в снятии оставила бы её навсегда."""
+    plugin, state, _calls, ctx = _make_plugin(tmp_path, monkeypatch)
+    plugin.configure(ctx)  # ассетов нет -> degraded, заявка плагина поставлена
+    assert state.snapshot()["status"] == "degraded"
+    state.failed("fatal elsewhere")
+
+    _write_assets(tmp_path)
+    plugin.cmd_reload_model({})
+
+    snap = state.snapshot()
+    assert snap["status"] == "failed"
+    assert snap["degraded_reason"] == "fatal elsewhere"
+
+    state.ok()
+
+    snap = state.snapshot()
+    assert snap["status"] == "ok"
+    assert snap["degraded_reason"] is None

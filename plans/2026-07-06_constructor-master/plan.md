@@ -367,6 +367,10 @@ P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карг
 | H.5 | [ ] | Ужесточение sentrux: min_depth назад ≥0.65 (перезамер после F/E), min_quality → 0.70+; если depth не восстановился — решение владельца о пороге, НЕ подгонка кода под метрику. **+ Вход 2026-07-10 (pre-push gate):** complex functions 44→86 за Ф0–Ф5 (единственный DEGRADED-критерий gate; coupling улучшился 0.16→0.12, циклы/god-файлы 0) — baseline осознанно пересохранён владельцем (`sentrux gate --save`, был от 2026-05-19, до плана); здесь разобрать топ сложных функций и вернуть счётчик вниз. Смежное: перекалибровка таблицы «Метрики приёмки» (quality 7077 < старт 7174; вопрос в plans/2026-07-10_post-review-hardening.md) | sentrux-check зелёный на новых порогах; complex-fn счётчик ≤ уровня, одобренного владельцем | S |
 | H.6 | [ ] | Финальная сверка: QUEUE.md, session_end, сводная дельта факт-vs-цель | план закрыт таблицей | S |
 
+## Ф9 — Фундамент «выше 8» (2.0, DRAFT 2026-11-01)
+
+Решение владельца 2026-11-01: все 7 осей второго вердикта CTO ([оси](../../docs/reports/2026-11-01_cto-roadmap-above-8.md), [планы](../../docs/reports/2026-11-01_cto-roadmap-above-8-plans.md)) — фазой этого плана. Тело фазы: [f9-foundation-above-8.md](f9-foundation-above-8.md) (база Ф9.0, ворота владельца W1–W5, порядок, ось 1, метрики) + [f9-foundation-above-8-tasks.md](f9-foundation-above-8-tasks.md) (оси 2–7). 25 задач, из них 8 — ссылки на планы-владельцы без переописания. Код — после приёмки 6а и camera 1.3/1.4; работа карточки — 2.0 (решение 23). Ждёт S1′.
+
 ---
 
 ## Порядок выполнения
@@ -534,6 +538,34 @@ P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карг
 - Task F8-4: Один стандарт логирования прототипа [PENDING]
 - Task F8-5: Ужесточение sentrux: min_depth ≥ 0.65 [PENDING] — порог временно 0.60 с Ф0.3
 - Task F8-6: Финальная сверка: QUEUE, session_end, сводная таблица [PENDING]
+
+### Ф9 — фундамент «выше 8» (id `F9-0`–`F9-24` — это Ф9.0–Ф9.24, [f9-foundation-above-8.md](f9-foundation-above-8.md))
+
+- Task F9-0: Замер базы фазы командами (haiku) [PENDING]
+- Task F9-1: Гигиена каталога: дамп, плановые поля, STATUS сервисов [PENDING] (после F9-0)
+- Task F9-2: Поля access/idempotent/owner в объявлении команды и каталоге [PENDING] — после 6а и camera 1.3
+- Task F9-3: params_schema у каждой команды, храповик [PENDING] (после F9-2)
+- Task F9-4: Ссылка: system-run-state, условие ready до ЗАПУСТИТЬ [PENDING]
+- Task F9-5: Ссылка: приёмка 6а, C-82, вопрос счётчиков [PENDING]
+- Task F9-6: sentrux check в venv и CI [PENDING]
+- Task F9-7: command_specs + register_from + тест тождества дампа, пилот [PENDING] (после F9-2, F9-18)
+- Task F9-8: Семьи BuiltinCommands к владельцам по касанию [PENDING] (после F9-7)
+- Task F9-9: Зелёный main: карантин по ID дефекта [PENDING]
+- Task F9-10: Ожидание по условию + линт роста time.sleep [PENDING]
+- Task F9-11: Ссылка: atlas 1.8, yaml-interfaces, 2.5 [PENDING]
+- Task F9-12: Ссылка: remediation, клиент читает access [PENDING] (после F9-2)
+- Task F9-13: CLI над dispatch_tool, ноль новых MCP [PENDING]
+- Task F9-14: Инструменты по намерению + outputSchema [PENDING] (после F9-12, F9-3) — после ворот W1
+- Task F9-15: Один счётчик рестарта [PENDING] (после F9-5)
+- Task F9-16: Поле версии контракта в конверте IPC [PENDING]
+- Task F9-17: Ссылка: owner-scope Ф2–Ф6, ворота W2 [PENDING]
+- Task F9-18: Ссылка: camera-device-service 1.3/1.4 [PENDING]
+- Task F9-19: Правило имени + страж коллизий ExactMatch [PENDING] (после F9-18)
+- Task F9-20: Честные оболочки сервисов [PENDING] (после F9-0)
+- Task F9-21: Ссылка: gui-graceful-close и gui-service, принцип 6 [PENDING]
+- Task F9-22: WIP-лимит механизмом [PENDING]
+- Task F9-23: Шапки = git, BRANCH_MISSING, строка очереди [PENDING]
+- Task F9-24: Линт противоречий между планами [PENDING] (после F9-23)
 
 
 ## Gates (точки решения владельца, с рекомендациями)

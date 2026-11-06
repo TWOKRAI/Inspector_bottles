@@ -1,0 +1,2 @@
+registry: defects.md
+| C-79 (поправка, при свёртке заменить статус в существующей строке) | закрыт: `_same_config_value`, NaN равен NaN на любой глубине dict/list/tuple. Обещанный реестром hazard H8 сделан здесь, а не в 1.11: `test_h8_recipe_nan_stop_window_no_conflict_and_key_reaches_result`, `test_h8_registry_warns_once_about_nan_window`. Отчёт `docs/reports/2026-11-02_lifecycle-stop-ownership_6a-defects.md` |

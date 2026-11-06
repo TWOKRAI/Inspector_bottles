@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from typing import Annotated, Any
 
@@ -48,6 +49,26 @@ logger = get_std_logger("blueprint")
 # Структурные ключи collector: их выводит ``infer_missing_collectors`` из wires и НЕ подмешивает из
 # легаси-секции ``metadata`` (единый источник для ``infer`` и проверки затенения, C-28.3).
 _STRUCTURAL_COLLECTOR_KEYS = ("mode", "inputs", "primary")
+
+
+def _same_config_value(a: Any, b: Any) -> bool:
+    """Равенство значений конфига, где NaN равен NaN на любой глубине dict/list/tuple (C-79).
+
+    Обычное ``!=`` считает два разных объекта NaN неравными, и ``_pick`` писал ложный WARNING
+    о конфликте typed-поля и extras (после границы процессов объекты NaN в контейнерах разные).
+    Первая строка ``a is b`` обязательна: она защищает от падения на одном и том же массиве
+    или самоссылающемся dict внутри контейнера в обеих частях (там старое ``!=`` не падало).
+    ``type(a) is type(b)`` у list/tuple: ``["a"]`` против ``("a",)`` остаётся конфликтом.
+    """
+    if a is b:
+        return True
+    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+        return True
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same_config_value(a[k], b[k]) for k in a)
+    if isinstance(a, (list, tuple)) and type(a) is type(b):
+        return len(a) == len(b) and all(map(_same_config_value, a, b))
+    return a == b
 
 
 @register_schema("WireV1")
@@ -311,7 +332,7 @@ class ProcessConfig(SchemaBase):
         def _pick(key: str, default):
             if key in fields_set:  # рецепт задал typed-поле явно — оно и побеждает
                 # Fable LOW-5: конфликт typed≠extras при обоих заданных — предупреждаем.
-                if key in extras and extras[key] != getattr(self, key):
+                if key in extras and not _same_config_value(extras[key], getattr(self, key)):
                     logger.warning(
                         f"ProcessConfig[{self.process_name}]: typed-поле '{key}'="
                         f"{getattr(self, key)!r} перекрывает extras['{key}']={extras[key]!r} "
