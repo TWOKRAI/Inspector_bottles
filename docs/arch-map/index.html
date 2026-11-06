@@ -1,0 +1,1983 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта архитектуры</title>
+<style>
+/* ===== Цвета: только через переменные; тёмная тема — ниже ===== */
+:root {
+  --bg: #f1f3f6;
+  --panel: #ffffff;
+  --panel-2: #e9edf2;
+  --text: #1b2430;
+  --muted: #5a6879;
+  --border: #c5cdd8;
+  --accent: #1f6fd1;
+  --err: #d32f2f;
+  --warn: #e07b00;
+  --ok: #2e7d32;
+  --wire: #5b6f84;
+  --layer-bg: #e6ebf1;
+  --layer-bd: #8f9fb2;
+  --group-bg: #d9e1ea;
+  --group-bd: #7d90a8;
+  --unit-bd: #3f5d83;
+  --pkg-bg: #eef2f6;
+  --pkg-bd: #8a99ab;
+  --file-bg: #ffffff;
+  --file-bd: #8a99ab;
+  --tier-core: #c9defa;
+  --tier-optional: #d9efd2;
+  --tier-frozen: #d6d6de;
+  --tier-unknown: #fff1c4;
+  --sel: #1f6fd1;
+  --out: #1f6fd1;
+  --in: #1c9a5b;
+  --badge-info: #6f7c8b;
+  --badge-text: #ffffff;
+  --label-bg: #f1f3f6;
+  --shadow: rgba(20, 30, 45, 0.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12171d;
+    --panel: #1b222b;
+    --panel-2: #242d38;
+    --text: #dde4ec;
+    --muted: #93a1b3;
+    --border: #36424f;
+    --accent: #5aa2ff;
+    --err: #ff6b6b;
+    --warn: #ffa733;
+    --ok: #6fcf74;
+    --wire: #8ea2b8;
+    --layer-bg: #1f2833;
+    --layer-bd: #52657b;
+    --group-bg: #28323f;
+    --group-bd: #5d7189;
+    --unit-bd: #7f9cc4;
+    --pkg-bg: #26303c;
+    --pkg-bd: #61758c;
+    --file-bg: #1b222b;
+    --file-bd: #61758c;
+    --tier-core: #25456e;
+    --tier-optional: #2a4d2a;
+    --tier-frozen: #3d3d47;
+    --tier-unknown: #5a4a1a;
+    --sel: #5aa2ff;
+    --out: #5aa2ff;
+    --in: #5fd38a;
+    --badge-info: #7b8998;
+    --badge-text: #ffffff;
+    --label-bg: #12171d;
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  overflow: hidden;
+}
+button, input, select { font: inherit; color: inherit; }
+button {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 9px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.link {
+  background: none; border: none; padding: 0; color: var(--accent); cursor: pointer;
+  text-align: left; text-decoration: underline dotted;
+}
+input[type="search"], input[type="text"] {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; width: 100%;
+}
+
+#app { display: flex; flex-direction: column; height: 100%; }
+
+/* ----- шапка ----- */
+#hdr {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+#hdr h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+#hdr .meta { color: var(--muted); font-size: 12px; }
+#hdr .meta b { color: var(--text); font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-left: auto; }
+.legend .it { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.legend .ln { display: inline-block; width: 28px; height: 0; border-top: 3px solid var(--wire); }
+.legend .ln.dashed { border-top-style: dashed; }
+.legend .ln.dotted { border-top-style: dotted; }
+.legend .ln.err { border-top-color: var(--err); }
+.legend .ln.warn { border-top-color: var(--warn); }
+.legend .sw { display: inline-block; width: 14px; height: 10px; border: 1px solid var(--unit-bd); border-radius: 2px; }
+.legend .bd { display: inline-block; min-width: 14px; padding: 0 4px; border-radius: 8px; background: var(--err); color: var(--badge-text); font-size: 10px; text-align: center; }
+
+/* ----- верхняя панель ----- */
+#bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 5px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border);
+}
+#bar .grp { display: inline-flex; align-items: center; gap: 8px; }
+#bar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+#bar .sep { width: 1px; align-self: stretch; background: var(--border); }
+#bar .ln { display: inline-block; width: 22px; height: 0; border-top: 3px solid var(--wire); }
+#bar .ln.dashed { border-top-style: dashed; }
+#bar .ln.dotted { border-top-style: dotted; }
+details.dd { position: relative; }
+details.dd > summary { cursor: pointer; list-style: none; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 3px 9px; user-select: none; }
+details.dd > summary::-webkit-details-marker { display: none; }
+details.dd[open] > summary { border-color: var(--accent); }
+details.dd .menu {
+  position: absolute; top: 100%; left: 0; z-index: 50; margin-top: 3px; min-width: 190px; max-height: 60vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;
+  box-shadow: 0 4px 14px var(--shadow);
+}
+details.dd .menu label { display: flex; padding: 2px 0; }
+details.dd .menu .empty { color: var(--muted); }
+
+/* ----- рабочая область ----- */
+#main { flex: 1; min-height: 0; display: flex; position: relative; }
+.side { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+#left { width: 290px; border-right: 1px solid var(--border); }
+#right { width: 400px; border-left: 1px solid var(--border); }
+.side.hidden { display: none; }
+.side h2 { font-size: 13px; margin: 0; padding: 7px 10px; background: var(--panel-2); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.side .body { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
+#center { flex: 1; min-width: 0; position: relative; }
+#cy { position: absolute; inset: 0; background: var(--bg); }
+#status {
+  position: absolute; left: 8px; bottom: 6px; z-index: 5; font-size: 11px; color: var(--muted);
+  background: var(--label-bg); padding: 1px 6px; border-radius: 3px; opacity: .92; pointer-events: none;
+  max-width: 80%;
+}
+#drawer {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 42%; z-index: 10;
+  background: var(--panel); border-top: 2px solid var(--border); display: flex; flex-direction: column;
+  box-shadow: 0 -4px 14px var(--shadow);
+}
+#drawer[hidden] { display: none; }
+#drawer .dh { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--panel-2); border-bottom: 1px solid var(--border); font-weight: 600; }
+#drawer .dh .sp { flex: 1; }
+#drawer .db { flex: 1; overflow: auto; padding: 4px 10px 10px; }
+
+/* ----- дерево ----- */
+#search { margin: 0 0 6px; }
+.tr { display: flex; align-items: center; gap: 3px; padding: 1px 2px; border-radius: 3px; white-space: nowrap; }
+.tr:hover { background: var(--panel-2); }
+.tr.sel { background: var(--accent); color: #fff; }
+.tr.sel .k, .tr.sel .cnt { color: #fff; }
+.tr .arr { width: 16px; flex: none; text-align: center; cursor: pointer; color: var(--muted); user-select: none; }
+.tr .arr.none { cursor: default; }
+.tr .nm { cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
+.tr .k { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; flex: none; }
+.tr .cnt { font-size: 10px; color: var(--muted); flex: none; }
+.tr.off .nm { text-decoration: line-through; opacity: .55; }
+.tr .fd { font-size: 10px; min-width: 14px; text-align: center; border-radius: 7px; color: var(--badge-text); background: var(--badge-info); padding: 0 3px; flex: none; }
+.tr .fd.err { background: var(--err); }
+.tr .fd.warn { background: var(--warn); }
+.more { color: var(--accent); cursor: pointer; padding: 2px 0 2px 20px; }
+
+/* ----- спецификация ----- */
+.spec h3 { font-size: 15px; margin: 0 0 2px; word-break: break-all; }
+.spec .sub { color: var(--muted); font-size: 12px; word-break: break-all; margin-bottom: 6px; }
+.spec h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; border-bottom: 1px solid var(--border); padding-bottom: 2px; }
+.spec table { border-collapse: collapse; width: 100%; }
+.spec td, .spec th { text-align: left; vertical-align: top; padding: 1px 6px 1px 0; }
+.spec td.k { color: var(--muted); white-space: nowrap; width: 1%; }
+.spec ul { margin: 0; padding-left: 16px; }
+.spec .chip { display: inline-block; border: 1px solid var(--border); border-radius: 9px; padding: 0 7px; margin: 0 3px 3px 0; font-size: 11px; }
+.spec .chip.err { border-color: var(--err); color: var(--err); }
+.spec .chip.warn { border-color: var(--warn); color: var(--warn); }
+.spec .chip.yes { border-color: var(--ok); color: var(--ok); }
+.spec .chip.no { border-color: var(--err); color: var(--err); }
+.spec .muted, .muted { color: var(--muted); }
+.spec .mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; word-break: break-all; }
+.spec .row { padding: 2px 0; border-bottom: 1px dotted var(--border); }
+.spec .fi { padding: 2px 0 2px 6px; border-left: 3px solid var(--border); margin: 3px 0; }
+.spec .fi.err { border-left-color: var(--err); }
+.spec .fi.warn { border-left-color: var(--warn); }
+.spec .btnrow { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+.spec .nocard { color: var(--warn); font-style: italic; }
+.spec table.card th { font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.spec table.card td { border-bottom: 1px dotted var(--border); padding: 3px 6px 3px 0; }
+.spec table.card td.src { font-size: 11px; color: var(--muted); word-break: break-all; }
+.spec .undecl { color: var(--warn); font-style: italic; }
+.spec .wrapl span { display: inline-block; margin: 0 6px 2px 0; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+details.info > summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
+.spec .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; color: var(--muted); }
+
+/* ----- находки ----- */
+table.fnd { border-collapse: collapse; width: 100%; }
+table.fnd th { text-align: left; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); padding: 2px 6px; }
+table.fnd td { padding: 2px 6px; border-bottom: 1px dotted var(--border); }
+table.fnd tr.rule td { background: var(--panel-2); font-weight: 600; }
+table.fnd tr.pair { cursor: pointer; }
+table.fnd tr.pair:hover td { background: var(--panel-2); }
+.sev { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--badge-info); margin-right: 5px; }
+.sev.err { background: var(--err); }
+.sev.warn { background: var(--warn); }
+
+/* ----- сообщение об ошибке запуска ----- */
+#fatal {
+  position: fixed; inset: 0; z-index: 100; background: var(--bg); color: var(--text);
+  padding: 24px; overflow: auto; white-space: pre-wrap; font: 14px/1.5 Consolas, "Courier New", monospace;
+}
+#fatal[hidden] { display: none; }
+#fatal h2 { color: var(--err); font-family: "Segoe UI", system-ui, sans-serif; }
+
+/* ----- узкий экран: панели становятся выезжающими ----- */
+@media (max-width: 900px) {
+  .side { position: absolute; top: 0; bottom: 0; z-index: 30; width: min(88vw, 380px); box-shadow: 0 0 14px var(--shadow); }
+  #left { left: 0; }
+  #right { right: 0; }
+  .legend { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="hdr">
+    <h1>Карта архитектуры</h1>
+    <span class="meta" id="hdr-meta"></span>
+    <span class="legend" id="legend">
+      <span class="it"><span class="ln"></span>hard</span>
+      <span class="it"><span class="ln dashed"></span>lazy</span>
+      <span class="it"><span class="ln dotted"></span>tc</span>
+      <span class="it"><span class="ln err"></span>ошибка</span>
+      <span class="it"><span class="ln warn"></span>предупреждение</span>
+      <span class="it"><span class="sw" style="background:var(--tier-core)"></span>core</span>
+      <span class="it"><span class="sw" style="background:var(--tier-optional)"></span>optional</span>
+      <span class="it"><span class="sw" style="background:var(--tier-frozen)"></span>frozen</span>
+      <span class="it"><span class="sw" style="background:var(--tier-unknown)"></span>не задан</span>
+      <span class="it"><span class="bd">3</span>число находок</span>
+    </span>
+  </header>
+
+  <div id="bar">
+    <div class="grp">
+      <button id="b-left" title="Дерево и поиск">Дерево</button>
+      <button id="b-right" title="Спецификация">Спецификация</button>
+    </div>
+    <span class="sep"></span>
+    <div class="grp" title="Какие виды импорта рисовать">
+      <label><input type="checkbox" id="k-hard" checked><span class="ln"></span>hard</label>
+      <label><input type="checkbox" id="k-lazy" checked><span class="ln dashed"></span>lazy</label>
+      <label><input type="checkbox" id="k-tc" checked><span class="ln dotted"></span>tc</label>
+    </div>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="f-viol">только нарушения</label>
+    <details class="dd" id="dd-contour"><summary>Контур: все</summary><div class="menu" id="m-contour"></div></details>
+    <details class="dd" id="dd-layers"><summary>Слои</summary><div class="menu" id="m-layers"></div></details>
+    <button id="b-focus" title="Только выбранный узел, его соседи и провода между ними">фокус</button>
+    <span class="sep"></span>
+    <button id="b-layers" title="Обзор: пять слоёв и провода между ними">до слоёв</button>
+    <button id="b-collapse" title="Всё свернуть и снять выделение">свернуть всё</button>
+    <button id="b-units">до юнитов</button>
+    <button id="b-fit">вписать</button>
+    <span class="sep"></span>
+    <button id="b-find">Находки</button>
+  </div>
+
+  <div id="main">
+    <aside class="side" id="left">
+      <h2>Иерархия</h2>
+      <div class="body">
+        <input type="search" id="search" placeholder="Поиск по имени или id…" autocomplete="off">
+        <div id="tree"></div>
+      </div>
+    </aside>
+
+    <section id="center">
+      <div id="cy"></div>
+      <div id="status"></div>
+      <div id="drawer" hidden>
+        <div class="dh"><span id="drawer-title">Находки</span><span class="sp"></span><button id="b-drawer-close">закрыть</button></div>
+        <div class="db" id="drawer-body"></div>
+      </div>
+    </section>
+
+    <aside class="side" id="right">
+      <h2>Спецификация</h2>
+      <div class="body spec" id="spec"><p class="muted">Выберите узел или провод на схеме.</p></div>
+    </aside>
+  </div>
+</div>
+
+<div id="fatal" hidden></div>
+
+<!-- Модель строит генератор: docs/arch-map/model.js задаёт window.ARCH_MODEL. fetch() не нужен — страница открывается с диска. -->
+<script src="model.js"></script>
+<!-- Библиотеки: точные версии, cdnjs / jsDelivr; integrity — sha384 файла, проверено при сборке страницы -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js" integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" integrity="sha384-KO35c6PFq7tFxAEx6FtATwL9vOBOmCzQYr7GM0iTr3oO22s7Jc9OkclOH4AV7jwK" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+/* =====================================================================================
+   ЧИСТАЯ ЛОГИКА. Здесь нет ни document, ни window, ни cytoscape: этот блок целиком
+   вырезается и гоняется в node (проверочная обвязка ищет маркеры PURE:BEGIN / PURE:END).
+   ===================================================================================== */
+// ===== PURE:BEGIN =====
+
+const SEP = '\u0001';
+const SEV_NUM = { error: 3, warn: 2, info: 1 };
+const LAYER_GAP = 180;    // горизонтальный зазор между слоями-колонками: здесь идут провода между слоями
+// место под заголовок контейнера зависит от его вида: заголовок слоя крупный, чтобы читаться при «вписать»
+function padTop(kind) { return kind === 'layer' ? 64 : (kind === 'group' ? 40 : 34); }
+function titleFont(kind) { return kind === 'layer' ? 38 : (kind === 'group' ? 20 : 12); }
+const PACK_PAD = 14;
+const PACK_GAP = 14;
+
+/* ---------- индекс модели ---------- */
+
+// Строит все справочники одним проходом. Некорректные рёбра (нет узла) отбрасываются и считаются в badEdges.
+function buildIndex(model) {
+  const meta = model.meta || {};
+  const nodes = model.nodes || [];
+  const byId = new Map();
+  const children = new Map();
+  const parentOf = new Map();
+  for (const n of nodes) { byId.set(n.id, n); children.set(n.id, []); }
+  for (const n of nodes) {
+    if (n.parent != null && byId.has(n.parent)) {
+      parentOf.set(n.id, n.parent);
+      children.get(n.parent).push(n.id);
+    }
+  }
+
+  // слои = корни дерева, в порядке meta.layers, потом по order
+  const layerNames = meta.layers || [];
+  const rootNodes = nodes.filter(n => !parentOf.has(n.id));
+  const rank = (n) => {
+    const k = layerNames.indexOf(n.id);
+    return k >= 0 ? k : 1000 + (typeof n.order === 'number' ? n.order : 0);
+  };
+  rootNodes.sort((a, b) => rank(a) - rank(b));
+  const roots = rootNodes.map(n => n.id);
+
+  const chainCache = new Map();
+  // путь от корня до узла включительно
+  function chain(id) {
+    let c = chainCache.get(id);
+    if (c) return c;
+    const p = parentOf.get(id);
+    c = p === undefined ? [id] : chain(p).concat(id);
+    chainCache.set(id, c);
+    return c;
+  }
+
+  // ближайший юнит вверх по дереву (сам узел, если он юнит); у слоя и группы — null
+  const unitOfCache = new Map();
+  function unitOf(id) {
+    if (unitOfCache.has(id)) return unitOfCache.get(id);
+    const n = byId.get(id);
+    let u = null;
+    if (n) {
+      if (n.kind === 'unit') u = id;
+      else {
+        const p = parentOf.get(id);
+        if (p !== undefined) u = unitOf(p);
+      }
+    }
+    unitOfCache.set(id, u);
+    return u;
+  }
+
+  // рёбра
+  const E = [];
+  let badEdges = 0;
+  const edgesOut = new Map();
+  const edgesIn = new Map();
+  const edgesByPair = new Map();
+  const depsOut = new Map();
+  const depsIn = new Map();
+  const bump = (m, a, b, kind) => {
+    let inner = m.get(a);
+    if (!inner) { inner = new Map(); m.set(a, inner); }
+    let c = inner.get(b);
+    if (!c) { c = { hard: 0, lazy: 0, tc: 0 }; inner.set(b, c); }
+    c[kind]++;
+  };
+  for (const e of (model.edges || [])) {
+    if (!byId.has(e.src) || !byId.has(e.dst)) { badEdges++; continue; }
+    const kind = (e.kind === 'lazy' || e.kind === 'tc') ? e.kind : 'hard';
+    const edge = { i: E.length, src: e.src, dst: e.dst, kind, names: e.names || [], line: e.line };
+    E.push(edge);
+    if (!edgesOut.has(e.src)) edgesOut.set(e.src, []);
+    edgesOut.get(e.src).push(edge.i);
+    if (!edgesIn.has(e.dst)) edgesIn.set(e.dst, []);
+    edgesIn.get(e.dst).push(edge.i);
+    const pk = e.src + SEP + e.dst;
+    if (!edgesByPair.has(pk)) edgesByPair.set(pk, []);
+    edgesByPair.get(pk).push(edge.i);
+    const us = unitOf(e.src);
+    const ud = unitOf(e.dst);
+    if (us && ud && us !== ud) { bump(depsOut, us, ud, kind); bump(depsIn, ud, us, kind); }
+  }
+
+  // находки: привязка к рёбрам, к юнитам, к узлам
+  const F = (model.findings || []).map((f, i) => Object.assign({}, f, { i, sevN: SEV_NUM[f.severity] || 1 }));
+  const edgeSev = new Uint8Array(E.length);
+  const edgeFinds = new Map();      // индекс ребра -> [индекс находки]
+  const unitLevel = [];             // находки на паре юнитов без совпавшего ребра
+  const unitFinds = new Map();      // юнит -> [индекс находки]
+  const fileFinds = new Map();      // файл -> [индекс находки]
+  const nodeFind = new Map();       // узел -> {n, error, warn, info}
+  const addTo = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+  for (const f of F) {
+    // совпадение с рёбрами по паре файлов; если в where есть номер строки — по нему, иначе все рёбра пары
+    let matched = [];
+    if (f.src && f.dst) {
+      const list = edgesByPair.get(f.src + SEP + f.dst) || [];
+      const m = /:(\d+)\s*$/.exec(String(f.where || ''));
+      if (m) matched = list.filter(i => E[i].line === Number(m[1]));
+      if (!matched.length) matched = list;
+    }
+    for (const i of matched) {
+      addTo(edgeFinds, i, f.i);
+      if (f.sevN > edgeSev[i]) edgeSev[i] = f.sevN;
+    }
+    if (!matched.length && f.src_unit && f.dst_unit && f.src_unit !== f.dst_unit) unitLevel.push(f.i);
+    const mem = Array.isArray(f.members) ? f.members : [];
+    for (const u of new Set([f.src_unit, f.dst_unit].concat(mem).filter(x => x && byId.has(x)))) addTo(unitFinds, u, f.i);
+    for (const x of new Set([f.src, f.dst].filter(x => x && byId.has(x)))) addTo(fileFinds, x, f.i);
+    // счётчик находок на каждом узле, которого находка касается (один раз на узел)
+    const touched = new Set();
+    for (const x of [f.src, f.dst, f.src_unit, f.dst_unit].concat(mem)) {
+      if (x && byId.has(x)) for (const a of chain(x)) touched.add(a);
+    }
+    for (const a of touched) {
+      let nf = nodeFind.get(a);
+      if (!nf) { nf = { n: 0, ew: 0, error: 0, warn: 0, info: 0 }; nodeFind.set(a, nf); }
+      nf.n++;
+      if (f.sevN >= 2) nf.ew++;
+      if (f.sevN === 3) nf.error++; else if (f.sevN === 2) nf.warn++; else nf.info++;
+    }
+  }
+
+  // Цикл юнитов: если у находки есть members (состав компоненты, в README не описан, но генератор его пишет),
+  // красим каждое ребро между двумя разными участниками цикла — тогда провод краснеет на любом уровне раскрытия.
+  for (const f of F) {
+    if (f.rule !== 'unit-cycle' || !Array.isArray(f.members) || f.members.length < 2) continue;
+    const mem = new Set(f.members);
+    for (const e of E) {
+      const us = unitOf(e.src);
+      const ud = unitOf(e.dst);
+      if (us && ud && us !== ud && mem.has(us) && mem.has(ud)) {
+        addTo(edgeFinds, e.i, f.i);
+        if (f.sevN > edgeSev[e.i]) edgeSev[e.i] = f.sevN;
+      }
+    }
+  }
+
+  return {
+    model, meta, byId, children, parentOf, roots, chain, unitOf,
+    E, badEdges, edgesOut, edgesIn, edgesByPair, depsOut, depsIn,
+    F, edgeSev, edgeFinds, unitLevel, unitFinds, fileFinds, nodeFind
+  };
+}
+
+// Предки без самого узла (от корня вниз).
+function ancestorsOf(idx, id) {
+  return idx.chain(id).slice(0, -1);
+}
+
+/* ---------- видимость и агрегирование проводов ---------- */
+
+// Узел, который реально нарисован вместо id: первый несвёрнутый предок на пути от корня, иначе сам id.
+// null — слой скрыт.
+function makeRep(idx, expanded, hiddenLayers) {
+  const cache = new Map();
+  return function rep(id) {
+    if (cache.has(id)) return cache.get(id);
+    const ch = idx.chain(id);
+    let r = id;
+    if (hiddenLayers && hiddenLayers.has(ch[0])) r = null;
+    else {
+      for (let k = 0; k < ch.length - 1; k++) {
+        if (!expanded.has(ch[k])) { r = ch[k]; break; }
+      }
+    }
+    cache.set(id, r);
+    return r;
+  };
+}
+
+// Список видимых узлов (в порядке обхода). allowed — необязательный фильтр (режим «фокус»).
+function visibleNodes(idx, expanded, hiddenLayers, allowed) {
+  const out = [];
+  function walk(id) {
+    if (allowed && !allowed.has(id)) return;
+    out.push(id);
+    if (expanded.has(id)) for (const c of idx.children.get(id)) walk(c);
+  }
+  for (const l of idx.roots) {
+    if (hiddenLayers && hiddenLayers.has(l)) continue;
+    walk(l);
+  }
+  return out;
+}
+
+// Агрегирует рёбра в провода между видимыми узлами.
+// opts: {kinds:{hard,lazy,tc}, hiddenLayers:Set}. Возвращает {map, list, used, rep}.
+function aggregateWires(idx, expanded, opts) {
+  const kinds = (opts && opts.kinds) || { hard: true, lazy: true, tc: true };
+  const rep = makeRep(idx, expanded, opts && opts.hiddenLayers);
+  const map = new Map();
+  let used = 0;
+  for (const e of idx.E) {
+    if (!kinds[e.kind]) continue;
+    const a = rep(e.src);
+    const b = rep(e.dst);
+    if (a === null || b === null || a === b) continue;
+    const key = a + SEP + b;
+    let w = map.get(key);
+    if (!w) {
+      w = { key, src: a, dst: b, count: 0, hard: 0, lazy: 0, tc: 0, sev: 0, edges: [], extra: [] };
+      map.set(key, w);
+    }
+    w.count++;
+    w[e.kind]++;
+    w.edges.push(e.i);
+    used++;
+    const s = idx.edgeSev[e.i];
+    if (s > w.sev) w.sev = s;
+  }
+  // находки уровня пары юнитов (например, цикл юнитов) красят провод между их видимыми представителями
+  for (const fi of idx.unitLevel) {
+    const f = idx.F[fi];
+    const a = rep(f.src_unit);
+    const b = rep(f.dst_unit);
+    if (a === null || b === null || a === b) continue;
+    const w = map.get(a + SEP + b);
+    if (!w) continue;
+    w.extra.push(fi);
+    if (f.sevN > w.sev) w.sev = f.sevN;
+  }
+  return { map, list: Array.from(map.values()), used, rep };
+}
+
+// Режим «фокус»: ids (видимые узлы) + прямые соседи по проводам; провода — все между этими узлами.
+function focusSubset(wires, ids) {
+  const nodes = new Set(ids);
+  for (const w of wires) {
+    if (ids.has(w.src)) nodes.add(w.dst);
+    if (ids.has(w.dst)) nodes.add(w.src);
+  }
+  return { nodes, wires: wires.filter(w => nodes.has(w.src) && nodes.has(w.dst)) };
+}
+
+// Нужные для видимости предки: набор узлов + все их предки.
+function withAncestors(idx, ids) {
+  const out = new Set();
+  for (const id of ids) for (const a of idx.chain(id)) out.add(a);
+  return out;
+}
+
+/* ---------- стиль провода ---------- */
+
+// Тонкие провода: схему должны читать рамки, а не линии.
+function wireWidth(count) {
+  return Math.min(5, Math.round((0.8 + 0.6 * Math.log2(1 + count)) * 10) / 10);
+}
+// Подпись провода: на уровне слоёв — hard/lazy/tc, иначе общее число импортов.
+function wireLabel(w, layerLevel) {
+  return layerLevel ? (w.hard + '/' + w.lazy + '/' + w.tc) : String(w.count);
+}
+function plural(n, one, few, many) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+function fmtNum(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+}
+// Сплошной, если есть хоть один hard; пунктир — только lazy (и tc вперемешку); точки — только tc.
+function wireDash(w) {
+  if (w.hard > 0) return 'solid';
+  if (w.lazy > 0) return 'dashed';
+  return 'dotted';
+}
+function wireColorName(w) {
+  return w.sev >= 3 ? 'err' : (w.sev === 2 ? 'warn' : 'neutral');
+}
+
+/* ---------- юниты: зависимости, находки, сводки ---------- */
+
+// Списки «зависит от» / «используют» для юнита, самые тяжёлые связи — сверху.
+function unitDeps(idx, unitId) {
+  const conv = (m) => {
+    const inner = m.get(unitId);
+    if (!inner) return [];
+    const out = [];
+    for (const [u, c] of inner) out.push({ unit: u, hard: c.hard, lazy: c.lazy, tc: c.tc, total: c.hard + c.lazy + c.tc });
+    out.sort((a, b) => b.total - a.total || a.unit.localeCompare(b.unit));
+    return out;
+  };
+  return { out: conv(idx.depsOut), inn: conv(idx.depsIn) };
+}
+
+// Находки юнита, сгруппированные по правилу.
+function findingsByRule(idx, ids) {
+  const g = new Map();
+  for (const fi of ids) {
+    const f = idx.F[fi];
+    if (!g.has(f.rule)) g.set(f.rule, []);
+    g.get(f.rule).push(f);
+  }
+  return Array.from(g.entries()).map(([rule, items]) => ({ rule, items })).sort((a, b) => a.rule.localeCompare(b.rule));
+}
+
+// Сводка по поддереву (для слоя, группы, пакета).
+function summaryOf(idx, id) {
+  const s = { units: 0, groups: 0, packages: 0, files: 0, loc: 0, tests: 0, unitIds: [] };
+  (function walk(x) {
+    const n = idx.byId.get(x);
+    if (n.kind === 'unit') {
+      s.units++; s.unitIds.push(x);
+      if (n.spec) { s.tests += n.spec.tests || 0; }
+    } else if (n.kind === 'group') s.groups++;
+    else if (n.kind === 'package') s.packages++;
+    else if (n.kind === 'file') { s.files++; s.loc += n.loc || 0; }
+    for (const c of idx.children.get(x)) walk(c);
+  })(id);
+  const nf = idx.nodeFind.get(id) || { n: 0, ew: 0, error: 0, warn: 0, info: 0 };
+  s.findings = nf;
+  return s;
+}
+
+// Таблица находок: правило -> пары юнитов со счётчиками.
+function groupFindings(idx) {
+  const rules = new Map();
+  for (const f of idx.F) {
+    let r = rules.get(f.rule);
+    if (!r) { r = { rule: f.rule, sev: 0, count: 0, pairs: new Map() }; rules.set(f.rule, r); }
+    r.count++;
+    if (f.sevN > r.sev) r.sev = f.sevN;
+    const pk = (f.src_unit || '') + SEP + (f.dst_unit || '');
+    let p = r.pairs.get(pk);
+    if (!p) { p = { src_unit: f.src_unit || null, dst_unit: f.dst_unit || null, count: 0, sev: 0 }; r.pairs.set(pk, p); }
+    p.count++;
+    if (f.sevN > p.sev) p.sev = f.sevN;
+  }
+  const out = Array.from(rules.values()).map(r => ({
+    rule: r.rule, sev: r.sev, count: r.count,
+    pairs: Array.from(r.pairs.values()).sort((a, b) => b.sev - a.sev || b.count - a.count || String(a.src_unit).localeCompare(String(b.src_unit)))
+  }));
+  out.sort((a, b) => b.sev - a.sev || b.count - a.count || a.rule.localeCompare(b.rule));
+  return out;
+}
+
+/* ---------- поиск и фильтры ---------- */
+
+function searchNodes(idx, q, limit) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q) return { items: [], total: 0 };
+  const rk = { layer: 0, group: 1, unit: 2, package: 3, file: 4 };
+  const hits = [];
+  for (const n of idx.model.nodes || []) {
+    if (String(n.name || '').toLowerCase().includes(q) || String(n.id).toLowerCase().includes(q)) hits.push(n);
+  }
+  hits.sort((a, b) => (rk[a.kind] === undefined ? 9 : rk[a.kind]) - (rk[b.kind] === undefined ? 9 : rk[b.kind]) || a.id.localeCompare(b.id));
+  return { items: hits.slice(0, limit), total: hits.length };
+}
+
+// Контуры юнита: card.contour может быть строкой или списком; карточки нет — пусто.
+function unitContours(n) {
+  const c = n && n.spec && n.spec.card && n.spec.card.contour;
+  if (Array.isArray(c)) return c.map(String);
+  if (c == null || c === '') return [];
+  return [String(c)];
+}
+function contourValues(idx) {
+  const s = new Set();
+  for (const n of idx.model.nodes || []) if (n.kind === 'unit') for (const c of unitContours(n)) s.add(c);
+  return Array.from(s).sort();
+}
+// true — узел затемняется фильтром по контуру (юнит и всё под ним без выбранных контуров)
+function dimmedByContour(idx, id, selected) {
+  if (!selected || selected.size === 0) return false;
+  const u = idx.unitOf(id);
+  if (!u) return false;
+  return !unitContours(idx.byId.get(u)).some(c => selected.has(c));
+}
+
+function tierOf(n) {
+  const t = n && n.spec && n.spec.tier;
+  return (t === 'core' || t === 'optional' || t === 'frozen') ? t : 'unknown';
+}
+
+/* ---------- состояние в адресе страницы ---------- */
+
+const HASH_KINDS = ['hard', 'lazy', 'tc'];
+
+// Раскрытые узлы вида «до юнитов»: все слои и группы.
+function unitsExpanded(idx) {
+  const out = new Set();
+  for (const n of idx.model.nodes || []) if (n.kind === 'layer' || n.kind === 'group') out.add(n.id);
+  return out;
+}
+
+// Разбор #view=layers|units&expand=a,b&select=id&focus=1&kinds=hard,lazy,tc&viol=1&panel=findings&layout=elk|grid.
+// Неизвестные ключи и значения молча пропускаются.
+function parseHash(h) {
+  const out = { view: null, expand: [], select: null, focus: false, kinds: null, viol: false, panel: null, layout: null };
+  const s = String(h || '').replace(/^#/, '');
+  if (!s) return out;
+  const dec = (v) => { try { return decodeURIComponent(v); } catch (e) { return v; } };
+  for (const part of s.split('&')) {
+    const k = part.indexOf('=');
+    if (k < 0) continue;
+    const key = part.slice(0, k);
+    const val = dec(part.slice(k + 1));
+    if (key === 'view') { if (val === 'layers' || val === 'units') out.view = val; }
+    else if (key === 'expand') out.expand = val.split(',').filter(Boolean);
+    else if (key === 'select') out.select = val || null;
+    else if (key === 'focus') out.focus = val === '1';
+    else if (key === 'kinds') {
+      const ks = val.split(',').filter(x => HASH_KINDS.includes(x));
+      if (ks.length) out.kinds = { hard: ks.includes('hard'), lazy: ks.includes('lazy'), tc: ks.includes('tc') };
+    }
+    else if (key === 'viol') out.viol = val === '1';
+    else if (key === 'panel') { if (val === 'findings') out.panel = val; }
+    else if (key === 'layout') { if (val === 'elk' || val === 'grid') out.layout = val; }
+  }
+  return out;
+}
+
+// Превращает разобранный адрес в состояние: id, которых нет в модели, игнорируются.
+function resolveHash(idx, p) {
+  const expanded = p.view === 'units' ? unitsExpanded(idx) : new Set();
+  const reveal = (id) => { for (const a of ancestorsOf(idx, id)) expanded.add(a); };
+  for (const id of p.expand) {
+    if (!idx.byId.has(id)) continue;
+    if (idx.children.get(id).length) expanded.add(id);
+    reveal(id);
+  }
+  let selected = null;
+  if (p.select && idx.byId.has(p.select)) { reveal(p.select); selected = { type: 'node', id: p.select }; }
+  return {
+    expanded, selected, focus: p.focus,
+    kinds: p.kinds || { hard: true, lazy: true, tc: true },
+    viol: p.viol, panel: p.panel, layout: p.layout
+  };
+}
+
+// Обратное преобразование: состояние -> строка адреса (без #). view=units — это «слои и группы раскрыты» плюс expand.
+function stateToHash(idx, st) {
+  const def = unitsExpanded(idx);
+  let view = 'units';
+  for (const d of def) if (!st.expanded.has(d)) { view = 'layers'; break; }
+  const base = view === 'units' ? def : new Set();
+  const extra = Array.from(st.expanded).filter(x => !base.has(x)).sort();
+  const parts = ['view=' + view];
+  if (extra.length) parts.push('expand=' + extra.map(encodeURIComponent).join(','));
+  if (st.selectedId) parts.push('select=' + encodeURIComponent(st.selectedId));
+  if (st.focus) parts.push('focus=1');
+  const ks = HASH_KINDS.filter(k => st.kinds[k]);
+  if (ks.length !== HASH_KINDS.length && ks.length) parts.push('kinds=' + ks.join(','));
+  if (st.viol) parts.push('viol=1');
+  if (st.panel) parts.push('panel=' + st.panel);
+  if (st.layout === 'elk') parts.push('layout=elk');
+  return parts.join('&');
+}
+
+// Название текущего вида для строки состояния.
+function viewName(idx, expanded) {
+  if (expanded.size === 0) return 'обзор (слои)';
+  const def = unitsExpanded(idx);
+  if (def.size === expanded.size && Array.from(def).every(x => expanded.has(x))) return 'юниты';
+  return 'раскрыто вручную: ' + expanded.size;
+}
+
+/* ---------- раскладка ---------- */
+
+// Размер листа подгоняется под подпись (юнит — под имя, группа и слой — крупнее).
+function leafSize(n, hasKids) {
+  // свёрнутый слой в обзоре: крупная рамка 420x300 (имя вверху, сводка отдельным блоком под ним)
+  if (n.kind === 'layer') return { w: 420, h: 300 };
+  const mark = hasKids ? 2 : 0;
+  const len = String(n.name).length + mark;
+  if (n.kind === 'group') return { w: Math.max(150, Math.round(len * 9.5 + 34)), h: 46 };
+  const w = Math.max(116, Math.min(300, Math.round(len * 7 + 26)));
+  const h = n.kind === 'unit' ? 46 : (n.kind === 'file' ? 26 : 34);
+  return { w, h };
+}
+
+// Подпись узла: «+»/«−» показывает, что узел раскрывается. Свёрнутый слой несёт сводку.
+function nodeLabel(idx, n, isExpanded) {
+  const kids = idx.children.get(n.id).length;
+  let t = (kids ? (isExpanded ? '\u2212 ' : '+ ') : '') + n.name;
+  if (isExpanded) return t;
+  if (n.kind === 'layer') return (kids ? '+ ' : '') + breakName(n.name);   // сводка слоя — отдельным узлом (layerCaption)
+  if (n.kind === 'group') {
+    const s = summaryOf(idx, n.id);
+    t += '\n' + s.units + ' ' + plural(s.units, 'юнит', 'юнита', 'юнитов');
+  } else if (n.kind === 'unit' && n.spec) t += '\n' + (n.spec.files || 0) + ' ф \u00b7 ' + fmtNum(n.spec.loc || 0) + ' loc';
+  return t;
+}
+
+// Длинное имя слоя переносится по подчёркиванию ближе к середине: multiprocess_ / framework.
+function breakName(name) {
+  name = String(name);
+  if (name.length <= 14) return name;
+  let best = -1;
+  for (let i = 0; i < name.length - 1; i++) {
+    if (name[i] === '_' && (best < 0 || Math.abs(i - name.length / 2) < Math.abs(best - name.length / 2))) best = i;
+  }
+  return best < 0 ? name : name.slice(0, best + 1) + '\n' + name.slice(best + 1);
+}
+
+// Сводка свёрнутого слоя: каждая цифра на своей строке, внизу число ошибок и предупреждений.
+function layerCaption(idx, id) {
+  const s = summaryOf(idx, id);
+  const nf = idx.nodeFind.get(id) || { error: 0, warn: 0 };
+  return s.units + ' ' + plural(s.units, 'юнит', 'юнита', 'юнитов') + '\n' +
+    s.files + ' ' + plural(s.files, 'файл', 'файла', 'файлов') + '\n' +
+    fmtNum(s.loc) + ' строк\n' +
+    nf.error + ' ' + plural(nf.error, 'ошибка', 'ошибки', 'ошибок') + ' \u00b7 ' + nf.warn + ' предупр.';
+}
+
+// Порядок детей: группы, затем юниты по tier (core, optional, frozen, не задан) и fan_in по убыванию, потом пакеты и файлы.
+function sortKids(idx, ids) {
+  const kr = { group: 0, unit: 1, package: 2, file: 3 };
+  const tr = { core: 0, optional: 1, frozen: 2, unknown: 3 };
+  const fin = (n) => (n.spec && typeof n.spec.fan_in === 'number' ? n.spec.fan_in : 0);
+  return ids.slice().sort((a, b) => {
+    const na = idx.byId.get(a);
+    const nb = idx.byId.get(b);
+    const ka = kr[na.kind] === undefined ? 4 : kr[na.kind];
+    const kb = kr[nb.kind] === undefined ? 4 : kr[nb.kind];
+    if (ka !== kb) return ka - kb;
+    if (na.kind === 'unit' && nb.kind === 'unit') {
+      const d = tr[tierOf(na)] - tr[tierOf(nb)];
+      if (d) return d;
+      const f = fin(nb) - fin(na);
+      if (f) return f;
+    }
+    return String(na.name).localeCompare(String(nb.name));
+  });
+}
+
+// Рёбра раскладки ELK: направление развёрнуто (импортируемый — левее), как цепочка слоёв.
+// Раскладка одного слоя: корень ELK = сам слой, вложенность — раскрытые узлы.
+function elkGraph(idx, layerId, visKids, wires) {
+  const padding = (kind) => '[top=' + padTop(kind) + ',left=' + PACK_PAD + ',bottom=' + PACK_PAD + ',right=' + PACK_PAD + ']';
+  function build(id, isRoot) {
+    const kids = visKids(id);
+    const n = idx.byId.get(id);
+    if (!kids.length) {
+      const s = leafSize(n, idx.children.get(id).length > 0);
+      return { id, width: s.w, height: s.h };
+    }
+    const node = { id, children: kids.map(k => build(k, false)) };
+    node.layoutOptions = { 'elk.padding': padding(n.kind) };
+    return node;
+  }
+  const root = build(layerId, true);
+  const edges = [];
+  if (root.children) {
+    let k = 0;
+    for (const w of wires) {
+      if (idx.chain(w.src)[0] !== layerId || idx.chain(w.dst)[0] !== layerId) continue;
+      edges.push({ id: 'e' + (k++), sources: [w.dst], targets: [w.src] });
+    }
+    root.edges = edges;
+    root.layoutOptions = {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.padding': padding('layer'),
+      // зазоры подобраны замером на настоящей модели: шире слой не нужен, иначе подписи пропадают при «вписать»
+      'elk.spacing.nodeNode': '14',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '40',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '14',
+      'elk.layered.compaction.postCompaction.strategy': 'LEFT_RIGHT_CONSTRAINT_LOCKING',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.edgeRouting': 'ORTHOGONAL'
+    };
+  }
+  return root;
+}
+
+// Читает результат ELK в плоскую карту абсолютных координат (левый верхний угол).
+function readElk(node, boxes, ox, oy, depth) {
+  const x = ox + (node.x || 0);
+  const y = oy + (node.y || 0);
+  boxes.set(node.id, { x, y, w: node.width, h: node.height, cont: !!(node.children && node.children.length), depth });
+  for (const c of node.children || []) readElk(c, boxes, x, y, depth + 1);
+}
+
+// Основная раскладка: контейнер раскладывает детей сеткой колонок; число колонок подбирается так,
+// чтобы рамка получилась примерно 3:4 (ширина к высоте 0,75). Дети отсортированы по tier и fan_in.
+function gridOf(ms, cols) {
+  const rows = [];
+  for (let i = 0; i < ms.length; i += cols) rows.push(ms.slice(i, i + cols));
+  const colW = [];
+  for (let c = 0; c < cols; c++) colW.push(Math.max(0, ...rows.map(r => (r[c] ? r[c].w : 0))));
+  const rowH = rows.map(r => Math.max(...r.map(m => m.h)));
+  const colX = [];
+  let x = 0;
+  for (let c = 0; c < cols; c++) { colX.push(x); x += colW[c] + PACK_GAP; }
+  const rowY = [];
+  let y = 0;
+  for (let r = 0; r < rows.length; r++) { rowY.push(y); y += rowH[r] + PACK_GAP; }
+  return { rows, colX, rowY, w: Math.max(0, x - PACK_GAP), h: Math.max(0, y - PACK_GAP) };
+}
+
+function packLayer(idx, layerId, visKids) {
+  function measure(id) {
+    const n = idx.byId.get(id);
+    const kids = sortKids(idx, visKids(id));
+    if (!kids.length) {
+      const s = leafSize(n, idx.children.get(id).length > 0);
+      return { id, w: s.w, h: s.h, grid: null };
+    }
+    const ms = kids.map(measure);
+    const top = padTop(n.kind);
+    let best = null;
+    for (let cols = 1; cols <= ms.length; cols++) {
+      const g = gridOf(ms, cols);
+      const w = g.w + 2 * PACK_PAD;
+      const h = top + g.h + PACK_PAD;
+      const score = Math.abs(Math.log((w / h) / 0.75));
+      if (!best || score < best.score - 1e-9) best = { score, g, w, h };
+    }
+    // заголовок контейнера не должен вылезать за рамку
+    const tw = String(n.name).length * titleFont(n.kind) * 0.62 + 40;
+    return { id, w: Math.max(best.w, Math.round(tw)), h: best.h, grid: best.g, top };
+  }
+  const boxes = new Map();
+  function place(m, x, y, depth) {
+    boxes.set(m.id, { x, y, w: m.w, h: m.h, cont: !!m.grid, depth });
+    if (!m.grid) return;
+    const g = m.grid;
+    const ox = x + (m.w - g.w) / 2;
+    const oy = y + m.top;
+    g.rows.forEach((r, ri) => r.forEach((k, ci) => place(k, ox + g.colX[ci], oy + g.rowY[ri], depth + 1)));
+  }
+  place(measure(layerId), 0, 0, 0);
+  return boxes;
+}
+
+// Пара непересекающихся по вложенности коробок, которые всё же пересекаются (для проверки раскладки).
+function findOverlaps(boxes, idx) {
+  const arr = Array.from(boxes.entries());
+  const bad = [];
+  for (let i = 0; i < arr.length; i++) {
+    for (let j = i + 1; j < arr.length; j++) {
+      const [ia, a] = arr[i];
+      const [ib, b] = arr[j];
+      if (idx.chain(ia).includes(ib) || idx.chain(ib).includes(ia)) continue;
+      if (a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5) bad.push([ia, ib]);
+    }
+  }
+  return bad;
+}
+
+// ===== PURE:END =====
+
+/* =====================================================================================
+   ИНТЕРФЕЙС. Всё ниже трогает DOM и cytoscape.
+   ===================================================================================== */
+
+const RULE_TITLES = {
+  'layer-reverse': 'Импорт против цепочки слоёв',
+  'unit-cycle': 'Цикл между юнитами',
+  'deep-import': 'Импорт мимо витрины юнита',
+  'private-import': 'Импорт приватного имени',
+  'unit-hygiene': 'Гигиена юнита (нет README, STATUS, interfaces или тестов)',
+  'unresolved-relative': 'Относительный импорт не разрешился'
+};
+const KIND_TITLES = { layer: 'слой', group: 'группа', unit: 'юнит', package: 'пакет', file: 'файл' };
+// Поля карточки в порядке показа; первые четыре объявляет человек (null = «не объявлено»)
+const CARD_DECLARED = ['purpose', 'tier', 'contour', 'runs_in'];
+const CARD_ORDER = ['purpose', 'tier', 'contour', 'runs_in', 'summary', 'adr_count', 'commands', 'threads'];
+const CARD_LABELS = { purpose: 'Назначение', tier: 'Tier', contour: 'Контур', runs_in: 'Исполняется в', summary: 'Кратко (докстринг)', adr_count: 'Решений (ADR)', commands: 'Команды', threads: 'Потоки' };
+const ROWS_STEP = 200;
+
+const S = {
+  idx: null, cy: null, elk: null,
+  expanded: new Set(),
+  selected: null,                 // {type:'node', id} | {type:'wire', src, dst}
+  kinds: { hard: true, lazy: true, tc: true },
+  onlyViol: false,
+  contours: new Set(),
+  hiddenLayers: new Set(),
+  focus: false,
+  treeOpen: new Set(),
+  treeCap: new Map(),
+  query: '',
+  token: 0,
+  agg: null,                      // последний результат aggregateWires (до фильтров показа)
+  wireRows: ROWS_STEP,
+  lastTap: { id: null, t: 0 },
+  useElk: false,                  // по умолчанию сетка колонок; ELK — по #layout=elk
+  hover: null,
+  lastHash: '',
+  layoutNote: ''
+};
+
+function $(id) { return document.getElementById(id); }
+
+// Небольшой конструктор DOM: текст всегда через textContent, innerHTML с данными модели не используется.
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  if (attrs) {
+    for (const k of Object.keys(attrs)) {
+      const v = attrs[k];
+      if (v === null || v === undefined || v === false) continue;
+      if (k === 'class') e.className = v;
+      else if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v === true ? '' : v);
+    }
+  }
+  for (const c of kids.flat(Infinity)) {
+    if (c === null || c === undefined || c === false) continue;
+    e.append(typeof c === 'object' ? c : document.createTextNode(String(c)));
+  }
+  return e;
+}
+
+function showFatal(err, title) {
+  const box = $('fatal');
+  box.hidden = false;
+  box.textContent = '';
+  box.append(el('h2', { text: title || 'Не удалось построить схему' }));
+  box.append(document.createTextNode(String(err && err.stack ? err.stack : err)));
+}
+
+// Служебные узлы рядом с основными: значок находок ('b:id') и сводка слоя ('c:id')
+function isAux(id) { return id.startsWith('b:') || id.startsWith('c:'); }
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function nodeTitle(idx, id) {
+  const n = idx.byId.get(id);
+  return n ? n.name : id;
+}
+
+/* ---------- стиль cytoscape (цвета берутся из CSS-переменных) ---------- */
+
+function buildStyle() {
+  const v = cssVar;
+  const st = [
+    { selector: 'node', style: {
+      'shape': 'round-rectangle', 'width': 'data(w)', 'height': 'data(h)',
+      'background-color': v('--file-bg'), 'border-width': 1.2, 'border-color': v('--file-bd'),
+      'label': 'data(label)', 'color': v('--text'), 'font-size': 11, 'text-wrap': 'wrap',
+      'text-max-width': 'data(tw)', 'text-valign': 'center', 'text-halign': 'center',
+      'z-index-compare': 'manual', 'z-index': 'data(z)', 'min-zoomed-font-size': 3
+    } },
+    // Семантический масштаб: подписи слоя и группы крупные и не гаснут при «вписать», юнит — обычный размер
+    { selector: 'node.layer', style: { 'background-color': v('--layer-bg'), 'border-color': v('--layer-bd'), 'border-width': 2.5, 'font-size': 46, 'font-weight': 'bold', 'min-zoomed-font-size': 0, 'text-valign': 'top', 'text-margin-y': 124 } },
+    // сводка свёрнутого слоя: прозрачный узел поверх нижней части рамки, клики пропускает
+    { selector: 'node.lcap', style: { 'background-opacity': 0, 'border-width': 0, 'font-size': 26, 'font-weight': 'normal', 'text-valign': 'center', 'text-margin-y': 0, 'events': 'no', 'z-index': 92, 'min-zoomed-font-size': 0 } },
+    { selector: 'node.group', style: { 'background-color': v('--group-bg'), 'border-color': v('--group-bd'), 'border-style': 'dashed', 'font-size': 14, 'font-weight': 'bold', 'min-zoomed-font-size': 0 } },
+    { selector: 'node.package', style: { 'background-color': v('--pkg-bg'), 'border-color': v('--pkg-bd') } },
+    { selector: 'node.file', style: { 'background-color': v('--file-bg'), 'border-color': v('--file-bd'), 'font-size': 10 } },
+    { selector: 'node.unit', style: { 'border-color': v('--unit-bd'), 'border-width': 1.8, 'font-size': 12 } },
+    { selector: 'node.unit.tier-core', style: { 'background-color': v('--tier-core') } },
+    { selector: 'node.unit.tier-optional', style: { 'background-color': v('--tier-optional') } },
+    { selector: 'node.unit.tier-frozen', style: { 'background-color': v('--tier-frozen'), 'border-style': 'double', 'border-width': 4 } },
+    { selector: 'node.unit.tier-unknown', style: { 'background-color': v('--tier-unknown') } },
+    // раскрытый контейнер: заголовок прижат к верхнему краю внутри рамки (отступ = 1,3 размера шрифта)
+    { selector: 'node.cont', style: { 'text-valign': 'top', 'text-margin-y': Math.round(titleFont('unit') * 1.3), 'font-size': titleFont('unit'), 'font-weight': 'bold' } },
+    { selector: 'node.group.cont', style: { 'text-margin-y': Math.round(titleFont('group') * 1.3), 'font-size': titleFont('group') } },
+    { selector: 'node.layer.cont', style: { 'text-margin-y': Math.round(titleFont('layer') * 1.3), 'font-size': titleFont('layer') } },
+    { selector: 'node.sel', style: { 'border-color': v('--sel'), 'border-width': 4 } },
+    { selector: 'node.dim', style: { 'opacity': 0.28 } },
+    { selector: 'node.faded', style: { 'opacity': 0.3 } },
+    // значок числа находок (только error и warn) — отдельный маленький узел в правом верхнем углу
+    { selector: 'node.badge', style: {
+      'shape': 'ellipse', 'width': 'data(w)', 'height': 18, 'background-color': v('--badge-info'), 'border-width': 0,
+      'label': 'data(label)', 'color': v('--badge-text'), 'font-size': 9, 'font-weight': 'bold',
+      'text-valign': 'center', 'text-halign': 'center', 'events': 'no', 'z-index': 95, 'min-zoomed-font-size': 0
+    } },
+    { selector: 'node.badge.b-err', style: { 'background-color': v('--err') } },
+    { selector: 'node.badge.b-warn', style: { 'background-color': v('--warn') } },
+    // Провода: в покое тонкие и полупрозрачные, подпись только при наведении, выделении и на уровне слоёв
+    { selector: 'edge', style: {
+      'curve-style': 'taxi', 'taxi-direction': 'horizontal', 'taxi-turn': '50%', 'taxi-turn-min-distance': 6,
+      'width': 'data(w)', 'line-color': v('--wire'), 'target-arrow-color': v('--wire'), 'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.8, 'line-style': 'solid', 'opacity': 0.25,
+      'z-index-compare': 'manual', 'z-index': 50,
+      'font-size': 10, 'color': v('--text'),
+      'text-background-color': v('--label-bg'), 'text-background-opacity': 0.9, 'text-background-padding': 2,
+      'min-zoomed-font-size': 0
+    } },
+    { selector: 'edge.dashed', style: { 'line-style': 'dashed' } },
+    { selector: 'edge.dotted', style: { 'line-style': 'dotted' } },
+    { selector: 'edge.hl-out', style: { 'line-color': v('--out'), 'target-arrow-color': v('--out'), 'opacity': 1, 'z-index': 70, 'label': 'data(lbl)' } },
+    { selector: 'edge.hl-in', style: { 'line-color': v('--in'), 'target-arrow-color': v('--in'), 'opacity': 1, 'z-index': 70, 'label': 'data(lbl)' } },
+    { selector: 'edge.err', style: { 'line-color': v('--err'), 'target-arrow-color': v('--err'), 'opacity': 0.45 } },
+    { selector: 'edge.warn', style: { 'line-color': v('--warn'), 'target-arrow-color': v('--warn'), 'opacity': 0.45 } },
+    { selector: 'edge.err.hl-out, edge.err.hl-in, edge.warn.hl-out, edge.warn.hl-in', style: { 'opacity': 1 } },
+    { selector: 'edge.rv1', style: { 'taxi-turn': '35%' } },
+    { selector: 'edge.rv2', style: { 'taxi-turn': '65%' } },
+    // уровень слоёв: дуги над и под рядом рамок, подпись hard/lazy/tc всегда видна
+    { selector: 'edge.ovw', style: {
+      'curve-style': 'unbundled-bezier', 'control-point-weights': [0.5], 'edge-distances': 'node-position',
+      'opacity': 0.85, 'arrow-scale': 1.3, 'label': 'data(lbl)', 'font-size': 32, 'font-weight': 'bold', 'z-index': 60
+    } },
+    { selector: 'edge.sel', style: { 'line-color': v('--sel'), 'target-arrow-color': v('--sel'), 'opacity': 1, 'z-index': 80, 'label': 'data(lbl)' } },
+    { selector: 'edge.dim', style: { 'opacity': 0.06 } },
+    { selector: 'edge.faded', style: { 'opacity': 0.05 } }
+  ];
+  // Вершина дуги = половина control-point-distance (центры рамок на полувысоте 150, поэтому первая дуга уходит на 210). Положительное значение уводит дугу влево от направления
+  // «источник -> цель»: провод справа налево (штатное направление импорта) идёт над рядом, обратный — под ним.
+  for (let k = 1; k <= 8; k++) {
+    st.splice(st.length - 3, 0, { selector: 'edge.ovs' + k, style: { 'control-point-distances': [2 * (210 + 110 * (k - 1))] } });
+  }
+  return st;
+}
+
+/* ---------- раскладка (сетка по умолчанию, ELK по желанию) ---------- */
+
+async function computeBoxes(visSet, wires) {
+  const idx = S.idx;
+  const boxes = new Map();
+  const visKids = (id) => (S.expanded.has(id) ? idx.children.get(id).filter(c => visSet.has(c)) : []);
+  let x = 0;
+  // в обзоре слоёв подписи проводов лежат над и под рядом, зазор можно сузить
+  const allCollapsed = idx.roots.every(l => !visSet.has(l) || !S.expanded.has(l));
+  const gap = allCollapsed ? 120 : LAYER_GAP;
+  const useElk = S.useElk && S.elk;
+  let note = useElk ? 'раскладка ELK' : 'сетка колонок';
+  for (const layerId of idx.roots) {
+    if (!visSet.has(layerId)) continue;
+    let lb = null;
+    if (useElk) {
+      try {
+        const res = await S.elk.layout(elkGraph(idx, layerId, visKids, wires));
+        lb = new Map();
+        readElk(res, lb, 0, 0, 0);
+      } catch (e) {
+        console.error('ELK, слой ' + layerId, e);
+        note = 'ELK упал на слое ' + layerId + ' (' + (e && e.message ? e.message : e) + '), сетка';
+        lb = null;
+      }
+    }
+    if (!lb) lb = packLayer(idx, layerId, visKids);
+    const root = lb.get(layerId);
+    for (const [id, b] of lb) { b.x += x; boxes.set(id, b); }
+    x += root.w + gap;
+  }
+  S.layoutNote = note;
+  return boxes;
+}
+
+/* ---------- главный цикл отрисовки ---------- */
+
+// Полная пересборка: агрегирование проводов, раскладка, элементы cytoscape. o: {fit, anchor, center}.
+function render(o) {
+  return renderCore(o).catch((e) => { console.error(e); showFatal(e); });
+}
+
+async function renderCore(o) {
+  o = o || {};
+  const my = ++S.token;
+  const idx = S.idx;
+  const cy = S.cy;
+  const agg = aggregateWires(idx, S.expanded, { kinds: S.kinds, hiddenLayers: S.hiddenLayers });
+  S.agg = agg;
+  let wires = agg.list;
+  if (S.onlyViol) wires = wires.filter(w => w.sev >= 2);
+
+  // режим «фокус»: нужен выбранный узел или провод
+  let allowed = null;
+  let focusNote = '';
+  if (S.focus) {
+    const sel = S.selected;
+    if (sel) {
+      const targets = new Set();
+      if (sel.type === 'node') { const r = agg.rep(sel.id); if (r) targets.add(r); }
+      else { targets.add(sel.src); targets.add(sel.dst); }
+      if (targets.size) {
+        const sub = focusSubset(wires, targets);
+        allowed = withAncestors(idx, new Set([...sub.nodes, ...targets]));
+        wires = sub.wires;
+      }
+    } else focusNote = ' · фокус: выберите узел';
+  }
+
+  const vis = visibleNodes(idx, S.expanded, S.hiddenLayers, allowed);
+  const visSet = new Set(vis);
+  wires = wires.filter(w => visSet.has(w.src) && visSet.has(w.dst));
+
+  const boxes = await computeBoxes(visSet, wires);
+  if (my !== S.token) return;       // пришёл более новый запрос
+
+  // положение якоря на экране до пересборки
+  let anchor = null;
+  if (o.anchor) {
+    const an = cy.getElementById(o.anchor);
+    if (an && an.nonempty()) anchor = { id: o.anchor, rp: an.renderedPosition() };
+  }
+
+  // уровень слоёв: все концы проводов — свёрнутые слои
+  const overview = wires.length > 0 && wires.every(w => idx.byId.get(w.src).kind === 'layer' && idx.byId.get(w.dst).kind === 'layer');
+  const reverseKeys = new Set(wires.map(w => w.src + SEP + w.dst));
+  const els = [];
+  const endpoints = new Set();
+  for (const w of wires) { endpoints.add(w.src); endpoints.add(w.dst); }
+  for (const id of vis) {
+    const n = idx.byId.get(id);
+    const b = boxes.get(id);
+    if (!b) continue;
+    const isExp = S.expanded.has(id) && b.cont;
+    const classes = [n.kind];
+    if (b.cont) classes.push('cont');
+    if (n.kind === 'unit') classes.push('tier-' + tierOf(n));
+    els.push({
+      group: 'nodes',
+      data: { id, label: nodeLabel(idx, n, isExp), w: Math.round(b.w), h: Math.round(b.h), tw: Math.max(40, Math.round(b.w) - 14), z: b.depth * 2 + 1 },
+      position: { x: b.x + b.w / 2, y: b.y + b.h / 2 },
+      classes: classes.join(' '),
+      selectable: false, grabbable: false
+    });
+    // значок считает только error и warn: info (unit-undeclared, unit-hygiene) значки не раздувает
+    const nf = idx.nodeFind.get(id);
+    if (n.kind === 'layer' && !b.cont) {
+      // свёрнутый слой: сводка (счётчики и находки) отдельным узлом в нижней части рамки; значок не нужен
+      els.push({
+        group: 'nodes',
+        data: { id: 'c:' + id, label: layerCaption(idx, id), w: Math.round(b.w), h: 160, tw: Math.round(b.w) - 20, z: 92 },
+        position: { x: b.x + b.w / 2, y: b.y + b.h - 88 },
+        classes: 'lcap aux', selectable: false, grabbable: false
+      });
+    } else if (nf && nf.ew > 0) {
+      const txt = nf.ew > 99 ? '99+' : String(nf.ew);
+      els.push({
+        group: 'nodes',
+        data: { id: 'b:' + id, label: txt, w: 16 + txt.length * 5, h: 18, z: 95 },
+        position: { x: b.x + b.w - 4, y: b.y + 2 },
+        classes: 'badge aux ' + (nf.error ? 'b-err' : 'b-warn'),
+        selectable: false, grabbable: false
+      });
+    }
+  }
+  for (const w of wires) {
+    const cls = [wireDash(w) === 'solid' ? '' : wireDash(w)];
+    const cn = wireColorName(w);
+    if (cn !== 'neutral') cls.push(cn);
+    if (overview) {
+      const span = Math.abs(idx.roots.indexOf(w.src) - idx.roots.indexOf(w.dst));
+      cls.push('ovw', 'ovs' + Math.max(1, Math.min(8, span)));
+    } else if (reverseKeys.has(w.dst + SEP + w.src)) cls.push(w.src < w.dst ? 'rv1' : 'rv2');
+    els.push({
+      group: 'edges',
+      data: { id: wireId(w.src, w.dst), source: w.src, target: w.dst, w: wireWidth(w.count) * (overview ? 3 : 1), lbl: wireLabel(w, overview) },
+      classes: cls.filter(Boolean).join(' ')
+    });
+  }
+
+  cy.batch(() => {
+    cy.elements().remove();
+    cy.add(els);
+  });
+  S.view = { vis, visSet, wires, endpoints, overview };
+  S.hover = null;
+  refreshStyles();
+
+  if (anchor) {
+    const n2 = cy.getElementById(anchor.id);
+    if (n2.nonempty()) {
+      const z = cy.zoom();
+      const p = n2.position();
+      cy.pan({ x: anchor.rp.x - p.x * z, y: anchor.rp.y - p.y * z });
+    }
+  } else if (o.fit) cy.fit(undefined, overview ? 16 : 30);
+  if (o.center) centerOn(o.center, o.instant);
+
+  renderStatus(agg, wires, vis, focusNote);
+  renderPanel();
+  renderTree();
+  writeHash();
+}
+
+function wireId(a, b) { return 'w:' + a + '>' + b; }
+
+function renderStatus(agg, wires, vis, extra) {
+  const st = $('status');
+  st.textContent = 'вид: ' + viewName(S.idx, S.expanded) + ' \u00b7 узлов: ' + vis.length + ' \u00b7 проводов: ' + wires.length + ' (импортов под ними: ' +
+    wires.reduce((s, w) => s + w.count, 0) + ' из ' + S.idx.E.length + ') \u00b7 ' + S.layoutNote + (extra || '');
+}
+
+// Выделение, затемнение: меняются классами без пересборки.
+function refreshStyles() {
+  const cy = S.cy;
+  if (!cy || !S.view) return;
+  const idx = S.idx;
+  cy.batch(() => {
+    cy.nodes().forEach(n => {
+      const id = n.id();
+      if (isAux(id)) return;
+      let dim = dimmedByContour(idx, id, S.contours);
+      if (!dim && S.onlyViol && !n.hasClass('cont') && !S.view.endpoints.has(id)) dim = true;
+      n.toggleClass('dim', dim);
+      n.toggleClass('sel', !!(S.selected && S.selected.type === 'node' && S.selected.id === id));
+    });
+    cy.nodes('.aux').forEach(b => {
+      const owner = cy.getElementById(b.id().slice(2));
+      b.toggleClass('dim', owner.hasClass('dim'));
+    });
+    cy.edges().forEach(e => {
+      const a = e.source();
+      const b = e.target();
+      e.toggleClass('dim', a.hasClass('dim') || b.hasClass('dim'));
+      e.toggleClass('sel', !!(S.selected && S.selected.type === 'wire' && wireId(S.selected.src, S.selected.dst) === e.id()));
+    });
+  });
+  refreshHighlight();
+}
+
+// Подсветка по наведению или выбору: провода узла (исходящие и входящие разным цветом), остальное приглушено.
+// Ничего не убирается со схемы — только классы.
+function refreshHighlight() {
+  const cy = S.cy;
+  if (!cy || !S.view) return;
+  const focusIds = [];
+  if (S.hover) focusIds.push(S.hover);
+  else if (S.selected && S.selected.type === 'node') focusIds.push(S.selected.id);
+  else if (S.selected && S.selected.type === 'wire') focusIds.push(S.selected.src, S.selected.dst);
+  cy.batch(() => {
+    cy.edges().removeClass('hl-out hl-in faded');
+    cy.nodes().removeClass('faded');
+    if (!focusIds.length) return;
+    const keep = new Set();
+    const hlEdges = new Set();
+    for (const id of focusIds) {
+      const n = cy.getElementById(id);
+      if (!n || n.empty()) continue;
+      const es = n.connectedEdges();
+      if (es.empty()) continue;       // контейнер или узел без проводов: подсвечивать нечего
+      keep.add(id);
+      es.forEach(e => {
+        hlEdges.add(e.id());
+        keep.add(e.source().id());
+        keep.add(e.target().id());
+        e.addClass(focusIds.includes(e.source().id()) ? 'hl-out' : 'hl-in');
+      });
+    }
+    if (!keep.size) return;
+    cy.edges().forEach(e => { if (!hlEdges.has(e.id()) && !e.hasClass('sel')) e.addClass('faded'); });
+    cy.nodes().forEach(n => {
+      const id = n.id();
+      if (isAux(id)) { if (!keep.has(id.slice(2))) n.addClass('faded'); return; }
+      if (n.hasClass('cont') || keep.has(id)) return;
+      n.addClass('faded');
+    });
+  });
+}
+
+function centerOn(id, instant) {
+  const cy = S.cy;
+  const n = cy.getElementById(id);
+  if (!n || n.empty()) return;
+  if (instant) { cy.zoom(Math.max(cy.zoom(), 0.7)); cy.center(n); return; }   // без анимации: кадр сразу готов к снимку
+  cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.7) }, { duration: 250 });
+}
+
+/* ---------- адрес страницы: состояние читается при загрузке и пишется при изменении ---------- */
+
+function currentHashState() {
+  return {
+    expanded: S.expanded,
+    selectedId: S.selected && S.selected.type === 'node' ? S.selected.id : null,
+    focus: S.focus, kinds: S.kinds, viol: S.onlyViol,
+    panel: $('drawer').hidden ? null : 'findings',
+    layout: S.useElk ? 'elk' : null
+  };
+}
+
+function writeHash() {
+  try {
+    if (typeof history === 'undefined' || typeof location === 'undefined') return;
+    S.lastHash = '#' + stateToHash(S.idx, currentHashState());
+    history.replaceState(null, '', S.lastHash);
+  } catch (e) { console.warn('адрес не обновился', e); }
+}
+
+function setDrawer(open) {
+  $('drawer').hidden = !open;
+  $('b-find').classList.toggle('on', open);
+}
+
+// Применяет #… к состоянию и синхронизирует органы управления.
+function applyHash() {
+  const p = parseHash(typeof location !== 'undefined' ? location.hash : '');
+  const r = resolveHash(S.idx, p);
+  S.expanded = r.expanded;
+  S.selected = r.selected;
+  S.focus = r.focus;
+  S.kinds = r.kinds;
+  S.onlyViol = r.viol;
+  S.useElk = r.layout === 'elk';
+  $('k-hard').checked = S.kinds.hard;
+  $('k-lazy').checked = S.kinds.lazy;
+  $('k-tc').checked = S.kinds.tc;
+  $('f-viol').checked = S.onlyViol;
+  $('b-focus').classList.toggle('on', S.focus);
+  setDrawer(r.panel === 'findings');
+  if (S.selected) for (const a of ancestorsOf(S.idx, S.selected.id)) S.treeOpen.add(a);
+  return render({ fit: true, center: S.selected ? S.selected.id : null, instant: true });
+}
+
+/* ---------- действия над схемой ---------- */
+
+function toggleNode(id) {
+  const idx = S.idx;
+  if (!idx.children.get(id).length) return;
+  const wasExpanded = S.expanded.has(id);
+  if (wasExpanded) S.expanded.delete(id); else S.expanded.add(id);
+  // выбранное внутри свёрнутого контейнера переезжает на контейнер
+  const sel = S.selected;
+  if (sel && wasExpanded) {
+    if (sel.type === 'node' && sel.id !== id && idx.chain(sel.id).includes(id)) S.selected = { type: 'node', id };
+    else if (sel.type === 'wire' && (idx.chain(sel.src).includes(id) || idx.chain(sel.dst).includes(id)) && sel.src !== id && sel.dst !== id) S.selected = null;
+  }
+  return render({ anchor: id });
+}
+
+function revealAncestors(id) {
+  for (const a of ancestorsOf(S.idx, id)) S.expanded.add(a);
+  S.hiddenLayers.delete(S.idx.chain(id)[0]);
+  syncLayerMenu();
+}
+
+// Выбор узла из дерева, поиска и списков: раскрывает предков, выделяет, центрирует.
+function selectNode(id, center) {
+  if (!S.idx.byId.has(id)) return;
+  revealAncestors(id);
+  S.selected = { type: 'node', id };
+  S.wireRows = ROWS_STEP;
+  for (const a of ancestorsOf(S.idx, id)) S.treeOpen.add(a);
+  return render({ center: center === false ? null : id });
+}
+
+// Выбор пары из таблицы находок: обе стороны сворачиваются в юниты, провод между ними выделяется.
+function selectPair(a, b) {
+  if (!b || !S.idx.byId.has(b) || !S.idx.byId.has(a)) { if (a) selectNode(a); return; }
+  revealAncestors(a);
+  revealAncestors(b);
+  S.expanded.delete(a);
+  S.expanded.delete(b);
+  S.selected = { type: 'wire', src: a, dst: b };
+  S.wireRows = ROWS_STEP;
+  return render({ center: a });
+}
+
+function setSelection(sel) {
+  S.selected = sel;
+  S.wireRows = ROWS_STEP;
+  if (sel && sel.type === 'node') for (const a of ancestorsOf(S.idx, sel.id)) S.treeOpen.add(a);
+  if (S.focus) render();
+  else { refreshStyles(); renderPanel(); renderTree(); writeHash(); }
+}
+
+/* ---------- панель «Спецификация» ---------- */
+
+function unitLink(id) {
+  const n = S.idx.byId.get(id);
+  return el('button', { class: 'link', title: id, onclick: () => selectNode(id) }, n ? n.name : id);
+}
+
+function sevClass(sevN) { return sevN >= 3 ? 'err' : (sevN === 2 ? 'warn' : ''); }
+
+function kvTable(rows) {
+  return el('table', null, rows.map(([k, v]) => el('tr', null, el('td', { class: 'k' }, k), el('td', null, v))));
+}
+
+function valueNode(v) {
+  if (v === null || v === undefined || v === '') return el('span', { class: 'muted' }, '—');
+  if (Array.isArray(v)) return v.length ? el('ul', null, v.map(x => el('li', null, typeof x === 'object' ? JSON.stringify(x) : String(x)))) : el('span', { class: 'muted' }, '—');
+  if (typeof v === 'object') {
+    // словарь (например card.sources: поле -> файл) — построчно «ключ: значение»
+    return el('div', null, Object.keys(v).map(k => el('div', { class: 'mono' }, k + ': ' + (typeof v[k] === 'object' && v[k] !== null ? JSON.stringify(v[k]) : String(v[k])))));
+  }
+  return String(v);
+}
+
+function sectionTitle(t) { return el('h4', null, t); }
+
+function findingItem(f, showPair) {
+  const idx = S.idx;
+  return el('div', { class: 'fi ' + sevClass(f.sevN) },
+    el('div', null, el('span', { class: 'chip ' + sevClass(f.sevN) }, f.severity || 'info'), ' ', f.where ? el('span', { class: 'mono' }, f.where) : ''),
+    showPair && (f.src_unit || f.dst_unit) ? el('div', { class: 'muted' }, f.src_unit ? nodeTitle(idx, f.src_unit) : '?', ' → ', f.dst_unit ? nodeTitle(idx, f.dst_unit) : '?') : '',
+    el('div', null, f.detail || ''));
+}
+
+function findingsBlock(ids, cap) {
+  if (!ids.length) return el('p', { class: 'muted' }, 'находок нет');
+  const groups = findingsByRule(S.idx, ids);
+  return el('div', null, groups.map(g => {
+    const shown = g.items.slice(0, cap);
+    return el('div', null,
+      el('div', null, el('b', null, g.rule), ' ', el('span', { class: 'muted' }, '×' + g.items.length + (RULE_TITLES[g.rule] ? ' — ' + RULE_TITLES[g.rule] : ''))),
+      shown.map(f => findingItem(f, true)),
+      g.items.length > shown.length ? el('div', { class: 'muted' }, 'и ещё ' + (g.items.length - shown.length) + '…') : '');
+  }));
+}
+
+// Карточка таблицей «поле | значение | источник». Объявляемое человеком поле без значения — «не объявлено».
+// Находки error и warn — сразу; info (unit-undeclared, unit-hygiene) — отдельной свёрнутой группой.
+function findingsSection(fids) {
+  const main = fids.filter(fi => S.idx.F[fi].sevN >= 2);
+  const info = fids.filter(fi => S.idx.F[fi].sevN < 2);
+  const out = [sectionTitle('Находки (' + main.length + ')'), findingsBlock(main, 50)];
+  if (info.length) out.push(el('details', { class: 'info' }, el('summary', null, 'Информационные (' + info.length + ')'), findingsBlock(info, 50)));
+  return out;
+}
+
+function renderCard(spec) {
+  const card = spec && spec.card;
+  if (!card) return el('p', { class: 'nocard' }, 'карточки нет');
+  const src = (card.sources && typeof card.sources === 'object') ? card.sources : {};
+  const rows = [];
+  const empty = (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length);
+  const row = (label, val, key) => rows.push(el('tr', null, el('td', { class: 'k' }, label), el('td', null, val), el('td', { class: 'src' }, src[key] ? String(src[key]) : '\u2014')));
+  for (const k of CARD_ORDER) {
+    if (!(k in card) && !CARD_DECLARED.includes(k)) continue;
+    const v = card[k];
+    if (CARD_DECLARED.includes(k) && empty(v)) { row(CARD_LABELS[k], el('span', { class: 'undecl' }, 'не объявлено'), k); continue; }
+    let node;
+    if (k === 'contour') node = el('span', null, (Array.isArray(v) ? v : [v]).map(c => el('span', { class: 'chip' }, String(c))));
+    else if (k === 'commands') {
+      const list = Array.isArray(v) ? v : [];
+      node = list.length ? el('div', null, el('div', { class: 'muted' }, list.length + ' шт.'), el('div', { class: 'wrapl' }, list.map(c => el('span', null, String(c))))) : el('span', { class: 'muted' }, '\u2014');
+    } else if (k === 'threads') {
+      const list = Array.isArray(v) ? v : [];
+      node = list.length ? el('div', null, list.map(t => el('div', { class: 'mono' }, (t && typeof t === 'object') ? (t.name + ' \u2014 ' + (t.where || '?')) : String(t)))) : el('span', { class: 'muted' }, '\u2014');
+    } else node = valueNode(v);
+    row(CARD_LABELS[k], node, k);
+  }
+  for (const k of Object.keys(card)) {
+    if (CARD_ORDER.includes(k) || k === 'sources') continue;
+    row(k, valueNode(card[k]), k);
+  }
+  return el('table', { class: 'card' }, el('tr', null, el('th', null, 'поле'), el('th', null, 'значение'), el('th', null, 'источник')), rows);
+}
+
+function flag(ok) { return el('span', { class: 'chip ' + (ok ? 'yes' : 'no') }, ok ? 'есть' : 'нет'); }
+
+function specUnit(n) {
+  const idx = S.idx;
+  const sp = n.spec || {};
+  const out = [];
+  out.push(sectionTitle('Карточка'));
+  out.push(renderCard(sp));
+  out.push(sectionTitle('Метрики'));
+  const inst = typeof sp.instability === 'number' ? sp.instability.toFixed(2) : '—';
+  out.push(kvTable([
+    ['loc', sp.loc == null ? '—' : String(sp.loc)], ['файлов', sp.files == null ? '—' : String(sp.files)], ['тестов', sp.tests == null ? '—' : String(sp.tests)],
+    ['fan_in', sp.fan_in == null ? '—' : String(sp.fan_in)], ['fan_out', sp.fan_out == null ? '—' : String(sp.fan_out)], ['instability', inst]
+  ]));
+  out.push(sectionTitle('Документы'));
+  const d = sp.docs || {};
+  out.push(el('div', null, ['readme', 'status', 'decisions', 'interfaces'].map(k => el('span', { style: 'margin-right:10px' }, k + ': ', flag(!!d[k])))));
+  out.push(sectionTitle('Интерфейсы'));
+  const ifs = Array.isArray(sp.interfaces) ? sp.interfaces : [];
+  if (!ifs.length) out.push(el('p', { class: 'muted' }, 'нет'));
+  for (const i of ifs) {
+    out.push(el('div', { class: 'row' },
+      el('b', null, i.name), ' ', el('span', { class: 'muted' }, i.style || ''), ' ', el('span', { class: 'mono muted' }, (i.file || '') + (i.line ? ':' + i.line : '')),
+      Array.isArray(i.methods) && i.methods.length ? el('div', { class: 'mono' }, i.methods.join(', ')) : ''));
+  }
+  out.push(sectionTitle('__all__'));
+  out.push(Array.isArray(sp.all) ? (sp.all.length ? el('div', { class: 'mono' }, sp.all.join(', ')) : el('p', { class: 'muted' }, 'пустой')) : el('p', { class: 'muted' }, 'нет'));
+  out.push(sectionTitle('Классы (топ)'));
+  const cls = Array.isArray(sp.classes_top) ? sp.classes_top : [];
+  if (!cls.length) out.push(el('p', { class: 'muted' }, 'нет'));
+  for (const c of cls) out.push(el('div', { class: 'row' }, el('b', null, c.name), (c.bases && c.bases.length) ? el('span', { class: 'muted' }, ' (' + c.bases.join(', ') + ')') : ''));
+  const deps = unitDeps(idx, n.id);
+  const depRows = (list) => list.length ? list.map(x => el('div', { class: 'row' }, unitLink(x.unit), ' ',
+    el('span', { class: 'muted' }, 'hard ' + x.hard + ' · lazy ' + x.lazy + ' · tc ' + x.tc))) : el('p', { class: 'muted' }, 'нет');
+  out.push(sectionTitle('Зависит от (' + deps.out.length + ')'));
+  out.push(depRows(deps.out));
+  out.push(sectionTitle('Используют (' + deps.inn.length + ')'));
+  out.push(depRows(deps.inn));
+  const fids = idx.unitFinds.get(n.id) || [];
+  out.push(...findingsSection(fids));
+  return out;
+}
+
+function importRows(idx, list, side, cap) {
+  if (!list || !list.length) return el('p', { class: 'muted' }, 'нет');
+  const shown = list.slice(0, cap);
+  return el('div', null, shown.map(i => {
+    const e = idx.E[i];
+    const other = idx.byId.get(side === 'out' ? e.dst : e.src);
+    return el('div', { class: 'row' },
+      el('span', { class: 'mono' }, (other && other.path) || (side === 'out' ? e.dst : e.src)), el('span', { class: 'muted' }, e.line ? ':' + e.line : ''),
+      ' ', el('span', { class: 'chip' }, e.kind), e.names.length ? el('div', { class: 'mono muted' }, e.names.join(', ')) : '');
+  }), list.length > shown.length ? el('div', { class: 'muted' }, 'и ещё ' + (list.length - shown.length) + '…') : '');
+}
+
+function specFile(n) {
+  const idx = S.idx;
+  const out = [];
+  out.push(kvTable([['loc', n.loc == null ? '—' : String(n.loc)], ['юнит', idx.unitOf(n.id) ? unitLink(idx.unitOf(n.id)) : '—']]));
+  out.push(sectionTitle('Классы'));
+  const cl = Array.isArray(n.classes) ? n.classes : [];
+  if (!cl.length) out.push(el('p', { class: 'muted' }, 'нет'));
+  for (const c of cl) out.push(el('div', { class: 'row' }, el('b', null, c.name), (c.bases && c.bases.length) ? el('span', { class: 'muted' }, ' (' + c.bases.join(', ') + ')') : '', c.line ? el('span', { class: 'muted' }, ' :' + c.line) : '',
+    Array.isArray(c.methods) && c.methods.length ? el('div', { class: 'mono' }, c.methods.join(', ')) : ''));
+  out.push(sectionTitle('Функции'));
+  const fn = Array.isArray(n.functions) ? n.functions : [];
+  out.push(fn.length ? el('div', { class: 'mono' }, fn.join(', ')) : el('p', { class: 'muted' }, 'нет'));
+  const o = idx.edgesOut.get(n.id) || [];
+  const i = idx.edgesIn.get(n.id) || [];
+  out.push(sectionTitle('Импортирует (' + o.length + ')'));
+  out.push(importRows(idx, o, 'out', 100));
+  out.push(sectionTitle('Импортируют его (' + i.length + ')'));
+  out.push(importRows(idx, i, 'in', 100));
+  const fids = idx.fileFinds.get(n.id) || [];
+  out.push(...findingsSection(fids));
+  return out;
+}
+
+function specContainer(n) {
+  const idx = S.idx;
+  const s = summaryOf(idx, n.id);
+  const out = [];
+  out.push(sectionTitle('Сводка'));
+  out.push(kvTable([
+    ['юнитов', String(s.units)], ['групп', String(s.groups)], ['пакетов', String(s.packages)], ['файлов', String(s.files)],
+    ['loc', String(s.loc)], ['тестов', String(s.tests)],
+    ['находки', s.findings.n + ' (error ' + s.findings.error + ', warn ' + s.findings.warn + ', info ' + s.findings.info + ')']
+  ]));
+  if (n.kind === 'layer' || n.kind === 'group') {
+    out.push(sectionTitle('Юниты'));
+    out.push(s.unitIds.length ? s.unitIds.map(u => el('div', { class: 'row' }, unitLink(u))) : el('p', { class: 'muted' }, 'нет'));
+  }
+  return out;
+}
+
+function renderNodePanel(n) {
+  const idx = S.idx;
+  const box = $('spec');
+  const kids = idx.children.get(n.id).length;
+  const head = [
+    el('h3', null, n.name),
+    el('div', { class: 'sub' }, el('span', { class: 'kind' }, KIND_TITLES[n.kind] || n.kind), ' ', n.id),
+    n.path ? el('div', { class: 'sub mono' }, n.path) : ''
+  ];
+  const btns = [];
+  if (kids) {
+    const exp = S.expanded.has(n.id);
+    btns.push(el('button', { onclick: () => toggleNode(n.id) }, exp ? '− свернуть' : '+ развернуть'));
+  }
+  btns.push(el('button', { onclick: () => centerOn(n.id) }, 'найти на схеме'));
+  let body;
+  if (n.kind === 'unit') body = specUnit(n);
+  else if (n.kind === 'file') body = specFile(n);
+  else body = specContainer(n);
+  box.textContent = '';
+  box.append(...head, el('div', { class: 'btnrow' }, btns), ...body.flat(Infinity));
+}
+
+function renderWirePanel(sel) {
+  const idx = S.idx;
+  const box = $('spec');
+  box.textContent = '';
+  const w = S.agg ? S.agg.map.get(sel.src + SEP + sel.dst) : null;
+  box.append(el('h3', null, 'Провод'), el('div', { class: 'sub' }, el('button', { class: 'link', onclick: () => selectNode(sel.src) }, nodeTitle(idx, sel.src)), ' → ', el('button', { class: 'link', onclick: () => selectNode(sel.dst) }, nodeTitle(idx, sel.dst))),
+    el('div', { class: 'sub mono' }, sel.src + '  →  ' + sel.dst));
+  if (!w) {
+    box.append(el('p', { class: 'muted' }, 'Между этими узлами нет проводов при текущих раскрытиях и фильтрах.'));
+    return;
+  }
+  box.append(kvTable([
+    ['импортов', String(w.count)], ['hard', String(w.hard)], ['lazy', String(w.lazy)], ['tc', String(w.tc)],
+    ['линия', wireDash(w) === 'solid' ? 'сплошная' : (wireDash(w) === 'dashed' ? 'пунктир' : 'точки')],
+    ['цвет', wireColorName(w) === 'err' ? 'красный (есть ошибка)' : (wireColorName(w) === 'warn' ? 'оранжевый (предупреждения)' : 'нейтральный')]
+  ]));
+  if (w.extra.length) {
+    box.append(sectionTitle('Находки на паре юнитов'));
+    box.append(...w.extra.map(fi => findingItem(idx.F[fi], false)));
+  }
+  box.append(sectionTitle('Импорты (' + w.edges.length + ')'));
+  const shown = w.edges.slice(0, S.wireRows);
+  for (const ei of shown) {
+    const e = idx.E[ei];
+    const sn = idx.byId.get(e.src);
+    const dn = idx.byId.get(e.dst);
+    const fl = (idx.edgeFinds.get(ei) || []).map(fi => idx.F[fi]);
+    box.append(el('div', { class: 'row' },
+      el('div', { class: 'mono' }, ((sn && sn.path) || e.src) + (e.line ? ':' + e.line : '') + '  →  ' + ((dn && dn.path) || e.dst)),
+      el('div', null, el('span', { class: 'chip' }, e.kind), ' ', el('span', { class: 'mono muted' }, e.names.join(', '))),
+      fl.map(f => findingItem(f, false))));
+  }
+  if (w.edges.length > shown.length) {
+    box.append(el('button', { onclick: () => { S.wireRows += ROWS_STEP; renderPanel(); } }, 'показать ещё (' + (w.edges.length - shown.length) + ')'));
+  }
+}
+
+function renderPanel() {
+  const sel = S.selected;
+  const box = $('spec');
+  if (!sel) { box.textContent = ''; box.append(el('p', { class: 'muted' }, 'Выберите узел или провод на схеме.')); return; }
+  if (sel.type === 'node') {
+    const n = S.idx.byId.get(sel.id);
+    if (!n) { box.textContent = ''; return; }
+    renderNodePanel(n);
+  } else renderWirePanel(sel);
+  box.scrollTop = 0;
+}
+
+/* ---------- левая панель: дерево и поиск ---------- */
+
+function treeRow(id, depth) {
+  const idx = S.idx;
+  const n = idx.byId.get(id);
+  const kids = idx.children.get(id);
+  const open = S.treeOpen.has(id);
+  const sel = S.selected && S.selected.type === 'node' && S.selected.id === id;
+  const nf = idx.nodeFind.get(id);
+  const off = S.hiddenLayers.has(idx.chain(id)[0]);
+  const row = el('div', { class: 'tr' + (sel ? ' sel' : '') + (off ? ' off' : ''), style: 'padding-left:' + (depth * 14) + 'px', 'data-id': id },
+    el('span', { class: 'arr' + (kids.length ? '' : ' none'), onclick: () => { if (!kids.length) return; if (open) S.treeOpen.delete(id); else S.treeOpen.add(id); renderTree(); } }, kids.length ? (open ? '▾' : '▸') : ''),
+    el('span', { class: 'k' }, KIND_TITLES[n.kind] || n.kind),
+    el('span', { class: 'nm', title: id, onclick: () => selectNode(id) }, n.name),
+    kids.length ? el('span', { class: 'cnt' }, String(kids.length)) : '',
+    nf && nf.ew ? el('span', { class: 'fd ' + (nf.error ? 'err' : 'warn') }, String(nf.ew)) : '');
+  return row;
+}
+
+function treeAppend(parent, id, depth) {
+  parent.append(treeRow(id, depth));
+  if (!S.treeOpen.has(id)) return;
+  const kids = S.idx.children.get(id);
+  const cap = S.treeCap.get(id) || 150;
+  for (const c of kids.slice(0, cap)) treeAppend(parent, c, depth + 1);
+  if (kids.length > cap) {
+    parent.append(el('div', { class: 'more', style: 'padding-left:' + ((depth + 1) * 14 + 20) + 'px', onclick: () => { S.treeCap.set(id, cap + 150); renderTree(); } }, 'ещё ' + (kids.length - cap) + '…'));
+  }
+}
+
+function renderTree() {
+  const idx = S.idx;
+  const root = $('tree');
+  root.textContent = '';
+  if (S.query.trim()) {
+    const r = searchNodes(idx, S.query, 120);
+    root.append(el('div', { class: 'muted' }, 'найдено: ' + r.total + (r.total > r.items.length ? ' (показано ' + r.items.length + ')' : '')));
+    for (const n of r.items) {
+      root.append(el('div', { class: 'tr', title: n.id, onclick: () => selectNode(n.id) },
+        el('span', { class: 'k' }, KIND_TITLES[n.kind] || n.kind), el('span', { class: 'nm' }, n.id)));
+    }
+    return;
+  }
+  for (const l of idx.roots) treeAppend(root, l, 0);
+  const sel = root.querySelector('.tr.sel');
+  if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+}
+
+/* ---------- таблица находок ---------- */
+
+function findingsTable(groups) {
+  const rows = [];
+  for (const g of groups) {
+    rows.push(el('tr', { class: 'rule' }, el('td', { colspan: 3 }, el('span', { class: 'sev ' + sevClass(g.sev) }), g.rule + ' \u2014 ' + (RULE_TITLES[g.rule] || ''), ' ', el('span', { class: 'muted' }, '(' + g.count + ')'))));
+    for (const p of g.pairs) {
+      rows.push(el('tr', { class: 'pair', onclick: () => selectPair(p.src_unit, p.dst_unit) },
+        el('td', null, el('span', { class: 'sev ' + sevClass(p.sev) }), p.src_unit || '\u2014'),
+        el('td', null, p.dst_unit ? '\u2192 ' + p.dst_unit : ''),
+        el('td', null, String(p.count))));
+    }
+  }
+  return el('table', { class: 'fnd' }, el('tr', null, el('th', null, 'Юнит-источник'), el('th', null, 'Юнит-приёмник'), el('th', null, 'Число')), rows);
+}
+
+// Таблица находок: error и warn сразу, info — свёрнутой группой ниже.
+function renderFindingsDrawer() {
+  const idx = S.idx;
+  const body = $('drawer-body');
+  body.textContent = '';
+  $('drawer-title').textContent = 'Находки: ' + idx.F.length;
+  if (!idx.F.length) { body.append(el('p', { class: 'muted' }, 'находок нет')); return; }
+  const groups = groupFindings(idx);
+  const main = groups.filter(g => g.sev >= 2);
+  const info = groups.filter(g => g.sev < 2);
+  body.append(main.length ? findingsTable(main) : el('p', { class: 'muted' }, 'ошибок и предупреждений нет'));
+  if (info.length) {
+    const n = info.reduce((a, g) => a + g.count, 0);
+    body.append(el('details', { class: 'info' }, el('summary', null, 'Информационные (' + n + ')'), findingsTable(info)));
+  }
+}
+
+/* ---------- верхняя панель ---------- */
+
+function syncLayerMenu() {
+  const menu = $('m-layers');
+  if (!menu || !S.idx) return;
+  menu.querySelectorAll('input').forEach(i => { i.checked = !S.hiddenLayers.has(i.value); });
+}
+
+function buildMenus() {
+  const idx = S.idx;
+  const mc = $('m-contour');
+  mc.textContent = '';
+  const vals = contourValues(idx);
+  if (!vals.length) mc.append(el('div', { class: 'empty' }, 'контур не объявлен ни у одного юнита'));
+  for (const c of vals) {
+    mc.append(el('label', null, el('input', { type: 'checkbox', value: c, onchange: (ev) => {
+      if (ev.target.checked) S.contours.add(c); else S.contours.delete(c);
+      $('dd-contour').querySelector('summary').textContent = 'Контур: ' + (S.contours.size ? Array.from(S.contours).join(', ') : 'все');
+      refreshStyles();
+    } }), c));
+  }
+  const ml = $('m-layers');
+  ml.textContent = '';
+  for (const l of idx.roots) {
+    ml.append(el('label', null, el('input', { type: 'checkbox', value: l, checked: true, onchange: (ev) => {
+      if (ev.target.checked) S.hiddenLayers.delete(l); else S.hiddenLayers.add(l);
+      render({ fit: true });
+    } }), nodeTitle(idx, l)));
+  }
+}
+
+function resetToUnits() {
+  S.expanded = unitsExpanded(S.idx);
+}
+
+function bindBar() {
+  const kinds = { hard: 'k-hard', lazy: 'k-lazy', tc: 'k-tc' };
+  for (const k of Object.keys(kinds)) {
+    $(kinds[k]).addEventListener('change', (ev) => { S.kinds[k] = ev.target.checked; render(); });
+  }
+  $('f-viol').addEventListener('change', (ev) => { S.onlyViol = ev.target.checked; render(); });
+  $('b-focus').addEventListener('click', () => {
+    S.focus = !S.focus;
+    $('b-focus').classList.toggle('on', S.focus);
+    render({ fit: S.focus || undefined });
+  });
+  $('b-collapse').addEventListener('click', () => { S.expanded = new Set(); S.selected = null; render({ fit: true }); });
+  $('b-units').addEventListener('click', () => { resetToUnits(); render({ fit: true }); });
+  $('b-layers').addEventListener('click', () => { S.expanded = new Set(); render({ fit: true }); });
+  $('b-fit').addEventListener('click', () => S.cy.fit(undefined, 30));
+  $('b-find').addEventListener('click', () => { setDrawer($('drawer').hidden); writeHash(); });
+  $('b-drawer-close').addEventListener('click', () => { setDrawer(false); writeHash(); });
+  // выпадающие меню закрываются кликом вне их
+  document.addEventListener('click', (ev) => {
+    for (const d of document.querySelectorAll('details.dd[open]')) if (!d.contains(ev.target)) d.removeAttribute('open');
+  });
+  const side = (btn, panel) => {
+    $(btn).addEventListener('click', () => { $(panel).classList.toggle('hidden'); $(btn).classList.toggle('on', !$(panel).classList.contains('hidden')); });
+  };
+  side('b-left', 'left');
+  side('b-right', 'right');
+  $('search').addEventListener('input', (ev) => { S.query = ev.target.value; renderTree(); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') setSelection(null); });
+  // узкий экран: панели свёрнуты, кнопки их выдвигают
+  const mq = window.matchMedia('(max-width: 900px)');
+  const apply = () => {
+    for (const [p, b] of [['left', 'b-left'], ['right', 'b-right']]) {
+      $(p).classList.toggle('hidden', mq.matches);
+      $(b).classList.toggle('on', !mq.matches);
+    }
+  };
+  apply();
+  if (mq.addEventListener) mq.addEventListener('change', apply);
+}
+
+function renderHeader() {
+  const m = S.idx.meta;
+  const c = m.counts || {};
+  const idx = S.idx;
+  const units = c.units != null ? c.units : (idx.model.nodes || []).filter(n => n.kind === 'unit').length;
+  const files = c.files != null ? c.files : (idx.model.nodes || []).filter(n => n.kind === 'file').length;
+  const box = $('hdr-meta');
+  box.textContent = '';
+  box.append('коммит ', el('b', null, m.commit || '?'), ' · собрано ', el('b', null, m.generated || '?'),
+    ' · юнитов ', el('b', null, String(units)), ' · файлов ', el('b', null, String(files)),
+    ' · импортов ', el('b', null, String(c.edges != null ? c.edges : idx.E.length)),
+    ' · находок ', el('b', null, String(c.findings != null ? c.findings : idx.F.length)));
+}
+
+/* ---------- запуск ---------- */
+
+function boot() {
+  const missing = [];
+  if (typeof window.ARCH_MODEL === 'undefined') missing.push('model.js (window.ARCH_MODEL): файл не найден рядом со страницей или пуст. Запустите: python scripts/arch_map/build.py');
+  if (typeof window.cytoscape === 'undefined') missing.push('cytoscape (cdnjs): библиотека не загрузилась. Нужен доступ в интернет к cdnjs.cloudflare.com.');
+  if (missing.length) throw new Error('Страница не может построить схему:\n - ' + missing.join('\n - '));
+
+  S.idx = buildIndex(window.ARCH_MODEL);
+  if (!S.idx.roots.length) throw new Error('В модели нет узлов.');
+  if (typeof window.ELK !== 'undefined') {
+    try { S.elk = new window.ELK(); } catch (e) { console.error('ELK не создался', e); S.elk = null; }
+  }
+
+  S.cy = window.cytoscape({
+    container: $('cy'), elements: [], style: buildStyle(),
+    minZoom: 0.04, maxZoom: 3, wheelSensitivity: 0.25, autoungrabify: true, boxSelectionEnabled: false,
+    textureOnViewport: false, pixelRatio: 'auto'
+  });
+  const cy = S.cy;
+
+  // клик по узлу выбирает, двойной клик раскрывает/сворачивает (cytoscape своего dbltap не даёт — считаем сами)
+  cy.on('tap', 'node', (ev) => {
+    const id = ev.target.id();
+    if (isAux(id)) return;
+    const now = Date.now();
+    if (S.lastTap.id === id && now - S.lastTap.t < 380) {
+      S.lastTap = { id: null, t: 0 };
+      toggleNode(id);
+      return;
+    }
+    S.lastTap = { id, t: now };
+    setSelection({ type: 'node', id });
+  });
+  cy.on('tap', 'edge', (ev) => {
+    const e = ev.target;
+    setSelection({ type: 'wire', src: e.source().id(), dst: e.target().id() });
+  });
+  cy.on('tap', (ev) => { if (ev.target === cy) setSelection(null); });
+
+  const dark = window.matchMedia('(prefers-color-scheme: dark)');
+  if (dark.addEventListener) dark.addEventListener('change', () => cy.style(buildStyle()));
+
+  // наведение: подсветка проводов узла; на проводе показывается его подпись
+  cy.on('mouseover', 'node', (ev) => {
+    const id = ev.target.id();
+    if (isAux(id)) return;
+    S.hover = id;
+    refreshHighlight();
+  });
+  cy.on('mouseout', 'node', () => { S.hover = null; refreshHighlight(); });
+  cy.on('mouseover', 'edge', (ev) => { ev.target.addClass('hl-out'); });
+  cy.on('mouseout', 'edge', () => refreshHighlight());
+
+  buildMenus();
+  bindBar();
+  renderHeader();
+  renderFindingsDrawer();
+  window.addEventListener('resize', () => cy.resize());
+  // ручная правка адреса (#view=…) применяется на лету; наши собственные записи пропускаются
+  window.addEventListener('hashchange', () => {
+    if (typeof location !== 'undefined' && location.hash !== S.lastHash) applyHash();
+  });
+  applyHash();
+}
+
+if (typeof document !== 'undefined' && document.getElementById('fatal')) {
+  try { boot(); } catch (e) { showFatal(e); }
+}
+</script>
+</body>
+</html>
