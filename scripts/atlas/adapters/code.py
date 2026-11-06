@@ -17,7 +17,8 @@ from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.adapters.plans import adapter_version
 from scripts.atlas.modules import OTHER, resolve
 from scripts.atlas.schema import AdapterOutput, BuildContext, Edge, Finding, Node
-from scripts.atlas.tree import AtlasError, run_git
+from scripts.atlas.tree import AtlasError
+from scripts.atlas.tree import read_blobs as _read
 from scripts.s2_gate import contract_gaps
 
 __all__ = ["S2_GATE", "CodeAdapter"]
@@ -33,29 +34,6 @@ _IMPORT = re.compile(
     re.MULTILINE,
 )
 _NEWLINE = re.compile(r"\r\n|\r|\n")
-
-
-def _read(root: Path, ref: str, paths: list[str], strict: bool = True) -> dict[str, bytes | None]:
-    """Содержимое `<ref>:<path>` одним `git cat-file --batch`; нет файла -> None (strict: AtlasError)."""
-    proc = run_git(root, "cat-file", "--batch", input="".join(f"{ref}:{p}\n" for p in paths).encode("utf-8"))
-    out: dict[str, bytes | None] = {}
-    pos = 0
-    try:
-        if proc.returncode != 0 and paths:
-            raise ValueError
-        for path in paths:
-            end = proc.stdout.index(b"\n", pos)
-            header, pos = proc.stdout[pos:end], end + 1
-            out[path] = None
-            if not header.endswith(b" missing"):  # путь с пробелом даёт заголовок из 3+ частей
-                _, kind, size = header.split(b" ")
-                out[path] = proc.stdout[pos : pos + int(size)] if kind == b"blob" else None
-                pos += int(size) + 1
-            if strict and out[path] is None:
-                raise ValueError
-    except ValueError:
-        raise AtlasError("atlas: git cat-file failed") from None
-    return out
 
 
 def _interface_names(module: ast.Module) -> list[str]:
