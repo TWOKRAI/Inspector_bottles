@@ -34,3 +34,31 @@
 - П. 1 выведен чтением, прогоном не подтверждён; п. 7 по знанию Qt API; блокировка `process.relay` — гипотеза без места в коде.
 - Не проверены: путь сокета `backend_ctl`, доступность `supervision.status` через `CommandSender`, живой стенд, `qt-mcp`, `sentrux check .`, `shutdown_timeout` в `inspection_full`.
 - Номер ADR 040 — по заголовкам `DECISIONS.md`.
+
+---
+
+# Раунд 2 (итерация 2 из 2) — CHANGES REQUESTED, блокеров нет
+
+**Ревьюер:** тот же `reviewer` sonnet (`a27b372c069f0a4d3`, ~241k, чтение). Разрез и порог «окно скрыто» принял. Закрыты: п. 1, 2, 5, 9 раунда 1. Проверка лидом по коду: A4 (`_force_at` читается один раз — `process_manager_process.py:4733-4741`), B2 (PM есть в `processes` с `alive: True` — `:875-881`), B3 (ответ handler'а плоский `{"success", "epoch", "processes"}` — `:896`) — подтверждены ✔ лид. Остальное принято как ревью-вывод.
+
+| № | Суть | Решение лида |
+|---|---|---|
+| A1 | I1: PM 4 остаётся зелёным (`plugins-stop` регистрируется последним независимо от места `children`); не указан PM 6 | I1 → PM 1, 2, 3, 6 + hazards; PM 4, 5, 7 зелёные |
+| A2 | I3: PM 7 не красный, если `summary` уехал вместе с `children` | PM 7 утверждает «`children`, `workers`, `state_store` раньше `summary`»; I3 → PM 7 + hazards |
+| A3 | I4: `process.restart` отвергает шлюз L раньше спавн-отказа | I4a (шлюз) → PM 3; I4b (спавн) → новый PM 8 `test_restart_refused_at_spawn_layer_after_system_stop` |
+| A4 | PM 6: «`force` сокращает срок» недостижимо; I6 не патч | PM 6 утверждает только ответ и учёт; эффект на идущее ожидание — OUT OF SCOPE и `docs/claude/OPEN_QUESTIONS.md` 2026-11-06; I6 = «снять защиту от повторного `request_stop`» |
+| A5 | I5 не патч; хвост включает `summary` и SSM | I5 = `budget_s=pm_total_s` + фейковая группа; PM 5 утверждает один `state_store` и одну `summary` |
+| A6 | TRAPS двусмысленны | ответ раньше конца стопа ребёнка — в PM 1 |
+| B1 | неразрешимое состояние при мёртвом PM (регрессия против «X закрывает сразу») | после `force_stop()` ещё `no_answer_s` тишины → `commit_close()` + WARNING; CC 7[dead_pm_tail…]; I16 |
+| B2 | PM в `processes` с `alive: True` → окно ждало бы выхода PM | параметр `ignore_names` (gui + PM); `alive: None` ≠ мёртв; I17 |
+| B3 | `poll_status` синхронный, опрос асинхронный; формат ответа | выписано: `RequestRunner.submit`, `qtbot.waitUntil`, плоский литерал; условие «нет параметра срока» снято (`timeout=` есть); teamlead сверяет форму живым вызовом |
+| B4 | как `MainWindow` получает координатор; существующие тесты без него | `set_close_coordinator`; без координатора прежнее поведение |
+| B5 | исключения в `confirm_discard`/`send_shutdown` блокируют окно | try/except по шагу 2, случаи в CC 1 и CC 3 |
+| B6 | «только наблюдает» без шага | наблюдение — Task 2.1; в 1.1 внешний стоп как сейчас |
+| B7 | `should_stop()` у `gui` в `STOPPING` ложен; `backend_gone()` без живого триггера; I9 без красного | шаг 11 заменён подтверждением ссылками; тик вынесен в `on_safety_tick`; I9 снят из предсказаний красного, закрыт приёмкой |
+| B8 | свойства без теста; CC красные тривиально | CC 7 параметризован; I14–I17; лид прогоняет набор на заглушке с теми же сигнатурами |
+| B9 | зонд: окно PID включает `QProgressDialog` | t «скрыто» = исчезло последнее видимое окно PID |
+
+## Что осталось открытым / ненадёжно (ревью р.2)
+
+- Отчёт раунда 1 с таблицей решений ревьюер не читал. B2 — по комментарию кода, `previous_states` монитора не читал. B1 — сторож родителя на Windows по одной строке `process_runner.py:166`; Job Object launcher'а не читал. Формат ответа `request_system_command` и живой стенд не проверялись. A3 — гипотеза до написания PM 3. Писатели `_stop_requested` проверены только в `process_module`, `app.py`, `process.py`. Бюджет (PM 5) — гипотеза. `team-protocol` §1, §3, §5 и `.rules/*` не читались. Существование строки `shut down successfully` ревьюер не проверял — лид видел её в `2026-11-02_system-run-state_smoke-h1h2.md` (таблица БЛ).
