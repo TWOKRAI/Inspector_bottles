@@ -678,6 +678,25 @@ class TestRequestSystemShutdown:
 
         process._log_warning.assert_called_once()
 
+    def test_no_event_when_coordinator_sent_shutdown(self):
+        """Координатор закрытия уже отправил system.shutdown (shutdown_sent) → общий event НЕ взводится."""
+        import threading
+
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        ev = threading.Event()
+        sr = _make_mock_shared_resources()
+        sr.get_system_stop_event.return_value = ev
+        process = GuiProcess(name="gui", shared_resources=sr)
+        process.send_message = MagicMock()
+        process._log_info = MagicMock()
+        process._log_warning = MagicMock()
+        process.shutdown_sent = True
+
+        process._request_system_shutdown()
+
+        assert not ev.is_set(), "после отправки shutdown координатором общий system_stop_event взводить нельзя"
+
 
 class TestGuiProcessSubscriptions:
     """GuiProcess подписывается на нужные пути StateStore.
