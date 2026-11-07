@@ -186,3 +186,47 @@ def test_progress_shows_k_of_n_children(qtbot: Any, make_coord: Any) -> None:
 
     assert dialog.labelText() == "Остановка системы… 1 из 3"
     assert coord.state is CloseState.STOPPING
+
+
+class _LogSpy:
+    """Подмена логгера модуля координатора: копит (уровень, текст)."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def __getattr__(self, level: str) -> Any:
+        return lambda msg, *_a, **_kw: self.records.append((level, msg))
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"success": True, "epoch": 1},  # processes нет вовсе
+        {"success": True, "result": {"success": True, "processes": {"worker": {"alive": False}}}},  # вложено глубже
+    ],
+    ids=["no_processes", "double_nested"],
+)
+def test_success_without_processes_dict_is_not_an_answer(
+    qtbot: Any, make_coord: Any, monkeypatch: pytest.MonkeyPatch, response: dict[str, Any]
+) -> None:
+    """(6) R1: success True без dict processes — не ответ: через no_answer_s вопрос оператору, WARNING один раз."""
+    from multiprocess_prototype.frontend.shutdown import close_coordinator as cc_mod
+
+    spy = _LogSpy()
+    monkeypatch.setattr(cc_mod, "_log", spy)
+    coord, fx, _window = make_coord(unattended_mode=False, response=response)
+    coord.request_close()
+    qtbot.wait(200)  # ~10 опросов по 20 мс, все такой формы
+    assert fx.ask_calls == 0
+
+    # Часы идут шагами по 0.5 с, между шагами — несколько опросов: если такой ответ засчитать
+    # (t_last_success = clock()), тишина никогда не превысит 0.5 с и вопроса не будет.
+    for _ in range(4):
+        fx.now += 0.5
+        qtbot.wait(100)
+    qtbot.waitUntil(lambda: fx.ask_calls == 1, timeout=2000)
+
+    assert fx.quit_calls == 0
+    assert coord.state is CloseState.STOPPING
+    shape = [m for lvl, m in spy.records if lvl == "warning" and "неизвестной формы" in m]
+    assert len(shape) == 1, spy.records

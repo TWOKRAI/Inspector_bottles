@@ -172,6 +172,7 @@ class CloseCoordinator(QObject):
         self._t_wait_click: float | None = None
         self._t_force: float | None = None
         self._forced = False
+        self._unknown_shape_logged = False  # WARNING о форме ответа — один раз за закрытие
         self._question: Closable | None = None
         self._question_token: object | None = None
         self._progress: _StopProgressDialog | None = None
@@ -290,12 +291,19 @@ class CloseCoordinator(QObject):
             return
         if not isinstance(result, dict) or result.get("success") is not True:
             return  # таймаут / ошибка — не ответ
+        processes = result.get("processes")
+        if not isinstance(processes, dict):
+            # success True, но processes не dict (лишняя вложенность, другая команда): ответом не
+            # считается — иначе сторож тишины молчал бы, пока PM жив, и ожидание было бы вечным.
+            if not self._unknown_shape_logged:
+                self._unknown_shape_logged = True
+                _log.warning(f"закрытие: ответ supervision.status неизвестной формы, ключи: {sorted(result)}")
+            return
         self._t_last_success = self._clock()
         if self._question is not None:
             # Ответ PM пришёл раньше оператора: «Подождать» без сдвига t_wait_click.
             self._drop_question()
-        processes = result.get("processes")
-        if not isinstance(processes, dict) or not processes:
+        if not processes:
             return
         children = {
             name: rec
