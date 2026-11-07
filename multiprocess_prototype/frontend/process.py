@@ -35,6 +35,9 @@ class GuiProcess(ProcessModule):
     автоматически обогащаются numpy frame из SHM (msg["frame"]).
     """
 
+    # ЗАГЛУШКА Task 1.1: True, когда CloseCoordinator уже отправил system.shutdown (читает GuiProcess.run).
+    shutdown_sent: bool = False
+
     # _init_system_threads() — НЕ переопределён: стандартный framework message_processor
 
     def _init_application_threads(self) -> None:

@@ -284,6 +284,12 @@ class MainWindow(QMainWindow):
         """Сохранить позицию и размер в QSettings."""
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
+    _close_coordinator = None  # ЗАГЛУШКА Task 1.1: closeEvent координатор пока не использует
+
+    def set_close_coordinator(self, coordinator) -> None:
+        """ЗАГЛУШКА Task 1.1: запомнить координатор закрытия (поведения нет)."""
+        self._close_coordinator = coordinator
+
     def closeEvent(self, event) -> None:
         """Подтвердить несохранённые правки графа (RS-4) и сохранить геометрию.
 
