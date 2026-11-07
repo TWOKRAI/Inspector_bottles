@@ -26,6 +26,8 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
+        # сгенерированные артефакты карты атласа (scripts/arch_map/build.py), не руками
+        exclude: ^docs/arch-map/model\.(js|json)$
       - id: debug-statements
 
   # ── Ruff (линтер + форматтер) ──

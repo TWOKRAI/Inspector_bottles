@@ -1,0 +1,1691 @@
+{
+ "meta": {
+  "tool": "scripts/arch_map/signboard.py bench",
+  "commit": "1dc6c71b7",
+  "targets": 10,
+  "note": "сгенерировано скриптом из кода; не править руками"
+ },
+ "targets": [
+  {
+   "id": "IRouterManager",
+   "address": "multiprocess_framework/modules/router_module/interfaces.py::IRouterManager",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/router_module/interfaces.py::IRouterManager",
+    "path": "multiprocess_framework/modules/router_module/interfaces.py",
+    "qualname": "IRouterManager",
+    "name": "IRouterManager",
+    "kind": "ABC",
+    "line": 21,
+    "doc_first_paragraph": "Контракт менеджера маршрутизации сообщений.",
+    "doc_missing": false,
+    "signature": "IRouterManager",
+    "init_from": "none",
+    "bases": [
+     "ABC"
+    ],
+    "members": [
+     {
+      "name": "manager_name",
+      "signature": "manager_name(self) -> str",
+      "abstract": true,
+      "kind": "property"
+     },
+     {
+      "name": "initialize",
+      "signature": "initialize(self) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "shutdown",
+      "signature": "shutdown(self) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "send",
+      "signature": "send(self, message: Union['Message', Dict[str, Any]]) -> Dict[str, Any]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "send_async",
+      "signature": "send_async(self, message: Union['Message', Dict[str, Any]], priority: str='normal') -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "receive",
+      "signature": "receive(self, timeout: float=0.0, return_messages: bool=True) -> List[Union['Message', Dict[str, Any]]]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "start_listening",
+      "signature": "start_listening(self, poll_interval: float=0.01) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "stop_listening",
+      "signature": "stop_listening(self, timeout: float=5.0) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "add_message_callback",
+      "signature": "add_message_callback(self, callback: Callable) -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "remove_message_callback",
+      "signature": "remove_message_callback(self, callback: Callable) -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "register_channel",
+      "signature": "register_channel(self, channel: 'IMessageChannel') -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "unregister_channel",
+      "signature": "unregister_channel(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "get_channel",
+      "signature": "get_channel(self, name: str) -> Optional['IMessageChannel']",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "get_all_channels",
+      "signature": "get_all_channels(self) -> List['IMessageChannel']",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "register_route",
+      "signature": "register_route(self, key: str, channel_name: Optional[str], strategy: Any=None, efficiency: int=0, tags: Optional[List[str]]=None) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "register_broadcast_route",
+      "signature": "register_broadcast_route(self, key: str, channel_names: List[str], tags: Optional[List[str]]=None) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "register_message_handler",
+      "signature": "register_message_handler(self, key: str, handler: Callable, expects_full_message: bool=True, metadata: Optional[Dict[str, Any]]=None, efficiency: int=0, tags: Optional[List[str]]=None) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "add_send_middleware",
+      "signature": "add_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "add_receive_middleware",
+      "signature": "add_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "clear_middleware",
+      "signature": "clear_middleware(self) -> None",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "get_stats",
+      "signature": "get_stats(self) -> Dict[str, Any]",
+      "abstract": true,
+      "kind": "method"
+     }
+    ],
+    "inherited_members": [],
+    "subclasses": [],
+    "subclasses_total": 0,
+    "name_collisions": 0,
+    "structural_matches": [],
+    "structural_total": 0,
+    "call_sites": [],
+    "call_sites_total": 0,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/router_module/tests/test_irouter_manager_contract.py::test_irouter_manager_abstract_set_is_the_21_literal_names_and_uninstantiable",
+     "multiprocess_framework/modules/router_module/tests/test_irouter_manager_contract.py::test_router_manager_signatures_match_irouter_manager_without_drift"
+    ],
+    "tests_total": 2,
+    "io": [],
+    "uses_count": 0,
+    "line1": "ABC — Контракт менеджера маршрутизации сообщений",
+    "line2": "использует меня 0 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "RouterManager",
+   "address": "multiprocess_framework/modules/router_module/core/router_manager.py::RouterManager",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/router_module/core/router_manager.py::RouterManager",
+    "path": "multiprocess_framework/modules/router_module/core/router_manager.py",
+    "qualname": "RouterManager",
+    "name": "RouterManager",
+    "kind": "manager",
+    "line": 130,
+    "doc_first_paragraph": "Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher.",
+    "doc_missing": false,
+    "signature": "RouterManager(manager_name: str, process: Optional[Any]=None, queue_registry: Optional[Any]=None, dispatch_strategy: DispatchStrategy=DispatchStrategy.EXACT_MATCH, send_queue_size: int=512, logger: Optional[Any]=None, relay_hub: Optional[str]='ProcessManager', use_kind_channels: Optional[bool]=None, use_kind_channels_config: bool=False, **kwargs: Any)",
+    "init_from": "own",
+    "bases": [
+     "ChannelRoutingManager"
+    ],
+    "members": [
+     {
+      "name": "__init__",
+      "signature": "__init__(self, manager_name: str, process: Optional[Any]=None, queue_registry: Optional[Any]=None, dispatch_strategy: DispatchStrategy=DispatchStrategy.EXACT_MATCH, send_queue_size: int=512, logger: Optional[Any]=None, relay_hub: Optional[str]='ProcessManager', use_kind_channels: Optional[bool]=None, use_kind_channels_config: bool=False, **kwargs: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_frame_middleware",
+      "signature": "register_frame_middleware(self, middleware: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "unregister_frame_middleware",
+      "signature": "unregister_frame_middleware(self, middleware: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "initialize",
+      "signature": "initialize(self) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "send_async",
+      "signature": "send_async(self, message: Union['Message', Dict[str, Any]], priority: str='normal') -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "send",
+      "signature": "send(self, message: Union['Message', Dict[str, Any]]) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "request",
+      "signature": "request(self, message: Union['Message', Dict[str, Any]], timeout: float=5.0, correlation_id: Optional[str]=None) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "request_async",
+      "signature": "request_async(self, message: Union['Message', Dict[str, Any]], on_response: Callable[[Dict[str, Any]], None], timeout: float=5.0, correlation_id: Optional[str]=None) -> str",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "reply_to_request",
+      "signature": "reply_to_request(self, request_msg: Dict[str, Any], result: Any, success: bool=True, response_command: str='command.response') -> Optional[Dict[str, Any]]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "receive",
+      "signature": "receive(self, timeout: float=0.0, return_messages: bool=True, input_channels_only: bool=True, channel_types: Optional[List[str]]=None) -> List[Union['Message', Dict[str, Any]]]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "pump_inbound",
+      "signature": "pump_inbound(self) -> int",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "start_listening",
+      "signature": "start_listening(self, poll_interval: float=0.01) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "stop_listening",
+      "signature": "stop_listening(self, timeout: float=5.0) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "add_message_callback",
+      "signature": "add_message_callback(self, callback: Callable) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "remove_message_callback",
+      "signature": "remove_message_callback(self, callback: Callable) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_channel",
+      "signature": "register_channel(self, channel: IMessageChannel) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_route",
+      "signature": "register_route(self, key: str, channel_name: Optional[str], strategy: DispatchStrategy=DispatchStrategy.EXACT_MATCH, efficiency: int=0, tags: Optional[List[str]]=None) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_broadcast_route",
+      "signature": "register_broadcast_route(self, key: str, channel_names: List[str], tags: Optional[List[str]]=None) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_channel_scenario",
+      "signature": "register_channel_scenario(self, scenario_name: str, channel_names: List[str], description: str='') -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_message_handler",
+      "signature": "register_message_handler(self, key: str, handler: Callable, expects_full_message: bool=True, metadata: Optional[Dict[str, Any]]=None, efficiency: int=0, tags: Optional[List[str]]=None, strategy: DispatchStrategy=DispatchStrategy.EXACT_MATCH) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_worker_handler",
+      "signature": "register_worker_handler(self, worker_name: str, handler: Callable) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "unregister_worker_handler",
+      "signature": "unregister_worker_handler(self, worker_name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_message_scenario",
+      "signature": "register_message_scenario(self, scenario_name: str, description: str='') -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "add_handler_to_message_scenario",
+      "signature": "add_handler_to_message_scenario(self, scenario_name: str, handler_key: str, handler: Callable, stage: int=0) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "add_send_middleware",
+      "signature": "add_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "add_receive_middleware",
+      "signature": "add_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "remove_send_middleware",
+      "signature": "remove_send_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "remove_receive_middleware",
+      "signature": "remove_receive_middleware(self, fn: Callable[[Dict], Optional[Dict]]) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "clear_middleware",
+      "signature": "clear_middleware(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "get_shm_stats",
+      "signature": "get_shm_stats(self) -> Dict[str, int]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "get_ring_info",
+      "signature": "get_ring_info(self) -> List[Dict[str, Any]]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "get_stats",
+      "signature": "get_stats(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "get_dispatcher_info",
+      "signature": "get_dispatcher_info(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "register_channel_handler",
+      "signature": "register_channel_handler(self, key: str, handler: Callable, **kwargs) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "cleanup",
+      "signature": "cleanup(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     }
+    ],
+    "inherited_members": [
+     {
+      "from": "ChannelRoutingManager",
+      "name": "reconfigure",
+      "signature": "reconfigure(self, config: Union[Dict[str, Any], Any]) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "idle_sinks",
+      "signature": "idle_sinks(self) -> List[str]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "unregister_channel",
+      "signature": "unregister_channel(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "get_channel",
+      "signature": "get_channel(self, name: str) -> Optional[IChannel]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "get_all_channels",
+      "signature": "get_all_channels(self) -> List[IChannel]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "flush",
+      "signature": "flush(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "set_sink_enabled",
+      "signature": "set_sink_enabled(self, name: str, enabled: bool) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "routes_using_sink",
+      "signature": "routes_using_sink(self, name: str) -> List[str]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "read_sink_tail",
+      "signature": "read_sink_tail(self, name: str, limit: Any=None) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "add_tap",
+      "signature": "add_tap(self, channel: Any, *, min_level: Any='ERROR', name: Optional[str]=None) -> str",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "has_tap",
+      "signature": "has_tap(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "close_all_taps",
+      "signature": "close_all_taps(self) -> int",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ChannelRoutingManager",
+      "name": "remove_tap",
+      "signature": "remove_tap(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "__init_subclass__",
+      "signature": "__init_subclass__(cls, **kwargs: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "shutdown",
+      "signature": "shutdown(self) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "scope",
+      "signature": "scope(self) -> IScope | None",
+      "abstract": false,
+      "kind": "property"
+     },
+     {
+      "from": "BaseManager",
+      "name": "attach_scope",
+      "signature": "attach_scope(self, scope: IScope) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "attach_adapter",
+      "signature": "attach_adapter(self, adapter: Any, name: Optional[str]=None) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "get_adapter",
+      "signature": "get_adapter(self, name: Optional[str]=None) -> Optional[Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "has_adapter",
+      "signature": "has_adapter(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "list_adapters",
+      "signature": "list_adapters(self) -> List[str]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "detach_adapter",
+      "signature": "detach_adapter(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "get_debug_info",
+      "signature": "get_debug_info(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "print_debug_info",
+      "signature": "print_debug_info(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "__str__",
+      "signature": "__str__(self) -> str",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "BaseManager",
+      "name": "__repr__",
+      "signature": "__repr__(self) -> str",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_debug",
+      "signature": "log_debug(self, message: str, **kwargs) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_info",
+      "signature": "log_info(self, message: str, **kwargs) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_warning",
+      "signature": "log_warning(self, message: str, **kwargs) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_error",
+      "signature": "log_error(self, message: str, **kwargs) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_critical",
+      "signature": "log_critical(self, message: str, **kwargs) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "should_voice",
+      "signature": "should_voice(self, key: str, interval: Optional[float]=None) -> 'tuple[bool, int]'",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "log_windowed",
+      "signature": "log_windowed(self, key: str, interval: Optional[float]=None, level: str='warning', message: str='', **ctx: Any) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "report_error",
+      "signature": "report_error(self, exc: BaseException, context: Optional[str]=None, throttle: Optional[float]=None, **fields: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "register_manager",
+      "signature": "register_manager(self, name: str, manager: Any, enabled: bool=True) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "unregister_manager",
+      "signature": "unregister_manager(self, name: str) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "get_manager",
+      "signature": "get_manager(self, name: str) -> Optional[Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "has_manager",
+      "signature": "has_manager(self, name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "enable",
+      "signature": "enable(self, manager_name: str, enabled: bool=True) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "disable",
+      "signature": "disable(self, manager_name: str) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "is_enabled",
+      "signature": "is_enabled(self, manager_name: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "get_enabled_managers",
+      "signature": "get_enabled_managers(self) -> Set[str]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "context",
+      "signature": "context(self, manager_name: str, enabled: bool=True)",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "update_config",
+      "signature": "update_config(self, config: Dict[str, Any]) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "get_config",
+      "signature": "get_config(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "get_state",
+      "signature": "get_state(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "get_available_methods",
+      "signature": "get_available_methods(self) -> Dict[str, List[str]]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "print_available_methods",
+      "signature": "print_available_methods(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "manager_call_failures",
+      "signature": "manager_call_failures(self) -> Dict[str, int]",
+      "abstract": false,
+      "kind": "property"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "track_error_misuse",
+      "signature": "track_error_misuse(self) -> Dict[str, int]",
+      "abstract": false,
+      "kind": "property"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "__getstate__",
+      "signature": "__getstate__(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "from": "ObservableMixin",
+      "name": "__setstate__",
+      "signature": "__setstate__(self, state: Dict[str, Any]) -> None",
+      "abstract": false,
+      "kind": "method"
+     }
+    ],
+    "subclasses": [],
+    "subclasses_total": 0,
+    "name_collisions": 0,
+    "structural_matches": [],
+    "structural_total": 0,
+    "call_sites": [
+     "multiprocess_framework/modules/process_module/managers/process_managers.py:356"
+    ],
+    "call_sites_total": 1,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "Services/robot_comm/tests/_t38_line_host.py",
+     "Plugins/io/otel_export/tests/test_f2_task21_acceptance.py::TestHandlerRegistersOnRealRouter::test_dispatch_through_real_router_reaches_the_plugin",
+     "Plugins/hub/device_hub/tests/test_spi_commands_acceptance.py",
+     "Plugins/io/telemetry_sink/tests/test_telemetry_sink_plugin.py",
+     "Plugins/hub/device_hub/tests/test_reply_envelope_acceptance.py"
+    ],
+    "tests_total": 116,
+    "io": [],
+    "uses_count": 17,
+    "line1": "manager — Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher",
+    "line2": "использует меня 1 (вызовы по имени) / использую 17",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "IConfig",
+   "address": "multiprocess_framework/modules/config_module/interfaces.py::IConfig",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/config_module/interfaces.py::IConfig",
+    "path": "multiprocess_framework/modules/config_module/interfaces.py",
+    "qualname": "IConfig",
+    "name": "IConfig",
+    "kind": "ABC",
+    "line": 20,
+    "doc_first_paragraph": "Контракт runtime-контейнера конфигурации.",
+    "doc_missing": false,
+    "signature": "IConfig",
+    "init_from": "none",
+    "bases": [
+     "ABC"
+    ],
+    "members": [
+     {
+      "name": "get",
+      "signature": "get(self, key: str, default: Any=None, env_fallback: bool=True) -> Any",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "set",
+      "signature": "set(self, key: str, value: Any, notify: bool=True) -> 'IConfig'",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "update",
+      "signature": "update(self, data: Dict[str, Any]) -> 'IConfig'",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "has",
+      "signature": "has(self, key: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "remove",
+      "signature": "remove(self, key: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "clear",
+      "signature": "clear(self) -> 'IConfig'",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "subscribe",
+      "signature": "subscribe(self, callback: Optional[Callable]=None, key: str='*') -> Any",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "unsubscribe",
+      "signature": "unsubscribe(self, callback: Callable, key: str='*') -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "data",
+      "signature": "data(self) -> Dict[str, Any]",
+      "abstract": true,
+      "kind": "property"
+     }
+    ],
+    "inherited_members": [],
+    "subclasses": [],
+    "subclasses_total": 0,
+    "name_collisions": 0,
+    "structural_matches": [
+     {
+      "name": "Config",
+      "where": "multiprocess_framework/modules/config_module/core/config.py:27"
+     }
+    ],
+    "structural_total": 1,
+    "call_sites": [],
+    "call_sites_total": 0,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/config_module/tests/test_iconfig_contract.py::test_iconfig_abstract_set_is_the_9_literal_names_and_uninstantiable"
+    ],
+    "tests_total": 1,
+    "io": [],
+    "uses_count": 0,
+    "line1": "ABC — Контракт runtime-контейнера конфигурации",
+    "line2": "использует меня 0 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "Config",
+   "address": "multiprocess_framework/modules/config_module/core/config.py::Config",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/config_module/core/config.py::Config",
+    "path": "multiprocess_framework/modules/config_module/core/config.py",
+    "qualname": "Config",
+    "name": "Config",
+    "kind": "class",
+    "line": 27,
+    "doc_first_paragraph": "Runtime-контейнер одной конфигурации.",
+    "doc_missing": false,
+    "signature": "Config(initial_data: Optional[Dict[str, Any]]=None, env_prefix: Optional[str]=None)",
+    "init_from": "own",
+    "bases": [],
+    "members": [
+     {
+      "name": "__init__",
+      "signature": "__init__(self, initial_data: Optional[Dict[str, Any]]=None, env_prefix: Optional[str]=None) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "get",
+      "signature": "get(self, key: str, default: Any=None, env_fallback: bool=True) -> Any",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "set",
+      "signature": "set(self, key: str, value: Any, notify: bool=True) -> Config",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "update",
+      "signature": "update(self, data: Dict[str, Any]) -> Config",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "has",
+      "signature": "has(self, key: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "remove",
+      "signature": "remove(self, key: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "clear",
+      "signature": "clear(self) -> Config",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "subscribe",
+      "signature": "subscribe(self, callback: Optional[Callable]=None, key: str='*') -> Union[None, Callable]",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "unsubscribe",
+      "signature": "unsubscribe(self, callback: Callable, key: str='*') -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "data",
+      "signature": "data(self) -> Dict[str, Any]",
+      "abstract": false,
+      "kind": "property"
+     },
+     {
+      "name": "__getitem__",
+      "signature": "__getitem__(self, key: str) -> Any",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "__setitem__",
+      "signature": "__setitem__(self, key: str, value: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "__contains__",
+      "signature": "__contains__(self, key: str) -> bool",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "__delitem__",
+      "signature": "__delitem__(self, key: str) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "__len__",
+      "signature": "__len__(self) -> int",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "__repr__",
+      "signature": "__repr__(self) -> str",
+      "abstract": false,
+      "kind": "method"
+     }
+    ],
+    "inherited_members": [],
+    "subclasses": [
+     {
+      "name": "ProcessConfigHandler",
+      "where": "multiprocess_framework/modules/process_module/configs/process_config_handler.py:50"
+     }
+    ],
+    "subclasses_total": 1,
+    "name_collisions": 12,
+    "structural_matches": [],
+    "structural_total": 0,
+    "call_sites": [
+     "multiprocess_prototype/frontend/app_services_factory.py:178",
+     "multiprocess_framework/modules/config_module/tools/loader.py:129",
+     "multiprocess_framework/modules/config_module/core/config_manager.py:108"
+    ],
+    "call_sites_total": 5,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_prototype/adapters/tests/test_config_store.py::test_save_calls_save_callback",
+     "multiprocess_prototype/adapters/tests/test_config_store.py::test_save_persists_via_callback",
+     "multiprocess_framework/modules/config_module/tests/test_config.py::test_env_fallback",
+     "multiprocess_framework/modules/config_module/tests/test_config.py::test_env_fallback_bool",
+     "multiprocess_framework/modules/config_module/tests/test_config.py::test_env_fallback_int"
+    ],
+    "tests_total": 35,
+    "io": [],
+    "uses_count": 1,
+    "line1": "class — Runtime-контейнер одной конфигурации",
+    "line2": "использует меня 5 (вызовы по имени) / использую 1",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "IConfigObserver",
+   "address": "multiprocess_framework/modules/config_module/interfaces.py::IConfigObserver",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/config_module/interfaces.py::IConfigObserver",
+    "path": "multiprocess_framework/modules/config_module/interfaces.py",
+    "qualname": "IConfigObserver",
+    "name": "IConfigObserver",
+    "kind": "Protocol",
+    "line": 14,
+    "doc_first_paragraph": "Протокол подписчика на изменения конфигурации.",
+    "doc_missing": false,
+    "signature": "IConfigObserver",
+    "init_from": "none",
+    "bases": [
+     "Protocol"
+    ],
+    "members": [
+     {
+      "name": "__call__",
+      "signature": "__call__(self, key: str, old_value: Any, new_value: Any) -> None",
+      "abstract": false,
+      "kind": "method"
+     }
+    ],
+    "inherited_members": [],
+    "subclasses": [],
+    "subclasses_total": 0,
+    "name_collisions": 0,
+    "structural_matches": [
+     {
+      "name": "_TransportProbe",
+      "where": "Services/otel_export/exporter.py:129"
+     },
+     {
+      "name": "Check",
+      "where": "scripts/docs_verify/docs_check.py:107"
+     },
+     {
+      "name": "_Release",
+      "where": "multiprocess_framework/modules/event_module/subscribers.py:54"
+     },
+     {
+      "name": "Arrivals",
+      "where": "backend_ctl/probes/probe_observability_consumer_acceptance.py:331"
+     },
+     {
+      "name": "RateSampler",
+      "where": "multiprocess_framework/modules/logger_module/core/sampling.py:121"
+     }
+    ],
+    "structural_total": 8,
+    "call_sites": [],
+    "call_sites_total": 0,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/config_module/tests/test_iconfig_contract.py::test_iconfig_observer_protocol_and_subscribe_passes_key_old_new"
+    ],
+    "tests_total": 1,
+    "io": [],
+    "uses_count": 0,
+    "line1": "Protocol — Протокол подписчика на изменения конфигурации",
+    "line2": "использует меня 0 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "IConfigManager",
+   "address": "multiprocess_framework/modules/config_module/interfaces.py::IConfigManager",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/config_module/interfaces.py::IConfigManager",
+    "path": "multiprocess_framework/modules/config_module/interfaces.py",
+    "qualname": "IConfigManager",
+    "name": "IConfigManager",
+    "kind": "ABC",
+    "line": 70,
+    "doc_first_paragraph": "Контракт менеджера конфигураций.",
+    "doc_missing": false,
+    "signature": "IConfigManager",
+    "init_from": "none",
+    "bases": [
+     "IBaseManager",
+     "ABC"
+    ],
+    "members": [
+     {
+      "name": "create_config",
+      "signature": "create_config(self, name: str, initial_data: Optional[Dict[str, Any]]=None, validation_schema: Optional[Any]=None, env_prefix: Optional[str]=None) -> IConfig",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "get_config",
+      "signature": "get_config(self, name: str) -> Optional[IConfig]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "remove_config",
+      "signature": "remove_config(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "list_configs",
+      "signature": "list_configs(self) -> List[str]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "has_config",
+      "signature": "has_config(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "sync_config",
+      "signature": "sync_config(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "name": "load_config_from_storage",
+      "signature": "load_config_from_storage(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     }
+    ],
+    "inherited_members": [
+     {
+      "from": "IBaseManager",
+      "name": "initialize",
+      "signature": "initialize(self) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "shutdown",
+      "signature": "shutdown(self) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "scope",
+      "signature": "scope(self) -> IScope | None",
+      "abstract": true,
+      "kind": "property"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "attach_adapter",
+      "signature": "attach_adapter(self, adapter: Any, name: Optional[str]=None) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "get_adapter",
+      "signature": "get_adapter(self, name: Optional[str]=None) -> Optional[Any]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "has_adapter",
+      "signature": "has_adapter(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "list_adapters",
+      "signature": "list_adapters(self) -> List[str]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "detach_adapter",
+      "signature": "detach_adapter(self, name: str) -> bool",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "get_stats",
+      "signature": "get_stats(self) -> Dict[str, Any]",
+      "abstract": true,
+      "kind": "method"
+     },
+     {
+      "from": "IBaseManager",
+      "name": "get_debug_info",
+      "signature": "get_debug_info(self) -> Dict[str, Any]",
+      "abstract": true,
+      "kind": "method"
+     }
+    ],
+    "subclasses": [
+     {
+      "name": "ConfigManager",
+      "where": "multiprocess_framework/modules/config_module/core/config_manager.py:29"
+     }
+    ],
+    "subclasses_total": 1,
+    "name_collisions": 0,
+    "structural_matches": [],
+    "structural_total": 0,
+    "call_sites": [],
+    "call_sites_total": 0,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/config_module/tests/test_iconfig_manager_contract.py::test_iconfig_manager_abstract_set_has_7_own_and_10_inherited_names"
+    ],
+    "tests_total": 1,
+    "io": [],
+    "uses_count": 1,
+    "line1": "ABC — Контракт менеджера конфигураций",
+    "line2": "использует меня 0 (вызовы по имени) / использую 1",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "ConfigFileWatcher",
+   "address": "multiprocess_framework/modules/config_module/tools/watcher.py::ConfigFileWatcher",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/config_module/tools/watcher.py::ConfigFileWatcher",
+    "path": "multiprocess_framework/modules/config_module/tools/watcher.py",
+    "qualname": "ConfigFileWatcher",
+    "name": "ConfigFileWatcher",
+    "kind": "class",
+    "line": 196,
+    "doc_first_paragraph": "Hot-reload: следит за файлом, обновляет Config при изменении.",
+    "doc_missing": false,
+    "signature": "ConfigFileWatcher(path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None)",
+    "init_from": "own",
+    "bases": [],
+    "members": [
+     {
+      "name": "__init__",
+      "signature": "__init__(self, path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "start",
+      "signature": "start(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "stop",
+      "signature": "stop(self) -> None",
+      "abstract": false,
+      "kind": "method"
+     },
+     {
+      "name": "is_running",
+      "signature": "is_running(self) -> bool",
+      "abstract": false,
+      "kind": "property"
+     }
+    ],
+    "inherited_members": [],
+    "subclasses": [],
+    "subclasses_total": 0,
+    "name_collisions": 0,
+    "structural_matches": [],
+    "structural_total": 0,
+    "call_sites": [
+     "multiprocess_framework/modules/process_module/managers/observability_reload.py:2341"
+    ],
+    "call_sites_total": 1,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/config_module/tests/test_watcher.py::test_double_start_is_safe",
+     "multiprocess_framework/modules/config_module/tests/test_watcher.py::test_dropped_event_gets_one_delayed_reload_with_last_content",
+     "multiprocess_framework/modules/config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored",
+     "multiprocess_framework/modules/config_module/tests/test_watcher.py::test_rapid_edits_collapse_into_first_and_one_delayed_reload",
+     "multiprocess_framework/modules/config_module/tests/test_watcher.py::test_recreate_without_rename_also_reloads"
+    ],
+    "tests_total": 11,
+    "io": [
+     {
+      "op": "watches",
+      "path_expr": "self._handler",
+      "line": 238
+     }
+    ],
+    "uses_count": 0,
+    "line1": "class — Hot-reload: следит за файлом, обновляет Config при изменении",
+    "line2": "использует меня 1 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "DataConverter.save_to_file",
+   "address": "multiprocess_framework/modules/data_schema_module/serialization/converter.py::DataConverter.save_to_file",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/data_schema_module/serialization/converter.py::DataConverter.save_to_file",
+    "path": "multiprocess_framework/modules/data_schema_module/serialization/converter.py",
+    "qualname": "DataConverter.save_to_file",
+    "name": "save_to_file",
+    "kind": "method",
+    "line": 255,
+    "doc_first_paragraph": "Сохранить данные в файл (JSON или YAML).",
+    "doc_missing": false,
+    "signature": "save_to_file(data: Any, file_path: Union[str, Path], format_type: Optional[FormatType]=None, model_class: Optional[Type[T]]=None, **kwargs: Any) -> None",
+    "call_sites": [],
+    "call_sites_total": 0,
+    "same_file_calls": 0,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_framework/modules/data_schema_module/tests/test_converter.py::TestFileOperations::test_save_and_load_json",
+     "multiprocess_framework/modules/data_schema_module/tests/test_converter.py::TestFileOperations::test_save_and_load_yaml",
+     "multiprocess_framework/modules/data_schema_module/tests/test_converter.py::TestFileOperations::test_save_nested_model",
+     "multiprocess_framework/modules/data_schema_module/tests/test_converters.py::test_data_converter_file_operations",
+     "multiprocess_framework/modules/data_schema_module/tests/test_converters.py::test_data_converter_roundtrips"
+    ],
+    "tests_total": 5,
+    "io": [
+     {
+      "op": "writes",
+      "path_expr": "path",
+      "line": 292
+     }
+    ],
+    "uses_count": 0,
+    "line1": "method — Сохранить данные в файл (JSON или YAML)",
+    "line2": "использует меня 0 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "write_companion",
+   "address": "multiprocess_framework/modules/process_module/configs/observability_companion.py::write_companion",
+   "level": "house",
+   "spec": {
+    "level": "house",
+    "id": "multiprocess_framework/modules/process_module/configs/observability_companion.py::write_companion",
+    "path": "multiprocess_framework/modules/process_module/configs/observability_companion.py",
+    "qualname": "write_companion",
+    "name": "write_companion",
+    "kind": "function",
+    "line": 100,
+    "doc_first_paragraph": "Записать секцию в спутник атомарно и идемпотентно.",
+    "doc_missing": false,
+    "signature": "write_companion(recipe_path: str | os.PathLike[str], section: Dict[str, Any]) -> Tuple[Path, bool]",
+    "call_sites": [
+     "backend_ctl/probes/probe_5_11_r3_watcher_cost.py:77"
+    ],
+    "call_sites_total": 1,
+    "same_file_calls": 1,
+    "call_sites_note": "вызовы по имени (импорт + вызов); 0 не значит «не используется»",
+    "tests": [
+     "multiprocess_prototype/backend/tests/test_orchestrator_hooks.py",
+     "multiprocess_prototype/backend/tests/test_boot_companion_base.py::test_boot_base_carries_the_recipe_slice_without_the_companion",
+     "multiprocess_prototype/backend/tests/test_boot_companion_base.py::test_key_removed_from_the_companion_returns_to_the_recipe_on_boot",
+     "multiprocess_prototype/backend/tests/test_boot_companion_base.py::test_live_companion_still_wins_on_boot",
+     "multiprocess_framework/modules/process_module/tests/test_observability_refs.py"
+    ],
+    "tests_total": 28,
+    "io": [
+     {
+      "op": "reads",
+      "path_expr": "path",
+      "line": 130
+     },
+     {
+      "op": "writes",
+      "path_expr": "tmp",
+      "line": 137
+     }
+    ],
+    "uses_count": 0,
+    "line1": "function — Записать секцию в спутник атомарно и идемпотентно",
+    "line2": "использует меня 1 (вызовы по имени) / использую 0",
+    "line3": null,
+    "red": false
+   }
+  },
+  {
+   "id": "observability_reload.py",
+   "address": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+   "level": "district",
+   "spec": {
+    "level": "district",
+    "id": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+    "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+    "name": "observability_reload.py",
+    "doc_line": "Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).",
+    "houses": [
+     {
+      "name": "resolve_base_log_dir",
+      "kind": "function",
+      "one_line": "Каталог логов как МАШИННЫЙ контекст пересборки (Task 5.12).",
+      "public": true,
+      "call_sites": 1
+     },
+     {
+      "name": "base_managers_payload",
+      "kind": "function",
+      "one_line": "Слой L0 в машинном контексте — та же база, из которой собирается boot.",
+      "public": true,
+      "call_sites": 0
+     },
+     {
+      "name": "_voice_repurposed_stats_enabled",
+      "kind": "function",
+      "one_line": "Голос ADR-PM-046 (смена смысла ``stats.enabled``) — на стадии «применяю», у КОТОРОЙ ЕСТЬ АВТОР.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "compose_managers_payload",
+      "kind": "function",
+      "one_line": "Разрешённые слои → конфиги менеджеров. **Одна сборка на два адресата.**",
+      "public": true,
+      "call_sites": 1
+     },
+     {
+      "name": "_root_level_rule",
+      "kind": "function",
+      "one_line": "Корневое правило уровня — **вид на общую функцию**, а не вторая реализация.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "observability_effective",
+      "kind": "function",
+      "one_line": "Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.",
+      "public": true,
+      "call_sites": 2
+     },
+     {
+      "name": "_schema_leaf_paths",
+      "kind": "function",
+      "one_line": "Листовые пути схемы: спуск ТОЛЬКО в под-``SchemaBase``.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_requested_leaves",
+      "kind": "function",
+      "one_line": "Листья ЗАПРОСА как ``(кортеж-путь, значение)`` — с резом по границе СХЕМЫ.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_other_value",
+      "kind": "function",
+      "one_line": "Заведомо ДРУГОЕ значение того же рода — второй полюс зонда.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_with_leaf",
+      "kind": "function",
+      "one_line": "Копия конфига с ОДНИМ подменённым листом — БЕЗ повторной валидации.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_controlled_layout_paths",
+      "kind": "function",
+      "one_line": "Пути раскладки, которыми управляет ОДИН лист запроса, со значениями из ``layout``.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "observability_verified",
+      "kind": "function",
+      "one_line": "Сравнить ЗАПРОШЕННОЕ с ДЕЙСТВУЮЩИМ и назвать расхождения поимённо (Task 5.7).",
+      "public": true,
+      "call_sites": 1
+     },
+     {
+      "name": "_idle_sinks",
+      "kind": "function",
+      "one_line": "Ф2.6: приёмники, объявленные и не принявшие ничего.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_sink_readback",
+      "kind": "function",
+      "one_line": "Активные приёмники плоскости и то, что снял оператор.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "observability_provenance",
+      "kind": "function",
+      "one_line": "Кто владеет каждым действующим ключом: ``{ключ: {layer, source}}``.",
+      "public": true,
+      "call_sites": 1
+     },
+     {
+      "name": "_plane_counters",
+      "kind": "function",
+      "one_line": "Счётчики одной плоскости наблюдаемости из её ``get_stats()``.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "observability_counters",
+      "kind": "function",
+      "one_line": "Потери и глубина буферов ЧЕТЫРЁХ плоскостей — «сколько наблюдаемости не доехало».",
+      "public": true,
+      "call_sites": 2
+     },
+     {
+      "name": "apply_observability_layers",
+      "kind": "function",
+      "one_line": "Пересобрать конфиги менеджеров ИЗ СЛОЁВ и применить (Task 5.12).",
+      "public": true,
+      "call_sites": 4
+     },
+     {
+      "name": "_rebuild_and_apply",
+      "kind": "function",
+      "one_line": "Тело пересборки (вызывается под локом стека — см. вызывающего).",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "apply_observation_policy",
+      "kind": "function",
+      "one_line": "Донести политику порта до ЖИВОГО гейта и вернуть применённое (Ф4, 4.1).",
+      "public": true,
+      "call_sites": 0
+     },
+     {
+      "name": "observation_throttle_report",
+      "kind": "function",
+      "one_line": "Отчёт о потолках IPC по СНЯТОМУ СЕЙЧАС состоянию процесса (Ф3, задача 3.0a, Н1).",
+      "public": true,
+      "call_sites": 0
+     },
+     {
+      "name": "apply_heartbeat_interval",
+      "kind": "function",
+      "one_line": "Донести ``observability.heartbeat_interval_sec`` до ЖИВОГО такта (Ф2, 2.3, M9).",
+      "public": true,
+      "call_sites": 0
+     },
+     {
+      "name": "telemetry_targets",
+      "kind": "function",
+      "one_line": "Получатель publish-плоскости и её L0 — одним резолвом для ВСЕХ пересборок.",
+      "public": true,
+      "call_sites": 4
+     },
+     {
+      "name": "telemetry_unaddressable",
+      "kind": "function",
+      "one_line": "Под-секции ``telemetry``, у которых на ЭТОМ процессе нет исполнителя.",
+      "public": true,
+      "call_sites": 2
+     },
+     {
+      "name": "format_telemetry_unaddressable",
+      "kind": "function",
+      "one_line": "Собрать причину отказа/голоса по списку под-секций без исполнителя.",
+      "public": true,
+      "call_sites": 3
+     },
+     {
+      "name": "apply_telemetry_layers",
+      "kind": "function",
+      "one_line": "Пересобрать ТОЛЬКО плоскость телеметрии из слоёв (Task 5.10.f).",
+      "public": true,
+      "call_sites": 1
+     },
+     {
+      "name": "_apply_telemetry_from_layers",
+      "kind": "function",
+      "one_line": "Собрать секцию ``telemetry`` из L0+слоёв и применить к её получателям.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_apply_throttle_from_layers",
+      "kind": "function",
+      "one_line": "Применить операторскую дельту троттла из слоя поверх загрузочных правил.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "_remark_operator_disabled_sinks",
+      "kind": "function",
+      "one_line": "Вернуть отметку «снято оператором» тем приёмникам, которые держит L3.",
+      "public": false,
+      "call_sites": 0
+     },
+     {
+      "name": "make_observability_on_reload",
+      "kind": "function",
+      "one_line": "Собрать ``on_reload(config)`` callback: файл → нужный СЛОЙ → пересборка.",
+      "public": true,
+      "call_sites": 0
+     },
+     {
+      "name": "start_observability_watcher",
+      "kind": "function",
+      "one_line": "Запустить watcher файла конфига, перестраивающий менеджеры наблюдаемости.",
+      "public": true,
+      "call_sites": 2
+     }
+    ],
+    "files_in": 7,
+    "files_out": 18,
+    "line1": "Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).",
+    "line2": "использует меня 7 файлов / использую 18 · домов 31 (публичных 17)",
+    "line3": null,
+    "red": false
+   }
+  }
+ ]
+}

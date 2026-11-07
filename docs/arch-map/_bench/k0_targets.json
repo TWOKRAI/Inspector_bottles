@@ -1,0 +1,12 @@
+[
+  {"id": "IRouterManager", "path": "multiprocess_framework/modules/router_module/interfaces.py", "qualname": "IRouterManager"},
+  {"id": "RouterManager", "path": "multiprocess_framework/modules/router_module/core/router_manager.py", "qualname": "RouterManager"},
+  {"id": "IConfig", "path": "multiprocess_framework/modules/config_module/interfaces.py", "qualname": "IConfig"},
+  {"id": "Config", "path": "multiprocess_framework/modules/config_module/core/config.py", "qualname": "Config"},
+  {"id": "IConfigObserver", "path": "multiprocess_framework/modules/config_module/interfaces.py", "qualname": "IConfigObserver"},
+  {"id": "IConfigManager", "path": "multiprocess_framework/modules/config_module/interfaces.py", "qualname": "IConfigManager"},
+  {"id": "ConfigFileWatcher", "path": "multiprocess_framework/modules/config_module/tools/watcher.py", "qualname": "ConfigFileWatcher"},
+  {"id": "DataConverter.save_to_file", "path": "multiprocess_framework/modules/data_schema_module/serialization/converter.py", "qualname": "DataConverter.save_to_file"},
+  {"id": "write_companion", "path": "multiprocess_framework/modules/process_module/configs/observability_companion.py", "qualname": "write_companion"},
+  {"id": "observability_reload.py", "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py"}
+]
