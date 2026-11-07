@@ -12,24 +12,24 @@ Opus, 2026-11-07, `main` 0f1883a64. **И** — измерено (команда 
 | ADR → план | `plans/` в тексте секции | автор ADR | 167/520 секций `## ADR-` (32 %) ² |
 | ADR → коммит | sha в тексте | — | ≤ 29/520 (5,6 %, верхняя граница: regex hex) ² |
 | новый ADR → план | `Refs:` коммита, добавившего заголовок | вычислимо | 26 из 29 коммитов с 10-01, добавивших 1–3 `## ADR-<MOD>-NNN` ³ |
-| план → итог | `## Итог` | `plans_ledger.py close` (пишет `SUMMARY.md`, `:135`) | активных 1/34 ⁴; в архиве 14 файлов с итогом/закрытием, `SUMMARY.md` 0 ⁴ |
+| план → итог | `## Итог` | `plans_ledger.py close` (пишет `SUMMARY.md`, `build_summary` `:2947`) | активных 1/34 ⁴; в архиве 14 файлов с итогом/закрытием, `SUMMARY.md` 0 ⁴ |
 | статус плана | шапка | словарь `plans_ledger.py:258` (4 значения) | 12 написаний первого слова на 25 шапках ⁴ |
 | модуль → решения | `DECISIONS.md` | `validate.py` (нет проверки) | Services: 7 без файла (`control_panel`, `dataset_gen`, `documents`, `hikvision_camera`, `ml_inference`, `ml_train`, `phone_gateway`) ⁵ |
 | читатель | `adapters/commits.py` | атлас | `scripts/atlas/baseline.txt` нет (`ls` → No such file) |
 
-¹ `git log -500 --no-merges --format='%B%x01' main | python3 -I trl.py` (regex `^Key:` по телу). ² парсер секций `## ADR-` по `git ls-files '*DECISIONS.md'` (34 файла с ADR, 520 H2, 376 вида `ADR-<MOD>-NNN`). ³ `git log --since=2026-10-01 --no-merges -p --unified=0 -- '*DECISIONS.md'` + `^\+## ADR-[A-Z]+-\d+`. ⁴ `rg -l -i '^## *(итог|закрытие|результат)' plans -g plan.md -g '!plans/_archive/**'` → 1; `rg --files plans -g plan.md -g '!plans/_archive/**'` → 34; `ls plans/_archive | wc -l` → 88 ; статусы — `rg -o` по шапкам `- **Статус:**` + `uniq -c`. ⁵ цикл по `Services/*/__init__.py` без `DECISIONS.md`; `git ls-files | rg '^Services/[^/]+/DECISIONS.md' | wc -l` → 11.
+¹ `git log -500 --no-merges --format='%B%x01' main` + одноразовый разбор `^Key:` по телу (`trl.py` в репозитории нет); для `Decision:` воспроизводимо — `git log --no-merges --grep='^Decision:' --format=%h main | wc -l`. ² парсер секций `## ADR-` по `git ls-files '*DECISIONS.md'` (34 файла с ADR, 520 H2, 376 вида `ADR-<MOD>-NNN`). ³ `git log --since=2026-10-01 --no-merges -p --unified=0 -- '*DECISIONS.md'` + `^\+## ADR-[A-Z]+-\d+`. ⁴ `rg -l -i '^## *(итог|закрытие|результат)' plans -g plan.md -g '!plans/_archive/**'` → 1; `rg --files plans -g plan.md -g '!plans/_archive/**'` → 34; `ls plans/_archive | wc -l` → 88 ; статусы — `rg -o` по шапкам `- **Статус:**` + `uniq -c`. ⁵ цикл по `Services/*/__init__.py` без `DECISIONS.md`; `git ls-files | rg '^Services/[^/]+/DECISIONS.md' | wc -l` → 11.
 
 **Сценарии сейчас** (шаги = вызовы агента):
 
 | Сценарий | Путь | Шаги | Где рвётся |
 |---|---|---|---|
-| S1 «почему у `ConfigFileWatcher` debounce» (**выполнен**) | `rg debounce watcher.py` → `git log -S debounce -- …` → `git show -s --format=%(trailers)` → `rg debounce */DECISIONS.md` → `awk` заголовок | 5 | исходный коммит — `2e829a5b6` «fresh start» (2026-04-30): **почему debounce вообще — не найти**; исправление `541002d8d` несёт `Why`/`Refs: k0-framework-quality`/`Task: …#1.2`, ADR-CFG-005 (`config_module/DECISIONS.md:70`) описывает то же, но ни ADR не называет коммит/план (`rg -c '541002d8d\|k0'` → 0), ни коммит — ADR; связь угадана по слову |
+| S1 «почему у `ConfigFileWatcher` debounce» (**выполнен**) | `rg debounce watcher.py` → `git log -S debounce -- …` → `git show -s --format=%(trailers)` → `rg debounce */DECISIONS.md` → `awk` заголовок | 5 | исходный коммит — `2e829a5b6` «fresh start» (2026-04-30): **почему debounce вообще — не найти**; исправление `541002d8d` несёт `Why`/`Refs: plans/2026-10-07_k0-framework-quality/plan.md`/`Task: k0-framework-quality#1.2`, ADR-CFG-005 (`config_module/DECISIONS.md:70`) описывает то же, но ни ADR не называет коммит/план (`rg -c '541002d8d\|k0'` → 0), ни коммит — ADR; связь угадана по слову |
 | S2 «что менялось в `process_manager_module` по gui-graceful-close» (**выполнен**) | `git log --format='%h %(trailers:key=Refs)' -- <модуль> \| rg graceful` → `rg ADR-PM-059` | 2–3 | коммиты: 6 из 364 — 1 вызов, работает; решение ADR-PM-059 лежит в **`process_module/DECISIONS.md`**, не в доме кода; id — только в теме `737904400`, не в трейлере; ADR называет план (`plans/2026-10-20_gui-graceful-close`) |
 | S3 «какое решение за кодом» | `rg <имя> */DECISIONS.md` | 2–4 | ключа нет |
-| S4 «что пробовали и отвергли» | `Rejected:` (12/500), «Отклонённые альтернативы» (30 секций в 8 файлах ⁶), память | 4+ | дома нет |
+| S4 «что пробовали и отвергли» | `Rejected:` (12/500), «Отклонённые альтернативы» и родня (36 заголовков H2–H4 «отвергли» и 43 жирные строки ⁶), память | 4+ | дома нет |
 | S5 «план закрыт — где итог» | ledger «Архив» → каталог → amendments/handoffs | 3–5 | итога нет у 74/88 |
 
-⁶ `rg -c -i '^#+ *(Отклонённые альтернативы|Альтернативы|Rejected|Отвергнут)' --glob DECISIONS.md` → 8 файлов, 30 секций.
+⁶ на дату stage 0 р.1 (`reports/7.3.review-r1.md`): `git grep` по `*DECISIONS.md` — 36 заголовков H2–H4 из множества «отвергли» (`tasks/7.3.md`) и 43 жирные строки; прежний счёт «30 секций в 8 файлах» — узкий regex.
 
 ## б) Как будет после Phase 7
 
@@ -58,9 +58,9 @@ Opus, 2026-11-07, `main` 0f1883a64. **И** — измерено (команда 
 ## г) Что может не стать лучше — возражения к CTO
 
 1. **`Decision:` обязателен ровно там, где он вычислим.** Hook требует его, когда дифф добавляет `## ADR-`, — но тот же дифф и даёт связь ADR → коммит без поля (³: 29 коммитов, 26 с `Refs:` → ADR → план тоже вычислим, 90 %). Ценный случай — код-коммит, реализующий ADR отдельно (S2: `5d0c2c19e` код, `737904400` ADR), — остаётся необязательным и, вероятно, пустым. **Предложение:** `origin` вычисляет ADR → коммит из диффа (`how: diff`, ретро на всю историю с 04-30), ADR → план — из `Refs:` того коммита; `Decision:` — распознаётся, не обязателен; `План:` не нужен. Цена: ~30 строк в 7.3 вместо правила hook (7.1a сужается до шаблона/гайда). Вопрос В10.
-2. **`## Итог` уже наполовину есть:** `close` пишет `SUMMARY.md` (`plans_ledger.py:135`), CTO его не учёл; в архиве итог у 14/88. Второй документ не нужен — `## Итог` включается в `SUMMARY.md` (так в 7.1b).
+2. **`## Итог` уже наполовину есть:** `close` пишет `SUMMARY.md` (`build_summary`, `plans_ledger.py:2947`), CTO его не учёл; в архиве итог у 14/88. Второй документ не нужен — `## Итог` включается в `SUMMARY.md` (так в 7.1b).
 3. **FREEZE `Risk/Reversible/Tested/Rejected`** — польза мала (1–2 %), вред тоже: убирается строка гайда, валидатор не меняется. Согласен; но `Rejected:` — единственный «отвергнуто» на уровне коммита, его дом теперь ADR — для решений без ADR он пропадёт (**Г**). Цена сохранить: 0 (оставить в гайде как необязательный).
-4. **`Отвергнуто:` против существующей секции** «Отклонённые альтернативы»/`### Alternatives` (30 секций, шаблон её уже имеет) — две формы одного факта. Предложение: одна строка — краткая выжимка секции, `origin` печатает строку, иначе первую строку секции. Цена 0.
+4. **`Отвергнуто:` против существующей секции** «Отклонённые альтернативы»/`### Alternatives` (36 заголовков и 43 жирные строки, шаблон её уже имеет) — две формы одного факта. Предложение: одна строка — краткая выжимка секции, `origin` печатает строку, иначе первую строку секции. Цена 0.
 5. **C0 набора `origin` без `.git`** (чистая копия бенча) — `grep-read` не может `git log`, Kill-3 срабатывает реже → смещение к постройке `origin` (В11). Цена: условие с `git log/show/blame` ≈ +$3.
 6. **Переучивание:** одно новое поле — риск низкий, если ошибка hook печатает готовую строку `Decision: ADR-…` (добавить в 7.1a).
 7. **Дом ADR ≠ дом кода** (ADR-PM-059 в `process_module`) — любой читатель «решения модуля M» по `M/DECISIONS.md` промахнётся; `origin` ищет id во всех домах (7.3 TRAPS).
@@ -81,7 +81,7 @@ Opus, 2026-11-07, `main` 0f1883a64. **И** — измерено (команда 
 - `ADR.template.md` — общий шаблон «ADR на файл»; модульный — `…/templates/DECISIONS.template.md` (с `### Alternatives`) → 7.1a.
 - `docs/ADR_REGISTRY.md` нет; реестр — `multiprocess_framework/docs/ADR_REGISTRY.md` (`scripts/sync/adr_modules.py:5`).
 - словарь — `plans_ledger.py:258` (`:25` — докстринг); `close` (`:3295`) пишет `SUMMARY.md`.
-- `validate_commit.py`: `KNOWN_TRAILERS` `:232`, `Refs` `:278-319`, `Task` `:35` — верно; `STRICT = False` `:254`; план commit-mechanism — IN PROGRESS (владелец формата коммита жив).
+- `validate_commit.py`: `KNOWN_TRAILERS` `:228`, `Refs` `:278-319`, `Task` `:35` — верно; `STRICT = False` `:254`; план commit-mechanism — IN PROGRESS (владелец формата коммита жив).
 - `validate.py:234` = `check_adr_sync`; тестов у `validate.py` нет.
 - указатель `docs/claude/DECISIONS/` — не в `CLAUDE.md`, а в `.claude/commands/dev/adr.md:2,26,38`.
 - числа: `Refs` 97,4 %, `Task` 5,2 %, 498/499 путей — совпали; ADR: 520 H2 (CTO 539 — вероятно с `###`), с `plans/` 167 (CTO 122), с sha ≤ 29 (CTO 14) (окно 1 200 симв. против всей секции); итог «1/34» у CTO — только активные, архив 14/88 не учтён.
