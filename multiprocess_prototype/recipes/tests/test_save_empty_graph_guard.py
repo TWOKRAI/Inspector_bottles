@@ -119,3 +119,32 @@ def test_empty_graph_over_empty_file_processes_writes_as_before(tmp_path: Path) 
     _save(store, {"processes": [], "wires": []}, expected_rev=None)
 
     assert yaml.safe_load(path.read_bytes().decode("utf-8"))["blueprint"]["processes"] == []
+
+
+def test_empty_graph_without_base_refuses_when_file_has_foundation_process(tmp_path: Path) -> None:
+    """Порядок: охрана стоит ДО правила владения. Файл с процессом фундамента, граф ``[]``, база неизвестна -> отказ.
+
+    Если охрану перенести после ``_editor_owned_topology``, фундамент файла вернётся в граф, тот перестанет быть
+    пустым и Save сотрёт 9 из 10 процессов (ревью стадии 5, M1). Вход — ``letter_robot_sim`` (10 процессов,
+    среди них ``devices``).
+    """
+    from multiprocess_prototype.recipes.tests.test_save_noise_store import fixture_a_lf
+
+    source = fixture_a_lf()
+    names = [p["process_name"] for p in yaml.safe_load(source.decode())["blueprint"]["processes"]]
+    assert "devices" in names
+    assert len(names) == 10
+    path = _put(tmp_path, "letter_robot_sim", source)
+    store = build_chain(tmp_path, "letter_robot_sim")
+
+    with pytest.raises(RecipeValidationError) as info:
+        save_editor_topology_to_recipe(
+            store,
+            "letter_robot_sim",
+            {"processes": [], "wires": []},
+            expected_rev=None,
+            foundation=_FOUNDATION,
+        )
+
+    assert info.value.errors == [_REFUSAL]
+    assert path.read_bytes() == source

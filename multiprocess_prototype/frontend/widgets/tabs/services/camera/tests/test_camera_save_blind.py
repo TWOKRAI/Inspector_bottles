@@ -559,7 +559,9 @@ def _validation_error() -> Exception:
     [(_validation_error, "x"), (lambda: RuntimeError("другое"), "")],
     ids=["validation", "runtime"],
 )
-def test_acc13_other_save_errors_swallowed_pending_kept(tmp_path: Path, make_error: Any, expected_last_error: str) -> None:
+def test_acc13_other_save_errors_swallowed_pending_kept(
+    tmp_path: Path, make_error: Any, expected_last_error: str
+) -> None:
     """ACC 13: save_active бросил не конфликт -> save() False, не бросает, pending цел.
 
     last_error: RuntimeError -> пуст; RecipeValidationError -> его текст (Task 1.16 m1, правка лида 2026-11-07).
