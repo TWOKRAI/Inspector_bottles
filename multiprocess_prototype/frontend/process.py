@@ -35,7 +35,8 @@ class GuiProcess(ProcessModule):
     автоматически обогащаются numpy frame из SHM (msg["frame"]).
     """
 
-    # ЗАГЛУШКА Task 1.1: True, когда CloseCoordinator уже отправил system.shutdown (читает GuiProcess.run).
+    # Task 1.1: True, когда CloseCoordinator уже отправил system.shutdown. Читает
+    # _request_system_shutdown после возврата run_gui (Qt-объектов к этому моменту может не быть).
     shutdown_sent: bool = False
 
     # _init_system_threads() — НЕ переопределён: стандартный framework message_processor
@@ -353,6 +354,14 @@ class GuiProcess(ProcessModule):
         Fallback (общий event не проброшен — старый launch): IPC ``system.shutdown`` в
         ProcessManager. Best-effort: ошибка на выходе не критична.
         """
+        if self.shutdown_sent:
+            # Task 1.1: CloseCoordinator уже отправил system.shutdown и дождался детей.
+            # Ни общего события, ни IPC-fallback: shutdown уже в работе у PM.
+            self._log_info(
+                "GuiProcess: system.shutdown уже отправлен координатором закрытия — общий event не взводится",
+                module="gui",
+            )
+            return
         ev = self._get_system_stop_event()
         if ev is not None:
             ev.set()

@@ -914,6 +914,12 @@ def run_gui(process: "GuiProcess") -> None:
     # 4. Создать MainWindow
     window = MainWindow()
 
+    # 4-bis. Task 1.1: крестик ждёт остановки системы (CloseCoordinator). Крестик →
+    # вопрос о правках → system.shutdown → «Остановка системы… k из N» → окно закрывается
+    # после выхода всех детей, кроме gui и самого PM (PM отдаёт о себе alive: True).
+    close_coordinator = _build_close_coordinator(app, process, window, command_sender, process_manager_proxy)
+    window.set_close_coordinator(close_coordinator)
+
     # Показать startup ошибки в StatusBar
     if not _report.ok:
         window.statusBar().showMessage(_report.summary(), 10000)
@@ -958,14 +964,12 @@ def run_gui(process: "GuiProcess") -> None:
     def _request_ui_restart() -> None:
         """Узкий callback для InterfaceSection — перезапуск UI без перезапуска процесса.
 
-        RS-4 (Fable #2): рестарт UI — тот же app.quit(), что обходит closeEvent → при
-        dirty-редакторе МОЛЧА терял правки. Спрашиваем подтверждение (тот же механизм,
-        что при закрытии); «Отмена» → рестарт НЕ выполняется.
+        RS-4 (Fable #2): рестарт при dirty-редакторе МОЛЧА терял правки — вопрос обязателен.
+        Task 1.1: вопрос задаёт координатор (один за закрытие); «Отмена» → рестарт НЕ
+        выполняется. Подтверждено → ``_restart_ui`` ставит ``quit_app`` координатора,
+        ``system.shutdown`` НЕ отправляется (бэкенд остаётся). Не в RUNNING — ничего.
         """
-        if not window.confirm_discard_topology_changes(reason="Сохранить их перед перезапуском интерфейса?"):
-            return
-        process._restart_ui = True
-        app.quit()
+        close_coordinator.request_restart()
 
     def _persist_active_recipe(slug: str) -> None:
         """persist #1: записать активный рецепт в файл состояния ``<stem>.state.yaml``.
@@ -1035,7 +1039,7 @@ def run_gui(process: "GuiProcess") -> None:
     )
 
     # 7. Запустить таймеры (fps, safety)
-    _setup_timers(app, process, window, telemetry_poller)
+    _setup_timers(app, process, window, telemetry_poller, close_coordinator)
 
     # 8. Сохранить ссылку на окно в process
     process._window = window
@@ -1181,11 +1185,68 @@ def _setup_bridge_callbacks(
     # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)
 
 
+def _build_close_coordinator(
+    app: QApplication,
+    process: "GuiProcess",
+    window: MainWindow,
+    command_sender: Any,
+    process_manager_proxy: Any,
+) -> Any:
+    """Task 1.1: собрать CloseCoordinator из настоящих эффектов (composition root).
+
+    Эффекты: вопрос о правках — окно; ``system.shutdown`` — ProcessManagerProxy; опрос —
+    ``supervision.status`` с таймаутом 1 с (вызывается на потоке пула); принудительная
+    остановка — общий ``system_stop_event``; ``quit_app`` — закрыть окно (``closeEvent`` в
+    ``CLOSING`` сохраняет геометрию) и выйти из Qt-цикла.
+    """
+    from .shutdown import CloseCoordinator
+    from .shutdown.close_coordinator import ask_force_stop_dialog
+
+    def _poll_status(timeout: float) -> dict:
+        return command_sender.request_system_command({"cmd": "supervision.status"}, timeout=timeout)
+
+    def _force_stop() -> None:
+        ev = process._get_system_stop_event()
+        if ev is None:
+            process._log_warning(
+                "закрытие: принудительная остановка — общий system_stop_event недоступен, "
+                "остаётся отправленный system.shutdown",
+                module="gui",
+            )
+            return
+        ev.set()
+        process._log_warning("закрытие: принудительная остановка — взведён общий system_stop_event", module="gui")
+
+    def _on_shutdown_sent() -> None:
+        process.shutdown_sent = True
+
+    def _quit_app() -> None:
+        if coordinator.restart_requested:
+            process._restart_ui = True  # до app.quit(): aboutToQuit читает флаг
+        window.close()
+        app.quit()
+
+    coordinator = CloseCoordinator(
+        window,
+        confirm_discard=lambda: window.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"),
+        send_shutdown=process_manager_proxy.shutdown_system,
+        poll_status=_poll_status,
+        ignore_names=frozenset({process.name, "ProcessManager"}),
+        ask_force_stop=lambda on_answer: ask_force_stop_dialog(window, on_answer),
+        force_stop=_force_stop,
+        quit_app=_quit_app,
+        on_shutdown_sent=_on_shutdown_sent,
+        unattended=unattended.is_unattended(),
+    )
+    return coordinator
+
+
 def _setup_timers(
     app: QApplication,
     process: "GuiProcess",
     window: MainWindow,
     telemetry_poller: Any,
+    close_coordinator: Any,
 ) -> None:
     """FPS таймер + safety таймер (+ терминальная остановка опроса телеметрии).
 
@@ -1246,14 +1307,12 @@ def _setup_timers(
     safety_timer.setInterval(1000)
 
     def _check_stop() -> None:
-        if process.should_stop():
-            # RS-4 (Fable #2): здесь НЕ показываем dirty-подтверждение сознательно.
-            # Это backend-driven teardown (PM/дерево уже останавливается: process.should_stop
-            # взведён извне — shutdown/смерть backend). Модальный диалог заблокировал бы
-            # safety-таймер во время каскадного teardown (SHM cleanup, PID-реестр) и рискует
-            # зомби/подвисанием. Пользовательский выход (закрытие окна) и рестарт UI —
-            # закрыты confirm'ом в closeEvent/_request_ui_restart, пока GUI жив и владеет циклом.
-            app.quit()
+        # Task 1.1: решение принимает координатор, app.quit() отсюда напрямую не зовём.
+        # should_stop при RUNNING/CONFIRMING — backend-driven teardown: commit_close сразу,
+        # БЕЗ dirty-подтверждения (RS-4, Fable #2: модальный диалог заблокировал бы цикл во
+        # время каскадного teardown). В STOPPING тик ожидание детей не прерывает: молчание
+        # PM ловит сторож тишины координатора.
+        close_coordinator.on_safety_tick(process.should_stop())
 
     safety_timer.timeout.connect(_check_stop)
     safety_timer.start()

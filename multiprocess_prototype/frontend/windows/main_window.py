@@ -284,19 +284,35 @@ class MainWindow(QMainWindow):
         """Сохранить позицию и размер в QSettings."""
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
-    _close_coordinator = None  # ЗАГЛУШКА Task 1.1: closeEvent координатор пока не использует
+    _close_coordinator = None  # Task 1.1: CloseCoordinator; None — прежнее закрытие (тесты, teardown)
 
     def set_close_coordinator(self, coordinator) -> None:
-        """ЗАГЛУШКА Task 1.1: запомнить координатор закрытия (поведения нет)."""
+        """Подключить координатор закрытия (Task 1.1): крестик ждёт остановки системы."""
         self._close_coordinator = coordinator
 
     def closeEvent(self, event) -> None:
-        """Подтвердить несохранённые правки графа (RS-4) и сохранить геометрию.
+        """Закрытие окна.
 
-        C-2/C-5: закрытие приложения при dirty-редакторе МОЛЧА теряло применённые-но-
-        несохранённые правки топологии. Теперь при dirty спрашиваем: Сохранить /
-        Не сохранять / Отмена. «Отмена» → окно не закрывается.
+        С координатором (Task 1.1): в ``CLOSING`` — сохранить геометрию и закрыться БЕЗ вопроса
+        (вопрос уже задан координатором: «Не сохранять» не снимает dirty, второй вопрос был бы
+        лишним); иначе событие игнорируется, а координатор начинает закрытие (вопрос →
+        ``system.shutdown`` → ожидание детей).
+
+        Без координатора — прежний путь RS-4: C-2/C-5: закрытие приложения при dirty-редакторе
+        МОЛЧА теряло применённые-но-несохранённые правки топологии. Теперь при dirty спрашиваем:
+        Сохранить / Не сохранять / Отмена. «Отмена» → окно не закрывается.
         """
+        coordinator = self._close_coordinator
+        if coordinator is not None:
+            from multiprocess_prototype.frontend.shutdown import CloseState
+
+            if coordinator.state is CloseState.CLOSING:
+                self._save_geometry()
+                super().closeEvent(event)
+                return
+            event.ignore()
+            coordinator.request_close()
+            return
         if not self.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"):
             event.ignore()
             return

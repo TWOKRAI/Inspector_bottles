@@ -624,7 +624,12 @@ class TestDataReceiverErrorRecovery:
 
 
 class TestRequestSystemShutdown:
-    """GuiProcess._request_system_shutdown — закрытие GUI гасит всю систему."""
+    """GuiProcess._request_system_shutdown — закрытие GUI гасит всю систему.
+
+    Task 1.1: первые три теста — путь БЕЗ координатора (``shutdown_sent`` по умолчанию
+    False: сбой отправки, backend_gone, старый запуск). Когда CloseCoordinator уже отправил
+    system.shutdown, путь другой — ``test_no_event_when_coordinator_sent_shutdown``.
+    """
 
     def test_sets_system_stop_event_when_available(self):
         """Основной путь: взводит ОБЩИЙ system_stop_event, IPC НЕ шлёт."""
@@ -638,6 +643,7 @@ class TestRequestSystemShutdown:
         process = GuiProcess(name="gui", shared_resources=sr)
         process.send_message = MagicMock()
         process._log_info = MagicMock()
+        assert process.shutdown_sent is False  # путь без координатора
 
         process._request_system_shutdown()
 
@@ -653,6 +659,7 @@ class TestRequestSystemShutdown:
         process.send_message = MagicMock()
         process._log_info = MagicMock()
         process._log_warning = MagicMock()
+        assert process.shutdown_sent is False  # путь без координатора
 
         process._request_system_shutdown()
 
@@ -673,6 +680,7 @@ class TestRequestSystemShutdown:
         process.send_message = MagicMock(side_effect=RuntimeError("router closed"))
         process._log_info = MagicMock()
         process._log_warning = MagicMock()
+        assert process.shutdown_sent is False  # путь без координатора
 
         process._request_system_shutdown()  # не должно бросить
 
