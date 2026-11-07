@@ -128,19 +128,21 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [DONE] (`59c7ce66e`; отчёт `docs/reviews/2026-10-28_task-1.12-developer.md`) (после 1.11; F2 ревью ветки)
   - **Module contract:** impl-only
-- Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [PENDING] (после 1.10)
+- Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [DONE] (`b807e6a99`, `5b47821f1`; инъекции 13/13, ревью стадии 5 с правками: `docs/reviews/2026-11-06_task-1.4-1.5-review.md`) (после 1.10)
   - **Module contract:** impl-only
-- Task 1.5: страж — AST R1/R2/R3/R4 с allowlist, `canonicalize_gui_positions` через движок [PENDING] (после 1.4)
+- Task 1.5: страж — AST R1/R2/R3/R4 с allowlist, `canonicalize_gui_positions` через движок [DONE] (`610cc89ce`, `b5e82eda0`; инъекции 14/15 + доп. матрица 38; стадия 0 — два раунда) (после 1.4)
   - **Module contract:** impl-only
-- Task 1.3: ADR-RCP-009 (движок, ревизия и лок, папка, решение №20), ADR-RCP-010 (каноническая форма), правка ADR-RCP-006, README/STATUS, OPEN_QUESTIONS, sync [PENDING] (после 1.5)
+- Task 1.3: ADR-RCP-009 (движок, ревизия и лок, папка, решение №20), ADR-RCP-010 (каноническая форма), правка ADR-RCP-006, README/STATUS, OPEN_QUESTIONS, sync [DONE: текст `287cb8dbe`, express-ревью 2026-11-07 идёт] (после 1.5)
   - **Module contract:** n/a
 
 Срез 1.1a → 1.1b → 1.1h → 1.1e → 1.1f → 1.1g → 1.7 → 1.1c — вертикальный (движок → `RecipeManager` → store → каталог →
 файл); разделён по лимиту REDS ≤ 10 на бриф и одному свойству на тест.
+- Task 1.16: Save не пишет пустой граф при незахваченной базе (D2, входящая `_5`); хвост ревью ветки m1–m3 (входящая `_6`) [PENDING] (поправка №13, решение лида 2026-11-07; стадия 0 не проведена; `tasks/1.16.md`)
+  - **Module contract:** impl-only
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; сумма таблицы 165 (поправки: 2026-11-02 +4 к 1.4; 2026-11-06 +5 к 1.5, стадия 0 р1–р2).
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; сумма таблицы 174 (поправки: 2026-11-02 +4 к 1.4; 2026-11-06 +5 к 1.5, стадия 0 р1–р2).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -166,6 +168,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
 | 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
 | 1.5 | 15 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
+| 1.16 | 9 | `recipes/tests/test_save_empty_graph_guard.py`, `camera/tests/test_camera_presenter.py`, `pipeline/tests/test_save_conflict_rev.py` | |
 
 ## Открытые вопросы (владельцу)
 
