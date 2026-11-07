@@ -29,3 +29,17 @@
 ## Итог для merge
 
 Код и документы ветки готовы: инъекции и ревью стадии 5 по каждой задаче, Opus-ревью ветки APPROVED (`docs/reviews/2026-11-07_c30-final-branch-review.md`, 2 minor закрыты `aaf5ec1b2`), красные = красные чистого main. Не закрыто: M1–M3 живьём, `backend_ctl` live-тест хаба, `test_yaml_patch.py`. Merge в main и push — по слову владельца.
+
+## ЗАМЕНА живого стенда M1/M2 на Qt offscreen (не стенд) · добавлено после слова владельца «давай»
+
+Тест `multiprocess_prototype/frontend/widgets/tabs/pipeline/tests/test_stand_substitute_m1_m2.py` (5 passed; отчёт `docs/reviews/2026-11-07_c30-stand-substitute-developer.md`): настоящие `PipelineTab` и `RecipesTab` (offscreen), клик по кнопке «Сохранить», `RecipeManager` + `RecipeStoreFromManager` + `InspectorRecipeFormatHook`, `TopologySession` с `capture_foundation(["devices"])`; диалоги `QMessageBox` перехвачены.
+
+| Замер | Что проверено заменой | Результат | Чего нет |
+|---|---|---|---|
+| M1 | Save без правок, оба пути (Pipeline, Recipes) | байты и mtime прежние после 1-го и 2-го клика | `run_gui` с реальным `capture_foundation`, ProcessManager, окно и хуки MainWindow |
+| M2 | внешняя правка (`# external edit`) → клик Save | диалог «Рецепт изменён снаружи — перезагрузите его» (Pipeline `critical`, Recipes `warning`), файл == правка руками | показ диалога на экране |
+| M3, M5 | — | ожидает камеры/стенда | всё |
+
+Мутации (A1/A2: убрать `foundation`; B1/B2: `expected_rev=None`) краснят ровно M1 и M2 нужного пути.
+
+**Находка, совпадает с ожиданием плана:** `bridge_synth_head.yaml` не содержит раскладки, поэтому ПЕРВЫЙ Save настоящей Pipeline-вкладки дописывает `metadata.gui_positions` (+5 строк: `synthetic_source.synthetic_frame_source` 400.0/100.0) — это то самое «первой записью ≤ `5 0`, вторая `0 0`» из критерия M1; M1 снят на «осевшем» рецепте (HEAD + этот блок как литерал). Что рабочий файл стенда раскладку имеет, выведено из логики, не из файла. Characterization-тест фиксирует поведение, не требование: если дописывание раскладки считать дефектом, тест правится вместе с продуктом.
