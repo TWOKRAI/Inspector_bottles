@@ -58,6 +58,7 @@ class StopDriver(FakeDriver):
         self.release = release
         self.hold = hold  # 0 — мгновенно; > 0 — столько секунд; _HOLD_S — до release
         self.calls_stop: list[tuple[float, float, int]] = []  # (момент входа, срок, ident потока)
+        self.raw_calls = 0  # все вызовы request_stop, до дедупликации по сроку
         self._seen: set[float] = set()
         self.entered = threading.Event()
         self.finished_at: float | None = None
@@ -70,6 +71,7 @@ class StopDriver(FakeDriver):
         return True
 
     def request_stop(self, deadline: float) -> None:
+        self.raw_calls += 1
         if deadline in self._seen:
             return
         self._seen.add(deadline)
@@ -325,3 +327,41 @@ def test_hook_puts_nothing_on_executor(hub: Hub) -> None:
     time.sleep(0.2)  # подача могла бы прийти с потока стопа уже после возврата хука
     assert hub.ctx.command_manager.mock_calls == [], hub.ctx.command_manager.mock_calls
     assert r1.calls_stop[0][2] != hook_thread
+
+
+def test_late_robot_not_delayed_by_hung_neighbour(hub: Hub) -> None:
+    r1 = hub.add("r1", hold=_HOLD_S)  # висит, пока тест не отпустит
+    hub.hook()
+    assert r1.entered.wait(1.0)
+    late = hub.add("late", workers=False)  # появился после хука
+    thread = threading.Thread(target=lambda: hub.plugin.shutdown(hub.ctx), daemon=True, name="c60b-shutdown")
+    thread.start()
+    try:
+        delivered = late.entered.wait(1.0)
+        assert r1.finished_at is None, "обвязка: зависший сосед уже отпущен"
+        assert delivered, "позднему роботу стоп не ушёл за 1,0 с: запись ждёт зависшего соседа"
+    finally:
+        hub.release.set()
+        thread.join(15.0)
+    assert not thread.is_alive()
+
+
+def test_new_driver_object_under_same_id_gets_one_stop(hub: Hub) -> None:
+    old = hub.add("r1")
+    hub.hook()
+    assert old.entered.wait(1.0)
+    transport = {"type": "tcp", "host": "127.0.0.1", "port": 50999, "unit_id": 2}
+    new = StopDriver(DeviceEntry(id="r1", name="r1", kind="robot", transport=transport), release=hub.release)
+    hub.plugin._manager._drivers["r1"] = new  # remove + upsert того же id: новый объект под прежним id
+    hub.shutdown()
+    assert len(old.calls_stop) == 1
+    assert len(new.calls_stop) == 1, "новый объект драйвера под прежним id остался без стопа"
+
+
+def test_hook_then_shutdown_sends_one_raw_call_per_robot(hub: Hub) -> None:
+    r1 = hub.add("r1")
+    hub.hook()
+    assert r1.entered.wait(1.0)
+    late = hub.add("late", workers=False)
+    hub.shutdown()  # фаза 1 (request_stop_all) и фаза 4 (_on_shutdown) с тем же сроком хука
+    assert (r1.raw_calls, late.raw_calls) == (1, 1), "повторный вызов request_stop за закрытие (до дедупа по сроку)"
