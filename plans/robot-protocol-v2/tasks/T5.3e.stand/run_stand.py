@@ -38,7 +38,9 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 WORKTREE = HERE.parents[3]  # plans/robot-protocol-v2/tasks/T5.3e.stand -> корень worktree
 MAIN_TREE = Path("D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles")
-MAIN_PYTHON = MAIN_TREE / ".venv" / "Scripts" / "python.exe"
+if not MAIN_TREE.exists():  # не Windows-машина владельца (Mac): главное дерево — этот checkout
+    MAIN_TREE = WORKTREE
+MAIN_PYTHON = MAIN_TREE / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 DEFAULT_STAND_ROOT = Path(tempfile.gettempdir()) / "t53e-stand"  # вне git; --stand-root переопределяет
 
 ROBOT_ID = "robot_main"
