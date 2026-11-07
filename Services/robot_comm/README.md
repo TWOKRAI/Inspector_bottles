@@ -83,6 +83,12 @@ echo, энкодер, зеркало ПЧ с heartbeat, draw busy/prog).
 Любая правка протокола = парная правка `cvt_universal_full.lua` + `registers.py`
 одним коммитом, с тестом на sim.
 
+## Кодоген протокола v2 (`codegen.py`, T1.4)
+
+Диапазоны APARAM по действию — из `scenario.aparam` в `protocols/delta_v2.yaml`. Генератор кладёт их в
+`core/protocol_v2.py` как `ACT_RANGE` (имя действия → `(lo, hi)` включительно, без NONE) и в Lua-блок как
+таблицу `ARNG` (ключ — код действия, как в `ACT`).
+
 ## Модель робота (`kinematics.py`, T2.K)
 
 Кинематика (FK/IK/цепочка звеньев) — за интерфейсом `RobotModel`, не жёстко
@@ -101,7 +107,7 @@ echo, энкодер, зеркало ПЧ с heartbeat, draw busy/prog).
 `geometry.Frame`), шаги `Move` (точка + вид хода `LINE`/`LINE_PASS`/`JOINT`) и
 `Action` (`DO_ON`/`DO_OFF`/`DELAY_MS`/`SPEED_PCT`/`ACCEL`/`ACCUR` + параметр).
 Имена видов и действий — ключи `KIND`/`ACT` из `core/protocol_v2`. Модели —
-Pydantic, неизменяемые, `to_dict()`/`from_dict()`; версия формата — на `Program`.
+Pydantic, неизменяемые, `to_dict()`/`from_dict()`; версия формата — на `Program`. Диапазоны действий — из `ACT_RANGE`.
 
 `compile_program(program, points, frames, params) -> Scenario` — чистая функция:
 записи в базе (float, без квантования ×0.1) и `step_of` — индекс шага на каждую

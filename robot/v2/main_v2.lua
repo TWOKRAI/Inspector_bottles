@@ -4,7 +4,7 @@
 FW_BUILD = 0x7CC1
 -- ===== 10_generated.lua =====
 -- Таблицы REG/OP/ERR/PDEF/... подставляются из delta_v2.yaml (codegen.lua_block).
--- ===== BEGIN GENERATED (delta_v2.yaml d3c801e4) =====
+-- ===== BEGIN GENERATED (delta_v2.yaml e9e06893) =====
 
 REG = {
   CMD_FLAG = 0x1000,
@@ -626,6 +626,33 @@ ACT = {
   SPEED_PCT = 4,
   ACCEL = 5,
   ACCUR = 6,
+}
+
+ARNG = {
+  [1] = {
+    lo = 1,
+    hi = 16,
+  },
+  [2] = {
+    lo = 1,
+    hi = 16,
+  },
+  [3] = {
+    lo = 0,
+    hi = 65535,
+  },
+  [4] = {
+    lo = 1,
+    hi = 100,
+  },
+  [5] = {
+    lo = 100,
+    hi = 50000,
+  },
+  [6] = {
+    lo = 0,
+    hi = 1,
+  },
 }
 
 C = {

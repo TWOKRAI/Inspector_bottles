@@ -301,3 +301,62 @@ def test_cli_check_exit_code(tmp_path):
     yaml_copy.write_bytes(_YAML_PATH.read_bytes())
     stale = subprocess.run([sys.executable, "-m", "Services.robot_comm.codegen", "--check"], cwd=tmp_path, **common)
     assert stale.returncode == 1, stale.stdout + stale.stderr
+
+
+# ─────────────────────────── T1.4: диапазоны APARAM (scenario.aparam) ───────────────────────────
+
+
+def _tmp_root_with_yaml(tmp_path, mutate):
+    """Корень в tmp_path с копией YAML, к которой применён `mutate(doc)`."""
+    proto_dir = tmp_path / "Services" / "robot_comm" / "protocols"
+    proto_dir.mkdir(parents=True)
+    doc = yaml.safe_load(_YAML_PATH.read_text(encoding="utf-8"))
+    mutate(doc)
+    (proto_dir / "delta_v2.yaml").write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return tmp_path
+
+
+def _generated_act_range_from(root):
+    from Services.robot_comm import codegen
+
+    texts = codegen.generate(root)
+    (text,) = [t for p, t in texts.items() if p.name == "protocol_v2.py"]
+    namespace: dict = {}
+    exec(text, namespace)  # noqa: S102 — сгенерированный модуль без импортов
+    return namespace["ACT_RANGE"]
+
+
+def test_act_range_rendered_from_yaml(tmp_path):
+    root = _tmp_root_with_yaml(tmp_path, lambda d: d["scenario"]["aparam"]["SPEED_PCT"].update(max=50))
+
+    assert _generated_act_range_from(root)["SPEED_PCT"] == (1, 50)
+
+
+def test_act_range_accel_follows_param_meta(tmp_path):
+    def mutate(d):
+        d["params"]["P_ACC_L"].update(min=200, max=40000)
+
+    root = _tmp_root_with_yaml(tmp_path, mutate)
+
+    assert _generated_act_range_from(root)["ACCEL"] == (200, 40000)
+
+
+def test_act_range_order_follows_actions_without_none():
+    ranges = _generated_act_range_from(_REPO_ROOT)
+
+    assert list(ranges) == ["DO_ON", "DO_OFF", "DELAY_MS", "SPEED_PCT", "ACCEL", "ACCUR"]
+
+
+def test_lua_block_arng_keyed_by_act_code():
+    import re
+
+    from Services.robot_comm import codegen
+
+    text = codegen.lua_block(_REPO_ROOT)
+
+    assert re.search(r"\bARNG\s*=\s*\{", text)
+    for code in range(1, 7):
+        assert re.search(rf"\[\s*{code}\s*\]\s*=\s*\{{\s*lo\s*=\s*\d+\s*,\s*hi\s*=\s*\d+", text.split("ARNG", 1)[1]), (
+            code
+        )
+    assert re.search(r"\[\s*4\s*\]\s*=\s*\{\s*lo\s*=\s*1\s*,\s*hi\s*=\s*100\s*,?\s*\}", text)
