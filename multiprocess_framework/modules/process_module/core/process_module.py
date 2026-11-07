@@ -278,6 +278,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             if work is not None:
                 self._own_work(work)
                 work.own(_WorkersStop(self), name="workers", kind="workers")
+                # Task 1.1a: поздние записи наследника — после воркеров в регистрации,
+                # значит раньше воркеров (и message_processor) в закрытии (LIFO).
+                self._own_work_late(work)
                 # C-60: весть плагинам о стопе — последней в регистрации, значит
                 # первой в фазе 2 (LIFO): до ожидания воркеров и исполнителей и до
                 # ``plugins`` (shutdown плагинов). Без оркестратора — пропуск.
@@ -421,6 +424,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
     def _own_work(self, work) -> None:
         """Точка регистрации записей наследника в ``work`` (по умолчанию — ничего)."""
+
+    def _own_work_late(self, work) -> None:
+        """Поздние записи наследника в ``work`` (по умолчанию — ничего), Task 1.1a.
+
+        Регистрируются ПОСЛЕ ``workers`` и ДО ``plugins-stop``, поэтому закрываются
+        раньше воркеров (LIFO): пока они закрываются, воркеры и ``message_processor``
+        ещё работают. ``plugins-stop`` по-прежнему закрывается первым.
+        """
 
     def _own_transport(self, transport) -> None:
         """Точка регистрации записей наследника в ``transport`` (по умолчанию — ничего)."""

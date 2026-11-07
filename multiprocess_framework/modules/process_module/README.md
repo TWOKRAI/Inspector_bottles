@@ -4,7 +4,7 @@
 
 Модуль `process_module` отвечает за **создание, инициализацию, управление и мониторинг процессов** в многопроцессном фреймворке. Это центральный компонент, который координирует работу конфигурации, коммуникации, менеджеров и воркеров (через `worker_module`).
 
-**Остановка:** `initialize()` открывает корень `proc/<имя>` (`planes | transport | work`), `stop()` только отменяет его, `shutdown()` закрывает один раз; наследник кладёт свои записи в `_own_work` / `_own_transport` (ADR-PM-054). Менеджеры корня получают область `<attr>-scope` сегмента (`stats_manager` -> `proc/<имя>/planes/stats_manager-scope`), она закрывается раньше их `shutdown()` (ADR-BM-009).
+**Остановка:** `initialize()` открывает корень `proc/<имя>` (`planes | transport | work`), `stop()` только отменяет его, `shutdown()` закрывает один раз; наследник кладёт свои записи в `_own_work` / `_own_work_late` / `_own_transport` (ADR-PM-054, ADR-PM-059). Менеджеры корня получают область `<attr>-scope` сегмента (`stats_manager` -> `proc/<имя>/planes/stats_manager-scope`), она закрывается раньше их `shutdown()` (ADR-BM-009).
 
 **Р4 (Task 1.2b-2):** `IProcessModule` объявляет `attach_stop_budget()` и `close_root()`; раннер выбирает путь корня по `isinstance(…, IProcessModule)`, а не по наличию `close_root`.
 
@@ -1016,6 +1016,9 @@ initialize: configure → start            (IDLE → READY → RUNNING)
                        ожидание воркеров и исполнителей (срок W = work_s)
                        shutdown            ← plugins           (* → STOPPED)
 ```
+
+Схема — для обычного процесса. Наследник вправе добавить поздние записи через `_own_work_late(work)`: они закрываются
+после `plugins-stop`, но РАНЬШЕ воркеров (ADR-PM-059; так `ProcessManagerProcess` держит область `children` — ADR-PMM-040).
 
 * Хук **запускает** остановку и возвращается; ждать — в `shutdown`. Идёт на потоке закрытия, параллельно ещё
   работают `process()`/`produce()` и операции исполнителя — потокобезопасность на плагине.
