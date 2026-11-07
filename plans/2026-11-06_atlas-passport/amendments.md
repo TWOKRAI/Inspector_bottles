@@ -1,0 +1,24 @@
+# atlas-passport — поправки после approve
+
+Нумерованные записи, только дописывание. Формат: № · дата · что изменено (старый → новый литерал) · `path:line` на `main` · SHA `main` · пересчёт бюджета (если меняется).
+
+0 · 2026-11-07 · план открыт (DRAFT): преемник `plans/2026-10-04_atlas` и плана ветки `feat/atlas-lookup-map` (`75f818845`) по решению владельца и CTO 2026-11-06 (точка отсчёта первой и как Kill-1; E2 FREEZE; K1.1 2026-11-10 закрывает старый план). 12 задач в 7 фазах (0–6) до С1 и закрытия; работа после С1 — списком, задачами только поправкой. Бюджет до С1 ≈ 2,6M токенов (оценка, не замер; `plan.md` «Бюджет»). `main` = `315fdbf51`.
+
+1 · 2026-11-07 · правки по вердикту CTO (`docs/reports/2026-11-07_cto-atlas-passport-plan-verdict.md` §3, правки 1–12; дополнение `…-addendum-arch-map.md`, правки 13–14) · `main` = `0f1883a64`, `feat/arch-map` = `930c5f2a3`, `feat/atlas-lookup-map` = `75f818845`:
+   1. Kill-1: «медиана `tool_calls` ≤ 10» → «≤ 2·N = 20» (`plan.md` «Kill и стопы», `tasks/1.2.md` DESIGN); В6 закрыт этим порогом (`design.md` §8).
+   2. `replay`/`lint_brief` — FREEZE, удаление запрещено (живой хук `lint-brief.sh:153`); слово В3 на них не запрашивается (`design.md` §2 стр. 8а, §5; `tasks/6.2.md`).
+   3. Форма команд: «тело проходит `ast.literal_eval`» → читатель принимает кортеж или `CommandSpec(...)` с литералами (`ast.Call`); форму выбирает Ф9.7; строка `@expose` для Ф9.7 снята, предложена строка `test_command_specs_static_readable` (`design.md` §1, §7; `tasks/4.2a.md`).
+   4. Новые строки судеб: `lint-result`/`result_form`/`review_form` — ОСТАЁТСЯ; адаптеры commits/plans/modules и находки ADR-ATL-001 — ОСТАЮТСЯ в `atlas check` до B1 (`design.md` §2 стр. 13, 14).
+   5. 6.2: «после 6.1 и слова В3» → «после 6.1, только если kill №2 сработал; иначе FREEZE/CANCELLED» (`plan.md` Phase 6, `tasks/6.2.md`, `design.md` §5); В3 сужен до `brief`/`metrics`.
+   6. «+19 159/−868» → «+18 909 чистого прироста (63 файла), −0» (`plan.md` «Приёмка»; `design.md` §9 п. 14).
+   7. ADR: в 4.2a FILES — `scripts/atlas/DECISIONS.md` (ADR-ATL-005); для 2.2 ADR A1 уже есть «Дополнением map-A1» к ADR-ATL-001 (`tasks/2.2.md`, `design.md` §9 п. 18).
+   8. При KILL остаётся `passport.py`, `reference.py` — FREEZE; grimp и `ast_graph.py` — FREEZE навсегда (`plan.md` Kill-2, `tasks/5.1.md`, `design.md` §1, §2).
+   9. Порог 18 303 — только `scripts/atlas`; размер `nav_bench` печатается в каждом отчёте слияния, в порог не входит (`plan.md` «Приёмка», `tasks/1.1.md`, `tasks/2.2.md`).
+   10. 6.1: считаются только kill №2/№3, №1 «не измерен»; без сработавшего kill закрытие — слово владельца (В2) (`tasks/6.1.md`, `design.md` §8 В2).
+   11. Косметика: `design.md` §9 нумерация 12/13 исправлена; `__main__.py` ветка `card`/`pack` — `:149-156` (пересчитано, не `:149-153` вердикта — `design.md` §9 п. 15).
+   12. 5.1 OUT OF SCOPE: Pyright `--outputjson` при ложных name-call > 1, не раньше С1.
+   13. Вариант А по умолчанию: в `main` только `scripts/nav_bench/` из `930c5f2a3`; `scripts/arch_map`, `docs/arch-map` — в ветке владельца FREEZE; вариант Б — вопрос В8 (`plan.md` «Приёмка», `design.md` §5, §8).
+   14. SHA `nav_bench` → `930c5f2a3` (1.1, 1.2, 2.2, 3.1); источник A1 → `75f818845` по путям, другая ветка; 3.1 — эталон в git (57 068 байт), регенерация не нужна, F1/F2/F7 руками, в git не класть. В5 закрыт: `feat/atlas-passport` от `main` после влития `nav_bench` (Task 1.1 теперь вливает `nav_bench`; 2.2 вливает только A1; 2.1 — после 0.1 и 1.1).
+   Сверх списка: бюджет 1.2 «≈ 510k» → «≤ $7 с `floor`» (510k — не расход); 4.2a — `atlas ref` с несколькими id (RED `test_ref_many_ids_one_call`); `design.md` §1 — два `ref` до A2 названы. Бюджет до С1 — см. запись 2.
+
+2 · 2026-11-07 · решения CTO по идеям (`docs/reports/2026-11-07_cto-atlas-ideas-verdict.md`): прежняя таблица «Ещё идеи, пока вне плана» (`design.md` §4) → `ideas.md` (28 идей П/С1/Н, семь лучших приёмов аналогов с пометками [не проверено], «второй источник / лишний слой», «не берём»); `design.md` §4 — указатель (вынесено по лимиту 32 КБ). Task 4.2 (10 REDS) разрезана по лимиту REDS ≤ 10: **4.2a** — паспорт и `ref` (10 REDS, 6 FILES), **4.2b** — `map` юнита и скелет файла, `status.stale`, `status.frozen`, JSON-схема контрактным тестом (5 REDS, 4 FILES), обе Senior+ со stage 0 дважды; 4.3 — после 4.2a, 5.1 — после 4.2b и 4.3. Формат шапки FREEZE — `design.md` §1. Hold-out (5 вопросов свежего агента) — шагом 0 Task 5.1, в Kill-2 не входит. Бюджет до С1: 2,6M → ≈ 3,1M токенов (4.2: 350k → 300k + 250k Opus; hold-out ≈ $3).
