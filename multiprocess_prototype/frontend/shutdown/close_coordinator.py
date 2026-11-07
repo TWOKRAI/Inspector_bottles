@@ -66,7 +66,7 @@ class _StopProgressDialog(QProgressDialog):
     здесь закрывает его только координатор (``finish``).
     """
 
-    def __init__(self, parent: QWidget | None) -> None:
+    def __init__(self, parent: QWidget | None, *, modal: bool = True) -> None:
         super().__init__(parent)
         self._allow_close = False
         self.setWindowTitle(_PROGRESS_TITLE)
@@ -76,7 +76,9 @@ class _StopProgressDialog(QProgressDialog):
         self.setAutoClose(False)
         self.setAutoReset(False)
         self.setRange(0, 0)  # N ещё неизвестно: «занят» до первого успешного ответа
-        self.setWindowModality(Qt.WindowModality.WindowModal)
+        # Без присмотра — немодальный: сторож модалок (unattended.install_modal_watchdog) берёт
+        # activeModalWidget() и писал бы WARNING «modal_closed» каждые 250 мс всего ожидания.
+        self.setWindowModality(Qt.WindowModality.WindowModal if modal else Qt.WindowModality.NonModal)
 
     def reject(self) -> None:  # noqa: D401 — Qt-хук: Esc и сторож модалок зовут reject
         """Esc не закрывает диалог остановки."""
@@ -368,7 +370,7 @@ class CloseCoordinator(QObject):
 
     def _show_progress(self) -> None:
         parent = self._window if isinstance(self._window, QWidget) else None
-        self._progress = _StopProgressDialog(parent)
+        self._progress = _StopProgressDialog(parent, modal=not self._unattended)
         self._progress.show()
 
     def _update_progress(self, stopped: int, total: int) -> None:

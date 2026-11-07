@@ -735,6 +735,8 @@ def test_progress_dialog_has_no_cancel_and_ignores_escape(qtbot: Any, make_env: 
     window = QWidget()
     qtbot.addWidget(window)
     env = make_env(window)
+    # PM молчит: ни один результат опроса не доходит и не «оживляет» диалог (setValue/show) после Esc
+    env.poll_gate.clear()
 
     env.coord.request_close()
     assert env.coord.state is CloseState.STOPPING
@@ -747,7 +749,8 @@ def test_progress_dialog_has_no_cancel_and_ignores_escape(qtbot: Any, make_env: 
     assert dialog.findChildren(QPushButton) == [], "кнопки отмены нет"
 
     QTest.keyClick(dialog, Qt.Key.Key_Escape)
-    qtbot.wait(100)
 
-    assert dialog.isVisible() is True, "Esc не закрывает диалог остановки"
+    assert dialog.isVisible() is True, "Esc не закрывает диалог остановки (сразу после нажатия)"
+    qtbot.wait(400)  # >= 300 мс при заблокированных ответах PM: диалог не вернулся на экран опросом, он и не уходил
+    assert dialog.isVisible() is True, "Esc не закрывает диалог остановки (через 400 мс без ответов PM)"
     assert env.coord.state is CloseState.STOPPING

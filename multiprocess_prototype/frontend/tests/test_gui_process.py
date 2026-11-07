@@ -705,6 +705,21 @@ class TestRequestSystemShutdown:
 
         assert not ev.is_set(), "после отправки shutdown координатором общий system_stop_event взводить нельзя"
 
+    def test_no_ipc_fallback_when_coordinator_sent_shutdown(self):
+        """shutdown_sent и общего event нет (старый launch): IPC-команда system.shutdown НЕ шлётся."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()  # get_system_stop_event → None: event недоступен
+        process = GuiProcess(name="gui", shared_resources=sr)
+        process.send_message = MagicMock()
+        process._log_info = MagicMock()
+        process._log_warning = MagicMock()
+        process.shutdown_sent = True
+
+        process._request_system_shutdown()
+
+        process.send_message.assert_not_called()
+
 
 class TestGuiProcessSubscriptions:
     """GuiProcess подписывается на нужные пути StateStore.

@@ -117,3 +117,57 @@ restart: state closing shutdown calls 0 _restart_ui True window visible False ap
 - **Зонд** `backend_ctl/probes/probe_gui_close_order_live.py` — не мой, не писал.
 - Полный набор тестов не гонял (радиус: 6 файлов из брифа, 122 теста). Другие вызовы `MainWindow.closeEvent` с координатором вне этих файлов не искал: координатор ставится только в `run_gui`.
 - Отрицательные утверждения слепого набора ждут 100–150 мс реального времени; под нагрузкой они слабеют (см. отчёт tester), прогон под нагрузкой не делал.
+
+## Раунд 2 (после коммита `e53efdb20`)
+
+Задача лида: находка 2. Без присмотра прогресс остановки немодальный, с оператором остаётся `WindowModal`.
+
+### Правка
+
+- `multiprocess_prototype/frontend/shutdown/close_coordinator.py`: `_StopProgressDialog(parent, *, modal=True)`. Модальность: `WindowModal if modal else NonModal`. `_show_progress` передаёт `modal=not self._unattended`.
+- Вопрос без присмотра не открывается: в `_check_silence` ветка `if self._unattended` вызывает `_do_force` и выходит ДО `ask_force_stop`. Это закреплено тестом (3): `ask_calls == 0`, `force_calls == 1`.
+- Новый файл `multiprocess_prototype/frontend/tests/test_close_coordinator_hazards.py` (авторский, файл tester не тронут):
+  1. `test_unattended_progress_is_not_active_modal` — `unattended=True`, `STOPPING`, диалог виден, `QApplication.activeModalWidget() is None`;
+  2. `test_attended_progress_is_window_modal` — без `unattended` диалог `WindowModal` и `activeModalWidget() is dialog` (страж против безусловной правки);
+  3. `test_real_unattended_watchdog_never_hits_progress` — настоящий `unattended.install_modal_watchdog` (`_UNATTENDED`, `_log`, `_answers` подменены через `monkeypatch`, `interval_ms=50`), ожидание 650 мс: записей `unattended.modal_closed` нет, `auto_answers() == ()`, диалог виден. Затем часы +2,0 с: `force_calls == 1`, `ask_calls == 0`, записей сторожа всё так же нет.
+
+### Прогоны
+
+```
+$ ruff check -q close_coordinator.py test_close_coordinator_hazards.py   -> код 0
+$ python -c 'import multiprocess_prototype; print(multiprocess_prototype.__file__)'
+/Users/twokrai/Project_code/Inspector_bottles/.claude/worktrees/op-1.1/multiprocess_prototype/__init__.py
+$ machine_gate.sh medium op-1.1 ... pytest -q --tb=short test_close_coordinator_hazards.py
+3 passed, 1 warning in 1.87s
+$ machine_gate.sh medium op-1.1 ... pytest -q --tb=short <радиус раунда 1: 6 файлов> + test_close_coordinator_hazards.py
+125 passed, 1 warning in 7.46s
+```
+
+125 = 122 из раунда 1 + 3 новых. Страж `test_root_close_order_golden` входит в радиус.
+
+### Инъекции: наблюдено против предсказанного
+
+Копия дерева в scratchpad, прогон `test_close_coordinator_hazards.py` + `test_close_coordinator.py` (33 теста). После прогона файл копии сверен с деревом (`cmp`: совпадает).
+
+| Инъекция | Предсказано (лид, до прогона) | Наблюдено | Совпало |
+|---|---|---|---|
+| диалог всегда `WindowModal` | красные (1) и (3), (2) зелёный | `2 failed, 31 passed`: (1), (3) | да |
+| диалог всегда `NonModal` | красный только (2) | `1 failed, 32 passed`: (2) | да |
+
+Причины красных при «всегда `WindowModal`» (`--tb=line`):
+- (1): `assert <..._StopProgressDialog(...)> is None` — `activeModalWidget()` возвращает диалог прогресса;
+- (3): `assert ['unattended....й путь.', ...] == []` — сторож пишет `modal_closed`.
+
+Так находка 2 из раунда 1 воспроизведена запуском (offscreen, Darwin): окно-модальный прогресс попадает под сторож. В раунде 1 это была гипотеза по чтению.
+
+Слепой набор tester модальность не закрепляет: при «всегда `NonModal`» его 30 тестов зелёные. Модальность держит только авторский тест (2).
+
+### Текст вопроса при рестарте UI (находка 3, принято как есть)
+
+При рестарте UI с несохранёнными правками графа (`dirty` или `layout_unsaved`) диалог «несохранённые правки» показывает вопрос «Сохранить их перед выходом?» (`app.py`, `_build_close_coordinator`: `confirm_discard_topology_changes(reason="Сохранить их перед выходом?")`). Без несохранённых правок вопрос не показывается.
+
+### Что осталось открытым (раунд 2)
+
+- Немодальный прогресс без присмотра не блокирует ввод в главное окно. На стенде без присмотра оператора нет, это допустимо. Поведение на реальном дисплее Windows не проверено.
+- Тест (3) подменяет приватные атрибуты модуля `unattended` (`_UNATTENDED`, `_log`, `_answers`): `_UNATTENDED` снимается при импорте, публичной ручки нет. При переименовании этих атрибутов тест (3) упадёт на `monkeypatch.setattr` (атрибута нет), а не пройдёт молча.
+- В `unattended=True` вопрос `ask_force_stop` закреплён только на фейке. Настоящий `ask_force_stop_dialog` (окно-модальный `QMessageBox`) без присмотра не вызывается, поэтому сторож его не видит.

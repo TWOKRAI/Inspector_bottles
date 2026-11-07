@@ -141,3 +141,22 @@ ruff: `ruff check -q` по обоим файлам чисто.
 - Эталон и инъекции — мои, не от реализатора; этап инъекций по таблице реализатора остаётся за ним.
 
 MEMORY LESSON: не требуется (повтор урока `feedback_blind_red_prove_bodies_with_scratch_reference`; новое только то, что `pytest -p <plugin>` с `PYTHONPATH` на scratchpad заменяет `sitecustomize` и работает с qt-тестами без изменений дерева).
+
+## Раунд 2 (уточнения по просьбе лида)
+
+Изменено только в `test_close_coordinator.py` и `test_gui_process.py`; реализацию в op-1.1 не читал, коммитов нет.
+
+1. `test_progress_dialog_has_no_cancel_and_ignores_escape` усилен по Esc: `poll_gate.clear()` ставится до `request_close()`, ответы PM не приходят и диалог не «оживает» через `setValue()`. После `QTest.keyClick(dialog, Escape)` `isVisible()` проверяется сразу, затем после `qtbot.wait(400)` (>= 300 мс) проверяется ещё раз. Состояние остаётся STOPPING.
+2. В `TestRequestSystemShutdown` добавлен `test_no_ipc_fallback_when_coordinator_sent_shutdown`: `shutdown_sent=True`, `get_system_stop_event` даёт None (старый launch), `send_message.assert_not_called()`.
+
+Предсказано и наблюдено (на эталоне, `-p refimpl_plugin`, с `REF_BREAK`):
+
+| Поломка | Предсказал | Наблюдал |
+|---|---|---|
+| без поломки | всё зелёное | 35 passed (30 + 5 в TestRequestSystemShutdown) |
+| `esc_closes` (Esc -> reject -> hide) | краснит progress_dialog | краснит только `test_progress_dialog_has_no_cancel_and_ignores_escape` |
+| `gui_sets_event` (`_request_system_shutdown` игнорирует `shutdown_sent`) | краснит оба GuiProcess-теста | краснит `test_no_event_when_coordinator_sent_shutdown` и `test_no_ipc_fallback_when_coordinator_sent_shutdown` |
+
+На заглушке: `test_no_ipc_fallback_...` красный (IPC уходит), progress красный (как раньше), итог 32 failed, 3 passed (3 — старые тесты `TestRequestSystemShutdown`).
+
+Чего доказательство не показывает: мой эталон не вызывает `setValue()` после опроса, поэтому старая версия теста H краснела на нём и без усиления. Слабость, найденная лидом (диалог возвращается на экран опросом), на эталоне не воспроизводится; усиленный тест устраняет её тем, что опрос заблокирован и проверка идёт сразу. Подтвердить на реализации с `setValue()` может только прогон на ней (инъекция «убрать reject/closeEvent»).
