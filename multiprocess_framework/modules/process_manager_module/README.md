@@ -537,7 +537,12 @@ config = {
 (нет ключа в `data`), `system_stopping` (операция снята из очереди при системном стопе), `executor_busy` (очередь
 исполнителя на потолке); отказы исполнителя ключа `outcome` не несут. `supervision.status` отдаёт на запись процесса
 `stop_outcome` — итог последнего стопа текущего воплощения (`None` у нового инстанса и у не стопавшегося). Значения
-`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
+`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Верхнее поле `supervision.status` `system_stop` (ADR-PMM-041) —
+ход системного стопа: `None`, пока стоп не начат; иначе `{"phase", "mode", "initiator", "started_at", "deadline_at",
+"pre_stop_step"}` (`phase` — `pre_stop | children | last_wave | done`; время — `time.time()`; `initiator` — отправитель
+`process.command`, `"event"` для стопа без команды, `"unknown"` без отправителя). Те же `phase`, `mode`, `initiator`,
+`started_at` идут в стор ключами `system.stop.*`. На стопе судить по `alive`, а не по `status` (монитор на паузе).
+Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
 
 Все команды помечены тегом `"system"`.
 
