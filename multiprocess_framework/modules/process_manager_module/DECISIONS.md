@@ -1799,7 +1799,8 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
   `warning`, `_try_auto_restart` не зовётся.
 - `GenericProcessManagerApp._own_work`: СНАЧАЛА `super()._own_work(work)` (дети PM), ЗАТЕМ `state_store`,
   `recipe_watcher`, `observability_watcher` — LIFO закрывает watcher'ы и SSM раньше конца детей и сводки,
-  как прежний `shutdown()`. Сигнал детям уходит раньше SSM: фаза 1 `work` взводит `request_stop` всех
+  как прежний `shutdown()`. **Порядок watcher'ов/SSM и детей заменён ADR-PMM-040** (дети — в `_own_work_late`,
+  закрываются раньше воркеров, watcher'ов и SSM). Сигнал детям уходит раньше SSM: фаза 1 `work` взводит `request_stop` всех
   записей сегмента до LIFO-фазы 2.
 - Известный предел: на пути `shutdown()` без `stop()` ошибка фазы 1 детей пишется в `errors` корня дважды (фаза 1 и повтор из `join_until`); на пути раннера (`stop()` + `close_root()`) — один раз. Снять дубль можно только правкой `base_manager` (`cancel()` зовёт фазу 1 без аккумулятора).
 
@@ -2098,3 +2099,69 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
 `docs/maps/pm-lifecycle-commands.md`, ADR-PMM-037, ADR-PMM-038, ADR-WRK-005, ADR-WRK-006, ADR-CMD-006, ADR-RTR-014,
 ADR-RTR-015, `tests/test_child_stop_idle_acceptance.py`, `tests/test_stop_wait_idle_hazards.py`,
 `tests/test_pm_stop_drains_own_queue_acceptance.py`.
+
+## ADR-PMM-040: Дети PM закрываются раньше `message_processor` — крюк корня `_own_work_late` (Task 1.1a gui-graceful-close, 2026-11-06)
+
+**Статус:** accepted (2026-11-06; стадия 0 — `docs/reports/2026-11-06_gui-graceful-close_1.1_stage0-review.md`;
+реализация — Task 1.1a плана `plans/2026-10-20_gui-graceful-close/plan.md`). **Заменяет пункт ADR-PMM-036 о порядке
+SSM/watcher'ов и детей.**
+
+### Контекст
+
+По ADR-PMM-036 область `children` регистрировалась в `_own_work` PM, то есть РАНЬШЕ `workers` (`_WorkersStop`,
+шаг 6a `ProcessModule.initialize`). LIFO фазы 2 закрывал воркеры — и с ними `message_processor` — ДО ожидания детей.
+Всё окно стопа детей PM был глух: `supervision.status`, второй `system.shutdown`, отказ `process.restart` не получали
+ответа (слепой набор `tests/test_pm_responsive_during_children_stop.py`, 5 красных до правки). Решение CTO D4: PM
+отвечает всё окно стопа детей.
+
+### Решение
+
+- **Крюк корня `ProcessModule._own_work_late(work)`** (база пустая). Вызов — в шаге 6a ПОСЛЕ
+  `work.own(_WorkersStop(self), …)` и ДО `work.own(…, name="plugins-stop")`. Записи крюка закрываются раньше воркеров
+  (LIFO); `plugins-stop` (C-60) остаётся последним в регистрации — первым в закрытии. У процесса без переопределения
+  порядок прежний (страж `process_module/tests/test_process_root_acceptance.py::test_root_close_order_golden`).
+- **PM: в `_own_work_late` переезжает только область `children`** (`work.child("children", budget_s=pm_graceful_s,
+  kill_reserve_s=KILL_RESERVE_S)` + `_ChildrenStop`). `summary` остаётся в `_own_work`: сводка публикуется после закрытия
+  SSM, как раньше.
+- **Порядок закрытия `work` PM:** `plugins-stop → children → workers (message_processor) → observability_watcher →
+  recipe_watcher → state_store → summary → plugins → hooks`. Фаза 1 корня не менялась: сигнал детям уходит до фазы 2.
+- **Команды в фазе детей** исполняет живой `message_processor`. Класс L отвергается: `KeyedExecutor` `pm-lifecycle`
+  закрыт уже фазой 1 (`request_stop` ставит `_closed`, ответ `system_stopping`, `worker_module/keyed_executor.py`
+  `request_stop`), `should_reject=_pm_stopping` дублирует отказ. Прямой `restart_process` отказывает слоем спавна
+  (`_spawn_refused_after_system_stop`). Повторный `system.shutdown` отвечает и не запрашивает стоп группы второй раз.
+- **Бюджет не менялся** (`_root_budget` = `pm_total_s + infra_s`, ADR-PMM-036 О6). Ребёнок, которому нужен
+  `terminate`, хвосту время оставляет (G = 1,0: корень закрыт за 1,14 с, выживших нет).
+
+### Известное ограничение
+
+После переноса `children` у хвоста `work` (`workers`, watcher'ы, SSM) нет своей доли бюджета: область `children` вправе
+занять весь `pm_total_s = G + TERMINATE_GRACE_S + KILL_CONFIRM_S` сегмента `work`. Проба (G = 1,0; ребёнок игнорирует
+сигнал и `terminate`, `kill()` в ≈ 2,02 с, ребёнок умирает через N с после `kill()`):
+
+| N | `survivors` корня |
+|---|---|
+| 0,5 | `()` |
+| 0,9 | `()` |
+| 0,98 | `('proc/ProcessManager/work/workers',)` |
+| 1,5 (не умер за окно) | `('…/work/children/processes', 'proc/ProcessManager/work/workers')` |
+
+Последствие: в этом окне отчёт корня PM не `ok` — `message_processor` в выживших (до правки воркеры закрывались первыми
+и выжившими не бывали). Случай N ≥ 1,5 — уже сбой ребёнка и до правки; новое — только `workers` в списке. Страж:
+`tests/test_process_root_pm_hazards.py::test_workers_not_survivor_when_child_outlives_kill_window`
+(`xfail(strict=True)`: станет красным, когда хвосту дадут долю). Решение — перераспределение долей бюджета `work`
+(контракт ADR-PMM-031/036 О6, литералы `modules/tests/test_manager_shutdown_1_2b_2_acceptance.py`, `PM_TEARDOWN_MARGIN_S`) —
+отдельная задача полосы Ф; см. `docs/claude/OPEN_QUESTIONS.md` 2026-11-06.
+
+### Отвергнуто
+
+- **Перенести `summary` вместе с `children`.** Сводка ушла бы раньше `workers` и SSM — момент публикации и её полнота
+  меняются (ревью стадии 0, п. 9).
+- **Вызов крюка после `plugins-stop`.** Плагины узнали бы о стопе позже начала ожидания детей (C-60).
+- **Доля хвоста в `_root_budget` в этой задаче.** Меняет контракт бюджета корня и числа спавнера (запас
+  `PM_TEARDOWN_MARGIN_S` при G ≥ 5 уже занят на 1,0 из 1,5) — не вертикальный срез; см. «Известное ограничение».
+- **Укоротить срок или резерв области `children`.** Меняет окна graceful/terminate/kill ADR-PMM-031.
+
+**Reversible:** yes (вернуть две строки `children` в `_own_work` PM; пустой крюк базы безвреден).
+**Refs:** `plans/2026-10-20_gui-graceful-close/plan.md`, `plans/2026-10-20_gui-graceful-close/tasks/1.1a.md`,
+ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children_stop.py`,
+`tests/test_process_root_pm_hazards.py`.

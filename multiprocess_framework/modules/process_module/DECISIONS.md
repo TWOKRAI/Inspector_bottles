@@ -4179,7 +4179,7 @@ Free-threaded Python — пересмотреть.
   (плагины, встроенные, наследники после `super().initialize()`); (2) фаза 1 `work` идёт по порядку регистрации —
   приём исполнителей закрывается раньше записей наследника и `workers`; (3) фаза 2 обратная: `workers` (ждёт и текущую
   операцию) → записи наследника → `executor_manager-scope` → `executors` → `plugins` → `hooks`; `transport` — после `work`.
-  *Порядок дополнен ADR-PM-057 (C-60): `plugins-stop` идёт перед `workers`.*
+  *Порядок дополнен ADR-PM-057 (C-60): `plugins-stop` идёт перед `workers`. Порядок уточнён ADR-PMM-040 / ADR-PM-059: записи крюка `_own_work_late` закрываются между `plugins-stop` и `workers` (у процесса без переопределения — прежний порядок).*
 - *Ключ конфига `executors`.* В `proc_dict["config"]` (тот же путь, что `plugins`):
   `{"<имя>": {"kind": "keyed", "serial": ..., "max_workers": ..., "max_pending": ...}}`.
   `ProcessLaunchConfig.executors: dict[str, dict[str, Any]] = {}`; в `build()` пустое значение **снимается** — форма
@@ -4249,6 +4249,7 @@ Free-threaded Python — пересмотреть.
   `plugins-stop` (`_attr_call("_orchestrator", "request_stop")`, `kind="callable"`) сразу после `workers` — последней,
   значит первой в фазе 2 (LIFO). Новый порядок фазы 2 `work`: `plugins-stop` → `workers` → записи наследника →
   `executor_manager-scope` → `executors` → `plugins` → `hooks` (дополняет ADR-PM-055, где `workers` был первым).
+  *Порядок уточнён ADR-PMM-040 / ADR-PM-059: между `plugins-stop` и `workers` закрываются записи `_own_work_late` (у PM — `children`); `plugins-stop` по-прежнему первым.*
   `PluginOrchestrator.request_stop()` обходит плагины в порядке, обратном загрузке (как `shutdown`); исключение
   плагина — одна строка ERROR, хук соседа идёт; наружу не выходит. Процесс без плагинов (`_orchestrator is None`) и
   двойник оркестратора без метода — запись пропускается (`_attr_call`), цена ноль.
@@ -4327,3 +4328,28 @@ Free-threaded Python — пересмотреть.
 
 **Refs:** `plans/lifecycle-stop-ownership/tasks/C-66.md`, `plans/lifecycle-stop-ownership/reports/C-66.stage0.md`, ADR-PM-011,
 `process_module/tests/test_health_claims_acceptance.py`, `process_module/tests/test_health_claims_hazards.py`.
+
+### ADR-PM-059 — Крюк `ProcessModule._own_work_late(work)`: поздние записи наследника закрываются раньше воркеров (2026-11-06, Task 1.1a gui-graceful-close)
+
+Записи `_own_work` регистрируются ДО `workers` и потому закрываются ПОСЛЕ них (LIFO фазы 2). Наследнику, которому нужно
+обратное — работа, под которую воркеры (у PM — `message_processor`) должны ещё жить, — места в корне не было. Решение и
+мотив для PM — ADR-PMM-040 (`process_manager_module/DECISIONS.md`); здесь контракт крюка для наследников.
+
+- *Контракт.* Защищённый `_own_work_late(work)`, база пустая. Зовётся в шаге 6a `initialize()` ПОСЛЕ
+  `work.own(_WorkersStop(self), name="workers")` и ДО записи `plugins-stop`. Закрытие `work`: `plugins-stop` → записи
+  `_own_work_late` (в обратном порядке регистрации) → `workers` → записи `_own_work` → `executor_manager-scope` →
+  `executors` → `plugins` → `hooks`. Фаза 1 (`request_stop` записей) идёт по порядку регистрации и не меняется.
+- *Для наследника.* Переопределять с `super()._own_work_late(work)` первой строкой. Кладите сюда только то, что обязано
+  закрыться при живых воркерах и `message_processor`; остальное — в `_own_work`. `plugins-stop` (ADR-PM-057) остаётся
+  первым в закрытии: поздние записи его не обгоняют. Запись ест срок сегмента `work`, как любая другая: у записей
+  `workers` и ниже собственной доли бюджета нет (ADR-PMM-040, «Известное ограничение»).
+- *Порядок прежних ADR.* ADR-PM-055 (п. «Место в `work`») и ADR-PM-057 описывают порядок фазы 2 процесса БЕЗ поздних
+  записей; он остаётся верным для процесса без переопределения — страж
+  `tests/test_process_root_acceptance.py::test_root_close_order_golden`. Единственный наследник с переопределением —
+  `ProcessManagerProcess`.
+- *Отвергнуто.* Вызов крюка после `plugins-stop`: плагины узнавали бы о стопе позже (ADR-PM-057, C-60). Переупорядочить
+  `_own_work` целиком: меняет порядок всех процессов и `GOLDEN_ORDER`.
+
+**Reversible:** yes (убрать крюк и его вызов; пустая база безвредна).
+**Refs:** ADR-PMM-040, ADR-PM-054, ADR-PM-055, ADR-PM-057, `plans/2026-10-20_gui-graceful-close/plan.md`,
+`process_module/core/process_module.py` (`_own_work_late`).
