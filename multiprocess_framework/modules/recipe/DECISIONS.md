@@ -560,7 +560,9 @@ ADR-SS-003 (инъекция миграций callbacks), ADR-SS-011 (инъек
 ### Изменения поведения `recipe.save` хаба (Task 1.4)
 
 - Комментарии, порядок и стиль YAML сохраняются: пишется дельта `normalize(текущий файл) → normalize(body)`.
-  Post: `normalize(файла после записи) == normalize(body)`; умолчания, которых нет в файле, не создаются.
+  Post: `normalize(файла после записи) == normalize(body)`, кроме ключей, которые `normalize` переносит (legacy top-level
+  `gui_positions`: остаются в файле и возвращаются при чтении — `camera_robot_calibration`, `dataset_circle_capture`);
+  умолчания, которых нет в файле, не создаются.
 - Текущий файл не разбирается, пуст или корень не mapping → `invalid`, файл цел (раньше перезаписывался).
 - Рецепт v1 (top-level `topology:`) → `bad_request` «рецепт v1: сначала миграция», файл цел. Критерий — литерал
   `"topology"` в универсальном `service.py`, он дублирует `InspectorRecipeFormatHook.normalize` (OPEN_QUESTIONS).

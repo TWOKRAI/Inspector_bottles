@@ -2176,3 +2176,15 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 - **Причина:** область `children` (`process_manager_process.py`, `_own_work_late`: `work.child("children", budget_s=pm_graceful_s, kill_reserve_s=KILL_RESERVE_S)`) вправе занять весь сегмент `work` = `pm_total_s = G + TERMINATE_GRACE_S + KILL_CONFIRM_S` (`_root_budget`, ADR-PMM-036 О6). После переноса детей раньше `workers` хвосту (`_WorkersStop.join_until`, `process_module/lifecycle/process_lifecycle.py`) остаётся ≈ 0 с; `stop_all_workers(timeout=0)` не успевает остановить `message_processor`.
 - **Страж:** `process_manager_module/tests/test_process_root_pm_hazards.py::test_workers_not_survivor_when_child_outlives_kill_window` (`xfail(strict=True)`).
 - **Направление:** доля хвоста в бюджете `work` PM (`_root_budget` + константа в `core/stop_budget.py`) при согласовании с `PM_TEARDOWN_MARGIN_S` = 1,5 (при G ≥ 5 корень уже берёт +1,0 из него) и литералами `modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:405,482` (3.2 / 8.0), `test_process_root_pm_hazards.py::test_pm_root_budget_is_pm_total_plus_infra`. Либо срок `children` = `work_deadline - tail`, без смены окон ADR-PMM-031. Владелец — полоса Ф.
+
+### 2026-11-07 · полоса Д, C-30 1.16 · ложные отказы охраны пустого графа и неточный текст · статус: открыт
+**Что не знаю:** считать ли дефектом два остатка охраны `save_editor_topology_to_recipe` (`expected_rev=None`). A1: файл только с процессами фундамента, граф `[]` или `[devices]` — отказ, хотя запись не меняла бы байты. A2: Recipes-Save в ДРУГОЙ рецепт с графом из одного фундамента даёт `False`, а текст «ревизия файла, с которой он строился, неизвестна» там вводит в заблуждение.
+**Что я проверил и чем:** ревью стадии 5 для 1.16 (пробы на копиях), Opus-ревью ветки 2026-11-07; рецептов репозитория с такими входами нет.
+**Чем это грозит, если не разобраться:** пользователь видит отказ без совета в редком сценарии; данные не теряются (файл цел).
+**Что нужно, чтобы закрыть:** решение владельца — оставить как есть или различать причины (свой текст для Recipes-Save в чужой рецепт).
+
+### 2026-11-07 · полоса Д, C-30 1.4 · legacy gui_positions возвращается при очистке позиций через recipe.save · статус: открыт
+**Что не знаю:** допустимо ли, что `recipe.save` хаба при очистке ВСЕХ канонических позиций оставляет legacy top-level `gui_positions` в файле (и они возвращаются при следующем чтении). Затронуты 2 рецепта: `camera_robot_calibration`, `dataset_circle_capture`.
+**Что я проверил и чем:** Opus-ревью ветки (проба с настоящим `InspectorRecipeFormatHook`: `normalize(файл после записи) != normalize(body)`); Post в docstring и ADR сужен.
+**Чем это грозит, если не разобраться:** очищенные позиции «оживают»; достижимо только через `recipe.save` хаба, GUI-пути идут иначе.
+**Что нужно, чтобы закрыть:** чистка двух рецептов силами полосы C либо перенос legacy-ключа хуком при записи.
