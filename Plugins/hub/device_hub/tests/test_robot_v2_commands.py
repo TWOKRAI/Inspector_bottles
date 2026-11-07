@@ -253,8 +253,14 @@ def test_descriptions_go_with_registration_refusal_only_logged(tmp_path: Path, m
             name: spec.description for name, (_src, spec) in command_table(DEFAULT_SOURCES).items() if spec.description
         }
         assert len(described) == 56
-        got = {name: kw["metadata"]["description"] for name, kw in registry.registered.items() if "metadata" in kw}
+        got = {
+            name: kw["metadata"]["description"]
+            for name, kw in registry.registered.items()
+            if "metadata" in kw and name != "robot_park_all"  # ручная команда T5.3e.5 — не из каталога операций
+        }
         assert got == {name: text for name, text in described.items() if name != "robot_stop"}
+        assert registry.registered["robot_park_all"]["executor"] == "device_io"
+        assert registry.registered["robot_park_all"]["targets"] == "all"
         assert "robot_stop" not in registry.registered and registry.refused == 2  # с опциями и запасной путь
         assert registry.registered["robot_point_list"]["executor"] == "device_io"
         assert registry.registered["robot_point_list"]["key_from"] == "device_id"

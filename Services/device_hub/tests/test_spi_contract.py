@@ -308,7 +308,7 @@ def test_plugin_commands_are_op_specs_of_kind_table() -> None:
     }
     expected |= {f"robot_{spec.name}" for spec in spi.ROBOT_DATA_OPS}
     assert set(DeviceHubPlugin._op_commands) == expected
-    assert len(expected) == 56 and len(DeviceHubPlugin.commands) == 73
+    assert len(expected) == 56 and len(DeviceHubPlugin.commands) == 74
 
 
 def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
@@ -324,8 +324,8 @@ def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
         device_kinds = table
 
     assert LampHub.commands["lamp_on"] == "cmd_lamp_on"
-    assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 73
-    assert len(LampHub.commands) == 74
+    assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 74
+    assert len(LampHub.commands) == 75
 
     manager = DeviceManager(store=None, kinds=table)
     manager.upsert({"id": "lamp_1", "name": "Лампа", "kind": "lamp"})
@@ -408,7 +408,7 @@ def test_subclass_kinds_cannot_drop_or_change_parent_command() -> None:
         class ChangedVfd(DeviceHubPlugin):
             device_kinds = changed
 
-    assert len(DeviceHubPlugin.commands) == 73
+    assert len(DeviceHubPlugin.commands) == 74
 
 
 def test_command_sources_refuses_ops_without_prefix_and_repeated_kind() -> None:

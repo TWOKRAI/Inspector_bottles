@@ -7,7 +7,8 @@ Purpose:
     циклов ожидания и ``sleep``: шаг идёт до первого ожидания и выходит. Своих потоков нет.
 
 Public API:
-    ``ParkMachine`` (конструктор с колбэками; ``accept``, ``guard``, ``step``, ``abort``, ``fail``).
+    ``ParkMachine`` (конструктор с колбэками; ``accept``, ``guard``, ``step``, ``abort``, ``fail``;
+    ``wait_terminal`` — ожидание итога ``seq`` из чужого потока, T5.3e.5a).
 
 Pre/post:
     ``accept`` — после ``RobotState.park_begin`` и пометок release / SOFT; ``abort`` из ``request_stop`` —
@@ -44,6 +45,16 @@ __all__ = ["ParkMachine"]
 
 # Выключение процесса: автомат замирает — итог ставит только abort(stop=True) из request_stop после записи стопа
 _FREEZE = object()
+# Сколько последних терминалов хранит автомат для wait_terminal (ждущий живёт ≤ 33,5 с; на деле 1–2 park за это время)
+_TERMINALS_KEPT = 8
+
+
+def _copy_terminal(value: dict) -> dict:
+    """Копия терминала: вложенный ``dropped`` тоже копируется (ждущий не портит память итогов)."""
+    out = dict(value)
+    if isinstance(out.get("dropped"), dict):
+        out["dropped"] = dict(out["dropped"])
+    return out
 
 
 class ParkMachine:
@@ -73,6 +84,9 @@ class ParkMachine:
         self._log_id = log_id
         # Не _lock: имя совпало бы со швом журнала обмена в сторожах тестов (Opus M7)
         self._mlock = threading.Lock()
+        # Итоги для ждущих из чужого потока (T5.3e.5a): условие на том же замке, 8 последних терминалов по seq
+        self._done = threading.Condition(self._mlock)
+        self._terminals: dict[int, dict] = {}
         self._active = False
         self._seq = 0
         self._t0: float | None = None
@@ -123,6 +137,32 @@ class ParkMachine:
         if v.parking:
             with self._mlock:
                 self._finish_locked(v.seq, False, reason)
+
+    def wait_terminal(self, seq: int, timeout_s: float) -> dict | None:
+        """Ждать терминал park ``seq`` не дольше ``timeout_s`` секунд реального времени (T5.3e.5a).
+
+        Pre:
+            ``seq`` — номер park этого автомата (из ответа ``robot_park`` или ``park_view().seq``). ``timeout_s``
+            — любое число; отрицательное трактуется как 0 (одна проверка без ожидания). Зовут из чужого потока
+            (исполнитель команды хаба), не из тика и не под ``_mlock``.
+        Post:
+            ``None`` — терминала ``seq`` нет к сроку (в том числе ``seq`` неизвестен или вытеснен из памяти
+            итогов: хранятся 8 последних терминалов). Иначе — копия значения терминала, ровно та, что
+            публикуется в ``devices.state.<id>.park``::
+
+                {"seq": int, "state": "done" | "failed", "step": str,
+                 "home": "moved" | "already" | None, "servo": False | None,
+                 "dropped": {"jobs": int, "returns": int},
+                 "reason": str | None, "elapsed_s": float | None}
+
+            Терминал, записанный до вызова, возвращается сразу. Сбой публикации терминала итог не отнимает.
+            Время ожидания — ``time``/``Condition`` (реальное), не часы автомата: ``FakeClock`` его не двигает.
+            Не бросает; состояние автомата не меняет.
+        """
+        with self._done:
+            self._done.wait_for(lambda: seq in self._terminals, timeout=max(0.0, timeout_s))
+            found = self._terminals.get(seq)
+            return _copy_terminal(found) if found is not None else None
 
     # ------------------------------------------------------------------ #
     # Тик
@@ -323,6 +363,11 @@ class ParkMachine:
             "reason": reason,
             "elapsed_s": elapsed,
         }
+        # До публикации: сбой publish не отнимает итог у ждущих (T5.3e.5a)
+        self._terminals[seq] = _copy_terminal(value)
+        while len(self._terminals) > _TERMINALS_KEPT:
+            del self._terminals[min(self._terminals)]
+        self._done.notify_all()
         self._publish(value)
         if ok:
             logger.info(f"робот {self._log_id!r}: основная остановка {seq} выполнена: дом {value['home']}, серво OFF")

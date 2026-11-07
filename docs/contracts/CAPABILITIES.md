@@ -108,7 +108,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `state.unsubscribe` | Отписаться от подписки | state_store |
 | `state.unsubscribe_all` | Отписать все подписки процесса | state_store |
 | `stats_snapshot` |  | diagnostics, stats |
-| `supervision.status` | Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора | system |
+| `supervision.status` | Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts/stop_outcome. Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора; stop_outcome — как умер ребёнок при последнем стопе текущего воплощения (exited|terminated|killed|handed_over|survived), None — не стопался | system |
 | `system.shutdown` | Завершить систему | system |
 | `system.stats` | Статистика системы | system |
 | `telemetry.broadcast` | Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle → центральный троттл оркестратора; cap-детекция на обоих путях | system |
@@ -287,6 +287,7 @@ request-response (dict). События (push без request_id) читаютс�
 | `robot_param_get_all` | Робот v2: все параметры из файла {device_id} -> params{raw, value}, epoch, rev |  |
 | `robot_param_set` | Робот v2: записать параметр {device_id, name, value, base_rev} |  |
 | `robot_park` | Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id, timeout_s?}; ответ сразу, итог — devices.state.<id>.park |  |
+| `robot_park_all` | Роботы v2: основная остановка всех (домой, серво OFF) {timeout_s?}; ответ — итог каждого |  |
 | `robot_point_capture` | Робот v2: запомнить текущую позу как точку {device_id, name, base_rev} |  |
 | `robot_point_delete` | Робот v2: удалить точку {device_id, name, base_rev} |  |
 | `robot_point_list` | Робот v2: список точек {device_id} -> points, rev |  |
