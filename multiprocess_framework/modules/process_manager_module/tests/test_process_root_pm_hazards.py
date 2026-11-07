@@ -566,6 +566,7 @@ def pm_rig():
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason=(
         "ADR-PMM-040, «Известное ограничение»: после переноса children в _own_work_late хвост work "
         "(workers/watcher'ы/SSM) не имеет своей доли бюджета; ребёнок, не умерший и на kill, съедает "
