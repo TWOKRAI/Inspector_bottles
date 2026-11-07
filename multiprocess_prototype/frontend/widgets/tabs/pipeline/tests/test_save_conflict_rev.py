@@ -192,12 +192,13 @@ def _session_with_base(store: Any, slug: str) -> Any:
     return session
 
 
-def _pipeline_presenter(store: Any, session: Any) -> Any:
-    """PipelinePresenter на настоящем сторе и сессии; модель и раскладка загружены из файла A."""
+def _pipeline_presenter(store: Any, session: Any, blueprint: dict | None = None) -> Any:
+    """PipelinePresenter на настоящем сторе и сессии; модель и раскладка из ``blueprint`` (по умолчанию файл A)."""
     from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
     from multiprocess_prototype.frontend.widgets.tabs.pipeline.tests._helpers import make_pipeline_services
 
-    blueprint = yaml.safe_load(_fixture_a_lf().decode("utf-8"))["blueprint"]
+    if blueprint is None:
+        blueprint = yaml.safe_load(_fixture_a_lf().decode("utf-8"))["blueprint"]
     services = make_pipeline_services(topology=blueprint)
     object.__setattr__(services, "recipes", store)
     presenter = PipelinePresenter(services, topology_session=session)
@@ -655,3 +656,54 @@ def test_callers_pass_session_foundation(
     _within(60, presenter.on_save, _SLUG)
 
     assert calls == [frozenset({"devices", "probe_infra"})] * 3
+
+
+# ---------------------------------------------------------------------------
+# Task 1.16 m3: Save без правок через каждого вызывающего — ``+0/-0`` (эффект, не только kwarg)
+# ---------------------------------------------------------------------------
+
+_BRIDGE_SLUG = "bridge_synth"
+
+
+def _bridge_synth_setup(tmp_path: Path) -> tuple[Path, bytes, Any, Any, dict]:
+    """Рецепт bridge_synth (байты HEAD) в tmp, настоящий стор, сессия с базой и фундаментом, живой граф.
+
+    Живой граф = ``base.yaml`` ⊕ рецепт (как его отдаёт редактор): с одним графом рецепта дифф вакуумен.
+    """
+    from multiprocess_prototype.recipes.tests.test_save_protected_owner_extra import _live_topology, _recipe_bytes
+
+    src = _recipe_bytes(_BRIDGE_SLUG)
+    path = _put(tmp_path, _BRIDGE_SLUG, src)
+    store = _build_store(tmp_path, _BRIDGE_SLUG)
+    session = _session_with_base(store, _BRIDGE_SLUG)
+    session.capture_foundation(["devices"])
+    live = _live_topology(_BRIDGE_SLUG)
+    assert [p["process_name"] for p in live["processes"]] == ["devices", "synthetic_source", "gui"]
+    return path, src, store, session, live
+
+
+def test_closeevent_save_without_edits_is_zero_diff(tmp_path: Path) -> None:
+    """closeEvent-Save живого графа без правок: файл побайтно прежний (foundation передан -> devices не пишется)."""
+    from multiprocess_prototype.frontend.app import _save_active_topology
+
+    path, src, store, session, live = _bridge_synth_setup(tmp_path)
+
+    _within(60, _save_active_topology, session, store, _Repo(live))
+
+    assert path.read_bytes() == src
+
+
+@pytest.mark.parametrize("caller", ["pipeline", "recipes"])
+def test_pipeline_and_recipes_save_without_edits_are_zero_diff(
+    tmp_path: Path, boxes: list[tuple[str, str]], caller: str
+) -> None:
+    """Pipeline-Save и Recipes-Save живого графа без правок: файл побайтно прежний."""
+    path, src, store, session, live = _bridge_synth_setup(tmp_path)
+
+    if caller == "pipeline":
+        _pipeline_presenter(store, session, blueprint=live).save_to_active_recipe(parent=None)
+    else:
+        presenter, _view = _recipes_presenter(store, _Repo(live), session)
+        _within(60, presenter.on_save, _BRIDGE_SLUG)
+
+    assert path.read_bytes() == src
