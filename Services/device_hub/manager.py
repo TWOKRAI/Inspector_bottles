@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
-from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
+from multiprocess_framework.modules.base_manager.interfaces import IHandle, ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
 
 from Services.device_hub.errors import (
@@ -94,6 +94,12 @@ class DeviceManager(BaseManager, ObservableMixin):
             key: dict(opts) for key, opts in (driver_options or {}).items()
         }
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
+        # Стоп из хука процесса (C-60.b): потоки, запущенные request_stop_all_begin и ещё не дождавшиеся (None — begin
+        # не было); сами объекты драйверов, которым стоп уже ушёл (членство по ``is``: remove + upsert того же id в окне
+        # создают новый объект); замок begin — повтор хука с разных потоков (всё тело begin под ним)
+        self._stop_handles: list[IHandle] | None = None
+        self._stop_served: list[DeviceDriver] = []
+        self._stop_begin_lock = threading.Lock()
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
@@ -138,6 +144,10 @@ class DeviceManager(BaseManager, ObservableMixin):
         вызывающем потоке (fail-closed), следующие роботы не пропускаются; лишней записи нет — её отсекает защёлка
         драйвера. Исключение одного драйвера логируется.
         Без ``spawn`` (менеджер без области: роботов ``delta_v2`` нет) — вызовы по очереди в этом потоке.
+
+        После ``request_stop_all_begin`` (стоп из хука процесса): потоки хука только дожидаются, повторного стопа нет;
+        драйверам, появившимся после ``begin``, стоп запускается СНАЧАЛА (зависший сосед не задерживает запись
+        позднему роботу), затем ждутся все потоки; поздним уходит срок этого вызова.
         """
         with self._registry_lock:
             if deadline is None:  # повторный вызов без срока (фаза 4 через _on_shutdown) — срок первого вызова
@@ -146,7 +156,43 @@ class DeviceManager(BaseManager, ObservableMixin):
                 )
             if self._stop_deadline is None:
                 self._stop_deadline = deadline
+            handles = self._stop_handles
+            self._stop_handles = [] if handles is not None else None  # забраны: повторный вызов их не ждёт
             drivers = list(self._drivers.items())
+        if handles is None:  # begin не было: прежний путь
+            self._stop_wait(self._stop_start(drivers, deadline), deadline)
+            return
+        with self._registry_lock:
+            late = [(dev_id, drv) for dev_id, drv in drivers if not any(drv is served for served in self._stop_served)]
+            self._stop_served.extend(drv for _dev_id, drv in late)
+        late_handles = self._stop_start(late, deadline)  # сначала запустить поздним, потом ждать всех
+        self._stop_wait([*handles, *late_handles], deadline)
+
+    def request_stop_all_begin(self, deadline: float) -> None:
+        """Фаза 1 остановки из хука процесса (C-60.b): запустить стоп-запрос всем драйверам, НЕ дожидаясь потоков.
+
+        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; он же уходит каждому драйверу и защёлкивается как
+        срок остановки (``request_stop_all`` после ``begin`` берёт его же).
+        Post: возврат без ожидания потоков стопа; не бросает (исключение драйвера — в лог); повторный вызов, в том
+        числе с другого потока, — без действия (тело под замком, стоп каждому роботу уходит один раз); потоки
+        дожидается ``request_stop_all``. При отказе ``spawn`` стоп этому роботу идёт в вызывающем потоке
+        (fail-closed) — тогда возврат не раньше конца этого вызова драйвера (до срока).
+        """
+        with self._stop_begin_lock:
+            if self._stop_handles is not None:
+                return
+            with self._registry_lock:
+                if self._stop_deadline is None:
+                    self._stop_deadline = deadline
+                drivers = list(self._drivers.items())
+            handles = self._stop_start(drivers, deadline)
+            # В конце: упавший begin оставляет поле None — request_stop_all идёт прежним путём
+            with self._registry_lock:
+                self._stop_served = [drv for _dev_id, drv in drivers]
+                self._stop_handles = handles
+
+    def _stop_start(self, drivers: list[tuple[str, DeviceDriver]], deadline: float) -> list[IHandle]:
+        """Запустить стоп-запрос драйверам ``drivers`` с ``stop_aware``; вернуть потоки (без ``spawn`` — ``[]``)."""
         targets: list[tuple[str, Callable[..., object]]] = []
         for dev_id, drv in drivers:
             # Отбор — внутри try на драйвер: флаг stop_aware без метода request_stop (AttributeError) или сбойное
@@ -159,8 +205,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         if self._spawn is None:
             for dev_id, request in targets:
                 self._stop_one(dev_id, request, deadline)
-            return
-        handles = []
+            return []
+        handles: list[IHandle] = []
         inline: list[tuple[str, Callable[..., object]]] = []  # spawn отказал: стоп этим роботам — в этом потоке
         for dev_id, request in targets:
             name = f"stop-{dev_id}-{_next_stop_k()}"
@@ -173,6 +219,11 @@ class DeviceManager(BaseManager, ObservableMixin):
                     (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
         for dev_id, request in inline:  # fail-closed: отказ spawn не лишает робота стопа (защёлка — в драйвере)
             self._stop_one(dev_id, request, deadline)
+        return handles
+
+    @staticmethod
+    def _stop_wait(handles: list[IHandle], deadline: float) -> None:
+        """Дождаться потоков стопа до общего срока ``deadline``; не вышедший поток — в лог."""
         for handle in handles:
             try:
                 report = handle.close(max(0.0, deadline - time.monotonic()))

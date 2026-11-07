@@ -273,12 +273,31 @@ class DeviceHubPlugin(ProcessModulePlugin):
             options["key_from"] = source.key_from
         return options
 
+    def request_stop(self, ctx: PluginContext) -> None:
+        """Фаза 1 стопа процесса (C-60.b): защёлка супервизора и запуск стопа роботам потоками области, без ожидания.
+
+        Срок стопа — от момента хука: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S``. Потоки стопа ждёт
+        ``shutdown`` (его ``request_stop_all`` после хука только дожидается). Замок воркеров хук не берёт: супервизор
+        держит его вокруг ``remove_worker`` до 5 с. Ничего не подаёт исполнителю процесса. После ``shutdown`` и на
+        плагине без ``configure`` — без действия; исключение не ловится (логирует оркестратор).
+        """
+        scope = self._scope
+        if scope is None:  # после shutdown или упавшего configure
+            return
+        ctx.log_info("DeviceHubPlugin: request_stop")
+        deadline = time.monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S
+        # Без _workers_lock: присваивание атрибута атомарно; супервизор читает флаг без замка и под замком; воркер,
+        # созданный в окне, удалит shutdown (под замком)
+        self._shutting_down = True
+        self._manager.request_stop_all_begin(deadline)
+
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
 
         Срок — абсолютный: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S`` в начале. Фаза 1: стоп всем роботам
-        параллельно (``request_stop_all(deadline)``) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда,
-        ``finally``) -> фаза 4 без записи стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
+        параллельно (``request_stop_all(deadline)``; после хука ``request_stop`` потоки стопа уже запущены — тут только
+        ожидание) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда, ``finally``) -> фаза 4 без записи
+        стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
         ``remove_worker`` фреймворка (до 5,0 с на поток) в срок НЕ входит: его время съедает остаток бюджета закрытия.
         Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
         """
