@@ -692,7 +692,7 @@ ProcessModule использует composition вместо наследован
 
 ```
 ProcessModule
-├── PluginOrchestrator(IProcessServices)  — plugin lifecycle (load → configure → start → shutdown)
+├── PluginOrchestrator(IProcessServices)  — plugin lifecycle (load → configure → start → request_stop → shutdown)
 ├── ProcessHeartbeat(IProcessServices)    — отправка heartbeat в роутер
 └── BuiltinCommands(IProcessServices)     — wire/worker команды
 ```
