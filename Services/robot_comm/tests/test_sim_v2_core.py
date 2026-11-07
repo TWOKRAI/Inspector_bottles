@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS
+from Services.robot_comm.core import protocol_v2
 from Services.robot_comm.core.protocol_v2 import ERR, KIND, OP, REG, REG_COUNT
 
 # сгенерирован разработчиком по контракту T2.1; до этого момента файл целиком RED
@@ -313,6 +314,15 @@ def test_do_set_channel_out_of_range_is_nak(channel):
     assert res["status"] == NAK
     assert res["errno"] == ERR["E_RANGE"]
     assert core.read(REG["TLM_DO_MASK"], 1)[0] == before
+
+
+def test_do_set_channel_reads_act_range(monkeypatch):
+    """Верхняя граница канала DO — `ACT_RANGE["DO_ON"]` в момент вызова (T1.4)."""
+    monkeypatch.setitem(protocol_v2.ACT_RANGE, "DO_ON", (1, 8))
+    core = fresh_core()
+    res = cmd(core, 1, OP["DO_SET"], 9, 1)
+    assert (res["status"], res["errno"]) == (NAK, ERR["E_RANGE"])
+    assert cmd(core, 2, OP["DO_SET"], 8, 1)["status"] == ACK
 
 
 def test_do_set_value_out_of_range_is_nak():

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from Services.robot_comm.core import protocol_v2
 from Services.robot_comm.core.protocol_v2 import ACT, CONSTANTS, ERR, KIND, OP, REASON, REG, REG_COUNT
 from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
 
@@ -270,3 +271,33 @@ def test_speed_pct_register_restored_after_normal_done():
     tick_until(core, lambda: reg(core, "TLM_ACTIVITY") == 0)
     assert reg(core, "TLM_DONE_SEQ") == 2, "сценарий кончился штатно (DONE), а не обрывом"
     assert reg(core, "TLM_SPD_PCT") == SPD_DEFAULT_PCT
+
+
+# --------------------------------------------------------------------------- #
+# T1.4: диапазоны APARAM читаются из protocol_v2.ACT_RANGE в момент проверки
+# --------------------------------------------------------------------------- #
+
+
+def test_sc_validate_reads_act_range(monkeypatch):
+    monkeypatch.setitem(protocol_v2.ACT_RANGE, "SPEED_PCT", (1, 50))
+    core = ready_core()
+    write_scenario(core, 0, [pt(420.0, action=ACT["SPEED_PCT"], aparam=51)])
+    res = cmd(core, 2, OP["SC_RUN"], 1, 10, 0, 0, 0, 0)
+    assert (res["status"], res["errno"], res["rvals"]) == (NAK, ERR["E_SC_RECORD"], [0, REASON["R_APARAM"]])
+
+    write_scenario(core, 0, [pt(420.0, action=ACT["SPEED_PCT"], aparam=50)])
+    assert cmd(core, 3, OP["SC_RUN"], 1, 11, 0, 0, 0, 0)["status"] == ACK
+
+
+def test_sc_run_start_state_reads_act_range(monkeypatch):
+    monkeypatch.setitem(protocol_v2.ACT_RANGE, "SPEED_PCT", (1, 50))
+    core = ready_core()
+    write_scenario(core, 0, [pt(420.0)])
+    res = cmd(core, 2, OP["SC_RUN"], 1, 10, 0, 51, 0, 0)
+    assert (res["status"], res["errno"], res["rvals"]) == (NAK, ERR["E_RANGE"], [REASON["R_APARAM"]])
+
+    # accur на проводе = значение ACCUR + 1: при (0, 0) допустимо только 0 и 1
+    monkeypatch.setitem(protocol_v2.ACT_RANGE, "ACCUR", (0, 0))
+    res = cmd(core, 3, OP["SC_RUN"], 1, 11, 0, 0, 0, 2)
+    assert (res["status"], res["errno"], res["rvals"]) == (NAK, ERR["E_RANGE"], [REASON["R_APARAM"]])
+    assert cmd(core, 4, OP["SC_RUN"], 1, 12, 0, 0, 0, 1)["status"] == ACK
