@@ -123,6 +123,9 @@ class MainWindow(QMainWindow):
     StatusBar: fps + latency.
     """
 
+    # Task 1.1: CloseCoordinator (set_close_coordinator); None — прежнее закрытие (тесты, teardown).
+    _close_coordinator = None
+
     def __init__(self, config: dict | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -284,8 +287,6 @@ class MainWindow(QMainWindow):
         """Сохранить позицию и размер в QSettings."""
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
-    _close_coordinator = None  # Task 1.1: CloseCoordinator; None — прежнее закрытие (тесты, teardown)
-
     def set_close_coordinator(self, coordinator) -> None:
         """Подключить координатор закрытия (Task 1.1): крестик ждёт остановки системы."""
         self._close_coordinator = coordinator
@@ -310,8 +311,15 @@ class MainWindow(QMainWindow):
                 self._save_geometry()
                 super().closeEvent(event)
                 return
-            event.ignore()
             coordinator.request_close()
+            # Крестик мог сразу привести в CLOSING (сбой send_shutdown, бэкенд ушёл во время
+            # вопроса): quit_app зовёт window.close() ВНУТРИ этого closeEvent, а Qt вложенный
+            # close() молча отбрасывает — окно осталось бы видимым. Закрываемся этим событием.
+            if coordinator.state is CloseState.CLOSING:
+                self._save_geometry()
+                event.accept()
+            else:
+                event.ignore()
             return
         if not self.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"):
             event.ignore()

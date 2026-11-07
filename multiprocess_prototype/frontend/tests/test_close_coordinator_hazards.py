@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
@@ -53,16 +54,19 @@ class _Fx:
 def make_coord(qtbot: Any):
     made: list[CloseCoordinator] = []
 
-    def _make(*, unattended_mode: bool) -> tuple[CloseCoordinator, _Fx, QWidget]:
+    def _make(
+        *, unattended_mode: bool, response: dict[str, Any] | None = None
+    ) -> tuple[CloseCoordinator, _Fx, QWidget]:
         window = QWidget()
         qtbot.addWidget(window)
         window.show()
         fx = _Fx()
+        reply = copy.deepcopy(response if response is not None else _TIMEOUT)
         coord = CloseCoordinator(
             window,
             confirm_discard=lambda: True,
             send_shutdown=lambda: {"success": True},
-            poll_status=lambda _timeout: dict(_TIMEOUT),
+            poll_status=lambda _timeout: copy.deepcopy(reply),
             ignore_names=frozenset({"gui", "ProcessManager"}),
             ask_force_stop=fx.ask,
             force_stop=fx.force,
@@ -144,3 +148,41 @@ def test_real_unattended_watchdog_never_hits_progress(
     finally:
         timer.stop()
         timer.deleteLater()
+
+
+def test_progress_hidden_after_commit_close_from_stopping(qtbot: Any, make_coord: Any) -> None:
+    """(4) commit_close из STOPPING прячет прогресс: после закрытия на экране не остаётся диалога."""
+    coord, fx, window = make_coord(unattended_mode=False)
+    coord.request_close()
+    dialog = _progress(qtbot, window)
+    assert coord.state is CloseState.STOPPING
+
+    coord.commit_close()
+
+    assert coord.state is CloseState.CLOSING
+    assert fx.quit_calls == 1
+    assert dialog.isVisible() is False
+    qtbot.wait(50)
+    assert [d for d in window.findChildren(QProgressDialog) if d.isVisible()] == []
+
+
+def test_progress_shows_k_of_n_children(qtbot: Any, make_coord: Any) -> None:
+    """(5) «k из N»: 3 ребёнка вне ignore_names, 1 остановлен → «1 из 3» (gui и PM не считаются)."""
+    response = {
+        "success": True,
+        "processes": {
+            "gui": {"alive": True},
+            "ProcessManager": {"alive": True},
+            "worker_a": {"alive": False},
+            "worker_b": {"alive": True},
+            "worker_c": {"alive": True},
+        },
+    }
+    coord, _fx, window = make_coord(unattended_mode=False, response=response)
+    coord.request_close()
+    dialog = _progress(qtbot, window)
+
+    qtbot.waitUntil(lambda: " из " in dialog.labelText(), timeout=2000)
+
+    assert dialog.labelText() == "Остановка системы… 1 из 3"
+    assert coord.state is CloseState.STOPPING

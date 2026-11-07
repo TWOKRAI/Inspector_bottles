@@ -171,3 +171,60 @@ $ machine_gate.sh medium op-1.1 ... pytest -q --tb=short <радиус раун�
 - Немодальный прогресс без присмотра не блокирует ввод в главное окно. На стенде без присмотра оператора нет, это допустимо. Поведение на реальном дисплее Windows не проверено.
 - Тест (3) подменяет приватные атрибуты модуля `unattended` (`_UNATTENDED`, `_log`, `_answers`): `_UNATTENDED` снимается при импорте, публичной ручки нет. При переименовании этих атрибутов тест (3) упадёт на `monkeypatch.setattr` (атрибута нет), а не пройдёт молча.
 - В `unattended=True` вопрос `ask_force_stop` закреплён только на фейке. Настоящий `ask_force_stop_dialog` (окно-модальный `QMessageBox`) без присмотра не вызывается, поэтому сторож его не видит.
+
+## Раунд 3 (ревью стадии 5, итерация 1 из 2; база HEAD `e609f70f4`)
+
+### Правки по пунктам ревью
+
+| П. | Файл | Что сделано |
+|---|---|---|
+| 1 (блокер) | `multiprocess_prototype/frontend/app.py` | Новая функция уровня модуля `_unwrap_status_reply(reply)` разворачивает конверт ровно на один уровень: не dict или внешний `success is not True` → как есть; `result` — dict с ключом `processes` → `result` (решает его `success`); иначе как есть. `_poll_status` в `_build_close_coordinator` возвращает `_unwrap_status_reply(reply)`. |
+| 2 | `multiprocess_prototype/frontend/windows/main_window.py` | `closeEvent` с координатором вне `CLOSING`: сначала `request_close()`, затем состояние `CLOSING` → `_save_geometry()` + `event.accept()`, иначе `event.ignore()`. Причина: `quit_app` зовёт `window.close()` внутри этого же `closeEvent`, и Qt вложенный `close()` отбрасывает. |
+| 3 | `app.py` | `ignore_names=frozenset({process.name, ORCHESTRATOR_PROCESS_NAME})`. Константа импортируется из `multiprocess_framework/modules/process_module/configs/observability_layers.py:107`, это направление prototype → framework. |
+| 4 | `tests/test_close_coordinator_hazards.py` | Тест (4) `test_progress_hidden_after_commit_close_from_stopping`. |
+| 5 | там же | Тест (5) `test_progress_shows_k_of_n_children`: 5 записей (gui, PM живы; worker_a мёртв; worker_b, worker_c живы) → текст «Остановка системы… 1 из 3». У фикстуры `make_coord` появился параметр `response`. |
+| 6b | `multiprocess_prototype/frontend/shutdown/close_coordinator.py` | Докстринг `ask_force_stop_dialog`: оборванная фраза заменена («если координатор закрыл вопрос сам… `finished` всё равно вызовет `on_answer`; координатор этот ответ отбрасывает»). |
+| 6d | `main_window.py` | `_close_coordinator = None` перенесён в начало класса, сразу после докстринга. |
+| 6e | `close_coordinator.py` `_update_progress` | Диалог берётся в локальную `dialog` до `setValue()`. После `setValue()` проверка `self._progress is not dialog → return`: `setValue` модального диалога крутит `processEvents`, и внутри может прийти `commit_close`. |
+| 6c | — | Литерал «за 2 с» в тексте вопроса оставлен, так требует спека. |
+
+Новый файл `multiprocess_prototype/frontend/tests/test_close_coordinator_wiring.py`. Объекты настоящие: `app._build_close_coordinator` и `MainWindow`; `QSettings` во временном ini. Фейковые: `command_sender`, `process_manager_proxy`, процесс и `app` (`quit` — счётчик). Крестик — `window.close()`.
+- `test_live_envelope_children_dead_quits_once` — конверт в живой форме: верхние ключи command, queue_type, request_id, result, sender, success, targets, type; в `result` — epoch, processes, success; процессы ProcessManager (жив), console_sink и ticker (мертвы). Проверки: `app.quit` ровно 1 раз, `CLOSING`, окно не видно, `shutdown_system` 1 раз, `shutdown_sent`, команда `{"cmd": "supervision.status"}`.
+- `test_envelope_without_success_is_not_all_dead[inner_success_false | outer_success_false]` — контроль: за ≥ 4 опроса нет `quit`, состояние `STOPPING`, окно видно.
+- `test_ignore_names_are_own_name_and_process_manager` (п. 3) — живы только `gui` и `ProcessManager` → окно закрывается.
+- `test_x_that_commits_at_once_hides_window[send_shutdown_fails | backend_gone_during_confirm]` (п. 2) — после крестика `CLOSING`, `app.quit` 1 раз, окно не видно, геометрия сохранена.
+
+### Прогоны
+
+```
+$ ruff check -q <5 файлов: close_coordinator.py, app.py, main_window.py, оба авторских теста>   -> код 0
+$ python -c 'import multiprocess_prototype; print(multiprocess_prototype.__file__)'
+/Users/twokrai/Project_code/Inspector_bottles/.claude/worktrees/op-1.1/multiprocess_prototype/__init__.py
+$ machine_gate.sh medium op-1.1 ... pytest -q --tb=short test_close_coordinator_hazards.py test_close_coordinator_wiring.py
+11 passed, 1 warning in 4.57s
+$ machine_gate.sh medium op-1.1 ... pytest -q --tb=short <радиус раунда 1: 6 файлов> + hazards + wiring
+134 passed, 1 warning in 10.20s
+```
+
+134 тестов, из них 5 в hazards и 6 в wiring. Остальное — радиус раунда 1 в состоянии `e609f70f4`: лид в раунде 2 дописал тесты в `test_close_coordinator.py` и `test_gui_process.py`, поэтому число не равно 125 + 8. Страж `test_root_close_order_golden` входит в радиус.
+
+### Инъекции: предсказано против наблюдено
+
+Копия дерева `scratchpad/inj3`: `git archive HEAD` + мои изменённые `.py`. Прогон 61 теста: `test_close_coordinator.py`, hazards, wiring, `test_main_window.py`. После матрицы копия сверена с деревом (`cmp` по всем изменённым `.py`: совпадает). Предсказания записаны до прогона: п. 1–2 — лид, полные списки красных — мои.
+
+| Инъекция | Предсказано | Наблюдено | Совпало |
+|---|---|---|---|
+| п. 1: `_poll_status` без разворачивания (`return reply`) | test_live_envelope… (лид); я добавил test_ignore_names… (тот же путь через конверт) | `2 failed, 59 passed`: test_live_envelope_children_dead_quits_once, test_ignore_names_are_own_name_and_process_manager | да |
+| п. 2: «всегда ignore» (`event.ignore()` вместо `accept`) | оба случая test_x_that_commits_at_once_hides_window | `2 failed, 59 passed`: [send_shutdown_fails], [backend_gone_during_confirm] | да |
+| п. 3: `ignore_names` без PM | test_ignore_names…, test_live_envelope… | `2 failed, 59 passed`: те же два | да |
+| п. 4: `finish()` убран из `commit_close` | hazards (4) | `1 failed, 60 passed`: test_progress_hidden_after_commit_close_from_stopping | да |
+| п. 5: k и N местами | hazards (5) | `1 failed, 60 passed`: test_progress_shows_k_of_n_children | да |
+
+Контрольные тесты конверта (внутренний и внешний `success False`) при инъекции п. 1 остаются зелёными. Это ожидаемо: без разворачивания закрытия нет ни в каком случае. Ловят они другую ошибку — разворачивание, которое не смотрит на `success`. Отдельной инъекцией это не проверял.
+
+### Что осталось открытым (раунд 3)
+
+- **Путь ответа GUI через `router.request` подтверждён только чтением кода.** `multiprocess_framework/modules/router_module/core/router_manager.py:1303-1313` (`reply_to_request`) собирает ответ `{"type": "response", "command": …, "sender": …, "targets": […], "queue_type": "system", "request_id": cid, "success": success, "result": result}` — те же ключи, что в живой форме ревьюера. Форма снята ревьюером через `backend_ctl`-драйвер, не через GUI. Живой `CommandSender.request_system_command` из процесса `gui` на Windows не запускался.
+- Тест п. 2 [backend_gone_during_confirm] подменяет метод экземпляра `window.confirm_discard_topology_changes`. Работает это потому, что `confirm_discard` в `app.py` — лямбда, которая читает атрибут при вызове. Если лямбду заменить связанным методом, подмена перестанет действовать, и тест покраснеет на `CLOSING`.
+- `_unwrap_status_reply` разворачивает ровно один уровень. Если PM когда-нибудь вложит конверт глубже, сработает только сторож тишины: успешные ответы есть, `processes` нет — окно ждёт без вопроса, пока PM отвечает. Сейчас такой формы нет.
+- Проверка 6e (возврат после `setValue`, если диалог сменился) тестом не воспроизведена: нужен повторный вход через `processEvents` внутри `setValue`. Закреплена только чтением.

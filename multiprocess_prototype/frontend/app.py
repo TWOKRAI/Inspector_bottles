@@ -1185,6 +1185,24 @@ def _setup_bridge_callbacks(
     # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)
 
 
+def _unwrap_status_reply(reply: Any) -> Any:
+    """Развернуть конверт ответа ``supervision.status`` ровно на один уровень.
+
+    ``CommandSender.request_system_command`` отдаёт конверт как есть:
+    ``{"success": True, "result": {"epoch": …, "processes": {…}, "success": True}, "type": "response", …}``.
+    Координатор читает ``success``/``processes`` на верхнем уровне, поэтому:
+    внешний ``success is not True`` (таймаут, ошибка доставки) — ответ как есть (не ответ);
+    ``result`` — dict с ключом ``processes`` — вернуть ``result`` (решает ЕГО ``success``);
+    иначе — как есть.
+    """
+    if not isinstance(reply, dict) or reply.get("success") is not True:
+        return reply
+    inner = reply.get("result")
+    if isinstance(inner, dict) and "processes" in inner:
+        return inner
+    return reply
+
+
 def _build_close_coordinator(
     app: QApplication,
     process: "GuiProcess",
@@ -1199,11 +1217,16 @@ def _build_close_coordinator(
     остановка — общий ``system_stop_event``; ``quit_app`` — закрыть окно (``closeEvent`` в
     ``CLOSING`` сохраняет геометрию) и выйти из Qt-цикла.
     """
+    from multiprocess_framework.modules.process_module.configs.observability_layers import (
+        ORCHESTRATOR_PROCESS_NAME,
+    )
+
     from .shutdown import CloseCoordinator
     from .shutdown.close_coordinator import ask_force_stop_dialog
 
     def _poll_status(timeout: float) -> dict:
-        return command_sender.request_system_command({"cmd": "supervision.status"}, timeout=timeout)
+        reply = command_sender.request_system_command({"cmd": "supervision.status"}, timeout=timeout)
+        return _unwrap_status_reply(reply)
 
     def _force_stop() -> None:
         ev = process._get_system_stop_event()
@@ -1231,7 +1254,8 @@ def _build_close_coordinator(
         confirm_discard=lambda: window.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"),
         send_shutdown=process_manager_proxy.shutdown_system,
         poll_status=_poll_status,
-        ignore_names=frozenset({process.name, "ProcessManager"}),
+        # PM отдаёт в supervision.status запись о себе (alive: True) — его не ждём, как и себя.
+        ignore_names=frozenset({process.name, ORCHESTRATOR_PROCESS_NAME}),
         ask_force_stop=lambda on_answer: ask_force_stop_dialog(window, on_answer),
         force_stop=_force_stop,
         quit_app=_quit_app,

@@ -99,8 +99,9 @@ def ask_force_stop_dialog(parent: QWidget | None, on_answer: Callable[[bool], No
     """Настоящий ``ask_force_stop``: немодальный для цикла событий вопрос (``open()``, не ``exec()``).
 
     «Остановить» (по умолчанию) → ``on_answer(True)``; «Подождать», Esc, крестик → ``on_answer(False)``.
-    Возвращает сам ``QMessageBox`` как ручку с ``close()``. Ответ после ``close()`` координатором
-    координатор отбрасывает сам (ручка уже не текущая).
+    Возвращает сам ``QMessageBox`` как ручку с ``close()``. Если координатор закрыл вопрос сам
+    (ответ PM пришёл раньше оператора), ``finished`` всё равно вызовет ``on_answer``; координатор
+    этот ответ отбрасывает: ручка к этому моменту уже не текущая.
     """
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
@@ -374,10 +375,15 @@ class CloseCoordinator(QObject):
         self._progress.show()
 
     def _update_progress(self, stopped: int, total: int) -> None:
-        if self._progress is None:
+        dialog = self._progress
+        if dialog is None:
             return
-        self._progress.setRange(0, max(total, 1))
-        self._progress.setValue(min(stopped, max(total, 1)))
+        dialog.setRange(0, max(total, 1))
+        # setValue модального QProgressDialog крутит processEvents: внутри может прийти
+        # commit_close (self._progress = None, finish()). Дальше — только если диалог всё ещё наш.
+        dialog.setValue(min(stopped, max(total, 1)))
+        if self._progress is not dialog:
+            return
         text = f"{_PROGRESS_TITLE}… {stopped} из {total}"
-        self._progress.setWindowTitle(text)
-        self._progress.setLabelText(text)
+        dialog.setWindowTitle(text)
+        dialog.setLabelText(text)
