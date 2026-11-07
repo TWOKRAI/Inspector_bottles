@@ -56,6 +56,15 @@ from .topology_manager import TopologyManager
 _BROKER_INIT_LOCK = threading.Lock()
 
 
+#: Task 1.2a gui-graceful-close (ADR-PMM-041): фазы хода системного стопа (``pre_stop`` ставит 1.4,
+#: ``last_wave`` — 1.3) и ключи ``system.stop.*``, которые идут в стор.
+_SYSTEM_STOP_PHASES = ("pre_stop", "children", "last_wave", "done")
+_SYSTEM_STOP_STORE_KEYS = ("phase", "mode", "initiator", "started_at")
+#: Служебный ключ ``data`` команды ``system.shutdown``: отправитель внешнего ``process.command``
+#: (ставит только ``_handle_process_command``; другим командам не подмешивается).
+_SHUTDOWN_SENDER_KEY = "_sender"
+
+
 def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
     """Унифицировать вызов из Dispatcher(data_dict) и прямой(kwargs)."""
     if isinstance(data, dict):
@@ -101,6 +110,13 @@ class ProcessManagerProcess(ProcessModule):
     #: Task 1.9b (D1/D4): стоп детей PM начат (``_ChildrenStop.request_stop``). Уровень класса — чтобы
     #: атрибут был у любого экземпляра, в том числе собранного в тестах через ``__new__`` (``make_pm``).
     _children_stopping: bool = False
+    #: Task 1.2a gui-graceful-close (ADR-PMM-041): ход системного стопа для ``supervision.status`` —
+    #: ``phase / mode / initiator / started_at / deadline_at / pre_stop_step``; ``None`` — стоп не начат.
+    #: Уровень класса — как ``_children_stopping``: PM из тестов (``__new__``) отвечает ``system_stop: None``.
+    #: Читается и пишется только под ``_system_stop_lock`` и только помощниками ``*_system_stop*``.
+    _system_stop_info: dict | None = None
+    #: Значения ``system.stop.*``, уже записанные в стор (под ``_system_stop_publish_lock``); ``None`` — ни одной.
+    _system_stop_published: dict | None = None
     #: Task 1.9b (D1): исполнитель операций жизненного цикла и два адаптера над ним; ``None`` до ``initialize()``.
     _lifecycle_executor: Any = None
     _lifecycle_submit: Any = None
@@ -129,6 +145,10 @@ class ProcessManagerProcess(ProcessModule):
         # а не только лениво, чтобы первое касание было заведомо однопоточным.
         self.__dict__["_broadcast_generations_map"] = {}
         self.__dict__["_broadcast_generations_lock_obj"] = threading.Lock()
+        # Task 1.2a gui-graceful-close: листовые локи хода стопа — здесь, чтобы первое касание было
+        # однопоточным; запасной путь в свойствах — для PM из тестов (``__new__``).
+        self.__dict__["_system_stop_lock_obj"] = threading.Lock()
+        self.__dict__["_system_stop_publish_lock_obj"] = threading.Lock()
         # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
         # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
         # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
@@ -537,6 +557,116 @@ class ProcessManagerProcess(ProcessModule):
         ev = getattr(self, "_system_stop_event", None)
         return bool(ev is not None and ev.is_set()) or self._children_stopping
 
+    # -------------------------------------------------------------------------
+    # Ход системного стопа (Task 1.2a gui-graceful-close, ADR-PMM-041)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _system_stop_lock(self) -> threading.Lock:
+        """Листовой лок словаря хода стопа: под ним только чтение, запись и проверка-и-установка."""
+        return self.__dict__.setdefault("_system_stop_lock_obj", threading.Lock())
+
+    @property
+    def _system_stop_publish_lock(self) -> threading.Lock:
+        """Сериализует публикации ``system.stop.*`` в стор (не словарь): фаза в сторе не откатывается."""
+        return self.__dict__.setdefault("_system_stop_publish_lock_obj", threading.Lock())
+
+    def _system_stop_snapshot(self) -> dict | None:
+        """Копия словаря хода стопа под локом или ``None``."""
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            return dict(info) if info is not None else None
+
+    def _begin_system_stop(self, mode: str, initiator: str, deadline_s: float | None, phase: str = "children") -> bool:
+        """Начать ход стопа. Первый выигрывает: ``True`` — стоп начат этим вызовом, ``False`` — уже шёл.
+
+        ``deadline_at`` (``time.time()``): ``force`` — ``started_at + deadline_s``; иначе
+        ``started_at + pm_graceful_s`` бюджета PM. Бюджет читается до лока (лок листовой).
+        """
+        if phase not in _SYSTEM_STOP_PHASES:
+            raise ValueError(f"system_stop: недопустимая фаза {phase!r}")
+        window_s = float(deadline_s) if mode == "force" and deadline_s is not None else None
+        if window_s is None:
+            window_s = float(self._budget()["pm_graceful_s"])
+        started_at = time.time()
+        info = {
+            "phase": phase,
+            "mode": mode,
+            "initiator": initiator,
+            "started_at": started_at,
+            "deadline_at": started_at + window_s,
+            "pre_stop_step": None,
+        }
+        with self._system_stop_lock:
+            if self._system_stop_info is not None:
+                return False
+            self._system_stop_info = info
+            return True
+
+    def _escalate_system_stop(self, mode: str, deadline_s: float) -> bool:
+        """``force`` поверх идущего graceful: новые ``mode`` и ``deadline_at``; ``started_at`` и ``initiator``
+        прежние. Повторный graceful, стоп не начат или ``phase == "done"`` — без изменений. ``True`` — изменено."""
+        if mode != "force":
+            return False
+        deadline_at = time.time() + float(deadline_s)
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is None or info["phase"] == "done" or info["mode"] == "force":
+                return False
+            info["mode"] = "force"
+            info["deadline_at"] = deadline_at
+            return True
+
+    def _set_system_stop_phase(self, phase: str) -> None:
+        """Сменить фазу хода стопа. Стоп не начат — no-op с WARNING (словарь не создаётся); ``done`` — конечная."""
+        if phase not in _SYSTEM_STOP_PHASES:
+            raise ValueError(f"system_stop: недопустимая фаза {phase!r}")
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is not None and info["phase"] != "done":
+                info["phase"] = phase
+        if info is None:
+            self._log_warning(f"system_stop: фаза {phase!r} без начатого стопа — пропущено")
+
+    def _set_pre_stop_step(self, step: str | None) -> None:
+        """Шаг фазы ``pre_stop`` (ставит Task 1.4). Стоп не начат — no-op с WARNING."""
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is not None:
+                info["pre_stop_step"] = step
+        if info is None:
+            self._log_warning("system_stop: шаг pre_stop без начатого стопа — пропущено")
+
+    def _publish_system_stop(self) -> None:
+        """Записать в стор изменившиеся ключи ``system.stop.*`` из ТЕКУЩЕГО снимка.
+
+        Зовёт вызывающий после взвода событий стопа, вне лока словаря. Публикации сериализованы
+        ``_system_stop_publish_lock``: снимок берётся под ним, поэтому поздний издатель не перезапишет
+        ``done`` старой фазой. Один вызов ``handle_state_set`` на изменившийся ключ. Сбой стора —
+        WARNING, ключ не помечается записанным; ``system.shutdown`` он не ломает.
+        """
+        ssm = getattr(self, "_state_store_manager", None)
+        if ssm is None:
+            return
+        with self._system_stop_publish_lock:
+            info = self._system_stop_snapshot()
+            if info is None:
+                return
+            published = self._system_stop_published
+            if published is None:
+                published = self._system_stop_published = {}
+            for key in _SYSTEM_STOP_STORE_KEYS:
+                value = info[key]
+                if key in published and published[key] == value:
+                    continue
+                path = f"system.stop.{key}"
+                try:
+                    ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessManager"}})
+                except Exception as exc:  # noqa: BLE001 — handle_state_set ловит только ValueError/TypeError
+                    self._log_warning(f"system_stop: запись {path} в стор не удалась: {exc}")
+                    continue
+                published[key] = value
+
     def _in_transition(self, name: str) -> bool:
         """Процесс ``name`` в операции жизненного цикла (идёт или стоит в очереди исполнителя)."""
         submit = self._lifecycle_submit
@@ -792,6 +922,12 @@ class ProcessManagerProcess(ProcessModule):
         mode = args.get("mode", "graceful")
         if mode not in ("graceful", "force"):
             return {"error": "mode: graceful|force"}
+        # Task 1.2a: отправитель внешнего ``process.command`` (``_handle_process_command``); иначе ``unknown``.
+        initiator = args.get(_SHUTDOWN_SENDER_KEY) or "unknown"
+        if not isinstance(initiator, str):
+            initiator = "unknown"
+        # Ход стопа (ADR-PMM-041): (режим, срок force) для ``_begin_system_stop`` / ``_escalate_system_stop``.
+        stop_mode, stop_deadline_s, escalate = "graceful", None, False
         reply: dict = {"success": True, "message": "Shutdown initiated"}
         if mode == "force":
             deadline_s = args.get("deadline_s", 1.0)
@@ -814,15 +950,22 @@ class ProcessManagerProcess(ProcessModule):
                 self._force_deadline_s = deadline_s
                 self._log_info(f"force: срок стопа детей {deadline_s} с")
                 reply.update(mode="force", deadline_s=deadline_s)
+                stop_mode, stop_deadline_s, escalate = "force", deadline_s, True
             else:
                 # Первый force выигрывает: ответ несёт ДЕЙСТВУЮЩИЙ срок, а не запрошенный.
                 effective = self._force_deadline_s if self._force_deadline_s is not None else deadline_s
                 self._log_info(f"force: срок уже стоит ({effective} с), повтор не меняет")
                 reply.update(mode="force", deadline_s=effective, already_set=True)
+        # Ход стопа — ДО событий: иначе опрос status успел бы начать его как ``event`` (ленивый begin).
+        # Первый выигрывает; force, принятый поверх идущего стопа, — эскалация.
+        if not self._begin_system_stop(stop_mode, initiator, stop_deadline_s) and escalate:
+            self._escalate_system_stop("force", stop_deadline_s)
         self._log_info("System shutdown requested via command")
         if self._system_stop_event is not None:
             self._system_stop_event.set()
         self.stop_event.set()
+        # Публикация — после взвода событий и вне лока словаря.
+        self._publish_system_stop()
         return reply
 
     def _cmd_system_stats(self, data=None, **kwargs) -> dict:
@@ -893,7 +1036,15 @@ class ProcessManagerProcess(ProcessModule):
                 # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
                 "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
             }
-        return {"success": True, "epoch": epoch, "processes": processes}
+        # Task 1.2a (ADR-PMM-041): ход системного стопа — копия под локом или None. Фазу из ``status``
+        # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
+        system_stop = self._system_stop_snapshot()
+        if system_stop is None and self._pm_stopping():
+            # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
+            # «стоп идёт, а system_stop пуст» нет. Идемпотентно — первый выигрывает.
+            self._begin_system_stop("graceful", "event", None)
+            system_stop = self._system_stop_snapshot()
+        return {"success": True, "epoch": epoch, "processes": processes, "system_stop": system_stop}
 
     # -------------------------------------------------------------------------
     # Topology commands
@@ -3538,6 +3689,10 @@ class ProcessManagerProcess(ProcessModule):
                 for key, value in data.items():
                     if key not in ("cmd", "correlation_id"):
                         inner_msg["data"][key] = value
+                if cmd == "system.shutdown":
+                    # Task 1.2a (ADR-PMM-041): инициатор стопа — отправитель конверта. Только этой команде:
+                    # другие обработчики получают ``data`` как раньше. Ключ из ``data`` снаружи перекрыт.
+                    inner_msg["data"][_SHUTDOWN_SENDER_KEY] = msg.get("sender")
 
                 # Task 1.9b (D2): команда с исполнителем (L/T) отвечает через ``reply`` сама, позже,
                 # с потока исполнителя; обёртка тогда не отвечает (``DEFERRED``).
@@ -4686,6 +4841,9 @@ class _ChildrenStop:
         ``join_until`` у ребёнка, которого ещё держит операция, было бы два владельца стопа.
         """
         pm = self._pm
+        # Task 1.2a (ADR-PMM-041): фаза ``children`` объявлена ПЕРВОЙ — до флага «PM гасится», исполнителя
+        # и паузы монитора (каждое до ``infra_s``). Стоп без команды (внешнее событие) — инициатор ``event``.
+        self._announce_phase("children", begin=True)
         pm._children_stopping = True
         # Один срок на исполнитель и паузу монитора (монитору — остаток).
         deadline = time.monotonic() + float(pm._budget()["infra_s"])
@@ -4747,7 +4905,11 @@ class _ChildrenStop:
         force_at = self._force_at
         if force_at is not None and not self._killed:
             deadline = min(deadline, force_at)
-        return self._group.join_until(deadline)
+        stopped = self._group.join_until(deadline)
+        if stopped:
+            # Task 1.2a: дети ушли — ``done`` в момент факта (до закрытия message_processor и стора).
+            self._announce_phase("done")
+        return stopped
 
     def kill(self) -> None:
         # Флаг ДО делегирования: join_until фазы 3 после kill() получает срок как есть.
@@ -4756,8 +4918,24 @@ class _ChildrenStop:
             self._group.kill()
 
     def close(self) -> None:
-        if self._group is not None:
-            self._group.close()
+        try:
+            if self._group is not None:
+                self._group.close()
+        finally:
+            # Task 1.2a: выжившие (``join_until`` не дал ``True``) — ``done`` при закрытии области; потребитель
+            # судит по ``alive``. Уже ``done`` — ни изменения, ни записи в стор.
+            self._announce_phase("done")
+
+    def _announce_phase(self, phase: str, *, begin: bool = False) -> None:
+        """Фаза хода стопа PM + публикация в стор. Сбой не ломает стоп детей (ERROR в лог)."""
+        pm = self._pm
+        try:
+            if begin:
+                pm._begin_system_stop("graceful", "event", None)
+            pm._set_system_stop_phase(phase)
+            pm._publish_system_stop()
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: фаза стопа {phase!r} не объявлена: {exc}")
 
     def result(self) -> dict[str, bool]:
         return self._group.result() if self._group is not None else {}

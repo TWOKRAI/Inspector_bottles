@@ -2165,3 +2165,56 @@ SSM/watcher'ов и детей.**
 **Refs:** `plans/2026-10-20_gui-graceful-close/plan.md`, `plans/2026-10-20_gui-graceful-close/tasks/1.1a.md`,
 ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children_stop.py`,
 `tests/test_process_root_pm_hazards.py`.
+
+## ADR-PMM-041: Ход системного стопа — поле `system_stop` в `supervision.status` и ключи `system.stop.*` в сторе (Task 1.2a gui-graceful-close, 2026-11-07)
+
+**Статус:** accepted (2026-11-07; стадия 0 — ревью 2026-11-07, пп. 2–6, 10, 12; реализация — Task 1.2a плана
+`plans/2026-10-20_gui-graceful-close/plan.md`, бриф `tasks/1.2a.md`).
+
+### Контекст
+
+После ADR-PMM-040 PM отвечает всё окно стопа детей, но потребитель (встроенный GUI, Пульт, `backend_ctl`) не видит,
+ЧТО идёт: фаза, режим, кто начал и до какого момента. `status` процессов на стопе устаревший — монитор на паузе
+(ADR-PMM-036), выводить фазу из него нельзя.
+
+### Решение
+
+- **Форма.** Верхнее поле ответа `supervision.status` — `system_stop`: `None`, пока стоп не начат; иначе словарь
+  `phase` (`pre_stop | children | last_wave | done`), `mode` (`graceful | force`), `initiator`, `started_at`
+  (`time.time()`), `deadline_at` (`time.time()`), `pre_stop_step` (в 1.2a всегда `None`). Отдаётся КОПИЯ под листовым
+  локом `_system_stop_lock`. `pre_stop` ставит Task 1.4, `last_wave` — Task 1.3. Поля на процесс не менялись.
+- **Один набор помощников.** `_begin_system_stop` (первый выигрывает: одна проверка-и-установка под локом),
+  `_escalate_system_stop` (`force` поверх graceful: новые `mode`/`deadline_at`, `started_at`/`initiator` прежние;
+  повторный graceful и `phase == "done"` — без изменений), `_set_system_stop_phase` (стоп не начат — WARNING без
+  создания словаря; `done` — конечная), `_set_pre_stop_step`, `_publish_system_stop`. Остальной код словарь не трогает.
+- **Инициатор** — `sender` конверта `process.command`: `_handle_process_command` кладёт его в `data` служебным
+  ключом `_sender` только для `system.shutdown` (другим командам `data` не меняется). Нет отправителя или прямой
+  `send_command` мимо конверта — `"unknown"`. Стоп без команды (внешнее `system_stop_event`) — `"event"`.
+- **Начало.** `system.shutdown`: ход стопа начинается ДО взвода событий (иначе опрос успел бы начать его как `event`),
+  после проверки аргументов (ошибка аргументов стоп не начинает). `deadline_at`: graceful — `started_at + pm_graceful_s`
+  бюджета PM, force — `started_at + deadline_s`. `_ChildrenStop.request_stop` первым действием (до
+  `_children_stopping`, исполнителя и паузы монитора) начинает стоп как `event`, если он не начат, и объявляет
+  `children`. `_cmd_supervision_status`, видя `system_stop is None` при `_pm_stopping()`, сам начинает стоп как
+  `event` — окна «стоп идёт, а поле пусто» нет.
+- **`done`** ставит `_ChildrenStop`: в `join_until`, вернувшем `True` (момент факта), иначе в `close()` (выжившие;
+  потребитель судит по `alive`). Не на любом возврате `join_until`: область зовёт его и до `kill()`. Не в
+  `_stop_summary`: к нему `message_processor` и SSM уже закрыты (порядок ADR-PMM-040), `done` никто бы не увидел.
+- **Стор.** `system.stop.{phase,mode,initiator,started_at}` через `handle_state_set` (source `ProcessManager`),
+  после взвода событий и вне лока словаря. `_publish_system_stop` под отдельным `_system_stop_publish_lock` берёт
+  ТЕКУЩИЙ снимок и пишет только ключи, изменившиеся с прошлой публикации: фаза в сторе не откатывается, число
+  вызовов равно числу дельт. Командный graceful-стоп — 5 дельт (4 при начале, `done`); эскалация — ещё `mode`.
+  Сбой стора — WARNING, `system.shutdown` не ломается. Флашер SSM может слить соседние дельты: каждую фазу пушем
+  потребитель не увидит.
+
+### Отвергнуто
+
+- **`done` в `_stop_summary`.** Публикация после закрытия `message_processor` и SSM — никому не видна.
+- **`done` на любом возврате `join_until`.** До `kill()` дети ещё живы.
+- **Отправитель всем командам в `data`.** Ломает обработчики, которые пересылают `data` целиком (`process.relay`)
+  или проверяют состав аргументов.
+- **Значение фазы из аргумента издателя.** Поздний издатель `children` откатил бы `done` в сторе (H10).
+
+**Reversible:** yes (поле и ключи новые; удаление помощников возвращает прежнее поведение).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2a.md`, `plans/2026-10-20_gui-graceful-close/design.md`
+(«Контракт хода»), ADR-PMM-036, ADR-PMM-038, ADR-PMM-040, `tests/test_supervision_status_system_stop.py`,
+`tests/test_supervision_status_system_stop_hazards.py`.
