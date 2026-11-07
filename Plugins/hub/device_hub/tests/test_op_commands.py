@@ -67,7 +67,7 @@ class _Recording(DeviceHubPlugin):
         return {"status": "ok"}
 
 
-def test_device_hub_plugin_has_73_commands_56_generated() -> None:
+def test_device_hub_plugin_has_74_commands_56_generated() -> None:
     names = set(DeviceHubPlugin.commands)
     assert len(names) == 74
     generated = names - _DEVICE_AND_HIK - {"robot_park_all"}  # ручная команда T5.3e.5 — не из описаний операций
