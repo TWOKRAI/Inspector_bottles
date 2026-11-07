@@ -80,7 +80,7 @@
   - **Module contract:** public-api-change (ответ команды PM)
 - Task 1.3: волна «последними» — GUI гаснет после всех [PENDING] (после 1.1; бюджет — поверх LSO 1.11)
   - **Module contract:** public-api-change (поле `stop_wave` схемы процесса)
-- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [PENDING] (после 0.2, 1.2, 1.3, LSO 1.9b)
+- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [PENDING] (после 0.2, 1.2a, 1.2, 1.3, LSO 1.9b)
   - **Module contract:** public-api-change (аргумент `initiator`, поле `outcomes` метода драйвера)
 
 ### Ф2 — интерфейс
