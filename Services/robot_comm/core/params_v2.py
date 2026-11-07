@@ -1,4 +1,4 @@
-# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (d3c801e4)
+# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (e9e06893)
 # не править руками; python -m Services.robot_comm.codegen
 
 from __future__ import annotations

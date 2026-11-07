@@ -80,7 +80,7 @@
 - Task T1.1: Кодоген: Python, `RobotParamsV2`, Lua-блок [DONE 2026-09-27 — `22900de7`] (после T0.1) — подробно [plan-done.md](plan-done.md#t11)
 - Task T1.2: Схемные инварианты YAML [DONE 2026-09-30 — `bc8cacc1`; слияние `4fd912ccd`] (после T1.1) — подробно [plan-done.md](plan-done.md#t12)
 - Task T1.3: Сборщик прошивки `build_fw.py` [DONE 2026-09-30 — `c8494eef`; слияние `4fd912ccd`] (после T1.1) — подробно [plan-done.md](plan-done.md#t13)
-- Task T1.4: Диапазоны APARAM в `delta_v2.yaml` → codegen [PENDING] (после T3.3; до Ф4)
+- Task T1.4: Диапазоны APARAM в `delta_v2.yaml` → codegen [DONE 2026-11-07 — лид inspector-bottles-eb, ветка `feat/robot-v2-t14`; stage 0 CHANGES REQUESTED→правки, слепой tester 19 тестов, инъекции I1–I10 совпали (I8 по grep нет), review APPROVED + 1 minor закрыт; бриф `tasks/T1.4.md`, отчёт `docs/reports/2026-11-07_robot-protocol-v2_T1.4.md`] (после T3.3; до Ф4) — долги: прошивка читает `ARNG` (Ф4/T4.1); `_DO_CHANNELS` в `device_hub/drivers/robot_driver_v2/texts.py:113`; три файла с `hypothesis` не запускались на Mac
 
 ### Ф2 — симулятор v2
 
