@@ -301,3 +301,12 @@ def test_sc_run_start_state_reads_act_range(monkeypatch):
     res = cmd(core, 3, OP["SC_RUN"], 1, 11, 0, 0, 0, 2)
     assert (res["status"], res["errno"], res["rvals"]) == (NAK, ERR["E_RANGE"], [REASON["R_APARAM"]])
     assert cmd(core, 4, OP["SC_RUN"], 1, 12, 0, 0, 0, 1)["status"] == ACK
+
+
+def test_sc_validate_action_without_range_row_is_r_aparam(monkeypatch):
+    """Действие из ACT без строки в ACT_RANGE — NAK E_SC_RECORD R_APARAM, а не исключение или молчаливый ACK (T1.4)."""
+    monkeypatch.delitem(protocol_v2.ACT_RANGE, "DELAY_MS")
+    core = ready_core()
+    write_scenario(core, 0, [pt(420.0, action=ACT["DELAY_MS"], aparam=5)])
+    res = cmd(core, 2, OP["SC_RUN"], 1, 10, 0, 0, 0, 0)
+    assert (res["status"], res["errno"], res["rvals"]) == (NAK, ERR["E_SC_RECORD"], [0, REASON["R_APARAM"]])
