@@ -367,7 +367,12 @@ def test_over_max_turns_is_flagged(tmp_path):
 
 def test_subprocess_runner_passes_prompt_on_stdin(tmp_path):
     """Боевой двойник: настоящий subprocess_runner, вместо claude — интерпретатор, печатающий свой stdin."""
-    cmd = [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read().upper())"]
+    # байтами UTF-8: локаль Windows (cp1251) у дочернего процесса не влияет на результат
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().decode('utf-8').upper().encode('utf-8'))",
+    ]
     result = bench.subprocess_runner(cmd, "вопрос Q1", tmp_path)
     assert (result.returncode, result.stdout) == (0, "ВОПРОС Q1")
     missing = bench.subprocess_runner(["no-such-binary-nav-bench", "-p"], "x", tmp_path)
