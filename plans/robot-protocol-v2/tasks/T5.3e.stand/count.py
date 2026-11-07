@@ -2,7 +2,7 @@
 """Подсчёт стенда T5.3e по каталогу(ам) прогона `run-*` (их пишет run_stand.py).
 
 Копия `SPI.stand/count.py` с правками T5.3e.3s: к таблице S0-S3 (регрессия `--regress`: S0, S1, G, пороги прежние)
-добавлена таблица park P1-P3 (L1-L3 брифа T5.3e.3, «Общие правила»): строка на критерий PASS / FAIL с фактом, пороги
+добавлена таблица park P1-P3 (L1-L3 брифа T5.3e.3, «Общие правила») и P4-P5 (`robot_park_all`, T5.3e.5a): строка на критерий PASS / FAIL с фактом, пороги
 - литералы в коде. Несколько каталогов - отчёт по каждому и сводка `P<n>: k/N`; `STAND: PASS` и код 0 - только если все PASS.
 
 Ниже - текст count.py SPI.stand (S0-S3, device_io). Таблица park: `count_park`.
@@ -327,6 +327,12 @@ LINE_INTERRUPTED = f"робот '{ROBOT_ID}': поводок jog прерван"
 REPLY_MAX_S = 1.0  # P1: ответ robot_park
 DONE_MAX_S = 30.0  # P1: итог от ответа
 ALREADY_MAX_S = 1.5  # P2: итог второго park от ответа
+P4_FIRST_MAX_S = 3.0  # P4: первый robot_park_all - ответ с done/moved от отправки
+P4_SECOND_MAX_S = 2.0  # P4: второй robot_park_all - ответ с already от отправки
+P5_FAILED_MAX_S = 1.5  # P5: итог .park failed от отправки system_shutdown
+REASON_STOPPING = "драйвер робота останавливается"
+LINE_NOT_STOPPED = "не остановлен к сроку"  # строка исполнителя при выходе из срока остановки
+EXECUTOR = "device_io"
 TICK_S = 0.5  # период тика драйвера (число тиков до итога = elapsed_s / 0,5)
 
 
@@ -413,6 +419,49 @@ def count_park(run: Path, events: list[dict[str, Any]], sim: list[tuple[float, s
             bool(stops) and stops[-1] & 3 == 1,
             str(stops[-1] & 3 if stops else None),
         )
+    elif name == "P4":
+        for label, max_s, home in (("P4.1", P4_FIRST_MAX_S, "moved"), ("P4.2", P4_SECOND_MAX_S, "already")):
+            r = reply_of(label)
+            robots = r.get("robots") if isinstance(r.get("robots"), dict) else {}
+            mine = robots.get(ROBOT_ID) if isinstance(robots.get(ROBOT_ID), dict) else {}
+            el = (replies.get(label) or {}).get("elapsed_s")
+            fv = final_value(label)
+            row(f"{label}: ответ robot_park_all: status ok, timeout_s 30.0", r.get("status") == "ok" and r.get("timeout_s") == 30.0, str({k: r.get(k) for k in ("status", "timeout_s", "message")}))  # fmt: skip
+            row(f'{label}: robots.{ROBOT_ID}: result "done", home "{home}", seq - число', mine.get("result") == "done" and mine.get("home") == home and isinstance(mine.get("seq"), int), str(mine))  # fmt: skip
+            row(f"{label}: ответ за <= {max_s} с от отправки", el is not None and el <= max_s, f"{el} с")
+            row(f'{label}: итог .park: state "done", home "{home}", seq == seq ответа', fv.get("state") == "done" and fv.get("home") == home and fv.get("seq") == mine.get("seq"), str({k: fv.get(k) for k in ("seq", "state", "home")}))  # fmt: skip
+        s1, s2 = reply_of("P4.1"), reply_of("P4.2")
+        q1 = ((s1.get("robots") or {}).get(ROBOT_ID) or {}).get("seq")
+        q2 = ((s2.get("robots") or {}).get(ROBOT_ID) or {}).get("seq")
+        row(
+            "второй park - новый seq (не равен первому)",
+            isinstance(q1, int) and isinstance(q2, int) and q2 != q1,
+            f"{q1} -> {q2}",
+        )
+        row("d1 == 1 (только SOFT выключения)", len(stops) == 1, f"{len(stops)} {stops}")
+        row("L1 == 0", n["L1"] == 0, str(n["L1"]))
+    elif name == "P5":
+        poll = read_jsonl(run / "park_poll.jsonl")
+        sd_t = next((e["t"] for e in events if e["ev"] == "shutdown_send"), None)
+        term = next((p for p in poll if (p.get("value") or {}).get("state") in ("done", "failed")), None)
+        tv = (term or {}).get("value") or {}
+        dt = round(term["t"] - sd_t, 3) if term and sd_t else None
+        row('итог .park robot_main: state == "failed"', tv.get("state") == "failed", str(tv.get("state")))
+        row(f'итог: reason == "{REASON_STOPPING}"', tv.get("reason") == REASON_STOPPING, str(tv.get("reason")))
+        row(f"итог за <= {P5_FAILED_MAX_S} с от system_shutdown", dt is not None and dt <= P5_FAILED_MAX_S, f"{dt} с")
+        not_stopped = log_lines(run, LINE_NOT_STOPPED)
+        io_not_stopped = sum(
+            1
+            for log in (run / "logs").rglob("*.log")
+            for ln in log.read_text(encoding="utf-8", errors="replace").splitlines()
+            if LINE_NOT_STOPPED in ln and EXECUTOR in ln
+        )
+        row(f"в logs/** нет строки «{LINE_NOT_STOPPED}» для {EXECUTOR}", io_not_stopped == 0, f"для {EXECUTOR}: {io_not_stopped}; всего строк с фразой: {not_stopped}")  # fmt: skip
+        row("L1 == 0", n["L1"] == 0, str(n["L1"]))
+        row("A1 == 0", n["A1"] == 0, str(n["A1"]))
+        row("E1 == 0", n["E1"] == 0, str(n["E1"]))
+        pr = replies.get("P5") or {}
+        print(f"Ответ robot_park_all (P5, записан, не критерий): {'пришёл за ' + str(pr.get('elapsed_s')) + ' с: ' + str(pr.get('reply')) if pr.get('reply') is not None else 'не пришёл (' + str(pr.get('error')) + ')'}")  # fmt: skip
     elif name == "P2":
         r1, r2 = reply_of("P2.1"), reply_of("P2.2")
         f1, f2, tf2 = final_value("P2.1"), final_value("P2.2"), to_final_s("P2.2")
@@ -434,7 +483,7 @@ def count_park(run: Path, events: list[dict[str, Any]], sim: list[tuple[float, s
         row(f"итог второго за <= {ALREADY_MAX_S} с от ответа", tf2 is not None and tf2 <= 1.5, f"{tf2} с")
         row("d1 == 1 (только SOFT выключения)", len(stops) == 1, f"{len(stops)} {stops}")
         row("L1 == 0", n["L1"] == 0, str(n["L1"]))
-    else:
+    elif name == "P3":
         fv = final_value("P3")
         t_ab = next(
             (

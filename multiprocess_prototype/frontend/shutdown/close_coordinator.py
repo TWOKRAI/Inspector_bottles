@@ -92,7 +92,8 @@ class _StopProgressDialog(QProgressDialog):
     def finish(self) -> None:
         self._allow_close = True
         self.hide()
-        self.deleteLater()
+        # Не deleteLater(): диалог — дочерний объект окна (guard G6 R6 запрещает .deleteLater() вне qt_lifetime.py);
+        # окно закрывается следом и освобождает его вместе с собой, второго диалога за жизнь окна не бывает.
 
 
 def ask_force_stop_dialog(parent: QWidget | None, on_answer: Callable[[bool], None]) -> QMessageBox:

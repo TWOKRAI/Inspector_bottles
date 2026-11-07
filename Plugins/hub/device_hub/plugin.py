@@ -103,14 +103,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
     _scope: IScope | None = None
     # Защёлка остановки: supervisor не создаёт воркеры и не разбирает очередь connect (К1, р.2 п.7)
     _shutting_down = False
-    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55).
+    # Таблица видов (Services/device_hub/kinds.py): фабрики драйверов менеджера и команды robot_* / vfd_* (55; +1 ручная
+    # robot_park_all в commands).
     # Подкласс со своим device_kinds получает команды новых строк сам (__init_subclass__, install_kind_commands)
     device_kinds: tuple[DeviceKind, ...] = DEFAULT_KINDS
     # Команды из описаний операций: имя -> (источник, операция); заполняет install_op_commands (copy-on-write)
     _op_commands: dict[str, tuple[OpSource, OpSpec]] = {}
 
     # ------------------------------------------------------------------ #
-    # Таблица команд (Р7): имя_команды -> имя_метода. Команды robot_* / vfd_* (55) генерирует install_op_commands
+    # Таблица команд (Р7): имя_команды -> имя_метода (+1 ручная robot_park_all). Команды robot_* / vfd_* (55)
+    # генерирует install_op_commands
     # сразу после класса из OP_SPECS классов драйверов таблицы видов (command_sources(device_kinds)).
     # ------------------------------------------------------------------ #
     commands: dict[str, str] = {
@@ -125,6 +127,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Соединение (асинхронные — Б2)
         "device_connect": "cmd_device_connect",
         "device_disconnect": "cmd_device_disconnect",
+        # Основная остановка всех роботов v2 (T5.3e.5): исполнитель device_io, все ключи (+1 ручная)
+        "robot_park_all": "cmd_robot_park_all",
         # Универсальные регистры
         "device_read": "cmd_device_read",
         "device_write": "cmd_device_write",
@@ -258,6 +262,17 @@ class DeviceHubPlugin(ProcessModulePlugin):
         регистрация как без хука. Описание пишется при регистрации, а не в ``start()``: замена словаря ``metadata``
         после регистрации стёрла бы ``executor``.
         """
+        if command_name == "robot_park_all":  # ручная команда (T5.3e.5): ждёт итоги до 33,5 с — не на потоке приёма
+            return {
+                "executor": "device_io",
+                "targets": "all",
+                "metadata": {
+                    "description": (
+                        "Роботы v2: основная остановка всех (домой, серво OFF) {timeout_s?}; ответ — итог каждого"
+                    ),
+                    "args": ["timeout_s?"],
+                },
+            }
         found = self._op_commands.get(command_name)
         if found is None:
             return {}
@@ -273,12 +288,31 @@ class DeviceHubPlugin(ProcessModulePlugin):
             options["key_from"] = source.key_from
         return options
 
+    def request_stop(self, ctx: PluginContext) -> None:
+        """Фаза 1 стопа процесса (C-60.b): защёлка супервизора и запуск стопа роботам потоками области, без ожидания.
+
+        Срок стопа — от момента хука: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S``. Потоки стопа ждёт
+        ``shutdown`` (его ``request_stop_all`` после хука только дожидается). Замок воркеров хук не берёт: супервизор
+        держит его вокруг ``remove_worker`` до 5 с. Ничего не подаёт исполнителю процесса. После ``shutdown`` и на
+        плагине без ``configure`` — без действия; исключение не ловится (логирует оркестратор).
+        """
+        scope = self._scope
+        if scope is None:  # после shutdown или упавшего configure
+            return
+        ctx.log_info("DeviceHubPlugin: request_stop")
+        deadline = time.monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S
+        # Без _workers_lock: присваивание атрибута атомарно; супервизор читает флаг без замка и под замком; воркер,
+        # созданный в окне, удалит shutdown (под замком)
+        self._shutting_down = True
+        self._manager.request_stop_all_begin(deadline)
+
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
 
         Срок — абсолютный: ``monotonic() + _SHUTDOWN_BUDGET_S - _SHUTDOWN_MARGIN_S`` в начале. Фаза 1: стоп всем роботам
-        параллельно (``request_stop_all(deadline)``) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда,
-        ``finally``) -> фаза 4 без записи стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
+        параллельно (``request_stop_all(deadline)``; после хука ``request_stop`` потоки стопа уже запущены — тут только
+        ожидание) -> удаление воркеров -> ``scope.close`` с остатком срока (всегда, ``finally``) -> фаза 4 без записи
+        стопа: одна проверка эха на робота, закрытие сокетов, сохранение реестра.
         ``remove_worker`` фреймворка (до 5,0 с на поток) в срок НЕ входит: его время съедает остаток бюджета закрытия.
         Повторный вызов и вызов после упавшего ``configure`` — без действия (К7).
         """
@@ -881,6 +915,23 @@ class DeviceHubPlugin(ProcessModulePlugin):
         finally:
             self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
+
+    def cmd_robot_park_all(self, data: dict) -> dict:
+        """Основная остановка всех роботов v2 с итогом каждого (T5.3e.5a); ответ — ``DeviceManager.robot_park_all``.
+
+        Порядок отказов: нет исполнителя ``device_io`` -> «идёт остановка хаба» (после хука ``request_stop``) ->
+        ``timeout_s``. Исключение — ответом ``status: "error"`` (``_safe_call``), не наружу.
+        """
+        return self._safe_call(self._park_all, data)
+
+    def _park_all(self, data: dict) -> dict:
+        """Без исполнителя команда стояла бы до 33,5 с на потоке приёма (L-9): громкий отказ, роботы не тронуты."""
+        # Менеджер команд, не драйвер: заглушки без метода допустимы (как в регистрации с опциями)
+        get_info = getattr(self._ctx.command_manager, "get_command_info", None)
+        info = get_info("robot_park_all") if callable(get_info) else None
+        if not (isinstance(info, dict) and isinstance(info.get("metadata"), dict) and info["metadata"].get("executor")):
+            return {"status": "error", "message": "robot_park_all: нет исполнителя device_io"}
+        return self._manager.robot_park_all(data, should_stop=lambda: self._shutting_down)
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Универсальные регистры
