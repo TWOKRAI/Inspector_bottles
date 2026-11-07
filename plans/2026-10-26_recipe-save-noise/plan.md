@@ -174,6 +174,27 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 
 Нет. В-П1…В-П3 закрыты ответами ревью раунда 3 (`design.md` §10.2); решения владельца и лида — `design.md` §11.
 
+## Долг на момент слияния в локальный main (2026-11-07, решение владельца: «merge да, push нет»)
+
+Ветка влита в локальный `main` с долгом: Windows и камер у владельца нет, срока нет. Долг — «ожидает стенда/камеры»,
+закрывается при первом окне с железом; до тех пор пункт C-30 «стенд» не считается снятым.
+
+| Замер | Что не снято | Чем подкреплено сейчас | Статус |
+|---|---|---|---|
+| M1 | Save без правок живым GUI: `bridge_synth` из байтов HEAD — первой записью ≤ `5 0`, второй `0 0`, mtime прежний; `webcam_sketch` `0 0`; `capture_foundation` в `run_gui` вызван | **ЗАМЕНА, не стенд:** `frontend/widgets/tabs/pipeline/tests/test_stand_substitute_m1_m2.py` (настоящие `PipelineTab`/`RecipesTab` offscreen, клик «Сохранить», 5 passed). Нет: `run_gui`, ProcessManager, окно, хуки `MainWindow` | ожидает стенда |
+| M2 | внешняя правка файла при открытом GUI → диалог конфликта на экране | та же замена (диалог перехвачен в offscreen, не показан) | ожидает стенда |
+| M3 | Camera Save `fps=30` → `config.fps: 30` под плагином → Pipeline-Save без конфликта; `git status` чист | ничем | ожидает камеры/стенда |
+| M5 | повтор `mjpg` и `register_update` на живой камере, WARNING на `params` | ничем | ожидает камеры/стенда |
+
+Тоже не снято: `backend_ctl` live-тест хаба; `recipe/tests/test_yaml_patch.py` не собирается на Mac (нет `hypothesis`) —
+1.4 и 1.5 им не подтверждены, прогнать там, где пакет есть; POSIX-лок и таймаут лока (`test_file_lock.py`
+пропускается вне Windows); `test_migration_preserves_eol[lf]` проверен только моделью CRLF.
+
+Решения владельца, которых ещё нет: права на кнопку «Сохранить» Камеры; M4 (Camera Save гасит `layout_unsaved` без
+записи позиций, `frontend/app.py:150-151`); брать ли `_4` (галочка дисплея пишет `enabled: true`, 12 из 22 рецептов);
+int-ключ `0:` в `RecipeEngine.save` (дубль `'0'`); `sentrux gate --save`. `origin/fix/recipe-save-noise` занята
+сессией `-48` и расходится с этой веткой — push не делается.
+
 ## Дальше (вне плана)
 
 - Чистка 21 строки шума в HEAD `letter_robot_sim.yaml` и возврат комментариев, legacy top-level `gui_positions` в
