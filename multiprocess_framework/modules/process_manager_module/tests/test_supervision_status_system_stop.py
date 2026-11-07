@@ -675,7 +675,8 @@ def test_close_with_survivors_sets_done() -> None:
     _bounded(survivors.cs.kill)
     assert _bounded(lambda: survivors.cs.join_until(time.monotonic() + 5.0)) is False
     mid = survivors.info()
-    assert mid is not None and mid["phase"] != "done", f"done выставлен без успешного ожидания детей: {mid}"
+    # 1.2a r2: join_until после kill() — последний ход области до закрытия message_processor, done ставится здесь.
+    assert mid is not None and mid["phase"] == "done", f"done не выставлен после kill и join_until: {mid}"
 
     _bounded(survivors.cs.close)
     final = survivors.info()

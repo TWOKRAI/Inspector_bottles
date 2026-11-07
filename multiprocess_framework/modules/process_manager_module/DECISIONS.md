@@ -2188,28 +2188,38 @@ ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children
   повторный graceful и `phase == "done"` — без изменений), `_set_system_stop_phase` (стоп не начат — WARNING без
   создания словаря; `done` — конечная), `_set_pre_stop_step`, `_publish_system_stop`. Остальной код словарь не трогает.
 - **Инициатор** — `sender` конверта `process.command`: `_handle_process_command` кладёт его в `data` служебным
-  ключом `_sender` только для `system.shutdown` (другим командам `data` не меняется). Нет отправителя или прямой
-  `send_command` мимо конверта — `"unknown"`. Стоп без команды (внешнее `system_stop_event`) — `"event"`.
+  ключом `_sender` только для `system.shutdown` (другим командам `data` не меняется). Значение — `_EnvelopeSender`
+  (подкласс `str`, метка происхождения); `_cmd_system_shutdown` принимает `_sender` только этого типа, строку из
+  `data` клиента — нет (через IPC приходит только `dict`/`str`, подделать тип нельзя). Длина `initiator` — не
+  более 64 символов. Нет отправителя или прямой `send_command` мимо конверта (в том числе с `_sender` в `data`) —
+  `"unknown"`. Стоп без команды (внешнее `system_stop_event`) — `"event"`.
 - **Начало.** `system.shutdown`: ход стопа начинается ДО взвода событий (иначе опрос успел бы начать его как `event`),
   после проверки аргументов (ошибка аргументов стоп не начинает). `deadline_at`: graceful — `started_at + pm_graceful_s`
   бюджета PM, force — `started_at + deadline_s`. `_ChildrenStop.request_stop` первым действием (до
   `_children_stopping`, исполнителя и паузы монитора) начинает стоп как `event`, если он не начат, и объявляет
   `children`. `_cmd_supervision_status`, видя `system_stop is None` при `_pm_stopping()`, сам начинает стоп как
   `event` — окна «стоп идёт, а поле пусто» нет.
-- **`done`** ставит `_ChildrenStop`: в `join_until`, вернувшем `True` (момент факта), иначе в `close()` (выжившие;
-  потребитель судит по `alive`). Не на любом возврате `join_until`: область зовёт его и до `kill()`. Не в
+- **`done`** ставит `_ChildrenStop.join_until`, если он вернул `True` (момент факта) или если `kill()` уже звали
+  (выжившие; потребитель судит по `alive`). Вызов после `kill()` — последний ход области до закрытия
+  `message_processor`: `_finish_stoppable` (`base_manager/core/lifetime.py`) зовёт `close()` только при `True`,
+  поэтому `close()` с выжившими не вызывается и остаётся лишь запасным путём. Не на любом возврате `join_until`:
+  область зовёт его и до `kill()`. Не в
   `_stop_summary`: к нему `message_processor` и SSM уже закрыты (порядок ADR-PMM-040), `done` никто бы не увидел.
 - **Стор.** `system.stop.{phase,mode,initiator,started_at}` через `handle_state_set` (source `ProcessManager`),
   после взвода событий и вне лока словаря. `_publish_system_stop` под отдельным `_system_stop_publish_lock` берёт
   ТЕКУЩИЙ снимок и пишет только ключи, изменившиеся с прошлой публикации: фаза в сторе не откатывается, число
   вызовов равно числу дельт. Командный graceful-стоп — 5 дельт (4 при начале, `done`); эскалация — ещё `mode`.
-  Сбой стора — WARNING, `system.shutdown` не ломается. Флашер SSM может слить соседние дельты: каждую фазу пушем
+  Сбой стора — исключение или ответ со `status` `rejected`/`error` (middleware, валидация) — WARNING, ключ не
+  помечается записанным (следующая публикация повторит его), `system.shutdown` не ломается. Флашер SSM может слить соседние дельты: каждую фазу пушем
   потребитель не увидит.
 
 ### Отвергнуто
 
 - **`done` в `_stop_summary`.** Публикация после закрытия `message_processor` и SSM — никому не видна.
 - **`done` на любом возврате `join_until`.** До `kill()` дети ещё живы.
+- **`done` только в `close()` для выживших** (итерация 0). Область не зовёт `close()` при `False`: стоп с выжившим
+  навсегда оставался `children` (ревью 1.2a, `survivor_rig.py`).
+- **Доверие строке `_sender` в `data`.** Прямая команда мимо конверта подделывала `initiator`.
 - **Отправитель всем командам в `data`.** Ломает обработчики, которые пересылают `data` целиком (`process.relay`)
   или проверяют состав аргументов.
 - **Значение фазы из аргумента издателя.** Поздний издатель `children` откатил бы `done` в сторе (H10).

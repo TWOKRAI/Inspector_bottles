@@ -63,6 +63,17 @@ _SYSTEM_STOP_STORE_KEYS = ("phase", "mode", "initiator", "started_at")
 #: Служебный ключ ``data`` команды ``system.shutdown``: отправитель внешнего ``process.command``
 #: (ставит только ``_handle_process_command``; другим командам не подмешивается).
 _SHUTDOWN_SENDER_KEY = "_sender"
+#: Предел длины ``initiator`` в ``system.stop`` (символов): отправитель конверта — чужая строка.
+_SHUTDOWN_INITIATOR_MAX = 64
+
+
+class _EnvelopeSender(str):
+    """Отправитель конверта ``process.command``, вложенный самим PM (Task 1.2a, ADR-PMM-041).
+
+    Тип — метка происхождения: строку ``_sender`` из ``data`` клиента (через IPC приходит только
+    ``dict``/``str``) ``_cmd_system_shutdown`` не примет, принимает только этот тип."""
+
+    __slots__ = ()
 
 
 def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
@@ -661,9 +672,14 @@ class ProcessManagerProcess(ProcessModule):
                     continue
                 path = f"system.stop.{key}"
                 try:
-                    ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessManager"}})
+                    reply = ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessManager"}})
                 except Exception as exc:  # noqa: BLE001 — handle_state_set ловит только ValueError/TypeError
                     self._log_warning(f"system_stop: запись {path} в стор не удалась: {exc}")
+                    continue
+                # Отказ стора приходит ответом, не исключением (middleware → ``rejected``, сбой → ``error``).
+                status = reply.get("status") if isinstance(reply, dict) else None
+                if status in ("rejected", "error"):
+                    self._log_warning(f"system_stop: стор отклонил {path} ({status}): {reply}")
                     continue
                 published[key] = value
 
@@ -922,10 +938,12 @@ class ProcessManagerProcess(ProcessModule):
         mode = args.get("mode", "graceful")
         if mode not in ("graceful", "force"):
             return {"error": "mode: graceful|force"}
-        # Task 1.2a: отправитель внешнего ``process.command`` (``_handle_process_command``); иначе ``unknown``.
-        initiator = args.get(_SHUTDOWN_SENDER_KEY) or "unknown"
-        if not isinstance(initiator, str):
-            initiator = "unknown"
+        # Task 1.2a: отправитель внешнего ``process.command`` — только ``_EnvelopeSender`` от
+        # ``_handle_process_command``; ``_sender`` из ``data`` клиента (прямая команда) — ``unknown``.
+        sender = args.get(_SHUTDOWN_SENDER_KEY)
+        initiator = (
+            str(sender)[:_SHUTDOWN_INITIATOR_MAX] if isinstance(sender, _EnvelopeSender) and sender else "unknown"
+        )
         # Ход стопа (ADR-PMM-041): (режим, срок force) для ``_begin_system_stop`` / ``_escalate_system_stop``.
         stop_mode, stop_deadline_s, escalate = "graceful", None, False
         reply: dict = {"success": True, "message": "Shutdown initiated"}
@@ -3692,7 +3710,10 @@ class ProcessManagerProcess(ProcessModule):
                 if cmd == "system.shutdown":
                     # Task 1.2a (ADR-PMM-041): инициатор стопа — отправитель конверта. Только этой команде:
                     # другие обработчики получают ``data`` как раньше. Ключ из ``data`` снаружи перекрыт.
-                    inner_msg["data"][_SHUTDOWN_SENDER_KEY] = msg.get("sender")
+                    sender = msg.get("sender")
+                    inner_msg["data"][_SHUTDOWN_SENDER_KEY] = (
+                        _EnvelopeSender(sender) if isinstance(sender, str) else None
+                    )
 
                 # Task 1.9b (D2): команда с исполнителем (L/T) отвечает через ``reply`` сама, позже,
                 # с потока исполнителя; обёртка тогда не отвечает (``DEFERRED``).
@@ -4894,7 +4915,10 @@ class _ChildrenStop:
     def join_until(self, deadline: float) -> bool:
         """Дети остановлены к сроку? Ошибка фазы 1 — один раз повторяется здесь (попадёт в ``errors`` корня);
         реестр упал (группы нет) — ``False`` без исключения. Срок ``force`` (если стоит и ``kill()``
-        ещё не звали) обрезает ``deadline`` — в том числе для группы, созданной здесь же."""
+        ещё не звали) обрезает ``deadline`` — в том числе для группы, созданной здесь же.
+
+        ``done`` ставится при ``True`` или после ``kill()`` (вызов фазы 3 — последний до закрытия
+        message_processor; ``close()`` область зовёт только при ``True``)."""
         error, self._phase1_error = self._phase1_error, None
         if error is not None:
             raise error
@@ -4906,8 +4930,11 @@ class _ChildrenStop:
         if force_at is not None and not self._killed:
             deadline = min(deadline, force_at)
         stopped = self._group.join_until(deadline)
-        if stopped:
+        if stopped or self._killed:
             # Task 1.2a: дети ушли — ``done`` в момент факта (до закрытия message_processor и стора).
+            # После ``kill()`` этот вызов — последний ход области до закрытия message_processor
+            # (``_finish_stoppable`` зовёт ``close()`` только при ``True``): выжившие получают ``done``
+            # здесь, потребитель судит по ``alive``.
             self._announce_phase("done")
         return stopped
 
@@ -4922,8 +4949,8 @@ class _ChildrenStop:
             if self._group is not None:
                 self._group.close()
         finally:
-            # Task 1.2a: выжившие (``join_until`` не дал ``True``) — ``done`` при закрытии области; потребитель
-            # судит по ``alive``. Уже ``done`` — ни изменения, ни записи в стор.
+            # Task 1.2a: запасной путь ``done`` (основной — ``join_until`` после ``kill()``). Уже ``done`` —
+            # ни изменения, ни записи в стор.
             self._announce_phase("done")
 
     def _announce_phase(self, phase: str, *, begin: bool = False) -> None:

@@ -220,3 +220,147 @@ def test_store_phase_never_rolls_back_under_concurrent_publish(order: str) -> No
     # Число вызовов == числу дельт: 4 при начале (phase, mode, initiator, started_at) + done.
     assert len(store.calls) == 5, store.calls
     assert pm._cmd_supervision_status()["system_stop"]["phase"] == "done"
+
+
+# --------------------------------------------------------------------------- #
+# H11. Выживший ребёнок на живом стенде: done до закрытия области (1.2a r2)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def rig_factory():
+    from .test_pm_responsive_during_children_stop import Rig
+
+    rigs: list[Any] = []
+
+    def factory(graceful_s: float) -> Any:
+        rig = Rig(graceful_s)
+        rigs.append(rig)
+        rig.start()
+        return rig
+
+    try:
+        yield factory
+    finally:
+        for rig in rigs:
+            rig.close()
+
+
+def _spy_stop_writes(rig: Any) -> list[tuple[str, Any]]:
+    """Журнал записей ``system.stop.*`` в настоящий стор Rig (пишем и дальше в него)."""
+    log: list[tuple[str, Any]] = []
+    ssm = rig.pm._state_store_manager
+    real = ssm.handle_state_set
+
+    def spy(msg: dict, *args: Any, **kwargs: Any) -> Any:
+        data = msg["data"] if isinstance(msg.get("data"), dict) else msg
+        if str(data.get("path", "")).startswith("system.stop."):
+            log.append((data["path"], data["value"]))
+        return real(msg, *args, **kwargs)
+
+    ssm.handle_state_set = spy
+    return log
+
+
+@pytest.mark.timeout(120)
+def test_survivor_rig_done_after_post_kill_join(rig_factory) -> None:
+    """Ребёнок переживает terminate и kill: область корня закрывается, ``system.stop.phase`` в сторе — ``done``.
+
+    Область зовёт ``close()`` только при ``join_until -> True``; с выжившим ``done`` ставит ``join_until``
+    после ``kill()``. Без этого стоп навсегда остаётся в ``children``."""
+    from .test_supervision_status_system_stop import _gui_msg
+
+    rig = rig_factory(1.0)
+    writes = _spy_stop_writes(rig)
+    child = rig.add_child("stuck", mode="terminate")
+    child.terminate = lambda: None
+    child.kill = lambda: None
+    msg = _gui_msg(sender="gui")
+    worker = threading.Thread(target=lambda: rig.pm._handle_process_command(msg), daemon=True, name="h11-cmd")
+    worker.start()
+    _join(worker)
+    assert rig.wait_root_closed(60.0), "область корня не закрылась за 60 с"
+    assert child.is_alive(), "предусловие: ребёнок не выжил — сценарий выжившего не воспроизведён"
+    snap = rig.pm._system_stop_snapshot()
+    assert snap is not None and snap["phase"] == "done", snap
+    assert ("system.stop.phase", "done") in writes, writes
+    assert writes.count(("system.stop.phase", "done")) == 1, writes
+
+
+# --------------------------------------------------------------------------- #
+# H12. initiator только из конверта process.command (1.2a r2)
+# --------------------------------------------------------------------------- #
+
+
+def _initiator_after(rig: Any) -> str:
+    assert rig.wait_until(lambda: rig.pm._system_stop_snapshot() is not None, 10.0), "стоп не начался"
+    return rig.pm._system_stop_snapshot()["initiator"]
+
+
+def _envelope(rig: Any, data: dict, sender: str) -> None:
+    from .test_supervision_status_system_stop import _gui_msg
+
+    msg = _gui_msg(data, sender=sender)
+    worker = threading.Thread(target=lambda: rig.pm._handle_process_command(msg), daemon=True, name="h12-cmd")
+    worker.start()
+    _join(worker)
+
+
+@pytest.mark.timeout(60)
+def test_initiator_from_envelope_gui(rig_factory) -> None:
+    """Конверт ``process.command`` от ``gui`` с ``_sender`` в ``data``: ``initiator == "gui"``."""
+    rig = rig_factory(5.0)
+    rig.add_child("hold", mode="slow", exit_after_s=3.0)
+    _envelope(rig, {"_sender": "forged"}, "gui")
+    assert _initiator_after(rig) == "gui"
+
+
+@pytest.mark.timeout(60)
+def test_initiator_forged_in_data_ignored(rig_factory) -> None:
+    """Прямая команда ``system.shutdown`` мимо конверта с ``_sender`` в ``data``: ``initiator == "unknown"``."""
+    rig = rig_factory(5.0)
+    rig.add_child("hold", mode="slow", exit_after_s=3.0)
+    rig.send("system.shutdown", {"_sender": "forged"})
+    assert _initiator_after(rig) == "unknown"
+
+
+@pytest.mark.timeout(60)
+def test_initiator_truncated_64(rig_factory) -> None:
+    """Отправитель конверта длиной 200 символов: в ``initiator`` — первые 64."""
+    rig = rig_factory(5.0)
+    rig.add_child("hold", mode="slow", exit_after_s=3.0)
+    _envelope(rig, {}, "g" * 200)
+    assert _initiator_after(rig) == "g" * 64
+
+
+# --------------------------------------------------------------------------- #
+# H13. Отказ стора ответом: WARNING, ключ не помечен записанным (1.2a r2)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(30)
+def test_publish_rejected_warns_and_not_marked() -> None:
+    """``handle_state_set`` отвечает ``rejected``: WARNING, повторная публикация пишет те же 4 ключа снова."""
+    from .test_supervision_status_system_stop import _Light
+
+    light = _Light()
+    paths: list[str] = []
+
+    def rejecting(msg: dict, *args: Any, **kwargs: Any) -> dict:
+        paths.append(msg["data"]["path"])
+        return {"status": "rejected", "reason": "middleware"}
+
+    light.pm._state_store_manager.handle_state_set = rejecting
+    assert light.shutdown({}).get("success") is True
+    first = list(paths)
+    assert first == [
+        "system.stop.phase",
+        "system.stop.mode",
+        "system.stop.initiator",
+        "system.stop.started_at",
+    ], first
+    worker = threading.Thread(target=light.pm._publish_system_stop, daemon=True, name="h13-publish")
+    worker.start()
+    _join(worker)
+    assert paths[4:] == first, paths
+    assert light.pm._log_warning.call_count >= 4, light.pm._log_warning.call_args_list
