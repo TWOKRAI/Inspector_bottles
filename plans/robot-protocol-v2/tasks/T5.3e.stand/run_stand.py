@@ -1,13 +1,13 @@
 # ruff: noqa: E501
-"""Оркестратор живого стенда T5.3e: сценарии park P1-P3 (L1-L3 брифа T5.3e.3) + регрессия SPI.stand (S0, S1, G).
+"""Оркестратор живого стенда T5.3e: сценарии park P1-P5 (P1-P3 = L1-L3 брифа T5.3e.3, P4-P5 = `robot_park_all`, T5.3e.5a) + регрессия SPI.stand (S0, S1, G).
 
-Копия `SPI.stand/run_stand.py` с правками T5.3e.3s: ключи `--scenario P1|P2|P3`, `--regress`, новая семантика
+Копия `SPI.stand/run_stand.py` с правками T5.3e.3s: ключи `--scenario P1|P2|P3` (+ P4, P5 - T5.3e.5a), `--regress`, новая семантика
 `--repeats`, счёт park (park.jsonl, jog.jsonl, program.jsonl). Основа - стенд SPI (S0-S3 как C-29 + device_io).
 Восстановлено по описанию стенда C-29 (`plans/robot-protocol-v2/tasks/C-29.stand.md`, handoff T5.3h) - скрипты C-29
 жили в scratchpad и потеряны (урок C-29: скрипты стенда - в git). Точная последовательность, время и числа - `README.md`.
 
 Режимы:
-    --scenario P1|P2|P3  сценарий park (L1-L3): группа D, подключение, готовность, сценарий, system_shutdown, count.py;
+    --scenario P1|P2|P3|P4|P5  сценарий park (L1-L3; P4/P5 - robot_park_all): группа D, подключение, готовность, сценарий, system_shutdown, count.py;
                     --repeats N (по умолчанию 3) - повтор прогона целиком, каждый в своём run-<время>/
     --regress       один прогон S0, S1 и G с прежними порогами SPI.stand (S2/S3 - только `--only S2,S3`)
     --dry-run       печатает план (команды, переменные, шаги), ничего не пишет и не запускает
@@ -57,7 +57,7 @@ RACE_PAUSE_S = 0.1  # пауза между кругами опроса
 RACE_CALL_TIMEOUT_S = 2.0  # срок одного вызова
 RACE_EXTRA_S = 20.0  # после первого успешного device_list ждать introspect.* ещё не дольше
 RACE_CMDS = ("introspect.status", "introspect.executors")
-PARK_SCENARIOS = ("P1", "P2", "P3")
+PARK_SCENARIOS = ("P1", "P2", "P3", "P4", "P5")
 READY_DEADLINE_S = 20.0  # C-57: каждое из двух условий готовности, шаг 0,05 с
 READY_STEP_S = 0.05
 PARK_POLL_DEADLINE_S = 40.0  # итог park: опрос `.park`, шаг 0,05 с
@@ -65,6 +65,8 @@ PARK_POLL_STEP_S = 0.05
 JOG_PERIOD_S = 0.05  # держатель P1: robot_jog_hold каждые <= 0,1 с
 USER_PROGRAM = "p3"  # P3: программа пользователя
 USER_PROGRAM_LEGS = 20  # P3: ходов (JOINT a/b, ~0,28 с каждый на симе без задержки)
+P5_SHUTDOWN_DELAY_S = 0.2  # P5: от отправки robot_park_all до system_shutdown
+PARK_ALL_CALL_TIMEOUT_S = 8.0  # P5: потолок ожидания ответа robot_park_all в потоке
 
 
 # --------------------------------------------------------------------------- план / конфиг
@@ -108,6 +110,8 @@ PARK_PLAN_STEPS = {
     "P1": "mark P1; держатель robot_jog_hold каждые 0,05 с (до возврата system_shutdown); moving + 0,3 с -> robot_park; итог `.park`",
     "P2": "mark P2; robot_jog_step dx=80 (вне дома, без jog); robot_park -> done; robot_servo on; второй robot_park -> already",
     "P3": "mark P3; robot_point_save a, b; robot_program_save p3 (20 ходов); robot_program_run; done >= 3 -> robot_park; опрос `.program` 25 мс",
+    "P4": "mark P4; robot_jog_step dx=80 (вне дома); robot_park_all {} -> done/moved (<= 3,0 с); второй robot_park_all {} -> already (<= 2,0 с)",
+    "P5": "mark P5; robot_jog_step dx=80; robot_park_all {} в потоке; +0,2 с system_shutdown; опрос `.park` 25 мс (park_poll.jsonl) -> failed, «драйвер робота останавливается»",
 }
 
 
@@ -403,6 +407,59 @@ class ProgramPoller(Poller):
             return self.last
 
 
+class ParkPoller(Poller):
+    """P5: `devices.state.<id>.park` через `state.get` каждые 25 мс -> `park_poll.jsonl` (строка на смену seq/state/step)."""
+
+    def __init__(self, port: int, path: Path) -> None:
+        super().__init__("park-poller", port)
+        self._fh = path.open("a", encoding="utf-8", buffering=1)
+        self.last_key: tuple[Any, Any, Any] | None = None
+        self.terminals: list[tuple[float, dict[str, Any]]] = []
+
+    def step(self) -> None:
+        res = self.drv.send_command(
+            "ProcessManager", "state.get", {"path": f"devices.state.{ROBOT_ID}.park"}, timeout=2.0
+        )
+        value = find_key(res, "value")
+        if not isinstance(value, dict):
+            return
+        t = time.time()
+        key = (value.get("seq"), value.get("state"), value.get("step"))
+        with self.lock:
+            if key == self.last_key:
+                return
+            self.last_key = key
+            if value.get("state") in ("done", "failed"):
+                self.terminals.append((t, value))
+            self._fh.write(json.dumps({"t": round(t, 3), "value": value}, ensure_ascii=False) + "\n")
+
+    def first_terminal_after_seq(self, seq0: int) -> tuple[float, dict[str, Any]] | None:
+        with self.lock:
+            return next(((t, v) for t, v in self.terminals if isinstance(v.get("seq"), int) and v["seq"] > seq0), None)
+
+
+class ParkAllCaller(Poller):
+    """P5: один `robot_park_all {}` в потоке (свой драйвер backend_ctl); ответ или исключение - событие `park_reply`."""
+
+    def __init__(self, port: int, ev: EventLog, label: str) -> None:
+        super().__init__("park-all-caller", port)
+        self.ev, self.label = ev, label
+
+    def run(self) -> None:
+        t_send = time.time()
+        body: Any = None
+        error: str | None = None
+        try:
+            body = reply_body(self.drv.send_command("devices", "robot_park_all", {}, timeout=PARK_ALL_CALL_TIMEOUT_S))
+        except Exception as exc:  # noqa: BLE001 - ответа нет (бэкенд закрывается): записать причину
+            error = f"{type(exc).__name__}: {exc}"[:200]
+        t_rx = time.time()
+        if body is not None and not isinstance(body, dict):
+            body = {"raw": repr(body)[:200]}
+        self.ev("park_reply", label=self.label, t_send=round(t_send, 3), t_rx=round(t_rx, 3),
+                elapsed_s=round(t_rx - t_send, 3), reply=body, error=error)  # fmt: skip
+
+
 def op_count(lines: list[dict[str, Any]], opname: str) -> int:
     """Сколько записей кода операции `opname` (сумма `n` склеек)."""
     pat = re.compile(rf"^W\*? CMD_OPCODE = \d+ \({opname}\)")
@@ -421,6 +478,10 @@ class Stand:
         self.checks: dict[str, Any] = {"meta": {"device_io_expected": not getattr(args, "base", False)}}
         self.holder: JogHolder | None = None
         self.program: ProgramPoller | None = None
+        self.park_poller: ParkPoller | None = None  # P5
+        self.caller: ParkAllCaller | None = None  # P5
+        self.t_shutdown_send = 0.0
+        self.shutdown_res: dict[str, Any] | None = None  # P5 гасит бэкенд сам, finish() не повторяет
         self.park_fh = (run_dir / "park.jsonl").open("a", encoding="utf-8", buffering=1)
         self.spawn_t: dict[str, float] = {}
 
@@ -756,8 +817,8 @@ class Stand:
         reply, t_reply = self.park_cmd("P1")
         self.park_final("P1", reply, t_reply)  # затем finish(): system_shutdown, держатель живёт до его возврата
 
-    def scenario_p2(self) -> None:
-        """L2: первый park без jog (робот вне дома, простой), `robot_servo on`, второй park."""
+    def leave_home(self, name: str) -> None:
+        """Робот вне дома, простой: `robot_jog_step dx=80` (без jog-удержания); ждёт x0 + 80 мм и `moving False`."""
         x0 = self.telemetry().get("x_mm")
 
         def stands_off_home() -> bool:
@@ -769,8 +830,12 @@ class Stand:
             )
 
         self.hub("robot_jog_step", device_id=ROBOT_ID, dx=80, dy=0, spd=50)
-        if not self.wait_for(stands_off_home, 10.0, "P2 робот вне дома, стоит"):
+        if not self.wait_for(stands_off_home, 10.0, f"{name} робот вне дома, стоит"):
             self.ev("precondition_failed", what="робот не вышел из дома шагом jog за 10 с")
+
+    def scenario_p2(self) -> None:
+        """L2: первый park без jog (робот вне дома, простой), `robot_servo on`, второй park."""
+        self.leave_home("P2")
         reply1, t1 = self.park_cmd("P2.1")
         self.park_final("P2.1", reply1, t1)
         self.hub("robot_servo", device_id=ROBOT_ID, on=True)
@@ -808,6 +873,60 @@ class Stand:
         reply, t_reply = self.park_cmd("P3")
         self.park_final("P3", reply, t_reply)
 
+    def park_all_cmd(self, label: str) -> tuple[dict[str, Any], float]:
+        """`robot_park_all {}` (исполнитель device_io, без device_id): ответ, момент его прихода. Событие `park_reply`."""
+        t_send = time.time()
+        res = self.hub("robot_park_all", timeout=20.0)
+        t_rx = time.time()
+        body = reply_body(res)
+        body = body if isinstance(body, dict) else {"raw": repr(body)[:200]}
+        self.ev("park_reply", label=label, t_send=round(t_send, 3), t_rx=round(t_rx, 3),
+                elapsed_s=round(t_rx - t_send, 3), reply=body, error=None)  # fmt: skip
+        return body, t_rx
+
+    @staticmethod
+    def robot_seq(reply: dict[str, Any]) -> dict[str, Any]:
+        """`{seq}` робота `robot_main` из ответа `robot_park_all` - в форме, которую ждёт `park_final`."""
+        robots = reply.get("robots")
+        mine = robots.get(ROBOT_ID) if isinstance(robots, dict) else None
+        return {"seq": mine.get("seq") if isinstance(mine, dict) else None}
+
+    def scenario_p4(self) -> None:
+        """L4: вне дома (`jog_step dx=80`), `robot_park_all {}` -> done/moved, затем второй `robot_park_all {}` -> already."""
+        self.leave_home("P4")
+        reply1, t1 = self.park_all_cmd("P4.1")
+        self.park_final("P4.1", self.robot_seq(reply1), t1)
+        reply2, t2 = self.park_all_cmd("P4.2")
+        self.park_final("P4.2", self.robot_seq(reply2), t2)
+
+    def scenario_p5(self) -> None:
+        """L5: вне дома; `robot_park_all {}` в потоке; через 0,2 с `system_shutdown`; итог `.park` наблюдает свой опрос."""
+        self.leave_home("P5")
+        value0 = self.state_value("park")
+        seq0 = value0.get("seq") if isinstance(value0, dict) and isinstance(value0.get("seq"), int) else 0
+        self.park_poller = ParkPoller(self.args.backend_port, self.run_dir / "park_poll.jsonl")
+        self.park_poller.start()
+        self.caller = ParkAllCaller(self.args.backend_port, self.ev, "P5")
+        self.caller.start()
+        time.sleep(P5_SHUTDOWN_DELAY_S)
+        self.shutdown_res = self.do_shutdown()
+        self.caller.join(PARK_ALL_CALL_TIMEOUT_S + 1.0)  # ответ команды, если пришёл
+        t_send = self.t_shutdown_send
+        done = self.park_poller.first_terminal_after_seq(seq0)
+        if done is not None and done[0] < t_send:
+            self.ev("precondition_failed", what="ход кончился раньше system_shutdown (итог .park до его отправки)")
+
+    def do_shutdown(self) -> dict[str, Any]:
+        """`system_shutdown` (graceful, настоящий `process.stop`): события `shutdown_send` / `shutdown_reply`, итог для checks."""
+        res: dict[str, Any] = {}
+        self.t_shutdown_send = self.ev("shutdown_send")
+        try:
+            res["shutdown"] = self.drv.system_shutdown(wait=True, wait_timeout=20.0)
+        except Exception as exc:  # noqa: BLE001
+            res["shutdown_error"] = f"{type(exc).__name__}: {exc}"
+        self.ev("shutdown_reply")
+        return res
+
     # ---- группа G: подключённый робот на быстром симе
     def group_g(self) -> None:
         g: dict[str, Any] = {}
@@ -833,17 +952,20 @@ class Stand:
 
     # ---- останов и уборка
     def finish(self, main_md5_before: str, status_before: str) -> None:
-        for p in (getattr(self, "status", None), getattr(self, "journal", None), self.program):
+        for p in (
+            getattr(self, "status", None),
+            getattr(self, "journal", None),
+            self.program,
+            self.park_poller,
+            self.caller,
+        ):
             if p is not None:
                 p.close()
         res: dict[str, Any] = {}
         if self.drv is not None:
-            self.ev("shutdown_send")
-            try:
-                res["shutdown"] = self.drv.system_shutdown(wait=True, wait_timeout=20.0)
-            except Exception as exc:  # noqa: BLE001
-                res["shutdown_error"] = f"{type(exc).__name__}: {exc}"
-            self.ev("shutdown_reply")
+            res.update(
+                self.shutdown_res if self.shutdown_res is not None else self.do_shutdown()
+            )  # P5 погасил бэкенд сам
             self.drv.close()
         if self.holder is not None:  # P1: держатель шлёт до возврата system_shutdown
             self.holder.close()
