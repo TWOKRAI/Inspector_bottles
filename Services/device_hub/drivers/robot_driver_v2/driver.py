@@ -660,7 +660,7 @@ class _RobotDriverCore(BaseDeviceDriver):
         Post: целое ``>= 0`` (0 — park ещё не принимался); то же значение, что ``seq`` в
         ``devices.state.<id>.park``. Не бросает, ничего не меняет.
         """
-        raise NotImplementedError("T5.3e.5a")
+        return self._state.park_view().seq
 
     def park_wait(self, seq: int, timeout_s: float) -> dict | None:
         """Ждать терминал park ``seq`` этого робота не дольше ``timeout_s`` с реального времени (T5.3e.5a).
@@ -679,7 +679,7 @@ class _RobotDriverCore(BaseDeviceDriver):
         Терминал, поставленный до вызова, возвращается сразу (хранятся 8 последних). Время — реальное:
         ``FakeClock`` драйвера ожидание не двигает. Не бросает.
         """
-        raise NotImplementedError("T5.3e.5a")
+        return self._park.wait_terminal(seq, timeout_s)
 
     # --- задания ---
 

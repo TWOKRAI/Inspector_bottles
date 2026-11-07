@@ -69,8 +69,8 @@ class _Recording(DeviceHubPlugin):
 
 def test_device_hub_plugin_has_73_commands_56_generated() -> None:
     names = set(DeviceHubPlugin.commands)
-    assert len(names) == 73
-    generated = names - _DEVICE_AND_HIK
+    assert len(names) == 74
+    generated = names - _DEVICE_AND_HIK - {"robot_park_all"}  # ручная команда T5.3e.5 — не из описаний операций
     assert generated == set(command_table(DEFAULT_SOURCES)) and len(generated) == 56
     assert all(
         DeviceHubPlugin.commands[n] == f"cmd_{n}" and callable(getattr(DeviceHubPlugin, f"cmd_{n}")) for n in names
@@ -193,23 +193,26 @@ def test_command_options_driver_command_description_only_and_plain_commands_empt
     assert plugin.command_options("hik_enum") == {}
 
 
-def test_command_options_executor_exactly_on_ten_data_commands() -> None:
+def test_command_options_executor_on_ten_data_commands_and_park_all() -> None:
     plugin = DeviceHubPlugin()
     with_executor = sorted(n for n in DeviceHubPlugin.commands if plugin.command_options(n).get("executor"))
     assert with_executor == sorted(
-        f"robot_{op}"
-        for op in (
-            "param_get_all",
-            "point_list",
-            "point_save",
-            "point_delete",
-            "frame_list",
-            "frame_teach",
-            "program_list",
-            "program_get",
-            "program_save",
-            "program_delete",
-        )
+        [
+            f"robot_{op}"
+            for op in (
+                "param_get_all",
+                "point_list",
+                "point_save",
+                "point_delete",
+                "frame_list",
+                "frame_teach",
+                "program_list",
+                "program_get",
+                "program_save",
+                "program_delete",
+            )
+        ]
+        + ["robot_park_all"]
     )
 
 

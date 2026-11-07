@@ -16,12 +16,13 @@ import itertools
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.base_manager.interfaces import IHandle, ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
 
+from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_PARKING
 from Services.device_hub.errors import (
     DeviceHubError,
     DeviceNotFoundError,
@@ -35,6 +36,7 @@ from Services.device_hub.robot_data_ops import STORE_ERRORS, run_op, store_error
 from Services.device_hub.spi import DeviceDriver
 
 if TYPE_CHECKING:
+    from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
     from Services.device_hub.robot_data_ops import RobotDataStore
 
 logger = get_std_logger(__name__)
@@ -44,6 +46,22 @@ _STOP_ALL_DEFAULT_S = 2.5
 # Номер потока рассылки стопа: имя ``stop-<id>-<k>`` уникально в области
 _STOP_SEQ = itertools.count(1)
 _STOP_SEQ_LOCK = threading.Lock()
+
+# robot_park_all (T5.3e.5a): срок park по умолчанию и его диапазон, с
+_PARK_ALL_DEFAULT_S = 30.0
+_PARK_ALL_MIN_S = 1.0
+_PARK_ALL_MAX_S = 32.0
+# Запас срока ожидания: тик 0,5 с + длительность — срок park замечает первый тик после него
+_PARK_ALL_GRACE_S = 1.5
+# После should_stop: ответ ≤ 1,0 с от хука (окно join исполнителя ≈ 3 с не съедается)
+_PARK_ALL_STOP_GRACE_S = 0.5
+# Срез ожидания одного робота: задержка реакции на should_stop (0,2 + 0,5 < 1,0)
+_PARK_ALL_SLICE_S = 0.2
+_TEXT_PARK_ALL_HUB_STOPPING = "идёт остановка хаба"
+_TEXT_PARK_ALL_BAD_TIMEOUT = "timeout_s: число от 1 до 32"
+_TEXT_PARK_ALL_NOT_DONE = "основная остановка не выполнена: "
+# skipped с этими причинами — не провал команды (робот не v2 или без связи — park ему не нужен)
+_PARK_ALL_OK_SKIPS = frozenset({"not_connected", "not_v2"})
 
 
 def _next_stop_k() -> int:
@@ -616,15 +634,17 @@ class DeviceManager(BaseManager, ObservableMixin):
             ``{"status": "error", "message": "timeout_s: число от 1 до 32"}``.
 
         Обход: записи реестра с ``kind == "robot"`` по возрастанию ``id`` (порядок отправки и ``message``).
-        Признак v2 — ``entry.protocol == "delta_v2"`` из записи реестра (не из драйвера). Каждому v2 со связью —
-        ``drv.call("park", {"timeout_s": float(timeout_s)})`` на драйвере из ``get_driver(id)``, затем ожидание
-        итога через ``drv.park_wait(seq, ...)``. Робот для метода — запись реестра (``upsert``) плюс драйвер,
+        Признак v2 — ``entry.protocol == "delta_v2"`` из записи реестра (не из драйвера). Сначала park всем: каждому
+        v2 со связью по очереди ``drv.call("park", {"timeout_s": float(timeout_s)})`` на драйвере из
+        ``get_driver(id)``; затем одно общее ожидание итогов всех принятых через ``drv.park_wait(seq, ...)`` срезами
+        до ``deadline`` и завершающий проход без ожидания. Отправка последовательная: роботы паркуются параллельно,
+        ждут одного срока. Робот для метода — запись реестра (``upsert``) плюс драйвер,
         который отдаёт ``get_driver(id)``; в тестах драйвер подставляется ``register_driver_factory("robot",
         factory)`` до ``initialize()``, связь — ``connect(id)`` / ``drv.is_connected``.
 
         Ответ::
 
-            {"status": "ok" | "error", "timeout_s": t, "elapsed_s": float,   # t — принятый timeout_s (30.0 без ключа)
+            {"status": "ok" | "error", "timeout_s": float(t), "elapsed_s": float,   # 30.0 без ключа
              "robots": {<id>: R, ...}}            # при "error" ещё:
             "message": "основная остановка не выполнена: <id>, <id>"   # id по возрастанию, через ", "
 
@@ -637,14 +657,122 @@ class DeviceManager(BaseManager, ObservableMixin):
             ``{"result": "skipped", "reason": "not_v2" | "not_connected" | "stopping" | "no_time"}`` — робот не
             тронут: ``not_v2`` — протокол не ``delta_v2`` (проверка до связи); ``not_connected`` — драйвера нет
             или ``is_connected`` ложен; ``stopping`` — ``should_stop()`` истинен перед его отправкой (ему и
-            следующим); ``no_time`` — срок ожидания вышел до его отправки (ему и следующим);
+            следующим, в фазе отправки); ``no_time`` — срок ожидания вышел до его отправки (отправки прежним
+            роботам съели срок; ему и следующим);
             ``{"result": "refused", "message": m}`` — ``park`` отказал (кроме «park уже идёт»);
             ``{"result": "error", "message": f"{type(exc).__name__}: {exc}"}`` — исключение вызова.
         Присоединение: ``park`` отказал текстом «идёт основная остановка робота» (park оператора уже идёт) → хаб
         ждёт его ``seq`` (``drv.park_current_seq()``), в ``R`` ещё ``"joined": True``; присоединённый park живёт
         по своему сроку, хаб ждёт только свой (итог может быть ``timeout``).
         """
-        raise NotImplementedError("T5.3e.5a")
+        t0 = time.monotonic()
+        try:
+            return self._park_all(args, should_stop, t0)
+        except Exception as exc:  # no-health: страховка «не бросает» — ошибка уходит в ответ команды и в лог
+            logger.exception("device_hub: robot_park_all прерван")
+            return {"status": "error", "message": f"robot_park_all: {type(exc).__name__}: {exc}"}
+
+    def _park_all(self, args: dict, should_stop: Callable[[], bool], t0: float) -> dict:
+        """Тело ``robot_park_all``: отказы -> park всем по ``id`` -> общее ожидание -> завершающий проход."""
+        if should_stop():
+            return {"status": "error", "message": _TEXT_PARK_ALL_HUB_STOPPING}
+        t = args.get("timeout_s", _PARK_ALL_DEFAULT_S)
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not (_PARK_ALL_MIN_S <= t <= _PARK_ALL_MAX_S):
+            return {"status": "error", "message": _TEXT_PARK_ALL_BAD_TIMEOUT}
+        timeout_s = float(t)
+        deadline = t0 + timeout_s + _PARK_ALL_GRACE_S
+        robots: dict[str, dict] = {}
+        # Ждущие: (id, драйвер, seq, присоединён) — драйвер тот же, что получил park (device_upsert между ними
+        # увёл бы seq к другому автомату)
+        pending: list[tuple[str, RobotDriverV2, int, bool]] = []
+        stopped = False
+        cut: str | None = None
+        entries = sorted((e for e in self.snapshot_registry() if e.kind == "robot"), key=lambda e: e.id)
+        for entry in entries:
+            if entry.protocol != "delta_v2":
+                robots[entry.id] = {"result": "skipped", "reason": "not_v2"}
+                continue
+            drv = self.get_driver(entry.id)
+            if drv is None or not drv.is_connected:
+                robots[entry.id] = {"result": "skipped", "reason": "not_connected"}
+                continue
+            if cut is None:
+                now = time.monotonic()
+                if should_stop():
+                    cut, stopped = "stopping", True
+                    deadline = min(deadline, now + _PARK_ALL_STOP_GRACE_S)
+                elif now >= deadline:
+                    cut = "no_time"
+            if cut is not None:
+                robots[entry.id] = {"result": "skipped", "reason": cut}
+                continue
+            robot = cast("RobotDriverV2", drv)
+            try:
+                reply = robot.call("park", {"timeout_s": timeout_s})
+                if reply.get("accepted") is True:
+                    pending.append((entry.id, robot, int(reply["seq"]), False))
+                elif reply.get("message") == TEXT_PARKING:
+                    pending.append((entry.id, robot, robot.park_current_seq(), True))
+                else:
+                    robots[entry.id] = {"result": "refused", "message": reply.get("message")}
+            except Exception as exc:  # no-health: исключение одного робота — его исход в ответе, соседи идут дальше
+                robots[entry.id] = {"result": "error", "message": f"{type(exc).__name__}: {exc}"}
+
+        while pending and time.monotonic() < deadline:
+            for item in list(pending):
+                now = time.monotonic()
+                if not stopped and should_stop():
+                    stopped = True
+                    deadline = min(deadline, now + _PARK_ALL_STOP_GRACE_S)
+                left = deadline - now
+                if left <= 0:
+                    break
+                if self._park_all_poll(item, min(_PARK_ALL_SLICE_S, left), robots):
+                    pending.remove(item)
+        for item in pending:  # завершающий проход: итог, поставленный в чужом срезе после опроса робота
+            if not self._park_all_poll(item, 0.0, robots):
+                robots[item[0]] = {"result": "timeout", "seq": item[2]}
+
+        robots = {dev_id: robots[dev_id] for dev_id in sorted(robots)}
+        failed = [
+            dev_id
+            for dev_id, r in robots.items()
+            if not (r["result"] == "done" or (r["result"] == "skipped" and r["reason"] in _PARK_ALL_OK_SKIPS))
+        ]
+        answer: dict[str, Any] = {
+            "status": "error" if failed else "ok",
+            "timeout_s": timeout_s,
+            "elapsed_s": time.monotonic() - t0,
+            "robots": robots,
+        }
+        if failed:
+            answer["message"] = _TEXT_PARK_ALL_NOT_DONE + ", ".join(failed)
+        return answer
+
+    @staticmethod
+    def _park_all_poll(item: tuple[str, RobotDriverV2, int, bool], timeout_s: float, robots: dict[str, dict]) -> bool:
+        """Один срез ожидания робота: итог (или исключение) записан в ``robots`` -> True; итога нет -> False."""
+        dev_id, robot, seq, joined = item
+        try:
+            value = robot.park_wait(seq, timeout_s)
+        except Exception as exc:  # no-health: исход робота в ответе, ожидание соседей идёт дальше
+            robots[dev_id] = {"result": "error", "message": f"{type(exc).__name__}: {exc}"}
+            return True
+        if value is None:
+            return False
+        if value.get("state") == "done":
+            r: dict[str, Any] = {
+                "result": "done",
+                "seq": seq,
+                "home": value.get("home"),
+                "elapsed_s": value.get("elapsed_s"),
+            }
+        else:
+            r = {"result": "failed", "seq": seq, "step": value.get("step"), "reason": value.get("reason")}
+        if joined:
+            r["joined"] = True
+        robots[dev_id] = r
+        return True
 
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers

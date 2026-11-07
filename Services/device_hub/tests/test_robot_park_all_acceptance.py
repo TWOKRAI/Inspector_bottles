@@ -121,6 +121,7 @@ class Scripted(BaseDeviceDriver):
         self.waits: list[tuple[int, float]] = []
         self.park_reply: dict = {"status": "ok", "accepted": True, "seq": 1, "timeout_s": DEFAULT_TIMEOUT_S}
         self.raises: Exception | None = None
+        self.send_gate: threading.Event | None = None  # задан — отправка park не возвращается, пока тест не откроет
         self.terminal: dict | None = None  # None — терминала нет: park_wait ждёт весь срок и возвращает None
         self.current_seq = 7
 
@@ -148,6 +149,8 @@ class Scripted(BaseDeviceDriver):
             self.order.append(self.entry.id)
             if self.raises is not None:
                 raise self.raises
+            if self.send_gate is not None:
+                self.send_gate.wait(10.0)
             return dict(self.park_reply)
         return {"status": "ok"}
 
@@ -542,19 +545,25 @@ def test_several_failures_listed_ascending_and_mapped_per_result_kind() -> None:
         assert took <= 2.9, took
 
 
-def test_wait_expired_before_next_send_marks_rest_no_time() -> None:
-    """Первый робот съел срок (``timeout_s 1.0`` -> 2,5 с): следующему — ``skipped/no_time``, park ему не отправлен."""
+def test_send_longer_than_deadline_marks_next_robot_no_time() -> None:
+    """Отправка первому дольше срока (``timeout_s 1.0`` -> 2,5 с): второму ``skipped/no_time``, park ему не уходит."""
     with hub() as h:
-        h.add_scripted("ra")  # итога нет
+        first = h.add_scripted("ra")
+        first.send_gate = threading.Event()
         second = h.add_scripted("rb")
         second.terminal = done_terminal()
-        answer, took = h.park_all({"timeout_s": 1.0})
-        assert answer["robots"]["ra"] == {"result": "timeout", "seq": 1}, answer
+        call = BackgroundCall(h, {"timeout_s": 1.0}, lambda: False)
+        try:
+            call.until(lambda: len(first.park_calls()) == 1, 5, "хаб послал park первому")
+            time.sleep(2.7)  # срок t0 + 1,0 + 1,5 вышел, отправка первому всё ещё идёт
+        finally:
+            first.send_gate.set()
+        answer, _ = call.wait()
         assert answer["robots"]["rb"] == {"result": "skipped", "reason": "no_time"}, answer
         assert second.calls == [], second.calls
+        assert answer["robots"]["ra"] == {"result": "timeout", "seq": 1}, answer
         assert answer["status"] == "error", answer
         assert answer["message"] == TEXT_NOT_DONE + "ra, rb", answer
-        assert took <= 2.9, took
 
 
 # --------------------------------------------------------------------------------------------------
@@ -671,14 +680,22 @@ def test_should_stop_on_entry_refuses_whole_command_before_timeout_check() -> No
         assert took < 1.0, took
 
 
-def test_should_stop_before_next_send_skips_it_and_following() -> None:
-    """Стоп после отправки первому: второму и третьему ``skipped/stopping``, park им не отправлен, ``error``."""
+def test_stop_during_first_send_skips_next_robots_as_stopping() -> None:
+    """Стоп во время отправки первому: следующим ``skipped/stopping``, park им не отправлен, ``error``."""
     with hub() as h:
         first = h.add_scripted("ra")
+        first.send_gate = threading.Event()
         first.terminal = done_terminal()
         second = h.add_scripted("rb")
         third = h.add_scripted("rc")
-        answer, _ = h.park_all({}, should_stop=lambda: len(first.waits) >= 1)  # стоп после ожидания итога первого
+        stop = threading.Event()
+        call = BackgroundCall(h, {}, stop.is_set)
+        try:
+            call.until(lambda: len(first.park_calls()) == 1, 5, "хаб послал park первому")
+            stop.set()  # процесс останавливается, пока идёт отправка первому
+        finally:
+            first.send_gate.set()
+        answer, _ = call.wait()
         assert len(first.park_calls()) == 1, first.calls
         assert answer["robots"]["rb"] == {"result": "skipped", "reason": "stopping"}, answer
         assert answer["robots"]["rc"] == {"result": "skipped", "reason": "stopping"}, answer
