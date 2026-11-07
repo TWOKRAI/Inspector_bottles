@@ -597,6 +597,55 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": "хранилище данных робота не задано"}
         return run_op(self._robot_store, dev_id, op, args, entry.params, log=logger)
 
+    def robot_park_all(self, args: dict, *, should_stop: Callable[[], bool] = lambda: False) -> dict:
+        """Основная остановка всех роботов v2 реестра с итогом каждого в ответе (команда ``robot_park_all``, T5.3e.5a).
+
+        Вызов: ``mgr.robot_park_all({})`` или ``mgr.robot_park_all({"timeout_s": 5.0}, should_stop=fn)``.
+        ``args["timeout_s"]`` — срок park каждого робота и основа срока ожидания, по умолчанию ``30.0``; прочие
+        ключи игнорируются. ``should_stop`` — без аргументов, ``True`` = процесс останавливается (хук
+        ``request_stop`` плагина); опрашивается перед каждой отправкой и в ожидании (не реже раза в 0,2 с).
+
+        Pre: нет; связь с роботами не нужна. Зовут из потока исполнителя команды (вызов блокирующий).
+        Post: не бросает. Срок ожидания ``deadline = t0 + timeout_s + 1.5`` (``t0`` — вход в метод, реальное
+        время); ответ не позже него плюс остаток одной идущей отправки ``park``. ``should_stop()`` стал истинным
+        во время ожидания → ``deadline = min(deadline, now + 0.5)``.
+
+        Отказы всей команды (роботы не тронуты, нового ``seq`` park нет), проверка в этом порядке:
+            ``should_stop()`` истинен на входе → ``{"status": "error", "message": "идёт остановка хаба"}``;
+            ``timeout_s`` — ``bool``, не ``int``/``float`` или вне ``[1.0, 32.0]`` →
+            ``{"status": "error", "message": "timeout_s: число от 1 до 32"}``.
+
+        Обход: записи реестра с ``kind == "robot"`` по возрастанию ``id`` (порядок отправки и ``message``).
+        Признак v2 — ``entry.protocol == "delta_v2"`` из записи реестра (не из драйвера). Каждому v2 со связью —
+        ``drv.call("park", {"timeout_s": float(timeout_s)})`` на драйвере из ``get_driver(id)``, затем ожидание
+        итога через ``drv.park_wait(seq, ...)``. Робот для метода — запись реестра (``upsert``) плюс драйвер,
+        который отдаёт ``get_driver(id)``; в тестах драйвер подставляется ``register_driver_factory("robot",
+        factory)`` до ``initialize()``, связь — ``connect(id)`` / ``drv.is_connected``.
+
+        Ответ::
+
+            {"status": "ok" | "error", "timeout_s": t, "elapsed_s": float,   # t — принятый timeout_s (30.0 без ключа)
+             "robots": {<id>: R, ...}}            # при "error" ещё:
+            "message": "основная остановка не выполнена: <id>, <id>"   # id по возрастанию, через ", "
+
+        ``"ok"`` ⇔ у каждого ``R`` ``result == "done"`` либо ``result == "skipped"`` с ``reason`` из
+        ``{"not_connected", "not_v2"}``; роботов нет → ``"ok"``, ``robots: {}``. В ``message`` — id всех прочих.
+        ``R`` (по одному на каждого робота реестра):
+            ``{"result": "done", "seq": k, "home": "moved" | "already", "elapsed_s": e}``;
+            ``{"result": "failed", "seq": k, "step": s, "reason": r}`` — ``step``/``reason`` из терминала park;
+            ``{"result": "timeout", "seq": k}`` — терминала нет к сроку ожидания (park робота идёт дальше);
+            ``{"result": "skipped", "reason": "not_v2" | "not_connected" | "stopping" | "no_time"}`` — робот не
+            тронут: ``not_v2`` — протокол не ``delta_v2`` (проверка до связи); ``not_connected`` — драйвера нет
+            или ``is_connected`` ложен; ``stopping`` — ``should_stop()`` истинен перед его отправкой (ему и
+            следующим); ``no_time`` — срок ожидания вышел до его отправки (ему и следующим);
+            ``{"result": "refused", "message": m}`` — ``park`` отказал (кроме «park уже идёт»);
+            ``{"result": "error", "message": f"{type(exc).__name__}: {exc}"}`` — исключение вызова.
+        Присоединение: ``park`` отказал текстом «идёт основная остановка робота» (park оператора уже идёт) → хаб
+        ждёт его ``seq`` (``drv.park_current_seq()``), в ``R`` ещё ``"joined": True``; присоединённый park живёт
+        по своему сроку, хаб ждёт только свой (итог может быть ``timeout``).
+        """
+        raise NotImplementedError("T5.3e.5a")
+
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers
     # ------------------------------------------------------------------ #

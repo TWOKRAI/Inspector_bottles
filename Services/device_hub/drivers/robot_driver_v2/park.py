@@ -7,7 +7,8 @@ Purpose:
     циклов ожидания и ``sleep``: шаг идёт до первого ожидания и выходит. Своих потоков нет.
 
 Public API:
-    ``ParkMachine`` (конструктор с колбэками; ``accept``, ``guard``, ``step``, ``abort``, ``fail``).
+    ``ParkMachine`` (конструктор с колбэками; ``accept``, ``guard``, ``step``, ``abort``, ``fail``;
+    ``wait_terminal`` — ожидание итога ``seq`` из чужого потока, T5.3e.5a).
 
 Pre/post:
     ``accept`` — после ``RobotState.park_begin`` и пометок release / SOFT; ``abort`` из ``request_stop`` —
@@ -123,6 +124,29 @@ class ParkMachine:
         if v.parking:
             with self._mlock:
                 self._finish_locked(v.seq, False, reason)
+
+    def wait_terminal(self, seq: int, timeout_s: float) -> dict | None:
+        """Ждать терминал park ``seq`` не дольше ``timeout_s`` секунд реального времени (T5.3e.5a).
+
+        Pre:
+            ``seq`` — номер park этого автомата (из ответа ``robot_park`` или ``park_view().seq``). ``timeout_s``
+            — любое число; отрицательное трактуется как 0 (одна проверка без ожидания). Зовут из чужого потока
+            (исполнитель команды хаба), не из тика и не под ``_mlock``.
+        Post:
+            ``None`` — терминала ``seq`` нет к сроку (в том числе ``seq`` неизвестен или вытеснен из памяти
+            итогов: хранятся 8 последних терминалов). Иначе — копия значения терминала, ровно та, что
+            публикуется в ``devices.state.<id>.park``::
+
+                {"seq": int, "state": "done" | "failed", "step": str,
+                 "home": "moved" | "already" | None, "servo": False | None,
+                 "dropped": {"jobs": int, "returns": int},
+                 "reason": str | None, "elapsed_s": float | None}
+
+            Терминал, записанный до вызова, возвращается сразу. Сбой публикации терминала итог не отнимает.
+            Время ожидания — ``time``/``Condition`` (реальное), не часы автомата: ``FakeClock`` его не двигает.
+            Не бросает; состояние автомата не меняет.
+        """
+        raise NotImplementedError("T5.3e.5a")
 
     # ------------------------------------------------------------------ #
     # Тик

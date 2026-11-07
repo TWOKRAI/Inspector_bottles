@@ -652,6 +652,35 @@ class _RobotDriverCore(BaseDeviceDriver):
             self._record_err()
             return {"status": "error", "message": str(exc)}
 
+    def park_current_seq(self) -> int:
+        """Номер последнего park этого робота (идущего или закрытого) — для присоединения (T5.3e.5a).
+
+        Pre: нет; связь не нужна. Зовут, когда ``call("park", ...)`` отказал текстом «идёт основная остановка
+        робота» (``texts.TEXT_PARKING``): park уже идёт, его ``seq`` в ответе отказа нет.
+        Post: целое ``>= 0`` (0 — park ещё не принимался); то же значение, что ``seq`` в
+        ``devices.state.<id>.park``. Не бросает, ничего не меняет.
+        """
+        raise NotImplementedError("T5.3e.5a")
+
+    def park_wait(self, seq: int, timeout_s: float) -> dict | None:
+        """Ждать терминал park ``seq`` этого робота не дольше ``timeout_s`` с реального времени (T5.3e.5a).
+
+        Pre: ``seq`` — из ответа ``call("park", ...)`` (``{"accepted": True, "seq": k, ...}``) или из
+        ``park_current_seq()``. ``timeout_s`` < 0 трактуется как 0 (проверка без ожидания). Зовут из потока
+        исполнителя команды, не из тика драйвера. Тик, ``call`` и шаги park не меняются.
+        Post: ``None`` — терминала ``seq`` нет к сроку. Иначе — копия значения терминала (то, что публикуется
+        в ``devices.state.<id>.park``)::
+
+            {"seq": int, "state": "done" | "failed", "step": str,
+             "home": "moved" | "already" | None, "servo": False | None,
+             "dropped": {"jobs": int, "returns": int},
+             "reason": str | None, "elapsed_s": float | None}
+
+        Терминал, поставленный до вызова, возвращается сразу (хранятся 8 последних). Время — реальное:
+        ``FakeClock`` драйвера ожидание не двигает. Не бросает.
+        """
+        raise NotImplementedError("T5.3e.5a")
+
     # --- задания ---
 
     # --- jog ---
