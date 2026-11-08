@@ -108,6 +108,8 @@ def test_status_outside_dictionary_is_info_not_gating(tmp_path):
         ("- **Status:** `ACTIVE`", None),
         ("- **Статус:** FROZEN", None),
         ("- **Статус:** FREEZE", None),
+        ("- **Статус:** draft", None),
+        ("- **Status:** In Progress (x)", None),
         ("- **Статус:** PLANNED.", "PLANNED"),
         ("- **Статус:** ВЫПОЛНЕН; осталось ревью", "ВЫПОЛНЕН"),
     ],
@@ -161,3 +163,49 @@ def test_frozen_is_accepted_by_add_status(tmp_path):
     assert cp.returncode == 0, (cp.stdout, cp.stderr)
     readme = (tmp_path / "plans" / "README.md").read_text(encoding="utf-8")
     assert "| FROZEN |" in readme
+
+
+def test_close_itog_limit_boundary_2560_passes_2561_refused(tmp_path):
+    # «я» — 2 байта UTF-8: 1280 символов = ровно 2560 байт; «a» сверху — 2561.
+    ok = _locked_plan(tmp_path / "ok", "\n## Итог\n\n" + "я" * 1280 + "\n")
+    cp = _run(ok, "close", PLAN)
+    assert cp.returncode == 0, (cp.stdout, cp.stderr)
+
+    over = _locked_plan(tmp_path / "over", "\n## Итог\n\n" + "я" * 1280 + "a\n")
+    cp = _run(over, "close", PLAN)
+    assert cp.returncode == 2, (cp.stdout, cp.stderr)
+    assert "CLOSED_WITHOUT_SUMMARY: '## Итог' is 2561 bytes, max 2560" in cp.stderr
+    assert (over / "plans" / PLAN / "plan.md").is_file()
+
+
+AMENDMENTS = (
+    "| # | дата | почему | Δ задач | Δ бюджета |\n|---|---|---|---|---|\n| — | 2026-11-01 | открытие | — | — |\n"
+)
+
+
+def _approvable_plan(tmp_path: Path, header: str, *, budget: bool) -> Path:
+    """Каталог плана, готовый к approve: шапка как задана, задача закрыта, amendments.md есть."""
+    plan_dir = tmp_path / "plans" / PLAN
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text(
+        f"# План\n\n{header}\n\n## Цели\n\nСделать.\n\n{BUDGET if budget else ''}{ITEMS}", encoding="utf-8"
+    )
+    (plan_dir / "amendments.md").write_text(AMENDMENTS, encoding="utf-8")
+    return tmp_path
+
+
+def test_approve_with_header_outside_dictionary_succeeds_and_writes_lock(tmp_path):
+    root = _approvable_plan(tmp_path, "- **Статус:** ЗАКРЫТ", budget=True)
+    cp = _run(root, "approve", PLAN)
+    assert cp.returncode == 0, (cp.stdout, cp.stderr)
+    assert "INFO STATUS_OUTSIDE_DICTIONARY" in cp.stdout
+    assert (root / "plans" / PLAN / "contract.lock").is_file()
+
+
+def test_approve_still_refuses_on_gating_finding(tmp_path):
+    root = _approvable_plan(tmp_path, "- **Статус:** ЗАКРЫТ", budget=False)
+    cp = _run(root, "approve", PLAN)
+    assert cp.returncode == 1, (cp.stdout, cp.stderr)
+    assert "WARN NO_BUDGET" in cp.stdout
+    assert "approve refused: 1 gate finding(s)" in cp.stderr
+    assert not (root / "plans" / PLAN / "contract.lock").exists()
