@@ -257,12 +257,17 @@ def test_hung_main_child_does_not_terminate_last_child(
         assert registry.stop_outcome("hung") == "terminated"
 
     assert main.t_dead is not None and last.t_signal is not None
-    assert last.t_signal >= main.t_dead, "stop_event last взведён до смерти main"
-    assert last.t_signal <= main.t_dead + 0.1, f"stop_event last опоздал на {last.t_signal - main.t_dead:.3f} с"
-    if not kill_expected:
-        assert 5.0 <= last.t_signal - t0 <= 5.1, (
-            f"stop_event last в {last.t_signal - t0:.3f} с от старта, ожидалось [5,0; 5,1]"
-        )
+    # Вариант (А) (решение лида 2026-11-08): last сигналят по времени, в D − last_wave_s = 5,0, не дожидаясь конца
+    # эскалации main. Без kill main умирает на terminate в 5,0 — сигнал last сразу после; с kill main живёт до 6,0,
+    # а last уже сигналлен в 5,0.
+    assert 5.0 <= last.t_signal - t0 <= 5.1, (
+        f"stop_event last в {last.t_signal - t0:.3f} с от старта, ожидалось [5,0; 5,1]"
+    )
+    if kill_expected:
+        assert last.t_signal < main.t_dead, "вариант (А): stop_event last должен уйти до смерти main (kill в 6,0)"
+    else:
+        assert last.t_signal >= main.t_dead, "stop_event last взведён до смерти main"
+        assert last.t_signal <= main.t_dead + 0.1, f"stop_event last опоздал на {last.t_signal - main.t_dead:.3f} с"
     assert last.terminate_calls == 0, "last получил terminate от зависшего соседа"
     assert last.kill_calls == 0, "last получил kill от зависшего соседа"
     assert registry.stop_outcome("gui") == "exited"

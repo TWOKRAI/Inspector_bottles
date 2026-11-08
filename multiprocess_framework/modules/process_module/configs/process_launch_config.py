@@ -100,6 +100,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = None
 
+    stop_wave: Annotated[
+        Any,
+        FieldMeta(
+            "Stop wave",
+            info="Волна системного стопа (Task 1.3): верхний уровень proc_dict, читает ProcessRegistry. "
+            "Тип Any — значение идёт сырым (годно 'main' или 'last'). None и 'main' в proc_dict не кладутся.",
+        ),
+    ] = None
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -186,6 +195,9 @@ class ProcessLaunchConfig(SchemaBase):
         # Ключ — литерал, не импорт: константа STOP_WINDOW_KEY живёт в process_manager_module/core/stop_budget.py,
         # а импорт оттуда дал бы обратную зависимость слоёв (process_module → process_manager_module).
         stop_window_s = payload.pop("stop_window_s", None)
+        # stop_wave (Task 1.3) — на верхний уровень proc_dict сырым (проверяет реестр PM). None и "main" не кладём:
+        # форма proc_dict прежняя. Ключ — литерал по той же причине, что у stop_window_s.
+        stop_wave = payload.pop("stop_wave", None)
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
         # executors остаётся в config (читает ProcessModule как config["executors"]); пустое значение
@@ -231,6 +243,8 @@ class ProcessLaunchConfig(SchemaBase):
             proc_dict["supervision_group"] = supervision_group
         if stop_window_s is not None:
             proc_dict["stop_window_s"] = stop_window_s
+        if stop_wave is not None and not (isinstance(stop_wave, str) and stop_wave == "main"):
+            proc_dict["stop_wave"] = stop_wave
         if self.memory is not None:
             proc_dict["memory"] = self.memory
         return name, proc_dict

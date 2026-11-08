@@ -11,7 +11,9 @@ Purpose:
 Public API (внутренний модуль ``core/``, из ``__init__``/``interfaces`` пакета не экспортируется):
     ``ChildProcessStop(processes, stop_events, *, on_confirmed_dead, on_outcome, logger, terminate_grace_s,
     kill_confirm_s, poll_s, idle, should_abort, windows_s)`` — ``request_stop()``, ``join_until(deadline)``, ``kill()``,
-    ``survivors()``, ``close()``; свойство ``stop_requested_wall`` (Task 1.2, ADR-PMM-042).
+    ``survivors()``, ``close()``; ``poll(deadline) -> (bool | None, pause)`` — один проход ``join_until`` без
+    ожидания, ``wait(pause)`` — пауза между проходами (Task 1.3, ADR-PMM-043);
+    свойство ``stop_requested_wall`` (Task 1.2, ADR-PMM-042).
 
 Инварианты:
     * метка ``on_confirmed_dead(name, process)`` — не более одной на имя за жизнь объекта,
@@ -297,31 +299,49 @@ class ChildProcessStop:
         проход. ``should_abort()`` истинен на проходе — ``False`` досрочно, ``aborted`` ``True``.
         После ``kill()`` настоящий ``kill()`` уходит один раз на первом проходе, где
         ``now >= min(начало + terminate_grace_s, deadline - kill_confirm_s)``.
+        Цикл ``poll(deadline)`` + ``wait(pause)`` (Task 1.3): поведение и порядок проверок прежние.
         """
         while True:
-            alive = self._observe()
-            if not alive:
-                return True
-            if self._abort_requested():
-                # Метки выжившим нет; ``survivors()`` их вернёт, ``kill()`` станет no-op.
-                with self._lock:
-                    self._aborted = True
-                return False
-            now = time.monotonic()
-            # Task 1.11: сроки имён — после проверки abort (1.9b D4: прерванному стопу сигналов нет).
-            name_next = self._name_escalate(alive, now, deadline) if self._windows is not None else None
-            kill_at = self._kill_at(deadline)
-            if kill_at is not None and now >= kill_at:
-                self._send_real_kill(alive)
-                kill_at = None
-            if now >= deadline:
-                return False
-            pause = min(self._poll_s, deadline - now)
-            if kill_at is not None:
-                pause = min(pause, kill_at - now)
-            if name_next is not None:
-                pause = min(pause, name_next - now)
+            result, pause = self.poll(deadline)
+            if result is not None:
+                return result
             self._wait(max(0.0, pause))
+
+    def wait(self, pause: float) -> None:
+        """Пауза между проходами ``poll`` (Task 1.3): ``idle(pause)`` или сон, как внутри ``join_until``."""
+        self._wait(max(0.0, pause))
+
+    def poll(self, deadline: float) -> tuple[bool | None, float]:
+        """Ровно один проход ``join_until`` без ожидания (Task 1.3, ADR-PMM-043).
+
+        Наблюдение, abort, сроки имён, настоящий ``kill()``, проверка срока ``deadline``.
+        ``(True, 0.0)`` — ждать некого; ``(False, 0.0)`` — срок вышел или abort;
+        ``(None, pause)`` — продолжать, ``pause`` — до ближайшего события (не больше ``poll_s``).
+        Срок ``deadline`` — настоящий срок вызова: он зажимает ``terminate``/``kill`` имён и группы.
+        """
+        alive = self._observe()
+        if not alive:
+            return True, 0.0
+        if self._abort_requested():
+            # Метки выжившим нет; ``survivors()`` их вернёт, ``kill()`` станет no-op.
+            with self._lock:
+                self._aborted = True
+            return False, 0.0
+        now = time.monotonic()
+        # Task 1.11: сроки имён — после проверки abort (1.9b D4: прерванному стопу сигналов нет).
+        name_next = self._name_escalate(alive, now, deadline) if self._windows is not None else None
+        kill_at = self._kill_at(deadline)
+        if kill_at is not None and now >= kill_at:
+            self._send_real_kill(alive)
+            kill_at = None
+        if now >= deadline:
+            return False, 0.0
+        pause = min(self._poll_s, deadline - now)
+        if kill_at is not None:
+            pause = min(pause, kill_at - now)
+        if name_next is not None:
+            pause = min(pause, name_next - now)
+        return None, max(0.0, pause)
 
     def _name_escalate(self, alive: list[tuple[str, Any]], now: float, deadline: float) -> float | None:
         """Эскалация по окнам имён (Task 1.11): terminate на сроке имени, kill через ``terminate_grace_s``.
