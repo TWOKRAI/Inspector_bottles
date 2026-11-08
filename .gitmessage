@@ -12,16 +12,15 @@
 # блоком, внутри блока пустых строк нет, Co-Authored-By — в этом же блоке.
 # Перенос длинного значения — со строки с отступом.
 # Обязательные: Why, Layer. Из плана — Refs.
-# Опциональные: Task, Risk, Reversible, Tested, Rejected.
+# Опциональные: Task, Decision, Rejected. Распознаются, не рекомендуются: Risk, Reversible, Tested.
+# Коммит с новым заголовком ADR в DECISIONS.md несёт строку Decision: <id> (hook подскажет её).
 # ────────────────────────────────────────────────────────────────────
 #
 # Why: одна-две строки про мотивацию (не реализацию)
 # Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
 # Refs: plans/<…>/plan.md, ADR-XXX, PR#NN, issue#NN  (через запятую)
 # Task: <slug>#<id>  (по желанию, например commit-mechanism#2.2)
-# Risk: low | medium | high — короткое почему
-# Reversible: yes | migration-needed | no
-# Tested: scope/N passed, например auth/120, framework/2587
+# Decision: ADR-<MOD>-NNN  (по желанию; одна строка на id)
 # Rejected: альтернатива X — отвергнута, потому что Y
 # Co-Authored-By: ... (если применимо)
 #
