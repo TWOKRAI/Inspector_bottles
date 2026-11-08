@@ -4916,9 +4916,7 @@ def _takes_argument(fn: Any) -> bool:
         params = inspect.signature(fn).parameters.values()
     except (TypeError, ValueError):
         return True
-    return any(
-        p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params
-    )
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
 
 
 class _ChildrenStop:
