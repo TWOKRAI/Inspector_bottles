@@ -83,7 +83,7 @@
 - Task 4.2a: паспорт v1 и `ref --format passport|json`, несколько id за вызов, бюджет и ранг, ADR-ATL-005 [PENDING] (после 4.1)
 - Task 4.2b: `map` юнита и скелет файла, `status.stale`/`status.frozen`, JSON-схема паспорта [PENDING] (после 4.2a)
 - Task 4.3: условие `atlas` в `nav_bench` [PENDING] (после 4.2a, 7.2 — механизм `bash_allow`)
-- Task 4.4: `purpose` → докстринги 57 юнитов, сверка каталог↔yaml (Д5, шаг 1) [PENDING] (после 0.1; В1 = да)
+- Task 4.4: `purpose` → докстринги 57 юнитов, сверка каталог↔yaml (Д5, шаг 1) [DONE] (после 0.1; В1 = да)
 - Task 4.4b: `modules.yaml` → корни + исключения (Д5, шаг 2) [PENDING] (после 4.4)
 
 ### Phase 5: Стоп С1 (Kill-2)
@@ -95,7 +95,7 @@
 **Цель фазы:** старый Атлас посчитан его правилом; `card`/`pack` снимаются только по его kill №2.
 
 - Task 6.1: K1.1 — счёт kill №2/№3, закрытие `plans/2026-10-04_atlas` (или слово В2); в `K1.1.result.md` строка `kill №2: сработал`/`kill №2: нет` [PENDING] (не раньше 2026-11-10)
-- Task 6.2: шапки FREEZE `brief`/`metrics`/`card`/`pack` и строка шаблона о FACTS — при любом исходе kill №2 [PENDING] (можно до 6.1)
+- Task 6.2: шапки FREEZE `brief`/`metrics`/`card`/`pack` и строка шаблона о FACTS — при любом исходе kill №2 [DONE] (можно до 6.1)
 - Task 6.2b: пробы `card`/`pack` в шести тестах → `ref` [PENDING] (после 6.1, 6.2; только при kill №2, иначе SKIPPED)
 - Task 6.2c: пробы `pack` в тестах итога и повтор команд `brief` [PENDING] (после 6.2b; только при kill №2)
 - Task 6.2a: снять CLI `card`/`pack`, если в `K1.1.result.md` ровно одна строка `kill №2: сработал`, иначе SKIPPED [PENDING] (после 6.2c)
@@ -105,10 +105,10 @@
 
 **Цель фазы:** ответ «почему так» по ключам, которые уже есть (`Refs:` 97,4 %), без реестра; атлас только читает; владельцы форматов не меняются (`chain.md`).
 
-- Task 7.1a: `Decision:` по желанию + предупреждение hook, обе копии валидатора [PENDING] (параллельно Phase 0–1)
-- Task 7.1b: словарь статусов + FROZEN + `## Итог` при close (plans_ledger) [PENDING] (параллельно Phase 0–1)
-- Task 7.1b-validate: сервис без `DECISIONS.md` — красный в `validate.py` [PENDING] (параллельно Phase 0–1)
-- Task 7.1c: документы и шаблоны под `Decision:` [PENDING] (после 7.1a)
+- Task 7.1a: `Decision:` по желанию + предупреждение hook, обе копии валидатора [DONE] (параллельно Phase 0–1)
+- Task 7.1b: словарь статусов + FROZEN + `## Итог` при close (plans_ledger) [DONE] (параллельно Phase 0–1)
+- Task 7.1b-validate: сервис без `DECISIONS.md` — красный в `validate.py` [DONE] (параллельно Phase 0–1)
+- Task 7.1c: документы и шаблоны под `Decision:` [DONE] (после 7.1a)
 - Task 7.2: `nav_bench` — клон с историей и `bash_allow` (код бенча) [PENDING] (после 1.1)
 - Task 7.2b: набор `origin`, `grep-read+git` ×3, вердикт Kill-3 [PENDING] (после 7.2 и слияния 7.1a, 7.1b)
 - Task 7.3: `atlas origin <путь|символ|ADR-id>` [PENDING] (после 2.2, 7.1a, 7.1b, 7.1c, 7.1b-validate, 7.2b; если Kill-3 не сработал)
