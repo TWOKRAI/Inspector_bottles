@@ -6,6 +6,7 @@ Purpose: строка факта `- <что> — `<команда>` → `<лит
     с ревизией маркера по входам блока. Живые строки (ветки, радиус тестов) — только на HEAD.
 Public API: brief, check, marker, task_file, write.
 Stability: lite
+FREEZE 2026-11-08: порождает FACTS из видов pack/card/ref; не удалять (принцип 3, В3); plans/2026-11-06_atlas-passport.
 """
 
 from __future__ import annotations
