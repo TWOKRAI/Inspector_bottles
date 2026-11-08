@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "qex": {
+      "command": "{python}",
+      "args": [
+        "{repo_root}/.claude/plugins/mcp-qex/qex-launcher.py"
+      ]
+    }
+  }
+}
