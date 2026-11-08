@@ -1,7 +1,7 @@
 """``robot_driver_v2.params`` (T5.3f f2).
 
 Purpose:
-    Параметры драйвера робота Delta v2: синхронизация, ``param_set`` / ``param_apply``, откат значения.
+    Параметры драйвера робота Delta v2: синхронизация, ``param_set`` / ``param_apply``, ``calib_belt``, откат значения.
 
 Stability: lite
 """
@@ -17,12 +17,15 @@ from Services.device_hub.drivers.robot_driver_v2.args import (
     _BadArgs,
     _StoreIOError,
     _base_rev_arg,
+    _int_in,
     _name_arg,
     _number_arg,
     _store_refusal,
 )
 from Services.device_hub.drivers.robot_driver_v2.texts import (
     TEXT_BAD_RANGE,
+    TEXT_BELT_HALF,
+    TEXT_BELT_NOT_APPLIED,
     TEXT_EPOCH_NOT_WRITTEN,
     TEXT_NO_STORE,
     TEXT_PARAM_DIVERGED,
@@ -34,6 +37,8 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
 )
 from Services.device_hub.drivers.robot_driver_v2.tlm import _w
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR
+from Services.robot_comm.calibration import CalibrationError, belt_from_marks
+from Services.robot_comm.calibration.belt import TEXT_BELT_FACTOR_RANGE
 from Services.robot_comm.core.client_v2 import RobotClientV2, SyncCancelled
 from Services.robot_comm.core.params_v2 import PARAM_ID, to_eng, to_raw
 from Services.robot_comm.errors import RevisionConflict, RobotNak
@@ -258,3 +263,124 @@ class ParamMixin:
         finally:
             self._param_lock.release()
         return {"status": "ok"}
+
+    def _op_calib_belt(self, args: dict) -> dict:
+        """CALIB_BELT {marks[{x_mm, y_mm, encoder}] x2, base_rev, dry_run?}: лента по двум отметкам (T5.4c).
+
+        Считает ``belt_from_marks``; ``dry_run`` отвечает расчётом, не трогая робота и файл. Иначе под ОДНИМ захватом
+        ``_param_lock`` пишет ``P_BELT_DIR`` и ``P_BELT_FACTOR`` (``_param_set_locked``, только изменившиеся) и зовёт
+        ``PARAM_APPLY``. ``base_rev`` сверяется первой, даже когда записывать нечего.
+
+        Сбой шага 2: NAK робота (или ответ шага не ``ok``) — записанные шаги откатываются в обратном порядке одной
+        попыткой каждый, откат не прошёл -> ``TEXT_BELT_HALF``. Ошибка хранилища — БЕЗ отката: робот уже принял
+        значение и метку E+1, а ``self._epoch`` остался E; откат записал бы метку E+1 и скрыл бы расхождение от тика —
+        следующий тик (``_resync_maybe``) вернёт роботу значения файла.
+        """
+        try:
+            marks = args.get("marks")
+            if type(marks) is not list or len(marks) != 2 or any(type(m) is not dict for m in marks):
+                raise _BadArgs("marks")
+            (x1, y1, enc1), (x2, y2, enc2) = (
+                (_number_arg(m, "x_mm"), _number_arg(m, "y_mm"), _int_in(m, "encoder", -(2**31), 2**31 - 1))
+                for m in marks
+            )
+            base_rev = _base_rev_arg(args)
+            dry_run = args.get("dry_run", False)
+            if type(dry_run) is not bool:
+                raise _BadArgs("dry_run")
+        except _BadArgs:
+            return {"status": "error", "message": TEXT_BAD_ARGS}
+        try:
+            belt = belt_from_marks((x1, y1), enc1, (x2, y2), enc2)
+        except CalibrationError as exc:
+            return {"status": "error", "message": str(exc)}
+        low, high = param_bounds("P_BELT_FACTOR")
+        if not low <= belt.raw_factor <= high:
+            return {"status": "error", "message": TEXT_BELT_FACTOR_RANGE}
+        calib = {
+            "factor_mm_per_imp": belt.factor_mm_per_imp,
+            "raw_factor": belt.raw_factor,
+            "direction": belt.direction,
+            "axis_dev_deg": belt.axis_dev_deg,
+            "travel_mm": belt.travel_mm,
+            "delta_enc": belt.delta_enc,
+        }
+        if dry_run:
+            return {"status": "ok", **calib, "written": [], "applied": False}
+        store = self._store
+        if store is None:
+            return {"status": "error", "message": TEXT_NO_STORE}
+        if not self.is_connected:
+            return dict(_NOT_CONNECTED)
+        refusal = self._param_gate()
+        if refusal is not None:
+            return refusal
+        try:
+            return self._calib_belt_locked(store, base_rev, calib)
+        except _STORE_ERRORS as exc:
+            return _store_refusal(exc)
+        finally:
+            self._param_lock.release()
+
+    def _calib_belt_locked(self, store: RobotDataStore, base_rev: str | None, calib: dict) -> dict:
+        """Тело ``calib_belt`` под ``_param_lock``: сверка ревизии, запись изменившихся параметров, ``PARAM_APPLY``."""
+        current = self._store_call(load_params, store, self.entry.id).rev
+        if current != base_rev:
+            raise RevisionConflict(current)  # робот не тронут, даже когда записывать нечего
+        wanted = (("P_BELT_DIR", calib["direction"]), ("P_BELT_FACTOR", calib["raw_factor"]))
+        changes = [(name, raw) for name, raw in wanted if self._values[name] != raw]
+        rev = current
+        done: list[tuple[str, int]] = []  # (имя, значение до записи) уже записанных шагов
+        for name, raw in changes:
+            old_raw = self._values[name]
+            try:
+                reply = self._param_set_locked(store, name, raw, rev)
+            except RobotNak:
+                self._calib_roll_back(store, done, rev)  # робот отказал: значение не принято
+                raise
+            except _STORE_ERRORS as exc:
+                if not done:
+                    raise  # шаг 1: записанного нет, ответ — как у param_set
+                # Откат через _param_set_locked спрятал бы расхождение меток от тика: оставляем его тику
+                logger.warning(f"робот {self.entry.id!r}: калибровка ленты: ошибка хранилища на шаге {len(done) + 1}")
+                self._publish_error(TEXT_BELT_HALF)
+                return _store_refusal(exc)
+            if reply["status"] != "ok":  # шаг сам вернул роботу значение файла (NO_REPLY, EPOCH_NOT_WRITTEN)
+                self._calib_roll_back(store, done, rev)
+                return reply
+            rev = reply["rev"]
+            done.append((name, old_raw))
+        written = [name for name, _old in done]
+        try:
+            self._client.param_apply()  # не _op_param_apply: _param_lock без повторного входа
+        except Exception as exc:
+            self._record_err()
+            logger.warning(
+                f"робот {self.entry.id!r}: PARAM_APPLY калибровки ленты не прошёл: {type(exc).__name__}: {exc}"
+            )
+            return {
+                "status": "error",
+                "message": TEXT_BELT_NOT_APPLIED,
+                **calib,
+                "written": written,
+                "applied": False,
+                "rev": rev,
+            }
+        return {"status": "ok", **calib, "written": written, "applied": True, "rev": rev, "epoch": self._epoch}
+
+    def _calib_roll_back(self, store: RobotDataStore, done: list[tuple[str, int]], rev: str | None) -> None:
+        """Вернуть записанные шаги калибровки в обратном порядке, по одной попытке; не прошло -> ``TEXT_BELT_HALF``."""
+        failed = False
+        for name, old_raw in reversed(done):
+            try:
+                reply = self._param_set_locked(store, name, old_raw, rev)
+            except Exception as exc:
+                logger.warning(f"робот {self.entry.id!r}: откат {name} не прошёл: {type(exc).__name__}: {exc}")
+                failed = True
+                continue
+            if reply["status"] == "ok":
+                rev = reply["rev"]
+            else:
+                failed = True
+        if failed:
+            self._publish_error(TEXT_BELT_HALF)

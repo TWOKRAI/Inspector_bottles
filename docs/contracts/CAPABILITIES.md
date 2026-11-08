@@ -258,6 +258,9 @@ request-response (dict). События (push без request_id) читаютс�
 | `register_update` | GUI/процесс обновляет значение регистра | registers |
 | `reset_metrics` |  | stats |
 | `robot_abort` | Стоп робота: {device_id, mode: 1|2|3}. |  |
+| `robot_calib_belt` | Робот v2: калибровка ленты по двум отметкам {device_id, marks[{x_mm, y_mm, encoder}] x2, base_rev, dry_run?} -> P_BELT_FACTOR, P_BELT_DIR, PARAM_APPLY |  |
+| `robot_calib_frame` | Робот v2: подогнать СК по сохранённым точкам и их номиналу в СК {device_id, name, points[{point, local[x, y, z]}] >= 3, base_rev} -> frame, yaw_deg, residuals_mm |  |
+| `robot_calib_tools` | Робот v2: проверить точки инструментов (только чтение) {device_id} -> tools |  |
 | `robot_clear_queue` | Очистить очередь заданий. |  |
 | `robot_do_set` | Робот v2: дискретный выход {device_id, ch: 1..16, on: bool} |  |
 | `robot_draw_abort` | Прервать рисование: {device_id}. |  |

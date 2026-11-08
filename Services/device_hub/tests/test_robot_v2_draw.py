@@ -408,7 +408,7 @@ def test_draw_point_out_of_zone_refused_without_motion(scope: Any) -> None:
 
 def test_draw_polyline_shared_spec_without_executor() -> None:
     """R8: ``command_table`` строится для v1 и v2; ``draw_polyline`` - один объект в обоих каталогах, без
-    ``executor`` и ``immediate``; команды с ``executor`` - прежние (10 операций данных и ``robot_park_all``)."""
+    ``executor`` и ``immediate``; команды с ``executor`` - прежние (12 операций данных и ``robot_park_all``)."""
     for cls in (RobotDriver, RobotDriverV2):
         source = spi.OpSource(prefix="robot", kind="robot", route="driver", ops=cls.OP_SPECS)
         assert "robot_draw_polyline" in spi.command_table([source])
@@ -435,6 +435,8 @@ def test_draw_polyline_shared_spec_without_executor() -> None:
                 "point_delete",
                 "frame_list",
                 "frame_teach",
+                "calib_frame",
+                "calib_tools",
                 "program_list",
                 "program_get",
                 "program_save",

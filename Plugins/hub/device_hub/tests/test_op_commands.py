@@ -3,7 +3,7 @@
 Purpose:
     Copy-on-write словарей ``commands`` / ``_op_commands`` (родитель не меняется), фабрика замыкания (каждый метод
     несёт свою операцию, Т4), ``__doc__`` (N6), отказ без частичной записи, маршрут тела ``_op_command`` по
-    ``route`` / ``needs_link``, состав 56 команд и 56 описаний. Ожидания — литералы.
+    ``route`` / ``needs_link``, состав 59 команд и 59 описаний. Ожидания — литералы.
 
 Public API:
     Только тесты ``test_*``.
@@ -67,11 +67,11 @@ class _Recording(DeviceHubPlugin):
         return {"status": "ok"}
 
 
-def test_device_hub_plugin_has_74_commands_56_generated() -> None:
+def test_device_hub_plugin_has_77_commands_59_generated() -> None:
     names = set(DeviceHubPlugin.commands)
-    assert len(names) == 74
+    assert len(names) == 77
     generated = names - _DEVICE_AND_HIK - {"robot_park_all"}  # ручная команда T5.3e.5 — не из описаний операций
-    assert generated == set(command_table(DEFAULT_SOURCES)) and len(generated) == 56
+    assert generated == set(command_table(DEFAULT_SOURCES)) and len(generated) == 59
     assert all(
         DeviceHubPlugin.commands[n] == f"cmd_{n}" and callable(getattr(DeviceHubPlugin, f"cmd_{n}")) for n in names
     )
@@ -162,9 +162,9 @@ def test_existing_cmd_attribute_raises() -> None:
         install_op_commands(Sub, [_source("own", OpSpec(name="x"))])
 
 
-def test_op_commands_descriptions_are_the_56() -> None:
+def test_op_commands_descriptions_are_the_59() -> None:
     described = {n for n, (_src, spec) in vars(DeviceHubPlugin)["_op_commands"].items() if spec.description}
-    assert len(described) == 56
+    assert len(described) == 59
     assert all(n.startswith(("robot_", "vfd_")) for n in described)
     assert sum(n.startswith("vfd_") for n in described) == 5
 
@@ -193,7 +193,7 @@ def test_command_options_driver_command_description_only_and_plain_commands_empt
     assert plugin.command_options("hik_enum") == {}
 
 
-def test_command_options_executor_on_ten_data_commands_and_park_all() -> None:
+def test_command_options_executor_on_twelve_data_commands_and_park_all() -> None:
     plugin = DeviceHubPlugin()
     with_executor = sorted(n for n in DeviceHubPlugin.commands if plugin.command_options(n).get("executor"))
     assert with_executor == sorted(
@@ -206,6 +206,8 @@ def test_command_options_executor_on_ten_data_commands_and_park_all() -> None:
                 "point_delete",
                 "frame_list",
                 "frame_teach",
+                "calib_frame",
+                "calib_tools",
                 "program_list",
                 "program_get",
                 "program_save",

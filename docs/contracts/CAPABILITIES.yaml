@@ -1639,6 +1639,17 @@ processes:
     - description: 'Стоп робота: {device_id, mode: 1|2|3}.'
       name: robot_abort
       tags: []
+    - description: 'Робот v2: калибровка ленты по двум отметкам {device_id, marks[{x_mm, y_mm, encoder}]
+        x2, base_rev, dry_run?} -> P_BELT_FACTOR, P_BELT_DIR, PARAM_APPLY'
+      name: robot_calib_belt
+      tags: []
+    - description: 'Робот v2: подогнать СК по сохранённым точкам и их номиналу в СК {device_id, name,
+        points[{point, local[x, y, z]}] >= 3, base_rev} -> frame, yaw_deg, residuals_mm'
+      name: robot_calib_frame
+      tags: []
+    - description: 'Робот v2: проверить точки инструментов (только чтение) {device_id} -> tools'
+      name: robot_calib_tools
+      tags: []
     - description: Очистить очередь заданий.
       name: robot_clear_queue
       tags: []

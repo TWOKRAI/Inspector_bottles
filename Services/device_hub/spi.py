@@ -5,7 +5,7 @@ Purpose:
     статический контракт; во время работы ``isinstance`` по ним не вызывается — умолчания даёт ``BaseDeviceDriver``,
     стоп — флаг ``stop_aware``). ``OpSpec`` описывает одну операцию драйвера, ``OpSource`` — набор операций одного
     префикса команд; ``command_table`` сводит источники в таблицу «имя команды -> (источник, операция)».
-    Каталоги: ``ROBOT_V2_OPS`` (19), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
+    Каталоги: ``ROBOT_V2_OPS`` (20), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (12 офлайн-операций), ``VFD_OPS`` (5).
     Драйвер объявляет свои операции ссылкой ``OP_SPECS = <каталог>``; команды плагина строятся из ``OP_SPECS`` классов
     драйверов таблицы видов (``Services/device_hub/kinds.py``: ``command_sources``, ``DEFAULT_SOURCES``), не из
     кортежей этого модуля напрямую. Флаги ``immediate`` — по коду драйверов
@@ -148,7 +148,7 @@ class StopAwareDriver(DeviceDriver, Protocol):
 
 
 # --------------------------------------------------------------------------------------------------
-# Каталоги операций. Описания и ``args_schema`` — тексты каталога команд (T5.3c, SPI.c2): у каждой из 56 операций.
+# Каталоги операций. Описания и ``args_schema`` — тексты каталога команд (T5.3c, SPI.c2): у каждой из 59 операций.
 # ``args_schema`` — ключи аргументов кроме ``device_id``; "?" в конце — необязательный (по коду драйверов).
 # --------------------------------------------------------------------------------------------------
 
@@ -177,7 +177,7 @@ _DRAW_POLYLINE = OpSpec(
 )
 _SHARED_ROBOT_OPS: tuple[OpSpec, ...] = (_ABORT, _ENQUEUE_JOB, _GET_TELEMETRY, _RETURN_JOB, _DRAW_POLYLINE)
 
-# 19 ключей robot_driver_v2/ops.py (OPS), в том же порядке
+# 20 ключей robot_driver_v2/ops.py (OPS), в том же порядке
 ROBOT_V2_OPS: tuple[OpSpec, ...] = (
     OpSpec(
         name="jog_hold",
@@ -246,6 +246,14 @@ ROBOT_V2_OPS: tuple[OpSpec, ...] = (
         immediate=True,
     ),
     _DRAW_POLYLINE,
+    OpSpec(
+        name="calib_belt",
+        description=(
+            "Робот v2: калибровка ленты по двум отметкам {device_id, marks[{x_mm, y_mm, encoder}] x2, base_rev, "
+            "dry_run?} -> P_BELT_FACTOR, P_BELT_DIR, PARAM_APPLY"
+        ),
+        args_schema=("marks", "base_rev", "dry_run?"),
+    ),
 )
 
 # 27 ключей RobotDriver._OPS (robot_driver.py): 16 «старых» и 11 draw_*, в том же порядке
@@ -356,7 +364,7 @@ ROBOT_V1_OPS: tuple[OpSpec, ...] = (
     OpSpec(name="draw_progress", description="Прогресс рисования: {device_id}."),
 )
 
-# 10 офлайн-операций данных робота v2 (RobotDataStore): связь не нужна; файловый ввод-вывод — на исполнителе
+# 12 офлайн-операций данных робота v2 (RobotDataStore): связь не нужна; файловый ввод-вывод — на исполнителе
 # процесса device_io (SPI.d2), ключ порядка — device_id
 ROBOT_DATA_OPS: tuple[OpSpec, ...] = (
     OpSpec(
@@ -395,6 +403,22 @@ ROBOT_DATA_OPS: tuple[OpSpec, ...] = (
         name="frame_teach",
         description="Робот v2: обучить СК по трём точкам {device_id, name, origin, on_x, in_plane, base_rev}",
         args_schema=("name", "origin", "on_x", "in_plane", "base_rev"),
+        needs_link=False,
+        executor="device_io",
+    ),
+    OpSpec(
+        name="calib_frame",
+        description=(
+            "Робот v2: подогнать СК по сохранённым точкам и их номиналу в СК {device_id, name, "
+            "points[{point, local[x, y, z]}] >= 3, base_rev} -> frame, yaw_deg, residuals_mm"
+        ),
+        args_schema=("name", "points", "base_rev"),
+        needs_link=False,
+        executor="device_io",
+    ),
+    OpSpec(
+        name="calib_tools",
+        description="Робот v2: проверить точки инструментов (только чтение) {device_id} -> tools",
         needs_link=False,
         executor="device_io",
     ),

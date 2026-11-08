@@ -57,7 +57,7 @@ _DEVICE_COMMANDS = (
     "device_connect device_disconnect device_read device_write"
 ).split()
 _HIK_COMMANDS = "hik_enum hik_open hik_close hik_get_params hik_set_params hik_release".split()
-# 41 команда робота маршрута «драйвер»: 29 прежних + 12 v2
+# 42 команды робота маршрута «драйвер»: 29 прежних + 13 v2
 _ROBOT_V1_COMMANDS = (
     "robot_enqueue_job robot_return_job robot_send_test_job robot_abort robot_set_mode robot_jog robot_jog_abort "
     "robot_set_servo robot_set_robot_config robot_get_robot_config robot_get_telemetry robot_read_echo "
@@ -723,9 +723,9 @@ def _drive_all(rig: Rig, kind: str, protocol: str, commands: list[str], prefix: 
 
 @pytest.mark.parametrize("protocol", ["delta_v2", "delta_universal3"])
 def test_a19_robot_driver_route_commands_call_driver_with_stripped_op(rig: Rig, protocol: str) -> None:
-    """А19: 41 команда робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
+    """А19: 42 команды робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
     bad, checked = _drive_all(rig, "robot", protocol, _ROBOT_DRIVER_COMMANDS, "robot_")
-    assert checked == 41
+    assert checked == 42
     assert bad == [], "\n".join(bad)
 
 
