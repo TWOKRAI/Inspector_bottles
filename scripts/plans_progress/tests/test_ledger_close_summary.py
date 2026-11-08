@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +17,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LEDGER = REPO_ROOT / "scripts" / "plans_ledger.py"
+PLAN_TEMPLATE = REPO_ROOT / ".claude" / "plugins" / "core" / "templates" / "PLAN.template.md"
 
 PLAN = "2026-11-01_itog"
 ARCHIVED = f"plans/_archive/2026-Q4/{PLAN}"
@@ -29,7 +32,7 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess:
         timeout=60,
         encoding="utf-8",
         errors="replace",
-        env={"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PATH": "/usr/bin:/bin"},
+        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -108,6 +111,7 @@ def test_status_outside_dictionary_is_info_not_gating(tmp_path):
         ("- **Status:** `ACTIVE`", None),
         ("- **Статус:** FROZEN", None),
         ("- **Статус:** FREEZE", None),
+        ("- **Status:** **ACTIVE**", None),
         ("- **Статус:** draft", None),
         ("- **Status:** In Progress (x)", None),
         ("- **Статус:** PLANNED.", "PLANNED"),
@@ -209,3 +213,47 @@ def test_approve_still_refuses_on_gating_finding(tmp_path):
     assert "WARN NO_BUDGET" in cp.stdout
     assert "approve refused: 1 gate finding(s)" in cp.stderr
     assert not (root / "plans" / PLAN / "contract.lock").exists()
+
+
+def test_close_refuses_untouched_itog_section_of_the_template(tmp_path):
+    template = PLAN_TEMPLATE.read_text(encoding="utf-8")
+    section = re.search(r"^## Итог\n.*?(?=^## |\Z)", template, re.S | re.M)
+    assert section, "в шаблоне нет раздела «## Итог»"
+    root = _locked_plan(tmp_path, "\n" + section.group(0))
+    cp = _run(root, "close", PLAN)
+    assert cp.returncode == 2, (cp.stdout, cp.stderr)
+    assert "CLOSED_WITHOUT_SUMMARY" in cp.stderr
+    assert (root / "plans" / PLAN / "plan.md").is_file()
+
+
+def test_close_refuses_itog_with_only_html_comment(tmp_path):
+    root = _locked_plan(tmp_path, "\n## Итог\n\n<!-- первая строка\n     вторая строка -->\n")
+    cp = _run(root, "close", PLAN)
+    assert cp.returncode == 2, (cp.stdout, cp.stderr)
+    assert "CLOSED_WITHOUT_SUMMARY" in cp.stderr
+
+
+def test_close_keeps_text_and_drops_comment_in_summary(tmp_path):
+    body = "\n## Итог\n\n<!-- пояснение\n     в два ряда -->\n\nВышло: всё.\nХвост <!-- встроенный --> строки.\n"
+    root = _locked_plan(tmp_path, body)
+    cp = _run(root, "close", PLAN)
+    assert cp.returncode == 0, (cp.stdout, cp.stderr)
+    summary = (root / ARCHIVED / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Итог\n\nВышло: всё.\nХвост  строки.\n" in summary
+    assert "<!--" not in summary
+    assert "пояснение" not in summary
+
+
+def test_heading_inside_comment_is_not_a_section_boundary_or_a_section(tmp_path):
+    # Заголовок внутри комментария не обрывает раздел...
+    inner = _locked_plan(tmp_path / "inner", "\n## Итог\n\nтекст\n<!-- ## Хвост\nскрытый -->\nещё\n")
+    cp = _run(inner, "close", PLAN)
+    assert cp.returncode == 0, (cp.stdout, cp.stderr)
+    summary = (inner / ARCHIVED / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Итог\n\nтекст\nещё\n" in summary
+    assert "скрытый" not in summary
+    # ...и «## Итог» внутри комментария — не раздел.
+    hidden = _locked_plan(tmp_path / "hidden", "\n<!--\n## Итог\nтекст в комментарии\n-->\n")
+    cp = _run(hidden, "close", PLAN)
+    assert cp.returncode == 2, (cp.stdout, cp.stderr)
+    assert "CLOSED_WITHOUT_SUMMARY" in cp.stderr

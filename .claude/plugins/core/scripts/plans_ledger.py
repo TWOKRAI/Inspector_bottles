@@ -143,7 +143,9 @@ Plan summary and status dictionary (Task 7.1b): a plan DIRECTORY with a
 `contract.lock` (an approved plan) cannot be archived without a `## Итог`
 section in `plan.md` — the exact line `## Итог` outside code fences, then at
 least one non-empty line before the next heading, at most `SUMMARY_MAX_BYTES`
-(2560) bytes of UTF-8 (lines are not counted). Otherwise `archive_plan`
+(2560) bytes of UTF-8 (lines are not counted); HTML comments (`<!-- … -->`,
+also multi-line) are cut out before both checks and never reach `SUMMARY.md`,
+so the untouched template section does not pass. Otherwise `archive_plan`
 raises `ValueError` `CLOSED_WITHOUT_SUMMARY`; `close` prints `error: …` and
 exits 2, `close --force` does not waive it (an abandoned plan is closed with
 an Итог «ОТМЕНЁН»), `doctor --fix` reports «skipped» and `DONE_NOT_ARCHIVED`
@@ -1653,14 +1655,53 @@ def _header_status(text: str) -> str | None:
     return None
 
 
+def _strip_html_comments(line: str, in_comment: bool) -> tuple[str, bool, bool]:
+    """``(line without HTML comments, still_inside_a_comment, had_comment)``.
+
+    A ``<!-- … -->`` may span lines: *in_comment* carries the state from the
+    previous line. An unterminated ``<!--`` hides the rest of the text, as in
+    HTML. ``had_comment`` is True when the line held any comment text."""
+    out: list[str] = []
+    had = in_comment
+    pos = 0
+    while pos < len(line):
+        if in_comment:
+            end = line.find("-->", pos)
+            if end == -1:
+                return "".join(out), True, True
+            pos = end + 3
+            in_comment = False
+            continue
+        start = line.find("<!--", pos)
+        if start == -1:
+            out.append(line[pos:])
+            break
+        out.append(line[pos:start])
+        had = True
+        in_comment = True
+        pos = start + 4
+    return "".join(out), in_comment, had
+
+
 def _itog_text(text: str) -> str | None:
     """The body of the plan's ``## Итог`` section — the lines between the
     exact unfenced line ``## Итог`` and the next unfenced heading, outer blank
     lines trimmed, joined by ``\\n`` — or ``None`` when there is no such
-    heading. An empty section is ``""``."""
+    heading. An empty section is ``""``.
+
+    HTML comments (``<!-- … -->``, also multi-line) are cut out first, outside
+    code fences: a line that held only a comment is dropped, and a heading
+    written inside a comment is neither the Итог heading nor a section end —
+    so the untouched template (a comment and nothing else) is an empty Итог."""
     body: list[str] = []
     inside = False
-    for line, fenced in _unfenced_lines(text):
+    in_comment = False
+    for raw, fenced in _unfenced_lines(text):
+        line = raw
+        if not fenced:
+            line, in_comment, had_comment = _strip_html_comments(raw, in_comment)
+            if had_comment and not line.strip():
+                continue
         if not inside:
             if not fenced and line.rstrip() == SUMMARY_HEADING:
                 inside = True
@@ -2191,7 +2232,8 @@ def archive_plan(
         any write or move happens.
       - A plan DIRECTORY with a ``contract.lock`` (an approved plan) needs a
         ``## Итог`` section with text in ``plan.md`` (Task 7.1b), at most
-        ``SUMMARY_MAX_BYTES`` bytes of UTF-8; otherwise ``ValueError``
+        ``SUMMARY_MAX_BYTES`` bytes of UTF-8, HTML comments not counted
+        (:func:`_itog_text`); otherwise ``ValueError``
         ``CLOSED_WITHOUT_SUMMARY`` before any write or move. ``close --force``
         and ``doctor --fix`` go through here, so neither waives it (a
         ``doctor --fix`` plan without it is «skipped»). A single-file plan and
