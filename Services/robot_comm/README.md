@@ -443,6 +443,12 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   параметра проверяет вызывающий.
 - **СК.** `origin`, `on_x`, `in_plane` — три точки в базе для `FrameDef`: начало и точки локальных (100, 0, 0) и
   (0, 100, 0). Масштаб не оценивается. Зеркальный набор номинальных точек отказом «СК перевёрнута», не успехом.
+- **Сила проверки невязки `fit_frame`.** При N = 3 у подгонки 6 степеней свободы на 9 уравнений, невязка почти пуста:
+  сдвиг точки на 1 мм в плоскости листа даёт 0.336–0.656 мм (не всегда больше порога 0.5), сдвиг на 1–2 мм по Z — не
+  более 0.008 мм (замер ревьюера стадии 0, не повторён). При N = 3 ловятся только грубые ошибки (перепутанная точка,
+  сантиметры вместо миллиметров, сдвиг от 2 мм в плоскости). Как проверка подгонка осмысленна с N ≥ 4. Порядок
+  отказов: невязка раньше «СК перевёрнута»; зеркальный номинал (y × −1) подгоняется точно поворотом на 180° и даёт
+  «СК перевёрнута».
 - **Инструменты.** `missing` — имена отсутствующих точек по алфавиту; `problems` — коды `TOOL_PROBLEMS`:
   `not_in_base` (у точки задан `frame`), `over_not_above_pick` (`over.z − pick.z < min_clear_mm`).
   `ok` — нет ни `missing`, ни `problems`.
@@ -463,7 +469,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 
 - **Пороги.** `MIN_TRAVEL_MM = 100.0`, `MAX_AXIS_DEV_DEG = 1.0`, `MAX_RESIDUAL_MM = 0.5`, `MIN_SECOND_SINGULAR_MM = 1.0`,
   `FRAME_POINT_OFFSET_MM = 100.0`.
-- **Тесты:** `pytest Services/robot_comm/tests/test_calibration_math.py` (тесты автора, стадия 2a).
+- **Тесты:** `pytest Services/robot_comm/tests/test_calibration_math.py` (тесты автора) и `test_t54_calibration_acceptance.py` (слепая приёмка).
 
 ## Тесты
 

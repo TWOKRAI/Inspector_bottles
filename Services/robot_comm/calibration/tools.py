@@ -56,5 +56,23 @@ def check_tool_points(
     `not_in_base` — у какой-либо из точек инструмента `frame` не `None`; `over_not_above_pick` — при наличии
     «над» и гнезда `over.z - pick.z < min_clear_mm`. Других правил нет.
     Raises: ничего не поднимает.
+
+    Проверяются имена тройки и транзитной точки; `not_in_base` - по любой имеющейся из них.
     """
-    raise NotImplementedError
+    results: list[ToolCheck] = []
+    for number in sorted(tools):
+        over_name, pick_name, _exit_name = tools[number]
+        names = set(tools[number])
+        transit_name = transit.get(number)
+        if transit_name is not None:
+            names.add(transit_name)
+        missing = tuple(sorted(name for name in names if name not in points))
+        problems: list[str] = []
+        if any(points[name].frame is not None for name in names if name in points):
+            problems.append("not_in_base")
+        if over_name in points and pick_name in points and points[over_name].z - points[pick_name].z < min_clear_mm:
+            problems.append("over_not_above_pick")
+        results.append(
+            ToolCheck(tool=number, ok=not missing and not problems, missing=missing, problems=tuple(problems))
+        )
+    return results

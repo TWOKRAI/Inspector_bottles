@@ -15,6 +15,7 @@ Stability: lite (контракт держат тесты `test_calibration_math
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 __all__ = [
@@ -101,5 +102,54 @@ def belt_from_marks(
         `TEXT_BELT_OFF_AXIS` — отклонение от оси больше `max_axis_dev_deg`;
         `TEXT_BELT_FACTOR_RANGE` — `raw_factor` меньше 1.
     Верхнюю границу `raw_factor` по диапазону параметра проверяет вызывающий.
+
+    Алгоритм (T5.4m, 2a). Порядок проверок закреплён:
+    1. Координаты не конечны -> BAD_MARKS.
+    2. Разность энкодера по модулю 2**32 приводится к диапазону 32-битного знакового; 0 -> NO_ENCODER.
+       Так переход через границу даёт малую разность, а убывание энкодера - отрицательную.
+    3. Ход `d = p2 - p1`, `travel = hypot(d)`; `travel < min_travel_mm` -> SHORT.
+    4. Единичный вектор движения детали при РОСТЕ энкодера - `d / travel`, умноженный на знак разности
+       (лента назад при росте энкодера даёт обратную ось). Ось - с наибольшим скалярным произведением по
+       `BELT_AXES`; отклонение - арккосинус этого произведения (зажатого в [-1, 1]), градусы;
+       больше `max_axis_dev_deg` -> OFF_AXIS.
+    5. Коэффициент - проекция хода на выбранную ось, делённая на модуль разности: прошивка ведёт деталь только
+       вдоль оси, поперечная ошибка `travel * sin(отклонение)` неустранима и ограничена п. 4.
+       `raw_factor = round(factor / BELT_FACTOR_SCALE)`; меньше 1 -> FACTOR_RANGE.
     """
-    raise NotImplementedError
+    try:
+        coords = (float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1]))
+    except (TypeError, ValueError, IndexError) as exc:
+        raise CalibrationError(TEXT_BELT_BAD_MARKS) from exc
+    if not all(math.isfinite(v) for v in coords):
+        raise CalibrationError(TEXT_BELT_BAD_MARKS)
+
+    delta = ((int(enc2) - int(enc1) + 2**31) % 2**32) - 2**31
+    if delta == 0:
+        raise CalibrationError(TEXT_BELT_NO_ENCODER)
+
+    dx, dy = coords[2] - coords[0], coords[3] - coords[1]
+    travel = math.hypot(dx, dy)
+    if travel < min_travel_mm:
+        raise CalibrationError(TEXT_BELT_SHORT)
+
+    sign = 1.0 if delta > 0 else -1.0
+    ux, uy = sign * dx / travel, sign * dy / travel
+    dots = [ux * ax + uy * ay for ax, ay in BELT_AXES]
+    axis = max(range(len(BELT_AXES)), key=dots.__getitem__)
+    axis_dev_deg = math.degrees(math.acos(max(-1.0, min(1.0, dots[axis]))))
+    if axis_dev_deg > max_axis_dev_deg:
+        raise CalibrationError(TEXT_BELT_OFF_AXIS)
+
+    ax, ay = BELT_AXES[axis]
+    factor = abs(dx * ax + dy * ay) / abs(delta)
+    raw_factor = round(factor / BELT_FACTOR_SCALE)
+    if raw_factor < 1:
+        raise CalibrationError(TEXT_BELT_FACTOR_RANGE)
+    return BeltResult(
+        factor_mm_per_imp=float(factor),
+        raw_factor=int(raw_factor),
+        direction=int(axis),
+        axis_dev_deg=float(axis_dev_deg),
+        travel_mm=float(travel),
+        delta_enc=int(delta),
+    )
