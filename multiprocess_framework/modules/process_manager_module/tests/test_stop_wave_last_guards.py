@@ -8,6 +8,10 @@
 С3: ``ChildProcessStop.poll`` — один проход без ожидания: ``(True, 0.0)`` / ``(False, 0.0)`` /
     ``(None, pause ≤ poll_s)``.
 С4: вариант (А) при ``main``, игнорирующем и ``terminate``: сигнал ``last`` в [5,0; 5,1] — раньше ``kill`` ``main``.
+С1 (усилен): ``budget_s`` ОТКРЫТОЙ области ``work/children`` настоящего PM после ``initialize()`` — 7,0 / 5,0
+    (инъекция (7) «область без ``+ last_wave_s``»).
+С5: групповой ``kill()`` фазы 3 до сигнала ``last``: ``kill`` зависшему ``main`` — через окно подтверждения после
+    ``kill()`` группы, не сразу (инъекция (11)); ``last`` без сигнала не получает ни ``terminate``, ни ``kill``.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from ..core.process_registry import ProcessRegistry
 from ..core.stop_budget import stop_budget
 from ..launcher.spawner import ProcessSpawner
 from ..process.process_manager_process import ProcessManagerProcess
+from .test_process_root_pm_hazards import _call_bounded
 from .test_stop_wave_last import _run_registry_group, _spawn, farm  # noqa: F401 — фикстура farm
 
 _WITH_LAST = {"gui": {"class": "x.Gui", "stop_wave": "last"}, "cam": {"class": "x.Cam"}}
@@ -47,8 +52,15 @@ def test_pm_root_budget_from_processes_config(processes_config: dict, root: tupl
     runner_budget = stop_budget(5.0)  # раннер шлёт пять ключей: last_wave_s PM считает сам
     pm.attach_stop_budget(runner_budget)
     assert pm._root_budget(runner_budget) == root
-    budget = pm._budget()
-    assert budget["pm_graceful_s"] + budget.get("last_wave_s", 0.0) == children_s
+    # Открыть настоящий корень: детей из processes_config не создавать, каталоги логов не трогать.
+    pm._create_processes_from_config = lambda _cfg: None
+    pm._sweep_orphaned_log_dirs = lambda _names: None
+    assert pm.initialize() is True
+    try:
+        assert pm.lifetime_segments["work"]._names["children"].res.budget_s == children_s
+    finally:
+        done, _result, error = _call_bounded(pm.shutdown)
+        assert done and error is None, repr(error)
 
 
 @pytest.mark.parametrize(
@@ -154,3 +166,39 @@ def test_last_signalled_by_time_before_main_kill(farm) -> None:  # noqa: F811
     assert last.terminate_calls == 0 and last.kill_calls == 0
     assert registry.stop_outcome("gui") == "exited"
     assert registry.stop_outcome("hung") == "killed"
+
+
+# --------------------------------------------------------------------------- #
+# С5: групповой kill() фазы 3 до сигнала last
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_group_kill_before_last_signal_waits_kill_confirm_window(farm) -> None:  # noqa: F811
+    registry = ProcessRegistry(logger=None, child_stop_budget=stop_budget(5.0))
+    main = _spawn(registry, farm, "hung", wave=None, exit_after_s=8.0, dies_on_terminate=False)
+    last = _spawn(registry, farm, "gui", wave="last", exit_after_s=0.3)
+    group = registry.children_stop(mark_reader_gone=False)
+    box: dict[str, Any] = {}
+
+    def body() -> None:
+        group.request_stop()  # фаза 1: только main
+        box["t_kill"] = time.monotonic()
+        group.kill()  # фаза 3 сразу (фаза 2 пропущена): last ещё не сигналлен
+        box["ok"] = group.join_until(box["t_kill"] + 2.0)  # until фазы 3
+
+    thread = threading.Thread(target=body, daemon=True)
+    thread.start()
+    thread.join(15.0)
+    assert not thread.is_alive()
+    t_kill = box["t_kill"]
+
+    assert box["ok"] is True
+    assert main.t_terminate is not None and main.t_terminate - t_kill <= 0.1
+    assert main.t_kill is not None and 1.0 <= main.t_kill - t_kill <= 1.1, (
+        f"kill main через {main.t_kill - t_kill:.3f} с после kill() группы, ожидалось [1,0; 1,1]"
+    )
+    assert last.t_signal is not None and last.t_signal >= t_kill
+    assert last.terminate_calls == 0 and last.kill_calls == 0
+    assert registry.stop_outcome("hung") == "killed"
+    assert registry.stop_outcome("gui") == "exited"
