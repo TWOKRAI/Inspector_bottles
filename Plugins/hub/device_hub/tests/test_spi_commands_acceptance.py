@@ -479,7 +479,7 @@ def test_a1_commands_are_exactly_the_77_names() -> None:
     assert set(DeviceHubPlugin.commands) == expected
 
 
-def test_a2_all_73_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
+def test_a2_all_77_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
     """А2: после ``_do_configure`` + ``_do_start`` у всех 77 команд есть запись; в логе нет повторов и отказов."""
     missing = [name for name in ALL_COMMANDS if rig.cm.get_command_info(name) is None]
     assert missing == [], missing
@@ -653,7 +653,7 @@ class PingDriver(FakeDriver):
 
 
 def test_a9_install_op_commands_extends_subclass_only() -> None:
-    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 74 имени, без метода."""
+    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 77 имён, без метода."""
     plugin_mod = importlib.import_module("Plugins.hub.device_hub.plugin")
 
     class Sub(DeviceHubPlugin):

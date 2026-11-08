@@ -19,6 +19,7 @@ Stability: lite
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -46,6 +47,10 @@ TEXT_OFF_AXIS = "лента не вдоль оси робота"
 TEXT_NO_ENCODER = "энкодер не изменился между отметками"
 TEXT_STORE_ERROR = "ошибка хранилища данных робота"
 TEXT_HALF = "калибровка ленты записана не полностью"
+TEXT_NOT_APPLIED = "параметры ленты записаны, применение не прошло — повторите применение"
+TEXT_SYNCING = "идёт синхронизация параметров"
+TEXT_BAD_MARKS = "неверные отметки ленты"
+TEXT_FACTOR_RANGE = "коэффициент ленты вне диапазона параметра"
 TEXT_NO_POINT = "точка не найдена"
 TEXT_IN_BASE = "точка СК должна быть в базе"
 _FACTOR = "P_BELT_FACTOR"
@@ -77,15 +82,26 @@ def driver_scope() -> Iterator[Any]:
         assert list(report.survivors) == [], f"выжившие потоки области теста: {list(report.survivors)}"
 
 
-class _NakFactorClient(RobotClientV2):
-    """Клиент, у которого ``param_set(P_BELT_FACTOR)`` отвечает NAK, пока ``armed`` (шов ``client_factory``)."""
+class _FaultClient(RobotClientV2):
+    """Клиент с крючками на ``param_set`` / ``param_apply`` (шов ``client_factory``): крючок бросает исключение
+    или ждёт событие ДО вызова настоящего метода. Крючки — атрибуты класса, ``_hub`` сбрасывает их при выходе."""
 
-    armed = False
+    set_hook: Callable[[str, int], None] | None = None
+    apply_hook: Callable[[], None] | None = None
 
     def param_set(self, name: str, raw: int) -> Any:
-        if _NakFactorClient.armed and name == _FACTOR:
-            raise RobotNak(1, None, "nak", None, ())
+        if _FaultClient.set_hook is not None:
+            _FaultClient.set_hook(name, raw)
         return super().param_set(name, raw)
+
+    def param_apply(self) -> Any:
+        if _FaultClient.apply_hook is not None:
+            _FaultClient.apply_hook()
+        return super().param_apply()
+
+
+def _nak(*_args: Any) -> None:
+    raise RobotNak(1, None, "nak", None, ())
 
 
 class _Hub:
@@ -152,6 +168,7 @@ def _hub(tmp_path: Path, client_factory: Callable[..., Any] = RobotClientV2) -> 
             assert bounded(lambda: mgr.connect(DEV), 60.0) is True
             yield _Hub(mgr, rig, mgr.get_driver(DEV), store, errors)
         finally:
+            _FaultClient.set_hook = _FaultClient.apply_hook = None  # отключение не должно идти через крючки
             try:
                 bounded(lambda: mgr.disconnect(DEV), 15.0)
             except Exception:  # noqa: BLE001 — уборка не подменяет исключение теста
@@ -296,19 +313,109 @@ def test_calib_belt_nothing_to_write_still_applies(tmp_path: Path) -> None:
 
 def test_calib_belt_second_write_nak_rolls_back_first(tmp_path: Path) -> None:
     """R7 (а): NAK на P_BELT_FACTOR после записи P_BELT_DIR -> P_BELT_DIR робота и файла прежний (1), ответ — ошибка."""
-    _NakFactorClient.armed = False
-    with _hub(tmp_path, client_factory=_NakFactorClient) as hub:
-        _NakFactorClient.armed = True
-        try:
-            answer = hub.belt(_MINUS_X)
-        finally:
-            _NakFactorClient.armed = False
+    with _hub(tmp_path, client_factory=_FaultClient) as hub:
+        _FaultClient.set_hook = lambda name, raw: _nak() if name == _FACTOR else None
+        answer = hub.belt(_MINUS_X)
+        _FaultClient.set_hook = None
         assert answer == {"status": "error", "message": "nak"}
         assert hub.robot_belt() == (_DEFAULT_FACTOR, _DEFAULT_DIR)
         assert hub.file_belt() == (_DEFAULT_FACTOR, _DEFAULT_DIR)
         assert hub.count("op=PARAM_APPLY") == 0
         assert hub.drv.is_connected  # замок отпущен, драйвер жив
         assert hub.belt(_PLUS_Y)["status"] == "ok"
+
+
+def test_calib_belt_nak_on_first_write_changes_nothing(tmp_path: Path) -> None:
+    """NAK на ПЕРВОЙ записи (P_BELT_DIR): откатывать нечего, робот и файл прежние, PARAM_APPLY не звался, ошибок нет."""
+    with _hub(tmp_path, client_factory=_FaultClient) as hub:
+        _FaultClient.set_hook = lambda name, raw: _nak() if name == _DIR else None
+        answer = hub.belt(_MINUS_X)
+        assert answer == {"status": "error", "message": "nak"}
+        assert hub.robot_belt() == hub.file_belt() == (_DEFAULT_FACTOR, _DEFAULT_DIR)
+        assert hub.count("op=PARAM_SET") == 0
+        assert hub.count("op=PARAM_APPLY") == 0
+        assert hub.errors == []
+
+
+def test_calib_belt_nak_and_failed_rollback_reports_half(tmp_path: Path) -> None:
+    """NAK на втором шаге И откат первого шага тоже не прошёл: ответ — NAK, last_error заканчивается «записана не
+    полностью»; робот и файл одинаковы (P_BELT_DIR уже новый, P_BELT_FACTOR старый)."""
+    dir_calls: list[int] = []
+
+    def hook(name: str, raw: int) -> None:
+        if name == _FACTOR:
+            _nak()
+        if name == _DIR:
+            dir_calls.append(raw)
+            if len(dir_calls) >= 2:  # откат (и его повтор внутри param_set) не доходит до робота
+                raise RuntimeError("link")
+
+    with _hub(tmp_path, client_factory=_FaultClient) as hub:
+        _FaultClient.set_hook = hook
+        answer = hub.belt(_MINUS_X)
+        assert answer == {"status": "error", "message": "nak"}
+        assert len(dir_calls) >= 2  # откат пробовался
+        assert hub.errors[-1] == TEXT_HALF
+        assert hub.robot_belt() == hub.file_belt() == (_DEFAULT_FACTOR, 2)
+        assert hub.count("op=PARAM_APPLY") == 0
+
+
+def test_calib_belt_apply_failure_keeps_writes_and_retry_applies(tmp_path: Path) -> None:
+    """PARAM_APPLY бросает: ответ — TEXT_BELT_NOT_APPLIED с written из двух параметров, applied False, записи не
+    откатываются (робот == файл); повтор с тем же rev -> ok, written пуст, applied True, TLM_CFG_PENDING снят."""
+    from Services.robot_comm.core.protocol_v2 import REG
+
+    applies: list[int] = []
+
+    def apply_hook() -> None:
+        applies.append(1)
+        if len(applies) == 1:
+            raise RuntimeError("boom")
+
+    with _hub(tmp_path, client_factory=_FaultClient) as hub:
+        _FaultClient.apply_hook = apply_hook
+        answer = hub.belt(_MINUS_X)
+        assert answer["status"] == "error", answer
+        assert answer["message"] == TEXT_NOT_APPLIED
+        assert (answer["written"], answer["applied"]) == ([_DIR, _FACTOR], False)
+        assert (answer["direction"], answer["raw_factor"]) == (2, 14451)
+        assert answer["rev"] == hub.file_rev()
+        assert hub.robot_belt() == hub.file_belt() == (14451, 2)
+        assert hub.rig.core.regs[REG["TLM_CFG_PENDING"]] == 1
+
+        retry = hub.call("calib_belt", {"marks": _MINUS_X, "base_rev": answer["rev"]})
+        assert retry["status"] == "ok", retry
+        assert (retry["written"], retry["applied"], retry["rev"]) == ([], True, answer["rev"])
+        assert hub.rig.core.regs[REG["TLM_CFG_PENDING"]] == 0
+        assert len(applies) == 2
+
+
+def test_calib_belt_holds_one_lock_over_both_writes(tmp_path: Path) -> None:
+    """Оба параметра пишутся под одним захватом _param_lock: пока первый calib_belt стоит на P_BELT_DIR, второй
+    calib_belt и param_set получают «идёт синхронизация параметров»; после отпускания робот == файл."""
+    entered, release = threading.Event(), threading.Event()
+
+    def hook(name: str, raw: int) -> None:
+        if name == _DIR and not entered.is_set():
+            entered.set()
+            release.wait(15.0)
+
+    with _hub(tmp_path, client_factory=_FaultClient) as hub:
+        _FaultClient.set_hook = hook
+        first: dict[str, Any] = {}
+        worker = threading.Thread(target=lambda: first.update(answer=hub.belt(_MINUS_X)), daemon=True)
+        worker.start()
+        try:
+            assert entered.wait(15.0), "первый calib_belt не дошёл до записи P_BELT_DIR"
+            busy = {"status": "error", "message": TEXT_SYNCING}
+            assert hub.belt(_PLUS_Y) == busy
+            assert hub.call("param_set", {"name": "P_SPD_DEFAULT", "value": 55, "base_rev": None}) == busy
+        finally:
+            release.set()
+            worker.join(15.0)
+        assert not worker.is_alive()
+        assert first["answer"]["status"] == "ok", first
+        assert hub.robot_belt() == hub.file_belt() == (14451, 2)
 
 
 def test_calib_belt_second_write_store_error_tick_restores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -343,6 +450,22 @@ def test_calib_belt_second_write_store_error_tick_restores(tmp_path: Path, monke
         _until(restored, _TICK_DEADLINE_S, "тик вернул роботу P_BELT_FACTOR из файла")
         assert hub.robot_belt() == (_DEFAULT_FACTOR, 2)
         assert hub.file_belt() == (_DEFAULT_FACTOR, 2)
+
+
+@pytest.mark.parametrize(
+    ("marks", "text"),
+    [
+        ([{"x_mm": 1e308, "y_mm": 0.0, "encoder": 0}, {"x_mm": -1e308, "y_mm": 0.0, "encoder": 1000}], TEXT_BAD_MARKS),
+        ([{"x_mm": 0.0, "y_mm": 0.0, "encoder": 0}, {"x_mm": 1e308, "y_mm": 0.0, "encoder": 1}], TEXT_FACTOR_RANGE),
+    ],
+    ids=["travel_overflows_float", "factor_overflows_float"],
+)
+def test_calib_belt_float_overflow_gives_constant_text(tmp_path: Path, marks: list[dict], text: str) -> None:
+    """Конечные, но огромные отметки: постоянный текст калибровки, не английское «cannot convert float infinity»."""
+    with _hub(tmp_path) as hub:
+        assert hub.belt(marks) == {"status": "error", "message": text}
+        assert hub.robot_belt() == (_DEFAULT_FACTOR, _DEFAULT_DIR)
+        assert hub.count("op=PARAM_SET") == 0
 
 
 # --------------------------------------------------------------------------------------------------
@@ -422,6 +545,17 @@ def test_calib_frame_refusals(tmp_path: Path) -> None:
         "status": "error",
         "message": TEXT_BAD_ARGS,
     }
+    assert load_frames(store, DEV)[0] == {}
+
+
+def test_calib_frame_huge_int_is_bad_args(tmp_path: Path) -> None:
+    """local[0] = 10**400 проходит isinstance(Real), но не переводится во float -> TEXT_BAD_ARGS, не OverflowError."""
+    store = RobotDataStore(tmp_path / "robot")
+    for i, local in enumerate(_LOCALS[:3]):
+        _save_point(store, f"s{i}", _base_of(local))
+    args = _frame_args(store, count=3)
+    args["points"][0]["local"] = [10**400, 0.0, 0.0]
+    assert _run(store, "calib_frame", args) == {"status": "error", "message": TEXT_BAD_ARGS}
     assert load_frames(store, DEV)[0] == {}
 
 

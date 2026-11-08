@@ -213,7 +213,11 @@ def _fit_points(args: dict[str, Any]) -> list[tuple[str, tuple[float, float, flo
         local = item.get("local")
         if not isinstance(local, (list, tuple)) or len(local) != 3 or not all(_is_real(v) for v in local):
             raise BadArgs
-        pairs.append((item["point"], (float(local[0]), float(local[1]), float(local[2]))))
+        try:
+            xyz = (float(local[0]), float(local[1]), float(local[2]))
+        except OverflowError:  # int > 1.8e308 проходит isinstance(Real), во float не переводится
+            raise BadArgs from None
+        pairs.append((item["point"], xyz))
     return pairs
 
 

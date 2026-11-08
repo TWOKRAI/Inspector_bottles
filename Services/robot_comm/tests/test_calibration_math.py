@@ -119,6 +119,12 @@ def test_belt_non_finite_precedes_encoder_check() -> None:
     _belt_refusal("неверные отметки ленты", (math.inf, 0.0), 5, (0.0, 0.0), 5)
 
 
+def test_belt_float_overflow_gives_constant_text() -> None:
+    """Конечные координаты, но разность не помещается в float; огромный ход на 1 импульс -> тексты, не OverflowError."""
+    _belt_refusal("неверные отметки ленты", (1e308, 0.0), 0, (-1e308, 0.0), 1000)
+    _belt_refusal("коэффициент ленты вне диапазона параметра", (0.0, 0.0), 0, (1e308, 0.0), 1)
+
+
 def test_belt_numbers_are_plain_python() -> None:
     """Числа результата - float/int Python, не numpy."""
     res = belt_from_marks((250.0, -100.0), 1000, (250.0, 100.0), 2384)

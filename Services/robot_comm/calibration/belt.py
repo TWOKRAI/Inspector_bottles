@@ -96,11 +96,11 @@ def belt_from_marks(
     Post: `BeltResult` (поля — в его докстроке); `factor_mm_per_imp` и `raw_factor` положительны;
     все числа — `float`/`int` Python.
     Raises: `CalibrationError` с текстом
-        `TEXT_BELT_BAD_MARKS` — координата не конечна;
+        `TEXT_BELT_BAD_MARKS` — координата не конечна или ход между отметками не помещается в float;
         `TEXT_BELT_NO_ENCODER` — энкодер не изменился между отметками;
         `TEXT_BELT_SHORT` — ход между отметками меньше `min_travel_mm`;
         `TEXT_BELT_OFF_AXIS` — отклонение от оси больше `max_axis_dev_deg`;
-        `TEXT_BELT_FACTOR_RANGE` — `raw_factor` меньше 1.
+        `TEXT_BELT_FACTOR_RANGE` — `raw_factor` меньше 1 или не помещается в float.
     Верхнюю границу `raw_factor` по диапазону параметра проверяет вызывающий.
 
     Алгоритм (T5.4m, 2a). Порядок проверок закреплён:
@@ -129,6 +129,8 @@ def belt_from_marks(
 
     dx, dy = coords[2] - coords[0], coords[3] - coords[1]
     travel = math.hypot(dx, dy)
+    if not math.isfinite(travel):  # разность конечных координат вышла за float (1e308 и -1e308)
+        raise CalibrationError(TEXT_BELT_BAD_MARKS)
     if travel < min_travel_mm:
         raise CalibrationError(TEXT_BELT_SHORT)
 
@@ -142,7 +144,10 @@ def belt_from_marks(
 
     ax, ay = BELT_AXES[axis]
     factor = abs(dx * ax + dy * ay) / abs(delta)
-    raw_factor = round(factor / BELT_FACTOR_SCALE)
+    scaled = factor / BELT_FACTOR_SCALE
+    if not math.isfinite(scaled):  # огромный ход на малую разность энкодера: round(inf) бросил бы OverflowError
+        raise CalibrationError(TEXT_BELT_FACTOR_RANGE)
+    raw_factor = round(scaled)
     if raw_factor < 1:
         raise CalibrationError(TEXT_BELT_FACTOR_RANGE)
     return BeltResult(
