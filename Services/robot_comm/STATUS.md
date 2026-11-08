@@ -43,6 +43,10 @@
   EXACT), `upload` блоками FC16, `run_chunks` с меткой стопа -> `RunReport`; тесты автора `test_client_v2_chunks.py` +
   слепая приёмка `test_client_v2_chunks_acceptance.py` (golden `tests/golden/t32_run_chunks.log`).
   Не сделано: пульс в `run_chunks` (поток вызывающего, T5.1), путь GUI -> `round_step` (T5.1/T6.1)
+- [x] Калибровка робота v2 (T5.4, robot-protocol-v2): пакет `calibration/` — `belt_from_marks` (коэффициент и направление
+  ленты), `fit_frame` (подгонка СК, отказ при невязке > 0,5 мм), `check_tool_points` (точки инструментов); чистые функции,
+  без робота. Приёмка: A1–A9 (`test_t54_calibration_acceptance.py`); B1–B9 и C1–C3 — в тестах хаба и камеры (см. STATUS хаба).
+  Не сделано: замер на железе (GATE-0)
 - [x] Ленивые `__init__` корня и `core/` (T3.6, PEP 562): `import Services.robot_comm.programs` не грузит pymodbus,
   `Services.modbus`, `core.client`; имена `__all__` прежние (приёмка `test_lazy_init_acceptance.py`). Остаётся
   `multiprocess_framework` через `params_v2` (≈ 0,7 с) — вне объёма по слову владельца
