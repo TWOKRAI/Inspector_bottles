@@ -427,7 +427,7 @@ def test_catalogue_descriptions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_old_names_work_as_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_transport: Any, robot_entry: Any
 ) -> None:
-    """RED 9 (FREEZE, О2): v2: ``enqueue_job`` работает, ``draw_polyline`` - «неизвестная операция»; v1 - как прежде."""
+    """RED 9 (T5.5, О2 снят): v2: ``enqueue_job`` ок, ``draw_polyline`` - точка (0, 0) вне зоны; v1 как прежде."""
     from Services.device_hub.drivers.robot_driver import RobotDriver
 
     plugin, ctx = _plugin(tmp_path / "v2", monkeypatch)
@@ -446,7 +446,8 @@ def test_old_names_work_as_before(
                 plugin, "robot_draw_polyline", {"device_id": "r1", "points": [{"x_mm": 0, "y_mm": 0, "pen": 1}]}
             )
             assert draw["status"] == "error"
-            assert draw["message"] == "Неизвестная операция робота: 'draw_polyline'"
+            assert "вне зоны" in draw["message"], draw
+            assert "Неизвестная операция" not in draw["message"], draw
         finally:
             _shutdown(plugin, ctx)
 
