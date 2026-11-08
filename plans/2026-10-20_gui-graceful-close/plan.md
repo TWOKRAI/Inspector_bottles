@@ -58,9 +58,9 @@
 | 0.1 | tester (sonnet), стенд heavy | ~0,3M токенов |
 | 0.2 | teamlead (opus) + reviewer (opus), стенд light/medium | ~0,4–0,5M |
 | 1.1a, 1.1, 1.3, 1.4 | tester (sonnet, слепой) + teamlead (opus) + reviewer (opus) на каждую | ~0,7–0,9M на задачу |
-| 1.2, 2.1, 2.2, 2.4 | developer (sonnet) + reviewer (opus) | ~0,4–0,5M на задачу |
+| 1.2, 2.1a, 2.1b, 2.2, 2.4 | developer (sonnet) + reviewer (opus) | ~0,4–0,5M на задачу (2.1b ~0,3M) |
 | 2.3 | tester (sonnet) живьём + инъекции лида; стенд heavy ~1,5 ч окна | ~0,5M |
-| Итого | 12 задач (3.1 — строка в чужом плане) | ~6–7M токенов, Opus ~12 запусков (оценка по LSO 1.1–1.8) |
+| Итого | 14 задач (0.1, 0.2, 1.1a, 1.1, 1.2a, 1.2, 1.3, 1.4, 1.4m, 2.1a, 2.1b, 2.2, 2.3, 2.4) + 3.1 — строка в чужом плане | ~7–8,5M токенов, Opus ~14 запусков (было ~6–7M; поправки §3, §5, §6) |
 
 ## Порядок выполнения
 
@@ -80,17 +80,20 @@
   - **Module contract:** public-api-change (ответ команды PM)
 - Task 1.3: волна «последними» — GUI гаснет после всех [DONE 2026-11-08, ветка `feat/gui-close-1.3`; heavy на Windows и живой пункт — PENDING, нужен стенд] (после 1.1; бюджет — поверх LSO 1.11)
   - **Module contract:** public-api-change (поле `stop_wave` схемы процесса)
-- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [PENDING] (после 0.2, 1.2a, 1.2, 1.3, LSO 1.9b)
-  - **Module contract:** public-api-change (аргумент `initiator`, поле `outcomes` метода драйвера)
+- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [PENDING] (после 0.2, 1.1a, 1.2a, 1.2, 1.3, LSO 1.9b — все в `main`; стадия 0 раунд 1 — CHANGES REQUESTED, текст переписан 2026-11-08)
+  - **Module contract:** public-api-change (ответ `system.shutdown`: `accepted`/`phase`/`escalated`; поля `outcomes`/`unconfirmed`/`timed_out` и `wait_timeout` метода драйвера и MCP) + new-lite (`process/pre_stop.py`)
+- Task 1.4m: манифест `pre_stop` прототипа — шаг `{process: "devices", command: "robot_park_all", args: {}, timeout_s: 35}` и живая проверка пути PM → `robot_park_all` → `process.stop` [PENDING] (после 1.4; блок: слово владельца — `docs/handoffs/2026-11-08_R2-T5.5.md:6`; источник ключа — `orchestrator_config`, `multiprocess_prototype/backend/launch.py:750`; файл задачи заводится после слова владельца)
+  - **Module contract:** n/a (конфиг прототипа)
 
 ### Ф2 — интерфейс
-- Task 2.1: окно хода остановки — зависание по окну стопа процесса, второй крестик, внешний стоп, смерть бэкенда [PENDING] (после 1.2, 1.4)
+- Task 2.1a: окно хода остановки — вопрос «процесс не отвечает» (`stop_deadline_at` + 1,5 с, «честная кнопка»), `force`, второй крестик, смерть бэкенда, прокси с `timeout_s` [PENDING] (после 1.1, 1.2, 1.3 — в `main`; от 1.4 — только текст фазы `pre_stop`; стадия 0 раунд 1 — CHANGES REQUESTED, текст переписан и разрезан 2026-11-08; зависший шаг `pre_stop` — вне задачи)
+- Task 2.1b: стоп не из GUI (дельта `system.stop.phase` / общий `system_stop_event`), кадры на стопе, `title=` для 2.2 [PENDING] (после 2.1a — общие файлы)
   - **Module contract:** new-lite (`frontend/widgets/dialogs/stop_progress.py`)
-- Task 2.2: несохранённое — один вопрос на все источники, черновик, восстановление [PENDING] (после 2.1 — общие файлы)
+- Task 2.2: несохранённое — один вопрос на все источники, черновик, восстановление [PENDING] (после 2.1b — общие файлы)
   - **Module contract:** new-lite (`frontend/shutdown/recovery_draft.py`)
 - Task 2.4: автосохранение графа — вкл/выкл и интервал из рецепта [PENDING] (после 2.2)
   - **Module contract:** new-lite (`frontend/shutdown/autosave.py`)
-- Task 2.3: живая приёмка на GUI-стенде + матрица инъекций лида [PENDING] (после 2.1, 2.2, 2.4)
+- Task 2.3: живая приёмка на GUI-стенде + матрица инъекций лида [PENDING] (после 2.1b, 2.2, 2.4; A6 несёт и живой пункт, вынесенный из 1.4: `force` 1,0 с, dirty граф, без unattended, 5 из 5, модальных окон 0)
   - **Module contract:** n/a
 
 ### Ф3 — Пульт
@@ -98,7 +101,7 @@
   - **Module contract:** n/a
 
 Цепочки (`team-protocol` §3): 0.1 — tester(RED) → лид; 0.2 — teamlead(REDS в брифе, красный прогон до правки `src`) →
-reviewer; 1.1a, 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) → reviewer; 1.2, 2.1, 2.2, 2.4 — developer(REDS в брифе)
+reviewer; 1.1a, 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) → reviewer; 1.2, 2.1a, 2.1b, 2.2, 2.4 — developer(REDS в брифе)
 → reviewer; 2.3 — tester(живой) → лид (S4); 3.1 — docs-writer → reviewer(express).
 
 Гейты: каждая задача — `pytest -q --tb=short` радиуса через `machine_gate.sh`; Ф1 — `sentrux check .` (слои);
@@ -132,7 +135,7 @@ reviewer; 1.1a, 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) 
      оператору, не молча (Task 1.1, шаг 6).
   5. Автосохранение графа — да; интервал и вкл/выкл — через рецепт → **Task 2.4**.
   6. Черновики — `%LOCALAPPDATA%\Inspector\recovery\` (Task 2.2, `design.md`).
-  7. Порог вопроса о зависании — из окна стопа процесса (LSO Task 1.11), не фиксированные 6 с / +5 с (Task 1.2, 2.1).
+  7. Порог вопроса о зависании — из окна стопа процесса (LSO Task 1.11), не фиксированные 6 с / +5 с (Task 1.2, 2.1). Сужено 2026-11-08 («честная кнопка», журнал ниже).
   8. «Закрыть принудительно» во время шага «домой» — да, с предупреждающей строкой (Task 2.1, как было).
   Ссылки «LSO 1.9» уточнены: KeyedExecutor и развилка — 1.9a, PM первый потребитель (стоп вне `message_processor`,
   нужен для хода) — 1.9b; `outcome` дополнен значением `handed_over` (решение CTO О1 в LSO).
@@ -144,3 +147,5 @@ reviewer; 1.1a, 1.1, 1.3, 1.4 — tester(RED, слепой) → teamlead(GREEN) 
 - 2026-11-07 — решение CTO (`a0f02fad5813727de`, ACCEPT WITH CONDITIONS, вариант A) по Task 1.2: LSO 1.10 расширяется на путь корня — итог пишется в реестр в момент подтверждения смерти через колбэк `on_outcome` в `ChildProcessStop._confirm`; `survived` — только после `kill()` и срока; `handed_over`/`survived` не перезаписывают подтверждённый итог; публичное поле называется `stop_outcome` (имя `outcome` — дубль, потребителей кода нет; `design.md`, 1.4, 2.1 переименованы). Проба CTO на rig 1.1a: итог считался верно, но в реестр не попадал; `outcomes()` посреди стопа с чужого потока лжёт `survived` — не вызывать с `message_processor`. Правило потребителя: «все остановлены» = `stop_outcome` не `null`. `tasks/1.2.md` переписан в бриф (статус BLOCKED снят). ADR-PMM-042 (041 — 1.2a).
 - 2026-11-08 — Task 1.2 влита в `main` (`68884237c`; ветка `feat/gui-close-1.2`: стадия 0 два раунда, слепой набор 6 тестов, реализация `2b3d6bbe3`, правки ревью `fda64c80a`; стадия 5 reviewer sonnet APPROVED во 2-м раунде). Итог корня пишется в реестр в `_confirm` (ранг + листовой лок), `stop_deadline_at`/`stop_wave` в записи процесса, F1 закрыт, ADR-PMM-042. Проба Mac: 65/65/64 ответов `exited` у соседа при живом медленном, 0 нарушений по `stop_wave`/`stop_deadline_at`; итог последнего медленного ребёнка опросом не виден (предел контракта в ADR). Решения лида: умершему до стопа `exited`; «остановлен» = {exited, terminated, killed}; правки обвязки вне FILES — `_GroupProxy.__getattr__`, 2 ключа `_PROCESS_KEYS`. heavy на Windows — ожидает стенда.
 - 2026-11-08 — Task 1.3 готова к слиянию (ветка `feat/gui-close-1.3`): стадия 0 — два раунда reviewer sonnet (CHANGES REQUESTED, 14 пунктов, затем 3 блокера) и раунд teamlead по R2-1…R2-3 (`reviews/task-1.3-stage0.md`); слепой набор 10 REDS (11 ячеек), реализация `016fb61e6`, стражи и правки ревью r1 (`10c1a168e`, `3b4e4caf1`), инъекции 1–10 и 7/11/11b и раунд 3 — все совпали с предсказаниями, кроме (7)/(8) (находки приняты); стадия 5 reviewer sonnet: раунд 1 CHANGES REQUESTED (2 major: ребёнок `last` не наблюдался до сигнала, нет тестов на требования DESIGN), раунд 2 APPROVED. Решения лида: вариант (А) — `last` сигналят по времени (`D − last_wave_s`) или когда `main` пуст; `has_last` только при старте; `poll(deadline)` в `child_process_stop.py` как девятый файл; окно имени `last` в `stop_deadline_at` = g = 5,0; правка ячейки kill REDS 2 слепого теста. Следствие для Task 2.1: вопрос «завис» не успевает появиться для ребёнка со стандартным окном (OPEN_QUESTIONS 2026-11-08). Не закрыто: живой пункт, замер выхода `gui` под `LAST_WAVE_S` = 2,0, heavy на Windows. Дальше Task 1.4.
+- 2026-11-08 — стадия 0 Task 1.4 (reviewer opus, раунд 1 — CHANGES REQUESTED, 17 находок; `reviews/task-1.4-stage0.md`), текст переписан teamlead по решениям лида. Шаг `pre_stop` — запрос `RouterManager.request_async` с потока отдельного исполнителя `pm-pre-stop`, ожидание срезами ≤ 50 мс (`_send_child_command` ответа не ждёт); отказ команд жизненного цикла в фазе `pre_stop` — предикат `_lifecycle_rejected()` у `pm-lifecycle` в самой 1.4 (`_pm_stopping()` и его потребители не меняются; рестарт монитором во время `pre_stop` — известное ограничение, ADR-PMM-044); аргумент `initiator` не вводится; `deadline_at` фазы `pre_stop` = `started_at + Σ timeout_s`, на переходе в `children` — `+ pm_graceful_s`; негодный шаг — ERROR и пропуск, PM стартует, Σ ≤ 120 с; драйвер кончает опрос по `stop_outcome`/`done`/разрыву, объединяет снимки, отдаёт `unconfirmed` и `timed_out`. Живой GUI-пункт перенесён в Task 2.3 (A6); заявка Р2 — в Task 1.4m (ждёт слова владельца). Итог последнего медленного ребёнка опросом может быть не виден — вариант В (PM публикует итоги в стор при `done`) вне 1.4, OPEN_QUESTIONS 2026-11-08. Дальше — reviewer раунд 2.
+- 2026-11-08 — **решение владельца «честная кнопка»** (получено лидом напрямую), сужает решение 7: «Подождать ещё» убрана — после варианта А Task 1.3 (ADR-PMM-043) PM терминирует ребёнка на конце окна, кнопка ничего не продлевает. Вопрос «процесс не отвечает» — на `stop_deadline_at + 1,5 с` (`TERMINATE_GRACE_S` 1,0 + два опроса), одна кнопка «Закрыть принудительно» без обещания продления, `hide_hang()`. Стадия 0 Task 2.1 (reviewer opus, раунд 1 — CHANGES REQUESTED, 20 находок; `reviews/task-2.1-stage0.md`), текст переписан teamlead по решениям лида: `timeout_s` у async-методов прокси; F только на быстрых отказах; `wall_clock` для сроков PM; запасной `force_stop` при молчащем PM; второй крестик — закрытие диалога; полная таблица подписей; внешний стоп через `bind_fanout`, `CONFIRMING` как 1.1; закрытие по `alive = false` без ожидания итога; зависший шаг `pre_stop` — вне 2.1 (1.4 не публикует срок шага). Решения лида по ESCALATION: разрез на 2.1a и 2.1b (REDS 18 ячеек > 10); A8 — нового механизма нет, POSIX ≤ 2,5 с, Windows расчётно ≤ 4,0 с (не измерено); нет сторожа родителя на Windows — кандидат в задачу framework (OPEN_QUESTIONS). `amendments.md` §6. Дальше — reviewer раунд 2 по 2.1a и 2.1b.
