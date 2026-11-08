@@ -1029,14 +1029,15 @@ class ProcessManagerProcess(ProcessModule):
         target = data.get("process") if isinstance(data, dict) else None
         # Task 1.2a (ADR-PMM-041): ход системного стопа — копия под локом или None. Фазу из ``status``
         # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
-        # Task 1.2: снимок — ВЫШЕ цикла, срок ``force`` режет ``stop_deadline_at`` записей.
+        # Task 1.2: снимок — ВЫШЕ цикла, срок ``force`` режет ``stop_deadline_at`` записей. Сигнал читается ДО
+        # снимка: сигнал детям идёт после начала хода стопа, значит снимок после него уже видит стоп (и ``force``).
+        signalled_at = self._children_signalled_at()
         system_stop = self._system_stop_snapshot()
         if system_stop is None and self._pm_stopping():
             # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
             # «стоп идёт, а system_stop пуст» нет. Идемпотентно — первый выигрывает.
             self._begin_system_stop("graceful", "event", None)
             system_stop = self._system_stop_snapshot()
-        signalled_at = self._children_signalled_at()
         force_deadline = None
         if system_stop is not None and system_stop.get("mode") == "force":
             value = system_stop.get("deadline_at")

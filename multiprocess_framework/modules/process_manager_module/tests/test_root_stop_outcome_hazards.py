@@ -392,3 +392,73 @@ def test_message_processor_thread_does_not_confirm_death(make_rig) -> None:
     assert set(quick_marks) <= waiters, (
         f"метку поставил не поток ожидания группы: метка {quick_marks}, ожидание {waiters}, читатели {readers}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# H6, H7: колбэки ``ChildProcessStop._confirm`` (ревью Task 1.2, раунд 1)
+# --------------------------------------------------------------------------- #
+
+
+def _child_stop(child: FakeChild, *, on_dead: Any = None, on_outcome: Any = None) -> ChildProcessStop:
+    return ChildProcessStop(
+        {child.name: child},
+        {child.name: child.stop_event},
+        on_confirmed_dead=on_dead,
+        on_outcome=on_outcome,
+        poll_s=0.01,
+        terminate_grace_s=0.2,
+        kill_confirm_s=0.2,
+    )
+
+
+@pytest.mark.timeout(60)
+def test_on_outcome_fires_once_without_reader_mark() -> None:
+    """``on_confirmed_dead=None`` (``mark_reader_gone=False``) не глушит итог: ``on_outcome`` — ровно один раз,
+    ``exited`` / ``terminated`` / ``killed``; повторные наблюдатели итог не повторяют."""
+    for mode, expected in (("slow", "exited"), ("terminate", "terminated"), ("kill", "killed")):
+        calls: list[tuple[str, str]] = []
+        child = FakeChild("c", [], mode=mode, exit_after_s=0.05)
+        stop = _child_stop(child, on_outcome=lambda name, outcome, calls=calls: calls.append((name, outcome)))
+
+        def run(stop: ChildProcessStop = stop) -> None:
+            stop.request_stop()
+            if not stop.join_until(time.monotonic() + 0.3):
+                stop.kill()
+                stop.join_until(time.monotonic() + 1.5)
+            stop.survivors()
+            stop.outcomes()
+            stop.close()
+
+        thread, box = _start(run, f"h6-{mode}")
+        _finish(thread, box)
+        assert calls == [("c", expected)], (mode, calls)
+
+
+@pytest.mark.timeout(30)
+def test_reader_mark_before_outcome_and_callbacks_isolated() -> None:
+    """Порядок: метка читателя, затем итог; падение одного колбэка не отменяет другой и не бросает наружу."""
+    order: list[str] = []
+    child = FakeChild("c", [], mode="slow")
+    child._die(0)
+
+    def bad_dead(name: str, process: Any) -> None:
+        order.append("dead")
+        raise RuntimeError("метка упала (H7)")
+
+    stop = _child_stop(child, on_dead=bad_dead, on_outcome=lambda name, outcome: order.append(f"outcome:{outcome}"))
+    thread, box = _start(stop.survivors, "h7-a")
+    _finish(thread, box)
+    assert order == ["dead", "outcome:exited"], order
+
+    order.clear()
+    other = FakeChild("d", [], mode="slow")
+    other._die(0)
+
+    def bad_outcome(name: str, outcome: str) -> None:
+        order.append("outcome")
+        raise RuntimeError("итог упал (H7)")
+
+    stop2 = _child_stop(other, on_dead=lambda name, process: order.append("dead"), on_outcome=bad_outcome)
+    thread, box = _start(stop2.survivors, "h7-b")
+    assert _finish(thread, box) == (), "survivors() после упавшего колбэка"
+    assert order == ["dead", "outcome"], order
