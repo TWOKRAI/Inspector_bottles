@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
+"""Универсальный SQL-менеджер на SQLAlchemy: PostgreSQL, MySQL, SQLite; сюда — менять доступ к БД
+
 sql_module — универсальный SQL-менеджер для multiprocess framework.
 
 Поддерживает PostgreSQL, MySQL, SQLite на базе SQLAlchemy 2.0.

@@ -1,4 +1,6 @@
-"""telemetry_readmodel_module — generic Qt-free ядро read-model телеметрии.
+"""Qt-free ядро read-model телеметрии: проекция значений и кольцевая история; сюда — менять чтение телеметрии
+
+telemetry_readmodel_module — generic Qt-free ядро read-model телеметрии.
 
 Одна проекция состояния (снимок ``path → value``) + кольцевые буферы истории,
 наполняемые ОДНИМ потоком уже разобранных дельт. Ядро транспорт-агностично и не

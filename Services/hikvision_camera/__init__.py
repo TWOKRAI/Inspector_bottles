@@ -1,4 +1,6 @@
-"""Services.hikvision_camera -- рефакторинг модуля Hikvision камеры.
+"""Сервис промышленной камеры Hikvision: SDK, логика, плагин; сюда — менять работу с камерой
+
+Services.hikvision_camera -- рефакторинг модуля Hikvision камеры.
 
 Чистая архитектура:
     sdk/    -- минимальные ctypes bindings к MVS SDK
