@@ -1027,6 +1027,22 @@ class ProcessManagerProcess(ProcessModule):
         started_at = dict(getattr(self, "_instance_started_at", None) or {})
         registry = getattr(self, "_process_registry", None)
         target = data.get("process") if isinstance(data, dict) else None
+        # Task 1.2a (ADR-PMM-041): ход системного стопа — копия под локом или None. Фазу из ``status``
+        # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
+        # Task 1.2: снимок — ВЫШЕ цикла, срок ``force`` режет ``stop_deadline_at`` записей. Сигнал читается ДО
+        # снимка: сигнал детям идёт после начала хода стопа, значит снимок после него уже видит стоп (и ``force``).
+        signalled_at = self._children_signalled_at()
+        system_stop = self._system_stop_snapshot()
+        if system_stop is None and self._pm_stopping():
+            # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
+            # «стоп идёт, а system_stop пуст» нет. Идемпотентно — первый выигрывает.
+            self._begin_system_stop("graceful", "event", None)
+            system_stop = self._system_stop_snapshot()
+        force_deadline = None
+        if system_stop is not None and system_stop.get("mode") == "force":
+            value = system_stop.get("deadline_at")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                force_deadline = float(value)
         processes: dict = {}
         for name in sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at)):
             if target and name != target:
@@ -1053,16 +1069,59 @@ class ProcessManagerProcess(ProcessModule):
                 "instance_restarts": instance_restarts.get(name, 0),
                 # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
                 "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
+                # Task 1.2 (ADR-PMM-042): волна стопа имени и срок, после которого ребёнок «завис».
+                "stop_wave": self._stop_wave(name),
+                "stop_deadline_at": (
+                    self._stop_deadline_at(registry, name, signalled_at, force_deadline) if proc is not None else None
+                ),
             }
-        # Task 1.2a (ADR-PMM-041): ход системного стопа — копия под локом или None. Фазу из ``status``
-        # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
-        system_stop = self._system_stop_snapshot()
-        if system_stop is None and self._pm_stopping():
-            # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
-            # «стоп идёт, а system_stop пуст» нет. Идемпотентно — первый выигрывает.
-            self._begin_system_stop("graceful", "event", None)
-            system_stop = self._system_stop_snapshot()
         return {"success": True, "epoch": epoch, "processes": processes, "system_stop": system_stop}
+
+    def _stop_wave(self, name: str) -> str:
+        """Волна системного стопа имени (Task 1.2): сегодня одна, ``"main"``; Task 1.3 заменит геттер."""
+        return "main"
+
+    def _children_signalled_at(self) -> float | None:
+        """Момент сигнала стопа детям корня (``time.time()``) от группы, не PM-часы; нет — ``None``.
+
+        Двойники ``_children_stop`` в тестах геттера не имеют или отдают не число — ``None``.
+        """
+        getter = getattr(getattr(self, "_children_stop", None), "signalled_at", None)
+        if not callable(getter):
+            return None
+        try:
+            value = getter()
+        except Exception as exc:  # noqa: BLE001 — статус не падает от геттера срока
+            self._log_warning(f"supervision.status: signalled_at() упал: {exc}")
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    @staticmethod
+    def _stop_deadline_at(
+        registry: Any, name: str, signalled_at: float | None, force_deadline: float | None
+    ) -> float | None:
+        """Срок стопа ребёнка (Task 1.2, ADR-PMM-042): сигнал + окно имени; при ``force`` — не позже его срока.
+
+        Верхняя оценка: настоящий ``terminate`` идёт в ``min(сигнал + окно, срок области)``. До сигнала,
+        вне стопа и у реестра без числового окна (двойник) — ``None``.
+        """
+        if signalled_at is None or registry is None:
+            return None
+        getter = getattr(registry, "stop_window_s", None)
+        if not callable(getter):
+            return None
+        try:
+            window = getter(name)
+        except Exception:  # noqa: BLE001 — статус не падает от окна одного имени
+            return None
+        if isinstance(window, bool) or not isinstance(window, (int, float)):
+            return None
+        deadline = signalled_at + float(window)
+        if force_deadline is not None:
+            deadline = min(deadline, force_deadline)
+        return deadline
 
     # -------------------------------------------------------------------------
     # Topology commands
@@ -4925,6 +4984,10 @@ class _ChildrenStop:
         if self._group is None and not self._start_failed:
             self.request_stop()
         if self._group is None:
+            # F1 (Task 1.2, ADR-PMM-042): группа не собралась, ``kill()`` уже звали — вызов фазы 3 последний,
+            # ``done`` ставится здесь, иначе «после ``done`` ``null`` = PM не подтвердил» не исполнится.
+            if self._killed:
+                self._announce_phase("done")
             return False
         force_at = self._force_at
         if force_at is not None and not self._killed:
@@ -4937,6 +5000,16 @@ class _ChildrenStop:
             # здесь, потребитель судит по ``alive``.
             self._announce_phase("done")
         return stopped
+
+    def signalled_at(self) -> float | None:
+        """Момент сигнала стопа детям (``time.time()``) от группы реестра (Task 1.2); нет — ``None``."""
+        getter = getattr(self._group, "signalled_at", None)
+        if not callable(getter):
+            return None
+        value = getter()
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
 
     def kill(self) -> None:
         # Флаг ДО делегирования: join_until фазы 3 после kill() получает срок как есть.

@@ -93,6 +93,10 @@ class MockProcessRegistry:
         """Task 1.10: итог последнего стопа воплощения (двойник стопов не ведёт — None)."""
         return None
 
+    def stop_window_s(self, name: str) -> float | None:
+        """Task 1.2: окно стопа имени (двойник окон не ведёт — None; PM отдаёт ``stop_deadline_at`` None)."""
+        return None
+
     def reset_call_stop_outcomes(self) -> None:
         """Task 1.10: сброс канала итога вызова (двойник канала не ведёт)."""
 

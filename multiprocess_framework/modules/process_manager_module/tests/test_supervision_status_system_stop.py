@@ -59,6 +59,8 @@ _PROCESS_KEYS = {
     "started_at",
     "instance_restarts",
     "stop_outcome",
+    "stop_wave",
+    "stop_deadline_at",
 }
 
 

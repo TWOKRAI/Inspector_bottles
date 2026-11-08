@@ -2053,7 +2053,7 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
 | стоп прерван системным стопом | `False` | `handed_over`, ключа `error` нет |
 | отказ исполнителя | как раньше | ключа нет |
 
-Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня (`_ChildrenGroupStop` `stop_outcome` не пишет);
+Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня — см. ADR-PMM-042;
 код 76; GUI; парсеры `backend_ctl`.
 
 ### Альтернативы
@@ -2228,3 +2228,91 @@ ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2a.md`, `plans/2026-10-20_gui-graceful-close/design.md`
 («Контракт хода»), ADR-PMM-036, ADR-PMM-038, ADR-PMM-040, `tests/test_supervision_status_system_stop.py`,
 `tests/test_supervision_status_system_stop_hazards.py`.
+
+## ADR-PMM-042: Итог стопа ребёнка на пути корня — реестр единственный источник `stop_outcome`; `stop_deadline_at` и `stop_wave` в `supervision.status` (Task 1.2 gui-graceful-close, 2026-11-08)
+
+**Статус:** accepted (2026-11-08; стадия 0 — `plans/2026-10-20_gui-graceful-close/reviews/task-1.2-stage0.md`,
+решение CTO 2026-11-07 вариант A; реализация — Task 1.2, бриф `plans/2026-10-20_gui-graceful-close/tasks/1.2.md`).
+
+### Контекст
+
+ADR-PMM-039 (Task 1.10) ввёл итог стопа воплощения (`exited | terminated | killed | handed_over | survived`), но писал
+его только `_stop_many`. Стоп корня (`_ChildrenGroupStop`, область `children`) итог считал и в реестр не писал: после
+закрытия корня `registry.stop_outcome` = `None`, а `ChildProcessStop.outcomes()` знал ответ. Звать `outcomes()` с потока
+`message_processor` нельзя: посреди стопа он лжёт `survived` у живых и сам подтверждает смерть (`_observe()` → `_confirm`)
+не на потоке-владельце группы. GUI (решение владельца 7) судит о зависании по сроку — его в ответе не было.
+
+### Решение
+
+- **Источник.** Реестр — единственный источник `stop_outcome` на обоих путях (`_stop_many` и корень). Единственный
+  писатель словаря — `ProcessRegistry._record_stop_outcome(name, outcome)` под листовым `_stop_outcome_lock` (только
+  проверка ранга и запись). Читатель `stop_outcome()` — без лока (D3 1.10). `add_process` сбрасывает итог (тот же лок).
+- **Момент записи — `_confirm`.** `ChildProcessStop` получил колбэк `on_outcome(name, outcome)`; итог (`killed` /
+  `terminated` / `exited` — по сигналу, доставленному ИМЕНИ) считается под существующим локом сразу после `_dead.add`,
+  колбэки — после выхода из лока, без раннего `return`: сначала `on_confirmed_dead` (метка читателя), потом
+  `on_outcome`; каждый в своём try/except с WARNING. Поэтому `stop_outcome != null` ⇒ метка читателя стоит.
+  `_build_child_stop` передаёт `on_outcome=self._record_stop_outcome` для обоих путей и при любом `mark_reader_gone`.
+  Цикл итога `_stop_many` пишет через `_record_stop_outcome`; канал ответа вызова (`call_stop_outcome`) — напрямую, без
+  правила. `outcomes()` и `_observe()` не меняются (заморозка).
+- **Правило перезаписи — ранг.** `handed_over` 1 < `survived` 2 < `exited` 3 < `terminated` 4 < `killed` 5; пишется,
+  если ранг нового >= сохранённого. Писателей два, порядок не гарантирован (при `False` от `executor.join_until`
+  стоп по одному идёт параллельно с корнем, ADR-PMM-039 I1): группа `_stop_many` видит смерть от `terminate` корня и
+  считает `exited`, её снимок `outcomes()` бывает снят до этой смерти (`handed_over`). Ранг сохраняет самый сильный
+  доставленный сигнал.
+- **Умерший до стопа** в группу корня не попадает: `_ChildrenGroupStop.request_stop` пишет ему `exited` (имя без
+  объекта в реестре не пишется). Так у каждого ребёнка, остановленного до или во время стопа, итог не `null`.
+- **`survived`** — только после `kill()` и срока: `False` от `join_until` фазы 3 → одним снимком `survivors()` на
+  потоке-владельце. До этого `None`. Умерший позже получает подтверждённый итог поверх (ранг выше).
+- **`stop_deadline_at`** (`time.time()`) = момент сигнала стопа детям + окно имени
+  (`ProcessRegistry.stop_window_s(name)`: `stop_window_s` воплощения, иначе `g`). Сигнал — геттер группы, не PM-часы:
+  `ChildProcessStop.stop_requested_wall` (ставится один раз в `request_stop`) → `_ChildrenGroupStop.signalled_at()` →
+  `_ChildrenStop.signalled_at()` → PM. PM-часы в `_ChildrenStop.request_stop` ошиблись бы на ожидание исполнителя и
+  паузу монитора. PM проверяет число (`isinstance`), иначе `None` (двойники). При `mode == "force"` —
+  `min(…, system_stop.deadline_at)`; для graceful `system_stop.deadline_at` не используется (он раньше реального срока —
+  ложное «завис»). Снимок `system_stop` берётся выше цикла по процессам. `null` до сигнала, вне стопа, у PM и у имени
+  без объекта в реестре; после смерти не пересчитывается. У умершего до стопа значение = сигнал + окно, потребитель им
+  не пользуется (`stop_outcome` уже `exited`).
+- **Предел срока.** Настоящий `terminate` по имени идёт в `min(_stop_requested_at + окно, срок области)`
+  (`child_process_stop.py`, `_name_escalate`), срок области фиксируется до фазы 1 (`base_manager/core/lifetime.py`):
+  `сигнал + окно` — верхняя оценка, перекос <= `infra_s`; для GUI безопасная сторона.
+- **`stop_wave`** — геттер `_stop_wave(name)`, сегодня `"main"` у всех; Task 1.3 заменит его (волна `last`).
+- **F1.** `_ChildrenStop.join_until` при `_group is None` (реестр не собрал группу) после `kill()` объявляет `done` —
+  иначе фаза навсегда `children`, а контракт «после `done` `null` = PM не подтвердил» на этом пути не исполняется.
+
+### Инварианты
+
+- `_confirm` зовёт только поток-владелец группы (тот, что ведёт `join_until`/`kill`/`close`): `_terminated.add` и
+  `_killed.add` стоят ПОСЛЕ `proc.terminate()`/`proc.kill()`, и итог верен, пока смерть наблюдает тот же поток.
+  `result()`, `survivors()`, `outcomes()` с потока `message_processor` не зовутся; статус читает только
+  `registry.stop_outcome(name)`.
+- На системном стопе спавн отвергает `create_and_register` (ADR-PMM-030): он проверяет только `system_stop_event`, не
+  `_children_stopping`. Отказанный рестарт и `remove_process` итог не сбрасывают; сбрасывает только `add_process`.
+- Метка читателя — ровно одна на имя (D2 1.10 без изменений).
+
+### Предел контракта
+
+Между реальной смертью и её наблюдением группой (<= `STOP_POLL_S`) бывает `alive=false, stop_outcome=null`.
+«Остановлен» = `stop_outcome` ∈ {`exited`, `terminated`, `killed`}; `survived` и `handed_over` = НЕ остановлен
+(ребёнок жив). «Все остановлены» = итог из этого набора у каждого ребёнка; после `system_stop.phase == "done"` `null` =
+«PM не подтвердил». `survived` опросом почти не виден (окно между концом детей и остановкой `message_processor` короче
+шага опроса) — доезжает логом. Долг документации: `README.md` модуля и `backend_ctl/AGENTS.md` — Task 1.4.
+
+Ключ итога — имя, а не воплощение: `ChildProcessStop` старого воплощения X, подтвердивший смерть после
+`remove_process` + `add_process` нового X, пишет `exited` под именем нового. На `main` до Task 1.2 так же через цикл
+`_stop_many` — не регрессия. Экспозиция низкая: нужны две одновременные операции на одно имя (исполнитель жизненного
+цикла их сериализует, спавн на системном стопе отвергнут). Проверка идентичности воплощения в записи итога не делается
+(решение лида 2026-11-08).
+
+### Отвергнуто
+
+- **Запись в конце (`result()`/`outcomes()` после закрытия области).** Посреди стопа соседи без итога; GUI не видит
+  умерших, пока жив медленный.
+- **Геттер итога через `outcomes()` из `supervision.status`.** Чужой поток подтверждает смерть и лжёт `survived` у живых.
+- **«Подтверждённый не затирается» вместо ранга.** `exited` группы `_stop_many` (смерть от `terminate` корня) —
+  тоже подтверждённый и затёр бы `terminated`.
+- **Срок от PM-часов или `system_stop.started_at + pm_graceful_s`.** Ошибка на ожидание исполнителя и паузу
+  монитора; без окна имени.
+
+**Reversible:** yes (поля ответа новые; колбэк необязательный — без него прежнее поведение).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2.md`, ADR-PMM-035, ADR-PMM-039 (дополнение Task 1.10),
+ADR-PMM-041, `tests/test_root_stop_outcome_acceptance.py`, `tests/test_root_stop_outcome_hazards.py`.
