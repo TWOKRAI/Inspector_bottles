@@ -4,7 +4,7 @@ actions_module — Action-шина с undo/redo и объединением пр
 app_module — Шаблон приложения (composition root): общая сборка многопроцессного приложения; сюда — менять каркас запуска
   ManifestStoreProtocol (2), BlueprintLoader (0), LauncherFactory (0), ProcDictsBuilder (0), StateBootstrap (0), … ещё 1
 base_manager — Базовый менеджер: жизненный цикл, адаптеры, наблюдаемость; сюда — менять фундамент всех менеджеров
-  IObservableMixin (12), IScope (11), IBaseManager (9), CloseReport (3), IHandle (3), … ещё 5
+  IObservableMixin (12), IScope (11), IBaseManager (10), CloseReport (3), IHandle (3), … ещё 5
 chain_module — Движок исполнения цепочек и DAG-pipeline, в т.ч. между процессами; сюда — менять порядок и шаги исполнения
   IChainLogger (3), IExecutionStep (2), IChainRunnable (1), IRemoteExecutable (1), INodeConnection (0), … ещё 2
 channel_routing_module — Базовая маршрутизация по каналам для роутера, логгера и ошибок; сюда — менять общую логику каналов
@@ -34,9 +34,9 @@ message_module — Транспортный протокол сообщений 
 process_manager_module — Оркестратор процессов: запуск системы, реестр, приоритеты, мониторинг; сюда — менять управление процессами
   ISystemLauncher (9), IProcessManagerProcess (7), IProcessRegistry (7)
 process_module — Базовый класс процесса: создание, инициализация, управление, мониторинг; сюда — менять жизнь процесса
-  IProcessModule (12), IProcessCommunication (11), ISharedResources (5), ProcessStatsDict
+  IProcessModule (14), IProcessCommunication (11), ISharedResources (5), ProcessStatsDict
 recipe — Управление рецептами: снимки конфигурации, определение формата, миграции, CRUD; сюда — менять рецепты
-  RecipeManagerProtocol (11), RecipeEngineProtocol (10), StoreProtocol (3)
+  RecipeManagerProtocol (15), RecipeEngineProtocol (10), StoreProtocol (3)
 registers_module — Рантайм именованных регистров: подписки на поля, карта маршрутов, отправка; сюда — менять регистры
   IRegistersManager (15)
 router_module — Маршрутизация сообщений между процессами через RouterManager; сюда — менять каналы и правила доставки
@@ -52,10 +52,11 @@ statistics_module — Менеджер статистики и метрик, т�
 telemetry_readmodel_module — Qt-free ядро read-model телеметрии: проекция значений и кольцевая история; сюда — менять чтение телеметрии
   ITelemetryReadModel (9)
 worker_module — Менеджер потоков-воркеров внутри процесса: старт, стоп, пауза, перезапуск; сюда — менять управление потоками
-  IWorkerManager (22), IWorkerRegistry (8), IWorkerLifecycle (4), WorkerStatus, WorkerType
+  IWorkerManager (22), IWorkerRegistry (8), IExecutorManager (6), IWorkerLifecycle (4), OrderedExecutor (4), … ещё 3
 framework_meta — Корневые файлы пакета фреймворка и его документация; сюда — менять версию, общие импорты, доки фреймворка
 services/auth — Аутентификация и RBAC: хеши паролей, пользователи, роли; сюда — менять вход и права доступа
   IAuthManager (12), IUserStorage (5), IPasswordHasher (2), ISessionTracker (2), IAuditWriter (1)
+services/camera_device — Общее ядро камер: контракт порта прибора и его фейк; сюда — менять порт, границу SDK и эмуляцию
 services/code_reader — Сервис считывателя кодов Hikrobot ID3000: приём результатов по TCP, разбор; сюда — менять чтение кодов
   CodeReaderSinkProtocol (6), CodeQuality, CodeRead, ReadResult, ReadStatus, … ещё 5
 services/control_panel — Сервис Пульт: GUI-контролы выдают значения на порты pipeline; сюда — менять контролы и их сигналы
