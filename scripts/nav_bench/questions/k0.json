@@ -1,0 +1,216 @@
+{
+  "name": "k0",
+  "repo_sha": "1dc6c71b7",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory"
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "What kind of type is `IRouterManager` (ABC, Protocol, plain class)? Does `RouterManager` implement it? Give where the interface is defined and where `RouterManager` is defined.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/router_module/interfaces.py",
+          "line": 21,
+          "symbol": "IRouterManager"
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/core/router_manager.py",
+          "line": 130,
+          "symbol": "RouterManager"
+        }
+      ],
+      "scored": true,
+      "note": "ABC; RouterManager does NOT inherit it (it extends ChannelRoutingManager only). No class in the tree inherits IRouterManager. Verified: git show 1dc6c71b7:<path>. require=all: both addresses needed.",
+      "require": "all"
+    },
+    {
+      "id": "Q2",
+      "question": "What are `IConfig` and `Config` in the config module, and how are they related (what do they inherit)? Give both definitions.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/config_module/interfaces.py",
+          "line": 20,
+          "symbol": "IConfig",
+          "tolerance": 0
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/core/config.py",
+          "line": 27,
+          "symbol": "Config",
+          "tolerance": 0
+        }
+      ],
+      "scored": true,
+      "note": "IConfig is an ABC; Config has no base classes (does not inherit IConfig).",
+      "require": "all"
+    },
+    {
+      "id": "Q3",
+      "question": "What members does `IConfigObserver` declare, and what kind of type is it? Give the line of the member.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/config_module/interfaces.py",
+          "line": 17,
+          "symbol": "IConfigObserver.__call__",
+          "tolerance": 0
+        }
+      ],
+      "scored": true,
+      "note": "runtime_checkable Protocol with one member, __call__(key, old_value, new_value), line 17; class header at line 14 (within the 3-line tolerance of 17). Known generator defect: dunder members are absent from the map model."
+    },
+    {
+      "id": "Q4",
+      "question": "How many abstract members does `IConfigManager` have, own and inherited? Give where `IConfigManager` and the base interface that supplies the inherited ones are defined.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/config_module/interfaces.py",
+          "line": 70,
+          "symbol": "IConfigManager"
+        },
+        {
+          "path": "multiprocess_framework/modules/base_manager/interfaces.py",
+          "line": 28,
+          "symbol": "IBaseManager"
+        }
+      ],
+      "scored": true,
+      "note": "17 = 7 own (create_config .. load_config_from_storage) + 10 from IBaseManager (initialize .. get_debug_info, lines 39-103). Scoring checks locations only, not the count; the count is in `answer` for a human.",
+      "require": "all"
+    },
+    {
+      "id": "Q5",
+      "question": "What is `ConfigFileWatcher`: what does it do, how does it detect changes, and where is it defined?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/config_module/tools/watcher.py",
+          "line": 196,
+          "symbol": "ConfigFileWatcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/tools/watcher.py",
+          "line": 38,
+          "symbol": "_ConfigReloadHandler"
+        }
+      ],
+      "scored": true,
+      "note": "Handoff said 'partial' (reference agent did not fix a location). Expected built from the source: class at watcher.py:196 (hot-reload via a watchdog Observer, daemon thread) and its event handler class _ConfigReloadHandler at :38."
+    },
+    {
+      "id": "Q6",
+      "question": "Which file holds the unit tests of `ConfigFileWatcher`, and what behaviours do they pin down?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/config_module/tests/test_watcher.py",
+          "line": null,
+          "symbol": null
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py",
+          "line": null,
+          "symbol": null
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/tests/test_observability_hot_reload.py",
+          "line": null,
+          "symbol": null
+        }
+      ],
+      "scored": true,
+      "note": "Handoff said 'partial'. Expected is the file itself (line null): the answer is a file-level one. Pinned behaviours (start/stop, reload on change/atomic replace/recreate, rapid edits collapse, delayed reload, stop cancels pending, foreign file ignored) are for a human reading `answer`. Round 2: also test_watcher_final_write.py and process_module/tests/test_observability_hot_reload.py (both exist at 1dc6c71b7; any one is a hit)."
+    },
+    {
+      "id": "Q7",
+      "question": "Which production (non-test) code uses `ConfigFileWatcher`? Give every usage place you find.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+          "line": 92,
+          "symbol": "ConfigFileWatcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+          "line": 2305,
+          "symbol": "ConfigFileWatcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+          "line": 2341,
+          "symbol": "ConfigFileWatcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/tools/__init__.py",
+          "line": 17,
+          "symbol": "ConfigFileWatcher"
+        }
+      ],
+      "scored": true,
+      "note": "Any one location counts (require any). Round 2: the re-export config_module/tools/__init__.py:17 (`from .watcher import ConfigFileWatcher`) is now an expected address."
+    },
+    {
+      "id": "Q8",
+      "question": "Who starts the observability file watcher (calls the function that creates a `ConfigFileWatcher`), and which files does it watch?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/app_module/orchestrator.py",
+          "line": 184,
+          "symbol": "start_observability_watcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/app_module/orchestrator.py",
+          "line": 241,
+          "symbol": "start_observability_watcher"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+          "line": 2259,
+          "symbol": "start_observability_watcher"
+        }
+      ],
+      "scored": false,
+      "note": "Handoff said 'partial' and the map has no call edges, so unscored. Expected built from the source: two calls in orchestrator.py (:184, :241) of start_observability_watcher defined at observability_reload.py:2259. Watched files (read from orchestrator.py): :184 the file at config key observability_config_path; :241 (method _start_recipe_observability_watcher) the recipe companion file from companion_path(). The 'which files' part is not scoreable by location."
+    },
+    {
+      "id": "Q9",
+      "question": "Which code writes the observability config file that the watcher observes (the recipe's machine-owned companion file)?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_module/configs/observability_companion.py",
+          "line": 100,
+          "symbol": "write_companion"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/configs/observability_companion.py",
+          "line": 256,
+          "symbol": "persist_session_to_companion"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/commands/builtin_commands.py",
+          "line": 3153,
+          "symbol": "persist_session_to_companion"
+        }
+      ],
+      "scored": false,
+      "note": "Handoff said 'partial', no data flow in the map, so unscored. Expected built from the source: write_companion (tmp + os.replace) at observability_companion.py:100, persist_session_to_companion at :256 and its caller builtin_commands.py:3153. A production writer outside these (e.g. GUI save of the human-owned recipe) was not searched."
+    },
+    {
+      "id": "Q10",
+      "question": "How does `DataConverter.save_to_file` write the file: in place, or via a temp file plus replace? Give the write line.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/data_schema_module/serialization/converter.py",
+          "line": 292,
+          "symbol": "open("
+        }
+      ],
+      "scored": true,
+      "note": "In place, no tmp + replace: open(path, 'w') at converter.py:292, write at :293 (def at :255). Handoff gave only 'converter.py:291-293'; there are two converter.py files in the tree (this one and Services/hikvision_camera/core/converter.py), the framework one is meant."
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "all",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "mcp__qex__search_code",
+    "mcp__graphify__query_graph",
+    "mcp__graphify__get_node",
+    "mcp__graphify__get_neighbors",
+    "mcp__graphify__shortest_path",
+    "mcp__graphify__god_nodes",
+    "mcp__graphify__get_community",
+    "mcp__graphify__graph_stats"
+  ],
+  "disallowed_tools": [
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "context_files": [
+    "docs/arch-map/units.md",
+    "docs/arch-map/findings.md",
+    "docs/arch-map/model.json",
+    "docs/arch-map/_bench/k0_reference.json"
+  ],
+  "max_turns": 60,
+  "max_budget_usd": 1.5,
+  "thresholds": {
+    "hits_min": 8,
+    "false_max": 1,
+    "calls_ratio_max": 0.5,
+    "tokens_ratio_max": 0.6
+  },
+  "mcp_config": "conditions/mcp/all.json",
+  "requires": [
+    "qex-index",
+    "graphify-graph"
+  ],
+  "prompt_prefix": "Use every aid: the reference files, mcp__qex__search_code (path=\"{run_root}\"), the mcp__graphify__ graph tools, Read/Grep/Glob. Confirm a place by reading it.",
+  "expected_tokens": 90000
+}
