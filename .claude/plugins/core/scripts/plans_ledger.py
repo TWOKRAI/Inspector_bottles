@@ -66,7 +66,9 @@ Public API:
     check_plan_gate(plan_dir_or_file) -> list[Finding]  check_plan_sizes()
                                             PLUS: NO_BUDGET, TASK_INCOMPLETE,
                                             TASK_TOO_MANY_FILES (none
-                                            fixable) — amendment 6
+                                            fixable) — amendment 6; and the
+                                            non-gating STATUS_OUTSIDE_DICTIONARY
+                                            (Task 7.1b)
     check_ledger(root) -> list[Finding]     codes: DONE_NOT_ARCHIVED,
                                             MISSING_ROW, ROW_WITHOUT_FILE,
                                             PLAN_TOO_BIG, TASK_TOO_BIG,
@@ -94,7 +96,7 @@ Public API:
                                             blocks of executor-brief.md
                                             (raises BriefRefused)
     build_summary(plan_dir) -> str          one-page SUMMARY.md text for a
-                                            plan directory (Goal/Tasks/
+                                            plan directory (Goal/Итог/Tasks/
                                             Amendments/Open->backlog),
                                             <= TASK_MAX_BYTES (raises
                                             ValueError when even the
@@ -137,6 +139,22 @@ DIRECTORY only (a single-file plan gets none); a `build_summary` failure
 (the page would exceed `TASK_MAX_BYTES` even after the shrunk re-render)
 raises before any write or move, so `close` refuses cleanly.
 
+Plan summary and status dictionary (Task 7.1b): a plan DIRECTORY with a
+`contract.lock` (an approved plan) cannot be archived without a `## Итог`
+section in `plan.md` — the exact line `## Итог` outside code fences, then at
+least one non-empty line before the next heading, at most `SUMMARY_MAX_BYTES`
+(2560) bytes of UTF-8 (lines are not counted). Otherwise `archive_plan`
+raises `ValueError` `CLOSED_WITHOUT_SUMMARY`; `close` prints `error: …` and
+exits 2, `close --force` does not waive it (an abandoned plan is closed with
+an Итог «ОТМЕНЁН»), `doctor --fix` reports «skipped» and `DONE_NOT_ARCHIVED`
+stays. A single-file plan and a directory without `contract.lock` have no such
+requirement. `build_summary` copies the section verbatim into `SUMMARY.md`
+after Goal when it exists (a plan without it is summarised, not refused).
+`STATUSES` (a ledger row's status; `add --status`) includes FROZEN;
+`HEADER_STATUSES` (the `**Статус:**` word of the plan header) adds APPROVED,
+IN PROGRESS and the legacy synonym FREEZE. A header outside it is the INFO
+finding STATUS_OUTSIDE_DICTIONARY, never an error.
+
 Usage:
     python scripts/plans_ledger.py status [--root DIR] [--json] [--check]
     python scripts/plans_ledger.py add PLAN [--status S] [--branch B] [--root DIR]
@@ -151,10 +169,12 @@ scopes to that one plan (`check_plan_gate` + `check_plan_contract`, never the
 whole-ledger `check_ledger`); `approve` runs the same `check_plan_gate` first
 and refuses (`--no-gate` bypasses it) — see `check_plan_gate`'s docstring for
 its codes (NO_BUDGET, TASK_INCOMPLETE, TASK_TOO_MANY_FILES). A `Finding`'s
-`gating` property is False only for UNAPPROVED_OVER_BUDGET — the one code
+`gating` property is False for UNAPPROVED_OVER_BUDGET — the code
 `check_ledger` emits (never `check_plan_gate`) when one or more *unlocked*
 plans carry size findings: those collapse into a single advisory line
-instead of gating `status --check`, since sizes gate only after `approve`.
+instead of gating `status --check`, since sizes gate only after `approve` —
+and for STATUS_OUTSIDE_DICTIONARY (`check_plan_gate`; printed, never refuses
+`approve`).
 
 Exit codes:
     0 — success (`status` without `--check` is informational: always 0).
@@ -165,8 +185,10 @@ Exit codes:
         field, or executor-brief.md missing a standing block).
     2 — the plan / root does not exist, an archive destination is taken, a
         write target is unsafe (symlink / outside the root), or `git mv` of a
-        tracked plan failed; `brief --plan` did not resolve, or no `--plan`
-        was given with zero or several active plans.
+        tracked plan failed, `close` refused a locked plan directory without a
+        `## Итог` section (CLOSED_WITHOUT_SUMMARY, also under `--force`);
+        `brief --plan` did not resolve, or no `--plan` was given with zero or
+        several active plans.
 
 Never deletes a plan: `close` / the doctor fix move it (`git mv` when tracked).
 """
@@ -209,6 +231,7 @@ __all__ = [
     "SCOPE_GREW",
     "SINGLE_PLAN_MAX_BYTES",
     "STATUSES",
+    "HEADER_STATUSES",
     "TASK_MAX_BYTES",
     "TASK_MAX_FILES",
     "TASK_TOO_BIG",
@@ -255,7 +278,14 @@ __all__ = [
     "task_order_marker",
 ]
 
-STATUSES = ("DRAFT", "ACTIVE", "DONE", "ARCHIVED")
+# Status of a ledger ROW (the «статус» column, `add --status`). FROZEN: a plan
+# stopped on purpose (Task 7.1b); it is not DONE and not archived by `close`.
+STATUSES = ("DRAFT", "ACTIVE", "DONE", "ARCHIVED", "FROZEN")
+# Words accepted in a plan HEADER (`**Статус:**` line of plan.md): the row
+# statuses plus the header-only APPROVED / IN PROGRESS; FREEZE is a legacy
+# synonym of FROZEN (read, never written). A header outside this set is an
+# advisory STATUS_OUTSIDE_DICTIONARY finding, not an error (ratchet later).
+HEADER_STATUSES = (*STATUSES, "APPROVED", "IN PROGRESS", "FREEZE")
 LEDGER_COLUMNS = ("plan", "branch", "phase", "tasks", "status", "updated")
 LEDGER_HEADER = "| план | ветка | фаза | задачи | статус | обновлено |"
 LEDGER_SEPARATOR = "|------|-------|------|--------|--------|-----------|"
@@ -299,7 +329,20 @@ TASK_TOO_MANY_FILES = "TASK_TOO_MANY_FILES"
 NO_BUDGET = "NO_BUDGET"
 UNAPPROVED_OVER_BUDGET = "UNAPPROVED_OVER_BUDGET"
 TASK_MAX_FILES = 8
-NON_GATING_CODES = frozenset({UNAPPROVED_OVER_BUDGET})
+# Plan header status (Task 7.1b): an advisory, never gating — the header word
+# is not in HEADER_STATUSES. `status --check --plan` prints it as an INFO line.
+STATUS_OUTSIDE_DICTIONARY = "STATUS_OUTSIDE_DICTIONARY"
+NON_GATING_CODES = frozenset({UNAPPROVED_OVER_BUDGET, STATUS_OUTSIDE_DICTIONARY})
+
+# Plan summary on close (Task 7.1b): the `## Итог` section of plan.md is the
+# plan's result in words; a locked plan directory cannot be archived without it.
+CLOSED_WITHOUT_SUMMARY = "CLOSED_WITHOUT_SUMMARY"
+SUMMARY_HEADING = "## Итог"
+SUMMARY_MAX_BYTES = 2560  # UTF-8; ~30 lines x 40 Cyrillic chars (a calculation, not a measurement)
+# Mirror of plans_progress.STATUS_LINE_RE (modules are autonomous: copied, not
+# imported) — keep the two in step.
+_HEADER_STATUS_LINE_RE = re.compile(r"\*\*(?:Статус|Status):?\*\*:?[ \t]*(?P<rest>.*)$")
+_HEADER_STATUS_WORD_MAX = 24
 
 _HEADER_ALIASES = {
     "план": "plan",
@@ -1582,6 +1625,54 @@ def _count_files_field_paths(block: list[str]) -> int:
     return len(spans)
 
 
+def _header_status(text: str) -> str | None:
+    """The normalised status word of a plan header, or ``None`` when the
+    header has no ``**Статус:**``/``**Status:**`` line.
+
+    The header is the part of *text* before its first ``##`` heading, code
+    fences skipped; the first status line there wins. Normalisation: leading
+    ``*``/backtick/space stripped, upper case; a value starting with
+    ``IN PROGRESS`` is that phrase, otherwise the first word without trailing
+    ``,.;:)`` (and ``*``/backtick). An empty value is ``None``.
+    """
+    for line, fenced in _unfenced_lines(text):
+        if fenced:
+            continue
+        heading = _HEADING_RE.match(line)
+        if heading and len(heading.group(1)) >= 2:
+            break
+        m = _HEADER_STATUS_LINE_RE.search(line)
+        if not m:
+            continue
+        rest = m.group("rest").lstrip("*` \t").upper()
+        if re.match(r"IN PROGRESS\b", rest):
+            return "IN PROGRESS"
+        words = rest.split()
+        word = words[0].rstrip(",.;:)*`") if words else ""
+        return word or None
+    return None
+
+
+def _itog_text(text: str) -> str | None:
+    """The body of the plan's ``## Итог`` section — the lines between the
+    exact unfenced line ``## Итог`` and the next unfenced heading, outer blank
+    lines trimmed, joined by ``\\n`` — or ``None`` when there is no such
+    heading. An empty section is ``""``."""
+    body: list[str] = []
+    inside = False
+    for line, fenced in _unfenced_lines(text):
+        if not inside:
+            if not fenced and line.rstrip() == SUMMARY_HEADING:
+                inside = True
+            continue
+        if not fenced and _HEADING_RE.match(line):
+            break
+        body.append(line.rstrip())
+    if not inside:
+        return None
+    return "\n".join(body).strip("\n")
+
+
 def check_plan_gate(plan_dir_or_file: Path) -> list[Finding]:
     """``check_plan_sizes(path)`` plus the amendment-6 plan-gate findings:
     a missing Budget section, an open task missing a required field, and a
@@ -1605,6 +1696,9 @@ def check_plan_gate(plan_dir_or_file: Path) -> list[Finding]:
       - TASK_TOO_MANY_FILES: an open task whose Files field names more than
         ``TASK_MAX_FILES`` distinct backtick-quoted paths.
       - None of the four codes is ``fixable``.
+      - STATUS_OUTSIDE_DICTIONARY (Task 7.1b): the ``**Статус:**`` word of the
+        plan header (:func:`_header_status`) is not in ``HEADER_STATUSES``;
+        non-gating (``NON_GATING_CODES``), never fixable.
     """
     path = Path(plan_dir_or_file)
     findings = check_plan_sizes(path)
@@ -1623,17 +1717,27 @@ def check_plan_gate(plan_dir_or_file: Path) -> list[Finding]:
             not fenced and _BUDGET_HEADING_RE.match(line)
             for line, fenced in _unfenced_lines(doc_text)
         )
+        label = (
+            f"{path.name}/{plan_doc.relative_to(path).as_posix()}"
+            if is_dir
+            else plan_doc.name
+        )
         if not has_budget:
-            label = (
-                f"{path.name}/{plan_doc.relative_to(path).as_posix()}"
-                if is_dir
-                else plan_doc.name
-            )
             findings.append(
                 Finding(
                     NO_BUDGET,
                     label,
                     "no Budget/Бюджет section (## Budget or ## Бюджет)",
+                )
+            )
+        header_word = _header_status(doc_text)
+        if header_word is not None and header_word not in HEADER_STATUSES:
+            findings.append(
+                Finding(
+                    STATUS_OUTSIDE_DICTIONARY,
+                    f"plans/{label}",
+                    f"header status '{header_word[:_HEADER_STATUS_WORD_MAX]}' "
+                    "is outside the dictionary",
                 )
             )
 
@@ -2041,6 +2145,25 @@ def _move(root: Path, src: Path, dst: Path) -> bool:
     return False
 
 
+def _require_itog(key: str, plan_md: Path) -> None:
+    """Refuse (``ValueError``, ``CLOSED_WITHOUT_SUMMARY``) a plan whose
+    ``plan.md`` has no ``## Итог`` section with text, or one over
+    ``SUMMARY_MAX_BYTES`` (UTF-8). Lines are not counted."""
+    text = _itog_text(_read(plan_md)) if plan_md.is_file() else None
+    if not text:
+        raise ValueError(
+            f"{CLOSED_WITHOUT_SUMMARY}: plans/{key} has no '{SUMMARY_HEADING}' "
+            "section with text in plan.md; write it and run close again "
+            "(--force does not waive it)"
+        )
+    size = len(text.encode("utf-8"))
+    if size > SUMMARY_MAX_BYTES:
+        raise ValueError(
+            f"{CLOSED_WITHOUT_SUMMARY}: '{SUMMARY_HEADING}' is {size} bytes, "
+            f"max {SUMMARY_MAX_BYTES}"
+        )
+
+
 def archive_plan(
     root: Path, plan_rel: str, *, today: str | None = None
 ) -> ArchiveResult:
@@ -2066,6 +2189,13 @@ def archive_plan(
         :func:`build_summary` failure (``ValueError``, the page still over
         ``TASK_MAX_BYTES`` after the shrunk re-render) is raised here before
         any write or move happens.
+      - A plan DIRECTORY with a ``contract.lock`` (an approved plan) needs a
+        ``## Итог`` section with text in ``plan.md`` (Task 7.1b), at most
+        ``SUMMARY_MAX_BYTES`` bytes of UTF-8; otherwise ``ValueError``
+        ``CLOSED_WITHOUT_SUMMARY`` before any write or move. ``close --force``
+        and ``doctor --fix`` go through here, so neither waives it (a
+        ``doctor --fix`` plan without it is «skipped»). A single-file plan and
+        a directory without ``contract.lock`` have no such requirement.
     """
     root = Path(root)
     plans_dir = _plans_dir(root)
@@ -2074,6 +2204,8 @@ def archive_plan(
         raise ValueError(f"plans/{key} is already archived")
     name = path.name
     is_dir = path.is_dir()
+    if is_dir and (path / "contract.lock").is_file():
+        _require_itog(key, path / "plan.md")
     quarter = quarter_for(name)
     dest = plans_dir / "_archive" / quarter / name
     readme = plans_dir / "README.md"
@@ -2957,6 +3089,10 @@ def build_summary(plan_dir: Path) -> str:
       - Never writes to disk; never calls git.
       - The Goal paragraph is :func:`_plan_goal_paragraph` of ``plan.md``
         (``""``/em-dash when there is no ``plan.md`` or no paragraph).
+      - After Goal: ``## Итог`` with the text of ``plan.md``'s ``## Итог``
+        section verbatim (:func:`_itog_text`) when it has text; otherwise no
+        such section (a plan without it is summarised, never refused here —
+        :func:`archive_plan` is where it is required).
       - The Tasks table has one row per task id in discovery order
         (:func:`discover_plan_files` order, first-seen); ``status`` is the
         task's :func:`task_order_marker`, or ``DONE`` when
@@ -2995,6 +3131,7 @@ def build_summary(plan_dir: Path) -> str:
 
     plan_md = plan_dir / "plan.md"
     goal = _plan_goal_paragraph(_read(plan_md)) if plan_md.is_file() else ""
+    itog = (_itog_text(_read(plan_md)) if plan_md.is_file() else None) or ""
 
     amendments_file = plan_dir / "amendments.md"
     amendment_rows = (
@@ -3010,6 +3147,8 @@ def build_summary(plan_dir: Path) -> str:
             goal or NO_VALUE,
             "",
         ]
+        if itog:
+            lines += [SUMMARY_HEADING, "", itog, ""]
 
         lines += [
             "## Tasks",
@@ -3443,14 +3582,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _, gate_path = resolve_plan(root, args.plan)
                 gate_findings = check_plan_gate(gate_path)
-                if gate_findings:
-                    for finding in gate_findings:
-                        prefix = "WARN" if finding.gating else "INFO"
-                        print(
-                            f"{prefix} {finding.code} {finding.plan}: {finding.detail}"
-                        )
+                for finding in gate_findings:
+                    prefix = "WARN" if finding.gating else "INFO"
+                    print(f"{prefix} {finding.code} {finding.plan}: {finding.detail}")
+                # A non-gating finding (STATUS_OUTSIDE_DICTIONARY) is printed,
+                # never a reason to refuse.
+                gating_findings = [f for f in gate_findings if f.gating]
+                if gating_findings:
                     print(
-                        f"approve refused: {len(gate_findings)} gate finding(s) "
+                        f"approve refused: {len(gating_findings)} gate finding(s) "
                         "— fix and re-run, or pass --no-gate",
                         file=sys.stderr,
                     )
