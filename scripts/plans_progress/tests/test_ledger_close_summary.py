@@ -257,3 +257,14 @@ def test_heading_inside_comment_is_not_a_section_boundary_or_a_section(tmp_path)
     cp = _run(hidden, "close", PLAN)
     assert cp.returncode == 2, (cp.stdout, cp.stderr)
     assert "CLOSED_WITHOUT_SUMMARY" in cp.stderr
+
+
+def test_heading_on_its_own_line_inside_multiline_comment_is_hidden(tmp_path):
+    body = "\n## Итог\n\nтекст\n<!--\n## Хвост\nскрытый\n-->\nещё\n"
+    root = _locked_plan(tmp_path, body)
+    cp = _run(root, "close", PLAN)
+    assert cp.returncode == 0, (cp.stdout, cp.stderr)
+    summary = (root / ARCHIVED / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Итог\n\nтекст\nещё\n" in summary
+    assert "скрытый" not in summary
+    assert "Хвост" not in summary
