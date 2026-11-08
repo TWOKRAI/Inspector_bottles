@@ -23,7 +23,7 @@ Rejected: альтернатива X — отвергнута, потому чт
 Co-Authored-By: Claude <модель> <noreply@anthropic.com>
 ```
 
-Рекомендуемые трейлеры — `Why`, `Layer`, `Refs`. `Task`, `Decision`, `Rejected` — по желанию. `Risk`, `Reversible`, `Tested`
+Обязательные трейлеры — `Why`, `Layer`; из плана — `Refs`. `Task`, `Decision`, `Rejected` — по желанию. `Risk`, `Reversible`, `Tested`
 валидатор распознаёт, но не рекомендует (см. «Остальные»).
 
 **Правило блока.** Все трейлеры — один абзац в самом конце сообщения:

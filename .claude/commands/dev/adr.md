@@ -37,7 +37,7 @@ global level later via a link from the global ADR to the module ADR.
 ## How it works
 
 1. The command determines the module: from `$ARGUMENTS` (a module name or path) or from the path of the code the decision is about. Then it opens `<module>/DECISIONS.md`; if the file is missing, it is created from `.claude/plugins/core/templates/DECISIONS.template.md` (frontmatter `module_code:`).
-2. The next ADR number is the last `## ADR-{CODE}-NNN` heading in that file plus one.
+2. The next ADR number is the largest NNN among the `##` and `###` `ADR-{CODE}-NNN` headings in that file, plus one (a file can hold `###` ADRs after the last `##` one).
 3. It adds a skeleton heading `## ADR-{CODE}-NNN: <title>` after the template's ADR block (date, status `Proposed`, optional `**Refs:**` with the plan path).
 4. It passes the tech-writer agent the current task's context + the created skeleton.
 5. tech-writer fills in the **Context**, **Decision**, **Alternatives considered**, **Consequences** sections based on the session history and the passed arguments.
