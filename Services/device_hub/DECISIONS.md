@@ -138,6 +138,8 @@ Enforced гейтом `Plugins/hub/device_hub/tests/test_no_private_access.py`
 
 **Полный текст:** [docs/adr/ADR-DH-012.md](docs/adr/ADR-DH-012.md)
 
+**Дополнение (T5.5):** `draw_polyline` — общая операция v1/v2 (T5.5): один `OpSpec` в обоих каталогах.
+
 ## ADR-DH-013: Основная остановка робота v2 — действие тика драйвера, а не шаг `process.stop`
 
 **Дата:** 2026-10-27

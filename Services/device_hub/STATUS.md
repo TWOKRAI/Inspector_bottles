@@ -58,3 +58,10 @@
   (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
 - Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
 - Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).
+
+## T5.5 — рисунок на v2
+
+- `draw_polyline` на v2 — программой (генератор `draw`, путь `program_run`); робот v2 принимает подачу CVT и рисунок.
+  Влито слиянием ветки `feat/robot-v2-t55` (T5.5a).
+- Открыто: `robot_draw_abort` на v2 — «неизвестная операция» (О2; остановка — `robot_program_abort` / `robot_abort`);
+  очередь рисунков на v2 нет (второй рисунок во время первого теряется, `jobs_dropped`); REVIEW-5 после T5.4 (стенд).
