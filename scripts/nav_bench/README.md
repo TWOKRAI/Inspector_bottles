@@ -144,6 +144,11 @@ JSON-файл:
   тем же `skip-worktree` и удалением.
 - Версия `claude` в запись не пишется.
 - Оценка — только по адресам; качество текстового ответа (`answer`) не проверяется.
+- Аудит Bash, `bash-meta` (раскрытие shell, раздел «Раунд 2»): fail-closed даёт ложный `TAINTED` (виден в `violations`) на
+  `HEAD^{tree}`, `HEAD@{1}`, `git grep class.*Router` без кавычек, `-G"a$"` (`-G'a$'` чисто), путь с `\` (`src\gui.py`),
+  `#`, `(`; чисты `HEAD~3`, `HEAD^`, `'*.py'`, `"class [A-Z].*Base"`. Перебор 304 форм (bash и zsh, git 2.51.2, macOS):
+  237 запустили пейджер, все помечены. Белый список рассчитан на опции shell по умолчанию: `setopt extendedglob` и
+  `RC_QUOTES` в zsh пользователя, Git Bash на Windows не проверены.
 
 ## Тесты
 
@@ -198,7 +203,12 @@ JSON-файл:
 `git show`, `git blame` это `S G L e f A B C m`, у `git grep` и неопознанных команд (fail-closed) — `e f A B C m`; `n`
 нет нигде (у `git grep` это флаг без значения). У `git grep` `-G` и `-L` — флаги без значения, поэтому `git grep
 -GOsh x` — это `-G` и `-O`, пейджер запускается, и вызов `TAINTED`. Чисты `git log -SOrder`, `git log -GOsh x`,
-`git grep -eObject`; `bash-flag` — `-nOsh`, `git grep -GOsh x`, `git grep -lLOsh x`. `--open-files-in-pager` (и сокращения `--open`) — `bash-flag`. У вызова Bash в `tool_uses` поле
+`git grep -eObject`; `bash-flag` — `-nOsh`, `git grep -GOsh x`, `git grep -lLOsh x`. `--open-files-in-pager` (и сокращения `--open`) — `bash-flag`.
+**`bash-meta`** (проверка после `bash-chain`, до `bash-flag`): аудит разбирает слова через `shlex`, а shell до запуска git
+раскрывает `$'..'`, `$".."`, `${..}`, `$IFS`, `{a,b}`, глоб, `~`, обратную косую — так `git grep $'-O'"cmd" x` запускал
+пейджер при чистом аудите (git 2.51.2). Класс закрыт белым списком, без перечня форм: вне кавычек допустимы буквы, цифры,
+пробел, таб и `_ . / : = @ % + , - ^`, `~` — только внутри слова; внутри `'...'` — всё; внутри `"..."` — всё, кроме `$` и
+`` ` ``; непарная кавычка — нарушение. Цена и пределы — в «Известных ограничениях». У вызова Bash в `tool_uses` поле
 `denied` = `is_error` его `tool_result` (отказ CLI либо код выхода != 0); отказанный вызов нарушением быть не перестаёт.
 Поставляется `grep-read+git` (`grep-read` + Bash по шаблонам `git log`, `git show`, `git blame`, `git grep`).
 

@@ -702,6 +702,12 @@ BASH_VALUE_FLAGS_LOG = frozenset("SGLefABCm")
 BASH_VALUE_FLAGS_STRICT = frozenset("efABCm")
 BASH_LOG_COMMAND = re.compile(r"^\s*git\s+(log|show|blame)\b")
 BASH_TEXT_LIMIT = 80
+# Аудит видит слова shlex, а git получает слова ПОСЛЕ раскрытий shell ($'..', $"..", ${..}, $IFS, {a,b}, глоб, `~`,
+# обратная косая); shlex их не делает, поэтому `$'-O'cmd` для него чист, а git видит -O. Класс закрыт белым списком:
+# вне кавычек допустимы буквы, цифры и эти символы (они ничего не раскрывают ни в bash, ни в zsh), `~` — только внутри
+# слова (`HEAD~3`); внутри '...' допустимо всё; внутри "..." — всё, кроме `$` и обратной кавычки. Остальное — bash-meta.
+BASH_PLAIN = frozenset("_./:=@%+,-^ \t")
+BASH_EXPANDS_IN_DQ = frozenset("$`")
 
 
 def _bash_template_regex(template: str) -> re.Pattern[str]:
@@ -733,6 +739,32 @@ def _short_cluster_has_open_flag(token: str, value_flags: frozenset[str]) -> boo
     return False
 
 
+def _has_shell_expansion(group: str) -> bool:
+    """``True`` — shell может построить слово иначе, чем shlex (см. ``BASH_PLAIN``); непарная кавычка — тоже."""
+    quote, escaped, prev = "", False, " "
+    for char in group:
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif quote == '"':
+            if char in BASH_EXPANDS_IN_DQ:
+                return True
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True  # `\"` не закрывает кавычку
+            elif char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "~":
+            if prev in " \t=:":  # начало слова или после `=`/`:` — тильда раскрывается
+                return True
+        elif not (char.isalnum() or char in BASH_PLAIN):
+            return True
+        prev = char
+    return bool(quote)
+
+
 def _bash_group_rule(
     group: str, exclude: list[str], prefixes: tuple[str, ...], value_flags: frozenset[str]
 ) -> str | None:
@@ -752,6 +784,8 @@ def _bash_group_rule(
                 return "bash-exclude"
     if any(mark in group for mark in BASH_CHAIN):
         return "bash-chain"
+    if _has_shell_expansion(group):  # иначе токены shlex ниже — не те слова, что получит git
+        return "bash-meta"
     for token in tokens:
         if token.startswith("--"):
             name = token.split("=", 1)[0]
@@ -798,7 +832,8 @@ def audit_violations(
 
     ``bash_allow`` (шаблоны с ``*``, уже с подставленными плейсхолдерами) делает ``Bash`` допустимым, но каждая его
     команда проверяется: нет шаблона — ``bash-pattern``; в группе ``*`` путь из ``exclude`` — ``bash-exclude``, склейка
-    или перенаправление — ``bash-chain``, флаг ``--output`` ``-O`` ``--git-dir`` ``--work-tree`` — ``bash-flag``.
+    или перенаправление — ``bash-chain``, раскрытие shell (``$`` ``{`` ``*`` ``\\`` и т. п. вне кавычек, ``$`` в
+    ``"..."``) — ``bash-meta``, флаг ``--output`` ``-O`` ``--git-dir`` ``--work-tree`` — ``bash-flag``.
     Текст нарушения: ``<правило>:<команда до 80 символов>``. Аудит видит только аргументы: ``git log -p`` без пути
     покажет и исключённые пути, а ``git grep x HEAD`` — файлы из ``exclude`` на ``repo_sha``.
     """

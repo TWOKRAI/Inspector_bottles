@@ -1058,9 +1058,44 @@ def test_bash_matching_pattern_is_clean():
         # F1': у log/show/blame -G и -L берут значение, поэтому O после них — часть значения
         "git log -GOsh x",
         "git blame -LOsh x",
+        # bash-meta: внутри одинарных кавычек shell ничего не раскрывает, `~` в середине слова — тоже
+        "git grep -n Order",
+        "git log -G'a$'",
+        "git grep -n 'def .*Router' -- '*.py'",
+        'git grep -n "class [A-Z].*Base"',
+        "git show HEAD~3:src/code.py",
+        "git log HEAD^ -1 --format='%h %s'",
+        "git grep -n Камера",
     ]
     assert _audit_bash(commands) == []
     assert _audit_bash(["  git log -1  "]) == []  # пробелы по краям команды не важны
+
+
+# F2 (merge gate 7.2): shell раскрывает слово ПОСЛЕ аудита, shlex — нет; на git 2.51.2 каждая форма
+# запускала пейджер при чистом аудите. Класс закрыт fail-closed по метасимволам вне кавычек.
+@pytest.mark.parametrize(
+    "group",
+    [
+        "$'-O'\"touch M\" v2",
+        '$"-O""touch M" v2',
+        '{-O"touch M",-e} v2',
+        '${X:--O"touch M"} v2',
+        "$'--open-files-in-pager=touch M' v2",
+        '$IFS-O"touch M" v2',  # раскрытие $IFS вне кавычек — пустое слово, остаётся -Otouch M
+        '"$X"-O"touch M" v2',  # $ в двойных кавычках раскрывается
+        '[-]O"touch M" v2',  # глоб
+        "x 'v2",  # непарная кавычка: разбор не определён — fail-closed
+    ],
+)
+def test_bash_shell_expansion_is_tainted(group):
+    command = f"git grep {group}"
+    assert _audit_bash([command]) == [f"bash-meta:{command}"]
+
+
+def test_bash_meta_known_false_tainted():
+    # цена fail-closed (README «Известные ограничения»): раскрытия нет, но вызов TAINTED
+    for command in ("git show HEAD^{tree}", "git grep -n class.*Router", 'git log -G"a$"', "git log -- src\\gui.py"):
+        assert _audit_bash([command]) == [f"bash-meta:{command}"], command
 
 
 # G2
