@@ -371,3 +371,205 @@ def test_g4_merge_flow_commit_created_and_warns(tmp_path: Path) -> None:
     parents = _git(repo, "rev-list", "--parents", "-n", "1", "HEAD").split()
     assert len(parents) == 3, f"HEAD is not a merge commit: {parents}"
     assert "merge commit without Why/Layer/Refs" in err, f"stderr:\n{err}"
+
+
+# --------------------------------------------------------------------------- Task 7.1a: трейлер `Decision:`
+#
+# Контракт (ТЗ `plans/2026-11-06_atlas-passport/tasks/7.1a.md` + DESIGN лида): коммит, чей staged-дифф
+# добавляет заголовок `## ADR-<MOD>-NNN` / `### ADR-<MOD>-NNN` в `*DECISIONS.md`, получает предупреждение
+# с готовой строкой `Decision: ADR-...` (всегда предупреждение, и при STRICT); сам `Decision:` — известный
+# трейлер, значение — ровно один id; id, которого нет ни в диффе, ни в индексе, — фаза 3.
+
+_ADR_SUBJECT = "docs(x): записать решение"
+_ADR_BASE = "# Решения\n\n## ADR-AB-001: старое решение\n\nТекст.\n"
+_DECISIONS = "docs/DECISIONS.md"
+_MALFORMED = "Decision: malformed value (expected ADR-<MOD>-NNN, one id per line)"
+
+
+def _adr_repo(tmp_path: Path, base: str = _ADR_BASE) -> Path:
+    """Чистый репозиторий (ветка main, плана нет): закоммичен `docs/DECISIONS.md` = base и список слоёв."""
+    repo = _init_repo(tmp_path / "adr", "main")
+    _write(repo / ".claude" / "commit-layers.txt", "# layers\n" + "\n".join(LAYERS) + "\n")
+    _write(repo / _DECISIONS, base)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    return repo
+
+
+def _stage_decisions(repo: Path, text: str, path: str = _DECISIONS) -> None:
+    _write(repo / path, text)
+    _git(repo, "add", path)
+
+
+def _adr_message(*decisions: str, subject: str = _ADR_SUBJECT) -> str:
+    lines = [_WHY, "Layer: docs", *decisions]
+    return subject + "\n\n" + "\n".join(lines) + "\n"
+
+
+def _add_line(*decisions: str) -> list[str]:
+    return [f"Decision: {d}" for d in decisions]
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_added_adr_without_decision_warns_with_ready_line(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, _ADR_BASE + "\n## ADR-AB-002: новое\n\nТекст.\n\n## ADR-AB-003: ещё новое\n\nТекст.\n")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message())
+
+    assert rc == 0, err
+    assert "`Decision: ADR-AB-002`" in err and "`Decision: ADR-AB-003`" in err, err
+    assert "ADR-AB-001" not in err, err  # старый заголовок дифф не затронул
+    assert err.count("this commit adds") == 2, err  # по строке на id
+
+    rc_ok, err_ok = _run_validator(COPIES[copy], repo, _adr_message(*_add_line("ADR-AB-002", "ADR-AB-003")))
+    assert rc_ok == 0 and err_ok == "", err_ok  # с `Decision:` на оба id - тишина
+
+    rc_one, err_one = _run_validator(COPIES[copy], repo, _adr_message(*_add_line("ADR-AB-002")))
+    assert rc_one == 0 and "`Decision: ADR-AB-003`" in err_one and "ADR-AB-002" not in err_one, err_one
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_decision_optional_without_adr_diff(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _write(repo / "notes.txt", "заметка\n")
+    _git(repo, "add", "notes.txt")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message("Decision: ADR-AB-001"))
+
+    assert rc == 0, err
+    assert "Unknown trailer" not in err, err
+    assert "not found in the index" not in err, err
+
+    rc_none, err_none = _run_validator(COPIES[copy], repo, _adr_message())
+    assert rc_none == 0 and "Decision" not in err_none, err_none  # без диффа ADR трейлер не обязателен
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_decision_unknown_id_is_phase3_warning(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _write(repo / "notes.txt", "заметка\n")
+    _git(repo, "add", "notes.txt")
+    message = _adr_message("Decision: ADR-AB-009")
+
+    rc, err = _run_validator(COPIES[copy], repo, message)
+    assert rc == 0, err
+    assert "Decision: ADR-AB-009 not found in the index" in err, err
+
+    strict = _strict_copy(COPIES[copy], tmp_path / "strict")
+    rc_strict, err_strict = _run_validator(strict, repo, message)
+    assert rc_strict == 1, err_strict
+    assert "Decision: ADR-AB-009 not found in the index" in err_strict, err_strict
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_added_adr_warning_stays_warning_under_strict(copy: str, tmp_path: Path) -> None:
+    # Страж: зелёный и до правки (правила нет), и после; красный, если шаг по ошибке пойдёт через _phase3.
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, _ADR_BASE + "\n## ADR-AB-002: новое\n\nТекст.\n")
+
+    strict = _strict_copy(COPIES[copy], tmp_path / "strict")
+    rc, err = _run_validator(strict, repo, _adr_message())
+
+    assert rc == 0, err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_header_edit_is_not_a_new_adr(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    # ADR-AB-001: правка заголовка (id и в `-`, и в `+`) - не новый ADR; ADR-AB-002 - новый.
+    _stage_decisions(repo, _ADR_BASE.replace("старое решение", "переименованное решение") + "\n## ADR-AB-002: новое\n")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message())
+
+    assert rc == 0, err
+    assert "`Decision: ADR-AB-002`" in err, err
+    assert "ADR-AB-001" not in err, err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_h3_adr_heading_counts(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, _ADR_BASE + "\n### ADR-PM-059: решение третьего уровня\n\nТекст.\n")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message())
+
+    assert rc == 0, err
+    assert "`Decision: ADR-PM-059`" in err, err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_merge_commit_skips_added_adr_rule(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, _ADR_BASE + "\n## ADR-AB-002: новое\n")
+
+    rc_plain, err_plain = _run_validator(COPIES[copy], repo, _adr_message())
+    rc_merge, err_merge = _run_validator(COPIES[copy], repo, _adr_message(subject="merge: слияние ветки"))
+
+    assert rc_plain == 0 and "`Decision: ADR-AB-002`" in err_plain, err_plain
+    assert rc_merge == 0, err_merge
+    assert "Decision" not in err_merge, err_merge
+
+
+@pytest.mark.parametrize("value", ["ADR-1, ADR-2", "ADR-AB-001, ADR-AB-002"])
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_malformed_decision_value_is_not_echoed(copy: str, value: str, tmp_path: Path) -> None:
+    # Второе значение начинается с правильного id: префиксное совпадение его бы пропустило, fullmatch - нет.
+    repo = _adr_repo(tmp_path)
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message(f"Decision: {value}"))
+
+    assert rc == 0, err
+    assert _MALFORMED in err, err
+    for token in value.split(", "):
+        assert token not in err, err  # значение в вывод не попадает
+
+
+# Дополнительные сторожа автора (сверх списка REDS лида).
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_decision_for_adr_added_by_this_commit_is_accepted(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, _ADR_BASE + "\n## ADR-AB-002: новое\n")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message("Decision: ADR-AB-002"))
+
+    assert rc == 0 and err == "", err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_decision_id_that_only_prefixes_an_indexed_id_is_not_found(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path, base="# Решения\n\n## ADR-AB-0012: длинный номер\n")
+    _write(repo / "notes.txt", "заметка\n")
+    _git(repo, "add", "notes.txt")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message("Decision: ADR-AB-001"))
+
+    assert rc == 0, err
+    assert "Decision: ADR-AB-001 not found in the index" in err, err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_adr_heading_outside_decisions_file_is_ignored(copy: str, tmp_path: Path) -> None:
+    repo = _adr_repo(tmp_path)
+    _stage_decisions(repo, "# Заметка\n\n## ADR-AB-002: не в DECISIONS\n", path="docs/notes.md")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message())
+
+    assert rc == 0 and "Decision" not in err, err
+
+
+@pytest.mark.parametrize("copy", list(COPIES))
+def test_decision_id_only_in_worktree_edit_is_not_in_the_index(copy: str, tmp_path: Path) -> None:
+    # Дерево != индекс: заголовок ADR-AB-555 лежит только в неподготовленной правке рабочего дерева.
+    # Коммит пути notes.txt (`git commit -F msg -- notes.txt`) его не берёт, значит, в индексе его нет.
+    repo = _adr_repo(tmp_path)
+    _write(repo / _DECISIONS, _ADR_BASE + "\n## ADR-AB-555: только в рабочем дереве\n")  # не git add
+    _write(repo / "notes.txt", "заметка\n")
+    _git(repo, "add", "notes.txt")
+
+    rc, err = _run_validator(COPIES[copy], repo, _adr_message("Decision: ADR-AB-555"))
+
+    assert rc == 0, err
+    assert "Decision: ADR-AB-555 not found in the index" in err, err
