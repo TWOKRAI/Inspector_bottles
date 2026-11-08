@@ -692,11 +692,15 @@ BASH_CHAIN = (";", "&&", "||", "|", "&", "\n", ">", "<", "`", "$(")  # скле�
 # --open-files-in-pager=<cmd> исполняет команду; git принимает и сокращения (--out=, --open=)
 BASH_LONG_FLAGS = ("--output", "--git-dir", "--work-tree", "--open-files-in-pager")
 BASH_SHORT_FLAG = "O"  # git grep -O<пейджер> / git log -O<файл>; регистр значим: -o — другой флаг
-# Короткие флаги git log/show/blame/grep (по `git help`), берущие значение: -S -G -L (поиск, диапазон), -e -f (шаблон,
-# файл шаблонов), -A -B -C -m (контекст, число). В связке ``-xyz`` остаток токена после такой буквы — значение:
-# ``-SOrder``, ``-eObject``, ``-L:OnClick:f.py`` не содержат флага -O. Буквы ``n`` здесь нет: у git grep ``-n`` — флаг
-# без значения (``-nOsh`` — это -n и -O), а у git log ``-n<число>`` букву O содержать не может.
-BASH_VALUE_FLAGS = frozenset("SGLefABCm")
+# Короткие флаги, берущие значение, зависят от подкоманды (по `git help`). У git log/show/blame: -S -G -L (поиск,
+# диапазон), -e -f (шаблон, файл шаблонов), -A -B -C -m (контекст, число). У git grep -G и -L — флаги БЕЗ значения
+# (``-GOsh`` — это -G и -O, пейджер запускается), -S там нет вовсе, поэтому для git grep и всех неопознанных команд
+# набор уже: ``e f A B C m`` (fail-closed). В связке ``-xyz`` остаток токена после буквы со значением — значение:
+# ``-SOrder`` у log, ``-eObject``, ``-L:OnClick:f.py`` у log/blame не содержат флага -O. Буквы ``n`` нет ни в одном
+# наборе: у git grep ``-n`` — флаг без значения (``-nOsh`` — это -n и -O), а у git log ``-n<число>`` буквы O нет.
+BASH_VALUE_FLAGS_LOG = frozenset("SGLefABCm")
+BASH_VALUE_FLAGS_STRICT = frozenset("efABCm")
+BASH_LOG_COMMAND = re.compile(r"^\s*git\s+(log|show|blame)\b")
 BASH_TEXT_LIMIT = 80
 
 
@@ -719,17 +723,19 @@ def _norm_arg(text: str, prefixes: tuple[str, ...]) -> str:
     return posixpath.normpath(text) if text else ""
 
 
-def _short_cluster_has_open_flag(token: str) -> bool:
+def _short_cluster_has_open_flag(token: str, value_flags: frozenset[str]) -> bool:
     """``-xyz`` слева направо: ``O`` до флага, берущего значение, — это -O; после такого флага остаток — значение."""
     for char in token[1:]:
         if char == BASH_SHORT_FLAG:
             return True
-        if char in BASH_VALUE_FLAGS:
+        if char in value_flags:
             return False
     return False
 
 
-def _bash_group_rule(group: str, exclude: list[str], prefixes: tuple[str, ...]) -> str | None:
+def _bash_group_rule(
+    group: str, exclude: list[str], prefixes: tuple[str, ...], value_flags: frozenset[str]
+) -> str | None:
     """Правило, которое нарушает текст группы ``*`` шаблона, или ``None``."""
     try:
         tokens = shlex.split(group, posix=True)
@@ -751,7 +757,7 @@ def _bash_group_rule(group: str, exclude: list[str], prefixes: tuple[str, ...]) 
             name = token.split("=", 1)[0]
             if len(name) > 2 and any(flag.startswith(name) for flag in BASH_LONG_FLAGS):
                 return "bash-flag"
-        elif token.startswith("-") and _short_cluster_has_open_flag(token):
+        elif token.startswith("-") and _short_cluster_has_open_flag(token, value_flags):
             return "bash-flag"
     return None
 
@@ -761,13 +767,15 @@ def _bash_rule(command: str, patterns: list[str], exclude: list[str], prefixes: 
     Литералы шаблона доверенные: проверяются только группы."""
     exclude = [item for item in (_norm_arg(item, ()) for item in exclude) if item]
     norm_prefixes = tuple(_norm_root(prefix) for prefix in prefixes)
+    # набор букв со значением — по подкоманде; git grep и всё неопознанное — строгий набор (fail-closed)
+    value_flags = BASH_VALUE_FLAGS_LOG if BASH_LOG_COMMAND.match(command) else BASH_VALUE_FLAGS_STRICT
     first = "bash-pattern"
     matched = False
     for template in patterns:
         found = _bash_template_regex(template).fullmatch(command.strip())
         if found is None:
             continue
-        rules = [_bash_group_rule(group, exclude, norm_prefixes) for group in found.groups()]
+        rules = [_bash_group_rule(group, exclude, norm_prefixes, value_flags) for group in found.groups()]
         bad = next((rule for rule in rules if rule), None)
         if bad is None:
             return None

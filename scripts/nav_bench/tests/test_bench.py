@@ -827,6 +827,9 @@ def test_bash_outside_pattern_is_violation():
     # F2: настоящий -O (отдельно, в связке, с приклеенным значением) остаётся грязным
     for command in ("git grep -O sh x", "git grep -nOsh x", "git grep -Osh x"):
         assert _audit_bash([command]) == [f"bash-flag:{command}"], command
+    # F1': у git grep -G и -L — флаги без значения: `-GOsh` это -G и -O, пейджер запускается (git 2.51.2)
+    for command in ("git grep -GOsh x", "git grep -LOsh x", "git grep -nGOsh x", "git grep -lLOsh x"):
+        assert _audit_bash([command]) == [f"bash-flag:{command}"], command
     # bash-chain не учитывает кавычки (fail-closed): `|` в кавычках — ложный TAINTED, он виден в записи
     assert _audit_bash(["git grep -E 'a|b'"]) == ["bash-chain:git grep -E 'a|b'"]
 
@@ -1051,6 +1054,10 @@ def test_bash_matching_pattern_is_clean():
         "git log -L:OnClick:src/gui.py",
         "git log -SOrder --oneline",
         "git grep -neObject src",
+        "git grep -e Object",
+        # F1': у log/show/blame -G и -L берут значение, поэтому O после них — часть значения
+        "git log -GOsh x",
+        "git blame -LOsh x",
     ]
     assert _audit_bash(commands) == []
     assert _audit_bash(["  git log -1  "]) == []  # пробелы по краям команды не важны

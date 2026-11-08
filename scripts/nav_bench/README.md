@@ -194,8 +194,11 @@ JSON-файл:
 остаётся и закрывается отдельной проверкой вывода (решает лид, вне 7.2).
 Известное ограничение: `bash-chain` не учитывает кавычки (fail-closed), поэтому `git grep -E 'a|b'` даёт ложный
 `TAINTED`; он виден в записи (`violations`), долю таких считает 7.2b. Флаг `-O` ищется в связке коротких флагов слева
-направо: после флага, берущего значение (`S G L e f A B C m`; `n` нет: у `git grep` это флаг без значения), остаток токена — значение (`-SOrder`, `-eObject` чисты;
-`-nOsh` — `bash-flag`). `--open-files-in-pager` (и сокращения `--open`) — `bash-flag`. У вызова Bash в `tool_uses` поле
+направо: после флага, берущего значение, остаток токена — значение. Набор букв зависит от подкоманды: у `git log`,
+`git show`, `git blame` это `S G L e f A B C m`, у `git grep` и неопознанных команд (fail-closed) — `e f A B C m`; `n`
+нет нигде (у `git grep` это флаг без значения). У `git grep` `-G` и `-L` — флаги без значения, поэтому `git grep
+-GOsh x` — это `-G` и `-O`, пейджер запускается, и вызов `TAINTED`. Чисты `git log -SOrder`, `git log -GOsh x`,
+`git grep -eObject`; `bash-flag` — `-nOsh`, `git grep -GOsh x`, `git grep -lLOsh x`. `--open-files-in-pager` (и сокращения `--open`) — `bash-flag`. У вызова Bash в `tool_uses` поле
 `denied` = `is_error` его `tool_result` (отказ CLI либо код выхода != 0); отказанный вызов нарушением быть не перестаёт.
 Поставляется `grep-read+git` (`grep-read` + Bash по шаблонам `git log`, `git show`, `git blame`, `git grep`).
 
