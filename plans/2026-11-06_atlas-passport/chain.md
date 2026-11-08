@@ -35,13 +35,13 @@ Opus, 2026-11-07, `main` 0f1883a64. **И** — измерено (команда 
 
 | Сценарий | Путь | Шаги | Замыкает |
 |---|---|---|---|
-| S1 | `atlas origin watcher.py::ConfigFileWatcher` | 1 | коммиты → `Why/Refs/Task` → ADR (`Decision:`/дифф) → абзац; до 04-30 — «история обрезана» |
-| S2 | `atlas origin <модуль> --since …` | 1 | статус плана из ledger; ADR по id во всех домах |
+| S1 | `atlas origin multiprocess_framework/modules/config_module/tools/watcher.py::ConfigFileWatcher` | 1 | коммиты → `Why/Refs/Task` → ADR (`Decision:`/дифф) → абзац; до 04-30 — «история обрезана» |
+| S2 | `atlas origin multiprocess_framework/modules/config_module/ --since …` | 1 | статус плана из ledger; ADR по id во всех домах |
 | S3 | `git log --format='%(trailers:key=Decision)' -- path` → ADR | 2 (через `origin` — 1) | `Decision:` (новые), `how: diff`/`inferred` (старые) |
 | S4 | `origin ADR-…` печатает `Отвергнуто:` | 1 | строка ADR (новые); старые — «Альтернативы» как есть |
 | S5 | `plans_ledger.py summary <план>` | 1 | `## Итог` обязателен при `close`, входит в `SUMMARY.md` |
 
-Руками: `Decision:` при новом ADR, `План:`/`Отвергнуто:` (необязательно), `## Итог` ≤ 30 строк. Вычисляется: ADR ↔ коммиты, статус, `SUMMARY.md`. Как есть (без ретро): коммиты, 520 ADR, архив, `[DONE дата — sha]`.
+Цель `origin` (`tasks/7.3.md`): путь, каталог-префикс, ADR-id или символ (`путь::символ`). Руками: `Decision:` при новом ADR, `План:`/`Отвергнуто:` (необязательно), `## Итог` ≤ 30 строк. Вычисляется: ADR ↔ коммиты, статус, `SUMMARY.md`. Как есть (без ретро): коммиты, 520 ADR, архив, `[DONE дата — sha]`.
 
 ## в) Почему лучше
 
