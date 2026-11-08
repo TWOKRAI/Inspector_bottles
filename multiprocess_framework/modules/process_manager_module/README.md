@@ -545,8 +545,8 @@ config = {
 Волны стопа (Task 1.3, ADR-PMM-043): ключ процесса `stop_wave` (верхний уровень `proc_dict`; `main` по умолчанию или
 `last`, негодное — WARNING без значения и `main`), читатель — `ProcessRegistry.stop_wave(name)`; на записи процесса
 `supervision.status` — поле `stop_wave`. Группа корня сигналит `main` в фазе 1, `last` — когда `main` пуст или в
-`D − last_wave_s` (`LAST_WAVE_S` = 2,0 с); при `last` в топологии `stop_budget(..., has_last=True)` даёт `pm_total_s`/`outer_s`
-+ 2,0 с, область `children` длиннее на `last_wave_s`. В момент сигнала `last` фаза — `last_wave`, а
+`D − last_wave_s` (`LAST_WAVE_S` = 2,0 с); при `last` в топологии `stop_budget(..., has_last=True)` прибавляет к `pm_total_s`/`outer_s`
+по 2,0 с, область `children` длиннее на `last_wave_s`. В момент сигнала `last` фаза — `last_wave`, а
 `system_stop.deadline_at` сдвигается на срок области (не при `force` и не после `done`); `stop_deadline_at` имени `last`
 — `null` до его сигнала, затем сигнал `last` + окно имени.
 Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
