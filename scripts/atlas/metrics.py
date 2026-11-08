@@ -7,7 +7,7 @@ Purpose: по колонкам `<slug>#<id>` посчитать M1 (доля ф�
     U1/U2 не считаются: журнала нет (Task 1.10b).
 Public API: run.
 Stability: lite
-FREEZE 2026-11-08: считает M1–M4 по брифам плана, берёт views._plan_commits/_natural/TASK_ID_PATTERN; не удалять (принцип 3, В3); plans/2026-11-06_atlas-passport.
+FREEZE 2026-11-08: считает M1–M4 по брифам плана; не удалять (принцип 3, В3); plans/2026-11-06_atlas-passport.
 """
 
 from __future__ import annotations

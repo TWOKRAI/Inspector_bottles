@@ -4,7 +4,7 @@ Atlas parses this file (ADR-ATL-001: node `result`, edge `reports`; ADR-ATL-004 
 contract: keep them literally, in this order; an empty section says
 `нет` (except `## Не проверено`, which is never empty). Required — the seven from `## Сделано` to `## Кому передано`
 (`atlas lint-result <file>`, the PostToolUse hook `lint-result.sh`, finding `RESULT_FORM`); `## Для следующего брифа`
-and `## Память` are optional. the `pack` view, reached by `atlas brief`, of the next task prints `## Осталось`, `## Не проверено` and
+and `## Память` are optional. The `pack` view, reached by `atlas brief`, of the next task prints `## Осталось`, `## Не проверено` and
 `## Для следующего брифа` as tails (Task 1.9a).
 
 Writers, in order, one at a time: the executor writes the file before its report; the lead then writes
