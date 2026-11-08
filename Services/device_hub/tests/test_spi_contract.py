@@ -42,7 +42,7 @@ _TCP = {"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 1}
 # Литерал исключений сторожа полноты «OP_SPECS == таблица операций»: пуст (на базе 27/27, 17/17, 5/5)
 _OPS_EXCEPTIONS: dict[str, set[str]] = {"RobotDriver": set(), "RobotDriverV2": set(), "VfdDriver": set()}
 
-# 56 команд с описанием каталога (T5.3c + SPI.c2): 10 данных + 18 v2 + 27 v1 - 4 общих + 5 vfd
+# 56 команд с описанием каталога (T5.3c + SPI.c2): 10 данных + 19 v2 + 27 v1 - 5 общих + 5 vfd
 _DESCRIBED = {
     "robot_jog_hold",
     "robot_jog_release",
@@ -196,11 +196,12 @@ def test_command_table_routes_and_links() -> None:
 
 
 def test_command_table_shared_robot_ops_one_row_one_object() -> None:
-    """``abort``, ``enqueue_job``, ``get_telemetry``, ``return_job`` — один объект в v1 и v2, одна строка таблицы."""
+    """``abort``, ``draw_polyline``, ``enqueue_job``, ``get_telemetry``, ``return_job`` — один объект в v1 и v2, одна
+    строка таблицы."""
     v1 = {s.name: s for s in spi.ROBOT_V1_OPS}
     v2 = {s.name: s for s in spi.ROBOT_V2_OPS}
     shared = set(v1) & set(v2)
-    assert shared == {"abort", "enqueue_job", "get_telemetry", "return_job"}
+    assert shared == {"abort", "draw_polyline", "enqueue_job", "get_telemetry", "return_job"}
     assert all(v1[name] is v2[name] for name in shared)
     table = spi.command_table(kinds.DEFAULT_SOURCES)
     assert table["robot_abort"][1] is v2["abort"]
@@ -241,8 +242,13 @@ def test_op_specs_match_driver_ops_table(cls: type, keys: Any) -> None:
     assert set(names) ^ keys() == _OPS_EXCEPTIONS[cls.__name__]
 
 
+def test_robot_v2_ops_order_matches_ops_table() -> None:
+    """Порядок ``ROBOT_V2_OPS`` — порядок ключей ``OPS`` драйвера v2 (комментарий каталога «в том же порядке»)."""
+    assert [s.name for s in spi.ROBOT_V2_OPS] == list(V2_OPS_TABLE)
+
+
 def test_op_specs_sizes() -> None:
-    assert (len(RobotDriver.OP_SPECS), len(RobotDriverV2.OP_SPECS), len(VfdDriver.OP_SPECS)) == (27, 18, 5)
+    assert (len(RobotDriver.OP_SPECS), len(RobotDriverV2.OP_SPECS), len(VfdDriver.OP_SPECS)) == (27, 19, 5)
     assert len(spi.ROBOT_DATA_OPS) == 10
     assert HikvisionDriver.OP_SPECS == () and GenericModbusDriver.OP_SPECS == ()
 

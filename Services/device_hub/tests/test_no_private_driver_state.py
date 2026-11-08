@@ -41,7 +41,7 @@ _OTHER_DRIVER_TESTS = (
     "test_manager_template_1_2b_3.py",
 )
 # Достижимость: сколько файлов сканируется (все ``*.py`` двух каталогов минус сам сторож и исключения)
-_SCANNED_FILES = 60
+_SCANNED_FILES = 62
 
 # Бывшие поля состояния драйвера (до T5.3f) и поля RobotState: через объект драйвера — 0 обращений
 _STATE_FIELDS = frozenset(
@@ -98,6 +98,8 @@ _SEAMS = {
     "_process_stop": 1,
     "_store": 1,
     "_dispatch": 1,
+    # T5.5: ``plugin._client`` — мост ПЛАГИНА robot_draw/robot_io в хаб (не поле драйвера; имя совпало с ``base.py``)
+    "_client": 2,
 }
 
 # Переходы RobotState с общими именами: вне пакета ловятся только через ``<…>.state.<имя>(``

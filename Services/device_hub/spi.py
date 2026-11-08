@@ -5,7 +5,7 @@ Purpose:
     статический контракт; во время работы ``isinstance`` по ним не вызывается — умолчания даёт ``BaseDeviceDriver``,
     стоп — флаг ``stop_aware``). ``OpSpec`` описывает одну операцию драйвера, ``OpSource`` — набор операций одного
     префикса команд; ``command_table`` сводит источники в таблицу «имя команды -> (источник, операция)».
-    Каталоги: ``ROBOT_V2_OPS`` (18), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
+    Каталоги: ``ROBOT_V2_OPS`` (19), ``ROBOT_V1_OPS`` (27), ``ROBOT_DATA_OPS`` (10 офлайн-операций), ``VFD_OPS`` (5).
     Драйвер объявляет свои операции ссылкой ``OP_SPECS = <каталог>``; команды плагина строятся из ``OP_SPECS`` классов
     драйверов таблицы видов (``Services/device_hub/kinds.py``: ``command_sources``, ``DEFAULT_SOURCES``), не из
     кортежей этого модуля напрямую. Флаги ``immediate`` — по коду драйверов
@@ -170,9 +170,14 @@ _RETURN_JOB = OpSpec(
     description="Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота).",
     args_schema=("x_mm", "y_mm", "z_mm?"),
 )
-_SHARED_ROBOT_OPS: tuple[OpSpec, ...] = (_ABORT, _ENQUEUE_JOB, _GET_TELEMETRY, _RETURN_JOB)
+_DRAW_POLYLINE = OpSpec(
+    name="draw_polyline",
+    description="Нарисовать полилинию: {device_id, points, ...}.",
+    args_schema=("points", "z?"),
+)
+_SHARED_ROBOT_OPS: tuple[OpSpec, ...] = (_ABORT, _ENQUEUE_JOB, _GET_TELEMETRY, _RETURN_JOB, _DRAW_POLYLINE)
 
-# 18 ключей robot_driver_v2/ops.py (OPS), в том же порядке
+# 19 ключей robot_driver_v2/ops.py (OPS), в том же порядке
 ROBOT_V2_OPS: tuple[OpSpec, ...] = (
     OpSpec(
         name="jog_hold",
@@ -240,6 +245,7 @@ ROBOT_V2_OPS: tuple[OpSpec, ...] = (
         args_schema=("timeout_s?",),
         immediate=True,
     ),
+    _DRAW_POLYLINE,
 )
 
 # 27 ключей RobotDriver._OPS (robot_driver.py): 16 «старых» и 11 draw_*, в том же порядке
@@ -301,11 +307,7 @@ ROBOT_V1_OPS: tuple[OpSpec, ...] = (
         description="Смена инструмента: {device_id, target: 0|1|2, timeout?}.",
         args_schema=("target?", "timeout?"),
     ),
-    OpSpec(
-        name="draw_polyline",
-        description="Нарисовать полилинию: {device_id, points, ...}.",
-        args_schema=("points", "z?"),
-    ),
+    _DRAW_POLYLINE,
     OpSpec(
         name="draw_circle",
         description="Нарисовать окружность: {device_id, cx, cy, r}.",

@@ -15,11 +15,13 @@ from Services.robot_comm.core.protocol_v2 import CONSTANTS, REG, STOP_LEVEL
 
 __all__ = [
     "TEXT_BAD_DO",
+    "TEXT_BAD_DRAW_ARGS",
     "TEXT_BAD_JOB_ARGS",
     "TEXT_BAD_RANGE",
     "TEXT_BAD_RETURN_ARGS",
     "TEXT_BAD_STOP_LEVEL",
     "TEXT_DISCONNECTING",
+    "TEXT_DRAW_TOO_MANY",
     "TEXT_EPOCH_NOT_WRITTEN",
     "TEXT_LEASE_LOST",
     "TEXT_NO_ECHO_WINDOW",
@@ -181,6 +183,9 @@ _HOME_TOL_DEG = 0.5
 # Тексты отказа постановки — постоянные, без входного значения (R8)
 TEXT_BAD_JOB_ARGS = "неверные аргументы задания"
 TEXT_BAD_RETURN_ARGS = "неверные аргументы возврата"
+# T5.5: рисунок (draw_polyline) — тоже постоянные тексты, без входных значений
+TEXT_BAD_DRAW_ARGS = "неверные точки рисунка"
+TEXT_DRAW_TOO_MANY = "слишком много точек в рисунке"
 # Глубина очередей заданий и возвратов по умолчанию (паритет v1)
 _JOB_QUEUE_MAXLEN = 256
 # Предел координаты на проводе: |v| * WIRE_SCALE <= W_MAX (R8)
