@@ -69,7 +69,7 @@ class ProcessRegistry:
         # Task 1.11: карта ``{имя: w_i}`` — окно воплощения после проверки и потолка; только имена с ключом.
         self._stop_windows: Dict[str, float] = {}
         # Task 1.3 (ADR-PMM-043): волна системного стопа воплощения ``{имя: "main" | "last"}``.
-        self._stop_waves: Dict[str, str] = {}
+        self._stop_waves: dict[str, str] = {}
         # Task 1.8 (L-9, ADR-PMM-037): чем ждать между проходами опроса остановки детей.
         # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
         # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
@@ -200,13 +200,13 @@ class ProcessRegistry:
         self._stop_windows[name] = window
         return window
 
-    def _register_stop_wave(self, name: str, process_config: Dict[str, Any]) -> str:
+    def _register_stop_wave(self, name: str, process_config: dict[str, Any]) -> str:
         """Волна воплощения из ``stop_wave`` (Task 1.3, ADR-PMM-043): годно ровно ``"main"`` или ``"last"``.
 
         Нет ключа или ``None`` — ``main``. Негодное значение — WARNING без значения, процесс в ``main``.
-        Не бросает: ошибка конфига не роняет создание процесса (принцип 5).
+        Не бросает: ошибка конфига не роняет создание процесса (принцип 5). Запись одна, без ``pop``: читатель
+        ``stop_wave(name)`` (группа корня) не видит окна «ключа нет» при пересоздании воплощения.
         """
-        self._stop_waves.pop(name, None)
         raw = process_config.get(STOP_WAVE_KEY)
         if raw is None:
             wave = STOP_WAVE_MAIN
@@ -729,7 +729,7 @@ class _ChildrenGroupStop:
         self._done: Dict[str, bool] = {}
         self._group: ChildProcessStop | None = None  # волна main
         self._last: ChildProcessStop | None = None  # волна last (Task 1.3); None — имён last нет
-        self._last_names: List[str] = []
+        self._last_names: list[str] = []
         self._last_signalled = False
         self._wave_listener: Callable[[str, float], None] | None = None
         self._names: List[str] = []
@@ -813,11 +813,15 @@ class _ChildrenGroupStop:
         main_done: bool | None = True if main is None else None
         last_done: bool | None = None
         while True:
-            pauses: List[float] = []
+            pauses: list[float] = []
             if main is not None and main_done is None:
                 main_done, pause = main.poll(deadline)
                 if main_done is None:
                     pauses.append(pause)
+            if not self._last_signalled:
+                # До сигнала last — только наблюдение (без сигналов и эскалации): смерть ребёнка last в основной
+                # волне метится (ReaderGone, итог) в момент факта, а не в момент сигнала last (О2, Task 1.1).
+                last.survivors()
             if not self._last_signalled and (main_done is True or time.monotonic() >= signal_at):
                 self._signal_last(last, deadline)
             if self._last_signalled and last_done is None:

@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import inspect
 import math
 import os
 import threading
@@ -1114,16 +1115,13 @@ class ProcessManagerProcess(ProcessModule):
         """Момент сигнала стопа детям корня (``time.time()``) от группы, не PM-часы; нет — ``None``.
 
         Task 1.3: ``name`` — момент сигнала волны этого имени. Двойники ``_children_stop`` в тестах геттера
-        не имеют или отдают не число — ``None``; геттер без аргумента (``TypeError``) — зовётся без имени.
+        не имеют или отдают не число — ``None``; геттер без параметров (сигнатура) — зовётся без имени.
         """
         getter = getattr(getattr(self, "_children_stop", None), "signalled_at", None)
         if not callable(getter):
             return None
         try:
-            try:
-                value = getter(name)
-            except TypeError:
-                value = getter()
+            value = getter(name) if _takes_argument(getter) else getter()
         except Exception as exc:  # noqa: BLE001 — статус не падает от геттера срока
             self._log_warning(f"supervision.status: signalled_at() упал: {exc}")
             return None
@@ -4908,6 +4906,21 @@ class ProcessManagerProcess(ProcessModule):
         return started
 
 
+def _takes_argument(fn: Any) -> bool:
+    """Принимает ли ``fn`` позиционный аргумент (Task 1.3): двойники ``signalled_at()`` в тестах — без параметров.
+
+    Проверка сигнатуры до вызова, а не ``except TypeError``: настоящий ``TypeError`` внутри геттера не скрывается.
+    Сигнатуру не прочесть — ``True`` (вызов с аргументом, как у настоящей группы).
+    """
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params
+    )
+
+
 class _ChildrenStop:
     """Единственный Stoppable детей PM в области ``work/children`` (Task 1.2a, ADR-PMM-036).
 
@@ -5065,15 +5078,12 @@ class _ChildrenStop:
     def signalled_at(self, name: str | None = None) -> float | None:
         """Момент сигнала стопа детям (``time.time()``) от группы реестра (Task 1.2); нет — ``None``.
 
-        Task 1.3: ``name`` — момент сигнала волны имени; геттер двойника без аргумента — зовётся без имени.
+        Task 1.3: ``name`` — момент сигнала волны имени; геттер двойника без параметров (сигнатура) — без имени.
         """
         getter = getattr(self._group, "signalled_at", None)
         if not callable(getter):
             return None
-        try:
-            value = getter(name)
-        except TypeError:
-            value = getter()
+        value = getter(name) if _takes_argument(getter) else getter()
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         return float(value)

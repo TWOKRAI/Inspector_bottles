@@ -235,9 +235,10 @@ def test_last_wave_child_not_signalled_until_main_done(farm) -> None:
 def test_hung_main_child_does_not_terminate_last_child(
     farm, main_ignores_terminate: bool, terminate_lo: float, kill_expected: bool
 ) -> None:
-    """``main`` игнорирует ``stop_event`` (живёт 8 с): ``terminate`` ``main`` в [5,0; 5,1], ``stop_event`` ``last``
-    сразу после его смерти, ``last`` не получает ни ``terminate``, ни ``kill`` и заканчивает ``exited``.
-    Вариант: ``main`` игнорирует и ``terminate`` — ``kill`` ``main`` в [6,0; 6,1]."""
+    """``main`` игнорирует ``stop_event`` (живёт 8 с): ``terminate`` ``main`` в [5,0; 5,1], ``stop_event`` ``last`` в
+    [5,0; 5,1] (вариант (А): по времени ``D − last_wave_s``) — после смерти ``main``, если тот умер на ``terminate``,
+    и до его смерти, если ``main`` игнорирует и ``terminate`` (``kill`` ``main`` в [6,0; 6,1]). ``last`` не получает
+    ни ``terminate``, ни ``kill`` и заканчивает ``exited``."""
     registry = ProcessRegistry(logger=None, child_stop_budget=stop_budget(5.0))
     main = _spawn(registry, farm, "hung", wave=None, exit_after_s=8.0, dies_on_terminate=not main_ignores_terminate)
     last = _spawn(registry, farm, "gui", wave="last", exit_after_s=0.3)
