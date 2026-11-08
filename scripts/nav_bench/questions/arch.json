@@ -1,0 +1,422 @@
+{
+  "name": "arch",
+  "repo_sha": "1dc6c71b7",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory"
+  ],
+  "thresholds": {
+    "hits_min": 0,
+    "facts_hit_min": 8,
+    "false_max": 1
+  },
+  "questions": [
+    {
+      "id": "A1",
+      "question": "The repository has four layers: multiprocess_framework, Services, Plugins, multiprocess_prototype. Write the allowed import direction as one chain `X -> Y -> Z -> W`, where `X -> Y` means X may import Y (reverse imports are forbidden). Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "multiprocess_prototype -> Plugins -> Services -> multiprocess_framework",
+            "multiprocess_prototype → Plugins → Services → multiprocess_framework",
+            "app -> Plugins -> Services -> framework",
+            "app → Plugins → Services → framework"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": ".sentrux/rules.toml",
+          "contains": "app → Plugins → Services → framework"
+        }
+      ],
+      "scored": true,
+      "note": "Format-instructed chain so a substring match is deterministic."
+    },
+    {
+      "id": "A2",
+      "question": "In `multiprocess_prototype/backend/topology/inspection_full.yaml`, in which process does `ColorMaskPlugin` run, and which `process_class` hosts it? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "processor"
+          ]
+        },
+        {
+          "any_of": [
+            "GenericProcessApp"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_prototype/backend/topology/inspection_full.yaml",
+          "contains": "process_name: processor"
+        },
+        {
+          "path": "multiprocess_prototype/backend/topology/inspection_full.yaml",
+          "contains": "multiprocess_prototype.generic_process_app.GenericProcessApp"
+        },
+        {
+          "path": "multiprocess_prototype/backend/topology/inspection_full.yaml",
+          "contains": "Plugins.processing.color_mask.plugin.ColorMaskPlugin"
+        }
+      ],
+      "scored": true,
+      "note": "Interpretation: the brief says 'framework module'; a topology hosts plugins, so a plugin is asked."
+    },
+    {
+      "id": "A3",
+      "question": "Name the classes a dict message passes through from `send_message` in process A to the handler in process B: the message class, its adapter, the router class, the channel class; and the module that supplies the queues. Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "MessageAdapter"
+          ]
+        },
+        {
+          "any_of": [
+            "RouterManager"
+          ]
+        },
+        {
+          "any_of": [
+            "QueueChannel"
+          ]
+        },
+        {
+          "any_of": [
+            "shared_resources_module"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/message_module/adapters/message_adapter.py",
+          "contains": "class MessageAdapter"
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/core/router_manager.py",
+          "contains": "class RouterManager(ChannelRoutingManager)"
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/queue_channel.py",
+          "contains": "class QueueChannel"
+        },
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "shared_resources_module"
+        }
+      ],
+      "scored": true,
+      "note": "The bare fact 'Message' was removed: whole-word matching ignores case, so the word in the question text satisfied it."
+    },
+    {
+      "id": "A4",
+      "question": "Which public names does `config_module` export in its `__all__` (give all of them)? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "ConfigSection"
+          ]
+        },
+        {
+          "any_of": [
+            "ConfigManagerConfig"
+          ]
+        },
+        {
+          "any_of": [
+            "IConfigManager"
+          ]
+        },
+        {
+          "any_of": [
+            "ConfigManager"
+          ]
+        },
+        {
+          "any_of": [
+            "IConfig"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/config_module/__init__.py",
+          "contains": "\"ConfigManagerConfig\""
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/__init__.py",
+          "contains": "\"ConfigSection\""
+        }
+      ],
+      "scored": true,
+      "note": "__all__ = Config, ConfigManager, ConfigManagerConfig, ConfigSection, IConfigManager, IConfig (6). Facts match whole words, so 'ConfigManager' and 'IConfig' no longer hide inside longer names. Still weak: the question does not ask for the count (6), so a partial list is judged by name only."
+    },
+    {
+      "id": "A5",
+      "question": "Which interface does `ConfigManager` implement, and how many abstract members does that interface have in total, own plus inherited? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "IConfigManager"
+          ]
+        },
+        {
+          "any_of": [
+            "17",
+            "seventeen"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/config_module/core/config_manager.py",
+          "contains": "class ConfigManager(BaseManager, ObservableMixin, IConfigManager)"
+        },
+        {
+          "path": "multiprocess_framework/modules/config_module/interfaces.py",
+          "contains": "class IConfigManager(IBaseManager, ABC)"
+        }
+      ],
+      "scored": true,
+      "note": "17 = 7 own (config_module/interfaces.py) + 10 in IBaseManager (@abstractmethod count between class lines, git show 1dc6c71b7)."
+    },
+    {
+      "id": "A6",
+      "question": "Which three units import `router_module` most (production code, not tests; count import statements per unit, unit = a directory under `multiprocess_framework/modules/` or a subpackage of `multiprocess_prototype/`)? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "process_module"
+          ]
+        },
+        {
+          "any_of": [
+            "frontend_module"
+          ]
+        },
+        {
+          "any_of": [
+            "multiprocess_prototype/frontend",
+            "multiprocess_prototype.frontend",
+            "prototype/frontend",
+            "prototype frontend"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/process_module/communication/process_communication.py",
+          "contains": "from ...router_module import QueueChannel"
+        },
+        {
+          "path": "multiprocess_framework/modules/frontend_module/bridge/remote_command_sender.py",
+          "contains": "router_module.channels.socket_client"
+        }
+      ],
+      "scored": true,
+      "note": "git grep -n -E '^\\s*(from|import) [A-Za-z_.]*router_module' 1dc6c71b7 -- '*.py', minus tests and router_module itself: process_module 14, frontend_module 3, multiprocess_prototype/frontend 3, process_manager_module 2, five singles. Counted by git grep, not taken from docs/arch-map/model.json."
+    },
+    {
+      "id": "A7",
+      "question": "How does a plugin get its configuration: which base class carries the config schema, which class method names the plugin's config class, and which object hands the YAML values to the plugin? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "SchemaBase"
+          ]
+        },
+        {
+          "any_of": [
+            "config_class"
+          ]
+        },
+        {
+          "any_of": [
+            "PluginContext"
+          ]
+        },
+        {
+          "any_of": [
+            "ctx.config",
+            "context.config"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/generic_process_config.py",
+          "contains": "class PluginConfig(SchemaBase)"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/base.py",
+          "contains": "def config_class"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/base.py",
+          "contains": "class PluginContext"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/base.py",
+          "contains": "self.config = config or {}"
+        }
+      ],
+      "scored": true,
+      "note": ""
+    },
+    {
+      "id": "A8",
+      "question": "Which named worker threads does `process_module` start in a generic process (system threads, heartbeat, data intake, pipeline, source producers)? Give the worker names. Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "message_processor"
+          ]
+        },
+        {
+          "any_of": [
+            "heartbeat_sender"
+          ]
+        },
+        {
+          "any_of": [
+            "data_receiver"
+          ]
+        },
+        {
+          "any_of": [
+            "pipeline_executor"
+          ]
+        },
+        {
+          "any_of": [
+            "source_producer"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/modules/process_module/threads/system_threads.py",
+          "contains": "\"message_processor\""
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/heartbeat/process_heartbeat.py",
+          "contains": "\"heartbeat_sender\""
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/generic_process.py",
+          "contains": "worker_name=\"data_receiver\""
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/generic_process.py",
+          "contains": "worker_name=\"pipeline_executor\""
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/generic_process.py",
+          "contains": "f\"source_producer_{source_plugin.name}\""
+        }
+      ],
+      "scored": true,
+      "note": "data_receiver, pipeline_executor and source_producer_<plugin> are created under conditions in generic_process.py."
+    },
+    {
+      "id": "A9",
+      "question": "Which function in which file resolves the pipeline (topology) file the app boots with: from the manifest or from a CLI override? Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "_resolve_pipeline"
+          ]
+        },
+        {
+          "any_of": [
+            "backend/launch.py",
+            "launch.py"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_prototype/backend/launch.py",
+          "contains": "def _resolve_pipeline(app"
+        }
+      ],
+      "scored": true,
+      "note": "Interpretation: the brief says 'recipes choose the topology'; at 1dc6c71b7 the choice is _resolve_pipeline (CLI override > app.pipeline); recipes live in app.recipes."
+    },
+    {
+      "id": "A10",
+      "question": "What is the difference between a process name and a Router channel (see `ROUTING_GLOSSARY.md`)? Which of them is the argument of `send_message`, what is a channel bound to, and must the two coincide? Also name the example channel the glossary gives for the `draw` register, and give an example process name from the glossary. Answer in the `answer` field; `locations` may be empty.",
+      "expected_facts": [
+        {
+          "any_of": [
+            "control_draw"
+          ]
+        },
+        {
+          "any_of": [
+            "renderer",
+            "processor"
+          ]
+        },
+        {
+          "any_of": [
+            "queue",
+            "queues"
+          ]
+        },
+        {
+          "any_of": [
+            "do not have to",
+            "not necessarily",
+            "may differ",
+            "need not",
+            "not have to match",
+            "differ",
+            "differs",
+            "different",
+            "differently",
+            "not the same"
+          ]
+        }
+      ],
+      "facts_require": "all",
+      "evidence": [
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "аргумент `target` в `send_message(target, msg)`"
+        },
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "не обязаны совпадать"
+        },
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "control_draw"
+        },
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "(например `renderer`, `processor`)"
+        }
+      ],
+      "scored": true,
+      "note": "No option may appear in the question text: the send_message fact was removed; control_draw and an example process name (renderer, processor: ROUTING_GLOSSARY.md, axis 1) are asked for explicitly, so an answer that swaps the roles of process name and channel misses. Inflected forms (queues, differs, different) are listed as options because matching is by whole word."
+    }
+  ]
+}
