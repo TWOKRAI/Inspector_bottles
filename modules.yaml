@@ -390,6 +390,19 @@ modules:
     ]
     parent: null
     purpose: "Аутентификация и RBAC: хеши паролей, пользователи, роли; сюда — менять вход и права доступа"
+  - id: "services/camera_device"
+    paths: [
+      "Services/camera_device/",
+    ]
+    layer: services
+    tier: null
+    docs: [
+      "Services/camera_device/README.md",
+      "Services/camera_device/STATUS.md",
+      "Services/camera_device/DECISIONS.md",
+    ]
+    parent: null
+    purpose: "Общее ядро камер: контракт порта прибора и его фейк; сюда — менять порт, границу SDK и эмуляцию"
   - id: "services/code_reader"
     paths: [
       "Services/code_reader/",
