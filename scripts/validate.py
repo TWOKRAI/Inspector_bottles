@@ -231,6 +231,48 @@ def check_services() -> None:
             warnings.append(msg)
 
 
+# Сервисы, у которых DECISIONS.md не было на момент введения проверки (Task 7.1b-validate).
+# Список только сокращается: появился файл -> имя убрать отсюда. Новый сервис в него не добавлять.
+SERVICES_WITHOUT_DECISIONS = frozenset(
+    {
+        "control_panel",
+        "dataset_gen",
+        "documents",
+        "hikvision_camera",
+        "ml_inference",
+        "ml_train",
+        "phone_gateway",
+    }
+)
+
+
+def check_services_decisions(services_root: Path | None = None) -> None:
+    """Каждый сервис (каталог с __init__.py) обязан иметь DECISIONS.md.
+
+    `check_services` обходит литерал SERVICES и нового сервиса не увидит, поэтому
+    здесь скан диска. Исключены `tests` и каталоги на `_`. Сервисы из базы
+    SERVICES_WITHOUT_DECISIONS без файла — [MISS], не ошибка.
+    """
+    root = SERVICES_ROOT if services_root is None else services_root
+    check_header("5c. Проверка DECISIONS.md у сервисов (скан Services/)")
+    for svc_dir in sorted(root.iterdir()):
+        name = svc_dir.name
+        if not svc_dir.is_dir() or name == "tests" or name.startswith("_"):
+            continue
+        if not (svc_dir / "__init__.py").exists():
+            continue
+        has_decisions = (svc_dir / "DECISIONS.md").exists()
+        if name in SERVICES_WITHOUT_DECISIONS:
+            if has_decisions:
+                print(f"  [OK] baseline можно сократить: {name}")
+            else:
+                print(f"  [MISS] baseline: нет DECISIONS.md: Services/{name}")
+        elif not has_decisions:
+            msg = f"  [FAIL] Нет DECISIONS.md: Services/{name}"
+            print(msg)
+            errors.append(msg)
+
+
 def check_adr_sync() -> None:
     check_header("6. Проверка синхронизации ADR-документации (scripts/sync --check)")
     result = subprocess.run(
@@ -404,6 +446,7 @@ def main() -> int:
     check_status_files()
     check_readme_files()
     check_services()
+    check_services_decisions()
     check_adr_sync()
     check_plans_progress()
     check_memory_tags()
