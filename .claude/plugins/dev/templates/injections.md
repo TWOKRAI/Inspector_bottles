@@ -5,7 +5,7 @@ on purpose. The format is ADR-ATL-004 §3 (`scripts/atlas/DECISIONS.md`).
 
 **Writers:** the lead writes `id`, `prop`, `forecast`, `test` BEFORE the run; the author of the task writes `file`, `old`, `new` from them (`project-rules` §5); `observed` comes from the run (`atlas inject
 run`, Task 1.9e; by hand until then). **Readers:** `atlas lint-brief` (1.9c: `old` found once in `file`), `atlas inject`
-(1.9e: apply, run the radius, `observed`, revert, summary), `atlas pack` (mismatch tail — 1.9e), Atlas nodes
+(1.9e: apply, run the radius, `observed`, revert, summary), the `pack` view, reached by `atlas brief` (mismatch tail — 1.9e), Atlas nodes
 `injection` and edges `breaks` (`observed`), `lists` (ADR-ATL-001). Contract test:
 `scripts/atlas/tests/test_formats_1_9d.py::test_injections_example_schema` reads the example below.
 

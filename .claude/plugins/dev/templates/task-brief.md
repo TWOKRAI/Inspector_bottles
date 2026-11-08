@@ -6,7 +6,7 @@ is ADR-ATL-004 §2 (`scripts/atlas/DECISIONS.md`); the readers below are code, s
 
 **Readers:** `plans_ledger.build_brief` (needs TASK, ROLE, DESIGN, FILES, REDS, TESTS, OUT OF SCOPE); the spawn hook
 `dev/hooks/lint-brief.sh` (DESIGN >= 3 lines, FILES <= 6, REDS <= 10 or `n/a`, REPORT); the plan gate
-`TASK_INCOMPLETE` (Files, Acceptance, CHAIN); `atlas pack` (`## Открыто для лида` via `views._lead_parts`);
+`TASK_INCOMPLETE` (Files, Acceptance, CHAIN); the `pack` view (`views.pack`, reached by `atlas brief`; `## Открыто для лида` via `views._lead_parts`);
 `atlas brief --check` (1.9b) and `atlas lint-brief` (1.9c). Contract test: `scripts/atlas/tests/test_formats_1_9d.py`
 builds the two examples below.
 
@@ -35,7 +35,7 @@ builds the two examples below.
    and `<!-- /atlas:facts -->`, `<sha7>` = the commit the literals came from; a fact that needs an uncommitted file
    goes to ACCEPTANCE. FACTS come from `python -m scripts.atlas brief <slug>#<id>` (`--write` puts the block into
    `tasks/<id>.md`, `--check` exits 1 when module files or cited files changed since `<sha7>`; ADR-ATL-004 §2.5а);
-   a fact the generator does not give is written by hand in the same grammar. Before stage 0 run
+   a fact the generator does not give is written by hand in the same grammar. `atlas brief` is FREEZE (plans/2026-11-06_atlas-passport, owner question 3): FACTS are optional for the spawn hook; `atlas lint-brief` still requires the FACTS label, so keep the label and the marker pair; if `atlas pack`/`card` stop parsing, generated FACTS fail replay: hand-write facts with `ref`/`log`/`index`. Before stage 0 run
    `python -m scripts.atlas lint-brief tasks/<id>.md` (ADR-ATL-004 §2.5б): form, replay of every command against its literal
    (a literal that is not a substring of the output, or carries a time, is red), REDS, `injections.json` (`old` found once),
    `PROBE`; `--no-replay` / `--no-fresh` skip the slow parts.

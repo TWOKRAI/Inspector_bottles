@@ -4,7 +4,7 @@ Atlas parses this file (ADR-ATL-001: node `result`, edge `reports`; ADR-ATL-004 
 contract: keep them literally, in this order; an empty section says
 `нет` (except `## Не проверено`, which is never empty). Required — the seven from `## Сделано` to `## Кому передано`
 (`atlas lint-result <file>`, the PostToolUse hook `lint-result.sh`, finding `RESULT_FORM`); `## Для следующего брифа`
-and `## Память` are optional. `atlas pack` of the next task prints `## Осталось`, `## Не проверено` and
+and `## Память` are optional. The `pack` view, reached by `atlas brief`, of the next task prints `## Осталось`, `## Не проверено` and
 `## Для следующего брифа` as tails (Task 1.9a).
 
 Writers, in order, one at a time: the executor writes the file before its report; the lead then writes
@@ -55,7 +55,7 @@ MEMORY LESSON <name>.md: <full file text> | none
   property broken on purpose (`.claude/CLAUDE.md` → «Test authorship»). The result carries one summary line
   `- N инъекций, совпало M, расхождений K — tasks/<id>.injections.json` (`, не прогнано L` when L > 0); every
   mismatch also gets a line under `## Не проверено`. A task without injections (docs, plans) writes `- нет`.
-- Old results keep the table `| инъекция | предсказано красных | наблюдалось | тест |` — `atlas pack` still prints
+- Old results keep the table `| инъекция | предсказано красных | наблюдалось | тест |` — the `pack` view, reached by `atlas brief`, still prints
   its rows where predicted ≠ observed (`views._result_parts`). For the summary line that tail comes back with the
   JSON reader of Task 1.9e; until then a mismatch is visible only under `## Не проверено`.
 - Tests that guard a declared guarantee carry `@pytest.mark.guards("G-<module>-NNN")` (ADR-ATL-001 §4); the
