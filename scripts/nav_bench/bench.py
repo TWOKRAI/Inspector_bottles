@@ -835,7 +835,7 @@ def run_bench(
     if int(condition["expected_tokens"]) <= 0:
         print(f"ОШИБКА: у условия {condition['name']} expected_tokens должно быть > 0 (оценка стоимости).", file=err)
         return 2, None
-    problem = baseline_set_problem(baseline, qset["name"])
+    problem = None if floor else baseline_set_problem(baseline, qset["name"])  # floor с любой базой: пороги вырезаны
     if problem:
         print(f"ОШИБКА: {problem}", file=err)
         return 2, None
@@ -947,9 +947,14 @@ def score_command(
     run_path: Path, questions_path: Path | None, out: TextIO | None = None, baseline_path: Path | None = None
 ) -> int:
     out = out or sys.stdout
-    record = load_json(run_path)
-    questions = load_questions(questions_path)["questions"] if questions_path else record["questions"]
-    print(render_markdown(rescore_record(record, questions, baseline_path)), file=out)
+    try:
+        record = load_json(run_path)
+        questions = load_questions(questions_path)["questions"] if questions_path else record["questions"]
+        rescored = rescore_record(record, questions, baseline_path)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"ОШИБКА: {exc}", file=sys.stderr)
+        return 2
+    print(render_markdown(rescored), file=out)
     return 0
 
 

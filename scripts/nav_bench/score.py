@@ -273,8 +273,9 @@ def verdict(
     hits / facts_hit — по худшему повтору (min), false — по худшему (max), вызовы и токены — по медиане.
     ``baseline`` — сводка базовой записи: относительные пороги ``calls_ratio_max`` / ``tokens_ratio_max``
     (медиана вызовов и ``final_context_tokens`` к медиане базы). Не измеренное значение (``None``) не проходит
-    молча: попадает в ``unmeasured``, и тогда ``pass`` ложно, а полоса — ``UNMEASURED``. ``tainted`` (нарушение
-    доступа в любом повторе) перекрывает всё, в том числе ``UNMEASURED``.
+    молча: попадает в ``unmeasured``; если иначе была бы полоса ``PASS``, то ``pass`` ложно, а полоса — ``UNMEASURED``
+    (``FIX`` и ``FAIL`` по измеренным порогам сохраняются). ``tainted`` (нарушение доступа в любом повторе)
+    перекрывает всё.
     """
     limits = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     checks: dict[str, tuple[Any, Any, Any]] = {}
@@ -317,10 +318,8 @@ def verdict(
     primary = agg[primary_name]["min"]
     if tainted:
         band = "TAINTED"
-    elif unmeasured:
-        band = "UNMEASURED"
     elif passed:
-        band = "PASS"
+        band = "UNMEASURED" if unmeasured else "PASS"  # не измеренная метрика не даёт стать PASS
     elif primary is not None and primary >= primary_limit - FIX_WIDTH:
         band = "FIX"
     else:

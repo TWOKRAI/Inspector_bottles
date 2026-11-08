@@ -221,3 +221,20 @@ def test_arch_fact_options_not_in_question_text():
                 if re.search(r"(?<!\w)" + re.escape(option) + r"(?!\w)", text, re.IGNORECASE):
                     leaks.append((question["id"], option))
     assert leaks == []
+
+
+def test_a10_inflected_correct_answers_hit_and_inverted_answer_misses():
+    a10 = [q for q in json.loads(ARCH.read_text(encoding="utf-8"))["questions"] if q["id"] == "A10"]
+
+    def facts(text):
+        return score.score_run(a10, _answer("A10", text))["per_question"][0]["facts"]
+
+    correct = [
+        "send_message takes the process name, e.g. renderer; the channel control_draw is bound to a queue; they differ",
+        "Process names like renderer go to send_message. Channels (control_draw) are bound to a queue; this differs",
+        "The process is `processor`; control_draw maps to a queue; the two are different things",
+        "renderer is a process; control_draw is a channel bound to the queues; they may differ",
+    ]
+    assert [facts(text) for text in correct] == ["hit"] * 4
+    inverted = "The channel is what send_message takes (e.g. control_draw); it is bound to a queue; the two differ."
+    assert facts(inverted) == "miss"  # имени процесса нет: роли перепутаны или не названы

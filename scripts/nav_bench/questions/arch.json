@@ -362,7 +362,7 @@
     },
     {
       "id": "A10",
-      "question": "What is the difference between a process name and a Router channel (see `ROUTING_GLOSSARY.md`)? Which of them is the argument of `send_message`, what is a channel bound to, and must the two coincide? Also name the example channel the glossary gives for the `draw` register. Answer in the `answer` field; `locations` may be empty.",
+      "question": "What is the difference between a process name and a Router channel (see `ROUTING_GLOSSARY.md`)? Which of them is the argument of `send_message`, what is a channel bound to, and must the two coincide? Also name the example channel the glossary gives for the `draw` register, and give an example process name from the glossary. Answer in the `answer` field; `locations` may be empty.",
       "expected_facts": [
         {
           "any_of": [
@@ -371,7 +371,14 @@
         },
         {
           "any_of": [
-            "queue"
+            "renderer",
+            "processor"
+          ]
+        },
+        {
+          "any_of": [
+            "queue",
+            "queues"
           ]
         },
         {
@@ -382,6 +389,9 @@
             "need not",
             "not have to match",
             "differ",
+            "differs",
+            "different",
+            "differently",
             "not the same"
           ]
         }
@@ -399,10 +409,14 @@
         {
           "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
           "contains": "control_draw"
+        },
+        {
+          "path": "multiprocess_framework/docs/ROUTING_GLOSSARY.md",
+          "contains": "(например `renderer`, `processor`)"
         }
       ],
       "scored": true,
-      "note": "No option may appear in the question text: the send_message fact was removed; control_draw is asked for explicitly."
+      "note": "No option may appear in the question text: the send_message fact was removed; control_draw and an example process name (renderer, processor: ROUTING_GLOSSARY.md, axis 1) are asked for explicitly, so an answer that swaps the roles of process name and channel misses. Inflected forms (queues, differs, different) are listed as options because matching is by whole word."
     }
   ]
 }

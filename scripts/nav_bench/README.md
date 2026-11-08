@@ -18,7 +18,7 @@ python scripts/nav_bench/bench.py run --questions scripts/nav_bench/questions/k0
 python scripts/nav_bench/bench.py run --questions ... --condition ... --repeats 3 --yes
 
 # 3. пересчитать оценку записи (поправили эталон — сессии повторять не надо)
-python scripts/nav_bench/bench.py score --run data/nav_bench/<дата>_k0_source-only.json [--questions другой.json]
+python scripts/nav_bench/bench.py score --run data/nav_bench/<дата>_k0_grep-read.json [--questions другой.json]
 
 # 4. две записи рядом
 python scripts/nav_bench/bench.py compare A.json B.json
@@ -96,11 +96,11 @@ JSON-файл:
 этого условия без него не запустить), `all` (код, qex, graphify, карта и справка). Условия `qex`, `graphify`, `map-only`,
 `reference`, `all` несут относительные пороги (`*_ratio_max`): они считаются от базового прогона `grep-read` на том же наборе.
 `run` **отказывает** (код 2), если в порогах есть `*_ratio_max`, а `--baseline` (или `thresholds.baseline`) не задан, и если
-набор базы (поле `set` её записи) не совпал с набором прогона. `score` без базы не отказывает, а пишет `unmeasured` и полосу `UNMEASURED`.
+набор базы (поле `set` её записи) не совпал с набором прогона. `score` без базы не отказывает, а пишет `unmeasured` (и полосу `UNMEASURED`, если иначе было бы `PASS`).
 
 **Вердикт по повторам:** `hits` — по худшему повтору (min), `false` — по худшему (max), вызовы и токены — по медиане.
 Не измеренное значение (нет базы, нет числа вызовов при `output_format: json`, имя поля в выводе не совпало) не проходит молча:
-оно попадает в `unmeasured`, `pass` ложно, полоса — `UNMEASURED`.
+оно попадает в `unmeasured`; если иначе была бы полоса `PASS`, `pass` ложно, а полоса — `UNMEASURED` (`FIX` и `FAIL` по измеренным порогам сохраняются).
 
 ### `map-only`: техническое ограничение и аудит
 
@@ -162,12 +162,12 @@ JSON-файл:
 **Метрики прогона.** `tool_calls`, `final_context_tokens` (input + cache_creation + cache_read последнего assistant-события),
 `cumulative_tokens` (in + out + cache_creation), `cache_read_tokens`, `subtype` (обрыв по бюджету виден: `error_max_budget_usd`).
 Пороги: абсолютные (`calls_median_max`, `tokens_median_max` — по final_context_tokens) или относительные к базовой записи
-(`calls_ratio_max`, `tokens_ratio_max`; база — `--baseline run.json` или `thresholds.baseline`; без базы `run` отказывает, `score` пишет `UNMEASURED`; база должна быть снята на том же наборе).
-Пороги набора перекрывают пороги условия. `bench.py floor` — один тривиальный вопрос теми же флагами: фиксированные накладные расходы.
+(`calls_ratio_max`, `tokens_ratio_max`; база — `--baseline run.json` или `thresholds.baseline`; без базы `run` отказывает, `score` пишет `unmeasured` (полоса `UNMEASURED`, если иначе было бы `PASS`); база должна быть снята на том же наборе).
+Пороги набора перекрывают пороги условия. `bench.py floor` — один тривиальный вопрос теми же флагами: фиксированные накладные расходы. Запись floor хранит пороги условия без ключей `*_ratio_max` и **не годится как база** для относительных порогов; при `floor` проверка набора базы не выполняется.
 
 **Вердикт — пять полос:** `PASS` (главная метрика >= порога, false <= 1, пороги выполнены), `FIX` (главная метрика на 1-2
-ниже порога, либо выше, но не выполнен другой порог), `FAIL` (ниже), `UNMEASURED` (порог задан, а метрики нет), `TAINTED` (любое нарушение доступа в любом повторе —
-прогон недействителен; первее `UNMEASURED`). Главная метрика: `facts_hit`, если задан `facts_hit_min`, иначе `hits`.
+ниже порога, либо выше, но не выполнен другой порог), `FAIL` (ниже), `UNMEASURED` (все измеренные пороги выполнены, но порог без метрики остался), `TAINTED` (любое нарушение доступа в любом повторе —
+прогон недействителен; первее остальных). Главная метрика: `facts_hit`, если задан `facts_hit_min`, иначе `hits`.
 Полоса `FIX` возможна и при выполненных `hits`: например, `hits` в норме, а `calls_ratio` провален (31 вызов против базы 40 = 0.775 > 0.5) — это шире определения «6-7 попаданий».
 
 **Аудит доступа — по списку разрешённого:** любой `tool_use` вне `allowed_tools` (имена без регистра, шаблоны `fnmatch`) и,

@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.nav_bench import bench, score
 
 PKG = Path(__file__).resolve().parent.parent
@@ -618,6 +620,12 @@ def test_unmeasured_metric_is_not_a_pass():
     assert (metric_none["pass"], metric_none["band"]) == (False, "UNMEASURED")
     assert score.verdict(agg, ratios, tainted=True)["band"] == "TAINTED"  # TAINTED первее
     assert score.verdict(agg)["band"] == "PASS"  # порогов на метрики нет — нечего не измерять
+    # провал на измеренном не прячется за UNMEASURED: UNMEASURED ставится только там, где иначе был бы PASS
+    weak = score.aggregate([{"hits": 7, "false": 0}, {"hits": 7, "false": 0}])
+    assert score.verdict(weak, ratios)["band"] == "FIX"
+    bad = score.aggregate([{"hits": 2, "false": 0}, {"hits": 2, "false": 0}])
+    assert score.verdict(bad, ratios)["band"] == "FAIL"
+    assert score.verdict(weak, ratios, tainted=True)["band"] == "TAINTED"
 
 
 def test_audit_prefixes_cover_resolved_and_raw_run_root(tmp_path):
@@ -625,7 +633,10 @@ def test_audit_prefixes_cover_resolved_and_raw_run_root(tmp_path):
     # Здесь тот же разрыв делает симлинк: сырой путь копии != resolve().
     real = tmp_path / "real" / "run"
     real.mkdir(parents=True)
-    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    try:
+        (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"ОС не даёт создать симлинк ({type(exc).__name__}: {exc}) — проверка не выполнена")
     raw = tmp_path / "link" / "run"
     assert str(raw) != str(raw.resolve())
 
@@ -647,3 +658,39 @@ def test_audit_prefixes_cover_resolved_and_raw_run_root(tmp_path):
     assert code == 0
     rep = json.loads(path.read_text(encoding="utf-8"))["repeats"][0]
     assert rep["violations"] == [f"Read:{raw}/multiprocess_framework/x.py"]
+
+
+def _written_record(tmp_path):
+    runner = FakeRunner(_stream([("Read", "a.py")]))
+    _, path, _, _ = _run(tmp_path, runner, repeats=1, yes=True)
+    return path
+
+
+def test_score_command_reports_foreign_baseline_set_without_traceback(tmp_path, capsys):
+    path = _written_record(tmp_path)
+    foreign = _baseline_file(tmp_path, set_name="arch")
+    out = io.StringIO()
+    assert bench.score_command(path, None, out=out, baseline_path=foreign) == 2
+    assert out.getvalue() == "" and "ОШИБКА" in capsys.readouterr().err
+    record = json.loads(path.read_text(encoding="utf-8"))
+    with pytest.raises(ValueError, match="arch"):
+        bench.rescore_record(record, record["questions"], foreign)
+    same = _baseline_file(tmp_path, set_name="k0")
+    assert bench.score_command(path, None, out=out, baseline_path=same) == 0 and "Вердикт" in out.getvalue()
+
+
+def test_rescore_old_record_without_prefixes_uses_root(tmp_path):
+    path = _written_record(tmp_path)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["prefixes"][0] == record["root"]
+    band = record["verdict"]["band"]
+    del record["prefixes"]  # запись, снятая до появления поля
+    rescored = bench.rescore_record(record, record["questions"])
+    assert rescored["repeats"][0]["score"]["hits"] == 2 and rescored["verdict"]["band"] == band == "FAIL"
+
+
+def test_floor_ignores_baseline_of_another_set(tmp_path):
+    runner = FakeRunner(_stream([("Read", "a.py")]))
+    foreign = _baseline_file(tmp_path, set_name="arch")
+    code, _, _, _ = _run(tmp_path, runner, repeats=1, yes=True, floor=True, baseline_path=foreign)
+    assert code == 0 and len(runner.calls) == 1
