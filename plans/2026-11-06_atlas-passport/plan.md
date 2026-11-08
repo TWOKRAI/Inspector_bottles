@@ -53,7 +53,7 @@
 
 **Цель фазы:** гейт CI `atlas` (1.7a) зелёный.
 
-- Task 0.1: запись `Services/camera_device` в `modules.yaml` — `test_modules_map` 12 passed; `merge-begin` → cto → владелец(push), в `main` до 2.1 [PENDING]
+- Task 0.1: запись `Services/camera_device` в `modules.yaml` — `test_modules_map` 12 passed; `merge-begin` → cto → владелец(push), в `main` до 2.1 [DONE]
 
 Условие фазы (В4): `uv sync --inexact` — **владелец вручную, основное дерево, окно `quiet`, до Task 2.1**; агенты не запускают.
 
