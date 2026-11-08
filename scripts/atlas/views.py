@@ -6,7 +6,7 @@ Purpose: `card` и `pack` читают SQLite реестра по build_id (ле
     модуля из поля `purpose` строки modules.yaml, общее для `card` и `index` (README не читается).
 Public API: TASK_ID_PATTERN, card, log, pack, purpose.
 Stability: lite
-FREEZE 2026-11-08: card, pack до kill №2 (зовёт brief.py); log, purpose живые; plans/2026-11-06_atlas-passport.
+FREEZE 2026-11-08: card, pack: помощники brief.py (CLI — 6.2a); log, purpose живые; plans/2026-11-06_atlas-passport.
 """
 
 from __future__ import annotations
