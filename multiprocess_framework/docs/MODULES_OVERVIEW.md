@@ -167,6 +167,7 @@ UI (опционально)   L12  frontend_module (PySide6)
 
 - `RecipeEngine` — snapshot/restore config-ветвей через `StoreProtocol`; миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003) или через реестр `run_chain` как дефолт (`doc_type` в `__init__`); доменные ветви — через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011).
 - `RecipeManager` — CRUD-обёртка + синхронизация `state.recipes.active`; `duplicate()` по умолчанию пишет comment-preserving через **generic writer модуля** `recipe.yaml_io.update_yaml_preserving` (C3, ADR-RCP-005); `yaml_updater=` — опциональная инъекция для подмены (напр. plain-PyYAML без ruamel).
+- Запись рецепта — один дельта-движок (ADR-RCP-009): `RecipeManager.patch_recipe(slug, after, *, expected_rev)` пишет только изменённое (комментарии и EOL файла сохраняются, пустая правка файл не трогает, устаревшая ревизия — `RecipeConflict`); прикладной код не вызывает `patch_yaml_preserving` напрямую — охраняет страж `tests/test_single_writer_guard.py`.
 - `migration` / `registered_steps` / `run_chain` — реестр step-миграций, `doc_type`-namespaced (C2, ADR-RCP-003); шаги (доменные dict-трансформации) регистрируются прикладным слоем, модуль их только каталогизирует и прогоняет цепочкой.
 - `is_v3_recipe` — распознавание v3-blueprint vs config-snapshot (единая точка; v3 не реплеится в store).
 - `normalize_recipe_v3_raw` — единая сборка v3-raw на запись (one source of truth).

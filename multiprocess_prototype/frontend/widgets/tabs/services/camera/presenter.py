@@ -15,6 +15,7 @@ from typing import Any
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_prototype.domain.commands import SetPluginConfig
+from multiprocess_prototype.recipes.save import RecipeValidationError
 
 logger = get_std_logger(__name__)
 
@@ -112,7 +113,10 @@ class CameraSettingsPresenter:
 
     @property
     def last_error(self) -> str:
-        """Текст конфликта последнего save() или "" (иные ошибки сюда не попадают)."""
+        """Причина отказа последнего save() или "": конфликт с внешней правкой, отказ валидации Save (Task 1.16 m1).
+
+        Иные ошибки (в т.ч. прочие ``RuntimeError``) сюда не попадают.
+        """
         return self._last_error
 
     def _find_camera(self) -> tuple[str, int, dict] | None:
@@ -136,7 +140,7 @@ class CameraSettingsPresenter:
         pending сбрасывается только после успешного save_active (при конфликте нужен для повтора).
 
         Returns:
-            True если save_active вернул True. Конфликт -> False + last_error; иная ошибка -> False.
+            True если save_active вернул True. Конфликт или отказ валидации -> False + last_error; иная ошибка -> False.
         """
         self._last_error = ""
         if self._recipes is None or self._commands is None or self._save_active is None or not self._pending:
@@ -164,6 +168,10 @@ class CameraSettingsPresenter:
             else:
                 logger.warning("CameraSettings: сохранение не удалось (%s)", type(exc).__name__)
             return False
+        except RecipeValidationError as exc:
+            logger.warning("CameraSettings: сохранение отклонено (%s)", type(exc).__name__)
+            self._last_error = "; ".join(exc.errors) or str(exc)
+            return False
         except Exception as exc:
             logger.warning("CameraSettings: сохранение не удалось (%s)", type(exc).__name__)
             return False
@@ -177,6 +185,10 @@ def _merge_camera_params(node: Any, pending: dict[str, Any]) -> bool:
 
     fps/mjpg пишутся как поля верхнего уровня (register-subset через YAML-extra),
     остальные CAP_PROP — в подсловарь `params`. Возвращает True если блок найден.
+
+    FREEZE (C-30, Task 1.10): живых вызывающих нет, Камера пишет через ``SetPluginConfig``; функция не удаляется
+    (принцип 3). Скрытый дефект: пишет ``params`` и поля верхнего уровня, а не ``config:`` плагина — не
+    использовать без исправления (вердикт CTO Q2).
     """
     found = False
     if isinstance(node, dict):

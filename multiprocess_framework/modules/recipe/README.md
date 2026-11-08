@@ -25,6 +25,21 @@ ADR-SS-011, ADR-RCP-001, ADR-RCP-003).
   (ADR-RCP-003); см. `migrations.py`.
 - `StoreProtocol` / `RecipeEngineProtocol` / `RecipeManagerProtocol` — контракты (`interfaces.py`).
 
+Запись рецепта — один дельта-движок (ADR-RCP-009, C-30), каноническая форма — ADR-RCP-010:
+
+- `RecipeManager.patch_recipe(slug, after, *, expected_rev, layout=None) -> str` — **единственный публичный путь
+  записи рецепта** для прикладного слоя: пишет дельту `N(файл) → N(after)`, возвращает новый `rev`. Комментарии,
+  порядок, flow-стиль и EOL файла сохраняются; пустая дельта — файл не тронут, возвращается прежний `rev`.
+  `expected_rev` не совпал с файлом → `RecipeConflict`; лок занят дольше 5 с → `RecipeLockTimeout`.
+- `RecipeManager.read_canonical(slug) -> (doc, rev)` / `read_recipe_rev(slug)` — чтение каноничного тела и `rev` из
+  одних байтов; `save_layout(slug, positions, locked_nodes, *, expected_rev)` — запись раскладки.
+- `apply_delta(target, before, after)` — чистая функция (без IO): та же дельта на plain-dict, `target` не мутируется.
+- `YamlPatchConflict` — путь дельты не ложится на цель (бросается до записи); `YamlWriteRefused` — страховка записи
+  отказала. В обоих случаях файл цел.
+- `update_yaml_preserving` / `update_blueprint_metadata_preserving` — тонкие замороженные контракты над тем же движком.
+- `patch_yaml_preserving(path, before, after)` — **внутренний путь модуля**, из `__init__.py` не экспортируется;
+  вызывать его вне `recipe` нельзя — использование охраняет страж `tests/test_single_writer_guard.py` (правила R1–R4).
+
 ## Usage
 
 1. Generic-движок с инъекцией доменных путей и миграций:
@@ -66,6 +81,14 @@ manager.set_active("prod_copy")              # state.recipes.active обновл
 (C3/ADR-RCP-005) — writer generic и живёт в модуле; инъекция `yaml_updater=`
 нужна лишь для подмены (напр. plain-PyYAML в окружении без ruamel).
 
+   Запись правки рецепта с оптимистичной ревизией (ADR-RCP-009):
+
+```python
+doc, rev = manager.read_canonical("prod")          # N(файл) и rev одного чтения
+doc["displays"] = new_displays                      # меняется только своя секция doc
+new_rev = manager.patch_recipe("prod", doc, expected_rev=rev)   # RecipeConflict, если файл успели изменить
+```
+
 4. Реестр step-миграций (ADR-RCP-003) — декоратор регистрирует шаг, раннер
    прогоняет цепочку in-memory (READ-путь, файлы не переписывает):
 
@@ -102,7 +125,9 @@ migrated = run_chain("recipe.config_snapshot", data, from_version=1, to_version=
 
 * `rev` — непрозрачная строка (сегодня sha256 байтов файла), считается от ТЕКУЩИХ
   байтов: правка мимо `recipe.save` рвёт ревизию редактора → `conflict`.
-* Запись — tmp в том же каталоге + `os.replace`; CAS под локом на имя (в пределах хаба).
+* Запись — дельта через движок `yaml_io` (ADR-RCP-009): комментарии, порядок и стиль сохраняются, пустая дельта
+  файл не трогает; tmp в том же каталоге + `os.replace`; CAS под локом на имя и межпроцессным `recipe_file_lock`.
+  Текущий файл не разбирается или не mapping → `invalid`, рецепт v1 (`topology:`) → `bad_request`; файл цел.
 * `recipe.activate` синхронная: `normalize → validate → topology.apply(recipe_path=абс.
   путь) → ManifestStore.set_pipeline("recipes/<slug>.yaml")`; активный рецепт пишется (в
   `<stem>.state.yaml`, `app.yaml` — умолчание, ADR-APP-008) только после успешного apply.
