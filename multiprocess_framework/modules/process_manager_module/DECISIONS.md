@@ -1329,6 +1329,8 @@ Switch и rollback этого класса НЕ имеют: планировщи
 **Дата:** 2026-09-24
 **Refs:** [plans/lifecycle-stop-ownership.md](../../../plans/lifecycle-stop-ownership.md) (Task 1.4), закрывает
 «класс сирот» из «Принятого риска» ADR-PMM-030
+**Дополнение Task 1.3 (ADR-PMM-043):** бюджет волн: `pm_total_s`/`outer_s` + `last_wave_s` только при `has_last`
+(в топологии есть процесс `stop_wave: last`); вложенность «спавнер > PM > ребёнок» сохраняется.
 
 ### Контекст
 
@@ -2313,6 +2315,77 @@ ADR-PMM-039 (Task 1.10) ввёл итог стопа воплощения (`exit
 - **Срок от PM-часов или `system_stop.started_at + pm_graceful_s`.** Ошибка на ожидание исполнителя и паузу
   монитора; без окна имени.
 
+**Последствия:** `stop_wave` — константа `main` до Task 1.3; с Task 1.3 — волна имени из реестра (ADR-PMM-043).
+
 **Reversible:** yes (поля ответа новые; колбэк необязательный — без него прежнее поведение).
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2.md`, ADR-PMM-035, ADR-PMM-039 (дополнение Task 1.10),
 ADR-PMM-041, `tests/test_root_stop_outcome_acceptance.py`, `tests/test_root_stop_outcome_hazards.py`.
+
+
+## ADR-PMM-043: Волны системного стопа — `stop_wave: last` гаснет после основной волны (Task 1.3 gui-graceful-close, 2026-11-08)
+
+**Статус:** accepted (2026-11-08; стадия 0 — три раунда, `plans/2026-10-20_gui-graceful-close/reviews/task-1.3-stage0.md`)
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.3.md`, ADR-PMM-031, ADR-PMM-035, ADR-PMM-042, LSO Task 1.11
+
+### Контекст
+
+GUI получал `terminate` в окне PM, пока PM ждал зависшего соседа: все дети корня гасились одной волной, окно
+`gui` кончалось вместе с окнами остальных. GUI должен гаснуть последним — после основной волны.
+
+### Решение
+
+- **Поле.** `stop_wave: Any = None` у `ProcessConfig` (чертёж) → `as_generic_config` → `GenericProcessConfig` →
+  верхний уровень `proc_dict`; `None` и `"main"` в `proc_dict` не кладутся. `Any`, не `Literal`: опечатка не роняет
+  blueprint (принцип 5) и не несёт значение в текст ошибки. Проверка — в реестре: годно ровно `"main"` или `"last"`;
+  иное — WARNING без значения, процесс в `main`. Прототип: `presentation.yaml` ставит `stop_wave: last` у `gui`.
+- **Реестр.** `_stop_waves` пишется в `_create_process` (рестарт и `topology.apply` идут тем же путём и обновляют
+  запись), снимается в `remove_process`; публичный `stop_wave(name)`. Группа корня (`_ChildrenGroupStop`) делит
+  имена на две сборки `ChildProcessStop`; имён `last` нет — вторая сборка не строится, путь прежний.
+- **Карта окон по всем именам** при волне `last` (`_build_child_stop(..., all_windows=True)`): область `children`
+  длиннее `g`, имя без ключа обязано получить `terminate` на `сигнал + g`, а не дожить до срока области.
+- **`poll` вместо коротких сроков.** `ChildProcessStop.poll(deadline)` — один проход `join_until` без ожидания,
+  `wait(pause)` — пауза; `join_until` = цикл `poll` + `wait`. Один поток группы крутит обе сборки с настоящим сроком
+  `D`: короткий `join_until(now + STOP_POLL_S)` зажал бы `term_at`/`kill_at` и `terminate` ушёл бы через ~50 мс.
+- **Сигнал `last` по времени (вариант А).** Фаза 1 сигналит только `main`. `last.request_stop()` — один раз, когда
+  `main` пуст или в `D − LAST_WAVE_S`. Следствие: у зависшего ребёнка `main` со стандартным окном `g` его
+  `terminate` (5,0 с) и сигнал `gui` (5,0 с) совпадают — вопрос «процесс завис» (design.md, C) для него не успевает
+  появиться; «подождать ещё» на стороне PM ничего не меняет, PM эскалирует по своему сроку. При `main`, который
+  игнорирует и `terminate`, `last` сигналят до его `kill` (6,0 с).
+- **Пороговое правило `force`.** Отдельной ветки нет: при `D − now ≤ LAST_WAVE_S` (в т.ч. `force` с
+  `deadline_s ≤ 2,0`) обе волны сигналят на первом проходе. При `force` с `deadline_s` в (2,0; 5,0] `last` сигналят в
+  `D − 2,0`, пока `main` ещё в окне; срок `terminate` `main` не сокращается (= `D`).
+- **Бюджет.** `stop_budget(g, *, has_last=False)`: `LAST_WAVE_S = 2.0`; только при `has_last` шестой ключ
+  `last_wave_s` и `pm_total_s`/`outer_s` + 2,0 (g = 5,0: 9,0 / 10,5 против 7,0 / 8,5). Без `has_last` — ровно пять
+  прежних ключей. Область `children` при `has_last`: `budget_s = pm_graceful_s + last_wave_s` (`D` = старт + 7,0,
+  `D − last_wave_s` = прежнее окно `main`, предел фазы 3 = `pm_total_s`). Ребёнку `last_wave_s` не уходит.
+- **`has_last` — только при старте.** PM считает его в `__init__` из `processes_config` (к `initialize`
+  `_process_configs` пуст), спавнер — в `stop()` из своего `processes_config`. `_ceiled_budget` при `has_last`
+  пересчитывает всегда (словарь раннера `last_wave_s` не несёт).
+- **Слушатель волны и сдвиг `deadline_at`.** Группа зовёт `callback("last", D)` сразу после сигнала `last`, вне лока;
+  PM (`_ChildrenStop._on_last_wave`) сдвигает `system_stop.deadline_at` на остаток срока области (под
+  `_system_stop_lock`; не при `force` и не после `done`) и объявляет фазу `last_wave`. Переход ловится внутри
+  `join_until`, не чтением `wave` после возврата. Сигнатура `children_stop` прежняя (слушатель — через `getattr`).
+- **`signalled_at` по волне.** `stop_deadline_at` имени `last` — от сигнала `last` (до него `null`, контракт 042);
+  у прочих — от сигнала `main`. Для `last` это верхняя оценка: настоящий `terminate` — в `min(сигнал + окно, D)`.
+
+### Известные ограничения
+
+- `has_last` не пересчитывается на `topology.apply`: рецепт с `gui: last`, применённый после старта топологии без
+  `last`, области корня не удлиняет (они открыты один раз).
+- `has_last` истинен (снят при старте), а имени `last` в реестре к стопу нет: группа идёт прежним путём без карты
+  окон, область `children` = 7,0 с — зависший `main` без своего ключа получает `terminate` на 7,0, а не на 5,0;
+  `deadline_at` и `stop_deadline_at` его имени остаются на 5,0 (занижены на 2,0). Если имя `last` в реестре, но мёртво,
+  сборки строятся с `all_windows=True` и `terminate` идёт на 5,0. Следствие решения «`has_last` только при старте».
+- `LAST_WAVE_S = 2.0` не замерено против штатного выхода `gui`; если замер > ~1,5 с — поднять до 3,0 (число в одном
+  месте, `stop_budget.LAST_WAVE_S`).
+
+### Отвергнуто
+
+- **Вариант (Б): `last` после конца эскалации `main`.** Нужен свой резерв эскалации у `last`: `pm_total_s` 11,0
+  вместо 9,0; иначе зависший `gui` остаётся без `terminate`/`kill`.
+- **Резерв 2,0 с «всегда».** Ломает «числа прежние» у топологий без `last`.
+- **`Literal["main", "last"]`.** Опечатка роняла бы весь blueprint и несла значение в текст ошибки.
+
+**Reversible:** yes (без `stop_wave: last` в топологии — путь и числа прежние).
+**Risk:** medium — стоп корня крутит две сборки одним потоком; держится слепыми REDS 1–10 и стражами
+`test_stop_wave_last_guards.py`.

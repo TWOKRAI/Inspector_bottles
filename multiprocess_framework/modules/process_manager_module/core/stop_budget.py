@@ -7,7 +7,8 @@ Purpose:
     Раньше формула жила двумя копиями (``process_registry`` и ``spawner.outer_stop_budget``).
 
 Public API (внутренний модуль ``core/``, из ``__init__``/``interfaces`` пакета не экспортируется):
-    ``stop_budget(shutdown_timeout) -> dict[str, float]`` и константы окон ниже.
+    ``stop_budget(shutdown_timeout, *, has_last=False) -> dict[str, float]``,
+    ``has_last_wave(processes_config) -> bool`` (Task 1.3) и константы окон ниже.
 
 Stability: lite
 """
@@ -24,12 +25,17 @@ __all__ = [
     "INFRA_STOP_S",
     "KILL_CONFIRM_S",
     "KILL_RESERVE_S",
+    "LAST_WAVE_S",
     "MAX_STOP_WINDOW_KEY",
     "PM_TEARDOWN_MARGIN_S",
     "SHUTDOWN_TIMEOUT_KEY",
     "STOP_POLL_S",
+    "STOP_WAVE_KEY",
+    "STOP_WAVE_LAST",
+    "STOP_WAVE_MAIN",
     "STOP_WINDOW_KEY",
     "TERMINATE_GRACE_S",
+    "has_last_wave",
     "outer_graceful_s",
     "stop_budget",
     "valid_window_s",
@@ -56,6 +62,12 @@ SHUTDOWN_TIMEOUT_KEY = "shutdown_timeout"
 # Task 1.11: окно стопа ребёнка (верхний уровень конфига процесса) и потолок окон (конфиг PM/оркестратора).
 STOP_WINDOW_KEY = "stop_window_s"
 MAX_STOP_WINDOW_KEY = "max_stop_window_s"
+# Task 1.3 (ADR-PMM-043): волна стопа процесса (верхний уровень конфига процесса) и окно волны ``last``.
+STOP_WAVE_KEY = "stop_wave"
+STOP_WAVE_MAIN = "main"
+STOP_WAVE_LAST = "last"
+# Окно волны ``last`` после сигнала (не замерено против ``gui``, design.md шаг 10): одно место числа.
+LAST_WAVE_S = 2.0
 
 #: Код выхода ребёнка, у которого после закрытия корня остались выжившие записи
 #: (Task 1.2a, ADR-PMM-036). Занятые коды: 0 (штатно), 1 (исключение), -N (сигнал),
@@ -77,7 +89,7 @@ def _graceful_s(shutdown_timeout: object) -> float:
     return value or DEFAULT_SHUTDOWN_TIMEOUT_S
 
 
-def stop_budget(shutdown_timeout: object) -> dict[str, float]:
+def stop_budget(shutdown_timeout: object, *, has_last: bool = False) -> dict[str, float]:
     """Окна остановки из graceful-бюджета PM.
 
     ``None``, ``0`` и ``0.0`` — умолчание ``DEFAULT_SHUTDOWN_TIMEOUT_S``. NaN, ±inf и
@@ -87,20 +99,40 @@ def stop_budget(shutdown_timeout: object) -> dict[str, float]:
     Ключи строго по порядку: ``work_s``, ``infra_s`` (сегменты ребёнка, сумма
     ``CHILD_STOP_FRACTION * pm_graceful_s``), ``pm_graceful_s`` (graceful-срок PM),
     ``pm_total_s`` (с эскалацией terminate → kill), ``outer_s`` (внешний join спавнера).
+
+    ``has_last`` (Task 1.3, ADR-PMM-043): в топологии есть процессы волны ``last``. Только тогда
+    шестой ключ ``last_wave_s`` (= ``LAST_WAVE_S``, после ``outer_s``), а ``pm_total_s`` и
+    ``outer_s`` больше на ``LAST_WAVE_S``. Без него — ровно пять прежних ключей.
     """
     pm_graceful_s = _graceful_s(shutdown_timeout)
     pm_total_s = pm_graceful_s + TERMINATE_GRACE_S + KILL_CONFIRM_S
+    if has_last:
+        pm_total_s += LAST_WAVE_S
     outer_s = pm_total_s + PM_TEARDOWN_MARGIN_S
     child_total = CHILD_STOP_FRACTION * pm_graceful_s
     infra_s = min(INFRA_STOP_S, child_total / 4)
     work_s = child_total - infra_s
-    return {
+    budget = {
         "work_s": work_s,
         "infra_s": infra_s,
         "pm_graceful_s": pm_graceful_s,
         "pm_total_s": pm_total_s,
         "outer_s": outer_s,
     }
+    if has_last:
+        budget["last_wave_s"] = LAST_WAVE_S
+    return budget
+
+
+def has_last_wave(processes_config: object) -> bool:
+    """Есть ли в ``processes_config`` процесс волны ``last`` (Task 1.3, ADR-PMM-043).
+
+    Негодное значение (``late``) волну ``last`` не создаёт. Не бросает: зовётся из ``__init__``
+    PM и из ``stop()`` спавнера.
+    """
+    if not isinstance(processes_config, dict):
+        return False
+    return any(cfg.get(STOP_WAVE_KEY) == STOP_WAVE_LAST for cfg in processes_config.values() if isinstance(cfg, dict))
 
 
 def valid_window_s(value: object) -> float | None:

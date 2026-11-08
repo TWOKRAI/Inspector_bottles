@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import inspect
 import math
 import os
 import threading
@@ -35,6 +36,8 @@ from ..core.stop_budget import (
     KILL_RESERVE_S,
     MAX_STOP_WINDOW_KEY,
     SHUTDOWN_TIMEOUT_KEY,
+    STOP_WAVE_MAIN,
+    has_last_wave,
     outer_graceful_s,
     stop_budget,
     valid_window_s,
@@ -197,6 +200,9 @@ class ProcessManagerProcess(ProcessModule):
 
         # Task 1.11 (DESIGN 2, 7): потолок окон стопа детей ``C`` — один раз, до реестра и ``_budget()``.
         self._stop_window_ceiling_s = self._read_stop_window_ceiling()
+        # Task 1.3 (ADR-PMM-043): есть ли волна ``last`` — ОДИН раз при старте, из ``processes_config`` (к
+        # ``initialize`` ``_process_configs`` ещё пуст). ``topology.apply`` его не пересчитывает (ограничение ADR-043).
+        self._has_last = has_last_wave(self.get_config("processes_config"))
 
         self._process_registry = ProcessRegistry(
             logger=self,
@@ -628,6 +634,20 @@ class ProcessManagerProcess(ProcessModule):
             info["deadline_at"] = deadline_at
             return True
 
+    def _shift_system_stop_deadline(self, deadline: float) -> bool:
+        """Сдвиг ``deadline_at`` хода стопа на срок области (Task 1.3, ADR-PMM-043); ``deadline`` — ``monotonic``.
+
+        Зовёт слушатель волны ``last`` в момент её сигнала: ``deadline_at = time.time() + остаток срока``.
+        Сдвига нет при ``mode == "force"``, ``phase == "done"`` и без начатого стопа. ``True`` — сдвинут.
+        """
+        deadline_at = time.time() + max(0.0, float(deadline) - time.monotonic())
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is None or info["phase"] == "done" or info["mode"] == "force":
+                return False
+            info["deadline_at"] = deadline_at
+            return True
+
     def _set_system_stop_phase(self, phase: str) -> None:
         """Сменить фазу хода стопа. Стоп не начат — no-op с WARNING (словарь не создаётся); ``done`` — конечная."""
         if phase not in _SYSTEM_STOP_PHASES:
@@ -1031,7 +1051,9 @@ class ProcessManagerProcess(ProcessModule):
         # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
         # Task 1.2: снимок — ВЫШЕ цикла, срок ``force`` режет ``stop_deadline_at`` записей. Сигнал читается ДО
         # снимка: сигнал детям идёт после начала хода стопа, значит снимок после него уже видит стоп (и ``force``).
-        signalled_at = self._children_signalled_at()
+        # Task 1.3 (ADR-PMM-043): сигнал — по волне имени (у ``last`` свой момент), тот же набор имён, что цикл ниже.
+        names = sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at))
+        signalled = {name: self._children_signalled_at(name) for name in names if not target or name == target}
         system_stop = self._system_stop_snapshot()
         if system_stop is None and self._pm_stopping():
             # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
@@ -1044,9 +1066,10 @@ class ProcessManagerProcess(ProcessModule):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 force_deadline = float(value)
         processes: dict = {}
-        for name in sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at)):
+        for name in names:
             if target and name != target:
                 continue
+            signalled_at = signalled.get(name)
             s = snap.get(name, {})
             proc = registry.get_process_by_name(name) if registry is not None else None
             if proc is None and name == getattr(self, "name", None):
@@ -1078,19 +1101,27 @@ class ProcessManagerProcess(ProcessModule):
         return {"success": True, "epoch": epoch, "processes": processes, "system_stop": system_stop}
 
     def _stop_wave(self, name: str) -> str:
-        """Волна системного стопа имени (Task 1.2): сегодня одна, ``"main"``; Task 1.3 заменит геттер."""
-        return "main"
+        """Волна системного стопа имени (Task 1.3, ADR-PMM-043): из реестра; двойник без строки — ``"main"``."""
+        getter = getattr(getattr(self, "_process_registry", None), "stop_wave", None)
+        if not callable(getter):
+            return STOP_WAVE_MAIN
+        try:
+            wave = getter(name)
+        except Exception:  # noqa: BLE001 — статус не падает от волны одного имени
+            return STOP_WAVE_MAIN
+        return wave if isinstance(wave, str) else STOP_WAVE_MAIN
 
-    def _children_signalled_at(self) -> float | None:
+    def _children_signalled_at(self, name: str | None = None) -> float | None:
         """Момент сигнала стопа детям корня (``time.time()``) от группы, не PM-часы; нет — ``None``.
 
-        Двойники ``_children_stop`` в тестах геттера не имеют или отдают не число — ``None``.
+        Task 1.3: ``name`` — момент сигнала волны этого имени. Двойники ``_children_stop`` в тестах геттера
+        не имеют или отдают не число — ``None``; геттер без параметров (сигнатура) — зовётся без имени.
         """
         getter = getattr(getattr(self, "_children_stop", None), "signalled_at", None)
         if not callable(getter):
             return None
         try:
-            value = getter()
+            value = getter(name) if _takes_argument(getter) else getter()
         except Exception as exc:  # noqa: BLE001 — статус не падает от геттера срока
             self._log_warning(f"supervision.status: signalled_at() упал: {exc}")
             return None
@@ -4006,11 +4037,19 @@ class ProcessManagerProcess(ProcessModule):
         return float(budget["pm_total_s"]), float(budget["infra_s"])
 
     def _ceiled_budget(self, base: dict) -> dict:
-        """``stop_budget(G(g_att, C))`` из словаря ``base``; без потолка — ``base`` как есть (Task 1.11)."""
+        """``stop_budget(G(g_att, C))`` из словаря ``base``; без потолка — ``base`` как есть (Task 1.11).
+
+        Task 1.3 (ADR-PMM-043): при волне ``last`` пересчёт ВСЕГДА — ``stop_budget(G, has_last=True)``: словарь
+        раннера ``last_wave_s`` не несёт.
+        """
         ceiling = getattr(self, "_stop_window_ceiling_s", None)
+        has_last = bool(getattr(self, "_has_last", False))
+        graceful = float(base["pm_graceful_s"])
+        if has_last:
+            outer = graceful if ceiling is None else outer_graceful_s(graceful, ceiling)
+            return stop_budget(outer, has_last=True)
         if ceiling is None:
             return base
-        graceful = float(base["pm_graceful_s"])
         outer = outer_graceful_s(graceful, ceiling)
         return base if outer == graceful else stop_budget(outer)
 
@@ -4048,7 +4087,11 @@ class ProcessManagerProcess(ProcessModule):
         """
         super()._own_work_late(work)
         self._children_stop = _ChildrenStop(self)
-        children = work.child("children", budget_s=self._budget()["pm_graceful_s"], kill_reserve_s=KILL_RESERVE_S)
+        # Task 1.3 (ADR-PMM-043): при волне ``last`` область длиннее на ``last_wave_s``: ``D − last_wave_s`` — прежнее
+        # окно ``main``, предел фазы 3 = ``pm_total_s``. Без ``last`` ключа нет — срок прежний.
+        budget = self._budget()
+        budget_s = float(budget["pm_graceful_s"]) + float(budget.get("last_wave_s", 0.0))
+        children = work.child("children", budget_s=budget_s, kill_reserve_s=KILL_RESERVE_S)
         children.own(self._children_stop, name="processes", kind="process")
 
     def _own_transport(self, transport) -> None:
@@ -4863,6 +4906,19 @@ class ProcessManagerProcess(ProcessModule):
         return started
 
 
+def _takes_argument(fn: Any) -> bool:
+    """Принимает ли ``fn`` позиционный аргумент (Task 1.3): двойники ``signalled_at()`` в тестах — без параметров.
+
+    Проверка сигнатуры до вызова, а не ``except TypeError``: настоящий ``TypeError`` внутри геттера не скрывается.
+    Сигнатуру не прочесть — ``True`` (вызов с аргументом, как у настоящей группы).
+    """
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+
+
 class _ChildrenStop:
     """Единственный Stoppable детей PM в области ``work/children`` (Task 1.2a, ADR-PMM-036).
 
@@ -4904,6 +4960,10 @@ class _ChildrenStop:
                     budget = infra_s if deadline is None else max(0.0, deadline - time.monotonic())
                     monitor.stop(wait=True, timeout=budget)
                 self._group = pm._process_registry.children_stop(mark_reader_gone=True)
+                # Task 1.3 (ADR-PMM-043): слушатель волны last; двойник группы без метода — пропуск.
+                setter = getattr(self._group, "set_wave_listener", None)
+                if callable(setter):
+                    setter(self._on_last_wave)
             except Exception as exc:
                 # Одна попытка: повтор в join_until/фазе 3 не лечит и множит ошибки.
                 self._start_failed = True
@@ -5001,12 +5061,27 @@ class _ChildrenStop:
             self._announce_phase("done")
         return stopped
 
-    def signalled_at(self) -> float | None:
-        """Момент сигнала стопа детям (``time.time()``) от группы реестра (Task 1.2); нет — ``None``."""
+    def _on_last_wave(self, wave: str, deadline: float) -> None:
+        """Слушатель волны (Task 1.3, ADR-PMM-043): сдвиг ``deadline_at`` на срок области, затем фаза ``last_wave``.
+
+        Зовётся потоком группы сразу после сигнала ``last``, вне её лока. Сбой — ERROR, стоп идёт.
+        """
+        pm = self._pm
+        try:
+            pm._shift_system_stop_deadline(deadline)
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: срок волны {wave!r} не сдвинут: {exc}")
+        self._announce_phase("last_wave")
+
+    def signalled_at(self, name: str | None = None) -> float | None:
+        """Момент сигнала стопа детям (``time.time()``) от группы реестра (Task 1.2); нет — ``None``.
+
+        Task 1.3: ``name`` — момент сигнала волны имени; геттер двойника без параметров (сигнатура) — без имени.
+        """
         getter = getattr(self._group, "signalled_at", None)
         if not callable(getter):
             return None
-        value = getter()
+        value = getter(name) if _takes_argument(getter) else getter()
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         return float(value)

@@ -18,6 +18,7 @@ from ..core.stop_budget import (
     DEFAULT_SHUTDOWN_TIMEOUT_S,
     MAX_STOP_WINDOW_KEY,
     SHUTDOWN_TIMEOUT_KEY,
+    has_last_wave,
     outer_graceful_s,
     stop_budget,
     valid_window_s,
@@ -209,7 +210,9 @@ class ProcessSpawner:
             # g оркестратора: при timeout=None это уже посчитанный graceful (второй вызов дал бы WARNING дважды).
             orchestrator_graceful = graceful if timeout is None else self._stop_graceful_s(None)
             graceful = max(graceful, outer_graceful_s(orchestrator_graceful, ceiling))
-        effective_timeout = stop_budget(graceful)["outer_s"]
+        # Task 1.3 (ADR-PMM-043): волна last в топологии — внешний срок длиннее на LAST_WAVE_S (вложенность 031).
+        has_last = has_last_wave(self._processes_config)
+        effective_timeout = stop_budget(graceful, has_last=has_last)["outer_s"]
 
         if self._logger:
             self._logger.info("Stopping system...")
