@@ -186,6 +186,8 @@ _GOOD = {"x_mm": 300.0, "y_mm": 0.0, "pen": 1}
         pytest.param({"points": [{**_GOOD, "x_mm": float("nan")}]}, "nan-x", id="nan-x"),
         pytest.param({"points": [{**_GOOD, "x_mm": 10**400}]}, "huge-int-x", id="huge-int-x"),
         pytest.param({"points": [{**_GOOD, "pen": 2}]}, "pen-2", id="pen-2"),
+        pytest.param({"points": [{**_GOOD, "pen": True}]}, "pen-bool", id="pen-bool"),
+        pytest.param({"points": [{**_GOOD, "pen": 1.0}]}, "pen-float", id="pen-float"),
         pytest.param({"points": [_GOOD], "z": "1"}, "z-str", id="z-str"),
         pytest.param({"points": [_GOOD], "z": True}, "z-bool", id="z-bool"),
         pytest.param({"points": [{"y_mm": 1.0}]}, "no-x", id="no-x"),
@@ -261,6 +263,89 @@ def test_draw_uses_v1_heights_and_z(scope: Any, monkeypatch: pytest.MonkeyPatch)
         home = points["home"]
         assert (home.x, home.y, home.z, home.rz) == pytest.approx(HOME)
     assert heights == [{-50.0, -40.0, -30.0}, {-45.0, -35.0, -25.0}]
+
+
+def _draw_recorded(scope: Any, monkeypatch: pytest.MonkeyPatch, drawing: list[dict], **params: Any) -> tuple[Any, dict]:
+    """Нарисовать на sim с ``entry.params`` = ``params``; вернуть ``(program, points)`` успешной компиляции."""
+    from Services.device_hub.drivers.robot_driver_v2 import programs as programs_mod
+
+    seen: list[tuple[Any, dict]] = []
+
+    def recording_compile(program: Any, points: Any, frames: Any, wparams: Any) -> Any:
+        scenario = real_compile_program(program, points, frames, wparams)  # проба вне зоны бросает - не пишется
+        seen.append((program, dict(points)))
+        return scenario
+
+    monkeypatch.setattr(programs_mod, "compile_program", recording_compile)
+    rec = _Rec()
+    with (
+        E2eRig() as rig,
+        _connected(scope, rec, rig.port, **params) as drv,
+        pulse(lambda: drv.tick(None), _TICK_PERIOD_S),
+    ):
+        reply = _draw(drv, drawing)
+        assert reply["status"] == "ok", reply
+        _wait_done(rec, 1)
+        _wait_released(drv)
+    assert len(seen) == 1
+    return seen[0]
+
+
+def _acts(program: Any) -> list[tuple[str, int]]:
+    return [(step.act, step.value) for step in program.steps if step.op == "act"]
+
+
+def _draw_z(points: dict) -> set[float]:
+    return {p.z for name, p in points.items() if name.startswith("draw/")}
+
+
+def test_draw_default_speeds_accel_and_rz(scope: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Умолчания v1: рисование SPEED_PCT 30, затем ACCEL 25000, переезд SPEED_PCT 100; RZ точек - RZ дома."""
+    program, points = _draw_recorded(scope, monkeypatch, SQUARE)
+    steps = program.steps
+    # подвод JOINT над началом (перо вверх), скорость рисования, ускорение, опускание
+    assert (steps[0].op, steps[0].kind, points[steps[0].point].z) == ("move", "JOINT", -40.0)
+    assert [(steps[1].op, steps[1].act, steps[1].value), (steps[2].op, steps[2].act, steps[2].value)] == [
+        ("act", "SPEED_PCT", 30),
+        ("act", "ACCEL", 25000),
+    ]
+    assert (steps[3].op, steps[3].kind, points[steps[3].point].z) == ("move", "LINE", -50.0)
+    # после штриха: скорость переезда, финальный подъём, дом
+    assert (steps[-3].op, steps[-3].act, steps[-3].value) == ("act", "SPEED_PCT", 100)
+    assert (steps[-2].op, steps[-2].kind, points[steps[-2].point].z) == ("move", "LINE", -30.0)
+    assert _acts(program) == [("SPEED_PCT", 30), ("ACCEL", 25000), ("SPEED_PCT", 100)]
+    assert {p.rz for name, p in points.items() if name.startswith("draw/")} == {HOME[3]}
+    assert {p.hand for p in points.values()} == {points["home"].hand}
+
+
+def test_draw_entry_params_override_heights_speeds_accel(scope: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ключи ``entry.params`` v1 меняют высоты, скорости и ускорение; опечатка в имени ключа вернула бы умолчание."""
+    two_strokes = [
+        {"x_mm": 300.0, "y_mm": 0.0, "pen": 0},
+        {"x_mm": 310.0, "y_mm": 0.0, "pen": 1},
+        {"x_mm": 300.0, "y_mm": 10.0, "pen": 0},
+        {"x_mm": 310.0, "y_mm": 10.0, "pen": 1},
+    ]
+    program, points = _draw_recorded(
+        scope,
+        monkeypatch,
+        two_strokes,
+        pen_down_mm=-48,
+        pen_up_mm=-38,
+        lift_mm=5,
+        draw_speed_pct=20,
+        draw_travel_pct=80,
+        draw_accel=20000,
+    )
+    assert _draw_z(points) == {-48.0, -38.0, -33.0}
+    # рисование 20, ускорение 20000 (раз, в первом штрихе), переезд 80 между штрихами, рисование 20, переезд 80 в конце
+    assert _acts(program) == [
+        ("SPEED_PCT", 20),
+        ("ACCEL", 20000),
+        ("SPEED_PCT", 80),
+        ("SPEED_PCT", 20),
+        ("SPEED_PCT", 80),
+    ]
 
 
 # --------------------------------------------------------------------------------------------------

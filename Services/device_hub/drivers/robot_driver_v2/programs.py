@@ -31,8 +31,9 @@ from Services.robot_comm.robot_data import load_frames, load_points, load_progra
 
 __all__ = ["ProgramMixin"]
 
-# Умолчания рисования — как у v1 (robot_driver.py:112-122), ключи ``entry.params`` те же
-_DRAW_MAX_POINTS = 5000  # потолок точек: команда синхронная, компиляция идёт в потоке приёма (≈ 70 мс на 5000)
+# Потолок числа ТОЧЕК рисунка (не штрихов): команда синхронная, генератор и компиляция идут в потоке приёма.
+# Замер (Mac, один прогон): 5000 точек кругами по 50 — 85-100 мс; 5000 штрихов (каждая точка pen=0) — 255-270 мс
+_DRAW_MAX_POINTS = 5000
 
 
 def _number(value: Any) -> float:
@@ -222,9 +223,9 @@ class ProgramMixin:
                 if not isinstance(point, dict):
                     raise ValueError
                 pen = point.get("pen", 1)  # нет ключа — перо вниз, как у v1
-                if pen not in (0, 1):
+                if isinstance(pen, bool) or not isinstance(pen, int) or pen not in (0, 1):  # только int 0/1
                     raise ValueError
-                clean.append({"x_mm": _number(point["x_mm"]), "y_mm": _number(point["y_mm"]), "pen": int(pen)})
+                clean.append({"x_mm": _number(point["x_mm"]), "y_mm": _number(point["y_mm"]), "pen": pen})
             z = args.get("z")
             if z is not None:
                 pen_down = _number(z)
