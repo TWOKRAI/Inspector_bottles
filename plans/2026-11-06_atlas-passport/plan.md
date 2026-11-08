@@ -109,7 +109,7 @@
 - Task 7.1b: словарь статусов + FROZEN + `## Итог` при close (plans_ledger) [DONE] (параллельно Phase 0–1)
 - Task 7.1b-validate: сервис без `DECISIONS.md` — красный в `validate.py` [DONE] (параллельно Phase 0–1)
 - Task 7.1c: документы и шаблоны под `Decision:` [DONE] (после 7.1a)
-- Task 7.2: `nav_bench` — клон с историей и `bash_allow` (код бенча) [PENDING] (после 1.1)
+- Task 7.2: `nav_bench` — клон с историей и `bash_allow` (код бенча) [DONE] (после 1.1)
 - Task 7.2b: набор `origin`, `grep-read+git` ×3, вердикт Kill-3 [PENDING] (после 7.2 и слияния 7.1a, 7.1b)
 - Task 7.3: `atlas origin <путь|символ|ADR-id>` [PENDING] (после 2.2, 7.1a, 7.1b, 7.1c, 7.1b-validate, 7.2b; если Kill-3 не сработал)
 - Task 7.3b: прогон С1-origin и вердикт вида [PENDING] (после 7.3)
