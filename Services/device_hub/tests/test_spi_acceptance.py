@@ -32,7 +32,7 @@ from Services.device_hub.registry.entry import DeviceEntry
 
 _TCP = {"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 1}
 
-# 10 операций данных робота v2 (А12 «10 ROBOT_DATA_OPS»; имена — без префикса ``robot_``, как в А19)
+# 12 операций данных робота v2 (А12 «12 ROBOT_DATA_OPS»; имена — без префикса ``robot_``, как в А19)
 _DATA_OPS = {
     "param_get_all",
     "point_list",
@@ -44,6 +44,8 @@ _DATA_OPS = {
     "program_get",
     "program_save",
     "program_delete",
+    "calib_frame",
+    "calib_tools",
 }
 
 
@@ -216,8 +218,8 @@ def test_a12_immediate_exactly_the_listed_names(catalog: str) -> None:
     assert {s.name for s in ops if s.immediate} == _IMMEDIATE[catalog]
 
 
-def test_a12_executor_device_io_exactly_on_the_ten_data_ops() -> None:
-    """А12 ``[d]``: ``executor == "device_io"`` у 10 операций ``ROBOT_DATA_OPS``; в прочих каталогах — ни у одной."""
+def test_a12_executor_device_io_exactly_on_the_twelve_data_ops() -> None:
+    """А12 ``[d]``: ``executor == "device_io"`` у 12 операций ``ROBOT_DATA_OPS``; в прочих каталогах — ни у одной."""
     mod = spi()
     data = list(mod.ROBOT_DATA_OPS)
     assert {s.name for s in data} == _DATA_OPS

@@ -51,7 +51,7 @@ _CONNECT_S = 60.0
 # Литералы файла приёмки
 # --------------------------------------------------------------------------------------------------
 
-# А1: 74 имени (+ ручная robot_park_all, T5.3e.5)
+# А1: 77 имён (+ ручная robot_park_all, T5.3e.5; + robot_calib_* T5.4)
 _DEVICE_COMMANDS = (
     "device_list device_describe device_upsert device_upsert_many device_sync_set device_remove device_protocols "
     "device_connect device_disconnect device_read device_write"
@@ -68,11 +68,11 @@ _ROBOT_V1_COMMANDS = (
 ).split()
 _ROBOT_V2_COMMANDS = (
     "robot_param_set robot_param_apply robot_stop robot_servo robot_do_set robot_jog_step robot_jog_hold "
-    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park"
+    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park robot_calib_belt"
 ).split()
 _ROBOT_DATA_COMMANDS = (
     "robot_param_get_all robot_point_list robot_point_save robot_point_delete robot_frame_list robot_frame_teach "
-    "robot_program_list robot_program_get robot_program_save robot_program_delete"
+    "robot_program_list robot_program_get robot_program_save robot_program_delete robot_calib_frame robot_calib_tools"
 ).split()
 _VFD_COMMANDS = "vfd_run vfd_set_freq vfd_stop vfd_reset_fault vfd_get_status".split()
 _ROBOT_DRIVER_COMMANDS = _ROBOT_V1_COMMANDS + _ROBOT_V2_COMMANDS
@@ -472,15 +472,15 @@ class PlainObjectDriver:
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a1_commands_are_exactly_the_74_names() -> None:
-    """А1: ``set(DeviceHubPlugin.commands)`` == 74 имени из файла приёмки."""
+def test_a1_commands_are_exactly_the_77_names() -> None:
+    """А1: ``set(DeviceHubPlugin.commands)`` == 77 имён из файла приёмки."""
     expected = set(ALL_COMMANDS)
-    assert len(ALL_COMMANDS) == 74 and len(expected) == 74, "литерал теста собран неверно"
+    assert len(ALL_COMMANDS) == 77 and len(expected) == 77, "литерал теста собран неверно"
     assert set(DeviceHubPlugin.commands) == expected
 
 
 def test_a2_all_73_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
-    """А2: после ``_do_configure`` + ``_do_start`` у всех 74 команд есть запись; в логе нет повторов и отказов."""
+    """А2: после ``_do_configure`` + ``_do_start`` у всех 77 команд есть запись; в логе нет повторов и отказов."""
     missing = [name for name in ALL_COMMANDS if rig.cm.get_command_info(name) is None]
     assert missing == [], missing
     assert rig.lines.matching(None, "already exists") == []
