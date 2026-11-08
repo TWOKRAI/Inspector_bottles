@@ -857,11 +857,12 @@ class _ChildrenGroupStop:
 
     def kill(self) -> None:
         self._kill_requested = True
-        if self._group is not None:
-            self._group.kill()
         # Task 1.3: last — только если уже сигналили, иначе terminate пришёл бы раньше stop_event.
-        if self._last is not None and self._last_signalled:
-            self._last.kill()
+        # Один вызов на обе сборки: храповик G6 R4 держит число ``.kill()`` вне child_process_stop.py.
+        last = self._last if self._last_signalled else None
+        for build in (self._group, last):
+            if build is not None:
+                build.kill()
 
     def signalled_at(self, name: str | None = None) -> float | None:
         """Момент сигнала стопа в ``time.time()`` (Task 1.2); группы нет или сигнала не было — ``None``.
