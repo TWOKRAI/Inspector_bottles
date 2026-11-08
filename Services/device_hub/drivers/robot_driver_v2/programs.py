@@ -8,20 +8,54 @@ Stability: lite
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
+from numbers import Real
 from typing import Any
 
 from Services.device_hub.drivers.base import logger
 from Services.device_hub.drivers.robot_driver_v2.args import _STORE_ERRORS, _BadArgs, _name_arg, _store_refusal
-from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_NO_PROGRAM, TEXT_NO_STORE, _next_thread_k
+from Services.device_hub.drivers.robot_driver_v2.texts import (
+    TEXT_BAD_DRAW_ARGS,
+    TEXT_DRAW_TOO_MANY,
+    TEXT_NO_PROGRAM,
+    TEXT_NO_STORE,
+    _next_thread_k,
+)
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS
 from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
 from Services.robot_comm.errors import RobotAborted, RobotCommError, RobotNotConnectedError
 from Services.robot_comm.programs import Move, Point, Program, compile_program
-from Services.robot_comm.programs.generators import return_slot, toolchange
+from Services.robot_comm.programs.generators import draw, return_slot, toolchange
 from Services.robot_comm.robot_data import load_frames, load_points, load_program
 
 __all__ = ["ProgramMixin"]
+
+# Умолчания рисования — как у v1 (robot_driver.py:112-122), ключи ``entry.params`` те же
+_DRAW_MAX_POINTS = 5000  # потолок точек: команда синхронная, компиляция идёт в потоке приёма (≈ 70 мс на 5000)
+
+
+def _number(value: Any) -> float:
+    """Конечное число: ``Real``, не ``bool``; иначе ``ValueError`` (``float(10**400)`` даёт ``OverflowError``)."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError
+    return number
+
+
+def _draw_strokes(points: list[dict]) -> list[list[tuple[float, float]]]:
+    """Точки v1 ``{x_mm, y_mm, pen}`` -> штрихи XY: первая точка начинает штрих при любом ``pen``, точка ``pen=0``
+    начинает новый штрих, точка ``pen=1`` дописывается в текущий. Соседние равные XY схлопывает генератор."""
+    strokes: list[list[tuple[float, float]]] = []
+    for point in points:
+        xy = (float(point["x_mm"]), float(point["y_mm"]))
+        if not strokes or point.get("pen", 1) == 0:
+            strokes.append([xy])
+        else:
+            strokes[-1].append(xy)
+    return strokes
 
 
 class ProgramMixin:
@@ -162,6 +196,60 @@ class ProgramMixin:
         except _STORE_ERRORS as exc:
             return _store_refusal(exc)
         return self.start_program(program, points, frames, name=name)
+
+    def _op_draw_polyline(self, args: dict) -> dict:
+        """Рисунок: точки v1 -> штрихи -> генератор ``draw`` -> программа (``_launch``, ``kind="program"``).
+
+        Аргументы разбираются до обращения к роботу; любое нарушение -> постоянный ``TEXT_BAD_DRAW_ARGS``.
+        Рисунок кончается домом (паритет RETURN / TOOLCHANGE). Второй рисунок во время программы — отказ допуска.
+        """
+        points = args.get("points")
+        if not isinstance(points, list) or not points:
+            return {"status": "error", "message": TEXT_BAD_DRAW_ARGS}
+        params = self.entry.params
+        try:
+            max_points = int(params.get("draw_max_points", _DRAW_MAX_POINTS))
+            pen_down = float(params.get("pen_down_mm", -50.0))
+            pen_up = float(params.get("pen_up_mm", -40.0))
+            lift_mm = float(params.get("lift_mm", 10.0))
+            draw_speed_pct = int(params.get("draw_speed_pct", 30))
+            travel_speed_pct = int(params.get("draw_travel_pct", 100))
+            draw_accel = int(params.get("draw_accel", 25000))
+            if len(points) > max_points:
+                return {"status": "error", "message": TEXT_DRAW_TOO_MANY}
+            clean: list[dict] = []
+            for point in points:
+                if not isinstance(point, dict):
+                    raise ValueError
+                pen = point.get("pen", 1)  # нет ключа — перо вниз, как у v1
+                if pen not in (0, 1):
+                    raise ValueError
+                clean.append({"x_mm": _number(point["x_mm"]), "y_mm": _number(point["y_mm"]), "pen": int(pen)})
+            z = args.get("z")
+            if z is not None:
+                pen_down = _number(z)
+                pen_up = pen_down + lift_mm
+        except (OverflowError, ValueError, TypeError, KeyError):
+            return {"status": "error", "message": TEXT_BAD_DRAW_ARGS}
+        try:
+            home = self._home_point()
+            gp = draw(
+                _draw_strokes(clean),
+                frame=None,
+                hand=home.hand,
+                rz=home.rz,
+                pen_down=pen_down,
+                pen_up=pen_up,
+                lift_mm=lift_mm,
+                draw_speed_pct=draw_speed_pct,
+                travel_speed_pct=travel_speed_pct,
+                accel=draw_accel,
+                name="draw",
+                home=home,
+            )
+        except ValueError as exc:  # GeneratorError — наследник ValueError; ValidationError Point — тоже
+            return {"status": "error", "message": str(exc)}
+        return self._launch(gp.program, gp.points, None, name="draw", kind="program")
 
     def _op_program_abort(self, _args: dict) -> dict:
         """Программа идёт -> ТОЛЬКО запись SOFT (``_write_stop``), без эха: подтверждение — итог ``.program``
