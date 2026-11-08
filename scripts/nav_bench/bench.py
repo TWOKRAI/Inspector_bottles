@@ -504,8 +504,10 @@ def build_command(
     """Командная строка одной сессии. Сам промпт идёт через stdin (длина, кавычки).
 
     Непустой ``bash_allow``: ``Bash`` в ``--tools``, ``Bash(<шаблон>)`` в ``--allowedTools``, а
-    ``--setting-sources user`` не пускает в сессию ``.claude/settings.json`` и ``settings.local.json`` копии
-    (в них ``Bash(*)`` и другие разрешения, которые сложились бы с ``--allowedTools``). Остальное — аудит
+    ``--setting-sources user`` не грузит источники project и local: ``.claude/settings.json`` и
+    ``settings.local.json`` копии (в них ``Bash(*)`` и другие разрешения, которые сложились бы с ``--allowedTools``).
+    ``~/.claude/settings.json`` пользователя остаётся в силе. Возможный побочный эффект: проектный CLAUDE.md и
+    project-хуки в этом режиме не грузятся (для CLI не проверено живым прогоном). Остальное — аудит
     ``audit_violations``.
     """
     resolve = functools.partial(resolve_placeholders, repo_root=repo_root, repo_sha=repo_sha, run_root=run_root)
@@ -687,8 +689,14 @@ def _tool_allowed(name: str, patterns: list[str]) -> bool:
 
 
 BASH_CHAIN = (";", "&&", "||", "|", "&", "\n", ">", "<", "`", "$(")  # склейка команд, перенаправление, подстановка
-BASH_LONG_FLAGS = ("--output", "--git-dir", "--work-tree")  # git принимает и сокращения: --out=
-BASH_SHORT_FLAG = "O"  # git grep -O / git log -O<файл>; регистр значим: -o — другой флаг
+# --open-files-in-pager=<cmd> исполняет команду; git принимает и сокращения (--out=, --open=)
+BASH_LONG_FLAGS = ("--output", "--git-dir", "--work-tree", "--open-files-in-pager")
+BASH_SHORT_FLAG = "O"  # git grep -O<пейджер> / git log -O<файл>; регистр значим: -o — другой флаг
+# Короткие флаги git log/show/blame/grep (по `git help`), берущие значение: -S -G -L (поиск, диапазон), -e -f (шаблон,
+# файл шаблонов), -A -B -C -m (контекст, число). В связке ``-xyz`` остаток токена после такой буквы — значение:
+# ``-SOrder``, ``-eObject``, ``-L:OnClick:f.py`` не содержат флага -O. Буквы ``n`` здесь нет: у git grep ``-n`` — флаг
+# без значения (``-nOsh`` — это -n и -O), а у git log ``-n<число>`` букву O содержать не может.
+BASH_VALUE_FLAGS = frozenset("SGLefABCm")
 BASH_TEXT_LIMIT = 80
 
 
@@ -699,7 +707,7 @@ def _bash_template_regex(template: str) -> re.Pattern[str]:
 
 def _norm_arg(text: str, prefixes: tuple[str, ...]) -> str:
     """posix, casefold, без ``./`` и без префикса копии; ``..`` схлопывается."""
-    text = text.replace("\\", "/").casefold()
+    text = re.sub(r"/{2,}", "/", text.replace("\\", "/").casefold())  # ``a//b`` и ``//a`` — те же пути
     for prefix in prefixes:
         if text == prefix:
             return ""
@@ -709,6 +717,16 @@ def _norm_arg(text: str, prefixes: tuple[str, ...]) -> str:
     while text.startswith("./"):
         text = text[2:]
     return posixpath.normpath(text) if text else ""
+
+
+def _short_cluster_has_open_flag(token: str) -> bool:
+    """``-xyz`` слева направо: ``O`` до флага, берущего значение, — это -O; после такого флага остаток — значение."""
+    for char in token[1:]:
+        if char == BASH_SHORT_FLAG:
+            return True
+        if char in BASH_VALUE_FLAGS:
+            return False
+    return False
 
 
 def _bash_group_rule(group: str, exclude: list[str], prefixes: tuple[str, ...]) -> str | None:
@@ -733,7 +751,7 @@ def _bash_group_rule(group: str, exclude: list[str], prefixes: tuple[str, ...]) 
             name = token.split("=", 1)[0]
             if len(name) > 2 and any(flag.startswith(name) for flag in BASH_LONG_FLAGS):
                 return "bash-flag"
-        elif token.startswith("-") and BASH_SHORT_FLAG in token[1:]:
+        elif token.startswith("-") and _short_cluster_has_open_flag(token):
             return "bash-flag"
     return None
 

@@ -821,6 +821,15 @@ def test_bash_outside_pattern_is_violation():
         assert _audit_bash([command]) == [f"bash-flag:{command}"], command
     assert _audit_bash(["git log --out=x"]) == ["bash-flag:git log --out=x"]  # сокращение длинного флага git
 
+    # F1: git grep --open-files-in-pager=<cmd> исполняет команду; git принимает и сокращение --open
+    for command in ("git grep --open-files-in-pager=sh x", "git grep --open=cat x", "git grep --open-f=sh x"):
+        assert _audit_bash([command]) == [f"bash-flag:{command}"], command
+    # F2: настоящий -O (отдельно, в связке, с приклеенным значением) остаётся грязным
+    for command in ("git grep -O sh x", "git grep -nOsh x", "git grep -Osh x"):
+        assert _audit_bash([command]) == [f"bash-flag:{command}"], command
+    # bash-chain не учитывает кавычки (fail-closed): `|` в кавычках — ложный TAINTED, он виден в записи
+    assert _audit_bash(["git grep -E 'a|b'"]) == ["bash-chain:git grep -E 'a|b'"]
+
     assert _audit_bash(["git grep -C 3 x"]) == []  # `-C` — не из списка запретных
     assert _audit_bash(["git grep -o x"]) == []  # `-o` в нижнем регистре — не `-O`
 
@@ -846,6 +855,13 @@ def test_bash_with_excluded_path_is_tainted(tmp_path):
     assert _audit_bash(["git log -- /c/copy/docs/reports/a.md"], prefixes=("/c/copy",)) == [
         "bash-exclude:git log -- /c/copy/docs/reports/a.md"
     ]  # путь с префиксом копии
+    # F4: лишние `/` вокруг префикса копии не прячут путь
+    for command in (
+        "git log -- /c/copy//docs/reports/x.md",
+        "git log -- //c/copy/docs/reports/x.md",
+        "git show HEAD:/c/copy//docs/reports/x.md",
+    ):
+        assert _audit_bash([command], prefixes=("/c/copy",)) == [f"bash-exclude:{command}"], command
     assert _audit_bash(["git log -- docs/reports-other/x"]) == []  # соседний каталог — не внутри exclude
     assert _audit_bash(["git log -- docs/keep.md"]) == []
 
@@ -1028,6 +1044,13 @@ def test_bash_matching_pattern_is_clean():
         "git blame -L 1,5 -- src/code.py",
         "git grep -n Router -- '*.py'",
         "git grep -C 3 x",
+        # F2: заглавная O внутри значения флага (-S -G -L -e ...) — не флаг -O
+        "git log -S'Order'",
+        'git log -G"OpenCV"',
+        "git grep -eObject -- src",
+        "git log -L:OnClick:src/gui.py",
+        "git log -SOrder --oneline",
+        "git grep -neObject src",
     ]
     assert _audit_bash(commands) == []
     assert _audit_bash(["  git log -1  "]) == []  # пробелы по краям команды не важны
