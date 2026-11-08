@@ -27,6 +27,9 @@ from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
 # Task 1.10 (D1/D3): итоги стопа, при которых смерть ребёнка подтверждена.
 _CONFIRMED_OUTCOMES = frozenset({"exited", "terminated", "killed"})
+# Task 1.2 (ADR-PMM-042): ранг итога стопа. Писателей два (``_stop_many`` и группа корня), порядок их записей
+# не гарантирован: новый итог пишется, только если его ранг >= сохранённого.
+_OUTCOME_RANK = {"handed_over": 1, "survived": 2, "exited": 3, "terminated": 4, "killed": 5}
 
 # Окна эскалации стопа детей (STOP_POLL_S, TERMINATE_GRACE_S, KILL_CONFIRM_S) и формула
 # бюджета живут в ``core/stop_budget.py`` (Task 1.1, ADR-PMM-035): реестр, спавнер и
@@ -84,8 +87,11 @@ class ProcessRegistry:
         # как и ready_event: старый инстанс не может подложить отчёт новому.
         self._exit_reports: Dict[str, Any] = {}
         # Task 1.10 (D3): итог последнего стопа ТЕКУЩЕГО воплощения по имени (D1: exited | terminated |
-        # killed | handed_over | survived). Пишет ``_stop_many``; ``add_process`` того же имени сбрасывает.
+        # killed | handed_over | survived). Пишет только ``_record_stop_outcome`` (Task 1.2: ``_stop_many`` и группа
+        # корня, правило ранга); ``add_process`` того же имени сбрасывает. Читатель ``stop_outcome()`` — без лока.
         self._stop_outcomes: Dict[str, str] = {}
+        # Листовой лок записи итога (Task 1.2, ADR-PMM-042): под ним только проверка ранга и запись.
+        self._stop_outcome_lock = threading.Lock()
         # Единственный канал итога стопа ДЛЯ ОТВЕТА PM (Task 1.10, D4): итоги ТЕКУЩЕГО вызова ``_stop_many``
         # на этом потоке. Отличает «стоп прошёл и записал итог» от «имя не дошло до ChildProcessStop» (запись
         # ``_stop_outcomes`` тогда от прошлого стопа). Поток исполнителя переиспользуется, поэтому читатель
@@ -108,7 +114,25 @@ class ProcessRegistry:
         # Новое воплощение — итога стопа у него ещё нет (двойники без ``name`` терпим).
         name = getattr(process, "name", None)
         if name is not None:
-            self._stop_outcomes.pop(name, None)
+            with self._stop_outcome_lock:
+                self._stop_outcomes.pop(name, None)
+
+    def _record_stop_outcome(self, name: str, outcome: str) -> None:
+        """Единственный писатель итога стопа (Task 1.2, ADR-PMM-042): пишет, если ранг нового >= сохранённого.
+
+        Зовётся из ``ChildProcessStop._confirm`` (колбэк ``on_outcome``) обоих путей, из цикла ``_stop_many``
+        и из группы корня (``exited`` умершему до стопа, ``survived`` после ``kill()`` и срока). Не ждёт.
+        """
+        rank = _OUTCOME_RANK.get(outcome, 0)
+        with self._stop_outcome_lock:
+            current = self._stop_outcomes.get(name)
+            if current is not None and _OUTCOME_RANK.get(current, 0) > rank:
+                return
+            self._stop_outcomes[name] = outcome
+
+    def stop_window_s(self, name: str) -> float:
+        """Окно стопа имени (Task 1.11): ``stop_window_s`` воплощения, иначе ``g`` системного стопа (Task 1.2)."""
+        return self._stop_windows.get(name, self._system_window_s())
 
     def stop_outcome(self, name: str) -> str | None:
         """Итог последнего стопа текущего воплощения ``name`` (D1) или ``None`` — не стопался."""
@@ -541,6 +565,7 @@ class ProcessRegistry:
             procs,
             self._stop_events,
             on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
+            on_outcome=self._record_stop_outcome,
             logger=self.logger,
             idle=self.stop_wait_idle,
             should_abort=should_abort,
@@ -590,7 +615,8 @@ class ProcessRegistry:
         outcomes = stop.outcomes()
         for name in group:
             outcome = outcomes[name]
-            self._stop_outcomes[name] = outcome
+            self._record_stop_outcome(name, outcome)
+            # Канал ответа вызова — итог ЭТОГО вызова как есть, без правила ранга (Task 1.10, D4).
             self._stop_call.outcomes[name] = outcome
             result[name] = outcome in _CONFIRMED_OUTCOMES
         survivors = [name for name in group if not result[name]]
@@ -644,6 +670,10 @@ class _ChildrenGroupStop:
     из другого потока ждёт этот лок. Пустая группа — ``join_until`` ``True``,
     ``kill``/``close`` ничего не делают. Сбой сборки — fail-closed: ``join_until`` ``False``,
     ``result()`` ``False`` по всем именам ``os_processes`` (смерть не подтверждена).
+
+    Итог стопа (Task 1.2, ADR-PMM-042) пишется в реестр: подтверждённым — в момент ``_confirm``
+    (колбэк группы), умершим до стопа — ``exited`` в ``request_stop``, выжившим после ``kill()`` и
+    срока — ``survived`` одним снимком в конце ``join_until``.
     """
 
     def __init__(self, registry: "ProcessRegistry", mark_reader_gone: bool) -> None:
@@ -656,6 +686,8 @@ class _ChildrenGroupStop:
         self._done: Dict[str, bool] = {}
         self._group: ChildProcessStop | None = None
         self._names: List[str] = []
+        # ``kill()`` уже звали: ``False`` следующего ``join_until`` — срок фазы 3, выжившим пишется ``survived``.
+        self._kill_requested = False
 
     def request_stop(self) -> None:
         with self._lock:
@@ -672,6 +704,11 @@ class _ChildrenGroupStop:
             self._done, self._group = done, group
             self._names = [name for name in dict.fromkeys(names) if name not in done]
             self._requested = True
+            # Task 1.2 (решение лида 2026-11-07): умерший ДО стопа в группу не попал — его итог ``exited``.
+            # Имя без объекта в реестре («нет в реестре») не пишется.
+            for name in done:
+                if self._registry.get_process_by_name(name) is not None:
+                    self._registry._record_stop_outcome(name, "exited")
             if group is not None:
                 group.request_stop()
 
@@ -683,11 +720,21 @@ class _ChildrenGroupStop:
             return False
         if group is None:
             return True
-        return group.join_until(deadline)
+        stopped = group.join_until(deadline)
+        if not stopped and self._kill_requested:
+            # Task 1.2: срок фазы 3 вышел — выжившим ``survived`` одним снимком (поток-владелец группы).
+            for name in group.survivors():
+                self._registry._record_stop_outcome(name, "survived")
+        return stopped
 
     def kill(self) -> None:
+        self._kill_requested = True
         if self._group is not None:
             self._group.kill()
+
+    def signalled_at(self) -> float | None:
+        """Момент сигнала стопа детям в ``time.time()`` (Task 1.2); группы нет или сигнала не было — ``None``."""
+        return getattr(self._group, "stop_requested_wall", None)
 
     def close(self) -> None:
         if self._group is not None:

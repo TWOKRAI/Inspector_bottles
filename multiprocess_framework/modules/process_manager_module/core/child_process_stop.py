@@ -9,15 +9,19 @@ Purpose:
     последовательного ``join`` впереди стоящего процесса.
 
 Public API (внутренний модуль ``core/``, из ``__init__``/``interfaces`` пакета не экспортируется):
-    ``ChildProcessStop(processes, stop_events, *, on_confirmed_dead, logger, terminate_grace_s,
+    ``ChildProcessStop(processes, stop_events, *, on_confirmed_dead, on_outcome, logger, terminate_grace_s,
     kill_confirm_s, poll_s, idle, should_abort, windows_s)`` — ``request_stop()``, ``join_until(deadline)``, ``kill()``,
-    ``survivors()``, ``close()``.
+    ``survivors()``, ``close()``; свойство ``stop_requested_wall`` (Task 1.2, ADR-PMM-042).
 
 Инварианты:
     * метка ``on_confirmed_dead(name, process)`` — не более одной на имя за жизнь объекта,
       в момент наблюдения смерти; выжившему метка не ставится;
     * ``survivors()`` строится по набору подтверждённых: имя не в выживших ⇒ метка была
       (правило ADR-PMM-030 «True ⇒ метка»);
+    * ``on_outcome(name, outcome)`` (Task 1.2, ADR-PMM-042) — в момент подтверждения смерти, ПОСЛЕ
+      ``on_confirmed_dead``: ``killed`` / ``terminated`` / ``exited`` по сигналу, доставленному ИМЕНИ.
+      Итог верен, пока ``_confirm`` зовёт поток-владелец группы: ``_terminated``/``_killed`` пишутся
+      после ``terminate()``/``kill()`` на том же потоке;
     * без ``windows_s`` до ``kill()`` сигналов нет; с ``windows_s`` — сигнал имени только по
       его сроку (``request_stop`` + окно, не позже срока ``join_until``) и только без abort
       (Task 1.11, ADR-PMM-035); ``kill()`` только шлёт ``terminate()`` тем, кому по имени ещё
@@ -57,6 +61,7 @@ class ChildProcessStop:
         stop_events: Mapping[str, Any],
         *,
         on_confirmed_dead: ConfirmedDead | None = None,
+        on_outcome: Callable[[str, str], None] | None = None,
         logger: Any = None,
         terminate_grace_s: float = TERMINATE_GRACE_S,
         kill_confirm_s: float = KILL_CONFIRM_S,
@@ -76,6 +81,8 @@ class ChildProcessStop:
         self._name_kill_at: dict[str, float] = {}
         self._events: dict[str, Any] = {name: stop_events.get(name) for name in self._processes}
         self._on_confirmed_dead = on_confirmed_dead
+        # Task 1.2 (ADR-PMM-042): итог имени в момент подтверждения смерти — запись в словарь, без ожиданий.
+        self._on_outcome = on_outcome
         self._logger = logger
         self._terminate_grace_s = float(terminate_grace_s)
         self._kill_confirm_s = float(kill_confirm_s)
@@ -99,6 +106,8 @@ class ChildProcessStop:
         # Точка отсчёта для текста «did not stop in <N>s»: request_stop(), а без него создание.
         self._stop_requested_at = time.monotonic()
         self._stop_requested = False
+        # Task 1.2: момент сигнала стопа в ``time.time()`` для срока в ``supervision.status``; до сигнала ``None``.
+        self._stop_requested_wall: float | None = None
         self._kill_started_at: float | None = None
         self._real_kill_sent = False
         # Task 1.10 (D2): кому из имён сигнал ДОСТАВЛЕН. Не флаги группы выше: имя, умершее между
@@ -142,18 +151,34 @@ class ChildProcessStop:
             return True
 
     def _confirm(self, name: str, proc: Any) -> None:
-        """Смерть увидена: зафиксировать и поставить метку один раз."""
+        """Смерть увидена: зафиксировать, поставить метку и отдать итог — по разу на имя.
+
+        Итог считается под локом вместе с ``_dead`` (множества сигналов пишутся под ним же); колбэки —
+        после выхода из лока (лок не реентерабельный). Порядок: метка читателя, затем итог — так
+        ``stop_outcome != None`` означает «метка стоит» (Task 1.2, ADR-PMM-042).
+        """
         with self._lock:
             if name in self._dead:
                 return
             self._dead.add(name)
+            if name in self._killed:
+                outcome = "killed"
+            elif name in self._terminated:
+                outcome = "terminated"
+            else:
+                outcome = "exited"
         callback = self._on_confirmed_dead
-        if callback is None:
-            return
-        try:
-            callback(name, proc)
-        except Exception as exc:  # noqa: BLE001 — метка вторична к факту смерти
-            self._emit("warning", f"метка подтверждённой смерти для '{name}' упала: {exc}")
+        if callback is not None:
+            try:
+                callback(name, proc)
+            except Exception as exc:  # noqa: BLE001 — метка вторична к факту смерти
+                self._emit("warning", f"метка подтверждённой смерти для '{name}' упала: {exc}")
+        on_outcome = self._on_outcome
+        if on_outcome is not None:
+            try:
+                on_outcome(name, outcome)
+            except Exception as exc:  # noqa: BLE001 — итог вторичен к факту смерти
+                self._emit("warning", f"запись итога стопа для '{name}' упала: {exc}")
 
     def _observe(self) -> list[tuple[str, Any]]:
         """Один проход опроса всех ещё живых; умерших метит сразу. Возвращает живых."""
@@ -173,6 +198,7 @@ class ChildProcessStop:
             if not self._stop_requested:
                 self._stop_requested = True
                 self._stop_requested_at = time.monotonic()
+                self._stop_requested_wall = time.time()
         for name, proc in self._pending():
             if not self._alive(name, proc):
                 continue
@@ -188,6 +214,11 @@ class ChildProcessStop:
                 event.set()
             except Exception as exc:  # noqa: BLE001 — остальные дети получают свой сигнал
                 self._emit("warning", f"stop_event.set() для '{name}' упал: {exc}")
+
+    @property
+    def stop_requested_wall(self) -> float | None:
+        """Момент первого ``request_stop()`` в ``time.time()`` (Task 1.2); до сигнала — ``None``."""
+        return self._stop_requested_wall
 
     @property
     def windows_s(self) -> dict[str, float] | None:

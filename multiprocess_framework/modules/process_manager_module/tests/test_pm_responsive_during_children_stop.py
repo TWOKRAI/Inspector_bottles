@@ -121,6 +121,10 @@ class _GroupProxy:
         self._real = real
         self._rig = rig
 
+    def __getattr__(self, name: str) -> Any:
+        # Task 1.2: прочие публичные методы группы (``signalled_at``) — без журнала, как у настоящей.
+        return getattr(self._real, name)
+
     def request_stop(self) -> None:
         self._rig.journal.append("group.request_stop")
         self._rig.request_stop_calls += 1
