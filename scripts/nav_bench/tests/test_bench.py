@@ -5,6 +5,7 @@ import io
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ SOURCE_ONLY = PKG / "conditions" / "source-only.json"  # алиас прежне
 MAP_ONLY = PKG / "conditions" / "map-only.json"
 QEX = PKG / "conditions" / "qex.json"
 GRAPHIFY = PKG / "conditions" / "graphify.json"
+GREP_READ_GIT = PKG / "conditions" / "grep-read+git.json"
 
 R = "multiprocess_framework/modules/"
 # Ответ агента на K0: Q1 и Q2 — оба верных адреса (require all), Q3 — «sure» мимо, остальные не отвечены.
@@ -62,7 +64,7 @@ def _stream(
     """Вывод ``--output-format stream-json``: события assistant с tool_use и итоговое result."""
     events = [{"type": "system", "subtype": "init"}]
     for name, target in tool_uses:
-        key = "file_path" if name == "Read" else "pattern"
+        key = {"Read": "file_path", "Bash": "command"}.get(name, "pattern")
         block = {"type": "tool_use", "name": name, "input": {key: target}}
         events.append({"type": "assistant", "message": {"content": [block]}})
     events.append({"type": "assistant", "message": {"content": [{"type": "text", "text": text}], "usage": LAST_USAGE}})
@@ -108,7 +110,7 @@ def _run(tmp_path, runner, condition=GREP_READ, questions=K0, **kwargs):
         questions,
         condition,
         kwargs.pop("repeats", 2),
-        tmp_path,
+        kwargs.pop("root", tmp_path),
         tmp_path / "out",
         runner=runner,
         copy_fn=kwargs.pop("copy_fn", lambda qset, cond, root, err=None: run_dir),
@@ -694,3 +696,366 @@ def test_floor_ignores_baseline_of_another_set(tmp_path):
     foreign = _baseline_file(tmp_path, set_name="arch")
     code, _, _, _ = _run(tmp_path, runner, repeats=1, yes=True, floor=True, baseline_path=foreign)
     assert code == 0 and len(runner.calls) == 1
+
+
+# --- Task 7.2: копия с историей git и Bash по шаблонам --------------------------------------------
+GIT_PATTERNS = ["git log", "git log *", "git show *", "git blame *", "git grep *"]
+SET_EXCLUDE = ["scripts/nav_bench", "docs/reports"]
+TOOLS = ["Read", "Grep", "Glob"]
+
+
+def _audit_bash(commands, patterns=GIT_PATTERNS, exclude=SET_EXCLUDE, prefixes=()):
+    uses = [{"name": "Bash", "target": command} for command in commands]
+    return bench.audit_violations(uses, TOOLS, [], prefixes, bash_allow=patterns, exclude=exclude)
+
+
+def _within(seconds, func, *args, **kwargs):
+    """Вызов в демон-потоке с дедлайном: зависший git не вешает прогон тестов."""
+    box = {}
+
+    def target():
+        try:
+            box["value"] = func(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 — исключение возвращается в поток теста
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), f"{getattr(func, '__name__', func)} не вернулся за {seconds} с"
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _out(repo, *args, check=True):
+    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8")
+    if check:
+        assert done.returncode == 0, done.stderr
+    return done
+
+
+def _history_repo(tmp_path):
+    """Одноразовый репозиторий: first -> second (= repo_sha); ветка side и тег; main ушла дальше (third)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+
+    def commit(files, message):
+        for rel, text in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text, encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", message)
+        return _out(repo, "rev-parse", "HEAD").stdout.strip()
+
+    first = commit(
+        {
+            "src/code.py": "v1",
+            "docs/keep.md": "keep",
+            "scripts/nav_bench/key.json": "answers",
+            "docs/reports/deep/answer.md": "answers",
+        },
+        "first",
+    )
+    second = commit({"src/code.py": "v2"}, "second")
+    _git(repo, "checkout", "-q", "-b", "side")
+    side = commit({"side.txt": "side"}, "side-only")
+    _git(repo, "tag", "v-side")
+    _git(repo, "checkout", "-q", "main")
+    third = commit({"src/code.py": "v3"}, "third")
+    return {"repo": repo, "first": first, "sha": second, "side": side, "third": third}
+
+
+def _clone_set(info, **fields):
+    return {"repo_sha": info["sha"], "exclude": list(SET_EXCLUDE), "copy": "clone", **fields}
+
+
+def _clone_condition(**fields):
+    return {**bench.CONDITION_DEFAULTS, "name": "c", "model": "haiku", **fields}
+
+
+def _make_clone(tmp_path, info, **set_fields):
+    return _within(
+        120,
+        bench.prepare_clean_copy,
+        _clone_set(info, **set_fields),
+        _clone_condition(),
+        info["repo"],
+        temp_base=tmp_path / "tmp",
+        err=io.StringIO(),
+    )
+
+
+def _questions_file(tmp_path, repo_sha, **fields):
+    data = {
+        "name": "mini",
+        "repo_sha": repo_sha,
+        "questions": [{"id": "Q1", "question": "where?", "expected": [{"path": "src/code.py", "line": 1}]}],
+        **fields,
+    }
+    path = tmp_path / "mini.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+# RED 1
+def test_bash_outside_pattern_is_violation():
+    assert _audit_bash(["ls"]) == ["bash-pattern:ls"]
+    assert _audit_bash(["git logx"]) == ["bash-pattern:git logx"]  # `git log` без `*` — только точная команда
+    assert _audit_bash(["Git log -1"]) == ["bash-pattern:Git log -1"]  # регистр значим
+    assert _audit_bash(["git status"]) == ["bash-pattern:git status"]
+    assert _audit_bash([""]) == ["bash-pattern:"]
+
+    for sep in (";", "&&", "||", "|", "&", ">", "<", "`"):
+        command = f"git log -1 {sep} x"
+        assert _audit_bash([command]) == [f"bash-chain:{command}"], sep
+    assert _audit_bash(["git log $(id)"]) == ["bash-chain:git log $(id)"]
+
+    for command in (
+        "git log --output=x",
+        "git show -O orderfile HEAD",
+        "git log --git-dir=/x",
+        "git grep --work-tree d x",
+    ):
+        assert _audit_bash([command]) == [f"bash-flag:{command}"], command
+    assert _audit_bash(["git log --out=x"]) == ["bash-flag:git log --out=x"]  # сокращение длинного флага git
+
+    assert _audit_bash(["git grep -C 3 x"]) == []  # `-C` — не из списка запретных
+    assert _audit_bash(["git grep -o x"]) == []  # `-o` в нижнем регистре — не `-O`
+
+    newline = _audit_bash(["git log -1\nls"])
+    assert len(newline) == 1 and newline[0].startswith("bash-chain:")
+
+    long_command = "ls " + "x" * 200
+    (text,) = _audit_bash([long_command])
+    rule, shown = text.split(":", 1)
+    assert rule == "bash-pattern" and shown == long_command[:80]
+
+
+# RED 2
+def test_bash_with_excluded_path_is_tainted(tmp_path):
+    key = "scripts/nav_bench/key.json"
+    assert _audit_bash([f"git show HEAD:{key}"]) == [f"bash-exclude:git show HEAD:{key}"]  # <rev>:<путь>
+    assert _audit_bash(["git show HEAD:docs/reports/a.md"]) == ["bash-exclude:git show HEAD:docs/reports/a.md"]
+    assert _audit_bash(["git blame -- ./Scripts/NAV_bench/key.json"]) == [
+        "bash-exclude:git blame -- ./Scripts/NAV_bench/key.json"
+    ]  # без регистра, без ./
+    assert _audit_bash(["git log -- scripts\\nav_bench\\x"]) == ["bash-exclude:git log -- scripts\\nav_bench\\x"]
+    assert _audit_bash(["git grep x -- 'scripts/nav_bench'"]) == ["bash-exclude:git grep x -- 'scripts/nav_bench'"]
+    assert _audit_bash(["git log -- /c/copy/docs/reports/a.md"], prefixes=("/c/copy",)) == [
+        "bash-exclude:git log -- /c/copy/docs/reports/a.md"
+    ]  # путь с префиксом копии
+    assert _audit_bash(["git log -- docs/reports-other/x"]) == []  # соседний каталог — не внутри exclude
+    assert _audit_bash(["git log -- docs/keep.md"]) == []
+
+    # сквозной прогон: git log -1 чист, git show HEAD:<exclude> — одно нарушение
+    uses = [("Bash", "git log -1")]
+    runner = FakeRunner(_stream(uses))
+    ok = lambda condition, run_root, repo_sha: []  # noqa: E731 — копия-пустышка, история не проверяется
+    _, path, _, _ = _run(tmp_path, runner, condition=GREP_READ_GIT, repeats=1, yes=True, history_fn=ok)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["repeats"][0]["violations"] == []
+    assert record["verdict"]["band"] != "TAINTED"
+
+    runner = FakeRunner(_stream(uses + [("Bash", f"git show HEAD:{key}")]))
+    _, path, _, _ = _run(tmp_path, runner, condition=GREP_READ_GIT, repeats=1, yes=True, history_fn=ok)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["repeats"][0]["violations"] == [f"bash-exclude:git show HEAD:{key}"]
+    assert record["verdict"]["band"] == "TAINTED"
+
+
+# RED 3
+def test_build_command_passes_bash_patterns():
+    condition = bench.load_condition(GREP_READ_GIT)
+    cmd = bench.build_command(condition)
+    assert cmd[cmd.index("--tools") + 1] == "Read,Grep,Glob,Bash"
+    assert cmd[cmd.index("--allowedTools") + 1] == (
+        "Read,Grep,Glob,Bash(git log),Bash(git log *),Bash(git show *),Bash(git blame *),Bash(git grep *)"
+    )
+    assert "Bash" not in cmd[cmd.index("--disallowedTools") + 1].split(",")
+    assert cmd[cmd.index("--setting-sources") + 1] == "user"  # settings*.json копии не вливаются в разрешения
+
+    plain = bench.build_command(bench.load_condition(GREP_READ))
+    assert "--setting-sources" not in plain  # условие без Bash — команда прежняя
+
+    templated = {
+        **condition,
+        "bash_allow": ["git show {repo_sha}:*", "git grep * {run_root}/src"],
+        "prompt_prefix": "root {run_root} sha {repo_sha} repo {repo_root}",
+    }
+    cmd = bench.build_command(templated, run_root="C:\\tmp\\copy", repo_root="D:\\repo", repo_sha="abc123")
+    allowed = cmd[cmd.index("--allowedTools") + 1].split(",")
+    assert allowed[3:] == ["Bash(git show abc123:*)", "Bash(git grep * C:/tmp/copy/src)"]
+    assert cmd[cmd.index("--append-system-prompt") + 1] == "root C:/tmp/copy sha abc123 repo D:/repo"
+
+
+# RED 4
+def test_clone_copy_has_history_at_repo_sha(tmp_path):
+    info = _history_repo(tmp_path)
+    copy = _make_clone(tmp_path, info)
+    assert (copy / ".git").exists()
+    assert _out(copy, "rev-parse", "HEAD").stdout.strip() == info["sha"]
+    assert _out(copy, "log", "--format=%s").stdout.split() == ["second", "first"]  # история до repo_sha, не дальше
+    assert (copy / "src" / "code.py").read_text(encoding="utf-8") == "v2"  # дерево на repo_sha, не на HEAD источника
+    assert _out(copy, "symbolic-ref", "-q", "HEAD", check=False).returncode != 0  # HEAD отсоединён
+    assert (copy / "docs" / "keep.md").read_text(encoding="utf-8") == "keep"
+    # копия-клон лежит в своём каталоге: хеш с полем copy не совпадает с хешем archive
+    plain = {"repo_sha": info["sha"], "exclude": list(SET_EXCLUDE)}
+    assert bench.clean_copy_path(plain, _clone_condition(), tmp_path) != copy
+    assert copy == bench.clean_copy_path(_clone_set(info), _clone_condition(), tmp_path / "tmp")
+
+
+# RED 5
+def test_clone_copy_removes_set_exclude_and_status_is_clean(tmp_path):
+    info = _history_repo(tmp_path)
+    copy = _make_clone(tmp_path, info)
+    assert not (copy / "scripts" / "nav_bench" / "key.json").exists()  # файл
+    assert not (copy / "scripts" / "nav_bench").exists()
+    assert not (copy / "docs" / "reports").exists()  # каталог с вложенным файлом
+    assert (copy / "docs" / "keep.md").exists()
+    assert _out(copy, "status", "--porcelain").stdout == ""  # «gitStatus» не назовёт удалённое
+
+
+# RED 6
+def test_clone_copy_hides_other_refs(tmp_path):
+    info = _history_repo(tmp_path)
+    copy = _make_clone(tmp_path, info)
+    assert _out(copy, "for-each-ref").stdout == ""  # ни веток, ни тегов, ни origin/*
+    assert _out(copy, "remote").stdout == ""
+    assert _out(copy, "log", "--all", "--format=%H").stdout.split() == [info["sha"], info["first"]]
+    assert _out(copy, "reflog", "show", "HEAD").stdout == ""  # «checkout: moving from ...» не остаётся
+
+
+# RED 7
+def test_clone_copy_has_no_alternates_or_foreign_objects(tmp_path):
+    info = _history_repo(tmp_path)
+    copy = _make_clone(tmp_path, info)
+    assert not (copy / ".git" / "objects" / "info" / "alternates").exists()
+    for foreign in (info["third"], info["side"]):
+        assert _out(copy, "cat-file", "-e", foreign, check=False).returncode != 0, foreign
+    assert _out(copy, "fsck", "--no-dangling", check=False).returncode == 0  # без alternates объекты свои, целые
+
+
+# RED 8
+def test_unknown_copy_value_is_refused(tmp_path):
+    bad_copy = _questions_file(tmp_path, "abc", copy="clon")
+    runner = FakeRunner(_stream([("Read", "a.py")]))
+    code, path, _, err = _run(tmp_path, runner, questions=bad_copy, yes=True)
+    assert (code, path) == (2, None) and runner.calls == []
+    assert "ОТКАЗ: copy набора должен быть archive или clone" in err
+
+    for field, value in (("bash_allow", ["git log {bogus}"]), ("prompt_prefix", "go {nope}")):
+        condition = _condition_file(tmp_path, **{"bash_allow": ["git log *"], field: value})
+        code, path, _, err = _run(tmp_path, runner, condition=condition, yes=True)
+        name = "bogus" if field == "bash_allow" else "nope"
+        assert (code, path) == (2, None) and runner.calls == [], field
+        assert f"ОТКАЗ: неизвестный плейсхолдер {{{name}}}" in err
+
+    known = _condition_file(
+        tmp_path,
+        max_budget_usd=1.0,
+        bash_allow=["git show {repo_sha}:*"],
+        prompt_prefix="{repo_root} {repo_sha} {run_root}",
+    )
+    ok = lambda condition, run_root, repo_sha: []  # noqa: E731
+    code, _, _, _ = _run(tmp_path, runner, condition=known, repeats=1, yes=True, history_fn=ok)
+    assert code == 0 and len(runner.calls) == 1  # свои три подстановки — не отказ
+
+
+# RED 9
+def test_bash_condition_requires_history_in_copy(tmp_path):
+    info = _history_repo(tmp_path)
+    questions = _questions_file(tmp_path, info["sha"], exclude=list(SET_EXCLUDE), copy="clone")
+    base = {"root": info["repo"], "questions": questions, "condition": GREP_READ_GIT, "repeats": 1, "yes": True}
+    dirty_free = lambda root, paths: []  # noqa: E731
+
+    # копия без .git (пустой каталог тестового копировщика) — отказ до сессии
+    runner = FakeRunner(_stream([("Bash", "git log -1")]))
+    code, path, _, err = _run(tmp_path, runner, **base)
+    assert (code, path) == (2, None) and runner.calls == []
+    assert "ОТКАЗ" in err and "нет истории git" in err
+
+    # клон другого коммита — тоже отказ
+    other_copy = _make_clone(tmp_path, {**info, "sha": info["first"]})
+    code, path, _, err = _run(tmp_path, runner, copy_fn=lambda q, c, r, err=None: other_copy, **base)
+    assert (code, path) == (2, None) and runner.calls == [] and "нет истории git" in err
+
+    # настоящий клон на repo_sha — запуск идёт
+    real = functools.partial(bench.prepare_clean_copy, temp_base=tmp_path / "real")
+    code, path, _, err = _within(120, _run, tmp_path, runner, copy_fn=real, dirty_fn=dirty_free, **base)
+    assert code == 0 and len(runner.calls) == 1, err
+
+
+# RED 10
+def test_parse_session_output_marks_denied_bash():
+    def use(uid, name, **args):
+        return {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "id": uid, "name": name, "input": args}]},
+        }
+
+    def result(uid, is_error, text):
+        block = {"type": "tool_result", "tool_use_id": uid, "content": text, "is_error": is_error}
+        return {"type": "user", "message": {"content": [block]}}
+
+    events = [
+        use("t1", "Bash", command="ls"),
+        result("t1", True, "Permission to use Bash with command ls has been denied."),
+        use("t2", "Bash", command="git log -1"),
+        result("t2", False, "abc commit"),
+        use("t3", "Read", file_path="a.py"),
+        result("t3", True, "no such file"),
+        result("t9", True, "result of an unknown call"),
+        {"type": "result", "subtype": "success", "is_error": False, "result": "x", "num_turns": 1},
+    ]
+    parsed = bench.parse_session_output("\n".join(json.dumps(e) for e in events))
+    assert parsed["tool_uses"] == [
+        {"name": "Bash", "target": "ls", "denied": True},
+        {"name": "Bash", "target": "git log -1", "denied": False},
+        {"name": "Read", "target": "a.py"},  # tool_result читается только у Bash
+    ]
+    assert parsed["tool_calls"] == 3
+
+
+# G1
+def test_bash_matching_pattern_is_clean():
+    commands = [
+        "git log",
+        "git log -1",
+        "git log --oneline -n 5 -- src/code.py",
+        "git show HEAD~1:src/code.py",
+        "git blame -L 1,5 -- src/code.py",
+        "git grep -n Router -- '*.py'",
+        "git grep -C 3 x",
+    ]
+    assert _audit_bash(commands) == []
+    assert _audit_bash(["  git log -1  "]) == []  # пробелы по краям команды не важны
+
+
+# G2
+def test_bash_template_literal_with_exclude_is_clean():
+    patterns = ["git show *:scripts/nav_bench/key.json"]  # `exclude` — в литерале шаблона, не в группе `*`
+    assert _audit_bash(["git show HEAD:scripts/nav_bench/key.json"], patterns=patterns) == []
+    assert _audit_bash(["git show HEAD~2:scripts/nav_bench/key.json"], patterns=patterns) == []
+
+
+# G3
+def test_archive_copy_and_cache_key_unchanged(tmp_path):
+    qset = bench.load_questions(K0)
+    condition = bench.load_condition(GREP_READ)
+    expected = Path("T/nav_bench/1dc6c71b7-cd10f5dfa7")  # хеш прежней формулы: exclude + имя + context_files
+    assert bench.clean_copy_path(qset, condition, Path("T")) == expected
+    assert bench.clean_copy_path({**qset, "copy": "archive"}, condition, Path("T")) == expected
+
+    info = _history_repo(tmp_path)
+    copy = bench.prepare_clean_copy(
+        {"repo_sha": info["sha"], "exclude": list(SET_EXCLUDE)},  # поля copy нет — archive
+        _clone_condition(),
+        info["repo"],
+        temp_base=tmp_path / "tmp",
+        err=io.StringIO(),
+    )
+    assert not (copy / ".git").exists()
+    assert (copy / "src" / "code.py").read_text(encoding="utf-8") == "v2"
+    assert not (copy / "docs" / "reports").exists()

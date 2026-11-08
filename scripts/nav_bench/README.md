@@ -81,7 +81,8 @@ JSON-файл:
 | `name`, `model` | имя и модель (`--model`: алиас `haiku`/`sonnet`/...) |
 | `allowed_tools`, `disallowed_tools` | `--allowedTools` / `--disallowedTools` |
 | `context_files` | файлы, названные агенту в промпте как справка (он читает их сам, это вызовы Read) |
-| `prompt_prefix` | `--append-system-prompt` |
+| `prompt_prefix` | `--append-system-prompt`; подстановки `{repo_root}`, `{repo_sha}`, `{run_root}` (пути — posix) |
+| `bash_allow` | необязательно: шаблоны Bash (`"git log *"`, `*` — любой текст). Непустой: `Bash` в `--tools`, `Bash(<шаблон>)` в `--allowedTools`, `--setting-sources user` (`settings*.json` копии не вливаются в разрешения) и аудит Bash (см. ниже). Нужна копия `copy: clone`. Те же подстановки; иное имя в `{}` — отказ (код 2) |
 | `max_turns` | лимит ходов; в `claude --help` v2.1.289 флага `--max-turns` **нет**, поэтому он не передаётся, а проверяется после прогона (`over_max_turns` в записи) |
 | `max_budget_usd` | необязательно; `--max-budget-usd` — единственный жёсткий стоп-кран по деньгам |
 | `expected_tokens` | оценка токенов на один повтор — для строки стоимости |
@@ -150,7 +151,12 @@ JSON-файл:
 **Чистая копия.** Сессия идёт не в репозитории, а в каталоге `%TEMP%/nav_bench/<repo_sha>-<hash>`: `git archive <repo_sha>`,
 затем удаляются пути поля набора `exclude` (для k0 и arch: `scripts/nav_bench`, `scripts/atlas/tests`, `docs/handoffs`,
 `docs/reports`, `docs/reviews`, `plans`, `docs/claude/memory`), затем докладываются `context_files` условия из рабочего дерева.
-Нет `.git`. Копия переиспользуется при том же sha + хеше (`exclude` и `context_files`: иначе карта прошлого условия осталась бы
+Поле набора `copy`: `archive` (умолчание; в копии нет `.git`) или `clone`; иное — отказ (код 2). Копия `clone`:
+`git clone --shared` -> `checkout --detach <repo_sha>` -> удалены все ссылки, `origin` и reflog (иначе `git log --all`
+показал бы эталон) -> `repack -a -d` и удалён `objects/info/alternates` (иначе `Read` источника достал бы любой файл) ->
+пути `exclude` помечены `skip-worktree` и удалены (`git status` чист). В копии есть история до `repo_sha` и только она.
+Условие с `bash_allow` перед сессией проверяет `git rev-parse HEAD` копии (начинается с `repo_sha`), иначе отказ.
+Ключ копии `archive` не изменился; у `clone` в хеш входит `copy`. Копия переиспользуется при том же sha + хеше (`exclude` и `context_files`: иначе карта прошлого условия осталась бы
 видна следующему; в хеш входит и имя условия: граф graphify, собранный внутри копии, не должен попасть в `grep-read` и `qex`). `--root` — репозиторий-источник; каталог записей по умолчанию `<root>/data/nav_bench`.
 
 **Оценка адресов.** `require: "all"|"any"` на вопрос (по умолчанию any; Q1, Q2, Q4 = all); `tolerance` на запись эталона
@@ -173,6 +179,15 @@ JSON-файл:
 **Аудит доступа — по списку разрешённого:** любой `tool_use` вне `allowed_tools` (имена без регистра, шаблоны `fnmatch`) и,
 при `audit_reads`, любое `Read` вне `context_files` (пути без регистра, posix) — нарушение. Технические пределы:
 `--tools` (встроенные из `allowed_tools`) и всегда `--strict-mcp-config` (MCP только из `--mcp-config`).
+
+**Аудит Bash (`bash_allow`):** команда без шаблона — `bash-pattern`; в тексте группы `*` шаблона (литералы шаблона не
+проверяются): путь из `exclude` (`shlex`-токены, куски по `:` и `=`, без регистра, без `./` и префикса копии) —
+`bash-exclude`; `;` `&&` `||` `|` `&` перевод строки `>` `<` `` ` `` `$(` — `bash-chain`; флаги `--output`, `-O`,
+`--git-dir`, `--work-tree` (регистр значим) — `bash-flag`. Любое нарушение — `TAINTED`; текст `<правило>:<команда до 80
+символов>`. Аудит видит только аргументы: `git log -p` без пути и `git grep x HEAD` показывают файлы из `exclude`
+(история копии их содержит) — шаблоны условия должны такие вызовы не разрешать. У вызова Bash в `tool_uses` поле
+`denied` = `is_error` его `tool_result` (отказ CLI либо код выхода != 0); отказанный вызов нарушением быть не перестаёт.
+Поставляется `grep-read+git` (`grep-read` + Bash по шаблонам `git log`, `git show`, `git blame`, `git grep`).
 
 **Условия:** `grep-read` (прежний `source-only`, файл-алиас оставлен), `map-only`, `reference`, `qex`
 (+`mcp__qex__search_code`), `graphify` (+чтения `mcp__graphify__*`), `all` (всё, включая карту и справку). MCP-условия:
