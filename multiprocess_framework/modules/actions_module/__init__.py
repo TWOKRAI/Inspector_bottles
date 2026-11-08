@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
+"""Action-шина с undo/redo и объединением правок для GUI; сюда — менять откат и повтор действий
+
 actions -- строительные блоки undo/redo фреймворка (под контракт UndoRedoController).
 
 Две реализации одного контракта (разные tier'ы, см. docs/audits/2026-06-18_command-undo-system.md):

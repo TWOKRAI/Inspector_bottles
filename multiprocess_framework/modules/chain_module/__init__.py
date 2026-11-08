@@ -1,4 +1,6 @@
-"""chain_module — DAG/Chain execution engine для многопроцессных приложений.
+"""Движок исполнения цепочек и DAG-pipeline, в т.ч. между процессами; сюда — менять порядок и шаги исполнения
+
+chain_module — DAG/Chain execution engine для многопроцессных приложений.
 
 Публичный API:
 
