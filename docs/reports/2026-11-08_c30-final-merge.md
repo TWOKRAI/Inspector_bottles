@@ -28,7 +28,7 @@
 - validate, память (теги и `BY-MODULE*.md`): красные на чистом main; заявка `plans/queue/inbox/2026-11-06_inspector-bottles-28_2.md` (C-13 вернулся) — записано.
 - G6 R6 `close_coordinator.py:95`: красный на main `50010cdb4`, в реестрах не было; починен на main коммитом `5db2a4d51`.
 - Шум полного framework suite (разброс красных 89 ↔ 164 между прогонами, ветка ↔ main): `OSError(28, 'No space left on device')` в `create_queues` на Mac при свободных ГиБ — заявка `plans/queue/inbox/2026-11-07_inspector-bottles-e8_2.md`. Мои два прогона это подтверждают: полные списки красных расходятся в обе стороны (`process_manager_module` 100/85, `shared_resources_module` 0/64), а те же тесты по отдельности на обоих деревьях дают одинаковые 10 красных.
-- Эти 10 красных (на main и на ветке одни и те же): набор `process_manager_module/tests/test_cv_threads.py` и родственные Mac-красные — заявка `…e8_1.md` (cv_threads, 6 из 6 красные на базе).
+- Эти 10 красных (на main и на ветке одни и те же): 6 × `process_manager_module/tests/test_cv_threads.py` и 2 × `config_module/tests/test_watcher.py` — заявка `…e8_1.md` (записана, причина не выяснена); 2 × корневые `tests/test_declarations_leak_order_independence.py::…` и `tests/test_module_tiers.py::test_no_test_dir_is_invisible_to_every_runner` — в моём точечном прогоне запускались из `multiprocess_framework/modules`, в реестрах не найдены, причину не разбирал (возможно артефакт cwd моего прогона).
 - `recipe/tests/test_yaml_patch.py` не собирается (нет `hypothesis`): заявка `…e8_2.md`; это НЕ зелёный suite.
 
 ## Долг и замена
