@@ -1085,6 +1085,10 @@ def test_bash_matching_pattern_is_clean():
         '"$X"-O"touch M" v2',  # $ в двойных кавычках раскрывается
         '[-]O"touch M" v2',  # глоб
         "x 'v2",  # непарная кавычка: разбор не определён — fail-closed
+        "-n ~root x",  # тильда в начале слова раскрывается
+        "~ x",
+        "-O sh $X",  # и мета-символ, и флаг -O: правило bash-meta идёт раньше bash-flag
+        "-e foo *.py",  # глоб `*` вне кавычек
     ],
 )
 def test_bash_shell_expansion_is_tainted(group):
