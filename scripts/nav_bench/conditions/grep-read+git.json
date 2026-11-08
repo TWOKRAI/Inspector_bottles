@@ -1,0 +1,33 @@
+{
+  "name": "grep-read+git",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "bash_allow": [
+    "git log",
+    "git log *",
+    "git show *",
+    "git blame *",
+    "git grep *"
+  ],
+  "context_files": [],
+  "max_turns": 60,
+  "max_budget_usd": 1.0,
+  "thresholds": {
+    "hits_min": 8,
+    "false_max": 1
+  },
+  "prompt_prefix": "Navigate by reading the code (Read, Grep, Glob) and by git history: through Bash you may run only git log, git show, git blame, git grep; no other shell commands.",
+  "expected_tokens": 85000
+}

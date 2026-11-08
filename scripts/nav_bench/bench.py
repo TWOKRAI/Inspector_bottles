@@ -7,7 +7,8 @@
     python scripts/nav_bench/bench.py verify-set --questions Q.json
 
 Один повтор = одна headless-сессия ``claude -p``, которая отвечает на ВСЕ вопросы набора. Сессия идёт в ЧИСТОЙ КОПИИ
-репозитория (``git archive <repo_sha>`` без путей ``exclude`` набора), чтобы эталон не лежал рядом с кодом.
+репозитория без путей ``exclude`` набора, чтобы эталон не лежал рядом с кодом: ``git archive <repo_sha>`` (набор
+``"copy": "archive"``, по умолчанию, без .git) либо клон с историей git до ``repo_sha`` (``"copy": "clone"``).
 Реальный запуск стоит денег: без ``--yes`` он не стартует; без ``max_budget_usd`` — только с ``--no-budget``.
 ``--dry-run`` ничего не запускает. Подробности и формат наборов — README.md рядом.
 """
@@ -17,8 +18,11 @@ from __future__ import annotations
 import argparse
 import datetime
 import fnmatch
+import functools
 import hashlib
 import json
+import posixpath
+import re
 import shlex
 import shutil
 import stat
@@ -48,6 +52,8 @@ CLAUDE_BIN = "claude"
 DEFAULT_OUTPUT_FORMAT = "stream-json"  # json не отдаёт число вызовов инструментов; stream-json требует --verbose
 SESSION_TIMEOUT_S = 1800
 MCP_PREFIX = "mcp__"
+COPY_MODES = ("archive", "clone")  # поле набора copy: git archive без .git либо клон с историей до repo_sha
+PLACEHOLDERS = ("repo_root", "repo_sha", "run_root")  # подстановки в bash_allow и prompt_prefix
 
 CONDITION_DEFAULTS: dict[str, Any] = {
     "allowed_tools": [],
@@ -60,6 +66,7 @@ CONDITION_DEFAULTS: dict[str, Any] = {
     "thresholds": {},
     "output_format": DEFAULT_OUTPUT_FORMAT,
     "audit_reads": False,  # True: Read разрешён только на context_files, любое другое чтение — нарушение
+    "bash_allow": [],  # шаблоны Bash ("git log *"): Bash только по ним (+ аудит); {repo_root} {repo_sha} {run_root}
     "mcp_config": None,  # шаблон MCP-конфига (от nav_bench); {python} {repo_root} {run_root}
     "requires": [],  # предпроверки: "qex-index", "graphify-graph"
 }
@@ -149,17 +156,22 @@ def effective_thresholds(qset: dict[str, Any], condition: dict[str, Any]) -> dic
 
 
 # --- Чистая копия репозитория -----------------------------------------------------------------
+def _copy_mode(qset: dict[str, Any]) -> Any:
+    return qset.get("copy", "archive")
+
+
 def clean_copy_path(qset: dict[str, Any], condition: dict[str, Any], temp_base: Path | None = None) -> Path:
     """``%TEMP%/nav_bench/<sha>-<hash>``; hash = exclude набора + имя условия + context_files условия (иначе копия
     от условия с картой осталась бы видна условию без карты, а граф graphify, собранный внутри копии, — условиям
     grep-read и qex)."""
-    key = json.dumps(
-        {
-            "exclude": sorted(qset["exclude"]),
-            "condition": condition["name"],
-            "context": sorted(condition["context_files"]),
-        }
-    )
+    fields = {
+        "exclude": sorted(qset["exclude"]),
+        "condition": condition["name"],
+        "context": sorted(condition["context_files"]),
+    }
+    if _copy_mode(qset) != "archive":  # ключ archive-копий не меняется: готовые копии остаются годными
+        fields["copy"] = _copy_mode(qset)
+    key = json.dumps(fields)
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
     base = Path(temp_base) if temp_base else Path(tempfile.gettempdir())
     return base / "nav_bench" / f"{qset['repo_sha']}-{digest}"
@@ -194,6 +206,39 @@ def _extract_archive(repo_root: Path, sha: str, dest: Path, err: TextIO) -> None
         print(f"предупреждение: при распаковке пропущено элементов: {skipped} (симлинки?)", file=err)
 
 
+def _git_raw(cwd: Path, *args: str, stdin: bytes | None = None) -> bytes:
+    done = subprocess.run(["git", "-C", str(cwd), *args], input=stdin, capture_output=True)
+    if done.returncode != 0:
+        stderr = done.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"git {' '.join(args[:2])} не удался: {stderr}")
+    return done.stdout
+
+
+def _clone_with_history(repo_root: Path, sha: str, dest: Path, exclude: list[str]) -> None:
+    """Клон ``repo_root`` в пустой ``dest``: дерево и история до ``sha``, больше ничего.
+
+    ``clone --shared`` -> ``checkout --detach sha`` -> все ссылки и reflog удалены (иначе ``git log --all`` дал бы
+    эталон) -> ``repack -a -d`` без ``-l`` забирает объекты из источника, после чего ``alternates`` убирается (иначе
+    ``Read`` источника достаёт любой файл) -> пути ``exclude`` помечены ``skip-worktree`` (иначе ``git status``
+    назвал бы удалённое; в индексе есть файлы, не каталоги). Сами пути удаляет вызывающий.
+    """
+    done = subprocess.run(["git", "clone", "-q", "--shared", str(repo_root), str(dest)], capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"git clone не удался: {done.stderr.decode('utf-8', errors='replace').strip()}")
+    _git_raw(dest, "checkout", "-q", "--detach", sha)
+    _git_raw(dest, "remote", "remove", "origin")
+    refs = _git_raw(dest, "for-each-ref", "--format=%(refname)").decode("utf-8").split()
+    if refs:
+        _git_raw(dest, "update-ref", "--stdin", stdin="".join(f"delete {ref}\n" for ref in refs).encode("utf-8"))
+    _git_raw(dest, "reflog", "expire", "--expire=now", "--all")
+    _git_raw(dest, "repack", "-a", "-d", "-q")
+    (dest / ".git" / "objects" / "info" / "alternates").unlink(missing_ok=True)
+    if exclude:
+        tracked = _git_raw(dest, "--literal-pathspecs", "ls-files", "-z", "--", *exclude)
+        if tracked:
+            _git_raw(dest, "update-index", "--skip-worktree", "-z", "--stdin", stdin=tracked)
+
+
 def prepare_clean_copy(
     qset: dict[str, Any],
     condition: dict[str, Any],
@@ -201,10 +246,11 @@ def prepare_clean_copy(
     temp_base: Path | None = None,
     err: TextIO | None = None,
 ) -> Path:
-    """Распаковывает ``git archive <repo_sha>`` без ``exclude`` и докладывает ``context_files`` условия.
+    """Копия на ``repo_sha`` без ``exclude`` + ``context_files`` условия. Набор ``copy``: ``archive`` (умолчание) —
+    ``git archive``, в копии нет .git; ``clone`` — клон с историей до ``repo_sha`` (``_clone_with_history``).
 
     Каталог собирается во временном соседе и переименовывается: недоделанная копия не переиспользуется.
-    Уже существующая копия с тем же sha+hash берётся как есть. В копии нет .git.
+    Уже существующая копия с тем же sha+hash берётся как есть.
     """
     err = err or sys.stderr
     repo_root = Path(repo_root)
@@ -216,7 +262,10 @@ def prepare_clean_copy(
         _rmtree_force(tmp)
     tmp.mkdir(parents=True)
     try:
-        _extract_archive(repo_root, qset["repo_sha"], tmp, err)
+        if _copy_mode(qset) == "clone":
+            _clone_with_history(repo_root, qset["repo_sha"], tmp, qset["exclude"])
+        else:
+            _extract_archive(repo_root, qset["repo_sha"], tmp, err)
         for rel in qset["exclude"]:
             target = tmp / rel
             if target.is_dir():
@@ -377,6 +426,25 @@ def check_requires(condition: dict[str, Any], run_root: Path, qex_home: Path | N
     return problems
 
 
+def check_history_copy(condition: dict[str, Any], run_root: Path, repo_sha: str) -> list[str]:
+    """Условие с ``bash_allow`` идёт только в копии с историей: ``git rev-parse HEAD`` копии начинается с ``repo_sha``
+    (sha набора бывает коротким). Копия без ``.git`` (``copy: archive``) или на другом коммите — проблема."""
+    if not condition["bash_allow"]:
+        return []
+    head = ""
+    if repo_sha and (Path(run_root) / ".git").exists():
+        done = subprocess.run(
+            ["git", "-C", str(run_root), "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8"
+        )
+        head = done.stdout.strip() if done.returncode == 0 else ""
+    if head and head.startswith(repo_sha):
+        return []
+    return [
+        f"в копии {run_root} нет истории git на repo_sha {repo_sha}: условие с bash_allow требует набор с "
+        '"copy": "clone"'
+    ]
+
+
 # --- Промпт и команда ----------------------------------------------------------------------------
 def build_prompt(questions: list[dict[str, Any]], condition: dict[str, Any], floor: bool = False) -> str:
     if floor:
@@ -396,22 +464,65 @@ def builtin_tools(allowed_tools: list[str]) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def unknown_placeholders(condition: dict[str, Any]) -> list[str]:
+    """Имена ``{имя}`` в ``bash_allow`` и ``prompt_prefix``, которых нет в ``PLACEHOLDERS``."""
+    texts = [*condition["bash_allow"], condition["prompt_prefix"]]
+    names = [name for text in texts for name in re.findall(r"\{(\w+)\}", text)]
+    return list(dict.fromkeys(name for name in names if name not in PLACEHOLDERS))
+
+
+def _posix(path: Path | str) -> str:
+    return str(path).replace("\\", "/")
+
+
+def resolve_placeholders(
+    text: str,
+    *,
+    repo_root: Path | str | None = None,
+    repo_sha: str | None = None,
+    run_root: Path | str | None = None,
+) -> str:
+    """Подставляет ``{repo_root}`` ``{repo_sha}`` ``{run_root}`` (пути — в posix-виде); не заданные остаются как есть,
+    кроме ``{run_root}``: без копии это ``.``."""
+    mapping = {"run_root": _posix(run_root or ".")}
+    if repo_root is not None:
+        mapping["repo_root"] = _posix(repo_root)
+    if repo_sha is not None:
+        mapping["repo_sha"] = repo_sha
+    return _subst(text, mapping)
+
+
 def build_command(
     condition: dict[str, Any],
     claude_bin: str = CLAUDE_BIN,
     *,
     mcp_config: Path | str | None = None,
     run_root: Path | str | None = None,
+    repo_root: Path | str | None = None,
+    repo_sha: str | None = None,
 ) -> list[str]:
-    """Командная строка одной сессии. Сам промпт идёт через stdin (длина, кавычки)."""
+    """Командная строка одной сессии. Сам промпт идёт через stdin (длина, кавычки).
+
+    Непустой ``bash_allow``: ``Bash`` в ``--tools``, ``Bash(<шаблон>)`` в ``--allowedTools``, а
+    ``--setting-sources user`` не грузит источники project и local: ``.claude/settings.json`` и
+    ``settings.local.json`` копии (в них ``Bash(*)`` и другие разрешения, которые сложились бы с ``--allowedTools``).
+    ``~/.claude/settings.json`` пользователя остаётся в силе. Возможный побочный эффект: проектный CLAUDE.md и
+    project-хуки в этом режиме не грузятся (для CLI не проверено живым прогоном). Остальное — аудит
+    ``audit_violations``.
+    """
+    resolve = functools.partial(resolve_placeholders, repo_root=repo_root, repo_sha=repo_sha, run_root=run_root)
+    bash_allow = [resolve(pattern) for pattern in condition["bash_allow"]]
     output_format = condition["output_format"]
     cmd = [claude_bin, "-p", "--output-format", output_format]
     if output_format == "stream-json":
         cmd.append("--verbose")
     cmd += ["--model", condition["model"], "--no-session-persistence"]
-    if condition["allowed_tools"]:
-        cmd += ["--tools", ",".join(builtin_tools(condition["allowed_tools"]))]
-        cmd += ["--allowedTools", ",".join(condition["allowed_tools"])]
+    if condition["allowed_tools"] or bash_allow:
+        tools = [*builtin_tools(condition["allowed_tools"]), *(["Bash"] if bash_allow else [])]
+        cmd += ["--tools", ",".join(dict.fromkeys(tools))]
+        cmd += ["--allowedTools", ",".join([*condition["allowed_tools"], *(f"Bash({item})" for item in bash_allow)])]
+    if bash_allow:
+        cmd += ["--setting-sources", "user"]
     if condition["disallowed_tools"]:
         cmd += ["--disallowedTools", ",".join(condition["disallowed_tools"])]
     if mcp_config is not None:
@@ -420,8 +531,7 @@ def build_command(
     if condition["max_budget_usd"] is not None:
         cmd += ["--max-budget-usd", str(condition["max_budget_usd"])]
     if condition["prompt_prefix"]:
-        prefix = condition["prompt_prefix"].replace("{run_root}", str(run_root or "."))
-        cmd += ["--append-system-prompt", prefix]
+        cmd += ["--append-system-prompt", resolve(condition["prompt_prefix"])]
     return cmd
 
 
@@ -503,7 +613,9 @@ def parse_session_output(stdout: str) -> dict[str, Any]:
 
     Имена полей — по документации (событие type=result: subtype, num_turns, duration_ms, result, is_error,
     total_cost_usd, usage{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens};
-    события type=assistant: message.content[] с блоками tool_use, message.usage). НЕ ПРОВЕРЕНО ЖИВЫМ ПРОГОНОМ.
+    события type=assistant: message.content[] с блоками tool_use, message.usage; события type=user с блоками
+    tool_result{tool_use_id, is_error}: у вызова Bash поле ``denied`` = is_error его результата).
+    НЕ ПРОВЕРЕНО ЖИВЫМ ПРОГОНОМ.
 
     Метрики токенов (определение — здесь, одно место):
       final_context_tokens — размер контекста на последнем шаге: input + cache_creation + cache_read из usage
@@ -520,12 +632,26 @@ def parse_session_output(stdout: str) -> dict[str, Any]:
         for block in ((event.get("message") or {}).get("content") or [])
         if isinstance(block, dict)
     ]
-    tool_uses = []
+    tool_uses: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
     for block in blocks:
         if block.get("type") == "tool_use":
             args = block.get("input") or {}
             target = args.get("file_path") or args.get("path") or args.get("pattern") or args.get("command")
-            tool_uses.append({"name": block.get("name"), "target": target})
+            entry: dict[str, Any] = {"name": block.get("name"), "target": target}
+            if str(block.get("name")).casefold() == "bash":
+                entry["denied"] = False  # станет True, если tool_result этого вызова — ошибка (отказ или код != 0)
+            tool_uses.append(entry)
+            if isinstance(block.get("id"), str):
+                by_id[block["id"]] = entry
+    for event in events:
+        if event.get("type") != "user":
+            continue
+        for block in (event.get("message") or {}).get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                entry = by_id.get(block.get("tool_use_id"), {})
+                if "denied" in entry:
+                    entry["denied"] = bool(block.get("is_error"))
 
     assistant_text = "\n".join(b["text"] for b in blocks if b.get("type") == "text" and isinstance(b.get("text"), str))
     final_text = result["result"] if result is not None and isinstance(result.get("result"), str) else assistant_text
@@ -562,20 +688,165 @@ def _tool_allowed(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name.casefold(), pattern.split("(")[0].casefold()) for pattern in patterns)
 
 
+BASH_CHAIN = (";", "&&", "||", "|", "&", "\n", ">", "<", "`", "$(")  # склейка команд, перенаправление, подстановка
+# --open-files-in-pager=<cmd> исполняет команду; git принимает и сокращения (--out=, --open=)
+BASH_LONG_FLAGS = ("--output", "--git-dir", "--work-tree", "--open-files-in-pager")
+BASH_SHORT_FLAG = "O"  # git grep -O<пейджер> / git log -O<файл>; регистр значим: -o — другой флаг
+# Короткие флаги, берущие значение, зависят от подкоманды (по `git help`). У git log/show/blame: -S -G -L (поиск,
+# диапазон), -e -f (шаблон, файл шаблонов), -A -B -C -m (контекст, число). У git grep -G и -L — флаги БЕЗ значения
+# (``-GOsh`` — это -G и -O, пейджер запускается), -S там нет вовсе, поэтому для git grep и всех неопознанных команд
+# набор уже: ``e f A B C m`` (fail-closed). В связке ``-xyz`` остаток токена после буквы со значением — значение:
+# ``-SOrder`` у log, ``-eObject``, ``-L:OnClick:f.py`` у log/blame не содержат флага -O. Буквы ``n`` нет ни в одном
+# наборе: у git grep ``-n`` — флаг без значения (``-nOsh`` — это -n и -O), а у git log ``-n<число>`` буквы O нет.
+BASH_VALUE_FLAGS_LOG = frozenset("SGLefABCm")
+BASH_VALUE_FLAGS_STRICT = frozenset("efABCm")
+BASH_LOG_COMMAND = re.compile(r"^\s*git\s+(log|show|blame)\b")
+BASH_TEXT_LIMIT = 80
+# Аудит видит слова shlex, а git получает слова ПОСЛЕ раскрытий shell ($'..', $"..", ${..}, $IFS, {a,b}, глоб, `~`,
+# обратная косая); shlex их не делает, поэтому `$'-O'cmd` для него чист, а git видит -O. Класс закрыт белым списком:
+# вне кавычек допустимы буквы, цифры и эти символы (они ничего не раскрывают ни в bash, ни в zsh), `~` — только внутри
+# слова (`HEAD~3`); внутри '...' допустимо всё; внутри "..." — всё, кроме `$` и обратной кавычки. Остальное — bash-meta.
+BASH_PLAIN = frozenset("_./:=@%+,-^ \t")
+BASH_EXPANDS_IN_DQ = frozenset("$`")
+
+
+def _bash_template_regex(template: str) -> re.Pattern[str]:
+    """``*`` -> группа ``(.*)`` (в том числе через перевод строки), остальное — литерал; регистр значим."""
+    return re.compile("(.*)".join(re.escape(part) for part in template.split("*")), re.DOTALL)
+
+
+def _norm_arg(text: str, prefixes: tuple[str, ...]) -> str:
+    """posix, casefold, без ``./`` и без префикса копии; ``..`` схлопывается."""
+    text = re.sub(r"/{2,}", "/", text.replace("\\", "/").casefold())  # ``a//b`` и ``//a`` — те же пути
+    for prefix in prefixes:
+        if text == prefix:
+            return ""
+        if text.startswith(prefix + "/"):
+            text = text[len(prefix) + 1 :]
+            break
+    while text.startswith("./"):
+        text = text[2:]
+    return posixpath.normpath(text) if text else ""
+
+
+def _short_cluster_has_open_flag(token: str, value_flags: frozenset[str]) -> bool:
+    """``-xyz`` слева направо: ``O`` до флага, берущего значение, — это -O; после такого флага остаток — значение."""
+    for char in token[1:]:
+        if char == BASH_SHORT_FLAG:
+            return True
+        if char in value_flags:
+            return False
+    return False
+
+
+def _has_shell_expansion(group: str) -> bool:
+    """``True`` — shell может построить слово иначе, чем shlex (см. ``BASH_PLAIN``); непарная кавычка — тоже."""
+    quote, escaped, prev = "", False, " "
+    for char in group:
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif quote == '"':
+            if char in BASH_EXPANDS_IN_DQ:
+                return True
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True  # `\"` не закрывает кавычку
+            elif char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "~":
+            if prev in " \t=:":  # начало слова или после `=`/`:` — тильда раскрывается
+                return True
+        elif not (char.isalnum() or char in BASH_PLAIN):
+            return True
+        prev = char
+    return bool(quote)
+
+
+def _bash_group_rule(
+    group: str, exclude: list[str], prefixes: tuple[str, ...], value_flags: frozenset[str]
+) -> str | None:
+    """Правило, которое нарушает текст группы ``*`` шаблона, или ``None``."""
+    try:
+        tokens = shlex.split(group, posix=True)
+    except ValueError:
+        tokens = group.split()
+    # shlex в posix-режиме съедает обратную косую (``a\\b`` -> ``ab``): пути ищутся и в «сырых» словах
+    for token in (
+        *tokens,
+        *group.split(),
+    ):  # путь: токен целиком и его куски по ``:`` и ``=`` (<rev>:<путь>, --opt=<путь>)
+        for piece in (token, *re.split(r"[:=]", token)):
+            path = _norm_arg(piece, prefixes)
+            if path and any(path == item or path.startswith(item + "/") for item in exclude):
+                return "bash-exclude"
+    if any(mark in group for mark in BASH_CHAIN):
+        return "bash-chain"
+    if _has_shell_expansion(group):  # иначе токены shlex ниже — не те слова, что получит git
+        return "bash-meta"
+    for token in tokens:
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if len(name) > 2 and any(flag.startswith(name) for flag in BASH_LONG_FLAGS):
+                return "bash-flag"
+        elif token.startswith("-") and _short_cluster_has_open_flag(token, value_flags):
+            return "bash-flag"
+    return None
+
+
+def _bash_rule(command: str, patterns: list[str], exclude: list[str], prefixes: tuple[str, ...]) -> str | None:
+    """``None`` — команда укладывается в шаблон, а тексты его групп ``*`` чисты; иначе имя нарушенного правила.
+    Литералы шаблона доверенные: проверяются только группы."""
+    exclude = [item for item in (_norm_arg(item, ()) for item in exclude) if item]
+    norm_prefixes = tuple(_norm_root(prefix) for prefix in prefixes)
+    # набор букв со значением — по подкоманде; git grep и всё неопознанное — строгий набор (fail-closed)
+    value_flags = BASH_VALUE_FLAGS_LOG if BASH_LOG_COMMAND.match(command) else BASH_VALUE_FLAGS_STRICT
+    first = "bash-pattern"
+    matched = False
+    for template in patterns:
+        found = _bash_template_regex(template).fullmatch(command.strip())
+        if found is None:
+            continue
+        rules = [_bash_group_rule(group, exclude, norm_prefixes, value_flags) for group in found.groups()]
+        bad = next((rule for rule in rules if rule), None)
+        if bad is None:
+            return None
+        if not matched:
+            first, matched = bad, True
+    return first
+
+
 def audit_violations(
     tool_uses: list[dict[str, Any]],
     allowed_tools: list[str],
     context_files: list[str],
     prefixes: tuple[str, ...],
     audit_reads: bool = False,
+    bash_allow: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> list[str]:
     """Аудит по списку разрешённого: любой tool_use вне ``allowed_tools`` — нарушение; при ``audit_reads`` и любое
-    чтение вне ``context_files``. Имена и пути сравниваются без учёта регистра, пути — в posix-виде."""
+    чтение вне ``context_files``. Имена и пути сравниваются без учёта регистра, пути — в posix-виде.
+
+    ``bash_allow`` (шаблоны с ``*``, уже с подставленными плейсхолдерами) делает ``Bash`` допустимым, но каждая его
+    команда проверяется: нет шаблона — ``bash-pattern``; в группе ``*`` путь из ``exclude`` — ``bash-exclude``, склейка
+    или перенаправление — ``bash-chain``, раскрытие shell (``$`` ``{`` ``*`` ``\\`` и т. п. вне кавычек, ``$`` в
+    ``"..."``) — ``bash-meta``, флаг ``--output`` ``-O`` ``--git-dir`` ``--work-tree`` — ``bash-flag``.
+    Текст нарушения: ``<правило>:<команда до 80 символов>``. Аудит видит только аргументы: ``git log -p`` без пути
+    покажет и исключённые пути, а ``git grep x HEAD`` — файлы из ``exclude`` на ``repo_sha``.
+    """
     allowed_paths = {score.normalize_path(path).casefold() for path in context_files}
     bad = []
     for use in tool_uses:
         name, target = str(use.get("name") or ""), use.get("target") or ""
-        if allowed_tools and not _tool_allowed(name, allowed_tools):
+        if bash_allow and name.casefold() == "bash":
+            rule = _bash_rule(str(target), bash_allow, exclude or [], prefixes)
+            if rule:
+                shown = str(target).replace("\n", "\\n")
+                bad.append(f"{rule}:{shown[:BASH_TEXT_LIMIT]}")
+        elif allowed_tools and not _tool_allowed(name, allowed_tools):
             bad.append(f"{name}:{target}")
         elif audit_reads and name.casefold() == "read":
             if score.normalize_path(target, prefixes).casefold() not in allowed_paths:
@@ -598,14 +869,23 @@ def _repeat_record(
     questions: list[dict[str, Any]],
     condition: dict[str, Any],
     prefixes: tuple[str, ...],
+    bash_allow: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> dict[str, Any]:
+    """``bash_allow`` — шаблоны условия с подставленными плейсхолдерами, ``exclude`` — из набора (для аудита Bash)."""
     parsed = parse_session_output(session.stdout)
     text = _answer_text(parsed, len(questions))
     scored = score.score_run(questions, text, prefixes)
     turns = parsed["turns"]
     max_turns = condition["max_turns"]
     violations = audit_violations(
-        parsed["tool_uses"], condition["allowed_tools"], condition["context_files"], prefixes, condition["audit_reads"]
+        parsed["tool_uses"],
+        condition["allowed_tools"],
+        condition["context_files"],
+        prefixes,
+        condition["audit_reads"],
+        bash_allow,
+        exclude,
     )
     error = ""
     if session.returncode != 0 or parsed["is_error"]:
@@ -810,14 +1090,15 @@ def run_bench(
     copy_fn: Callable[..., Path] = prepare_clean_copy,
     dirty_fn: Callable[[Path, list[str]], list[str]] = git_dirty,
     preflight_fn: Callable[[dict[str, Any], Path], list[str]] = check_requires,
+    history_fn: Callable[[dict[str, Any], Path, str], list[str]] = check_history_copy,
     today: str | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
 ) -> tuple[int, Path | None]:
     """Код выхода и путь записи. Код 2 — отказ (нет --yes, нет бюджета, нет индекса) или ошибка набора.
 
-    ``root`` — репозиторий-источник (из него ``git archive``); сессия идёт в чистой копии. ``floor`` — один
-    тривиальный вопрос теми же флагами: фиксированные накладные расходы.
+    ``root`` — репозиторий-источник (из него ``git archive`` или ``git clone``); сессия идёт в чистой копии.
+    ``floor`` — один тривиальный вопрос теми же флагами: фиксированные накладные расходы.
     """
     out = out or sys.stdout
     err = err or sys.stderr
@@ -834,6 +1115,14 @@ def run_bench(
         return 2, None
     if int(condition["expected_tokens"]) <= 0:
         print(f"ОШИБКА: у условия {condition['name']} expected_tokens должно быть > 0 (оценка стоимости).", file=err)
+        return 2, None
+    if _copy_mode(qset) not in COPY_MODES:
+        print("ОТКАЗ: copy набора должен быть archive или clone", file=err)
+        return 2, None
+    unknown = unknown_placeholders(condition)
+    if unknown:
+        for name in unknown:
+            print(f"ОТКАЗ: неизвестный плейсхолдер {{{name}}} (есть: {', '.join(PLACEHOLDERS)})", file=err)
         return 2, None
     problem = None if floor else baseline_set_problem(baseline, qset["name"])  # floor с любой базой: пороги вырезаны
     if problem:
@@ -859,11 +1148,13 @@ def run_bench(
     if dry_run:
         run_root = clean_copy_path(qset, condition)
         mcp = mcp_config_dest(run_root, condition) if condition["mcp_config"] else None
-        cmd = build_command(condition, mcp_config=mcp, run_root=run_root)
+        cmd = build_command(
+            condition, mcp_config=mcp, run_root=run_root, repo_root=root.resolve(), repo_sha=qset["repo_sha"]
+        )
         state = "уже есть" if run_root.exists() else "будет создана при реальном запуске"
         print(
             f"[dry-run] чистая копия {qset['repo_sha']} (без: {', '.join(qset['exclude']) or '-'}): "
-            f"{run_root} ({state})",
+            f"{run_root} ({state})" + (f", copy: {_copy_mode(qset)}" if _copy_mode(qset) != "archive" else ""),
             file=out,
         )
         print(f"[dry-run] промпт ({len(prompt)} симв.) идёт через stdin", file=out)
@@ -895,13 +1186,19 @@ def run_bench(
     except (OSError, RuntimeError) as exc:
         print(f"ОШИБКА чистой копии: {exc}", file=err)
         return 2, None
-    problems = preflight_fn(condition, run_root)
+    problems = [*history_fn(condition, run_root, qset["repo_sha"]), *preflight_fn(condition, run_root)]
     if problems:
         for problem in problems:
             print(f"ОТКАЗ: {problem}", file=err)
         return 2, None
     mcp = render_mcp_config(condition, root, run_root)
-    cmd = build_command(condition, mcp_config=mcp, run_root=run_root)
+    cmd = build_command(
+        condition, mcp_config=mcp, run_root=run_root, repo_root=root.resolve(), repo_sha=qset["repo_sha"]
+    )
+    bash_allow = [
+        resolve_placeholders(item, repo_root=root.resolve(), repo_sha=qset["repo_sha"], run_root=run_root)
+        for item in condition["bash_allow"]
+    ]
 
     # cwd сессии — run_root как есть, а агент может назвать и раскрытый путь (короткое %TEMP%, симлинк): оба вида
     prefixes = tuple(dict.fromkeys((str(run_root.resolve()), str(run_root))))
@@ -909,7 +1206,9 @@ def run_bench(
     for index in range(1, repeats + 1):
         print(f"повтор {index}/{repeats}...", file=err)
         session = runner(cmd, prompt, run_root)
-        rep = _repeat_record(index, session, qset["questions"], condition, prefixes)
+        rep = _repeat_record(
+            index, session, qset["questions"], condition, prefixes, bash_allow=bash_allow, exclude=qset["exclude"]
+        )
         if rep["error"]:
             print(f"повтор {index}: сессия с ошибкой (код {rep['returncode']}): {rep['error']}", file=err)
         repeat_records.append(rep)
@@ -1005,7 +1304,9 @@ def main(argv: list[str] | None = None) -> int:
             "--baseline", type=Path, default=None, help="запись базового прогона для относительных порогов"
         )
         run.add_argument("--out", type=Path, default=None, help="каталог записи (по умолчанию <root>/data/nav_bench)")
-        run.add_argument("--root", type=Path, default=Path("."), help="репозиторий-источник для git archive")
+        run.add_argument(
+            "--root", type=Path, default=Path("."), help="репозиторий-источник для git archive / git clone"
+        )
 
     rescore = sub.add_parser("score", help="пересчитать оценку записи прогона")
     rescore.add_argument("--run", required=True, type=Path)
