@@ -50,6 +50,8 @@ _LAYOUT_BLUEPRINT_KEYS = ("metadata",)
 
 # Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
 _EXPECTED_DIFFS = [
+    # Геометрия ячеек сима (word-layout P3): 9 ячеек в досягаемости сима; рецепт β — ORDER #21/#26.
+    ".blueprint.processes[6].plugins[0].config.first_y",
     ".blueprint.wires[0].source",
     ".description",
     ".devices[0].params.robot_params",
