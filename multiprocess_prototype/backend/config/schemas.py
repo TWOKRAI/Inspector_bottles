@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -192,6 +192,34 @@ class TelemetrySection(SchemaBase):
     ] = {}
 
 
+class ShutdownSection(SchemaBase):
+    """Сценарии закрытия системы (Task 1.4m, ADR-PMM-044).
+
+    ``pre_stop`` — манифест шагов, которые ProcessManager выполняет ПЕРЕД событиями
+    стопа (graceful; ``force`` шаги пропускает). Схему шага (``process``/``command``/
+    ``args``/``timeout_s``) секция НЕ дублирует: её проверяет ``parse_pre_stop`` в PM,
+    негодная запись там — ERROR и пропуск шага, а не отказ загрузки конфига. Поэтому
+    тип элемента — ``Any``. ``None`` (строка ``pre_stop:`` без значения) считается
+    пустым списком. ``user_overrides.yaml`` заменяет список целиком.
+    """
+
+    pre_stop: Annotated[
+        list[Any],
+        FieldMeta(
+            "Шаги перед остановкой",
+            info="Команды, которые PM шлёт процессам перед событиями стопа "
+            "(например «домой» робота). Пусто — стоп без шагов. Негодную запись "
+            "проверяет и логирует PM.",
+        ),
+    ] = Field(default_factory=list)
+
+    @field_validator("pre_stop", mode="before")
+    @classmethod
+    def _none_is_empty(cls, value: Any) -> Any:
+        """``pre_stop:`` без значения в yaml не должен ронять загрузку."""
+        return [] if value is None else value
+
+
 class SystemConfig(SchemaBase):
     """Корневая схема system.yaml."""
 
@@ -204,6 +232,7 @@ class SystemConfig(SchemaBase):
     backend_ctl: BackendCtlSection = BackendCtlSection()
     observability: ObservabilityConfig = ObservabilityConfig()
     telemetry: TelemetrySection = TelemetrySection()
+    shutdown: ShutdownSection = ShutdownSection()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

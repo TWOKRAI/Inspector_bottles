@@ -11,6 +11,7 @@ state bootstrap) останется здесь.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -751,6 +752,9 @@ class SystemBuilder:
                 "initial_state": initial_state,
                 "state_throttle_rules": throttle_rules,
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
+                # Task 1.4m: манифест pre_stop (читает PM, parse_pre_stop); ключ есть всегда,
+                # глубокая копия — Dict at Boundary, вложенный args не общий с sys_config.
+                "pre_stop": copy.deepcopy(sys_config.shutdown.pre_stop),
                 # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
                 # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
                 # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и

@@ -1099,6 +1099,14 @@
     },
     "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
     "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/phone_sketch.yaml",
+    "pre_stop": [
+      {
+        "args": {},
+        "command": "robot_park_all",
+        "process": "devices",
+        "timeout_s": 35
+      }
+    ],
     "presentation_overlay": null,
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
@@ -1223,6 +1231,16 @@
       },
       "processing": {
         "worker_pool_size": 0
+      },
+      "shutdown": {
+        "pre_stop": [
+          {
+            "args": {},
+            "command": "robot_park_all",
+            "process": "devices",
+            "timeout_s": 35
+          }
+        ]
       },
       "storage": {
         "batch_size": 100,
