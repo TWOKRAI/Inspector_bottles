@@ -220,7 +220,7 @@ module's decisions, gotchas, or open questions — rebuild the registry with
 
 For tracking formal ADR with numbered history → `<module>/DECISIONS.md`
 (see `.claude/plugins/core/templates/DECISIONS.template.md`). For one-off global
-architectural decisions → use `/dev:adr` (creates in `docs/claude/DECISIONS/`).
+architectural decisions → use `/dev:adr` (creates in `docs/decisions/`).
 
 ## Output format (when agent reports)
 

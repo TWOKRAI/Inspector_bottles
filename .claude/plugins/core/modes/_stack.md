@@ -166,4 +166,4 @@ web_search_deny_agents = cto                    # comma-separated subagent_type 
 > - **N1**: external API client must respect rate limits (no "bypass" workarounds).
 >
 > Numbering: R# = rules, N# = constraints, D# = decisions.
-> Detailed ADRs live in `docs/claude/DECISIONS/` or `<module>/DECISIONS.md`.
+> Detailed ADRs live in `docs/decisions/` or `<module>/DECISIONS.md`.
