@@ -119,6 +119,37 @@ def test_h1a_pop_after_set_random_is_refused():
     assert seq.snapshot() == _EMPTY_STATUS
 
 
+def test_h1a_set_random_then_load_keeps_new_head_against_stale_pop():
+    """H1(а): цепочка ``next`` (поколение g0) -> ``set_random`` -> ``load`` (режим снова list) -> устаревшие
+    ``pop(g0)``/``skip(g0)`` возвращают ``False``, голова нового списка цела (``fed 0``, ``remaining N``)."""
+    seq = DiscSequence()
+    seq.load([(CA, 0.0), (CE, 10.0)])
+    g0 = seq.next().generation
+    assert seq.set_random() == 2
+    assert seq.load([(CR, 5.0), (CE, 6.0), (CA, 7.0)]) == 0
+
+    assert seq.pop(g0) is False
+    assert seq.skip(g0) is False
+    assert seq.snapshot() == {"mode": "list", "total": 3, "fed": 0, "skipped": 0, "remaining": 3}
+    head = seq.next()
+    assert (head.letter, head.angle_deg, head.pos) == (CR, 5.0, 0)
+
+
+def test_h1a_set_random_bumps_generation():
+    """H1(а): ``set_random`` меняет поколение (контракт ``SequenceHead.generation``: растёт при ``load`` и
+    ``set_random``). Устаревший ``pop`` после ``set_random`` без ``load`` отсекается ещё и режимом, поэтому
+    само поколение наблюдается только через ``next().generation``. Ловит: ``set_random`` без ``generation += 1``."""
+    seq = DiscSequence()
+    seq.load([(CA, 0.0), (CE, 10.0)])
+    g0 = seq.next().generation
+    seq.set_random()
+    head = seq.next()
+    assert head.mode == "random"
+    assert head.generation > g0, (g0, head.generation)
+    seq.set_random()  # повторный выход из random — тоже новое поколение
+    assert seq.next().generation > head.generation
+
+
 def test_h1b_command_during_make_discards_object_and_keeps_force_defect(tmp_path):
     """H1(б): команда ``load(replace=True)`` пришла посреди ``factory.make()`` -> объект выброшен (не в ``active``),
     ``_next_id_n`` не сдвинут (следующий получает тот же ``object_id``), следующий успешный спавн — голова нового
@@ -152,8 +183,10 @@ def test_h1b_command_during_make_discards_object_and_keeps_force_defect(tmp_path
 
 def test_h1c_load_storm_keeps_counter_invariant(tmp_path):
     """H1(в): поток команд 200 раз ``load(replace=True)``, воркер тикает; в каждом ``snapshot()`` —
-    ``fed + skipped + remaining == total``. Держит ТОЛЬКО инвариант (диск, чей ``pop`` прошёл до ``load``,
-    вправе появиться после ответа на него — проверка букв по поколению в H1(а)/(б))."""
+    ``fed + skipped + remaining == total``. Это тест ЖИВОСТИ (нет исключений и зависания воркера под
+    нагрузкой), а НЕ атомарности: разрыв между полями (injection B1/B5) он не ловит — атомарность держит
+    ``test_h1d_*`` с проверкой после каждого ``release()``. Диск, чей ``pop`` прошёл до ``load``, вправе
+    появиться после ответа на него — проверка букв по поколению в H1(а)/(б)."""
     factory = _HookFactory(_preset(_write_catalog(tmp_path, [CA, CE, CR])))
     seq = DiscSequence()
     spawner = _spacing_spawner(factory, seq, max_active=10**6, spacing=(0.5, 0.5))
@@ -188,6 +221,67 @@ def test_h1c_load_storm_keeps_counter_invariant(tmp_path):
     assert not thread.is_alive(), "воркер завис"
     assert not errors, errors
     assert not violations, violations[:3]
+
+
+class _InvariantLock:
+    """Настоящий лок, у которого ``release()`` = «отпустить, затем проверить инвариант через ``snapshot()»
+    (``snapshot`` берёт этот же лок; флаг не даёт рекурсии). Проверка идёт в КРИТИЧЕСКОЙ ТОЧКЕ — сразу после
+    каждого отпускания, поэтому метод, меняющий состояние в двух ``with``, виден по промежуточному состоянию."""
+
+    def __init__(self, seq: DiscSequence) -> None:
+        self._real = threading.Lock()
+        self._seq = seq
+        self._checking = False
+        self.checks = 0
+        self.violations: list[dict] = []
+
+    def acquire(self, *args, **kwargs):
+        return self._real.acquire(*args, **kwargs)
+
+    def release(self) -> None:
+        self._real.release()
+        if self._checking:
+            return
+        self._checking = True
+        try:
+            snap = self._seq.snapshot()
+        finally:
+            self._checking = False
+        self.checks += 1
+        if snap["remaining"] < 0 or snap["fed"] + snap["skipped"] + snap["remaining"] != snap["total"]:
+            self.violations.append(snap)
+
+    def __enter__(self):
+        self._real.acquire()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.release()
+
+
+def test_h1d_every_public_method_leaves_counters_consistent_after_release():
+    """H1(г): после КАЖДОГО ``release()`` лока ``DiscSequence`` инвариант ``remaining >= 0`` и ``fed + skipped
+    + remaining == total`` держится на цепочке ``load -> next -> pop -> next -> skip -> load(replace) ->
+    pop -> load(replace) -> set_random``. Детерминированно, без потоков. Ловит методы, меняющие состояние в
+    двух ``with`` (``pop``: ``_pos`` и ``_fed`` раздельно; ``load``: ``_items`` и счётчики раздельно)."""
+    seq = DiscSequence()
+    guard = _InvariantLock(seq)
+    seq._lock = guard
+
+    seq.load([(CA, 1.0)] * 5)
+    for _ in range(4):
+        assert seq.pop(seq.next().generation) is True
+    assert seq.skip(seq.next().generation) is True  # список исчерпан: pos 5, fed 4, skipped 1
+    seq.load([(CE, 2.0), (CR, 3.0)], replace=True)  # новый короче старого pos
+    seq.load([(CA, 4.0)] * 6, replace=True)  # replace при неисчерпанном остатке
+    assert seq.pop(seq.next().generation) is True
+    assert seq.pop(seq.next().generation) is True
+    seq.load([(CE, 5.0)], replace=True)  # новый короче pos 2
+    assert seq.set_random() == 1
+
+    assert guard.checks >= 19, guard.checks  # шов реально сработал на каждом захвате
+    assert not guard.violations, guard.violations[:3]
+    assert seq.snapshot() == _EMPTY_STATUS
 
 
 # --------------------------------------------------------------------------- #
