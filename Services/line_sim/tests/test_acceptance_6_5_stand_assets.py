@@ -10,7 +10,7 @@ Purpose: проверить публичный контракт модуля `Se
 Источник: спека, разделы «Посылка», «DESIGN» (только публичные имена и литералы вывода) и
 «ACCEPTANCE». Тесты автора и тело модуля не читались. Все записи — только в tmp; реальный
 `data/line_sim` не трогается. Ожидаемые значения — литералы спеки (598x484x3, 410x484x4,
-300x300x4, 8 файлов в каталогах А К Р Х); эталон пикселей борта считается здесь же из
+300x300x4, 66 файлов в каталогах 33 букв); эталон пикселей борта считается здесь же из
 закоммиченной фикстуры по формуле усечения `np.median(row, axis=0).astype(np.uint8)`.
 
 Модуль-под-тестом импортируется лениво (фикстура `bsa`), чтобы до реализации каждый тест
@@ -39,8 +39,8 @@ __all__: list[str] = []
 
 _FIXTURE_PHOTO = Path(__file__).resolve().parent / "fixtures" / "belt_photo_full.png"
 
-# А К Р Х (кириллица); исходник в UTF-8.
-_LETTER_DIRS = ["А", "К", "Р", "Х"]
+# 33 буквы (кириллица, sorted); исходник в UTF-8.
+_LETTER_DIRS = list("ЁАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
 _LETTER_FILES = ["DejaVuSans_s3.png", "DejaVuSansMono_s3.png"]
 
 _PHOTO = "belt_photo_full.png"
@@ -49,7 +49,7 @@ _DISK = "letters_ink_disk.png"
 
 _LINE_PHOTO = "belt_photo_full.png 598x484x3"
 _LINE_TILE = "belt_tile.png 410x484x4"
-_LINE_LETTERS = "letters_ink 8 files, disk 300x300x4"
+_LINE_LETTERS = "letters_ink 66 files, disk 300x300x4"
 
 _RAIL_ROWS = list(range(0, 22)) + list(range(463, 484))
 _BODY = slice(22, 463)  # строки 22..462
@@ -61,7 +61,7 @@ _RUN_DEADLINE_S = 180.0
 
 
 def _all_files() -> list[str]:
-    """11 файлов сборки: относительные пути от `--data-dir` (posix-вид)."""
+    """69 файлов сборки: относительные пути от `--data-dir` (posix-вид)."""
     letters = [f"letters_ink/{d}/{f}" for d in _LETTER_DIRS for f in _LETTER_FILES]
     return [_PHOTO, _TILE, *letters, _DISK]
 
@@ -123,7 +123,7 @@ def _check_assets(data: Path) -> None:
         assert sorted(p.name for p in (root / d).iterdir()) == sorted(_LETTER_FILES), d
         for f in _LETTER_FILES:
             assert imread_unicode(root / d / f, cv2.IMREAD_UNCHANGED).size > 0
-    assert len(_letters_files(data)) == 8
+    assert len(_letters_files(data)) == 66
 
     disk = imread_unicode(data / _DISK, cv2.IMREAD_UNCHANGED)
     assert disk.shape == (300, 300, 4), disk.shape
@@ -244,7 +244,7 @@ def test_acc06b_second_run_skips_and_keeps_files(lifecycle: dict[str, object]) -
     ]
     before: dict = lifecycle["snap_first"]  # type: ignore[assignment]
     after: dict = lifecycle["snap_second"]  # type: ignore[assignment]
-    assert len(before) == 11 and set(before) == set(after)
+    assert len(before) == 69 and set(before) == set(after)
     for rel in before:
         assert after[rel][0] == before[rel][0], f"байты изменились: {rel}"
         assert after[rel][1] == before[rel][1], f"mtime_ns изменился: {rel}"
@@ -260,7 +260,7 @@ def test_acc07_force_rebuilds_everything(lifecycle: dict[str, object]) -> None:
     ]
     before: dict = lifecycle["snap_second"]  # type: ignore[assignment]
     after: dict = lifecycle["snap_forced"]  # type: ignore[assignment]
-    assert len(after) == 11
+    assert len(after) == 69
     for rel in before:
         assert after[rel][1] > before[rel][1], f"mtime_ns не вырос: {rel}"
 
@@ -281,7 +281,7 @@ def test_acc08_missing_letter_file_rebuilds_only_letters(bsa: ModuleType, built_
         f"skipped {_LINE_TILE}",
         f"built {_LINE_LETTERS}",
     ]
-    assert len(_letters_files(data)) == 8
+    assert len(_letters_files(data)) == 66
     _check_assets(data)
     for rel, (data_bytes, mtime) in snap.items():
         assert (data / rel).read_bytes() == data_bytes
@@ -335,8 +335,8 @@ def test_acc16_junk_in_letters_removed_and_disk_restored(bsa: ModuleType, built_
 
     assert rc == 0, err
     assert not junk.exists()
-    assert len(_letters_files(data)) == 8
-    assert sorted(p.name for p in _letters_files(data)) == sorted(_LETTER_FILES * 4)
+    assert len(_letters_files(data)) == 66
+    assert sorted(p.name for p in _letters_files(data)) == sorted(_LETTER_FILES * 33)
     assert imread_unicode(data / _DISK, cv2.IMREAD_UNCHANGED).shape == (300, 300, 4)
 
 
