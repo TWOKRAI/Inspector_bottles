@@ -2,7 +2,7 @@
 
 **Состояние: сделано (Task 2.2 + Task 3.4 + Task 3.6 + Task 3.5b плана line-sim).**
 
-**Обновлено:** 2026-09-27 — редактор слоёв 1.1b (`.yaml` в `preset_path`) и 1.2a (команды `preset.get/commit/preview`,
+**Обновлено:** 2026-11-09 — Task R1: команда `scene.sequence` (подача дисков по списку) и ключ `sequence` в `scene.status`; формы `data`, ответы и порядок подачи — в `README.md` плагина (раздел «Подача дисков по списку»). Ранее: 2026-09-27 — редактор слоёв 1.1b (`.yaml` в `preset_path`) и 1.2a (команды `preset.get/commit/preview`,
 горячая подмена фабрики). Ранее: 2026-09-23 — Task 3.6: фон-тайл едет с энкодером (с layer-render 1.3 фон задаётся только ключом `background_layers`; до этого — Task 3.4, заглушка-спрайт заменена движком `Services.line_sim`).
 
 | Что | Состояние |
@@ -14,6 +14,7 @@
 | Задания робота (Task 3.5b) | есть: команды `scene.job_done`/`scene.status`, конфиг `geometry`/`match_radius_mm`/`dup_window_s`, разбор очереди в начале `produce()` (`match_job` → `spawner.remove`); `tests/test_scene_source_task_3_5.py` (tester) — 7/7; `tests/test_scene_source_hazards_3_5.py` (автор) — 3/3 (200 заданий из 4 потоков во время `produce()`, `ecap` далеко впереди мира, два задания на объект в одном разборе) |
 | Границы | `tests/test_scene_source_acceptance.py::test_no_forbidden_imports` — 0 запрещённых импортов |
 | Направление ленты / точка входа (Task 5.3b) | есть: конфиг `belt_direction` → `SceneCompositor` (точку входа `entry_x_px` плагин выводит сам из `resolution_width`; неверное направление → откат на фон с записью в лог); `tests/test_scene_source_hazards.py::test_belt_direction_minus_one_object_moves_toward_smaller_x` (автор, WIRING реальным плагином+движком) |
+| Подача дисков по списку (Task R1) | есть: команда `scene.sequence` (`discs` / `discs` + `replace` / `random`), ключ `sequence {mode, total, fed, skipped, remaining}` в `scene.status`; подробности и ответы — в README; `correlation_id` игнорируется |
 | Поперечное смещение дисков (`sim-lateral-offset` 1.1) | есть: ключ `lateral_offset_px` (дефолт ядра `[0, 0]`, стенд `[10, 20]`), проверка в `configure()` вне try/except движка (`ValueError` с ключом и значением; ненулевой диапазон без `geometry.frame_down_*` — тоже), `lateral_px` в `sim.objects`, `px_per_mm` в `match_job`; `tests/test_acceptance_lateral_offset_plugin.py` (tester, слепой) |
 
 ## Долг / открытые вопросы
@@ -27,3 +28,4 @@
   break-injection ловит «`recent` без замка» 2 раза из 5, «снимок очереди → `clear()`» без
   расширенного окна не ловит вовсе (см. докстринг `test_scene_source_hazards_3_5.py`).
 - Живой двухпроцессный стенд с реальным движком (счётчик `line_filter` > 0) — шаг лида, не проверено в этом коммите.
+- Task R1: живая подача `scene.sequence` на стенде в этой задаче не выполнялась; проверка — по сценарию в README плагина.

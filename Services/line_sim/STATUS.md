@@ -4,7 +4,10 @@
 + Task 1.0 плана `plans/line-sim-layer-editor/phase-1-engine.md` (переносимые пути пресета: `base_dir`
 вместо абсолютизации строк, LS-013) + Task 1.1b (диск и буква раздельными слоями: `class://`,
 `color_rgb`, `tools/make_font_letters.py`, пресет `letters_layered.yaml`, LS-014) + Task 1.2a
-(`ObjectSpawner.set_factory`, `ObjectFactory.force_defect_pending` — горячая подмена пресета в `scene_source`).
+(`ObjectSpawner.set_factory`, `ObjectFactory.force_defect_pending` — горячая подмена пресета в `scene_source`)
++ Task R1 (подача дисков по списку, `plans/line-sim/tasks/R1.md`) и R1b (ассеты на 33 буквы).
+
+**Обновлено:** 2026-11-09 — Task R1 и R1b.
 
 | Часть | Статус |
 |---|---|
@@ -23,6 +26,8 @@
 | `core/truth.py` (`TruthLedger`) — поймал/пропустил/дубль/ложная тревога/ошибка захвата | готово (Task 5.2; 5.1b — `false_alarm_frozen_xy`: ложная тревога в той же точке X/Y с другим `ecap`, окно `frozen_window_s` 10 с по `job.t`, радиус `frozen_radius_mm` 5 мм); подключение к `Plugins/sim/scene_source` — команды `truth.status`/`truth.reset`, уровни `truth_*` (ADR-PM-038, прореживание `truth_publish_s`) |
 | `SceneCompositor(belt_direction, entry_x_px)` + `tools/make_letter_catalog.py` — сим подогнан под боевой рецепт `hikvision_letter_robot.yaml` | готово (Task 5.3b, контракт §4.1–§4.2); согласованность геометрии сима с `bilinear_px_to_mm` прототипа сторожит `apps/line_sim/tests/test_fit_letter_robot.py` |
 | `SceneCompositor.render` делегирует `layer_render.render_scene` (отсечение, паспорта и геометрия ленты остались здесь); `background_bgr` без стека проверяет `SolidFill` в `__init__` — три `int` 0..255, иначе `ValueError` | готово (layer-render Task 2.5, LR-003); кадры и паспорта побайтно прежние — литералы sha256 в `Services/layer_render/tests/test_acceptance_2_5_render_scene.py` |
+| Подача дисков по списку (Task R1): `DiscSequence`, `ObjectSpawner(sequence=)`, `ObjectFactory.make(class_index=, angle_deg=)` и `render(...)`; константы `SEQUENCE_MIN_INTERVAL_S = 1.0`, `SEQUENCE_MAX_LEN = 200` | готово (`plans/line-sim/tasks/R1.md`); экспорта через `core/__init__` нет сознательно; протокол команды — `Plugins/sim/scene_source/README.md` |
+| Ассеты сима на 33 буквы русского алфавита (Task R1b): `tools/build_stand_assets.py`, `_LETTERS` — 33 буквы; `data/line_sim/letters_ink` — 66 файлов, диск — `data/line_sim/letters_ink_disk.png` | готово (Task R1b) |
 | Поперечное смещение дисков: `ObjectPassport.lateral_px`, `ObjectSpawner(lateral_offset_px)`, `cy` компоновщика, `BeltGeometry.frame_down_*` + поперечное слагаемое `object_robot_xy` | готово (`plans/sim-lateral-offset.md` Task 1.1); `tests/test_acceptance_lateral_offset.py` (tester, слепой), `tests/test_lateral_offset_hazards.py` (автор). Известное расхождение: изотропия сима 8.163 px/мм против 6.135 px/мм рецепта по вертикали — ≈0.8 мм на 20 px, не чинится |
 
 **Известное ограничение (2026-09-22):** эталоны дисков-букв реально не сняты на этой машине —

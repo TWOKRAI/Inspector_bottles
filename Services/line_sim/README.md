@@ -26,8 +26,9 @@ from Services.line_sim import (
 | `SceneCompositor` | `core/scene_compositor.py` | конкретная реализация Protocol (Task 3.4): `SceneCompositor(spawner, px_per_mm, belt_y_px, background_bgr=(60,60,60), belt_direction=1, entry_x_px=0.0, background_layers=None)`, `render(now_encoder, camera_rect) -> (frame_rgb, passports)`; `background_layers` — стек слоёв фона из `Services/layer_render` (цвета RGB), единственный способ положить тайл под объекты; `belt_direction`/`entry_x_px` — Task 5.3b |
 | `LayeredObject` | `core/layered_object.py` | `LayeredObject(passport, layers, rng)`; `LayeredObject.from_rendered(rendered, *, object_id, spawn_encoder)` — паспорт из `RenderedObject` без нового розыгрыша (Task 2.4b); `render()` без аргументов |
 | `ScenePreset` | `core/preset.py` (реэкспорт; определён в `Services/layer_render/preset.py`, Task 2.4a; в `core/preset.py` остался блок стенда: `REPO_ROOT`, `resolve_repo_path`, `apply_defect_override`, `load_scene_preset`) | Pydantic-конфиг: `catalog_dir`, `angle_range_deg`, `defect_probability`, `layers` — `from_dict`/`to_dict`/`from_yaml`/`to_yaml` |
-| `ObjectFactory` | `core/factory.py` | подкласс `Services.layer_render.factory.ObjectFactory` (Task 2.4b): `render(rng, ...) -> RenderedObject` и `nominal_layers` — в базе; здесь `make(object_id, spawn_encoder, rng) -> LayeredObject`, `force_defect_next()`, `force_defect_pending` — Task 3.2 |
-| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200, lateral_offset_px=(0.0, 0.0))` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3; `set_flow(*, interval_s=None, spacing_mm=None)`, `paused`/`flow` (read-only) — Task 6.1 |
+| `ObjectFactory` | `core/factory.py` | подкласс `Services.layer_render.factory.ObjectFactory` (Task 2.4b): `render(rng, ...) -> RenderedObject` и `nominal_layers` — в базе; здесь `make(object_id, spawn_encoder, rng, *, class_index=None, angle_deg=None) -> LayeredObject` (Task R1: `class_index`/`angle_deg` — подача дисков по списку), `force_defect_next()`, `force_defect_pending` — Task 3.2 |
+| `ObjectSpawner` | `core/spawner.py` | `ObjectSpawner(factory, *, interval_s=None, spacing_mm=None, scene_length_mm, max_active=200, lateral_offset_px=(0.0, 0.0), sequence=None)` — ровно один из `interval_s`/`spacing_mm` (Task 3.3a, LS-010); `sequence: DiscSequence | None` — список дисков (Task R1): `tick(now_encoder, now_wall_s, rng)`, `active_objects()`, `set_paused(bool)`, `force_defect_next()` — Task 3.3; `set_flow(*, interval_s=None, spacing_mm=None)`, `paused`/`flow` (read-only) — Task 6.1 |
+| `DiscSequence`, `SequenceBusy`, `SEQUENCE_MIN_INTERVAL_S`, `SEQUENCE_MAX_LEN` | `core/spawner.py` (не экспортированы через `core/__init__` сознательно — импорт напрямую) | Task R1: список дисков `[(буква, угол), ...]` под одним `threading.Lock`: `load(discs, *, replace=False) -> dropped`, `next()`, `pop(gen)`/`skip(gen)`, `set_random()`, `snapshot()`; `SequenceBusy(remaining)`; `SEQUENCE_MIN_INTERVAL_S = 1.0` (не чаще одного диска в секунду, реальное время), `SEQUENCE_MAX_LEN = 200` (длина списка) |
 | `validate_flow` | `core/spawner.py` | `validate_flow(interval_s, spacing_mm) -> None` — проверка режима отсчёта спавна (ровно один задан, `0 < lo <= hi`), вынесена из `ObjectSpawner.__init__` и звана также из `set_flow` (Task 6.1) — не экспортирован через `Services.line_sim`/`Services.line_sim.core`, импорт напрямую из `core.spawner` |
 | `encoder_to_offset_mm` | `core/belt.py` | `(enc_now - spawn_enc) * FACTOR_MM`; константы — из `Services.robot_comm.core.registers` |
 
@@ -108,6 +109,11 @@ YAML пишется `yaml.safe_dump` — комментарии не сохра�
 не варьируются между объектами). Слои объекта: `base` (`mode="static"`, спрайт класса) →
 слои пресета (резолвленные) → **`damaged`** (`mode="defect"`) — дефект строго последним,
 как того требует LS-006 (иначе `defect=None` не будет побитово равен объекту без дефект-слоя).
+
+Task R1: `class_index=` и `angle_deg=` (keyword-only, по умолчанию `None`) заменяют свой розыгрыш: заданный
+класс не тянет `rng.integers`, заданный угол не тянет `rng.uniform` (остальной порядок розыгрышей тот же).
+`None` — прежний путь, байт в байт. Угол — `int | float` не `bool`, конечный, в `[0, 360)`; неверный
+класс или угол — `ValueError` до любого розыгрыша.
 
 `damaged` — occlusion-пятно (`dataset_gen.core.augment.apply_occlusion`): тёмно-серый
 прямоугольник ~35% меньшей стороны базового спрайта, смещённый к верхнему левому углу,
@@ -241,6 +247,23 @@ float}` — read-only свойства для `scene.status`, чтобы не л
 `set_flow()`, как и `set_paused()`/`force_defect_next()`, вызывается ТОЛЬКО из потока
 воркера кадров — команды кладут намерение в очередь и не трогают спавнер напрямую (см.
 `Plugins/sim/scene_source/README.md`).
+
+### Подача дисков по списку (Task R1)
+
+`ObjectSpawner(..., sequence=DiscSequence())`: пока список не исчерпан, каждый спавн берёт его голову —
+буква идёт в `class_index` (имя папки класса текущей фабрики, сравнение строк точное), угол — в
+`angle_deg` (как есть, без розыгрыша). Исчерпанный список — спавн стоит до следующей загрузки; к случайным
+спавнер сам не возвращается. Пороги потока (`interval_s`/`spacing_mm`) и пауза действуют как обычно.
+
+- `DiscSequence` — единственное состояние, которое трогают два потока: команда (`load`/`set_random`/
+  `snapshot`) и воркер кадров (`next`/`pop`/`skip`). Каждый метод — одна критическая секция под одним
+  локом. `load` без `replace` при неисчерпанном списке → `SequenceBusy(remaining)`, список не меняется.
+- Поколение (`generation`) меняется при `load`/`set_random`. Воркер снимает голову со снимком поколения;
+  если команда сменила список во время `make()`, собранный объект выбрасывается, и `pop`/`skip` чужого
+  списка не засчитывают.
+- Интервал между дисками — `SEQUENCE_MIN_INTERVAL_S` (1.0 с, `time.monotonic()`), длина — `SEQUENCE_MAX_LEN`
+  (200). Это константы модуля, не ключи конфига. Протокол команды `scene.sequence` — в
+  `Plugins/sim/scene_source/README.md`.
 
 ## ObjectSpawner — известные ограничения и потокобезопасность
 
