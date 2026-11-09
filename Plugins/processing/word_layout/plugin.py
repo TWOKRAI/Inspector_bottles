@@ -165,7 +165,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
     def _handle_item(self, item: dict) -> dict:
         word = self._resolve_word(item)
         if not word.strip():
-            self._note_skip_once(item, "слово не задано")
+            self._note_skip_guarded(item, "слово не задано")
             return item
         self._ensure_assembler(word, self._word_src)
         assert self._assembler is not None
@@ -178,7 +178,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
 
         if self._assembler.done:
             self._reg.done = True
-            self._note_skip_once(item, "слово готово")
+            self._note_skip_guarded(item, "слово готово")
             return item
 
         # Триггер-режим: сигнал на порту взводит однократный взвод.
@@ -270,6 +270,13 @@ class WordLayoutPlugin(ProcessModulePlugin):
         """Строка журнала диска: буква, угол сети (как есть), решение."""
         self._ctx.log_info(f"WordLayoutPlugin: диск '{self._label_of(pred)}' {_fmt1(pred['angle_deg'])}° → {decision}")
 
+    def _note_skip_guarded(self, item: dict, reason: str) -> None:
+        """``_note_skip_once`` под защитой: ошибка журнала не должна ронять решение плагина."""
+        try:
+            self._note_skip_once(item, reason)
+        except Exception as exc:  # noqa: BLE001 — журнал вторичен; значение входа в сообщение не кладём
+            self._ctx.log_error(f"WordLayoutPlugin: строка пропуска '{reason}' не записана: {type(exc).__name__}")
+
     def _note_skip_once(self, item: dict, reason: str) -> None:
         """Строка пропуска на выходах «слово не задано» / «слово готово» — один раз на диск.
 
@@ -283,8 +290,11 @@ class WordLayoutPlugin(ProcessModulePlugin):
             if pred is not None and trig is not None and trig is not False:
                 self._log_disk(pred, f"пропуск: {reason}")
             return
-        if pred is None:  # пауза: следующий диск — новый, даже с той же буквой
-            self._logged_skip_key = None
+        if pred is None:
+            # Пауза без track_id: следующий диск — новый, даже с той же буквой. Ключ track_id на паузе
+            # не трогаем: моргнувшая уверенность или контрольный item — тот же диск, второй строки нет.
+            if self._logged_skip_key is not None and self._logged_skip_key[0] == "label":
+                self._logged_skip_key = None
             return
         key = self._disk_key(pred, self._disk_id(item))
         if key == self._logged_skip_key:

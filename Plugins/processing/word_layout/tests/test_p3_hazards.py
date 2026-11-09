@@ -157,3 +157,131 @@ def test_g6_slots_of_independent_of_filling() -> None:
     assert asm.slots_of("Е") == [1, 3, 8]
     assert asm.slots_of(" е ") == [1, 3, 8]
     assert asm.slots_of("А") == []
+
+
+# --- Р1: «один раз на диск» на выходах «не задано» / «готово» ----------------
+# Пауза (item без уверенного предсказания) сбрасывает ключ диска только без track_id.
+
+_NOT_SET = "пропуск: слово не задано"
+_DONE = "пропуск: слово готово"
+_WEAK = (
+    {"confidence": 0.1},
+    {"below_threshold": True},
+)
+
+
+def _plain(label: str, tid: int | None = None, **pred_over: object) -> dict:
+    """Диск (tid не None — с sidecar.track_id); pred_over правит предсказание."""
+    pred: dict = {"label": label, "confidence": 0.9, "angle_deg": 0.0, "angle_valid": True}
+    pred.update(pred_over)
+    item: dict = {"predictions": [pred], "pick_xy": dict(_PICK)}
+    if tid is not None:
+        item["sidecar"] = {"track_id": tid}
+    return item
+
+
+def _count(services: MockProcessServices, tail: str) -> int:
+    return sum(1 for e in services.logs if "диск '" in e["msg"] and e["msg"].endswith(tail))
+
+
+def _done_layout(*, with_tid: bool) -> tuple[WordLayoutPlugin, MockProcessServices]:
+    """Плагин, у которого слово «ПЕРЕМИРИЕ» собрано полностью (диски tid 1-9 или без track_id)."""
+    layout, services = _layout()
+    for n, label in enumerate(_WORD, start=1):
+        assert "robot_job" in layout.process([_plain(label, n if with_tid else None)])[0]
+    assert layout._reg.done is True
+    return layout, services
+
+
+def test_r1_no_tid_pause_resets_key_word_not_set() -> None:
+    layout, services = _layout(target_word="")
+    layout.process([_plain("Р")])
+    layout.process([{"predictions": []}])
+    layout.process([_plain("Р")])
+    assert _count(services, _NOT_SET) == 2
+
+
+def test_r1_no_tid_pause_resets_key_word_done() -> None:
+    layout, services = _done_layout(with_tid=False)
+    layout.process([_plain("Р")])
+    layout.process([_plain("Р")])  # тот же диск, кадр подряд — строки нет
+    assert _count(services, _DONE) == 1
+    layout.process([{"predictions": []}])
+    layout.process([_plain("Р")])
+    assert _count(services, _DONE) == 2
+
+
+def test_r1_tid_control_item_without_sidecar_no_second_line() -> None:
+    layout, services = _layout(target_word="")
+    layout.process([_plain("Р", 1)])
+    layout.process([{"predictions": []}])  # контрольный item: без sidecar, без предсказания
+    layout.process([_plain("Р", 1)])
+    assert _count(services, _NOT_SET) == 1
+
+
+def test_r1_tid_weak_prediction_no_second_line_word_not_set() -> None:
+    for weak in _WEAK:
+        layout, services = _layout(target_word="")
+        layout.process([_plain("Р", 1)])
+        layout.process([_plain("Р", 1, **weak)])
+        layout.process([_plain("Р", 1)])
+        assert _count(services, _NOT_SET) == 1, weak
+
+
+def test_r1_tid_pause_no_second_line_word_done() -> None:
+    layout, services = _done_layout(with_tid=True)
+    layout.process([_plain("Е", 10)])
+    layout.process([{"predictions": []}])
+    layout.process([_plain("Е", 10)])
+    assert _count(services, _DONE) == 1
+    for weak in _WEAK:
+        layout.process([_plain("Е", 10, **weak)])
+        layout.process([_plain("Е", 10)])
+    assert _count(services, _DONE) == 1
+
+
+def test_r1_weak_frame_is_not_a_disk_but_same_disk_confident_is() -> None:
+    for weak in _WEAK:
+        layout, services = _layout(target_word="")
+        layout.process([_plain("Р", 1, **weak)])
+        assert _count(services, _NOT_SET) == 0, weak
+        layout.process([_plain("Р", 1)])  # парная достижимость: уверенный диск строку даёт
+        assert _count(services, _NOT_SET) == 1, weak
+
+        done, done_services = _done_layout(with_tid=True)
+        done.process([_plain("Е", 10, **weak)])
+        assert _count(done_services, _DONE) == 0, weak
+        done.process([_plain("Е", 10)])
+        assert _count(done_services, _DONE) == 1, weak
+
+
+# --- Р3: ошибка журнала не роняет решение плагина ----------------------------
+
+
+def test_r3_broken_prediction_does_not_crash_skip_exits() -> None:
+    for broken in ({"angle_deg": None}, {"confidence": None}):
+        layout, services = _layout(target_word="")
+        item = _plain("Р", 1, **broken)
+        assert layout.process([item]) == [item]
+        errors = [e["msg"] for e in services.logs if e.get("level") == "ERROR"]
+        assert errors == ["WordLayoutPlugin: строка пропуска 'слово не задано' не записана: TypeError"], broken
+        assert _count(services, _NOT_SET) == 0
+
+        done, done_services = _done_layout(with_tid=True)
+        item = _plain("Е", 10, **broken)
+        assert done.process([item]) == [item]
+        errors = [e["msg"] for e in done_services.logs if e.get("level") == "ERROR"]
+        assert errors == ["WordLayoutPlugin: строка пропуска 'слово готово' не записана: TypeError"], broken
+        assert _count(done_services, _DONE) == 0
+
+
+# --- Р4: метка с пробелами и в нижнем регистре --------------------------------
+
+
+def test_r4_label_normalized_in_line() -> None:
+    layout, services = _layout()
+    assert "robot_job" in layout.process([_plain(" р ", 1)])[0]
+    layout.process([_plain(" а ", 2)])
+    lines = [e["msg"] for e in services.logs if "диск '" in e["msg"]]
+    assert lines[0].startswith("WordLayoutPlugin: диск 'Р' 0.0° → ячейка 2:")
+    assert lines[1] == "WordLayoutPlugin: диск 'А' 0.0° → пропуск: нет в слове 'ПЕРЕМИРИЕ'"
