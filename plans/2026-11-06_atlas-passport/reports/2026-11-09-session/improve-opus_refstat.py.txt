@@ -1,0 +1,23 @@
+import json, sys
+d = json.load(open(sys.argv[1]))
+def walk(o, path=""):
+    if isinstance(o, dict):
+        yield path, o
+        for k, v in o.items():
+            yield from walk(v, path + "/" + k)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            yield from walk(v, path + "[]")
+print("top keys", list(d.keys()) if isinstance(d, dict) else type(d))
+mem = [o for p, o in walk(d) if p.endswith("/members[]")]
+inh = [o for p, o in walk(d) if p.endswith("/inherited_members[]")]
+print("members", len(mem), "with line", sum("line" in m for m in mem), "dunder", sum(m.get("name","").startswith("__") for m in mem))
+print("inherited", len(inh), "with line", sum("line" in m for m in inh), "with path", sum("path" in m for m in inh))
+bases = [o for p, o in walk(d) if "bases" in o]
+print("objects with bases", len(bases), "bases forms", {type(b).__name__ for o in bases for b in o["bases"]})
+specs = [o for p, o in walk(d) if p.endswith("/spec")]
+print("specs", len(specs), "levels", sorted({s.get("level") for s in specs}))
+for s in specs: print("  ", s.get("level"), s.get("id"), s.get("line"), "io=%d" % len(s.get("io") or []))
+paths = sorted({s.get("path") for s in specs if s.get("path")})
+print("paths", paths)
+print("base_manager mentioned:", "base_manager" in open(sys.argv[1]).read())

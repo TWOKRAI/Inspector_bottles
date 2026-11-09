@@ -1,0 +1,236 @@
+"""Офлайн-пересчёт hits записи r1 (grep-read) при вариантах правила. Без запуска бенча, без правок репозитория.
+
+Запуск: cd /Users/twokrai/Project_code/Inspector_bottles && PYTHONUTF8=1 .venv/bin/python <этот файл> [table|variants|all]
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+import sys
+from pathlib import Path
+
+REPO = Path("/Users/twokrai/Project_code/Inspector_bottles")
+sys.path.insert(0, str(REPO))
+from scripts.nav_bench import score  # noqa: E402  (читаем score.py как есть)
+
+RECORD = REPO / "data/nav_bench/2026-11-09_r1_grep-read.json"
+QSET = REPO / "scripts/nav_bench/questions/r1.json"
+
+rec = json.loads(RECORD.read_text(encoding="utf-8"))
+qset = json.loads(QSET.read_text(encoding="utf-8"))
+PREFIXES = tuple(rec["prefixes"])
+QUESTIONS = qset["questions"]
+assert QUESTIONS == rec["questions"], "r1.json разошёлся с записью"
+
+# ---------------------------------------------------------------- разбор ответов
+
+RUNS: list[dict[str, dict]] = []  # по повторам: id -> ответ (как parse_answers)
+for r in rec["repeats"]:
+    RUNS.append(score.parse_answers(r["final_text"]))
+
+
+def answer_of(run_idx: int, qid: str):
+    return RUNS[run_idx].get(score._key(qid))
+
+
+# ---------------------------------------------------------------- V0 и проверка «читаю score.py как есть»
+
+
+def v0_verdict(q, ans, questions=None):
+    return score.classify(q, ans, PREFIXES)
+
+
+def check_v0_matches_record() -> None:
+    for i, r in enumerate(rec["repeats"]):
+        recorded = [row["verdict"] for row in r["score"]["per_question"]]
+        mine = [v0_verdict(q, answer_of(i, q["id"])) for q in QUESTIONS]
+        assert recorded == mine, (i, recorded, mine)
+
+
+# ---------------------------------------------------------------- вспомогательное
+
+
+def locs_of(ans) -> list[tuple[str, int | None, int | None]]:
+    if ans is None:
+        return []
+    return [score.parse_location_range(loc, PREFIXES) for loc in ans["locations"]]
+
+
+def entry_status(exp: dict, ans, tol: int | None = None) -> str:
+    """Статус одной записи эталона для таблицы причин."""
+    want = score.normalize_path(exp["path"])
+    t = exp.get("tolerance", score.TOLERANCE_LINES) if tol is None else tol
+    same = [(s, e) for (p, s, e) in locs_of(ans) if p == want]
+    if not same:
+        return "файл не назван"
+    line = exp.get("line")
+    if line is None:
+        return "ok"
+    ok = any(s is not None and s <= line + t and e >= line - t for s, e in same)
+    if ok:
+        return "ok"
+    if all(s is None for s, _ in same):
+        return "файл без строки"
+    shown = ",".join(f"{s}" if s == e else f"{s}-{e}" for s, e in same if s is not None)
+    return f"строка {shown} вне [{line - t},{line + t}]"
+
+
+# ---------------------------------------------------------------- V1: файл-уровень
+
+
+def v1_hit(q, ans) -> bool:
+    expected = q["expected"]
+    named = {p for (p, _, _) in locs_of(ans)}
+    paths = [score.normalize_path(e["path"]) for e in expected]
+    ok = [p in named for p in paths]
+    return all(ok) if q.get("require", "any") == "all" else any(ok)
+
+
+# ---------------------------------------------------------------- V2: частичный зачёт
+
+
+def symbol_in_text(symbol: str | None, ans) -> bool:
+    return bool(symbol and ans and re.search(r"(?<!\w)" + re.escape(symbol) + r"(?!\w)", ans["answer"], re.I))
+
+
+def v2_question_score(q, ans, *, tol: int = 10, use_symbol: bool = False, path_only: float = 0.0) -> float:
+    expected = q["expected"]
+    total = 0.0
+    for exp in expected:
+        st = entry_status(exp, ans, tol)
+        if st == "ok":
+            total += 1.0
+        elif st != "файл не назван":  # файл назван, строка не в окне
+            if use_symbol and symbol_in_text(exp.get("symbol"), ans):
+                total += 1.0
+            else:
+                total += path_only
+    return total / len(expected)
+
+
+# ---------------------------------------------------------------- V3: исправленный эталон
+
+EDITS = {
+    # R3: validate() — изменение в теле функции (def 979 .. конец 1217 на repo_sha), окно = вся функция
+    ("R3", "validate"): {"line": 1098, "tolerance": 119},
+    # R5: область — шапка модульной докстринги + вставленные 2 строки (строки 1-11)
+    ("R5", "Stability"): {"line": 6, "tolerance": 5},
+    ("R5", "Public API"): {"line": 6, "tolerance": 5},
+    # R7: adr.md переписан целиком — адрес = файл
+    ("R7", "description"): {"line": None},
+}
+# V3b: добавка «вопрос просит только файл» -> адрес = путь (line: null)
+EDITS_FILE_ONLY = {
+    ("R1", "Итог плана"): {"line": None},  # «which plan skeleton file»
+    ("R4", "testpaths"): {"line": None},  # «in which project config file»
+    ("R7", "PR"): {"line": None},  # «Which files?»
+}
+ADD = {
+    # R8: вернуть четвёртую строку (task-result.md:58, `git grep -F 'atlas pack'` на repo_sha)
+    "R8": {"path": ".claude/plugins/dev/templates/task-result.md", "line": 58, "symbol": "atlas pack"},
+}
+
+
+def edited_questions(file_only: bool = False, groups: tuple[str, ...] | None = None) -> list[dict]:
+    """groups: ограничить правки вопросами (None - все)."""
+    edits = {**EDITS, **(EDITS_FILE_ONLY if file_only else {})}
+    qs = copy.deepcopy(QUESTIONS)
+    for q in qs:
+        if groups is not None and q["id"] not in groups:
+            continue
+        for exp in q["expected"]:
+            patch = edits.get((q["id"], exp.get("symbol")))
+            if patch:
+                exp.update(patch)
+        if q["id"] in ADD:
+            q["expected"].append(copy.deepcopy(ADD[q["id"]]))
+    return qs
+
+
+def dump_sets(outdir: Path) -> None:
+    for name, fo in (("r1.V3.json", False), ("r1.V3b.json", True)):
+        data = copy.deepcopy(qset)
+        data["questions"] = edited_questions(fo)
+        (outdir / name).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------- вывод
+
+
+def verdict_line(name: str, per_run: list[int], false=None) -> str:
+    mn = min(per_run)
+    k1 = "Kill-1 по hits: " + (">=7 (условие hits выполнено)" if mn >= 7 else f"<7 (hits.min {mn})")
+    k2 = "Kill-2: " + ("зелёная" if mn >= 7 else "жёлтая" if mn == 6 else "СТОП")
+    extra = f"  false={false} max={max(false)}" if false is not None else ""
+    return f"{name:<34} hits={per_run} hits.min={mn} | {k1} | {k2}{extra}"
+
+
+def table() -> None:
+    names = ["V0"]
+    print("Таблица 8x3: адреса агента | статусы записей эталона | вердикт score.py (V0)")
+    for q in QUESTIONS:
+        print(f"\n## {q['id']}  require={q.get('require')}  expected=" + "; ".join(
+            f"{e['path']}:{e.get('line')}±{e.get('tolerance', 3)}" for e in q["expected"]))
+        for i in range(3):
+            a = answer_of(i, q["id"])
+            sts = [entry_status(e, a) for e in q["expected"]]
+            print(f"  r{i+1}: {v0_verdict(q, a):<5} conf={(a or {}).get('confidence')} locs={(a or {}).get('locations')}")
+            for e, st in zip(q["expected"], sts):
+                print(f"        {e['path'].split('/')[-1]}:{e.get('line')} -> {st}")
+
+
+def variants() -> None:
+    check_v0_matches_record()
+    print("V0 воспроизводит verdict'ы записи: OK\n")
+    per = {}
+    # V0
+    h = [sum(v0_verdict(q, answer_of(i, q["id"])) == "hit" for q in QUESTIONS) for i in range(3)]
+    f = [sum(v0_verdict(q, answer_of(i, q["id"])) == "false" for q in QUESTIONS) for i in range(3)]
+    print(verdict_line("V0 нынешнее", h, f))
+    # V1
+    h1 = [sum(v1_hit(q, answer_of(i, q["id"])) for q in QUESTIONS) for i in range(3)]
+    print(verdict_line("V1 файл-уровень", h1))
+    for i in range(3):
+        print(f"    r{i+1} файл-уровень: " + " ".join(q["id"] + ("+" if v1_hit(q, answer_of(i, q["id"])) else "-") for q in QUESTIONS))
+    # V2
+    for label, kw in (
+        ("V2a ±10 (ячейки 0/1)", dict(tol=10)),
+        ("V2b ±10 или символ в тексте", dict(tol=10, use_symbol=True)),
+        ("V2c ±10, путь без строки=0.5", dict(tol=10, path_only=0.5)),
+        ("V2d ±10 или символ, путь=0.5", dict(tol=10, use_symbol=True, path_only=0.5)),
+    ):
+        sc = [[v2_question_score(q, answer_of(i, q["id"]), **kw) for q in QUESTIONS] for i in range(3)]
+        sums = [round(sum(s), 2) for s in sc]
+        full = [sum(x >= 0.999 for x in s) for s in sc]
+        ge = [sum(x >= 2 / 3 - 1e-9 for x in s) for s in sc]
+        print(f"{label:<34} сумма={sums} min={min(sums)} | вопросов с долей 1.0={full} min={min(full)} | с долей>=0.67={ge} min={min(ge)}")
+        for i in range(3):
+            print("    r%d: " % (i + 1) + " ".join(f"{q['id']}={x:.2f}" for q, x in zip(QUESTIONS, sc[i])))
+    # V3 / V3b
+    for label, fo in (("V3  эталон исправлен (R3,R5,R7-adr,R8)", False), ("V3b V3 + «только файл» (R1,R4,R7)", True)):
+        qs3 = edited_questions(fo)
+        h3 = [sum(score.classify(q, answer_of(i, q["id"]), PREFIXES) == "hit" for q in qs3) for i in range(3)]
+        f3 = [sum(score.classify(q, answer_of(i, q["id"]), PREFIXES) == "false" for q in qs3) for i in range(3)]
+        print(verdict_line(label, h3, f3))
+        for i in range(3):
+            print(f"    r{i+1}: " + " ".join(f"{q['id']}={score.classify(q, answer_of(i, q['id']), PREFIXES)}" for q in qs3))
+    print("\nV3b: вклад каждой группы правок отдельно (hits / false по повторам):")
+    for g in ("R1", "R3", "R4", "R5", "R7", "R8"):
+        qs = edited_questions(True, (g,))
+        hh = [sum(score.classify(q, answer_of(i, q["id"]), PREFIXES) == "hit" for q in qs) for i in range(3)]
+        ff = [sum(score.classify(q, answer_of(i, q["id"]), PREFIXES) == "false" for q in qs) for i in range(3)]
+        print(f"  только {g}: hits={hh} false={ff}")
+
+
+if __name__ == "__main__":
+    what = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if what == "dump":
+        dump_sets(Path(sys.argv[2]))
+        sys.exit(0)
+    if what in ("table", "all"):
+        table()
+        print()
+    if what in ("variants", "all"):
+        variants()

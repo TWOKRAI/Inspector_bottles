@@ -1,0 +1,50 @@
+[
+ [
+  "F1 ConfigFileWatcher.io",
+  [
+   {
+    "op": "watches",
+    "path_expr": "self._handler",
+    "line": 238
+   }
+  ]
+ ],
+ [
+  "F2 write_companion.call_sites/total/line2",
+  [
+   [
+    "backend_ctl/probes/probe_5_11_r3_watcher_cost.py:77"
+   ],
+   1,
+   "использует меня 1 (вызовы по имени) / использую 0"
+  ]
+ ],
+ [
+  "F7 IConfigObserver.structural_matches/total",
+  [
+   [
+    {
+     "name": "_TransportProbe",
+     "where": "Services/otel_export/exporter.py:129"
+    },
+    {
+     "name": "Check",
+     "where": "scripts/docs_verify/docs_check.py:107"
+    },
+    {
+     "name": "_Release",
+     "where": "multiprocess_framework/modules/event_module/subscribers.py:54"
+    },
+    {
+     "name": "Arrivals",
+     "where": "backend_ctl/probes/probe_observability_consumer_acceptance.py:331"
+    },
+    {
+     "name": "RateSampler",
+     "where": "multiprocess_framework/modules/logger_module/core/sampling.py:121"
+    }
+   ],
+   8
+  ]
+ ]
+]
