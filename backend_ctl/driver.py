@@ -739,15 +739,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 "timed_out": False,
             }
         reply_dict = reply if isinstance(reply, dict) else {}
+        # Живой ответ — конверт process.command.response: ответ ``system.shutdown`` лежит в ``result``,
+        # а ``success`` конверта True и на отказе already_stopping. Читаем лист; timeout — по плоскому ответу.
+        payload = _leaf_result(reply_dict)
         accepted: bool | None
         if reply_dict.get("error") == "timeout":
             accepted = None
         else:
-            raw_accepted = reply_dict.get("accepted", reply_dict.get("success"))
+            raw_accepted = payload.get("accepted", payload.get("success"))
             accepted = bool(raw_accepted)
-        reply_mode = reply_dict.get("mode", mode)
+        reply_mode = payload.get("mode", mode)
         # accepted False при already_stopping — стоп идёт, итоги честные; прочий отказ — стоп не начат.
-        stop_running = accepted is not False or reply_dict.get("reason") == "already_stopping"
+        stop_running = accepted is not False or payload.get("reason") == "already_stopping"
         if not wait or not stop_running:
             # PM отверг команду (ошибка аргументов) — сокет не закроется: не ждём.
             pm_gone = False if accepted is False else bool(self.connection_lost)
@@ -817,7 +820,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                     outcomes.setdefault(name, None)
                     if outcome is not None:
                         outcomes[name] = outcome
-                all_done = all(outcomes[name] in done_outcomes for name in names)
+                # ``outcomes`` — все дети, виденные в любом снимке; пустой набор не есть «все подтверждены».
+                all_done = bool(outcomes) and all(outcome in done_outcomes for outcome in outcomes.values())
                 phase_done = isinstance(system_stop, dict) and system_stop.get("phase") == "done"
                 if all_done or phase_done:
                     finished_by_outcomes = True
