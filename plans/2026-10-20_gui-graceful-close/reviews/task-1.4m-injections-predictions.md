@@ -15,3 +15,14 @@
 | I9 | `system.yaml`: поле `shutdown.pre_stop` → `shutdown.prestop` (опечатка в ключе) | reds2, reds3, reds4a, reds4b, reds6 + golden ×2 | схема молча отбрасывает лишний ключ (extra) — база пуста; reds1, reds4c, reds5 зелёные |
 
 Ожидание суммарно: 9 инъекций, из них совпадение по набору — цель ≥ 7; расхождение — запись «ФАКТ» с датой, а не молчаливая правка. Дополнительно (не инъекция, а проверка слабости): после GREEN прогнать reds5 на базе без шага — зелёный, как предсказал тестер (предусловия базы нет в 5; закрыто reds6).
+
+## Дополнение 2026-11-09 (после ревью стадии 5, ДО запуска) — база `5f4e2cf12`, набор из 4 файлов
+
+Добавлен авторский hazard `test_shutdown_section_author.py` (M3). Набор прогона — 4 файла: `test_shutdown_section.py`, `test_shutdown_section_author.py`, `test_launch_pre_stop.py`, `test_build_characterization.py`. Авторский тест читает только литерал через `SystemConfig.model_validate`, от `system.yaml` и `launch.py` не зависит.
+
+| № | Инъекция | Ожидаемый красный набор | Почему |
+|---|---|---|---|
+| I10 | `schemas.py`: `list[Any]` → `list[dict[str, str]]` | reds2, reds3, reds4a, reds4b, reds6, author, golden ×2 | настоящий `system.yaml` (`args: {}`, `timeout_s: 35`) перестаёт грузиться; reds1 и reds4c зелёные (`[]` валиден); reds5 зелёная — загрузка идёт после слияния файлов, итог `[]` |
+| I1–I9 | как выше | как выше + author зелёный во всех | author не зависит от yaml/launch; при I1 (валидатор) тоже зелёный (литерал без `None`) |
+
+Откат правки — копией файла (cp из резервной копии), не `git checkout`.
