@@ -303,3 +303,51 @@ def test_h6_own_stop_event_without_system_event_cancels_step() -> None:
     assert other._pre_stop_cancel_source() is None
     other._children_stopping = True
     assert other._pre_stop_cancel_source() == "event"
+
+
+# --------------------------------------------------------------------------- #
+# h7, h8 — два пути взвода событий после шагов, каждый отдельно (ревью r1, m1; инъекции 14 и R)
+# --------------------------------------------------------------------------- #
+
+
+def test_h7_steps_thread_finally_sets_events_without_executor_reply() -> None:
+    """Путь ``finally``: поток шагов зовётся напрямую (без ``reply`` исполнителя); исключение вне обработки шага
+    (``_set_pre_stop_step``) → одна ERROR, события взведены, фаза ``children``."""
+    pm = _pm(router=_Router())
+    pm._pre_stop_steps = _steps(("p1", "s1", 1.0))
+    assert pm._begin_system_stop("graceful", "unknown", None, phase="pre_stop", window_s=1.0)
+
+    def boom(step: str | None) -> None:
+        raise RuntimeError("t14 outside step")
+
+    pm._set_pre_stop_step = boom
+    _run_in_thread(pm._run_pre_stop, 5.0)
+    assert [e for e in pm.errors if "RuntimeError" in e] == ["pre_stop: поток шагов — исключение RuntimeError"]
+    assert (pm.stop_event.is_set(), pm._system_stop_event.is_set()) == (True, True)
+    assert pm._system_stop_snapshot()["phase"] == "children"
+
+
+class _RefusingExecutor:
+    """Исполнитель, отказывающий при ``submit`` (как ``system_stopping``): ``reply`` сразу, действие не идёт."""
+
+    def __init__(self) -> None:
+        self.actions: list[Any] = []
+
+    def submit(self, action: Callable, key: Any, reply: Callable) -> bool:
+        self.actions.append(action)
+        reply({"success": False, "error": "system_stopping"})
+        return False
+
+
+def test_h8_executor_refusal_reply_sets_events_without_steps_thread() -> None:
+    """Путь ``reply``: ``submit`` отклонён до старта — поток шагов не идёт, события взводит ``reply``."""
+    pm = _pm(router=_Router())
+    pm._pre_stop_steps = _steps(("p1", "s1", 5.0))
+    pm._pre_stop_executor = _RefusingExecutor()
+    box: dict[str, Any] = {}
+    _run_in_thread(lambda: box.update(reply=pm._cmd_system_shutdown(None)), 2.0)
+    assert box["reply"]["accepted"] is True and box["reply"]["phase"] == "pre_stop", box["reply"]
+    assert len(pm._pre_stop_executor.actions) == 1
+    assert pm.router_manager.requests == []
+    assert (pm.stop_event.is_set(), pm._system_stop_event.is_set()) == (True, True)
+    assert pm._system_stop_snapshot()["phase"] == "children"
