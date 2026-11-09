@@ -1,0 +1,119 @@
+{
+  "name": "holdout",
+  "repo_sha": "10d50e31572085b98f36ed7dd6756318656e84ac",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory"
+  ],
+  "thresholds": {
+    "hits_min": 4,
+    "false_max": 1
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "What kind of type is `IPlatformConsole` in the console module (ABC, Protocol, plain class), and which concrete classes inherit it? Give where the interface is defined and where each implementing class is defined.",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/console_module/interfaces.py",
+          "line": 21,
+          "symbol": "IPlatformConsole"
+        },
+        {
+          "path": "multiprocess_framework/modules/console_module/platforms/unix.py",
+          "line": 29,
+          "symbol": "UnixConsole"
+        },
+        {
+          "path": "multiprocess_framework/modules/console_module/platforms/windows.py",
+          "line": 17,
+          "symbol": "WindowsConsole"
+        }
+      ],
+      "scored": true,
+      "note": "ABC defined at interfaces.py:21; two production subclasses, UnixConsole (unix.py:29) and WindowsConsole (windows.py:17). platforms/base.py only re-exports the name. Default tolerance 3. Verified: git show 10d50e31572085b98f36ed7dd6756318656e84ac:<path>. require=all: all three addresses needed.",
+      "require": "all"
+    },
+    {
+      "id": "Q2",
+      "question": "`ConsoleManager` can read lines typed into the terminal in the background. Where does it create the background thread that does this, and on which line inside that thread's loop does it fetch the next line of input?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/console_module/core/console_manager.py",
+          "line": 179,
+          "symbol": "Thread"
+        },
+        {
+          "path": "multiprocess_framework/modules/console_module/core/console_manager.py",
+          "line": 200,
+          "symbol": "read_input"
+        }
+      ],
+      "scored": true,
+      "note": "Thread created at console_manager.py:179 (threading.Thread, daemon, target _input_loop, inside enable_input); the loop body _input_loop calls self._platform.read_input() at :200. Default tolerance 3. Verified: git show 10d50e31572085b98f36ed7dd6756318656e84ac:<path>. require=all: both addresses needed.",
+      "require": "all"
+    },
+    {
+      "id": "Q3",
+      "question": "Which production (non-test) code calls the `execute_remote` method on a step object to run a cross-process step? Give every call site of the `.execute_remote(...)` call itself (not the places that merely define or document it).",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/chain_module/core/chain.py",
+          "line": 72,
+          "symbol": "execute_remote"
+        },
+        {
+          "path": "multiprocess_framework/modules/chain_module/core/dag.py",
+          "line": 99,
+          "symbol": "execute_remote"
+        },
+        {
+          "path": "multiprocess_framework/modules/chain_module/core/parallel.py",
+          "line": 113,
+          "symbol": "execute_remote"
+        }
+      ],
+      "scored": true,
+      "note": "Three call sites of step.execute_remote(...): chain.py:72, dag.py:99, parallel.py:113 (inside ParallelChainRunnable._execute_remote; parallel.py:74 calls that private wrapper, not the method). The only definition is the Protocol member interfaces.py:78 (no implementer in the tree). Default tolerance 3. Verified: git grep -n execute_remote on 10d50e31572085b98f36ed7dd6756318656e84ac. require=all: all three call sites needed.",
+      "require": "all"
+    },
+    {
+      "id": "Q4",
+      "question": "In the auth service, what kind of type is `IAuditWriter`, and which production class provides its required method? Does that class inherit the interface? Give where the interface is defined and where the implementing method is defined.",
+      "expected": [
+        {
+          "path": "Services/auth/interfaces.py",
+          "line": 224,
+          "symbol": "IAuditWriter"
+        },
+        {
+          "path": "Services/auth/audit_writer.py",
+          "line": 143,
+          "symbol": "log"
+        }
+      ],
+      "scored": true,
+      "note": "runtime_checkable Protocol (interfaces.py:224) with one member log(entry) at :227; AuditWriter (audit_writer.py:46, bases BaseManager and ObservableMixin) does NOT inherit it and provides log at audit_writer.py:143 (structural typing). Default tolerance 3. Verified: git show 10d50e31572085b98f36ed7dd6756318656e84ac:<path>. require=all: both addresses needed.",
+      "require": "all"
+    },
+    {
+      "id": "Q5",
+      "question": "How does the device-hub registry store write its YAML file to disk: directly into the target file, or some other way? Give the line of the call that puts the new content under the target file name.",
+      "expected": [
+        {
+          "path": "Services/device_hub/registry/store.py",
+          "line": 120,
+          "symbol": "replace"
+        }
+      ],
+      "scored": true,
+      "note": "Not in place: save() writes a temp file next to the target (tempfile.mkstemp, os.write) and then os.replace(tmp_path, self._path) at Services/device_hub/registry/store.py:120. Default tolerance 3. Verified: git show 10d50e31572085b98f36ed7dd6756318656e84ac:Services/device_hub/registry/store.py"
+    }
+  ]
+}
