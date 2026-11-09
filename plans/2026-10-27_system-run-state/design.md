@@ -65,7 +65,7 @@
 | `fault` | авария | Aborted | потеря готовности в `running` (R3) | отказ `fault_unacknowledged` | no-op | ok при `fault_stop_done`, иначе `fault_stopping` | отказ `fault_unacknowledged` |
 | `shutting_down` | завершение | — | `system.shutdown` | отказ `shutting_down` | отказ `shutting_down` | отказ `shutting_down` | отказ `shutting_down` |
 
-Правила таблицы. (1) Авария **не** проходит через `stopping`: `fault` сразу снимает `run_event`, ждёт `paused` и ставит
+Строка `ready` + START при `ready=False` (готовность пропала между тиком и командой): `not_ready`, отказ `not_ready`; в `ready` переводит только `tick` (Task 1.1, стадия 0 2026-11-09). Правила таблицы. (1) Авария **не** проходит через `stopping`: `fault` сразу снимает `run_event`, ждёт `paused` и ставит
 внутренний признак `fault_stop_done`; состояние остаётся `fault` до `ack`; готовность вернулась — всё равно `fault`.
 (2) Потеря готовности в `stopping` состояние не меняет. (3) Для ожидания `paused` (STOP и авария) остановленным считается только мёртвый процесс (`alive == False`) —
 ожидание не висит `run_stop_timeout_s` на нём, причина «процесс не жив» остаётся в `reasons`. Живой, но без свежего
