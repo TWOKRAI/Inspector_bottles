@@ -1,0 +1,1377 @@
+{
+  "set": "r1",
+  "repo_sha": "35e68f3d57282e52bab4921b4efecaa2319c7e8d",
+  "source_root": "/Users/twokrai/Project_code/Inspector_bottles",
+  "root": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83",
+  "prefixes": [
+    "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83",
+    "/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+  ],
+  "date": "2026-11-09",
+  "condition": "grep-read",
+  "model": "haiku",
+  "condition_def": {
+    "allowed_tools": [
+      "Read",
+      "Grep",
+      "Glob"
+    ],
+    "disallowed_tools": [
+      "Bash",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "Agent",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "context_files": [],
+    "prompt_prefix": "Navigate by reading the source code only (Read, Grep, Glob).",
+    "max_turns": 60,
+    "max_budget_usd": 0.85,
+    "expected_tokens": 68000,
+    "thresholds": {
+      "hits_min": 7,
+      "false_max": 1
+    },
+    "output_format": "stream-json",
+    "audit_reads": false,
+    "bash_allow": [],
+    "mcp_config": null,
+    "requires": [],
+    "name": "grep-read",
+    "model": "haiku"
+  },
+  "thresholds": {
+    "hits_min": 7,
+    "false_max": 1
+  },
+  "baseline": null,
+  "command": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "haiku",
+    "--no-session-persistence",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--disallowedTools",
+    "Bash,Edit,Write,NotebookEdit,Agent,WebFetch,WebSearch",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.85",
+    "--append-system-prompt",
+    "Navigate by reading the source code only (Read, Grep, Glob)."
+  ],
+  "questions": [
+    {
+      "id": "R1",
+      "question": "Closing a plan must be refused for an approved plan directory unless its author wrote a short result section into the plan text, and the one-page summary produced when the plan is archived must repeat that section verbatim. In which functions of the script that archives and summarises plans must this be done, and which plan skeleton file must gain the new section?",
+      "expected": [
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 2044,
+          "symbol": "archive_plan"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 2947,
+          "symbol": "build_summary"
+        },
+        {
+          "path": ".claude/plugins/core/templates/PLAN.template.md",
+          "line": 21,
+          "symbol": "Итог плана"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b, derived from merge a23c73279. git diff a23c73279^1 a23c73279: existing archive_plan and build_summary changed (plus new helpers); existing PLAN.template.md table row changed and a section added.",
+      "require": "all"
+    },
+    {
+      "id": "R2",
+      "question": "The register of plans needs one more row status for a plan that was stopped on purpose (neither done nor archived). The per-plan check must also report a plan whose header status word is outside an agreed vocabulary, as an informational finding that never blocks. In the plans script, where are the row-status words, the set of non-blocking finding codes, and the per-plan check defined?",
+      "expected": [
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 258,
+          "symbol": "STATUSES"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 302,
+          "symbol": "NON_GATING_CODES"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 1585,
+          "symbol": "check_plan_gate"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b, derived from merge a23c73279. git diff a23c73279^1 a23c73279 -- scripts/plans_ledger.py: existing STATUSES (FROZEN added), NON_GATING_CODES (new code added) and check_plan_gate (header status finding added) changed.",
+      "require": "all"
+    },
+    {
+      "id": "R3",
+      "question": "The commit-message validator should accept a new optional trailer that cites an architecture decision id (form ADR-<MOD>-NNN, one id per line), warn when a commit adds an ADR heading to a decision log without that trailer, and flag an id that is found nowhere. Where is the set of recognised trailer names defined, and which routine runs the per-rule checks?",
+      "expected": [
+        {
+          "path": "scripts/validate_commit/validate_commit.py",
+          "line": 228,
+          "symbol": "KNOWN_TRAILERS"
+        },
+        {
+          "path": "scripts/validate_commit/validate_commit.py",
+          "line": 979,
+          "symbol": "validate"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1a, derived from merge 3d269915d. git diff 3d269915d^1 3d269915d -- scripts/validate_commit/validate_commit.py: existing KNOWN_TRAILERS gained the new name; the new rule step was inserted inside the existing validate() (def line expected; the step itself is about 250 lines below it).",
+      "require": "all"
+    },
+    {
+      "id": "R4",
+      "question": "Project validation must fail when a service directory under Services/ has no decision-log file DECISIONS.md. In the project validation script, where is the entry point that runs all checks (the new check is wired in there), and in which project config file must the tests of that script be registered so that the default pytest run collects them?",
+      "expected": [
+        {
+          "path": "scripts/validate.py",
+          "line": 396,
+          "symbol": "main",
+          "tolerance": 10
+        },
+        {
+          "path": "pyproject.toml",
+          "line": 150,
+          "symbol": "testpaths"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b-validate, derived from merge 1b508049c. git diff 1b508049c^1 1b508049c: existing main() gained the call to the new check; the existing pytest testpaths list in pyproject.toml gained the scripts/tests entry. The new check function itself does not exist at repo_sha and is not expected.",
+      "require": "all"
+    },
+    {
+      "id": "R5",
+      "question": "Three atlas generator scripts are kept on purpose but no longer developed, and each must get a dated freeze note with a pointer to the plan in its module docstring: the script that writes the FACTS block into task briefs, the script that computes the M1-M4 metrics table over briefs, and the script that holds the card, pack, log and purpose views for agents. Which three files, and where in each docstring does the note go?",
+      "expected": [
+        {
+          "path": "scripts/atlas/brief.py",
+          "line": 8,
+          "symbol": "Stability",
+          "tolerance": 5
+        },
+        {
+          "path": "scripts/atlas/metrics.py",
+          "line": 8,
+          "symbol": "Public API",
+          "tolerance": 5
+        },
+        {
+          "path": "scripts/atlas/views.py",
+          "line": 8,
+          "symbol": "Stability",
+          "tolerance": 5
+        }
+      ],
+      "scored": true,
+      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- scripts/atlas: one docstring line added at line 9-10 of brief.py, metrics.py, views.py (module docstring header = the area; anchor line 8, tolerance 5).",
+      "require": "all"
+    },
+    {
+      "id": "R6",
+      "question": "Where are the commit-message template that git shows when committing and the written commit guide, both listing which trailers are required, optional, or merely tolerated? Their recommended optional set must change: three older optional trailers stop being recommended and a decision-id trailer is recommended instead.",
+      "expected": [
+        {
+          "path": ".gitmessage",
+          "line": 15,
+          "symbol": "Опциональные"
+        },
+        {
+          "path": ".claude/COMMIT_GUIDE.md",
+          "line": 21,
+          "symbol": "Risk"
+        },
+        {
+          "path": ".claude/COMMIT_GUIDE.md",
+          "line": 128,
+          "symbol": "Остальные"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1c, derived from merge 13403b45c. git diff 13403b45c^1 13403b45c: existing .gitmessage optional-trailers comment line and the COMMIT_GUIDE.md format block and optional-trailers heading region were rewritten.",
+      "require": "all"
+    },
+    {
+      "id": "R7",
+      "question": "The slash command that records an architecture decision currently writes to a global folder; it must default to the module's own decision log and remind the author about the decision-id commit trailer. Separately, the module-level decision record template must gain an optional line pointing to the plan the decision came from. Which files?",
+      "expected": [
+        {
+          "path": ".claude/plugins/dev/commands/adr.md",
+          "line": 2,
+          "symbol": "description",
+          "tolerance": 10
+        },
+        {
+          "path": ".claude/plugins/core/templates/DECISIONS.template.md",
+          "line": 31,
+          "symbol": "PR"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1c, derived from merge 13403b45c. git diff 13403b45c^1 13403b45c: adr.md rewritten from its first line (whole-file area, tolerance 10); DECISIONS.template.md gained the Refs line directly after the PR line (anchor = PR line, an unchanged neighbour of an inserted line).",
+      "require": "all"
+    },
+    {
+      "id": "R8",
+      "question": "Several templates of the dev plugin describe an agent-facing atlas view (the one that prints what was left open and unchecked by the previous task result) by the command name that used to print it; the wording must change to say the view is reached through another command. Which template files mention it, and on which lines?",
+      "expected": [
+        {
+          "path": ".claude/plugins/dev/templates/task-brief.md",
+          "line": 9,
+          "symbol": "atlas pack"
+        },
+        {
+          "path": ".claude/plugins/dev/templates/task-result.md",
+          "line": 7,
+          "symbol": "atlas pack"
+        },
+        {
+          "path": ".claude/plugins/dev/templates/injections.md",
+          "line": 8,
+          "symbol": "atlas pack"
+        }
+      ],
+      "scored": true,
+      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- .claude/plugins/dev/templates: the mention of the old command name was reworded on each of these four lines; git grep -F at repo_sha finds exactly four such lines in three files under that directory.",
+      "require": "all"
+    }
+  ],
+  "repeats": [
+    {
+      "index": 1,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 53,
+      "tool_calls": 52,
+      "final_context_tokens": 104857,
+      "cumulative_tokens": 114630,
+      "cache_read_tokens": 3293518,
+      "wall_s": 201.441,
+      "cost_usd": 0.5246618000000001,
+      "over_max_turns": false,
+      "violations": [],
+      "tool_uses": [
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands/dev/plan.md"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/commands/adr.md"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-result.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/executor-brief.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-brief.md"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/__main__.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/brief.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/metrics.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/views.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.gitmessage"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/COMMIT_GUIDE.md"
+        }
+      ],
+      "final_text": "Based on my thorough search of the codebase, here are the answers to your navigation questions:\n\n```json\n{\"id\": \"R1\", \"answer\": \"Closing a plan must be refused unless author wrote result section. The functions that archive/summarise plans are build_findings() at line 1427 which checks per-plan state, and the plan skeleton that must gain result section is in .claude/plugins/core/templates/PLAN.template.md\", \"locations\": [\"scripts/plans_progress/plans_progress.py:1427\", \".claude/plugins/core/templates/PLAN.template.md\"], \"confidence\": \"unsure\"}\n```\n\n```json\n{\"id\": \"R2\", \"answer\": \"Row status words defined in CANON_BY_WORD (done/pending/in_progress/blocked/deferred/superseded). Non-blocking finding codes use blocking=False parameter (e.g. DUP_HEADING, HEADER_STATUS_CONFLICT at lines 1462, 1445). Per-plan check defined in build_findings() at line 1427 which generates Finding objects with blocking flag; must add check for unknown header_status.\", \"locations\": [\"scripts/plans_progress/plans_progress.py:66-76\", \"scripts/plans_progress/plans_progress.py:1427\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R3\", \"answer\": \"Trailer names defined in KNOWN_TRAILERS set at line 228 (Layer, Refs, Risk, Reversible, Tested, Rejected, etc). Per-rule checks performed in validate() function at line 979 which checks trailer presence/values.\", \"locations\": [\"scripts/validate_commit/validate_commit.py:228\", \"scripts/validate_commit/validate_commit.py:979\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R4\", \"answer\": \"Entry point for all checks is main() function at line 396 in scripts/validate.py; DECISIONS.md check must be added to check_services() function at line 198. Tests registered in multiprocess_framework/modules/pytest.ini via conftest discovery.\", \"locations\": [\"scripts/validate.py:396\", \"scripts/validate.py:198\", \"multiprocess_framework/modules/pytest.ini\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R5\", \"answer\": \"Three atlas generator scripts: (1) scripts/atlas/brief.py (line 1) — writes FACTS block into task briefs; (2) scripts/atlas/metrics.py (line 1) — computes M1-M4 metrics table; (3) scripts/atlas/views.py (line 1) — card, pack, log and purpose views. Freeze note with plan pointer goes in the module docstring (Purpose: section).\", \"locations\": [\"scripts/atlas/brief.py:1\", \"scripts/atlas/metrics.py:1\", \"scripts/atlas/views.py:1\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R6\", \"answer\": \"Commit message template is .gitmessage (lines 14-15 list required trailers: Why, Layer; optional: Task, Risk, Reversible, Tested, Rejected). Written commit guide is .claude/COMMIT_GUIDE.md (the authoritative single copy at lines 17-24 listing trailers).\", \"locations\": [\".gitmessage:14-15\", \".claude/COMMIT_GUIDE.md:17-24\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R7\", \"answer\": \"ADR slash command at .claude/plugins/dev/commands/adr.md creates architecture decisions. It currently writes to docs/claude/DECISIONS/ (global). Module-level decision template is .claude/plugins/core/templates/DECISIONS.template.md; must add optional line pointing to plan and reminder about ADR-MOD-NNN commit trailer.\", \"locations\": [\".claude/plugins/dev/commands/adr.md:38-42\", \".claude/plugins/core/templates/DECISIONS.template.md\"], \"confidence\": \"unsure\"}\n```\n\n```json\n{\"id\": \"R8\", \"answer\": \"Dev plugin templates mention atlas view by old command name. File .claude/plugins/dev/templates/task-brief.md line 9 says '`atlas pack` (`## Открыто для лида` via `views._lead_parts`)' — the old references are in executor-brief.md line 73, task-result.md lines 7 and 58, and injections.md line 8 where they mention 'atlas pack'. The view is now reached through 'atlas pack' command, not by old name.\", \"locations\": [\".claude/plugins/dev/templates/task-brief.md:9\", \".claude/plugins/dev/templates/executor-brief.md:73\", \".claude/plugins/dev/templates/task-result.md:7\"], \"confidence\": \"unsure\"}\n```",
+      "score": {
+        "per_question": [
+          {
+            "id": "R1",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              "scripts/plans_progress/plans_progress.py:1427",
+              ".claude/plugins/core/templates/PLAN.template.md"
+            ]
+          },
+          {
+            "id": "R2",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/plans_progress/plans_progress.py:66-76",
+              "scripts/plans_progress/plans_progress.py:1427"
+            ]
+          },
+          {
+            "id": "R3",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/validate_commit/validate_commit.py:228",
+              "scripts/validate_commit/validate_commit.py:979"
+            ]
+          },
+          {
+            "id": "R4",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/validate.py:396",
+              "scripts/validate.py:198",
+              "multiprocess_framework/modules/pytest.ini"
+            ]
+          },
+          {
+            "id": "R5",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/atlas/brief.py:1",
+              "scripts/atlas/metrics.py:1",
+              "scripts/atlas/views.py:1"
+            ]
+          },
+          {
+            "id": "R6",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              ".gitmessage:14-15",
+              ".claude/COMMIT_GUIDE.md:17-24"
+            ]
+          },
+          {
+            "id": "R7",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".claude/plugins/dev/commands/adr.md:38-42",
+              ".claude/plugins/core/templates/DECISIONS.template.md"
+            ]
+          },
+          {
+            "id": "R8",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".claude/plugins/dev/templates/task-brief.md:9",
+              ".claude/plugins/dev/templates/executor-brief.md:73",
+              ".claude/plugins/dev/templates/task-result.md:7"
+            ]
+          }
+        ],
+        "hits": 1,
+        "false": 3,
+        "scored": 8,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "total_hits": 1,
+        "total_false": 3,
+        "total": 8
+      }
+    },
+    {
+      "index": 2,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 67,
+      "tool_calls": 66,
+      "final_context_tokens": 104911,
+      "cumulative_tokens": 95063,
+      "cache_read_tokens": 1735703,
+      "wall_s": 144.51,
+      "cost_usd": 0.33760730000000005,
+      "over_max_turns": true,
+      "violations": [],
+      "tool_uses": [
+        {
+          "name": "Glob",
+          "target": "scripts/**/*.py"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/**/*.md"
+        },
+        {
+          "name": "Glob",
+          "target": "plans/**/*.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/plans_progress/*.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/validate*.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/validate_commit/*.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress"
+        },
+        {
+          "name": "Glob",
+          "target": ".gitmessage"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.gitmessage"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/COMMIT_GUIDE.md"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/**/atlas*.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/**/*atlas*.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/**/render*.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/plugins/core/templates/PLAN.template.md"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/commands/dev/adr.md"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/commands/dev/*.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/aggregate_context"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/templates/PLAN.template.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/aggregate_context/render_adr.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/aggregate_context/render_context.py"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/plugins/core/templates/DECISIONS.template.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/aggregate_context/*.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/**/brief*.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/**/*metrics*.py"
+        },
+        {
+          "name": "Glob",
+          "target": "scripts/atlas/*.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/brief.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/views.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/metrics.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/templates/ADR.template.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/commands/dev/adr*"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands/dev"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/commands"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands/dev/implement.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands/dev/test.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/commands/dev/review.md"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/plugins/dev/templates/*.md"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/plugins/core/templates/*.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/executor-brief.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/agents/developer.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-brief.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-result.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-brief.md"
+        },
+        {
+          "name": "Glob",
+          "target": ".claude/commands/core/analysis/*.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/templates/DECISIONS.template.md"
+        }
+      ],
+      "final_text": "Based on my exploration of the codebase, here are my answers:\n\n{\"id\": \"R1\", \"answer\": \"Functions that archive and summarize plans must validate that an approved plan has a result section in the plan text file, and the summary written during archiving (SUMMARY.md) must verbatim repeat that section. The plan skeleton that gains the new result section is the PLAN.template.md file.\", \"locations\": [\".claude/plugins/core/templates/PLAN.template.md\"], \"confidence\": \"unsure\"}\n\n{\"id\": \"R2\", \"answer\": \"Row-status words are defined in CANON_BY_WORD dict (lines 66-76: DONE, PENDING, IN_PROGRESS, BLOCKED, DEFERRED, SUPERSEDED). Non-blocking finding codes are those with blocking=False in build_findings (lines 1427-1490): TASK_ID_UNPARSED, HEADER_STATUS_CONFLICT, NOT_UTF8, DUP_HEADING, STATUS_CONFLICT, NO_DATE_IN_NAME, NO_STATUS_MARK, ALL_DONE_NOT_ARCHIVED, BRANCH_MISSING, ORDER_BLOCK_MISSING, ORDER_BLOCK_STALE. Per-plan check is build_findings function.\", \"locations\": [\"scripts/plans_progress/plans_progress.py:66\", \"scripts/plans_progress/plans_progress.py:1427\"], \"confidence\": \"sure\"}\n\n{\"id\": \"R3\", \"answer\": \"The set of recognised trailer names is KNOWN_TRAILERS at line 228-239, which includes Why, Layer, Refs, Risk, Reversible, Tested, Rejected, and standard git trailers. Per-rule checks are run by validate() function at line 500+, which calls apply_tests_gate(), _refs_problem(), TASK_VALUE_RE.match(), etc.\", \"locations\": [\"scripts/validate_commit/validate_commit.py:228\", \"scripts/validate_commit/validate_commit.py:500\"], \"confidence\": \"unsure\"}\n\n{\"id\": \"R4\", \"answer\": \"Entry point that runs all validation checks is main() function in validate.py; it calls check_imports(), check_no_syspath(), check_init_files(), check_interfaces(), check_status_files(), check_services(), check_adr_sync(), check_plans_progress(), etc. Service DECISIONS.md requirement should be added to check_services() function. Tests are registered in pytest.ini (likely in multiprocess_framework/modules or at project root).\", \"locations\": [\"scripts/validate.py:380\", \"scripts/validate.py:198\"], \"confidence\": \"unsure\"}\n\n{\"id\": \"R5\", \"answer\": \"Three atlas generator scripts kept on purpose but frozen: (1) scripts/atlas/brief.py - writes FACTS block into task briefs (docstring line 1-8); (2) scripts/atlas/metrics.py - computes M1-M4 metrics table (docstring line 1-10); (3) scripts/atlas/views.py - holds card, pack, log, purpose views for agents (docstring line 1-9). Freeze note goes in module docstring below the Purpose line.\", \"locations\": [\"scripts/atlas/brief.py:1\", \"scripts/atlas/metrics.py:1\", \"scripts/atlas/views.py:1\"], \"confidence\": \"sure\"}\n\n{\"id\": \"R6\", \"answer\": \"Commit message template is .gitmessage with required trailers listed (lines 14-15: Why, Layer; optional: Task, Risk, Reversible, Tested, Rejected). Commit guide is .claude/COMMIT_GUIDE.md listing same trailers at lines 17-24. Recommended optional set changes: Risk, Reversible, Tested, Rejected stop being recommended; ADR-id trailer (Refs: ADR-MOD-NNN) becomes recommended.\", \"locations\": [\".gitmessage:14\", \".claude/COMMIT_GUIDE.md:17\"], \"confidence\": \"unsure\"}\n\n{\"id\": \"R7\", \"answer\": \"ADR slash command mentioned in ADR.template.md (line 51: `/dev:adr <title>`). Module-level decision record template is DECISIONS.template.md which needs optional line pointing to the plan. Command file likely in .claude/commands/dev/adr.md (but not found in search). Module template gains plan reference field in header.\", \"locations\": [\".claude/plugins/core/templates/ADR.template.md:51\", \".claude/plugins/core/templates/DECISIONS.template.md:1\"], \"confidence\": \"unsure\"}\n\n{\"id\": \"R8\", \"answer\": \"Template files mention `python -m scripts.atlas brief` and `atlas pack` commands: task-brief.md (lines 9, 36, 39, 72) and task-result.md (line 8). Wording must change to reference the command through another slash command instead of by script path (e.g., from `python -m scripts.atlas brief` to `/analysis:atlas-brief` or similar).\", \"locations\": [\".claude/plugins/dev/templates/task-brief.md:9\", \".claude/plugins/dev/templates/task-result.md:8\"], \"confidence\": \"unsure\"}",
+      "score": {
+        "per_question": [
+          {
+            "id": "R1",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".claude/plugins/core/templates/PLAN.template.md"
+            ]
+          },
+          {
+            "id": "R2",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/plans_progress/plans_progress.py:66",
+              "scripts/plans_progress/plans_progress.py:1427"
+            ]
+          },
+          {
+            "id": "R3",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              "scripts/validate_commit/validate_commit.py:228",
+              "scripts/validate_commit/validate_commit.py:500"
+            ]
+          },
+          {
+            "id": "R4",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              "scripts/validate.py:380",
+              "scripts/validate.py:198"
+            ]
+          },
+          {
+            "id": "R5",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/atlas/brief.py:1",
+              "scripts/atlas/metrics.py:1",
+              "scripts/atlas/views.py:1"
+            ]
+          },
+          {
+            "id": "R6",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".gitmessage:14",
+              ".claude/COMMIT_GUIDE.md:17"
+            ]
+          },
+          {
+            "id": "R7",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".claude/plugins/core/templates/ADR.template.md:51",
+              ".claude/plugins/core/templates/DECISIONS.template.md:1"
+            ]
+          },
+          {
+            "id": "R8",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              ".claude/plugins/dev/templates/task-brief.md:9",
+              ".claude/plugins/dev/templates/task-result.md:8"
+            ]
+          }
+        ],
+        "hits": 0,
+        "false": 2,
+        "scored": 8,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "total_hits": 0,
+        "total_false": 2,
+        "total": 8
+      }
+    },
+    {
+      "index": 3,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 58,
+      "tool_calls": 57,
+      "final_context_tokens": 90459,
+      "cumulative_tokens": 82423,
+      "cache_read_tokens": 3144015,
+      "wall_s": 188.612,
+      "cost_usd": 0.46844149999999996,
+      "over_max_turns": false,
+      "violations": [],
+      "tool_uses": [
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_ledger.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_ledger.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_ledger.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_ledger.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/commands"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/templates/PLAN.template.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_ledger.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate_commit/validate_commit.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/plans_progress/plans_progress.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/brief.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/metrics.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/atlas/views.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.gitmessage"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/COMMIT_GUIDE.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/commands/adr.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/core/templates/DECISIONS.template.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/scripts/validate.py"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/pyproject.toml"
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/review-report.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-brief.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/task-result.md"
+        },
+        {
+          "name": "Grep",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/executor-brief.md"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83/.claude/plugins/dev/templates/team-brief.md"
+        }
+      ],
+      "final_text": "Based on my investigation of the codebase, here are the answers to your navigation questions:\n\n```json\n{\"id\": \"R1\", \"answer\": \"archive_plan and build_summary functions in scripts/plans_ledger.py; archive_plan writes SUMMARY.md to the archived plan and refuses closing unless approved plans have a result section. Plan skeleton needs a Result section field. The one-page summary from build_summary must repeat that section verbatim.\", \"locations\": [\"scripts/plans_ledger.py:2044\", \"scripts/plans_ledger.py:2947\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R2\", \"answer\": \"Row status words (DRAFT, ACTIVE, DONE, ARCHIVED) defined at line 258 in scripts/plans_ledger.py. Per-plan check is in plans_progress.py with Finding class at line 192 (blocking field); non-blocking finding codes are ones where blocking=False. The per-plan header_status check is near line 149 and 789.\", \"locations\": [\"scripts/plans_ledger.py:258\", \"scripts/plans_progress/plans_progress.py:192\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R3\", \"answer\": \"Trailer names defined in KNOWN_TRAILERS at line 228 in validate_commit.py (Why, Layer, Refs, Risk, Reversible, Tested, Rejected, Task). Per-rule checks run in validate function (around line 1001-1200); must add ADR-MOD-NNN trailer handling and check for ADR headings in DECISIONS.md.\", \"locations\": [\"scripts/validate_commit/validate_commit.py:228\", \"scripts/validate_commit/validate_commit.py:1001\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R4\", \"answer\": \"Entry point is main() at line 396; check_services() at line 198 performs service checks. Must add DECISIONS.md existence check here. Tests are registered in pyproject.toml testpaths at line 150 (scripts/validate_commit/tests is already there; add scripts/validate/tests).\", \"locations\": [\"scripts/validate.py:396\", \"scripts/validate.py:198\", \"pyproject.toml:150\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R5\", \"answer\": \"Three freeze-note recipients: scripts/atlas/brief.py (line 1, module docstring), scripts/atlas/metrics.py (line 1, module docstring), scripts/atlas/views.py (line 1, module docstring). Each freeze note must include dated reference to the plan and go in the module docstring after the Purpose line.\", \"locations\": [\"scripts/atlas/brief.py:1\", \"scripts/atlas/metrics.py:1\", \"scripts/atlas/views.py:1\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R6\", \"answer\": \"Git template: .gitmessage (lines 1-43, currently lists Risk, Reversible, Tested, Rejected as optional). Commit guide: .claude/COMMIT_GUIDE.md (lines 128-133 lists optional trailers). Both must add ADR-MOD-NNN as recommended optional and remove three others from recommended set.\", \"locations\": [\".gitmessage:15\", \".claude/COMMIT_GUIDE.md:128\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R7\", \"answer\": \"Slash command: .claude/plugins/dev/commands/adr.md (currently writes global ADRs). Must default to module's DECISIONS.md (line 27 shows per-module format). Template: .claude/plugins/core/templates/DECISIONS.template.md needs optional Plan pointer line after Status field.\", \"locations\": [\".claude/plugins/dev/commands/adr.md:27\", \".claude/plugins/core/templates/DECISIONS.template.md:30\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"R8\", \"answer\": \"Three templates mention an atlas view by old command name: task-brief.md line 9 says 'atlas pack' for lead parts; task-result.md lines 7 and 58 say 'atlas pack' for next task tails. Change all references from the specific command name to 'reached through another command' or similar.\", \"locations\": [\".claude/plugins/dev/templates/task-brief.md:9\", \".claude/plugins/dev/templates/task-result.md:7\", \".claude/plugins/dev/templates/task-result.md:58\"], \"confidence\": \"sure\"}\n```",
+      "score": {
+        "per_question": [
+          {
+            "id": "R1",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/plans_ledger.py:2044",
+              "scripts/plans_ledger.py:2947"
+            ]
+          },
+          {
+            "id": "R2",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/plans_ledger.py:258",
+              "scripts/plans_progress/plans_progress.py:192"
+            ]
+          },
+          {
+            "id": "R3",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/validate_commit/validate_commit.py:228",
+              "scripts/validate_commit/validate_commit.py:1001"
+            ]
+          },
+          {
+            "id": "R4",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/validate.py:396",
+              "scripts/validate.py:198",
+              "pyproject.toml:150"
+            ]
+          },
+          {
+            "id": "R5",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "scripts/atlas/brief.py:1",
+              "scripts/atlas/metrics.py:1",
+              "scripts/atlas/views.py:1"
+            ]
+          },
+          {
+            "id": "R6",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              ".gitmessage:15",
+              ".claude/COMMIT_GUIDE.md:128"
+            ]
+          },
+          {
+            "id": "R7",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              ".claude/plugins/dev/commands/adr.md:27",
+              ".claude/plugins/core/templates/DECISIONS.template.md:30"
+            ]
+          },
+          {
+            "id": "R8",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              ".claude/plugins/dev/templates/task-brief.md:9",
+              ".claude/plugins/dev/templates/task-result.md:7",
+              ".claude/plugins/dev/templates/task-result.md:58"
+            ]
+          }
+        ],
+        "hits": 1,
+        "false": 5,
+        "scored": 8,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "total_hits": 1,
+        "total_false": 5,
+        "total": 8
+      }
+    }
+  ],
+  "aggregate": {
+    "repeats": 3,
+    "hits": {
+      "min": 0,
+      "median": 1,
+      "max": 1
+    },
+    "false": {
+      "min": 2,
+      "median": 3,
+      "max": 5
+    },
+    "facts_hit": {
+      "min": null,
+      "median": null,
+      "max": null
+    },
+    "tool_calls": {
+      "min": 52,
+      "median": 57,
+      "max": 66
+    },
+    "final_context_tokens": {
+      "min": 90459,
+      "median": 104857,
+      "max": 104911
+    },
+    "cumulative_tokens": {
+      "min": 82423,
+      "median": 95063,
+      "max": 114630
+    },
+    "cache_read_tokens": {
+      "min": 1735703,
+      "median": 3144015,
+      "max": 3293518
+    },
+    "wall_s": {
+      "min": 144.51,
+      "median": 188.612,
+      "max": 201.441
+    }
+  },
+  "verdict": {
+    "pass": false,
+    "band": "FAIL",
+    "checks": {
+      "hits": {
+        "value": 0,
+        "limit": 7,
+        "ok": false
+      },
+      "false": {
+        "value": 5,
+        "limit": 1,
+        "ok": false
+      }
+    },
+    "unmeasured": []
+  }
+}

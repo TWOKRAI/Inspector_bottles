@@ -1,0 +1,9 @@
+Время шагов (time -p, секунды; real). Mac, внутри machine_gate light.
+0 build.py (arch_map, подготовка к шагам 1-2): не замерялся (запущен до замеров, ~сек; индекс signboard строится при 1-м вызове ~5.8 с)
+1 signboard show ConfigFileWatcher (первый вызов, строит индекс репозитория): real 5.76
+2 signboard show config_module (второй вызов): real 0.08
+3 scan_text(watcher.py) -> FileFacts JSON (python -c, включая импорт): real 0.05
+4a old atlas ref ConfigFileWatcher (main, не нашёл модуль): real 0.20
+4b old atlas ref config_module --symbol ConfigFileWatcher (main, упал grimp): real 4.62
+4c old atlas card config_module (main, упал grimp): real 0.28
+4d (то же на ветке трека, а не main) ref ConfigFileWatcher: real 0.18; card config_module: real 4.61
