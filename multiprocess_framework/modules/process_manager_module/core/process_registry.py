@@ -55,6 +55,7 @@ class ProcessRegistry:
         system_ready_event: Optional[Event] = None,
         child_stop_budget: Optional[Dict[str, float]] = None,
         max_stop_window_s: float | None = None,
+        run_event: Optional[Event] = None,
     ) -> None:
         self.logger = logger
         # Task 1.1 (ADR-PMM-035): словарь ``stop_budget(shutdown_timeout PM)`` — каждый ребёнок
@@ -112,6 +113,10 @@ class ProcessRegistry:
         # (SourceProducer) ждут его перед первым produce(). Едет Process-kwargs
         # (inheritance при spawn), не в bundle custom и не позиционно.
         self._system_ready_event: Optional[Event] = system_ready_event
+        # Task 1.1 (system-run-state): событие работы системы — взводит и снимает ТОЛЬКО PM
+        # (``_run_apply``). Ребёнок его только читает (``SourceProducer``). Тот же путь, что
+        # у ``system_ready_event``: Process-kwargs (inheritance при spawn), не bundle custom.
+        self._run_event: Optional[Event] = run_event
         # Ф3.1 (routing-epoch): поставщик routing_meta для bundle нового ребёнка
         # ({"epoch": N, "incarnations": {...}}). None → пустой meta (совместимость).
         self._routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = routing_meta_fn
@@ -359,7 +364,14 @@ class ProcessRegistry:
             # mp.Event/Condition на Windows-spawn пиклится только через inheritance →
             # иначе RuntimeError "should only be shared ... through inheritance".
             # system_stop_event передаётся отдельным Process-аргументом (см. ниже).
-            for key in ("stop_event", "error_manager", "pause_event", "system_ready_event", "system_stop_event"):
+            for key in (
+                "stop_event",
+                "error_manager",
+                "pause_event",
+                "system_ready_event",
+                "system_stop_event",
+                "run_event",
+            ):
                 custom.pop(key, None)
 
             all_process_memory: Dict[str, Dict[str, Any]] = {}
@@ -427,6 +439,8 @@ class ProcessRegistry:
                     "parent_pid": os.getpid(),
                     "exit_report": exit_report_slot,
                     "system_ready_event": self._system_ready_event,
+                    # Task 1.1 (system-run-state): событие работы — тем же путём.
+                    "run_event": self._run_event,
                 },
                 name=name,
             )

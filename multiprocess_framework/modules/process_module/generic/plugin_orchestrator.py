@@ -237,6 +237,17 @@ class PluginOrchestrator:
                     f"PluginOrchestrator[{self._services.name}]: request_stop '{plugin.name}': {e}"
                 )
 
+    def config_of(self, plugin: ProcessModulePlugin) -> dict:
+        """Копия плоского ``ctx.config`` загруженного плагина (Task 1.1 плана system-run-state).
+
+        Поиск по тождеству (``p is plugin``) среди плагинов после ``boot()``. Плагина нет в
+        списке → ``{}``. Живой словарь контекста наружу не отдаётся: каждый вызов — свежая копия.
+        """
+        for p, ctx in zip(self._plugins, self._contexts):
+            if p is plugin:
+                return dict(ctx.config)
+        return {}
+
     # --- Properties ---
 
     @property

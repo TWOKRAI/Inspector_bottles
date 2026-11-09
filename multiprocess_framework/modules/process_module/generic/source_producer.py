@@ -55,6 +55,12 @@ class SourceProducer:
             ``DEFAULT_PREROLL_TIMEOUT_S``); None → без ожидания, поведение прежнее.
             Источник событие только читает — взводит его один PM.
         log_warning: callback предупреждения (срок preroll истёк). None → строка не пишется.
+        run_event: событие работы системы (Task 1.1 плана system-run-state). Не None и
+            ``run_gated`` истинен → при снятом событии ``run_loop`` не зовёт ``produce()``
+            (ветка паузы: сброс темпа, сон 0.05 с, без срока). None → гейта нет.
+            Источник событие только читает — взводит и снимает его один PM.
+        run_gated: ключ конфига source-плагина (умолчание ``True``). ``False`` → источник
+            не смотрит на ``run_event``, кадры идут и в ``ready`` (превью).
     """
 
     def __init__(
@@ -73,6 +79,8 @@ class SourceProducer:
         breaker_backoff_sec: float = DEFAULT_BREAKER_BACKOFF_SEC,
         ready_event: Any | None = None,
         log_warning: Callable[[str], None] | None = None,
+        run_event: Any | None = None,
+        run_gated: bool = True,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
@@ -90,6 +98,9 @@ class SourceProducer:
         self._ready_event = ready_event
         # Preroll отрабатывает один раз за жизнь продюсера (повторный run_loop — не ждём).
         self._preroll_done = ready_event is None
+        # Task 1.1 (system-run-state): гейт работы. Только чтение события, без срока.
+        self._run_event = run_event
+        self._run_gated = run_gated
         # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
         # ProcessModule._log_debug тоже kwargs-safe (несёт trace_id=... как extra
         # для LogRecord, Ф7 G.6). Периодический per-frame TRACE снят в Ф7 G.1 —
@@ -141,7 +152,10 @@ class SourceProducer:
             return
 
         while not stop_event.is_set():
-            if pause_event.is_set():
+            # Пауза воркера или закрытый гейт работы (Task 1.1): та же ветка, без срока.
+            if pause_event.is_set() or (
+                self._run_event is not None and self._run_gated and not self._run_event.is_set()
+            ):
                 self._pacer.reset()  # после паузы расписание — от «сейчас»
                 time.sleep(0.05)
                 continue
