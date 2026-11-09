@@ -126,7 +126,7 @@
         }
       ],
       "scored": true,
-      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- scripts/atlas: one docstring line added at line 9-10 of brief.py, metrics.py, views.py (module docstring header = the area; anchor line 8, tolerance 5).",
+      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- scripts/atlas: one docstring line added at line 9-10 of brief.py, metrics.py, views.py (module docstring header = the area; window 1-11: docstring lines 1-9 plus two inserted lines; anchor line 6, tolerance 5, set by amendment 9).",
       "require": "all"
     },
     {
