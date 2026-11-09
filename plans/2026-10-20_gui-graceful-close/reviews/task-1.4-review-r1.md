@@ -126,3 +126,82 @@ REDS 1(а) идёт со spawn-процессом `AckChild` (зелёная), �
 - Инъекции драйвера 11–13, 17–19 я не повторял, верил отчёту `injections-driver`. PM-инъекции повторил только две (Z и (14)), в копии `git archive HEAD`, по одному прогону.
 - Тайминговые ячейки SM (0,05 / 0,1 / 0,3 с) зелёные 3 из 3 на этой машине; под нагрузкой не мерил.
 - Подтвердил вложенную форму ответа чтением кода (`_handle_process_command`, `reply_to_request`, `SocketClient.request`, `unwrap`), а не живым запуском стенда.
+
+---
+
+# Раунд 2 из 2
+
+HEAD `d47465817` (`git diff ee6149ea3..HEAD`: PM `acc5201d9`, `c68061e0e`, `21bebb146`; драйвер `3f2b032c2`). Код не правился, не коммитился.
+Скретч вне репозитория: `.../scratchpad/rev14/` (`r2base/` — копия `git archive HEAD`, `inject_r2.py`, `inject_14b_run.py`, `repro_r2_stopevent.py`, `r2_radius.log`).
+
+## Вердикт: APPROVED
+
+Находок раунда 2: blocker 0, major 0, minor 2 (оба — в OPEN_QUESTIONS, правки не требуют). M1, M2, m2 закрыты воспроизведением.
+
+## Закрытие находок раунда 1 (инъекции на копии HEAD, по одному прогону)
+
+Метод: `inject_r2.py` кладёт патч в копию `r2base`, гоняет файл через гейт `light`, возвращает файл. Базовая линия — 14 passed (8 author + 6 envelope).
+
+| находка | инъекция | наблюдено |
+|---|---|---|
+| M2 (h5) | Z: убрать блок выхода из `pre_stop` в `_set_system_stop_phase` | `test_h5_phase_change_out_of_pre_stop_clears_step_and_rebases_graceful_only` красный, 1 failed / 7 passed |
+| отмена по `stop_event` / `_children_stopping` (h6) | S: убрать ветку `own`/`_children_stopping` из `_pre_stop_cancel_source` | `test_h6_own_stop_event_without_system_event_cancels_step` красный, 1 failed / 7 passed |
+| m1, путь `finally` (h7) | 14: убрать `finally` | красные h7, а также h2 и h6 (прямой вызов `_run_pre_stop`), 3 failed / 5 passed |
+| m1, путь `reply` (h8) | R: `reply` = `lambda _r: None` | красный только h8, 1 failed / 7 passed |
+| m1, оба пути | 14б: нет `finally` и `reply` не взводит | SM: красные 6 из 7 ячеек, среди них SM 2 (без событий падает всё, что их ждёт) |
+| M1 | D1: драйвер читает плоский `reply_dict` | красные 3 из 6: `..already_stopping..`, `..reads_mode_from_result`, `..real_pm_and_router` |
+| m2 | D2: `all_done` по `names` (пустое — истинно) | красный `test_only_process_manager_snapshot_does_not_end_the_poll`, 1 failed / 5 passed |
+
+Каждый хазард-тест краснеет под своей инъекцией и только под ней (h7 и h6 краснеют ещё и под 14 из-за прямого вызова `_run_pre_stop` — безвредно).
+Тайминг h5–h8: 6 прогонов author подряд — 8 passed x6 (0,75 с), флака нет. Окно h6 (`elapsed <= 0,1` при срезе 0,05) узкое, на этой машине держится.
+
+## Новые риски, о которых спросил лид
+
+(а) Безопасность `stop_event` / `_children_stopping` как источника отмены. В PM `stop_event` взводит только `_set_stop_events` (`process_manager_process.py:1262`);
+вызывается из: `_shutdown_graceful` без шагов (шагов нет), путь `force` и запасной путь без `_children_stop` (оба СНАЧАЛА ставят флаг `_cancel_pre_stop`),
+повтор `graceful` вне `pre_stop` (шаги не идут), `_finish_pre_stop` (после выхода из цикла шагов, из того же потока). Гонки «последний шаг идёт, а `stop_event` уже взведён» нет:
+фаза выходит из `pre_stop` только после отмены или после цикла. `_children_stopping` ставит один `_ChildrenStop.request_stop` (`:5242`), ни разу не снимает; перед ним
+`_announce_phase("children", begin=True)` — между ними мгновенное окно (миллисекунды), отмена видна на ближайшем срезе 50 мс. `stop_event.clear()` для PM в
+`process_manager_module/process` и `process_module/core` нет — переиспользования старого взведённого события при рестарте нет. Внешние взводчики (раннер при смерти родителя, спавнер) — легитимный стоп.
+Репродукция `repro_r2_stopevent.py`: `stop_event` взведён заранее, общий — нет -> `accepted True, phase 'children'`, запросов шагам 0 (шаг не стартует, без преждевременных запусков).
+Вывод: преждевременного прерывания при легитимном `graceful` нет.
+
+(б) Тест на настоящих объектах (`test_driver_reads_envelopes_built_by_real_pm_and_router`): зовёт НАСТОЯЩИЕ `ProcessManagerProcess._handle_process_command`, `_cmd_system_shutdown`,
+`_ChildrenStop` и `RouterManager.reply_to_request` (`router.send` перехвачен); подменён только `CommandManager` (шим пробрасывает вложенный `data` в `_cmd_system_shutdown`, `_EnvelopeSender`
+ставит настоящий `_handle_process_command`). Копии логики нет. Предусловия теста сами проверяют форму (`command == "process.command.response"`, `second["success"] is True`, `result.accepted is False`).
+Тест регрессионный: под D1 краснеет. Не покрыто: звено `SocketBridgeAdapter.on_inbound` -> `SocketClient.request` (подтверждено чтением, см. M1 раунда 1).
+
+(в) ADR-044 п. 4/8 против кода. п. 4 («два пути оставлены намеренно», h7 = `finally`/инъекция 14, h8 = `reply`/инъекция R, 14б — SM 2 красная) — совпадает с моими прогонами.
+п. 5 («в фазе `pre_stop` их внутри PM взводит только путь `force` после флага») верно, но неполно: ещё `_finish_pre_stop` после цикла (минор, ниже). п. 8 — повтор `graceful`, `force`, `already_set` без `phase`,
+запасной путь без `_children_stop` — совпадает с `_shutdown_graceful` / `_cmd_system_shutdown`. п. 7 (выход из `pre_stop` любым путём) — совпадает с `:675-682`.
+Блок Break-injection в `tasks/1.4.md` (факты 1, 2, 10, 14, 14б, R, Z, S) совпадает с моими воспроизведениями.
+
+## Радиус и проверки (гейт `medium`/`light op-1.4-review`, pytest по файлу)
+
+| набор | итог |
+|---|---|
+| PM: `test_system_shutdown_pre_stop` 7, `test_pre_stop_author` 8, `test_pre_stop_contract` 32, `test_system_shutdown_force` 16, `_force_author` 5 | все passed |
+| PM: `test_stop_wave_last` 11, `_guards` 16, `test_stop_budget` 30, `_child_stop_acceptance` 36, `test_process_root_pm_hazards` 20 (+1 xfailed), `test_supervision_status_system_stop` 34, `_hazards` 8, `test_supervision_instance_truth` 14, `test_supervision_strategies` 43 | все passed |
+| PM: `test_lifecycle_command_classes` 23, `_fifo_acceptance` 10, `_fifo_hazards` 13, `_restart_reply` 2, `test_parent_death_acceptance` 7, `_hazards` 8 | все passed |
+| PM: `test_pm_marks_gone_reader_acceptance` 8, `_hazards` 12, `test_pm_observability_routing` 26, `test_pm_responsive_during_children_stop` 8, `test_pm_stop_drains_own_queue_acceptance` 7 | все passed |
+| PM: `test_root_stop_outcome_acceptance` 6, `_hazards` 8, `test_stop_outcome_acceptance` 15, `_hazards` 4 | все passed |
+| backend_ctl: `test_system_shutdown_driver` 4, `_author` 2, `_outcomes` 1, `_envelope` 6, `test_mcp_server_sdk` 51, `test_mcp_full_and_rules_doc_parity` 1 | все passed |
+| `sentrux check .` на чистом `git archive HEAD` | Quality 6069, `All rules pass` |
+| `ruff check -q` и `ruff format --check` по 5 изменённым файлам (`driver.py`, `process_manager_process.py`, `pre_stop.py`, `test_pre_stop_author.py`, `test_system_shutdown_driver_envelope.py`) | exit 0 / `5 files already formatted` |
+| `scripts/validate.py` | 2 FAIL — оба известные (память: теги, индекс BY-MODULE); других нет |
+
+## Находки раунда 2 (minor, в OPEN_QUESTIONS)
+
+- m4 [minor, quality] Пустой набор детей: исправление `all_done = bool(outcomes) and all(... outcomes.values())` считает по объединению всех виденных детей, а не по текущему снимку.
+  Ребёнок, исчезнувший из реестра без итога, теперь держит опрос до `done` / разрыва / срока (раньше опрос кончался). Это честнее (имя в `unconfirmed`), но на пустом реестре после ухода детей
+  без `done` опрос идёт до `wait_timeout`. Воспроизводить как проблему нет оснований (`done` объявляется до закрытия message_processor); пометить в OPEN_QUESTIONS.
+- m5 [minor, docs] ADR-044 п. 5 перечисляет внутрисистемных взводчиков `stop_event` в `pre_stop` неполно (нет `_finish_pre_stop`, который взводит его сам после цикла). Не влияет на код.
+
+Не закрыто из раунда 1 и оставлено лидом: m1 (два пути взвода) — принято, охраняется h7/h8; m3 (`AckChild` собирает ответ вручную; авто-ответ настоящего роутера ребёнка тестом этой задачи не пройден) — в OPEN_QUESTIONS, живой прогон придёт с Task 1.4m.
+
+## Что осталось открытым / ненадёжно (раунд 2)
+
+- Heavy FL 9–10 и Windows не гонялись (известно); `test_cv_threads.py` 6 красных — те же, что на чистом main (не гонял, принято со слов лида).
+- M1 теперь проверен на конверте из настоящих `_handle_process_command` + `reply_to_request`; звено сокетного моста (`SocketBridgeAdapter` -> `SocketClient.request`, вкладывающее конверт PM в `result`) подтверждено чтением, не живым стендом.
+- Инъекции раунда 2 — по одному прогону, на копии `git archive HEAD`; тайминговое окно h6 (0,1 с) тонкое, держится на этой машине (6 из 6), под нагрузкой не мерил.
+- Останов корня PM при взводе `stop_event` во время шага теперь покрыт h6 на двойнике; на настоящем корне PM (через `run_process_function`) не проверен.
