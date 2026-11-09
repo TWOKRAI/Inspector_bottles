@@ -41,9 +41,9 @@ tests/
   читают драйвер напрямую, без `getattr`. `stop_aware = True` — драйвер получает стоп фазы 1 остановки
   (`request_stop`), поток рассылки заводится только таким.
 - `OpSpec(name, description, args_schema, needs_link, executor, immediate)` — одна операция; `OpSource(prefix, kind,
-  route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (19), `ROBOT_V1_OPS` (27),
-  `ROBOT_DATA_OPS` (10, офлайн, `executor="device_io"`), `VFD_OPS` (5). Драйвер ссылается на свой каталог
-  (`OP_SPECS = ROBOT_V2_OPS`). Всего 56 команд. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
+  route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (20), `ROBOT_V1_OPS` (27),
+  `ROBOT_DATA_OPS` (12, офлайн, `executor="device_io"`), `VFD_OPS` (5). Драйвер ссылается на свой каталог
+  (`OP_SPECS = ROBOT_V2_OPS`). Всего 59 команд из каталогов. `command_table` строгий: одно имя из двух мест с неравными `OpSpec` или разным `kind` / `route` / `key_from`
   источника — `ValueError`.
 - `kinds.py` — таблица видов, один источник: строка `DeviceKind(kind, drivers, prefix, data_ops, build)` — классы
   драйверов по протоколу записи (`"*"` — любой другой), префикс команд, операции данных вида, сборка драйвера. Из
@@ -52,8 +52,8 @@ tests/
   `spi` <- `drivers` <- `kinds` <- `manager` / плагин.
 - Команды `robot_*` / `vfd_*` ставит `install_op_commands(DeviceHubPlugin, command_sources(device_kinds))` при импорте
   модуля плагина (copy-on-write `commands`); вручную остались 11 `device_*`, 6 `hik_*` и `robot_park_all` (T5.3e.5;
-  опции регистрации — ветка `command_options`, не `OpSpec`). Имена прежних 72 команд не менялись; 73-я — `robot_park`
-  (T5.3e), 74-я — `robot_park_all`. Всего 74 команды: 56 из каталогов и 18 вручную.
+  опции регистрации — ветка `command_options`, не `OpSpec`). Всего 77 команд: 59 из каталогов и 18 вручную.
+- **Калибровка v2 (T5.4, `Services/robot_comm/calibration/`):** `robot_calib_belt {device_id, marks[{x_mm, y_mm, encoder}] x2, base_rev, dry_run?}` пишет `P_BELT_DIR` и `P_BELT_FACTOR` под одним `_param_lock`, затем `PARAM_APPLY`. Откат первой записи — только при NAK на вторую; сбой хранилища на второй — без отката (тик вернёт значения файла). `dry_run` ничего не пишет. `robot_calib_frame {device_id, name, points[{point, local[x, y, z]}] ≥ 3, base_rev}` — СК по наименьшим квадратам, отказ при невязке > 0,5 мм; при N = 3 проверка почти пуста, смысл с N ≥ 4. `robot_calib_tools {device_id}` — только чтение. Тексты отказов — `calibration/belt.py`, `robot_driver_v2/texts.py`.
 
 **Новый вид устройства = класс драйвера + одна строка `DeviceKind` в `DEFAULT_KINDS` (правка хаба в одну строку
 `kinds.py`):** класс с `kind`, `OP_SPECS` и методом `call`; из строки менеджер получает фабрику, плагин — команды
@@ -69,7 +69,7 @@ tests/
 класса (стоп — способность класса, не экземпляра).
 
 **`command_options` и исполнитель `device_io`.** Хук плагина `command_options(name)` отдаёт при регистрации
-`{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 9)
+`{"metadata": {"description", "args"}, "executor", "key_from"}`. Операции данных робота (`robot_point_list` и ещё 11)
 идут на именованный исполнитель `device_io` процесса `devices` (`base.yaml`, `executors.device_io: {max_workers: 4,
 max_pending: 64}` — умолчания `ExecutorSpec`, не замер), ключ порядка — `device_id`. Операции `immediate` в очередь
 исполнителя не ставятся. Без исполнителя в процессе команда идёт запасным путём на потоке роутера (INFO в логе).
@@ -197,7 +197,7 @@ max_pending: 64}` — умолчания `ExecutorSpec`, не замер), кл�
 - **Исполнитель и цена.** `command_options` отдаёт `executor: "device_io"`, `targets: "all"` — ключ «все»: операция
   ждёт всех поданных раньше и задерживает всех поданных позже (`worker_module/keyed_executor.py`). Цена: второй
   `robot_park_all` встаёт за первым и идёт со своим `t0` (роботам уйдёт `park` ещё раз — `already`; после хука его
-  отсекает «идёт остановка хаба»); 10 операций данных всех роботов (`robot_point_list` и др.) ждут до ~33,5 с — не
+  отсекает «идёт остановка хаба»); 12 операций данных всех роботов (`robot_point_list` и др.) ждут до ~33,5 с — не
   дефект, плата за один вызов на выключение. Без исполнителя в процессе команда отказывает, а не встаёт на поток
   приёма.
 - **Шаг `pre_stop`.** Манифест ProcessManager: `{process: "devices", command: "robot_park_all", args: {}, timeout_s:

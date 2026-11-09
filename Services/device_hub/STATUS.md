@@ -47,7 +47,7 @@
 
 ## SPI хаба — итог (ADR-DH-012)
 
-Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 56 операций в каталогах `OpSpec`, из них
+Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 59 операций в каталогах `OpSpec`, из них
 генерируются команды `robot_*` / `vfd_*` (72 имени не менялись); исполнитель `device_io` (4/64) объявлен в топологии
 (`base.yaml`, C-47 исправлен в framework); `drv._client` в тестах хаба вне v1/ПЧ/сторожа 43 -> 0; затвор переподключения
 в базе. Команды и фабрики — из таблицы видов `kinds.py` по `OP_SPECS` драйверов (SPI.h); подкласс плагина со своим
@@ -58,6 +58,19 @@
   (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
 - Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
 - Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).
+
+## T5.4 — калибровка робота v2
+
+Команды `robot_calib_belt` / `robot_calib_frame` / `robot_calib_tools` (77 команд хаба, в каталогах 59); расчёт в пакете
+`Services/robot_comm/calibration` (`belt_from_marks`, `fit_frame`, `check_tool_points`). Приёмка: A1–A9
+(`Services/robot_comm/tests/test_t54_calibration_acceptance.py`), B1–B9
+(`Plugins/hub/device_hub/tests/test_t54_calib_commands_acceptance.py`), C1–C3
+(`Plugins/calibration/camera_robot/tests/test_v2_driver_contract.py`).
+
+**Открыто:**
+- `P_BELT_FACTOR` допускает до 65535 (`delta_v2.yaml:636`), а слово протокола знаковое (±32767): sim принимает 40000
+  без отказа (читано по `sim_core_v2.py:1523`, не запускалось); поведение на железе не проверено до GATE-0.
+  `param_bounds` оставлены по умолчанию (вопрос В8).
 
 ## T5.5 — рисунок на v2
 

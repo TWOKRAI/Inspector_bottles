@@ -51,13 +51,13 @@ _CONNECT_S = 60.0
 # Литералы файла приёмки
 # --------------------------------------------------------------------------------------------------
 
-# А1: 74 имени (+ ручная robot_park_all, T5.3e.5)
+# А1: 77 имён (+ ручная robot_park_all, T5.3e.5; + robot_calib_* T5.4)
 _DEVICE_COMMANDS = (
     "device_list device_describe device_upsert device_upsert_many device_sync_set device_remove device_protocols "
     "device_connect device_disconnect device_read device_write"
 ).split()
 _HIK_COMMANDS = "hik_enum hik_open hik_close hik_get_params hik_set_params hik_release".split()
-# 41 команда робота маршрута «драйвер»: 29 прежних + 12 v2
+# 42 команды робота маршрута «драйвер»: 29 прежних + 13 v2
 _ROBOT_V1_COMMANDS = (
     "robot_enqueue_job robot_return_job robot_send_test_job robot_abort robot_set_mode robot_jog robot_jog_abort "
     "robot_set_servo robot_set_robot_config robot_get_robot_config robot_get_telemetry robot_read_echo "
@@ -68,11 +68,11 @@ _ROBOT_V1_COMMANDS = (
 ).split()
 _ROBOT_V2_COMMANDS = (
     "robot_param_set robot_param_apply robot_stop robot_servo robot_do_set robot_jog_step robot_jog_hold "
-    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park"
+    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park robot_calib_belt"
 ).split()
 _ROBOT_DATA_COMMANDS = (
     "robot_param_get_all robot_point_list robot_point_save robot_point_delete robot_frame_list robot_frame_teach "
-    "robot_program_list robot_program_get robot_program_save robot_program_delete"
+    "robot_program_list robot_program_get robot_program_save robot_program_delete robot_calib_frame robot_calib_tools"
 ).split()
 _VFD_COMMANDS = "vfd_run vfd_set_freq vfd_stop vfd_reset_fault vfd_get_status".split()
 _ROBOT_DRIVER_COMMANDS = _ROBOT_V1_COMMANDS + _ROBOT_V2_COMMANDS
@@ -472,15 +472,15 @@ class PlainObjectDriver:
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a1_commands_are_exactly_the_74_names() -> None:
-    """А1: ``set(DeviceHubPlugin.commands)`` == 74 имени из файла приёмки."""
+def test_a1_commands_are_exactly_the_77_names() -> None:
+    """А1: ``set(DeviceHubPlugin.commands)`` == 77 имён из файла приёмки."""
     expected = set(ALL_COMMANDS)
-    assert len(ALL_COMMANDS) == 74 and len(expected) == 74, "литерал теста собран неверно"
+    assert len(ALL_COMMANDS) == 77 and len(expected) == 77, "литерал теста собран неверно"
     assert set(DeviceHubPlugin.commands) == expected
 
 
-def test_a2_all_73_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
-    """А2: после ``_do_configure`` + ``_do_start`` у всех 74 команд есть запись; в логе нет повторов и отказов."""
+def test_a2_all_77_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
+    """А2: после ``_do_configure`` + ``_do_start`` у всех 77 команд есть запись; в логе нет повторов и отказов."""
     missing = [name for name in ALL_COMMANDS if rig.cm.get_command_info(name) is None]
     assert missing == [], missing
     assert rig.lines.matching(None, "already exists") == []
@@ -653,7 +653,7 @@ class PingDriver(FakeDriver):
 
 
 def test_a9_install_op_commands_extends_subclass_only() -> None:
-    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 74 имени, без метода."""
+    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 77 имён, без метода."""
     plugin_mod = importlib.import_module("Plugins.hub.device_hub.plugin")
 
     class Sub(DeviceHubPlugin):
@@ -723,9 +723,9 @@ def _drive_all(rig: Rig, kind: str, protocol: str, commands: list[str], prefix: 
 
 @pytest.mark.parametrize("protocol", ["delta_v2", "delta_universal3"])
 def test_a19_robot_driver_route_commands_call_driver_with_stripped_op(rig: Rig, protocol: str) -> None:
-    """А19: 41 команда робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
+    """А19: 42 команды робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
     bad, checked = _drive_all(rig, "robot", protocol, _ROBOT_DRIVER_COMMANDS, "robot_")
-    assert checked == 41
+    assert checked == 42
     assert bad == [], "\n".join(bad)
 
 

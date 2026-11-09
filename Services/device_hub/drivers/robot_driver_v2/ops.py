@@ -294,3 +294,4 @@ OPS.update(
 )
 OPS["park"] = OpsMixin._op_park  # T5.3e: основная остановка (В2); порядок ключей OPS — порядок ROBOT_V2_OPS
 OPS["draw_polyline"] = ProgramMixin._op_draw_polyline  # T5.5: рисунок программой; после park, как в ROBOT_V2_OPS
+OPS["calib_belt"] = ParamMixin._op_calib_belt  # T5.4c: калибровка ленты; после draw_polyline, как в ROBOT_V2_OPS

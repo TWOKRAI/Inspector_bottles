@@ -426,6 +426,51 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
   файла; `store._new_lock` (`= threading.Lock`) — фабрика замка документа, подмена
   `monkeypatch.setattr(store, "_new_lock", fake)` действует без правки файла.
 
+## Калибровка (T5.4, `calibration/`)
+
+Чистая математика без ввода-вывода: числа на входе, результат или `CalibrationError` на выходе
+(`from Services.robot_comm.calibration import ...`). `Services.robot_comm` пакет не импортирует: `numpy` грузит только
+он сам. Запись результатов и команды хаба — T5.4c, не здесь.
+
+| Функция | Вход | Результат |
+|---|---|---|
+| `belt_from_marks(p1, enc1, p2, enc2, *, min_travel_mm=100.0, max_axis_dev_deg=1.0)` | два положения детали (x, y) мм в базе, два показания 32-битного энкодера | `BeltResult(factor_mm_per_imp, raw_factor, direction, axis_dev_deg, travel_mm, delta_enc)` |
+| `fit_frame(base, local, *, max_residual_mm=0.5)` | N >= 3 пар «точка в базе / номинал в СК», (x, y, z) мм | `FrameFit(origin, on_x, in_plane, yaw_deg, residuals_mm, max_residual_mm)` |
+| `check_tool_points(points, *, tools=TOOL_POINTS_V1, transit=TRANSIT_V1, min_clear_mm=1.0)` | карта `{имя: Point}` | `list[ToolCheck(tool, ok, missing, problems)]`, по возрастанию номера инструмента |
+
+- **Лента.** `direction` — индекс в `BELT_AXES` (0 +X, 1 +Y, 2 −X, 3 −Y; значение `P_BELT_DIR`). `raw_factor` —
+  `factor_mm_per_imp / BELT_FACTOR_SCALE` (`1e-5` мм/имп на единицу), не меньше 1; верхнюю границу по диапазону
+  параметра проверяет вызывающий.
+- **СК.** `origin`, `on_x`, `in_plane` — три точки в базе для `FrameDef`: начало и точки локальных (100, 0, 0) и
+  (0, 100, 0). Масштаб не оценивается. Зеркальный набор номинальных точек отказом «СК перевёрнута», не успехом.
+- **Сила проверки невязки `fit_frame`.** При N = 3 у подгонки 6 степеней свободы на 9 уравнений, невязка почти пуста:
+  сдвиг точки на 1 мм в плоскости листа даёт 0.336–0.656 мм (не всегда больше порога 0.5), сдвиг на 1–2 мм по Z — не
+  более 0.008 мм (замер ревьюера стадии 0, не повторён). При N = 3 ловятся только грубые ошибки (перепутанная точка,
+  сантиметры вместо миллиметров, сдвиг от 2 мм в плоскости). Как проверка подгонка осмысленна с N ≥ 4. Порядок
+  отказов: невязка раньше «СК перевёрнута»; зеркальный номинал (y × −1) подгоняется точно поворотом на 180° и даёт
+  «СК перевёрнута».
+- **Инструменты.** `missing` — имена отсутствующих точек по алфавиту; `problems` — коды `TOOL_PROBLEMS`:
+  `not_in_base` (у точки задан `frame`), `over_not_above_pick` (`over.z − pick.z < min_clear_mm`).
+  `ok` — нет ни `missing`, ни `problems`.
+- **Отказы.** `CalibrationError(ValueError)`; `str(exc)` — постоянный текст без входных значений (уходит в ответ
+  команды как есть):
+
+| Константа | Текст |
+|---|---|
+| `TEXT_BELT_BAD_MARKS` | неверные отметки ленты |
+| `TEXT_BELT_NO_ENCODER` | энкодер не изменился между отметками |
+| `TEXT_BELT_SHORT` | мало хода ленты между отметками |
+| `TEXT_BELT_OFF_AXIS` | лента не вдоль оси робота |
+| `TEXT_BELT_FACTOR_RANGE` | коэффициент ленты вне диапазона параметра |
+| `TEXT_FRAME_BAD_POINTS` | неверные точки подгонки СК |
+| `TEXT_FRAME_DEGENERATE` | точки СК вырождены |
+| `TEXT_FRAME_RESIDUAL` | точки не совпадают с размерами СК |
+| `TEXT_FRAME_UPSIDE_DOWN` | СК перевёрнута: ось Z вниз |
+
+- **Пороги.** `MIN_TRAVEL_MM = 100.0`, `MAX_AXIS_DEV_DEG = 1.0`, `MAX_RESIDUAL_MM = 0.5`, `MIN_SECOND_SINGULAR_MM = 1.0`,
+  `FRAME_POINT_OFFSET_MM = 100.0`, `MAX_COORD_MM = 1e6` (координата входной точки `fit_frame` больше по модулю — `TEXT_FRAME_BAD_POINTS`; без предела `np.linalg.svd` зависает на ~1e155).
+- **Тесты:** `pytest Services/robot_comm/tests/test_calibration_math.py` (тесты автора) и `test_t54_calibration_acceptance.py` (слепая приёмка).
+
 ## Тесты
 
 ```bash
