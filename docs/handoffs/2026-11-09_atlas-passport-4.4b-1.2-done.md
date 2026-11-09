@@ -77,6 +77,28 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 | набор `r1` (drafter) | `a8134e055e2df2f3e` |
 | ADR-правка developer / ревью | `a3187404c78cef4a1` / `a5adc512648853fa6` |
 
+## Что в `main`, что нет (проверено `git merge-base --is-ancestor`)
+
+| В `main` | Только в ветках |
+|---|---|
+| `6d6b36720` ссылки ADR, `73968f13d` набор `r1` + условие, `49a4a2b89` потолок 0,85 | 4.4b: `worktree-agent-adbf2ecf3fa0db0ed` (`984cc5799`, `aa391fba9`, `c712f0262`) |
+| | весь план `docs/atlas-reports` (на 24+ коммита впереди `main`): Task 4.4b/1.2, пороги, результат 1.2, поправка 7, этот handoff, сводка ревью, отчёты исполнителей, записи замера |
+
+В `main` сейчас `modules.yaml` ещё 1035 строк: 4.4b не влита. Ветка `docs/atlas-reports` в `main` не сливалась (так было и раньше; решает владелец вместе с очередью планов).
+
+## Где что лежит (ничего не только в чате)
+
+- Вердикты и находки всех ревью, инъекции, результат замера: `plans/2026-11-06_atlas-passport/reports/2026-11-09_reviews-summary.md`.
+- Отчёты исполнителей: `docs/reviews/2026-11-08_task-docs-refs-developer.md`, `docs/reviews/2026-11-09_task-4.4b-{developer,injection,fixes}.md`.
+- Записи замера (в `data/nav_bench` они вне git, здесь копии): `plans/2026-11-06_atlas-passport/reports/1.2-records/` (`floor` и `r1`, `.json` и `.md`).
+- Предсказания инъекций 4.4b: `plans/2026-11-06_atlas-passport/reports/4.4b.injection-predictions.md`.
+- Урок про `protect-branch` дописан в `docs/claude/memory/feedback_protect_branch_blocks_worktree_subagents.md`.
+- Рабочие worktree (не удалять до слияния): `atlas-passport`, `agent-adbf2ecf3fa0db0ed` (4.4b), `agent-a3187404c78cef4a1` (слита, можно убрать), `agent-a8455e6bb97f596e6` (tester, файл теста уже в ветке 4.4b).
+
+## Фраза для старта нового чата
+
+«Продолжай по `docs/handoffs/2026-11-09_atlas-passport-4.4b-1.2-done.md`, ветка `docs/atlas-reports`, worktree `.claude/worktrees/atlas-passport`. Сначала слияние 4.4b в `main` (я сделал/разрешил коммит на main), потом исправление `r1` и повторный C0.»
+
 ## Что оставил открытым / ненадёжным
 
 - Остановка по `max_budget_usd` на подписке не проверена: ни один повтор не оборвался. Отвечаемость `r1` теперь известна частично.
