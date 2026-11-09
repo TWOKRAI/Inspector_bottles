@@ -68,8 +68,8 @@
 
 **Цель фазы:** сканер A1 (`75f818845`) в `main`; `arch_map`/`signboard`/`docs/arch-map` — нет.
 
-- Task 2.1: A1 стадия 5 на `feat/atlas-passport` — матрица инъекций I1–I22, ревью, замер времени [PENDING] (после 0.1, 1.1)
-- Task 2.2: слияние A1 в `main` [PENDING] (после 2.1)
+- Task 2.1: A1 стадия 5 на `feat/atlas-passport` — матрица инъекций I1–I22, ревью, замер времени [DONE] (после 0.1, 1.1)
+- Task 2.2: слияние A1 в `main` [DONE] (после 2.1)
 
 ### Phase 3: Опыт формы
 
