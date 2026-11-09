@@ -86,6 +86,11 @@ class WordAssembler:
         for s in self._slots:
             s.filled = False
 
+    def slots_of(self, label: str) -> list[int]:
+        """Индексы ячеек с буквой ``label`` по возрастанию, независимо от заполнения (``[]`` — буквы нет)."""
+        norm = (label or "").strip().upper()
+        return [idx for idx, s in enumerate(self._slots) if s.char == norm]
+
     # --- матчинг ---
 
     def offer(

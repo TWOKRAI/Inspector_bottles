@@ -29,6 +29,11 @@ from .registers import WordLayoutRegisters
 _PUBLISH_PERIOD_S = 1.0
 
 
+def _fmt1(v: float) -> str:
+    """Число с одним знаком для строки журнала; ``+ 0.0`` снимает ``-0.0`` (угол ±0,04° → ``0.0``)."""
+    return f"{round(float(v), 1) + 0.0:.1f}"
+
+
 def _norm(w: str) -> str:
     """Слово в виде, по которому строятся ячейки: верхний регистр, пробелы схлопнуты."""
     return " ".join(w.upper().split())
@@ -114,6 +119,9 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._taken_track: object | None = None
         # Триггер-режим: взвод по сигналу trigger.
         self._trig_armed = False
+        # Ключ диска, по которому в журнал уже записана строка (пропуск или взятие): один раз на диск.
+        # Читается/пишется только журналом, на решения «брать» не влияет.
+        self._logged_skip_key: tuple | None = None
         # Возврат: фронт сигнала «вернуть на ленту» (срабатывает раз на нажатие).
         self._return_armed = True
         # Once-флаг предупреждения «нет калибровки/pick» (не флудить лог).
@@ -157,6 +165,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
     def _handle_item(self, item: dict) -> dict:
         word = self._resolve_word(item)
         if not word.strip():
+            self._note_skip_guarded(item, "слово не задано")
             return item
         self._ensure_assembler(word, self._word_src)
         assert self._assembler is not None
@@ -169,6 +178,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
 
         if self._assembler.done:
             self._reg.done = True
+            self._note_skip_guarded(item, "слово готово")
             return item
 
         # Триггер-режим: сигнал на порту взводит однократный взвод.
@@ -188,6 +198,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         pick = self._resolve_pick(item)
         if pick is None and self._reg.require_pick:
             self._note_no_pick()
+            self._log_disk(pred, "пропуск: нет координаты забора")
             return item
 
         self._reg.last_label = pred["label"]
@@ -201,6 +212,11 @@ class WordLayoutPlugin(ProcessModulePlugin):
         )
         if job is None:
             # Буква не нужна/дубль — диск пропускаем (взвод снят, ждём следующий).
+            cells = self._assembler.slots_of(pred["label"])
+            if cells:
+                self._log_disk(pred, f"пропуск: ячейки '{self._label_of(pred)}' заняты ({', '.join(map(str, cells))})")
+            else:
+                self._log_disk(pred, f"пропуск: нет в слове '{self._reg.word_norm}'")
             return item
 
         # Команда роботу: ЗАБОР (pick с ленты, трекинг по энкодеру) + УКЛАДКА (place в слот
@@ -226,17 +242,65 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._reg.last_correction_deg = round(float(job["angle_deg"]), 2)
         self._reg.next_letter = self._assembler.next_letter
         self._reg.done = self._assembler.done
-        pick_txt = f"взять({pick[0]:.1f},{pick[1]:.1f}) → " if pick else ""
-        self._ctx.log_info(
-            f"WordLayoutPlugin: слот {job['slot']} '{job['char']}' → {pick_txt}положить "
-            f"x{pose['place_x_mm']:.1f} y{pose['place_y_mm']:.1f} z{pose['place_z_mm']:.1f} "
-            f"r{pose['place_rz_deg']:.1f}° [{self._reg.slots_filled}/{self._reg.slots_total}]"
+        pick_txt = f"взять({_fmt1(pick[0])},{_fmt1(pick[1])}) → " if pick else ""
+        self._log_disk(
+            pred,
+            f"ячейка {job['slot']}: {pick_txt}положить "
+            f"x{_fmt1(pose['place_x_mm'])} y{_fmt1(pose['place_y_mm'])} z{_fmt1(pose['place_z_mm'])} "
+            f"r{_fmt1(pose['place_rz_deg'])}° [{self._reg.slots_filled}/{self._reg.slots_total}]",
         )
+        self._logged_skip_key = self._disk_key(pred, tid)
         return {**item, self._reg.job_key: pose}
 
     # ------------------------------------------------------------------ #
     # Внутреннее
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _label_of(pred: dict) -> str:
+        """Буква диска для журнала: как в ячейках слова (верхний регистр, без пробелов по краям)."""
+        return pred["label"].strip().upper()
+
+    @staticmethod
+    def _disk_key(pred: dict, tid: object | None) -> tuple:
+        """Ключ диска для «одна строка на диск»: track_id, а без него — буква."""
+        return ("tid", tid) if tid is not None else ("label", pred["label"])
+
+    def _log_disk(self, pred: dict, decision: str) -> None:
+        """Строка журнала диска: буква, угол сети (как есть), решение."""
+        self._ctx.log_info(f"WordLayoutPlugin: диск '{self._label_of(pred)}' {_fmt1(pred['angle_deg'])}° → {decision}")
+
+    def _note_skip_guarded(self, item: dict, reason: str) -> None:
+        """``_note_skip_once`` под защитой: ошибка журнала не должна ронять решение плагина."""
+        try:
+            self._note_skip_once(item, reason)
+        except Exception as exc:  # noqa: BLE001 — журнал вторичен; значение входа в сообщение не кладём
+            self._ctx.log_error(f"WordLayoutPlugin: строка пропуска '{reason}' не записана: {type(exc).__name__}")
+
+    def _note_skip_once(self, item: dict, reason: str) -> None:
+        """Строка пропуска на выходах «слово не задано» / «слово готово» — один раз на диск.
+
+        Только читает ``_top_pred``/``_disk_id`` и пишет своё ``_logged_skip_key``: состояние
+        ``_should_take`` не трогается, диск остаётся невзятым (слово задали — он берётся как обычно).
+        Триггер-режим: ключа нет, строка на каждый item с сигналом.
+        """
+        pred = self._top_pred(item)
+        if self._reg.use_trigger and self._reg.trigger_source:
+            trig = item.get(self._reg.trigger_source)
+            if pred is not None and trig is not None and trig is not False:
+                self._log_disk(pred, f"пропуск: {reason}")
+            return
+        if pred is None:
+            # Пауза без track_id: следующий диск — новый, даже с той же буквой. Ключ track_id на паузе
+            # не трогаем: моргнувшая уверенность или контрольный item — тот же диск, второй строки нет.
+            if self._logged_skip_key is not None and self._logged_skip_key[0] == "label":
+                self._logged_skip_key = None
+            return
+        key = self._disk_key(pred, self._disk_id(item))
+        if key == self._logged_skip_key:
+            return
+        self._logged_skip_key = key
+        self._log_disk(pred, f"пропуск: {reason}")
 
     def _write_word(self, w: str, log: bool = True) -> bool:
         """Записать слово в регистр «Слово» (единственное хранилище). False — регистр отказал."""
@@ -396,13 +460,17 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
-        # Первая сборка и смена слова — в журнал (с источником); пересборка по геометрии — без строки.
+        # Первая сборка, смена слова (с источником) и смена геометрии — в журнал.
         if old_sig is None:
             self._ctx.log_info(f"WordLayoutPlugin: слово '{self._reg.word_norm}' (источник: {src})")
         elif sig[0] != old_sig[0]:
             self._ctx.log_info(
                 f"WordLayoutPlugin: смена слова '{old_norm}' → '{self._reg.word_norm}' "
                 f"(источник: {src}) — ячейки с нуля (было заполнено {old_filled}/{old_total})"
+            )
+        else:
+            self._ctx.log_info(
+                f"WordLayoutPlugin: геометрия ячеек изменена — ячейки с нуля (было заполнено {old_filled}/{old_total})"
             )
         if self._reg.spacing_warn:
             self._ctx.log_info(

@@ -313,7 +313,7 @@ blueprint:
             word_source: signal_2
             use_pitch: true
             first_x: 320.0
-            first_y: -200.0
+            first_y: -440.0
             line_angle_deg: 90.0
             pitch_mm: 0.0
             last_x: 320.0
