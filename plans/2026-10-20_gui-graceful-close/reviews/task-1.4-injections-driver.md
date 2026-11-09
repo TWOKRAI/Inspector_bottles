@@ -26,3 +26,30 @@
 - Инъекции — на фейках; против настоящего PM драйвер не проверен (FL 9–10 — стенд).
 - Ячейка (е) `now+1` и ячейка (г) слабы (см. выше): (е) `now+1` не отличает расширение от константы, (г) не отличает разбор снимков от его отсутствия.
 - Инъекции 11 и 19 идут тем же путём `outcomes.setdefault`; отдельной инъекции на фильтр `isinstance(entry, dict)` и на проверку `success is not False` не было (не в списке лида).
+
+## Раунд 2 (ревью r1: M1 и m2)
+
+Правки `backend_ctl/driver.py` (M1: `accepted`/`reason`/`mode` читаются из листа ответа `_leaf_result`, `timeout` — по плоскому ответу; m2: `all_done = bool(outcomes) and all(...)` по всем детям, виденным в любом снимке).
+Новый авторский файл `backend_ctl/tests/test_system_shutdown_driver_envelope.py` (6 тестов): вложенные `already_stopping` / `accepted True` + `mode` / ошибка аргументов; один тест на настоящих объектах; (е') перебазирование срока; снимок только с `ProcessManager`.
+Тест на настоящих объектах: `ProcessManagerProcess._handle_process_command` + `_cmd_system_shutdown` (PM через `__new__`, фейковая группа) + настоящий `RouterManager.reply_to_request` (`send` перехвачен). Лёгкий класс: без процессов и сокетов. Первый `graceful` — `accepted True`, повтор — `success True` у конверта и `result.accepted False`, `mode: sideways` — `success False`, `result.error`.
+Слепые тесты не правились.
+
+Прогон после правок (гейт `light op-1.4d`): envelope 6 passed, DR 1 passed, SD 4 passed, SA 2 passed, `test_mcp_server_sdk.py` 51 passed, `test_mcp_full_and_rules_doc_parity.py` 1 passed. `ruff check backend_ctl` и `ruff format --check` по двум файлам чистые.
+
+| инъекция | предсказано | наблюдено | совпало |
+|---|---|---|---|
+| 13: `accepted` из `success` (верхний уровень) | envelope красный | envelope: красные (1) вложенный `already_stopping` (`accepted True`, ждали False) и (4) настоящие объекты; DR (г) тоже красный; SD, SA зелёные | да |
+| 20: `payload = reply_dict` (нет `_leaf_result` для accepted/reason/mode) | envelope красный | envelope: красные (1), (2) (`mode` `graceful` вместо `force`) и (4); DR, SD, SA ЗЕЛЁНЫЕ | да; DR слеп к M1-классу |
+| 21: `all_done` без `bool(outcomes)` (m2 откачен) | envelope красный | envelope: красный только тест «снимок только с ProcessManager» (`timed_out False`, ждали True); DR, SD, SA зелёные | да |
+| 17: `wait_timeout=None` — постоянные 20,0 (повтор) | (е) DR, теперь и (е') | DR (е) `now+30` красный, как раньше; envelope (е'): `elapsed_s=20.0` вместо [25,0; 25,5] красный | да |
+
+Откат после каждой инъекции — запись исходного текста; `git diff --stat` после серии показывает только намеренную правку M1/m2 (8+/4−), посторонних строк нет.
+
+Слабые ячейки DR:
+- (г): теперь сильнее — envelope (1) требует `status_calls == 2` и `outcomes == {"a": "exited"}`, `timed_out False`: опрос должен кончиться по РАЗОБРАННЫМ снимкам (при `timeout 5 с` без разбора он шёл бы до срока).
+- (е) `now+1`: в самом DR остаётся неразличимой (`max(20, 1+12) = 20` совпадает с константой). Различимо только при позднем снимке с `system_stop`: (е') — `system_stop` виден через 5 с, `deadline_at = now+1` -> срок 20 с от снимка, `elapsed_s` в [25,0; 25,5]; константа от начала даёт 20,0.
+
+## Что осталось открытым / ненадёжно (раунд 2)
+- Настоящие объекты — PM через `__new__` и перехваченный `send` роутера; сокет, `SocketClient.request` и `CommandManager` не пройдены (командный менеджер заменён тонкой прокладкой к `_cmd_system_shutdown`). Конверт собран настоящим кодом, но живой путь по сокету — только FL 9–10 (стенд, не гонялись).
+- L-smoke `test_system_shutdown_force_live.py:193` (`accepted is True`) по-прежнему не различает вложенную и плоскую форму; поле, видимое только во вложенной форме (`res["mode"]` при `force`), в L-smoke/FL не добавлялось — файл не из списка этого раунда.
+- `all_done` теперь по всем виденным детям: ребёнок, чья запись исчезла из снимков без итога, держит опрос до `done`/разрыва/срока (раньше опрос кончился бы раньше). Это сознательно: честнее, но возможна задержка до срока.
