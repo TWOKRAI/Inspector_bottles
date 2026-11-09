@@ -76,7 +76,7 @@
 ### Phase 3: Опыт формы
 
 - Task 3.1: опыт 0b — 3 + 3 прогона «эталон» / «эталон + код» [DONE] (стоп 0b по букве не сработал: 6 из 10; 5 из 8 — поправка 10) (после 1.2, если Kill-1 не сработал)
-- Task 3.2: `nav_bench`: `ceiling`, `pattern` в трассе, линт `verify-set`, колонка «файл» [PENDING] (после 1.2; до повтора C0 и 5.1)
+- Task 3.2: `nav_bench`: `ceiling`, `pattern` в трассе, линт `verify-set`, колонка «файл» [DONE]
 
 ### Phase 4: A3′ — паспорт
 
@@ -103,7 +103,7 @@
 - Task 6.2b: пробы `card`/`pack` в шести тестах → `ref` [PENDING] (после 6.1, 6.2; только при kill №2, иначе SKIPPED)
 - Task 6.2c: пробы `pack` в тестах итога и повтор команд `brief` [PENDING] (после 6.2b; только при kill №2)
 - Task 6.2a: снять CLI `card`/`pack`, если в `K1.1.result.md` ровно одна строка `kill №2: сработал`, иначе SKIPPED [PENDING] (после 6.2c)
-- Task 6.3: `ship.md` и `plans/README.md` Lifecycle п. 3 под отказ `close` без `## Итог` (`CLOSED_WITHOUT_SUMMARY`) и закрытие без kill записью владельца [PENDING] (после слова владельца В2)
+- Task 6.3: `ship.md` и `plans/README.md` Lifecycle п. 3 под отказ `close` без `## Итог` (`CLOSED_WITHOUT_SUMMARY`) и закрытие без kill записью владельца [DONE]
 
 ### Phase 7: Происхождение (цепь план → коммит → код → документ)
 
