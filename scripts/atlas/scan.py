@@ -25,7 +25,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -165,6 +165,10 @@ class ThreadSite:
     daemon: bool | None = None
 
 
+_KIND_CODE = {"class": "c", "function": "f", "method": "m"}  # вид DefFact в теле кэша
+_KIND_NAME = {v: k for k, v in _KIND_CODE.items()}
+
+
 @dataclass(frozen=True)
 class FileFacts:
     loc: int = 0  # непустые строки
@@ -187,6 +191,15 @@ class FileFacts:
     v2_error: str | None = None  # имя исключения разбора полей v2 (поля A1 при этом целы), иначе None
 
     def to_json(self) -> str:
+        strs: list[str] = []
+        index: dict[str, int] = {}
+
+        def ix(text: str) -> int:
+            if text not in index:
+                index[text] = len(strs)
+                strs.append(text)
+            return index[text]
+
         data = {
             "loc": self.loc,
             "doc": self.doc,
@@ -199,18 +212,43 @@ class FileFacts:
             "tier": self.tier,
             "contour": self.contour,
             "error": self.error,
+            # v2 — сжатая форма (гейт размера `scan_cache` ≤ 4× A1): строки имён, qualname и получателей — одна
+            # таблица `strs` на файл, записи ссылаются на неё индексом; `calls` и `test_defs` — плоские массивы
+            # целых фиксированного шага (4 и 2). В памяти — те же dataclass'ы.
+            "strs": strs,
+            "defs": [
+                [ix(d.qualname), _KIND_CODE[d.kind], d.line, d.signature, d.decorators, int(d.abstract)]
+                + [int(d.is_async), d.doc, d.bases]
+                for d in self.defs
+            ],
+            "calls": [
+                v
+                for c in self.calls
+                for v in (ix(c.name), c.line, ix(c.enclosing), -1 if c.receiver is None else ix(c.receiver))
+            ],
+            "io": [[i.op, i.path, i.line, ix(i.enclosing)] for i in self.io],
+            "thread_sites": [[t.pattern, t.line, ix(t.enclosing), t.daemon] for t in self.thread_sites],
+            "test_defs": [v for q, ln in self.test_defs for v in (ix(q), ln)],
+            "v2_error": self.v2_error,
         }
-        return json.dumps(data, separators=(",", ":"))  # ASCII: одиночный суррогат не ломает запись в sqlite
+        # UTF-8 без экранирования: кириллица в `doc` иначе стоит 6 байт на букву (гейт размера `scan_cache`, Task 4.1).
+        body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+        try:
+            body.encode("utf-8")
+        except UnicodeEncodeError:  # одиночный суррогат: тело не кодируется в UTF-8
+            body = json.dumps(data, separators=(",", ":"))  # ASCII: одиночный суррогат не ломает запись в sqlite
+        return body
 
     @classmethod
     def from_json(cls, text: str) -> FileFacts:
         """Обратное к `to_json`; тело неверной формы -> исключение (для `scan` это промах кэша).
 
-        v2: читает d["defs"], d["calls"], d["io"], d["thread_sites"], d["test_defs"], d["v2_error"] через `d[...]`
-        (не `d.get`): тело старой формы без этих ключей бросает, `scan()` считает это промахом и разбирает заново.
-        В INTERFACE-стадии новые ключи не читаются и не пишутся (`to_json` тоже) — это делает GREEN.
+        v2: читает d["strs"], d["defs"], d["calls"], d["io"], d["thread_sites"], d["test_defs"], d["v2_error"]
+        через `d[...]` (не `d.get`): тело старой формы без этих ключей бросает, `scan()` считает это промахом
+        и разбирает заново.
         """
         d = json.loads(text)
+        strs, calls, tests = d["strs"], d["calls"], d["test_defs"]
         return cls(
             loc=d["loc"],
             doc=d["doc"],
@@ -225,6 +263,20 @@ class FileFacts:
             tier=d["tier"],
             contour=None if d["contour"] is None else tuple(d["contour"]),
             error=d["error"],
+            defs=tuple(
+                DefFact(strs[q], _KIND_NAME[k], ln, sig, tuple(dec), bool(ab), bool(asy), doc, tuple(b))
+                for q, k, ln, sig, dec, ab, asy, doc, b in d["defs"]
+            ),
+            calls=tuple(
+                CallFact(
+                    strs[calls[i]], calls[i + 1], strs[calls[i + 2]], None if calls[i + 3] < 0 else strs[calls[i + 3]]
+                )
+                for i in range(0, len(calls), 4)
+            ),
+            io=tuple(IoFact(op, p, ln, strs[enc]) for op, p, ln, enc in d["io"]),
+            thread_sites=tuple(ThreadSite(p, ln, strs[enc], dmn) for p, ln, enc, dmn in d["thread_sites"]),
+            test_defs=tuple((strs[tests[i]], tests[i + 1]) for i in range(0, len(tests), 2)),
+            v2_error=d["v2_error"],
         )
 
 
@@ -401,6 +453,209 @@ def _loc(text: str) -> int:
     return sum(1 for line in text.splitlines() if line.strip())
 
 
+# --------------------------------------------------------------------------- факты v2 (Task 4.1)
+
+_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+_REPLACES = frozenset({("os", "replace"), ("os", "rename"), ("shutil", "move")})
+
+
+def _decorator_name(expr: ast.expr) -> str:
+    """Листовое имя декоратора: `a.b.c` -> `c`, `d(x)` -> `d`; иное выражение — его исходник."""
+    if isinstance(expr, ast.Call):
+        expr = expr.func
+    return leaf_name(expr) or ast.unparse(expr)
+
+
+def _first_paragraph(node: ast.AST) -> str | None:
+    doc = ast.get_docstring(node)  # type: ignore[arg-type]
+    if not doc:
+        return None
+    lines: list[str] = []
+    for line in doc.splitlines():
+        if not line.strip():
+            break
+        lines.append(line.strip())
+    return " ".join(lines) or None
+
+
+def _ctor_pattern(expr: ast.expr | None) -> str | None:
+    """Имя конструктора из `THREAD_PATTERNS`, если `expr` — его вызов (`Thread(...)`, `threading.Thread(...)`)."""
+    if isinstance(expr, ast.Call) and isinstance(expr.func, (ast.Name, ast.Attribute)):
+        name = leaf_name(expr.func)
+        if name in THREAD_PATTERNS:
+            return name
+    return None
+
+
+def _daemon_literal(call: ast.Call) -> bool | None:
+    for kw in call.keywords:
+        if kw.arg == "daemon":
+            value = kw.value
+            return value.value if isinstance(value, ast.Constant) and isinstance(value.value, bool) else None
+    return None
+
+
+class _V2Collector:
+    """Один обход дерева: `defs`, `calls`, `test_defs` по ходу; `io` и `thread_sites` — после, по собранным местам.
+
+    Стек областей — список `(имя, вид)`, вид `class` или `def`. Декораторы, умолчания, аннотации и основы класса
+    вычисляются во внешней области и обходятся до входа в тело.
+    """
+
+    def __init__(self) -> None:
+        self.defs: list[DefFact] = []
+        self.calls: list[CallFact] = []
+        self.test_defs: list[tuple[str, int]] = []
+        self.replaces: list[IoFact] = []
+        self.sites: list[ThreadSite] = []  # цепочки `Thread(...).start()`
+        self.ctors: list[tuple[str, str, ast.Call, str]] = []  # (область, цель, вызов, шаблон) из присваиваний
+        self.observer_attrs: set[tuple[str, str]] = set()  # (класс, `self.<a>`) с `Observer(...)`
+        self.starts: set[tuple[str, str]] = set()  # (область, получатель) вызовов `.start()`
+        self.schedules: list[tuple[str, str | None, str, ast.Call]] = []  # (область, класс, получатель, вызов)
+
+    @staticmethod
+    def _enclosing(stack: list[tuple[str, str]]) -> str:
+        return ".".join(name for name, _ in stack) or "<module>"
+
+    @staticmethod
+    def _class_of(stack: list[tuple[str, str]]) -> str | None:
+        for i in range(len(stack) - 1, -1, -1):
+            if stack[i][1] == "class":
+                return ".".join(name for name, _ in stack[: i + 1])
+        return None
+
+    def visit(self, node: ast.AST, stack: list[tuple[str, str]]) -> None:
+        if isinstance(node, _FUNC_NODES):
+            self._visit_def(node, stack)
+        elif isinstance(node, ast.ClassDef):
+            self._visit_class(node, stack)
+        else:
+            if isinstance(node, ast.Call):
+                self._call(node, stack)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                self._assign(node, stack)
+            for child in ast.iter_child_nodes(node):
+                self.visit(child, stack)
+
+    def _visit_def(self, node: ast.FunctionDef | ast.AsyncFunctionDef, stack: list[tuple[str, str]]) -> None:
+        for outer in (*node.decorator_list, node.args, node.returns):
+            if outer is not None:
+                self.visit(outer, stack)
+        qualname = ".".join([*(name for name, _ in stack), node.name])
+        signature = ast.unparse(node.args)
+        if node.returns is not None:
+            signature += " -> " + ast.unparse(node.returns)
+        decorators = tuple(_decorator_name(d) for d in node.decorator_list)
+        kind = "method" if stack and stack[-1][1] == "class" else "function"
+        self.defs.append(
+            DefFact(
+                qualname,
+                kind,
+                node.lineno,
+                signature,
+                decorators,
+                "abstractmethod" in decorators,
+                isinstance(node, ast.AsyncFunctionDef),
+                _first_paragraph(node),
+            )
+        )
+        if node.name.startswith("test") and all(k == "class" and n.startswith("Test") for n, k in stack):
+            self.test_defs.append((qualname, node.lineno))
+        inner = [*stack, (node.name, "def")]
+        for stmt in node.body:
+            self.visit(stmt, inner)
+
+    def _visit_class(self, node: ast.ClassDef, stack: list[tuple[str, str]]) -> None:
+        for outer in (*node.decorator_list, *node.bases, *node.keywords):
+            self.visit(outer, stack)
+        qualname = ".".join([*(name for name, _ in stack), node.name])
+        decorators = tuple(_decorator_name(d) for d in node.decorator_list)
+        bases = tuple(ast.unparse(b) for b in node.bases)
+        self.defs.append(
+            DefFact(qualname, "class", node.lineno, "", decorators, False, False, _first_paragraph(node), bases)
+        )
+        inner = [*stack, (node.name, "class")]
+        for stmt in node.body:
+            self.visit(stmt, inner)
+
+    def _call(self, node: ast.Call, stack: list[tuple[str, str]]) -> None:
+        func = node.func
+        if isinstance(func, ast.Name):
+            name, receiver = func.id, None
+        elif isinstance(func, ast.Attribute):
+            name, receiver = func.attr, ast.unparse(func.value)
+        else:
+            return  # `f()()`, `d[k]()`: имени нет
+        enclosing = self._enclosing(stack)
+        self.calls.append(CallFact(name, node.lineno, enclosing, receiver))
+        if receiver is None:
+            return
+        if name == "start":
+            self.starts.add((enclosing, receiver))
+            pattern = _ctor_pattern(func.value)  # type: ignore[union-attr]
+            if pattern is not None:  # цепочка `Thread(...).start()`
+                ctor: ast.Call = func.value  # type: ignore[union-attr,assignment]
+                self.sites.append(ThreadSite(pattern, ctor.lineno, enclosing, _daemon_literal(ctor)))
+        elif name == "schedule":
+            self.schedules.append((enclosing, self._class_of(stack), receiver, node))
+        elif (receiver, name) in _REPLACES and len(node.args) >= 2:
+            self.replaces.append(IoFact("replaces", ast.unparse(node.args[1]), node.lineno, enclosing))
+
+    def _assign(self, node: ast.Assign | ast.AnnAssign, stack: list[tuple[str, str]]) -> None:
+        pattern = _ctor_pattern(node.value)
+        if pattern is None:
+            return
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        enclosing = self._enclosing(stack)
+        cls = self._class_of(stack)
+        for target in targets:
+            if not isinstance(target, (ast.Name, ast.Attribute)):
+                continue
+            text = ast.unparse(target)
+            self.ctors.append((enclosing, text, node.value, pattern))  # type: ignore[arg-type]
+            if pattern == "Observer" and cls is not None and text.startswith("self."):
+                self.observer_attrs.add((cls, text))
+
+    def finish(self) -> tuple[tuple[IoFact, ...], tuple[ThreadSite, ...]]:
+        observer_locals = {(enc, text) for enc, text, _, pattern in self.ctors if pattern == "Observer"}
+        io = list(self.replaces)
+        for enclosing, cls, receiver, call in self.schedules:
+            if receiver.startswith("self."):
+                known = cls is not None and (cls, receiver) in self.observer_attrs
+            else:
+                known = (enclosing, receiver) in observer_locals
+            if not known:
+                continue
+            if len(call.args) >= 2:
+                path: ast.expr | None = call.args[1]
+            else:
+                path = next((kw.value for kw in call.keywords if kw.arg == "path"), None)
+            if path is not None:
+                io.append(IoFact("watch", ast.unparse(path), call.lineno, enclosing))
+        sites = list(self.sites)
+        for enclosing, text, ctor, pattern in self.ctors:
+            if (enclosing, text) in self.starts:
+                sites.append(ThreadSite(pattern, ctor.lineno, enclosing, _daemon_literal(ctor)))
+        io.sort(key=lambda f: f.line)
+        sites.sort(key=lambda s: s.line)
+        return tuple(io), tuple(sites)
+
+
+def _collect_v2(tree: ast.Module) -> dict[str, tuple]:
+    """Поля v2 `FileFacts` из дерева модуля; может бросить (ловит `scan_text` в своём `try`)."""
+    collector = _V2Collector()
+    for stmt in tree.body:
+        collector.visit(stmt, [])
+    io, sites = collector.finish()
+    return {
+        "defs": tuple(collector.defs),
+        "calls": tuple(collector.calls),
+        "io": io,
+        "thread_sites": sites,
+        "test_defs": tuple(collector.test_defs),
+    }
+
+
 def scan_text(text: str) -> FileFacts:
     """Факты исходника; не бросает никогда. Зависят только от текста (R5): ни пути, ни `is_init`."""
     text = text.removeprefix("﻿")
@@ -422,7 +677,7 @@ def scan_text(text: str) -> FileFacts:
         commands, threads = collect_derived(tree)
         doc = ast.get_docstring(tree) or ""
         tier, contour = read_doc_headers(doc)
-        return FileFacts(
+        a1 = FileFacts(
             loc=loc,
             doc=next((x.strip() for x in doc.splitlines() if x.strip()), None),
             all=read_all(tree),
@@ -436,6 +691,10 @@ def scan_text(text: str) -> FileFacts:
         )
     except Exception as exc:  # noqa: BLE001 — SyntaxError, ValueError, RecursionError, MemoryError, ...
         return FileFacts(loc=loc, error=type(exc).__name__)
+    try:  # v2 — свой `try`: сбой разбора v2 оставляет поля A1 как есть
+        return replace(a1, **_collect_v2(tree))
+    except Exception as exc:  # noqa: BLE001 — RecursionError на глубоком дереве и т. п.
+        return replace(a1, v2_error=type(exc).__name__)
 
 
 def _facts_of_bytes(data: bytes) -> FileFacts:
@@ -526,7 +785,8 @@ def scan(source: Source, paths: Sequence[str], cache: sqlite3.Connection | None 
                 continue
             facts = by_oid[oid] = _facts_of_bytes(data)
             parsed += 1
-            if facts.error not in _ENV_ERRORS:  # зависят от стека/памяти, а не от блоба (R5): в кэш нельзя (F1)
+            # зависят от стека/памяти, а не от блоба (R5): в кэш нельзя (F1); то же для сбоя разбора v2
+            if facts.error not in _ENV_ERRORS and facts.v2_error not in _ENV_ERRORS:
                 to_cache.append((oid, facts.to_json()))
     if to_cache and cache is not None:
         put_scans(cache, scanner, to_cache)
