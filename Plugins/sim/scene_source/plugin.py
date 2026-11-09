@@ -53,6 +53,7 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 from __future__ import annotations
 
 import collections
+import math
 import os
 import threading
 import time
@@ -86,7 +87,13 @@ from Services.line_sim.core import (
     match_job,
     resolve_repo_path,
 )
-from Services.line_sim.core.spawner import validate_flow, validate_lateral_offset_px
+from Services.line_sim.core.spawner import (
+    SEQUENCE_MAX_LEN,
+    DiscSequence,
+    SequenceBusy,
+    validate_flow,
+    validate_lateral_offset_px,
+)
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -183,6 +190,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         "scene.flow": "cmd_flow",
         "scene.defect_rate": "cmd_defect_rate",
         "scene.defect_now": "cmd_defect_now",
+        "scene.sequence": "cmd_sequence",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -319,15 +327,24 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._preset: ScenePreset | None = None
         self._live_factory: ObjectFactory | None = None
 
+        # Task R1: список дисков `{буква, угол}` — единственное состояние спавнера, общее с потоком команд
+        # (свой лок внутри `DiscSequence`). Движок не собран -> `None`, `scene.sequence` отвечает `applied: false`.
+        self._sequence: DiscSequence | None = None
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
             preset = load_scene_preset(preset_path, self._defect_override)
             self._preset = preset
             factory = ObjectFactory(preset)
+            sequence = DiscSequence()
             self._spawner = ObjectSpawner(
-                factory, scene_length_mm=scene_length_mm, lateral_offset_px=lateral_offset_px, **spawner_kwargs
+                factory,
+                scene_length_mm=scene_length_mm,
+                lateral_offset_px=lateral_offset_px,
+                sequence=sequence,
+                **spawner_kwargs,
             )
+            self._sequence = sequence
             self._compositor = SceneCompositor(
                 self._spawner,
                 px_per_mm=px_per_mm,
@@ -529,6 +546,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
             "flow": flow,
             "defect_probability": defect_probability,
             "force_defect_pending": force_defect_pending,
+            "sequence": (
+                self._sequence.snapshot()
+                if self._sequence is not None
+                else {"mode": "random", "total": 0, "fed": 0, "skipped": 0, "remaining": 0}
+            ),
         }
 
     def cmd_truth_status(self, data: dict | None = None) -> dict:
@@ -646,6 +668,103 @@ class SceneSourcePlugin(ProcessModulePlugin):
             return {"status": "ok", "applied": False}
         overload = self._push_control({"op": "defect_now"})
         return overload if overload is not None else {"status": "ok"}
+
+    # ------------------------------------------------------------------ #
+    # Подача дисков по списку (Task R1)
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _disc_defect(item: object) -> float | None:
+        """Форма одного элемента `discs`: `[буква, угол]` (list/tuple длины 2), буква — `str`, угол —
+        `int | float` (не `bool`), конечный, `0 <= угол < 360`. Хорош — вернуть угол как `float` (`-0.0` ->
+        `+0.0`: `угол + 0.0`, как у `lateral_px`), плох — `None`. Исключений не бросает."""
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return None
+        letter, angle = item
+        if not isinstance(letter, str):  # нехешируемая «буква» — дефект формы, до дедупликации не доходим
+            return None
+        if isinstance(angle, bool) or not isinstance(angle, (int, float)):
+            return None
+        try:
+            value = float(angle)
+        except OverflowError:  # no-health: int вне диапазона float (10**400) — дефект значения, ответ вызывающему
+            return None
+        if not math.isfinite(value) or not 0.0 <= value < 360.0:
+            return None
+        return value + 0.0
+
+    def cmd_sequence(self, data: dict | None = None) -> dict:
+        """`scene.sequence` — подать диски по списку (Task R1). Ровно одна из форм `data`:
+        `{"discs": [[буква, угол], ...]}` (загрузить, если текущий исчерпан), `{"discs": ..., "replace":
+        bool}` (`true` заменяет текущий, остаток выброшен), `{"random": true}` (вернуться к случайным).
+
+        Порядок проверок (первая сработавшая отвечает, до шага 6 ничего не меняется): 1 структура
+        запроса; 2 `discs` — непустой `list` не длиннее `SEQUENCE_MAX_LEN`; 3 форма КАЖДОГО элемента
+        (раньше букв; плохой -> `invalid` + `index`); 4 движок не собран -> `ok, applied: false`;
+        5 буквы против каталога ТЕКУЩЕЙ живой фабрики (`invalid` + `unknown`); 6 `DiscSequence.load()` /
+        `set_random()` (`busy` + `remaining`). `message` не повторяет входные значения. Спавнер отсюда не
+        трогается — только `DiscSequence` под своим локом."""
+        if not isinstance(data, dict):
+            return self._invalid("scene.sequence: ожидается dict")
+        keys = set(data)
+        if keys == {"random"}:
+            if data["random"] is not True:
+                return self._invalid("scene.sequence: random должен быть true")
+            discs = None
+            replace = False
+        elif keys == {"discs"} or keys == {"discs", "replace"}:
+            replace = data.get("replace", False)
+            if not isinstance(replace, bool):
+                return self._invalid("scene.sequence: replace должен быть bool")
+            discs = data["discs"]
+        else:
+            return self._invalid("scene.sequence: ожидается ровно один из наборов discs | discs+replace | random")
+
+        if discs is not None:
+            if not isinstance(discs, list):
+                return self._invalid("scene.sequence: discs должен быть списком")
+            if not discs:
+                return self._invalid("scene.sequence: пустой список дисков")
+            if len(discs) > SEQUENCE_MAX_LEN:
+                return self._invalid(f"scene.sequence: список длиннее {SEQUENCE_MAX_LEN} дисков")
+            checked: list[tuple[str, float]] = []
+            for index, item in enumerate(discs):
+                angle = self._disc_defect(item)
+                if angle is None:
+                    return {
+                        "status": "error",
+                        "code": "invalid",
+                        "index": index,
+                        "message": f"scene.sequence: диск {index} — ожидалась пара [буква, угол], 0 <= угол < 360",
+                    }
+                checked.append((item[0], angle))
+
+        if self._spawner is None or self._sequence is None:
+            return {"status": "ok", "applied": False}
+
+        if discs is None:
+            return {"status": "ok", "mode": "random", "dropped": self._sequence.set_random()}
+
+        live_factory = self._live_factory
+        known = set(live_factory.class_names) if live_factory is not None else set()
+        unknown = list(dict.fromkeys(letter for letter, _angle in checked if letter not in known))
+        if unknown:
+            return {
+                "status": "error",
+                "code": "invalid",
+                "unknown": unknown,
+                "message": f"scene.sequence: букв нет в каталоге: {len(unknown)}",
+            }
+        try:
+            dropped = self._sequence.load(checked, replace=replace)
+        except SequenceBusy as busy:  # no-health: список ещё подаётся — отказ уходит вызывающему в ответе команды
+            return {
+                "status": "error",
+                "code": "busy",
+                "remaining": busy.remaining,
+                "message": f"scene.sequence: подаётся список, осталось {busy.remaining}",
+            }
+        return {"status": "ok", "queued": len(checked), "dropped": dropped}
 
     # ------------------------------------------------------------------ #
     # Команды пресета (Task 1.2a — план line-sim-layer-editor, «Устройство»)

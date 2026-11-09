@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -120,6 +121,7 @@ class ObjectFactory:
         force_defect: bool = False,
         label: str = "",
         class_index: int | None = None,
+        angle_deg: float | None = None,
     ) -> RenderedObject:
         """Собрать объект: класс и угол — из `rng`, слои — база + пресет + дефект (последним).
 
@@ -130,10 +132,13 @@ class ObjectFactory:
 
         `class_index` (Task 6.2): `None` — класс разыгрывается, путь байт в байт прежний; задан —
         `rng.integers` не зовётся, дальше тот же порядок.
+        `angle_deg` (Task R1): `None` — угол разыгрывается из `angle_range_deg` пресета, путь байт в байт
+        прежний; задан — `rng.uniform` не зовётся, объект получает ровно этот угол (внешний вызывающий задаёт угол сам).
         Pre: при заданном `class_index` — каталог есть, `int` (не `bool`; `np.integer` — да),
-        `0 <= class_index < num_classes`; иначе `ValueError` до любого розыгрыша.
+        `0 <= class_index < num_classes`; при заданном `angle_deg` — `int | float | np.floating` (не `bool`),
+        конечное, `0 <= angle_deg < 360`; иначе `ValueError` до любого розыгрыша.
         """
-        class_name, angle_deg, bottom_layers = self._resolve_bottom_layers(rng, class_index)
+        class_name, angle_deg, bottom_layers = self._resolve_bottom_layers(rng, class_index, angle_deg)
 
         # ponytail: блоб дефекта строится из спрайта НИЖНЕГО слоя (bottom_layers[0]) как есть —
         # его собственные offset/scale/angle игнорируются (как и раньше для "base"); апгрейд —
@@ -169,30 +174,50 @@ class ObjectFactory:
             raise ValueError(f"class_index вне [0, num_classes={n})")
         return int(class_index)
 
+    @staticmethod
+    def _check_angle_deg(angle_deg: object) -> float:
+        """Проверка `angle_deg` до любого розыгрыша; тексты ошибок без входного значения."""
+        if isinstance(angle_deg, bool) or not isinstance(angle_deg, int | float | np.floating):
+            raise ValueError("angle_deg: ожидалось число")
+        try:
+            value = float(angle_deg)
+        except OverflowError:  # int, не влезающий в float (10**400) — тот же дефект значения
+            raise ValueError("angle_deg: ожидалось конечное число") from None
+        if not math.isfinite(value):
+            raise ValueError("angle_deg: ожидалось конечное число")
+        if not 0.0 <= value < 360.0:
+            raise ValueError("angle_deg вне [0, 360)")
+        return value
+
     def _resolve_bottom_layers(
-        self, rng: np.random.Generator, class_index: int | None = None
+        self, rng: np.random.Generator, class_index: int | None = None, angle_deg: float | None = None
     ) -> tuple[str, float, list[LayerSpec]]:
         """Класс, угол объекта и слои пресета (без defect-слоя) — из `rng`.
 
         Порядок розыгрышей — часть контракта seed (LS-006): `integers` (класс) -> `uniform`
         (угол) -> `get_sprite`. Общий для `render()` и `nominal_layers()`, чтобы для одного seed
         класс в ленте, плитке превью и раскладке слоёв совпадал. Заданный `class_index` (Task 6.2)
-        убирает только `integers`; порядок остальных розыгрышей тот же.
+        убирает только `integers`; порядок остальных розыгрышей тот же. Заданный `angle_deg` (Task R1)
+        так же убирает только `uniform` угла; `None` — прежний путь.
         """
         if class_index is not None:
             class_index = self._check_class_index(class_index)
+        if angle_deg is not None:
+            angle_deg = self._check_angle_deg(angle_deg)
         if self._catalog is None:
             # Пресет без catalog_dir (только layers — гарантировано ScenePreset._catalog_or_layers,
             # там же отдельно запрещён слой class:// без catalog_dir, так что self._extra_layers
             # здесь всегда обычные загруженные RGBA-слои, без class-маркера) — класса нет.
             class_name = ""
-            angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
+            if angle_deg is None:
+                angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
             bottom_layers = list(self._extra_layers)
         else:
             if class_index is None:
                 class_index = int(rng.integers(self.num_classes))
             class_name = self._catalog.entry(class_index).name
-            angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
+            if angle_deg is None:
+                angle_deg = float(rng.uniform(*self._preset.angle_range_deg))
             base_sprite = self._catalog.get_sprite(class_index, rng)
 
             if self._has_class_layer:

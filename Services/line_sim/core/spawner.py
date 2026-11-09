@@ -3,8 +3,10 @@
 
 Часы и очередь спавна принадлежат спавнеру целиком (LS-008): `tick()` — единственная
 точка входа, вызывающий передаёт только "что сейчас" (`now_encoder`, `now_wall_s`, `rng`).
-Единственный producer — поток-продюсер кадров (Task 3.4); лок не нужен, это НЕ
-многопоточный доступ к одному инстансу (если появится второй вызывающий — тогда лок).
+Единственный producer — поток-продюсер кадров (Task 3.4); сам спавнер по-прежнему однопоточный,
+лок ему не нужен (если появится второй вызывающий — тогда лок). Лок (`threading.Lock`) есть только
+у `DiscSequence` (Task R1, подача дисков по списку) — это единственное состояние, общее с потоком
+команд: команда плагина меняет список, воркер `tick()` берёт голову и снимает её.
 
 Два режима отсчёта следующего спавна (Task 3.3a, LS-010) — ровно один задан в конструкторе:
 `interval_s` (по настенному времени, исходный режим Task 3.3) или `spacing_mm` (по пути
@@ -17,7 +19,9 @@
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import replace
+from typing import NamedTuple
 
 import numpy as np
 
@@ -25,6 +29,121 @@ from Services.line_sim.core.belt import encoder_to_offset_mm
 from Services.line_sim.core.factory import ObjectFactory
 from Services.line_sim.core.layered_object import LayeredObject
 from Services.line_sim.interfaces import ObjectPassport
+
+#: Минимум настенного времени между двумя спавнами при подаче списка (решение 1.0: `state` word_layout
+#: не чаще раза в секунду, `design.md` §2.9). Константа, не ключ конфига; время — `time.monotonic()` воркера.
+SEQUENCE_MIN_INTERVAL_S = 1.0
+
+#: Максимальная длина списка дисков: `max_active=200` спавнера по умолчанию — список длиннее на стоящей
+#: ленте упёрся бы в потолок активных объектов.
+SEQUENCE_MAX_LEN = 200
+
+
+class SequenceBusy(Exception):
+    """`DiscSequence.load()` без `replace` при неисчерпанном списке; `remaining` — сколько дисков осталось."""
+
+    def __init__(self, remaining: int) -> None:
+        super().__init__(f"подаётся список, осталось {remaining}")
+        self.remaining = remaining
+
+
+class SequenceHead(NamedTuple):
+    """Снимок головы списка (`DiscSequence.next()`): `mode` `"random"` | `"list"`, `generation` — номер
+    поколения списка на момент снимка (меняется при `load`/`set_random`), `pos`/`letter`/`angle_deg` —
+    голова. У `"random"` и у исчерпанного/пустого `"list"` последние три — `None`."""
+
+    mode: str
+    generation: int
+    pos: int | None
+    letter: str | None
+    angle_deg: float | None
+
+
+class DiscSequence:
+    """Список дисков `[(буква, угол), ...]` — ЕДИНСТВЕННОЕ состояние спавнера, которое трогают два потока:
+    команда плагина (`load`/`set_random`/`snapshot`) и воркер кадров (`next`/`pop`/`skip`). Всё состояние —
+    под одним `self._lock`, каждый метод — ОДНА критическая секция.
+
+    Воркер зовёт `next()` один раз за `tick()` и снимает голову `pop(generation)`/`skip(generation)` с
+    поколением из СНИМКА: если команда за это время сменила список (`generation` изменилось), `pop`/`skip`
+    ничего не меняют и возвращают `False` — диск чужого списка не засчитывается новому.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._mode = "random"
+        self._generation = 0
+        self._items: list[tuple[str, float]] = []
+        self._pos = 0
+        self._fed = 0
+        self._skipped = 0
+
+    def _remaining_locked(self) -> int:
+        """Сколько дисков осталось подать. Зовётся ТОЛЬКО под `self._lock`."""
+        return len(self._items) - self._pos
+
+    def next(self) -> SequenceHead:
+        """Снимок головы одним захватом лока (воркер зовёт один раз за `tick()`)."""
+        with self._lock:
+            if self._mode != "list" or self._remaining_locked() == 0:
+                return SequenceHead(self._mode, self._generation, None, None, None)
+            letter, angle = self._items[self._pos]
+            return SequenceHead(self._mode, self._generation, self._pos, letter, angle)
+
+    def pop(self, generation: int) -> bool:
+        """Голова подана: сдвинуть позицию, `fed += 1`. Чужое поколение, не режим списка или пустой
+        остаток — `False`, ничего не меняется."""
+        with self._lock:
+            if generation != self._generation or self._mode != "list" or self._remaining_locked() == 0:
+                return False
+            self._pos += 1
+            self._fed += 1
+            return True
+
+    def skip(self, generation: int) -> bool:
+        """Голова пропущена (буквы нет в каталоге): как `pop`, но `skipped += 1`."""
+        with self._lock:
+            if generation != self._generation or self._mode != "list" or self._remaining_locked() == 0:
+                return False
+            self._pos += 1
+            self._skipped += 1
+            return True
+
+    def load(self, discs: list[tuple[str, float]], *, replace: bool = False) -> int:
+        """Загрузить список. Идёт список с остатком и `replace` ложно — `SequenceBusy(remaining)`, ничего
+        не меняется. Иначе заменяет; возвращает число выброшенных дисков старого списка. Проверка и
+        замена — внутри ОДНОГО `with self._lock` (две команды без `replace` не могут обе стать `ok`)."""
+        with self._lock:
+            remaining = self._remaining_locked()
+            if self._mode == "list" and remaining > 0 and not replace:
+                raise SequenceBusy(remaining)
+            dropped = remaining if self._mode == "list" else 0
+            self._items = [(item[0], item[1]) for item in discs]
+            self._pos = self._fed = self._skipped = 0
+            self._mode = "list"
+            self._generation += 1
+            return dropped
+
+    def set_random(self) -> int:
+        """Выйти из режима списка: остаток выброшен (его число — результат), спавн снова случайный."""
+        with self._lock:
+            dropped = self._remaining_locked()
+            self._mode = "random"
+            self._items = []
+            self._pos = self._fed = self._skipped = 0
+            self._generation += 1
+            return dropped
+
+    def snapshot(self) -> dict:
+        """`{"mode", "total", "fed", "skipped", "remaining"}` — JSON-типы, для `scene.status`."""
+        with self._lock:
+            return {
+                "mode": self._mode,
+                "total": len(self._items),
+                "fed": self._fed,
+                "skipped": self._skipped,
+                "remaining": self._remaining_locked(),
+            }
 
 
 def validate_flow(
@@ -124,6 +243,7 @@ class ObjectSpawner:
         scene_length_mm: float,
         max_active: int = 200,
         lateral_offset_px: tuple[float, float] = (0.0, 0.0),
+        sequence: DiscSequence | None = None,
     ) -> None:
         validate_flow(interval_s, spacing_mm)
         self._lateral_offset_px = validate_lateral_offset_px(lateral_offset_px)
@@ -143,6 +263,10 @@ class ObjectSpawner:
         self._next_spacing_mm: float | None = None
         self._paused = False
         self._next_id_n = 1
+        self._sequence = sequence
+        # Настенное время последнего спавна (любого — и случайного): первый диск списка после случайного
+        # тоже не раньше `SEQUENCE_MIN_INTERVAL_S`. Пишет только воркер.
+        self._last_spawn_wall_s: float | None = None
 
     def tick(self, *, now_encoder: float, now_wall_s: float, rng: np.random.Generator) -> None:
         """Один шаг часов спавнера: сперва деспавн (на КАЖДОМ тике), затем — спавн по
@@ -171,10 +295,15 @@ class ObjectSpawner:
             <= self._scene_length_mm
         ]
 
-        if self._interval_s is not None:
+        # Голова списка — ОДИН снимок за тик (`next()` под одним захватом лока): отдельных `peek()` и
+        # чтения режима нет, иначе режим и голова могли бы относиться к разным спискам (TOCTOU).
+        head = self._sequence.next() if self._sequence is not None else None
+        if head is not None and head.mode == "list":
+            self._tick_list(head, now_encoder=now_encoder, now_wall_s=now_wall_s, rng=rng)
+        elif self._interval_s is not None:
             self._tick_interval(now_encoder=now_encoder, now_wall_s=now_wall_s, rng=rng)
         else:
-            self._tick_spacing(now_encoder=now_encoder, rng=rng)
+            self._tick_spacing(now_encoder=now_encoder, now_wall_s=now_wall_s, rng=rng)
 
     def _tick_interval(self, *, now_encoder: float, now_wall_s: float, rng: np.random.Generator) -> None:
         """Режим `interval_s` (Task 3.3, без изменений в Task 3.3a).
@@ -204,13 +333,28 @@ class ObjectSpawner:
             self._deadline = now_wall_s + float(rng.uniform(*self._interval_s))
             obj = self._make(object_id, now_encoder, rng)
             self._active.append(obj)
+            self._last_spawn_wall_s = now_wall_s
             self._next_id_n += 1
 
-    def _make(self, object_id: str, now_encoder: float, rng: np.random.Generator) -> LayeredObject:
+    def _make(
+        self,
+        object_id: str,
+        now_encoder: float,
+        rng: np.random.Generator,
+        *,
+        class_index: int | None = None,
+        angle_deg: float | None = None,
+    ) -> LayeredObject:
         """`factory.make()` + поперечное смещение паспорта (см. докстринг класса). Розыгрыш —
         ПОСЛЕ сборки объекта: исключение фабрики не тратит rng, а розыгрыши фабрики идут
-        в прежнем порядке."""
-        obj = self._factory.make(object_id, spawn_encoder=now_encoder, rng=rng)
+        в прежнем порядке. `class_index`/`angle_deg` (диск списка, Task R1) уходят в фабрику только
+        когда заданы — случайный путь зовёт `make` ровно как раньше (фабрики-заглушки тестов)."""
+        make_kwargs: dict[str, object] = {}
+        if class_index is not None:
+            make_kwargs["class_index"] = class_index
+        if angle_deg is not None:
+            make_kwargs["angle_deg"] = angle_deg
+        obj = self._factory.make(object_id, spawn_encoder=now_encoder, rng=rng, **make_kwargs)
         lo, hi = self._lateral_offset_px
         if hi > 0.0:
             magnitude = float(rng.uniform(lo, hi))
@@ -219,7 +363,7 @@ class ObjectSpawner:
             obj.passport = replace(obj.passport, lateral_px=sign * magnitude + 0.0)
         return obj
 
-    def _tick_spacing(self, *, now_encoder: float, rng: np.random.Generator) -> None:
+    def _tick_spacing(self, *, now_encoder: float, now_wall_s: float, rng: np.random.Generator) -> None:
         """Режим `spacing_mm` (Task 3.3a): следующий объект появляется, когда лента
         проехала выбранный шаг — считает та же `encoder_to_offset_mm`, которой уже
         пользуется деспавн (первая строка `tick()`), не отдельная формула.
@@ -276,6 +420,78 @@ class ObjectSpawner:
         self._next_spacing_mm = float(rng.uniform(*self._spacing_mm))
         obj = self._make(object_id, now_encoder, rng)
         self._active.append(obj)
+        self._last_spawn_wall_s = now_wall_s
+        self._next_id_n += 1
+
+    def _tick_list(
+        self, head: SequenceHead, *, now_encoder: float, now_wall_s: float, rng: np.random.Generator
+    ) -> None:
+        """Режим списка (Task R1): подать диск `head` (буква = класс каталога фабрики, угол — из списка).
+
+        Пороги потока (срок `interval_s` / шаг `spacing_mm`) те же, что у случайного режима, плюс
+        `SEQUENCE_MIN_INTERVAL_S` между любыми двумя спавнами по настенному времени. Пока что-то из этого
+        не выполнено — `return`, порог НЕ тратится: список, пришедший позже, подаёт первый диск сразу,
+        как только прошла 1 с и порог потока достигнут. Исчерпанный список (`letter is None`) спавн
+        останавливает до следующей команды (возврат к случайным сам по себе — нет).
+
+        Порядок: порог сдвигается ДО `make` (как fix F1 у случайных режимов — падающая фабрика бросает
+        раз в порог, не на каждом тике); голова снимается `pop(generation)` только ПОСЛЕ успешного
+        `make`, поэтому транзитный сбой фабрики диск не теряет. Если `pop` вернул `False` (команда сменила
+        список, пока шёл `make`), собранный объект ВЫБРАСЫВАЕТСЯ: не в `active`, `_last_spawn_wall_s` и
+        `_next_id_n` не меняются, а сброшенный фабрикой форс брака взводится заново — нажатие оператора
+        достаётся следующему диску.
+        """
+        if head.letter is None:
+            return
+
+        if self._interval_s is not None:
+            if self._deadline is None:
+                self._deadline = now_wall_s + float(rng.uniform(*self._interval_s))
+                return
+        elif self._last_spawn_encoder is not None:
+            traveled_mm = encoder_to_offset_mm(now_encoder, self._last_spawn_encoder)
+            if traveled_mm < -self._scene_length_mm:  # разрыв счётчика — как в `_tick_spacing`, до паузы
+                self._last_spawn_encoder = now_encoder
+                return
+
+        if self._paused or len(self._active) >= self._max_active:
+            return
+        if self._last_spawn_wall_s is not None and now_wall_s - self._last_spawn_wall_s < SEQUENCE_MIN_INTERVAL_S:
+            return
+
+        if self._interval_s is not None:
+            if now_wall_s < self._deadline:  # type: ignore[operator]  # срок взведён выше
+                return
+        elif self._last_spawn_encoder is not None:
+            if self._next_spacing_mm is None:  # порог сброшен `set_flow()` — см. `_tick_spacing`
+                self._next_spacing_mm = float(rng.uniform(*self._spacing_mm))  # type: ignore[misc]
+            if encoder_to_offset_mm(now_encoder, self._last_spawn_encoder) < self._next_spacing_mm:
+                return
+
+        # Порог сдвигается ДО make (F1).
+        if self._interval_s is not None:
+            self._deadline = now_wall_s + float(rng.uniform(*self._interval_s))
+        else:
+            self._last_spawn_encoder = now_encoder
+            self._next_spacing_mm = float(rng.uniform(*self._spacing_mm))  # type: ignore[misc]
+
+        assert self._sequence is not None  # режим списка бывает только при заданной последовательности
+        class_names = self._factory.class_names
+        if head.letter not in class_names:
+            self._sequence.skip(head.generation)
+            raise ValueError("список дисков: буквы нет в каталоге фабрики")
+
+        object_id = f"obj-{self._next_id_n}"
+        forced_before = self._factory.force_defect_pending
+        obj = self._make(
+            object_id, now_encoder, rng, class_index=class_names.index(head.letter), angle_deg=head.angle_deg
+        )
+        if not self._sequence.pop(head.generation):
+            if forced_before:
+                self._factory.force_defect_next()
+            return
+        self._active.append(obj)
+        self._last_spawn_wall_s = now_wall_s
         self._next_id_n += 1
 
     def active_objects(self) -> list[LayeredObject]:
