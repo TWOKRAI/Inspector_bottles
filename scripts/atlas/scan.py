@@ -5,8 +5,8 @@ Purpose: один код читает дерево git (`Tree`) и словар�
     содержимого блоба, поэтому хранятся в `scan_cache` по `(oid, SCANNER)`: новый SHA разбирает лишь изменённые файлы.
     `ImportIndex` разрешает импорты в пути файлов индекса. Модуль не импортирует `scripts.arch_map` (карта удаляется)
     и адаптеры atlas; разбор перенесён копией из `scripts/arch_map/build.py`.
-Public API: Source, DictSource, ImportRec, ClassFact, FileFacts, ScanResult, Resolved, ImportIndex, scan, scan_text,
-    resolve_relative, SCANNER, MAX_BLOB_BYTES.
+Public API: Source, DictSource, ImportRec, ClassFact, DefFact, CallFact, IoFact, ThreadSite, FileFacts, ScanResult,
+    Resolved, ImportIndex, scan, scan_text, resolve_relative, SCANNER, MAX_BLOB_BYTES, THREAD_PATTERNS.
     Правило ошибок: `scan_text` и разбор блоба не бросают; непарсящийся файл — `FileFacts(error=<имя исключения>)`.
 Stability: lite
 
@@ -34,14 +34,19 @@ from scripts.atlas.store import get_scans, put_scans
 __all__ = [
     "MAX_BLOB_BYTES",
     "SCANNER",
+    "THREAD_PATTERNS",
+    "CallFact",
     "ClassFact",
+    "DefFact",
     "DictSource",
     "FileFacts",
     "ImportIndex",
     "ImportRec",
+    "IoFact",
     "Resolved",
     "ScanResult",
     "Source",
+    "ThreadSite",
     "resolve_relative",
     "scan",
     "scan_text",
@@ -52,6 +57,8 @@ MAX_BLOB_BYTES = 1_048_576  # блоб длиннее не декодирует�
 
 IMPORT_GUARDS = frozenset({"ImportError", "ModuleNotFoundError", "Exception", "BaseException"})
 TIERS = ("core", "optional", "frozen")
+# конструкторы для `ThreadSite`; константа, не конфиг (ключ кэша — хеш файла)
+THREAD_PATTERNS = ("Thread", "Timer", "Observer")
 DOC_HEADER = re.compile(r"^(Tier|Contour):[ \t]*(.+)$", re.MULTILINE)
 
 
@@ -79,6 +86,86 @@ class ClassFact:
 
 
 @dataclass(frozen=True)
+class DefFact:
+    """Определение (v2, Task 4.1): класс, функция или метод — каждый `def`/`class` на любой глубине вложенности.
+
+    qualname: имя через точку от модуля (`Cls.method`, `func`, `func.inner`); у метода всегда с классом.
+    kind: `class`, `function` (вне класса) или `method` (def прямо в теле класса, dunder тоже).
+    line: строка `def`/`class` (не декоратора).
+    signature: `ast.unparse(args)` + ` -> <returns>` при аннотации возврата; у класса `""`.
+    decorators: листовые имена декораторов (`a.b.c` -> `c`, вызов `d(x)` -> `d`).
+    abstract: есть декоратор `abstractmethod`; у класса — основа `ABC`/`Protocol` не считается, всегда False.
+    is_async: `async def`.
+    doc: первый абзац докстринга (до пустой строки), иначе None.
+    bases: `ast.unparse` каждой основы класса; у функции и метода `()`.
+    """
+
+    qualname: str
+    kind: Literal["class", "function", "method"]
+    line: int
+    signature: str = ""
+    decorators: tuple[str, ...] = ()
+    abstract: bool = False
+    is_async: bool = False
+    doc: str | None = None
+    bases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CallFact:
+    """Вызов `name(...)` (v2): какое имя, где и откуда.
+
+    name: последнее имя вызываемого (`f` в `f()`, `m` в `x.m()`).
+    line: строка вызова.
+    enclosing: qualname ближайшего объемлющего def/class; на уровне модуля `<module>`.
+    receiver: None у голого имени (`f()`), иначе `ast.unparse(func.value)` (`self`, `os.path`, `a.b`).
+    """
+
+    name: str
+    line: int
+    enclosing: str = "<module>"
+    receiver: str | None = None
+
+
+@dataclass(frozen=True)
+class IoFact:
+    """Побочный эффект на файловой системе (v2); `open`/`read_text` сюда не входят.
+
+    op: `watch` — `X.schedule(handler, path, ...)`, где `X` присвоен `Observer(...)` в той же функции
+        (`self.<a>` — в том же классе); путь = второй позиционный аргумент, иначе `path=`, иначе записи нет
+        (`sch.schedule(a, b, 1, "p")` без `Observer` — не watch).
+        `replaces` — `os.replace` / `os.rename` / `shutil.move`; путь = второй позиционный аргумент
+        (`Path.replace` и `str.replace` — нет: путь в получателе).
+    path: `ast.unparse` аргумента пути (источник, не значение: `str(self._path.parent)`).
+    line: строка вызова.
+    enclosing: как у `CallFact`.
+    """
+
+    op: Literal["watch", "replaces"]
+    path: str
+    line: int
+    enclosing: str = "<module>"
+
+
+@dataclass(frozen=True)
+class ThreadSite:
+    """Место запуска потока (v2): конструктор из `THREAD_PATTERNS` с `.start()` той же цели в той же функции.
+
+    pattern: имя конструктора из `THREAD_PATTERNS` (`Thread`, `Timer`, `Observer`).
+    line: строка КОНСТРУКТОРА (не `.start()`).
+    enclosing: как у `CallFact`.
+    daemon: литерал `daemon=` у конструктора: True / False; не задан или не литерал -> None.
+    Запись есть только при `.start()`: конструктор без запуска записи не даёт; цепочка
+    `Thread(target=f, daemon=True).start()` запись даёт.
+    """
+
+    pattern: str
+    line: int
+    enclosing: str = "<module>"
+    daemon: bool | None = None
+
+
+@dataclass(frozen=True)
 class FileFacts:
     loc: int = 0  # непустые строки
     doc: str | None = None  # первая непустая строка докстринга модуля
@@ -91,6 +178,13 @@ class FileFacts:
     tier: str | None = None
     contour: tuple[str, ...] | None = None
     error: str | None = None  # имя исключения разбора или "BlobTooLarge"
+    # --- v2 (Task 4.1); поля A1 выше не меняются. Разбор v2 — в своём `try`: сбой не трогает поля A1.
+    defs: tuple[DefFact, ...] = ()  # все class/def/method с qualname; ClassFact.methods A1 — имена без строк, остаётся
+    calls: tuple[CallFact, ...] = ()  # все вызовы файла
+    io: tuple[IoFact, ...] = ()  # watch и replaces
+    thread_sites: tuple[ThreadSite, ...] = ()  # пуски потоков по `THREAD_PATTERNS`
+    test_defs: tuple[tuple[str, int], ...] = ()  # (qualname, строка): функции с префиксом `test` и методы в `Test*`
+    v2_error: str | None = None  # имя исключения разбора полей v2 (поля A1 при этом целы), иначе None
 
     def to_json(self) -> str:
         data = {
@@ -110,7 +204,12 @@ class FileFacts:
 
     @classmethod
     def from_json(cls, text: str) -> FileFacts:
-        """Обратное к `to_json`; тело неверной формы -> исключение (для `scan` это промах кэша)."""
+        """Обратное к `to_json`; тело неверной формы -> исключение (для `scan` это промах кэша).
+
+        v2: читает d["defs"], d["calls"], d["io"], d["thread_sites"], d["test_defs"], d["v2_error"] через `d[...]`
+        (не `d.get`): тело старой формы без этих ключей бросает, `scan()` считает это промахом и разбирает заново.
+        В INTERFACE-стадии новые ключи не читаются и не пишутся (`to_json` тоже) — это делает GREEN.
+        """
         d = json.loads(text)
         return cls(
             loc=d["loc"],
