@@ -53,7 +53,6 @@ telemetry_readmodel_module — Qt-free ядро read-model телеметрии:
   ITelemetryReadModel (9)
 worker_module — Менеджер потоков-воркеров внутри процесса: старт, стоп, пауза, перезапуск; сюда — менять управление потоками
   IWorkerManager (22), IWorkerRegistry (8), IExecutorManager (6), IWorkerLifecycle (4), OrderedExecutor (4), … ещё 3
-framework_meta — Корневые файлы пакета фреймворка и его документация; сюда — менять версию, общие импорты, доки фреймворка
 services/auth — Аутентификация и RBAC: хеши паролей, пользователи, роли; сюда — менять вход и права доступа
   IAuthManager (12), IUserStorage (5), IPasswordHasher (2), ISessionTracker (2), IAuditWriter (1)
 services/camera_device — Общее ядро камер: контракт порта прибора и его фейк; сюда — менять порт, границу SDK и эмуляцию
@@ -88,7 +87,6 @@ services/sql — Универсальный SQL-менеджер на SQLAlchemy
   ISQLManager (8), IRepository (7), IAsyncEngineAdapter (3), IEngineAdapter (3), ISchemaMapper (3), … ещё 3
 services/vfd_comm — Сервис частотного преобразователя INVT GD20, не зависит от транспорта; сюда — менять управление ПЧ
   VfdClientProtocol (7)
-services_shared — Корневой пакет Services и его STATUS; общий уровень сервисов
 plugins/calibration — Плагины калибровки (камера и робот и др.); сюда — менять калибровочные плагины
 plugins/control — Плагины управления внешними устройствами: роботы, IO, реле; сюда — менять управляющие плагины
 plugins/filter — Плагины фильтрации и анализа координат (виртуальная линия и др.); сюда — менять фильтры координат
@@ -101,6 +99,8 @@ plugins/sim — Плагины-хосты симулятора линии; се�
 plugins/sinks — Плагины-приёмники: вывод и экспорт данных из конца цепочки; сюда — менять приёмники данных
 plugins/sources — Плагины источников данных: камеры, файлы, генераторы; сюда — менять источники
 plugins/utility — Служебные и тестовые плагины (heartbeat, pilot_widgets и др.); сюда — менять служебные плагины
+framework_meta — Корневые файлы пакета фреймворка и его документация; сюда — менять версию, общие импорты, доки фреймворка
+services_shared — Корневой пакет Services и его STATUS; общий уровень сервисов
 plugins_shared — Общие доменные утилиты нескольких плагинов, сами не плагины; сюда — менять общий код плагинов
 prototype/adapters — Adapter-слой между domain Protocols и реестрами фреймворка; сюда — менять привязку domain к реестрам
 prototype/backend — Backend прототипа: конфигурация системы и топология процессов и плагинов; сюда — менять wiring системы
