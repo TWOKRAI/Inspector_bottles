@@ -730,14 +730,19 @@ class ProcessManagerProcess(ProcessModule):
         return self.__dict__.setdefault("_pre_stop_cancel_obj", threading.Event())
 
     def _pre_stop_cancel_source(self) -> str | None:
-        """Почему шаги отменены: ``"force"`` | ``"event"`` (внешний взвод ``_system_stop_event``) | ``None``.
+        """Почему шаги отменены: ``"force"`` | ``"event"`` | ``None``.
 
-        До своего взвода в ``finally`` событие может взвести только чужой — поэтому оно и есть отмена.
+        ``"event"`` — корень PM гасится не потоком шагов: внешний ``_system_stop_event``, свой ``stop_event``
+        (раннер/спавнер) или начатый стоп детей. До ``_finish_pre_stop`` эти события в фазе ``pre_stop`` внутри
+        PM взводит только путь ``force`` — и он ставит флаг отмены раньше; значит, любой их взвод — отмена.
         """
         if self._pre_stop_cancel_flag.is_set():
             return self._pre_stop_cancel_reason or "force"
         ev = getattr(self, "_system_stop_event", None)
         if ev is not None and ev.is_set():
+            return "event"
+        own = getattr(self, "stop_event", None)
+        if (own is not None and own.is_set()) or self._children_stopping:
             return "event"
         return None
 

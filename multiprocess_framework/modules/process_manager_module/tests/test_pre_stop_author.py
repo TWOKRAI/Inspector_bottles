@@ -239,3 +239,67 @@ def test_h4_bare_new_double_shutdown_and_status_do_not_fail() -> None:
     assert forced._pre_stop_cancel_source() == "force"
     _run_in_thread(lambda: box.update(status2=forced._cmd_supervision_status({})), 2.0)
     assert box["status2"]["success"] is True
+
+
+# --------------------------------------------------------------------------- #
+# h5 — выход из pre_stop не потоком шагов (ревью r1, M2; инъекция Z)
+# --------------------------------------------------------------------------- #
+
+
+def test_h5_phase_change_out_of_pre_stop_clears_step_and_rebases_graceful_only() -> None:
+    """Корневой стоп (``_ChildrenStop.request_stop`` → ``_set_system_stop_phase("children")``) во время шага:
+    ``pre_stop_step is None``; graceful — ``deadline_at − now`` в [4,8; 5,0] (pm_graceful 5,0);
+    ``force`` — срок прежний."""
+    graceful = _pm()
+    assert graceful._begin_system_stop("graceful", "unknown", None, phase="pre_stop", window_s=60.0)
+    graceful._set_pre_stop_step("p1.home")
+    _run_in_thread(graceful._children_stop.request_stop, 5.0)
+    snap = graceful._system_stop_snapshot()
+    assert snap["phase"] == "children" and snap["pre_stop_step"] is None, snap
+    remaining = snap["deadline_at"] - time.time()
+    assert 4.8 <= remaining <= 5.0, remaining
+    # Поток шагов после такого выхода — no-op перехода.
+    assert graceful._leave_pre_stop() is False
+
+    forced = _pm()
+    assert forced._begin_system_stop("graceful", "unknown", None, phase="pre_stop", window_s=60.0)
+    assert forced._escalate_system_stop("force", 1.0)
+    force_deadline = forced._system_stop_snapshot()["deadline_at"]
+    forced._set_pre_stop_step("p1.home")
+    forced._set_system_stop_phase("children")
+    snap = forced._system_stop_snapshot()
+    assert snap["phase"] == "children" and snap["pre_stop_step"] is None, snap
+    assert snap["deadline_at"] == force_deadline, (snap, force_deadline)
+
+
+# --------------------------------------------------------------------------- #
+# h6 — свой stop_event PM без общего события отменяет шаг (ревью r1, открытое)
+# --------------------------------------------------------------------------- #
+
+
+def test_h6_own_stop_event_without_system_event_cancels_step() -> None:
+    router = _Router()  # молчит: шаг ждёт до отмены
+    pm = _pm(router=router)
+    pm._pre_stop_steps = _steps(("p1", "s1", 30.0), ("p2", "s2", 5.0))
+    assert pm._begin_system_stop("graceful", "unknown", None, phase="pre_stop", window_s=35.0)
+    steps = threading.Thread(target=pm._run_pre_stop, daemon=True, name="t14-steps")
+    steps.start()
+    assert _wait(lambda: len(router.requests) == 1, 2.0), "1-й шаг не начался"
+
+    t0 = time.monotonic()
+    pm.stop_event.set()  # раннер/спавнер: только свой stop_event, общий не взведён
+    assert _wait(lambda: pm._system_stop_snapshot()["phase"] == "children", 0.1), pm._system_stop_snapshot()
+    elapsed = time.monotonic() - t0
+    steps.join(2.0)
+    assert not steps.is_alive()
+    assert elapsed <= 0.1, elapsed
+    assert pm._system_stop_snapshot()["pre_stop_step"] is None
+    assert pm._system_stop_event.is_set()
+    assert [m["command"] for m, _cb in router.requests] == ["s1"]
+    assert "pre_stop: шаг 'p1.s1' прерван (event)" in pm.infos, pm.infos
+
+    # Начатый стоп детей (без событий) — тот же источник отмены.
+    other = _pm()
+    assert other._pre_stop_cancel_source() is None
+    other._children_stopping = True
+    assert other._pre_stop_cancel_source() == "event"
