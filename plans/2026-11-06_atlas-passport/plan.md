@@ -62,7 +62,7 @@
 **Цель фазы:** «сколько стоит найти место без атласа» — числом до кода.
 
 - Task 1.1: E1 `nav_bench` — ревью на SHA `930c5f2a3`, правки, влитие `scripts/nav_bench` в `main` по путям [DONE]
-- Task 1.2: отсчёт C0 — `floor`, `grep-read` ×3 на `k0` и `arch`; вердикт Kill-1; прогон — `tasks/1.2.junior.md` [PENDING] (после 1.1)
+- Task 1.2: отсчёт C0 — `floor`, `grep-read` ×3 на `k0` и `arch`; вердикт Kill-1; прогон — `tasks/1.2.junior.md` [DONE] (`r1`, п. 7: Kill-1 не сработал)
 
 ### Phase 2: A1 — закрыть и влить
 
