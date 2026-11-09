@@ -119,7 +119,10 @@ def resolve(rel_path: str, modules: list[dict]) -> str:
 
 
 class _DiskTree:
-    """Диск как «ревизия»: файлы только под корнями `roots` (`<root>*/{__init__,README,STATUS,DECISIONS}`)."""
+    """Диск как «ревизия»: файлы только под корнями `roots` (`<root>*/{__init__,README,STATUS,DECISIONS}`).
+
+    Юнит — реальный каталог: симлинки пропускаются, как в ревизии (там это blob, не дерево).
+    """
 
     def __init__(self, base: Path) -> None:
         self._base = base
@@ -133,7 +136,7 @@ class _DiskTree:
                 found += [
                     f"{root['path']}{unit.name}/{item}"
                     for item in (_INIT, *_DOC_FILES)
-                    if unit.is_dir() and (unit / item).is_file()
+                    if unit.is_dir() and not unit.is_symlink() and (unit / item).is_file()
                 ]
         return found
 
@@ -179,7 +182,7 @@ def _purpose(raw: bytes | None, unit_id: str, name: str) -> str:
             raise ValueError
         raw.decode("utf-8-sig")  # ast.parse пропускает невалидный UTF-8 внутри комментария
         docstring = ast.get_docstring(ast.parse(raw))
-    except (SyntaxError, ValueError):  # UnicodeDecodeError — подкласс ValueError
+    except (SyntaxError, ValueError, MemoryError, RecursionError):  # UnicodeDecodeError — подкласс ValueError
         raise ValueError(f"{name}: юнит {unit_id}: {_INIT} не разобран") from None
     if docstring is None:
         raise ValueError(f"{name}: юнит {unit_id}: нет докстринга")

@@ -138,12 +138,14 @@ def test_bad_init_error_hides_source(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("tiers", "tail"),
     [
-        pytest.param("ghost: SECRET", "ghost", id="id-is-not-a-unit"),
-        pytest.param("a: SECRET", "a", id="value-not-core-or-optional"),
+        pytest.param("ghost: SECRET", "ключ 'tiers': id ghost не юнит", id="id-is-not-a-unit"),
+        pytest.param(
+            "a: SECRET", "ключ 'tiers': у юнита a значение не core и не optional", id="value-not-core-or-optional"
+        ),
     ],
 )
 def test_tier_errors_hide_value(tmp_path: Path, tiers: str, tail: str) -> None:
-    """Ошибка tiers: id-ключ печатать можно, значение (`SECRET`) — нет."""
+    """Ошибка tiers: id-ключ печатать можно, значение (`SECRET`) — нет; текст — точный литерал."""
     _fill(
         tmp_path,
         _yaml(("lib/", "framework", ""), extra=f"tiers:\n  {tiers}\n"),
@@ -152,8 +154,40 @@ def test_tier_errors_hide_value(tmp_path: Path, tiers: str, tail: str) -> None:
     with pytest.raises(ValueError) as caught:
         _load(tmp_path)
     message = str(caught.value)
-    assert message.startswith("modules.yaml: ") and tail in message
+    assert message == f"modules.yaml: {tail}"
     assert "SECRET" not in message
+
+
+def test_nested_package_is_not_a_unit_in_revision(repo: GitRepo) -> None:
+    """`lib/nopkg/sub/__init__.py` без `lib/nopkg/__init__.py` — не юнит (фильтр глубины пути)."""
+    _fill(
+        repo.path,
+        _yaml(("lib/", "framework", "")),
+        {"lib/a/__init__.py": '"""А."""\n', "lib/nopkg/sub/__init__.py": '"""Вложенный."""\n'},
+    )
+    repo.commit("nested")
+    assert [row["id"] for row in _from_revision(repo)] == ["a"]
+
+
+def test_symlinked_dir_is_not_a_unit_on_disk(tmp_path: Path) -> None:
+    """Симлинк на каталог с `__init__.py` не создаёт юнит на диске (в ревизии симлинк — не дерево)."""
+    outside = tmp_path / "outside" / "evil"
+    _put(outside, "__init__.py", '"""Чужой."""\n')
+    base = tmp_path / "repo"
+    _fill(base, _yaml(("lib/", "framework", "")), {"lib/a/__init__.py": '"""А."""\n'})
+    try:
+        (base / "lib" / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:  # Windows без права на симлинки
+        pytest.skip("симлинки недоступны")
+    assert [row["id"] for row in _load(base)] == ["a"]
+
+
+def test_unparsable_deep_expression_is_reported_not_leaked(tmp_path: Path) -> None:
+    """`__init__.py` с выражением, роняющим парсер (RecursionError/MemoryError), -> ValueError «не разобран»."""
+    _fill(tmp_path, _yaml(("lib/", "framework", "")), {"lib/x/__init__.py": "x = " + "-" * 300000 + "\n"})
+    with pytest.raises(ValueError) as caught:
+        _load(tmp_path)
+    assert str(caught.value) == "modules.yaml: юнит x: __init__.py не разобран"
 
 
 def test_modules_for_reads_committed_blobs(repo: GitRepo, monkeypatch: pytest.MonkeyPatch) -> None:

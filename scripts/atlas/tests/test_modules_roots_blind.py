@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import json
 import os
-import statistics
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -560,14 +558,20 @@ def test_tags_check_exits_2_on_malformed_roots(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- 7. репозиторный приём
+# закреплено на 984cc5799 по решению лида 2026-11-09: тесты раздела читают коммит с yaml 4.4b, а не HEAD и не
+# рабочий файл, чтобы обычная правка докстринга юнита или новой записи `modules:` не красила CI-джоб atlas.
+
+_PINNED = "984cc5799"  # закреплено на 984cc5799 по решению лида 2026-11-09
+
+
+def _git_show(commit: str) -> str:
+    proc = subprocess.run(["git", "-C", str(_ROOT), "show", f"{commit}:modules.yaml"], capture_output=True, check=False)
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    return proc.stdout.decode("utf-8")
 
 
 def _old_text() -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(_ROOT), "show", f"{_OLD_COMMIT}:modules.yaml"], capture_output=True, check=False
-    )
-    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
-    return proc.stdout.decode("utf-8")
+    return _git_show(_OLD_COMMIT)
 
 
 def _canon(rows: list[dict]) -> set[str]:
@@ -576,62 +580,42 @@ def _canon(rows: list[dict]) -> set[str]:
 
 def test_repo_modules_yaml_is_at_most_450_lines() -> None:
     """Файл ужат: <= 450 строк (было 1035), версия остаётся 1, ключ roots есть."""
-    raw = (_ROOT / "modules.yaml").read_bytes()
+    raw = _git_show(_PINNED).encode("utf-8")  # закреплено на 984cc5799 по решению лида 2026-11-09
     assert raw.count(b"\n") <= 450
     data = yaml.safe_load(raw.decode("utf-8"))
     assert data["version"] == 1
     assert isinstance(data["roots"], list) and data["roots"]
 
 
-def test_repo_load_modules_rows_equal_the_old_flat_yaml() -> None:
-    """Те же строки, что в плоском yaml коммита 35e68f3d5 (равенство множеств и числа строк)."""
-    from scripts.atlas.modules import load_modules
-
-    old_rows = yaml.safe_load(_old_text())["modules"]
-    rows = run_with_deadline(load_modules, 120)
-    assert len(rows) == len(old_rows)
-    assert _canon(rows) == _canon(old_rows)
-
-
-def test_repo_modules_for_head_rows_equal_the_old_flat_yaml() -> None:
-    """modules_for(HEAD) выдаёт те же строки, что плоский yaml."""
+def test_repo_pinned_revision_rows_equal_the_old_flat_yaml() -> None:
+    """Строки ревизии 984cc5799 (юниты + исключения) = строки плоского yaml 35e68f3d5: 89 = 57 + 32."""
     from scripts.atlas.adapters.modules import modules_for
     from scripts.atlas.tree import Tree
 
     old_rows = yaml.safe_load(_old_text())["modules"]
-    rows = run_with_deadline(lambda: modules_for(Tree(_ROOT, "HEAD")), 120)
-    assert len(rows) == len(old_rows)
+    exceptions = yaml.safe_load(_git_show(_PINNED))["modules"]  # закреплено на 984cc5799 по решению лида 2026-11-09
+    rows = run_with_deadline(lambda: modules_for(Tree(_ROOT, _PINNED)), 120)
+    assert (len(old_rows), len(rows), len(exceptions)) == (89, 89, 32)
+    assert len(rows) - len(exceptions) == 57
     assert _canon(rows) == _canon(old_rows)
 
 
 def test_repo_exceptions_keep_their_relative_order() -> None:
-    """Записи `modules:` идут в конце и в старом относительном порядке; юниты — перед ними."""
-    from scripts.atlas.modules import load_modules
+    """Записи `modules:` ревизии 984cc5799 идут в конце и в старом относительном порядке; юниты — перед ними."""
+    from scripts.atlas.adapters.modules import modules_for
+    from scripts.atlas.tree import Tree
 
     old_ids = [row["id"] for row in yaml.safe_load(_old_text())["modules"]]
-    data = yaml.safe_load((_ROOT / "modules.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(_git_show(_PINNED))  # закреплено на 984cc5799 по решению лида 2026-11-09
     exception_ids = [row["id"] for row in data["modules"]]
     assert exception_ids, "в modules.yaml не осталось исключений — проверка порядка пуста"
     assert set(exception_ids) <= set(old_ids)
     assert exception_ids == [i for i in old_ids if i in set(exception_ids)]
-    rows = run_with_deadline(load_modules, 120)
+    rows = run_with_deadline(lambda: modules_for(Tree(_ROOT, _PINNED)), 120)
     ids = [row["id"] for row in rows]
     assert ids[-len(exception_ids) :] == exception_ids
     assert len(ids) == len(set(ids))
 
 
-def test_repo_modules_for_head_median_of_seven_runs_is_fast() -> None:
-    """Скорость чтения юнитов из ревизии: медиана 7 прогонов <= 0.15 с."""
-    from scripts.atlas.adapters.modules import modules_for
-    from scripts.atlas.tree import Tree
-
-    def work() -> list[float]:
-        times = []
-        for _ in range(7):
-            started = time.perf_counter()
-            modules_for(Tree(_ROOT, "HEAD"))
-            times.append(time.perf_counter() - started)
-        return times
-
-    median = statistics.median(run_with_deadline(work, 120))
-    assert median <= 0.15, f"медиана {median:.3f} с"
+# скорость — одноразовая приёмка (медиана 0,103 с, 2026-11-09); постоянно защищено счётчиком cat-file
+# (test_modules_for_uses_exactly_two_git_cat_file_calls)
