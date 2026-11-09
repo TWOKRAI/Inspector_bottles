@@ -11,6 +11,9 @@ Public API:
     parse_pre_stop(raw) -> tuple[list[PreStopStep], list[str]] — принятые шаги и тексты ошибок.
     PRE_STOP_STEP_MAX_S — потолок ``timeout_s`` одного шага (60,0 с).
     PRE_STOP_TOTAL_MAX_S — потолок суммы ``timeout_s`` принятых шагов (120,0 с, граница включительно).
+    PRE_STOP_SLICE_S — срез ожиданий шага (0,05 с).
+    run_pre_stop_step(step, *, process_exists, ready_event, request_async, cancel_source, sender) — исполнить
+        один шаг запросом с ожиданием ответа; итог ``(источник отмены | None, причина сбоя | None)``.
 
 Stability:
     lite-контракт (контракт-тест ``tests/test_pre_stop_contract.py``). Формат текста ошибки
@@ -19,14 +22,27 @@ Stability:
 
 from __future__ import annotations
 
-from typing import Any
+import threading
+import time
+from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-__all__ = ["PRE_STOP_STEP_MAX_S", "PRE_STOP_TOTAL_MAX_S", "PreStopStep", "parse_pre_stop"]
+from ...message_module import build_command_message
+
+__all__ = [
+    "PRE_STOP_SLICE_S",
+    "PRE_STOP_STEP_MAX_S",
+    "PRE_STOP_TOTAL_MAX_S",
+    "PreStopStep",
+    "parse_pre_stop",
+    "run_pre_stop_step",
+]
 
 PRE_STOP_STEP_MAX_S = 60.0
 PRE_STOP_TOTAL_MAX_S = 120.0
+#: Срез ожиданий шага: отмена (``force`` / внешнее событие) видна не позже него.
+PRE_STOP_SLICE_S = 0.05
 #: Допуск сравнения суммы с потолком: 0,1 + 0,2 не должно «превысить» 0,3 из-за двоичной дроби.
 _TOTAL_EPS = 1e-9
 
@@ -95,3 +111,76 @@ def parse_pre_stop(raw: Any) -> tuple[list[PreStopStep], list[str]]:
         total += step.timeout_s
         steps.append(step)
     return steps, errors
+
+
+def run_pre_stop_step(
+    step: PreStopStep,
+    *,
+    process_exists: Callable[[str], bool],
+    ready_event: Callable[[str], Any],
+    request_async: Callable[..., Any],
+    cancel_source: Callable[[], str | None],
+    sender: str,
+) -> tuple[str | None, str | None]:
+    """Исполнить шаг: ``(источник отмены, None)`` | ``(None, причина сбоя)`` | ``(None, None)`` — выполнен.
+
+    Порядок (ADR-PMM-044): реестр (``process_exists``) → готовность (``ready_event`` → ``Event | None``; ``None`` —
+    сигнала нет, действовать сразу) → ``request_async(message, on_response, timeout=...)`` → ожидание ответа. Все
+    ожидания — срезами ≤ ``PRE_STOP_SLICE_S`` с проверкой ``cancel_source()``; часы шага — ``time.monotonic()``.
+    Зовётся с потока шагов, не с потока приёма: колбэк ``request_async`` приходит на поток приёма и только кладёт
+    ответ. Колбэк закрытого шага (опоздавший ответ, конверт подметания) — no-op. Исключения пробрасываются.
+    """
+    deadline = time.monotonic() + step.timeout_s
+    if not process_exists(step.process):
+        return None, "процесс не найден"
+    ready = ready_event(step.process)
+    if ready is not None:
+        while not ready.is_set():
+            source = cancel_source()
+            if source is not None:
+                return source, None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None, "ребёнок не готов"
+            ready.wait(min(PRE_STOP_SLICE_S, remaining))
+    source = cancel_source()
+    if source is not None:
+        return source, None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None, "timeout"
+
+    answered = threading.Event()
+    closed = threading.Event()
+    box: dict[str, Any] = {}
+
+    def on_response(response: dict) -> None:
+        # Поток приёма PM: только положить ответ и взвести событие. Шаг закрыт — no-op (h2).
+        if closed.is_set():
+            return
+        box["response"] = response
+        box["thread"] = threading.get_ident()
+        answered.set()
+
+    message = build_command_message(step.process, step.command, dict(step.args), sender=sender)
+    caller = threading.get_ident()
+    try:
+        request_async(message, on_response, timeout=remaining)
+        while not answered.is_set():
+            source = cancel_source()
+            if source is not None:
+                return source, None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None, "timeout"
+            answered.wait(min(PRE_STOP_SLICE_S, remaining))
+    finally:
+        closed.set()
+    response = box.get("response")
+    if box.get("thread") == caller:
+        return None, "ошибка отправки"  # синхронный отказ request_async — колбэк на потоке шага
+    if isinstance(response, dict) and response.get("success") is True:
+        return None, None
+    if isinstance(response, dict) and "type" not in response and response.get("error") == "timeout":
+        return None, "timeout"  # конверт подметания слота
+    return None, "ошибка ответа"

@@ -8,12 +8,20 @@
 from __future__ import annotations
 
 import math
+import threading
 
 import pytest
 from pydantic import ValidationError
 
 from ..process import pre_stop as mod
-from ..process.pre_stop import PRE_STOP_STEP_MAX_S, PRE_STOP_TOTAL_MAX_S, PreStopStep, parse_pre_stop
+from ..process.pre_stop import (
+    PRE_STOP_SLICE_S,
+    PRE_STOP_STEP_MAX_S,
+    PRE_STOP_TOTAL_MAX_S,
+    PreStopStep,
+    parse_pre_stop,
+    run_pre_stop_step,
+)
 
 
 def _entry(timeout_s=5, **override):
@@ -23,9 +31,17 @@ def _entry(timeout_s=5, **override):
 
 
 def test_public_api_names_and_constants() -> None:
-    assert sorted(mod.__all__) == ["PRE_STOP_STEP_MAX_S", "PRE_STOP_TOTAL_MAX_S", "PreStopStep", "parse_pre_stop"]
+    assert sorted(mod.__all__) == [
+        "PRE_STOP_SLICE_S",
+        "PRE_STOP_STEP_MAX_S",
+        "PRE_STOP_TOTAL_MAX_S",
+        "PreStopStep",
+        "parse_pre_stop",
+        "run_pre_stop_step",
+    ]
     assert PRE_STOP_STEP_MAX_S == 60.0
     assert PRE_STOP_TOTAL_MAX_S == 120.0
+    assert PRE_STOP_SLICE_S == 0.05
 
 
 @pytest.mark.parametrize("raw", [None, []], ids=["none", "empty"])
@@ -133,3 +149,56 @@ def test_total_ceiling_counts_only_accepted_records() -> None:
 def test_total_float_sum_at_boundary_is_not_overflow() -> None:
     steps, errors = parse_pre_stop([_entry(0.1)] * 1200)
     assert (len(steps), errors) == (1200, [])
+
+
+def _run(reply=None, *, exists=True, sync_fail=False, cancel=None):
+    sent: list[dict] = []
+
+    def request_async(message, on_response, timeout=5.0):
+        sent.append(message)
+        if sync_fail:
+            on_response({"success": False, "error": "no route"})
+        elif reply is not None:
+            # Настоящий ответ приходит на поток приёма, не на поток шага.
+            threading.Thread(target=on_response, args=(reply,), daemon=True).start()
+        return "cid"
+
+    step = PreStopStep(process="arm", command="robot.home", args={"k": 1}, timeout_s=0.2)
+    outcome = run_pre_stop_step(
+        step,
+        process_exists=lambda name: exists,
+        ready_event=lambda name: None,
+        request_async=request_async,
+        cancel_source=lambda: cancel,
+        sender="ProcessManager",
+    )
+    return outcome, sent
+
+
+def test_run_step_request_shape_and_success() -> None:
+    outcome, sent = _run({"type": "response", "success": True})
+    assert outcome == (None, None)
+    assert len(sent) == 1
+    assert {k: sent[0][k] for k in ("type", "command", "targets", "sender", "data")} == {
+        "type": "command",
+        "command": "robot.home",
+        "targets": ["arm"],
+        "sender": "ProcessManager",
+        "data": {"k": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"reply": {"type": "response", "success": False}}, (None, "ошибка ответа")),
+        ({"sync_fail": True}, (None, "ошибка отправки")),
+        ({}, (None, "timeout")),
+        ({"exists": False}, (None, "процесс не найден")),
+        ({"cancel": "force"}, ("force", None)),
+    ],
+    ids=["nack", "sync-fail", "silent", "no-process", "cancelled"],
+)
+def test_run_step_outcomes(kwargs, expected) -> None:
+    outcome, _sent = _run(**kwargs)
+    assert outcome == expected

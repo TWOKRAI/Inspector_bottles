@@ -529,7 +529,7 @@ config = {
 | `wire.setup` / `wire.teardown` | параметры wire | L, `pm-lifecycle-submit`, все ключи | Настроить / разобрать wire-канал |
 | `telemetry.broadcast`, `observability.tail.subscribe_all` / `unsubscribe_all` | см. описания | T, `pm-transition-gate`, все ключи | В исполнитель, если идёт операция жизненного цикла, иначе сразу |
 | `supervision.status`, `topology.get`, `topology.diff`, `wire.status` | — | R, сразу | Чтение (снимки словарей без лока, D3) |
-| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}`. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
+| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}` + `accepted`, `phase`; `force` поверх graceful — `escalated: True`; повтор — `accepted: False, reason: "already_stopping"` (ADR-PMM-044). При шагах `pre_stop` graceful отвечает `phase: "pre_stop"`, события взводит поток шагов после них. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
 | `system.stats` | — | R, сразу | Статистика: monitor + processes |
 
 Класс задаёт **регистрация** команды (`executor=`, `key_from=`, `targets=`), а не отправитель. Ответ на команду
@@ -550,6 +550,20 @@ config = {
 `system_stop.deadline_at` сдвигается на срок области (не при `force` и не после `done`); `stop_deadline_at` имени `last`
 — `null` до его сигнала, затем сигнал `last` + окно имени.
 Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
+
+Итог стопа ребёнка (Task 1.2, ADR-PMM-042): единственный источник `stop_outcome` — реестр; запись процесса
+`supervision.status` несёт ещё `stop_wave` и `stop_deadline_at` (срок, после которого ребёнок «завис»; `force` его режет).
+«Остановлен» = `stop_outcome` ∈ {`exited`, `terminated`, `killed`}; `survived` и `handed_over` — ребёнок жив. Между
+смертью и её наблюдением бывает `alive=false, stop_outcome=null` — судить по итогу, не по `alive`; после
+`system_stop.phase == "done"` `null` = «PM не подтвердил». `survived` опросом почти не виден — доезжает логом.
+
+Шаги `pre_stop` (Task 1.4, ADR-PMM-044): ключ `pre_stop` конфига PM (из `orchestrator_config`) — список
+`{process, command, args, timeout_s}` (`0 < timeout_s <= 60`, сумма принятых <= 120 с; схема — `process/pre_stop.py`).
+Негодная запись — ERROR `pre_stop[<i>]: <поле> — <причина>` без значений и пропуск; PM стартует всегда. graceful
+исполняет шаги запросом ребёнку (`request_async`) на исполнителе `pm-pre-stop` ДО взвода событий стопа; сбой шага —
+одна WARNING и следующий шаг; `force` или внешний `system_stop_event` прерывают шаг (≤ 50 мс). В фазе `pre_stop`
+`system_stop.pre_stop_step` = `"<process>.<command>"`, `deadline_at` = `started_at + Σ timeout_s`; команды класса L
+и T-для-цели-в-переходе отвечают `system_stopping`. Переход в `children` перебазирует graceful-срок на `pm_graceful_s`.
 
 Все команды помечены тегом `"system"`.
 

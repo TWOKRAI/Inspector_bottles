@@ -22,7 +22,6 @@ from ...command_module import DEFERRED
 from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...error_module.interfaces import SubsystemStartFailed
-from ...message_module import build_command_message
 from ...logger_module.channels.log_channel import (
     find_foreign_log_roots,
     sweep_log_dir_tree,
@@ -51,7 +50,7 @@ from .backend_ctl_endpoint import (
     teardown_backend_ctl_channel,
 )
 from .observability_broker import POINT_COMMANDS
-from .pre_stop import PreStopStep, parse_pre_stop
+from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
 from .topology_manager import TopologyManager
 
 #: 4.4 (ревью, R4): ленивое создание брокера зовут два read-потока канала
@@ -64,8 +63,6 @@ _BROKER_INIT_LOCK = threading.Lock()
 #: Task 1.2a gui-graceful-close (ADR-PMM-041): фазы хода системного стопа (``pre_stop`` ставит 1.4,
 #: ``last_wave`` — 1.3) и ключи ``system.stop.*``, которые идут в стор.
 _SYSTEM_STOP_PHASES = ("pre_stop", "children", "last_wave", "done")
-#: Task 1.4 (ADR-PMM-044): срез ожиданий шага ``pre_stop`` — отмена (``force`` / событие) видна не позже него.
-_PRE_STOP_SLICE_S = 0.05
 _SYSTEM_STOP_STORE_KEYS = ("phase", "mode", "initiator", "started_at")
 #: Служебный ключ ``data`` команды ``system.shutdown``: отправитель внешнего ``process.command``
 #: (ставит только ``_handle_process_command``; другим командам не подмешивается).
@@ -836,65 +833,16 @@ class ProcessManagerProcess(ProcessModule):
         return True
 
     def _pre_stop_step_outcome(self, step: PreStopStep) -> tuple[str | None, str | None]:
-        """Исполнить шаг: ``(источник отмены, None)`` | ``(None, причина сбоя)`` | ``(None, None)`` — выполнен.
-
-        Порядок (DESIGN 1): реестр → готовность ребёнка → ``request_async`` → ожидание ответа. Все ожидания —
-        срезами ≤ ``_PRE_STOP_SLICE_S`` с проверкой отмены; часы шага — ``time.monotonic()``.
-        """
-        deadline = time.monotonic() + step.timeout_s
-        if self._process_registry.get_process_by_name(step.process) is None:
-            return None, "процесс не найден"
-        ready = self._child_ready_event(step.process)
-        if ready is not None:
-            while not ready.is_set():
-                source = self._pre_stop_cancel_source()
-                if source is not None:
-                    return source, None
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None, "ребёнок не готов"
-                ready.wait(min(_PRE_STOP_SLICE_S, remaining))
-        source = self._pre_stop_cancel_source()
-        if source is not None:
-            return source, None
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None, "timeout"
-
-        answered = threading.Event()
-        closed = threading.Event()
-        box: dict[str, Any] = {}
-
-        def on_response(response: dict) -> None:
-            # Поток приёма PM: только положить ответ и взвести событие. Шаг закрыт — no-op (h2).
-            if closed.is_set():
-                return
-            box["response"] = response
-            box["thread"] = threading.get_ident()
-            answered.set()
-
-        message = build_command_message(step.process, step.command, dict(step.args), sender=self.name)
-        caller = threading.get_ident()
-        try:
-            self.router_manager.request_async(message, on_response, timeout=remaining)
-            while not answered.is_set():
-                source = self._pre_stop_cancel_source()
-                if source is not None:
-                    return source, None
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None, "timeout"
-                answered.wait(min(_PRE_STOP_SLICE_S, remaining))
-        finally:
-            closed.set()
-        response = box.get("response")
-        if box.get("thread") == caller:
-            return None, "ошибка отправки"  # синхронный отказ request_async — колбэк на потоке шага
-        if isinstance(response, dict) and response.get("success") is True:
-            return None, None
-        if isinstance(response, dict) and "type" not in response and response.get("error") == "timeout":
-            return None, "timeout"  # конверт подметания слота
-        return None, "ошибка ответа"
+        """Исполнить шаг (``pre_stop.run_pre_stop_step``) поверх реестра, гейта готовности и роутера PM."""
+        registry = self._process_registry
+        return run_pre_stop_step(
+            step,
+            process_exists=lambda name: registry.get_process_by_name(name) is not None,
+            ready_event=self._child_ready_event,
+            request_async=self.router_manager.request_async,
+            cancel_source=self._pre_stop_cancel_source,
+            sender=self.name,
+        )
 
     def _publish_system_stop(self) -> None:
         """Записать в стор изменившиеся ключи ``system.stop.*`` из ТЕКУЩЕГО снимка.
