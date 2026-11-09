@@ -157,7 +157,15 @@ def test_force_sets_deadline_then_events_and_replies_immediately(rig: _Rig) -> N
     reply = rig.command({"mode": "force", "deadline_s": 1.0})
     t_after = time.monotonic()
 
-    assert reply == {"success": True, "message": "Shutdown initiated", "mode": "force", "deadline_s": 1.0}
+    # Task 1.4 (ADR-PMM-044): прежние поля — прежние литералы, плюс ``accepted`` и ``phase``.
+    assert reply == {
+        "success": True,
+        "message": "Shutdown initiated",
+        "mode": "force",
+        "deadline_s": 1.0,
+        "accepted": True,
+        "phase": "children",
+    }
     assert t_after - t_before < 0.5, f"force ответил за {t_after - t_before:.3f} с — команда не должна ждать срок"
     assert rig.events_set == (True, True)
     # Порядок: к моменту set() каждого события срок уже стоял (иначе PM успеет начать стоп без срока).

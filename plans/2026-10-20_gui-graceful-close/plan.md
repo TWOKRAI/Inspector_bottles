@@ -80,7 +80,7 @@
   - **Module contract:** public-api-change (ответ команды PM)
 - Task 1.3: волна «последними» — GUI гаснет после всех [DONE 2026-11-08, ветка `feat/gui-close-1.3`; heavy на Windows и живой пункт — PENDING, нужен стенд] (после 1.1; бюджет — поверх LSO 1.11)
   - **Module contract:** public-api-change (поле `stop_wave` схемы процесса)
-- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [PENDING] (после 0.2, 1.1a, 1.2a, 1.2, 1.3, LSO 1.9b — все в `main`; стадия 0 раунд 1 — CHANGES REQUESTED, текст переписан 2026-11-08)
+- Task 1.4: `pre_stop` для «домой», `force` прерывает шаг, честный итог в `backend_ctl system_shutdown` [DONE 2026-11-09, ветка `feat/gui-close-1.4`; medium зелёный, ревью стадии 5 APPROVED во 2-м раунде; heavy FL 9–10 на Windows и живой пункт 2.3 — PENDING, нужен стенд] (после 0.2, 1.1a, 1.2a, 1.2, 1.3, LSO 1.9b — все в `main`; стадия 0 раунд 1 — CHANGES REQUESTED, текст переписан 2026-11-08)
   - **Module contract:** public-api-change (ответ `system.shutdown`: `accepted`/`phase`/`escalated`; поля `outcomes`/`unconfirmed`/`timed_out` и `wait_timeout` метода драйвера и MCP) + new-lite (`process/pre_stop.py`)
 - Task 1.4m: манифест `pre_stop` прототипа — шаг `{process: "devices", command: "robot_park_all", args: {}, timeout_s: 35}` и живая проверка пути PM → `robot_park_all` → `process.stop` [PENDING] (после 1.4; блок: слово владельца — `docs/handoffs/2026-11-08_R2-T5.5.md:6`; источник ключа — `orchestrator_config`, `multiprocess_prototype/backend/launch.py:750`; файл задачи заводится после слова владельца)
   - **Module contract:** n/a (конфиг прототипа)

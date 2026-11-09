@@ -193,7 +193,8 @@ def test_driver_system_shutdown_live_smoke(tmp_path) -> None:
         "accepted is True": res["accepted"] is True,
         "pm_gone is True": res["pm_gone"] is True,
         "mode == force": res["mode"] == "force",
-        "outcomes is None": res["outcomes"] is None,
+        "outcomes is dict": isinstance(res["outcomes"], dict),
+        "timed_out is False": res["timed_out"] is False,
         f"pm exited <= {_PM_EXIT_WAIT_S} s": exitcode is not None,
     }
     print(f"\n[L-smoke] res={res!r} pm_exitcode={exitcode!r}", flush=True)
@@ -252,4 +253,95 @@ def test_force_on_healthy_system_not_slower_than_graceful(capfd, tmp_path) -> No
             f"(rule: force <= graceful + 0.3) {_mark(median_ok)}"
         ],
     )
+    _fail_if_any(failures)
+
+
+# --------------------------------------------------------------------------- #
+# Task 1.4 (gui-graceful-close): честные итоги по процессам в результате драйвера. Слепая приёмка REDS 9-10.
+# --------------------------------------------------------------------------- #
+
+
+def _driver_shutdown_run(tmp_path: Path, *, index: int, recipe: Path | str, **kwargs: Any) -> dict:
+    """Один прогон: старт, 2 с трафика, ``drv.system_shutdown(**kwargs)`` (итоги из ``supervision.status``)."""
+    harness = BackendHarness(recipe=recipe, port=_port(index), warmup=1.0, log_dir=tmp_path / f"run_{index}")
+    try:
+        drv = harness.start()
+        time.sleep(2.0)
+        res = drv.system_shutdown(**kwargs)
+    finally:
+        harness.stop()
+    return {"index": index, "res": res}
+
+
+@pytest.mark.harness_smoke
+def test_force_with_hung_child_honest_outcomes(tmp_path) -> None:
+    """Task 1.4, REDS 9 (5 из 5): ``inspection_full`` + зависший ребёнок, ``drv.system_shutdown(mode="force",
+    deadline_s=1.0)``: ``accepted is True``, ``timed_out is False``, ``pm_gone is True``; итог зависшего —
+    ``terminated`` или ``killed`` либо его имя в ``unconfirmed`` (никогда ``exited``/``survived``); у остальных детей
+    ``exited``; ``elapsed_s`` < 4,0 в каждом прогоне и медиана <= 2,5. Число прогонов с подтверждённым итогом
+    зависшего — в вывод."""
+    recipe = _make_hung_recipe(tmp_path)
+    runs = [_driver_shutdown_run(tmp_path, index=i, recipe=recipe, mode="force", deadline_s=1.0) for i in range(5)]
+
+    failures: list[str] = []
+    confirmed = 0
+    for r in runs:
+        i, res = r["index"], r["res"]
+        if res["accepted"] is not True:
+            failures.append(f"run {i}: accepted={res['accepted']!r}")
+        if res["timed_out"] is not False:
+            failures.append(f"run {i}: timed_out={res['timed_out']!r}")
+        if res["pm_gone"] is not True:
+            failures.append(f"run {i}: pm_gone={res['pm_gone']!r}")
+        outcomes = res["outcomes"]
+        if not isinstance(outcomes, dict):
+            failures.append(f"run {i}: outcomes={outcomes!r}, ожидался словарь")
+            continue
+        hung = outcomes.get(_HUNG_NAME)
+        if hung in ("terminated", "killed"):
+            confirmed += 1
+        elif _HUNG_NAME not in (res["unconfirmed"] or []):
+            failures.append(f"run {i}: итог зависшего '{_HUNG_NAME}' = {hung!r} и его нет в unconfirmed")
+        for name, outcome in outcomes.items():
+            if name != _HUNG_NAME and outcome != "exited":
+                failures.append(f"run {i}: итог '{name}' = {outcome!r}, ожидалось 'exited'")
+        if not res["elapsed_s"] < 4.0:
+            failures.append(f"run {i}: elapsed_s={res['elapsed_s']!r} >= 4.0")
+
+    median = statistics.median(r["res"]["elapsed_s"] for r in runs)
+    if not median <= 2.5:
+        failures.append(f"медиана elapsed_s {median:.3f} с > 2.5 с")
+    print(
+        f"\n[FL9] итог зависшего подтверждён в {confirmed} из 5 прогонов; медиана elapsed_s = {median:.3f} с",
+        flush=True,
+    )
+    for r in runs:
+        print(f"  run {r['index']}: {r['res']!r}", flush=True)
+    _fail_if_any(failures)
+
+
+@pytest.mark.harness_smoke
+def test_graceful_wait_returns_all_exited(tmp_path) -> None:
+    """Task 1.4, REDS 10 (5 из 5): ``inspection_full``, ``drv.system_shutdown()``: все дети с подтверждённым итогом —
+    ``exited``; ``unconfirmed`` пуст на здоровом графе; ``timed_out is False``; ``pm_gone is True``."""
+    runs = [_driver_shutdown_run(tmp_path, index=i, recipe=_RECIPE) for i in range(5)]
+
+    failures: list[str] = []
+    for r in runs:
+        i, res = r["index"], r["res"]
+        outcomes = res["outcomes"]
+        if not isinstance(outcomes, dict) or not outcomes:
+            failures.append(f"run {i}: outcomes={outcomes!r}, ожидался непустой словарь")
+        else:
+            bad = {name: outcome for name, outcome in outcomes.items() if outcome != "exited"}
+            if bad:
+                failures.append(f"run {i}: итоги не 'exited': {bad}")
+        if res["unconfirmed"] != []:
+            failures.append(f"run {i}: unconfirmed={res['unconfirmed']!r}, ожидался []")
+        if res["timed_out"] is not False:
+            failures.append(f"run {i}: timed_out={res['timed_out']!r}")
+        if res["pm_gone"] is not True:
+            failures.append(f"run {i}: pm_gone={res['pm_gone']!r}")
+    for r in runs:
+        print(f"  run {r['index']}: {r['res']!r}", flush=True)
     _fail_if_any(failures)

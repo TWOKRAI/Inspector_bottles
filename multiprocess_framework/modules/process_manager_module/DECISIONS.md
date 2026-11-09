@@ -1938,6 +1938,10 @@ K=120 без вычерпывания — жив через 3 с (ожидани
   порядок регистрации в `work`). Цену мерит L6 (`backend_ctl/tests/test_system_shutdown_force_live.py`).
 - (д) `force` с `deadline_s` меньше обычного стопа (0,7–1,8 с) обрывает и здоровых детей посреди их стопа. Срок самих
   детей (`work_s` от 5,0 с, `stop_budget.py`) `force` не меняет.
+- (е) Task 1.4 (ADR-PMM-044): ответ дополнен полями `accepted`/`phase`. Первый `graceful` и свежий `force` —
+  `accepted: True`; `force` поверх идущего graceful — `escalated: True`; повтор `graceful` — `accepted: False,
+  reason: "already_stopping", phase` (без новых событий в фазе `pre_stop`); повтор `force` — `already_set` +
+  `accepted: False, reason` (без `phase`). Прежние поля и литералы не менялись.
 
 **Reversible:** yes (без `mode` команда идёт прежним путём; снять `set_force_deadline` — `force` станет graceful).
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/0.2.md`, `tests/test_system_shutdown_force.py`,
@@ -2226,6 +2230,12 @@ ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children
   или проверяют состав аргументов.
 - **Значение фазы из аргумента издателя.** Поздний издатель `children` откатил бы `done` в сторе (H10).
 
+**Дополнение Task 1.4 (ADR-PMM-044):** `pre_stop_step` ставит поток шагов `pm-pre-stop` (`"<process>.<command>"`
+текущего шага, `None` после списка и при выходе из фазы). `deadline_at` фазы `pre_stop` — `started_at + Σ timeout_s`
+принятых шагов (`_begin_system_stop(..., window_s=Σ)`); при выходе в `children` graceful перебазируется на
+`time.time() + pm_graceful_s`, `force` не сдвигается. Значения `initiator`: имя отправителя | `event` | `unknown`;
+литерала `parent_death` нет.
+
 **Reversible:** yes (поле и ключи новые; удаление помощников возвращает прежнее поведение).
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2a.md`, `plans/2026-10-20_gui-graceful-close/design.md`
 («Контракт хода»), ADR-PMM-036, ADR-PMM-038, ADR-PMM-040, `tests/test_supervision_status_system_stop.py`,
@@ -2297,7 +2307,7 @@ ADR-PMM-039 (Task 1.10) ввёл итог стопа воплощения (`exit
 «Остановлен» = `stop_outcome` ∈ {`exited`, `terminated`, `killed`}; `survived` и `handed_over` = НЕ остановлен
 (ребёнок жив). «Все остановлены» = итог из этого набора у каждого ребёнка; после `system_stop.phase == "done"` `null` =
 «PM не подтвердил». `survived` опросом почти не виден (окно между концом детей и остановкой `message_processor` короче
-шага опроса) — доезжает логом. Долг документации: `README.md` модуля и `backend_ctl/AGENTS.md` — Task 1.4.
+шага опроса) — доезжает логом. Долг документации: `README.md` модуля и `backend_ctl/AGENTS.md` — Task 1.4. README модуля закрыт в Task 1.4 (абзац «Итог стопа ребёнка»); `backend_ctl/AGENTS.md` — часть драйвера Task 1.4.
 
 Ключ итога — имя, а не воплощение: `ChildProcessStop` старого воплощения X, подтвердивший смерть после
 `remove_process` + `add_process` нового X, пишет `exited` под именем нового. На `main` до Task 1.2 так же через цикл
@@ -2389,3 +2399,75 @@ GUI получал `terminate` в окне PM, пока PM ждал зависш
 **Reversible:** yes (без `stop_wave: last` в топологии — путь и числа прежние).
 **Risk:** medium — стоп корня крутит две сборки одним потоком; держится слепыми REDS 1–10 и стражами
 `test_stop_wave_last_guards.py`.
+
+## ADR-PMM-044: `pre_stop` — шаги-запросы до событий стопа, отдельный исполнитель, отказ L/T в фазе `pre_stop` (Task 1.4 gui-graceful-close, 2026-11-09)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** «Домой» перед стопом (робот паркуется) нужно исполнить ДО взвода `_system_stop_event`: после него
+дети гаснут. Нужен запрос с ожиданием ответа, срок на шаг, отмена `force` и внешним событием, честный ход стопа.
+
+### Решение
+
+1. **Схема** (`process/pre_stop.py`, lite-контракт): ключ `pre_stop` конфига PM (из `orchestrator_config`) — список
+   `{process, command, args, timeout_s}`; `timeout_s` — конечное число `0 < t <= 60` (`bool`/строки нет, `int` — да).
+   Негодная запись — одна ERROR `pre_stop[<i>]: <поле> — <причина>` без входных значений и пропуск; потолок
+   `Σ timeout_s <= 120` по принятым записям (граница включительно). PM стартует всегда (принцип 5).
+2. **Шаг — запрос** `router_manager.request_async` (`build_command_message`, `sender` = имя PM) с потока
+   `pm-pre-stop`. Порядок: реестр (`процесс не найден`) → событие готовности (`ребёнок не готов`) → запрос → ожидание.
+   Все ожидания — срезами 50 мс по событию с проверкой отмены. Колбэк (поток приёма) только кладёт ответ и взводит
+   `Event` шага. Сбой — одна WARNING `pre_stop: шаг '<p>.<c>' — <причина>` (`timeout` | `ошибка ответа` |
+   `ошибка отправки` | `процесс не найден` | `ребёнок не готов` | `исключение <Класс>`), следующий шаг. Синхронный
+   отказ `request_async` (колбэк на потоке шага) — `ошибка отправки`; исключение `send` — `исключение <Класс>`.
+   Отмена — INFO `... прерван (force|event)`, остальные шаги не идут.
+3. **Запоздавший ответ.** Приходит в system-очередь PM. Колбэк закрытого шага — no-op; слот подметается таймаутом
+   `request_async` на такте `receive()`; ответ после подметания `_resolve_pending` не находит — обычный разбор
+   `command.response` (обработчика нет). Повторного шага нет.
+4. **Исполнитель** `pm-pre-stop` (`KeyedExecutor`, `serial`, `max_pending: 1`) создаётся в `initialize` только при
+   шагах (иначе ноль потоков); весь список — одна операция `submit`. Нет `executor_manager` — ERROR
+   `pre_stop: исполнитель недоступен — шаги отключены`. События стопа и публикацию взводит поток шагов в `finally`
+   (`_finish_pre_stop`, идемпотентна); отказ `submit` (`reply`) зовёт её же.
+   Два пути оставлены намеренно (ревью r1, m1): `finally` потока шагов и `reply` операции `submit` (он же идёт и на
+   нормальном выходе). SM 2 проверяет «хотя бы один путь»; каждый путь по отдельности охраняют hazard h7 (`finally`,
+   инъекция 14) и h8 (`reply` отказа, инъекция R); инъекция 14б убирает оба — SM 2 красная.
+5. **Отмена** — флаг `force` (ленивое свойство `_pre_stop_cancel_flag`) ИЛИ `_system_stop_event`, взведённый не
+   потоком шагов (`harness.stop()`, запасной путь GUI, спавнер). В фазе `pre_stop` событие НЕ взведено. Ревью r1:
+   ещё свой `stop_event` PM и начатый стоп детей (`_children_stopping`) — источник `event`; в фазе `pre_stop` их внутри
+   PM взводит только путь `force` после флага, снаружи — раннер/спавнер (h6, инъекция S).
+6. **Отказ L/T.** `pm-lifecycle` получает предикат `_lifecycle_rejected() = _pm_stopping() or phase == "pre_stop"`:
+   L и T-для-цели-в-переходе отвечают `system_stopping`. `_pm_stopping()` и его потребители (`stop_abort`, отказ
+   спавна, ожидания, ленивый begin) не меняются. Известное ограничение: монитор может перезапустить упавшего
+   ребёнка во время `pre_stop`.
+7. **Ход стопа.** Фаза `pre_stop`: `deadline_at = started_at + Σ timeout_s`. Переход `pre_stop → children` —
+   `_leave_pre_stop` (под `_system_stop_lock`, только из `pre_stop`; повтор — no-op): `pre_stop_step = None`,
+   graceful — `deadline_at = time.time() + pm_graceful_s`, `force` — без сдвига. То же делает `_set_system_stop_phase`
+   при выходе из `pre_stop` любым путём (`_ChildrenStop.request_stop` при внешнем событии).
+8. **Ответ `system.shutdown`.** Первый `graceful` — `accepted: True, mode: "graceful", phase` (`pre_stop` при шагах и
+   `_pm_stopping()` ложном, иначе `children` и события сразу). Повтор `graceful` — `accepted: False,
+   reason: "already_stopping", phase` (+ прежний `message`); в фазе `pre_stop` без событий и без публикации, вне
+   `pre_stop` события взводятся, как до 1.4 (идемпотентно, страж Task 0.2). `force` свежий — `accepted: True,
+   phase: "children"`, шаги не исполняются. `force` поверх graceful — `_escalate_system_stop`, отмена, переход и
+   события на потоке приёма; `accepted: True, escalated: True` (ключ `escalated` — только здесь). Повтор `force` —
+   `already_set` + `accepted: False, reason` (без `phase`). Запасной путь без `_children_stop` (двойники): шаги
+   отменяются, события всегда, `accepted` — итог `_begin_system_stop`, при `False` — `reason`.
+   Аргумент `initiator` не вводится (`_EnvelopeSender`, ADR-PMM-041).
+
+### Отвергнуто
+
+- **`_send_child_command`** — не ждёт ответа и таймаута не знает.
+- **Шаги в `pm-lifecycle`** — шаг до 60 с занял бы единственного рабочего; собственный предикат отказа фазы
+  `pre_stop` отклонил бы сам шаг.
+- **Расширить `_pm_stopping()`** — поменяло бы `stop_abort`, отказ спавна и ожидания в фазе `pre_stop`.
+- **Явный аргумент `initiator`** — открыл бы подделку инициатора; потребителя нет.
+- **Отказ старта PM за негодный шаг** — один негодный ключ ронял бы бэкенд (принцип 5).
+- **Блокирующий `request(timeout)`** — ждёт слепо, отмену не видит.
+- **Конец опроса драйвера по `alive`** — ADR-PMM-042 «Предел контракта» (`alive=false, stop_outcome=null`).
+
+**Последствия:** итог последнего медленного ребёнка опросом может быть не виден (`message_processor` PM закрывается
+вскоре после `done`) — вариант «итоги в стор при `done`» в `docs/claude/OPEN_QUESTIONS.md` (2026-11-08). Манифест
+`pre_stop` и шаг `robot_park_all` — Task 1.4m.
+
+**Reversible:** yes (без ключа `pre_stop` путь прежний; новые поля ответа — добавочные).
+**Risk:** medium — второй поток в стопе PM; держится SM REDS 1–7 и hazard h1–h4 (`tests/test_pre_stop_author.py`).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.4.md`, ADR-PMM-038, ADR-PMM-039, ADR-PMM-041, ADR-PMM-042,
+`tests/test_system_shutdown_pre_stop.py`, `tests/test_pre_stop_contract.py`, `tests/test_pre_stop_author.py`.

@@ -84,7 +84,15 @@ def _info_lines(pm: Any) -> list[str]:
 def test_repeat_force_reply_carries_effective_deadline() -> None:
     pm, _ = _pm()
     first = _bounded(lambda: pm._cmd_system_shutdown({"mode": "force", "deadline_s": 1.0}))
-    assert first == {"success": True, "message": "Shutdown initiated", "mode": "force", "deadline_s": 1.0}
+    # Task 1.4 (ADR-PMM-044): прежние поля — прежние литералы, плюс новые поля ответа.
+    assert first == {
+        "success": True,
+        "message": "Shutdown initiated",
+        "mode": "force",
+        "deadline_s": 1.0,
+        "accepted": True,
+        "phase": "children",
+    }
 
     second = _bounded(lambda: pm._cmd_system_shutdown({"mode": "force", "deadline_s": 4.0}))
     assert second == {
@@ -93,6 +101,8 @@ def test_repeat_force_reply_carries_effective_deadline() -> None:
         "mode": "force",
         "deadline_s": 1.0,
         "already_set": True,
+        "accepted": False,
+        "reason": "already_stopping",
     }, second
     assert any("force: срок уже стоит (1.0 с), повтор не меняет" in line for line in _info_lines(pm)), _info_lines(pm)
 
@@ -111,7 +121,16 @@ def test_force_without_deadline_uses_default_one_second() -> None:
     t_before = time.monotonic()
     reply = _bounded(lambda: pm._cmd_system_shutdown({"mode": "force"}))
     t_after = time.monotonic()
-    assert reply == {"success": True, "message": "Shutdown initiated", "mode": "force", "deadline_s": 1.0}, reply
+    # Стоп уже начат ``request_stop`` (ход стопа graceful/event) — force поверх него эскалирует (Task 1.4).
+    assert reply == {
+        "success": True,
+        "message": "Shutdown initiated",
+        "mode": "force",
+        "deadline_s": 1.0,
+        "accepted": True,
+        "escalated": True,
+        "phase": "children",
+    }, reply
 
     assert _bounded(lambda: pm._children_stop.join_until(time.monotonic() + 10.0)) is True
     passed = group.join_deadlines[0]
@@ -121,7 +140,13 @@ def test_force_without_deadline_uses_default_one_second() -> None:
 def test_force_without_children_stop_falls_back_to_graceful() -> None:
     pm, _ = _pm(with_children_stop=False)
     reply = _bounded(lambda: pm._cmd_system_shutdown({"mode": "force", "deadline_s": 1.0}))
-    assert reply == {"success": True, "message": "Shutdown initiated", "mode": "graceful"}, reply
+    assert reply == {
+        "success": True,
+        "message": "Shutdown initiated",
+        "mode": "graceful",
+        "accepted": True,
+        "phase": "children",
+    }, reply
     assert pm._log_warning.call_count == 1, pm._log_warning.call_args_list
     assert (pm.stop_event.is_set(), pm._system_stop_event.is_set()) == (True, True)
 
@@ -129,6 +154,12 @@ def test_force_without_children_stop_falls_back_to_graceful() -> None:
 def test_graceful_without_mode_exact_old_reply() -> None:
     pm, _ = _pm()
     reply = _bounded(lambda: pm._cmd_system_shutdown(None))
-    assert reply == {"success": True, "message": "Shutdown initiated"}, reply
+    assert reply == {
+        "success": True,
+        "message": "Shutdown initiated",
+        "accepted": True,
+        "mode": "graceful",
+        "phase": "children",
+    }, reply
     assert (pm.stop_event.is_set(), pm._system_stop_event.is_set()) == (True, True)
     assert pm._children_stop._force_at is None

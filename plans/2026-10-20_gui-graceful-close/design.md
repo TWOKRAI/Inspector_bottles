@@ -172,7 +172,7 @@
 умолчанию 1,0, диапазон 0,1–5,0) — Task 0.2, первой. Аргумента `initiator` нет (решение Task 1.4): инициатор — `sender`
 конверта (Task 1.2a), явный аргумент открыл бы подделку. Ответ сразу: `{"success": True, "accepted": True, "mode": ..., "phase":
 "pre_stop" | "children"}`; повтор во время стопа: `graceful` → `accepted: False, "reason": "already_stopping", "phase": <текущая>`
-(события не взводятся), `force` поверх `graceful` → эскалация (`accepted: True, "escalated": True`, шаг `pre_stop` прерывается).
+(в фазе `pre_stop` события не взводятся; вне её — взводятся идемпотентно, как до 1.4, ADR-PMM-044), `force` поверх `graceful` → эскалация (`accepted: True, "escalated": True`, шаг `pre_stop` прерывается).
 
 ## Черновик восстановления
 
