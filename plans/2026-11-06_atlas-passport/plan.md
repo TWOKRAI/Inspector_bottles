@@ -84,7 +84,7 @@
 - Task 4.2b: `map` юнита и скелет файла, `status.stale`/`status.frozen`, JSON-схема паспорта [PENDING] (после 4.2a)
 - Task 4.3: условие `atlas` в `nav_bench` [PENDING] (после 4.2a, 7.2 — механизм `bash_allow`)
 - Task 4.4: `purpose` → докстринги 57 юнитов, сверка каталог↔yaml (Д5, шаг 1) [DONE] (после 0.1; В1 = да)
-- Task 4.4b: `modules.yaml` → корни + исключения (Д5, шаг 2) [PENDING] (после 4.4)
+- Task 4.4b: `modules.yaml` → корни + исключения (Д5, шаг 2) [DONE] (после 4.4)
 
 ### Phase 5: Стоп С1 (Kill-2)
 
