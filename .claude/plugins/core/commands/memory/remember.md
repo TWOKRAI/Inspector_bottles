@@ -50,7 +50,7 @@ and don't record what code / git / the plan / `CLAUDE.md` already store (FORBID)
    ---
    name: <kebab-slug>
    description: "<one line, Russian and English keywords — recall matches on it>"
-   module: [<ids from modules.yaml, or empty>]
+   module: [<ids from the first column of docs/atlas/INDEX.md, or empty>]
    mechanism: [<1-2 ids from docs/claude/memory/TAGS.yaml>]
    metadata:
      type: feedback | project | user | reference
