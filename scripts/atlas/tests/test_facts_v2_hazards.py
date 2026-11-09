@@ -147,3 +147,27 @@ def test_lone_surrogate_body_falls_back_to_ascii(tmp_path):
         assert again.facts == first.facts
     finally:
         con.close()
+
+
+def test_subclasses_same_file_included():
+    """Наследники из файла базы (иерархии исключений и интерфейсов) видны: `how: "same-file"`, `scope` — по файлу."""
+    from scripts.atlas.links import build_links
+
+    src = (
+        "import ext\n\n\nclass Base:\n    pass\n\n\nclass Kid(Base):\n    pass\n\n\nclass Grand(Kid):\n    pass\n"
+        "\n\nclass Outside(ext.Base):\n    pass\n"  # `ext.Base` — чужой модуль, не `Base` этого файла
+    )
+    other = "from pkg.m import Base\n\n\nclass Far(Base):\n    pass\n"
+    links = build_links(
+        {"pkg/m.py": scan_text(src), "pkg/tests/test_far.py": scan_text(other), "pkg/far.py": scan_text(other)}
+    )
+    got = links.of("pkg/m.py::Base")["subclasses"]
+    assert got == [
+        {"where": "pkg/far.py:4", "how": "import", "scope": "prod", "enclosing": "Far"},
+        {"where": "pkg/m.py:8", "how": "same-file", "scope": "prod", "enclosing": "Kid"},
+        {"where": "pkg/tests/test_far.py:4", "how": "import", "scope": "test", "enclosing": "Far"},
+    ]
+    assert links.of("pkg/m.py::Kid")["subclasses"] == [
+        {"where": "pkg/m.py:12", "how": "same-file", "scope": "prod", "enclosing": "Grand"}
+    ]
+    assert links.of("pkg/m.py::Grand")["subclasses"] == []

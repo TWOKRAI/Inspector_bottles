@@ -28,9 +28,10 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
     `same_file` — вызов в файле самого символа (F2). `enclosing` — ближайший def/class вызова.
   - `call_sites_unresolved` — число (int) вызовов с совпавшим именем, которые не отнесены ни к одному символу
     (`x.m()` по произвольному получателю): счётчик «не видно», а не список.
-  - `subclasses` — наследники (`how: "import"`): классы, чей `DefFact.bases` называет символ-класс
-    и чей файл его импортирует. Запись как у `used_by`, но `where` — `"путь:строка"` строки `class` наследника
-    (`DefFact.line`), `enclosing` = qualname наследника.
+  - `subclasses` — наследники: классы, чей `DefFact.bases` называет символ-класс. `how: "import"` — файл
+    наследника импортирует основу; `how: "same-file"` — основа и наследник в одном файле (иерархии исключений и
+    интерфейсов: без импорта; основа — класс верхнего уровня файла, имя без точки). Запись как у `used_by`, но
+    `where` — `"путь:строка"` строки `class` наследника (`DefFact.line`), `enclosing` = qualname наследника.
   - `structural` — структурные двойники протокола/ABC: `{"required": [имена], "twins": [qualname с путём]}`
     или `None`. Обязательные имена — все неприватные (без `_` в начале) не-dunder методы класса-основы;
     меньше двух таких -> `None` (в ответе строка «слишком общий протокол» в ключе `note`). Двойник — класс
@@ -44,9 +45,20 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
 `test_*.py`, `*_test.py`, `conftest.py` (шире `_TEST_FILE` A1: помощники внутри `tests/` тоже тест); иначе
 `"prod"` (каталог `testing/` — поставляемые двойники, не тесты).
 
-Что НЕ разрешается (граница «не видно» паспорта): вызовы и импорты по алиасу (`import m as x`, `from m import f
-as g`); символы, видимые только через реэкспорт `__init__.py`; динамические вызовы (`getattr`, строки).
-Такие вызовы в `call_sites` не попадают и в `call_sites_unresolved` не считаются.
+Что НЕ разрешается (граница «не видно» паспорта): символы, видимые только через реэкспорт `__init__.py`;
+динамические вызовы (`getattr`, строки); вызовы по алиасу. В `call_sites` такие вызовы не попадают; считаются ли
+они в `call_sites_unresolved`, зависит от формы алиаса:
+  - `import m as x; x.f()` — вызов с получателем `x`, не разрешённый в символ: СЧИТАЕТСЯ в `call_sites_unresolved`
+    (как любой `x.m()` по произвольному получателю);
+  - `from a import f as g; g()` — голое имя `g` без определения и без from-импорта под этим именем: нигде НЕ
+    считается ни в `call_sites`, ни в `call_sites_unresolved`; сам импорт при этом попадает в `used_by` символа `f`.
+
+Известные ложные разрешения (имя -> символ по первому from-импорту; частота на HEAD не измерена):
+  - `from a import f as g` + `from b import f`: имя `f` в таблице from-импортов достаётся первому импорту, у
+    алиаса отдельной записи нет — вызов `f()` может отнестись к символу `a::f`, а не `b::f`;
+  - вложенный `def f` или параметр `f` затеняет импортированное имя, но разбор вызовов этого не видит: вызов
+    локального `f()` относится к импортированному `f`.
+Полное решение — отдельное поле алиаса в фактах (v2 сканера); в Task 4.1b не заводится.
 
 Не входит: `bases` — цепочка основ с глубиной (Task 4.1b); `command_specs` (Task 4.2a).
 """
@@ -171,6 +183,10 @@ class Links:
         d = self._defs.get(path, {}).get(name)
         return d is not None and d.kind != "method"
 
+    def _top_class(self, path: str, name: str) -> bool:
+        d = self._defs.get(path, {}).get(name)
+        return d is not None and d.kind == "class"
+
     def _class_of(self, path: str, enclosing: str) -> str | None:
         parts = enclosing.split(".")
         table = self._defs.get(path, {})
@@ -221,12 +237,17 @@ class Links:
                 core = base.split("[", 1)[0].strip()
                 head, _, leaf = core.rpartition(".")
                 if not head:
-                    hit = from_names.get(leaf)  # основа того же файла — без импорта, сюда не входит
+                    hit = from_names.get(leaf)
                 else:
                     hit = modules.get(head)
-                if hit is not None and hit[0] != path and self._defs.get(hit[0], {}).get(leaf, None) is not None:
-                    sym = (hit[0], leaf)
-                    self._subclasses[sym].append((path, d.line, _entry(path, d.line, "import", d.qualname)))
+                if hit is not None and hit[0] != path:
+                    target, how = hit[0], "import"
+                elif not head and self._top_class(path, leaf):
+                    target, how = path, "same-file"  # основа из своего файла: импорта нет
+                else:
+                    continue
+                if self._defs.get(target, {}).get(leaf) is not None:
+                    self._subclasses[(target, leaf)].append((path, d.line, _entry(path, d.line, how, d.qualname)))
 
     def _index_tests(self, path: str, facts: FileFacts) -> None:
         if not facts.test_defs:
