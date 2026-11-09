@@ -1128,3 +1128,395 @@ def test_archive_copy_and_cache_key_unchanged(tmp_path):
     assert not (copy / ".git").exists()
     assert (copy / "src" / "code.py").read_text(encoding="utf-8") == "v2"
     assert not (copy / "docs" / "reports").exists()
+
+
+# --- ceiling, трасса, предупреждения эталона, колонка «файл» (слепые тесты, стадия 1) ----------------------
+def _mini_set_file(tmp_path, questions, **fields):
+    data = {"name": "mini", "repo_sha": "abc123", "questions": questions, **fields}
+    path = tmp_path / "mini_set.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _entry(path, line, tol=None):
+    item = {"path": path, "line": line}
+    if tol is not None:
+        item["tolerance"] = tol
+    return item
+
+
+def _ceiling_fixture(tmp_path):
+    """Набор из 8 вопросов (оцениваемых 7) и эталон-вывод ``atlas ref`` в разных формах адресов."""
+    questions = [
+        {"id": "A1", "question": "?", "expected": [_entry("x.py", 10, 2)]},
+        {"id": "A2", "question": "?", "expected": [_entry("y.py", 10, 2)]},
+        {"id": "A3", "question": "?", "require": "all", "expected": [_entry("b.py", 5, 0), _entry("c.py", 7, 0)]},
+        {"id": "A4", "question": "?", "require": "any", "expected": [_entry("b.py", 5, 0), _entry("c.py", 7, 0)]},
+        {"id": "A5", "question": "?", "scored": False, "expected": [_entry("z.py", 1, 0)]},
+        {"id": "A6", "question": "?", "expected": [_entry("d.py", None)]},
+        {"id": "A7", "question": "?", "expected": [_entry("e.py", 30)]},
+        {"id": "A8", "question": "?", "require": "all", "expected": [_entry("x.py", 10, 2), _entry("b.py", 5, 0)]},
+    ]
+    qpath = _mini_set_file(tmp_path, questions)
+    ref = {
+        "refs": [
+            {"path": "x.py", "line": 12},  # 12 внутри окна 10 ± 2
+            {"path": "y.py", "line": 13},  # 13 вне окна 10 ± 2
+            {"path": "b.py", "line": 5},
+            {"path": "d.py", "line": 99},  # запись d.py без строки достижима любым адресом файла
+            "e.py",  # строка-путь без строки: запись e.py:30 по ней недостижима
+            "just a sentence, not an address",
+        ]
+    }
+    rpath = tmp_path / "ref.json"
+    rpath.write_text(json.dumps(ref), encoding="utf-8")
+    return qpath, rpath
+
+
+def _cli(capsys, argv):
+    code = _within(30, bench.main, argv)
+    shown = capsys.readouterr()
+    return code, shown.out, shown.err
+
+
+# RED ceiling-1
+def test_ceiling_counts_reachable_expected_from_reference(tmp_path, capsys):
+    qpath, rpath = _ceiling_fixture(tmp_path)
+    code, out, _ = _cli(capsys, ["ceiling", "--questions", str(qpath), "--reference", str(rpath)])
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert code == 0
+    assert "A1 reachable=yes" in lines  # 12 в окне 10 ± 2 (граница включена)
+    assert "A2 reachable=no" in lines  # 13 в окно 10 ± 2 не входит
+    assert lines[lines.index("A2 reachable=no") + 1] == "  y.py:10 ±2 -> нет в эталоне"
+    assert "A3 reachable=no" in lines  # require all: c.py:7 в эталоне нет
+    assert "  c.py:7 ±0 -> нет в эталоне" in lines
+    assert "A4 reachable=yes" in lines  # require any: хватает b.py:5
+    assert "A5 reachable=yes" not in lines  # scored: false — не считается
+    assert "A6 reachable=yes" in lines  # запись без строки: любой адрес того же пути
+    assert "A7 reachable=no" in lines  # адрес «e.py» без строки не достаёт запись e.py:30
+    assert lines[lines.index("A7 reachable=no") + 1] == "  e.py:30 ±3 -> нет в эталоне"  # допуск по умолчанию
+    assert "A8 reachable=yes" in lines
+    assert lines[-1] == "ceiling mini: 4/7"
+
+    # те же числа через функции
+    addrs = bench.reference_addresses(json.loads(rpath.read_text(encoding="utf-8")))
+    _, reached, total = bench.ceiling(bench.load_questions(qpath), addrs)
+    assert (reached, total) == (4, 7)
+
+    # формы адресов: путь предка наследуется, path_expr без строки адреса не даёт
+    shapes = {
+        "a": {"path": "p/a.py", "line": 12},
+        "b": [{"path": "p/b.py", "children": [{"line": 21}]}],
+        "c": {"path": "p/c.py", "path_expr": "x"},
+        "d": "p/d.py:42",
+        "e": ["p/e.py::Cls.meth", "p/f.py"],
+        "g": "just text",
+        "h": 7,
+        "i": None,
+    }
+    assert bench.reference_addresses(shapes) == {
+        ("p/a.py", 12),
+        ("p/b.py", None),
+        ("p/b.py", 21),
+        ("p/d.py", 42),
+        ("p/e.py", None),
+        ("p/f.py", None),
+    }
+
+
+# RED ceiling-2
+def test_ceiling_exit_codes_0_1_2(tmp_path, capsys):
+    qpath, rpath = _ceiling_fixture(tmp_path)
+    base = ["ceiling", "--questions", str(qpath), "--reference", str(rpath)]
+    assert _cli(capsys, base)[0] == 0  # без --min — всегда 0
+    assert _cli(capsys, [*base, "--min", "4"])[0] == 0  # K == N: порог набран
+    code, out, _ = _cli(capsys, [*base, "--min", "5"])
+    assert code == 1  # K = 4 < 5
+    assert "ceiling mini: 4/7" in out  # отчёт печатается и при коде 1
+
+    code, _, err = _cli(capsys, ["ceiling", "--questions", str(qpath), "--reference", str(tmp_path / "нет.json")])
+    assert code == 2 and "ОШИБКА:" in err  # нет файла
+    broken = tmp_path / "broken.json"
+    broken.write_text("это не json {", encoding="utf-8")
+    code, _, err = _cli(capsys, ["ceiling", "--questions", str(qpath), "--reference", str(broken)])
+    assert code == 2 and "ОШИБКА:" in err  # не JSON
+
+
+# RED trace-1
+def test_session_trace_keeps_pattern_and_glob_beside_path():
+    def use(name, **args):
+        block = {"type": "tool_use", "name": name, "input": args}
+        return {"type": "assistant", "message": {"content": [block]}}
+
+    events = [
+        use("Grep", pattern="IRouter", path="src", glob="*.py"),
+        use("Grep", pattern="IRouter"),
+        use("Glob", pattern="**/*.md"),
+        use("Grep", pattern="needle", file_path="f.py"),
+        use("Read", file_path="a.py"),
+        use("Bash", command="ls"),
+        {"type": "result", "subtype": "success", "is_error": False, "result": "x", "num_turns": 1},
+    ]
+    parsed = bench.parse_session_output("\n".join(json.dumps(e) for e in events))
+    assert parsed["tool_uses"] == [
+        {"name": "Grep", "target": "src", "pattern": "IRouter", "glob": "*.py"},  # target по-прежнему путь
+        {"name": "Grep", "target": "IRouter", "pattern": "IRouter"},  # нет пути — target шаблон; glob-ключа нет
+        {"name": "Glob", "target": "**/*.md", "pattern": "**/*.md"},
+        {"name": "Grep", "target": "f.py", "pattern": "needle"},
+        {"name": "Read", "target": "a.py"},  # старые записи не правятся: ключей pattern/glob нет
+        {"name": "Bash", "target": "ls", "denied": False},
+    ]
+    # новые ключи аудит не трогают; старые записи без них читаются как раньше
+    new = {"name": "Grep", "target": "src", "pattern": "IRouter", "glob": "*.py"}
+    old = {"name": "Grep", "target": "src"}
+    assert bench.audit_violations([new, old], ["Grep"], [], ()) == []
+    assert bench.audit_violations([new, old], ["Read"], [], ()) == ["Grep:src", "Grep:src"]
+
+
+def _wset(questions, exclude=()):
+    return {"name": "w", "repo_sha": "abc123", "exclude": list(exclude), "questions": questions}
+
+
+def _wq(qid, expected, question="Where is it defined?", **fields):
+    return {"id": qid, "question": question, "expected": expected, "scored": True, **fields}
+
+
+def _fake_show(texts, calls=None):
+    """Двойник git_show: текст из словаря, нет ключа — файла нет; git не трогается."""
+
+    def show(root, sha, path):
+        if calls is not None:
+            calls.append((sha, path))
+        return texts.get(path)
+
+    return show
+
+
+ANY_TEXT = _fake_show({"a.md": "text"})
+
+
+# RED warn-a
+def test_verify_set_warns_note_tolerance_and_anchor_mismatch():
+    qset = _wset(
+        [
+            _wq("N1", [_entry("a.md", 10, 0)], note="tolerance 3 is enough here"),
+            _wq("N2", [_entry("a.md", 10, 0), _entry("a.md", 20, 2)], note="use a 5-line tolerance"),
+            _wq("N3", [_entry("a.md", 10, 0), _entry("a.md", 20, 2)], note="tolerance 2"),  # равно одному из tol
+            _wq("N4", [_entry("a.md", 10)], note="tolerance 3"),  # tol записи по умолчанию — 3
+            _wq("N5", [_entry("a.md", 6), _entry("a.md", 40)], note="Anchor Line 8 is the def"),
+            _wq("N6", [_entry("a.md", 6)], note="anchor line 6"),
+            _wq("N7", [_entry("a.md", 6), _entry("a.md", 40)], note="anchor line 40"),  # равно одной из line
+            _wq("N8", [_entry("a.md", 6)]),  # заметки нет
+            _wq("N9", [_entry("a.md", 6, 0)], note="tolerance 0"),
+        ]
+    )
+    assert bench.verify_set_warnings(qset, Path("."), ANY_TEXT) == [
+        "N1: note: tolerance 3, в записи tolerance 0",
+        "N2: note: tolerance 5, в записи tolerance 0, 2",
+        "N5: note: anchor line 8, в записи line 6, 40",
+    ]
+
+
+# RED warn-b
+def test_verify_set_warns_file_question_with_line():
+    qset = _wset(
+        [
+            _wq(
+                "F1",
+                [_entry("a.md", None), _entry("b.md", 7), _entry("c.md", 9)],
+                question="Which files define the router and where?",
+            ),
+            _wq("F2", [_entry("d.md", 3)], question="What file holds the registry?"),
+            _wq("F3", [_entry("e.md", 4)], question="WHICH FILE owns it?"),
+            _wq("F4", [_entry("f.md", 5)], question="Which file is it?", scored=False),  # не оцениваемый
+            _wq("F5", [_entry("f.md", None)], question="Which file is it?"),  # строки в эталоне нет
+            _wq("F6", [_entry("f.md", 5)], question="Where is the file?"),  # нет which/what
+            _wq("F7", [_entry("f.md", 5)], question="What does it do? Name the file."),  # «?» рвёт связь
+            _wq("F8", [_entry("g.md", 5)], question="Which " + "x" * 38 + " file at 5"),  # между словами 40 знаков
+            _wq("F9", [_entry("g.md", 5)], question="Which " + "x" * 39 + " file at 5"),  # 41 знак — мимо
+        ]
+    )
+    assert bench.verify_set_warnings(qset, Path("."), ANY_TEXT) == [
+        "F1: вопрос о файле, эталон требует строку: b.md:7",  # первая запись со строкой
+        "F2: вопрос о файле, эталон требует строку: d.md:3",
+        "F3: вопрос о файле, эталон требует строку: e.md:4",
+        "F8: вопрос о файле, эталон требует строку: g.md:5",
+    ]
+
+
+# RED warn-c
+def test_verify_set_warns_excluded_twin_same_text():
+    texts = {
+        "real/a.md": "same",
+        "real/b.md": "same",
+        "real/c.md": "other",
+        "dir/twin.md": "same",
+        "other.md": "different",
+        # gone.md, docs/reports (каталог) и gone2.md на repo_sha нет
+    }
+    qset = _wset(
+        [
+            _wq("E1", [_entry("real/a.md", None)]),
+            _wq("E2", [_entry("real/a.md", None), _entry("real/b.md", None)]),  # два пути с тем же текстом
+            _wq("E3", [_entry("real/c.md", None)]),  # текст отличается от двойника
+            _wq("E4", [_entry("real/a.md", 1), _entry("real/a.md", 5)]),  # один путь, две записи
+            _wq("E5", [_entry("gone2.md", None)]),  # ожидаемого файла нет; None == None не повод
+        ],
+        exclude=["dir/twin.md", "gone.md", "other.md", "docs/reports"],
+    )
+    calls = []
+    warnings = bench.verify_set_warnings(qset, Path("."), _fake_show(texts, calls))
+    assert len(warnings) == 3  # по одной строке на пару вопрос-exclude: E1, E2, E4
+    assert warnings[0] == "E1: двойник dir/twin.md исключён, текст равен real/a.md"
+    assert warnings[1] in (
+        "E2: двойник dir/twin.md исключён, текст равен real/a.md",
+        "E2: двойник dir/twin.md исключён, текст равен real/b.md",
+    )
+    assert warnings[2] == "E4: двойник dir/twin.md исключён, текст равен real/a.md"
+    assert {sha for sha, _ in calls} == {"abc123"}  # тексты — на repo_sha набора
+    assert ("abc123", "dir/twin.md") in calls
+
+
+PY_SRC = """\
+import os
+
+
+def alpha():
+    x = 1
+    y = 2
+    return x + y
+
+
+def beta():
+    a = 1
+    return a
+
+
+class C:
+    def meth(self):
+        return 1
+
+    def other(self):
+        return 2
+
+
+def outer():
+    def inner():
+        return 1
+    return inner
+
+
+async def gamma():
+    a = 1
+    b = 2
+    return a + b
+"""
+
+
+# RED warn-d
+def test_verify_set_warns_window_beyond_enclosing_function():
+    texts = {"m.py": PY_SRC, "bad.py": "def (:\n    pass\n", "m.txt": PY_SRC}
+    qset = _wset(
+        [
+            _wq("T1", [_entry("m.py", 6)]),  # допуск по умолчанию 3: окно 3-9 шире alpha 4-7
+            _wq("T2", [_entry("m.py", 5, 0)]),  # окно внутри
+            _wq("T3", [_entry("m.py", 7, 0)]),  # line == end_lineno: внутри
+            _wq("T4", [_entry("m.py", 7, 1)]),  # окно 6-8 за концом alpha
+            _wq("T5", [_entry("m.py", 5, 1)]),  # окно 4-6: начало на lineno — не выходит
+            _wq("T6", [_entry("m.py", 4, 1)]),  # line == lineno: функция не охватывает (lineno < line), молчим
+            _wq("T7", [_entry("m.py", 17, 2)]),  # метод: окно 15-19 шире meth 16-17
+            _wq("T8", [_entry("m.py", 25, 1)]),  # вложенная inner 24-25, не outer 23-26
+            _wq("T9", [_entry("m.py", 30, 3)]),  # async def gamma 29-32
+            _wq("T10", [_entry("m.py", 2, 3)]),  # на уровне модуля — функции нет
+            _wq("T11", [_entry("m.py", None)]),  # строки нет
+            _wq("T12", [_entry("bad.py", 2, 3)]),  # SyntaxError — пропуск
+            _wq("T13", [_entry("m.txt", 6, 3)]),  # не .py
+        ]
+    )
+    assert bench.verify_set_warnings(qset, Path("."), _fake_show(texts)) == [
+        "T1: окно m.py:6 ±3 выходит за alpha (4-7)",
+        "T4: окно m.py:7 ±1 выходит за alpha (4-7)",
+        "T7: окно m.py:17 ±2 выходит за meth (16-17)",
+        "T8: окно m.py:25 ±1 выходит за inner (24-25)",
+        "T9: окно m.py:30 ±3 выходит за gamma (29-32)",
+    ]
+
+
+# RED warn-exit
+def test_verify_set_warnings_keep_exit_code(tmp_path):
+    texts = {"a.md": "text", "b.md": "text"}
+    warned = _mini_set_file(
+        tmp_path,
+        [
+            _wq("Q1", [_entry("a.md", 10, 0)], note="tolerance 3"),
+            _wq("Q2", [_entry("b.md", 6)], note="anchor line 8"),
+        ],
+    )
+    qset = bench.load_questions(warned)
+    assert bench.verify_set(qset, Path("."), _fake_show(texts)) == ([], 2)  # verify_set и её возврат не меняются
+
+    out = io.StringIO()
+    code = bench.verify_set_command(warned, Path("."), out=out, show_fn=_fake_show(texts))
+    lines = out.getvalue().splitlines()
+    summary = next(i for i, line in enumerate(lines) if line.startswith("verify-set mini @ abc123:"))
+    warning = "ПРЕДУПРЕЖДЕНИЕ: Q1: note: tolerance 3, в записи tolerance 0"
+    assert code == 0  # одни предупреждения код не меняют
+    assert warning in lines
+    assert "ПРЕДУПРЕЖДЕНИЕ: Q2: note: anchor line 8, в записи line 6" in lines
+    assert summary < lines.index(warning)  # после строки итога
+    assert lines[-1] == "предупреждений 2"
+    assert "ПРОБЛЕМА" not in out.getvalue()
+
+    # проблема + предупреждение: код 1 из-за проблемы; пропавший файл не роняет проход предупреждений
+    broken = _mini_set_file(
+        tmp_path,
+        [
+            _wq("Q1", [_entry("a.md", 10, 0)], note="tolerance 3"),
+            _wq("Q2", [_entry("gone.py", 5)]),
+        ],
+    )
+    out = io.StringIO()
+    code = bench.verify_set_command(broken, Path("."), out=out, show_fn=_fake_show(texts))
+    shown = out.getvalue()
+    assert code == 1
+    assert "ПРОБЛЕМА: Q2: файла gone.py нет на abc123" in shown
+    assert "ПРЕДУПРЕЖДЕНИЕ: Q1: note: tolerance 3, в записи tolerance 0" in shown
+    assert shown.splitlines()[-1] == "предупреждений 1"
+
+
+def _cells(line):
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+# RED file-column
+def test_markdown_file_column_and_old_record_renders(tmp_path):
+    qpath = _questions_file(tmp_path, "abc123")
+    runner = FakeRunner(_stream([("Read", "a.py")], text="no answers here"))
+    _, path, _, _ = _run(tmp_path, runner, questions=qpath, repeats=3, yes=True)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    for rep, (hits, files, false) in zip(record["repeats"], [(2, None, 2), (2, 4, 2), (4, 6, 1)], strict=True):
+        rep["score"].update({"hits": hits, "scored": 8, "false": false})
+        rep["score"].pop("files_hit", None)
+        if files is not None:
+            rep["score"]["files_hit"] = files  # запись №1 — «старая»: ключа files_hit нет
+
+    lines = bench.render_markdown(record).splitlines()
+    header = next(line for line in lines if line.startswith("| # |"))
+    assert header.startswith("| # | hits | файл (справка) | false | факты |")
+    assert any(line.startswith("| 1 | 2/8 | н/д | 2 | 0/0 |") for line in lines)  # старая запись: н/д
+    assert any(line.startswith("| 2 | 2/8 | 4/8 | 2 | 0/0 |") for line in lines)
+    assert any(line.startswith("| 3 | 4/8 | 6/8 | 1 | 0/0 |") for line in lines)
+
+    rows = [line for line in lines if line.startswith(("| 1 |", "| 2 |", "| 3 |"))]
+    stats = [next(line for line in lines if line.startswith(f"| **{name}** |")) for name in ("min", "median", "max")]
+    assert len(_cells(header)) == 14
+    assert [len(_cells(line)) for line in rows] == [14, 14, 14]
+    assert [len(_cells(line)) for line in stats] == [14, 14, 14]  # было 13
+    assert [_cells(line)[:4] for line in stats] == [
+        ["**min**", "0", "", "0"],  # ячейка новой колонки в строках статистики пустая
+        ["**median**", "0", "", "0"],
+        ["**max**", "0", "", "0"],
+    ]
+    note = "вердикт — только hits по правилу V3; `файл` — справка"
+    assert note in lines
+    assert lines.index(note) > lines.index(stats[2])  # под таблицей

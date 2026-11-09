@@ -238,3 +238,38 @@ def test_a10_inflected_correct_answers_hit_and_inverted_answer_misses():
     assert [facts(text) for text in correct] == ["hit"] * 4
     inverted = "The channel is what send_message takes (e.g. control_draw); it is bound to a queue; the two differ."
     assert facts(inverted) == "miss"  # имени процесса нет: роли перепутаны или не названы
+
+
+def _e(path, line):
+    return {"path": path, "line": line, "symbol": None}
+
+
+# RED file-hit
+def test_files_hit_counts_named_paths_by_require():
+    questions = [
+        {"id": "F1", "question": "?", "require": "any", "expected": [_e("a.py", 10), _e("b.py", 20)]},
+        {"id": "F2", "question": "?", "require": "all", "expected": [_e("c.py", 5), _e("d.py", 6)]},
+        {"id": "F3", "question": "?", "require": "all", "expected": [_e("c2.py", 5), _e("d2.py", 6)]},
+        {"id": "F4", "question": "?", "scored": False, "expected": [_e("g.py", 1)]},
+        {"id": "F5", "question": "?", "expected": [_e("h.py", 1)]},
+        {"id": "F6", "question": "?", "expected": [], "expected_facts": [{"any_of": ["zzz"]}]},
+        {"id": "F7", "question": "?", "require": "any", "expected": [_e("e.py", None)]},
+        {"id": "F8", "question": "?", "require": "any", "expected": [_e("b.py", 20)]},
+    ]
+    text = "".join(
+        _text(qid, locations, confidence)
+        for qid, locations, confidence in [
+            ("F1", ["b.py:999"], "sure"),  # путь назван, строка мимо: файл есть, hit нет
+            ("F2", ["c.py:5"], "unsure"),  # require all: d.py не назван
+            ("F3", ["/abs/root/c2.py:1", "./d2.py:9"], "unsure"),  # префикс корня и ./ срезаются
+            ("F4", ["g.py:1"], "sure"),  # не оцениваемый вопрос
+            ("F7", ["e.py"], "unsure"),  # путь без строки
+            ("F8", ["xb.py:1", "sub/b.py:2"], "unsure"),  # похожие пути — не тот же путь
+        ]  # F5 не отвечен, у F6 нет адресов
+    )
+    result = score.score_run(questions, text, prefixes=("/abs/root",))
+    assert result["scored"] == 6  # F1 F2 F3 F5 F7 F8: оцениваемые с адресами
+    assert result["files_hit"] == 3  # F1, F3, F7
+    assert result["hits"] == 1  # по строкам попал только F7; на files_hit строки не влияют
+    assert "files_hit" not in score.METRICS  # справка, в сводку и вердикт не входит
+    assert "files_hit" not in score.aggregate([{"hits": 1, "false": 0}])
