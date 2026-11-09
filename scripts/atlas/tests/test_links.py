@@ -477,3 +477,215 @@ def test_tests_by_symbol_count_test_functions_naming_it():
     assert len(y["tests"]) == 1
     assert y["tests"][0]["enclosing"] == "TestK.test_c"
     assert z["tests"] == []
+
+
+# ---------------------------------------------------------------- 10. bases: основы класса с разрешением (Task 4.1b)
+
+_BASES = {
+    "pkg/__init__.py": "",
+    # Base на строке 10 (после _pad), Mixin ниже: строка основы не совпадает со строкой её импорта у потребителей
+    "pkg/core.py": _pad(
+        """\
+class Base:  # @core_base
+    pass
+
+
+X = 1
+
+
+class Mixin:  # @core_mixin
+    pass
+"""
+    ),
+    # основа в файле на 13-й строке: `import m` в потребителе стоит на другой строке
+    "m.py": _pad(
+        """\
+class Base:  # @m_base
+    pass
+""",
+        12,
+    ),
+    "tests/base_t.py": _pad(
+        """\
+class TBase:  # @t_base
+    pass
+"""
+    ),
+    "pkg/own.py": _pad(
+        """\
+from pkg.core import Mixin
+
+
+class Local:  # @own_local
+    pass
+
+
+class Multi(Local, Mixin):
+    pass
+"""
+    ),
+    "pkg/uses.py": _pad(
+        """\
+import m
+from pkg import core
+from pkg.core import Base
+from tests.base_t import TBase
+from typing import TypeVar
+
+T = TypeVar("T")
+
+
+class ViaFrom(Base):
+    pass
+
+
+class ViaModule(m.Base):
+    pass
+
+
+class ViaPkgModule(core.Base):
+    pass
+
+
+class Generic1(Base[T]):
+    pass
+
+
+class FromTests(TBase):
+    pass
+"""
+    ),
+    # наследник в tests/, основа в prod: scope берётся по файлу основы, а не наследника
+    "tests/test_sub.py": _pad(
+        """\
+from pkg.core import Base
+
+
+class InTests(Base):
+    pass
+""",
+        11,
+    ),
+}
+
+
+def _bases(links, ident: str):
+    """`of(ident)["bases"]`; отсутствие ключа — понятный провал assert, а не KeyError."""
+    res = _of(links, ident)
+    assert res is not None, f"{ident}: of() вернул None"
+    assert "bases" in res, f"{ident}: в ответе of() нет ключа 'bases' (ключи: {sorted(res)})"
+    return res["bases"]
+
+
+def test_class_bases_resolve_with_where():
+    """`bases` класса — список в порядке `DefFact.bases`; запись `{name, where, how, scope}`; `where` — строка `class`
+    ОСНОВЫ (не строка импорта); `how` — `same-file` (основа в своём файле) или `import`; `scope` — по файлу основы.
+    Разрешаются: имя своего файла, from-импорт, `m.Base` по `import m` и `from pkg import core`, `Base[T]` -> `Base`."""
+    files = _BASES
+    links = _links(files)
+
+    def entry(name: str, base_at: str, how: str, scope: str = "prod") -> dict:
+        return {"name": name, "where": base_at, "how": how, "scope": scope}
+
+    core_base = _at(files, "pkg/core.py", "core_base")
+    # порядок объявления (Local, Mixin) не совпадает с порядком по where (pkg/core.py < pkg/own.py)
+    assert _bases(links, "pkg/own.py::Multi") == [
+        entry("Local", _at(files, "pkg/own.py", "own_local"), "same-file"),
+        entry("Mixin", _at(files, "pkg/core.py", "core_mixin"), "import"),
+    ]
+    assert _bases(links, "pkg/uses.py::ViaFrom") == [entry("Base", core_base, "import")]
+    assert _bases(links, "pkg/uses.py::ViaModule") == [entry("m.Base", _at(files, "m.py", "m_base"), "import")]
+    assert _bases(links, "pkg/uses.py::ViaPkgModule") == [entry("core.Base", core_base, "import")]
+    assert _bases(links, "pkg/uses.py::Generic1") == [entry("Base[T]", core_base, "import")]
+    assert _bases(links, "pkg/uses.py::FromTests") == [
+        entry("TBase", _at(files, "tests/base_t.py", "t_base"), "import", "test")
+    ]
+    assert _bases(links, "tests/test_sub.py::InTests") == [entry("Base", core_base, "import", "prod")]
+
+
+_UNRES = {
+    "pkg/__init__.py": "from pkg.core import Base\n",
+    "pkg/core.py": _pad("class Base:\n    pass\n"),
+    "unres.py": _pad(
+        """\
+import abc
+from typing import Protocol
+from pkg import Base
+
+
+class ViaAbc(abc.ABC):
+    pass
+
+
+class ViaObject(object):
+    pass
+
+
+class ViaProtocol(Protocol):
+    pass
+
+
+class ViaReexport(Base):
+    pass
+
+
+class Plain:
+    def meth(self):
+        pass
+
+
+def func():
+    pass
+"""
+    ),
+    "alias.py": _pad(
+        """\
+from pkg.core import Base as Aliased
+
+
+class ViaAlias(Aliased):
+    pass
+"""
+    ),
+    "call.py": _pad(
+        """\
+from pkg.core import Base
+
+
+class ViaCall(Base(1)):
+    pass
+"""
+    ),
+}
+
+
+def test_unresolved_base_where_and_how_null():
+    """Не разрешённая основа (`abc.ABC`, `object`, `Protocol`, реэкспорт через `__init__`, алиас `as`, вызов) — запись
+    есть, `where` и `how` — именно None; счётчика нет. У функции и метода `bases` — None, у класса без баз — `[]`."""
+    links = _links(_UNRES)
+
+    for ident, name in (
+        ("unres.py::ViaAbc", "abc.ABC"),
+        ("unres.py::ViaObject", "object"),
+        ("unres.py::ViaProtocol", "Protocol"),
+        ("unres.py::ViaReexport", "Base"),
+        ("alias.py::ViaAlias", "Aliased"),
+        ("call.py::ViaCall", "Base(1)"),
+    ):
+        got = _bases(links, ident)
+        assert isinstance(got, list) and len(got) == 1, f"{ident}: {got!r}"
+        entry = got[0]
+        assert entry.get("name") == name, f"{ident}: {entry!r}"
+        assert "where" in entry and "how" in entry, f"{ident}: нет ключей where/how: {entry!r}"
+        assert entry["where"] is None, f"{ident}: where={entry['where']!r}"
+        assert entry["how"] is None, f"{ident}: how={entry['how']!r}"
+
+    # счётчика не разрешённых основ нет: рядом с прежними разделами появляется только `bases`
+    res = _of(links, "unres.py::ViaAbc")
+    assert res is not None
+    old_keys = {"used_by", "call_sites", "call_sites_unresolved", "subclasses", "tests", "structural", "note"}
+    assert set(res) - old_keys == {"bases"}
+
+    assert _bases(links, "unres.py::Plain") == []
+    assert _bases(links, "unres.py::func") is None
+    assert _bases(links, "unres.py::Plain.meth") is None
