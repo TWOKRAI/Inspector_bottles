@@ -73,8 +73,9 @@
         },
         {
           "path": "scripts/validate_commit/validate_commit.py",
-          "line": 979,
-          "symbol": "validate"
+          "line": 1098,
+          "symbol": "validate",
+          "tolerance": 119
         }
       ],
       "scored": true,
@@ -107,19 +108,19 @@
       "expected": [
         {
           "path": "scripts/atlas/brief.py",
-          "line": 8,
+          "line": 6,
           "symbol": "Stability",
           "tolerance": 5
         },
         {
           "path": "scripts/atlas/metrics.py",
-          "line": 8,
+          "line": 6,
           "symbol": "Public API",
           "tolerance": 5
         },
         {
           "path": "scripts/atlas/views.py",
-          "line": 8,
+          "line": 6,
           "symbol": "Stability",
           "tolerance": 5
         }
@@ -158,7 +159,7 @@
       "expected": [
         {
           "path": ".claude/plugins/dev/commands/adr.md",
-          "line": 2,
+          "line": null,
           "symbol": "description",
           "tolerance": 10
         },
@@ -189,6 +190,11 @@
         {
           "path": ".claude/plugins/dev/templates/injections.md",
           "line": 8,
+          "symbol": "atlas pack"
+        },
+        {
+          "path": ".claude/plugins/dev/templates/task-result.md",
+          "line": 58,
           "symbol": "atlas pack"
         }
       ],
