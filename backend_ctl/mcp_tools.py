@@ -306,11 +306,13 @@ def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
-    # Только mode/deadline_s: wait/wait_timeout — дефолты драйвера (ждать закрытия сокета до 20 с).
+    # mode/deadline_s/wait_timeout: wait — дефолт драйвера (ждать итоги и закрытие сокета PM).
     # deadline_s — как есть, без float(): диапазон и тип проверяет PM и отвечает названной ошибкой.
     kw: dict[str, Any] = {"mode": str(args.get("mode", "graceful"))}
     if args.get("deadline_s") is not None:
         kw["deadline_s"] = args["deadline_s"]
+    if args.get("wait_timeout") is not None:
+        kw["wait_timeout"] = float(args["wait_timeout"])
     return _jsonable(drv.system_shutdown(**kw))
 
 
@@ -852,12 +854,18 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "system_shutdown",
-        "Остановить ВСЮ систему (system.shutdown) и дождаться, пока PM закроет сокет backend_ctl. "
-        "mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s (0.1..5.0 с, "
-        "дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
-        "{accepted (None — ответ timeout, команда могла дойти), mode, elapsed_s, pm_gone, outcomes=null}. "
+        "Остановить ВСЮ систему (system.shutdown), дождаться итогов по процессам и закрытия сокета "
+        "backend_ctl. mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s "
+        "(0.1..5.0 с, дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
+        "{accepted (None — ответ timeout, команда могла дойти; False + already_stopping — стоп уже идёт, "
+        "итоги всё равно собираются), mode, elapsed_s, pm_gone, "
+        "outcomes ({имя ребёнка: exited | terminated | killed | null}), "
+        "unconfirmed (имена без подтверждённого итога, по алфавиту), timed_out}. "
         "pm_gone=true — сокет закрыт (в том числе раньше ответа: тогда accepted=None); "
-        "процесс PM в этот момент может быть ещё жив. "
+        "процесс PM в этот момент может быть ещё жив. outcomes/unconfirmed=null и timed_out=false, "
+        "если опроса не было (ошибка аргументов, сокет закрыт раньше ответа). "
+        "Итог последнего медленного ребёнка опросом может быть не виден: имя в unconfirmed — "
+        "это «не подтверждено», а не «не остановлен». "
         "Разрушающий: после вызова бэкенда нет.",
         _obj(
             {
@@ -869,6 +877,13 @@ TOOLS: List[ToolSpec] = [
                 "deadline_s": {
                     "type": "number",
                     "description": "Только для force: срок стопа детей, сек (0.1..5.0, дефолт 1.0).",
+                },
+                "wait_timeout": {
+                    "type": "number",
+                    "description": (
+                        "Предел ожидания итогов, сек. По умолчанию 20 с, а после первого снимка "
+                        "с system_stop — max(20, deadline_at - сейчас + 12) с."
+                    ),
                 },
             },
             [],

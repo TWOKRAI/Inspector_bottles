@@ -682,27 +682,44 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         mode: str = "graceful",
         deadline_s: float = 1.0,
         wait: bool = True,
-        wait_timeout: float = 20.0,
+        wait_timeout: float | None = None,
+        pm_name: str = "ProcessManager",
     ) -> dict[str, Any]:
-        """Остановить систему командой ``system.shutdown`` (ADR-PMM-038, Task 0.2 gui-graceful-close).
+        """Остановить систему командой ``system.shutdown`` и вернуть честные итоги по процессам.
 
-        ``mode="force"`` — PM обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с),
-        не уложившихся добивает фаза 3 области стопа; ``graceful`` — обычный стоп, ``deadline_s``
-        не передаётся. Срок запроса 6.0 с: команда может ждать в очереди PM до 5 с (предел (а)).
+        ADR-PMM-038 (Task 0.2) и ADR-PMM-042/044 (Task 1.4 gui-graceful-close). ``mode="force"`` — PM
+        обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с), не уложившихся добивает
+        фаза 3 области стопа; ``graceful`` — обычный стоп, ``deadline_s`` не передаётся. Срок запроса
+        6.0 с: команда может ждать в очереди PM до 5 с (предел (а)).
 
-        При ``wait`` — опрос ``connection_lost`` каждые 100 мс до ``True`` или ``wait_timeout``.
-        ``accepted is False`` (PM ответил ошибкой — стоп не начат) — возврат сразу, без ожидания:
-        ``pm_gone=False``, ``elapsed_s`` — время до ответа. Сокет закрылся раньше ответа
-        (``BackendUnavailable`` из запроса) — PM ушёл: ``accepted=None``, ``pm_gone=True``, без ожидания.
+        При ``wait`` после принятой команды драйвер опрашивает ``supervision.status`` каждые 50 мс.
+        Опрос кончается первым из: у каждого ребёнка (строки ``pm_name`` в счёт нет) есть
+        ``stop_outcome`` из ``exited`` / ``terminated`` / ``killed``; ``system_stop.phase == "done"``;
+        разрыв соединения; ``wait_timeout``. После конца по итогам или по ``done`` драйвер ждёт закрытия
+        сокета ещё не дольше ``min(остаток, 3.0 с)``.
 
-        Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes"}``:
-          * ``accepted`` — ``True``/``False`` по ``success`` ответа; ``None``, если ответ — timeout
-            (команда могла дойти; закрытия сокета ждём всё равно) или ответа нет, потому что сокет
-            закрылся раньше;
+        ``accepted is False`` с ``reason == "already_stopping"`` — стоп идёт, опрашиваем. Прочий
+        ``accepted is False`` (ошибка аргументов) — возврат сразу: без опроса, ``outcomes=None``.
+        Сокет закрылся раньше ответа (``BackendUnavailable`` из запроса) — PM ушёл: ``accepted=None``,
+        ``pm_gone=True``, без опроса.
+
+        ``wait_timeout=None`` — срок по умолчанию: 20.0 с до первого снимка с ``system_stop``, затем
+        ``max(20.0, deadline_at - сейчас + 12.0)`` от момента этого снимка (12.0 = ``pm_total_s`` с
+        волной ``last`` + запас).
+
+        Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes", "unconfirmed", "timed_out"}``:
+          * ``accepted`` — ``accepted`` ответа (иначе ``success``); ``None``, если ответ — timeout
+            (команда могла дойти) или ответа нет, потому что сокет закрылся раньше;
           * ``pm_gone`` — PM закрыл сокет backend_ctl. Сам процесс PM в этот момент может быть ещё
             жив: транспорт закрывается раньше остальных частей PM;
           * ``elapsed_s`` — от отправки команды до конца ожидания;
-          * ``outcomes`` — пока ``None`` (исходы по процессам — Task 1.4).
+          * ``outcomes`` — ``{имя: итог}`` по детям: последнее не-``null`` ``stop_outcome`` за все
+            снимки; без итога — ``None``. ``None`` целиком, если опроса не было;
+          * ``unconfirmed`` — имена без итога, по алфавиту (``None``, если опроса не было);
+          * ``timed_out`` — опрос кончился по ``wait_timeout``.
+
+        Предел: итог последнего медленного ребёнка опросом может быть не виден — транспорт PM
+        закрывается вскоре после ``done``; такое имя попадает в ``unconfirmed``.
         """
         command: dict[str, Any] = {"cmd": "system.shutdown", "mode": mode}
         if mode == "force":
@@ -718,26 +735,108 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 "elapsed_s": round(time.monotonic() - started, 3),
                 "pm_gone": True,
                 "outcomes": None,
+                "unconfirmed": None,
+                "timed_out": False,
             }
-        if isinstance(reply, dict) and reply.get("error") == "timeout":
-            accepted: bool | None = None
+        reply_dict = reply if isinstance(reply, dict) else {}
+        accepted: bool | None
+        if reply_dict.get("error") == "timeout":
+            accepted = None
         else:
-            accepted = isinstance(reply, dict) and bool(reply.get("success"))
-        # PM отверг команду (ошибка аргументов) — стоп не начат, сокет не закроется: не ждём.
-        pm_gone = False if accepted is False else bool(self.connection_lost)
-        if wait and not pm_gone and accepted is not False:
-            wait_until = time.monotonic() + float(wait_timeout)
-            while not pm_gone and time.monotonic() < wait_until:
-                time.sleep(min(0.1, max(0.0, wait_until - time.monotonic())))
-                pm_gone = bool(self.connection_lost)
-        reply_mode = reply.get("mode", mode) if isinstance(reply, dict) else mode
+            raw_accepted = reply_dict.get("accepted", reply_dict.get("success"))
+            accepted = bool(raw_accepted)
+        reply_mode = reply_dict.get("mode", mode)
+        # accepted False при already_stopping — стоп идёт, итоги честные; прочий отказ — стоп не начат.
+        stop_running = accepted is not False or reply_dict.get("reason") == "already_stopping"
+        if not wait or not stop_running:
+            # PM отверг команду (ошибка аргументов) — сокет не закроется: не ждём.
+            pm_gone = False if accepted is False else bool(self.connection_lost)
+            return {
+                "accepted": accepted,
+                "mode": reply_mode,
+                "elapsed_s": round(time.monotonic() - started, 3),
+                "pm_gone": pm_gone,
+                "outcomes": None,
+                "unconfirmed": None,
+                "timed_out": False,
+            }
+        outcomes, pm_gone, timed_out = self._poll_shutdown_outcomes(started, wait_timeout, pm_name)
         return {
             "accepted": accepted,
             "mode": reply_mode,
             "elapsed_s": round(time.monotonic() - started, 3),
             "pm_gone": pm_gone,
-            "outcomes": None,
+            "outcomes": outcomes,
+            "unconfirmed": sorted(name for name, outcome in outcomes.items() if outcome is None),
+            "timed_out": timed_out,
         }
+
+    def _poll_shutdown_outcomes(
+        self, started: float, wait_timeout: float | None, pm_name: str
+    ) -> tuple[dict[str, str | None], bool, bool]:
+        """Опрос ``supervision.status`` после ``system.shutdown``: ``(outcomes, pm_gone, timed_out)``.
+
+        Порядок такта: снимок -> конец «у всех итог» / ``done`` -> только потом ``connection_lost``.
+        Часы — только через модуль ``time`` (тесты подменяют ``backend_ctl.driver.time``).
+        """
+        poll_interval_s = 0.05
+        socket_wait_s = 3.0
+        default_wait_s = 20.0
+        done_outcomes = ("exited", "terminated", "killed")
+        outcomes: dict[str, str | None] = {}
+        budget_s = default_wait_s if wait_timeout is None else float(wait_timeout)
+        wait_until = started + budget_s
+        budget_fixed = wait_timeout is not None
+        pm_gone = False
+        timed_out = False
+        finished_by_outcomes = False
+
+        while True:
+            now = time.monotonic()
+            if now >= wait_until:
+                timed_out = True
+                break
+            try:
+                reply = self.supervision_status(pm_name=pm_name, timeout=min(2.0, max(0.05, wait_until - now)))
+            except BackendUnavailable:
+                pm_gone = True
+                break
+            snapshot = _leaf_result(reply)
+            processes = snapshot.get("processes") if isinstance(snapshot, dict) else None
+            if isinstance(processes, dict) and snapshot.get("success") is not False:
+                system_stop = snapshot.get("system_stop")
+                if not budget_fixed and isinstance(system_stop, dict):
+                    deadline_at = system_stop.get("deadline_at")
+                    if isinstance(deadline_at, (int, float)):
+                        budget_fixed = True
+                        extended_s = max(default_wait_s, float(deadline_at) - time.time() + 12.0)
+                        wait_until = time.monotonic() + extended_s
+                names = [name for name, entry in processes.items() if name != pm_name and isinstance(entry, dict)]
+                for name in names:
+                    outcome = processes[name].get("stop_outcome")
+                    outcomes.setdefault(name, None)
+                    if outcome is not None:
+                        outcomes[name] = outcome
+                all_done = all(outcomes[name] in done_outcomes for name in names)
+                phase_done = isinstance(system_stop, dict) and system_stop.get("phase") == "done"
+                if all_done or phase_done:
+                    finished_by_outcomes = True
+                    break
+            if self.connection_lost:
+                pm_gone = True
+                break
+            time.sleep(min(poll_interval_s, max(0.0, wait_until - time.monotonic())))
+
+        if finished_by_outcomes:
+            socket_until = min(wait_until, time.monotonic() + socket_wait_s)
+            while not pm_gone and time.monotonic() < socket_until:
+                if self.connection_lost:
+                    pm_gone = True
+                    break
+                time.sleep(min(0.1, max(0.0, socket_until - time.monotonic())))
+            if not pm_gone:
+                pm_gone = bool(self.connection_lost)
+        return outcomes, pm_gone, timed_out
 
     # ---- Интроспекция (P1 команды) ----
 
