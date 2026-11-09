@@ -375,6 +375,32 @@ def test_draw_runs_as_program_on_sim(scope: Any) -> None:
         assert (after["returns_done"], after["returns_failed"]) == before
 
 
+def test_draw_ends_at_home_from_away_start(scope: Any) -> None:
+    """Сторож R4/R5: старт НЕ из дома -> рисунок кончается заездом домой по ПРОВОДУ sim.
+
+    Остальные тесты стартуют из дома и не отличают «вернулся домой» от «остался в точке старта». Поза читается
+    ``rig.pose_wire()``, а не из снимка ``status`` драйвера: снимок после ``done`` отстаёт на такт и показывает позу
+    до программы (корень ложной тревоги REVIEW-5).
+    """
+    rec = _Rec()
+    away_xy = (240.0, -210.0)  # дом (300, -210) сдвинут jog_step dx=-60 по x
+    with E2eRig() as rig, _connected(scope, rec, rig.port) as drv, pulse(lambda: drv.tick(None), _TICK_PERIOD_S):
+        moved = bounded(lambda: drv.call("jog_step", {"dx": -60, "dy": 0, "spd": 50}), _CALL_S)
+        assert moved["status"] == "ok", moved
+        _wait(
+            lambda: rig.pose_wire()[:2] == pytest.approx(away_xy, abs=0.1) and rig.read("TLM_MOVING") == [0],
+            _DONE_S,
+            "робот встал в (240, -210) по проводу",
+        )
+        assert rig.pose_wire() != pytest.approx(HOME, abs=0.1), "обвязка: старт совпал с домом"
+        _wait_released(drv)  # допуск запуска снят после jog
+        reply = _draw(drv, SQUARE)
+        assert reply["status"] == "ok", reply
+        _wait_done(rec, 1)
+        _wait(lambda: rig.pose_wire() == pytest.approx(HOME, abs=0.1), _DONE_S, "поза по проводу вернулась в дом")
+        assert rig.pose_wire() == pytest.approx(HOME, abs=0.1)
+
+
 def test_draw_while_program_running_refused(scope: Any) -> None:
     """R6: второй рисунок, пока идёт первый, получает отказ допуска; первый доходит до ``done``."""
     rec = _Rec()
