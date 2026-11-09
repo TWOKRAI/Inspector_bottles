@@ -60,7 +60,16 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
     локального `f()` относится к импортированному `f`.
 Полное решение — отдельное поле алиаса в фактах (v2 сканера); в Task 4.1b не заводится.
 
-Не входит: `bases` — цепочка основ с глубиной (Task 4.1b); `command_specs` (Task 4.2a).
+  - `bases` (Task 4.1b) — основы класса в порядке `DefFact.bases`, по одной записи на основу (разрешённую или нет):
+    `{"name": .., "where": "путь:строка", "how": .., "scope": ..}`. `name` — сырой текст основы (`m.Base`, `Base[T]`),
+    не лист; `where` — строка `class` ОСНОВЫ (не строка импорта); `how` — `"same-file"` (основа из своего файла) или
+    `"import"`; `scope` — по файлу основы (не наследника). Разрешение то же, что у `subclasses`: имя класса своего
+    файла; from-импорт; `m.Base` по импорту модуля `m`; у `Base[T]` — имя до `[`. Основа без адреса (`abc.ABC`,
+    `object`, `Protocol`, реэкспорт `__init__`, алиас `as`, вызов `Base(1)`) — запись есть, `where`, `how`, `scope`
+    равны None: `where: None` значит «адрес не разрешён», а не «не искали». Счётчика неразрешённых нет. У класса без
+    основ — `[]`; у функции и метода — `None`. Глубина — один уровень: цепочки основ нет.
+
+Не входит: `inherited_members` и цепочка основ глубже одного уровня; `command_specs` (Task 4.2a).
 """
 
 from __future__ import annotations
@@ -115,6 +124,7 @@ class Links:
         self._calls: dict[_Sym, list[tuple[str, int, dict]]] = defaultdict(list)
         self._unresolved: dict[str, int] = defaultdict(int)  # имя -> число неотнесённых `x.m()`
         self._subclasses: dict[_Sym, list[tuple[str, int, dict]]] = defaultdict(list)
+        self._bases: dict[_Sym, list[dict]] = {}  # класс -> основы в порядке `DefFact.bases`, с адресом или None
         self._importers: dict[str, set[str]] = defaultdict(set)  # путь -> файлы, чьи импорты указывают на него
         self._tests_by_name: dict[str, dict[str, list[tuple[str, int]]]] = {}  # файл -> имя -> тесты, его вызвавшие
         self._methods_of: dict[_Sym, list[str]] = {}  # класс -> имена прямых методов в порядке определения
@@ -227,27 +237,44 @@ class Links:
             entry["same_file"] = target[0] == path
             self._calls[target].append((path, call.line, entry))
 
+    def _resolve_base(
+        self, path: str, base: str, from_names: dict[str, tuple[str, int]], modules: dict[str, tuple[str, int]]
+    ) -> tuple[str, str, str] | None:
+        """Основа `base` класса из файла `path` -> `(файл основы, имя в нём, how)` или None, если адрес не разрешён.
+
+        `Base[T]` берётся по имени до `[`; `m.Base` — по импорту модуля `m`; голое имя — по from-импорту либо как класс
+        своего файла (`how: "same-file"`, импорта нет). Имя должно быть объявлено в файле основы."""
+        core = base.split("[", 1)[0].strip()
+        head, _, leaf = core.rpartition(".")
+        hit = modules.get(head) if head else from_names.get(leaf)
+        if hit is not None and hit[0] != path:
+            target, how = hit[0], "import"
+        elif not head and self._top_class(path, leaf):
+            target, how = path, "same-file"  # основа из своего файла: импорта нет
+        else:
+            return None
+        if self._defs.get(target, {}).get(leaf) is None:
+            return None
+        return target, leaf, how
+
     def _index_subclasses(
         self, path: str, facts: FileFacts, from_names: dict[str, tuple[str, int]], modules: dict[str, tuple[str, int]]
     ) -> None:
         for d in self._defs[path].values():
             if d.kind != "class":
                 continue
+            bases: list[dict] = []
             for base in d.bases:
-                core = base.split("[", 1)[0].strip()
-                head, _, leaf = core.rpartition(".")
-                if not head:
-                    hit = from_names.get(leaf)
-                else:
-                    hit = modules.get(head)
-                if hit is not None and hit[0] != path:
-                    target, how = hit[0], "import"
-                elif not head and self._top_class(path, leaf):
-                    target, how = path, "same-file"  # основа из своего файла: импорта нет
-                else:
-                    continue
-                if self._defs.get(target, {}).get(leaf) is not None:
+                resolved = self._resolve_base(path, base, from_names, modules)
+                entry = {"name": base, "where": None, "how": None, "scope": None}  # None: адрес не разрешён
+                if resolved is not None:
+                    target, leaf, how = resolved
                     self._subclasses[(target, leaf)].append((path, d.line, _entry(path, d.line, how, d.qualname)))
+                    base_def = self._defs[target][leaf]
+                    if base_def.kind == "class":  # `where` — строка `class` основы; функция-«основа» адреса не даёт
+                        entry.update(where=f"{target}:{base_def.line}", how=how, scope=_scope(target))
+                bases.append(entry)
+            self._bases[(path, d.qualname)] = bases
 
     def _index_tests(self, path: str, facts: FileFacts) -> None:
         if not facts.test_defs:
@@ -310,6 +337,7 @@ class Links:
             "subclasses": _sorted(self._subclasses.get(sym, [])),
             "tests": _sorted(tests),
         }
+        result["bases"] = [dict(b) for b in self._bases[sym]] if d.kind == "class" else None
         if d.kind == "class":
             result["structural"] = self._structural(sym)
             if result["structural"] is None:
