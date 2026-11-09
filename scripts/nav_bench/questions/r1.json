@@ -1,0 +1,200 @@
+{
+  "name": "r1",
+  "repo_sha": "35e68f3d57282e52bab4921b4efecaa2319c7e8d",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory",
+    ".claude/plugins/core/scripts/plans_ledger.py",
+    ".claude/plugins/lang-python/templates/validate_commit",
+    ".claude/commands/dev/adr.md"
+  ],
+  "questions": [
+    {
+      "id": "R1",
+      "question": "Closing a plan must be refused for an approved plan directory unless its author wrote a short result section into the plan text, and the one-page summary produced when the plan is archived must repeat that section verbatim. In which functions of the script that archives and summarises plans must this be done, and which plan skeleton file must gain the new section?",
+      "expected": [
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 2044,
+          "symbol": "archive_plan"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 2947,
+          "symbol": "build_summary"
+        },
+        {
+          "path": ".claude/plugins/core/templates/PLAN.template.md",
+          "line": 21,
+          "symbol": "Итог плана"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b, derived from merge a23c73279. git diff a23c73279^1 a23c73279: existing archive_plan and build_summary changed (plus new helpers); existing PLAN.template.md table row changed and a section added.",
+      "require": "all"
+    },
+    {
+      "id": "R2",
+      "question": "The register of plans needs one more row status for a plan that was stopped on purpose (neither done nor archived). The per-plan check must also report a plan whose header status word is outside an agreed vocabulary, as an informational finding that never blocks. In the plans script, where are the row-status words, the set of non-blocking finding codes, and the per-plan check defined?",
+      "expected": [
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 258,
+          "symbol": "STATUSES"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 302,
+          "symbol": "NON_GATING_CODES"
+        },
+        {
+          "path": "scripts/plans_ledger.py",
+          "line": 1585,
+          "symbol": "check_plan_gate"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b, derived from merge a23c73279. git diff a23c73279^1 a23c73279 -- scripts/plans_ledger.py: existing STATUSES (FROZEN added), NON_GATING_CODES (new code added) and check_plan_gate (header status finding added) changed.",
+      "require": "all"
+    },
+    {
+      "id": "R3",
+      "question": "The commit-message validator should accept a new optional trailer that cites an architecture decision id (form ADR-<MOD>-NNN, one id per line), warn when a commit adds an ADR heading to a decision log without that trailer, and flag an id that is found nowhere. Where is the set of recognised trailer names defined, and which routine runs the per-rule checks?",
+      "expected": [
+        {
+          "path": "scripts/validate_commit/validate_commit.py",
+          "line": 228,
+          "symbol": "KNOWN_TRAILERS"
+        },
+        {
+          "path": "scripts/validate_commit/validate_commit.py",
+          "line": 979,
+          "symbol": "validate"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1a, derived from merge 3d269915d. git diff 3d269915d^1 3d269915d -- scripts/validate_commit/validate_commit.py: existing KNOWN_TRAILERS gained the new name; the new rule step was inserted inside the existing validate() (def line expected; the step itself is about 250 lines below it).",
+      "require": "all"
+    },
+    {
+      "id": "R4",
+      "question": "Project validation must fail when a service directory under Services/ has no decision-log file DECISIONS.md. In the project validation script, where is the entry point that runs all checks (the new check is wired in there), and in which project config file must the tests of that script be registered so that the default pytest run collects them?",
+      "expected": [
+        {
+          "path": "scripts/validate.py",
+          "line": 396,
+          "symbol": "main",
+          "tolerance": 10
+        },
+        {
+          "path": "pyproject.toml",
+          "line": 150,
+          "symbol": "testpaths"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1b-validate, derived from merge 1b508049c. git diff 1b508049c^1 1b508049c: existing main() gained the call to the new check; the existing pytest testpaths list in pyproject.toml gained the scripts/tests entry. The new check function itself does not exist at repo_sha and is not expected.",
+      "require": "all"
+    },
+    {
+      "id": "R5",
+      "question": "Three atlas generator scripts are kept on purpose but no longer developed, and each must get a dated freeze note with a pointer to the plan in its module docstring: the script that writes the FACTS block into task briefs, the script that computes the M1-M4 metrics table over briefs, and the script that holds the card, pack, log and purpose views for agents. Which three files, and where in each docstring does the note go?",
+      "expected": [
+        {
+          "path": "scripts/atlas/brief.py",
+          "line": 8,
+          "symbol": "Stability",
+          "tolerance": 5
+        },
+        {
+          "path": "scripts/atlas/metrics.py",
+          "line": 8,
+          "symbol": "Public API",
+          "tolerance": 5
+        },
+        {
+          "path": "scripts/atlas/views.py",
+          "line": 8,
+          "symbol": "Stability",
+          "tolerance": 5
+        }
+      ],
+      "scored": true,
+      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- scripts/atlas: one docstring line added at line 9-10 of brief.py, metrics.py, views.py (module docstring header = the area; anchor line 8, tolerance 5).",
+      "require": "all"
+    },
+    {
+      "id": "R6",
+      "question": "Where are the commit-message template that git shows when committing and the written commit guide, both listing which trailers are required, optional, or merely tolerated? Their recommended optional set must change: three older optional trailers stop being recommended and a decision-id trailer is recommended instead.",
+      "expected": [
+        {
+          "path": ".gitmessage",
+          "line": 15,
+          "symbol": "Опциональные"
+        },
+        {
+          "path": ".claude/COMMIT_GUIDE.md",
+          "line": 21,
+          "symbol": "Risk"
+        },
+        {
+          "path": ".claude/COMMIT_GUIDE.md",
+          "line": 128,
+          "symbol": "Остальные"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1c, derived from merge 13403b45c. git diff 13403b45c^1 13403b45c: existing .gitmessage optional-trailers comment line and the COMMIT_GUIDE.md format block and optional-trailers heading region were rewritten.",
+      "require": "all"
+    },
+    {
+      "id": "R7",
+      "question": "The slash command that records an architecture decision currently writes to a global folder; it must default to the module's own decision log and remind the author about the decision-id commit trailer. Separately, the module-level decision record template must gain an optional line pointing to the plan the decision came from. Which files?",
+      "expected": [
+        {
+          "path": ".claude/plugins/dev/commands/adr.md",
+          "line": 2,
+          "symbol": "description",
+          "tolerance": 10
+        },
+        {
+          "path": ".claude/plugins/core/templates/DECISIONS.template.md",
+          "line": 31,
+          "symbol": "PR"
+        }
+      ],
+      "scored": true,
+      "note": "Task 7.1c, derived from merge 13403b45c. git diff 13403b45c^1 13403b45c: adr.md rewritten from its first line (whole-file area, tolerance 10); DECISIONS.template.md gained the Refs line directly after the PR line (anchor = PR line, an unchanged neighbour of an inserted line).",
+      "require": "all"
+    },
+    {
+      "id": "R8",
+      "question": "Several templates of the dev plugin describe an agent-facing atlas view (the one that prints what was left open and unchecked by the previous task result) by the command name that used to print it; the wording must change to say the view is reached through another command. Which template files mention it, and on which lines?",
+      "expected": [
+        {
+          "path": ".claude/plugins/dev/templates/task-brief.md",
+          "line": 9,
+          "symbol": "atlas pack"
+        },
+        {
+          "path": ".claude/plugins/dev/templates/task-result.md",
+          "line": 7,
+          "symbol": "atlas pack"
+        },
+        {
+          "path": ".claude/plugins/dev/templates/injections.md",
+          "line": 8,
+          "symbol": "atlas pack"
+        }
+      ],
+      "scored": true,
+      "note": "Task 6.2, derived from merge 2d663a497. git diff 2d663a497^1 2d663a497 -- .claude/plugins/dev/templates: the mention of the old command name was reworded on each of these four lines; git grep -F at repo_sha finds exactly four such lines in three files under that directory.",
+      "require": "all"
+    }
+  ]
+}
