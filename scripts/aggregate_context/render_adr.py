@@ -9,7 +9,7 @@
 - Между `ADR-INDEX:BEGIN/END` — таблица "Модульные решения":
       | Код | ADR | Title | Файл |
 
-Глобальные ADR (cross-module) лежат в `docs/claude/DECISIONS/NNNN-*.md`
+Глобальные ADR (cross-module) лежат в `docs/decisions/NNNN-*.md`
 (существующая конвенция seed'а — не трогаем).
 """
 

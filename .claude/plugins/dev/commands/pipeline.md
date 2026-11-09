@@ -247,7 +247,7 @@ Run `/dev:ship`:
 - validate → tests → linter
 - Show the final diff
 - Propose a commit message in Conventional Commits + trailers format
-  (`Why:`, `Layer:`, `Refs:` — **mandatory** if a plan file exists for the current branch, + optional `Risk:` / `Reversible:` / `Tested:` / `Rejected:`).
+  (`Why:`, `Layer:`, `Refs:` — **mandatory** if a plan file exists for the current branch, + optional `Rejected:`; `Risk:` / `Reversible:` / `Tested:` are recognized, not recommended — FREEZE, see `.claude/COMMIT_GUIDE.md`).
   Full guide: `.claude/COMMIT_GUIDE.md`. Validation: `scripts/validate_commit/validate_commit.py`.
 - If every Task in the plan = [DONE] → propose closing the plan (Status: DONE, a separate `docs(plans): закрыть <slug>` commit) <!-- lint-language: allow -->
 - Phase gates are **not cancelled** by the transport: the phase is closed → `cto` acceptance (S7); merge into `main` →
