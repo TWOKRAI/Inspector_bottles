@@ -1,5 +1,5 @@
 """CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `lint-brief`, `brief`, `metrics`,
-`--json` (Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b, 1.9c, 1.9f).
+`--json` (Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b, 1.9c, 1.9f, 4.2a).
 
 Запуск: `python -m scripts.atlas`.
 
@@ -14,6 +14,11 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     `metrics`: 0 — все ячейки посчитаны, 1 — есть `?` (нарушение формы отчёта или хеш DONE вне репозитория), 2 — нет
     плана или задачи, неверный spec, usage; читает рабочее дерево, реестр не строит.
     `lint-result <файл>` не знает git и базу: ветка стоит до определения корня репозитория.
+    `ref <id>... --format passport|json` (Task 4.2a): паспорт символа (`passport.py`); без `--format` ровно один id и
+    прежний вывод. Код 2 по вводу: без `--format` больше одного id, `--symbol` с `--format`, `--budget`/`--all`/
+    `--full` без `--format`, `--format` не `passport`/`json`, `--all` не из списка; код 2 и у ошибочного id
+    (`not found`, `ambiguous`) — остальные паспорта печатаются. `--root <путь>` — корень берётся от этого пути, не от
+    cwd; `--exclude <путь>` (повторяемый) — префиксы, которые паспорт не читает.
 Public API: main.
 Stability: lite
 """
@@ -21,11 +26,12 @@ Stability: lite
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import brief, lint_brief, metrics, reference, result_form, store, views
+from scripts.atlas import brief, lint_brief, metrics, passport, reference, result_form, store, views
 from scripts.atlas.adapters.plans import live_plans
 from scripts.atlas.build import build, to_json
 from scripts.atlas.check import check, legacy_before
@@ -51,9 +57,19 @@ def _parser() -> argparse.ArgumentParser:
     pack = sub.add_parser("pack", parents=[common, with_ref], help="бриф задачи <slug>#<id>")
     pack.add_argument("task")
     pack.add_argument("--module", action="append", default=[], help="модуль задачи (повторяемый)")
-    ref = sub.add_parser("ref", parents=[common, with_ref], help="справочник интерфейсов и кода модуля")
-    ref.add_argument("module")
+    ref = sub.add_parser(
+        "ref", parents=[common, with_ref], help="справочник интерфейсов и кода модуля, паспорт символа"
+    )
+    ref.add_argument("module", nargs="+", metavar="id", help="модуль (или id символа с --format); id идут до опций")
     ref.add_argument("--symbol", default=None, help="сузить вывод до одного символа")
+    ref.add_argument("--format", default=None, help="паспорт символа: passport (текст) или json; id можно несколько")
+    ref.add_argument("--budget", type=int, default=None, help="строк на паспорт (по умолчанию 40); нужен --format")
+    ref.add_argument(
+        "--all", action="append", default=[], help="не резать раздел паспорта (повторяемый); нужен --format"
+    )
+    ref.add_argument("--full", action="store_true", help="паспорт без среза; нужен --format")
+    ref.add_argument("--root", default=None, help="корень репозитория берётся от этого пути (по умолчанию cwd)")
+    ref.add_argument("--exclude", action="append", default=[], help="префикс пути, который паспорт не читает")
     index = sub.add_parser("index", parents=[common, with_ref], help="индекс проекта (docs/atlas/INDEX.md)")
     index.add_argument("--write", action="store_true", help="записать docs/atlas/INDEX.md")
     index.add_argument("--check", action="store_true", help="сверить docs/atlas/INDEX.md с индексом (код 1 — отстал)")
@@ -79,6 +95,48 @@ def _parser() -> argparse.ArgumentParser:
 
 def _default_main_ref(root: Path) -> str:
     return "main" if run_git(root, "rev-parse", "--verify", "-q", "main").returncode == 0 else "origin/main"
+
+
+_FORMATS = ("passport", "json")
+
+
+def _ref_usage_error(args: argparse.Namespace) -> str | None:
+    """Текст ошибки ввода подкоманды `ref` (код 2) или None; тексты постоянные, значения флагов в них не входят."""
+    if args.format is None:
+        if len(args.module) > 1:
+            return "atlas ref: без --format нужен ровно один id"
+        if args.budget is not None or args.all or args.full:
+            return "atlas ref: --budget, --all и --full требуют --format"
+        return None
+    if args.format not in _FORMATS:
+        return "atlas ref: --format принимает passport или json"
+    if args.symbol is not None:
+        return "atlas ref: --symbol несовместим с --format"
+    if any(name not in passport.SHOW_ALL_SECTIONS for name in args.all):
+        return "atlas ref: --all принимает used_by, call_sites, subclasses, structural, tests"
+    return None
+
+
+def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
+    """`ref <id>... --format`: паспорта в порядке id; ошибочный id -> строка в stderr и код 2, остальные печатаются."""
+    records = passport.passports_for(root, ref, list(args.module), exclude=tuple(args.exclude))
+    failed = False
+    for number, record in enumerate(records, 1):
+        if "error" in record:
+            failed = True
+            print(f"atlas ref: id {number}: {record['error']}", file=sys.stderr)
+    if args.format == "json":
+        print(json.dumps(records, ensure_ascii=False, indent=2))
+        return 2 if failed else 0
+    budget = 40 if args.budget is None else args.budget
+    blocks = []
+    for record in records:
+        if "error" in record:
+            blocks.append("\n".join([f"== {record['id']} ==", record["error"], *record.get("candidates", [])]))
+        else:
+            blocks.append(passport.render_text(record, budget=budget, show_all=frozenset(args.all), full=args.full))
+    print("\n\n".join(blocks))
+    return 2 if failed else 0
 
 
 def _lint_result(file: str) -> int:
@@ -120,8 +178,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "lint-result":  # до корня репозитория: работает и вне git-репо
         return _lint_result(args.file)
+    if args.command == "ref" and (usage_error := _ref_usage_error(args)) is not None:  # до git: ввод не зависит от репо
+        parser.print_usage(sys.stderr)
+        print(usage_error, file=sys.stderr)
+        return 2
     try:
-        root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
+        start = Path(args.root) if args.command == "ref" and args.root is not None else Path.cwd()
+        root = Path(git(start, "rev-parse", "--show-toplevel"))
         main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)
         if args.command == "lint-brief":  # реестр не читает и не строит: соединения нет
             code, lines = lint_brief.run(root, args.file, replay=not args.no_replay, fresh=not args.no_fresh)
@@ -140,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
             code, lines = brief.check(root, brief.task_file(root, args.task))
             print("\n".join(lines))
             return code
+        if args.command == "ref" and args.format is not None:  # паспорт читает ревизию, соединения нет
+            return _ref_passport(root, ref, args)
         con = store.connect(root / "data" / "atlas.sqlite")
         try:
             if args.command == "check":
@@ -155,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n".join(lines))
                 return 0
             if args.command == "ref":
-                print("\n".join(reference.ref(con, root, ref, main_ref, args.module, args.symbol)))
+                print("\n".join(reference.ref(con, root, ref, main_ref, args.module[0], args.symbol)))
                 return 0
             if args.command == "brief":
                 path = brief.task_file(root, args.task) if args.write else None  # плохой путь — до сборки
