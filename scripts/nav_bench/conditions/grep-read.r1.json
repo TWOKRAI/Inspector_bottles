@@ -17,7 +17,7 @@
   ],
   "context_files": [],
   "max_turns": 60,
-  "max_budget_usd": 0.8,
+  "max_budget_usd": 0.85,
   "thresholds": {
     "hits_min": 7,
     "false_max": 1
