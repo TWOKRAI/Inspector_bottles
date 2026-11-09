@@ -1,7 +1,9 @@
 """Дерево ревизии git: список файлов, чтение, распаковка во временный каталог (Task 1.2).
 
 Purpose: сборка читает ревизию (ref), а не рабочий каталог; git вызывается подпроцессом.
-Public API: AtlasError, Tree, git, git_z, resolve, run_git.
+Public API: AtlasError, Tree, git, git_z, read_blobs, resolve, run_git.
+    read_blobs — пакетное чтение блобов одним `git cat-file --batch`; Tree.oids() — oid блобов дерева,
+    Tree.read_many() — то же чтение без исключения на отсутствующем файле. files() и oids() делят один `ls-tree`.
 Stability: lite
 """
 
@@ -14,9 +16,9 @@ import tarfile
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
-__all__ = ["AtlasError", "Tree", "git", "git_z", "resolve", "run_git"]
+__all__ = ["AtlasError", "Tree", "git", "git_z", "read_blobs", "resolve", "run_git"]
 
 
 class AtlasError(Exception):
@@ -51,18 +53,70 @@ def resolve(root: str | Path, ref: str) -> str:
     return proc.stdout.decode("utf-8").strip()
 
 
+def read_blobs(root: str | Path, ref: str, paths: list[str], strict: bool = True) -> dict[str, bytes | None]:
+    """Содержимое `<ref>:<path>` одним `git cat-file --batch`; нет файла -> None (strict: AtlasError).
+
+    Путь с переводом строки -> AtlasError: протокол cat-file построчный, перенос в пути сдвинул бы все
+    следующие ответы. Усечённый вывод (длина блоба не равна заявленной) -> AtlasError. Пустой список -> {} без git.
+    """
+    if not paths:
+        return {}
+    if any("\n" in p for p in paths):
+        raise AtlasError("atlas: path with a newline cannot be read by cat-file --batch")
+    proc = run_git(root, "cat-file", "--batch", input="".join(f"{ref}:{p}\n" for p in paths).encode("utf-8"))
+    out: dict[str, bytes | None] = {}
+    pos = 0
+    try:
+        if proc.returncode != 0:
+            raise ValueError
+        for path in paths:
+            end = proc.stdout.index(b"\n", pos)
+            header, pos = proc.stdout[pos:end], end + 1
+            out[path] = None
+            if not header.endswith(b" missing"):  # путь с пробелом даёт заголовок из 3+ частей
+                _, kind, size = header.split(b" ")
+                if kind == b"blob":
+                    blob = proc.stdout[pos : pos + int(size)]
+                    if len(blob) != int(size):  # усечённый вывод при коде 0
+                        raise ValueError
+                    out[path] = blob
+                pos += int(size) + 1
+            if strict and out[path] is None:
+                raise ValueError
+    except ValueError:
+        raise AtlasError("atlas: git cat-file failed") from None
+    return out
+
+
 class Tree:
     """Дерево коммита `ref` репозитория `root`."""
 
     def __init__(self, root: str | Path, ref: str) -> None:
         self.root = Path(root)
         self.ref = ref
-        self._files: list[str] | None = None
+        self._entries: list[tuple[str, str, str]] | None = None  # (режим, oid, путь) одного `ls-tree -r -z`
+
+    def _ls(self) -> list[tuple[str, str, str]]:
+        if self._entries is None:
+            entries = []
+            for item in git_z(self.root, "ls-tree", "-r", "-z", self.ref):
+                meta, _, path = item.partition("\t")
+                mode, _, oid = meta.split(" ")
+                entries.append((mode, oid, path))
+            self._entries = entries
+        return self._entries
 
     def files(self) -> list[str]:
-        if self._files is None:
-            self._files = git_z(self.root, "ls-tree", "-r", "--name-only", "-z", self.ref)
-        return list(self._files)
+        """Все записи дерева, включая символьные ссылки и gitlink."""
+        return [path for _, _, path in self._ls()]
+
+    def oids(self) -> dict[str, str]:
+        """{путь: oid блоба} только для обычных файлов (режим 100644/100755)."""
+        return {path: oid for mode, oid, path in self._ls() if mode in ("100644", "100755")}
+
+    def read_many(self, paths: Iterable[str]) -> dict[str, bytes | None]:
+        """Содержимое файлов одним git-процессом; нет файла -> None, не исключение."""
+        return read_blobs(self.root, self.ref, list(paths), strict=False)
 
     def read(self, path: str) -> bytes:
         """Содержимое файла в ревизии; нет файла -> FileNotFoundError."""

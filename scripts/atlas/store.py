@@ -2,8 +2,10 @@
 
 Purpose: одна строка `builds` на ключ (sha, main_ref, fingerprint, base_tree); остальные таблицы — по build_id.
     Журнал по умолчанию (без WAL): повторная сборка с тем же ключом не меняет байты файла.
-Public API: connect, find_build, write_build, read_build, build_row, modules_without_contract_test, get_view, put_view.
+Public API: connect, find_build, write_build, read_build, build_row, modules_without_contract_test, get_view, put_view,
+    get_scans, put_scans.
     Таблица view_cache — готовый вывод `ref`/`card` (список строк) по ключу ревизии, отпечатков адаптеров и кода.
+    Таблица scan_cache — факты файла (JSON) по oid блоба и ключу сканера (scripts.atlas.scan.SCANNER).
 Stability: lite
 """
 
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 
 from scripts.atlas.schema import AdapterOutput, Edge, Finding, Node
@@ -20,8 +23,10 @@ __all__ = [
     "build_row",
     "connect",
     "find_build",
+    "get_scans",
     "get_view",
     "modules_without_contract_test",
+    "put_scans",
     "put_view",
     "read_build",
     "write_build",
@@ -45,9 +50,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
 CREATE TABLE IF NOT EXISTS view_cache (
     sha TEXT NOT NULL, main_ref TEXT NOT NULL, adapters_fp TEXT NOT NULL, code TEXT NOT NULL, view TEXT NOT NULL,
     arg TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (sha, main_ref, adapters_fp, code, view, arg));
+CREATE TABLE IF NOT EXISTS scan_cache (
+    oid TEXT NOT NULL, scanner TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (oid, scanner));
 """
-_SCHEMA = 4  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
-_TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache")
+_SCHEMA = 5  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache", "scan_cache")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -180,3 +187,37 @@ def put_view(
             )
     except sqlite3.OperationalError as exc:  # база занята читателем: кэш — оптимизация, вид уже посчитан
         print(f"atlas: кэш вида не записан: {exc}", file=sys.stderr)
+
+
+_CHUNK = 500  # предел переменных в одном `IN (...)`
+
+
+def get_scans(con: sqlite3.Connection, scanner: str, oids: Iterable[str]) -> dict[str, str]:
+    """Тела фактов (`FileFacts.to_json()`) по oid для ключа `scanner`; форму не проверяет — это дело `scan`.
+
+    База занята -> строка в stderr и {} (все промахи): кэш — оптимизация.
+    """
+    wanted = list(dict.fromkeys(oids))
+    found: dict[str, str] = {}
+    try:
+        for i in range(0, len(wanted), _CHUNK):
+            chunk = wanted[i : i + _CHUNK]
+            marks = ", ".join("?" * len(chunk))
+            sql = f"SELECT oid, body FROM scan_cache WHERE scanner = ? AND oid IN ({marks})"
+            found.update(con.execute(sql, (scanner, *chunk)))
+    except sqlite3.OperationalError as exc:
+        print(f"atlas: кэш фактов не прочитан: {exc}", file=sys.stderr)
+        return {}
+    return found
+
+
+def put_scans(con: sqlite3.Connection, scanner: str, rows: Iterable[tuple[str, str]]) -> None:
+    """Записать пары (oid, body) одной транзакцией; тот же ключ перезаписывается."""
+    try:
+        with con:
+            con.executemany(
+                "INSERT OR REPLACE INTO scan_cache (oid, scanner, body) VALUES (?, ?, ?)",
+                [(oid, scanner, body) for oid, body in rows],
+            )
+    except sqlite3.OperationalError as exc:  # база занята читателем: факты уже разобраны
+        print(f"atlas: кэш фактов не записан: {exc}", file=sys.stderr)
