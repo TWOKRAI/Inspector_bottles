@@ -193,7 +193,8 @@ def test_driver_system_shutdown_live_smoke(tmp_path) -> None:
         "accepted is True": res["accepted"] is True,
         "pm_gone is True": res["pm_gone"] is True,
         "mode == force": res["mode"] == "force",
-        "outcomes is None": res["outcomes"] is None,
+        "outcomes is dict": isinstance(res["outcomes"], dict),
+        "timed_out is False": res["timed_out"] is False,
         f"pm exited <= {_PM_EXIT_WAIT_S} s": exitcode is not None,
     }
     print(f"\n[L-smoke] res={res!r} pm_exitcode={exitcode!r}", flush=True)

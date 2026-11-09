@@ -3,11 +3,12 @@
 
 Приёмка вслепую (стадия 1). Контракт — ``plans/2026-10-20_gui-graceful-close/tasks/0.2.md``, DESIGN шаги 4–5:
 
-  * ``system_shutdown(mode="graceful", deadline_s=1.0, wait=True, wait_timeout=20.0) -> dict``;
+  * ``system_shutdown(mode="graceful", deadline_s=1.0, wait=True, wait_timeout=None) -> dict``;
   * команда уходит через ``system_command`` со сроком запроса 6.0 с;
-  * при ``wait`` драйвер опрашивает ``connection_lost`` каждые 100 мс до ``True`` или ``wait_timeout``;
-  * возврат ``{"accepted": bool | None, "mode", "elapsed_s", "pm_gone", "outcomes": None}``;
-    ``accepted=None``, если ответ на команду — timeout (сокет всё равно ждём);
+  * при ``wait`` драйвер (Task 1.4) опрашивает ``supervision.status`` до итогов, ``connection_lost`` (разрыв),
+    ``done`` или ``wait_timeout``; снимок без итогов у ребёнка не кончает опрос;
+  * возврат ``{"accepted": bool | None, "mode", "elapsed_s", "pm_gone", "outcomes", "unconfirmed",
+    "timed_out"}``; ``accepted=None``, если ответ на команду — timeout (опрос идёт всё равно);
     ``pm_gone`` = «PM закрыл сокет backend_ctl»;
   * MCP-инструмент ``system_shutdown`` зарегистрирован, класс безопасности ``escalated``.
 
@@ -35,6 +36,7 @@ class _LossyDriver(BackendDriver):
     def __init__(self, lost_at_read: int | None) -> None:
         self._lost_at_read = lost_at_read
         self.reads = 0
+        self.status_calls = 0
         super().__init__()
 
     @property
@@ -70,7 +72,17 @@ def _driver(monkeypatch: pytest.MonkeyPatch, *, lost_at_read: int | None, reply:
         sent.append((command, timeout))
         return reply
 
+    def fake_supervision_status(*args: Any, **kwargs: Any) -> dict:
+        # Конверт send_command с вложенным result; у ребёнка ``a`` итога нет (Task 1.4, DESIGN 6).
+        drv.status_calls += 1
+        entry = {"alive": True, "stop_outcome": None}
+        return {
+            "success": True,
+            "result": {"success": True, "epoch": 0, "processes": {"ProcessManager": entry, "a": entry}},
+        }
+
     monkeypatch.setattr(drv, "system_command", fake_system_command)
+    monkeypatch.setattr(drv, "supervision_status", fake_supervision_status)
     return drv, sent
 
 
@@ -90,7 +102,10 @@ def test_wait_distinguishes_gone_from_timeout(
     assert res["pm_gone"] is expect_gone, res
     assert res["accepted"] is True, res
     assert res["mode"] == "force", res
-    assert res["outcomes"] is None, res
+    # Снимки без итогов: у ``a`` итога нет — имя в unconfirmed; конец по разрыву или по wait_timeout.
+    assert res["outcomes"] == {"a": None}, res
+    assert res["unconfirmed"] == ["a"], res
+    assert res["timed_out"] is (not expect_gone), res
     if expect_gone:
         assert res["elapsed_s"] < _WAIT_TIMEOUT_S, f"сокет закрылся на 3-м опросе, а ждали {res['elapsed_s']} с"
     else:
@@ -116,6 +131,7 @@ def test_command_timeout_gives_accepted_none_and_still_waits(monkeypatch: pytest
     assert res["accepted"] is None, f"timeout ответа != отказ: accepted должен быть None, получено {res}"
     # «Всё равно ждать закрытия сокета»: pm_gone=True достижим только если драйвер продолжил опрос.
     assert res["pm_gone"] is True, res
+    assert drv.status_calls >= 3, f"supervision.status опрошен {drv.status_calls} раз — драйвер не опрашивал"
     assert drv.reads >= 3, f"connection_lost опрошен {drv.reads} раз — драйвер не ждал сокет"
     assert len(sent) == 1, sent
 
@@ -127,10 +143,23 @@ class _RecordingDriver:
         self.calls: list[dict] = []
 
     def system_shutdown(
-        self, mode: str = "graceful", deadline_s: float = 1.0, wait: bool = True, wait_timeout: float = 20.0
+        self,
+        mode: str = "graceful",
+        deadline_s: float = 1.0,
+        wait: bool = True,
+        wait_timeout: float | None = None,
+        pm_name: str = "ProcessManager",
     ) -> dict:
         self.calls.append({"mode": mode, "deadline_s": deadline_s, "wait": wait, "wait_timeout": wait_timeout})
-        return {"accepted": True, "mode": mode, "elapsed_s": 0.0, "pm_gone": True, "outcomes": None}
+        return {
+            "accepted": True,
+            "mode": mode,
+            "elapsed_s": 0.0,
+            "pm_gone": True,
+            "outcomes": {"a": "exited"},
+            "unconfirmed": [],
+            "timed_out": False,
+        }
 
 
 def test_mcp_tool_registered_as_escalated() -> None:
