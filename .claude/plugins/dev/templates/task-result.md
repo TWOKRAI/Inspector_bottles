@@ -66,7 +66,7 @@ MEMORY LESSON <name>.md: <full file text> | none
 - `memory hits:` — the search command from `project-rules` §8 and its hits.
 - `MEMORY LESSON <name>.md:` is followed either by `none` or by the full lesson text on the next lines inside a
   four-backtick fence (````) — lessons contain `## ` headings and 22 of them contain ``` themselves. Tags as `project-rules` §8 requires
-  (`description:` RU+EN, `module:` ⊆ `modules.yaml`, `mechanism:` ⊆ `docs/claude/memory/TAGS.yaml`, `role:`).
+  (`description:` RU+EN, `module:` ⊆ ids in the first column of `docs/atlas/INDEX.md`, `mechanism:` ⊆ `docs/claude/memory/TAGS.yaml`, `role:`).
 - The lead writes the lesson into `docs/claude/memory/` and then replaces the fenced block with the file name — the
   lesson keeps one home. An executor never writes a lesson file.
 
