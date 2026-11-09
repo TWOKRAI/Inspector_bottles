@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime
 import fnmatch
 import functools
@@ -363,6 +364,176 @@ def verify_set(
     return problems, checked
 
 
+# --- verify-set: предупреждения о слабых местах эталона ------------------------------------------------
+NOTE_TOLERANCE_RE = re.compile(r"tolerance (\d+)|(\d+)-line tolerance", re.IGNORECASE)
+NOTE_ANCHOR_RE = re.compile(r"anchor line (\d+)", re.IGNORECASE)
+FILE_QUESTION_RE = re.compile(r"(?i)\b(which|what)\b[^?]{0,40}\bfiles?\b")
+
+
+def _distinct(values: list[int]) -> list[int]:
+    """Значения без повторов, в порядке появления."""
+    return list(dict.fromkeys(values))
+
+
+def _enclosing_function(tree: ast.AST, line: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Самая вложенная функция, где ``lineno < line <= end_lineno`` (строка def сама функцию не охватывает)."""
+    found = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno < line <= (node.end_lineno or 0):
+            if found is None or node.lineno > found.lineno:
+                found = node
+    return found
+
+
+def verify_set_warnings(
+    qset: dict[str, Any], root: Path, show_fn: Callable[[Path, str, str], str | None] = git_show
+) -> list[str]:
+    """Предупреждения о слабых местах эталона; на код возврата ``verify-set`` не влияют.
+
+    а) число в ``note`` («tolerance N», «N-line tolerance», «anchor line N») не совпадает с записями вопроса;
+    б) оцениваемый вопрос про файл («which/what … file»), а эталон требует строку;
+    в) путь из ``exclude`` с тем же текстом на ``repo_sha``, что у ожидаемого пути (двойник);
+    г) окно ``line ± tolerance`` выходит за объемлющую функцию (``.py``).
+    Допуск, которого в записи нет, — ``score.TOLERANCE_LINES``. Нет файла на ``repo_sha`` — запись пропускается.
+    """
+    warnings: list[str] = []
+    cache: dict[str, str | None] = {}
+    trees: dict[str, ast.AST | None] = {}
+
+    def text_of(path: str) -> str | None:
+        if path not in cache:
+            cache[path] = show_fn(root, qset["repo_sha"], path)
+        return cache[path]
+
+    def tree_of(path: str) -> ast.AST | None:
+        if path not in trees:
+            text = text_of(path)
+            try:
+                trees[path] = None if text is None else ast.parse(text)
+            except (SyntaxError, ValueError):
+                trees[path] = None
+        return trees[path]
+
+    for question in qset["questions"]:
+        qid = question["id"]
+        items = question.get("expected") or []
+        tols = [int(item.get("tolerance", score.TOLERANCE_LINES)) for item in items]
+        lines = [item["line"] for item in items if item.get("line") is not None]
+
+        note = str(question.get("note") or "")
+        found = NOTE_TOLERANCE_RE.search(note)
+        if found:
+            number = int(found.group(1) or found.group(2))
+            if number not in tols:
+                shown = ", ".join(map(str, _distinct(tols)))
+                warnings.append(f"{qid}: note: tolerance {number}, в записи tolerance {shown}")
+        found = NOTE_ANCHOR_RE.search(note)
+        if found:
+            number = int(found.group(1))
+            if number not in lines:
+                shown = ", ".join(map(str, _distinct(lines))) or "null"
+                warnings.append(f"{qid}: note: anchor line {number}, в записи line {shown}")
+
+        if question.get("scored", True) and FILE_QUESTION_RE.search(str(question.get("question") or "")):
+            with_line = next((item for item in items if item.get("line") is not None), None)
+            if with_line is not None:
+                warnings.append(
+                    f"{qid}: вопрос о файле, эталон требует строку: {with_line['path']}:{with_line['line']}"
+                )
+
+        for twin in qset.get("exclude") or []:
+            twin_text = text_of(twin)
+            if twin_text is None:
+                continue
+            same = next((p for p in dict.fromkeys(i["path"] for i in items) if text_of(p) == twin_text), None)
+            if same is not None:
+                warnings.append(f"{qid}: двойник {twin} исключён, текст равен {same}")
+
+        for item, tol in zip(items, tols, strict=True):
+            line, path = item.get("line"), item["path"]
+            if line is None or not path.endswith(".py"):
+                continue
+            tree = tree_of(path)
+            func = None if tree is None else _enclosing_function(tree, int(line))
+            if func is not None and (line - tol < func.lineno or line + tol > func.end_lineno):
+                warnings.append(
+                    f"{qid}: окно {path}:{line} ±{tol} выходит за {func.name} ({func.lineno}-{func.end_lineno})"
+                )
+    return warnings
+
+
+# --- ceiling: потолок набора по справочнику адресов ------------------------------------------------------
+_ADDR_LINE_RE = re.compile(r"^[\w./-]+\.\w+:\d+$")
+_ADDR_PY_RE = re.compile(r"^[\w./-]+\.py(::.*)?$")
+
+
+def reference_addresses(obj: Any, path: str | None = None) -> set[tuple[str, int | None]]:
+    """Адреса ``(путь, строка | None)`` из произвольного JSON эталона (3.1 или ``atlas ref --format json``).
+
+    Словарь со строковым ``path`` задаёт путь потомкам. ``path`` + целый ``line`` — адрес со строкой; ``path`` без
+    ключа ``line`` и без ``path_expr`` — адрес без строки. Строки ``путь:строка`` и ``путь.py[::имя]`` — тоже адреса.
+    """
+    found: set[tuple[str, int | None]] = set()
+    if isinstance(obj, str):
+        if _ADDR_LINE_RE.match(obj):
+            file, _, number = obj.rpartition(":")
+            found.add((file, int(number)))
+        elif _ADDR_PY_RE.match(obj):
+            found.add((obj.split("::", 1)[0], None))
+    elif isinstance(obj, list):
+        for child in obj:
+            found |= reference_addresses(child, path)
+    elif isinstance(obj, dict):
+        own = obj.get("path") if isinstance(obj.get("path"), str) else None
+        path = own or path
+        line = obj.get("line")
+        if path is not None and isinstance(line, int) and not isinstance(line, bool):
+            found.add((path, line))
+        elif own is not None and "line" not in obj and "path_expr" not in obj:
+            found.add((own, None))
+        for key, child in obj.items():
+            if key != "path":  # сам путь — не отдельный адрес без строки
+                found |= reference_addresses(child, path)
+    return found
+
+
+def _reachable(item: dict[str, Any], addrs: set[tuple[str, int | None]]) -> bool:
+    want = score.normalize_path(str(item["path"]))
+    return any(
+        file == want and score.location_matches(file if line is None else f"{file}:{line}", item)
+        for file, line in addrs
+    )
+
+
+def ceiling(qset: dict[str, Any], addrs: set[tuple[str, int | None]]) -> tuple[list[str], int, int]:
+    """Какие оцениваемые вопросы набора достижимы по адресам: (строки отчёта, достижимо, оцениваемых).
+
+    Вопрос достижим, если по ``require`` (``all`` / ``any``) каждая / хоть одна ожидаемая запись есть среди адресов
+    (то же сравнение, что при оценке: путь и окно ``line ± tolerance``). Вопросы без ``expected`` не считаются.
+    """
+    report: list[str] = []
+    reached = total = 0
+    for question in qset["questions"]:
+        items = question.get("expected") or []
+        if not question.get("scored", True) or not items:
+            continue
+        total += 1
+        flags = [_reachable(item, addrs) for item in items]
+        ok = all(flags) if question.get("require", "any") == "all" else any(flags)
+        reached += ok
+        report.append(f"{question['id']} reachable={'yes' if ok else 'no'}")
+        if not ok:
+            for item, flag in zip(items, flags, strict=True):
+                if flag:
+                    continue
+                if item.get("line") is None:
+                    report.append(f"  {item['path']} -> нет в эталоне")
+                else:
+                    tol = int(item.get("tolerance", score.TOLERANCE_LINES))
+                    report.append(f"  {item['path']}:{item['line']} ±{tol} -> нет в эталоне")
+    return report, reached, total
+
+
 # --- MCP-конфиг и предпроверки -------------------------------------------------------------------
 def _subst(obj: Any, mapping: dict[str, str]) -> Any:
     if isinstance(obj, str):
@@ -639,6 +810,9 @@ def parse_session_output(stdout: str) -> dict[str, Any]:
             args = block.get("input") or {}
             target = args.get("file_path") or args.get("path") or args.get("pattern") or args.get("command")
             entry: dict[str, Any] = {"name": block.get("name"), "target": target}
+            for key in ("pattern", "glob"):  # шаблон поиска рядом с target: путь берётся раньше шаблона
+                if key in args:
+                    entry[key] = args[key]
             if str(block.get("name")).casefold() == "bash":
                 entry["denied"] = False  # станет True, если tool_result этого вызова — ошибка (отказ или код != 0)
             tool_uses.append(entry)
@@ -985,9 +1159,9 @@ def render_markdown(record: dict[str, Any]) -> str:
         f"repo_sha набора `{record['repo_sha']}`, прогон в чистой копии `{record.get('root', 'н/д')}`, "
         f"модель `{record['model']}`",
         "",
-        "| # | hits | false | факты | hits (все) | вызовы | контекст | накоп. | cache read | сек | ходы | статус "
-        "| заметки |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| # | hits | файл (справка) | false | факты | hits (все) | вызовы | контекст | накоп. | cache read | сек "
+        "| ходы | статус | заметки |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for rep in record["repeats"]:
         notes = []
@@ -998,19 +1172,22 @@ def render_markdown(record: dict[str, Any]) -> str:
         if rep["violations"]:
             notes.append(f"нарушений доступа: {len(rep['violations'])}")
         sc = rep["score"]
+        files_cell = f"{sc['files_hit']}/{sc['scored']}" if "files_hit" in sc else "н/д"  # у старой записи ключа нет
         lines.append(
-            f"| {rep['index']} | {sc['hits']}/{sc['scored']} | {sc['false']} | {sc['facts_hit']}/{sc['facts_scored']} "
+            f"| {rep['index']} | {sc['hits']}/{sc['scored']} | {files_cell} | {sc['false']} "
+            f"| {sc['facts_hit']}/{sc['facts_scored']} "
             f"| {sc['total_hits']}/{sc['total']} | {_fmt(rep['tool_calls'])} | {_fmt(rep['final_context_tokens'])} "
             f"| {_fmt(rep['cumulative_tokens'])} | {_fmt(rep['cache_read_tokens'])} | {_fmt(rep['wall_s'])} "
             f"| {_fmt(rep['turns'])} | {_fmt(rep['subtype'])} | {'; '.join(notes)} |"
         )
     for stat_name in ("min", "median", "max"):
         lines.append(
-            f"| **{stat_name}** | {_fmt(agg['hits'][stat_name])} | {_fmt(agg['false'][stat_name])} "
+            f"| **{stat_name}** | {_fmt(agg['hits'][stat_name])} | | {_fmt(agg['false'][stat_name])} "
             f"| {_fmt(agg['facts_hit'][stat_name])} | | {_fmt(agg['tool_calls'][stat_name])} "
             f"| {_fmt(agg['final_context_tokens'][stat_name])} | {_fmt(agg['cumulative_tokens'][stat_name])} "
             f"| {_fmt(agg['cache_read_tokens'][stat_name])} | {_fmt(agg['wall_s'][stat_name])} | | | |"
         )
+    lines += ["", "вердикт — только hits по правилу V3; `файл` — справка"]
     lines += ["", f"**Вердикт: {ver['band']}**"]
     if ver["band"] == "TAINTED":
         bad = [v for rep in record["repeats"] for v in rep["violations"]]
@@ -1277,7 +1454,29 @@ def verify_set_command(
         f"verify-set {qset['name']} @ {qset['repo_sha']}: проверено записей {checked}, проблем {len(problems)}",
         file=out,
     )
+    warnings = verify_set_warnings(qset, root, show_fn)
+    for warning in warnings:
+        print(f"ПРЕДУПРЕЖДЕНИЕ: {warning}", file=out)
+    print(f"предупреждений {len(warnings)}", file=out)
     return 1 if problems else 0
+
+
+def ceiling_command(
+    questions_path: Path, reference_path: Path, minimum: int | None = None, out: TextIO | None = None
+) -> int:
+    """Код: 0; с ``minimum`` при достижимых меньше него — 1; нет файла или не JSON — 2."""
+    out = out or sys.stdout
+    try:
+        qset = load_questions(questions_path)
+        addrs = reference_addresses(load_json(reference_path))
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"ОШИБКА: {exc}", file=sys.stderr)
+        return 2
+    report, reached, total = ceiling(qset, addrs)
+    for row in report:
+        print(row, file=out)
+    print(f"ceiling {qset['name']}: {reached}/{total}", file=out)
+    return 1 if minimum is not None and reached < minimum else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1321,7 +1520,14 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--questions", required=True, type=Path)
     verify.add_argument("--root", type=Path, default=Path("."))
 
+    ceil = sub.add_parser("ceiling", help="какие ожидаемые адреса набора есть в JSON-эталоне (потолок набора)")
+    ceil.add_argument("--questions", required=True, type=Path)
+    ceil.add_argument("--reference", required=True, type=Path, help="JSON эталона 3.1 или `atlas ref --format json`")
+    ceil.add_argument("--min", type=int, default=None, help="код 1, если достижимых вопросов меньше N")
+
     args = parser.parse_args(argv)
+    if args.command == "ceiling":
+        return ceiling_command(args.questions, args.reference, args.min)
     if args.command in ("run", "floor"):
         code, _ = run_bench(
             args.questions,

@@ -303,7 +303,7 @@ def test_fake_session_end_to_end_writes_counts(tmp_path):
     assert record["root"] == str((tmp_path / "run").resolve())
 
     table = path.with_suffix(".md").read_text(encoding="utf-8")
-    assert "| 1 | 2/8 | 1 | 0/0 | 2/10 | 3 | 850 | 1500 | 99999 | 12.5 | 4 | success |" in table
+    assert "| 1 | 2/8 | 3/8 | 1 | 0/0 | 2/10 | 3 | 850 | 1500 | 99999 | 12.5 | 4 | success |" in table
     assert "**Вердикт: FAIL**" in table
 
     # повторный запуск в тот же день не затирает прошлую запись
@@ -313,7 +313,7 @@ def test_fake_session_end_to_end_writes_counts(tmp_path):
     # пересчёт по сохранённому тексту даёт ту же таблицу строк повторов
     shown = io.StringIO()
     assert bench.score_command(path, None, out=shown) == 0
-    assert "| 1 | 2/8 | 1 | 0/0 | 2/10 | 3 | 850 | 1500 | 99999 | 12.5 | 4 | success |" in shown.getvalue()
+    assert "| 1 | 2/8 | 3/8 | 1 | 0/0 | 2/10 | 3 | 850 | 1500 | 99999 | 12.5 | 4 | success |" in shown.getvalue()
 
     # compare сводит две записи рядом
     side = io.StringIO()

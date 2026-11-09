@@ -193,6 +193,13 @@ def classify_facts(question: dict[str, Any], answer: dict[str, Any] | None) -> s
     return "hit" if (all(found) if need_all else any(found)) else "miss"
 
 
+def _files_named(question: dict[str, Any], locations: list[str], prefixes: tuple[str, ...]) -> bool:
+    """Названы ли в адресах агента пути эталона вопроса (по ``require``); строки не важны."""
+    named = {parse_location_range(loc, prefixes)[0] for loc in locations}
+    found = [normalize_path(str(exp["path"])) in named for exp in question["expected"]]
+    return all(found) if question.get("require", "any") == "all" else any(found)
+
+
 def score_run(
     questions: list[dict[str, Any]],
     final_text: str,
@@ -202,6 +209,8 @@ def score_run(
 
     ``hits`` / ``false`` — только оцениваемые вопросы (``scored: true``) с адресами: по ним пороги.
     ``facts_hit`` — оцениваемые вопросы с фактами, где факты найдены. ``total_*`` — по всем вопросам набора.
+    ``files_hit`` — справка: оцениваемые вопросы с адресами, где пути эталона названы (строки не важны); в METRICS,
+    сводку и вердикт не входит.
     """
     answers = parse_answers(final_text)
     per_question: list[dict[str, Any]] = []
@@ -220,6 +229,8 @@ def score_run(
     scored = [row for row in per_question if row["scored"]]
     located = [row for row in scored if row["verdict"] != "n/a"]
     with_facts = [row for row in scored if row["facts"] is not None]
+    by_id = {str(question["id"]): question for question in questions}
+    files_hit = sum(_files_named(by_id[str(row["id"])], row["locations"], prefixes) for row in located)
     return {
         "per_question": per_question,
         "hits": sum(row["verdict"] == "hit" for row in scored),
@@ -227,6 +238,7 @@ def score_run(
         "scored": len(located),
         "facts_hit": sum(row["facts"] == "hit" for row in with_facts),
         "facts_scored": len(with_facts),
+        "files_hit": files_hit,
         "total_hits": sum(row["verdict"] == "hit" for row in per_question),
         "total_false": sum(row["verdict"] == "false" for row in per_question),
         "total": len(per_question),
