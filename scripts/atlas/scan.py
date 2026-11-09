@@ -390,6 +390,9 @@ class ScanResult:
     hits: int  # различных oid из кэша
 
 
+_ENV_ERRORS = frozenset({"RecursionError", "MemoryError"})  # ошибки окружения: в кэш не кладутся
+
+
 def scan(source: Source, paths: Sequence[str], cache: sqlite3.Connection | None = None) -> ScanResult:
     """Факты файлов `paths`; разбор — по одному разу на oid, кэш `scan_cache` — по `(oid, SCANNER)`."""
     scanner = SCANNER  # читается при вызове: тест подменяет константу модуля
@@ -412,23 +415,28 @@ def scan(source: Source, paths: Sequence[str], cache: sqlite3.Connection | None 
     hits = len(by_oid)
 
     todo = {oid: p for oid, p in first_path.items() if oid not in by_oid}
-    fresh: list[tuple[str, str]] = []
+    parsed = 0
+    to_cache: list[tuple[str, str]] = []
     if todo:
         blobs = source.read_many(list(todo.values()))
         for oid, path in todo.items():
             data = blobs.get(path)
             if data is None:  # файл исчез между oids() и чтением
                 continue
+            if len(oid) == 40 and _blob_oid(data) != oid:  # содержимое сменилось между oids() и чтением (F2)
+                continue
             facts = by_oid[oid] = _facts_of_bytes(data)
-            fresh.append((oid, facts.to_json()))
-    if fresh and cache is not None:
-        put_scans(cache, scanner, fresh)
+            parsed += 1
+            if facts.error not in _ENV_ERRORS:  # зависят от стека/памяти, а не от блоба (R5): в кэш нельзя (F1)
+                to_cache.append((oid, facts.to_json()))
+    if to_cache and cache is not None:
+        put_scans(cache, scanner, to_cache)
 
     gone = [p for p in present if oids[p] not in by_oid]
     gone_set = set(gone)
     facts_by_path = {p: by_oid[oids[p]] for p in present if p not in gone_set}
     missing += gone
-    return ScanResult(facts_by_path, tuple(missing), len(fresh), hits)
+    return ScanResult(facts_by_path, tuple(missing), parsed, hits)
 
 
 # --------------------------------------------------------------------------- разрешение импортов
@@ -470,7 +478,9 @@ class ImportIndex:
             if not name:
                 continue
             self._module_of[path] = name
-            self._path_of[name] = path
+            known = self._path_of.get(name)
+            if known is None or not self._is_init(known):  # пакет побеждает модуль при любом порядке (F4)
+                self._path_of[name] = path
         self.roots: frozenset[str] = frozenset(name.split(".")[0] for name in self._module_of.values())
 
     @staticmethod

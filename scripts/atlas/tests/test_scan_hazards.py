@@ -17,7 +17,7 @@ import pytest
 
 import scripts.atlas.tree as tree_module
 from scripts.atlas import store
-from scripts.atlas.scan import ClassFact, DictSource, FileFacts, ImportRec, scan, scan_text
+from scripts.atlas.scan import ClassFact, DictSource, FileFacts, ImportIndex, ImportRec, _blob_oid, scan, scan_text
 from scripts.atlas.store import get_scans, put_scans
 from scripts.atlas.tests.conftest import run_with_deadline
 from scripts.atlas.tree import AtlasError, Tree, read_blobs
@@ -251,3 +251,68 @@ def test_blob_over_limit_not_decoded(repo):
 def test_run_with_deadline_is_importable():
     # якорь: тесты выше зависят от git-фикстур из conftest, а не от своих копий
     assert run_with_deadline(lambda: 1, 5.0) == 1
+
+
+def test_recursion_error_facts_not_cached(tmp_path):
+    """RecursionError зависит от глубины стека, не от блоба (R5): в кэш не идёт; SyntaxError кэшируется."""
+    chain = "x = " + " + ".join(["1"] * 3000)
+    src = DictSource({"chain.py": chain, "bad.py": "def ("})
+    con = store.connect(tmp_path / "atlas.sqlite")
+    try:
+        res = scan(src, ["chain.py", "bad.py"], con)
+        assert res.facts["chain.py"].error == "RecursionError"
+        assert res.facts["bad.py"].error == "SyntaxError"
+        assert res.parsed == 2
+        assert _count(con) == 1  # только SyntaxError
+
+        again = scan(src, ["chain.py", "bad.py"], con)
+        assert again.hits == 1
+        assert again.parsed == 1
+        assert again.facts["chain.py"].error == "RecursionError"
+    finally:
+        con.close()
+
+
+class _SwappedSource:
+    """oids() отдаёт oid старого содержимого, read_many() — нового: файл сменился между вызовами."""
+
+    def __init__(self, old: bytes, new: bytes) -> None:
+        self._old = old
+        self._new = new
+
+    def files(self) -> list[str]:
+        return ["m.py"]
+
+    def oids(self) -> dict[str, str]:
+        return {"m.py": _blob_oid(self._old)}
+
+    def read_many(self, paths):
+        return {p: self._new for p in paths}
+
+
+def test_blob_oid_mismatch_not_cached(tmp_path):
+    src = _SwappedSource(b"def old_func():\n    pass\n", b"def new_func():\n    pass\n")
+    con = store.connect(tmp_path / "atlas.sqlite")
+    try:
+        res = scan(src, ["m.py"], con)
+        assert "m.py" in res.missing
+        assert "m.py" not in res.facts
+        assert _count(con) == 0
+    finally:
+        con.close()
+
+
+def _imp_x_y():
+    return ImportRec(kind="hard", line=1, level=0, module="x.y", names=(), is_from=False, guarded=False)
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["x/__init__.py", "x/y.py", "x/y/__init__.py"],
+        ["x/__init__.py", "x/y/__init__.py", "x/y.py"],
+    ],
+)
+def test_import_index_package_wins_over_module_in_any_order(paths):
+    res = ImportIndex(paths).resolve("main.py", _imp_x_y())
+    assert res.targets == (("x/y/__init__.py", ()),)
