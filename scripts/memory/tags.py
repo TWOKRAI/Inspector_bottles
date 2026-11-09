@@ -47,7 +47,14 @@ def _error(root: Path, path: Path, code: str, value) -> str:
 
 
 def check(root: Path) -> list[str]:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # скрипт запускают и без PYTHONPATH
+    from scripts.atlas.modules import unit_ids
+
     modules = set(_ids((_load_yaml(root / "modules.yaml") or {}).get("modules")))
+    try:
+        modules.update(unit_ids(root / "modules.yaml"))
+    except ValueError as exc:
+        _fail(str(exc))
     tags_path = root / _lessons.MEMORY_REL / "TAGS.yaml"
     mechanism_ids = _ids((_load_yaml(tags_path) or {}).get("mechanisms"))
     mechanisms = set(mechanism_ids)
