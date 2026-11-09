@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 import pytest
 
+from multiprocess_framework.modules.command_module.core.command_manager import CommandManager
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 from Plugins.sim.scene_source.plugin import SceneSourcePlugin
 from Services.dataset_gen.core.catalog import imwrite_unicode
@@ -496,6 +497,97 @@ def test_h3_random_mid_list_drops_remaining_and_spawns_random(tmp_path, monkeypa
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    "payload", [{"discs": None}, {"discs": None, "replace": False}], ids=["discs_none", "discs_none_replace_false"]
+)
+def test_h3_discs_none_is_invalid_not_random(tmp_path, monkeypatch, payload):
+    """H3: ``{"discs": None}`` (в т.ч. с ``replace: false``) — ``invalid`` без ``index``, а не «выйти в random»:
+    список из 3 подаётся дальше, ``scene.status.sequence`` не изменился. Ловит: ``None`` как общий маркер формы
+    ``{"random": true}`` и значения ключа ``discs``."""
+    rig = _Rig(tmp_path, monkeypatch, [CA, CE, CR])
+    assert rig.call("scene.sequence", {"discs": [[CA, 1], [CE, 2], [CR, 3]]})["status"] == "ok"
+    before = rig.sequence_status()
+    assert before == {"mode": "list", "total": 3, "fed": 0, "skipped": 0, "remaining": 3}
+
+    resp = rig.call("scene.sequence", payload)
+
+    assert resp["status"] == "error" and resp["code"] == "invalid" and "index" not in resp, resp
+    assert rig.sequence_status() == before
+    rig.step_until_fed(3)
+    assert [(p["class_name"], p["angle_deg"]) for p in rig.passports()] == [(CA, 1.0), (CE, 2.0), (CR, 3.0)]
+
+
+_DISCS3 = [[CA, 1], [CE, 2], [CR, 3]]
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    ("payload", "effect"),
+    [
+        pytest.param(
+            {"discs": _DISCS3, "correlation_id": "c-1"}, {"status": "ok", "queued": 3, "dropped": 0}, id="discs"
+        ),
+        pytest.param(
+            {"discs": _DISCS3, "replace": True, "correlation_id": "c-1"},
+            {"status": "ok", "queued": 3, "dropped": 0},
+            id="discs_replace",
+        ),
+        pytest.param(
+            {"random": True, "correlation_id": "c-1"}, {"status": "ok", "mode": "random", "dropped": 0}, id="random"
+        ),
+    ],
+)
+def test_h12_transport_key_correlation_id_is_ignored(tmp_path, monkeypatch, payload, effect):
+    """H12: роутер добавляет ``correlation_id`` в ``data`` любого request-response вызова -> форма с ним даёт тот же
+    ответ и состояние, что без него; входной dict не мутируется. Ловит: строгая проверка набора ключей без
+    отбрасывания служебного ключа отвергала любой реальный запрос."""
+    rig = _Rig(tmp_path, monkeypatch, [CA, CE, CR])
+    snapshot = {key: (list(value) if isinstance(value, list) else value) for key, value in payload.items()}
+
+    resp = rig.call("scene.sequence", payload)
+
+    assert resp == effect, resp
+    assert payload == snapshot, "входной dict изменён"
+    expected_mode = "random" if "random" in payload else "list"
+    assert rig.sequence_status()["mode"] == expected_mode
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"discs": _DISCS3, "x": 1, "correlation_id": "c-1"}, id="extra_key"),
+        pytest.param({"correlation_id": "c-1"}, id="only_transport_key"),
+        pytest.param({"random": True, "replace": True, "correlation_id": "c-1"}, id="random_and_replace"),
+    ],
+)
+def test_h12_other_keys_with_transport_key_still_invalid(tmp_path, monkeypatch, payload):
+    """H12: отбрасывается ТОЛЬКО ``correlation_id``; лишние ключи и пустой набор по-прежнему ``invalid``."""
+    rig = _Rig(tmp_path, monkeypatch, [CA, CE, CR])
+
+    resp = rig.call("scene.sequence", payload)
+
+    assert resp["status"] == "error" and resp["code"] == "invalid", resp
+    assert rig.sequence_status() == _EMPTY_STATUS
+
+
+@pytest.mark.timeout(60)
+def test_h12_real_command_manager_with_correlation_id(tmp_path, monkeypatch):
+    """H12: через НАСТОЯЩИЙ ``CommandManager`` (команды плагина зарегистрированы ``_auto_register_commands``, вызов —
+    ``handle_command`` с конвертом ``{"command", "data": {..., "correlation_id"}}``, как приходит по IPC)."""
+    rig = _Rig(tmp_path, monkeypatch, [CA, CE, CR])
+    manager = CommandManager("camera")
+    rig.ctx.command_manager = manager
+    rig.plugin._auto_register_commands(rig.ctx)
+
+    resp = manager.handle_command({"command": "scene.sequence", "data": {"discs": _DISCS3, "correlation_id": "c-1"}})
+    assert resp == {"status": "ok", "queued": 3, "dropped": 0}, resp
+    resp = manager.handle_command({"command": "scene.sequence", "data": {"random": True, "correlation_id": "c-2"}})
+    assert resp == {"status": "ok", "mode": "random", "dropped": 3}, resp
+    assert rig.sequence_status() == _EMPTY_STATUS
+
+
+@pytest.mark.timeout(60)
 def test_h4_restart_forgets_list(tmp_path, monkeypatch):
     """H4: список живёт только в памяти — новый ``configure()`` -> ``sequence`` в режиме random, total 0.
     Контракт (README): скрипт после рестарта шлёт список заново."""
@@ -587,6 +679,38 @@ def test_h7_letter_missing_from_catalog_is_skipped(tmp_path):
 
     (obj,) = spawner.active_objects()
     assert (obj.passport.object_id, obj.passport.class_name, obj.passport.angle_deg) == ("obj-1", CE, 2.0)
+
+
+class _ReplaceAfterNext(DiscSequence):
+    """``next()`` отдаёт снимок головы, и сразу после него «приходит команда» ``load(replace=True)``."""
+
+    def __init__(self, new: list[tuple[str, float]]) -> None:
+        super().__init__()
+        self._new = new
+        self._fired = False
+
+    def next(self):
+        head = super().next()
+        if head.letter is not None and not self._fired:
+            self._fired = True
+            self.load(self._new, replace=True)
+        return head
+
+
+def test_h7_command_between_next_and_skip_is_silent(tmp_path):
+    """H7: команда ``replace`` пришла между ``next()`` и ``skip()`` -> ``skip`` отказывает (поколение чужое), ``tick``
+    не бросает (лишней строки «сбой фабрики» нет), объекта нет, голова нового списка цела."""
+    factory = _HookFactory(_preset(_write_catalog(tmp_path, [CA, CE, CR])))
+    seq = _ReplaceAfterNext([(CR, 9.0), (CE, 8.0)])
+    seq.load([(CYA, 1.0), (CE, 2.0)])
+    spawner = _spacing_spawner(factory, seq)
+
+    spawner.tick(now_encoder=0.0, now_wall_s=0.0, rng=np.random.default_rng(0))  # не бросает
+
+    assert spawner.active_objects() == [] and factory.make_calls == 0
+    assert seq.snapshot() == {"mode": "list", "total": 2, "fed": 0, "skipped": 0, "remaining": 2}
+    head = seq.next()
+    assert (head.letter, head.angle_deg) == (CR, 9.0)
 
 
 @pytest.mark.timeout(60)

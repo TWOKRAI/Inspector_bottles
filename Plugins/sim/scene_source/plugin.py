@@ -147,6 +147,12 @@ _BACKGROUND_BGR = (60, 60, 60)
 #: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
 _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
+#: Служебные ключи транспорта в `data` команды: роутер добавляет `correlation_id` в `data` любого
+#: request-response вызова (`RouterManager.request`; список фреймворка — приватный
+#: `message_module.contracts.registry._TRANSPORT_KEYS`, не импортируется). Строгая проверка набора ключей
+#: `scene.sequence` их отбрасывает (только эти): иначе отвергался бы любой реальный запрос.
+_TRANSPORT_KEYS = frozenset({"correlation_id"})
+
 _ENGINE_DOWN_MESSAGE = "движок не запущен — применится после перезапуска"
 _MISSING_KEY = object()
 
@@ -706,21 +712,24 @@ class SceneSourcePlugin(ProcessModulePlugin):
         трогается — только `DiscSequence` под своим локом."""
         if not isinstance(data, dict):
             return self._invalid("scene.sequence: ожидается dict")
+        data = {key: value for key, value in data.items() if key not in _TRANSPORT_KEYS}  # копия, вход не мутируется
         keys = set(data)
         if keys == {"random"}:
             if data["random"] is not True:
                 return self._invalid("scene.sequence: random должен быть true")
+            is_random = True
             discs = None
             replace = False
         elif keys == {"discs"} or keys == {"discs", "replace"}:
             replace = data.get("replace", False)
             if not isinstance(replace, bool):
                 return self._invalid("scene.sequence: replace должен быть bool")
+            is_random = False
             discs = data["discs"]
         else:
             return self._invalid("scene.sequence: ожидается ровно один из наборов discs | discs+replace | random")
 
-        if discs is not None:
+        if not is_random:
             if not isinstance(discs, list):
                 return self._invalid("scene.sequence: discs должен быть списком")
             if not discs:
@@ -742,7 +751,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if self._spawner is None or self._sequence is None:
             return {"status": "ok", "applied": False}
 
-        if discs is None:
+        if is_random:
             return {"status": "ok", "mode": "random", "dropped": self._sequence.set_random()}
 
         live_factory = self._live_factory

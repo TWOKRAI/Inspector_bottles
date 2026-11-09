@@ -478,8 +478,9 @@ class ObjectSpawner:
         assert self._sequence is not None  # режим списка бывает только при заданной последовательности
         class_names = self._factory.class_names
         if head.letter not in class_names:
-            self._sequence.skip(head.generation)
-            raise ValueError("список дисков: буквы нет в каталоге фабрики")
+            if self._sequence.skip(head.generation):
+                raise ValueError("список дисков: буквы нет в каталоге фабрики")
+            return  # список уже чужой (команда пришла после next()): пропускать нечего, строки в логе не нужно
 
         object_id = f"obj-{self._next_id_n}"
         forced_before = self._factory.force_defect_pending
