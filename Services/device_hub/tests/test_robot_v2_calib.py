@@ -18,7 +18,11 @@ Stability: lite
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -53,6 +57,7 @@ TEXT_BAD_MARKS = "неверные отметки ленты"
 TEXT_FACTOR_RANGE = "коэффициент ленты вне диапазона параметра"
 TEXT_NO_POINT = "точка не найдена"
 TEXT_IN_BASE = "точка СК должна быть в базе"
+TEXT_FRAME_BAD_POINTS = "неверные точки подгонки СК"
 _FACTOR = "P_BELT_FACTOR"
 _DIR = "P_BELT_DIR"
 _DEFAULT_FACTOR = 14447
@@ -556,6 +561,61 @@ def test_calib_frame_huge_int_is_bad_args(tmp_path: Path) -> None:
     args = _frame_args(store, count=3)
     args["points"][0]["local"] = [10**400, 0.0, 0.0]
     assert _run(store, "calib_frame", args) == {"status": "error", "message": TEXT_BAD_ARGS}
+    assert load_frames(store, DEV)[0] == {}
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_OP_CODE = (
+    "import json, logging, sys\n"
+    "from Services.device_hub.robot_data_ops import run_op\n"
+    "from Services.robot_comm.store import RobotDataStore\n"
+    "answer = run_op(RobotDataStore(sys.argv[1]), sys.argv[2], 'calib_frame', json.loads(sys.argv[3]), {},\n"
+    "                log=logging.getLogger('calib'))\n"
+    "print(json.dumps(answer))\n"
+)
+
+
+def _calib_frame_in_subprocess(store_dir: Path, args: dict, deadline_s: float = 10.0) -> dict:
+    """``calib_frame`` над готовым хранилищем в дочернем процессе с дедлайном. Поток с join не годится:
+    ``np.linalg.svd`` на inf держит GIL и вешает весь прогон; дочерний процесс по дедлайну убивается."""
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", _OP_CODE, str(store_dir), DEV, json.dumps(args)],
+            capture_output=True,
+            text=True,
+            timeout=deadline_s,
+            stdin=subprocess.DEVNULL,
+            check=True,
+            cwd=_REPO_ROOT,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"calib_frame не вернулся за {deadline_s} с (зависание)")
+    return json.loads(out.stdout)
+
+
+def test_calib_frame_huge_local_is_refused_without_hang(tmp_path: Path) -> None:
+    """local = [1e308, 0, 0] (конечное число): fit_frame отказывает «неверные точки», исполнитель не виснет."""
+    store = RobotDataStore(tmp_path / "robot")
+    for i, local in enumerate(_LOCALS[:3]):
+        _save_point(store, f"s{i}", _base_of(local))
+    args = _frame_args(store, count=3)
+    args["points"][0]["local"] = [1e308, 0.0, 0.0]
+    assert _calib_frame_in_subprocess(tmp_path / "robot", args) == {"status": "error", "message": TEXT_FRAME_BAD_POINTS}
+    assert load_frames(store, DEV)[0] == {}
+
+
+def test_calib_frame_huge_saved_point_is_refused_without_hang(tmp_path: Path) -> None:
+    """Сохранённая точка с x = 1e308 (point_save её принимает): подгонка отказывает «неверные точки», не виснет."""
+    store = RobotDataStore(tmp_path / "robot")
+    _save_point(store, "s0", (1e308, 0.0, 0.0))
+    for i, local in enumerate(_LOCALS[1:3], start=1):
+        _save_point(store, f"s{i}", _base_of(local))
+    assert _calib_frame_in_subprocess(tmp_path / "robot", _frame_args(store, count=3)) == {
+        "status": "error",
+        "message": TEXT_FRAME_BAD_POINTS,
+    }
     assert load_frames(store, DEV)[0] == {}
 
 

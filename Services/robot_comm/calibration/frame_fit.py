@@ -5,7 +5,8 @@ Purpose:
     `FrameDef` (начало, точка на оси X, точка в плоскости XY), угол поворота вокруг Z и невязки. Файлов и
     робота не касается.
 
-Public API: `FrameFit`, `fit_frame`, `MAX_RESIDUAL_MM`, `MIN_SECOND_SINGULAR_MM`, `FRAME_POINT_OFFSET_MM`.
+Public API: `FrameFit`, `fit_frame`, `MAX_RESIDUAL_MM`, `MIN_SECOND_SINGULAR_MM`, `FRAME_POINT_OFFSET_MM`,
+    `MAX_COORD_MM`.
 
 Stability: lite (контракт держат тесты `test_calibration_math.py`).
 
@@ -30,6 +31,7 @@ from Services.robot_comm.calibration.belt import (
 
 __all__ = [
     "FRAME_POINT_OFFSET_MM",
+    "MAX_COORD_MM",
     "MAX_RESIDUAL_MM",
     "MIN_SECOND_SINGULAR_MM",
     "FrameFit",
@@ -40,6 +42,9 @@ __all__ = [
 MAX_RESIDUAL_MM: float = 0.5
 # Номинальные точки вырождены, если второе сингулярное число их центрированной матрицы меньше, мм.
 MIN_SECOND_SINGULAR_MM: float = 1.0
+# Наибольшая допустимая по модулю координата входной точки (база и номинал), мм. Физический предел рабочей зоны с
+# запасом; без него координата ~1e155 и больше переполняет произведения матрицы `H` до inf, и `np.linalg.svd` зависает.
+MAX_COORD_MM: float = 1e6
 # Расстояние от начала СК до точек `on_x` и `in_plane` в локальных координатах, мм.
 FRAME_POINT_OFFSET_MM: float = 100.0
 
@@ -75,7 +80,7 @@ def fit_frame(
     Post: `FrameFit` (поля — в его докстроке); СК правая, её ось Z смотрит вверх базы; масштаб не
     оценивается (СК — движение твёрдого тела).
     Raises: `CalibrationError` с текстом
-        `TEXT_FRAME_BAD_POINTS` — длины не равны, N < 3 или координата не конечна;
+        `TEXT_FRAME_BAD_POINTS` — длины не равны, N < 3, координата не конечна или больше `MAX_COORD_MM` по модулю;
         `TEXT_FRAME_DEGENERATE` — номинальные точки вырождены;
         `TEXT_FRAME_RESIDUAL` — наибольшая невязка больше `max_residual_mm`;
         `TEXT_FRAME_UPSIDE_DOWN` — ось Z подогнанной СК смотрит вниз базы.
@@ -112,6 +117,8 @@ def fit_frame(
         or b_arr.shape[0] < 3
         or not np.isfinite(b_arr).all()
         or not np.isfinite(l_arr).all()
+        or np.abs(b_arr).max() > MAX_COORD_MM
+        or np.abs(l_arr).max() > MAX_COORD_MM
     ):
         raise CalibrationError(TEXT_FRAME_BAD_POINTS)
 

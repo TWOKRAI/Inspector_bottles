@@ -468,7 +468,7 @@ QT_QPA_PLATFORM=offscreen python -m Services.robot_comm.gui.sim_view --quit-afte
 | `TEXT_FRAME_UPSIDE_DOWN` | СК перевёрнута: ось Z вниз |
 
 - **Пороги.** `MIN_TRAVEL_MM = 100.0`, `MAX_AXIS_DEV_DEG = 1.0`, `MAX_RESIDUAL_MM = 0.5`, `MIN_SECOND_SINGULAR_MM = 1.0`,
-  `FRAME_POINT_OFFSET_MM = 100.0`.
+  `FRAME_POINT_OFFSET_MM = 100.0`, `MAX_COORD_MM = 1e6` (координата входной точки `fit_frame` больше по модулю — `TEXT_FRAME_BAD_POINTS`; без предела `np.linalg.svd` зависает на ~1e155).
 - **Тесты:** `pytest Services/robot_comm/tests/test_calibration_math.py` (тесты автора) и `test_t54_calibration_acceptance.py` (слепая приёмка).
 
 ## Тесты

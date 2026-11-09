@@ -17,10 +17,13 @@ Stability: lite
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -173,6 +176,74 @@ def test_fit_frame_residual_checked_before_upside_down() -> None:
     flipped = [(x + 300.0, -y - 100.0, -z - 40.0) for x, y, z in _SHEET]
     flipped[1] = (flipped[1][0], flipped[1][1] + 30.0, flipped[1][2])
     _frame_refusal("точки не совпадают с размерами СК", flipped, list(_SHEET))
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FIT_CODE = (
+    "import json, sys\n"
+    "from Services.robot_comm.calibration import CalibrationError, fit_frame\n"
+    "try:\n"
+    "    r = fit_frame(json.loads(sys.argv[1]), json.loads(sys.argv[2]))\n"
+    "    print(json.dumps({'residual': r.max_residual_mm, 'yaw': r.yaw_deg}))\n"
+    "except CalibrationError as exc:\n"
+    "    print(json.dumps({'error': str(exc)}))\n"
+)
+
+
+def _fit_in_subprocess(base, local, deadline_s: float = 10.0) -> dict:
+    """``fit_frame`` в дочернем процессе с дедлайном. Поток с join не годится: ``np.linalg.svd`` на inf держит GIL,
+    ``join`` не вернётся и повиснет весь прогон; дочерний процесс по дедлайну убивается, тест краснеет."""
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", _FIT_CODE, json.dumps(base), json.dumps(local)],
+            capture_output=True,
+            text=True,
+            timeout=deadline_s,
+            stdin=subprocess.DEVNULL,
+            check=True,
+            cwd=_REPO_ROOT,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"fit_frame не вернулся за {deadline_s} с (зависание)")
+    return json.loads(out.stdout)
+
+
+@pytest.mark.parametrize(
+    ("where", "value"),
+    [
+        ("base", 1e308),
+        ("local", 1e308),
+        ("local", -1e308),
+        ("base", 1e155),
+        ("local", 1e6 + 1.0),
+        ("base", -(1e6 + 1.0)),
+    ],
+    ids=[
+        "base_1e308",
+        "local_1e308",
+        "local_minus_1e308",
+        "base_1e155",
+        "local_just_over_limit",
+        "base_just_over_limit",
+    ],
+)
+def test_fit_frame_coordinate_beyond_limit_refused_without_hang(where: str, value: float) -> None:
+    """Координата больше 1e6 мм по модулю (в базе или номинале) -> «неверные точки» сразу, SVD не вызывается."""
+    base = [list(p) for p in _SHEET]
+    local = [list(p) for p in _SHEET]
+    (base if where == "base" else local)[0][0] = value
+    assert _fit_in_subprocess(base, local) == {"error": "неверные точки подгонки СК"}
+
+
+def test_fit_frame_coordinate_exactly_at_limit_still_fits() -> None:
+    """Граница: координата ровно 1e6 мм проходит проверку и подгоняется (тождественная СК)."""
+    pts = [[1e6, 0.0, 0.0], [297.0, 0.0, 0.0], [0.0, 210.0, 0.0]]
+    out = _fit_in_subprocess(pts, pts)
+    assert "error" not in out, out
+    assert out["residual"] < 0.5
+    assert out["yaw"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_fit_frame_bad_points() -> None:
