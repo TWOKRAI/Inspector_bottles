@@ -1,0 +1,823 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Карта плана Атласа</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Раскладка: одна колонка, четыре рисунка; каждый рисунок несёт одно утверждение и прокручивается внутри своей рамки на телефоне. */
+:root{
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#18202e; --muted:#566074; --line:#c5ccd9;
+  --accent:#1c5fd0; --keep:#1d7a4c; --later:#9b5f0a; --freeze:#46598a; --kill:#b0372b;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --surface:#1a2029; --ink:#e5e9f0; --muted:#97a3b7; --line:#394355;
+  --accent:#6ba5ff; --keep:#5ccf96; --later:#e3a548; --freeze:#92a8de; --kill:#f27a6c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --surface:#1a2029; --ink:#e5e9f0; --muted:#97a3b7; --line:#394355;
+  --accent:#6ba5ff; --keep:#5ccf96; --later:#e3a548; --freeze:#92a8de; --kill:#f27a6c; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 56px}
+main{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:36px}
+h1{font-size:28px;line-height:1.2;margin:0 0 6px;font-weight:600;text-wrap:balance}
+h2{font-size:19px;line-height:1.3;margin:0 0 6px;font-weight:600;text-wrap:balance}
+p{margin:0;max-width:68ch}
+.lead{color:var(--muted)}
+.meta{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:8px}
+.callout{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.callout b{font-weight:600}
+section{display:flex;flex-direction:column;gap:10px}
+figure{margin:0;display:flex;flex-direction:column;gap:8px}
+figcaption{color:var(--muted);font-size:13.5px;max-width:78ch}
+.scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px}
+.scroll svg{display:block;width:100%;height:auto}
+ul.why{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:6px;max-width:72ch}
+code{font-family:var(--mono);font-size:.92em}
+.foot{border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:6px}
+.foot ul{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:4px;max-width:78ch;color:var(--muted);font-size:13.5px}
+/* рисунки */
+svg text{font-family:var(--font)}
+.box{fill:var(--surface);stroke:var(--line);stroke-width:1.4}
+.box.have{fill:color-mix(in srgb,var(--accent) 12%,var(--surface));stroke:var(--accent)}
+.box.dashed{fill:var(--surface);stroke:var(--muted);stroke-dasharray:5 4}
+.box.accent{stroke:var(--accent);stroke-width:2}
+.box.nb{fill:none;stroke:var(--line)}
+.box.note{fill:color-mix(in srgb,var(--kill) 8%,var(--surface));stroke:var(--kill);stroke-dasharray:4 3}
+.box.killbox{fill:color-mix(in srgb,var(--kill) 9%,var(--surface));stroke:var(--kill);stroke-width:1.6}
+.box.struck{stroke:var(--kill);opacity:.8}
+.box.dest{fill:var(--surface)}
+.dia{fill:color-mix(in srgb,var(--kill) 10%,var(--surface));stroke:var(--kill);stroke-width:1.6}
+.t{font-size:13px;font-weight:600;fill:var(--ink)}
+.t2{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.s{font-size:11.5px;fill:var(--muted)}
+.lb{font-size:11.5px;fill:var(--ink)}
+.hd{font-size:11px;font-weight:600;letter-spacing:.08em;fill:var(--muted)}
+.ar{fill:none;stroke:var(--muted);stroke-width:1.4}
+.ar.dash{stroke-dasharray:5 4}
+.ah{fill:var(--muted)}
+.chip{stroke-width:1.4}
+.chipt{font-size:11px;font-weight:600;letter-spacing:.04em}
+.chip.keep{fill:color-mix(in srgb,var(--keep) 14%,var(--surface));stroke:var(--keep)}
+.chipt.keep{fill:var(--keep)}
+.chip.later{fill:color-mix(in srgb,var(--later) 14%,var(--surface));stroke:var(--later)}
+.chipt.later{fill:var(--later)}
+.chip.freeze{fill:color-mix(in srgb,var(--freeze) 14%,var(--surface));stroke:var(--freeze)}
+.chipt.freeze{fill:var(--freeze)}
+.chip.kill{fill:color-mix(in srgb,var(--kill) 14%,var(--surface));stroke:var(--kill)}
+.chipt.kill{fill:var(--kill)}
+.chip.own{fill:var(--surface);stroke:var(--ink)}
+.chipt.own{fill:var(--ink)}
+.struck-line{stroke:var(--kill);stroke-width:1.4}
+h3{font-size:15px;line-height:1.3;margin:6px 0 0;font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.card h3{margin:0}
+.card p{font-size:13.5px}
+pre.code{margin:0;font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;white-space:pre}
+.panel{fill:none;stroke:var(--line);stroke-width:1}
+.layer{fill:color-mix(in srgb,var(--accent) 6%,var(--surface));stroke:var(--line);stroke-width:1.4}
+.box.hand{fill:color-mix(in srgb,var(--kill) 8%,var(--surface));stroke:var(--kill);stroke-dasharray:4 3}
+.grid{stroke:var(--line);stroke-width:1}
+.bar.kill{fill:var(--kill)}
+.bar.keep{fill:var(--keep)}
+.bar.add{fill:var(--freeze)}
+.bar.del{fill:var(--keep)}
+.verdict{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--keep);border-radius:6px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.pill.keep{color:var(--keep);border-color:var(--keep);background:color-mix(in srgb,var(--keep) 12%,var(--surface))}
+.pill.later{color:var(--later);border-color:var(--later);background:color-mix(in srgb,var(--later) 12%,var(--surface))}
+.pill.kill{color:var(--kill);border-color:var(--kill);background:color-mix(in srgb,var(--kill) 12%,var(--surface))}
+.pill.eq{color:var(--muted)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:13.5px}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{font-size:11px;letter-spacing:.06em;color:var(--muted);font-weight:600}
+td:first-child{font-weight:600;white-space:nowrap}
+ol.ask{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:8px;max-width:78ch}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+<main>
+<header>
+  <h1>Карта плана Атласа</h1>
+  <p class="lead">Куда уходят старый план, карточка модуля и их функции, что получится в конце и почему порядок именно такой.</p>
+  <div class="meta">main c07fb7cb7 · ветка трека 75f818845 · 2026-11-06 · разбор лида и CTO</div>
+</header>
+
+<div class="verdict">
+  <h2>Моя оценка</h2>
+  <p><b>Новый план лучше по конструкции и по скорости, но по главному мерилу ещё не доказан.</b> Истина берётся из кода, рукописных списков нет, скан занимает секунды вместо минут, условия остановки стоят до кода. При этом в main нового плана нет, а выигрыш агента не измерен: nav_bench ни разу не запускался.</p>
+  <div class="pills">
+    <span class="pill keep">лучше: источник истины, скорость, остановка до кода</span>
+    <span class="pill later">не доказано: выигрыш агента</span>
+    <span class="pill kill">хуже: в main пока ничего нет</span>
+  </div>
+  <p>Старый план тем же вопросом на замере K0c получил «не различимо». Поэтому новый начинается с замера без атласа за около 255k токенов Haiku: это дешевле любой ошибки в тысячи строк. Если grep и так находит места за 10 вызовов или меньше, план сжимается до сканера A1, гейта и команды <code>ref</code>.</p>
+</div>
+
+<div class="callout">
+  <p><b>Про @expose и «механизм».</b> Маркера <code>@expose</code> в коде не было: это идея из брифа 2026-11-01, CTO не принял её как основной путь и выбрал <code>command_specs()</code> с кортежами. Был и работает другой механизм. <code>command_contracts.py</code> описывает параметры встроенных команд схемами Pydantic, а <code>introspect.capabilities</code> отдаёт их агенту. Под тестами: <code>test_command_contract_oracle.py</code> (6 тестов по счёту лида) разбирает код обработчиков через AST и сверяет поля контракта с ключами, которые они читают; <code>test_capabilities.py</code> (12 по счёту лида). Отдельно CTO гонял разовый зонд «метод → команда» на Pydantic: JSON-типы проходят, <code>Callable</code> нет. Файла зонда в репозитории нет, остался пересказ в вердикте.</p>
+</div>
+
+<section>
+  <h2>1. Было и стало</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 486" role="img" aria-label="Старый план строит реестр из трейлеров и двух рукописных списков и выдаёт агенту бриф; новый читает код и объявления модуля, строит паспорт и меряет выигрыш агента." style="min-width:820px"><rect class="panel" x="6" y="6" width="468" height="474" rx="10"/>
+<rect class="panel" x="486" y="6" width="488" height="474" rx="10"/>
+<text class="hd" x="24" y="30" text-anchor="start">СТАРЫЙ ПЛАН · реестр доказанности</text>
+<text class="hd" x="504" y="30" text-anchor="start">НОВЫЙ ПЛАН · паспорт из кода</text>
+<rect class="box" x="20" y="48" width="140" height="56" rx="6"/>
+<text class="t" x="90.0" y="73.5" text-anchor="middle">трейлеры коммитов</text>
+<text class="s" x="90.0" y="87.5" text-anchor="middle">Refs ~94 %, Task 5–7 %</text>
+<rect class="box hand" x="170" y="48" width="140" height="56" rx="6"/>
+<text class="t" x="240.0" y="73.5" text-anchor="middle">plan.md</text>
+<text class="s" x="240.0" y="87.5" text-anchor="middle">пишут руками</text>
+<rect class="box hand" x="320" y="48" width="140" height="56" rx="6"/>
+<text class="t" x="390.0" y="73.5" text-anchor="middle">modules.yaml</text>
+<text class="s" x="390.0" y="87.5" text-anchor="middle">88 записей, руками</text>
+<path class="ar" d="M90,104 L90,122 L240,122 L240,140" marker-end="url(#arr)"/>
+<path class="ar" d="M240,104 L240,140" marker-end="url(#arr)"/>
+<path class="ar" d="M390,104 L390,122 L240,122 L240,140" marker-end="url(#arr)"/>
+<rect class="box" x="60" y="140" width="360" height="56" rx="6"/>
+<text class="t" x="240.0" y="165.5" text-anchor="middle">реестр и codemap</text>
+<text class="s" x="240.0" y="179.5" text-anchor="middle">sqlite 289 МБ; checkout ревизии 270–540 с</text>
+<path class="ar" d="M240,196 L240,232" marker-end="url(#arr)"/>
+<rect class="box" x="60" y="232" width="360" height="56" rx="6"/>
+<text class="t" x="240.0" y="257.5" text-anchor="middle">card · pack · brief</text>
+<text class="s" x="240.0" y="271.5" text-anchor="middle">карточка, хвосты задач, факты брифа</text>
+<path class="ar" d="M240,288 L240,324" marker-end="url(#arr)"/>
+<rect class="box" x="60" y="324" width="360" height="56" rx="6"/>
+<text class="t" x="240.0" y="349.5" text-anchor="middle">бриф агенту</text>
+<text class="s" x="240.0" y="363.5" text-anchor="middle">K0c: 109–144k против 178k токенов, не различимо</text>
+<rect class="box have" x="20" y="410" width="200" height="50" rx="6"/>
+<text class="t" x="120.0" y="432.5" text-anchor="middle">гейт CI «atlas» (1.7a)</text>
+<text class="s" x="120.0" y="446.5" text-anchor="middle">единственный живой продукт</text>
+<rect class="box" x="236" y="410" width="230" height="50" rx="6"/>
+<text class="t" x="351.0" y="432.5" text-anchor="middle">63 файла в scripts/atlas</text>
+<text class="s" x="351.0" y="446.5" text-anchor="middle">4 623 + 13 680 строк тестов</text>
+<rect class="box" x="498" y="48" width="140" height="56" rx="6"/>
+<text class="t" x="568.0" y="73.5" text-anchor="middle">код в ревизии git</text>
+<text class="s" x="568.0" y="87.5" text-anchor="middle">блобы, без выгрузки</text>
+<rect class="box" x="648" y="48" width="164" height="56" rx="6"/>
+<text class="t" x="730.0" y="73.5" text-anchor="middle">объявление в модуле</text>
+<text class="s" x="730.0" y="87.5" text-anchor="middle">докстринг, команды</text>
+<rect class="box" x="822" y="48" width="140" height="56" rx="6"/>
+<text class="t" x="892.0" y="73.5" text-anchor="middle">тесты</text>
+<text class="s" x="892.0" y="87.5" text-anchor="middle">по символу</text>
+<path class="ar" d="M568,104 L568,122 L730,122 L730,140" marker-end="url(#arr)"/>
+<path class="ar" d="M730,104 L730,140" marker-end="url(#arr)"/>
+<path class="ar" d="M892,104 L892,122 L730,122 L730,140" marker-end="url(#arr)"/>
+<rect class="box have" x="560" y="140" width="340" height="56" rx="6"/>
+<text class="t" x="730.0" y="165.5" text-anchor="middle">скан + кэш по содержимому</text>
+<text class="s" x="730.0" y="179.5" text-anchor="middle">4,79 с холодно, 0,06 с тепло (1 прогон)</text>
+<path class="ar" d="M730,196 L730,232" marker-end="url(#arr)"/>
+<rect class="box dashed accent" x="560" y="232" width="340" height="56" rx="6"/>
+<text class="t" x="730.0" y="257.5" text-anchor="middle">индекс связей → паспорт</text>
+<text class="s" x="730.0" y="271.5" text-anchor="middle">6 одинаковых разделов на всех уровнях</text>
+<path class="ar" d="M730,288 L730,324" marker-end="url(#arr)"/>
+<rect class="box dashed" x="560" y="324" width="340" height="56" rx="6"/>
+<text class="t" x="730.0" y="349.5" text-anchor="middle">ref · map · страница</text>
+<text class="s" x="730.0" y="363.5" text-anchor="middle">один символ вместо чтения модуля</text>
+<rect class="box have" x="498" y="410" width="214" height="50" rx="6"/>
+<text class="t" x="605.0" y="432.5" text-anchor="middle">atlas check</text>
+<text class="s" x="605.0" y="446.5" text-anchor="middle">один гейт находок</text>
+<rect class="box have" x="730" y="410" width="232" height="50" rx="6"/>
+<text class="t" x="846.0" y="432.5" text-anchor="middle">nav_bench</text>
+<text class="s" x="846.0" y="446.5" text-anchor="middle">меряет против grep, стоп до кода</text></svg></div>
+    <figcaption>Слева старый план: два рукописных списка и трейлеры питают реестр, из реестра собираются карточки и брифы. Справа новый: всё из кода и объявлений модуля, на выходе паспорт, а выигрыш меряет отдельный бенчмарк.</figcaption>
+  </figure>
+  <ul class="why">
+    <li><b>Стало лучше:</b> нет рукописных списков (modules.yaml разошёлся с кодом через 5 дней), скан без checkout, один формат паспорта на всех уровнях, остановка до кода.</li>
+    <li><b>Стало хуже или потеряно:</b> цепь «коммит → задача → план → документ» отложена, метрика доказанности осталась идеей, pack и brief заморожены, в main нового пока нет.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>2. Насколько лучше</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Ось</th><th>Старый план</th><th>Новый план</th><th>Итог</th></tr></thead>
+      <tbody>
+        <tr><td>Цель</td><td>снизить цену входа агента реестром связей и качества</td><td>найти место и понять устройство, не читая модуль</td><td><span class="pill keep">лучше</span> ближе к действию агента</td></tr>
+        <tr><td>Мерило</td><td>цена входа −20 % (база 142 044 токена)</td><td>nav_bench: шаги и токены против grep</td><td><span class="pill later">частично</span> цену всей задачи не мерит</td></tr>
+        <tr><td>Источник истины</td><td>трейлеры, plan.md, modules.yaml (рукописные)</td><td>код и объявления модуля</td><td><span class="pill keep">лучше</span></td></tr>
+        <tr><td>Скорость</td><td>checkout ревизии 270–540 с</td><td>холодный скан 4,79 с, тёплый 0,06 с</td><td><span class="pill keep">лучше</span> по одному прогону</td></tr>
+        <tr><td>Польза для агента</td><td>K0c: 109–144k против 178k токенов, «не различимо»</td><td>не измерена; проба без атласа: 6 из 10, около 85k</td><td><span class="pill later">не доказано</span></td></tr>
+        <tr><td>Остановка</td><td>6 kill-критериев, проверка с 10 ноября</td><td>2 kill: до кода и после A3′</td><td><span class="pill keep">лучше</span> срабатывает раньше</td></tr>
+        <tr><td>Размер</td><td>+19 159 / −868 строк за 33 дня</td><td>ветка: +7 270 / −34 (.py)</td><td><span class="pill kill">пока хуже</span> правило «удалено ≥ добавлено» введено, но не выполнено</td></tr>
+        <tr><td>В main</td><td>25 из 42 задач, 63 файла</td><td>ничего: всё в ветке</td><td><span class="pill kill">хуже</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 262" role="img" aria-label="Измерено: холодный скан нового плана занимает 4,79 секунды против 270–540 секунд у checkout старого; старый план добавил 19 159 строк и удалил 868, ветка нового добавила 7 270 и удалила 34." style="min-width:820px"><text class="hd" x="20" y="24" text-anchor="start">ВРЕМЯ НА РЕВИЗИЮ, секунды (шкала логарифмическая)</text>
+<line class="grid" x1="292.8" y1="44" x2="292.8" y2="196"/>
+<text class="s" x="292.8" y="214" text-anchor="middle">0,1</text>
+<line class="grid" x1="374.6" y1="44" x2="374.6" y2="196"/>
+<text class="s" x="374.6" y="214" text-anchor="middle">1</text>
+<line class="grid" x1="456.4" y1="44" x2="456.4" y2="196"/>
+<text class="s" x="456.4" y="214" text-anchor="middle">10</text>
+<line class="grid" x1="538.2" y1="44" x2="538.2" y2="196"/>
+<text class="s" x="538.2" y="214" text-anchor="middle">100</text>
+<line class="grid" x1="620.0" y1="44" x2="620.0" y2="196"/>
+<text class="s" x="620.0" y="214" text-anchor="middle">1000</text>
+<text class="t2" x="20" y="68">старый: checkout ревизии</text>
+<text class="s" x="20" y="84">270–540 с</text>
+<rect class="bar kill" x="573.5" y="56" width="24.6" height="24" rx="3"/>
+<text class="t2" x="20" y="118">новый: холодный скан</text>
+<text class="s" x="20" y="134">4,79 с</text>
+<rect class="bar keep" x="250.0" y="106" width="180.2" height="24" rx="3"/>
+<text class="t2" x="20" y="168">новый: тёплый скан</text>
+<text class="s" x="20" y="184">0,06 с</text>
+<rect class="bar keep" x="250.0" y="156" width="24.6" height="24" rx="3"/>
+<text class="hd" x="690" y="24" text-anchor="start">СТРОК КОДА, добавлено и удалено</text>
+<text class="t2" x="690" y="50">старый: scripts/atlas, 33 дня</text>
+<text class="s" x="690" y="64">добавлено 19 159, удалено 868</text>
+<rect class="bar add" x="690" y="70" width="258.6" height="14" rx="3"/>
+<rect class="bar del" x="690" y="88" width="11.7" height="14" rx="3"/>
+<text class="t2" x="690" y="130">новый: ветка, только .py</text>
+<text class="s" x="690" y="144">добавлено 7 270, удалено 34</text>
+<rect class="bar add" x="690" y="150" width="98.1" height="14" rx="3"/>
+<rect class="bar del" x="690" y="168" width="2.0" height="14" rx="3"/>
+<text class="s" x="690" y="214" text-anchor="start">синий: добавлено, зелёный: удалено</text>
+<text class="s" x="20" y="244" text-anchor="start">оба замера по одному прогону; старый checkout взят из проекта слияния, новый скан — из отчёта A1 на загруженной машине</text></svg></div>
+    <figcaption>Скорость и размер измерены, пользу для агента ещё нет. Один прогон на скан, цифры по старому checkout взяты из проекта слияния, поэтому сравнение грубое.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>3. Что получится в конце</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 410" role="img" aria-label="Конечный результат: код и объявления модулей проходят скан, индекс и паспорт; из паспорта строятся виды для агента и владельца, а nav_bench меряет выигрыш." style="min-width:820px"><rect class="box" x="20" y="40" width="190" height="56" rx="6"/>
+<text class="t" x="115.0" y="65.5" text-anchor="middle">код в ревизии git</text>
+<text class="s" x="115.0" y="79.5" text-anchor="middle">блобы, без выгрузки на диск</text>
+<rect class="box" x="20" y="108" width="190" height="56" rx="6"/>
+<text class="t" x="115.0" y="133.5" text-anchor="middle">объявлено модулем</text>
+<text class="s" x="115.0" y="147.5" text-anchor="middle">докстринг, __all__, command_specs()</text>
+<rect class="box" x="20" y="176" width="190" height="56" rx="6"/>
+<text class="t" x="115.0" y="201.5" text-anchor="middle">тесты</text>
+<text class="s" x="115.0" y="215.5" text-anchor="middle">имена test-функций, nodeid</text>
+<rect class="box dashed" x="20" y="244" width="190" height="56" rx="6"/>
+<text class="t" x="115.0" y="269.5" text-anchor="middle">рецепты и YAML топологии</text>
+<text class="s" x="115.0" y="283.5" text-anchor="middle">дороги: процессы, IPC</text>
+<path class="ar" d="M210,68 L236,68 L236,170 L262,170" marker-end="url(#arr)"/>
+<path class="ar" d="M210,136 L236,136 L236,170 L262,170" marker-end="url(#arr)"/>
+<path class="ar" d="M210,204 L236,204 L236,170 L262,170" marker-end="url(#arr)"/>
+<path class="ar dash" d="M210,272 L240,272 L240,228 L480,228 L480,205" marker-end="url(#arr)"/>
+<text class="s" x="372" y="244" text-anchor="start">через channel_map, шаг 7</text>
+<rect class="box have" x="262" y="135" width="140" height="70" rx="6"/>
+<text class="t" x="332.0" y="160.5" text-anchor="middle">скан (A1)</text>
+<text class="s" x="332.0" y="174.5" text-anchor="middle">факты файла,</text>
+<text class="s" x="332.0" y="188.5" text-anchor="middle">кэш по содержимому</text>
+<rect class="box dashed" x="452" y="135" width="140" height="70" rx="6"/>
+<text class="t" x="522.0" y="160.5" text-anchor="middle">индекс связей</text>
+<text class="s" x="522.0" y="174.5" text-anchor="middle">кто кого вызывает,</text>
+<text class="s" x="522.0" y="188.5" text-anchor="middle">наследует, тестирует</text>
+<rect class="box dashed accent" x="642" y="135" width="150" height="70" rx="6"/>
+<text class="t" x="717.0" y="160.5" text-anchor="middle">паспорт</text>
+<text class="s" x="717.0" y="174.5" text-anchor="middle">6 одинаковых разделов</text>
+<text class="s" x="717.0" y="188.5" text-anchor="middle">на всех уровнях</text>
+<path class="ar" d="M402,170 L452,170" marker-end="url(#arr)"/>
+<text class="lb" x="427" y="162" text-anchor="middle">факты</text>
+<path class="ar" d="M592,170 L642,170" marker-end="url(#arr)"/>
+<text class="lb" x="617" y="162" text-anchor="middle">связи</text>
+<rect class="box dashed" x="842" y="40" width="120" height="44" rx="6"/>
+<text class="t" x="902.0" y="59.5" text-anchor="middle">atlas ref</text>
+<text class="s" x="902.0" y="73.5" text-anchor="middle">один символ</text>
+<rect class="box dashed" x="842" y="96" width="120" height="44" rx="6"/>
+<text class="t" x="902.0" y="115.5" text-anchor="middle">atlas map</text>
+<text class="s" x="902.0" y="129.5" text-anchor="middle">зум по уровням</text>
+<rect class="box dashed" x="842" y="152" width="120" height="44" rx="6"/>
+<text class="t" x="902.0" y="171.5" text-anchor="middle">страница-карта</text>
+<text class="s" x="902.0" y="185.5" text-anchor="middle">для владельца</text>
+<rect class="box dashed" x="842" y="208" width="120" height="44" rx="6"/>
+<text class="t" x="902.0" y="227.5" text-anchor="middle">route, find</text>
+<text class="s" x="902.0" y="241.5" text-anchor="middle">после замера</text>
+<path class="ar" d="M792,170 L816,170 L816,62 L842,62" marker-end="url(#arr)"/>
+<path class="ar" d="M792,170 L816,170 L816,118 L842,118" marker-end="url(#arr)"/>
+<path class="ar" d="M792,170 L816,170 L816,174 L842,174" marker-end="url(#arr)"/>
+<path class="ar" d="M792,170 L816,170 L816,230 L842,230" marker-end="url(#arr)"/>
+<rect class="box have" x="262" y="262" width="140" height="50" rx="6"/>
+<text class="t" x="332.0" y="284.5" text-anchor="middle">sqlite = кэш</text>
+<text class="s" x="332.0" y="298.5" text-anchor="middle">можно выбросить</text>
+<path class="ar" d="M332,205 L332,262" marker-end="url(#arr)"/>
+<rect class="box have" x="452" y="262" width="140" height="50" rx="6"/>
+<text class="t" x="522.0" y="284.5" text-anchor="middle">atlas check</text>
+<text class="s" x="522.0" y="298.5" text-anchor="middle">один гейт находок</text>
+<path class="ar" d="M522,205 L522,262" marker-end="url(#arr)"/>
+<text class="lb" x="530" y="240" text-anchor="start">находки</text>
+<rect class="box dashed" x="642" y="262" width="150" height="50" rx="6"/>
+<text class="t" x="717.0" y="284.5" text-anchor="middle">живой стенд</text>
+<text class="s" x="717.0" y="298.5" text-anchor="middle">backend_ctl: только сверка</text>
+<path class="ar dash" d="M717,262 L717,205" marker-end="url(#arr)"/>
+<text class="lb" x="725" y="240" text-anchor="start">стоп 3</text>
+<rect class="box have" x="802" y="338" width="160" height="50" rx="6"/>
+<text class="t" x="882.0" y="360.5" text-anchor="middle">nav_bench</text>
+<text class="s" x="882.0" y="374.5" text-anchor="middle">шаги и токены против grep</text>
+<path class="ar dash" d="M902,252 L902,338" marker-end="url(#arr)"/>
+<text class="lb" x="910" y="300" text-anchor="start">меряет</text>
+<text class="lb" x="20" y="346" text-anchor="start">соседи: атлас от них не зависит</text>
+<rect class="box nb" x="20" y="354" width="110" height="44" rx="6"/>
+<text class="t" x="75.0" y="373.5" text-anchor="middle">qex</text>
+<text class="s" x="75.0" y="387.5" text-anchor="middle">поиск по смыслу</text>
+<rect class="box nb" x="142" y="354" width="110" height="44" rx="6"/>
+<text class="t" x="197.0" y="373.5" text-anchor="middle">graphify</text>
+<text class="s" x="197.0" y="387.5" text-anchor="middle">сообщества кода</text>
+<rect class="box nb" x="264" y="354" width="110" height="44" rx="6"/>
+<text class="t" x="319.0" y="373.5" text-anchor="middle">grep</text>
+<text class="s" x="319.0" y="387.5" text-anchor="middle">точный текст</text>
+<rect class="box have" x="460" y="362" width="18" height="12" rx="3"/>
+<text class="s" x="486" y="372" text-anchor="start">есть в ветке или на main</text>
+<rect class="box dashed" x="460" y="382" width="18" height="12" rx="3"/>
+<text class="s" x="486" y="392" text-anchor="start">ещё не начато</text></svg></div>
+    <figcaption>Код и объявления модулей проходят один скан. Из фактов собирается индекс, из индекса паспорт одной формы. Агент и владелец смотрят в паспорт через разные виды, а nav_bench меряет, стало ли агенту дешевле искать.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>4. Три слоя и один владелец у каждого факта</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 400" role="img" aria-label="Три слоя: код модуля объявляет факт, atlas читает его статически, живой каталог читает в рантайме; статика и рантайм сверяются один раз, на стопе 3." style="min-width:820px"><rect class="layer" x="20" y="44" width="270" height="200" rx="8"/>
+<text class="t" x="34" y="68" text-anchor="start">1 · объявление в коде</text>
+<text class="s" x="34" y="84" text-anchor="start">владелец истины</text>
+<text class="lb" x="34" y="112" text-anchor="start">докстринг, шапка Tier:</text>
+<text class="lb" x="34" y="133" text-anchor="start">interfaces.py, __all__</text>
+<text class="lb" x="34" y="154" text-anchor="start">каталог с __init__.py = модуль</text>
+<text class="lb" x="34" y="175" text-anchor="start">command_contracts.py + оракул AST</text>
+<text class="lb" x="34" y="196" text-anchor="start">command_specs() (цель)</text>
+<text class="lb" x="34" y="217" text-anchor="start">params_schema: только ссылка</text>
+<rect class="layer" x="355" y="44" width="270" height="200" rx="8"/>
+<text class="t" x="369" y="68" text-anchor="start">2 · atlas</text>
+<text class="s" x="369" y="84" text-anchor="start">единственный статический читатель</text>
+<text class="lb" x="369" y="112" text-anchor="start">скан → факты → индексы</text>
+<text class="lb" x="369" y="133" text-anchor="start">паспорт, 6 разделов</text>
+<text class="lb" x="369" y="154" text-anchor="start">ref · map · check · route</text>
+<text class="lb" x="369" y="175" text-anchor="start">вид импорта, вызовы, тесты</text>
+<text class="lb" x="369" y="196" text-anchor="start">рантайм не хранит никогда</text>
+<rect class="layer" x="690" y="44" width="270" height="200" rx="8"/>
+<text class="t" x="704" y="68" text-anchor="start">3 · живой каталог</text>
+<text class="s" x="704" y="84" text-anchor="start">introspect.* и его клиенты</text>
+<text class="lb" x="704" y="112" text-anchor="start">introspect.capabilities</text>
+<text class="lb" x="704" y="133" text-anchor="start">backend_ctl, GUI, консоль</text>
+<text class="lb" x="704" y="154" text-anchor="start">register_from (цель)</text>
+<text class="lb" x="704" y="175" text-anchor="start">access, idempotent, owner</text>
+<text class="lb" x="704" y="196" text-anchor="start">состояние, регистры, роутер</text>
+<path class="ar" d="M290,120 L355,120" marker-end="url(#arr)"/>
+<text class="lb" x="322" y="112" text-anchor="middle">читает</text>
+<path class="ar" d="M155,244 L155,284 L825,284 L825,244" marker-end="url(#arr)"/>
+<text class="lb" x="490" y="276" text-anchor="middle">регистрирует в рантайме</text>
+<path class="ar dash" d="M625,170 L690,170" marker-end="url(#arr)"/>
+<text class="lb" x="657" y="162" text-anchor="middle">R3</text>
+<text class="s" x="657" y="190" text-anchor="middle">стоп 3</text>
+<text class="hd" x="20" y="322" text-anchor="start">СОСЕДИ И ИСТОЧНИКИ</text>
+<rect class="box nb" x="20" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="95.0" y="355.5" text-anchor="middle">sentrux</text>
+<text class="s" x="95.0" y="369.5" text-anchor="middle">судит границы слоёв</text>
+<rect class="box nb" x="182" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="257.0" y="355.5" text-anchor="middle">channel_map</text>
+<text class="s" x="257.0" y="369.5" text-anchor="middle">каналы IPC, atlas читает</text>
+<rect class="box nb" x="344" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="419.0" y="355.5" text-anchor="middle">message_contracts</text>
+<text class="s" x="419.0" y="369.5" text-anchor="middle">схемы сообщений</text>
+<rect class="box nb" x="506" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="581.0" y="355.5" text-anchor="middle">git log</text>
+<text class="s" x="581.0" y="369.5" text-anchor="middle">co-change, коммиты по пути</text>
+<rect class="box nb" x="668" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="743.0" y="355.5" text-anchor="middle">qex</text>
+<text class="s" x="743.0" y="369.5" text-anchor="middle">поиск по смыслу</text>
+<rect class="box nb" x="830" y="332" width="150" height="52" rx="6"/>
+<text class="t" x="905.0" y="355.5" text-anchor="middle">graphify</text>
+<text class="s" x="905.0" y="369.5" text-anchor="middle">сосед; решит замер</text></svg></div>
+    <figcaption>Атлас только читает объявления, живой каталог только читает рантайм, сверка одна и стоит на стопе 3. Поэтому дубля нет: у каждого факта один владелец, остальные ссылаются на него. Соседи не входят в атлас и от него не зависят.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>5. Как агент будет пользоваться</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 306" role="img" aria-label="Путь агента к месту в коде: без атласа несколько поисков и чтений файлов, с атласом один запрос к паспорту и при нужде одна строка кода." style="min-width:820px"><text class="hd" x="20" y="24" text-anchor="start">БЕЗ АТЛАСА (grep и чтение файлов)</text>
+<rect class="box" x="20" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="90.0" y="67.5" text-anchor="middle">grep по имени</text>
+<rect class="box" x="176" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="246.0" y="67.5" text-anchor="middle">открыть файл</text>
+<path class="ar" d="M160,63 L176,63" marker-end="url(#arr)"/>
+<rect class="box" x="332" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="402.0" y="67.5" text-anchor="middle">найти класс</text>
+<path class="ar" d="M316,63 L332,63" marker-end="url(#arr)"/>
+<rect class="box" x="488" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="558.0" y="67.5" text-anchor="middle">grep по использованиям</text>
+<path class="ar" d="M472,63 L488,63" marker-end="url(#arr)"/>
+<rect class="box" x="644" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="714.0" y="67.5" text-anchor="middle">открыть ещё файлы</text>
+<path class="ar" d="M628,63 L644,63" marker-end="url(#arr)"/>
+<rect class="box" x="800" y="40" width="140" height="46" rx="6"/>
+<text class="t" x="870.0" y="67.5" text-anchor="middle">ответ</text>
+<path class="ar" d="M784,63 L800,63" marker-end="url(#arr)"/>
+<text class="s" x="20" y="108" text-anchor="start">пробный прогон Haiku: 6 из 10 мест найдено, около 40 вызовов, около 85k токенов (не точка отсчёта)</text>
+<text class="hd" x="20" y="160" text-anchor="start">С АТЛАСОМ (цель)</text>
+<rect class="box dashed accent" x="20" y="176" width="210" height="52" rx="6"/>
+<text class="t" x="125.0" y="206.5" text-anchor="middle">atlas ref &lt;символ&gt;</text>
+<rect class="box dashed accent" x="256" y="176" width="210" height="52" rx="6"/>
+<text class="t" x="361.0" y="199.5" text-anchor="middle">паспорт</text>
+<text class="s" x="361.0" y="213.5" text-anchor="middle">назначение, подключение, связи</text>
+<path class="ar" d="M230,202 L256,202" marker-end="url(#arr)"/>
+<rect class="box dashed accent" x="492" y="176" width="210" height="52" rx="6"/>
+<text class="t" x="597.0" y="199.5" text-anchor="middle">одна строка по файл:строка</text>
+<text class="s" x="597.0" y="213.5" text-anchor="middle">если нужно</text>
+<path class="ar" d="M466,202 L492,202" marker-end="url(#arr)"/>
+<rect class="box dashed accent" x="728" y="176" width="210" height="52" rx="6"/>
+<text class="t" x="833.0" y="206.5" text-anchor="middle">ответ</text>
+<path class="ar" d="M702,202 L728,202" marker-end="url(#arr)"/>
+<text class="s" x="20" y="252" text-anchor="start">условие стопа C1: найдено ≥ 8 из 10, вызовов не больше 0,5 и токенов не больше 0,6 от точки отсчёта</text>
+<text class="s" x="20" y="290" text-anchor="start">схема пути, не замер: число шагов зависит от вопроса</text></svg></div>
+    <figcaption>Вместо цепочки поисков и чтений агент задаёт один вопрос про символ и получает паспорт одной формы. Выигрыш проверяется замером на стопе C1, а не обещанием.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>6. Пример на реальном классе</h2>
+  <p>Вопрос агента: что такое ConfigFileWatcher, как им пользоваться и кто его зовёт. Ниже вывод инструментов на реальном коде ветки трека (75f818845), снятый 2026-11-06 на Mac.</p>
+  <div class="cols">
+    <div class="card"><h3>Без атласа</h3><p><code>git grep ConfigFileWatcher</code> даёт 39 мест в 8 файлах, 5 из них тесты. Чтобы понять класс, нужно открыть <code>watcher.py</code> (254 строки). Вопрос про устройство модуля это 3 788 строк .py в 32 файлах, 2 004 строки без тестов.</p></div>
+    <div class="card"><h3>Старый атлас</h3><p><code>atlas ref</code> принимает имя модуля, а не класса. Команды <code>ref config_module --symbol ConfigFileWatcher</code> и <code>card config_module</code> на этом Mac вывода не дали: в venv нет <code>grimp</code>. На машине с <code>grimp</code> их в этой проверке не запускали.</p></div>
+    <div class="card"><h3>Новый паспорт (прототип)</h3><p>31 строка по классу и 27 по модулю. Первый запуск 5,76 с (строится индекс), второй 0,08 с. Факты одного файла сканер A1 снимает за 0,05 с.</p></div>
+  </div>
+  <h3>Паспорт класса, вывод дословно</h3>
+  <pre class="code">[house] ConfigFileWatcher
+class — Hot-reload: следит за файлом, обновляет Config при изменении
+использует меня 1 (вызовы по имени) / использую 0
+
+Сигнатура:
+  ConfigFileWatcher(path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None)   (__init__: own)
+
+Докстринг:
+  Hot-reload: следит за файлом, обновляет Config при изменении.
+
+Члены (4):
+  __init__(self, path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None) -&gt; None
+  start(self) -&gt; None
+  stop(self) -&gt; None
+  is_running(self) -&gt; bool
+
+Наследники по имени базы (0):
+  нет
+
+Вызовы по имени: 1 (+0 в файле); 0 — не «не используется»:
+  multiprocess_framework/modules/process_module/managers/observability_reload.py:2341
+
+Тесты (11):
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_double_start_is_safe
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_dropped_event_gets_one_delayed_reload_with_last_content
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_rapid_edits_collapse_into_first_and_one_delayed_reload
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_recreate_without_rename_also_reloads
+
+Ввод-вывод:
+  watches  self._handler  :238</pre>
+  <h3>Паспорт модуля, вывод дословно</h3>
+  <pre class="code">[unit] config_module
+Config Module — управление конфигурациями в рантайме.
+использует меня 7 / использую 3 (юнитов, hard+lazy)
+нарушений направления: 0
+
+Правило направления импортов:
+  можно → никого; нельзя ← Services, Plugins, multiprocess_prototype, backend_ctl; в чужой юнит — через его витрину (__init__, interfaces)
+
+Счётчики:
+  packages 5, files 17, loc 1638, classes 14, functions 9, loc_unit 1638, tests 12
+
+Находки по серьёзности:
+  error 0, warn 4, info 1
+
+Ярус:
+  core
+
+Интерфейсы:
+  IConfigObserver (Protocol)
+  IConfig (ABC)
+  IConfigManager (ABC)
+
+Витрина __all__:
+  Config, ConfigManager, ConfigManagerConfig, ConfigSection, IConfigManager, IConfig
+
+Рецепты, где назван:
+  0</pre>
+  <h3>Как это ложится на шесть разделов паспорта</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Раздел</th><th>Что дал прототип</th><th>Чего нет или что неверно</th></tr></thead>
+      <tbody>
+        <tr><td>Назначение</td><td>«Hot-reload: следит за файлом, обновляет Config при изменении»</td><td>нет ответа на «зачем в системе» и «где работает»: из какого места создаётся и в каком потоке. Это задача A3′</td></tr>
+        <tr><td>Подключение</td><td>сигнатура с параметрами <code>path</code>, <code>config</code>, <code>on_reload</code>, <code>debounce_seconds</code>, <code>log_error</code>; члены <code>start</code>, <code>stop</code>, <code>is_running</code>. На уровне модуля: правило «нельзя ← Services, Plugins, multiprocess_prototype, backend_ctl», витрина <code>__all__</code>, интерфейсы</td><td>правила слоя и витрины заданы на уровне модуля, у класса их нет</td></tr>
+        <tr><td>Связи</td><td>использует меня 1: <code>process_module/managers/observability_reload.py:2341</code>; наследников 0</td><td>атлас видит 1 вызов по имени против 39 вхождений в grep. По проверке CTO в продукте это 1 создание, 2 импорта, 1 аннотация и 3 реэкспорта, остальное докстринги и тесты. Паспорт не различает виды связей и не отделяет продукт от тестов; карточка сама предупреждает, что 0 не значит «не используется»</td></tr>
+        <tr><td>Где работает</td><td>ввод-вывод: <code>watches self._handler :238</code></td><td>ложный факт F1 из ревью E2. По коду CTO строка 238 это <code>self._observer.schedule(self._handler, str(self._path.parent), …)</code>: класс следит за каталогом, а не за обработчиком. Потоки сканер не видит (<code>threads</code> пуст), хотя <code>Observer()</code> с <code>daemon=True</code> запускается на строках 236–239. Исправление входит в A3′</td></tr>
+        <tr><td>Проверка</td><td>тестов 11; на уровне модуля находки: error 0, warn 4, info 1</td><td>в тексте названы только 5 тестов из 11, остаток не показан и это не сказано. Само число 11 не проверено: CTO насчитал 10 <code>def test_</code> в <code>test_watcher.py</code></td></tr>
+        <tr><td>Состояние</td><td>ярус core (уровень модуля), описание есть</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="why">
+    <li><b>Что видно:</b> один запрос заменяет чтение файла в 254 строки и поиск по 8 файлам: назначение, сигнатура, члены, единственный вызов и тесты стоят на одной странице.</li>
+    <li><b>Что ещё не готово:</b> это прототип, формат не контракт Д1. Три системных дефекта: немые нули (0 вместо «не найдено»), немое усечение списков и продукт с тестами в одном счёте. Все три лечатся в A3′ без новых слоёв.</li>
+    <li><b>Чего прототип не видит:</b> динамические вызовы. Поэтому в паспорте нужна честная пометка «не найдено», а не «не используется».</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. Куда уходит старый план</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 684" role="img" aria-label="Судьба двенадцати частей старого плана и карточки модуля: что остаётся, что берём как правило, что откладываем, что заморожено или заменено." style="min-width:820px"><text class="hd" x="20" y="20" text-anchor="start">ЧТО БЫЛО</text>
+<text class="hd" x="398" y="20" text-anchor="middle">СУДЬБА</text>
+<text class="hd" x="512" y="20" text-anchor="start">КУДА В ИТОГЕ</text>
+<rect class="box" x="20" y="32" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="52.5" text-anchor="middle">ядро: tree, store, адаптеры кода</text>
+<text class="s" x="178.0" y="66.5" text-anchor="middle">scripts/atlas, 4 623 строки</text>
+<path class="ar" d="M336,55 L342,55" marker-end="url(#arr)"/>
+<rect class="chip keep" x="342" y="41" width="112" height="28" rx="14"/>
+<text class="chipt keep" x="398" y="59" text-anchor="middle">ОСТАЁТСЯ</text>
+<path class="ar" d="M454,55 L500,55" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="32" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="59.5" text-anchor="middle">основа сканера A1: переписано в ветке, не рядом</text>
+<rect class="box" x="20" y="86" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="106.5" text-anchor="middle">гейт CI «atlas» (1.7a)</text>
+<text class="s" x="178.0" y="120.5" text-anchor="middle">единственный живой продукт старого плана</text>
+<path class="ar" d="M336,109 L342,109" marker-end="url(#arr)"/>
+<rect class="chip keep" x="342" y="95" width="112" height="28" rx="14"/>
+<text class="chipt keep" x="398" y="113" text-anchor="middle">ОСТАЁТСЯ</text>
+<path class="ar" d="M454,109 L500,109" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="86" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="106.5" text-anchor="middle">станет atlas check; сейчас красный: нет camera_device</text>
+<text class="s" x="730.0" y="120.5" text-anchor="middle">в modules.yaml, чинить первым</text>
+<rect class="box" x="20" y="140" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="160.5" text-anchor="middle">метрика доказанности</text>
+<text class="s" x="178.0" y="174.5" text-anchor="middle">42,4 % имён с тестом; гарантии не написаны</text>
+<path class="ar" d="M336,163 L342,163" marker-end="url(#arr)"/>
+<rect class="chip keep" x="342" y="149" width="112" height="28" rx="14"/>
+<text class="chipt keep" x="398" y="167" text-anchor="middle">ИДЕЯ</text>
+<path class="ar" d="M454,163 L500,163" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="140" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="160.5" text-anchor="middle">паспорт → «Проверка» → tests, из кода по символу</text>
+<text class="s" x="730.0" y="174.5" text-anchor="middle">гарантии, инъекции, мутации не несём</text>
+<rect class="box" x="20" y="194" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="214.5" text-anchor="middle">ведомость удалений</text>
+<text class="s" x="178.0" y="228.5" text-anchor="middle">принцип «удалила больше, чем добавила»</text>
+<path class="ar" d="M336,217 L342,217" marker-end="url(#arr)"/>
+<rect class="chip keep" x="342" y="203" width="112" height="28" rx="14"/>
+<text class="chipt keep" x="398" y="221" text-anchor="middle">ПРАВИЛО</text>
+<path class="ar" d="M454,217 L500,217" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="194" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="214.5" text-anchor="middle">строка приёмки каждого слияния: git diff --shortstat</text>
+<text class="s" x="730.0" y="228.5" text-anchor="middle">старый план нарушил: +19 159 / −868 строк</text>
+<rect class="box" x="20" y="248" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="268.5" text-anchor="middle">kill-критерии, цена входа</text>
+<text class="s" x="178.0" y="282.5" text-anchor="middle">6 kill; проверка K1.1 с 10 ноября</text>
+<path class="ar" d="M336,271 L342,271" marker-end="url(#arr)"/>
+<rect class="chip keep" x="342" y="257" width="112" height="28" rx="14"/>
+<text class="chipt keep" x="398" y="275" text-anchor="middle">ПРАВИЛО</text>
+<path class="ar" d="M454,271 L500,271" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="248" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="268.5" text-anchor="middle">Kill-1 до кода, Kill-2 на стопе 1 (nav_bench)</text>
+<text class="s" x="730.0" y="282.5" text-anchor="middle">K1.1 10 ноября закрывает старый план</text>
+<rect class="box" x="20" y="302" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="322.5" text-anchor="middle">цепь commit → Task → plan → doc</text>
+<text class="s" x="178.0" y="336.5" text-anchor="middle">Refs: ~94 % коммитов, Task: 5–7 %</text>
+<path class="ar" d="M336,325 L342,325" marker-end="url(#arr)"/>
+<rect class="chip later" x="342" y="311" width="112" height="28" rx="14"/>
+<text class="chipt later" x="398" y="329" text-anchor="middle">ПОТОМ</text>
+<path class="ar" d="M454,325 L500,325" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="302" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="322.5" text-anchor="middle">паспорт → «Связи»: коммиты по пути из git log</text>
+<text class="s" x="730.0" y="336.5" text-anchor="middle">после A3′; цепь целиком не нужна</text>
+<rect class="box" x="20" y="356" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="376.5" text-anchor="middle">свежесть документа</text>
+<text class="s" x="178.0" y="390.5" text-anchor="middle">в коде 0 строк, только в ADR</text>
+<path class="ar" d="M336,379 L342,379" marker-end="url(#arr)"/>
+<rect class="chip later" x="342" y="365" width="112" height="28" rx="14"/>
+<text class="chipt later" x="398" y="383" text-anchor="middle">ПОТОМ</text>
+<path class="ar" d="M454,379 L500,379" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="356" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="383.5" text-anchor="middle">после стопа 1; считать из git, без modules.yaml</text>
+<rect class="box" x="20" y="410" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="430.5" text-anchor="middle">card, pack, brief, replay</text>
+<text class="s" x="178.0" y="444.5" text-anchor="middle">~1 300 строк кода, 3 000+ строк тестов</text>
+<path class="ar" d="M336,433 L342,433" marker-end="url(#arr)"/>
+<rect class="chip freeze" x="342" y="419" width="112" height="28" rx="14"/>
+<text class="chipt freeze" x="398" y="437" text-anchor="middle">ЗАМЕНЕНО</text>
+<path class="ar" d="M454,433 L500,433" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="410" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="430.5" text-anchor="middle">ref и map вместо card и pack; замер K0c: «не различимо»</text>
+<text class="s" x="730.0" y="444.5" text-anchor="middle">решение 10 ноября, удаление волной A2; brief FREEZE</text>
+<rect class="box" x="20" y="464" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="484.5" text-anchor="middle">modules.yaml, ведётся руками</text>
+<text class="s" x="178.0" y="498.5" text-anchor="middle">88 записей, разошлись с кодом</text>
+<path class="ar" d="M336,487 L342,487" marker-end="url(#arr)"/>
+<rect class="chip later" x="342" y="473" width="112" height="28" rx="14"/>
+<text class="chipt later" x="398" y="491" text-anchor="middle">СЖАТЬ</text>
+<path class="ar" d="M454,487 L500,487" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="464" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="484.5" text-anchor="middle">юниты по правилу «каталог с __init__.py», yaml = исключения</text>
+<text class="s" x="730.0" y="498.5" text-anchor="middle">ждёт слова владельца (Д5)</text>
+<rect class="box" x="20" y="518" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="538.5" text-anchor="middle">инъекции, мутации, 1.9e</text>
+<text class="s" x="178.0" y="552.5" text-anchor="middle">1.5b, 1.8, 1.9e: не написаны</text>
+<path class="ar" d="M336,541 L342,541" marker-end="url(#arr)"/>
+<rect class="chip freeze" x="342" y="527" width="112" height="28" rx="14"/>
+<text class="chipt freeze" x="398" y="545" text-anchor="middle">ЗАМОРОЖЕНО</text>
+<path class="ar" d="M454,541 L500,541" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="518" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="545.5" text-anchor="middle">остаются практикой процесса, не кодом атласа</text>
+<rect class="box" x="20" y="572" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="592.5" text-anchor="middle">arch_map и signboard (в ветке)</text>
+<text class="s" x="178.0" y="606.5" text-anchor="middle">+2 711 строк, третий сканер</text>
+<path class="ar" d="M336,595 L342,595" marker-end="url(#arr)"/>
+<rect class="chip kill" x="342" y="581" width="112" height="28" rx="14"/>
+<text class="chipt kill" x="398" y="599" text-anchor="middle">НЕ ВЛИВАТЬ</text>
+<path class="ar" d="M454,595 L500,595" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="572" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="592.5" text-anchor="middle">алгоритмы переезжают на факты A1; в main не попадут</text>
+<text class="s" x="730.0" y="606.5" text-anchor="middle">удаление бесплатно: в main их нет</text>
+<rect class="box" x="20" y="626" width="316" height="46" rx="6"/>
+<text class="t" x="178.0" y="646.5" text-anchor="middle">карточка модуля (2026-11-01)</text>
+<text class="s" x="178.0" y="660.5" text-anchor="middle">CommandSpec, register_from, module.info</text>
+<path class="ar" d="M336,649 L342,649" marker-end="url(#arr)"/>
+<rect class="chip own" x="342" y="635" width="112" height="28" rx="14"/>
+<text class="chipt own" x="398" y="653" text-anchor="middle">СВОЙ ПЛАН</text>
+<path class="ar" d="M454,649 L500,649" marker-end="url(#arr)"/>
+<rect class="box dest" x="500" y="626" width="460" height="46" rx="6"/>
+<text class="t2" x="730.0" y="646.5" text-anchor="middle">Ф9.7 мастер-плана (2.0); паспорт читает только объявление</text>
+<text class="s" x="730.0" y="660.5" text-anchor="middle">рантайм: только сверка на стопе 3</text></svg></div>
+    <figcaption>Берём то, что дёшево и подтверждено замером: ядро, гейт, три правила. Откладываем то, у чего нет порога или карты. Замораживаем и удаляем то, что замер K0c не подтвердил.</figcaption>
+  </figure>
+  <ul class="why">
+    <li><b>Одно мерило.</b> Остаётся то, что подтвердил nav_bench. Карточки и pack K0c не различил: 109–144k токенов против 178k, раундов не меньше.</li>
+    <li><b>Истина из кода.</b> Рукописные списки расходятся: modules.yaml стал красным через 5 дней после нового сервиса.</li>
+    <li><b>Меньше слоёв.</b> Старое ядро становится сканером A1, а не живёт рядом с ним.</li>
+    <li><b>Удалять не позже, чем добавлять.</b> Старый план добавил 19 159 строк и удалил 868.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. Карточка модуля и паспорт: один источник</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 980 300" role="img" aria-label="Один источник команд: модуль объявляет их литералами, паспорт читает объявление статически, CommandManager читает в рантайме, на стопе 3 имена сверяются с каталогом introspect.capabilities." style="min-width:820px"><rect class="box have" x="20" y="120" width="220" height="96" rx="6"/>
+<text class="t" x="130.0" y="158.5" text-anchor="middle">код модуля</text>
+<text class="s" x="130.0" y="172.5" text-anchor="middle">command_specs():</text>
+<text class="s" x="130.0" y="186.5" text-anchor="middle">литеральный список кортежей</text>
+<rect class="box dashed struck" x="20" y="24" width="220" height="60" rx="6"/>
+<text class="t" x="130.0" y="51.5" text-anchor="middle">@expose</text>
+<text class="s" x="130.0" y="65.5" text-anchor="middle">идея 2026-11-01, в коде не было</text>
+<line class="struck-line" x1="102" y1="47" x2="158" y2="47"/>
+<text class="lb" x="130" y="102" text-anchor="middle">отклонён CTO как основной путь</text>
+<rect class="box dashed accent" x="370" y="24" width="270" height="96" rx="6"/>
+<text class="t" x="505.0" y="62.5" text-anchor="middle">паспорт атласа</text>
+<text class="s" x="505.0" y="76.5" text-anchor="middle">читает AST, код не запускает</text>
+<text class="s" x="505.0" y="90.5" text-anchor="middle">runtime.commands: где, как = declared</text>
+<rect class="box dashed" x="370" y="190" width="270" height="96" rx="6"/>
+<text class="t" x="505.0" y="228.5" text-anchor="middle">CommandManager.register_from</text>
+<text class="s" x="505.0" y="242.5" text-anchor="middle">рантайм: владелец вызывает</text>
+<text class="s" x="505.0" y="256.5" text-anchor="middle">после своего initialize()</text>
+<rect class="box have" x="720" y="200" width="240" height="76" rx="6"/>
+<text class="t" x="840.0" y="228.5" text-anchor="middle">introspect.capabilities</text>
+<text class="s" x="840.0" y="242.5" text-anchor="middle">каталог живого процесса</text>
+<text class="s" x="840.0" y="256.5" text-anchor="middle">есть в main, под тестами</text>
+<path class="ar" d="M240,150 L305,150 L305,72 L370,72" marker-end="url(#arr)"/>
+<text class="lb" x="312" y="112" text-anchor="start">читает</text>
+<path class="ar" d="M240,190 L305,190 L305,238 L370,238" marker-end="url(#arr)"/>
+<text class="lb" x="312" y="214" text-anchor="start">регистрирует</text>
+<path class="ar" d="M640,238 L720,238" marker-end="url(#arr)"/>
+<path class="ar dash" d="M640,72 L840,72 L840,200" marker-end="url(#arr)"/>
+<text class="lb" x="846" y="140" text-anchor="start">сверка на стопе 3:</text>
+<text class="lb" x="846" y="154" text-anchor="start">статические имена ⊆ каталога</text>
+<rect class="box note" x="680" y="6" width="280" height="30" rx="6"/>
+<text class="s" x="820.0" y="25.5" text-anchor="middle">в паспорт не идёт: get_stats, registers</text>
+<text class="s" x="130" y="238" text-anchor="middle">на main сегодня: 0 вхождений; план Ф9.7, PENDING</text></svg></div>
+    <figcaption>Команды объявляются один раз, в коде модуля. Паспорт читает объявление без запуска, рантайм читает его же. Второго реестра нет, пока паспорт не хранит рантайм. Его держат три правила: атлас не импортирует framework, у каждой записи есть файл и строка, на стопе 3 расхождение с каталогом считается находкой, а не записью.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>9. Порядок работ и два условия остановки</h2>
+  <figure>
+    <div class="scroll"><svg viewBox="0 0 1180 290" role="img" aria-label="Порядок работ: сначала отсчёт без атласа, затем A1, опыт 0b и A3′; два Kill-условия отправляют в минимальный план, иначе открывается остальное." style="min-width:980px"><rect class="box" x="10" y="56" width="120" height="84" rx="6"/>
+<text class="t" x="70.0" y="81.5" text-anchor="middle">0 · гигиена</text>
+<text class="s" x="70.0" y="95.5" text-anchor="middle">camera_device</text>
+<text class="s" x="70.0" y="109.5" text-anchor="middle">в modules.yaml,</text>
+<text class="s" x="70.0" y="123.5" text-anchor="middle">CI зелёный</text>
+<rect class="box" x="148" y="56" width="120" height="84" rx="6"/>
+<text class="t" x="208.0" y="81.5" text-anchor="middle">1 · отсчёт</text>
+<text class="s" x="208.0" y="95.5" text-anchor="middle">grep-read × 3,</text>
+<text class="s" x="208.0" y="109.5" text-anchor="middle">~255k токенов</text>
+<text class="s" x="208.0" y="123.5" text-anchor="middle">Haiku</text>
+<polygon class="dia" points="330,98 366,62 402,98 366,134"/>
+<text class="t" x="366" y="102" text-anchor="middle">Kill-1</text>
+<rect class="box have" x="420" y="56" width="120" height="84" rx="6"/>
+<text class="t" x="480.0" y="81.5" text-anchor="middle">2 · A1</text>
+<text class="s" x="480.0" y="95.5" text-anchor="middle">инъекции I1–I22,</text>
+<text class="s" x="480.0" y="109.5" text-anchor="middle">ревью, влить</text>
+<text class="s" x="480.0" y="123.5" text-anchor="middle">A1 + nav_bench</text>
+<rect class="box" x="558" y="56" width="120" height="84" rx="6"/>
+<text class="t" x="618.0" y="88.5" text-anchor="middle">3 · опыт 0b</text>
+<text class="s" x="618.0" y="102.5" text-anchor="middle">3 + 3 прогона,</text>
+<text class="s" x="618.0" y="116.5" text-anchor="middle">порог 6 из 10</text>
+<rect class="box dashed accent" x="696" y="56" width="120" height="84" rx="6"/>
+<text class="t" x="756.0" y="88.5" text-anchor="middle">4 · A3′</text>
+<text class="s" x="756.0" y="102.5" text-anchor="middle">passport.py,</text>
+<text class="s" x="756.0" y="116.5" text-anchor="middle">links.py</text>
+<polygon class="dia" points="840,98 876,62 912,98 876,134"/>
+<text class="t" x="876" y="102" text-anchor="middle">Kill-2</text>
+<rect class="box dashed" x="940" y="30" width="232" height="136" rx="6"/>
+<text class="t" x="1056.0" y="67.5" text-anchor="middle">5 · после стопа 1</text>
+<text class="s" x="1056.0" y="81.5" text-anchor="middle">B2′ страница-карта</text>
+<text class="s" x="1056.0" y="95.5" text-anchor="middle">стоп 2: 3 дома владельцу</text>
+<text class="s" x="1056.0" y="109.5" text-anchor="middle">B1 находки атласа в гейт</text>
+<text class="s" x="1056.0" y="123.5" text-anchor="middle">A2 без grimp и checkout</text>
+<text class="s" x="1056.0" y="137.5" text-anchor="middle">дороги, стоп 3, route и find</text>
+<path class="ar" d="M130,98 L148,98" marker-end="url(#arr)"/>
+<path class="ar" d="M268,98 L330,98" marker-end="url(#arr)"/>
+<path class="ar" d="M402,98 L420,98" marker-end="url(#arr)"/>
+<text class="lb" x="411" y="90" text-anchor="middle">да</text>
+<path class="ar" d="M540,98 L558,98" marker-end="url(#arr)"/>
+<path class="ar" d="M678,98 L696,98" marker-end="url(#arr)"/>
+<path class="ar" d="M816,98 L840,98" marker-end="url(#arr)"/>
+<path class="ar" d="M912,98 L940,98" marker-end="url(#arr)"/>
+<text class="lb" x="926" y="90" text-anchor="middle">да</text>
+<rect class="box killbox" x="330" y="214" width="582" height="56" rx="6"/>
+<text class="t" x="621.0" y="239.5" text-anchor="middle">если сработал любой Kill: остаётся A1 + atlas check + ref в JSON</text>
+<text class="s" x="621.0" y="253.5" text-anchor="middle">паспорта всех уровней, страница-карта и route не строим</text>
+<path class="ar" d="M366,134 L366,214" marker-end="url(#arr)"/>
+<text class="s" x="374" y="180" text-anchor="start">медиана grep ≤ 10 вызовов при ≥ 8/10</text>
+<path class="ar" d="M876,134 L876,214" marker-end="url(#arr)"/>
+<text class="s" x="868" y="180" text-anchor="end">любое отношение к отсчёту не выполнено</text>
+<rect class="box dashed" x="10" y="214" width="290" height="56" rx="6"/>
+<text class="t" x="155.0" y="239.5" text-anchor="middle">10 ноября: K1.1</text>
+<text class="s" x="155.0" y="253.5" text-anchor="middle">закрывает старый план; удаление волной A2</text>
+<text class="s" x="10" y="40" text-anchor="start">стоп C1: найдено ≥ 8 из 10, ложных ≤ 1, вызовов ≤ 0,5 и токенов ≤ 0,6 от отсчёта (nav_bench)</text></svg></div>
+    <figcaption>Замер без атласа идёт первым и сам служит условием остановки: если grep уже справляется, большая часть плана не нужна. Второе условие стоит после A3′. До него страница-карта, находки в гейте и маршруты не начинаются. Находки атласа идут в один гейт, вердикт о границах слоёв остаётся за sentrux.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>10. Что улучшим по итогам примера</h2>
+  <p>Пример на ConfigFileWatcher показал три системных дефекта формы. Все лечатся в A3′ без новых слоёв. Идеи сверх этого живут только если дают попадание в nav_bench.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Правка или идея</th><th>Что даёт</th><th>Когда</th></tr></thead>
+      <tbody>
+        <tr><td>Честное «не найдено»</td><td>счётчик печатает «найдено N, не видно: динамика»; 0 значит «искали и нет»</td><td>A3′</td></tr>
+        <tr><td>Продукт против теста</td><td>у каждой связи поле <code>scope</code>: «из продукта 1, из тестов 29»</td><td>A3′, поправка Д1</td></tr>
+        <tr><td>Усечение видно</td><td>«показано 5 из 11», срез по рангу, а не по порядку файла</td><td>A3′</td></tr>
+        <tr><td>Где работает</td><td>потоки по образцам <code>Thread(</code>, <code>Observer()</code>, <code>daemon</code>; процесс через цепочку создателей</td><td>потоки A3′, процессы шаг 7</td></tr>
+        <tr><td>Зачем в системе</td><td>к докстрингу добавляется «зовут из: функция и её первый абзац»</td><td>A3′</td></tr>
+        <tr><td>Бюджет токенов и ранжирование</td><td>приём Aider: <code>ref</code> по умолчанию до 40 строк по важности, <code>--full</code> по запросу</td><td>A3′, замер на C1</td></tr>
+        <tr><td>Горячее место (churn, co-change)</td><td>«тронут N раз за 30 дней» и файлы, меняющиеся вместе</td><td>после стопа 1</td></tr>
+        <tr><td><code>atlas diff</code> для владельца</td><td>«что изменилось между двумя ревизиями» из тех же фактов</td><td>после стопа 2</td></tr>
+        <tr><td>Подсказка перед чтением файла</td><td>одна строка паспорта перед открытием файла; идея без замера</td><td>после стопа 1</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Ещё идеи, пока вне плана</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Идея</th><th>Откуда</th><th>Что даёт</th><th>Проверка и шаг</th></tr></thead>
+      <tbody>
+        <tr><td><code>atlas why &lt;символ&gt;</code></td><td>CTO</td><td>цепочка создателей до точки входа процесса: ответ «зачем и где работает» без чтения файлов</td><td>вопрос Q-a в nav_bench; после шага 7 (дороги)</td></tr>
+        <tr><td>Модуль одним экраном</td><td>CTO</td><td><code>map &lt;юнит&gt; --depth 1 --budget 1500</code>, новой команды нет</td><td>стоп C1; A3′</td></tr>
+        <tr><td>Класс наследует строки модуля</td><td>CTO</td><td>у класса появляются витрина <code>__all__</code> и правило слоя, сегодня их нет</td><td>A3′</td></tr>
+        <tr><td>Имена вместо счётчиков у модуля</td><td>CTO</td><td>«использую 3» по именам; находки warn 4 с файлом и строкой; «рецепты: не найдено, просмотрено N YAML»</td><td>A3′, низкий приоритет</td></tr>
+        <tr><td>Покрытие тестами при выполнении</td><td>code-graph-rag: <a href="https://github.com/vitali87/code-graph-rag">github.com/vitali87/code-graph-rag</a></td><td>«тестов 11 статически, исполнено 9» и строки без теста</td><td>только если C1 упадёт на разделе «Проверка»; задача CI</td></tr>
+        <tr><td>Строковые id символов <code>путь::имя</code></td><td>SCIP (Sourcegraph)</td><td>стабильные ссылки между видами и ревизиями</td><td>уже в Д1; отдельного замера нет</td></tr>
+        <tr><td>Форма каталога команд по образцу MCP <code>tools/list</code></td><td><a href="https://modelcontextprotocol.io/specification/2025-06-18/server/tools">спецификация MCP</a></td><td>схема параметров и аннотации (<code>access</code>, <code>idempotent</code>, <code>owner</code>) в одном формате</td><td>Ф9.2; MCP-сервер атласа не строим</td></tr>
+        <tr><td>Ссылка на термин вместо словаря</td><td>CTO</td><td>паспорт ссылается на якорь в <code>ROUTING_GLOSSARY.md</code>, второй каталог не нужен</td><td>после стопа 1; без замера</td></tr>
+        <tr><td>Определения и ссылки как два вида записей</td><td>tree-sitter tags: <a href="https://tree-sitter.github.io/tree-sitter/4-code-navigation.html">tree-sitter.github.io</a></td><td>образец структуры фактов; зависимость не берём, хватает <code>ast</code></td><td>идея уже заложена в Д2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Новые вопросы для nav_bench: «в каком потоке и из какого места создаётся ConfigFileWatcher», «какие файлы менялись вместе с watcher.py за 30 дней», для владельца «что изменилось в config_module между двумя ревизиями». Не делаем: MCP-сервер атласа, LLM-пересказы модулей, эмбеддинги внутри атласа, tree-sitter, автоправку modules.yaml, «поток данных» как ребро.</p>
+</section>
+
+<section>
+  <h2>11. Что нужно решить вам</h2>
+  <p><b>Что вы увидите и когда.</b> Страница-карта появится только после стопа 1. До него видны замер без атласа (шаг 1), результат A1 с инъекциями и опыт 0b. От вас нужны сейчас два действия: <code>uv sync --inexact</code> и слово по правилу модулей. Следующая развилка идёт после замера без атласа (Kill-1). Цен на A3′, B2′, B1 и A2 нет ни в одном документе.</p>
+  <ol class="ask">
+    <li><b>Модули по правилу.</b> Выводить модули правилом «каталог с __init__.py», а modules.yaml сжать до исключений. Рекомендация: да, гейт красен через 5 дней после нового сервиса.</li>
+    <li><b>Срок 10 ноября.</b> Снять срок с 1.9e, 1.6d и 1.10c: K1.1 закрывает старый план. Рекомендация: да.</li>
+    <li><b>Удаление.</b> Заморозить шапкой card, pack, brief, lint_brief, replay, metrics, arch_map, ast_graph, graph_slice и ручные карты, удалять волной A2 только с <code>git diff --shortstat</code>. Рекомендация: да.</li>
+    <li><b>Память.</b> memory-rules остаётся замороженным, в атлас идёт только счётчик уроков после стопа 1. Рекомендация: да, без кода.</li>
+    <li><b>Каталог команд.</b> Владелец — process_module (Ф9.2 и Ф9.7), backend_ctl клиент, GUI-каталог прототипа убирает gui-service 1b.2b. Рекомендация: да.</li>
+  </ol>
+</section>
+
+<div class="foot">
+  <h2>Что осталось открытым</h2>
+  <ul>
+    <li>nav_bench живьём ни разу не запускался; пороги и граница «≤ 10 вызовов» выбраны суждением, разброс не измерен.</li>
+    <li>Ветку смотрели по origin. Раунд 2 E1 и отчёт A1 могут лежать только в рабочей копии на Windows.</li>
+    <li>Цен на A3′, B2′, B1 и A2 нет ни в одном документе.</li>
+    <li>Статус CI на GitHub не проверен: по триггерам job atlas на main красен с 2026-11-01.</li>
+  </ul>
+</div>
+</main>
+
+</body></html>
