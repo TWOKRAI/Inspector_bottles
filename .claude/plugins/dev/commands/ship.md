@@ -143,6 +143,14 @@ If the plan is found and every Task = [DONE] (the remainder is only backlog / a 
    Task = [DONE]" check (a task marked `[SKIPPED]`/`[CANCELLED]` doesn't block this).
    `plans_ledger.py close` writes `SUMMARY.md` into the plan directory before the move;
    a new session reads an archived plan through its `SUMMARY.md` only.
+
+   A layout-v2 plan with `contract.lock` also needs a section with the exact heading line
+   `## Итог` and text in `plan.md` (≤ 2560 bytes of text): without it, or over the limit, <!-- lint-language: allow -->
+   `close` exits 2 with `CLOSED_WITHOUT_SUMMARY`, and `--force` does not waive it — write the section and run
+   `close` again; an abandoned plan is closed with an Итог that says ОТМЕНЁН. A plan closed without a <!-- lint-language: allow -->
+   fired kill (the plan's stop criterion: abandoned or frozen early) needs the owner's explicit written
+   word: put its date and quote into the Итог of `plan.md`, which `SUMMARY.md` copies for the next session <!-- lint-language: allow -->
+   (a single-file plan — next to its `Status` line).
 3. **Refresh, then check the ledger:** `python3 scripts/plans_ledger.py add <plan-dir-or-file relative to plans/>`, then `python3 scripts/plans_ledger.py status` — no findings for the closed plan
    (show other `WARN`s to the owner, but don't fix them silently).
 4. **Progress check (plans_progress):** if `scripts/plans_progress/plans_progress.py` exists and `plans/queue/progress-baseline.txt` exists,

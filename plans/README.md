@@ -14,7 +14,7 @@ Manager (`/dev:plan <task>`) creates one plan per non-trivial task. **Дата I
 
 1. **`/dev:plan <task>`** → Manager writes plan file (или папку layout v2), creates branch `<type>/<slug>` (`feat`/`fix`/`refactor`/`docs`) **и регистрирует план строкой в ledger «Активные» ниже** (`python3 scripts/plans_ledger.py add <plan>`).
 2. **`/dev:implement Task X.Y`** → Developer implements the task, commits с `Refs: plans/YYYY-MM-DD_<slug>.md` (для layout v2 — `.../plan.md`; `phase-N.md` только у legacy multi-phase) trailer, flips status `[PENDING]` → `[DONE]`.
-3. **`/dev:ship`** → verifies `Refs:` trailers on the branch; когда все задачи `[DONE]` → закрывает план (`Status: DONE`) **и архивирует его (archive-on-done): `python3 scripts/plans_ledger.py close <plan>` — `git mv` в `_archive/<YYYY-Qn>/` + перенос строки в «Архив»**.
+3. **`/dev:ship`** → verifies `Refs:` trailers on the branch; когда все задачи `[DONE]` → закрывает план (`Status: DONE`) **и архивирует его (archive-on-done): `python3 scripts/plans_ledger.py close <plan>` — `git mv` в `_archive/<YYYY-Qn>/` + перенос строки в «Архив»**. У плана layout v2 с `contract.lock` `close` требует раздел `## Итог` в `plan.md` (строка заголовка ровно такая): без него или при превышении предела (2560 байт) — отказ с кодом 2 и `CLOSED_WITHOUT_SUMMARY`, `--force` не снимает; план, закрытый без сработавшего kill (критерий остановки плана: брошен или заморожен досрочно), закрывается только явной записью владельца: дата и цитата — в `## Итог` плана (его копирует `SUMMARY.md`), у однофайлового плана — рядом со строкой `Status`.
 4. **`/dev:plan-status`** → `python3 scripts/plans_ledger.py status` — обзор всех планов без перечитывания + progress bar для плана текущей ветки.
 
 ## Layout v2
