@@ -326,3 +326,22 @@ def test_empty_threads_caveat_comes_from_constant(repo: GitRepo, monkeypatch) ->
     lines = _text_lines(p)
     assert "threads: — (ищет: FakeThread)" in lines
     assert THREADS_NOTE not in lines
+
+
+def test_method_by_name_receiver_forms_class_name_and_dotted(repo: GitRepo) -> None:
+    """4.5b п. 3 (ревью r1, замечание 4): получатель — имя класса (`Step.run_x(obj)`) и составной (`a.b.run_x()`) —
+    оба идут в `call_sites_by_name`: условие — «получатель не None и не `self`», а не набор простых имён."""
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/step.py": _STEP,
+        "pkg/forms.py": "from pkg.step import Step\n\n\ndef use(obj, a):\n    Step.run_x(obj)\n    a.b.run_x()\n",
+    }
+    _commit(repo, files)
+    p = _build(repo, STEP)
+    assert p["links"]["call_sites_unresolved"] == 2
+    got = p["links"]["call_sites_by_name"]
+    assert got["count"] == 2
+    assert [(e["where"], e["how"], e["enclosing"]) for e in got["items"]] == [
+        ("pkg/forms.py:5", "by-name", "use"),
+        ("pkg/forms.py:6", "by-name", "use"),
+    ]
