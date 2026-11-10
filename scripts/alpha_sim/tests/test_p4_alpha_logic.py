@@ -342,7 +342,6 @@ _BREAKS = [
     pytest.param(_jobf(0, "res_errno", 3), ("row", 1, "res_errno"), id="res_errno_job1"),
     pytest.param(_arg(0, 2, 4700), ("row", 1, "ARGS[2]"), id="args2_job1"),
     pytest.param(_sub(0, "взять(458.2,-343.0)", "взять(458.2,-350.0)"), ("row", 1, "pick"), id="pick_line1"),
-    pytest.param(_feed(2, ("Е", 31.0)), ("row", 3, "feed"), id="feed_angle_disk3"),
     pytest.param(_feed(2, ("И", 30.0)), ("row", 3, "feed"), id="feed_letter_disk3"),
     pytest.param(_sub(3, "→ ячейка 5:", "→ ячейка 4:"), ("row", 4, "cell"), id="cell_line4"),
     pytest.param(_sub(3, "[3/9]", "[4/9]"), ("row", 4, "progress"), id="progress_line4"),
@@ -390,14 +389,17 @@ def test_case_b_word_line_after_first_disk_fails() -> None:
     assert any(c.check == "word_line" and not c.ok for c in res.checks)
 
 
-def test_case_b_feed_boundary_half_degree() -> None:
-    # |угол − подача| > 0,5 — FAIL; ровно 0,5 и меньше — PASS (обе стороны границы)
-    for feed_angle, expect_ok in [(30.4, True), (30.5, True), (30.6, False)]:
+def test_case_b_feed_checks_letter_only_not_angle() -> None:
+    # решение лида после стенда: угол сети читается с шумом (до ±12°) — feed судит только БУКВУ;
+    # угол держат окна r и ARGS[9]. Подача с углом дальше 0,5° от сети — PASS, Δ выводится в observed.
+    for feed_angle, delta in [(30.4, None), (30.6, "-0.6"), (33.0, "-3.0"), (27.0, "+3.0")]:
         inp = _b_inputs()
         _feed(2, ("Е", feed_angle))(inp)
         res = _judge("B", inp)
-        assert res.rows[2].ok is expect_ok, feed_angle
-        assert res.ok is expect_ok, feed_angle
+        assert res.rows[2].ok is True, feed_angle
+        assert res.ok is True, feed_angle
+        if delta is not None:
+            assert f"Δугла {delta}°" in res.rows[2].observed, res.rows[2].observed
 
 
 _EDGES = [

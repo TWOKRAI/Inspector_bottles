@@ -204,7 +204,6 @@ _PLACE_Z = -132.0
 _PICK_X = (454.9, 461.5)
 _PICK_Y = (-344.0, -342.0)
 _R_TOL = 5.0
-_FEED_TOL = 0.5
 _FIXED_ARGS = {4: 64216, 5: 3, 6: 3200, 8: 64216}
 _A2 = (4549, 4615)
 _A3 = (62096, 62116)
@@ -302,6 +301,7 @@ class CaseResult:
     rows: tuple[Row, ...]
     checks: tuple[Row, ...]
     ok: bool
+    pairs: tuple[tuple[str, float, float], ...] = ()  # (буква, подача, сеть) только у дисков с совпавшей буквой
 
 
 def _given(letter: str, angle: float) -> str:
@@ -327,7 +327,8 @@ def _judge_line(e: Expect, line: DiskLine, feed: tuple[str, float] | None) -> li
         why.extend(_judge_taken(e, line))
     if feed is not None:
         f_letter, f_angle = feed
-        if f_letter != line.letter or abs(wrap180(line.angle - f_angle)) > _FEED_TOL + _EPS:
+        # только буква: угол сети читается с шумом, его держат окна r и ARGS[9]; Δ выводится в observed
+        if f_letter != line.letter:
             why.append(f"feed подано {_given(f_letter, f_angle)}, сеть {_given(line.letter, line.angle)}")
     return why
 
@@ -413,6 +414,31 @@ def _judge_regs(case: Case, regs: dict, before: int) -> list[Row]:
     return rows
 
 
+def _align(feed_letters: list[str], line_letters: list[str]) -> list[tuple[int | None, int | None]]:
+    """Выравнивание подачи и строк по буквам: пары (номер подачи, номер строки); ``None`` — нет строки/лишняя."""
+    pairs: list[tuple[int | None, int | None]] = []
+    i = j = 0
+    nf, nl = len(feed_letters), len(line_letters)
+    while i < nf and j < nl:
+        if feed_letters[i] == line_letters[j]:
+            pairs.append((i, j))
+            i += 1
+            j += 1
+        elif line_letters[j] in feed_letters[i + 1 :]:
+            pairs.append((i, None))  # буква строки — у более поздней подачи: у диска i строки нет
+            i += 1
+        elif nl - j > nf - i:
+            pairs.append((None, j))  # строк больше, чем подач, и буквы нет в подаче: лишняя строка
+            j += 1
+        else:
+            pairs.append((i, j))  # та же позиция, буква прочитана иначе (FAIL letter/feed)
+            i += 1
+            j += 1
+    pairs.extend((k, None) for k in range(i, nf))
+    pairs.extend((None, k) for k in range(j, nl))
+    return pairs
+
+
 def judge_case(
     case_id: str,
     lines: list[str],
@@ -437,27 +463,46 @@ def judge_case(
             word_msg, word_pos = msg, pos
 
     n_exp = len(case.expects)
+    use_feed = feed is not None and len(feed) == n_exp
+    if use_feed and len(disks) != n_exp:
+        assert feed is not None
+        pairs = _align([f[0] for f in feed], [ln.letter for _, ln in disks])
+    else:  # без подачи или при равном числе строк — по позиции
+        pairs = [(i if i < n_exp else None, i if i < len(disks) else None) for i in range(max(len(disks), n_exp))]
     rows: list[Row] = []
+    angle_pairs: list[tuple[str, float, float]] = []
     taken_seen = 0
-    for i in range(max(len(disks), n_exp)):
-        e = case.expects[i] if i < n_exp else None
-        if i >= len(disks):
-            assert e is not None
-            rows.append(Row(i + 1, "disk", _given(e.letter, e.angle), "нет строки", False, ("нет строки",)))
+    extra = 0
+    for fi, di in pairs:
+        if di is None:
+            assert fi is not None
+            e = case.expects[fi]
+            given = _given(e.letter, e.angle)
+            why = (f"нет строки у диска №{fi + 1} (вход {given})",)
+            rows.append(Row(fi + 1, "disk", given, "нет строки", False, why))
             continue
-        msg, line = disks[i]
+        msg, line = disks[di]
         observed = msg[len(_PREFIX) :] if msg.startswith(_PREFIX) else msg
-        if e is None:
-            rows.append(Row(i + 1, "disk", _given(line.letter, line.angle), observed, False, ("лишняя строка",)))
+        if fi is None:
+            extra += 1
+            given = _given(line.letter, line.angle)
+            rows.append(Row(n_exp + extra, "disk", given, observed, False, ("лишняя строка",)))
             continue
-        why = _judge_line(e, line, feed[i] if feed is not None and i < len(feed) else None)
+        e = case.expects[fi]
+        fed = feed[fi] if feed is not None and fi < len(feed) else None
+        why_list = _judge_line(e, line, fed)
+        if fed is not None and round(wrap180(line.angle - fed[1]), 1) != 0.0:
+            observed += f" | Δугла {wrap180(line.angle - fed[1]):+.1f}°"
         if line.skip is None:
             if jobs is not None:
                 job = jobs[taken_seen] if taken_seen < len(jobs) else None
-                why.extend(_judge_job(e, job) if e.skip is None else [])
+                why_list.extend(_judge_job(e, job) if e.skip is None else [])
                 observed += _job_suffix(job)
             taken_seen += 1
-        rows.append(Row(i + 1, "disk", _given(e.letter, e.angle), observed, not why, tuple(why)))
+        rows.append(Row(fi + 1, "disk", _given(e.letter, e.angle), observed, not why_list, tuple(why_list)))
+        fed_letter, fed_angle = fed if fed is not None else (e.letter, e.angle)
+        if line.letter == fed_letter:
+            angle_pairs.append((line.letter, fed_angle, line.angle))
 
     checks: list[Row] = []
     word_reasons: list[str] = []
@@ -477,7 +522,7 @@ def judge_case(
     if regs is not None:
         checks.extend(_judge_regs(case, regs, jobs_emitted_before))
     ok = all(r.ok for r in rows) and all(c.ok for c in checks)
-    return CaseResult(case_id, tuple(rows), tuple(checks), ok)
+    return CaseResult(case_id, tuple(rows), tuple(checks), ok, tuple(angle_pairs))
 
 
 def judge_journal(case_id: str, lines: list[str]) -> CaseResult:
@@ -502,6 +547,8 @@ class AngleReport:
     rows: tuple[AngleRow, ...]
     verdict: str  # "совпала" | "инвертирована" | "иное" | "не определить" | "не измерено"
     median_delta: float | None
+    n_used: int = 0  # дисков в расчёте (подача не 0°/180°)
+    max_abs_delta: float | None = None  # max |Δ| по дискам в расчёте
 
 
 def angle_report(pairs: list[tuple[str, float, float]]) -> AngleReport:
@@ -518,7 +565,13 @@ def angle_report(pairs: list[tuple[str, float, float]]) -> AngleReport:
         verdict = "инвертирована"
     else:
         verdict = "иное"
-    return AngleReport(rows, verdict, statistics.median(r.delta for r in informative))
+    return AngleReport(
+        rows,
+        verdict,
+        statistics.median(r.delta for r in informative),
+        len(informative),
+        max(abs(r.delta) for r in informative),
+    )
 
 
 # --- Дом, стоп, остановка ---------------------------------------------------------------------------------------------

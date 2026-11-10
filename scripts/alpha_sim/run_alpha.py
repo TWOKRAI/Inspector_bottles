@@ -560,7 +560,7 @@ class _Alpha:
     ) -> None:
         checks = (*result.checks, *extra)
         ok = result.ok and not extra
-        result = L.CaseResult(cid, result.rows, checks, ok)
+        result = L.CaseResult(cid, result.rows, checks, ok, result.pairs)
         word = [c for c in checks if c.check == "word_line"]
         for row in word:
             self.emit(L.format_row(cid, row))
@@ -572,11 +572,7 @@ class _Alpha:
         self.emit(f"{cid} INFO state processes.layout.state.word_layout: {snap}")
         if feed is None:
             self.emit(f"{cid} подача: sim.objects не дал полный список — углы по списку")
-        # пары для блока углов: (буква, подача, сеть)
-        lines = [ln for ln in (L.parse_layout_line(m) for m in msgs) if ln is not None]
-        for i, line in enumerate(lines[: len(case.discs)]):
-            fed = feed[i][1] if feed is not None else case.discs[i][1]
-            self.angle_pairs.append((line.letter, fed, line.angle))
+        self.angle_pairs.extend(result.pairs)  # пары блока углов: только диски с совпавшей буквой
         self.statuses[cid] = "PASS" if ok else "FAIL"
         self.results.append(result)
         self.emit(f"{cid} случай: {self.statuses[cid]}")
@@ -678,8 +674,13 @@ class _Alpha:
 
     def angle_block(self) -> None:
         report = L.angle_report(self.angle_pairs)
-        median = f", медиана Δ {report.median_delta:+.1f}°" if report.median_delta is not None else ""
-        self.emit(f"углы: {report.verdict}{median}{self.angle_note}")
+        stats = ""
+        if report.median_delta is not None and report.max_abs_delta is not None:
+            stats = (
+                f" (в расчёте {report.n_used} из {len(report.rows)} дисков: "
+                f"медиана Δ {report.median_delta:+.1f}°, макс |Δ| {report.max_abs_delta:.1f}°)"
+            )
+        self.emit(f"углы: {report.verdict}{stats}{self.angle_note}")
         for i, row in enumerate(report.rows, 1):
             self.emit(
                 f"углы #{i} {row.letter}: подача {row.fed:.1f}° сеть {row.net:.1f}° "

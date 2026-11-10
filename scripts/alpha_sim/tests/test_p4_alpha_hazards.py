@@ -12,8 +12,12 @@ import io
 import math
 import threading
 
+import pytest
+
 from scripts.alpha_sim import logic as L
 from scripts.alpha_sim import run_alpha as RA
+from scripts.alpha_sim.tests import fixture_p4_stand_dump as F
+from scripts.alpha_sim.tests import test_p4_alpha_logic as TL
 from scripts.alpha_sim.tests import test_p4_alpha_runner as T
 
 
@@ -422,3 +426,114 @@ def test_g10_pair_plain_process_does_not_climb(monkeypatch) -> None:
     _fake_tools(monkeypatch, {100: (90, "/x/Python apps/line_sim/run.py"), 90: (1, "/bin/zsh -l")})
     info = _within(lambda: RA.lsof_listeners(8766), 5.0)
     assert info.command == "/x/Python apps/line_sim/run.py"
+
+
+# --- Г11: правки судьи по итогам стенда (feed — буква, выравнивание по буквам, углы по сопоставленным) -------------
+
+
+def _d_missing_m() -> dict:
+    """Случай D: подано П, М, Е, И, Р; сеть не дала строки для М 30° (строки П, Е, И, Р, задания И, Р)."""
+    inp = TL._d_inputs()
+    del inp["lines"][1]
+    del inp["jobs"][0]
+    return inp
+
+
+def test_g11a_feed_angle_noise_passes_but_wrong_letter_fails() -> None:
+    inp = TL._b_inputs()
+    TL._sub(2, "диск 'Е' 30.0°", "диск 'Е' 33.0°")(inp)  # сеть +3° от подачи
+    TL._sub(2, "r-30.0°", "r-33.0°")(inp)  # r в окне −30 ± 5
+    res = TL._judge("B", inp)
+    assert res.ok is True, [r for r in res.rows if not r.ok]
+    assert "Δугла +3.0°" in res.rows[2].observed
+    # пара: подана другая буква — FAIL feed именно этой строки
+    bad = TL._b_inputs()
+    TL._feed(2, ("И", 30.0))(bad)
+    res_bad = TL._judge("B", bad)
+    assert [r.index for r in res_bad.rows if not r.ok] == [3]
+    assert TL._has_reason(res_bad.rows[2], "feed")
+
+
+def test_g11b_missing_line_aligns_by_letters() -> None:
+    res = TL._judge("D", _d_missing_m())
+    failed = [r for r in res.rows if not r.ok]
+    assert [r.index for r in failed] == [2]  # ровно один FAIL — у М 30,0°
+    assert failed[0].reasons == ("нет строки у диска №2 (вход М 30.0°)",)
+    assert [r.index for r in res.rows] == [1, 2, 3, 4, 5]
+    assert next(c for c in res.checks if c.check == "lines.count").ok is False
+    # лишняя строка (буквы нет в подаче) — одна FAIL «лишняя строка», остальные сопоставлены
+    extra = TL._b_inputs()
+    extra["lines"].insert(3, TL._msg("Щ", 12.0, TL._skip("нет в слове 'ПЕРЕМИРИЕ'")))
+    res_x = TL._judge("B", extra)
+    assert [(r.index, r.reasons) for r in res_x.rows if not r.ok] == [(13, ("лишняя строка",))]
+    # пара: все пять строк D — как раньше, всё PASS
+    assert TL._judge("D", TL._d_inputs()).ok is True
+
+
+def test_g11c_angle_pairs_only_matched_letters_and_stats() -> None:
+    res = TL._judge("D", _d_missing_m())
+    assert res.pairs == (("П", 0.0, 0.0), ("Е", 0.0, 0.0), ("И", 90.0, 90.0), ("Р", 300.0, 300.0))
+    wrong = TL._b_inputs()
+    TL._sub(3, "диск 'И'", "диск 'Й'")(wrong)  # буква сети ≠ подаче: диск в конвенцию не входит
+    pairs = TL._judge("B", wrong).pairs
+    assert len(pairs) == 11 and ("И", 60.0, 60.0) not in pairs
+    rep = L.angle_report([("Е", 30, 30.4), ("И", 60, 59.0), ("Р", 300, 301.0), ("Р", 0, 5.0)])
+    assert (len(rep.rows), rep.n_used) == (4, 3)  # диск с подачей 0° в расчёте не участвует
+    assert rep.median_delta == pytest.approx(0.4)
+    assert rep.max_abs_delta == pytest.approx(1.0)
+
+
+def _judge_fixture(case_id: str, before: int):
+    jobs = [L.CvtJob(a, ac, rs, er) for a, ac, rs, er in getattr(F, f"{case_id}_JOBS")]
+    return L.judge_case(
+        case_id,
+        getattr(F, f"{case_id}_LAYOUT"),
+        jobs,
+        getattr(F, f"{case_id}_REGS"),
+        getattr(F, f"{case_id}_FEED"),
+        before,
+    )
+
+
+def _keys(reasons: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(r.split(" ", 1)[0] for r in reasons)
+
+
+def test_g11d_real_stand_dump_b_and_d() -> None:
+    # B: те же FAIL по окнам, что в alpha_run2.out (литералы со стенда), без «feed подано … сеть …» по углам
+    res_b = _judge_fixture("B", 0)
+    got = {r.index: _keys(r.reasons) for r in res_b.rows if not r.ok}
+    assert got == {
+        3: ("pick", "ARGS[3]"),
+        4: ("pick", "ARGS[3]"),
+        5: ("pick", "ARGS[3]"),
+        7: ("r", "ARGS[9]"),
+        8: ("pick", "r", "ARGS[3]", "ARGS[9]"),
+        9: ("pick", "ARGS[3]"),
+        11: ("pick", "r", "ARGS[2]", "ARGS[3]", "ARGS[9]"),
+        12: ("pick", "r", "ARGS[3]", "ARGS[9]"),
+    }
+    assert not any("feed" in reason for r in res_b.rows for reason in r.reasons)
+    assert all(c.ok for c in res_b.checks)
+    assert len(res_b.pairs) == 12
+    rep = L.angle_report(list(res_b.pairs))
+    assert rep.verdict == "иное"  # шум сети до 12°: все |Δ| ≤ 5 не выполнено
+    assert rep.n_used == 9  # Р0, А0, Б0 не участвуют
+    assert rep.median_delta == pytest.approx(1.6, abs=0.05)
+    assert rep.max_abs_delta == pytest.approx(11.9, abs=0.05)
+
+    # D: сеть не дала строки для М 30° — одна «нет строки», остальные сопоставлены по буквам (не сдвинуты)
+    res_d = _judge_fixture("D", 9)
+    failed = {r.index: r for r in res_d.rows if not r.ok}
+    assert failed[2].reasons == ("нет строки у диска №2 (вход М 30.0°)",)
+    assert not any(_keys(r.reasons)[:1] == ("letter",) for r in res_d.rows)
+    assert [r.index for r in res_d.rows if r.ok] == [1, 3]  # П и Е (пропуски) сопоставлены и PASS
+    assert {c.check for c in res_d.checks if not c.ok} >= {"lines.count", "jobs.count"}
+    assert [p[0] for p in res_d.pairs] == ["П", "Е", "И", "Р"]
+
+
+def test_g11e_run_prints_angle_stats() -> None:
+    rc, out = T._run(T.World())
+    assert rc == 0, out
+    line = next(ln for ln in out.splitlines() if ln.startswith("углы: "))
+    assert line.startswith("углы: совпала (в расчёте ") and "медиана Δ +0.0°" in line and "макс |Δ| 0.0°)" in line
