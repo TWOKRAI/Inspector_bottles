@@ -123,6 +123,13 @@ def lsof_listeners(port: int) -> ListenerInfo | None:
     return ListenerInfo(port, pid, command, cwd)
 
 
+def _file_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _read_lines(path: Path) -> list[str] | None:
     try:
         return path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -233,8 +240,12 @@ class _Alpha:
         sleep: Callable[[float], None],
         out: TextIO,
         read_lines: Callable[[Path], list[str] | None],
+        wall_clock: Callable[[], float] | None = None,
+        file_mtime: Callable[[Path], float | None] | None = None,
     ) -> None:
         self.args = args
+        self._wall_clock = wall_clock
+        self._file_mtime = file_mtime
         self._factory = driver_factory
         self._listeners = listeners
         self.clock = clock
@@ -293,7 +304,10 @@ class _Alpha:
         info = self._listeners(port)
         if info is None:
             return f"на порту {port} нет слушателя (сим/прототип не запущен)"
-        tokens = shlex.split(info.command) if info.command else []
+        try:
+            tokens = shlex.split(info.command) if info.command else []
+        except ValueError:  # незакрытая кавычка в чужой командной строке: запасной разбор по пробелам
+            tokens = info.command.split()
         found = None
         for tok in tokens:
             path = tok if os.path.isabs(tok) else os.path.join(info.cwd, tok)
@@ -391,6 +405,8 @@ class _Alpha:
         return int(journal.get("jobs", 0)), int(journal.get("done", 0))
 
     def _set_pause(self, paused: bool) -> None:
+        if paused:
+            self.paused = True  # до отправки: сим мог применить паузу, а ответ потерялся — cleanup её снимет
         res = self.sim_cmd("camera", "scene.pause", {"paused": paused})
         if not _ok(res):
             raise Precondition(f"scene.pause {{paused: {paused}}} не принят: {res}")
@@ -402,6 +418,15 @@ class _Alpha:
 
         if not self.wait_until("active", 60.0, empty):
             raise Precondition("сцена сима не опустела за 60 с после паузы (active ≠ 0)")
+
+    def _note_late(self, msgs: list[str]) -> None:
+        """Строки диска после точки судейства прошлого случая: печать INFO и ``--dump``, на код выхода не влияют."""
+        if self.prev is None:
+            return
+        for msg in msgs:
+            cid = self.prev.case.case_id
+            self.emit(f"INFO поздняя строка диска после случая {cid}: {msg}")
+            self.dump.setdefault("late_disk_lines", []).append({"after": cid, "message": msg})
 
     def _tail_of_previous(self) -> None:
         prev = self.prev
@@ -433,8 +458,10 @@ class _Alpha:
 
         def quiet() -> bool:
             nonlocal last
-            if any(L.parse_layout_line(m) is not None for m in self.layout.drain()):
+            disks = [m for m in self.layout.drain() if L.parse_layout_line(m) is not None]
+            if disks:
                 last = self.clock()
+                self._note_late(disks)
             return self.clock() - last >= SILENCE_S
 
         end = start + 30.0
@@ -621,6 +648,7 @@ class _Alpha:
         self.emit(L.format_row("ДОМОЙ", row))
 
     def p6(self) -> None:
+        shutdown_at = self._wall_clock() if self._wall_clock is not None else None
         reply = self.proto.system_shutdown(wait=True, wait_timeout=60.0)
         free = self.wait_until("порт", 10.0, lambda: self._listeners(self.args.proto_port) is None)
         shutdown_row = L.judge_shutdown(reply, free)
@@ -633,7 +661,13 @@ class _Alpha:
             )  # fmt: skip
         else:
             after = self.n9 if self.n9 is not None else (self.n8 or 0)
-            stop_row = L.judge_stop(file_lines, after)
+            mtime = self._file_mtime(path) if self._file_mtime is not None else None
+            if self._file_mtime is not None and mtime is None:
+                stop_row = L.Row(
+                    None, "stop", "", "нет mtime", False, (f"stop не удалось получить mtime файла {path}",)
+                )
+            else:
+                stop_row = L.judge_stop(file_lines, after, file_mtime=mtime, shutdown_at=shutdown_at, source=str(path))
         ok = shutdown_row.ok and stop_row.ok
         self.statuses["СТОП"] = "PASS" if ok else "FAIL"
         self.results.extend([shutdown_row, stop_row])
@@ -684,6 +718,11 @@ class _Alpha:
 
     def normal_tail(self) -> None:
         for name, fn in (("ДОМОЙ", self.p5), ("СТОП", self.p6)):
+            if name == "СТОП" and self.layout is not None:
+                try:  # поздние строки диска последнего случая (до остановки прототипа)
+                    self._note_late([m for m in self.layout.drain() if L.parse_layout_line(m) is not None])
+                except Exception as exc:  # noqa: BLE001
+                    self.emit(f"INFO: не удалось дочитать журнал layout: {_fmt_exc(exc)}")
             try:
                 fn()
             except Exception as exc:  # noqa: BLE001
@@ -772,9 +811,15 @@ class _Alpha:
             self.precond = True
             return self._end()
         aborted = False
+        interrupt: KeyboardInterrupt | None = None
         for cid in ("B", "D", "C"):
             try:
                 self.run_case(cid)
+            except KeyboardInterrupt as exc:  # Ctrl-C: уборка (ДОМОЙ, СТОП, пауза) и повторный raise
+                self.emit("прервано (Ctrl-C): уборка")
+                self.precond = True
+                aborted = True
+                interrupt = exc
             except CaseFail:
                 aborted = True
             except Precondition as exc:
@@ -791,8 +836,16 @@ class _Alpha:
         if aborted:
             self.cleanup()
         else:
-            self.normal_tail()
-        return self._end()
+            try:
+                self.normal_tail()
+            except KeyboardInterrupt as exc:
+                self.emit("прервано (Ctrl-C) в ДОМОЙ/СТОП")
+                self.precond = True
+                interrupt = exc
+        rc = self._end()
+        if interrupt is not None:
+            raise interrupt
+        return rc
 
     def _end(self) -> int:
         rc = self.finish()
@@ -823,6 +876,8 @@ def run(
     sleep: Callable[[float], None],
     out: TextIO,
     read_lines: Callable[[Path], list[str] | None],
+    wall_clock: Callable[[], float] | None = None,
+    file_mtime: Callable[[Path], float | None] | None = None,
 ) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -836,6 +891,8 @@ def run(
         sleep=sleep,
         out=out,
         read_lines=read_lines,
+        wall_clock=wall_clock,
+        file_mtime=file_mtime,
     )
     return alpha.execute()
 
@@ -853,6 +910,8 @@ def main() -> int:
         sleep=time.sleep,
         out=sys.stdout,
         read_lines=_read_lines,
+        wall_clock=time.time,
+        file_mtime=_file_mtime,
     )
 
 

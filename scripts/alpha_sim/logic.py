@@ -101,23 +101,44 @@ class CvtJob:
 _OPCODE_RE = re.compile(r"^W\*? CMD_OPCODE = (\d+) \(([^)]*)\)")
 _ARGC_RE = re.compile(r"^W\*? CMD_ARGC = (\d+)")
 _ARG_RE = re.compile(r"^W\*? CMD_ARGS\[(\d+)\] = (-?\d+)")
-_RES_RE = re.compile(r"RES_STATUS = (-?\d+), RES_ERRNO = (-?\d+)")
+_RES_RE = re.compile(r"RES_SEQ = (\d+), RES_STATUS = (-?\d+), RES_ERRNO = (-?\d+)")
+_CMD_SEQ_RE = re.compile(r"^W\*? CMD_SEQ = (\d+)")
 
 
 def parse_cvt_jobs(texts: list[str]) -> list[CvtJob]:
     """Блоки ``CVT_JOB`` из текстов журнала обмена по порядку. Блок другой команды (SC_RUN…) — не задание.
 
-    Блок открывает строка ``CMD_OPCODE``; ``ARGC``/``ARGS`` и ``RES_*`` относятся к последнему открытому блоку.
-    Ответ без своего блока и ответ блока, который уже получил ответ, игнорируются.
+    Блок открывает строка ``CMD_OPCODE``; ``ARGC``/``ARGS`` относятся к последнему открытому блоку. Ответ ``R`` берётся
+    только у блока с тем же ``CMD_SEQ`` (``RES_SEQ == CMD_SEQ``): чужой или устаревший ``RES_SEQ`` не подходит, ответа
+    своего задания нет — ``res_status``/``res_errno`` равны ``None``.
     """
     jobs: list[dict] = []
     cur: dict | None = None  # открытый блок; cur["cvt"] False — чужая команда, её строки пропускаются
+    last_seq: int | None = None  # CMD_SEQ, объявленный перед блоком
     for text in texts:
+        cmd_seq = _CMD_SEQ_RE.match(text)
+        if cmd_seq is not None:
+            last_seq = int(cmd_seq.group(1))
+            continue
         op = _OPCODE_RE.match(text)
         if op is not None:
-            cur = {"cvt": op.group(2) == "CVT_JOB", "args": {}, "argc": None, "status": None, "errno": None}
+            cur = {
+                "cvt": op.group(2) == "CVT_JOB",
+                "seq": last_seq,
+                "args": {},
+                "argc": None,
+                "status": None,
+                "errno": None,
+            }
             if cur["cvt"]:
                 jobs.append(cur)
+            continue
+        if text.startswith("R "):
+            res = _RES_RE.search(text)
+            if res is not None:
+                mine = next((j for j in reversed(jobs) if j["seq"] == int(res.group(1)) and j["status"] is None), None)
+                if mine is not None:
+                    mine["status"], mine["errno"] = int(res.group(2)), int(res.group(3))
             continue
         if cur is None or not cur["cvt"]:
             continue
@@ -129,10 +150,6 @@ def parse_cvt_jobs(texts: list[str]) -> list[CvtJob]:
         if arg is not None:
             cur["args"][int(arg.group(1))] = int(arg.group(2))
             continue
-        if text.startswith("R "):
-            res = _RES_RE.search(text)
-            if res is not None and cur["status"] is None:
-                cur["status"], cur["errno"] = int(res.group(1)), int(res.group(2))
     return [CvtJob(j["args"], j["argc"], j["status"], j["errno"]) for j in jobs]
 
 
@@ -627,8 +644,29 @@ def judge_home(reply: dict, park_state: dict | None, texts: list[str]) -> Row:
 _STOP_RE = re.compile(r"STOP_REQ = (\d+)")
 
 
-def judge_stop(file_lines: list[str], after_seq: int) -> Row:
-    """Чистый стоп по файлу журнала: после ``after_seq`` один SOFT ``STOP_REQ`` (n % 4 == 1), затем disconnect."""
+_MTIME_SLACK_S = 2.0
+
+
+def judge_stop(
+    file_lines: list[str],
+    after_seq: int,
+    *,
+    file_mtime: float | None = None,
+    shutdown_at: float | None = None,
+    source: str = "",
+) -> Row:
+    """Чистый стоп по файлу журнала: после ``after_seq`` один SOFT ``STOP_REQ`` (n % 4 == 1), затем disconnect.
+
+    ``file_mtime`` и ``shutdown_at`` (время отправки ``system_shutdown``, секунды эпохи) привязывают файл к ТЕКУЩЕМУ
+    запуску: файл, изменённый раньше ``shutdown_at − 2 с``, чужой (seq прошлых запусков может совпасть с ``after_seq``).
+    Оба ``None`` — привязка не проверяется.
+    """
+    if file_mtime is not None and shutdown_at is not None and file_mtime < shutdown_at - _MTIME_SLACK_S:
+        why = (
+            f"stop файл журнала не от этого запуска (mtime {file_mtime:.1f}, "
+            f"shutdown был в {shutdown_at:.1f}): {source}",
+        )
+        return Row(None, "stop", "", "файл старше запуска", False, why)
     # Файл дописывается между запусками прототипа: seq начинается с #1 заново. Берём последнюю инкарнацию —
     # с последней строки, у которой seq МЕНЬШЕ предыдущего (равный seq у сжатых «… ×N» строк — не граница).
     seen = [p for p in (parse_exchange_file_line(ln) for ln in file_lines) if p is not None]

@@ -133,12 +133,17 @@ def test_g2_merged_noise_between_blocks_does_not_break_parse() -> None:
 
 
 def test_g7_overlapping_gets_replace_by_seq_not_duplicate() -> None:
-    first = [_line(1, "W* CMD_OPCODE = 32 (CVT_JOB)"), _line(2, "W* CMD_ARGC = 10"), _line(3, "W 0x1204 = 1", n=1)]
+    first = [
+        _line(0, "W* CMD_SEQ = 5"),
+        _line(1, "W* CMD_OPCODE = 32 (CVT_JOB)"),
+        _line(2, "W* CMD_ARGC = 10"),
+        _line(3, "W 0x1204 = 1", n=1),
+    ]
     second = [_line(3, "W 0x1204 = 1", n=3), _line(4, "R RES_SEQ..+12 RES_SEQ = 5, RES_STATUS = 1, RES_ERRNO = 0 (ОК)")]
     acc: dict[int, dict] = {}
     L.merge_exchange_lines(acc, first)
     L.merge_exchange_lines(acc, second)  # since_seq=3: перекрытие по seq 3, у неё n выросло 1 → 3
-    assert sorted(acc) == [1, 2, 3, 4]
+    assert sorted(acc) == [0, 1, 2, 3, 4]
     assert acc[3]["n"] == 3
     jobs = L.parse_cvt_jobs([acc[s]["text"] for s in sorted(acc)])
     assert len(jobs) == 1
@@ -727,3 +732,172 @@ def test_g14_pair_job_not_reached_robot_stops_before_d(monkeypatch) -> None:
     assert world.count("sim", "send_command", "scene.sequence", {"discs": T._D_LIST}) == 0  # D не стартовал
     assert not any(c.args[3] == "МИР" for c in world.calls if c.method == "set_register_verified")
     assert "cleanup: " in out
+
+
+# --- Г15-Г20: находки ревью стадии 5 --------------------------------------------------------------------------------
+
+
+def _run_kw(world: T.World, argv: list[str] | None = None, **extra):
+    """Как ``T._run``, но с дополнительными именованными зависимостями ``run`` и приёмом BaseException."""
+    out = io.StringIO()
+    box: dict = {}
+
+    def target() -> None:
+        try:
+            box["rc"] = RA.run(
+                argv if argv is not None else ["--tree", T._TREE],
+                driver_factory=world.driver_factory,
+                listeners=world.listeners,
+                clock=world.clock,
+                sleep=world.sleep,
+                out=out,
+                read_lines=world.read_lines,
+                **extra,
+            )
+        except BaseException as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    th = threading.Thread(target=target, daemon=True)
+    th.start()
+    th.join(timeout=30)
+    assert not th.is_alive(), "run не вышел за 30 с (завис)"
+    return box, out.getvalue()
+
+
+def _old_file(seq_stop: int = 282) -> list[str]:
+    """Файл ПРОШЛЫХ запусков: последняя инкарнация старая, STOP_REQ и disconnect с seq > after_seq текущего прогона."""
+
+    def fl(seq: int, text: str, n: int) -> str:
+        return f"#{n} 2026-11-09 10:00:00,000 [INFO] S.d.d.e.robot_main: #{seq} {text}"
+
+    lines = [fl(i, "in W 0x1204 = 1", 1000 + i) for i in range(1, seq_stop)]
+    return [*lines, fl(seq_stop, "in W STOP_REQ = 21", 1282), fl(seq_stop + 1, " disconnect", 1283)]
+
+
+def test_g15_stop_file_must_belong_to_this_run_by_mtime() -> None:
+    old = _old_file()
+    # без привязки (старый вызов) старый файл давал ложный PASS — теперь тот же вход при старом mtime FAIL
+    stale = L.judge_stop(old, 279, file_mtime=4000.0, shutdown_at=5000.0, source="/x/robot_exchange.log")
+    assert stale.ok is False
+    assert stale.reasons[0].startswith("stop файл журнала не от этого запуска")
+    assert "/x/robot_exchange.log" in stale.reasons[0] and "4000" in stale.reasons[0] and "5000" in stale.reasons[0]
+    # пара: свежий файл (mtime ≥ shutdown − 2 с) — PASS как раньше; граница допуска 2,0 с
+    assert L.judge_stop(old, 279, file_mtime=5000.5, shutdown_at=5000.0).ok is True
+    assert L.judge_stop(old, 279, file_mtime=4998.0, shutdown_at=5000.0).ok is True
+    assert L.judge_stop(old, 279, file_mtime=4997.9, shutdown_at=5000.0).ok is False
+    assert L.judge_stop(old, 279).ok is True  # без аргументов привязки поведение прежнее
+
+
+def test_g15_runner_stale_file_fails_stop_fresh_passes() -> None:
+    stale_world = T.World()
+    stale_world.file_lines = _old_file()
+    # мир пишет в файл свои строки при shutdown — для «старого файла» подменяем чтение
+    stale_world.read_lines = lambda path: _old_file()
+    box, out = _run_kw(stale_world, wall_clock=lambda: 5000.0, file_mtime=lambda path: 4000.0)
+    assert box.get("rc") == 1, out
+    assert any(ln.startswith("СТОП stop:") and "не от этого запуска" in ln for ln in out.splitlines()), out
+    fresh_world = T.World()
+    box, out = _run_kw(fresh_world, wall_clock=lambda: 5000.0, file_mtime=lambda path: 5000.2)
+    assert box.get("rc") == 0, out
+    assert out.rstrip("\n").splitlines()[-1] == T._SUMMARY_OK
+
+
+# --- Г16: пауза применена симом, а ответ потерян --------------------------------------------------------------------
+
+
+def test_g16_lost_pause_reply_still_unpaused_by_cleanup() -> None:
+    fired: list = []
+
+    def lost_reply(world, real, target, command, args, **kw):
+        if command == "scene.pause" and args == {"paused": True} and not fired:
+            fired.append(1)
+            real(target, command, args, **kw)  # сим применил паузу
+            return {"result": {"status": "error", "code": "timeout"}}  # а ответ дошёл как ошибка
+        return NotImplemented
+
+    world = _Hooked({("sim", "send_command"): lost_reply})
+    rc, out = T._run(world)
+    assert fired and rc == 3, out
+    assert world.paused is False  # cleanup снял паузу, которую сим мог применить
+    assert "cleanup: пауза сима → пауза снята" in out.splitlines()
+
+
+# --- Г17: Ctrl-C -----------------------------------------------------------------------------------------------------
+
+
+def test_g17_keyboard_interrupt_cleans_up_and_reraises() -> None:
+    fired: list = []
+
+    def interrupt(world, real, target, command, args, **kw):
+        if command == "scene.status" and world.paused and not fired:
+            fired.append(1)
+            raise KeyboardInterrupt
+        return NotImplemented
+
+    world = _Hooked({("sim", "send_command"): interrupt})
+    box, out = _run_kw(world)
+    assert isinstance(box.get("exc"), KeyboardInterrupt), box
+    assert world.paused is False  # Ctrl-C на паузе не оставляет сим на паузе
+    assert _called(world, "proto", "robot_park_all") == 1 and world.count("proto", "system_shutdown") == 1
+    assert "cleanup: " in out
+
+
+# --- Г18: незакрытая кавычка в командной строке слушателя -------------------------------------------------------------
+
+
+def test_g18_unbalanced_quote_in_listener_command_is_precondition_not_traceback() -> None:
+    world = T.World(infos={8766: RA.ListenerInfo(8766, 7, "node it's.js", T._TREE), 8765: None})
+    box, out = _run_kw(world)
+    assert box.get("rc") == 3, box
+    assert [o for o in world.order if o[0] == "factory"] == []
+    assert "предусловие" in out and "8766" in out
+
+
+# --- Г19: ответ R относится к своему CMD_SEQ -------------------------------------------------------------------------
+
+
+def _job_texts(seq: int, rs: list[tuple[int, int, int]]) -> list[str]:
+    block = T._cvt_texts(seq, 63336, 64536)[:-1]  # без штатного R
+    return [*block, *[f"R RES_SEQ..+12 RES_SEQ = {s}, RES_STATUS = {st}, RES_ERRNO = {er} (x)" for s, st, er in rs]]
+
+
+def test_g19_response_bound_to_its_cmd_seq() -> None:
+    # устаревший R (seq 99) перед ответом своего задания (seq 100: STATUS 0, ERRNO 3)
+    job = L.parse_cvt_jobs(_job_texts(100, [(99, 1, 0), (100, 0, 3)]))[0]
+    assert (job.res_status, job.res_errno) == (0, 3)
+    # ответа своего задания нет, есть только чужой — поле отсутствует, FAIL с названной причиной
+    lone = L.parse_cvt_jobs(_job_texts(100, [(99, 1, 0)]))[0]
+    assert lone.res_status is None and lone.res_errno is None
+    reasons = L._judge_job(L.CASES["B"].expects[0], lone)
+    assert any(r.startswith("res_status") for r in reasons)
+    # пара: свой ответ сразу — как раньше
+    ok = L.parse_cvt_jobs(_job_texts(100, [(100, 1, 0)]))[0]
+    assert (ok.res_status, ok.res_errno) == (1, 0)
+
+
+# --- Г20: поздняя строка диска ---------------------------------------------------------------------------------------
+
+
+class _LateLineWorld(T.World):
+    def release(self, case: str) -> None:
+        super().release(case)
+        if case == "D":
+            msg = "WordLayoutPlugin: диск 'Е' 61.0° → пропуск: слово готово"
+            self.sched.append((self.t + 6.0, lambda: self.emit(msg)))
+
+
+def test_g20_late_disk_line_is_printed_and_dumped(tmp_path) -> None:
+    dump = tmp_path / "dump.json"
+    world = _LateLineWorld()
+    box, out = _run_kw(world, ["--tree", T._TREE, "--dump", str(dump)])
+    assert box.get("rc") == 0, out  # на код выхода не влияет
+    assert "INFO поздняя строка диска после случая D: WordLayoutPlugin: диск 'Е' 61.0° → пропуск: слово готово" in out
+    import json
+
+    data = json.loads(dump.read_text(encoding="utf-8"))
+    assert data["late_disk_lines"] == [
+        {"after": "D", "message": "WordLayoutPlugin: диск 'Е' 61.0° → пропуск: слово готово"}
+    ]
+    # пара: без поздней строки такой строки нет
+    _, out_ok = _run_kw(T.World())
+    assert "поздняя строка" not in out_ok
