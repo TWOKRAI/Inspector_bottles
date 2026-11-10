@@ -86,7 +86,7 @@
 - Task 4.1b: `links.bases` с `where` [DONE] (после 4.1)
 - Task 4.2a: паспорт v1 и `ref --format passport|json`, несколько id за вызов, бюджет и ранг, ADR-ATL-005 [DONE] (после 4.1b, 3.2)
 - Task 4.2b-1: `status.stale`/`frozen`, JSON-схема паспорта [DONE] (после 4.2a)
-- Task 4.2b-2: `map` юнита и файла [PENDING] (после 4.2b-1)
+- Task 4.2b-2: `map` юнита и файла [DONE] (после 4.2b-1)
 - Task 4.3: условие `atlas` в `nav_bench` [PENDING] (после 4.2a, 7.2 — механизм `bash_allow`)
 - Task 4.4: `purpose` → докстринги 57 юнитов, сверка каталог↔yaml (Д5, шаг 1) [DONE] (после 0.1; В1 = да)
 - Task 4.4b: `modules.yaml` → корни + исключения (Д5, шаг 2) [DONE] (после 4.4)
