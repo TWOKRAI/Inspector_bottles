@@ -2,15 +2,17 @@
 
 Purpose: по ревизии git (`ref`) и идентификатору символа собирает паспорт: конверт и шесть разделов с постоянными
     ключами (JSON-совместимый `dict`), печатает его текстом по бюджету строк. Читает факты v2 (`scan`), связи
-    (`build_links`), слой (`modules_for` + `modules.resolve`). Не меняет репозиторий и рабочее дерево; пишет только
-    кэш фактов `data/atlas.sqlite` через `scan()`.
+    (`build_links`), слой (`modules_for` + `modules.resolve`). Не меняет репозиторий (кроме stat-кэша `.git/index`,
+    который обновляет `git diff` из `status.stale`) и не меняет рабочее дерево; рабочее дерево читает только
+    `status.stale`; пишет только кэш фактов `data/atlas.sqlite` через `scan()`.
 Public API: build_passport, resolve_ident, render_text, passports_for.
 Stability: lite
 
 Pre: `root` — корень git-репозитория (каталог с `.git`), `ref` — ревизия git (как у `ref` Task 4.1: `HEAD`, ветка,
     sha). Пути в паспорте — posix, от `root`. `exclude` — префиксы путей от `root` (posix): файлы под префиксом не
     читаются и в паспорт не попадают (ни как символ, ни как связь).
-Post: паспорт детерминирован: та же ревизия -> тот же `dict`. Модуль не меняет репозиторий и рабочее дерево.
+Post: паспорт детерминирован: та же ревизия -> тот же `dict` (кроме `status.stale`: он зависит от рабочего дерева).
+    Модуль не меняет репозиторий (кроме stat-кэша `.git/index`) и рабочее дерево.
 
 Правило пустого. `null` раздела или ключа = «не искали» (источника нет, значение — другая задача); `[]` и `0` =
 «искали, не нашли». `where: null` у ЗАПИСИ внутри раздела = «адрес не разрешён» — это не `null` раздела. `line`
@@ -124,11 +126,20 @@ Post: паспорт детерминирован: та же ревизия -> �
   doc_missing  bool          `True` — у символа нет докстринга (`purpose.text == ""`)
   dynamic      int           `links.call_sites_unresolved` + число динамических `command_specs` (`command_specs_dynamic`
                              в `scan.py`, 4.2a GREEN; `0`, если `runtime.commands` — `null`)
-  stale        null          ключ есть; значение — Task 4.2b
-  frozen       null          ключ есть; значение — Task 4.2b
+  stale        list[str] | null   пути паспорта (`path`, путь из каждого `where`, из `structural.twins`), чьё
+                             содержимое в рабочем дереве отличается от `sha`: один `git --no-optional-locks
+                             --literal-pathspecs diff -z --name-only --no-renames <sha> -- <пути>`; порядок — как пути
+                             в паспорте, без повторов. `[]` — искали, чисто. `null` — не искали: `sha` != HEAD корня,
+                             HEAD не разрешается или `git diff` упал (bare-клон). `where: null` пропускается;
+                             неотслеженные файлы не ищутся
+  frozen       list[dict]    шапки `FREEZE YYYY-MM-DD: текст` — сначала докстринг файла символа, затем `__init__.py`
+                             цепочки (обход каталогов общий с `interface.all`). Запись `{"date": str, "text": str,
+                             "where": "путь:строка"}`; `text` — после `FREEZE YYYY-MM-DD: `; `where` — строка шапки.
+                             Без повторов. Звено цепочки с `error` пропускается. `[]` — искали, нет. `null` у
+                             `frozen` в v1 не бывает
 
-Не входит: `recipes`; `kind` выше class/function/method (unit, package, file, layer); `map`; `stale`/`frozen`
-значения; кэш `links` (`build_links` пересчитывается при каждом вызове).
+Не входит: `recipes`; `kind` выше class/function/method (unit, package, file, layer); `map`; кэш `links` (`build_links`
+пересчитывается при каждом вызове).
 
 Текст (`render_text`). Порядок: `== <id> ==`; строки конверта (`path:line`, `sha`, `scanner`); затем шесть разделов в
 порядке `purpose`, `interface`, `links`, `runtime`, `checks`, `status` — у каждого строка-заголовок `<раздел>:`.
@@ -141,7 +152,11 @@ Post: паспорт детерминирован: та же ревизия -> �
   - член класса: `  имя(сигнатура)  :строка`, например
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
-  - связь с `where: null`: `<имя> — строка не указана`.
+  - связь с `where: null`: `<имя> — строка не указана`;
+  - статус (Task 4.2b-1): строка `status:` несёт `tier`, `doc_missing`, `dynamic`; затем строки с отступом в 2
+    пробела: `  stale: —` (`[]`), `  stale: не искали` (`null`), `  stale: a.py, b.py` (без среза); `  frozen: —`
+    (`[]`), иначе по строке на шапку `  frozen: <date> <text> (<путь:строка>)`. Строки входят в служебный минимум
+    (не режутся).
 Расположение образцов внутри раздела `links` (подзаголовки `used_by`, `call_sites`, ...) тестом RED не утверждается,
 кроме самих образцов выше.
 """
@@ -380,6 +395,45 @@ class _Ctx:
             if stop and not (folder == stop or folder.startswith(stop + "/")):
                 break
         return chain if seen_all else None
+
+    def _init_chain(self, path: str, rows: list[dict]) -> list[tuple[str, FileFacts]]:
+        """Звенья-пакеты от каталога файла `path` вверх: `(путь __init__.py, его факты)`, от ближайшего к юниту.
+
+        Общий обход для `interface.all` и `status.frozen` (выносится из `_all_chain`, Task 4.2b-1).
+        Pre: `path` — путь файла ревизии (posix, от корня); `rows` — `self.rows()` (границы юнитов).
+        Post: граница юнита — совпавший элемент `paths` с наибольшей длиной (как `modules.resolve`); юнит с `paths`
+            без `/` (файл целиком) — `stop=""`, обход идёт до корня. Обход останавливается на первой дыре (каталог без
+            `__init__.py` в фактах), после звена на границе юнита и при выходе из юнита. Звено с `error`/`v2_error`
+            входит в результат как есть (пропуск — решение вызывающего). Результат — список, пустой, если ближайшего
+            `__init__.py` нет. Не читает рабочее дерево, не бросает.
+        """
+        raise NotImplementedError
+
+    def _stale(self, passport: dict) -> list[str] | None:
+        """`status.stale` собранного паспорта (раздел `status` в нём ещё не нужен).
+
+        Pre: `passport` — `dict` с конвертом и пятью разделами до `status` (`path`, `links`, `runtime`, `checks`
+            уже построены); `self.sha` — полный sha ревизии.
+        Post: `None`, если `self.sha` != `resolve(self.root, "HEAD")`, HEAD не разрешается или `git diff` упал
+            (`AtlasError` ловится только вокруг `resolve(root, "HEAD")` и `git_z`); иначе список путей паспорта,
+            изменённых в рабочем дереве относительно `self.sha` (`git --no-optional-locks --literal-pathspecs diff -z
+            --name-only --no-renames <sha> -- <пути>`), в порядке путей паспорта, без повторов; `[]` — чисто. Пути:
+            `path`, путь из каждого `where` (`links.*`, `checks.tests`, `runtime.*`, `interface.members`,
+            `links.bases`), путь из `links.structural.twins` (часть до `::`). `where: null` пропускается.
+            Один вызов `git` на паспорт; репозиторий не меняется (кроме stat-кэша `.git/index`).
+        """
+        raise NotImplementedError
+
+    def _frozen(self, path: str, facts: FileFacts, rows: list[dict]) -> list[dict]:
+        """`status.frozen`: шапки `FREEZE` файла символа, затем `__init__.py` цепочки.
+
+        Pre: `path`, `facts` — файл символа; `rows` — `self.rows()`.
+        Post: список `{"date": str, "text": str, "where": "путь:строка"}`: сначала шапки `facts.freeze` (порядок
+            строк файла), затем шапки каждого звена `_init_chain(path, rows)` без `error`, от ближайшего к юниту.
+            Без повторов (символ в самом `__init__.py` — шапки файла не дублируются звеном). `[]` — искали, нет.
+            `v2_error` звена не влияет. Класс и метод получают цепочку своего файла. Не бросает.
+        """
+        raise NotImplementedError
 
     def _links(self, d: DefFact, got: dict) -> dict:
         structural = None

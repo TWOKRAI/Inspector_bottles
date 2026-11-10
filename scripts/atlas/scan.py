@@ -200,6 +200,11 @@ class FileFacts:
     v2_error: str | None = None  # имя исключения разбора полей v2 (поля A1 при этом целы), иначе None
     # --- Task 4.2a: (name, line, form, scope) по `def command_specs`; None — объявления в файле нет (докстринг модуля)
     command_specs: tuple[tuple[str, int, str, str], ...] | None = None
+    # --- Task 4.2b-1: шапки `FREEZE YYYY-MM-DD: текст` в докстринге модуля — (date, text, line), порядок строк файла.
+    # `date` — `YYYY-MM-DD`, `text` — всё после `FREEZE YYYY-MM-DD: ` (без хвостовых пробелов), `line` — строка файла
+    # (`Constant.lineno` докстринга + индекс сырой строки; `get_docstring` строк не даёт). `()` — шапок нет или файла
+    # с докстрингом нет. Не меняет `doc`; в `to_json`/`from_json` попадает (иначе тёплый вызов даст `()`).
+    freeze: tuple[tuple[str, str, int], ...] = ()
 
     @property
     def command_specs_dynamic(self) -> int:
