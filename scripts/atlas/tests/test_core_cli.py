@@ -99,7 +99,11 @@ def test_build_race_loser_returns_winner_build_id(repo: Any, monkeypatch: pytest
         con.close()
 
 
-def test_readonly_db_exits_2_not_1(repo: Any, atlas: Any) -> None:
+def test_unwritable_cache_dir_check_exits_0_with_notice(repo: Any, atlas: Any) -> None:
+    """Кэш — оптимизация, а не условие работы (4.5d): база, которую sqlite не откроет, не роняет `check`.
+
+    Было: код 2 и `atlas: internal error:`. Теперь `store.connect` отдаёт соединение в памяти и пишет строку в stderr.
+    """
     _seed(repo)
     assert atlas(repo, "build").code == 0  # якорь: на записываемой базе всё работает
     repo.write("README.md", "next\n")
@@ -112,5 +116,6 @@ def test_readonly_db_exits_2_not_1(repo: Any, atlas: Any) -> None:
         res = atlas(repo, "check")
     finally:
         db.rmdir()
-    assert res.code == 2
-    assert res.err.startswith("atlas: internal error:"), res.err
+    assert res.code == 0, res.err
+    assert any(line.startswith("atlas: кэш недоступен (") for line in res.err.splitlines()), res.err
+    assert "internal error" not in res.err, res.err
