@@ -184,3 +184,86 @@ def test_command_specs_survive_cache_body() -> None:
     assert FileFacts.from_json(facts.to_json()) == facts
     plain = scan_text("def f():\n    return 1\n")
     assert plain.command_specs is None and FileFacts.from_json(plain.to_json()).command_specs is None
+
+
+# ---------------------------------------------------------------- правки ревью р.1
+
+_ALL = {
+    "pkg/__init__.py": '__all__ = ["Svc"]\n',
+    "pkg/sub/__init__.py": '__all__ = ["Svc", "Other"]\n',
+    "pkg/sub/core.py": "class Svc:\n    pass\n\n\nclass Quiet:\n    pass\n",
+    "solo/__init__.py": "",
+    "solo/mod.py": "class Lone:\n    pass\n",
+}
+
+
+def test_interface_all_from_packages_when_file_has_no_all(repo: GitRepo) -> None:
+    """У файла символа `__all__` нет: звенья с именем — от ближайшего пакета вверх; `__all__` у звена есть, имени нет —
+    `[]`; `__all__` нет нигде — `null`."""
+    _commit(repo, _ALL)
+    assert _one(repo, "pkg/sub/core.py::Svc")["interface"]["all"] == ["pkg/sub/__init__.py", "pkg/__init__.py"]
+    assert _one(repo, "pkg/sub/core.py::Quiet")["interface"]["all"] == []
+    assert _one(repo, "solo/mod.py::Lone")["interface"]["all"] is None
+
+
+_ASYNC = {
+    "pkg/__init__.py": "",
+    "pkg/aio.py": "async def go(x: int) -> str:\n    return str(x)\n\n\n"
+    "class C:\n    async def run(self, n: int) -> None:\n        return None\n",
+}
+
+
+def test_async_signature_keeps_async_like_reference(repo: GitRepo) -> None:
+    """`async def` — `async (…)` в `signature` (как `reference._sig`), в тексте члена — `async имя(…)  :строка`;
+    нет шапки `Tier:` — `tier нет шапки`."""
+    from scripts.atlas.passport import render_text
+
+    _commit(repo, _ASYNC)
+    assert _one(repo, "pkg/aio.py::go")["interface"]["signature"] == "async (x: int) -> str"
+    cls = _one(repo, "pkg/aio.py::C")
+    assert cls["interface"]["members"] == [
+        {"name": "run", "signature": "async (n: int) -> None", "where": "pkg/aio.py:6"}
+    ]
+    lines = [line.strip() for line in render_text(cls).splitlines()]
+    assert "async run(n: int) -> None  :6" in lines
+    assert any(line.startswith("status: tier нет шапки;") for line in lines)
+
+
+_TXT = {
+    "pkg/__init__.py": "",
+    "pkg/svc.py": """\
+import os
+import threading
+
+
+class Base:
+    def command_specs(self):
+        return [("go", "Идти")]
+
+    def start(self):
+        threading.Thread(target=print).start()
+        os.replace("a", "b")
+""",
+    "pkg/kids.py": "from pkg.svc import Base\n\n\nclass K1(Base):\n    pass\n\n\nclass K2(Base):\n    pass\n",
+    "tests/__init__.py": "",
+    "tests/test_base.py": "from pkg.svc import Base\n\n\ndef test_a():\n    Base()\n\n\ndef test_b():\n    Base()\n",
+}
+
+
+def test_text_runtime_rows_and_show_all_lifts_cut(repo: GitRepo) -> None:
+    """Непустые `threads`/`commands`/`io` печатаются с адресом `путь:строка`; при бюджете 1 `tests` и `subclasses`
+    режутся, `--all tests subclasses` снимает пометки."""
+    from scripts.atlas.passport import render_text
+
+    _commit(repo, _TXT)
+    p = _one(repo, "pkg/svc.py::Base")
+    lines = [line.strip() for line in render_text(p, full=True).splitlines()]
+    assert "Thread (daemon: не задан) — pkg/svc.py:10" in lines
+    assert "go — pkg/svc.py:7 (declared)" in lines
+    assert "replaces 'b' — pkg/svc.py:11" in lines  # path — выражение пути (`ast.unparse`)
+    cut = render_text(p, budget=1)
+    assert "показано 1 из 2; все: --all tests" in cut and "показано 1 из 2; все: --all subclasses" in cut
+    lifted = render_text(p, budget=1, show_all=frozenset({"tests", "subclasses"}))
+    assert "все: --all tests" not in lifted and "все: --all subclasses" not in lifted
+    assert "все: --all call_sites" in lifted  # прочие списки режутся по-прежнему
+    assert "test_b — tests/test_base.py:8 (test-body)" in lifted and "K2 — pkg/kids.py:8 (import)" in lifted

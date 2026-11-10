@@ -47,12 +47,13 @@ Post: паспорт детерминирован: та же ревизия -> �
   ключ       тип                      null / пусто
   layer      str                      id юнита слоя (`modules_for(Tree(root, ref))` + `modules.resolve(path, rows)`);
                                       `"other"` — путь ни в одном юните. Не `null`. НЕ `load_modules()`: ревизия
-  all        list[str] | null         `null` — у файла символа нет литерального `__all__`. Иначе пути `__init__.py` от
-                                      ближайшего пакета до юнита, где имя в `__all__` (с него и до самого юнита); `[]` —
-                                      `__all__` есть, имени в цепочке нет
+  all        list[str] | null         `null` — литерального `__all__` нет ни у файла символа, ни у одного `__init__.py`
+                                      цепочки (от ближайшего пакета до юнита). Иначе пути `__init__.py` звеньев, где имя
+                                      в `__all__`, от ближайшего пакета до юнита — и когда у самого файла `__all__` нет;
+                                      `[]` — `__all__` есть хотя бы у одного звена, имени нигде нет
   signature  str                      у функции и метода — хвост строки `reference._sig` после имени (без `self`/`cls`,
-                                      `-> T` после скобок): `(key: str) -> None`; у `property` — `-> T` или `""`; у
-                                      класса `""`
+                                      `-> T` после скобок): `(key: str) -> None`; у `async def` — `async (x: int) -> T`
+                                      (как `reference._sig`); у `property` — `-> T` или `""`; у класса `""`
   members    list[dict] | null        у класса: члены из `defs` 4.1, отбор как `reference._methods` (неприватные +
                                       `codemap.DUNDERS`), порядок исходника; `[]` — членов нет. У функции, метода `null`
                                       Запись `{"name": str, "signature": str, "where": "путь:строка"}`; `signature` — по
@@ -65,9 +66,9 @@ Post: паспорт детерминирован: та же ревизия -> �
                                                   enclosing: "<module>"}`
   uses                    null                    всегда `null` (источника в 4.1 нет)
   subclasses              list[dict]              `[]` — наследников нет. Запись `{where, how: "import" |
-                                                  "same-file", scope, enclosing}`
+                                                  "same-file", scope, enclosing, rank}`
   call_sites              list[dict]              `[]` — разрешённых вызовов нет. Запись `{where, how:
-                                                  "name-call", scope, enclosing, same_file}`
+                                                  "name-call", scope, enclosing, same_file, rank}`
   call_sites_unresolved   int                     `0` — неотнесённых вызовов нет. Счётчик «не видно», не список
   bases                   list[dict] | null       у класса: основы в порядке `DefFact.bases`, запись
                                                   `{name, where, how, scope}`;
@@ -79,6 +80,10 @@ Post: паспорт детерминирован: та же ревизия -> �
                                                   методами: `required: []`, `twins: []`, `note` = `links.TOO_GENERIC`;
                                                   иначе
                                                   `note: null`. У функции и метода `null`
+
+`rank` (int) записи `links.call_sites`, `links.subclasses`, `checks.tests` — число вызовов из продукта
+(`scope: prod`, `call_sites`) у её `enclosing` (`<module>` — 0); у `used_by` ключа нет (ранг импорта всегда 0).
+Сужение DESIGN 3 (там к рангу прибавлялись prod `used_by`) принято лидом. Ключ нужен `render_text` для порядка среза.
 
 `where` записи — `"путь:строка"` или `null`; у `used_by`, `subclasses`, `call_sites` он всегда строка (из `Links`).
 `scope` — `"prod"` | `"test"` (по пути записи).
@@ -95,7 +100,9 @@ Post: паспорт детерминирован: та же ревизия -> �
                                    объявлена»). Иначе записи `{"name": str, "where": "путь:строка", "how": "declared"}`
                                    по литералам кортежа или `CommandSpec(...)`; запись без `where` не рождается (R2);
                                    `[]` — объявлена, литералов нет. Область — символ-класс или функция, чьё тело
-                                   (с вложенными) содержит `def command_specs`
+                                   (с вложенными) содержит `def command_specs`. У самого объявляющего
+                                   `command_specs` символа (метода или вложенной функции) `commands` = `null`: форма
+                                   относится к вмещающему символу
   io          list[dict]           `[]` — побочных эффектов нет. Запись `{"op": "watch" | "replaces", "path": str,
                                    "where": "путь:строка"}`:
                                    `IoFact` с `enclosing` = qualname символа или вложенный; `path` — ВЫРАЖЕНИЕ пути
@@ -108,7 +115,7 @@ Post: паспорт детерминирован: та же ревизия -> �
                                 реестра, не `путь::qualname`). Иначе находки готовой сборки `sha` (`main_ref=sha`) по
                                 `node` символа; `build()` не вызывается
   tests     list[dict]          `[]` — тестов нет. Записи `Links.of(...)["tests"]`: `{where, how: "test-body",
-                                scope: "test", enclosing}`
+                                scope: "test", enclosing, rank}`
 
 `status`:
 
@@ -201,8 +208,10 @@ def _find_node(tree: ast.AST, qualname: str, line: int) -> ast.AST | None:
 
 
 def _tail(fn: ast.FunctionDef | ast.AsyncFunctionDef, drop_first: bool) -> str:
-    """Хвост `reference._sig` после имени: `(x: int) -> str`; у property — `-> T` или `""`."""
-    return _sig(fn, drop_first).removeprefix("async ").removeprefix(fn.name).strip()
+    """Строка `reference._sig` без имени: `(x: int) -> str`, `async (x: int) -> str`; у property — `-> T` или `""`."""
+    full = _sig(fn, drop_first)
+    prefix = "async " if full.startswith("async ") else ""
+    return prefix + full.removeprefix(prefix).removeprefix(fn.name).strip()
 
 
 def _drop_first(fn: ast.FunctionDef | ast.AsyncFunctionDef, is_method: bool) -> bool:
@@ -344,12 +353,13 @@ class _Ctx:
         }
 
     def _all_chain(self, path: str, d: DefFact, facts: FileFacts, rows: list[dict]) -> list[str] | None:
-        if facts.all is None:
-            return None
+        seen_all = facts.all is not None  # `__all__` у файла символа или у звена цепочки
         name = d.qualname.split(".")[0]
         stop = ""
         best = 0
-        for row in rows:  # граница юнита — совпавший элемент `paths` (правило `modules.resolve`)
+        # граница юнита — совпавший элемент `paths`: копия цикла `modules.resolve` (modules.py:113-118);
+        # правка resolve -> править здесь
+        for row in rows:
             for element in row["paths"]:
                 hit = path.startswith(element) if element.endswith("/") else path == element
                 if hit and len(element) > best:
@@ -361,6 +371,7 @@ class _Ctx:
             pkg = self.facts.get(init)
             if pkg is None:
                 break
+            seen_all = seen_all or pkg.all is not None
             if pkg.all is not None and name in pkg.all:
                 chain.append(init)
             if not folder or (stop and folder == stop):
@@ -368,7 +379,7 @@ class _Ctx:
             folder = folder.rpartition("/")[0]
             if stop and not (folder == stop or folder.startswith(stop + "/")):
                 break
-        return chain
+        return chain if seen_all else None
 
     def _links(self, d: DefFact, got: dict) -> dict:
         structural = None
@@ -513,7 +524,8 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
         add("  members:")
         for m in members:
             sig = m["signature"]
-            add(f"    {m['name']}{' ' + sig if sig.startswith('->') else sig}  :{_split(m['where'])[1]}")
+            prefix, sig = ("async ", sig.removeprefix("async ")) if sig.startswith("async ") else ("", sig)
+            add(f"    {prefix}{m['name']}{' ' + sig if sig.startswith('->') else sig}  :{_split(m['where'])[1]}")
     else:
         add(f"  members: {_value(members)}")
     entries = [*lnk["used_by"], *lnk["call_sites"], *lnk["subclasses"]]
@@ -576,7 +588,7 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
         add(f"  tests: {_EMPTY}")
     doc = "да" if st["doc_missing"] else "нет"
     add(
-        f"status: tier {_value(st['tier'])}; doc_missing {doc}; dynamic {_value(st['dynamic'])}; "
+        f"status: tier {st['tier'] or 'нет шапки'}; doc_missing {doc}; dynamic {_value(st['dynamic'])}; "
         f"stale {_value(st['stale'])}; frozen {_value(st['frozen'])}"
     )
 
@@ -632,7 +644,9 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
         конверт, заголовки разделов, `purpose` и служебные строки; остаток делится поровну между разделами-списками
         (без приоритета), излишек короткого уходит прочим. Порядок записей среза — `(-rank, path, line)`; `rank` =
         число вызовов из продукта (`scope: prod`) у `enclosing` записи (у `used_by` `enclosing` = `<module>`,
-        `rank` = 0: порядок по `path`). Раздел из `show_all` не режется.
+        `rank` = 0: порядок по `path`). Раздел из `show_all` не режется. Строк может быть больше `budget`: в минимум
+        входят по одной записи на каждый срезанный список и его пометка, члены класса не режутся; «<= 40 строк на
+        экран» верно для небольших классов.
         Срезанный раздел содержит `показано K из N; все: --all <раздел>`. Паспорт не меняется.
     Raises: `ValueError`, если в `show_all` есть имя вне `SHOW_ALL_SECTIONS`.
     """
