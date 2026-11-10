@@ -216,6 +216,7 @@ class _CaseState:
     n0: int
     jobs0: int
     done0: int
+    before: int  # jobs_emitted регистра перед случаем (факт, не литерал)
 
 
 # --- Сам прогон -------------------------------------------------------------------------------------------------------
@@ -406,17 +407,23 @@ class _Alpha:
         prev = self.prev
         if prev is None:
             return
+        # Ждём ФАКТИЧЕСКИ выданные прошлым случаем задания (прирост регистра jobs_emitted), не литерал: красный случай
+        # (сеть потеряла диск) не должен прятать следующие; его FAIL уже записан своими строками.
+        now = L.regs_from_introspect(self.proto.introspect_registers("layout")).get("jobs_emitted")
+        want = int(now) - prev.before if isinstance(now, int) else prev.case.jobs
+        if want < prev.case.jobs:
+            self.emit(f"хвост по факту: {want} из {prev.case.jobs} (случай {prev.case.case_id} красный)")
         exch = _Exchange(self, prev.n0)
 
         def arrived() -> bool:
             exch.poll()
             jobs = len(L.parse_cvt_jobs(exch.texts()))
             done = self.sim_journal()[1] - prev.done0
-            return jobs == prev.case.jobs and done == prev.case.jobs
+            return jobs == want and done == want
 
         if not self.wait_until("хвост", 60.0, arrived):
             raise Precondition(
-                f"хвост случая {prev.case.case_id}: CVT_JOB {len(L.parse_cvt_jobs(exch.texts()))} из {prev.case.jobs}, "
+                f"хвост случая {prev.case.case_id}: CVT_JOB {len(L.parse_cvt_jobs(exch.texts()))} из {want} выданных, "
                 f"journal.done +{self.sim_journal()[1] - prev.done0}"
             )
 
@@ -535,7 +542,7 @@ class _Alpha:
                        f"journal.done +{done_info.get('done')} из {case.jobs}",))
             )  # fmt: skip
         self._finish_case(cid, case, result, extra, feed, msgs, snap, regs, exch)
-        self.prev = _CaseState(case, n0, jobs0, done0)
+        self.prev = _CaseState(case, n0, jobs0, done0, int(before))
 
     def _object_ids(self) -> set[str]:
         objects = self.state_value(self.sim, "sim.objects")

@@ -644,3 +644,86 @@ def test_g13_two_incarnations_only_last_is_judged() -> None:
     assert L.judge_stop(squeezed, 590).ok is True
     # старый STOP_REQ из прошлого запуска не засчитывается и тогда, когда новых строк нет
     assert L.judge_stop([*FX.BOUNDARY], 168).ok is False
+
+
+# --- Г14: красный случай (сеть потеряла диск) не прячет следующие: хвост ждёт ФАКТИЧЕСКИ выданные задания -----
+
+
+def _lossy_cases(monkeypatch) -> None:
+    """B теряет диск М 300°: строк 11, заданий 8, регистры 8; D и C — суммы с учётом потери (11 и 14)."""
+    import copy
+
+    cases = copy.deepcopy(T._CASES)
+    b = cases["B"]
+    b["discs"], b["decisions"] = b["discs"][:-1], b["decisions"][:-1]
+    b["jobs"] = b["jobs"][:-1]
+    b["regs"].update(slots_filled=8, jobs_emitted=8, done=False)
+    cases["D"]["regs"]["jobs_emitted"] = 11
+    cases["C"]["regs"]["jobs_emitted"] = 14
+    monkeypatch.setattr(T, "_CASES", cases)
+
+
+class _LossyWorld(T.World):
+    """Сим подал все 12 дисков B (fed 12), но сеть дала 11 строк: итог подачи — total 12 / fed 12.
+
+    ``robot_loses_job`` — восьмое задание не доходит до робота: его строк нет в журнале обмена.
+    """
+
+    robot_loses_job = False
+    _cmd_blocks = 0
+    _skipping = False
+
+    def add_ex(self, text: str, side: str = "in") -> None:
+        if text.startswith("W* CMD_SEQ ="):
+            self._cmd_blocks += 1
+            self._skipping = self.robot_loses_job and self._cmd_blocks == 8
+        if not self._skipping:
+            super().add_ex(text, side)
+
+    def release(self, case: str) -> None:
+        super().release(case)
+        if case == "B" and self.sched:
+            last = self.sched[-1][1]
+
+            def finish() -> None:
+                last()
+                self.seq = {"mode": "list", "total": 12, "fed": 12, "skipped": 0, "remaining": 0}
+
+            self.sched[-1] = (self.sched[-1][0], finish)
+
+
+def test_g14_lost_disk_in_b_does_not_hide_d_and_c(monkeypatch) -> None:
+    _lossy_cases(monkeypatch)
+    world = _LossyWorld()
+    rc, out = T._run(world)
+    lines = out.splitlines()
+    assert world.errors == []
+    assert "хвост по факту: 8 из 9 (случай B красный)" in lines
+    assert "B случай: FAIL" in lines
+    assert "D случай: PASS" in lines and "C случай: PASS" in lines  # D и C стартовали и измерены
+    assert world.count("sim", "send_command", "scene.sequence", {"discs": T._D_LIST}) == 1
+    assert world.count("sim", "send_command", "scene.sequence", {"discs": T._C_LIST}) == 1
+    assert any(ln.startswith("B lines.count") and "FAIL" in ln for ln in lines)
+    # jobs_emitted_before — факт регистра (8), не литерал B (9): D (прирост 3) без ложного FAIL regs.jobs_emitted
+    assert "D regs.jobs_emitted: 11 (каскад от прошлого случая: литерал 12) → PASS" in lines
+    assert not any(ln.startswith(("D regs.jobs_emitted", "C regs.jobs_emitted")) and "FAIL" in ln for ln in lines)
+    assert rc == 1, out
+    assert lines[-1].startswith("итог: B=FAIL D=PASS C=PASS ДОМОЙ=PASS СТОП=PASS → код 1")
+
+
+def test_g14_pair_full_b_has_no_fact_line() -> None:
+    rc, out = T._run(T.World())
+    assert rc == 0, out
+    assert "хвост по факту" not in out
+
+
+def test_g14_pair_job_not_reached_robot_stops_before_d(monkeypatch) -> None:
+    _lossy_cases(monkeypatch)  # выдано 8, до робота дошло 7
+    world = _LossyWorld()
+    world.robot_loses_job = True
+    rc, out = T._run(world)
+    assert rc == 3, out
+    assert "хвост случая B: CVT_JOB 7 из 8 выданных" in out
+    assert world.count("sim", "send_command", "scene.sequence", {"discs": T._D_LIST}) == 0  # D не стартовал
+    assert not any(c.args[3] == "МИР" for c in world.calls if c.method == "set_register_verified")
+    assert "cleanup: " in out
