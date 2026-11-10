@@ -173,7 +173,7 @@ from scripts.atlas.links import TOO_GENERIC, Links, build_links
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.reference import _methods, _sig, _tag
 from scripts.atlas.scan import SCANNER, DefFact, FileFacts, scan
-from scripts.atlas.tree import AtlasError, Tree, resolve
+from scripts.atlas.tree import AtlasError, Tree, git_z, resolve
 
 
 __all__ = ["build_passport", "passports_for", "render_text", "resolve_ident"]
@@ -201,6 +201,30 @@ def _excluded(path: str, exclude: tuple[str, ...]) -> bool:
 def _split(where: str) -> tuple[str, int]:
     path, _, line = where.rpartition(":")
     return path, int(line)
+
+
+def _passport_paths(passport: dict) -> list[str]:
+    """Пути паспорта для `status.stale` в порядке паспорта, без повторов: `path`, затем обход разделов до `status`
+    в порядке ключей — путь каждого `where` (кроме `null`) и путь каждого `structural.twins` (часть до `::`)."""
+    out = [passport["path"]]
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "where":
+                    if isinstance(item, str):
+                        out.append(_split(item)[0])
+                elif key == "twins" and isinstance(item, list):
+                    out.extend(twin.partition("::")[0] for twin in item)
+                else:
+                    walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    for section in SECTIONS[:-1]:  # `status` строится после: его `frozen.where` в `stale` не входит
+        walk(passport[section])
+    return list(dict.fromkeys(out))
 
 
 def _find_node(tree: ast.AST, qualname: str, line: int) -> ast.AST | None:
@@ -305,7 +329,7 @@ class _Ctx:
         got = self.links.of(ident) or {}
         node = self._node(path, d)
         text = d.doc or ""
-        return {
+        p = {
             "passport": 1,
             "kind": d.kind,
             "id": ident,
@@ -322,10 +346,12 @@ class _Ctx:
                 "tier": facts.tier,
                 "doc_missing": text == "",
                 "dynamic": got.get("call_sites_unresolved", 0) + self._dynamic(path, d, facts),
-                "stale": None,
-                "frozen": None,
+                "stale": None,  # ниже: `_stale` читает уже собранные разделы
+                "frozen": self._frozen(path, facts, self.rows()),
             },
         }
+        p["status"]["stale"] = self._stale(p)
+        return p
 
     def _node(self, path: str, d: DefFact) -> ast.AST | None:
         try:
@@ -368,32 +394,11 @@ class _Ctx:
         }
 
     def _all_chain(self, path: str, d: DefFact, facts: FileFacts, rows: list[dict]) -> list[str] | None:
-        seen_all = facts.all is not None  # `__all__` у файла символа или у звена цепочки
+        links = self._init_chain(path, rows)
+        # `__all__` у файла символа или у звена цепочки; звено с `error` даёт `all=None` и идёт дальше, как до 4.2b-1
+        seen_all = facts.all is not None or any(pkg.all is not None for _, pkg in links)
         name = d.qualname.split(".")[0]
-        stop = ""
-        best = 0
-        # граница юнита — совпавший элемент `paths`: копия цикла `modules.resolve` (modules.py:113-118);
-        # правка resolve -> править здесь
-        for row in rows:
-            for element in row["paths"]:
-                hit = path.startswith(element) if element.endswith("/") else path == element
-                if hit and len(element) > best:
-                    best, stop = len(element), element.rstrip("/") if element.endswith("/") else ""
-        chain: list[str] = []
-        folder = path.rpartition("/")[0]
-        while True:
-            init = f"{folder}/__init__.py" if folder else "__init__.py"
-            pkg = self.facts.get(init)
-            if pkg is None:
-                break
-            seen_all = seen_all or pkg.all is not None
-            if pkg.all is not None and name in pkg.all:
-                chain.append(init)
-            if not folder or (stop and folder == stop):
-                break
-            folder = folder.rpartition("/")[0]
-            if stop and not (folder == stop or folder.startswith(stop + "/")):
-                break
+        chain = [init for init, pkg in links if pkg.all is not None and name in pkg.all]
         return chain if seen_all else None
 
     def _init_chain(self, path: str, rows: list[dict]) -> list[tuple[str, FileFacts]]:
@@ -407,7 +412,29 @@ class _Ctx:
             входит в результат как есть (пропуск — решение вызывающего). Результат — список, пустой, если ближайшего
             `__init__.py` нет. Не читает рабочее дерево, не бросает.
         """
-        raise NotImplementedError
+        stop = ""
+        best = 0
+        # граница юнита — совпавший элемент `paths`: копия цикла `modules.resolve` (modules.py:113-118);
+        # правка resolve -> править здесь
+        for row in rows:
+            for element in row["paths"]:
+                hit = path.startswith(element) if element.endswith("/") else path == element
+                if hit and len(element) > best:
+                    best, stop = len(element), element.rstrip("/") if element.endswith("/") else ""
+        links: list[tuple[str, FileFacts]] = []
+        folder = path.rpartition("/")[0]
+        while True:
+            init = f"{folder}/__init__.py" if folder else "__init__.py"
+            pkg = self.facts.get(init)
+            if pkg is None:
+                break
+            links.append((init, pkg))
+            if not folder or (stop and folder == stop):
+                break
+            folder = folder.rpartition("/")[0]
+            if stop and not (folder == stop or folder.startswith(stop + "/")):
+                break
+        return links
 
     def _stale(self, passport: dict) -> list[str] | None:
         """`status.stale` собранного паспорта (раздел `status` в нём ещё не нужен).
@@ -422,7 +449,19 @@ class _Ctx:
             `links.bases`), путь из `links.structural.twins` (часть до `::`). `where: null` пропускается.
             Один вызов `git` на паспорт; репозиторий не меняется (кроме stat-кэша `.git/index`).
         """
-        raise NotImplementedError
+        try:
+            head = resolve(self.root, "HEAD")
+        except AtlasError:  # HEAD не разрешается (пустой репозиторий, битый HEAD): не искали
+            return None
+        if head != self.sha:  # `--ref` на чужой ревизии: рабочее дерево к ней не относится
+            return None
+        paths = _passport_paths(passport)
+        args = ("--no-optional-locks", "--literal-pathspecs", "diff", "-z", "--name-only", "--no-renames", self.sha)
+        try:
+            changed = set(git_z(self.root, *args, "--", *paths))
+        except AtlasError:  # `git diff` упал (bare-клон без рабочего дерева и т. п.): не искали
+            return None
+        return [p for p in paths if p in changed]
 
     def _frozen(self, path: str, facts: FileFacts, rows: list[dict]) -> list[dict]:
         """`status.frozen`: шапки `FREEZE` файла символа, затем `__init__.py` цепочки.
@@ -433,7 +472,12 @@ class _Ctx:
             Без повторов (символ в самом `__init__.py` — шапки файла не дублируются звеном). `[]` — искали, нет.
             `v2_error` звена не влияет. Класс и метод получают цепочку своего файла. Не бросает.
         """
-        raise NotImplementedError
+        heads = [{"date": date, "text": text, "where": f"{path}:{line}"} for date, text, line in facts.freeze]
+        for init, pkg in self._init_chain(path, rows):
+            if init == path or pkg.error is not None:  # символ в самом `__init__.py`; звено не разобрано
+                continue
+            heads += [{"date": date, "text": text, "where": f"{init}:{line}"} for date, text, line in pkg.freeze]
+        return heads
 
     def _links(self, d: DefFact, got: dict) -> dict:
         structural = None
@@ -641,10 +685,13 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     else:
         add(f"  tests: {_EMPTY}")
     doc = "да" if st["doc_missing"] else "нет"
-    add(
-        f"status: tier {st['tier'] or 'нет шапки'}; doc_missing {doc}; dynamic {_value(st['dynamic'])}; "
-        f"stale {_value(st['stale'])}; frozen {_value(st['frozen'])}"
-    )
+    add(f"status: tier {st['tier'] or 'нет шапки'}; doc_missing {doc}; dynamic {_value(st['dynamic'])}")
+    add(f"  stale: {', '.join(st['stale']) if st['stale'] else _value(st['stale'])}")  # служебные: не режутся
+    if st["frozen"]:
+        for head in st["frozen"]:
+            add(f"  frozen: {head['date']} {head['text']} ({head['where']})")
+    else:
+        add(f"  frozen: {_value(st['frozen'])}")
 
     lists = {v[0]: v for k, v in fixed if k == "list"}
     free = {n: len(v[2]) for n, v in lists.items() if not full and n not in show_all}
@@ -670,7 +717,8 @@ def build_passport(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...]
         `resolve_ident`); `root` и `ref` — см. модуль.
     Post: JSON-совместимый `dict`: конверт (`passport`, `kind`, `id`, `path`, `line`, `sha`, `scanner`) и шесть
         разделов (`purpose`, `interface`, `links`, `runtime`, `checks`, `status`) — все ключи всегда, `null` против
-        `[]`/`0` по таблицам модуля. `json.dumps(result)` проходит без `default=`. Не меняет репозиторий.
+        `[]`/`0` по таблицам модуля. `json.dumps(result)` проходит без `default=`. Не меняет репозиторий (кроме
+        stat-кэша `.git/index` от `git diff` ключа `status.stale`).
     Raises: `tree.AtlasError`, если `ident` не найден в ревизии или файл символа в `exclude`; `ref` не разрешается в
         ревизию. Паспорт не бросает на файлах с `error`/`v2_error` — их символы не находятся.
     """

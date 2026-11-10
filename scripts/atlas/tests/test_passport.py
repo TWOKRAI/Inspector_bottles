@@ -157,7 +157,7 @@ def _check_constant_shape(p: dict, kind: str, ident: str, sha: str) -> None:
     assert p["links"]["uses"] is None
     assert p["runtime"]["processes"] is None
     assert p["checks"]["findings"] is None  # node реестра не путь::qualname
-    assert p["status"]["stale"] is None and p["status"]["frozen"] is None
+    assert p["status"]["stale"] == [] and p["status"]["frozen"] == []
     assert p["interface"]["layer"] == "other"  # строка, не null; modules.yaml в ревизии нет
     assert p["interface"]["all"] is None  # литерального __all__ нет
 

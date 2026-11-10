@@ -24,6 +24,9 @@ Stability: lite
 Шапка модуля (R8): в очищенном докстринге модуля строки `Tier: core|optional|frozen` (значение без учёта регистра;
 другое значение — None; побеждает первая допустимая строка) и `Contour: a, b` (элементы через запятую, пустые
 отброшены; первая подходящая строка побеждает).
+
+Шапки заморозки (Task 4.2b-1): `FileFacts.freeze` — `(date, text, line)` каждой строки СЫРОГО докстринга модуля,
+что начинается с `FREEZE YYYY-MM-DD:` (`read_freeze`); поле A1 (`v2_error` его не трогает), `doc` не меняется.
 """
 
 from __future__ import annotations
@@ -69,6 +72,7 @@ TIERS = ("core", "optional", "frozen")
 # конструкторы для `ThreadSite`; константа, не конфиг (ключ кэша — хеш файла)
 THREAD_PATTERNS = ("Thread", "Timer", "Observer")
 DOC_HEADER = re.compile(r"^(Tier|Contour):[ \t]*(.+)$", re.MULTILINE)
+FREEZE_HEADER = re.compile(r"FREEZE (\d{4}-\d{2}-\d{2}):(.*)", re.ASCII)  # `match` по сырой строке: только с начала
 
 
 # --------------------------------------------------------------------------- факты
@@ -254,6 +258,7 @@ class FileFacts:
             "command_specs": None
             if self.command_specs is None
             else [[n, ln, f, ix(sc)] for n, ln, f, sc in self.command_specs],
+            "freeze": [[date, text, ln] for date, text, ln in self.freeze],
         }
         # UTF-8 без экранирования: кириллица в `doc` иначе стоит 6 байт на букву (гейт размера `scan_cache`, Task 4.1).
         body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
@@ -267,9 +272,9 @@ class FileFacts:
     def from_json(cls, text: str) -> FileFacts:
         """Обратное к `to_json`; тело неверной формы -> исключение (для `scan` это промах кэша).
 
-        v2: читает d["strs"], d["defs"], d["calls"], d["io"], d["thread_sites"], d["test_defs"], d["v2_error"]
-        через `d[...]` (не `d.get`): тело старой формы без этих ключей бросает, `scan()` считает это промахом
-        и разбирает заново.
+        v2: читает d["strs"], d["defs"], d["calls"], d["io"], d["thread_sites"], d["test_defs"], d["v2_error"],
+        d["command_specs"], d["freeze"] через `d[...]` (не `d.get`): тело старой формы без этих ключей бросает,
+        `scan()` считает это промахом и разбирает заново.
         """
         d = json.loads(text)
         strs, calls, tests = d["strs"], d["calls"], d["test_defs"]
@@ -304,6 +309,7 @@ class FileFacts:
             command_specs=None
             if d["command_specs"] is None
             else tuple((n, ln, f, strs[sc]) for n, ln, f, sc in d["command_specs"]),
+            freeze=tuple((date, text, ln) for date, text, ln in d["freeze"]),
         )
 
 
@@ -463,6 +469,26 @@ def read_doc_headers(doc: str) -> tuple[str | None, tuple[str, ...] | None]:
         elif contour is None:
             contour = tuple(x.strip() for x in value.split(",") if x.strip()) or None
     return tier, contour
+
+
+def read_freeze(tree: ast.Module) -> tuple[tuple[str, str, int], ...]:
+    """Шапки `FREEZE YYYY-MM-DD: текст` докстринга модуля: `(date, text, line)` в порядке строк файла.
+
+    Строки — сырой `value.split("\\n")` константы докстринга (не `get_docstring`: тот чистит отступы и строк не даёт);
+    `line` = `Constant.lineno` + индекс строки. Шапка — строка, что начинается с `FREEZE YYYY-MM-DD:`; `text` — хвост
+    после `FREEZE YYYY-MM-DD: ` без хвостовых пробелов. Докстринга нет — `()`.
+    """
+    first = tree.body[0] if tree.body else None
+    if not (
+        isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
+    ):
+        return ()
+    heads: list[tuple[str, str, int]] = []
+    for index, raw in enumerate(first.value.value.split("\n")):
+        match = FREEZE_HEADER.match(raw)
+        if match:
+            heads.append((match.group(1), match.group(2).removeprefix(" ").rstrip(), first.value.lineno + index))
+    return tuple(heads)
 
 
 def _is_dunder(name: str) -> bool:
@@ -761,6 +787,7 @@ def scan_text(text: str) -> FileFacts:
             threads=threads,
             tier=tier,
             contour=contour,
+            freeze=read_freeze(tree),
         )
     except Exception as exc:  # noqa: BLE001 — SyntaxError, ValueError, RecursionError, MemoryError, ...
         return FileFacts(loc=loc, error=type(exc).__name__)
