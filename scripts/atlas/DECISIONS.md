@@ -562,7 +562,8 @@ M2 (1.9f) — blocker+major классов `fact`, `dryrun`, `form`: их лов
 содержимое в рабочем дереве отличается от `sha`: один `git --no-optional-locks --literal-pathspecs diff -z --name-only
 --no-renames <sha> -- <пути>` на паспорт; `null` — `sha` != HEAD, HEAD не разрешается или `git diff` упал (bare-клон).
 Это **сужает ADR-ATL-003** («виды читают не рабочее дерево, а ревизию») для одного ключа: рабочее дерево читает
-только `stale`, остальной паспорт — из `sha`; репозиторий не меняется, кроме stat-кэша `.git/index`. `frozen` — шапки
+только `stale`, остальной паспорт — из `sha`; репозиторий не меняется, кроме stat-кэша `.git/index` (`--no-optional-locks` на
+`git diff` не действует: `index.lock` до ~0,5 с при устаревшем кэше; `OSError` при длинном argv -> `null`). `frozen` — шапки
 `FREEZE YYYY-MM-DD: текст` докстринга файла символа (`FileFacts.freeze`, сырые строки, `Constant.lineno` + индекс),
 затем `__init__.py` цепочки общим обходом с `interface.all` (`_init_chain`); звено с `error` пропускается. Текст:
 строки `  stale: …` и `  frozen: …` (по строке на шапку) — служебный минимум, не режутся. Бюджет `ConfigFileWatcher`

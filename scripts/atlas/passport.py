@@ -442,12 +442,15 @@ class _Ctx:
         Pre: `passport` — `dict` с конвертом и пятью разделами до `status` (`path`, `links`, `runtime`, `checks`
             уже построены); `self.sha` — полный sha ревизии.
         Post: `None`, если `self.sha` != `resolve(self.root, "HEAD")`, HEAD не разрешается или `git diff` упал
-            (`AtlasError` ловится только вокруг `resolve(root, "HEAD")` и `git_z`); иначе список путей паспорта,
-            изменённых в рабочем дереве относительно `self.sha` (`git --no-optional-locks --literal-pathspecs diff -z
-            --name-only --no-renames <sha> -- <пути>`), в порядке путей паспорта, без повторов; `[]` — чисто. Пути:
+            (`AtlasError`/`OSError` ловятся только вокруг `resolve(root, "HEAD")` и `git_z`); иначе список путей
+            паспорта, изменённых в рабочем дереве относительно `self.sha` (`git --no-optional-locks
+            --literal-pathspecs diff -z --name-only --no-renames <sha> -- <пути>`), в порядке путей паспорта, без
+            повторов; `[]` — чисто. Пути:
             `path`, путь из каждого `where` (`links.*`, `checks.tests`, `runtime.*`, `interface.members`,
             `links.bases`), путь из `links.structural.twins` (часть до `::`). `where: null` пропускается.
-            Один вызов `git` на паспорт; репозиторий не меняется (кроме stat-кэша `.git/index`).
+            Один вызов `git` на паспорт; репозиторий не меняется (кроме stat-кэша `.git/index`: `--no-optional-locks`
+            на `git diff` не действует, `index.lock` держится до ~0,5 с при устаревшем stat-кэше, ~15 мс иначе).
+            Правка режима файла без правки текста тоже попадает в `stale` (поведение git).
         """
         try:
             head = resolve(self.root, "HEAD")
@@ -459,7 +462,7 @@ class _Ctx:
         args = ("--no-optional-locks", "--literal-pathspecs", "diff", "-z", "--name-only", "--no-renames", self.sha)
         try:
             changed = set(git_z(self.root, *args, "--", *paths))
-        except AtlasError:  # `git diff` упал (bare-клон без рабочего дерева и т. п.): не искали
+        except (AtlasError, OSError):  # `git diff` упал (bare-клон) или argv слишком длинный: не искали
             return None
         return [p for p in paths if p in changed]
 

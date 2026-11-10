@@ -177,3 +177,28 @@ def test_one_git_diff_per_passport_none_in_resolve(repo: GitRepo, monkeypatch: p
     assert len(calls) == 3
     assert run_with_deadline(lambda: passport.resolve_ident(repo.path, "HEAD", "a"), DEADLINE_S) == ["pkg/lib.py::a"]
     assert len(calls) == 3
+
+
+def test_freeze_survives_json_round_trip() -> None:
+    """`freeze` пишется в `to_json` и читается `from_json` (J7/J7b: без этого тёплый вызов даёт `[]`)."""
+    from scripts.atlas.scan import FileFacts, scan_text
+
+    facts = scan_text('"""\nFREEZE 2026-11-08: x\n"""\n')
+    assert facts.freeze == (("2026-11-08", "x", 2),)
+    assert FileFacts.from_json(facts.to_json()).freeze == (("2026-11-08", "x", 2),)
+
+
+def test_stale_is_null_when_argv_too_long(repo: GitRepo, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слишком длинный argv (`OSError` из `subprocess`) -> `stale: null`, паспорт не падает."""
+    from scripts.atlas import passport
+
+    _commit(repo, _TWO)
+
+    def too_long(root: object, *args: str) -> list[str]:
+        if "diff" in args:
+            raise OSError(7, "Argument list too long")
+        return []
+
+    monkeypatch.setattr(passport, "git_z", too_long)
+    p = run_with_deadline(lambda: passport.build_passport(repo.path, "HEAD", "pkg/lib.py::b"), DEADLINE_S)
+    assert p["status"]["stale"] is None
