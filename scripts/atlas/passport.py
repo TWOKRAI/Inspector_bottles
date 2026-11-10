@@ -271,6 +271,18 @@ _TOP_SHOWN = 6  # `top` члена юнита в тексте: до 6 имён, 
 _STALE_SHOWN = 5  # `stale` в тексте `map`: первые 5 путей, остаток `; ещё N`
 
 
+def _norm_exclude(exclude: tuple[str, ...], root: Path) -> tuple[str, ...]:
+    """`--exclude`: `./pkg`, `pkg\\` -> `pkg`; пустой, выше корня, вне корня -> AtlasError; префикс, равный корню
+    (`.`, `./`, `a/..`), — AtlasError: он скрыл бы весь репозиторий (код 2, значение пути в тексте не печатается)."""
+    out = []
+    for prefix in exclude:
+        norm = norm_path(prefix, root)
+        if norm == ".":
+            raise AtlasError("atlas: --exclude: путь совпадает с корнем репозитория")
+        out.append(norm)
+    return tuple(out)
+
+
 def _excluded(path: str, exclude: tuple[str, ...]) -> bool:
     """Путь под префиксом: равен ему или начинается с `префикс/` (DESIGN 6)."""
     for prefix in exclude:
@@ -356,9 +368,7 @@ class _Ctx:
     def open(cls, root: Path, ref: str, exclude: tuple[str, ...], *, with_links: bool = True) -> _Ctx:
         """`with_links=False` — без `build_links` (пустой `Links`): `map` связей символов не читает (~0,5-1 с)."""
         root = Path(root)
-        exclude = tuple(
-            norm_path(prefix, root) for prefix in exclude
-        )  # `./pkg`, `pkg\\` -> `pkg`; пустой -> AtlasError
+        exclude = _norm_exclude(exclude, root)
         sha = resolve(root, ref)
         tree = Tree(root, sha)
         paths = sorted(p for p in tree.oids() if p.endswith(".py") and not _excluded(p, exclude))

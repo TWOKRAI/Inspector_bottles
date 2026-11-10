@@ -25,6 +25,7 @@ Post: ошибка юнита — ValueError `<name>: юнит K: …` (K — id
 from __future__ import annotations
 
 import ast
+import os
 import posixpath
 import re
 from collections.abc import Callable
@@ -51,19 +52,22 @@ def norm_path(s: str, root: Path | None = None) -> str:
 
     Pre: `root` — корень репозитория или None. Post: абсолютный путь внутри `root` -> путь от корня; `root is None`
     — любой абсолютный путь ошибка. Raises: `AtlasError` (CLI: код 2, строка `atlas: ...`, значение пути в тексте
-    не печатается) — пустая строка, `..` выше корня, абсолютный путь вне `root`. Символьные ссылки не разворачиваются
-    (корень сверяется и как дан, и через `resolve`). Регистр на Windows не сводится."""
+    не печатается) — пустая строка, `..` выше корня, абсолютный путь вне `root`. Абсолютный путь сверяется с корнем
+    как дан и через `os.path.realpath` (алиас-симлинк: macOS `/tmp` -> `/private/tmp`), корень — как дан и через
+    `resolve()`. Регистр на Windows не сводится."""
     path = s.replace("\\", "/")
     if path == "":
         raise AtlasError("atlas: путь пуст")
     if path.startswith("/") or _DRIVE.match(path):
         norm = posixpath.normpath(path)
         bases = {root.as_posix().rstrip("/"), root.resolve().as_posix().rstrip("/")} if root is not None else set()
-        for base in sorted(bases, key=len, reverse=True):
-            if norm == base:
-                return "."
-            if norm.startswith(base + "/"):
-                return norm[len(base) + 1 :]
+        # как дан, затем с развёрнутыми симлинками (путь и корень по обе стороны алиаса)
+        for variant in (norm, os.path.realpath(norm).replace("\\", "/")) if bases else ():
+            for base in sorted(bases, key=len, reverse=True):
+                if variant == base:
+                    return "."
+                if variant.startswith(base + "/"):
+                    return variant[len(base) + 1 :]
         raise AtlasError("atlas: абсолютный путь вне корня репозитория")
     norm = posixpath.normpath(path)
     if norm == ".." or norm.startswith("../"):

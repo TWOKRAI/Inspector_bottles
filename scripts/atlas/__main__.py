@@ -176,13 +176,15 @@ def _map_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
 def _error_block(record: dict, budget: int) -> str:
     """Блок текста ошибочного id: `== id ==`, ошибка, кандидаты. Блок не длиннее `budget` строк, но не короче трёх:
     кандидаты, что не влезли, заменяет `ещё N; уточните путь::имя` (кандидатов `max(budget - 3, 0)`). Влезли все
-    (`2 + N <= budget`) — хвоста нет: `ещё 1` стоил бы строку, как сам кандидат."""
+    (`2 + N <= budget`) — хвоста нет: `ещё 1` стоил бы строку, как сам кандидат. Хвост — только если что-то скрыто:
+    `not found` (кандидатов нет) при любом бюджете — две строки."""
     head = [f"== {record['id']} ==", record["error"]]
     candidates = record.get("candidates", [])
     if len(head) + len(candidates) <= budget:
         return "\n".join([*head, *candidates])
     keep = max(budget - 3, 0)
-    return "\n".join([*head, *candidates[:keep], f"ещё {len(candidates) - keep}; {_MORE_HINT}"])
+    hidden = len(candidates) - keep
+    return "\n".join([*head, *candidates[:keep], *([f"ещё {hidden}; {_MORE_HINT}"] if hidden > 0 else [])])
 
 
 def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -274,3 +276,60 @@ def test_all_chain_starts_with_own_file(repo: GitRepo, atlas: Any) -> None:
     assert rec["interface"]["all"] == ["lib/a/sub/impl.py", "lib/a/sub/__init__.py", "lib/a/__init__.py"]
     [own] = json.loads(atlas(repo, "ref", "lib/b/__init__.py::Own", "--format", "json").out)
     assert own["interface"]["all"] == ["lib/b/__init__.py"]
+
+
+# ---------------------------------------------------------------- ревью r1
+
+
+def test_error_block_not_found_has_no_zero_tail(repo: GitRepo, atlas: Any) -> None:
+    """`not found` (кандидатов нет) при `--budget 1`: две строки, без `ещё 0; ...`."""
+    _commit(repo, _SMALL)
+    res = atlas(repo, "ref", "zzzNoSuchName", "--format", "passport", "--budget", "1")
+    assert res.code == 2
+    assert res.out.splitlines() == ["== zzzNoSuchName ==", "not found"]
+
+
+@pytest.mark.parametrize("prefix", [".", "./", "a/.."])
+def test_exclude_equal_to_root_exit_2(repo: GitRepo, atlas: Any, prefix: str) -> None:
+    """`--exclude` с путём, равным корню, скрыл бы весь репозиторий: код 2, строка без значения пути."""
+    _commit(repo, _SMALL)
+    for argv in (("ref", "pkg/a.py::f", "--format", "passport"), ("map", "pkg/a.py")):
+        res = atlas(repo, *argv, "--exclude", prefix)
+        assert res.code == 2 and res.out == "", (argv, res.out)
+        assert "atlas: --exclude: путь совпадает с корнем репозитория" in res.err.splitlines(), res.err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink_to на Windows требует прав; ветка алиаса — posix")
+def test_absolute_path_through_symlink_alias_inside_root(repo: GitRepo, atlas: Any, tmp_path: Path) -> None:
+    """Абсолютный путь через симлинк-алиас корня (macOS `/tmp` -> `/private/tmp`) читается как внутри корня."""
+    from scripts.atlas.modules import norm_path
+
+    _commit(repo, _SMALL)
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo.path, target_is_directory=True)
+    assert norm_path(str(alias / "pkg" / "a.py"), repo.path) == "pkg/a.py"
+    canon = atlas(repo, "ref", "pkg/a.py::f", "--format", "json")
+    other = atlas(repo, "ref", f"{alias}/pkg/a.py::f", "--format", "json")
+    assert other.code == 0, other.err
+    assert other.out == canon.out
+
+
+def test_nested_docs_dir_is_product_group(repo: GitRepo, atlas: Any) -> None:
+    """Группа 1 — только верхний уровень `docs/`: вложенный `pkg/docs/x.py` — продукт (группа 0, по пути перед
+    `zzpkg/`), `docs/y.py` — группа 1, затем тесты."""
+    _commit(
+        repo,
+        {
+            "core/__init__.py": "",
+            "core/lib.py": "def target():\n    return 1\n",
+            "pkg/__init__.py": "",
+            "pkg/docs/x.py": "from core.lib import target\n",
+            "zzpkg/__init__.py": "",
+            "zzpkg/prod.py": "from core.lib import target\n",
+            "docs/y.py": "from core.lib import target\n",
+            "tests/test_a.py": "from core.lib import target\n",
+        },
+    )
+    res = atlas(repo, "ref", "core/lib.py::target", "--format", "passport", "--full")
+    assert res.code == 0, res.err
+    assert _addresses(res.out, "used_by") == ["pkg/docs/x.py:1", "zzpkg/prod.py:1", "docs/y.py:1", "tests/test_a.py:1"]
