@@ -439,7 +439,7 @@
     "baseRef": "head"
   },
   "effortLevel": "high",
-  "model": "opus",
+  "model": "sonnet",
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
     "github@claude-plugins-official": true,

@@ -169,6 +169,9 @@ Servers with docs: `docs/claude/LEAD_RULES.md` → «MCP routing».
 
 Never trade reasoning quality for tokens. Lean output at the source (`pytest -q --tb=short`, `ruff check -q`); debugger/tester get full output; read the 3 files that matter, not 20 (qex / targeted `Grep`); MCP tool search is on by default — set `ENABLE_TOOL_SEARCH=false` only if a gateway rejects it; CLI over MCP for one-off ops; disable unused servers in `enabled.yaml`, audit with `/context`. Unavoidable `/compact` → focus files + tests + plan path; at a boundary prefer `/clear` + handoff. Details: `docs/claude/LEAD_RULES.md` → «Token discipline».
 
+- Long logs → `log-reader`, test or build runs → `test-runner`, broad search → `Explore` (all `haiku`, read-only, `.claude/agents/core/`). A job of 1–3 tool calls the lead does itself. Check a subagent's claim at the cited `path:line` before an edit rests on it.
+- When a task does not come out: verify with tests first, then raise effort one level, and only then take a stronger model. `/compact` before switching model.
+
 ## Project layout — where to write and where to read
 
 | What | Path |
