@@ -176,10 +176,13 @@ def _full_text(sha: str, scanner: str) -> str:
 
 
 def _cut_text(sha: str, scanner: str) -> str:
-    """Образец map-form п. 3 буквально: бюджет на 2 члена из 3, `used_by` и `tests` целиком."""
+    """Образец map-form п. 3 буквально: `--budget 22` (полный текст — 23 строки, метка среза входит в бюджет) —
+    1 член из 3 и метка, `used_by` и `tests` целиком; 22 строки. Решение лида 2026-11-10: «показано 2 из 3» при
+    метке в бюджете недостижимо (23 строки > 22)."""
     lines = _full_text(sha, scanner).splitlines()
-    i = lines.index("    u/b.py — Модуль b.  (run_b, arun)")
-    lines[i] = "    показано 2 из 3; все: --all members"
+    lines.remove("    u/b.py — Модуль b.  (run_b, arun)")
+    i = lines.index("    u/__init__.py — Пакет u.")
+    lines[i] = "    показано 1 из 3; все: --all members"
     return "\n".join(lines)
 
 
@@ -268,9 +271,15 @@ def test_map_unit_and_file_constant_keys_and_values(repo: GitRepo) -> None:
             "all": ["A", "B"],
             "signature": None,
             "members": [
-                {"name": "u/a.py", "signature": None, "where": "u/a.py:1", "top": ["A", "B"]},
-                {"name": "u/__init__.py", "signature": None, "where": "u/__init__.py:1", "top": []},
-                {"name": "u/b.py", "signature": None, "where": "u/b.py:1", "top": ["run_b", "arun"]},
+                {"name": "u/a.py", "signature": None, "where": "u/a.py:1", "top": ["A", "B"], "doc": "Модуль a."},
+                {"name": "u/__init__.py", "signature": None, "where": "u/__init__.py:1", "top": [], "doc": "Пакет u."},
+                {
+                    "name": "u/b.py",
+                    "signature": None,
+                    "where": "u/b.py:1",
+                    "top": ["run_b", "arun"],
+                    "doc": "Модуль b.",
+                },
             ],
         },
         "links": {
@@ -377,8 +386,9 @@ def test_map_unit_used_by_grouped_by_importer_unit(repo: GitRepo) -> None:
 
 
 def test_map_text_budget_cut_shows_k_of_n(repo: GitRepo) -> None:
-    """Текст `unit u`: образец map-form п. 3 буквально при бюджете на 2 члена (22: полный текст — 23 строки), без среза
-    при `budget=60`, `full=True` и `show_all={"members"}` (тот же полный текст без метки); минимум при `budget=1`: по
+    """Текст `unit u`: образец map-form п. 3 буквально при `budget=22` (1 член из 3: полный текст — 23 строки, метка
+    входит в бюджет), без среза при `budget=60` и `full=True`; `show_all={"members"}` при 22 — члены целиком, их строки
+    идут в расход бюджета, поэтому режется `used_by` (как у `ref`); минимум при `budget=1`: по
     одной записи на непустой список + метки `показано K из N; все: --all <раздел>`; ключи, всегда `null` у `map`,
     не печатаются; строки «из продукта/из тестов» нет; импорт через `u/__init__` (`w`) — в `used_by`."""
     sha, _ = _seed(repo)
@@ -389,7 +399,9 @@ def test_map_text_budget_cut_shows_k_of_n(repo: GitRepo) -> None:
     assert _lines(_render(p, budget=22)) == _lines(_cut_text(sha, scanner))
     assert _lines(_render(p, budget=60)) == _lines(full)
     assert _lines(_render(p, budget=1, full=True)) == _lines(full)
-    assert _lines(_render(p, budget=22, show_all=frozenset({"members"}))) == _lines(full)
+    lifted = full.replace("    w — w/y.py:5 (import) ×1", "    показано 1 из 2; все: --all used_by")
+    assert _lines(_render(p, budget=22, show_all=frozenset({"members"}))) == _lines(lifted)
+    assert len(_lines(_render(p, budget=22))) == 22  # строк <= max(budget, минимум)
 
     minimum = _render(p, budget=1)
     stripped = _stripped(minimum)
@@ -558,7 +570,8 @@ def test_map_unit_exclude_drops_files_everywhere(repo: GitRepo) -> None:
     (импортёр `v/`); остальное на месте."""
     _seed(repo)
     p = _build(repo, "u", exclude=("u/b.py", "u/tests/", "v/"))
-    assert [m["name"] for m in p["interface"]["members"]] == ["u/a.py", "u/__init__.py"]
+    # порядок `(-операторов с целью в файле, путь)`: без `v/` у `u/a.py` 0, у `u/__init__.py` 1 (`w/y.py:5`)
+    assert [m["name"] for m in p["interface"]["members"]] == ["u/__init__.py", "u/a.py"]
     assert p["checks"]["tests"] == []
     assert p["links"]["used_by"] == [{"name": "w", "where": "w/y.py:5", "how": "import", "count": 1}]
 

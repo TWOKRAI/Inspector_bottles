@@ -23,7 +23,6 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     (Task 4.2b-2): паспорт юнита или файла (`passport.build_map`); цель одна; `--format` по умолчанию `passport`,
     `--budget` 60; `--all` — из `passport.MAP_SHOW_ALL`. Код 2: нет цели, цель не найдена (stderr `atlas map: not
     found`), `--format` не `passport`/`json`, `--all` не из списка. `ref --all members` остаётся кодом 2.
-    Тело `map` — заглушка INTERFACE: `NotImplementedError` до GREEN.
 Public API: main.
 Stability: lite
 """
@@ -149,11 +148,22 @@ def _map_usage_error(args: argparse.Namespace) -> str | None:
 def _map_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
     """`map <цель>`: паспорт юнита или файла (JSON — список из одного объекта, как у `ref`; текст — `render_text`).
 
-    Pre: ввод прошёл `_map_usage_error`. Post: 0 — паспорт напечатан; 2 — цель не найдена (`AtlasError` из
-    `passport.build_map`, stderr `atlas map: <текст>`, без значения цели в тексте `not found`) или ревизия `--ref` не
-    разрешается. Заглушка INTERFACE (Task 4.2b-2): `NotImplementedError` до GREEN.
+    Pre: ввод прошёл `_map_usage_error`. Post: 0 — паспорт напечатан; 2 — цель не найдена (`AtlasError("not found")`
+    из `passport.build_map` -> stderr `atlas map: not found`, без значения цели) или ревизия `--ref` не разрешается
+    (`AtlasError` с текстом `resolve` уходит в общий обработчик `main`, код 2). stdout при коде 2 пуст.
     """
-    raise NotImplementedError
+    try:
+        record = passport.build_map(root, ref, args.target, exclude=tuple(args.exclude))
+    except AtlasError as exc:
+        if str(exc) != "not found":
+            raise
+        print("atlas map: not found", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        print(json.dumps([record], ensure_ascii=False, indent=2))
+    else:
+        print(passport.render_text(record, budget=args.budget, show_all=frozenset(args.all), full=args.full))
+    return 0
 
 
 def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:

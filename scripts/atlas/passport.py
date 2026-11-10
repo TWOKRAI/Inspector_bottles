@@ -157,8 +157,9 @@ Post: паспорт детерминирован: та же ревизия -> �
   interface.signature      `null`                                        `null`
   interface.members        форма A — по ПРОД-ФАЙЛАМ: `{name: путь,       форма B — по символам: `{name: qualname,
                            signature: null, where: "путь:1",             signature, where}`, верхний уровень,
-                           top: [имена без `_`]}`, порядок                имена на `_` тоже; классы и функции,
-                           `(-операторов импорта с целью в файле, путь)` методы не входят
+                           top: [имена без `_`], doc: FileFacts.doc}`,    имена на `_` тоже; классы и функции,
+                           порядок `(-операторов импорта с целью в       методы не входят
+                           файле, путь)`
   links.used_by            `{name: id юнита-импортёра, where, how:       то же, цель — файл (реэкспорт через
                            "import", count}`, `where` — min по (путь,    `__init__` у файла не виден)
                            строка); `count` — операторов импорта, включая
@@ -199,8 +200,8 @@ Post: паспорт детерминирован: та же ревизия -> �
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
   - связь с `where: null`: `<имя> — строка не указана`;
-  - срез и имена среза: у class/function/method — `SHOW_ALL_SECTIONS`; у `kind` unit/file (Task 4.2b-2, будущий
-    контракт, пока не реализован) — `MAP_SHOW_ALL`; `render_text` выбирает набор по `kind` паспорта. Текст `map`
+  - срез и имена среза: у class/function/method — `SHOW_ALL_SECTIONS`; у `kind` unit/file (Task 4.2b-2) —
+    `MAP_SHOW_ALL`; `render_text` выбирает набор по `kind` паспорта. Метка среза входит в бюджет. Текст `map`
     — образец `map-form.md` п. 3 (`== unit u ==`, вторая строка `<path>; sha <sha>; scanner <scanner>` без `:line`);
   - статус (Task 4.2b-1): строка `status:` несёт `tier`, `doc_missing`, `dynamic`; затем строки с отступом в 2
     пробела: `  stale: —` (`[]`), `  stale: не искали` (`null`), `  stale: a.py, b.py` (без среза); `  frozen: —`
@@ -218,10 +219,11 @@ from pathlib import Path
 
 from scripts.atlas import store
 from scripts.atlas.adapters.modules import modules_for
-from scripts.atlas.links import TOO_GENERIC, Links, build_links
+from scripts.atlas.links import TOO_GENERIC, Links, _scope, build_links
+from scripts.atlas.modules import OTHER
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.reference import _methods, _sig, _tag
-from scripts.atlas.scan import SCANNER, DefFact, FileFacts, scan
+from scripts.atlas.scan import SCANNER, DefFact, FileFacts, ImportIndex, scan
 from scripts.atlas.tree import AtlasError, Tree, git_z, resolve
 
 
@@ -237,6 +239,9 @@ _NOT_SEARCHED = "не искали"
 _EMPTY = "—"
 _NO_SPECS = "форма command_specs() не объявлена"
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+_PATHSPEC_MAX = 100  # `status.stale`: больше путей — `git diff` без pathspec (предел argv), пересечение в Python
+_TOP_SHOWN = 6  # `top` члена юнита в тексте: до 6 имён, остаток `, +N`
+_STALE_SHOWN = 5  # `stale` в тексте `map`: первые 5 путей, остаток `; ещё N`
 
 
 def _excluded(path: str, exclude: tuple[str, ...]) -> bool:
@@ -255,8 +260,9 @@ def _split(where: str) -> tuple[str, int]:
 
 def _passport_paths(passport: dict) -> list[str]:
     """Пути паспорта для `status.stale` в порядке паспорта, без повторов: `path`, затем обход разделов до `status`
-    в порядке ключей — путь каждого `where` (кроме `null`) и путь каждого `structural.twins` (часть до `::`)."""
-    out = [passport["path"]]
+    в порядке ключей — путь каждого `where` (кроме `null`) и путь каждого `structural.twins` (часть до `::`).
+    У `kind: unit` `path` — каталог (`paths[0]`), он не входит: файлы юнита приходят из `where` членов и тестов."""
+    out = [] if passport["kind"] == "unit" else [passport["path"]]
 
     def walk(value: object) -> None:
         if isinstance(value, dict):
@@ -320,7 +326,8 @@ class _Ctx:
     _ranks: dict[tuple[str, str], int] = field(default_factory=dict)
 
     @classmethod
-    def open(cls, root: Path, ref: str, exclude: tuple[str, ...]) -> _Ctx:
+    def open(cls, root: Path, ref: str, exclude: tuple[str, ...], *, with_links: bool = True) -> _Ctx:
+        """`with_links=False` — без `build_links` (пустой `Links`): `map` связей символов не читает (~0,5-1 с)."""
         root = Path(root)
         sha = resolve(root, ref)
         tree = Tree(root, sha)
@@ -330,7 +337,7 @@ class _Ctx:
             facts = scan(tree, paths, cache=con).facts
         finally:
             con.close()
-        return cls(root, sha, tree, facts, build_links(facts))
+        return cls(root, sha, tree, facts, build_links(facts) if with_links else Links())
 
     def rows(self) -> list[dict]:
         if self._rows is None:
@@ -496,10 +503,10 @@ class _Ctx:
             паспорта, изменённых в рабочем дереве относительно `self.sha`, в порядке путей паспорта, без повторов;
             `[]` — чисто. Вызов `git`: при <= 100 путях — `git --no-optional-locks --literal-pathspecs diff -z
             --name-only --no-renames <sha> -- <пути>` (pathspec); при > 100 путях — тот же `git diff` БЕЗ pathspec и
-            пересечение со списком путей в Python (`map process_module`: 359 путей, ~29 КБ argv). Порог и пересечение —
-            Task 4.2b-2 GREEN; до него код всегда передаёт pathspec. Пути:
-            `path`, путь из каждого `where` (`links.*`, `checks.tests`, `runtime.*`, `interface.members`,
-            `links.bases`), путь из `links.structural.twins` (часть до `::`). `where: null` пропускается.
+            пересечение со списком путей в Python (`map process_module`: 359 путей, ~29 КБ argv). Пути:
+            `path` (у `kind: unit` — нет: это каталог `paths[0]`), путь из каждого `where` (`links.*`, `checks.tests`,
+            `runtime.*`, `interface.members`, `links.bases`), путь из `links.structural.twins` (часть до `::`).
+            `where: null` пропускается.
             Один вызов `git` на паспорт в обоих случаях; репозиторий не меняется (кроме stat-кэша `.git/index`:
             `--no-optional-locks` на `git diff` не действует, `index.lock` держится до ~0,5 с при устаревшем
             stat-кэше, ~15 мс иначе).
@@ -513,8 +520,9 @@ class _Ctx:
             return None
         paths = _passport_paths(passport)
         args = ("--no-optional-locks", "--literal-pathspecs", "diff", "-z", "--name-only", "--no-renames", self.sha)
+        spec = ("--", *paths) if len(paths) <= _PATHSPEC_MAX else ()  # иначе весь diff и пересечение ниже
         try:
-            changed = set(git_z(self.root, *args, "--", *paths))
+            changed = set(git_z(self.root, *args, *spec))
         except (AtlasError, OSError):  # `git diff` упал (bare-клон) или argv слишком длинный: не искали
             return None
         return [p for p in paths if p in changed]
@@ -592,6 +600,235 @@ class _Ctx:
             ],
         }
 
+    # ------------------------------------------------------------------ map: юнит и файл (Task 4.2b-2)
+
+    def map(self, target: str) -> dict:
+        """Паспорт цели `build_map` (правила — в его докстринге). Raises: `AtlasError("not found")`."""
+        t = target.replace("\\", "/")
+        rows = self.rows()
+        row = next((r for r in rows if r["id"] == t), None)
+        if row is not None:
+            return self._map_unit(row, rows)
+        if t.endswith(".py") and t in self.facts:  # `facts` — уже без `exclude`
+            return self._map_file(t, rows)
+        raise AtlasError("not found")
+
+    def _imports_into(self, targets: set[str], skip) -> list[tuple[str, int, tuple[str, ...]]]:
+        """Операторы импорта prod-файлов с хотя бы одной целью в `targets`: `(путь, строка, цели из targets)`.
+
+        Оператор — запись `ImportRec` (`from u.a import A, B` — одна запись; `import a, b` — две, по имени),
+        `ImportIndex.resolve(...).status == "internal"`; цель через `__init__.py` — сам `__init__.py` (реэкспорт
+        дальше не разворачивается). Импортёр с `skip(путь)` пропускается (проверка — только у файлов с попаданием).
+        """
+        index = ImportIndex(self.facts)
+        out: list[tuple[str, int, tuple[str, ...]]] = []
+        for path, facts in self.facts.items():
+            if _scope(path) != "prod":
+                continue
+            found = []
+            for rec in facts.imports:
+                resolved = index.resolve(path, rec)
+                if resolved.status != "internal":
+                    continue
+                hit = tuple(dict.fromkeys(p for p, _ in resolved.targets if p in targets))
+                if hit:
+                    found.append((path, rec.line, hit))
+            if found and not skip(path):
+                out += found
+        return out
+
+    @staticmethod
+    def _used_by(stmts: list[tuple[str, int, tuple[str, ...]]], unit_of) -> list[dict]:
+        """Группы по юниту импортёра: `count` — операторов, `where` — min по (путь, строка); порядок `(-count, name)`.
+        Pre: `unit_of(путь)` — id юнита импортёра (`modules.resolve`)."""
+        groups: dict[str, list[tuple[str, int]]] = {}
+        for path, line, _ in stmts:
+            groups.setdefault(unit_of(path), []).append((path, line))
+        out = [
+            {"name": name, "where": "{}:{}".format(*min(places)), "how": "import", "count": len(places)}
+            for name, places in groups.items()
+        ]
+        return sorted(out, key=lambda e: (-e["count"], e["name"]))
+
+    @staticmethod
+    def _top(facts: FileFacts) -> list[str] | None:
+        """`top` члена юнита: верхний уровень class/def без `_`, порядок исходника; `None` — файл не разобран."""
+        if facts.error is not None or facts.v2_error is not None:
+            return None
+        names = (d.qualname for d in facts.defs if d.kind != "method" and "." not in d.qualname)
+        return list(dict.fromkeys(n for n in names if not n.startswith("_")))
+
+    def _map_runtime(self, paths: list[str]) -> tuple[dict, int]:
+        """`runtime` по файлам `paths` (записи по `(путь, строка)`) и сумма `command_specs_dynamic`.
+
+        Файлы с `error`/`v2_error` записей не дают (у них полей v2 нет)."""
+        threads: list[tuple[str, int, dict]] = []
+        io: list[tuple[str, int, dict]] = []
+        commands: list[tuple[str, int, dict]] = []
+        dynamic = 0
+        for path in paths:
+            facts = self.facts[path]
+            for t in facts.thread_sites:
+                threads.append((path, t.line, {"pattern": t.pattern, "daemon": t.daemon, "where": f"{path}:{t.line}"}))
+            for i in facts.io:
+                io.append((path, i.line, {"op": i.op, "path": i.path, "where": f"{path}:{i.line}"}))
+            for name, line, form, _ in facts.command_specs or ():
+                if form != "dynamic":  # dynamic адреса имени нет: только счёт в `status.dynamic`
+                    commands.append((path, line, {"name": name, "where": f"{path}:{line}", "how": "declared"}))
+            dynamic += facts.command_specs_dynamic
+        ordered = lambda xs: [e for _, _, e in sorted(xs, key=lambda x: (x[0], x[1]))]  # noqa: E731
+        runtime = {"processes": None, "threads": ordered(threads), "commands": ordered(commands), "io": ordered(io)}
+        return runtime, dynamic
+
+    def _map_unit(self, row: dict, rows: list[dict]) -> dict:
+        uid = row["id"]
+        heads = tuple(row["paths"])
+
+        def under(path: str) -> bool:  # префильтр до `resolve`: тот же матч элемента `paths`, что в `modules.resolve`
+            return any(path.startswith(e) if e.endswith("/") else path == e for e in heads)
+
+        files = sorted(p for p in self.facts if under(p) and module_of(p, rows) == uid)
+        own = set(files)
+        stmts = self._imports_into(own, own.__contains__)
+        ops: dict[str, int] = {}
+        for _, _, hit in stmts:
+            for target in hit:
+                ops[target] = ops.get(target, 0) + 1
+        prod = sorted((p for p in files if _scope(p) == "prod"), key=lambda p: (-ops.get(p, 0), p))
+        members = [
+            {
+                "name": p,
+                "signature": None,
+                "where": f"{p}:1",
+                "top": self._top(self.facts[p]),
+                "doc": None if self.facts[p].error is not None else self.facts[p].doc or "",
+            }
+            for p in prod
+        ]
+        tests = [
+            {"name": p, "where": f"{p}:1", "count": len(self.facts[p].test_defs)}
+            for p in files
+            if _scope(p) == "test" and self.facts[p].test_defs
+        ]
+        tests.sort(key=lambda e: (-e["count"], e["name"]))
+        init = heads[0] + "__init__.py" if heads and heads[0].endswith("/") else None
+        pkg = self.facts.get(init) if init is not None else None
+        runtime, dynamic = self._map_runtime(prod)
+        docs = row.get("docs") or []
+        p = {
+            "passport": 1,
+            "kind": "unit",
+            "id": uid,
+            "path": heads[0] if heads else "",
+            "line": None,
+            "sha": self.sha,
+            "scanner": SCANNER,
+            "purpose": {
+                "text": row.get("purpose") or "",
+                "called_from": None,
+                "called_from_more": 0,
+                "declared_at": None,
+            },
+            "interface": {
+                "layer": uid,
+                "all": list(pkg.all) if pkg is not None and pkg.all is not None else None,
+                "signature": None,
+                "members": members,
+            },
+            "links": self._map_links(self._used_by(stmts, lambda path: module_of(path, rows))),
+            "runtime": runtime,
+            "checks": {"findings": None, "tests": tests},
+            "status": {
+                "tier": row.get("tier"),
+                "doc_missing": not any(str(d).rsplit("/", 1)[-1] == "README.md" for d in docs),
+                "dynamic": dynamic,
+                "stale": None,
+                "frozen": (
+                    [{"date": date, "text": text, "where": f"{init}:{line}"} for date, text, line in pkg.freeze]
+                    if pkg is not None and pkg.error is None
+                    else []
+                ),
+            },
+        }
+        p["status"]["stale"] = self._stale(p)
+        return p
+
+    @staticmethod
+    def _map_links(used_by: list[dict]) -> dict:
+        return {
+            "used_by": used_by,
+            "uses": None,
+            "subclasses": None,
+            "call_sites": None,
+            "call_sites_unresolved": None,
+            "bases": None,
+            "structural": None,
+        }
+
+    def _file_members(self, path: str, facts: FileFacts) -> list[dict]:
+        """Форма B: верхний уровень class/def (имена на `_` тоже), сигнатура — `reference._sig` без имени."""
+        try:
+            tree: ast.AST | None = ast.parse(self.tree.read(path).decode("utf-8").removeprefix("﻿"))
+        except Exception:  # noqa: BLE001 — факты уже есть; без дерева сигнатура берётся из DefFact
+            tree = None
+        out = []
+        for d in facts.defs:
+            if d.kind == "method" or "." in d.qualname:
+                continue
+            node = _find_node(tree, d.qualname, d.line) if tree is not None else None
+            sig = "" if d.kind == "class" else _tail(node, False) if isinstance(node, _FUNCS) else d.signature
+            out.append({"name": d.qualname, "signature": sig, "where": f"{path}:{d.line}"})
+        return out
+
+    def _map_file(self, path: str, rows: list[dict]) -> dict:
+        facts = self.facts[path]
+        layer = module_of(path, rows)
+        broken = facts.error is not None  # A1 не разобран: ни докстринга, ни шапок, ни v2
+        no_v2 = broken or facts.v2_error is not None
+        units: dict[str, str] = {}
+
+        def unit_of(importer: str) -> str:
+            if importer not in units:
+                units[importer] = module_of(importer, rows)
+            return units[importer]
+
+        # импортёры своего юнита — не `used_by`; файл вне юнитов (`other`) исключает только себя
+        skip = (lambda p: p == path) if layer == OTHER else (lambda p: unit_of(p) == layer)
+        stmts = self._imports_into({path}, skip)
+        text = None if broken else facts.doc or ""
+        if no_v2:
+            runtime, dynamic = {"processes": None, "threads": None, "commands": None, "io": None}, None
+        else:
+            runtime, dynamic = self._map_runtime([path])
+        p = {
+            "passport": 1,
+            "kind": "file",
+            "id": path,
+            "path": path,
+            "line": None,
+            "sha": self.sha,
+            "scanner": SCANNER,
+            "purpose": {"text": text, "called_from": None, "called_from_more": 0, "declared_at": None},
+            "interface": {
+                "layer": layer,
+                "all": None,  # у файла не искали (OUT OF SCOPE 4.2b-2)
+                "signature": None,
+                "members": None if no_v2 else self._file_members(path, facts),
+            },
+            "links": self._map_links(self._used_by(stmts, unit_of)),
+            "runtime": runtime,
+            "checks": {"findings": None, "tests": None},
+            "status": {
+                "tier": facts.tier,
+                "doc_missing": None if text is None else text == "",
+                "dynamic": dynamic,
+                "stale": None,
+                "frozen": self._frozen(path, facts, rows),
+            },
+        }
+        p["status"]["stale"] = self._stale(p)
+        return p
+
 
 # --------------------------------------------------------------------------- текст
 
@@ -617,8 +854,11 @@ def _value(value: object) -> str:
     return str(value)
 
 
-def _alloc(sizes: dict[str, int], avail: int) -> dict[str, int]:
-    """Строк записей на раздел: поровну, излишек короткого — прочим; срезанный раздел платит строку пометки."""
+def _alloc(sizes: dict[str, int], avail: int, names: tuple[str, ...] = SHOW_ALL_SECTIONS) -> dict[str, int]:
+    """Строк записей на раздел: поровну, излишек короткого — прочим; срезанный раздел платит строку пометки.
+
+    `names` — имена среза своего `kind` (`SHOW_ALL_SECTIONS` у символа, `MAP_SHOW_ALL` у unit/file): порядок раздачи
+    остатка."""
     give: dict[str, int] = {}
     pending = dict(sizes)
     while pending:
@@ -631,11 +871,12 @@ def _alloc(sizes: dict[str, int], avail: int) -> dict[str, int]:
             avail -= n
             del pending[k]
     if pending:
-        names = [k for k in SHOW_ALL_SECTIONS if k in pending]
-        share = max(avail // len(names) - 1, 1)  # минус строка «показано K из N»
-        extra = max(avail - (share + 1) * len(names), 0)
-        for k in names:
-            give[k] = min(pending[k] - 1, share + (1 if extra > 0 else 0))
+        cut = [k for k in names if k in pending]
+        share = max(avail // len(cut) - 1, 1)  # минус строка «показано K из N»
+        extra = max(avail - (share + 1) * len(cut), 0)
+        for k in cut:
+            # не меньше одной записи (минимум); список из одной записи не режется — иначе «показано 0 из 1»
+            give[k] = max(min(pending[k] - 1, share + (1 if extra > 0 else 0)), 1)
             extra -= 1
     return give
 
@@ -749,10 +990,16 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     else:
         add(f"  frozen: {_value(st['frozen'])}")
 
+    return _emit(fixed, budget, show_all, full, SHOW_ALL_SECTIONS)
+
+
+def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str], full: bool, names: tuple) -> str:
+    """Строки и списки (`_render`, `_render_map`) -> текст по бюджету: раздел из `show_all` не режется, но его записи
+    входят в расход бюджета; `full` — без среза; остаток делит `_alloc` (имена среза — `names`)."""
     lists = {v[0]: v for k, v in fixed if k == "list"}
     free = {n: len(v[2]) for n, v in lists.items() if not full and n not in show_all}
     used = sum(1 for k, _ in fixed if k == "line") + sum(len(v[2]) for n, v in lists.items() if n not in free)
-    give = _alloc(free, budget - used)
+    give = _alloc(free, budget - used, names)
     out: list[str] = []
     for kind, item in fixed:
         if kind == "line":
@@ -764,6 +1011,105 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
         if keep < len(rows):
             out.append(f"{indent}показано {keep} из {len(rows)}; все: --all {name}")
     return "\n".join(out)
+
+
+def _unit_member_row(m: dict) -> str:
+    """`u/a.py — Модуль a.  (A, B)`: `doc` или `—`; `top` до 6 имён, остаток `, +N`; пустой `top` — без скобок."""
+    row = f"{m['name']} — {m.get('doc') or _EMPTY}"
+    top = m["top"]
+    if top is None:
+        return f"{row}  ({_NOT_SEARCHED})"
+    if not top:
+        return row
+    rest = len(top) - _TOP_SHOWN
+    return f"{row}  ({', '.join(top[:_TOP_SHOWN])}{f', +{rest}' if rest > 0 else ''})"
+
+
+def _file_member_row(m: dict) -> str:
+    """`class A  :4`, `def f(x: int) -> int  :7`, `async def g() -> None  :9` (вид — по `signature`: `""` у класса)."""
+    sig, line = m["signature"], _split(m["where"])[1]
+    if not sig:
+        return f"class {m['name']}  :{line}"
+    if sig.startswith("async "):
+        return f"async def {m['name']}{sig.removeprefix('async ')}  :{line}"
+    return f"def {m['name']}{sig}  :{line}"
+
+
+def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: bool) -> str:
+    """Текст `kind` unit/file (образец — `map-form.md` п. 3): печатаются только ключи, у которых у `map` есть
+    источник; ключи, всегда `null` у `map`, — только в JSON. Срез — `_emit` с именами `MAP_SHOW_ALL`."""
+    p = passport
+    pur, itf, lnk, rt, chk, st = (p[s] for s in SECTIONS)
+    unit = p["kind"] == "unit"
+    fixed: list[tuple[str, object]] = []
+
+    def add(text: str) -> None:
+        fixed.append(("line", text))
+
+    def add_list(name: str, entries: list, row) -> None:
+        fixed.append(("list", (name, "    ", entries, row)))  # порядок записей — как в паспорте
+
+    add(f"== {p['kind']} {p['id']} ==")
+    add(f"{p['path']}; sha {p['sha']}; scanner {p['scanner']}")
+    add(f"purpose: {_value(pur['text'])}")
+    add(f"interface: layer {itf['layer']}")
+    all_ = itf["all"]
+    # у юнита `null` — `__init__.py` или его `__all__` нет (искали); у файла `null` — не искали (сознательно)
+    add(f"  all: {', '.join(all_) if all_ else (_EMPTY if unit or all_ == [] else _NOT_SEARCHED)}")
+    if itf["members"]:
+        add("  members:")
+        add_list("members", itf["members"], _unit_member_row if unit else _file_member_row)
+    else:
+        add(f"  members: {_value(itf['members'])}")
+    used = lnk["used_by"]
+    found = sum(e["count"] for e in used)
+    add(f"links: найдено {found}" + (" (формы: import)" if used else "") + f"; {_UNSEEN}")
+    if used:
+        add(f"  used_by: {len(used)}")
+        add_list("used_by", used, lambda e: f"{e['name']} — {e['where']} ({e['how']}) ×{e['count']}")
+    else:
+        add(f"  used_by: {_EMPTY}")
+    add("runtime:")
+    rows = {
+        "threads": lambda t: (
+            f"{t['pattern']} (daemon: {'не задан' if t['daemon'] is None else t['daemon']}) — {t['where']}"
+        ),
+        "commands": lambda c: f"{c['name']} — {c['where']} ({c['how']})",
+        "io": lambda i: f"{i['op']} {i['path']} — {i['where']}",
+    }
+    for name, row in rows.items():
+        entries = rt[name]
+        if not entries:
+            add(f"  {name}: {_value(entries)}")
+            continue
+        add(f"  {name}: {len(entries)}")
+        if name == "commands":  # не режется (map-form п. 4)
+            for entry in entries:
+                add(f"    {row(entry)}")
+        else:
+            add_list(name, entries, row)
+    add("checks:")
+    if chk["tests"]:
+        add(f"  tests: {len(chk['tests'])}")
+        add_list("tests", chk["tests"], lambda e: f"{e['name']} — {e['where']} ×{e['count']}")
+    else:
+        add(f"  tests: {_value(chk['tests'])}")
+    missing = st["doc_missing"]
+    doc = _NOT_SEARCHED if missing is None else "да" if missing else "нет"
+    tier = st["tier"] or (_EMPTY if unit else "нет шапки")
+    add(f"status: tier {tier}; doc_missing {doc}; dynamic {_value(st['dynamic'])}")
+    stale = st["stale"]
+    if stale:
+        rest = len(stale) - _STALE_SHOWN
+        add(f"  stale: {', '.join(stale[:_STALE_SHOWN])}" + (f"; ещё {rest}" if rest > 0 else ""))
+    else:
+        add(f"  stale: {_value(stale)}")
+    if st["frozen"]:
+        for head in st["frozen"]:
+            add(f"  frozen: {head['date']} {head['text']} ({head['where']})")
+    else:
+        add(f"  frozen: {_value(st['frozen'])}")
+    return _emit(fixed, budget, show_all, full, MAP_SHOW_ALL)
 
 
 def build_passport(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] = ()) -> dict:
@@ -791,15 +1137,32 @@ def build_map(root: Path, ref: str, target: str, *, exclude: tuple[str, ...] = (
         `sha`, `scanner`) и шесть разделов с теми же постоянными ключами, что у символа (значения unit | file — таблица
         `Паспорт юнита и файла` модуля). Приоритет цели: id юнита реестра -> `unit`; иначе путь файла -> `file`.
         Не меняет репозиторий (кроме stat-кэша `.git/index` от `git diff` ключа `status.stale`); паспорт
-        детерминирован (кроме `status.stale`).
-        Файл с `error`/`v2_error` (цель-файл или член юнита) — поведение не зафиксировано, решает GREEN и hazard-тест.
+        детерминирован (кроме `status.stale`). Кэш фактов `data/atlas.sqlite` пишет только промах `scan` (как
+        `ref`); `build_links` не вызывается.
+        Решения GREEN (закреплены `test_passport_map_hazards.py`):
+        - `used_by`: оператор — запись `ImportRec` с `status == "internal"` и хотя бы одной целью в файлах цели:
+          `from u.a import A, B` — один оператор (одна запись), `import u.a, u.b` — два (запись на имя). У юнита
+          импортёр — prod-файл вне юнита; у файла — prod-файл вне юнита файла, у файла вне юнитов (`other`) — любой,
+          кроме самого файла. Импортёр с `error` операторов не даёт (его импорты не разобраны).
+        - Запись члена юнита: `{name, signature: null, where: "путь:1", top, doc}`; `doc` — `FileFacts.doc`, `""` —
+          докстринга нет.
+        - Файл с `error` (A1 не разобран): цель-файл находится (`kind: file`); ключи из разбора самого файла — `null`
+          («не искали»): `purpose.text`, `status.doc_missing`, `interface.members`, `runtime.threads/commands/io`,
+          `status.dynamic`; `used_by`, `stale`, `frozen` (цепочка `__init__.py`) считаются как обычно. Член юнита с
+          `error`: `top: null`, `doc: null`; записей в `runtime` и `dynamic` не даёт.
+        - Файл с `v2_error` (A1 цел): `purpose.text`, `doc_missing`, `tier`, `frozen` — как обычно; `members`,
+          `runtime.threads/commands/io`, `dynamic` — `null`. Член юнита с `v2_error`: `top: null`, `doc` — как обычно.
+          Тест-файл с `error`/`v2_error` даёт `test_defs = ()` и в `checks.tests` не входит (`count > 0`).
+        - Цель-файл под `exclude` — `not found`. Юнит, все файлы которого под `exclude`, находится: строка реестра
+          есть, `members`, `tests`, `used_by` — `[]`.
+        - Юнит с `paths[0]` не каталогом или без `__init__.py` в фактах: `interface.all` — `null`, `status.frozen` —
+          `[]`; `path` — `paths[0]` как в реестре.
     Raises: `tree.AtlasError("not found")` — цель не id юнита и не путь `.py` ревизии вне `exclude`: текст ровно
         `not found`, значение цели в него не входит; CLI печатает `atlas map: not found` и выходит с кодом 2. Тот же
         класс — `ref` не разрешается в ревизию (текст `resolve`). Исключение, не запись `{"error": ...}`: цель одна,
         частичного результата нет (в отличие от `passports_for`).
-    Stub: Task 4.2b-2 INTERFACE — тело не реализовано (GREEN).
     """
-    raise NotImplementedError
+    return _Ctx.open(root, ref, exclude, with_links=False).map(target)
 
 
 def resolve_ident(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] = ()) -> list[str]:
@@ -818,8 +1181,8 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
     """Текст паспорта (образцы строк — в докстринге модуля). Без завершающего перевода строки.
 
     Pre: `passport` — результат `build_passport` (или `build_map`); `show_all` ⊆ `SHOW_ALL_SECTIONS` (у `kind` unit/file
-        — ⊆ `MAP_SHOW_ALL`: имена среза берутся по `kind` паспорта; будущий контракт Task 4.2b-2, сейчас набор
-        один — `SHOW_ALL_SECTIONS`); `budget` — число строк на ЭТОТ паспорт (у каждого id независимо).
+        — ⊆ `MAP_SHOW_ALL`: имена среза берутся по `kind` паспорта, текст unit/file — `_render_map`); `budget` — число
+        строк на ЭТОТ паспорт (у каждого id независимо). Записи раздела из `show_all` входят в расход бюджета.
     Post: `full=True` — без среза (сильнее `budget` и `show_all`). Иначе строк <= max(`budget`, минимум); минимум —
         конверт, заголовки разделов, `purpose` и служебные строки; остаток делится поровну между разделами-списками
         (без приоритета), излишек короткого уходит прочим. Порядок записей среза — `(-rank, path, line)`; `rank` =
@@ -831,10 +1194,11 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
     Raises: `ValueError`, если в `show_all` есть имя вне набора среза своего `kind` (`SHOW_ALL_SECTIONS` либо, у
         unit/file, `MAP_SHOW_ALL`).
     """
-    unknown = set(show_all) - set(SHOW_ALL_SECTIONS)
+    is_map = passport.get("kind") in ("unit", "file")
+    unknown = set(show_all) - set(MAP_SHOW_ALL if is_map else SHOW_ALL_SECTIONS)
     if unknown:
         raise ValueError(f"show_all: неизвестные разделы {sorted(unknown)}")
-    return _render(passport, budget, frozenset(show_all), full)
+    return (_render_map if is_map else _render)(passport, budget, frozenset(show_all), full)
 
 
 def passports_for(root: Path, ref: str, idents: list[str], *, exclude: tuple[str, ...] = ()) -> list[dict]:

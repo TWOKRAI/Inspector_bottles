@@ -23,7 +23,7 @@ class|function|method - докстринг модуля `scripts/atlas/passport.
 | `interface.layer` | id юнита | `modules.resolve(path)` (`other` -> `"other"`, как 4.2a) |
 | `interface.all` | `list(FileFacts.all)` у `init` (правило `frozen`), иначе `null` | `null` |
 | `interface.signature` | `null` | `null` |
-| `interface.members` | `[{name: путь prod-файла, signature: null, where: "путь:1", top: [qualname без `_`]}]` | `[{name: qualname, signature, where}]`, верхний уровень, имена на `_` тоже |
+| `interface.members` | `[{name: путь prod-файла, signature: null, where: "путь:1", top: [qualname без `_`], doc: FileFacts.doc или ""}]` | `[{name: qualname, signature, where}]`, верхний уровень, имена на `_` тоже |
 | `links.used_by` | `[{name: id юнита-импортёра, where: min по (путь, строка), how: "import", count: число операторов}]` | то же, цель - файл (реэкспорт через `__init__` у файла не виден) |
 | `links.call_sites`, `subclasses`, `bases`, `structural`, `uses`, `call_sites_unresolved` | `null` | `null` |
 | `runtime.threads`, `.io`, `.commands` | записи prod-файлов (как `_runtime`: `where`, поля записи) по `(путь, строка)`; `commands` - `[]`, если нет | то же по одному файлу |
@@ -51,7 +51,7 @@ class|function|method - докстринг модуля `scripts/atlas/passport.
 `links: найдено N (формы: import); не видно: динамика, аннотации, упоминания`, `N` = сумма `count`, строки «из продукта/из тестов» нет;
 `used_by: K` - число групп. `status:` и `  stale:`, `  frozen:` - литералы 4.2b-1 п. 4, но `stale` при > 5 путях -
 `  stale: a.py, b.py, c.py, d.py, e.py; ещё 3` (первые 5, JSON полный). Полный литерал юнита `u` (`paths: ["u/"]`, три prod-файла,
-`u/__init__.py` с `__all__`, два импортёра `v` ×2 и `w` ×1, один тест-файл с 2 тестами; `--budget` на 2 члена; `<…>` - подстановка):
+`u/__init__.py` с `__all__`, два импортёра `v` ×2 и `w` ×1, один тест-файл с 2 тестами; `--budget 22` - полный текст 23 строки, метка среза входит в бюджет, поэтому 1 член из 3; `<…>` - подстановка; ред. лида 2026-11-10: «2 из 3» при метке в бюджете недостижимо):
 
 ```
 == unit u ==
@@ -60,9 +60,8 @@ purpose: <purpose строки реестра>
 interface: layer u
   all: A, B
   members:
-    u/a.py — <FileFacts.doc>  (A, B)
-    u/__init__.py — <FileFacts.doc или —>
-    показано 2 из 3; все: --all members
+    u/a.py — <doc члена>  (A, B)
+    показано 1 из 3; все: --all members
 links: найдено 3 (формы: import); не видно: динамика, аннотации, упоминания
   used_by: 2
     v — v/x.py:3 (import) ×2
@@ -78,7 +77,7 @@ status: tier core; doc_missing нет; dynamic —
   stale: —
   frozen: —
 ```
-Файл без неприватного `top` - строка без скобок. Член файла: `  class ConfigFileWatcher  :196`; `  def load(path: str) -> Config  :40`;
+Текст члена юнита - ключ `doc` записи (`—`, если `""`). Файл без неприватного `top` - строка без скобок. Член файла: `  class ConfigFileWatcher  :196`; `  def load(path: str) -> Config  :40`;
 `  async def run() -> None  :7`. `top` - до 6 имён через запятую, остаток `+N`.
 
 ## 4. Срез и бюджет
