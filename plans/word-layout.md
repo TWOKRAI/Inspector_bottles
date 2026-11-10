@@ -139,7 +139,7 @@ Plugins/processing/word_layout/
 - Task P3: Проводка + рецепт + журнал каждого диска [DONE 2026-11-09 — `plans/word-layout/tasks/P3.md`, отчёт `docs/reports/2026-11-09_word-layout_P3.md`; код — ветка `feat/word-layout-p3`; стенд — smoke, не приёмка α: подачи списком (R1 полосы Д) ещё нет] (после P2) — `angle_deg` до `robot_io` доходит (`place_rz_deg` → `place_rz` → `CVT_JOB`, сторожа Г1а/Г1б); журнал на каждый диск; `first_y −440` в `letter_robot_sim.yaml`
 - Task C-32: Второй одинаковый диск подряд — новый диск по `sidecar.track_id`, журнал смены слова [DONE 2026-10-25 — `plans/word-layout/tasks/C-32.md`; сим-прогон случая C — после R1 полосы Д]
 - Task C-37: Слово с порта и запись регистра `target_word` равноправны — действует последнее пришедшее, источник в журнале [DONE 2026-10-26 — `plans/word-layout/tasks/C-37.md`; регистр — одно хранилище слова; форма GUI — C-46]
-- Task P4: Docs + memory + smoke [IN PROGRESS] (после P3 и R1 полосы Д) — `README.md`/`STATUS.md` плагина есть (`23a65d8b`); записи в `docs/claude/memory/` про `word_layout` нет, smoke не подтверждён
+- Task P4: Docs + memory + smoke [DONE 2026-11-10, ветка `feat/word-layout-p4`, не влита] — скрипт `scripts/alpha_sim/` (случаи B, D, C, «домой», стоп), README/STATUS плагина и скрипта, урок в `docs/claude/memory/` (слушатель порта на macOS — spawn-потомок); стенд: B/D/C красные по геометрии съёма и углу, код 1, вердикт α — Task 1.2; отчёт `docs/reports/2026-11-10_word-layout_P4.md`
 
 ## Открытые вопросы / follow-up
 

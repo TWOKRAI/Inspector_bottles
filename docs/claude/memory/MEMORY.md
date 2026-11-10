@@ -63,6 +63,8 @@
 - [GUI-стенд боевым входом](project_gui_stand_production_entry_only.md) — `INSPECTOR_GUI_UNATTENDED=1`
 - [Бэкенд через backend_ctl](feedback_backend_ctl_for_agents.md) — не GUI, не qt-mcp
 
+- [macOS: слушатель порта — spawn-потомок](feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it.md) — фейк зелёный, стенд отказал; lsof → ppid
+
 ## 4. Как писать
 Урок = ловушка + замер (вход→выход) + триггер; теги `module:` и `mechanism:` во frontmatter; `/core:memory:remember` (только лид; субагент — блок MEMORY LESSON, project-rules §8).
 Состояние плана — в plan.md, не сюда. Поиск (все уроки, и ролей тоже): `python scripts/memory/search.py <3-5 слов> [--module id] [--mechanism id]`; словарь механизмов — `TAGS.yaml`.
