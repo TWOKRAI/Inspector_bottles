@@ -283,3 +283,21 @@ def test_map_file_with_error_tier_not_searched(repo: GitRepo) -> None:
     _seed(repo, {"u/bad.py": '"""Модуль bad.\n\nTier: core\n"""\ndef broken(:\n'})
     text = _render(_build(repo, "u/bad.py"), full=True).splitlines()
     assert "status: tier не искали; doc_missing не искали; dynamic не искали" in text
+
+
+def test_map_file_used_by_counts_init_above_unit_boundary(repo: GitRepo) -> None:
+    """И1, граница юнита (ревью opus р.2, итерация 2): скрываются только `__init__.py` цепочки ВНУТРИ юнита файла
+    (`_init_chain`). `fw/__init__.py` лежит выше границы юнита `fwx` (`fw/x/`): его импорт — зависимость между
+    юнитами и считается (как `framework_meta` у `base_manager/__init__.py` на реальном репо)."""
+    _commit(
+        repo,
+        {
+            "modules.yaml": _registry(_row("fw", "fw/"), _row("fwx", "fw/x/")),
+            "fw/__init__.py": "from fw.x.m import Y\n",
+            "fw/x/__init__.py": "",
+            "fw/x/m.py": "Y = 1\n",
+        },
+    )
+    assert _build(repo, "fw/x/m.py")["links"]["used_by"] == [
+        {"name": "fw", "where": "fw/__init__.py:1", "how": "import", "count": 1}
+    ]
