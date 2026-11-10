@@ -14,9 +14,12 @@ Stability: lite
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import subprocess
 import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +113,7 @@ def test_newer_schema_not_dropped(tmp_path: Path, capsys: pytest.CaptureFixture[
     facts = _probe(path)
 
     assert facts["file"] == ""  # работа в памяти
+    assert facts["version"] == 5  # у соединения в памяти — версия этого атласа, не файла
     assert _marker_and_version(path) == (1, _SCHEMA + 1)  # строки и версия на месте
     assert capsys.readouterr().err == "atlas: кэш новее этой версии атласа, работаю без кэша\n"
 
@@ -127,15 +131,13 @@ def test_ref_works_when_cache_unavailable(repo: GitRepo, atlas: Any) -> None:
     assert "atlas: кэш недоступен (" in result.err
 
 
-def test_non_utf8_path_skipped(repo: GitRepo, capsys: pytest.CaptureFixture[str]) -> None:
-    from scripts.atlas.tree import Tree
-
+def _commit_bad_path(repo: GitRepo) -> None:
+    """Коммит с `ok.py` и путём `bad\xff.py` (на APFS файл с таким именем не создать: путь только в индексе)."""
     repo.write("ok.py", "x = 1\n")
     repo.commit("ok")
     blob = subprocess.run(
         ["git", "-C", str(repo.path), "hash-object", "-w", "--stdin"], input=b"y = 2\n", capture_output=True, check=True
     ).stdout.strip()
-    # на APFS файл с таким именем не создать: путь только в индексе (байтовый аргумент)
     subprocess.run(
         [
             b"git",
@@ -150,12 +152,56 @@ def test_non_utf8_path_skipped(repo: GitRepo, capsys: pytest.CaptureFixture[str]
         capture_output=True,
     )
     subprocess.run(["git", "-C", str(repo.path), "commit", "-q", "-m", "bad path"], check=True, capture_output=True)
+
+
+def test_non_utf8_path_skipped(repo: GitRepo, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.atlas.tree import Tree
+
+    _commit_bad_path(repo)
     capsys.readouterr()
 
     files = run_with_deadline(lambda: Tree(repo.path, repo.head).files())
 
     assert files == ["ok.py"]
     assert capsys.readouterr().err == "atlas: пропущено 1 путей не в UTF-8\n"
+
+
+def test_git_z_is_strict_by_default_on_non_utf8_path(repo: GitRepo) -> None:
+    """Пропуск включается только `skip_undecodable=True` в `Tree._ls`; прочие вызывающие (`check._renames` разбирает
+    токены позиционно, пропуск сдвинул бы пары) получают `UnicodeDecodeError`, как раньше."""
+    from scripts.atlas.tree import git_z
+
+    _commit_bad_path(repo)
+
+    with pytest.raises(UnicodeDecodeError):
+        run_with_deadline(lambda: git_z(repo.path, "ls-tree", "-r", "-z", repo.head))
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset нет (Windows): пояс процесса не подменить")
+def test_corrupt_stamp_is_utc_in_any_timezone(tmp_path: Path) -> None:
+    path = tmp_path / "data" / "atlas.sqlite"
+    path.parent.mkdir()
+    path.write_text("garbage")
+    old_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Etc/GMT-9"  # UTC+9: локальное время на 9 часов впереди UTC
+    time.tzset()
+    try:
+        before = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(seconds=2)
+        _probe(path)
+        after = datetime.now(timezone.utc) + timedelta(seconds=2)
+    finally:
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
+
+    kept = [p.name for p in path.parent.iterdir() if ".corrupt-" in p.name]
+    assert len(kept) == 1, kept
+    match = re.fullmatch(r"atlas\.sqlite\.corrupt-(\d{8}T\d{6})", kept[0])
+    assert match, kept[0]
+    stamp = datetime.strptime(match.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    assert before <= stamp <= after, (kept[0], before, after)
 
 
 @pytest.mark.skipif(
