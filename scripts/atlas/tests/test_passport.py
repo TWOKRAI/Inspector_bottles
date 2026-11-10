@@ -35,7 +35,16 @@ ENVELOPE = ["passport", "kind", "id", "path", "line", "sha", "scanner"]
 SECTION_KEYS = {
     "purpose": {"text", "called_from", "called_from_more", "declared_at"},
     "interface": {"layer", "all", "signature", "members"},
-    "links": {"used_by", "uses", "subclasses", "call_sites", "call_sites_unresolved", "bases", "structural"},
+    "links": {
+        "used_by",
+        "uses",
+        "subclasses",
+        "call_sites",
+        "call_sites_unresolved",
+        "bases",
+        "structural",
+        "call_sites_by_name",  # Task 4.5b
+    },
     "runtime": {"processes", "threads", "commands", "io"},
     "checks": {"findings", "tests"},
     "status": {"tier", "doc_missing", "dynamic", "stale", "frozen"},

@@ -4,7 +4,7 @@ Purpose: из `dict[str, FileFacts]` (ровно то, что отдаёт `scan
     репозитория, значение — факты файла, включая поля v2 `defs`, `calls`, `test_defs`) строит индекс, который
     отвечает на вопрос «что известно о символе `путь::qualname`». Индекс считается заново при каждом вызове
     `build_links`, кэша нет (кэш `links` вне Task 4.1). Паспорт (Task 4.2a) читает только `Links.of`.
-Public API: Links, build_links.
+Public API: Links, build_links, BY_NAME_MAX.
 Stability: lite
 
 Pre: `facts` — отображение путь -> `FileFacts`; файлы с `error` или `v2_error` вкладывают пустые списки и не мешают
@@ -31,6 +31,12 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
     `x.m()` по произвольному получателю; голый вызов или `m.f()`, где имя (у `m.f()` — первый сегмент
     получателя) затенено; голый вызов двусмысленного from-импорта; голый вызов через фасад `__init__.py`, не
     давший адреса. Счётчик «не видно», а не список; ключ — имя, общий для всех одноимённых символов.
+  - `call_sites_by_name` (Task 4.5b) — только у метода: `{"count": N, "items": [...] | None}`; у класса и функции
+    ключа нет (паспорт пишет `null`).
+    N — неотнесённые вызовы `x.<имя метода>(...)` из prod-файлов, где `x` не `self` (голый вызов, в том числе
+    затенённый, и вызовы из тестов — нет); тип `x` не проверен, ключ — имя (общий для одноимённых методов).
+    `items` — записи формы `call_sites` с `how: "by-name"` (`same_file` — вызов в файле метода) при
+    N <= `BY_NAME_MAX` (10), иначе None.
   - `subclasses` — наследники: классы, чей `DefFact.bases` называет символ-класс. `how: "import"` — файл
     наследника импортирует основу; `how: "same-file"` — основа и наследник в одном файле (иерархии исключений и
     интерфейсов: без импорта; основа — класс верхнего уровня файла, имя без точки). Запись как у `used_by`, но
@@ -102,11 +108,13 @@ from collections import defaultdict
 
 from scripts.atlas.scan import DefFact, FileFacts, ImportIndex, resolve_relative
 
-__all__ = ["Links", "build_links"]
+__all__ = ["BY_NAME_MAX", "Links", "build_links"]
 
 TOO_GENERIC = "слишком общий протокол: меньше двух обязательных методов"
 _TEST_PATH = re.compile(r"(^|/)tests/|(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$")
 _REEXPORT_HOPS = 5  # звено — один `__init__.py`, через который идёт реэкспорт (Task 4.5a, решение лида а)
+# `call_sites_by_name.items` — адреса при N <= 10, иначе None: у 74% prod public методов на HEAD <= 10 (Task 4.5b)
+BY_NAME_MAX = 10
 
 type _Sym = tuple[str, str]  # (путь, qualname)
 
@@ -148,6 +156,8 @@ class Links:
         self._used_by: dict[_Sym, list[tuple[str, int, dict]]] = defaultdict(list)
         self._calls: dict[_Sym, list[tuple[str, int, dict]]] = defaultdict(list)
         self._unresolved: dict[str, int] = defaultdict(int)  # имя -> число неотнесённых `x.m()`
+        # имя -> (путь, строка, enclosing) неотнесённых prod-вызовов `x.m()`, `x` не None и не `self` (Task 4.5b)
+        self._by_name: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
         self._subclasses: dict[_Sym, list[tuple[str, int, dict]]] = defaultdict(list)
         self._bases: dict[_Sym, list[dict]] = {}  # класс -> основы в порядке `DefFact.bases`, с адресом или None
         self._importers: dict[str, set[str]] = defaultdict(set)  # путь -> файлы, чьи импорты указывают на него
@@ -397,6 +407,9 @@ class Links:
                         self._used_by[target].append((path, line, _entry(path, line, "import", "<module>")))
             if target is None:
                 self._unresolved[call.name] += 1
+                # голый затенённый вызов (4.5a, receiver None) и `self.m()` — не сюда; только prod
+                if call.receiver is not None and call.receiver != "self" and _scope(path) == "prod":
+                    self._by_name[call.name].append((path, call.line, call.enclosing))
                 continue
             entry = _entry(path, call.line, "name-call", call.enclosing)
             entry["same_file"] = target[0] == path
@@ -489,6 +502,19 @@ class Links:
             twins.append(f"{path}::{qualname}")
         return {"required": required, "twins": sorted(twins)}
 
+    def _by_name_of(self, path: str, name: str) -> dict:
+        """`call_sites_by_name` метода `path::...name`: `count` — все записи `_by_name[name]`; `items` — записи формы
+        `call_sites` с `how: "by-name"` при `count <= BY_NAME_MAX`, иначе None (имя частое, адреса не отдаются)."""
+        found = self._by_name.get(name, [])
+        if len(found) > BY_NAME_MAX:
+            return {"count": len(found), "items": None}
+        items = []
+        for where, line, enclosing in found:
+            entry = _entry(where, line, "by-name", enclosing)
+            entry["same_file"] = where == path
+            items.append((where, line, entry))
+        return {"count": len(found), "items": _sorted(items)}
+
     def of(self, ident: str) -> dict | None:
         """Связи символа `"путь::qualname"` (разделы — в докстринге модуля).
 
@@ -517,6 +543,8 @@ class Links:
             "tests": _sorted(tests),
         }
         result["bases"] = [dict(b) for b in self._bases[sym]] if d.kind == "class" else None
+        if d.kind == "method":  # у класса и функции ключа нет: ответ `of` для них прежний (4.5b п. 5)
+            result["call_sites_by_name"] = self._by_name_of(path, name)
         if d.kind == "class":
             result["structural"] = self._structural(sym)
             if result["structural"] is None:

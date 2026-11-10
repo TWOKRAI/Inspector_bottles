@@ -616,6 +616,15 @@ GREEN (решения лида 2026-11-10): запись члена юнита �
 вызовы имени unresolved. Не меняются: ключи и формы JSON, `ImportIndex`, `map`, `x.m()`, `used_by` (по
 записи импорта в `__init__.py`). Алиас `import m as x` в фактах не хранится и не заводится.
 
+**Task 4.5b — паспорт без молчаливых «нет».** `ThreadSite` — каждый вызов конструктора из `THREAD_PATTERNS`
+без требования `.start()`, дубль по `(enclosing, line)` не пишется (`SCANNER` сменился, кэш фактов промахивается
+сам). Пустые `threads`/`commands`/`io` в тексте паспорта символа несут оговорку из констант (`THREAD_PATTERNS`,
+`IO_PATTERNS` = `Observer.schedule` + `_REPLACES`; `commands` — `def command_specs()`, `register_command` не
+читается); JSON и `map` прежние. Новый ключ `links.call_sites_by_name`: у метода `{count, items}` — prod-вызовы
+`x.m()` (`x` не `self`), не отнесённые ни к одному символу, по имени без проверки типа, `how: "by-name"`; `items` —
+`null` при N > 10 (`links.BY_NAME_MAX`, 74% методов на HEAD <= 10); у класса и функции `null`, у `map` ключа нет.
+Срез текста — свой список в `_alloc`, снимает его `--all call_sites`; `SHOW_ALL_SECTIONS` прежний.
+
 ### Последствия
 
 - Бенч (5.1) и агент (4.3) читают паспорт; `map`, `stale`/`frozen` — 4.2b.

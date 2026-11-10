@@ -83,6 +83,12 @@ Post: паспорт детерминирован: та же ревизия -> �
                                                   методами: `required: []`, `twins: []`, `note` = `links.TOO_GENERIC`;
                                                   иначе
                                                   `note: null`. У функции и метода `null`
+  call_sites_by_name      dict | null             (Task 4.5b) у метода: `{"count": N, "items": list[dict] | null}` —
+                                                  вызовы `x.<имя>(...)` из продукта, `x` не `self`, не отнесённые ни
+                                                  к одному символу (`Links.of`, тип `x` не проверен); `items` — записи
+                                                  `{where, how: "by-name", scope, enclosing, same_file, rank}` при
+                                                  N <= 10, `null` при N > 10 (имя частое); `{"count": 0, "items": []}`
+                                                  — таких нет. У класса и функции `null`; у `build_map` ключа нет
 
 `rank` (int) записи `links.call_sites`, `links.subclasses`, `checks.tests` — число вызовов из продукта
 (`scope: prod`, `call_sites`) у её `enclosing` (`<module>` — 0); у `used_by` ключа нет (ранг импорта всегда 0).
@@ -199,6 +205,13 @@ Post: паспорт детерминирован: та же ревизия -> �
     записей раздела в порядке `links.py` (`import`, `name-call`, `same-file`, `test-body`); счёт по областям: `из
     продукта A, из тестов B` (A, B — число записей `scope: prod` и `scope: test`, отдельно, не суммой);
   - срез: `показано K из N; все: --all <раздел>`;
+  - пустые `runtime` символа (Task 4.5b; у `map` — прежний `—`): `threads: — (ищет: Thread, Timer, Observer)`
+    (`scan.THREAD_PATTERNS`), `io: — (ищет: ...)` (`scan.IO_PATTERNS`), `commands: — (ищет только def
+    command_specs(); register_command(...) не читает)`; у `commands: null` — `_NO_SPECS`, пробел, та же оговорка;
+  - вызовы по имени метода (Task 4.5b): N <= 10 — `по имени метода, тип не проверен (N):` и записи `_link_row`
+    (срез — список `call_sites_by_name` в `_alloc`, снимает его `--all call_sites`); N > 10 — одна строка
+    `по имени метода (prod, без self): N вызовов .<имя>(...) - имя частое, адреса не печатаются` (ASCII ` - `,
+    в остальном тексте — «—»); N = 0, класс и функция — строки нет;
   - член класса: `  имя(сигнатура)  :строка`, например
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
@@ -225,7 +238,7 @@ from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.links import TOO_GENERIC, Links, _scope, build_links
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.reference import _methods, _sig, _tag
-from scripts.atlas.scan import SCANNER, DefFact, FileFacts, ImportIndex, scan
+from scripts.atlas.scan import IO_PATTERNS, SCANNER, THREAD_PATTERNS, DefFact, FileFacts, ImportIndex, scan
 from scripts.atlas.tree import AtlasError, Tree, git_z, resolve
 
 
@@ -234,12 +247,17 @@ __all__ = ["build_map", "build_passport", "passports_for", "render_text", "resol
 SECTIONS = ("purpose", "interface", "links", "runtime", "checks", "status")  # порядок ключей и заголовков
 SHOW_ALL_SECTIONS = ("used_by", "call_sites", "subclasses", "structural", "tests")  # допустимые значения `show_all`
 MAP_SHOW_ALL = ("members", "used_by", "tests", "threads", "io")  # то же у `kind` unit/file (`atlas map --all`)
+# имена среза текста символа (`_alloc`): `SHOW_ALL_SECTIONS` + адреса по имени метода (Task 4.5b; флага `--all`
+# своего нет: его снимает `--all call_sites`, `_ALL_FLAG`)
+_SYMBOL_CUT = (*SHOW_ALL_SECTIONS, "call_sites_by_name")
+_ALL_FLAG = {"call_sites_by_name": "call_sites"}  # список среза -> значение `--all`, что его снимает
 
 _FORMS = ("import", "name-call", "same-file", "test-body")  # порядок форм — порядок упоминания в `links.py`
 _UNSEEN = "не видно: динамика, аннотации, упоминания"
 _NOT_SEARCHED = "не искали"
 _EMPTY = "—"
 _NO_SPECS = "форма command_specs() не объявлена"
+_COMMANDS_NOTE = "(ищет только def command_specs(); register_command(...) не читает)"  # Ф9.7: register_command
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _PATHSPEC_MAX = 100  # `status.stale`: больше путей — `git diff` без pathspec (предел argv), пересечение в Python
 _TOP_SHOWN = 6  # `top` члена юнита в тексте: до 6 имён, остаток `, +N`
@@ -558,7 +576,16 @@ class _Ctx:
             "call_sites_unresolved": got.get("call_sites_unresolved", 0),
             "bases": got.get("bases") if d.kind == "class" else None,
             "structural": structural,
+            "call_sites_by_name": self._by_name(d, got),
         }
+
+    def _by_name(self, d: DefFact, got: dict) -> dict | None:
+        """`links.call_sites_by_name`: у метода `{count, items}` (`items` с `rank`, None при N > 10), иначе None."""
+        raw = got.get("call_sites_by_name")
+        if d.kind != "method" or raw is None:
+            return None
+        items = raw["items"]
+        return {"count": raw["count"], "items": None if items is None else self.ranked(items)}
 
     @staticmethod
     def _inside(enclosing: str, qualname: str) -> bool:
@@ -939,6 +966,17 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
         else:
             add(f"  {name}: {_value(lnk[name])}")
     add(f"  call_sites_unresolved: {_value(lnk['call_sites_unresolved'])}")
+    by_name = lnk.get("call_sites_by_name")  # Task 4.5b: только у метода; N = 0 — строки нет
+    if by_name and by_name["count"]:
+        method = p["id"].partition("::")[2].rsplit(".", 1)[-1]
+        if by_name["items"] is None:
+            add(
+                f"  по имени метода (prod, без self): {by_name['count']} вызовов .{method}(...)"
+                " - имя частое, адреса не печатаются"
+            )
+        else:
+            add(f"  по имени метода, тип не проверен ({by_name['count']}):")
+            add_list("call_sites_by_name", "    ", by_name["items"], _link_row)
     add(f"  uses: {_value(lnk['uses'])}")
     if lnk["bases"]:
         add("  bases:")
@@ -963,21 +1001,21 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
             daemon = "не задан" if t["daemon"] is None else str(t["daemon"])
             add(f"    {t['pattern']} (daemon: {daemon}) — {t['where']}")
     else:
-        add(f"  threads: {_EMPTY}")
+        add(f"  threads: {_EMPTY} (ищет: {', '.join(THREAD_PATTERNS)})")  # Task 4.5b: «—» — не «нет потоков»
     if rt["commands"] is None:
-        add(f"  commands: {_NO_SPECS}")
+        add(f"  commands: {_NO_SPECS} {_COMMANDS_NOTE}")
     elif rt["commands"]:
         add("  commands:")
         for c in rt["commands"]:
             add(f"    {c['name']} — {c['where']} ({c['how']})")
     else:
-        add(f"  commands: {_EMPTY}")
+        add(f"  commands: {_EMPTY} {_COMMANDS_NOTE}")
     if rt["io"]:
         add("  io:")
         for i in rt["io"]:
             add(f"    {i['op']} {i['path']} — {i['where']}")
     else:
-        add(f"  io: {_EMPTY}")
+        add(f"  io: {_EMPTY} (ищет: {', '.join(IO_PATTERNS)})")
     add(f"checks: findings {_value(chk['findings'])}")
     if chk["tests"]:
         add(f"  tests: {len(chk['tests'])}")
@@ -993,7 +1031,8 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     else:
         add(f"  frozen: {_value(st['frozen'])}")
 
-    return _emit(fixed, budget, show_all, full, SHOW_ALL_SECTIONS)
+    show = show_all | {"call_sites_by_name"} if "call_sites" in show_all else show_all  # `--all call_sites` — оба
+    return _emit(fixed, budget, show, full, _SYMBOL_CUT)
 
 
 def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str], full: bool, names: tuple) -> str:
@@ -1012,7 +1051,7 @@ def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str]
         keep = give.get(name, len(rows))
         out += [f"{indent}{row(r)}" for r in rows[:keep]]
         if keep < len(rows):
-            out.append(f"{indent}показано {keep} из {len(rows)}; все: --all {name}")
+            out.append(f"{indent}показано {keep} из {len(rows)}; все: --all {_ALL_FLAG.get(name, name)}")
     return "\n".join(out)
 
 

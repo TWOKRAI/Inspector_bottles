@@ -105,6 +105,7 @@ def _schema(kind: str) -> dict[str, dict[str, tuple[type, ...]]]:
             "call_sites_unresolved": (int,),
             "bases": (list,) if is_class else (NONE,),
             "structural": (dict, NONE) if is_class else (NONE,),
+            "call_sites_by_name": (dict,) if kind == "method" else (NONE,),  # Task 4.5b
         },
     }
 
@@ -152,3 +153,161 @@ def test_passport_json_matches_schema(repo: GitRepo) -> None:
     dirty = _build(repo, "pkg/mod.py::helper")
     _check(dirty, "function")
     assert dirty["status"]["stale"] == ["pkg/caller.py"]
+
+
+# ---------------------------------------------------------------- Task 4.5b: оговорки и вызовы по имени (REDS 2-8)
+
+THREADS_NOTE = "threads: — (ищет: Thread, Timer, Observer)"
+COMMANDS_NOTE = "(ищет только def command_specs(); register_command(...) не читает)"
+IO_NOTE = "io: — (ищет: Observer.schedule, os.rename, os.replace, shutil.move)"
+
+_EMPTY_FILES = {
+    "pkg/__init__.py": "",
+    "pkg/svc.py": "class Plain:\n    pass\n\n\nclass Declared:\n    def command_specs(self):\n        return []\n",
+}
+
+_STEP = "class Step:\n    def run_x(self):\n        return 1\n\n    def other(self):\n        self.run_x()\n"
+STEP = "pkg/step.py::Step.run_x"
+
+
+def _text_lines(p: dict) -> list[str]:
+    from scripts.atlas.tests.test_passport_status import _render
+
+    return [line.strip() for line in _render(p, full=True).splitlines()]
+
+
+def _by_name_files(prod: int, tests: int = 0) -> dict[str, str]:
+    files = {"pkg/__init__.py": "", "pkg/step.py": _STEP}
+    if prod:
+        files["pkg/many.py"] = "def many(step):\n" + "    step.run_x()\n" * prod
+    if tests:
+        files["tests/__init__.py"] = ""
+        files["tests/test_step.py"] = "def test_a(step):\n" + "    step.run_x()\n" * tests
+    return files
+
+
+def test_empty_threads_prints_patterns_caveat(repo: GitRepo) -> None:
+    """RED 4.5b п. 2: пустой `threads` символа -> `threads: — (ищет: Thread, Timer, Observer)`; JSON — `[]`."""
+    _commit(repo, _EMPTY_FILES)
+    p = _build(repo, "pkg/svc.py::Plain")
+    assert p["runtime"]["threads"] == []
+    lines = _text_lines(p)
+    assert THREADS_NOTE in lines
+    assert "threads: —" not in lines
+
+
+def test_empty_commands_prints_command_specs_caveat(repo: GitRepo) -> None:
+    """RED 4.5b п. 2: `commands` `[]` -> `commands: — (оговорка)`; `null` -> `_NO_SPECS`, пробел, оговорка в конце."""
+    _commit(repo, _EMPTY_FILES)
+    declared = _build(repo, "pkg/svc.py::Declared")
+    plain = _build(repo, "pkg/svc.py::Plain")
+    assert declared["runtime"]["commands"] == [] and plain["runtime"]["commands"] is None
+    assert f"commands: — {COMMANDS_NOTE}" in _text_lines(declared)
+    assert f"commands: форма command_specs() не объявлена {COMMANDS_NOTE}" in _text_lines(plain)
+
+
+def test_empty_io_caveat_comes_from_constant(repo: GitRepo, monkeypatch) -> None:
+    """RED 4.5b п. 2: пустой `io` -> `io: — (ищет: <IO_PATTERNS>)`; `IO_PATTERNS` собран из `_REPLACES` и
+    `Observer.schedule`; текст берётся из константы при печати (подмена константы меняет строку)."""
+    from scripts.atlas import passport, scan
+
+    assert set(scan.IO_PATTERNS) == {"Observer.schedule", "os.replace", "os.rename", "shutil.move"}
+    assert set(scan.IO_PATTERNS) == {"Observer.schedule"} | {f"{m}.{f}" for m, f in scan._REPLACES}
+    _commit(repo, _EMPTY_FILES)
+    p = _build(repo, "pkg/svc.py::Plain")
+    assert p["runtime"]["io"] == []
+    assert IO_NOTE in _text_lines(p)
+    monkeypatch.setattr(passport, "IO_PATTERNS", ("Fake.io",))
+    assert "io: — (ищет: Fake.io)" in _text_lines(p)
+
+
+def test_method_by_name_few_addresses_listed(repo: GitRepo) -> None:
+    """RED 4.5b п. 3: три вызова `step.run_x()` в трёх prod-файлах -> count 3, три записи `how: "by-name"`; текст —
+    заголовок `по имени метода, тип не проверен (3):` и строка на адрес."""
+    files = {"pkg/__init__.py": "", "pkg/step.py": _STEP}
+    for x in "abc":
+        files[f"pkg/{x}.py"] = f"def caller_{x}(step):\n    step.run_x()\n"
+    _commit(repo, files)
+    p = _build(repo, STEP)
+    got = p["links"]["call_sites_by_name"]
+    assert got["count"] == 3
+    assert [(e["where"], e["how"], e["scope"], e["same_file"]) for e in got["items"]] == [
+        ("pkg/a.py:2", "by-name", "prod", False),
+        ("pkg/b.py:2", "by-name", "prod", False),
+        ("pkg/c.py:2", "by-name", "prod", False),
+    ]
+    lines = _text_lines(p)
+    assert "по имени метода, тип не проверен (3):" in lines
+    for x in "abc":
+        assert f"caller_{x} — pkg/{x}.py:2 (by-name)" in lines
+
+
+def test_method_by_name_threshold(repo: GitRepo) -> None:
+    """RED 4.5b п. 3: граница 10 — 10 вызовов -> 10 записей `items`; 11 -> `items` null, строка «имя частое»."""
+    _commit(repo, _by_name_files(10))
+    ten = _build(repo, STEP)
+    assert ten["links"]["call_sites_by_name"]["count"] == 10
+    assert len(ten["links"]["call_sites_by_name"]["items"]) == 10
+    assert "по имени метода, тип не проверен (10):" in _text_lines(ten)
+    _commit(repo, _by_name_files(11))
+    eleven = _build(repo, STEP)
+    assert eleven["links"]["call_sites_by_name"] == {"count": 11, "items": None}
+    lines = _text_lines(eleven)
+    assert "по имени метода (prod, без self): 11 вызовов .run_x(...) - имя частое, адреса не печатаются" in lines
+    assert not [s for s in lines if "pkg/many.py:" in s]
+
+
+def test_method_by_name_excludes_tests_scope(repo: GitRepo) -> None:
+    """RED 4.5b п. 3: вызовы из тест-файла (scope tests) в `call_sites_by_name` не идут: 1 prod + 2 test -> count 1."""
+    _commit(repo, _by_name_files(1, tests=2))
+    got = _build(repo, STEP)["links"]["call_sites_by_name"]
+    assert got["count"] == 1
+    assert [e["where"] for e in got["items"]] == ["pkg/many.py:2"]
+
+
+def test_method_passport_has_call_sites_by_name(repo: GitRepo) -> None:
+    """RED 4.5b п. 4: ключ `links.call_sites_by_name` — `dict` у метода (`{"count": 0, "items": []}` без внешних
+    вызовов), `null` у класса и функции; схема `_schema` сверяет ключи равенством множеств."""
+    _commit(repo, _FILES)
+    method = _build(repo, "pkg/mod.py::Handler.run")
+    _check(method, "method")
+    assert method["links"]["call_sites_by_name"] == {"count": 0, "items": []}
+    for ident, kind in (("pkg/mod.py::Handler", "class"), ("pkg/mod.py::helper", "function")):
+        p = _build(repo, ident)
+        _check(p, kind)
+        assert p["links"]["call_sites_by_name"] is None
+
+
+def test_method_by_name_slice_lifted_by_all_call_sites(repo: GitRepo) -> None:
+    """4.5b п. 3: адреса по имени — список среза (`_alloc`): `--budget 1` режет до 1 записи с пометкой
+    `--all call_sites`; `show_all={"call_sites"}` снимает и этот срез (3 записи, пометки нет)."""
+    from scripts.atlas.tests.test_passport_status import _render
+
+    files = {"pkg/__init__.py": "", "pkg/step.py": _STEP}
+    for x in "abc":
+        files[f"pkg/{x}.py"] = f"def caller_{x}(step):\n    step.run_x()\n"
+    _commit(repo, files)
+    p = _build(repo, STEP)
+    cut = [s.strip() for s in _render(p, budget=1).splitlines()]
+    head = cut.index("по имени метода, тип не проверен (3):")
+    assert cut[head + 1 : head + 3] == ["caller_a — pkg/a.py:2 (by-name)", "показано 1 из 3; все: --all call_sites"]
+    lifted = [s.strip() for s in _render(p, budget=1, show_all=frozenset({"call_sites"})).splitlines()]
+    head = lifted.index("по имени метода, тип не проверен (3):")
+    assert lifted[head + 1 : head + 4] == [f"caller_{x} — pkg/{x}.py:2 (by-name)" for x in "abc"]
+    assert not [s for s in lifted if s.startswith("показано")]
+
+
+def test_method_by_name_excludes_self_receiver(repo: GitRepo) -> None:
+    """4.5b п. 3: неотнесённый `self.run_x()` (у класса `Other` метода нет) в `call_sites_by_name` не идёт, хотя он
+    в `call_sites_unresolved`; `obj.run_x()` из того же файла идёт."""
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/step.py": _STEP,
+        "pkg/other.py": "class Other:\n    def go(self, obj):\n        self.run_x()\n        obj.run_x()\n",
+    }
+    _commit(repo, files)
+    p = _build(repo, STEP)
+    assert p["links"]["call_sites_unresolved"] == 2
+    got = p["links"]["call_sites_by_name"]
+    assert got["count"] == 1
+    assert [(e["where"], e["enclosing"]) for e in got["items"]] == [("pkg/other.py:4", "Other.go")]
