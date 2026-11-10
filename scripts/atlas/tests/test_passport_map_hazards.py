@@ -3,7 +3,8 @@
 Purpose: вложенная строка реестра (`modules:` внутри `paths` другого юнита); юниты с `paths[0]` не каталогом и без
     `__init__.py`; файл с `error`/`v2_error` (цель-файл и член юнита); цель под `exclude`; `\\` в цели; ветка
     `_stale` > 100 путей (git diff без pathspec + пересечение); счёт операторов импорта; `used_by` файла вне юнитов.
-    Поведение — докстринг `passport.build_map` («Решения GREEN»).
+    Поведение — докстринг `passport.build_map` («Решения GREEN»). Последний тест — про `ref` и общий `_alloc`
+    (ревью стадии 5, И1): список из одной записи у паспорта СИМВОЛА не режется до 0.
 Public API: тесты test_*; публичных имён нет.
 Stability: lite
 
@@ -181,3 +182,33 @@ def test_map_file_outside_units_counts_other_importers(repo: GitRepo) -> None:
     tool = _build(repo, "scripts/tool.py")
     assert tool["interface"]["layer"] == "other"
     assert tool["links"]["used_by"] == [{"name": "other", "where": "scripts/user.py:1", "how": "import", "count": 1}]
+
+
+def test_ref_symbol_single_entry_list_not_cut_to_zero(repo: GitRepo) -> None:
+    """`ref` (паспорт символа, не `map`), общий `_alloc`: у функции `u/a.py::f` `used_by` — 1 запись, `call_sites` — 5.
+    При `budget=1` каждый список даёт минимум одну запись: `used_by` целиком без метки (до правки GREEN было
+    `показано 0 из 1; все: --all used_by`), `call_sites` — 1 из 5 с меткой. Строк — минимум: полный текст минус 4
+    записи `call_sites` плюс метка."""
+    from scripts.atlas.passport import build_passport, render_text
+    from scripts.atlas.tests.conftest import run_with_deadline
+
+    _commit(
+        repo,
+        {
+            "u/__init__.py": "",
+            "u/a.py": '"""Модуль a."""\n\n\ndef f():\n    return 1\n',
+            "v/__init__.py": "",
+            "v/x.py": "from u.a import f\n\n\ndef g():\n    f()\n    f()\n    f()\n    f()\n    f()\n",
+        },
+    )
+    p = run_with_deadline(lambda: build_passport(repo.path, "HEAD", "u/a.py::f"), 120.0)
+    assert p["kind"] == "function"
+    assert [e["where"] for e in p["links"]["used_by"]] == ["v/x.py:1"]
+    assert len(p["links"]["call_sites"]) == 5
+    cut = [line.strip() for line in render_text(p, budget=1).splitlines()]
+    full = render_text(p, full=True).splitlines()
+    assert "<module> — v/x.py:1 (import)" in cut
+    assert not [s for s in cut if s.startswith("показано 0 из")]
+    assert not [s for s in cut if "--all used_by" in s]
+    assert "показано 1 из 5; все: --all call_sites" in cut
+    assert len(cut) == len(full) - 4 + 1  # строк <= max(budget, минимум): ровно минимум

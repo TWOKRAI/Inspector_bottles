@@ -79,6 +79,9 @@ def test_map_target_resolution_and_exit_codes(repo: GitRepo, atlas: Any, tmp_pat
 
     bogus = atlas(repo, "map", "u", "--all", "call_sites")
     assert bogus.code == 2 and bogus.out == "" and bogus.err.strip() != ""
+    # ревью стадии 5, И2: ошибка ввода, не падение `render_text` (ValueError -> общий except -> 2 с traceback)
+    assert "atlas map: --all принимает members, used_by, tests, threads, io" in bogus.err.splitlines()
+    assert "Traceback" not in bogus.err
     lifted = atlas(repo, "map", "u", "--all", "members", "--all", "used_by", "--budget", "1")
     assert lifted.code == 0, lifted.err
     lifted_lines = [line.strip() for line in lifted.out.splitlines()]
