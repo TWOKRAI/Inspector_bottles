@@ -173,6 +173,84 @@ def test_unparsed_signature_counts_as_shadowed():
     assert res["call_sites_unresolved"] == 2
 
 
+def test_return_annotation_does_not_shadow_calls():
+    """Аннотация возврата (`-> int`) не входит в разбор параметров: вызов в `def run(x) -> int` отнесён
+    (ревью stage 5, инъекция N1: без отрезания ` -> ` сигнатура не разбирается и затеняет всё)."""
+    own = {
+        "mod.py": (
+            "def callback() -> int:\n"  # 1
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def run(x) -> int:\n"  # 5
+            "    return callback()\n"  # 6
+        )
+    }
+    res = _of(_links(own), "mod.py::callback")
+    assert res["call_sites"] == [_site("mod.py:6", "run", True)]
+    assert res["call_sites_unresolved"] == 0
+
+    imported = {
+        "lib.py": "def callback() -> int:\n    return 1\n",
+        "use.py": (
+            "from lib import callback\n"  # 1
+            "\n"
+            "\n"
+            "def run(x) -> int:\n"  # 4
+            "    return callback()\n"  # 5
+        ),
+    }
+    res = _of(_links(imported), "lib.py::callback")
+    assert res["call_sites"] == [_site("use.py:5", "run", False)]
+    assert res["call_sites_unresolved"] == 0
+
+
+def test_dotted_receiver_shadowed_by_first_segment_param():
+    """`import pkg.sub` + `def run(pkg): pkg.sub.func()` — получатель затенён по первому сегменту `pkg`; вызов из
+    `other` без параметра отнесён (инъекция N4: сверка всего получателя `pkg.sub` с параметрами)."""
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/sub.py": "def func():\n    pass\n",
+        "use.py": (
+            "import pkg.sub\n"  # 1
+            "\n"
+            "\n"
+            "def run(pkg):\n"  # 4
+            "    pkg.sub.func()\n"  # 5: затенён
+            "\n"
+            "\n"
+            "def other():\n"  # 8
+            "    pkg.sub.func()\n"  # 9
+        ),
+    }
+    res = _of(_links(files), "pkg/sub.py::func")
+    assert res["call_sites"] == [_site("use.py:9", "other", False)]
+    assert res["call_sites_unresolved"] == 1
+
+
+def test_own_definition_beats_from_import():
+    """`from pkg import X` и свой `def X` в файле: `X()` — вызов своего `use.py::X`, а не реэкспорта
+    `pkg/core.py::X` (инъекция N5: from-импорт проверяется раньше своего определения)."""
+    files = {
+        "pkg/__init__.py": "from .core import X\n",
+        "pkg/core.py": "def X():\n    pass\n",
+        "use.py": (
+            "from pkg import X\n"  # 1
+            "\n"
+            "\n"
+            "def X():\n"  # 4
+            "    pass\n"
+            "\n"
+            "\n"
+            "def run():\n"  # 8
+            "    X()\n"  # 9
+        ),
+    }
+    links = _links(files)
+    assert _of(links, "use.py::X")["call_sites"] == [_site("use.py:9", "run", True)]
+    assert _of(links, "pkg/core.py::X")["call_sites"] == []
+
+
 def test_shadowed_module_call_adds_no_used_by():
     """Все `lib.func()` файла затенены параметром `lib`: затенённый вызов не рождает запись `used_by` по `import lib`
     (инъекция 14 матрицы 4.5a: `used_by` пишется до проверки затенения — тест красный)."""

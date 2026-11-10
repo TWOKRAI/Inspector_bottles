@@ -96,6 +96,45 @@ def test_reexport_hop_limit(hops, resolved):
         assert res["call_sites_unresolved"] == 1
 
 
+def test_facade_two_distinct_targets_unresolved():
+    """Фасад `try: from .a import X / except ImportError: from .b import X`, `X` определён в обоих: цели записей
+    различны -> вызов не относится ни к `a`, ни к `b`, unresolved 1 (инъекция N2: брать первую цель)."""
+    facade = "try:\n    from .a import X\nexcept ImportError:\n    from .b import X\n"
+    files = {
+        "pkg/__init__.py": facade,
+        "pkg/a.py": "def X():\n    pass\n",
+        "pkg/b.py": "def X():\n    pass\n",
+        "use.py": _USE,
+    }
+    links = _links(files)
+    assert _of(links, "pkg/a.py::X")["call_sites"] == []
+    assert _of(links, "pkg/b.py::X")["call_sites"] == []
+    assert _of(links, "pkg/a.py::X")["call_sites_unresolved"] == 1
+
+
+def test_facade_type_checking_and_lazy_same_target_resolved():
+    """Две записи фасада к одной цели (`if TYPE_CHECKING:` и `__getattr__`, обе `from .core import X`) — не
+    двусмысленность: вызов отнесён к `pkg/core.py::X` (инъекция N3: без схлопывания повторных целей)."""
+    facade = (
+        "from typing import TYPE_CHECKING\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from .core import X\n"
+        "\n"
+        "\n"
+        "def __getattr__(name):\n"
+        '    if name == "X":\n'
+        "        from .core import X\n"
+        "\n"
+        "        return X\n"
+        "    raise AttributeError(name)\n"
+    )
+    files = {"pkg/__init__.py": facade, "pkg/core.py": "def X():\n    pass\n", "use.py": _USE}
+    res = _of(_links(files), "pkg/core.py::X")
+    assert res["call_sites"] == [_CALL]
+    assert res["call_sites_unresolved"] == 0
+
+
 def test_reexport_cycle_stops():
     """`a/__init__` <- `b/__init__` <- `a/__init__`: разбор кончается (дедлайн), `call_sites == []`, unresolved 1."""
     files = {

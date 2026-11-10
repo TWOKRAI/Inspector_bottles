@@ -74,6 +74,11 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
 Известная неточность: `ImportRec` алиас не хранит, поэтому `from a import f as g` + `from b import f` дают имени `f`
 два определения — вызов `f()` (на деле `b::f`) не относится никому и считается в `call_sites_unresolved`.
 Полное решение — отдельное поле алиаса в фактах (v2 сканера); в Task 4.5a не заводится.
+Ещё неточности затенения (Task 4.5a, ревью stage 5):
+  - `" -> "` внутри значения по умолчанию ломает разбор сигнатуры: затенено любое имя (на дереве 0 из 57 669 def);
+  - не учитываются присваивание, `lambda`, переменные включений и тело класса (`class A: def helper(): ...;
+    x = helper()` — вызов в теле класса относится к верхнему `helper`, если такой есть);
+  - у `@property` + `@x.setter` берётся первый `DefFact` qualname: параметры сеттера не видны (на дереве 0 вызовов).
 
   - `bases` (Task 4.1b) — основы класса в порядке `DefFact.bases`, по одной записи на основу (разрешённую или нет):
     `{"name": .., "where": "путь:строка", "how": .., "scope": ..}`. `name` — сырой текст основы (`m.Base`, `Base[T]`),
@@ -244,17 +249,16 @@ class Links:
 
         Звено — один `__init__.py`: в его фактах ищется `ImportRec` с этим именем любого `kind` (`lazy` в
         `def __getattr__` по PEP 562 и во вспомогательной функции — тоже). Определение — имя верхнего уровня цели.
-        None: записи нет; цели записей различны; цель — не `__init__.py` и имя не определяет; цикл; звено сверх
-        `_REEXPORT_HOPS`. Ответ запоминается по `(init_path, name)`."""
+        None: записи нет; цели записей различны; цель — не `__init__.py` и имя не определяет; звено сверх
+        `_REEXPORT_HOPS` (так же кончается цикл фасадов). Ответ запоминается по `(init_path, name)`."""
         key = (init_path, name)
         if key in self._reexports:
             return self._reexports[key]
         found: _Sym | None = None
-        path, seen = init_path, set()
-        for _ in range(_REEXPORT_HOPS):
-            if path in seen or not _is_init(path):
-                break  # цикл или тупик: не фасад и имя не определяет
-            seen.add(path)
+        path = init_path
+        for _ in range(_REEXPORT_HOPS):  # цикл фасадов обрывает тот же предел
+            if not _is_init(path):
+                break  # тупик: не фасад и имя не определяет
             targets = self._reexport_targets(index, path, name)
             if len(targets) != 1:
                 break  # записи нет или цели различны
