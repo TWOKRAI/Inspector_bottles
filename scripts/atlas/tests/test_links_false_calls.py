@@ -171,3 +171,26 @@ def test_unparsed_signature_counts_as_shadowed():
     res = _of(links, "lib.py::f")
     assert res["call_sites"] == [_site("use.py:8", "ok", False)]
     assert res["call_sites_unresolved"] == 2
+
+
+def test_shadowed_module_call_adds_no_used_by():
+    """Все `lib.func()` файла затенены параметром `lib`: затенённый вызов не рождает запись `used_by` по `import lib`
+    (инъекция 14 матрицы 4.5a: `used_by` пишется до проверки затенения — тест красный)."""
+    files = {
+        "lib.py": "def func():\n    pass\n",
+        "use.py": (
+            "import lib\n"  # 1
+            "\n"
+            "\n"
+            "def run(lib):\n"  # 4
+            "    lib.func()\n"  # 5: затенён
+            "\n"
+            "\n"
+            "def again(x, lib):\n"  # 8
+            "    lib.func()\n"  # 9: затенён
+        ),
+    }
+    res = _of(_links(files), "lib.py::func")
+    assert res["used_by"] == []
+    assert res["call_sites"] == []
+    assert res["call_sites_unresolved"] == 2
