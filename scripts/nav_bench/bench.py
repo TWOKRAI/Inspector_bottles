@@ -5,6 +5,8 @@
     python scripts/nav_bench/bench.py score --run data/nav_bench/<файл>.json [--baseline B.json]
     python scripts/nav_bench/bench.py compare A.json B.json
     python scripts/nav_bench/bench.py verify-set --questions Q.json
+    python scripts/nav_bench/bench.py ceiling --questions Q.json --reference R.json [--min N]
+    python scripts/nav_bench/bench.py ceiling --questions Q.json --text T.json [--root R] [--min N]
 
 Один повтор = одна headless-сессия ``claude -p``, которая отвечает на ВСЕ вопросы набора. Сессия идёт в ЧИСТОЙ КОПИИ
 репозитория без путей ``exclude`` набора, чтобы эталон не лежал рядом с кодом: ``git archive <repo_sha>`` (набор
@@ -22,6 +24,7 @@ import fnmatch
 import functools
 import hashlib
 import json
+import os
 import posixpath
 import re
 import shlex
@@ -532,6 +535,242 @@ def ceiling(qset: dict[str, Any], addrs: set[tuple[str, int | None]]) -> tuple[l
                     tol = int(item.get("tolerance", score.TOLERANCE_LINES))
                     report.append(f"  {item['path']}:{item['line']} ±{tol} -> нет в эталоне")
     return report, reached, total
+
+
+# --- ceiling --text: потолок набора по тексту паспортов atlas (Task 3.3) -----------------------------------
+ATLAS_TIMEOUT_S = 600
+TARGET_VERBS = ("ref", "map")
+# опции, которыми цель могла бы сменить ревизию, корень, срез или размер паспорта; бенч ставит их сам
+TARGET_FORBIDDEN_OPTIONS = ("--format", "--ref", "--root", "--exclude", "--budget", "--all", "--full")
+
+type AtlasRunner = Callable[[list[str], Path], tuple[int, str, str]]
+
+_HEAD_RE = re.compile(r"^== .+ ==$")  # первая строка паспорта: `== <id> ==`, `== unit <id> ==`
+_ENVELOPE_RE = re.compile(r"^(?P<path>[^;]+?)(?::\d+)?; sha ")  # вторая строка: `<path>[:<line>]; sha …`
+_TEXT_ADDR_RE = re.compile(r"(?<![\w./-])([\w./-]+\.\w+):(\d+)")  # `_ADDR_LINE_RE`, поиском, с границей слева
+_TEXT_FILE_RE = re.compile(r"(?<![\w./-])([\w./-]+\.py)(?![\w./-]|:[\w:])")  # токен целиком, без `:N` и `::имя`
+_MEMBER_LINE_RE = re.compile(r"  :(\d+)$")  # конец строки члена: `  :17`
+
+
+def _forbidden_option(arg: str) -> bool:
+    """Опция из ``TARGET_FORBIDDEN_OPTIONS``: целиком, ``--x=…`` или сокращением (argparse принимает ``--bud``)."""
+    if not arg.startswith("--"):
+        return False
+    name = arg.split("=", 1)[0]
+    return any(option.startswith(name) for option in TARGET_FORBIDDEN_OPTIONS)
+
+
+def load_targets(path: Path, qset: dict[str, Any]) -> dict[str, list[list[str]]]:
+    """Цели ``{"set": <имя набора>, "targets": {<qid>: [[<argv atlas>], ...]}}``; вопрос без целей отсутствует в ответе.
+
+    ``ValueError``: ``set`` не равен ``name`` набора; qid не из набора; argv пуст или не из строк; ``argv[0]`` не
+    ``ref``/``map``; в argv опция из ``TARGET_FORBIDDEN_OPTIONS``; id в argv вопроса больше записей его ``expected``.
+    """
+    data = load_json(path)
+    if not isinstance(data, dict) or not isinstance(data.get("targets"), dict):
+        raise ValueError(f"{path}: нужен объект с полями set и targets (объект)")
+    if data.get("set") != qset["name"]:
+        raise ValueError(f"{path}: set {data.get('set')!r} не равен имени набора {qset['name']!r}")
+    by_id = {question["id"]: question for question in qset["questions"]}
+    found: dict[str, list[list[str]]] = {}
+    for qid, argvs in data["targets"].items():
+        if qid not in by_id:
+            raise ValueError(f"{path}: вопроса {qid!r} нет в наборе {qset['name']!r}")
+        if not isinstance(argvs, list):
+            raise ValueError(f"{path}: {qid}: цели — список argv")
+        ids = 0
+        for argv in argvs:
+            if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv):
+                raise ValueError(f"{path}: {qid}: argv — непустой список строк: {argv!r}")
+            if argv[0] not in TARGET_VERBS:
+                raise ValueError(f"{path}: {qid}: argv[0] — одно из {TARGET_VERBS}: {argv!r}")
+            bad = next((arg for arg in argv[1:] if _forbidden_option(arg)), None)
+            if bad is not None:
+                raise ValueError(f"{path}: {qid}: опцию {bad!r} ставит бенч, в цели её нет")
+            ids += len(argv) - 1
+        limit = len(by_id[qid].get("expected") or [])
+        if ids > limit:
+            raise ValueError(f"{path}: {qid}: id целей {ids} больше записей expected {limit}")
+        if argvs:
+            found[qid] = [list(argv) for argv in argvs]
+    return found
+
+
+def _run_atlas(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
+    """Один запуск atlas путём (без PYTHONPATH: кодовый корень atlas находит сам). Таймаут — код 2."""
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    env["PYTHONUTF8"] = "1"
+    try:
+        done = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=ATLAS_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return 2, "", f"таймаут {ATLAS_TIMEOUT_S} с"
+    return done.returncode, done.stdout, done.stderr
+
+
+def atlas_texts(
+    qset: dict[str, Any], targets: dict[str, list[list[str]]], root: Path, runner: AtlasRunner | None = None
+) -> dict[str, tuple[str, list[str]]]:
+    """Текст паспортов целей каждого вопроса: ``{qid: (текст, проблемы)}``; вопроса без целей в ответе нет.
+
+    Паспорта строятся в клоне ``root`` на ``repo_sha`` набора (временный каталог ``nav_bench_text_*``, удаляется
+    всегда): кэш atlas ложится в клон, не в ``root``. Код atlas — текущего дерева. Код atlas не 0 — проблема
+    ``  atlas <argv>: код N: <последняя строка stderr>``, stdout всё равно разбирается (atlas печатает паспорта
+    остальных id). Сбой git при клоне — ``RuntimeError``.
+    """
+    runner = runner or _run_atlas
+    texts: dict[str, tuple[str, list[str]]] = {}
+    if not targets:
+        return texts
+    sha = qset["repo_sha"]
+    atlas = PKG_DIR.parent / "atlas"
+    clone = Path(tempfile.mkdtemp(prefix="nav_bench_text_"))
+    try:
+        done = subprocess.run(
+            ["git", "clone", "-q", "--shared", "--no-checkout", str(root), str(clone)], capture_output=True
+        )
+        if done.returncode != 0:
+            raise RuntimeError(f"git clone не удался: {done.stderr.decode('utf-8', errors='replace').strip()}")
+        _git_raw(clone, "checkout", "-q", "--detach", sha)
+        for qid, argvs in targets.items():
+            parts: list[str] = []
+            problems: list[str] = []
+            for argv in argvs:
+                cmd = [sys.executable, str(atlas), *argv, "--format", "passport", "--ref", sha, "--root", str(clone)]
+                for prefix in qset.get("exclude") or []:
+                    cmd += ["--exclude", prefix]
+                code, stdout, stderr = runner(cmd, clone)
+                parts.append(stdout)
+                if code != 0:
+                    last = stderr.strip().splitlines()[-1] if stderr.strip() else ""
+                    problems.append(f"  atlas {' '.join(argv)}: код {code}: {last}".rstrip())
+            texts[qid] = ("\n\n".join(parts), problems)
+    finally:
+        _rmtree_force(clone)
+    return texts
+
+
+def text_addresses(text: str) -> set[tuple[str, int | None]]:
+    """Адреса ``(путь, строка | None)`` из текста паспортов atlas; других правил нет.
+
+    а) ``== … ==`` открывает паспорт; следующая строка ``<path>[:<line>]; sha …`` задаёт его путь, если тот кончается
+       на ``.py``, иначе пути нет; блок без такой строки (``not found``, ``ambiguous``) адресов не даёт;
+    б) токен ``путь:строка`` — как ``_ADDR_LINE_RE``, поиском, с границей слева;
+    в) токен целиком ``путь.py`` (без ``:N`` и ``::имя``) — ``(путь, None)``;
+    г) конец строки ``  :N`` (член класса или файла) — ``(путь паспорта, N)``.
+    """
+    found: set[tuple[str, int | None]] = set()
+    path: str | None = None
+    open_block = False
+    expect_envelope = False
+    for line in text.splitlines():
+        if _HEAD_RE.match(line):
+            path, open_block, expect_envelope = None, True, True
+            continue
+        if not open_block:
+            continue
+        if expect_envelope:
+            expect_envelope = False
+            envelope = _ENVELOPE_RE.match(line)
+            if envelope is None:
+                open_block = False
+                continue
+            candidate = envelope.group("path")
+            path = candidate if candidate.endswith(".py") else None
+        found.update((file, int(number)) for file, number in _TEXT_ADDR_RE.findall(line))
+        found.update((file, None) for file in _TEXT_FILE_RE.findall(line))
+        member = _MEMBER_LINE_RE.search(line)
+        if member is not None and path is not None:
+            found.add((path, int(member.group(1))))
+    return found
+
+
+def ceiling_text(qset: dict[str, Any], texts: dict[str, tuple[str, list[str]]]) -> tuple[list[str], int, int]:
+    """Как ``ceiling``, но адреса вопроса — только из текста ЕГО целей (``texts[qid]``): общего пула нет.
+
+    Вопрос без записи в ``texts`` — «нет целей», недостижим. Строки отчёта: ``<qid> reachable=yes|no``; на каждую
+    запись ``expected`` ``  <путь>[:<строка> ±<допуск>] -> найден|нет в тексте``; проблемы atlas; ``  нет целей``.
+    """
+    report: list[str] = []
+    reached = total = 0
+    for question in qset["questions"]:
+        items = question.get("expected") or []
+        if not question.get("scored", True) or not items:
+            continue
+        total += 1
+        qid = question["id"]
+        text, problems = texts.get(qid, ("", []))
+        addrs = text_addresses(text)
+        flags = [_reachable(item, addrs) for item in items]
+        ok = all(flags) if question.get("require", "any") == "all" else any(flags)
+        reached += ok
+        report.append(f"{qid} reachable={'yes' if ok else 'no'}")
+        for item, flag in zip(items, flags, strict=True):
+            if item.get("line") is None:
+                where = str(item["path"])
+            else:
+                where = f"{item['path']}:{item['line']} ±{int(item.get('tolerance', score.TOLERANCE_LINES))}"
+            report.append(f"  {where} -> {'найден' if flag else 'нет в тексте'}")
+        report.extend(problems)
+        if qid not in texts:
+            report.append("  нет целей")
+    return report, reached, total
+
+
+def _require_committed(root: Path, paths: list[Path]) -> None:
+    """Файлы лежат в ``root``, отслеживаются git и чисты (запись 11 п. 1): иначе ``ValueError``."""
+    base = Path(root).resolve()
+    rels: list[str] = []
+    for path in paths:
+        try:
+            rels.append(Path(path).resolve().relative_to(base).as_posix())
+        except ValueError:
+            raise ValueError(f"{path}: вне репозитория {root}") from None
+    for rel in rels:
+        known = subprocess.run(["git", "-C", str(base), "ls-files", "--error-unmatch", "--", rel], capture_output=True)
+        if known.returncode != 0:
+            raise ValueError(f"{rel}: не в git — заморозь набор и цели коммитом")
+    dirty = git_dirty(base, rels)
+    if dirty:
+        raise ValueError(f"есть незакоммиченные правки ({'; '.join(dirty)}) — заморозь набор и цели коммитом")
+
+
+def ceiling_text_command(
+    questions_path: Path,
+    targets_path: Path,
+    root: Path,
+    minimum: int | None = None,
+    out: TextIO | None = None,
+    runner: AtlasRunner | None = None,
+) -> int:
+    """Код: 0; с ``minimum`` при достижимых меньше него — 1; ошибка ввода, git или Q/T не в коммите — 2.
+
+    С ``minimum`` набор и цели должны лежать в ``root``, быть в git и чистыми: потолок по правленным на лету целям
+    ничего не доказывает.
+    """
+    out = out or sys.stdout
+    try:
+        qset = load_questions(questions_path)
+        targets = load_targets(targets_path, qset)
+        if minimum is not None:
+            _require_committed(root, [questions_path, targets_path])
+        texts = atlas_texts(qset, targets, root, runner)
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        print(f"ОШИБКА: {exc}", file=sys.stderr)
+        return 2
+    report, reached, total = ceiling_text(qset, texts)
+    for row in report:
+        print(row, file=out)
+    print(f"ceiling-text {qset['name']}: {reached}/{total}", file=out)
+    return 1 if minimum is not None and reached < minimum else 0
 
 
 # --- MCP-конфиг и предпроверки -------------------------------------------------------------------
@@ -1520,13 +1759,18 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--questions", required=True, type=Path)
     verify.add_argument("--root", type=Path, default=Path("."))
 
-    ceil = sub.add_parser("ceiling", help="какие ожидаемые адреса набора есть в JSON-эталоне (потолок набора)")
+    ceil = sub.add_parser("ceiling", help="какие ожидаемые адреса набора есть в JSON-эталоне или в тексте паспортов")
     ceil.add_argument("--questions", required=True, type=Path)
-    ceil.add_argument("--reference", required=True, type=Path, help="JSON эталона 3.1 или `atlas ref --format json`")
+    source = ceil.add_mutually_exclusive_group(required=True)
+    source.add_argument("--reference", type=Path, help="JSON эталона 3.1 или `atlas ref --format json`")
+    source.add_argument("--text", type=Path, help="JSON целей (форма — README): паспорта atlas на repo_sha набора")
+    ceil.add_argument("--root", type=Path, default=Path("."), help="репозиторий-источник клона на repo_sha (с --text)")
     ceil.add_argument("--min", type=int, default=None, help="код 1, если достижимых вопросов меньше N")
 
     args = parser.parse_args(argv)
     if args.command == "ceiling":
+        if args.text is not None:
+            return ceiling_text_command(args.questions, args.text, args.root, args.min)
         return ceiling_command(args.questions, args.reference, args.min)
     if args.command in ("run", "floor"):
         code, _ = run_bench(
