@@ -315,3 +315,43 @@ def test_g8b_shutdown_exception_still_unpauses() -> None:
     assert rc == 3, out
     assert any(ln.startswith("cleanup: СТОП → ошибка RuntimeError") for ln in out.splitlines())
     assert world.count("sim", "send_command", "scene.pause", {"paused": False}) == 1
+
+
+# --- Г9: dropped журнала ОБМЕНА — FAIL случая, P5/P6 всё равно идут --------------------------------------------------
+
+
+def _exchange_dropped_hook(dropped: int, fired: list):
+    def hook(world, real, target, command, args, **kw):
+        if command != "robot_exchange_log_get" or fired or world.first("sim", "send_command", "scene.sequence") is None:
+            return NotImplemented
+        fired.append(dropped)  # первый get посреди случая B (список уже отправлен)
+        reply = real(target, command, args, **kw)
+        return {"result": dict(reply["result"], dropped=dropped)}
+
+    return hook
+
+
+def test_g9_exchange_dropped_fails_case_and_still_parks_and_stops() -> None:
+    fired: list = []
+    world = _Hooked({("proto", "send_command"): _exchange_dropped_hook(3, fired)})
+    rc, out = T._run(world)
+    assert fired == [3]
+    assert rc == 1, out
+    lines = out.splitlines()
+    assert any(ln.startswith("B exchange:") and "→ FAIL: exchange dropped 3" in ln for ln in lines), out
+    assert "B случай: FAIL" in lines
+    assert _called(world, "proto", "robot_park_all") == 1
+    assert world.count("proto", "system_shutdown") == 1
+    assert lines[-1].startswith("итог: B=FAIL D=PASS C=PASS ДОМОЙ=PASS СТОП=PASS → код 1")
+    assert world.errors == []
+
+
+def test_g9_pair_same_scene_with_zero_dropped_passes() -> None:
+    # достижимость: тот же хук сработал (get посреди случая достигнут), но dropped == 0 → PASS
+    fired: list = []
+    world = _Hooked({("proto", "send_command"): _exchange_dropped_hook(0, fired)})
+    rc, out = T._run(world)
+    assert fired == [0]
+    assert rc == 0, out
+    assert not any(ln.startswith("B exchange") for ln in out.splitlines())
+    assert "B случай: PASS" in out.splitlines()
