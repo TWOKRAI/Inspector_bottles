@@ -11,10 +11,13 @@ Stability: lite
 
 from __future__ import annotations
 
+import itertools
 import json
+import os
 import sys
 import sqlite3
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.atlas.schema import AdapterOutput, Edge, Finding, Node
@@ -53,32 +56,139 @@ CREATE TABLE IF NOT EXISTS view_cache (
 CREATE TABLE IF NOT EXISTS scan_cache (
     oid TEXT NOT NULL, scanner TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (oid, scanner));
 """
-_SCHEMA = 5  # PRAGMA user_version; база — производный кэш: другая версия -> таблицы пересоздаются, миграций нет
+_SCHEMA = 5  # PRAGMA user_version; база — производный кэш: версия ниже -> таблицы пересоздаются, выше -> не трогается
 _TABLES = ("builds", "nodes", "edges", "findings", "snapshots", "view_cache", "scan_cache")
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
-    """Открыть (создав каталог и таблицы) базу реестра; версия схемы не совпала -> таблицы пересоздаются.
+class _NotADatabase(Exception):
+    """Файл по пути — не база SQLite (`DatabaseError`, не `OperationalError`, на первом `PRAGMA`)."""
 
-    Файл не удаляется (параллельный `atlas build` держит его открытым): сброс — одна транзакция IMMEDIATE.
-    """
+
+class _NewerSchema(Exception):
+    """`user_version` файла выше `_SCHEMA`: база новее этой версии атласа, её таблицы не стираются."""
+
+
+def _create_schema(con: sqlite3.Connection) -> None:
+    for statement in filter(str.strip, _DDL.split(";")):  # executescript сам делает COMMIT
+        con.execute(statement)
+    con.execute(f"PRAGMA user_version = {_SCHEMA}")
+
+
+def _open(path: str | Path) -> sqlite3.Connection:
+    """Открыть базу по `path` (каталог и таблицы создаются; версия ниже `_SCHEMA` -> пересоздание в файле)."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, isolation_level=None)
-    if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:
-        con.execute("BEGIN IMMEDIATE")
+    try:
         try:
-            if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:  # другой процесс мог успеть раньше
-                for table in _TABLES:
-                    con.execute(f"DROP TABLE IF EXISTS {table}")
-                for statement in filter(str.strip, _DDL.split(";")):  # executescript сам делает COMMIT
-                    con.execute(statement)
-                con.execute(f"PRAGMA user_version = {_SCHEMA}")
-            con.execute("COMMIT")
-        except BaseException:
-            con.close()
+            version = con.execute("PRAGMA user_version").fetchone()[0]
+        except sqlite3.OperationalError:  # `database is locked`, `unable to open database file`: файл здоров
             raise
+        except sqlite3.DatabaseError as exc:  # `file is not a database`
+            raise _NotADatabase from exc
+        if version > _SCHEMA:
+            raise _NewerSchema
+        if version != _SCHEMA:
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                if con.execute("PRAGMA user_version").fetchone()[0] != _SCHEMA:  # другой процесс мог успеть раньше
+                    for table in _TABLES:
+                        con.execute(f"DROP TABLE IF EXISTS {table}")
+                    _create_schema(con)
+                con.execute("COMMIT")
+            except sqlite3.OperationalError:  # только для чтения, занята: файл здоров
+                raise
+            except (
+                sqlite3.DatabaseError
+            ) as exc:  # усечённый файл с верной сигнатурой: `database disk image is malformed`
+                raise _NotADatabase from exc
+    except BaseException:
+        con.close()
+        raise
     con.isolation_level = ""  # дальше — обычный режим транзакций, как у остального кода
     return con
+
+
+def _in_memory(message: str) -> sqlite3.Connection:
+    """Соединение «в памяти» с той же схемой и строка в stderr: кэш — оптимизация, а не условие работы."""
+    print(message, file=sys.stderr)
+    con = sqlite3.connect(":memory:", isolation_level=None)
+    _create_schema(con)
+    con.isolation_level = ""
+    return con
+
+
+def _stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+
+
+def _is_not_a_database(path: Path) -> bool:
+    """Файл по `path` и сейчас не база? Читает заново, только на чтение: файла нет или он здоров -> False."""
+    try:
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        con.execute("SELECT count(*) FROM sqlite_master").fetchone()  # и сигнатура, и первая страница
+    except sqlite3.OperationalError:
+        return False
+    except sqlite3.DatabaseError:
+        return True
+    finally:
+        con.close()
+    return False
+
+
+def _set_aside(path: Path) -> Path | None:
+    """Перенести не-базу в `<имя>.corrupt-<UTC YYYYmmddTHHMMSS>[-N]` рядом; вернуть имя копии.
+
+    Файл перечитывается: другой процесс мог уже пересоздать базу -> None, файл не трогается. Занятость имени копии
+    проверяет `os.link` (FileExistsError -> следующий суффикс `-1`, `-2`, …): `rename` перезаписал бы чужую копию.
+    `FileNotFoundError` (другой процесс успел убрать файл) и прочие `OSError` — наверх.
+    """
+    if not _is_not_a_database(path):
+        return None
+    stamp = _stamp()
+    for n in itertools.count():
+        target = path.with_name(f"{path.name}.corrupt-{stamp}" + (f"-{n}" if n else ""))
+        try:
+            os.link(path, target)
+        except FileExistsError:
+            continue
+        break
+    try:
+        path.unlink()
+    except FileNotFoundError:  # другой процесс убрал файл между link и unlink: копия сохранена
+        pass
+    return target
+
+
+def connect(path: str | Path) -> sqlite3.Connection:
+    """Открыть (создав каталог и таблицы) базу реестра; отказ кэша не бросает, а даёт базу в памяти.
+
+    Версия ниже `_SCHEMA` -> таблицы пересоздаются (сброс — одна транзакция IMMEDIATE, файл не удаляется:
+    параллельный `atlas build` держит его открытым). Версия выше -> таблицы не стираются, работа в памяти.
+    Файл — не база (мусор, усечённый файл) -> сохраняется копией `<имя>.corrupt-<UTC>[-N]`, база создаётся заново (если
+    другой процесс уже пересоздал её — файл не трогается). Любая другая
+    `sqlite3.Error`/`OSError` (каталог не создать, база занята или только для чтения) -> база в памяти и строка
+    в stderr; файл не трогается. Вызывающий отличить соединение «в памяти» не может и не должен.
+    """
+    path = Path(path)
+    try:
+        try:
+            return _open(path)
+        except _NotADatabase:
+            try:
+                kept = _set_aside(path)
+            except FileNotFoundError:  # другой процесс убрал мусор раньше нас: файла нет, база создастся заново
+                kept = None
+            if kept is not None:
+                print(f"atlas: кэш повреждён, сохранён как {kept.name}", file=sys.stderr)
+            return _open(path)  # один повтор: файл уже пересоздан (нами или другим процессом)
+    except _NewerSchema:
+        return _in_memory("atlas: кэш новее этой версии атласа, работаю без кэша")
+    except (sqlite3.Error, OSError, _NotADatabase) as exc:  # `_NotADatabase` — и после переименования
+        real = exc.__cause__ if isinstance(exc, _NotADatabase) else exc
+        return _in_memory(f"atlas: кэш недоступен ({type(real).__name__}), работаю без кэша")
 
 
 def find_build(con: sqlite3.Connection, sha: str, main_ref: str, fingerprint: str, base_tree: str = "") -> int | None:
@@ -195,7 +305,7 @@ _CHUNK = 500  # предел переменных в одном `IN (...)`
 def get_scans(con: sqlite3.Connection, scanner: str, oids: Iterable[str]) -> dict[str, str]:
     """Тела фактов (`FileFacts.to_json()`) по oid для ключа `scanner`; форму не проверяет — это дело `scan`.
 
-    База занята -> строка в stderr и {} (все промахи): кэш — оптимизация.
+    База занята или повреждена -> строка в stderr и {} (все промахи): кэш — оптимизация.
     """
     wanted = list(dict.fromkeys(oids))
     found: dict[str, str] = {}
@@ -205,7 +315,7 @@ def get_scans(con: sqlite3.Connection, scanner: str, oids: Iterable[str]) -> dic
             marks = ", ".join("?" * len(chunk))
             sql = f"SELECT oid, body FROM scan_cache WHERE scanner = ? AND oid IN ({marks})"
             found.update(con.execute(sql, (scanner, *chunk)))
-    except sqlite3.OperationalError as exc:
+    except sqlite3.DatabaseError as exc:  # занята (OperationalError) или страницы повреждены: все промахи
         print(f"atlas: кэш фактов не прочитан: {exc}", file=sys.stderr)
         return {}
     return found
@@ -219,5 +329,5 @@ def put_scans(con: sqlite3.Connection, scanner: str, rows: Iterable[tuple[str, s
                 "INSERT OR REPLACE INTO scan_cache (oid, scanner, body) VALUES (?, ?, ?)",
                 [(oid, scanner, body) for oid, body in rows],
             )
-    except sqlite3.OperationalError as exc:  # база занята читателем: факты уже разобраны
+    except sqlite3.DatabaseError as exc:  # база занята читателем или повреждена: факты уже разобраны
         print(f"atlas: кэш фактов не записан: {exc}", file=sys.stderr)

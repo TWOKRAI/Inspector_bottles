@@ -1,11 +1,12 @@
 """Карта «путь -> модуль»: загрузка modules.yaml и резолвер (Task 0.3, plans/2026-10-04_atlas).
 
 Формат и правила — plans/2026-10-04_atlas/tasks/0.3.md. Только stdlib и PyYAML,
-кода проекта не импортирует: модуль читают адаптеры атласа и хуки коммита.
+кода проекта не импортирует (кроме `tree.AtlasError`, у `tree.py` импортов проекта нет): модуль читают адаптеры
+атласа и хуки коммита.
 
 Purpose: загрузка modules.yaml (строгая: нужен `purpose`), разбор текста (мягкий по умолчанию),
-    юниты из каталогов-корней `roots`, резолвер «путь -> модуль».
-Public API: OTHER, expand_roots, load_modules, parse_modules, resolve, unit_ids.
+    юниты из каталогов-корней `roots`, резолвер «путь -> модуль», `norm_path` — путь с входа CLI.
+Public API: OTHER, expand_roots, load_modules, norm_path, parse_modules, resolve, unit_ids.
 Stability: lite
 
 Элемент `paths` с «/» на конце — префикс каталога, без «/» — точный файл.
@@ -24,12 +25,17 @@ Post: ошибка юнита — ValueError `<name>: юнит K: …` (K — id
 from __future__ import annotations
 
 import ast
+import os
+import posixpath
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 import yaml
 
-__all__ = ["OTHER", "expand_roots", "load_modules", "parse_modules", "resolve", "unit_ids"]
+from scripts.atlas.tree import AtlasError
+
+__all__ = ["OTHER", "expand_roots", "load_modules", "norm_path", "parse_modules", "resolve", "unit_ids"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REQUIRED_KEYS = ("id", "paths", "layer", "tier", "docs", "parent")
@@ -38,6 +44,35 @@ _DOC_FILES = ("README.md", "STATUS.md", "DECISIONS.md")
 _TIERS = ("core", "optional")
 
 OTHER = "other"
+_DRIVE = re.compile(r"[A-Za-z]:/")  # диск Windows в пути после замены `\` на `/`
+
+
+def norm_path(s: str, root: Path | None = None) -> str:
+    """Путь с входа CLI -> posix-путь от корня репозитория: `\\` -> `/`, без ведущего `./`, `posixpath.normpath`.
+
+    Pre: `root` — корень репозитория или None. Post: абсолютный путь внутри `root` -> путь от корня; `root is None`
+    — любой абсолютный путь ошибка. Raises: `AtlasError` (CLI: код 2, строка `atlas: ...`, значение пути в тексте
+    не печатается) — пустая строка, `..` выше корня, абсолютный путь вне `root`. Абсолютный путь сверяется с корнем
+    как дан и через `os.path.realpath` (алиас-симлинк: macOS `/tmp` -> `/private/tmp`), корень — как дан и через
+    `resolve()`. Регистр на Windows не сводится."""
+    path = s.replace("\\", "/")
+    if path == "":
+        raise AtlasError("atlas: путь пуст")
+    if path.startswith("/") or _DRIVE.match(path):
+        norm = posixpath.normpath(path)
+        bases = {root.as_posix().rstrip("/"), root.resolve().as_posix().rstrip("/")} if root is not None else set()
+        # как дан, затем с развёрнутыми симлинками (путь и корень по обе стороны алиаса)
+        for variant in (norm, os.path.realpath(norm).replace("\\", "/")) if bases else ():
+            for base in sorted(bases, key=len, reverse=True):
+                if variant == base:
+                    return "."
+                if variant.startswith(base + "/"):
+                    return variant[len(base) + 1 :]
+        raise AtlasError("atlas: абсолютный путь вне корня репозитория")
+    norm = posixpath.normpath(path)
+    if norm == ".." or norm.startswith("../"):
+        raise AtlasError("atlas: путь выше корня репозитория")
+    return norm
 
 
 def load_modules(path: str | Path = "modules.yaml") -> list[dict]:
@@ -108,7 +143,11 @@ def resolve(rel_path: str, modules: list[dict]) -> str:
 
     `modules` — список, который вернул load_modules.
     """
-    path = str(rel_path).replace("\\", "/")
+    try:
+        raw = str(rel_path).replace("\\", "/")
+        path = norm_path(raw) + ("/" if raw.endswith("/") else "")  # `pkg/` — каталог: совпадает с элементом `pkg/`
+    except AtlasError:  # пустой, выше корня, абсолютный: ни один элемент `paths` не совпадёт
+        return OTHER
     best_id, best_len = OTHER, 0
     for row in modules:
         for element in row["paths"]:

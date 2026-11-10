@@ -144,12 +144,23 @@ def test_db_with_another_schema_version_is_recreated(repo: GitRepo, atlas: Any, 
     assert "base_tree" in columns
     assert _query(path, "SELECT sha FROM builds") == [(x,)]
 
-    # случай 2: база другой версии схемы (user_version 999) с меткой
+    # случай 2а: база НОВЕЕ схемы (user_version 999) с меткой — не стирается, версия остаётся, сборка идёт в памяти
     marker = sqlite3.connect(path)
     marker.execute("INSERT INTO nodes (build_id, kind, id) VALUES (999, 'marker', 'marker')")
     marker.execute("PRAGMA user_version = 999")
     marker.commit()
     marker.close()
+    assert _query(path, "SELECT count(*) FROM nodes WHERE kind = 'marker'") == [(1,)]
+    res = atlas(repo, "build", "--ref", x, "--main-ref", "main")
+    assert res.code == 0, res.err
+    assert _query(path, "SELECT count(*) FROM nodes WHERE kind = 'marker'") == [(1,)]
+    assert _query(path, "PRAGMA user_version") == [(999,)]
+
+    # случай 2б: база МЛАДШЕ схемы (user_version 4, _SCHEMA 5) с меткой — таблицы пересоздаются, метка стёрта
+    older = sqlite3.connect(path)
+    older.execute("PRAGMA user_version = 4")
+    older.commit()
+    older.close()
     assert _query(path, "SELECT count(*) FROM nodes WHERE kind = 'marker'") == [(1,)]
     res = atlas(repo, "build", "--ref", x, "--main-ref", "main")
     assert res.code == 0, res.err

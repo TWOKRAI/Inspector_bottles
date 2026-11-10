@@ -183,8 +183,8 @@ class Svc:
 
 
 def test_thread_site_needs_constructor_and_start():
-    """P5: запись `ThreadSite` — только когда конструктор из `THREAD_PATTERNS` и `.start()` той же цели лежат в одной
-    функции (цепочка `Thread(...).start()` тоже); `line` — строка конструктора, не `.start()`; `daemon` —
+    """P5 (Task 4.5b): запись `ThreadSite` — у КАЖДОГО вызова конструктора из `THREAD_PATTERNS`, `.start()` не нужен;
+    цепочка `Thread(...).start()` — одна запись; `line` — строка конструктора, не `.start()`; `daemon` —
     литерал `daemon=` у конструктора (True/False), иначе None."""
     from scripts.atlas import scan as scan_mod
 
@@ -196,17 +196,42 @@ def test_thread_site_needs_constructor_and_start():
         [
             ("Thread", ln("t_started"), "started", True),
             ("Thread", ln("t_chain"), "chained", True),
+            ("Thread", ln("t_never"), "never_started", None),  # без .start(): запись есть (Task 4.5b)
             ("Timer", ln("t_timer"), "timer", None),
             ("Thread", ln("t_false"), "non_daemon", False),
             ("Thread", ln("t_dyn"), "dynamic", None),  # конструктор на нескольких строках: строка `Thread(`
             ("Thread", ln("t_attr"), "attr_daemon", None),  # `t.daemon = True` — не литерал в конструкторе
+            ("Thread", ln("t_other"), "other_target", None),  # .start() чужой цели: запись есть (Task 4.5b)
+            ("Thread", ln("t_build"), "build", None),  # конструктор в `build`, .start() в `run` (Task 4.5b)
             ("Observer", ln("t_obs"), "Svc.go", None),
         ]
     )
-    # нет записей: `never_started` (без .start()), `other_target` (.start() чужой цели),
-    # `build`+`run` (конструктор и .start() в разных функциях)
+    # нет записей: `run` (`t = build(f)` — не конструктор), `u = make()` в `other_target`
     assert got == expected
     assert isinstance(facts.thread_sites, tuple)
+
+
+_SPLIT_THREAD_SRC = """\
+import threading
+
+
+class Worker:
+    def __init__(self, f):
+        self._t = threading.Thread(target=f, daemon=True)  # @ctor
+
+    def begin(self):
+        self._t.start()
+"""
+
+
+def test_thread_without_start_in_same_function_recorded():
+    """RED Task 4.5b п. 1: `self._t = threading.Thread(...)` в `__init__`, `.start()` в другом методе -> одна запись
+    у конструктора (`enclosing` — `Worker.__init__`, строка 6); запуск в `begin` записи не даёт."""
+    from scripts.atlas.scan import scan_text
+
+    assert _line(_SPLIT_THREAD_SRC, "ctor") == 6
+    got = [(s.pattern, s.line, s.enclosing, s.daemon) for s in scan_text(_SPLIT_THREAD_SRC).thread_sites]
+    assert got == [("Thread", 6, "Worker.__init__", True)]
 
 
 # ---------------------------------------------------------------- 3. defs
@@ -441,3 +466,26 @@ def test_old_form_cache_body_is_miss(tmp_path: Path):
             assert redo.facts["m.py"] == fresh
     finally:
         con.close()
+
+
+_SAME_LINE_SRC = """\
+from threading import Thread, Timer
+
+
+def pair(f):
+    a, b = Thread(target=f), Timer(1.0, f)  # @pair
+    return a, b
+
+
+def other(f):
+    return Thread(target=f, daemon=False)  # @other
+"""
+
+
+def test_thread_sites_dedup_by_enclosing_and_line():
+    """Task 4.5b п. 1: два конструктора в одной строке одной функции -> одна запись (первая в порядке обхода);
+    в другой функции — своя запись."""
+    from scripts.atlas.scan import scan_text
+
+    got = sorted((s.pattern, s.line, s.enclosing, s.daemon) for s in scan_text(_SAME_LINE_SRC).thread_sites)
+    assert got == [("Thread", 5, "pair", None), ("Thread", 10, "other", False)]

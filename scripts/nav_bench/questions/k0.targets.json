@@ -1,0 +1,13 @@
+{
+  "set": "k0",
+  "targets": {
+    "Q1": [["ref", "IRouterManager", "RouterManager"]],
+    "Q2": [["ref", "IConfig", "multiprocess_framework/modules/config_module/core/config.py::Config"]],
+    "Q3": [["ref", "IConfigObserver"]],
+    "Q4": [["ref", "IConfigManager"]],
+    "Q5": [["ref", "ConfigFileWatcher"]],
+    "Q6": [["ref", "ConfigFileWatcher"]],
+    "Q7": [["ref", "ConfigFileWatcher"]],
+    "Q10": [["ref", "DataConverter.save_to_file"]]
+  }
+}

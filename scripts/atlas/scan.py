@@ -6,7 +6,8 @@ Purpose: один код читает дерево git (`Tree`) и словар�
     `ImportIndex` разрешает импорты в пути файлов индекса. Модуль не импортирует `scripts.arch_map` (карта удаляется)
     и адаптеры atlas; разбор перенесён копией из `scripts/arch_map/build.py`.
 Public API: Source, DictSource, ImportRec, ClassFact, DefFact, CallFact, IoFact, ThreadSite, FileFacts, ScanResult,
-    Resolved, ImportIndex, scan, scan_text, resolve_relative, SCANNER, MAX_BLOB_BYTES, THREAD_PATTERNS.
+    Resolved, ImportIndex, scan, scan_text, resolve_relative, SCANNER, MAX_BLOB_BYTES, THREAD_PATTERNS,
+    IO_PATTERNS.
     Правило ошибок: `scan_text` и разбор блоба не бросают; непарсящийся файл — `FileFacts(error=<имя исключения>)`.
 Stability: lite
 
@@ -46,6 +47,7 @@ from scripts.atlas.store import get_scans, put_scans
 __all__ = [
     "MAX_BLOB_BYTES",
     "SCANNER",
+    "IO_PATTERNS",
     "THREAD_PATTERNS",
     "CallFact",
     "ClassFact",
@@ -162,14 +164,16 @@ class IoFact:
 
 @dataclass(frozen=True)
 class ThreadSite:
-    """Место запуска потока (v2): конструктор из `THREAD_PATTERNS` с `.start()` той же цели в той же функции.
+    """Место потока (v2, Task 4.5b): каждый вызов конструктора из `THREAD_PATTERNS` (`Thread(...)`, `x.Thread(...)`).
 
     pattern: имя конструктора из `THREAD_PATTERNS` (`Thread`, `Timer`, `Observer`).
-    line: строка КОНСТРУКТОРА (не `.start()`).
+    line: строка КОНСТРУКТОРА (не `.start()`; у многострочного — первая строка).
     enclosing: как у `CallFact`.
     daemon: литерал `daemon=` у конструктора: True / False; не задан или не литерал -> None.
-    Запись есть только при `.start()`: конструктор без запуска записи не даёт; цепочка
-    `Thread(target=f, daemon=True).start()` запись даёт.
+    `.start()` не нужен: `self._t = Thread(...)` в `__init__` и запуск в другом методе — запись у конструктора;
+    конструктор без запуска — тоже запись. Дубль по `(enclosing, line)` не пишется (цепочка
+    `Thread(...).start()` и два конструктора в одной строке функции — одна запись, первая в порядке обхода).
+    Конструктор узнаётся по листовому имени вызова, без проверки импорта.
     """
 
     pattern: str
@@ -512,6 +516,8 @@ def _loc(text: str) -> int:
 
 _FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 _REPLACES = frozenset({("os", "replace"), ("os", "rename"), ("shutil", "move")})
+# что ищет `IoFact` (Task 4.5b): оговорка пустого `runtime.io` в тексте паспорта; `replaces` — по `_REPLACES`
+IO_PATTERNS = ("Observer.schedule", *sorted(f"{m}.{f}" for m, f in _REPLACES))
 
 
 def _decorator_name(expr: ast.expr) -> str:
@@ -562,10 +568,10 @@ class _V2Collector:
         self.calls: list[CallFact] = []
         self.test_defs: list[tuple[str, int]] = []
         self.replaces: list[IoFact] = []
-        self.sites: list[ThreadSite] = []  # цепочки `Thread(...).start()`
+        self.sites: list[ThreadSite] = []  # каждый вызов конструктора потока (Task 4.5b)
+        self.site_keys: set[tuple[str, int]] = set()  # (область, строка) уже записанных мест: дубль не пишется
         self.ctors: list[tuple[str, str, ast.Call, str]] = []  # (область, цель, вызов, шаблон) из присваиваний
         self.observer_attrs: set[tuple[str, str]] = set()  # (класс, `self.<a>`) с `Observer(...)`
-        self.starts: set[tuple[str, str]] = set()  # (область, получатель) вызовов `.start()`
         self.schedules: list[tuple[str, str | None, str, ast.Call]] = []  # (область, класс, получатель, вызов)
         self.command_specs: list[tuple[str, int, str, str]] | None = None  # None — `def command_specs` не встречен
 
@@ -648,15 +654,13 @@ class _V2Collector:
             return  # `f()()`, `d[k]()`: имени нет
         enclosing = self._enclosing(stack)
         self.calls.append(CallFact(name, node.lineno, enclosing, receiver))
+        pattern = _ctor_pattern(node)
+        if pattern is not None and (enclosing, node.lineno) not in self.site_keys:  # `.start()` не нужен (4.5b)
+            self.site_keys.add((enclosing, node.lineno))
+            self.sites.append(ThreadSite(pattern, node.lineno, enclosing, _daemon_literal(node)))
         if receiver is None:
             return
-        if name == "start":
-            self.starts.add((enclosing, receiver))
-            pattern = _ctor_pattern(func.value)  # type: ignore[union-attr]
-            if pattern is not None:  # цепочка `Thread(...).start()`
-                ctor: ast.Call = func.value  # type: ignore[union-attr,assignment]
-                self.sites.append(ThreadSite(pattern, ctor.lineno, enclosing, _daemon_literal(ctor)))
-        elif name == "schedule":
+        if name == "schedule":
             self.schedules.append((enclosing, self._class_of(stack), receiver, node))
         elif (receiver, name) in _REPLACES and len(node.args) >= 2:
             self.replaces.append(IoFact("replaces", ast.unparse(node.args[1]), node.lineno, enclosing))
@@ -693,9 +697,6 @@ class _V2Collector:
             if path is not None:
                 io.append(IoFact("watch", ast.unparse(path), call.lineno, enclosing))
         sites = list(self.sites)
-        for enclosing, text, ctor, pattern in self.ctors:
-            if (enclosing, text) in self.starts:
-                sites.append(ThreadSite(pattern, ctor.lineno, enclosing, _daemon_literal(ctor)))
         io.sort(key=lambda f: f.line)
         sites.sort(key=lambda s: s.line)
         return tuple(io), tuple(sites)

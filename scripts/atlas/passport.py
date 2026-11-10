@@ -51,14 +51,16 @@ Post: паспорт детерминирован: та же ревизия -> �
   layer      str                      id юнита слоя (`modules_for(Tree(root, ref))` + `modules.resolve(path, rows)`);
                                       `"other"` — путь ни в одном юните. Не `null`. НЕ `load_modules()`: ревизия
   all        list[str] | null         `null` — литерального `__all__` нет ни у файла символа, ни у одного `__init__.py`
-                                      цепочки (от ближайшего пакета до юнита). Иначе пути `__init__.py` звеньев, где имя
-                                      в `__all__`, от ближайшего пакета до юнита — и когда у самого файла `__all__` нет;
+                                      цепочки (от ближайшего пакета до юнита). Иначе пути звеньев, где имя в `__all__`:
+                                      сначала файл символа, если его `__all__` с именем (Task 4.5c, В14), затем
+                                      `__init__.py` от ближайшего пакета до юнита — и когда у файла `__all__` нет;
                                       `[]` — `__all__` есть хотя бы у одного звена, имени нигде нет
   signature  str                      у функции и метода — хвост строки `reference._sig` после имени (без `self`/`cls`,
                                       `-> T` после скобок): `(key: str) -> None`; у `async def` — `async (x: int) -> T`
                                       (как `reference._sig`); у `property` — `-> T` или `""`; у класса `""`
   members    list[dict] | null        у класса: члены из `defs` 4.1, отбор как `reference._methods` (неприватные +
-                                      `codemap.DUNDERS`), порядок исходника; `[]` — членов нет. У функции, метода `null`
+                                      `codemap.DUNDERS`), порядок исходника; `[]` — членов нет. У функции, метода
+                                      `null`. В тексте режется (Task 4.5c): минимум 3, хвост `ещё N; --full`
                                       Запись `{"name": str, "signature": str, "where": "путь:строка"}`; `signature` — по
                                       правилу `signature` выше; `where` — строка `def` члена (не `null`)
 
@@ -83,6 +85,12 @@ Post: паспорт детерминирован: та же ревизия -> �
                                                   методами: `required: []`, `twins: []`, `note` = `links.TOO_GENERIC`;
                                                   иначе
                                                   `note: null`. У функции и метода `null`
+  call_sites_by_name      dict | null             (Task 4.5b) у метода: `{"count": N, "items": list[dict] | null}` —
+                                                  вызовы `x.<имя>(...)` из продукта, `x` не `self`, не отнесённые ни
+                                                  к одному символу (`Links.of`, тип `x` не проверен); `items` — записи
+                                                  `{where, how: "by-name", scope, enclosing, same_file, rank}` при
+                                                  N <= 10, `null` при N > 10 (имя частое); `{"count": 0, "items": []}`
+                                                  — таких нет. У класса и функции `null`; у `build_map` ключа нет
 
 `rank` (int) записи `links.call_sites`, `links.subclasses`, `checks.tests` — число вызовов из продукта
 (`scope: prod`, `call_sites`) у её `enclosing` (`<module>` — 0); у `used_by` ключа нет (ранг импорта всегда 0).
@@ -199,6 +207,13 @@ Post: паспорт детерминирован: та же ревизия -> �
     записей раздела в порядке `links.py` (`import`, `name-call`, `same-file`, `test-body`); счёт по областям: `из
     продукта A, из тестов B` (A, B — число записей `scope: prod` и `scope: test`, отдельно, не суммой);
   - срез: `показано K из N; все: --all <раздел>`;
+  - пустые `runtime` символа (Task 4.5b; у `map` — прежний `—`): `threads: — (ищет: Thread, Timer, Observer)`
+    (`scan.THREAD_PATTERNS`), `io: — (ищет: ...)` (`scan.IO_PATTERNS`), `commands: — (ищет только def
+    command_specs(); register_command(...) не читает)`; у `commands: null` — `_NO_SPECS`, пробел, та же оговорка;
+  - вызовы по имени метода (Task 4.5b): N <= 10 — `по имени метода, тип не проверен (N):` и записи `_link_row`
+    (срез — список `call_sites_by_name` в `_alloc`, снимает его `--all call_sites`); N > 10 — одна строка
+    `по имени метода (prod, без self): N вызовов .<имя>(...) - имя частое, адреса не печатаются` (ASCII ` - `,
+    в остальном тексте — «—»); N = 0, класс и функция — строки нет;
   - член класса: `  имя(сигнатура)  :строка`, например
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
@@ -223,9 +238,10 @@ from pathlib import Path
 from scripts.atlas import store
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.links import TOO_GENERIC, Links, _scope, build_links
+from scripts.atlas.modules import norm_path
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.reference import _methods, _sig, _tag
-from scripts.atlas.scan import SCANNER, DefFact, FileFacts, ImportIndex, scan
+from scripts.atlas.scan import IO_PATTERNS, SCANNER, THREAD_PATTERNS, DefFact, FileFacts, ImportIndex, scan
 from scripts.atlas.tree import AtlasError, Tree, git_z, resolve
 
 
@@ -234,16 +250,37 @@ __all__ = ["build_map", "build_passport", "passports_for", "render_text", "resol
 SECTIONS = ("purpose", "interface", "links", "runtime", "checks", "status")  # порядок ключей и заголовков
 SHOW_ALL_SECTIONS = ("used_by", "call_sites", "subclasses", "structural", "tests")  # допустимые значения `show_all`
 MAP_SHOW_ALL = ("members", "used_by", "tests", "threads", "io")  # то же у `kind` unit/file (`atlas map --all`)
+# имена среза текста символа (`_alloc`): `members` класса (Task 4.5c; флага `--all` нет, только `--full`:
+# `_FULL_ONLY`) + `SHOW_ALL_SECTIONS` + адреса по имени метода (Task 4.5b; флага `--all` своего нет: его снимает
+# `--all call_sites`, `_ALL_FLAG`)
+_SYMBOL_CUT = ("members", *SHOW_ALL_SECTIONS, "call_sites_by_name")
+_ALL_FLAG = {"call_sites_by_name": "call_sites"}  # список среза -> значение `--all`, что его снимает
 
+_SIDE_DIRS = ("docs/", "plans/", ".claude/")  # продукт внутри них — после основного продукта (`_order`, группа 1)
+_MEMBERS_MIN = 3  # `members` класса в тексте: меньше 3 строк не режется; остаток — `ещё N; --full`
+_FULL_ONLY = {"members": _MEMBERS_MIN}  # списки без своего `--all`: снимает только `--full`; значение — минимум строк
 _FORMS = ("import", "name-call", "same-file", "test-body")  # порядок форм — порядок упоминания в `links.py`
 _UNSEEN = "не видно: динамика, аннотации, упоминания"
 _NOT_SEARCHED = "не искали"
 _EMPTY = "—"
 _NO_SPECS = "форма command_specs() не объявлена"
+_COMMANDS_NOTE = "(ищет только def command_specs(); register_command(...) не читает)"  # Ф9.7: register_command
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _PATHSPEC_MAX = 100  # `status.stale`: больше путей — `git diff` без pathspec (предел argv), пересечение в Python
 _TOP_SHOWN = 6  # `top` члена юнита в тексте: до 6 имён, остаток `, +N`
 _STALE_SHOWN = 5  # `stale` в тексте `map`: первые 5 путей, остаток `; ещё N`
+
+
+def _norm_exclude(exclude: tuple[str, ...], root: Path) -> tuple[str, ...]:
+    """`--exclude`: `./pkg`, `pkg\\` -> `pkg`; пустой, выше корня, вне корня -> AtlasError; префикс, равный корню
+    (`.`, `./`, `a/..`), — AtlasError: он скрыл бы весь репозиторий (код 2, значение пути в тексте не печатается)."""
+    out = []
+    for prefix in exclude:
+        norm = norm_path(prefix, root)
+        if norm == ".":
+            raise AtlasError("atlas: --exclude: путь совпадает с корнем репозитория")
+        out.append(norm)
+    return tuple(out)
 
 
 def _excluded(path: str, exclude: tuple[str, ...]) -> bool:
@@ -331,6 +368,7 @@ class _Ctx:
     def open(cls, root: Path, ref: str, exclude: tuple[str, ...], *, with_links: bool = True) -> _Ctx:
         """`with_links=False` — без `build_links` (пустой `Links`): `map` связей символов не читает (~0,5-1 с)."""
         root = Path(root)
+        exclude = _norm_exclude(exclude, root)
         sha = resolve(root, ref)
         tree = Tree(root, sha)
         paths = sorted(p for p in tree.oids() if p.endswith(".py") and not _excluded(p, exclude))
@@ -354,10 +392,12 @@ class _Ctx:
         return next((d for d in self.defs(path) if d.qualname == qualname), None)
 
     def resolve(self, ident: str) -> list[str]:
+        """Полные id по `ident`; часть до `::` (или голое имя) идёт через `norm_path` (AtlasError — код 2 в CLI)."""
         path, sep, qualname = ident.partition("::")
+        path = norm_path(path, self.root)
         if sep:
-            return [ident] if qualname and self.find(path, qualname) is not None else []
-        return [f"{p}::{ident}" for p in sorted(self.facts) if self.find(p, ident) is not None]
+            return [f"{path}::{qualname}"] if qualname and self.find(path, qualname) is not None else []
+        return [f"{p}::{path}" for p in sorted(self.facts) if self.find(p, path) is not None]
 
     def rank(self, path: str, enclosing: str) -> int:
         """Число вызовов из продукта у `путь::enclosing`; `<module>` — 0."""
@@ -458,6 +498,8 @@ class _Ctx:
         seen_all = facts.all is not None or any(pkg.all is not None for _, pkg in links)
         name = d.qualname.split(".")[0]
         chain = [init for init, pkg in links if pkg.all is not None and name in pkg.all]
+        if facts.all is not None and name in facts.all and path not in chain:  # В14: файл символа — первое звено
+            chain.insert(0, path)  # (`path` в `chain` — символ в самом `__init__.py`, он уже звено)
         return chain if seen_all else None
 
     def _init_chain(self, path: str, rows: list[dict]) -> list[tuple[str, FileFacts]]:
@@ -558,7 +600,16 @@ class _Ctx:
             "call_sites_unresolved": got.get("call_sites_unresolved", 0),
             "bases": got.get("bases") if d.kind == "class" else None,
             "structural": structural,
+            "call_sites_by_name": self._by_name(d, got),
         }
+
+    def _by_name(self, d: DefFact, got: dict) -> dict | None:
+        """`links.call_sites_by_name`: у метода `{count, items}` (`items` с `rank`, None при N > 10), иначе None."""
+        raw = got.get("call_sites_by_name")
+        if d.kind != "method" or raw is None:
+            return None
+        items = raw["items"]
+        return {"count": raw["count"], "items": None if items is None else self.ranked(items)}
 
     @staticmethod
     def _inside(enclosing: str, qualname: str) -> bool:
@@ -606,7 +657,9 @@ class _Ctx:
 
     def map(self, target: str) -> dict:
         """Паспорт цели `build_map` (правила — в его докстринге). Raises: `AtlasError("not found")`."""
-        t = target.replace("\\", "/")
+        if target.replace("\\", "/").endswith("/"):  # каталог (`u/`) — не цель, `normpath` слэш бы снял (пин 4.2b-2)
+            raise AtlasError("not found")
+        t = norm_path(target, self.root)
         rows = self.rows()
         row = next((r for r in rows if r["id"] == t), None)
         if row is not None:
@@ -836,10 +889,13 @@ class _Ctx:
 # --------------------------------------------------------------------------- текст
 
 
-def _order(entry: dict) -> tuple[int, str, int]:
+def _order(entry: dict) -> tuple[int, int, str, int]:
+    """Ключ порядка записей текста: `(группа, -rank, path, line)`; группа 0 — продукт вне `_SIDE_DIRS`, 1 — продукт в
+    них, 2 — тесты. JSON порядок `links.py` (`(where, line)`) не меняет."""
     where = entry.get("where")
     path, line = _split(where) if where else ("", 0)
-    return -entry.get("rank", 0), path, line
+    group = 2 if entry.get("scope") == "test" else 1 if path.startswith(_SIDE_DIRS) else 0
+    return group, -entry.get("rank", 0), path, line
 
 
 def _link_row(entry: dict) -> str:
@@ -847,6 +903,13 @@ def _link_row(entry: dict) -> str:
     if entry.get("where") is None:
         return f"{name} — строка не указана"
     return f"{name} — {entry['where']} ({entry['how']})"
+
+
+def _member_row(m: dict) -> str:
+    """`  имя(сигнатура)  :строка` члена класса (без отступа): `name(x: int) -> int  :7`, `async run() -> None  :9`."""
+    sig = m["signature"]
+    prefix, sig = ("async ", sig.removeprefix("async ")) if sig.startswith("async ") else ("", sig)
+    return f"{prefix}{m['name']}{' ' + sig if sig.startswith('->') else sig}  :{_split(m['where'])[1]}"
 
 
 def _value(value: object) -> str:
@@ -857,11 +920,17 @@ def _value(value: object) -> str:
     return str(value)
 
 
-def _alloc(sizes: dict[str, int], avail: int, names: tuple[str, ...] = SHOW_ALL_SECTIONS) -> dict[str, int]:
+def _alloc(
+    sizes: dict[str, int],
+    avail: int,
+    names: tuple[str, ...] = SHOW_ALL_SECTIONS,
+    floors: dict[str, int] | None = None,
+) -> dict[str, int]:
     """Строк записей на раздел: поровну, излишек короткого — прочим; срезанный раздел платит строку пометки.
 
     `names` — имена среза своего `kind` (`SHOW_ALL_SECTIONS` у символа, `MAP_SHOW_ALL` у unit/file): порядок раздачи
-    остатка."""
+    остатка. `floors` — минимум записей у срезанного списка (по умолчанию 1; `members` символа — `_MEMBERS_MIN`)."""
+    floors = floors or {}
     give: dict[str, int] = {}
     pending = dict(sizes)
     while pending:
@@ -879,7 +948,7 @@ def _alloc(sizes: dict[str, int], avail: int, names: tuple[str, ...] = SHOW_ALL_
         extra = max(avail - (share + 1) * len(cut), 0)
         for k in cut:
             # не меньше одной записи (минимум); список из одной записи не режется — иначе «показано 0 из 1»
-            give[k] = max(min(pending[k] - 1, share + (1 if extra > 0 else 0)), 1)
+            give[k] = max(min(pending[k] - 1, share + (1 if extra > 0 else 0)), floors.get(k, 1))
             extra -= 1
     return give
 
@@ -892,18 +961,11 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     def add(text: str) -> None:
         fixed.append(("line", text))
 
-    def add_list(name: str, indent: str, entries: list, row) -> None:
-        fixed.append(
-            (
-                "list",
-                (
-                    name,
-                    indent,
-                    sorted(entries, key=_order) if entries and isinstance(entries[0], dict) else entries,
-                    row,
-                ),
-            )
+    def add_list(name: str, indent: str, entries: list, row, keep_order: bool = False) -> None:
+        ordered = (
+            entries if keep_order or not (entries and isinstance(entries[0], dict)) else sorted(entries, key=_order)
         )
+        fixed.append(("list", (name, indent, ordered, row)))
 
     add(f"== {p['id']} ==")
     add(f"{p['path']}:{p['line']}; sha {p['sha']}; scanner {p['scanner']}")
@@ -920,10 +982,7 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     members = itf["members"]
     if members:
         add("  members:")
-        for m in members:
-            sig = m["signature"]
-            prefix, sig = ("async ", sig.removeprefix("async ")) if sig.startswith("async ") else ("", sig)
-            add(f"    {prefix}{m['name']}{' ' + sig if sig.startswith('->') else sig}  :{_split(m['where'])[1]}")
+        add_list("members", "    ", members, _member_row, keep_order=True)  # порядок исходника, срез — `ещё N; --full`
     else:
         add(f"  members: {_value(members)}")
     entries = [*lnk["used_by"], *lnk["call_sites"], *lnk["subclasses"]]
@@ -939,6 +998,17 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
         else:
             add(f"  {name}: {_value(lnk[name])}")
     add(f"  call_sites_unresolved: {_value(lnk['call_sites_unresolved'])}")
+    by_name = lnk.get("call_sites_by_name")  # Task 4.5b: только у метода; N = 0 — строки нет
+    if by_name and by_name["count"]:
+        method = p["id"].partition("::")[2].rsplit(".", 1)[-1]
+        if by_name["items"] is None:
+            add(
+                f"  по имени метода (prod, без self): {by_name['count']} вызовов .{method}(...)"
+                " - имя частое, адреса не печатаются"
+            )
+        else:
+            add(f"  по имени метода, тип не проверен ({by_name['count']}):")
+            add_list("call_sites_by_name", "    ", by_name["items"], _link_row)
     add(f"  uses: {_value(lnk['uses'])}")
     if lnk["bases"]:
         add("  bases:")
@@ -963,21 +1033,21 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
             daemon = "не задан" if t["daemon"] is None else str(t["daemon"])
             add(f"    {t['pattern']} (daemon: {daemon}) — {t['where']}")
     else:
-        add(f"  threads: {_EMPTY}")
+        add(f"  threads: {_EMPTY} (ищет: {', '.join(THREAD_PATTERNS)})")  # Task 4.5b: «—» — не «нет потоков»
     if rt["commands"] is None:
-        add(f"  commands: {_NO_SPECS}")
+        add(f"  commands: {_NO_SPECS} {_COMMANDS_NOTE}")
     elif rt["commands"]:
         add("  commands:")
         for c in rt["commands"]:
             add(f"    {c['name']} — {c['where']} ({c['how']})")
     else:
-        add(f"  commands: {_EMPTY}")
+        add(f"  commands: {_EMPTY} {_COMMANDS_NOTE}")
     if rt["io"]:
         add("  io:")
         for i in rt["io"]:
             add(f"    {i['op']} {i['path']} — {i['where']}")
     else:
-        add(f"  io: {_EMPTY}")
+        add(f"  io: {_EMPTY} (ищет: {', '.join(IO_PATTERNS)})")
     add(f"checks: findings {_value(chk['findings'])}")
     if chk["tests"]:
         add(f"  tests: {len(chk['tests'])}")
@@ -993,16 +1063,26 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     else:
         add(f"  frozen: {_value(st['frozen'])}")
 
-    return _emit(fixed, budget, show_all, full, SHOW_ALL_SECTIONS)
+    show = show_all | {"call_sites_by_name"} if "call_sites" in show_all else show_all  # `--all call_sites` — оба
+    return _emit(fixed, budget, show, full, _SYMBOL_CUT, _FULL_ONLY)
 
 
-def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str], full: bool, names: tuple) -> str:
+def _emit(
+    fixed: list[tuple[str, object]],
+    budget: int,
+    show_all: frozenset[str],
+    full: bool,
+    names: tuple,
+    full_only: dict[str, int] | None = None,
+) -> str:
     """Строки и списки (`_render`, `_render_map`) -> текст по бюджету: раздел из `show_all` не режется, но его записи
-    входят в расход бюджета; `full` — без среза; остаток делит `_alloc` (имена среза — `names`)."""
+    входят в расход бюджета; `full` — без среза; остаток делит `_alloc` (имена среза — `names`). `full_only` — списки
+    без своего `--all` (`_FULL_ONLY`): минимум записей и пометка `ещё N; --full` вместо `показано K из N`."""
+    full_only = full_only or {}
     lists = {v[0]: v for k, v in fixed if k == "list"}
     free = {n: len(v[2]) for n, v in lists.items() if not full and n not in show_all}
     used = sum(1 for k, _ in fixed if k == "line") + sum(len(v[2]) for n, v in lists.items() if n not in free)
-    give = _alloc(free, budget - used, names)
+    give = _alloc(free, budget - used, names, full_only)
     out: list[str] = []
     for kind, item in fixed:
         if kind == "line":
@@ -1012,7 +1092,12 @@ def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str]
         keep = give.get(name, len(rows))
         out += [f"{indent}{row(r)}" for r in rows[:keep]]
         if keep < len(rows):
-            out.append(f"{indent}показано {keep} из {len(rows)}; все: --all {name}")
+            mark = (
+                f"ещё {len(rows) - keep}; --full"
+                if name in full_only
+                else f"показано {keep} из {len(rows)}; все: --all {_ALL_FLAG.get(name, name)}"
+            )
+            out.append(f"{indent}{mark}")
     return "\n".join(out)
 
 
@@ -1210,10 +1295,12 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
     Post: `full=True` — без среза (сильнее `budget` и `show_all`). Иначе строк <= max(`budget`, минимум); минимум —
         конверт, заголовки разделов, `purpose` и служебные строки, все записи разделов из `show_all`; остаток
         делится поровну между разделами-списками (без приоритета), излишек короткого уходит прочим. Порядок
-        записей среза — `(-rank, path, line)`; `rank` = число вызовов из продукта (`scope: prod`) у `enclosing`
+        записей среза — `(группа, -rank, path, line)` (Task 4.5c: группа 0 — продукт вне `docs/`, `plans/`, `.claude/`,
+        1 — продукт в них, 2 — тесты); `rank` = число вызовов из продукта (`scope: prod`) у `enclosing`
         записи (у `used_by` `enclosing` = `<module>`, `rank` = 0: порядок по `path`). Раздел из `show_all` не
         режется. Строк может быть больше `budget`: в минимум входят по одной записи на каждый срезанный список и его
-        пометка, члены класса не режутся; «<= 40 строк на экран» верно для небольших классов.
+        пометка; `members` класса режутся до минимума в 3 члена и пометки `ещё N; --full` (снимает только `full`:
+        `--all members` у символа — `ValueError`); «<= 40 строк на экран» верно для небольших классов.
         Срезанный раздел содержит `показано K из N; все: --all <раздел>`. Паспорт не меняется.
     Raises: `ValueError`, если в `show_all` есть имя вне набора среза своего `kind` (`SHOW_ALL_SECTIONS` либо, у
         unit/file, `MAP_SHOW_ALL`).

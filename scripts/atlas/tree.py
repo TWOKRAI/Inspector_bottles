@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from contextlib import contextmanager
@@ -37,12 +38,28 @@ def git(root: str | Path, *args: str) -> str:
     return proc.stdout.decode("utf-8").strip()
 
 
-def git_z(root: str | Path, *args: str) -> list[str]:
-    """Stdout git с разделителем NUL (`-z`), без хвостовой пустой записи."""
+def git_z(root: str | Path, *args: str, skip_undecodable: bool = False) -> list[str]:
+    """Stdout git с разделителем NUL (`-z`), без хвостовой пустой записи.
+
+    Запись не в UTF-8 -> UnicodeDecodeError; `skip_undecodable=True` — запись пропускается, одна строка в stderr
+    `atlas: пропущено N путей не в UTF-8`. Годится только там, где запись — целая строка (`ls-tree -r -z`):
+    позиционный разбор токенов (`diff --name-status -z`) от пропуска сдвинулся бы.
+    """
     proc = run_git(root, *args)
     if proc.returncode != 0:
         raise AtlasError(f"atlas: git {' '.join(args)} failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
-    return [item.decode("utf-8") for item in proc.stdout.split(b"\0") if item]
+    items: list[str] = []
+    skipped = 0
+    for raw in filter(None, proc.stdout.split(b"\0")):
+        try:
+            items.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            if not skip_undecodable:
+                raise
+            skipped += 1
+    if skipped:
+        print(f"atlas: пропущено {skipped} путей не в UTF-8", file=sys.stderr)
+    return items
 
 
 def resolve(root: str | Path, ref: str) -> str:
@@ -99,7 +116,7 @@ class Tree:
     def _ls(self) -> list[tuple[str, str, str]]:
         if self._entries is None:
             entries = []
-            for item in git_z(self.root, "ls-tree", "-r", "-z", self.ref):
+            for item in git_z(self.root, "ls-tree", "-r", "-z", self.ref, skip_undecodable=True):
                 meta, _, path = item.partition("\t")
                 mode, _, oid = meta.split(" ")
                 entries.append((mode, oid, path))
