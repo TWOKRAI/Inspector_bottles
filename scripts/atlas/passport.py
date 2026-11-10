@@ -1,11 +1,12 @@
 """Паспорт символа Д1 (Task 4.2a): один объект про класс, функцию или метод — для `ref --format`, бенча и агента.
+Тот же конверт и шесть разделов у юнита и файла (`build_map`, Task 4.2b-2) — для `atlas map`.
 
 Purpose: по ревизии git (`ref`) и идентификатору символа собирает паспорт: конверт и шесть разделов с постоянными
     ключами (JSON-совместимый `dict`), печатает его текстом по бюджету строк. Читает факты v2 (`scan`), связи
     (`build_links`), слой (`modules_for` + `modules.resolve`). Не меняет репозиторий (кроме stat-кэша `.git/index`,
     который обновляет `git diff` из `status.stale`) и не меняет рабочее дерево; рабочее дерево читает только
     `status.stale`; пишет только кэш фактов `data/atlas.sqlite` через `scan()`.
-Public API: build_passport, resolve_ident, render_text, passports_for.
+Public API: build_passport, build_map, resolve_ident, render_text, passports_for.
 Stability: lite
 
 Pre: `root` — корень git-репозитория (каталог с `.git`), `ref` — ревизия git (как у `ref` Task 4.1: `HEAD`, ветка,
@@ -23,10 +24,10 @@ Post: паспорт детерминирован: та же ревизия -> �
 
   ключ       тип   значение
   passport   int   `1`
-  kind       str   `class` | `function` | `method` (`DefFact.kind`)
-  id         str   `путь::qualname`
-  path       str   путь файла символа
-  line       int   строка `def`/`class` (`DefFact.line`)
+  kind       str   `class` | `function` | `method` (`DefFact.kind`); у `build_map` — `unit` | `file`
+  id         str   `путь::qualname`; у `build_map` — id юнита реестра (`unit`) или путь файла (`file`)
+  path       str   путь файла символа; у `build_map` — `paths[0]` юнита как в реестре (`unit`) или путь файла (`file`)
+  line       int | null   строка `def`/`class` (`DefFact.line`); `null` у `build_map` (юнит и файл без строки)
   sha        str   полный sha ревизии `ref` (40 символов), не имя ветки
   scanner    str   `scan.SCANNER` (версия сканера фактов)
 
@@ -128,7 +129,8 @@ Post: паспорт детерминирован: та же ревизия -> �
                              в `scan.py`, 4.2a GREEN; `0`, если `runtime.commands` — `null`)
   stale        list[str] | null   пути паспорта (`path`, путь из каждого `where`, из `structural.twins`), чьё
                              содержимое в рабочем дереве отличается от `sha`: один `git --no-optional-locks
-                             --literal-pathspecs diff -z --name-only --no-renames <sha> -- <пути>`; порядок — как пути
+                             --literal-pathspecs diff -z --name-only --no-renames <sha> -- <пути>` (при > 100 путях —
+                             тот же `git diff` без `-- <пути>`, пересечение в Python; Task 4.2b-2); порядок — как пути
                              в паспорте, без повторов. `[]` — искали, чисто. `null` — не искали: `sha` != HEAD корня,
                              HEAD не разрешается или `git diff` упал (bare-клон). `where: null` пропускается;
                              неотслеженные файлы не ищутся
@@ -138,8 +140,52 @@ Post: паспорт детерминирован: та же ревизия -> �
                              Без повторов. Звено цепочки с `error` пропускается. `[]` — искали, нет. `null` у
                              `frozen` в v1 не бывает
 
-Не входит: `recipes`; `kind` выше class/function/method (unit, package, file, layer); `map`; кэш `links` (`build_links`
-пересчитывается при каждом вызове).
+Паспорт юнита и файла (`build_map`, Task 4.2b-2). Конверт и шесть разделов — те же, ключи постоянны; `kind` — `unit`
+| `file`, `line` — `null`. Цель: id строки реестра (`modules_for(Tree(root, sha))`, не `load_modules()`) -> `unit`;
+иначе путь `.py` ревизии вне `exclude` -> `file`; обратная косая черта в цели читается как `/`. Члены юнита — файлы
+`.py` вне `exclude` с `modules.resolve(path, rows) == id` (вложенный юнит не входит). Значения ключей (источник —
+`plans/2026-11-06_atlas-passport/map-form.md` п. 1–2; здесь — отличия от паспорта символа):
+
+  ключ                     unit                                          file
+  purpose.text             `purpose` строки реестра                      `FileFacts.doc` (первая строка докстринга)
+  purpose.declared_at,
+    .called_from           `null`                                        `null` (`called_from_more` — `0`)
+  interface.layer          id юнита                                      `modules.resolve(path)` (`other` -> `"other"`)
+  interface.all            `FileFacts.all` у `paths[0]+"__init__.py"`    `null` (не искали, сознательно)
+                           (`null`, если `paths[0]` не каталог или
+                           `__init__.py` нет в фактах)
+  interface.signature      `null`                                        `null`
+  interface.members        форма A — по ПРОД-ФАЙЛАМ: `{name: путь,       форма B — по символам: `{name: qualname,
+                           signature: null, where: "путь:1",             signature, where}`, верхний уровень,
+                           top: [имена без `_`]}`, порядок                имена на `_` тоже; классы и функции,
+                           `(-операторов импорта с целью в файле, путь)` методы не входят
+  links.used_by            `{name: id юнита-импортёра, where, how:       то же, цель — файл (реэкспорт через
+                           "import", count}`, `where` — min по (путь,    `__init__` у файла не виден)
+                           строка); `count` — операторов импорта, включая
+                           импорт через реэкспорт; порядок `(-count, name)`
+  links.call_sites,
+    subclasses, bases,
+    structural, uses,
+    call_sites_unresolved  `null`                                        `null`
+  runtime.threads/io/      записи продуктовых файлов по `(путь, строка)` записи файла; `commands` — `[]`, если нет
+    commands
+  runtime.processes,
+    checks.findings        `null`                                        `null`
+  checks.tests             `{name: путь тест-файла, where: "путь:1",     `null`
+                           count: число test-функций}`, `count > 0`
+  status.tier              `tier` строки реестра                         шапка `Tier:` файла
+  status.doc_missing       нет `README.md` среди `docs` строки           `purpose.text == ""`
+  status.dynamic           сумма `command_specs_dynamic` по prod-файлам  `command_specs_dynamic` файла
+                           (без `call_sites_unresolved`: он по имени)
+  status.stale             правило 4.2b-1 по путям цели и `where`        правило 4.2b-1 по пути файла и `where`
+  status.frozen            шапки `__init__.py` юнита (только если        цепочка файла (4.2b-1)
+                           `paths[0]` каталог и `__init__.py` в фактах)
+
+Продуктовый файл — `links._scope(path) == "prod"`; тест-файлы входят только в `checks.tests`. Две формы
+`interface.members`: у `unit` запись — файл (форма A), у `file` — символ (форма B).
+
+Не входит: `recipes`; `kind` выше unit/file (package, layer); `uses`; `interface.all` у файла; методы в `members`; кэш
+`links` (`build_links` пересчитывается при каждом вызове).
 
 Текст (`render_text`). Порядок: `== <id> ==`; строки конверта (`path:line`, `sha`, `scanner`); затем шесть разделов в
 порядке `purpose`, `interface`, `links`, `runtime`, `checks`, `status` — у каждого строка-заголовок `<раздел>:`.
@@ -153,6 +199,9 @@ Post: паспорт детерминирован: та же ревизия -> �
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
   - связь с `where: null`: `<имя> — строка не указана`;
+  - срез и имена среза: у class/function/method — `SHOW_ALL_SECTIONS`; у `kind` unit/file (Task 4.2b-2, будущий
+    контракт, пока не реализован) — `MAP_SHOW_ALL`; `render_text` выбирает набор по `kind` паспорта. Текст `map`
+    — образец `map-form.md` п. 3 (`== unit u ==`, вторая строка `<path>; sha <sha>; scanner <scanner>` без `:line`);
   - статус (Task 4.2b-1): строка `status:` несёт `tier`, `doc_missing`, `dynamic`; затем строки с отступом в 2
     пробела: `  stale: —` (`[]`), `  stale: не искали` (`null`), `  stale: a.py, b.py` (без среза); `  frozen: —`
     (`[]`), иначе по строке на шапку `  frozen: <date> <text> (<путь:строка>)`. Строки входят в служебный минимум
@@ -176,10 +225,11 @@ from scripts.atlas.scan import SCANNER, DefFact, FileFacts, scan
 from scripts.atlas.tree import AtlasError, Tree, git_z, resolve
 
 
-__all__ = ["build_passport", "passports_for", "render_text", "resolve_ident"]
+__all__ = ["build_map", "build_passport", "passports_for", "render_text", "resolve_ident"]
 
 SECTIONS = ("purpose", "interface", "links", "runtime", "checks", "status")  # порядок ключей и заголовков
 SHOW_ALL_SECTIONS = ("used_by", "call_sites", "subclasses", "structural", "tests")  # допустимые значения `show_all`
+MAP_SHOW_ALL = ("members", "used_by", "tests", "threads", "io")  # то же у `kind` unit/file (`atlas map --all`)
 
 _FORMS = ("import", "name-call", "same-file", "test-body")  # порядок форм — порядок упоминания в `links.py`
 _UNSEEN = "не видно: динамика, аннотации, упоминания"
@@ -443,13 +493,16 @@ class _Ctx:
             уже построены); `self.sha` — полный sha ревизии.
         Post: `None`, если `self.sha` != `resolve(self.root, "HEAD")`, HEAD не разрешается или `git diff` упал
             (`AtlasError`/`OSError` ловятся только вокруг `resolve(root, "HEAD")` и `git_z`); иначе список путей
-            паспорта, изменённых в рабочем дереве относительно `self.sha` (`git --no-optional-locks
-            --literal-pathspecs diff -z --name-only --no-renames <sha> -- <пути>`), в порядке путей паспорта, без
-            повторов; `[]` — чисто. Пути:
+            паспорта, изменённых в рабочем дереве относительно `self.sha`, в порядке путей паспорта, без повторов;
+            `[]` — чисто. Вызов `git`: при <= 100 путях — `git --no-optional-locks --literal-pathspecs diff -z
+            --name-only --no-renames <sha> -- <пути>` (pathspec); при > 100 путях — тот же `git diff` БЕЗ pathspec и
+            пересечение со списком путей в Python (`map process_module`: 359 путей, ~29 КБ argv). Порог и пересечение —
+            Task 4.2b-2 GREEN; до него код всегда передаёт pathspec. Пути:
             `path`, путь из каждого `where` (`links.*`, `checks.tests`, `runtime.*`, `interface.members`,
             `links.bases`), путь из `links.structural.twins` (часть до `::`). `where: null` пропускается.
-            Один вызов `git` на паспорт; репозиторий не меняется (кроме stat-кэша `.git/index`: `--no-optional-locks`
-            на `git diff` не действует, `index.lock` держится до ~0,5 с при устаревшем stat-кэше, ~15 мс иначе).
+            Один вызов `git` на паспорт в обоих случаях; репозиторий не меняется (кроме stat-кэша `.git/index`:
+            `--no-optional-locks` на `git diff` не действует, `index.lock` держится до ~0,5 с при устаревшем
+            stat-кэше, ~15 мс иначе).
             Правка режима файла без правки текста тоже попадает в `stale` (поведение git).
         """
         try:
@@ -728,6 +781,27 @@ def build_passport(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...]
     return _Ctx.open(root, ref, exclude).passport(ident)
 
 
+def build_map(root: Path, ref: str, target: str, *, exclude: tuple[str, ...] = ()) -> dict:
+    """Паспорт юнита или файла (`atlas map`; структура — в докстринге модуля, образцы — `map-form.md`).
+
+    Pre: `target` — id строки реестра ревизии `ref` (`modules_for(Tree(root, sha))`) либо путь `.py` из
+        `tree.oids()` вне `exclude`; обратная косая черта читается как `/`. Пустая строка и каталог — не цель.
+        `root` и `ref` — см. модуль.
+    Post: JSON-совместимый `dict`: конверт (`passport: 1`, `kind` = `unit` | `file`, `id`, `path`, `line: null`,
+        `sha`, `scanner`) и шесть разделов с теми же постоянными ключами, что у символа (значения unit | file — таблица
+        `Паспорт юнита и файла` модуля). Приоритет цели: id юнита реестра -> `unit`; иначе путь файла -> `file`.
+        Не меняет репозиторий (кроме stat-кэша `.git/index` от `git diff` ключа `status.stale`); паспорт
+        детерминирован (кроме `status.stale`).
+        Файл с `error`/`v2_error` (цель-файл или член юнита) — поведение не зафиксировано, решает GREEN и hazard-тест.
+    Raises: `tree.AtlasError("not found")` — цель не id юнита и не путь `.py` ревизии вне `exclude`: текст ровно
+        `not found`, значение цели в него не входит; CLI печатает `atlas map: not found` и выходит с кодом 2. Тот же
+        класс — `ref` не разрешается в ревизию (текст `resolve`). Исключение, не запись `{"error": ...}`: цель одна,
+        частичного результата нет (в отличие от `passports_for`).
+    Stub: Task 4.2b-2 INTERFACE — тело не реализовано (GREEN).
+    """
+    raise NotImplementedError
+
+
 def resolve_ident(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] = ()) -> list[str]:
     """Полные `путь::qualname` по `ident`.
 
@@ -743,8 +817,9 @@ def resolve_ident(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] 
 def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = frozenset(), full: bool = False) -> str:
     """Текст паспорта (образцы строк — в докстринге модуля). Без завершающего перевода строки.
 
-    Pre: `passport` — результат `build_passport`; `show_all` ⊆ `SHOW_ALL_SECTIONS`; `budget` — число строк на ЭТОТ
-        паспорт (у каждого id независимо).
+    Pre: `passport` — результат `build_passport` (или `build_map`); `show_all` ⊆ `SHOW_ALL_SECTIONS` (у `kind` unit/file
+        — ⊆ `MAP_SHOW_ALL`: имена среза берутся по `kind` паспорта; будущий контракт Task 4.2b-2, сейчас набор
+        один — `SHOW_ALL_SECTIONS`); `budget` — число строк на ЭТОТ паспорт (у каждого id независимо).
     Post: `full=True` — без среза (сильнее `budget` и `show_all`). Иначе строк <= max(`budget`, минимум); минимум —
         конверт, заголовки разделов, `purpose` и служебные строки; остаток делится поровну между разделами-списками
         (без приоритета), излишек короткого уходит прочим. Порядок записей среза — `(-rank, path, line)`; `rank` =
@@ -753,7 +828,8 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
         входят по одной записи на каждый срезанный список и его пометка, члены класса не режутся; «<= 40 строк на
         экран» верно для небольших классов.
         Срезанный раздел содержит `показано K из N; все: --all <раздел>`. Паспорт не меняется.
-    Raises: `ValueError`, если в `show_all` есть имя вне `SHOW_ALL_SECTIONS`.
+    Raises: `ValueError`, если в `show_all` есть имя вне набора среза своего `kind` (`SHOW_ALL_SECTIONS` либо, у
+        unit/file, `MAP_SHOW_ALL`).
     """
     unknown = set(show_all) - set(SHOW_ALL_SECTIONS)
     if unknown:
@@ -765,8 +841,9 @@ def passports_for(root: Path, ref: str, idents: list[str], *, exclude: tuple[str
     """Паспорта по списку идентификаторов, в порядке `idents`.
 
     Pre: `idents` — не пусто; каждый — `путь::qualname` или голое имя.
-    Post: список той же длины и порядка. Разрешённый id -> результат `build_passport`. Ошибочный id -> запись
-        `{"id": <как дан>, "error": "not found"}` (0 совпадений) либо `{"id": <как дан>, "error": "ambiguous",
+    Post: список той же длины и порядка. Разрешённый id -> результат `build_passport` (только символы class/function/
+        method: цели unit/file — `build_map`; имена среза `render_text` берутся по `kind` паспорта). Ошибочный id ->
+        запись `{"id": <как дан>, "error": "not found"}` (0 совпадений) либо `{"id": <как дан>, "error": "ambiguous",
         "candidates": [<путь::qualname>, ...]}` (больше одного; `candidates` отсортированы по пути; ключа нет у
         `not found`). Ошибка одного id не отменяет остальные: их паспорта полные. Дубли `idents` дают дубли записей.
     """

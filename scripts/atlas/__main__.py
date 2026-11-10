@@ -1,5 +1,5 @@
-"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `index`, `lint-result`, `lint-brief`, `brief`, `metrics`,
-`--json` (Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b, 1.9c, 1.9f, 4.2a).
+"""CLI atlas: `build`, `check`, `card`, `pack`, `log`, `ref`, `map`, `index`, `lint-result`, `lint-brief`, `brief`,
+`metrics`, `--json` (Tasks 1.2, 1.6, 1.6b, 1.9a, 1.9b, 1.9c, 1.9f, 4.2a, 4.2b-2).
 
 Запуск: `python -m scripts.atlas`.
 
@@ -19,6 +19,11 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     `--full` без `--format`, `--format` не `passport`/`json`, `--all` не из списка; код 2 и у ошибочного id
     (`not found`, `ambiguous`) — остальные паспорта печатаются. `--root <путь>` — корень берётся от этого пути, не от
     cwd; `--exclude <путь>` (повторяемый) — префиксы, которые паспорт не читает.
+    `map <юнит|файл> [--format passport|json] [--budget N] [--all <раздел>] [--full] [--ref] [--root] [--exclude]`
+    (Task 4.2b-2): паспорт юнита или файла (`passport.build_map`); цель одна; `--format` по умолчанию `passport`,
+    `--budget` 60; `--all` — из `passport.MAP_SHOW_ALL`. Код 2: нет цели, цель не найдена (stderr `atlas map: not
+    found`), `--format` не `passport`/`json`, `--all` не из списка. `ref --all members` остаётся кодом 2.
+    Тело `map` — заглушка INTERFACE: `NotImplementedError` до GREEN.
 Public API: main.
 Stability: lite
 """
@@ -73,6 +78,16 @@ def _parser() -> argparse.ArgumentParser:
     ref.add_argument("--full", action="store_true", help="паспорт без среза; нужен --format")
     ref.add_argument("--root", default=None, help="корень репозитория берётся от этого пути (по умолчанию cwd)")
     ref.add_argument("--exclude", action="append", default=[], help="префикс пути, который паспорт не читает")
+    mp = sub.add_parser("map", parents=[common, with_ref], help="паспорт юнита (id реестра) или файла (путь .py)")
+    mp.add_argument("target", metavar="юнит|файл", help="id юнита реестра или путь .py от корня репозитория")
+    mp.add_argument("--format", default="passport", help="passport (текст, по умолчанию) или json")
+    mp.add_argument("--budget", type=int, default=60, help="строк на цель (по умолчанию 60)")
+    mp.add_argument(
+        "--all", action="append", default=[], help="не резать раздел (повторяемый): " + ", ".join(passport.MAP_SHOW_ALL)
+    )
+    mp.add_argument("--full", action="store_true", help="паспорт без среза")
+    mp.add_argument("--root", default=None, help="корень репозитория берётся от этого пути (по умолчанию cwd)")
+    mp.add_argument("--exclude", action="append", default=[], help="префикс пути, который паспорт не читает")
     index = sub.add_parser("index", parents=[common, with_ref], help="индекс проекта (docs/atlas/INDEX.md)")
     index.add_argument("--write", action="store_true", help="записать docs/atlas/INDEX.md")
     index.add_argument("--check", action="store_true", help="сверить docs/atlas/INDEX.md с индексом (код 1 — отстал)")
@@ -118,6 +133,27 @@ def _ref_usage_error(args: argparse.Namespace) -> str | None:
     if any(name not in passport.SHOW_ALL_SECTIONS for name in args.all):
         return "atlas ref: --all принимает used_by, call_sites, subclasses, structural, tests"
     return None
+
+
+def _map_usage_error(args: argparse.Namespace) -> str | None:
+    """Текст ошибки ввода подкоманды `map` (код 2) или None; тексты постоянные, значения флагов в них не входят.
+
+    Цель обязательна на уровне argparse (нет цели -> код 2 из `parse_args`)."""
+    if args.format not in _FORMATS:
+        return "atlas map: --format принимает passport или json"
+    if any(name not in passport.MAP_SHOW_ALL for name in args.all):
+        return "atlas map: --all принимает " + ", ".join(passport.MAP_SHOW_ALL)
+    return None
+
+
+def _map_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
+    """`map <цель>`: паспорт юнита или файла (JSON — список из одного объекта, как у `ref`; текст — `render_text`).
+
+    Pre: ввод прошёл `_map_usage_error`. Post: 0 — паспорт напечатан; 2 — цель не найдена (`AtlasError` из
+    `passport.build_map`, stderr `atlas map: <текст>`, без значения цели в тексте `not found`) или ревизия `--ref` не
+    разрешается. Заглушка INTERFACE (Task 4.2b-2): `NotImplementedError` до GREEN.
+    """
+    raise NotImplementedError
 
 
 def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
@@ -170,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.print_usage(sys.stderr)
         print(
-            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, index, lint-result, lint-brief, "
+            "atlas: нужна ровно одна форма: build, check, card, pack, log, ref, map, index, lint-result, lint-brief, "
             "brief, metrics или --json",
             file=sys.stderr,
         )
@@ -181,12 +217,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "lint-result":  # до корня репозитория: работает и вне git-репо
         return _lint_result(args.file)
-    if args.command == "ref" and (usage_error := _ref_usage_error(args)) is not None:  # до git: ввод не зависит от репо
+    usage_check = {"ref": _ref_usage_error, "map": _map_usage_error}.get(args.command)
+    if usage_check is not None and (usage_error := usage_check(args)) is not None:  # до git: ввод не зависит от репо
         parser.print_usage(sys.stderr)
         print(usage_error, file=sys.stderr)
         return 2
     try:
-        start = Path(args.root) if args.command == "ref" and args.root is not None else Path.cwd()
+        start = Path(args.root) if args.command in ("ref", "map") and args.root is not None else Path.cwd()
         root = Path(git(start, "rev-parse", "--show-toplevel"))
         main_ref = getattr(args, "main_ref", None) or _default_main_ref(root)
         if args.command == "lint-brief":  # реестр не читает и не строит: соединения нет
@@ -208,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
             return code
         if args.command == "ref" and args.format is not None:  # паспорт читает ревизию, соединения нет
             return _ref_passport(root, ref, args)
+        if args.command == "map":  # то же: ревизия, без соединения
+            return _map_passport(root, ref, args)
         con = store.connect(root / "data" / "atlas.sqlite")
         try:
             if args.command == "check":
