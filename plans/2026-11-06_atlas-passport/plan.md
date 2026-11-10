@@ -85,15 +85,15 @@
 - Task 4.1: факты v2 и индекс связей (`scan.py`, `links.py`) [DONE] (после 2.2, 3.1)
 - Task 4.1b: `links.bases` с `where` [DONE] (после 4.1)
 - Task 4.2a: паспорт v1 и `ref --format passport|json`, несколько id за вызов, бюджет и ранг, ADR-ATL-005 [DONE] (после 4.1b, 3.2)
-- Task 4.2b1: `status.stale`/`frozen`, JSON-схема паспорта [PENDING] (после 4.2a)
-- Task 4.2b2: `map` юнита и файла [PENDING] (после 4.2b1)
+- Task 4.2b-1: `status.stale`/`frozen`, JSON-схема паспорта [PENDING] (после 4.2a)
+- Task 4.2b-2: `map` юнита и файла [PENDING] (после 4.2b-1)
 - Task 4.3: условие `atlas` в `nav_bench` [PENDING] (после 4.2a, 7.2 — механизм `bash_allow`)
 - Task 4.4: `purpose` → докстринги 57 юнитов, сверка каталог↔yaml (Д5, шаг 1) [DONE] (после 0.1; В1 = да)
 - Task 4.4b: `modules.yaml` → корни + исключения (Д5, шаг 2) [DONE] (после 4.4)
 
 ### Phase 5: Стоп С1 (Kill-2)
 
-- Task 5.1: С1 — hold-out 5 вопросов, `atlas` ×3 против C0 на `r1` и `arch`; ручная сверка 10 паспортов; вердикт Kill-2 [PENDING] (после 3.2, повтора C0, 4.2b2, 4.3)
+- Task 5.1: С1 — hold-out 5 вопросов, `atlas` ×3 против C0 на `r1` и `arch`; ручная сверка 10 паспортов; вердикт Kill-2 [PENDING] (после 3.2, повтора C0, 4.2b-2, 4.3)
 
 ### Phase 6: Закрытие старого плана
 
@@ -136,7 +136,7 @@ B2′ страница-карта → стоп 2 → B1 → A2 (`design.md` §5)
 | 3.1 | ~360k Haiku | 6 × ~60k |
 | 3.2, 4.1b | ~80k + ~60k Sonnet | 10 и 2 REDS |
 | 4.1 | ~350k Opus | пик 287–371k (`team-protocol` §6) |
-| 4.2a, 4.2b1/2 | ~300k + ~250k Opus | 10 и 5 REDS |
+| 4.2a, 4.2b-1/2 | ~300k + ~250k Opus | 10 и 5 REDS |
 | 4.3 | ~80k Sonnet | условие, тест |
 | 4.4, 4.4b | ~80k + ~150k Sonnet | 57 докстрингов; корни; вне пути к С1 |
 | 5.1 | ~360k Haiku + ~150k Sonnet; hold-out ≈ $3 (потолок $6) | 6 повторов |
