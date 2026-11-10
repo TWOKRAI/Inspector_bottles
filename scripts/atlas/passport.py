@@ -151,9 +151,11 @@ Post: паспорт детерминирован: та же ревизия -> �
   purpose.declared_at,
     .called_from           `null`                                        `null` (`called_from_more` — `0`)
   interface.layer          id юнита                                      `modules.resolve(path)` (`other` -> `"other"`)
-  interface.all            `FileFacts.all` у `paths[0]+"__init__.py"`    `null` (не искали, сознательно)
-                           (`null`, если `paths[0]` не каталог или
-                           `__init__.py` нет в фактах)
+  interface.all            `FileFacts.all` у `__init__.py` юнита         `null` (не искали, сознательно)
+                           (`paths[0]+"__init__.py"` у каталога, сам
+                           `paths[0]`, если это `__init__.py`); `null` —
+                           кандидата нет (текст `не искали`) или у него
+                           нет фактов/`__all__` (текст `—`)
   interface.signature      `null`                                        `null`
   interface.members        форма A — по ПРОД-ФАЙЛАМ: `{name: путь,       форма B — по символам: `{name: qualname,
                            signature: null, where: "путь:1",             signature, where}`, верхний уровень,
@@ -161,9 +163,10 @@ Post: паспорт детерминирован: та же ревизия -> �
                            порядок `(-операторов импорта с целью в       методы не входят
                            файле, путь)`
   links.used_by            `{name: id юнита-импортёра, where, how:       то же, цель — файл (реэкспорт через
-                           "import", count}`, `where` — min по (путь,    `__init__` у файла не виден)
-                           строка); `count` — операторов импорта, включая
-                           импорт через реэкспорт; порядок `(-count, name)`
+                           "import", count}`, `where` — min по (путь,    `__init__` у файла не виден); импортёры —
+                           строка); `count` — операторов импорта, включая кроме самого файла и `__init__.py` его
+                           импорт через реэкспорт; порядок `(-count,     цепочки пакетов; свой юнит — группой
+                           name)`; импортёры — вне юнита                 с id своего юнита
   links.call_sites,
     subclasses, bases,
     structural, uses,
@@ -179,8 +182,8 @@ Post: паспорт детерминирован: та же ревизия -> �
   status.dynamic           сумма `command_specs_dynamic` по prod-файлам  `command_specs_dynamic` файла
                            (без `call_sites_unresolved`: он по имени)
   status.stale             правило 4.2b-1 по путям цели и `where`        правило 4.2b-1 по пути файла и `where`
-  status.frozen            шапки `__init__.py` юнита (только если        цепочка файла (4.2b-1)
-                           `paths[0]` каталог и `__init__.py` в фактах)
+  status.frozen            шапки `__init__.py` юнита (тот же кандидат,   цепочка файла (4.2b-1)
+                           что у `interface.all`; иначе `[]`)
 
 Продуктовый файл — `links._scope(path) == "prod"`; тест-файлы входят только в `checks.tests`. Две формы
 `interface.members`: у `unit` запись — файл (форма A), у `file` — символ (форма B).
@@ -220,7 +223,6 @@ from pathlib import Path
 from scripts.atlas import store
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas.links import TOO_GENERIC, Links, _scope, build_links
-from scripts.atlas.modules import OTHER
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.reference import _methods, _sig, _tag
 from scripts.atlas.scan import SCANNER, DefFact, FileFacts, ImportIndex, scan
@@ -711,7 +713,7 @@ class _Ctx:
             if _scope(p) == "test" and self.facts[p].test_defs
         ]
         tests.sort(key=lambda e: (-e["count"], e["name"]))
-        init = heads[0] + "__init__.py" if heads and heads[0].endswith("/") else None
+        init = _unit_init(heads[0]) if heads else None
         pkg = self.facts.get(init) if init is not None else None
         runtime, dynamic = self._map_runtime(prod)
         docs = row.get("docs") or []
@@ -792,8 +794,9 @@ class _Ctx:
                 units[importer] = module_of(importer, rows)
             return units[importer]
 
-        # импортёры своего юнита — не `used_by`; файл вне юнитов (`other`) исключает только себя
-        skip = (lambda p: p == path) if layer == OTHER else (lambda p: unit_of(p) == layer)
+        # исключены сам файл и `__init__.py` его цепочки пакетов (реэкспорт); импортёры своего юнита — группой юнита
+        hidden = {path, *(init for init, _ in self._init_chain(path, rows))}
+        skip = hidden.__contains__
         stmts = self._imports_into({path}, skip)
         text = None if broken else facts.doc or ""
         if no_v2:
@@ -1013,6 +1016,16 @@ def _emit(fixed: list[tuple[str, object]], budget: int, show_all: frozenset[str]
     return "\n".join(out)
 
 
+def _unit_init(head: str) -> str | None:
+    """`__init__.py` юнита по `paths[0]`: каталог (`a/`) -> `a/__init__.py`; сам `__init__.py` -> он же; иначе (другой
+    файл: `.py`, `.md`) — `None`, искать негде. Источник `interface.all` и `status.frozen` юнита."""
+    if head.endswith("/"):
+        return head + "__init__.py"
+    if head == "__init__.py" or head.endswith("/__init__.py"):
+        return head
+    return None
+
+
 def _unit_member_row(m: dict) -> str:
     """`u/a.py — Модуль a.  (A, B)`: `doc` или `—`; `top` до 6 имён, остаток `, +N`; пустой `top` — без скобок."""
     row = f"{m['name']} — {m.get('doc') or _EMPTY}"
@@ -1037,7 +1050,8 @@ def _file_member_row(m: dict) -> str:
 
 def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: bool) -> str:
     """Текст `kind` unit/file (образец — `map-form.md` п. 3): печатаются только ключи, у которых у `map` есть
-    источник; ключи, всегда `null` у `map`, — только в JSON. Срез — `_emit` с именами `MAP_SHOW_ALL`."""
+    источник; ключи, всегда `null` у `map`, — только в JSON. Срез — `_emit` с именами `MAP_SHOW_ALL`.
+    Post: строк <= max(`budget`, минимум); минимум включает все записи разделов из `show_all` (как у `render_text`)."""
     p = passport
     pur, itf, lnk, rt, chk, st = (p[s] for s in SECTIONS)
     unit = p["kind"] == "unit"
@@ -1055,7 +1069,10 @@ def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: boo
     add(f"interface: layer {itf['layer']}")
     all_ = itf["all"]
     # у юнита `null` — `__init__.py` или его `__all__` нет (искали); у файла `null` — не искали (сознательно)
-    add(f"  all: {', '.join(all_) if all_ else (_EMPTY if unit or all_ == [] else _NOT_SEARCHED)}")
+    # `null`: у юнита с `__init__.py`-кандидатом (каталог или сам `__init__.py`) — искали, нет (`—`); у юнита без
+    # кандидата (`paths[0]` — другой файл) и у файла — не искали
+    searched = unit and _unit_init(p["path"]) is not None
+    add(f"  all: {', '.join(all_) if all_ else (_EMPTY if searched or all_ == [] else _NOT_SEARCHED)}")
     if itf["members"]:
         add("  members:")
         add_list("members", itf["members"], _unit_member_row if unit else _file_member_row)
@@ -1096,7 +1113,10 @@ def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: boo
         add(f"  tests: {_value(chk['tests'])}")
     missing = st["doc_missing"]
     doc = _NOT_SEARCHED if missing is None else "да" if missing else "нет"
-    tier = st["tier"] or (_EMPTY if unit else "нет шапки")
+    if unit:
+        tier = st["tier"] or _EMPTY
+    else:  # файл с `error`: шапки не прочитаны — не искали
+        tier = st["tier"] or (_NOT_SEARCHED if pur["text"] is None else "нет шапки")
     add(f"status: tier {tier}; doc_missing {doc}; dynamic {_value(st['dynamic'])}")
     stale = st["stale"]
     if stale:
@@ -1142,8 +1162,9 @@ def build_map(root: Path, ref: str, target: str, *, exclude: tuple[str, ...] = (
         Решения GREEN (закреплены `test_passport_map_hazards.py`):
         - `used_by`: оператор — запись `ImportRec` с `status == "internal"` и хотя бы одной целью в файлах цели:
           `from u.a import A, B` — один оператор (одна запись), `import u.a, u.b` — два (запись на имя). У юнита
-          импортёр — prod-файл вне юнита; у файла — prod-файл вне юнита файла, у файла вне юнитов (`other`) — любой,
-          кроме самого файла. Импортёр с `error` операторов не даёт (его импорты не разобраны).
+          импортёр — prod-файл вне юнита; у файла — prod-файл, кроме самого файла и `__init__.py` его цепочки
+          пакетов (`_init_chain`: реэкспорт); импортёры своего юнита идут группой с id своего юнита (ревью стадии 5
+          р.2, вариант (а)). Импортёр с `error` операторов не даёт (его импорты не разобраны).
         - Запись члена юнита: `{name, signature: null, where: "путь:1", top, doc}`; `doc` — `FileFacts.doc`, `""` —
           докстринга нет.
         - Файл с `error` (A1 не разобран): цель-файл находится (`kind: file`); ключи из разбора самого файла — `null`
@@ -1155,8 +1176,11 @@ def build_map(root: Path, ref: str, target: str, *, exclude: tuple[str, ...] = (
           Тест-файл с `error`/`v2_error` даёт `test_defs = ()` и в `checks.tests` не входит (`count > 0`).
         - Цель-файл под `exclude` — `not found`. Юнит, все файлы которого под `exclude`, находится: строка реестра
           есть, `members`, `tests`, `used_by` — `[]`.
-        - Юнит с `paths[0]` не каталогом или без `__init__.py` в фактах: `interface.all` — `null`, `status.frozen` —
-          `[]`; `path` — `paths[0]` как в реестре.
+        - `__init__.py` юнита (`_unit_init`): `paths[0]` — каталог -> `paths[0] + "__init__.py"`; `paths[0]` сам
+          `__init__.py` -> он же (`framework_meta`). Источник `interface.all` и `status.frozen`. Иначе (`paths[0]` —
+          другой файл: `.py`, `.md`) искать негде: `all` — `null`, в тексте `all: не искали`; `frozen` — `[]`. У
+          кандидата без фактов или без `__all__` — `all: null`, в тексте `—` (искали, нет). `path` — `paths[0]` как в
+          реестре.
     Raises: `tree.AtlasError("not found")` — цель не id юнита и не путь `.py` ревизии вне `exclude`: текст ровно
         `not found`, значение цели в него не входит; CLI печатает `atlas map: not found` и выходит с кодом 2. Тот же
         класс — `ref` не разрешается в ревизию (текст `resolve`). Исключение, не запись `{"error": ...}`: цель одна,
@@ -1184,12 +1208,12 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
         — ⊆ `MAP_SHOW_ALL`: имена среза берутся по `kind` паспорта, текст unit/file — `_render_map`); `budget` — число
         строк на ЭТОТ паспорт (у каждого id независимо). Записи раздела из `show_all` входят в расход бюджета.
     Post: `full=True` — без среза (сильнее `budget` и `show_all`). Иначе строк <= max(`budget`, минимум); минимум —
-        конверт, заголовки разделов, `purpose` и служебные строки; остаток делится поровну между разделами-списками
-        (без приоритета), излишек короткого уходит прочим. Порядок записей среза — `(-rank, path, line)`; `rank` =
-        число вызовов из продукта (`scope: prod`) у `enclosing` записи (у `used_by` `enclosing` = `<module>`,
-        `rank` = 0: порядок по `path`). Раздел из `show_all` не режется. Строк может быть больше `budget`: в минимум
-        входят по одной записи на каждый срезанный список и его пометка, члены класса не режутся; «<= 40 строк на
-        экран» верно для небольших классов.
+        конверт, заголовки разделов, `purpose` и служебные строки, все записи разделов из `show_all`; остаток
+        делится поровну между разделами-списками (без приоритета), излишек короткого уходит прочим. Порядок
+        записей среза — `(-rank, path, line)`; `rank` = число вызовов из продукта (`scope: prod`) у `enclosing`
+        записи (у `used_by` `enclosing` = `<module>`, `rank` = 0: порядок по `path`). Раздел из `show_all` не
+        режется. Строк может быть больше `budget`: в минимум входят по одной записи на каждый срезанный список и его
+        пометка, члены класса не режутся; «<= 40 строк на экран» верно для небольших классов.
         Срезанный раздел содержит `показано K из N; все: --all <раздел>`. Паспорт не меняется.
     Raises: `ValueError`, если в `show_all` есть имя вне набора среза своего `kind` (`SHOW_ALL_SECTIONS` либо, у
         unit/file, `MAP_SHOW_ALL`).

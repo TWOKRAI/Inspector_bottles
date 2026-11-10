@@ -92,6 +92,9 @@ def test_map_target_resolution_and_exit_codes(repo: GitRepo, atlas: Any, tmp_pat
 
     ref_all = atlas(repo, "ref", "u/a.py::A", "--format", "passport", "--all", "members")
     assert ref_all.code == 2 and ref_all.err.strip() != ""
+    # ревью стадии 5 р.2, М3: ошибка ввода `ref`, не падение `render_text` (мутант J08)
+    assert "atlas ref: --all принимает used_by, call_sites, subclasses, structural, tests" in ref_all.err.splitlines()
+    assert "Traceback" not in ref_all.err
     ref_unit = atlas(repo, "ref", "u", "--format", "json")
     assert ref_unit.code == 2
     assert json.loads(ref_unit.out) == [{"id": "u", "error": "not found"}]

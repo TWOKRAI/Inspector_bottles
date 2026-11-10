@@ -21,10 +21,10 @@ class|function|method - докстринг модуля `scripts/atlas/passport.
 | `purpose.declared_at`, `.called_from` | `null` | `null` |
 | `purpose.called_from_more` | `0` | `0` |
 | `interface.layer` | id юнита | `modules.resolve(path)` (`other` -> `"other"`, как 4.2a) |
-| `interface.all` | `list(FileFacts.all)` у `init` (правило `frozen`), иначе `null` | `null` |
+| `interface.all` | `list(FileFacts.all)` у `init` (правило `frozen`), иначе `null`; нет кандидата `init` - в тексте `all: не искали`, кандидат без `__all__` - `—` | `null` |
 | `interface.signature` | `null` | `null` |
 | `interface.members` | `[{name: путь prod-файла, signature: null, where: "путь:1", top: [qualname без `_`], doc: FileFacts.doc или ""}]` | `[{name: qualname, signature, where}]`, верхний уровень, имена на `_` тоже |
-| `links.used_by` | `[{name: id юнита-импортёра, where: min по (путь, строка), how: "import", count: число операторов}]` | то же, цель - файл (реэкспорт через `__init__` у файла не виден) |
+| `links.used_by` | `[{name: id юнита-импортёра, where: min по (путь, строка), how: "import", count: число операторов}]` | то же, цель - файл (реэкспорт через `__init__` у файла не виден); импортёры вне самого файла и вне `__init__.py` его цепочки пакетов; импортёры своего юнита - группой с id своего юнита |
 | `links.call_sites`, `subclasses`, `bases`, `structural`, `uses`, `call_sites_unresolved` | `null` | `null` |
 | `runtime.threads`, `.io`, `.commands` | записи prod-файлов (как `_runtime`: `where`, поля записи) по `(путь, строка)`; `commands` - `[]`, если нет | то же по одному файлу |
 | `runtime.processes` | `null` | `null` |
@@ -34,7 +34,7 @@ class|function|method - докстринг модуля `scripts/atlas/passport.
 | `status.doc_missing` | `true`, если среди `docs` строки нет `README.md` (`docs: []` -> `true`) | `purpose.text == ""` |
 | `status.dynamic` | сумма `command_specs_dynamic` по prod-файлам | `command_specs_dynamic` файла (без `call_sites_unresolved`) |
 | `status.stale` | пути цели (prod-файлы, `used_by.where`, тест-файлы), правило 4.2b-1 | пути файла и `where` паспорта |
-| `status.frozen` | шапки `init = paths[0] + "__init__.py"`, только если `paths[0]` оканчивается на `/` и `init` есть в фактах, иначе `[]` | цепочка файла (4.2b-1) |
+| `status.frozen` | шапки `init`: `paths[0] + "__init__.py"`, если `paths[0]` оканчивается на `/`; сам `paths[0]`, если он `__init__.py`; только если `init` есть в фактах, иначе `[]` (ред. лида 2026-11-10, ревью стадии 5 р.2) | цепочка файла (4.2b-1) |
 
 - `top` юнита - верхний уровень `class`/`def` без `_`; `members` файла - то же с `_`; сигнатура - формат `reference._sig` (без `self`, `-> T` после скобок).
 - `used_by`: операторы импорта (`scan.ImportIndex(facts).resolve(путь, запись)`, `status == "internal"`) в prod-файлах вне членов

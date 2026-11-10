@@ -212,3 +212,74 @@ def test_ref_symbol_single_entry_list_not_cut_to_zero(repo: GitRepo) -> None:
     assert not [s for s in cut if "--all used_by" in s]
     assert "показано 1 из 5; все: --all call_sites" in cut
     assert len(cut) == len(full) - 4 + 1  # строк <= max(budget, минимум): ровно минимум
+
+
+# ---------------------------------------------------------------- ревью стадии 5 р.2 (opus): И1, И2, М1
+
+
+def test_map_file_used_by_counts_own_unit_but_not_init_chain(repo: GitRepo) -> None:
+    """И1, вариант (а): `used_by` файла — импортёры своего юнита идут группой с id юнита (`u/c.py` -> `u`), а
+    `__init__.py` цепочки пакетов файла (реэкспорт) — нет: у `u/a.py` скрыт `u/__init__.py`, у `u/sub/m.py` —
+    `u/sub/__init__.py` и `u/__init__.py`."""
+    _seed(
+        repo,
+        {
+            "u/__init__.py": '"""Пакет u."""\nfrom u.a import A, B\nfrom u.sub.m import X\n\n__all__ = ["A", "B"]\n',
+            "u/c.py": '"""Модуль c."""\nfrom u.a import A\nfrom u.sub.m import X\n',
+            "u/sub/__init__.py": "from u.sub.m import X\n",
+            "u/sub/m.py": "X = 1\n",
+        },
+    )
+    assert _build(repo, "u/a.py")["links"]["used_by"] == [
+        {"name": "v", "where": "v/x.py:3", "how": "import", "count": 2},
+        {"name": "u", "where": "u/c.py:2", "how": "import", "count": 1},
+    ]
+    assert _build(repo, "u/sub/m.py")["links"]["used_by"] == [
+        {"name": "u", "where": "u/c.py:3", "how": "import", "count": 1}
+    ]
+
+
+def test_map_unit_paths0_is_init_file(repo: GitRepo) -> None:
+    """И2 (1): `paths[0]` — сам `m/__init__.py` (как `framework_meta`): он и есть `__init__.py` юнита — `all` и
+    `frozen` из него."""
+    _commit(
+        repo,
+        {
+            "modules.yaml": _registry(_row("meta", "m/__init__.py")),
+            "m/__init__.py": '"""Мета.\n\nFREEZE 2026-02-02: мета стоп\n"""\n__all__ = ["one", "two"]\n',
+            "m/other.py": "Y = 2\n",
+        },
+    )
+    p = _build(repo, "meta")
+    assert p["path"] == "m/__init__.py"
+    assert p["interface"]["all"] == ["one", "two"]
+    assert p["status"]["frozen"] == [{"date": "2026-02-02", "text": "мета стоп", "where": "m/__init__.py:3"}]
+    assert [m["name"] for m in p["interface"]["members"]] == ["m/__init__.py"]
+    assert "  all: one, two" in _render(p, full=True).splitlines()
+
+
+def test_map_unit_paths0_not_package_prints_not_searched(repo: GitRepo) -> None:
+    """И2 (2): `paths[0]` — `.md` (как `prototype_root`): `__init__.py` искать негде — `all: null`, текст
+    `all: не искали`; у каталога без `__all__` — `all: —` (искали, нет)."""
+    _commit(
+        repo,
+        {
+            "modules.yaml": _registry(_row("proto", "app/ARCH.md"), _row("pkg", "pkg/")),
+            "app/ARCH.md": "# арх\n",
+            "app/main.py": "Z = 3\n",
+            "pkg/__init__.py": '"""Пакет без __all__."""\n',
+        },
+    )
+    proto = _build(repo, "proto")
+    assert (proto["path"], proto["interface"]["all"], proto["status"]["frozen"]) == ("app/ARCH.md", None, [])
+    assert "  all: не искали" in _render(proto, full=True).splitlines()
+    pkg = _build(repo, "pkg")
+    assert pkg["interface"]["all"] is None
+    assert "  all: —" in _render(pkg, full=True).splitlines()
+
+
+def test_map_file_with_error_tier_not_searched(repo: GitRepo) -> None:
+    """М1: файл с `error` и шапкой `Tier: core` — шапки не прочитаны: строка статуса — `не искали` у всех трёх."""
+    _seed(repo, {"u/bad.py": '"""Модуль bad.\n\nTier: core\n"""\ndef broken(:\n'})
+    text = _render(_build(repo, "u/bad.py"), full=True).splitlines()
+    assert "status: tier не искали; doc_missing не искали; dynamic не искали" in text
