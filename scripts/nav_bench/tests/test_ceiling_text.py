@@ -321,24 +321,49 @@ def test_ceiling_text_exit_codes(tmp_path, capsys):
         {"set": "mini", "targets": {"Q1": [[]]}},  # пустой argv
         {"set": "mini", "targets": {"Q1": [["ref", 7]]}},  # argv не из строк
         {"set": "mini", "targets": {"Q1": [["why", "S1"]]}},  # argv[0] не ref/map
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "S2"]]}},  # id больше записей expected (одна)
-        {"set": "mini", "targets": {"Q1": [["ref", "S1"], ["map", "a.py"]]}},  # id по всем argv вопроса — тоже
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--format", "json"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--ref", "HEAD"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--root", "/"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--exclude", "x"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--budget", "9999"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--all", "used_by"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--full"]]}},
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--budget=9999"]]}},  # форма --x=…
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--bud", "9999"]]}},  # сокращение argparse
-        {"set": "mini", "targets": {"Q1": [["ref", "S1", "--ex=x"]]}},
     ],
 )
 def test_load_targets_rejects_invalid(tmp_path, bad):
     qset = _three_questions("abc")
     with pytest.raises(ValueError):
         bench.load_targets(_write_json(tmp_path / "t.json", bad), qset)
+
+
+@pytest.mark.parametrize(
+    "argvs",
+    [
+        [["ref", "S1", "S2"]],  # id больше записей expected (у Q1 одна)
+        [["ref", "S1"], ["map", "a.py"]],  # id по всем argv вопроса — тоже
+    ],
+)
+def test_load_targets_rejects_more_ids_than_expected(tmp_path, argvs):
+    qset = _three_questions("abc")
+    with pytest.raises(ValueError, match="больше записей expected"):
+        bench.load_targets(_write_json(tmp_path / "t.json", {"set": "mini", "targets": {"Q1": argvs}}), qset)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["ref", "S1", "--format", "json"],
+        ["ref", "S1", "--ref", "HEAD"],
+        ["ref", "S1", "--root", "/"],
+        ["ref", "S1", "--exclude", "x"],
+        ["ref", "S1", "--budget", "9999"],
+        ["ref", "S1", "--all", "used_by"],
+        ["ref", "S1", "--full"],
+        ["ref", "S1", "--budget=9999"],  # форма --x=…
+        ["ref", "S1", "--bud", "9999"],  # сокращение argparse
+        ["ref", "S1", "--ex=x"],
+    ],
+)
+def test_load_targets_rejects_forbidden_options(tmp_path, argv):
+    """У Q1 три записи expected: счёт id (до трёх у самых длинных argv) не должен заслонять проверку опций, поэтому
+    ошибка обязана быть именно про опцию."""
+    qset = _three_questions("abc")
+    qset["questions"][0]["expected"] = [_entry("a.py", 1, 0)] * 3
+    with pytest.raises(ValueError, match="ставит бенч"):
+        bench.load_targets(_write_json(tmp_path / "t.json", {"set": "mini", "targets": {"Q1": [argv]}}), qset)
 
 
 def test_load_targets_accepts_valid_and_drops_empty(tmp_path):
@@ -496,7 +521,7 @@ def test_min_requires_committed_inputs(tmp_path, capsys):
 
     outside = _write_json(tmp_path / "outside_t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]]}})
     code, _, err = run(1, targets=outside)  # вне root
-    assert code == 2 and "ОШИБКА:" in err
+    assert code == 2 and "ОШИБКА:" in err and "вне репозитория" in err
 
 
 # RED 9
