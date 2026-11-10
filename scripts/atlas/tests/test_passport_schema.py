@@ -311,3 +311,18 @@ def test_method_by_name_excludes_self_receiver(repo: GitRepo) -> None:
     got = p["links"]["call_sites_by_name"]
     assert got["count"] == 1
     assert [(e["where"], e["enclosing"]) for e in got["items"]] == [("pkg/other.py:4", "Other.go")]
+
+
+def test_empty_threads_caveat_comes_from_constant(repo: GitRepo, monkeypatch) -> None:
+    """4.5b п. 2 (строка 05 матрицы инъекций): перечень оговорки пустого `threads` берётся из `THREAD_PATTERNS` при
+    печати — подмена константы меняет строку; литерал в `render_text` этот тест роняет."""
+    from scripts.atlas import passport
+
+    _commit(repo, _EMPTY_FILES)
+    p = _build(repo, "pkg/svc.py::Plain")
+    assert p["runtime"]["threads"] == []
+    assert THREADS_NOTE in _text_lines(p)
+    monkeypatch.setattr(passport, "THREAD_PATTERNS", ("FakeThread",))
+    lines = _text_lines(p)
+    assert "threads: — (ищет: FakeThread)" in lines
+    assert THREADS_NOTE not in lines
