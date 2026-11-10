@@ -2,6 +2,7 @@
 name: teamlead
 description: TeamLead — senior developer (Opus). Implementer for Senior+ tasks and escalation point on 3rd review iteration. Writes complex architecture, refactoring, integration. Can do express review of small PRs.
 model: opus
+effort: xhigh
 omitClaudeMd: true
 skills: project-rules, verify-done
 disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__serena
