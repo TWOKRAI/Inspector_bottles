@@ -326,7 +326,11 @@ def test_g8b_shutdown_exception_still_unpauses() -> None:
 
 def _exchange_dropped_hook(dropped: int, fired: list):
     def hook(world, real, target, command, args, **kw):
-        if command != "robot_exchange_log_get" or fired or world.first("sim", "send_command", "scene.sequence") is None:
+        if (
+            command != "robot_exchange_log_get"
+            or fired
+            or world.first("sim", "send_command", "scene.sequence", lambda c: "discs" in c.args[2]) is None
+        ):
             return NotImplemented
         fired.append(dropped)  # первый get посреди случая B (список уже отправлен)
         reply = real(target, command, args, **kw)
@@ -537,3 +541,106 @@ def test_g11e_run_prints_angle_stats() -> None:
     assert rc == 0, out
     line = next(ln for ln in out.splitlines() if ln.startswith("углы: "))
     assert line.startswith("углы: совпала (в расчёте ") and "медиана Δ +0.0°" in line and "макс |Δ| 0.0°)" in line
+
+
+# --- Г12: подача сима возвращается в random (P3 и конец прогона) ----------------------------------------------------
+
+_RANDOM = {"random": True}
+
+
+class _StarvedSim(_Hooked):
+    """Сим после прошлого прогона: список исчерпан, спавн стоит, пока не пришёл ``{"random": true}``."""
+
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self.seq = {"mode": "list", "total": 5, "fed": 5, "skipped": 0, "remaining": 0}
+
+    def tick(self) -> None:
+        stream_was_on = self.stream_on
+        self.stream_on = stream_was_on and self.seq["mode"] == "random"
+        super().tick()
+        self.stream_on = stream_was_on
+
+
+def _sim_sequence_calls(world: T.World) -> list[tuple[int, dict]]:
+    return [(i, a) for i, c, a, _ in world.cmds("sim") if c == "scene.sequence"]
+
+
+def test_g12_p3_sends_random_before_waiting_for_first_disk() -> None:
+    world = _StarvedSim()
+    rc, out = T._run(world)
+    assert rc == 0, out
+    first = _sim_sequence_calls(world)[0]
+    assert first[1] == _RANDOM
+    defect = world.first("sim", "send_command", "scene.defect_rate")
+    vfd = world.first("proto", "send_command", "vfd_run")
+    assert first[0] < defect.idx and first[0] < vfd.idx  # random — на входе P3, до ленты и до случая B
+
+    # пара: тот же исчерпанный сим без random (ответ не ok) — P3 не проходит, ни park, ни shutdown
+    def refuse(world, real, target, command, args, **kw):
+        if command == "scene.sequence" and args == _RANDOM:
+            return {"result": {"status": "error", "code": "invalid"}}
+        return NotImplemented
+
+    bad = _StarvedSim(hooks={("sim", "send_command"): refuse})
+    rc_bad, out_bad = T._run(bad)
+    assert rc_bad == 3, out_bad
+    assert "предусловие" in out_bad and "random" in out_bad
+    assert bad.count("proto", "system_shutdown") == 0 and _called(bad, "proto", "robot_park_all") == 0
+    assert _called(bad, "proto", "vfd_run") == 0  # random идёт до ленты: лента не тронута
+    assert "режим подачи → random" not in out_bad
+
+
+def test_g12_cleanup_and_normal_end_return_random_as_last_sim_step() -> None:
+    # abort на случае B (неизвестная буква): cleanup → park → shutdown → снять паузу → random последним шагом сима
+    world = T.World(invalid_b=True)
+    rc, out = T._run(world)
+    assert rc == 3, out
+    calls = _sim_sequence_calls(world)
+    assert [a for _, a in calls].count(_RANDOM) == 2  # P3 и cleanup
+    last_sim = max(i for i, *_ in world.cmds("sim"))
+    assert calls[-1] == (last_sim, _RANDOM)
+    unpause = world.first("sim", "send_command", "scene.pause", lambda c: c.args[2] == {"paused": False})
+    assert unpause.idx < last_sim
+    assert any(ln.startswith("cleanup: режим подачи сима") for ln in out.splitlines())
+    # нормальный конец: random тоже последний вызов сима, строка «изменено» называет режим подачи
+    ok_world = T.World()
+    rc_ok, out_ok = T._run(ok_world)
+    assert rc_ok == 0, out_ok
+    ok_calls = _sim_sequence_calls(ok_world)
+    assert [a for _, a in ok_calls].count(_RANDOM) == 2
+    assert ok_calls[-1][0] == max(i for i, *_ in ok_world.cmds("sim"))
+    changed = next(ln for ln in out_ok.splitlines() if ln.startswith("изменено в симе/на стенде: "))
+    assert "режим подачи → random" in changed and "defect_rate 0.0" in changed
+
+
+# --- Г13: файл журнала обмена дописывается между запусками — судим последнюю инкарнацию ------------------------------
+
+from scripts.alpha_sim.tests import fixture_p4_stand_exchange_file as FX  # noqa: E402
+
+
+def _stop_line(n: int, seq: int, text: str) -> str:
+    return f"#{n} 2026-11-10 10:44:42,434 [INFO] S.d.d.e.robot_main: #{seq} {text}"
+
+
+def test_g13_two_incarnations_only_last_is_judged() -> None:
+    lines = [*FX.BOUNDARY, *FX.TAIL_STOP]  # прошлый запуск: STOP_REQ=5, #625; новый: STOP_REQ=9, #174
+    row = L.judge_stop(lines, 168)
+    assert row.ok is True, row
+    assert row.observed.startswith("STOP_REQ [9]")
+    assert "стоп сделал свой park" in row.observed
+    # пара: две STOP_REQ уже в ПОСЛЕДНЕЙ инкарнации — по-прежнему FAIL
+    twice = [
+        *FX.BOUNDARY,
+        *FX.TAIL_STOP[:6],
+        _stop_line(268, 175, "in W STOP_REQ = 13"),
+        _stop_line(273, 176, " disconnect"),
+    ]
+    assert L.judge_stop(twice, 168).ok is False
+    # одна инкарнация — как раньше
+    assert L.judge_stop(FX.TAIL_STOP, 168).ok is True
+    # равный seq подряд (сжатая строка «… ×62» того же seq) — не новая инкарнация
+    squeezed = [_stop_line(1, 600, "in W STOP_REQ = 9"), _stop_line(2, 600, "… ×3"), _stop_line(3, 601, " disconnect")]
+    assert L.judge_stop(squeezed, 590).ok is True
+    # старый STOP_REQ из прошлого запуска не засчитывается и тогда, когда новых строк нет
+    assert L.judge_stop([*FX.BOUNDARY], 168).ok is False

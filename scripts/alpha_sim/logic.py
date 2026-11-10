@@ -629,7 +629,11 @@ _STOP_RE = re.compile(r"STOP_REQ = (\d+)")
 
 def judge_stop(file_lines: list[str], after_seq: int) -> Row:
     """Чистый стоп по файлу журнала: после ``after_seq`` один SOFT ``STOP_REQ`` (n % 4 == 1), затем disconnect."""
-    parsed = [p for p in (parse_exchange_file_line(ln) for ln in file_lines) if p is not None and p[0] > after_seq]
+    # Файл дописывается между запусками прототипа: seq начинается с #1 заново. Берём последнюю инкарнацию —
+    # с последней строки, у которой seq МЕНЬШЕ предыдущего (равный seq у сжатых «… ×N» строк — не граница).
+    seen = [p for p in (parse_exchange_file_line(ln) for ln in file_lines) if p is not None]
+    cut = max((i for i in range(1, len(seen)) if seen[i][0] < seen[i - 1][0]), default=0)
+    parsed = [p for p in seen[cut:] if p[0] > after_seq]
     parsed.sort(key=lambda p: p[0])
     if not parsed:
         return Row(None, "stop", "", "нет строк", False, (f"нет строк журнала после seq {after_seq}",))
@@ -646,6 +650,8 @@ def judge_stop(file_lines: list[str], after_seq: int) -> Row:
             why.append("disconnect нет после STOP_REQ")
         if any("(SERVO)" in text for seq, text in parsed if seq < stop_seq):
             note = " | стоп сделал свой park"
+    if cut:
+        note += f" | в файле прошлые запуски: отброшено строк {cut}"
     observed = f"STOP_REQ {[n for _, n in stops]}, строк после seq {after_seq}: {len(parsed)}{note}"
     return Row(None, "stop", "", observed, not why, tuple(why))
 

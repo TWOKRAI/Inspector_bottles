@@ -449,6 +449,9 @@ class FakeDriver:
             w.paused = paused
             return {"status": "ok", "ok": True, "paused": paused}
         if command == "scene.sequence":
+            if args == {"random": True}:  # возврат к случайной подаче (идемпотентно)
+                w.seq = {"mode": "random", "total": 0, "fed": 0, "skipped": 0, "remaining": 0}
+                return {"status": "ok", "mode": "random", "dropped": 0}
             discs = _norm(args["discs"])
             case = next((k for k, v in (("B", _B_LIST), ("D", _D_LIST), ("C", _C_LIST)) if discs == v), None)
             if case is None:
@@ -644,7 +647,8 @@ def test_order_and_unknown_letter_precondition() -> None:
     assert world.count("sim", "send_command", "scene.pause", {"paused": False}) == 1
     # сим не останавливают, слово следующих случаев не ставят
     assert world.count("sim", "system_shutdown") == 0
-    assert world.count("sim", "send_command", "scene.sequence") == 1
+    assert world.count("sim", "send_command", "scene.sequence", {"discs": _B_LIST}) == 1  # список только B
+    assert world.count("sim", "send_command", "scene.sequence", {"random": True}) == 2  # P3 и cleanup
     assert world.count("proto", "set_register_verified") == 1
 
     assert "предусловие" in out
@@ -676,7 +680,8 @@ def test_full_run_on_fakes() -> None:
     assert world.count("sim", "send_command", "scene.sequence", {"discs": _B_LIST}) == 1
     assert world.count("sim", "send_command", "scene.sequence", {"discs": _D_LIST}) == 1
     assert world.count("sim", "send_command", "scene.sequence", {"discs": _C_LIST}) == 1
-    assert world.count("sim", "send_command", "scene.sequence") == 3
+    assert world.count("sim", "send_command", "scene.sequence", {"random": True}) == 2  # P3 и возврат в конце
+    assert world.count("sim", "send_command", "scene.sequence") == 5
     assert world.count("sim", "send_command", "scene.defect_rate", {"probability": 0.0}) == 1
     assert world.count("sim", "send_command", "scene.pause", {"paused": True}) == 3
     assert world.count("sim", "send_command", "scene.pause", {"paused": False}) == 3
@@ -734,7 +739,8 @@ def test_no_recognition_stops_at_p3() -> None:
     assert world.count("proto", "system_shutdown") == 0
     assert world.count("proto", "send_command", "robot_park_all") == 0
     assert world.count("proto", "set_register_verified") == 0
-    assert [c for c in world.cmds("sim") if c[1] in ("scene.defect_rate", "scene.pause", "scene.sequence")] == []
+    assert [c for c in world.cmds("sim") if c[1] in ("scene.defect_rate", "scene.pause")] == []
+    assert [c[2] for c in world.cmds("sim") if c[1] == "scene.sequence"] == [{"random": True}]  # только P3
     # срок P3 — 120 с по фейковым часам (не раньше), от vfd_run
     vfd = world.first("proto", "send_command", "vfd_run")
     assert vfd is not None

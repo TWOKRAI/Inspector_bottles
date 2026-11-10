@@ -251,6 +251,7 @@ class _Alpha:
         self.paused = False  # пауза сима поставлена нами и не снята
         self.changed_defect_rate = False
         self.changed_belt = False
+        self.changed_feed_mode = False
         self.angle_pairs: list[tuple[str, float, float]] = []
         self.angle_note = ""
         self.prev: _CaseState | None = None
@@ -358,6 +359,11 @@ class _Alpha:
 
     def p3(self) -> None:
         assert self.layout is not None
+        # сим мог остаться в режиме «список исчерпан» (спавн стоит): без random строки диска не придут
+        res = self.sim_cmd("camera", "scene.sequence", {"random": True})
+        if not _ok(res):
+            raise Precondition(f"P3: scene.sequence {{random: true}} не принят: {res}")
+        self.changed_feed_mode = True
         res = self.proto_cmd("devices", "vfd_run", {"device_id": "vfd_belt", "freq_hz": 10.0})
         if not _ok(res):
             raise Precondition(f"vfd_run не принят: {res}")
@@ -660,6 +666,14 @@ class _Alpha:
         self._cleanup_step("ДОМОЙ", home)
         self._cleanup_step("СТОП", stop)
         self._cleanup_step("пауза сима", unpause)
+        self._cleanup_step("режим подачи сима", self._restore_random)
+
+    def _restore_random(self) -> str:
+        """Вернуть сим в случайную подачу (идемпотентно): список исчерпан — спавн иначе стоит до следующего запуска."""
+        res = self.sim_cmd("camera", "scene.sequence", {"random": True})
+        if not _ok(res):
+            raise RuntimeError(f"scene.sequence {{random: true}} не принят: {res}")
+        return "random"
 
     def normal_tail(self) -> None:
         for name, fn in (("ДОМОЙ", self.p5), ("СТОП", self.p6)):
@@ -671,6 +685,10 @@ class _Alpha:
                 self.statuses[name] = "FAIL"
                 self.precond = True
                 self.results.append(L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",)))
+        try:
+            self.emit(f"сим: режим подачи → {self._restore_random()}")
+        except Exception as exc:  # noqa: BLE001 — возврат режима вторичен, на код выхода не влияет
+            self.emit(f"сим: возврат режима подачи не удался: {_fmt_exc(exc)}")
 
     def angle_block(self) -> None:
         report = L.angle_report(self.angle_pairs)
@@ -693,6 +711,8 @@ class _Alpha:
         changed = []
         if self.changed_defect_rate:
             changed.append("defect_rate 0.0")
+        if self.changed_feed_mode:
+            changed.append("режим подачи → random")
         if self.changed_belt:
             changed.append("лента 10 Гц (vfd_run прототипа)")
         if changed:
