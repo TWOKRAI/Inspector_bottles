@@ -18,7 +18,10 @@ Purpose: разбор argv, проводка видов card/pack/log (views.py)
     прежний вывод. Код 2 по вводу: без `--format` больше одного id, `--symbol` с `--format`, `--budget`/`--all`/
     `--full` без `--format`, `--format` не `passport`/`json`, `--all` не из списка; код 2 и у ошибочного id
     (`not found`, `ambiguous`) — остальные паспорта печатаются. `--root <путь>` — корень берётся от этого пути, не от
-    cwd; `--exclude <путь>` (повторяемый) — префиксы, которые паспорт не читает.
+    cwd; `--exclude <путь>` (повторяемый) — префиксы, которые паспорт не читает; без `--format` он тоже код 2.
+    Task 4.5c: `--budget` < 1 у `ref` и `map` — код 2 (`atlas: --budget принимает целое >= 1`); `./`, `\\`, `..`
+    и абсолютный путь внутри корня в id, цели `map` и `--exclude` приводит `modules.norm_path`, пустой путь,
+    `..` выше корня и абсолютный путь вне корня — код 2 (stderr `atlas: ...`); блок `ambiguous` режется по бюджету.
     `map <юнит|файл> [--format passport|json] [--budget N] [--all <раздел>] [--full] [--ref] [--root] [--exclude]`
     (Task 4.2b-2): паспорт юнита или файла (`passport.build_map`); цель одна; `--format` по умолчанию `passport`,
     `--budget` 60; `--all` — из `passport.MAP_SHOW_ALL`. Код 2: нет цели, цель не найдена (stderr `atlas map: not
@@ -115,6 +118,8 @@ def _default_main_ref(root: Path) -> str:
 
 
 _FORMATS = ("passport", "json")
+_BUDGET_ERROR = "atlas: --budget принимает целое >= 1"
+_MORE_HINT = "уточните путь::имя"
 
 
 def _ref_usage_error(args: argparse.Namespace) -> str | None:
@@ -124,6 +129,8 @@ def _ref_usage_error(args: argparse.Namespace) -> str | None:
             return "atlas ref: без --format нужен ровно один id"
         if args.budget is not None or args.all or args.full:
             return "atlas ref: --budget, --all и --full требуют --format"
+        if args.exclude:
+            return "atlas ref: --exclude требует --format"
         return None
     if args.format not in _FORMATS:
         return "atlas ref: --format принимает passport или json"
@@ -131,7 +138,7 @@ def _ref_usage_error(args: argparse.Namespace) -> str | None:
         return "atlas ref: --symbol несовместим с --format"
     if any(name not in passport.SHOW_ALL_SECTIONS for name in args.all):
         return "atlas ref: --all принимает used_by, call_sites, subclasses, structural, tests"
-    return None
+    return _BUDGET_ERROR if args.budget is not None and args.budget < 1 else None
 
 
 def _map_usage_error(args: argparse.Namespace) -> str | None:
@@ -142,7 +149,7 @@ def _map_usage_error(args: argparse.Namespace) -> str | None:
         return "atlas map: --format принимает passport или json"
     if any(name not in passport.MAP_SHOW_ALL for name in args.all):
         return "atlas map: --all принимает " + ", ".join(passport.MAP_SHOW_ALL)
-    return None
+    return _BUDGET_ERROR if args.budget < 1 else None
 
 
 def _map_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
@@ -166,6 +173,18 @@ def _map_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
     return 0
 
 
+def _error_block(record: dict, budget: int) -> str:
+    """Блок текста ошибочного id: `== id ==`, ошибка, кандидаты. Блок не длиннее `budget` строк, но не короче трёх:
+    кандидаты, что не влезли, заменяет `ещё N; уточните путь::имя` (кандидатов `max(budget - 3, 0)`). Влезли все
+    (`2 + N <= budget`) — хвоста нет: `ещё 1` стоил бы строку, как сам кандидат."""
+    head = [f"== {record['id']} ==", record["error"]]
+    candidates = record.get("candidates", [])
+    if len(head) + len(candidates) <= budget:
+        return "\n".join([*head, *candidates])
+    keep = max(budget - 3, 0)
+    return "\n".join([*head, *candidates[:keep], f"ещё {len(candidates) - keep}; {_MORE_HINT}"])
+
+
 def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
     """`ref <id>... --format`: паспорта в порядке id; ошибочный id -> строка в stderr и код 2, остальные печатаются."""
     records = passport.passports_for(root, ref, list(args.module), exclude=tuple(args.exclude))
@@ -181,7 +200,7 @@ def _ref_passport(root: Path, ref: str, args: argparse.Namespace) -> int:
     blocks = []
     for record in records:
         if "error" in record:
-            blocks.append("\n".join([f"== {record['id']} ==", record["error"], *record.get("candidates", [])]))
+            blocks.append(_error_block(record, budget))
         else:
             blocks.append(passport.render_text(record, budget=budget, show_all=frozenset(args.all), full=args.full))
     print("\n\n".join(blocks))

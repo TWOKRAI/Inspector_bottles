@@ -543,7 +543,8 @@ class Hidden:
 def test_interface_all_chain_from_nearest_package(
     repo: GitRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`all` — `__init__.py` от ближайшего пакета до юнита, где имя в `__all__` (не `__all__` одного юнита); `[]` —
+    """`all` — файл символа (если его `__all__` с именем), затем `__init__.py` от ближайшего пакета до юнита, где имя в
+    `__all__` (не `__all__` одного юнита); `[]` —
     `__all__` есть, имени нет; `null` — `__all__` нет. `layer` — id юнита из `roots:` ревизии фикстуры (`fx/a`), не
     из cwd; путь вне юнитов — `other`."""
     _commit(repo, _T6)
@@ -552,10 +553,11 @@ def test_interface_all_chain_from_nearest_package(
     monkeypatch.chdir(elsewhere)  # корень — аргумент, не cwd
 
     widget = _build(repo, "lib/a/sub/impl.py::Widget")["interface"]
-    assert widget["all"] == ["lib/a/sub/__init__.py"]  # юнит lib/a/__init__.py имени Widget не знает
+    # файл символа со своим `__all__` с именем — первое звено (Task 4.5c, В14); lib/a/__init__.py имени Widget не знает
+    assert widget["all"] == ["lib/a/sub/impl.py", "lib/a/sub/__init__.py"]
     assert widget["layer"] == "fx/a"
     deep = _build(repo, "lib/a/sub/impl.py::Deep")["interface"]
-    assert deep["all"] == ["lib/a/sub/__init__.py", "lib/a/__init__.py"]  # от ближайшего до юнита
+    assert deep["all"] == ["lib/a/sub/impl.py", "lib/a/sub/__init__.py", "lib/a/__init__.py"]  # файл, затем пакеты
     assert _build(repo, "lib/a/sub/impl.py::Hidden")["interface"]["all"] == []
     thing = _build(repo, "lib/b/mod.py::Thing")["interface"]
     assert thing["all"] is None and thing["layer"] == "fx/b"
