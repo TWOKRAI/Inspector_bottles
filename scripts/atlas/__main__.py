@@ -31,11 +31,14 @@ import sys
 import traceback
 from pathlib import Path
 
-from scripts.atlas import brief, lint_brief, metrics, passport, reference, result_form, store, views
-from scripts.atlas.adapters.plans import live_plans
-from scripts.atlas.build import build, to_json
-from scripts.atlas.check import check, legacy_before
-from scripts.atlas.tree import AtlasError, git, resolve, run_git
+if not __package__:  # запуск путём `python <repo>/scripts/atlas`: кодовый корень в sys.path (DESIGN 7), не --root
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.atlas import brief, lint_brief, metrics, passport, reference, result_form, store, views  # noqa: E402
+from scripts.atlas.adapters.plans import live_plans  # noqa: E402
+from scripts.atlas.build import build, to_json  # noqa: E402
+from scripts.atlas.check import check, legacy_before  # noqa: E402
+from scripts.atlas.tree import AtlasError, git, resolve, run_git  # noqa: E402
 
 __all__ = ["main"]
 

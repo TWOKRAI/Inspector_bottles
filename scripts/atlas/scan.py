@@ -12,6 +12,15 @@ Stability: lite
 
 Правка этого файла меняет `SCANNER` и тем самым сбрасывает кэш фактов (цена — один холодный скан).
 
+Объявленные команды (R2, Task 4.2a): `FileFacts.command_specs` — записи `(name, line, form, scope)` по каждому
+`def command_specs` файла на любой глубине; `scope` — qualname самого `def command_specs` (`Service.command_specs`,
+`build.command_specs`), `line` — строка элемента. Разбираются элементы литеральной коллекции каждого `return` тела
+(вложенные def не в счёте): кортеж с первым строковым литералом -> `form: "tuple"`; `CommandSpec(...)` с литеральным
+именем (первый позиционный или `name=`) -> `"call"`; прочее (вызов, имя, `*x`) и `return` не литеральной коллекции ->
+`"dynamic"` с `name == ""`. `None` — в файле нет `def command_specs`; `()` — есть, элементов нет.
+`command_specs_dynamic` — число записей `dynamic`. Записи `dynamic` адреса имени не дают: паспорт их только считает
+(`status.dynamic`), в `runtime.commands` идут только `tuple` и `call`.
+
 Шапка модуля (R8): в очищенном докстринге модуля строки `Tier: core|optional|frozen` (значение без учёта регистра;
 другое значение — None; побеждает первая допустимая строка) и `Contour: a, b` (элементы через запятую, пустые
 отброшены; первая подходящая строка побеждает).
@@ -189,6 +198,13 @@ class FileFacts:
     thread_sites: tuple[ThreadSite, ...] = ()  # пуски потоков по `THREAD_PATTERNS`
     test_defs: tuple[tuple[str, int], ...] = ()  # (qualname, строка): функции с префиксом `test` и методы в `Test*`
     v2_error: str | None = None  # имя исключения разбора полей v2 (поля A1 при этом целы), иначе None
+    # --- Task 4.2a: (name, line, form, scope) по `def command_specs`; None — объявления в файле нет (докстринг модуля)
+    command_specs: tuple[tuple[str, int, str, str], ...] | None = None
+
+    @property
+    def command_specs_dynamic(self) -> int:
+        """Число динамических элементов `command_specs` (не литерал): паспорт кладёт их в `status.dynamic`."""
+        return sum(1 for _, _, form, _ in self.command_specs or () if form == "dynamic")
 
     def to_json(self) -> str:
         strs: list[str] = []
@@ -230,6 +246,9 @@ class FileFacts:
             "thread_sites": [[t.pattern, t.line, ix(t.enclosing), t.daemon] for t in self.thread_sites],
             "test_defs": [v for q, ln in self.test_defs for v in (ix(q), ln)],
             "v2_error": self.v2_error,
+            "command_specs": None
+            if self.command_specs is None
+            else [[n, ln, f, ix(sc)] for n, ln, f, sc in self.command_specs],
         }
         # UTF-8 без экранирования: кириллица в `doc` иначе стоит 6 байт на букву (гейт размера `scan_cache`, Task 4.1).
         body = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
@@ -277,6 +296,9 @@ class FileFacts:
             thread_sites=tuple(ThreadSite(p, ln, strs[enc], dmn) for p, ln, enc, dmn in d["thread_sites"]),
             test_defs=tuple((strs[tests[i]], tests[i + 1]) for i in range(0, len(tests), 2)),
             v2_error=d["v2_error"],
+            command_specs=None
+            if d["command_specs"] is None
+            else tuple((n, ln, f, strs[sc]) for n, ln, f, sc in d["command_specs"]),
         )
 
 
@@ -512,6 +534,7 @@ class _V2Collector:
         self.observer_attrs: set[tuple[str, str]] = set()  # (класс, `self.<a>`) с `Observer(...)`
         self.starts: set[tuple[str, str]] = set()  # (область, получатель) вызовов `.start()`
         self.schedules: list[tuple[str, str | None, str, ast.Call]] = []  # (область, класс, получатель, вызов)
+        self.command_specs: list[tuple[str, int, str, str]] | None = None  # None — `def command_specs` не встречен
 
     @staticmethod
     def _enclosing(stack: list[tuple[str, str]]) -> str:
@@ -561,6 +584,10 @@ class _V2Collector:
         )
         if node.name.startswith("test") and all(k == "class" and n.startswith("Test") for n, k in stack):
             self.test_defs.append((qualname, node.lineno))
+        if node.name == "command_specs":
+            if self.command_specs is None:
+                self.command_specs = []
+            self.command_specs.extend((name, line, form, qualname) for name, line, form in _command_entries(node))
         inner = [*stack, (node.name, "def")]
         for stmt in node.body:
             self.visit(stmt, inner)
@@ -641,7 +668,47 @@ class _V2Collector:
         return tuple(io), tuple(sites)
 
 
-def _collect_v2(tree: ast.Module) -> dict[str, tuple]:
+def _own_returns(node: ast.AST) -> list[ast.Return]:
+    """`return` тела функции без вложенных def/class/lambda, в порядке исходника."""
+    found: list[ast.Return] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (*_FUNC_NODES, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(child, ast.Return):
+            found.append(child)
+        found.extend(_own_returns(child))
+    return found
+
+
+def _spec_name(elt: ast.expr) -> tuple[str, str] | None:
+    """`(имя, форма)` литерального элемента `command_specs`: кортеж или `CommandSpec(...)`; иначе None."""
+    if isinstance(elt, ast.Tuple) and elt.elts:
+        name = literal_str(elt.elts[0])
+        return None if name is None else (name, "tuple")
+    if isinstance(elt, ast.Call) and leaf_name(elt.func) == "CommandSpec":
+        arg = elt.args[0] if elt.args else next((k.value for k in elt.keywords if k.arg == "name"), None)
+        name = literal_str(arg)
+        return None if name is None else (name, "call")
+    return None
+
+
+def _command_entries(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, int, str]]:
+    """Элементы `def command_specs`: `(name, line, form)`; динамический элемент — `("", line, "dynamic")`."""
+    out: list[tuple[str, int, str]] = []
+    for ret in sorted(_own_returns(node), key=lambda r: (r.lineno, r.col_offset)):
+        value = ret.value
+        if value is None or (isinstance(value, ast.Constant) and value.value is None):
+            continue
+        if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            out.append(("", value.lineno, "dynamic"))
+            continue
+        for elt in value.elts:
+            hit = _spec_name(elt)
+            out.append(("", elt.lineno, "dynamic") if hit is None else (hit[0], elt.lineno, hit[1]))
+    return out
+
+
+def _collect_v2(tree: ast.Module) -> dict[str, tuple | None]:
     """Поля v2 `FileFacts` из дерева модуля; может бросить (ловит `scan_text` в своём `try`)."""
     collector = _V2Collector()
     for stmt in tree.body:
@@ -653,6 +720,7 @@ def _collect_v2(tree: ast.Module) -> dict[str, tuple]:
         "io": io,
         "thread_sites": sites,
         "test_defs": tuple(collector.test_defs),
+        "command_specs": None if collector.command_specs is None else tuple(collector.command_specs),
     }
 
 
