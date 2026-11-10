@@ -7,6 +7,7 @@
 
 import io
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -145,6 +146,15 @@ def _mini_repo(tmp_path):
     return repo, sha
 
 
+def _code_repo(tmp_path):
+    """Репозиторий-«дерево с кодом atlas»: `scripts/atlas/__main__.py` в коммите. Возвращает (путь, HEAD)."""
+    code = tmp_path / "code_tree"
+    (code / "scripts" / "atlas").mkdir(parents=True)
+    _git(code, "init", "-q")
+    (code / "scripts" / "atlas" / "__main__.py").write_text("VERSION = 1\n", encoding="utf-8")
+    return code, _commit_all(code, "atlas code")
+
+
 def _three_questions(sha, **fields):
     return {
         "name": "mini",
@@ -271,6 +281,7 @@ def test_ceiling_text_exit_codes(tmp_path, capsys):
         {"set": "mini", "targets": {"Q1": [["ref", "S1"]], "Q2": [["ref", "S2"]], "Q3": [["ref", "S3"]]}},
     )
     _commit_all(repo, "freeze set and targets")  # --min требует Q и T в коммите
+    code_tree, _ = _code_repo(tmp_path)
     runner = _fake_runner(
         {
             "S1": "== a.py::S1 ==\na.py:10; sha s; scanner x\n",
@@ -281,7 +292,7 @@ def test_ceiling_text_exit_codes(tmp_path, capsys):
 
     def run(minimum=None, questions=qpath, targets=tpath):
         out = io.StringIO()
-        code = _within(60, bench.ceiling_text_command, questions, targets, repo, minimum, out, runner)
+        code = _within(60, bench.ceiling_text_command, questions, targets, repo, minimum, out, runner, code_tree)
         return code, out.getvalue(), capsys.readouterr().err
 
     code, out, _ = run()
@@ -485,10 +496,11 @@ def test_min_requires_committed_inputs(tmp_path, capsys):
     qpath = _write_json(repo / "q.json", _three_questions(sha))
     tpath = _write_json(repo / "t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]]}})
     runner = _fake_runner({"S1": "== a.py::S1 ==\na.py:10; sha s; scanner x\n"})
+    code_tree, _ = _code_repo(tmp_path)
 
     def run(minimum, questions=qpath, targets=tpath):
         out = io.StringIO()
-        code = _within(60, bench.ceiling_text_command, questions, targets, repo, minimum, out, runner)
+        code = _within(60, bench.ceiling_text_command, questions, targets, repo, minimum, out, runner, code_tree)
         return code, out.getvalue(), capsys.readouterr().err
 
     assert run(None)[0] == 0  # без --min ничего не коммитили — и это нормально
@@ -547,9 +559,99 @@ def test_real_atlas_on_mini_repo(tmp_path, capsys):
     code = _within(
         300,
         bench.main,
-        ["ceiling", "--questions", str(qpath), "--text", str(tpath), "--root", str(repo), "--min", "1"],
+        ["ceiling", "--questions", str(qpath), "--text", str(tpath), "--root", str(repo)],
     )
     shown = capsys.readouterr()
     assert code == 0, shown.err
-    assert shown.out.splitlines() == ["Q1 reachable=yes", "  pkg/m.py:4 ±0 -> найден", "ceiling-text mini: 1/1"]
+    version, *rows = shown.out.splitlines()
+    assert re.fullmatch(r"atlas-код: [0-9a-f]{40}( \+правки)?", version), version
+    assert rows == ["Q1 reachable=yes", "  pkg/m.py:4 ±0 -> найден", "ceiling-text mini: 1/1"]
     assert not (repo / "data").exists()  # кэш atlas — в клоне, не в репозитории-источнике
+
+
+def test_atlas_texts_isolate_questions(tmp_path):
+    """Вывод и проблемы целей одного вопроса не попадают в текст другого."""
+    repo, sha = _mini_repo(tmp_path)
+
+    def runner(cmd, cwd):
+        if cmd[3] == "S1":
+            return 2, "== a.py::S1 ==\na.py:10; sha s; scanner x\n", "boom1\n"
+        return 0, "== b.py::S2 ==\nb.py:20; sha s; scanner x\n", ""
+
+    texts = _within(
+        60, bench.atlas_texts, _three_questions(sha), {"Q1": [["ref", "S1"]], "Q2": [["ref", "S2"]]}, repo, runner
+    )
+    assert bench.text_addresses(texts["Q1"][0]) == {("a.py", 10)} and texts["Q1"][1] == ["  atlas ref S1: код 2: boom1"]
+    assert bench.text_addresses(texts["Q2"][0]) == {("b.py", 20)} and texts["Q2"][1] == []
+
+
+def test_command_address_in_other_questions_target_does_not_count(tmp_path, capsys):
+    repo, sha = _mini_repo(tmp_path)
+    qset = _three_questions(sha)
+    qset["questions"] = [
+        {"id": "Q1", "question": "?", "expected": [_entry("a.py", 10, 0)]},
+        {"id": "Q2", "question": "?", "expected": [_entry("a.py", 10, 0)]},  # тот же адрес, цель другая
+    ]
+    qpath = _write_json(tmp_path / "q.json", qset)
+    tpath = _write_json(tmp_path / "t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]], "Q2": [["ref", "S2"]]}})
+    runner = _fake_runner(
+        {"S1": "== a.py::S1 ==\na.py:10; sha s; scanner x\n", "S2": "== c.py::S2 ==\nc.py:1; sha s; scanner x\n"}
+    )
+    code_tree, _ = _code_repo(tmp_path)
+    out = io.StringIO()
+    assert _within(60, bench.ceiling_text_command, qpath, tpath, repo, None, out, runner, code_tree) == 0
+    lines = out.getvalue().splitlines()
+    assert "Q1 reachable=yes" in lines and "Q2 reachable=no" in lines
+    assert lines[-1] == "ceiling-text mini: 1/2"
+
+
+def test_report_names_atlas_code_and_min_requires_clean_atlas(tmp_path, capsys):
+    repo, sha = _mini_repo(tmp_path)
+    qpath = _write_json(repo / "q.json", _three_questions(sha))
+    tpath = _write_json(repo / "t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]]}})
+    _commit_all(repo, "freeze")
+    code_tree, head = _code_repo(tmp_path)
+    runner = _fake_runner({"S1": "== a.py::S1 ==\na.py:10; sha s; scanner x\n"})
+
+    def run(minimum):
+        out = io.StringIO()
+        code = _within(60, bench.ceiling_text_command, qpath, tpath, repo, minimum, out, runner, code_tree)
+        return code, out.getvalue(), capsys.readouterr().err
+
+    code, out, _ = run(1)
+    assert code == 0 and out.splitlines()[0] == f"atlas-код: {head}"  # чистый код: без пометки
+
+    (code_tree / "scripts" / "atlas" / "__main__.py").write_text("VERSION = 2\n", encoding="utf-8")
+    code, out, _ = run(None)  # без --min грязный код допустим, но помечен
+    assert code == 0 and out.splitlines()[0] == f"atlas-код: {head} +правки"
+    code, out, err = run(1)
+    assert code == 2 and "заморозь код atlas коммитом" in err and out == ""
+
+
+def test_missing_repo_sha_is_error_exit_2(tmp_path, capsys):
+    repo, _ = _mini_repo(tmp_path)
+    missing = "0" * 40
+    qpath = _write_json(tmp_path / "q.json", _three_questions(missing))
+    tpath = _write_json(tmp_path / "t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]]}})
+    calls = []
+    out = io.StringIO()
+    code_tree, _ = _code_repo(tmp_path)
+    code = _within(60, bench.ceiling_text_command, qpath, tpath, repo, None, out, _fake_runner({}, calls), code_tree)
+    assert code == 2 and calls == [] and out.getvalue() == ""
+    assert f"ОШИБКА: repo_sha {missing} набора нет в репозитории" in capsys.readouterr().err
+
+
+def test_atlas_timeout_is_error_exit_2(tmp_path, capsys):
+    repo, sha = _mini_repo(tmp_path)
+    qpath = _write_json(repo / "q.json", _three_questions(sha))
+    tpath = _write_json(repo / "t.json", {"set": "mini", "targets": {"Q1": [["ref", "S1"]]}})
+    _commit_all(repo, "freeze")  # --min требует Q и T в коммите
+
+    def runner(cmd, cwd):
+        raise subprocess.TimeoutExpired(cmd, 600)
+
+    out = io.StringIO()
+    code_tree, _ = _code_repo(tmp_path)
+    code = _within(60, bench.ceiling_text_command, qpath, tpath, repo, 1, out, runner, code_tree)  # K не считается
+    assert code == 2 and out.getvalue() == ""
+    assert "ОШИБКА: atlas ref S1: таймаут 600 с" in capsys.readouterr().err

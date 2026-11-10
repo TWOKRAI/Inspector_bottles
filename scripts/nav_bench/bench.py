@@ -597,22 +597,23 @@ def load_targets(path: Path, qset: dict[str, Any]) -> dict[str, list[list[str]]]
 
 
 def _run_atlas(cmd: list[str], cwd: Path) -> tuple[int, str, str]:
-    """Один запуск atlas путём (без PYTHONPATH: кодовый корень atlas находит сам). Таймаут — код 2."""
+    """Один запуск atlas путём (без PYTHONPATH: кодовый корень atlas находит сам).
+
+    Протокол раннера: ``(код, stdout, stderr)``; таймаут — ``subprocess.TimeoutExpired`` (его превращает в ошибку
+    ``atlas_texts``): молча заниженный потолок читался бы как «потолок ниже --min».
+    """
     env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     env["PYTHONUTF8"] = "1"
-    try:
-        done = subprocess.run(
-            cmd,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=ATLAS_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired:
-        return 2, "", f"таймаут {ATLAS_TIMEOUT_S} с"
+    done = subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=ATLAS_TIMEOUT_S,
+    )
     return done.returncode, done.stdout, done.stderr
 
 
@@ -624,13 +625,17 @@ def atlas_texts(
     Паспорта строятся в клоне ``root`` на ``repo_sha`` набора (временный каталог ``nav_bench_text_*``, удаляется
     всегда): кэш atlas ложится в клон, не в ``root``. Код atlas — текущего дерева. Код atlas не 0 — проблема
     ``  atlas <argv>: код N: <последняя строка stderr>``, stdout всё равно разбирается (atlas печатает паспорта
-    остальных id). Сбой git при клоне — ``RuntimeError``.
+    остальных id). Нет ``repo_sha`` в ``root``, сбой git при клоне, таймаут atlas (``subprocess.TimeoutExpired`` от
+    раннера) — ``RuntimeError``.
     """
     runner = runner or _run_atlas
     texts: dict[str, tuple[str, list[str]]] = {}
     if not targets:
         return texts
     sha = qset["repo_sha"]
+    known = subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True)
+    if known.returncode != 0:
+        raise RuntimeError(f"repo_sha {sha} набора нет в репозитории {root}")
     atlas = PKG_DIR.parent / "atlas"
     clone = Path(tempfile.mkdtemp(prefix="nav_bench_text_"))
     try:
@@ -647,7 +652,10 @@ def atlas_texts(
                 cmd = [sys.executable, str(atlas), *argv, "--format", "passport", "--ref", sha, "--root", str(clone)]
                 for prefix in qset.get("exclude") or []:
                     cmd += ["--exclude", prefix]
-                code, stdout, stderr = runner(cmd, clone)
+                try:
+                    code, stdout, stderr = runner(cmd, clone)
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError(f"atlas {' '.join(argv)}: таймаут {ATLAS_TIMEOUT_S} с") from None
                 parts.append(stdout)
                 if code != 0:
                     last = stderr.strip().splitlines()[-1] if stderr.strip() else ""
@@ -750,23 +758,33 @@ def ceiling_text_command(
     minimum: int | None = None,
     out: TextIO | None = None,
     runner: AtlasRunner | None = None,
+    code_root: Path | None = None,
 ) -> int:
-    """Код: 0; с ``minimum`` при достижимых меньше него — 1; ошибка ввода, git или Q/T не в коммите — 2.
+    """Код: 0; с ``minimum`` при достижимых меньше него — 1; ошибка ввода, git, таймаут atlas, Q/T или код atlas не в
+    коммите — 2.
 
-    С ``minimum`` набор и цели должны лежать в ``root``, быть в git и чистыми: потолок по правленным на лету целям
-    ничего не доказывает.
+    Первая строка вывода — ``atlas-код: <HEAD дерева с кодом atlas>`` (``code_root``, по умолчанию корень репозитория
+    этого ``bench.py``; `` +правки``, если ``scripts/atlas`` с незакоммиченными правками). С ``minimum`` набор, цели
+    (в ``root``) и ``scripts/atlas`` должны быть в git и чистыми: потолок по правленным на лету целям или коду ничего
+    не доказывает.
     """
     out = out or sys.stdout
+    code_root = Path(code_root) if code_root is not None else PKG_DIR.parents[1]
     try:
         qset = load_questions(questions_path)
         targets = load_targets(targets_path, qset)
         if minimum is not None:
             _require_committed(root, [questions_path, targets_path])
+        code_sha = _git_raw(code_root, "rev-parse", "HEAD").decode("utf-8").strip()
+        code_dirty = bool(git_dirty(code_root, ["scripts/atlas"]))
+        if minimum is not None and code_dirty:
+            raise ValueError("scripts/atlas с незакоммиченными правками — заморозь код atlas коммитом")
         texts = atlas_texts(qset, targets, root, runner)
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
         return 2
     report, reached, total = ceiling_text(qset, texts)
+    print(f"atlas-код: {code_sha}{' +правки' if code_dirty else ''}", file=out)
     for row in report:
         print(row, file=out)
     print(f"ceiling-text {qset['name']}: {reached}/{total}", file=out)
