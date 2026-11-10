@@ -355,3 +355,70 @@ def test_g9_pair_same_scene_with_zero_dropped_passes() -> None:
     assert rc == 0, out
     assert not any(ln.startswith("B exchange") for ln in out.splitlines())
     assert "B случай: PASS" in out.splitlines()
+
+
+# --- Г10: слушатель — multiprocessing-потомок (spawn_main): команда берётся у корня запуска ---------------------------
+
+_SPAWN = "/x/Python.app/Contents/MacOS/Python -c from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=5)"
+
+
+def _fake_tools(monkeypatch, procs: dict[int, tuple[int, str]], listener: int = 100):
+    """Подмена ``_run_tool``: ``procs[pid] = (ppid, команда)``; lsof отдаёт ``listener`` и cwd ``/stand``."""
+    import subprocess
+
+    def fake(cmd):
+        def done(out: str, rc: int = 0):
+            return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+
+        if cmd[0] == "lsof" and "-Fp" in cmd:
+            return done(f"p{listener}\n")
+        if cmd[0] == "lsof":
+            return done("n/stand\n")
+        pid = int(cmd[-1])
+        if pid not in procs:
+            return done("", 1)
+        ppid, command = procs[pid]
+        return done(f"{command}\n" if cmd[2] == "command=" else f"  {ppid}\n")
+
+    monkeypatch.setattr(RA, "_run_tool", fake)
+
+
+def test_g10_spawn_child_takes_root_command_one_level(monkeypatch) -> None:
+    _fake_tools(monkeypatch, {100: (90, _SPAWN), 90: (1, "/x/Python apps/line_sim/run.py")})
+    info = _within(lambda: RA.lsof_listeners(8766), 5.0)
+    assert info == RA.ListenerInfo(8766, 100, "/x/Python apps/line_sim/run.py", "/stand")
+
+
+def test_g10_two_level_chain(monkeypatch) -> None:
+    root = "/x/Python multiprocess_prototype/run.py letter_robot_sim --headless"
+    _fake_tools(monkeypatch, {100: (90, _SPAWN), 90: (80, _SPAWN + " --multiprocessing-fork"), 80: (1, root)})
+    info = _within(lambda: RA.lsof_listeners(8765), 5.0)
+    assert (info.pid, info.command, info.cwd) == (100, root, "/stand")
+
+
+def test_g10_root_not_found_raises_with_chain(monkeypatch) -> None:
+    # цепочка из spawn_main-процессов длиннее 5 уровней и упирается в PID 1
+    procs = {100 + i: (101 + i, _SPAWN) for i in range(8)}
+    _fake_tools(monkeypatch, procs)
+    try:
+        _within(lambda: RA.lsof_listeners(8765), 5.0)
+    except AssertionError as exc:  # _within упаковывает исключение вызова
+        text = str(exc)
+        assert "ListenerProbeError" in text and "цепочка" in text and "100:" in text
+    else:
+        raise AssertionError("ожидался ListenerProbeError")
+    # и цикл/PID 1: родитель — init
+    _fake_tools(monkeypatch, {100: (1, _SPAWN)})
+    try:
+        _within(lambda: RA.lsof_listeners(8765), 5.0)
+    except AssertionError as exc:
+        assert "ListenerProbeError" in str(exc)
+    else:
+        raise AssertionError("ожидался ListenerProbeError")
+
+
+def test_g10_pair_plain_process_does_not_climb(monkeypatch) -> None:
+    # обычный процесс без spawn_main: команда своя, к родителю не поднимаемся (родитель — «ловушка» с другим скриптом)
+    _fake_tools(monkeypatch, {100: (90, "/x/Python apps/line_sim/run.py"), 90: (1, "/bin/zsh -l")})
+    info = _within(lambda: RA.lsof_listeners(8766), 5.0)
+    assert info.command == "/x/Python apps/line_sim/run.py"

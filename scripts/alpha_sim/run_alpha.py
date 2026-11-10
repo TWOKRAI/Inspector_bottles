@@ -67,6 +67,36 @@ def _run_tool(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         raise ListenerProbeError(f"{cmd[0]}: {type(exc).__name__}: {exc}") from exc
 
 
+def _is_spawn_child(command: str) -> bool:
+    """Потомок ``multiprocessing`` (spawn): его командная строка не называет скрипт запуска."""
+    return "spawn_main" in command or "--multiprocessing-fork" in command
+
+
+def _root_command(pid: int, command: str) -> str:
+    """Командная строка первого предка слушателя без ``spawn_main`` (до 5 уровней; PID 1 или цикл — стоп)."""
+    chain = [f"{pid}: {command}"]
+    seen = {pid}
+    cur = pid
+    for _ in range(5):
+        pp = _run_tool(["ps", "-o", "ppid=", "-p", str(cur)])
+        text = pp.stdout.strip()
+        if pp.returncode != 0 or not text.isdigit():
+            break
+        parent = int(text)
+        if parent <= 1 or parent in seen:
+            break
+        ps = _run_tool(["ps", "-o", "command=", "-p", str(parent)])
+        parent_cmd = ps.stdout.strip()
+        if ps.returncode != 0 or not parent_cmd:
+            break
+        chain.append(f"{parent}: {parent_cmd}")
+        if not _is_spawn_child(parent_cmd):
+            return parent_cmd
+        seen.add(parent)
+        cur = parent
+    raise ListenerProbeError("корень запуска не найден выше spawn_main-потомка; цепочка: " + " <- ".join(chain))
+
+
 def lsof_listeners(port: int) -> ListenerInfo | None:
     """Кто слушает TCP-порт (macOS/Linux): lsof → PID, ps → команда, lsof → cwd. rc 1 и пусто — слушателя нет."""
     r = _run_tool(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"])
@@ -87,7 +117,10 @@ def lsof_listeners(port: int) -> ListenerInfo | None:
     cwd = next((ln[1:] for ln in cwd_out.stdout.splitlines() if ln.startswith("n")), "")
     if cwd_out.returncode != 0 or not cwd:
         raise ListenerProbeError(f"lsof cwd PID {pid}: rc {cwd_out.returncode}: {cwd_out.stderr.strip()}")
-    return ListenerInfo(port, pid, ps.stdout.strip(), cwd)
+    command = ps.stdout.strip()
+    if _is_spawn_child(command):
+        command = _root_command(pid, command)
+    return ListenerInfo(port, pid, command, cwd)
 
 
 def _read_lines(path: Path) -> list[str] | None:
