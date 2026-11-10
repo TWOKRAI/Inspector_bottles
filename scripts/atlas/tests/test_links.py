@@ -185,8 +185,8 @@ def u6():
 
 
 def test_call_sites_resolve_by_import_or_self_only():
-    """Разрешаются: голое имя в своём файле, голое имя по `from m import f`, `m.f()` по `import m`, `self.m()` внутри
-    класса символа. Не разрешаются и не считаются: вызовы по алиасу (`as`) и через реэкспорт `__init__`;
+    """Разрешаются: голое имя в своём файле, голое имя по `from m import f` (Task 4.5a: и через реэкспорт `__init__`),
+    `m.f()` по `import m`, `self.m()` внутри класса символа. Не разрешаются и не считаются: вызовы по алиасу (`as`);
     собственный `f` другого файла — не `lib.f`. `x.f()` по произвольному получателю — только счётчик.
     Алиасы (`import lib as L`, `from lib import f as g`) здесь НЕ проверяются: `ImportRec` алиас не хранит, из фактов
     файла `L.f()` не отличить от `x.f()` (см. отчёт tester: граница «не видно» из контракта не наблюдаема)."""
@@ -199,10 +199,12 @@ def test_call_sites_resolve_by_import_or_self_only():
         {"where": at("a.py", "a_from"), "how": "name-call", "scope": "prod", "enclosing": "u1", "same_file": False},
         {"where": at("b.py", "b_module"), "how": "name-call", "scope": "prod", "enclosing": "u2", "same_file": False},
         {"where": at("lib.py", "own"), "how": "name-call", "scope": "prod", "enclosing": "own", "same_file": True},
+        # Task 4.5a: `from pkg import f` в r.py идёт через реэкспорт `pkg/__init__.py` (`from lib import f`) к lib.f
+        {"where": at("r.py", "r_reexport"), "how": "name-call", "scope": "prod", "enclosing": "u6", "same_file": False},
     ]
     assert res["call_sites"] == expected_f
-    # `x.f()` из e.py — единственное «совпало имя, не отнесено»: реэкспорт (r.py) и собственный `f` в s.py
-    # (s.py::f, а не lib.f) сюда не попадают
+    # `x.f()` из e.py — единственное «совпало имя, не отнесено»: собственный `f` в s.py (s.py::f, а не lib.f)
+    # сюда не попадает
     assert res["call_sites_unresolved"] == 1
     assert isinstance(res["call_sites_unresolved"], int)
 
@@ -660,15 +662,18 @@ class ViaCall(Base(1)):
 
 
 def test_unresolved_base_where_and_how_null():
-    """Не разрешённая основа (`abc.ABC`, `object`, `Protocol`, реэкспорт через `__init__`, алиас `as`, вызов) — запись
-    есть, `where` и `how` — именно None; счётчика нет. У функции и метода `bases` — None, у класса без баз — `[]`."""
+    """Не разрешённая основа (`abc.ABC`, `object`, `Protocol`, алиас `as`, вызов) — запись есть, `where` и `how` —
+    именно None; счётчика нет. У функции и метода `bases` — None, у класса без баз — `[]`. Реэкспорт через `__init__`
+    с Task 4.5a разрешается: `where` — строка `class Base` в `pkg/core.py`."""
     links = _links(_UNRES)
 
+    assert _bases(links, "unres.py::ViaReexport") == [
+        {"name": "Base", "where": "pkg/core.py:10", "how": "import", "scope": "prod"}
+    ]
     for ident, name in (
         ("unres.py::ViaAbc", "abc.ABC"),
         ("unres.py::ViaObject", "object"),
         ("unres.py::ViaProtocol", "Protocol"),
-        ("unres.py::ViaReexport", "Base"),
         ("alias.py::ViaAlias", "Aliased"),
         ("call.py::ViaCall", "Base(1)"),
     ):

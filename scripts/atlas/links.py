@@ -23,11 +23,14 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
     "scope": .., "enclosing": ..}`; `where` — файл-импортёр и строка импорта (`ImportRec.line`); `enclosing` у импорта —
     `"<module>"`.
   - `call_sites` — разрешённые вызовы (name-call) из `CallFact`: голое имя в своём файле; голое имя по
-    from-импорту символа; `m.f()` по импорту модуля `m`; `self.m()` внутри класса символа. Запись:
+    from-импорту символа, в том числе через реэкспорт `__init__.py` (до 5 звеньев, Task 4.5a); `m.f()` по импорту
+    модуля `m`; `self.m()` внутри класса символа. Запись:
     `{"where": "путь:строка", "how": "name-call", "scope": .., "enclosing": qualname, "same_file": bool}`;
     `same_file` — вызов в файле самого символа (F2). `enclosing` — ближайший def/class вызова.
-  - `call_sites_unresolved` — число (int) вызовов с совпавшим именем, которые не отнесены ни к одному символу
-    (`x.m()` по произвольному получателю): счётчик «не видно», а не список.
+  - `call_sites_unresolved` — число (int) вызовов с совпавшим именем, которые не отнесены ни к одному символу:
+    `x.m()` по произвольному получателю; голый вызов или `m.f()`, где имя (у `m.f()` — первый сегмент
+    получателя) затенено; голый вызов двусмысленного from-импорта; голый вызов через фасад `__init__.py`, не
+    давший адреса. Счётчик «не видно», а не список; ключ — имя, общий для всех одноимённых символов.
   - `subclasses` — наследники: классы, чей `DefFact.bases` называет символ-класс. `how: "import"` — файл
     наследника импортирует основу; `how: "same-file"` — основа и наследник в одном файле (иерархии исключений и
     интерфейсов: без импорта; основа — класс верхнего уровня файла, имя без точки). Запись как у `used_by`, но
@@ -45,7 +48,22 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
 `test_*.py`, `*_test.py`, `conftest.py` (шире `_TEST_FILE` A1: помощники внутри `tests/` тоже тест); иначе
 `"prod"` (каталог `testing/` — поставляемые двойники, не тесты).
 
-Что НЕ разрешается (граница «не видно» паспорта): символы, видимые только через реэкспорт `__init__.py`;
+Реэкспорт (Task 4.5a). Голое имя по `from pkg import X`, где `pkg/__init__.py` имя не определяет, идёт по записям
+`ImportRec` фасада с этим именем (любой `kind`: `lazy` внутри `def __getattr__` по PEP 562 и во вспомогательной
+функции — тоже) до файла определения; звено — один `__init__.py`, звеньев не больше 5. Нет записи, цели записей
+различны, цикл, 6-е звено -> вызов в `call_sites_unresolved`. `used_by` определения остаётся по записи импорта
+в самом `__init__.py`: импортёры фасада в нём не видны. `m.X()` по `import pkg` через фасад не разрешается.
+
+Затенение (Task 4.5a). Голый вызов `f()` (и `m.f()` по первому сегменту получателя) не относится к символу, если
+имя — параметр `def` цепочки охватывающих вызова или `def`/`class`, вложенный в функцию или метод этой цепочки;
+одноимённый метод охватывающего класса не затеняет. Сигнатура, которая не разбирается, затеняет любое имя. Без
+анализа потока: порядок объявлений, ветки `if`, присваивания, `lambda` и переменные включений не учитываются.
+
+Двусмысленность (Task 4.5a). Различных определений `(путь, имя)` у from-импортов имени в файле (после реэкспорта)
+>= 2 -> голые вызовы имени в файле не относятся никому. `from pkg import X` + `from pkg.core import X` к одному
+определению — не двусмысленны. Своё определение файла побеждает from-импорт без проверки двусмысленности.
+
+Что НЕ разрешается (граница «не видно» паспорта): реэкспорт сверх 5 звеньев, через `*` или `importlib`;
 динамические вызовы (`getattr`, строки); вызовы по алиасу. В `call_sites` такие вызовы не попадают; считаются ли
 они в `call_sites_unresolved`, зависит от формы алиаса:
   - `import m as x; x.f()` — вызов с получателем `x`, не разрешённый в символ: СЧИТАЕТСЯ в `call_sites_unresolved`
@@ -53,19 +71,17 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
   - `from a import f as g; g()` — голое имя `g` без определения и без from-импорта под этим именем: нигде НЕ
     считается ни в `call_sites`, ни в `call_sites_unresolved`; сам импорт при этом попадает в `used_by` символа `f`.
 
-Известные ложные разрешения (имя -> символ по первому from-импорту; частота на HEAD не измерена):
-  - `from a import f as g` + `from b import f`: имя `f` в таблице from-импортов достаётся первому импорту, у
-    алиаса отдельной записи нет — вызов `f()` может отнестись к символу `a::f`, а не `b::f`;
-  - вложенный `def f` или параметр `f` затеняет импортированное имя, но разбор вызовов этого не видит: вызов
-    локального `f()` относится к импортированному `f`.
-Полное решение — отдельное поле алиаса в фактах (v2 сканера); в Task 4.1b не заводится.
+Известная неточность: `ImportRec` алиас не хранит, поэтому `from a import f as g` + `from b import f` дают имени `f`
+два определения — вызов `f()` (на деле `b::f`) не относится никому и считается в `call_sites_unresolved`.
+Полное решение — отдельное поле алиаса в фактах (v2 сканера); в Task 4.5a не заводится.
 
   - `bases` (Task 4.1b) — основы класса в порядке `DefFact.bases`, по одной записи на основу (разрешённую или нет):
     `{"name": .., "where": "путь:строка", "how": .., "scope": ..}`. `name` — сырой текст основы (`m.Base`, `Base[T]`),
     не лист; `where` — строка `class` ОСНОВЫ (не строка импорта); `how` — `"same-file"` (основа из своего файла) или
     `"import"`; `scope` — по файлу основы (не наследника). Разрешение то же, что у `subclasses`: имя класса своего
-    файла; from-импорт; `m.Base` по импорту модуля `m`; у `Base[T]` — имя до `[`. Основа без адреса (`abc.ABC`,
-    `object`, `Protocol`, реэкспорт `__init__`, алиас `as`, вызов `Base(1)`) — запись есть, `where`, `how`, `scope`
+    файла; from-импорт; `m.Base` по импорту модуля `m`; у `Base[T]` — имя до `[`; импорт из `__init__.py` — по
+    реэкспорту до файла определения (Task 4.5a, те же 5 звеньев). Основа без адреса (`abc.ABC`, `object`,
+    `Protocol`, реэкспорт сверх 5 звеньев, алиас `as`, вызов `Base(1)`) — запись есть, `where`, `how`, `scope`
     равны None: `where: None` значит «адрес не разрешён», а не «не искали». Счётчика неразрешённых нет. У класса без
     основ — `[]`; у функции и метода — `None`. Глубина — один уровень: цепочки основ нет.
 
@@ -74,6 +90,8 @@ Post: `build_links(facts)` детерминирован: тот же `facts` -> 
 
 from __future__ import annotations
 
+import ast
+import functools
 import re
 from collections import defaultdict
 
@@ -83,10 +101,12 @@ __all__ = ["Links", "build_links"]
 
 TOO_GENERIC = "слишком общий протокол: меньше двух обязательных методов"
 _TEST_PATH = re.compile(r"(^|/)tests/|(^|/)(test_[^/]*|[^/]*_test|conftest)\.py$")
+_REEXPORT_HOPS = 5  # звено — один `__init__.py`, через который идёт реэкспорт (Task 4.5a, решение лида а)
 
 type _Sym = tuple[str, str]  # (путь, qualname)
 
 
+@functools.cache  # путь -> scope: ~108 тыс. записей на дереве, ~4,4 тыс. путей (Task 4.5a, бюджет Kill-2)
 def _scope(path: str) -> str:
     return "test" if _TEST_PATH.search(path) else "prod"
 
@@ -129,6 +149,10 @@ class Links:
         self._tests_by_name: dict[str, dict[str, list[tuple[str, int]]]] = {}  # файл -> имя -> тесты, его вызвавшие
         self._methods_of: dict[_Sym, list[str]] = {}  # класс -> имена прямых методов в порядке определения
         self._classes_with: dict[str, set[_Sym]] = defaultdict(set)  # неприватный метод -> классы с ним
+        self._params: dict[str, frozenset[str] | None] = {}  # сигнатура -> имена параметров; None — не разобрана
+        self._reexports: dict[tuple[str, str], _Sym | None] = {}  # (`__init__.py`, имя) -> определение или None
+        self._locals: dict[tuple[str, str], frozenset[str] | None] = {}  # (путь, enclosing) -> локальные имена
+        self._children: dict[str, dict[str, set[str]]] = {}  # путь -> qualname -> имена вложенных def/class
         self._build()
 
     # ------------------------------------------------------------------ построение
@@ -151,17 +175,19 @@ class Links:
                     if not name.startswith("_"):
                         self._classes_with[name].add(sym)
         for path, facts in self._facts.items():
-            from_names, modules = self._imports(index, path, facts)
-            self._index_calls(path, facts, from_names, modules)
-            self._index_subclasses(path, facts, from_names, modules)
+            from_names, modules, from_targets = self._imports(index, path, facts)
+            self._index_calls(path, facts, self._from_definitions(index, from_targets), modules)
+            self._index_subclasses(index, path, facts, from_names, modules)
             self._index_tests(path, facts)
 
     def _imports(
         self, index: ImportIndex, path: str, facts: FileFacts
-    ) -> tuple[dict[str, tuple[str, int]], dict[str, tuple[str, int]]]:
-        """Импорты файла: имена `from m import f` и модули (`import m`, `from pkg import mod`) -> (цель, строка)."""
+    ) -> tuple[dict[str, tuple[str, int]], dict[str, tuple[str, int]], dict[str, list[str]]]:
+        """Импорты файла: имена `from m import f` и модули (`import m`, `from pkg import mod`) -> (цель, строка);
+        третий словарь — все различные цели from-импортов имени в порядке записей (для двусмысленности)."""
         from_names: dict[str, tuple[str, int]] = {}
         modules: dict[str, tuple[str, int]] = {}
+        from_targets: dict[str, list[str]] = {}
         for rec in facts.imports:
             resolved = index.resolve(path, rec)
             if resolved.status != "internal":
@@ -183,11 +209,142 @@ class Links:
                         modules.setdefault(name, (target, rec.line))
                     else:
                         from_names.setdefault(name, (target, rec.line))
+                        targets = from_targets.setdefault(name, [])
+                        if target not in targets:
+                            targets.append(target)
                         if target != path:
                             self._used_by[(target, name)].append(
                                 (path, rec.line, _entry(path, rec.line, "import", "<module>"))
                             )
-        return from_names, modules
+        return from_names, modules, from_targets
+
+    def _reexport_targets(self, index: ImportIndex, path: str, name: str) -> list[str]:
+        """Файлы, откуда `__init__.py` `path` берёт имя `name` (`from m import name`, любой `kind`), без повторов."""
+        facts = self._facts.get(path)
+        targets: list[str] = []
+        if facts is None:
+            return targets
+        current = _module_name(path)
+        for rec in facts.imports:
+            if not rec.is_from or name not in rec.names:
+                continue
+            resolved = index.resolve(path, rec)
+            if resolved.status != "internal":
+                continue
+            base = resolve_relative(rec.level, rec.module, current, True) if rec.level else rec.module
+            for target, names in resolved.targets:
+                if name not in names or _module_name(target) == f"{base}.{name}":  # `from . import mod` — не имя
+                    continue
+                if target not in targets:
+                    targets.append(target)
+        return targets
+
+    def _follow_reexport(self, index: ImportIndex, init_path: str, name: str) -> tuple[str, str] | None:
+        """Реэкспорт `name` фасадом `init_path` -> `(файл определения, name)` или None, если адреса нет.
+
+        Звено — один `__init__.py`: в его фактах ищется `ImportRec` с этим именем любого `kind` (`lazy` в
+        `def __getattr__` по PEP 562 и во вспомогательной функции — тоже). Определение — имя верхнего уровня цели.
+        None: записи нет; цели записей различны; цель — не `__init__.py` и имя не определяет; цикл; звено сверх
+        `_REEXPORT_HOPS`. Ответ запоминается по `(init_path, name)`."""
+        key = (init_path, name)
+        if key in self._reexports:
+            return self._reexports[key]
+        found: _Sym | None = None
+        path, seen = init_path, set()
+        for _ in range(_REEXPORT_HOPS):
+            if path in seen or not _is_init(path):
+                break  # цикл или тупик: не фасад и имя не определяет
+            seen.add(path)
+            targets = self._reexport_targets(index, path, name)
+            if len(targets) != 1:
+                break  # записи нет или цели различны
+            if self._top(targets[0], name):
+                found = (targets[0], name)
+                break
+            path = targets[0]
+        self._reexports[key] = found
+        return found
+
+    def _from_definitions(self, index: ImportIndex, from_targets: dict[str, list[str]]) -> dict[str, _Sym | None]:
+        """Имя from-импорта файла -> определение `(путь, имя)` после реэкспорта `__init__.py`.
+
+        None — голый вызов имени не относится никому и считается в `call_sites_unresolved`: различных определений
+        >= 2 (двусмысленность) или фасад `__init__.py` адреса не дал. Имени нет в ответе — ни одна цель имя не
+        определяет и не фасад: вызов не считается нигде (как до Task 4.5a)."""
+        out: dict[str, _Sym | None] = {}
+        for name, targets in from_targets.items():
+            found: list[_Sym] = []
+            lost = False
+            for target in targets:
+                if self._top(target, name):
+                    sym: _Sym | None = (target, name)
+                elif _is_init(target):
+                    sym = self._follow_reexport(index, target, name)
+                    lost = lost or sym is None
+                else:
+                    sym = None
+                if sym is not None and sym not in found:
+                    found.append(sym)
+            if len(found) == 1:
+                out[name] = found[0]
+            elif found or lost:
+                out[name] = None
+        return out
+
+    def _params_of(self, d: DefFact) -> frozenset[str] | None:
+        """Имена всех параметров `def` по `DefFact.signature`; None — сигнатура не разбирается. Разбор — раз на
+        сигнатуру."""
+        sig = d.signature
+        if sig not in self._params:
+            names: frozenset[str] | None = None
+            try:
+                node = ast.parse(f"def _({sig.split(' -> ')[0]}): pass").body[0]
+            except (SyntaxError, ValueError):  # ValueError: нулевой байт в тексте
+                node = None
+            if isinstance(node, ast.FunctionDef):
+                a = node.args
+                every = [*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg]
+                names = frozenset(x.arg for x in every if x is not None)
+            self._params[sig] = names
+        return self._params[sig]
+
+    def _local_names(self, path: str, enclosing: str) -> frozenset[str] | None:
+        """Локальные имена в `enclosing`: параметры `def` цепочки охватывающих и имена `def`/`class`, вложенных в
+        функцию или метод цепочки (метод охватывающего класса — нет). None — у `def` цепочки сигнатура не
+        разобрана: локальным считается любое имя. Ответ запоминается по `(path, enclosing)`."""
+        key = (path, enclosing)
+        if key in self._locals:
+            return self._locals[key]
+        table = self._defs.get(path, {})
+        kids = self._children.get(path)
+        if kids is None:
+            kids = defaultdict(set)
+            for q in table:
+                parent, _, leaf = q.rpartition(".")
+                if parent:
+                    kids[parent].add(leaf)
+            self._children[path] = kids
+        names: set[str] | None = set()
+        parts = enclosing.split(".")
+        for i in range(len(parts), 0, -1):
+            q = ".".join(parts[:i])
+            d = table.get(q)
+            if d is None or d.kind == "class":
+                continue
+            params = self._params_of(d)
+            if params is None:
+                names = None
+                break
+            names |= params
+            names |= kids.get(q, set())
+        self._locals[key] = None if names is None else frozenset(names)
+        return self._locals[key]
+
+    def _shadowed(self, path: str, enclosing: str, name: str) -> bool:
+        """`name` внутри `enclosing` — локальное имя (`_local_names`). Без анализа потока: порядок объявления и
+        ветки `if` не учитываются."""
+        local = self._local_names(path, enclosing)
+        return local is None or name in local
 
     def _top(self, path: str, name: str) -> bool:
         d = self._defs.get(path, {}).get(name)
@@ -207,7 +364,7 @@ class Links:
         return None
 
     def _index_calls(
-        self, path: str, facts: FileFacts, from_names: dict[str, tuple[str, int]], modules: dict[str, tuple[str, int]]
+        self, path: str, facts: FileFacts, from_defs: dict[str, _Sym | None], modules: dict[str, tuple[str, int]]
     ) -> None:
         seen_module_use: set[tuple[str, str, int]] = set()
         for call in facts.calls:
@@ -215,17 +372,21 @@ class Links:
             if call.receiver is None:
                 if self._top(path, call.name):
                     target = (path, call.name)
-                elif call.name in from_names and self._top(from_names[call.name][0], call.name):
-                    target = (from_names[call.name][0], call.name)
+                elif call.name in from_defs:
+                    target = from_defs[call.name]  # None: двусмысленно или фасад без адреса -> unresolved
                 else:
                     continue  # голое имя без определения и from-импорта: не видно, не считается
+                if target is not None and self._shadowed(path, call.enclosing, call.name):
+                    target = None  # параметр или вложенный def/class: вызов локального имени
             elif call.receiver == "self":
                 cls = self._class_of(path, call.enclosing)
                 if cls is not None and f"{cls}.{call.name}" in self._defs[path]:
                     target = (path, f"{cls}.{call.name}")
             elif call.receiver in modules:
                 where, line = modules[call.receiver]
-                if self._top(where, call.name):
+                if self._top(where, call.name) and not self._shadowed(
+                    path, call.enclosing, call.receiver.split(".", 1)[0]
+                ):
                     target = (where, call.name)
                     if where != path and (where, call.name, line) not in seen_module_use:
                         seen_module_use.add((where, call.name, line))
@@ -238,12 +399,18 @@ class Links:
             self._calls[target].append((path, call.line, entry))
 
     def _resolve_base(
-        self, path: str, base: str, from_names: dict[str, tuple[str, int]], modules: dict[str, tuple[str, int]]
+        self,
+        index: ImportIndex,
+        path: str,
+        base: str,
+        from_names: dict[str, tuple[str, int]],
+        modules: dict[str, tuple[str, int]],
     ) -> tuple[str, str, str] | None:
         """Основа `base` класса из файла `path` -> `(файл основы, имя в нём, how)` или None, если адрес не разрешён.
 
         `Base[T]` берётся по имени до `[`; `m.Base` — по импорту модуля `m`; голое имя — по from-импорту либо как класс
-        своего файла (`how: "same-file"`, импорта нет). Имя должно быть объявлено в файле основы."""
+        своего файла (`how: "same-file"`, импорта нет). Имя должно быть объявлено в файле основы; импорт из
+        `__init__.py`, где имени нет, идёт по реэкспорту (`_follow_reexport`) — файл основы тогда файл определения."""
         core = base.split("[", 1)[0].strip()
         head, _, leaf = core.rpartition(".")
         hit = modules.get(head) if head else from_names.get(leaf)
@@ -254,18 +421,26 @@ class Links:
         else:
             return None
         if self._defs.get(target, {}).get(leaf) is None:
-            return None
+            followed = self._follow_reexport(index, target, leaf) if how == "import" else None
+            if followed is None:
+                return None
+            target = followed[0]
         return target, leaf, how
 
     def _index_subclasses(
-        self, path: str, facts: FileFacts, from_names: dict[str, tuple[str, int]], modules: dict[str, tuple[str, int]]
+        self,
+        index: ImportIndex,
+        path: str,
+        facts: FileFacts,
+        from_names: dict[str, tuple[str, int]],
+        modules: dict[str, tuple[str, int]],
     ) -> None:
         for d in self._defs[path].values():
             if d.kind != "class":
                 continue
             bases: list[dict] = []
             for base in d.bases:
-                resolved = self._resolve_base(path, base, from_names, modules)
+                resolved = self._resolve_base(index, path, base, from_names, modules)
                 entry = {"name": base, "where": None, "how": None, "scope": None}  # None: адрес не разрешён
                 if resolved is not None:
                     target, leaf, how = resolved
