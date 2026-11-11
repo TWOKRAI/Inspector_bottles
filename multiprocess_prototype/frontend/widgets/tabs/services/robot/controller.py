@@ -541,6 +541,7 @@ class RobotWidgetController:
         if not self._device_id:
             self._widget.set_status("Робот: устройство не выбрано.")
             return
+        self._link_ok = False  # ответ на опрос (или следующий пуш) снова пишет текст связи / итог park
         if self._park_text is None:  # итог «Остановить» не затираем
             self._widget.set_status("Опрос робота…")
         self._presenter.get_telemetry(self._device_id, self._on_telemetry_response)
@@ -549,6 +550,7 @@ class RobotWidgetController:
     def _on_telemetry_response(self, data: dict) -> None:
         """Обработчик ответа get_telemetry (pull)."""
         if not data or not data.get("telemetry"):
+            self._link_ok = False  # следующий живой пуш вернёт текст связи / итог park
             self._widget.set_status("Робот не отвечает (телеметрия пуста).")
             self._widget.set_mode_switch_enabled(False)
             return

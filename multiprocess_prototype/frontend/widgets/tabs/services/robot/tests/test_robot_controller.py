@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from collections import Counter
 from unittest.mock import MagicMock
 
 import pytest
@@ -629,7 +630,16 @@ def test_park_deadline_shows_no_result_text(qtbot, timeout_s, not_yet_s, latest_
 
 @pytest.mark.parametrize(
     "reply_extra",
-    [pytest.param({}, id="no_timeout_s"), pytest.param({"timeout_s": True}, id="bool_timeout_s")],
+    [
+        pytest.param({}, id="no_timeout_s"),
+        pytest.param({"timeout_s": True}, id="bool_timeout_s"),
+        pytest.param({"timeout_s": 0}, id="zero"),
+        pytest.param({"timeout_s": -1}, id="negative"),
+        pytest.param({"timeout_s": 61}, id="above_hub_ceiling"),
+        pytest.param({"timeout_s": "30"}, id="string"),
+        pytest.param({"timeout_s": None}, id="none"),
+        pytest.param({"timeout_s": float("nan")}, id="nan"),
+    ],
 )
 @pytest.mark.timeout(30)
 def test_park_deadline_fallback_when_timeout_missing(qtbot, monkeypatch, reply_extra) -> None:
@@ -726,3 +736,106 @@ def test_status_deleted_drops_leaf(qtbot) -> None:
     controller._on_telemetry_push(f"{_STATUS}.ts", time.time())
     assert widget._lbl_telemetry.text() == after_delete
     assert not widget._combo_mode.isEnabled()
+
+
+# --- T5.3e.6, ревью стадии 5 (раунд 1): сторожа на подписки, порядок срока, сброс при смене устройства ---
+
+
+def _ledger_controller(qtbot) -> tuple[RobotWidgetController, list[str], list[str]]:
+    """Контроллер на настоящем GuiStateBindings; списки ensure / release подписок."""
+    ensured: list[str] = []
+    released: list[str] = []
+    bindings = GuiStateBindings(
+        MagicMock(),
+        read_model=TelemetryReadModel(),
+        ensure_subscription=ensured.append,
+        release_subscription=released.append,
+    )
+    widget = RobotControlWidget()
+    qtbot.addWidget(widget)
+    controller = RobotWidgetController(widget, make_presenter(), bindings=bindings)
+    controller.set_device("robot_main")
+    assert ensured, "set_device('robot_main') не оформил подписок"
+    return controller, ensured, released
+
+
+def test_unbind_releases_every_subscription(qtbot) -> None:
+    controller, ensured, released = _ledger_controller(qtbot)
+    controller.unbind()
+    assert Counter(ensured) == Counter(released)
+
+
+def test_set_device_none_releases_every_subscription(qtbot) -> None:
+    controller, ensured, released = _ledger_controller(qtbot)
+    controller.set_device(None)
+    assert Counter(ensured) == Counter(released)
+
+
+@pytest.mark.timeout(30)
+def test_terminal_before_reply_not_overwritten_by_deadline(qtbot) -> None:
+    """Итог пришёл раньше ответа: срок взводится до _render_park, итог аннулирует его и не затирается текстом срока."""
+    widget, controller, presenter = make_park_controller(qtbot)
+    reply = press_park(widget, presenter)
+    controller._on_park_push(_PARK, {"seq": 1, "state": "done", "home": "moved", "reason": ""})
+    reply({"status": "ok", "accepted": True, "seq": 1, "timeout_s": 1})
+    t0 = time.monotonic()
+    assert widget._lbl_status.text() == _TXT_DONE
+    _wait_to(qtbot, t0, 4.6)
+    assert widget._lbl_status.text() == _TXT_DONE
+
+
+def test_set_device_resets_view_and_link_state(qtbot) -> None:
+    """Вид и признак связи прошлого устройства не переходят на новое."""
+    chain = _RealChain(qtbot)
+    chain.hub_merge(_hub_status(x=300.0, free=True), path=_STATUS)
+    assert chain.widget._lbl_status.text() == _TXT_LINK
+    assert chain.widget._combo_mode.isEnabled()
+    # в кэше robot_2 только quality и ts: без telemetry и free
+    chain.hub_merge({"quality": "good", "ts": time.time()}, path="devices.state.robot_2.status")
+    chain.controller.set_device("robot_2")
+    assert not chain.widget._combo_mode.isEnabled()  # free прошлого вида не перенесён
+    assert chain.widget._lbl_status.text() != _TXT_LINK
+    chain.hub_merge(_hub_status(x=111.0, free=True), path="devices.state.robot_2.status")
+    assert chain.widget._lbl_status.text() == _TXT_LINK  # переход в ok на новом устройстве снова пишет текст
+
+
+def test_set_device_resets_status_timestamp(qtbot, monkeypatch) -> None:
+    """Время последнего пуша прошлого устройства не даёт «Нет связи» на новом."""
+    chain = _RealChain(qtbot)
+    chain.hub_merge(_hub_status(), path=_STATUS)
+    chain.controller.set_device("robot_2")  # кэша robot_2 нет
+    real_time = time.time
+    monkeypatch.setattr(controller_module.time, "time", lambda: real_time() + 10.0)
+    chain.controller._check_stale()
+    assert "Нет связи" not in chain.widget._lbl_status.text()
+
+
+def test_stale_ts_then_fresh_push_restores_link_text(qtbot) -> None:
+    """Хаб жив, устройство замёрзло (ts встал): после свежего ts текст связи возвращается."""
+    chain = _RealChain(qtbot)
+    now = time.time()
+    chain.hub_merge(_hub_status(ts=now), path=_STATUS)
+    assert chain.widget._lbl_status.text() == _TXT_LINK
+    chain.hub_merge(_hub_status(ts=now - 10.0), path=_STATUS)
+    assert chain.widget._lbl_status.text().startswith("Нет связи с hub")
+    chain.hub_merge(_hub_status(ts=now + 1.0), path=_STATUS)
+    assert chain.widget._lbl_status.text() == _TXT_LINK
+
+
+def test_refresh_then_pull_response_restores_link_text(qtbot) -> None:
+    widget, controller, _presenter = make_park_controller(qtbot)
+    controller._on_telemetry_push(_STATUS, {**_TELEMETRY, "ts": time.time()})
+    assert widget._lbl_status.text() == _TXT_LINK
+    controller._on_refresh()
+    assert widget._lbl_status.text() == "Опрос робота…"
+    controller._on_telemetry_response({**_TELEMETRY, "ts": time.time()})
+    assert widget._lbl_status.text() == _TXT_LINK
+
+
+def test_empty_pull_response_then_live_push_restores_link_text(qtbot) -> None:
+    widget, controller, _presenter = make_park_controller(qtbot)
+    controller._on_telemetry_push(_STATUS, {**_TELEMETRY, "ts": time.time()})
+    controller._on_telemetry_response({})
+    assert widget._lbl_status.text() == "Робот не отвечает (телеметрия пуста)."
+    controller._on_telemetry_push(f"{_STATUS}.ts", time.time())
+    assert widget._lbl_status.text() == _TXT_LINK
