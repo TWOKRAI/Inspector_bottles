@@ -2,12 +2,13 @@
 
 **Состояние: сделано (Task 2.2 + Task 3.4 + Task 3.6 + Task 3.5b плана line-sim).**
 
-**Обновлено:** 2026-11-09 — Task R1: команда `scene.sequence` (подача дисков по списку) и ключ `sequence` в `scene.status`; формы `data`, ответы и порядок подачи — в `README.md` плагина (раздел «Подача дисков по списку»). Ранее: 2026-09-27 — редактор слоёв 1.1b (`.yaml` в `preset_path`) и 1.2a (команды `preset.get/commit/preview`,
+**Обновлено:** 2026-11-11 — C-87: энкодер из мира досчитывается по `mm_s` между батчами (потолок `stale_ms`), см. `DECISIONS.md` ADR-SCN-001. Ранее: 2026-11-09 — Task R1: команда `scene.sequence` (подача дисков по списку) и ключ `sequence` в `scene.status`; формы `data`, ответы и порядок подачи — в `README.md` плагина (раздел «Подача дисков по списку»). Ранее: 2026-09-27 — редактор слоёв 1.1b (`.yaml` в `preset_path`) и 1.2a (команды `preset.get/commit/preview`,
 горячая подмена фабрики). Ранее: 2026-09-23 — Task 3.6: фон-тайл едет с энкодером (с layer-render 1.3 фон задаётся только ключом `background_layers`; до этого — Task 3.4, заглушка-спрайт заменена движком `Services.line_sim`).
 
 | Что | Состояние |
 |---|---|
-| `plugin.py` — `SceneSourcePlugin` | есть: `configure`/`start`/`produce`, подписка `sim.belt.**` (sync=False, не тронуто Task 3.4), обе формы дельт, протухание → предупреждение (де-дублировано по `t`); движок line_sim (`ScenePreset`/`ObjectFactory`/`ObjectSpawner`/`SceneCompositor`), fallback на фон при недоступном каталоге, `sim.objects` в мир по смене состава |
+| `plugin.py` — `SceneSourcePlugin` | есть: `configure`/`start`/`produce`, подписка `sim.belt.**` (sync=False, не тронуто Task 3.4), обе формы дельт, досчёт энкодера по `mm_s` между батчами (C-87, потолок `stale_ms`), протухание → предупреждение (де-дублировано по `t`); движок line_sim (`ScenePreset`/`ObjectFactory`/`ObjectSpawner`/`SceneCompositor`), fallback на фон при недоступном каталоге, `sim.objects` в мир по смене состава |
+| Тесты C-87 (досчёт энкодера) | `tests/test_acceptance_c87_extrapolation.py` (tester, слепой, офлайн), `tests/test_acceptance_c87_live_step.py` (tester, живой шаг кадра, `LINE_SIM_LIVE=1`), `tests/test_scene_source_hazards_c87.py` (автор: гонка писатель/читатель с `sys.setswitchinterval`, де-дупликация предупреждения, clamp после меньшей дельты, bool не число) |
 | Тесты офлайн | `tests/test_scene_source_acceptance.py` (tester, Task 2.2, минимально обновлён Task 3.4 — см. блок правки в файле) — 4/4; `tests/test_scene_source_hazards.py` (автор) — 8/8 (Task 2.2: гонка старта/обе формы дельт/де-дублирование/конкурентность; Task 3.4: воспроизводимость по seed, падающая фабрика не роняет кадр, `sim.objects` только по смене состава, item без `sim_truth`) |
 | Тесты live | `apps/line_sim/tests/test_f2_task22_live.py` (`LINE_SIM_LIVE=1`) — прогонялось на Task 2.2; живой стенд с движком — шаг лида (не в этом коммите) |
 | Тесты Task 3.6 | `tests/test_scene_source_task_3_6.py` (tester) — нечитаемая текстура: 1 `log_error`, объекты живы; порядок каналов BGR; `tests/test_scene_source_hazards_3_6.py` (автор) — путь от корня репо при чужом CWD, битый файл |
