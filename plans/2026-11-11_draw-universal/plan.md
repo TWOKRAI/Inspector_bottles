@@ -2,8 +2,8 @@
 
 - **Slug:** draw-universal
 - **Дата:** 2026-11-11
-- **Статус:** DRAFT
-- **Plan review:** r1 CHANGES REQUESTED, 18 ([`review-plan-r1.md`](review-plan-r1.md)); r2 CHANGES REQUESTED, 6 блокеров + 7 мелких ([`review-plan-r2.md`](review-plan-r2.md)) — правки внесены, третьего раунда нет; ждёт владельца
+- **Статус:** APPROVED 2026-11-11
+- **Plan review:** CHANGES 2 (r1 — 18 ([`review-plan-r1.md`](review-plan-r1.md)), r2 — 6 блокеров + 7 мелких ([`review-plan-r2.md`](review-plan-r2.md)), правки внесены); владелец утвердил 2026-11-11
 - **Ветка:** feat/draw-universal
 
 ## Контекст
@@ -12,7 +12,7 @@
 `contour_draw`, `render_overlay` и подпись в `ml_inference`; кириллицу умеет только последнее. Решения владельца
 2026-11-11 — [handoff](../../docs/handoffs/2026-11-11_draw-architecture-to-plan.md) `:13-23`. Архитектура —
 [CTO r2](../../docs/reports/2026-11-11_draw-architecture-cto-r2.md) (главный), [CTO r1](../../docs/reports/2026-11-11_draw-architecture-cto.md)
-(контракты, замеры). План — только путь показа: Ф0–Ф3, Ф4 по желанию; из готового — [`design.md`](design.md) §2.
+(контракты, замеры). План — только путь показа: Ф0–Ф3, Ф4 по желанию, последней — Task 5.1 (отложено, В5); из готового — [`design.md`](design.md) §2.
 
 ## Цели
 
@@ -38,12 +38,12 @@
 
 | Этот план | Что |
 |---|---|
-| Владеет | `Services/draw` (фигуры, `lower`, cv2, шрифты, текст-патч, conformance, mapping/styles); `overlay_draw`; `ItemTemplate`/`get_path`/`RateGate` в SDK плагинов |
+| Владеет | `Services/draw` (фигуры, `lower`, cv2, шрифты, текст-патч, mapping/styles; conformance — 5.1); `overlay_draw`; `ItemTemplate`/`get_path`/`RateGate` в SDK плагинов |
 | Берёт | ничего: нижний слой группы |
 | Даёт | шрифты и текст-патч → layer-render Ф7; словарь фигур → разметка и layer-render Ф9; `ItemTemplate`/`RateGate` → DS-1 (`backlog.md:77`); `scene` → пары 5a |
-| Порядок | первым. Task 1.4 открывает DS-1 (∥ Ф2–Ф3; общий `dataset_circle_capture.yaml` — Task 2.2, не в одной волне). layer-render — после Ф1 (решение 9); dataset-annotation — после В2, DS-1 и Ф1 |
+| Порядок | первым. Task 1.4 открывает DS-1 (∥ Ф2–Ф3; общий `dataset_circle_capture.yaml` — Task 2.2, не в одной волне). layer-render — после Ф1 (решение 9); dataset-annotation — после DS-1 и Ф1 (В2 решён) |
 
-Пересечения с dataset-annotation (рекомендации — в В2–В4): истина меток — пара кадр + `.json` (решение 8 новее
+Пересечения с dataset-annotation (решения В2–В4 — decisions log): истина меток — пара кадр + `.json` (решение 8 новее
 `dataset-annotation/plan.md:73-74`); фигура — пиксели `Services/draw` (r1 `:60-66`), доли YOLO только в экспорте; экспорт —
 `Services/draw/export.py`, снимок датасета — сервис датасета; интерактив на канве — layer-render; обучение — на чистом
 кадре (`dataset-annotation/plan.md:100`).
@@ -53,9 +53,10 @@
 
 ## Бюджет
 
-Оценка: **участники × ~56k стартового контекста + работа**. Ф0–Ф3 — **~6,2M токенов (5,4–7,0M), ~49 запусков**
-(в первой редакции 5,0M / ~41); Ф4 ~1,1M. Таблица — [`amendments.md`](amendments.md) §1. Задача за 2× своей доли — стоп и
-вопрос владельцу; пересчёт — записью в `amendments.md` после каждой фазы.
+Оценка: **участники × ~56k стартового контекста + работа**. Ф0–Ф3 — **~5,95M токенов (5,2–6,7M), ~46 запусков**
+(было ~6,2M / ~49: часть 1.3 и 1.4 ушла в 5.1); Task 5.1 отдельно **~0,5M, 5 запусков**; Ф4 ~1,05M. Таблица —
+[`amendments.md`](amendments.md) §1–2. Задача за 2× своей доли — стоп и вопрос владельцу; пересчёт — записью в
+`amendments.md` после каждой фазы.
 
 ## Порядок выполнения
 
@@ -67,11 +68,11 @@
 
 ### Phase 1: ядро `Services/draw`
 
-**Цель фазы:** `overlay_draw` рисует через ядро; текст, шрифты, реестр бэкендов, conformance; помощники SDK.
+**Цель фазы:** `overlay_draw` рисует через ядро; текст, шрифты, реестр бэкендов; помощники SDK.
 
 - Task 1.1: ядро: сцена → `lower` → cv2; `scene_from_overlay`; `overlay_draw` через ядро **[VERTICAL SLICE]** [PENDING] (после 0.1)
-- Task 1.2: текст альфа-патчем, `FontRegistry`, встроенный шрифт (решение В1) [PENDING] (после 1.1)
-- Task 1.3: `rect`, `polyline`, заливка с альфой; правила реестра бэкендов; набор conformance [PENDING] (после 1.2)
+- Task 1.2: текст альфа-патчем, `FontRegistry`, встроенный шрифт (В1: да) [PENDING] (после 1.1)
+- Task 1.3: `rect`, `polyline`, заливка с альфой; правила реестра бэкендов [PENDING] (после 1.2)
 - Task 1.4: `ItemTemplate`, `get_path`, `RateGate` в SDK плагинов framework [PENDING] (после 0.1; ∥ 1.1–1.3)
 
 ### Phase 2: mapping и замена `circle_draw` / `contour_draw`
@@ -95,6 +96,12 @@
 
 - Task 4.1: фигура `mask` патчем по рамке маски [PENDING] (после 1.3)
 - Task 4.2: топологии `inspection_basic` / `inspection_full` на `overlay_draw` [PENDING] (после 4.1, 2.1)
+
+### Phase 5: отложенное (В5) — последней, даже если Ф4 не запускалась
+
+**Цель фазы:** набор conformance под второй бэкенд и фильтры `bucket`/`safe`.
+
+- Task 5.1: набор conformance (`check_backend`, сцены) и фильтры `bucket`/`safe` [PENDING] (последняя; после 1.3, 1.4, 4.2)
 
 ## Гейты
 
@@ -131,31 +138,21 @@
 
 ## Открытые вопросы
 
-- [ ] **В1 (r2 №3).** Класть DejaVu Sans и Sans Bold (1,46 МБ, `.venv/lib/python3.12/site-packages/matplotlib/mpl-data/fonts/ttf/`,
-  лицензия `LICENSE_DEJAVU` — лид цитирует в вопросе) в `Services/draw/fonts/`? Спрашивается **при одобрении плана**,
-  параллельно с Ф0, 1.1, 1.4 (они не ждут; 1.2 ждёт). Умолчание — да. «Нет» = только системный шрифт (список как
-  `_FONT_CANDIDATES`, `ml_inference/plugin/plugin.py:40-45`); реестр и `data/fonts/` остаются, `fonts/` не создаётся.
-  Видимо: вид и ширина подписей зависят от машины (DejaVu Bold 252 px, Arial Bold 200 px, r2 `:197`). Поправка «нет»
-  меняет ровно: 1.2 шаги 0 и 1 (нет встроенных `dejavu-*` и файла `DEFAULT_FONT`; задача стартует); 3.1 `styles` — без
-  `font` (системный шрифт); пин текста — с допуском. Запись — лид, в `amendments.md`. — владелец
-- [ ] **В2.** Сведение `dataset-annotation` и `Services/labeling` (таблица выше). Рекомендация: один пакет; план
-  dataset-annotation пересобрать на паре и фигурах `draw` после DS-1. Блокирует только dataset-annotation. — владелец
-- [ ] **В3 (O6, O7).** Экспорт для `ml_train` и YOLO/COCO планируют трое: layer-render (`plan.md:156-157`), dataset-annotation
-  (`phase-4-quality-export.md:108`), CTO. Рекомендация: перевод фигур — одна функция в `draw/export.py`; раскладка папок —
-  сервис датасета. Задач этого плана не блокирует. — владелец
-- [ ] **В4 (O8).** Сбор кадров: новый `dataset_capture` (`dataset-annotation/phase-3-capture.md:18-20`) или `frame_saver` с
-  DS-1 (`backlog.md:77`). Рекомендация: `frame_saver`. Задач этого плана не блокирует. — владелец
-- [ ] **В5 (ревью r1, п. 16).** Оставить ли в плане набор conformance 1.3 под второй бэкенд (`check_backend`, `exact_as`,
-  `reference=`, `auto`, три фейковых бэкенда, ≥ 8 сцен) и фильтры `bucket`/`safe` 1.4 (только DS-1, плана нет) или отложить?
-  Ревью (ponytail): отложить — второй бэкенд не раньше Ф6, ценность для cv2 (двойное смешивание, защита вне рамки) — 2–3
-  пиксельных теста, фильтры — в DS-1. CTO (r1 §5; решения владельца 2, 6): оставить — набор есть контракт сменной
-  реализации, фильтры идут в общий помощник сразу. `auto` — [cv2], остаётся при любом ответе. Не решено; бюджет при
-  «отложить» не пересчитан. Точка решения — при одобрении плана, вместе с В1. — владелец
+- [x] **В1 (r2 №3).** Класть DejaVu Sans и Sans Bold (1,46 МБ) в `Services/draw/fonts/`? → решено, см. decisions log.
+- [x] **В2.** Сведение `dataset-annotation` и `Services/labeling`: один пакет? → решено, см. decisions log.
+- [x] **В3 (O6, O7).** Перевод фигур в YOLO/COCO — `draw/export.py`, раскладка папок — сервис датасета? → решено, см. decisions log.
+- [x] **В4 (O8).** Сбор кадров: `frame_saver` вместо нового `dataset_capture`? → решено, см. decisions log.
+- [x] **В5 (ревью r1, п. 16).** Оставить conformance 1.3 и фильтры `bucket`/`safe` 1.4 или отложить? → решено, см. decisions log.
 
 ## Решения (decisions log)
 
 - **2026-11-11:** 9 задач на Ф0–Ф3 и 2 на Ф4 вместо фаз 0–6, остальное — «Следующие планы» (владелец: «план не раздувать»).
 - **2026-11-11:** старые плагины — эталон для литералов sha256 до правки, не оракул в тестах.
+- **2026-11-11, владелец, В1:** да — DejaVu Sans и Sans Bold в `Services/draw/fonts/`; Task 1.2 не ждёт ответа.
+- **2026-11-11, владелец, В2:** да — один пакет (dataset-annotation + `Services/labeling`); блокирует только dataset-annotation.
+- **2026-11-11, владелец, В3:** да — фигура → YOLO/COCO в `Services/draw/export.py`, раскладка папок — в сервисе датасета.
+- **2026-11-11, владелец, В4:** да — `frame_saver`; «можно переименовать, если нужно будет».
+- **2026-11-11, владелец, В5:** да, но отложить на самый потом — conformance и `bucket`/`safe` остаются в плане, вынесены из 1.3, 1.4, 4.1 в последнюю Task 5.1; бюджет — `amendments.md` §2.
 
 ## Итог
 

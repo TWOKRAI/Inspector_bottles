@@ -15,7 +15,7 @@
 | `backends.py` | `register_backend`, `get_backend`, `available_backends`, `Cv2Backend` | 1.1, 1.3 |
 | `fonts.py`, `fonts/` | `FontInfo`, `FontRegistry`, `DEFAULT_FONT = "dejavu-bold"` — r2 `:178-193` | 1.2 |
 | `text.py` | `PilTextRasterizer`: строка → альфа-маска uint8, кэш строк | 1.2 |
-| `conformance.py` | сцены набора и `check_backend(backend) -> list[str]` | 1.3 |
+| `conformance.py` | сцены набора и `check_backend(backend) -> list[str]` | 5.1 (последняя) |
 | `mapping.py` | `MappingRule`, `compile_rules`, `build_scene` | 2.1 |
 
 Две границы данных (r2 §4, строка про «сцену»): **сцена** — JSON-данные, идёт между процессами (inline, это
@@ -33,15 +33,14 @@
   тихо становится симулятором).
 - `auto` разрешается один раз при `configure`; имя — в лог и в регистр только для чтения `active_backend` (2.1).
 
-### 1.2 Conformance (r1 `:161`, r2 `:159-163`)
+### 1.2 Conformance — Task 5.1 (r1 `:161`, r2 `:159-163`)
 
-Объём — на выбор владельца (пункт 16 ревью r1): служит только второму бэкенду из Ф6 — `check_backend`, `exact_as`,
-`reference=`, три поддельных бэкенда, сцены сверх минимума (`auto` — [cv2], нужен умолчанию 2.1); на одном cv2 нужны 3 пиксельных теста (двойное
-смешивание, мусор вне рамки, градиент покрытия). Разметка `[Ф6]`/`[cv2]` — в `tasks/1.3.md`, «Отложить» не требует
-перепланирования, кроме 4.1: шаг 5 и conformance-RED убираются.
+Отложено в Task 5.1 (последняя задача плана; В5, владелец 2026-11-11): служит второму бэкенду из Ф6 —
+`check_backend`, `exact_as`, `reference=`, три поддельных бэкенда, сцены сверх минимума. На одном cv2 Task 1.3 держит
+3 пиксельных теста (двойное смешивание, мусор вне рамки, градиент покрытия); `auto` — в 1.3.
 
 - Вне объединения рамок фигур (с запасом на толщину) пиксели побайтно равны входу.
-- Внутри — покрытие и цвет с допуском. Допуски CTO (IoU 0,95) не откалиброваны: литералы ставит тестер Task 1.3.
+- Внутри — покрытие и цвет с допуском. Допуски CTO (IoU 0,95) не откалиброваны: литералы ставит тестер Task 5.1.
 - Бэкенд с `caps.exact_as` сравнивается с эталонным побайтно.
 - В наборе — пересекающиеся полупрозрачные фигуры: ROI-вариант CTO смешал пересечение дважды (расхождение 61 уровень).
 - В наборе — патч с градиентной маской 0..255 (сглаженный край): бинарный бэкенд внутри рамки даёт другой средний цвет.
@@ -50,9 +49,9 @@
 ### 1.3 Помощники SDK (r2 §2.4–2.5)
 
 Место — `multiprocess_framework/modules/process_module/plugins/item_template.py` и `rate_gate.py`, экспорт из
-`plugins/__init__.py` (сегодня 59 строк, `__all__` с 33-й). Грамматика — таблица r2 `:209-217`; фильтры `bucket`,
-`default`, `safe`. Только ключи dict и целые индексы списка, без атрибутов и выражений. `RateGate(max_fps)`, 0 —
-выключено. Потребитель вне плана — DS-1 (`plans/queue/backlog.md:77-107`): диапазон DS-1 = фильтр `|bucket=N`.
+`plugins/__init__.py` (сегодня 59 строк, `__all__` с 33-й). Грамматика — таблица r2 `:209-217`; фильтр `default`
+(1.4); `bucket`, `safe` — Task 5.1. Только ключи dict и целые индексы списка, без атрибутов и выражений. `RateGate(max_fps)`, 0 —
+выключено. Потребитель вне плана — DS-1 (`plans/queue/backlog.md:77-107`): диапазон DS-1 = `|bucket=N` (5.1).
 
 ### 1.4 Операция `patch` (Task 1.2, 1.3)
 
@@ -77,7 +76,7 @@
 | маска, рамки, `area=` | `Plugins/render/render_overlay/plugin.py:97-163` | правила `mask`, `rect` (4.1, 4.2) |
 | реестр бэкендов | `Services/ml_inference/engine.py:28-38` | `backends.py` (1.1, 1.3) |
 | правка `list[dict]` в GUI | `multiprocess_prototype/frontend/forms/factory/kinds.py:171-173` (JSON-редактор) | регистры `mapping`, `styles` (2.1) |
-| DejaVu и лицензия | `.venv/lib/python3.12/site-packages/matplotlib/mpl-data/fonts/ttf/` (`DejaVuSans.ttf`, `DejaVuSans-Bold.ttf`, `LICENSE_DEJAVU`) | `Services/draw/fonts/` (1.2, после В1) |
+| DejaVu и лицензия | `.venv/lib/python3.12/site-packages/matplotlib/mpl-data/fonts/ttf/` (`DejaVuSans.ttf`, `DejaVuSans-Bold.ttf`, `LICENSE_DEJAVU`) | `Services/draw/fonts/` (1.2; В1 — «да») |
 
 Тесты `overlay_draw`: 30 функций `def test_` в 4 файлах (`grep -c`); в handoff — 26. Число для приёмки берёт
 прогон на стадии 0 Task 1.1.
@@ -112,9 +111,6 @@
   (`cv2.putText`), подпись `ml_inference` — Arial Bold на Windows (`plugin.py:41-46`). После Ф1/Ф3 — DejaVu через
   FreeType. Ширина строки 22 px: DejaVu Bold 252 px, Arial Bold 200 px (r2 `:197`). Сравнение ширины — только на
   встроенном шрифте.
-- **В1 «нет».** DejaVu в репозиторий не кладём: реестр и `data/fonts/` остаются, по умолчанию — системный шрифт;
-  вид и ширина подписи зависят от машины, тесты текста — с допуском (шаг 0 Task 1.2 правится записью в `amendments.md`).
-  Поправка «нет»: нет встроенных `dejavu-*` и файла `DEFAULT_FONT`, шрифт системный, пин-тест текста — с допуском.
 - **Размер шрифта из `label_scale`.** Hershey-масштаб не равен px. Правило по умолчанию (`font_px` из строки стиля,
   иначе формула Task 1.2) — подбор глазами на стенде; число фиксирует лид на стадии 4.
 - **`org` и `anchor`.** `cv2.putText` ставит `org` в левый нижний угол, `anchor` патча — левый верхний: подписи точек
