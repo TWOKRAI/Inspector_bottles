@@ -159,3 +159,7 @@ created_utc: <iso>
 - Часть 1: `Why:` сбор датасета; `Layer: mixed` (plugins+prototype); `Refs: plans/dataset-circle-capture.md`.
 - Часть 2: `Layer: mixed`; `Refs: plans/camera-robot-calibration.md`.
 - Решения: crop из ROI; триггер `enter_zone`; калибровка — гомография по 5 точкам, энкодер отдельным шагом, оператор jog'ом наводит робота.
+
+## Связь с DS-1 (2026-11-11)
+
+[`dataset-sidecar-truth`](2026-11-11_dataset-sidecar-truth/plan.md) расширяет `frame_saver` (регистры `sidecar_keys`, `sidecar_source`; DEFERRED до решения владельца DS-В4 — `save_when`, `min_free_mb`, `subfolder_template`) и берёт `sidecar` от `center_crop` без правки. Умолчания новых регистров дают прежний `.json`: рецепт `dataset_circle_capture.yaml` не меняется (приёмка DS-1 Task 1.1a). Пересечение O8 — [`queue/group-draw-dataset.md`](queue/group-draw-dataset.md).
