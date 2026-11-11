@@ -18,6 +18,7 @@ from scripts.atlas import store
 from scripts.atlas.adapters.code import CodeAdapter
 from scripts.atlas.adapters.commits import CommitsAdapter
 from scripts.atlas.adapters.modules import ModulesAdapter
+from scripts.atlas.adapters.parse import ParseAdapter
 from scripts.atlas.adapters.plans import PlansAdapter
 from scripts.atlas.rules import RulesAdapter
 from scripts.atlas.schema import Adapter, AdapterOutput, BuildContext
@@ -25,7 +26,14 @@ from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
 
 __all__ = ["ADAPTERS", "CORE_VERSION", "SCHEMA_VERSION", "build", "code_fingerprint", "fingerprint", "to_json"]
 
-ADAPTERS: tuple[Adapter, ...] = (ModulesAdapter(), PlansAdapter(), CommitsAdapter(), CodeAdapter(), RulesAdapter())
+ADAPTERS: tuple[Adapter, ...] = (
+    ModulesAdapter(),
+    PlansAdapter(),
+    CommitsAdapter(),
+    CodeAdapter(),
+    RulesAdapter(),
+    ParseAdapter(),
+)
 CORE_VERSION = "1"
 SCHEMA_VERSION = 1
 

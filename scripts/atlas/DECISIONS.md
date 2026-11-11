@@ -110,6 +110,7 @@ CTO `plans/2026-10-04_atlas/research/CTO_VERDICT.md`. Серия ATL — пак�
 | `MUTATION_BELOW` | module | балл ниже порога — выключена до калибровки |
 | `DOC_STALE` | doc | долг свежести выше порога (порог — 1.4 по замеру) |
 | `RESULT_FORM` | result | итог `tasks/<id>.result.md` не по форме 0.7: нет раздела `## T` из семи обязательных, раздел абзацем `**T:**` / `**T.**`, пустой раздел или `## Не проверено` со словом «нет» (`scripts/atlas/result_form.py`); **warning**; узел `result:<slug>#<id>`, `detail` — имена нарушенных разделов через `,`, `source` — путь итога (Task 1.9a) |
+| `FILE_NOT_PARSED` | file | нетестовый `.py` слоя framework, services или plugins не разобран: размер > `MAX_BLOB_BYTES` (`BlobTooLarge`), не utf-8 (`UnicodeDecodeError`) или `ast.parse` упал (`SyntaxError`); **warning** (blocking — по слову владельца после замера шума); узел `file:<путь>`, `detail` — имя класса исключения, `source` — путь; пути из `tree.oids()` (symlink не читается), путь с `\n` пропускается; `v2_error` не считается; `map`/`ref` по-прежнему пишут «не искали» (`scripts/atlas/adapters/parse.py`, Task B7) |
 
 «Дифф» для `PRE_POST_MISSING` — `git diff <merge-base(main_ref, head)> <head>`; на самом `main` (head == merge-base)
 множество пусто по построению. Считает его адаптер интерфейсов: ядро передаёт адаптеру `BuildContext{tree, base}`,
