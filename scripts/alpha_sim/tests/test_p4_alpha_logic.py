@@ -335,7 +335,7 @@ _BREAKS = [
     ),
     pytest.param(_arg(4, 7, 4400), ("row", 7, "ARGS[7]"), id="args7_job5"),
     pytest.param(_arg(4, 9, 64536), ("row", 7, "ARGS[9]"), id="args9_job5"),
-    pytest.param(_sub(6, "r60.0°", "r50.0°"), ("row", 7, "r"), id="r_line7"),
+    pytest.param(_sub(6, "r60.0°", "r40.0°"), ("row", 7, "r"), id="r_line7"),
     pytest.param(_arg(0, 6, 3300), ("row", 1, "ARGS[6]"), id="args6_job1"),
     pytest.param(_jobf(0, "argc", 9), ("row", 1, "argc"), id="argc_job1"),
     pytest.param(_jobf(0, "res_status", 0), ("row", 1, "res_status"), id="res_status_job1"),
@@ -403,34 +403,34 @@ def test_case_b_feed_checks_letter_only_not_angle() -> None:
 
 
 _EDGES = [
-    # окно забора §2.8: px ∈ [454.9, 461.5], py ∈ [−344.0, −342.0]
+    # окно забора (временно расширено, решение владельца 2026-11-11): px ∈ [454.9, 462.0], py ∈ [−344.0, −340.0]
     pytest.param(_sub(0, "взять(458.2,", "взять(454.9,"), True, "pick", id="pick_x_lo_in"),
     pytest.param(_sub(0, "взять(458.2,", "взять(454.8,"), False, "pick", id="pick_x_lo_out"),
-    pytest.param(_sub(0, "взять(458.2,", "взять(461.5,"), True, "pick", id="pick_x_hi_in"),
-    pytest.param(_sub(0, "взять(458.2,", "взять(461.6,"), False, "pick", id="pick_x_hi_out"),
+    pytest.param(_sub(0, "взять(458.2,", "взять(462.0,"), True, "pick", id="pick_x_hi_in"),
+    pytest.param(_sub(0, "взять(458.2,", "взять(462.1,"), False, "pick", id="pick_x_hi_out"),
     pytest.param(_sub(0, "-343.0)", "-344.0)"), True, "pick", id="pick_y_lo_in"),
     pytest.param(_sub(0, "-343.0)", "-344.1)"), False, "pick", id="pick_y_lo_out"),
-    pytest.param(_sub(0, "-343.0)", "-342.0)"), True, "pick", id="pick_y_hi_in"),
-    pytest.param(_sub(0, "-343.0)", "-341.9)"), False, "pick", id="pick_y_hi_out"),
-    # r ∈ wrap180(0 − подача) ± 5,0; диск 1 — подача 0°
-    pytest.param(_sub(0, "r0.0°", "r5.0°"), True, "r", id="r_hi_in"),
-    pytest.param(_sub(0, "r0.0°", "r-5.0°"), True, "r", id="r_lo_in"),
-    pytest.param(_sub(0, "r0.0°", "r5.1°"), False, "r", id="r_hi_out"),
-    pytest.param(_sub(0, "r0.0°", "r-5.1°"), False, "r", id="r_lo_out"),
-    # ARGS[2] ∈ 4549…4615, ARGS[3] ∈ 62096…62116
+    pytest.param(_sub(0, "-343.0)", "-340.0)"), True, "pick", id="pick_y_hi_in"),
+    pytest.param(_sub(0, "-343.0)", "-339.9)"), False, "pick", id="pick_y_hi_out"),
+    # r ∈ wrap180(0 − подача) ± 15,0 (временно); диск 1 — подача 0°
+    pytest.param(_sub(0, "r0.0°", "r15.0°"), True, "r", id="r_hi_in"),
+    pytest.param(_sub(0, "r0.0°", "r-15.0°"), True, "r", id="r_lo_in"),
+    pytest.param(_sub(0, "r0.0°", "r15.1°"), False, "r", id="r_hi_out"),
+    pytest.param(_sub(0, "r0.0°", "r-15.1°"), False, "r", id="r_lo_out"),
+    # ARGS[2] ∈ 4549…4620, ARGS[3] ∈ 62096…62136 (временно)
     pytest.param(_arg(0, 2, 4549), True, "ARGS[2]", id="args2_lo_in"),
     pytest.param(_arg(0, 2, 4548), False, "ARGS[2]", id="args2_lo_out"),
-    pytest.param(_arg(0, 2, 4615), True, "ARGS[2]", id="args2_hi_in"),
-    pytest.param(_arg(0, 2, 4616), False, "ARGS[2]", id="args2_hi_out"),
+    pytest.param(_arg(0, 2, 4620), True, "ARGS[2]", id="args2_hi_in"),
+    pytest.param(_arg(0, 2, 4621), False, "ARGS[2]", id="args2_hi_out"),
     pytest.param(_arg(0, 3, 62096), True, "ARGS[3]", id="args3_lo_in"),
     pytest.param(_arg(0, 3, 62095), False, "ARGS[3]", id="args3_lo_out"),
-    pytest.param(_arg(0, 3, 62116), True, "ARGS[3]", id="args3_hi_in"),
-    pytest.param(_arg(0, 3, 62117), False, "ARGS[3]", id="args3_hi_out"),
-    # ARGS[9] для 0°: 64486…64586 включительно
-    pytest.param(_arg(0, 9, 64486), True, "ARGS[9]", id="args9_lo_in"),
-    pytest.param(_arg(0, 9, 64485), False, "ARGS[9]", id="args9_lo_out"),
-    pytest.param(_arg(0, 9, 64586), True, "ARGS[9]", id="args9_hi_in"),
-    pytest.param(_arg(0, 9, 64587), False, "ARGS[9]", id="args9_hi_out"),
+    pytest.param(_arg(0, 3, 62136), True, "ARGS[3]", id="args3_hi_in"),
+    pytest.param(_arg(0, 3, 62137), False, "ARGS[3]", id="args3_hi_out"),
+    # ARGS[9] для 0°: 64386…64686 включительно (временно, ±150)
+    pytest.param(_arg(0, 9, 64386), True, "ARGS[9]", id="args9_lo_in"),
+    pytest.param(_arg(0, 9, 64385), False, "ARGS[9]", id="args9_lo_out"),
+    pytest.param(_arg(0, 9, 64686), True, "ARGS[9]", id="args9_hi_in"),
+    pytest.param(_arg(0, 9, 64687), False, "ARGS[9]", id="args9_hi_out"),
 ]
 
 
@@ -494,8 +494,8 @@ def test_cases_d_c_literals() -> None:
 # --- таблица CASES (Д4) --------------------------------------------------------------------------------------------
 
 _A7 = {0: 61136, 1: 62236, 2: 63336, 3: 64436, 4: 0, 5: 1100, 6: 2200, 7: 3300, 8: 4400}
-_WIN = {0: (64486, 64586), 30: (64186, 64286), 60: (63886, 63986), 90: (63586, 63686),
-        300: (65086, 65186), 330: (64786, 64886)}  # fmt: skip
+_WIN = {0: (64386, 64686), 30: (64086, 64386), 60: (63786, 64086), 90: (63486, 63786),
+        300: (64986, 65286), 330: (64686, 64986)}  # fmt: skip
 
 
 def _expects(spec):
@@ -596,11 +596,13 @@ def test_angle_report_ignores_zero_and_straight_discs_and_edge() -> None:
     # диски с подачей 0° и 180° в вердикте не участвуют: Р0 с мусорным углом сети не портит «совпала»
     assert L.angle_report([("Р", 0, 100.0), ("Е", 30, 30.4)]).verdict == "совпала"
     assert L.angle_report([("Р", 180, 10.0), ("Е", 30, 30.4)]).verdict == "совпала"
-    # граница |Δ| ≤ 5,0: ровно 5,0 — «совпала», 5,1 — «иное» (Δинв = 65,1)
-    assert L.angle_report([("Е", 30, 35.0)]).verdict == "совпала"
-    assert L.angle_report([("Е", 30, 35.1)]).verdict == "иное"
+    # граница |Δ| ≤ 15,0 (временно): 5,1 и 15,0 — «совпала», 15,1 — «иное»
+    assert L.angle_report([("Е", 30, 35.1)]).verdict == "совпала"
+    assert L.angle_report([("Е", 30, 45.0)]).verdict == "совпала"
+    assert L.angle_report([("Е", 30, 45.1)]).verdict == "иное"
+    assert L.angle_report([("Е", 30, 30.4), ("И", 60, 74.0)]).verdict == "совпала"
     # одна пара не из совпавших ломает вердикт «все»
-    assert L.angle_report([("Е", 30, 30.4), ("И", 60, 70.0)]).verdict == "иное"
+    assert L.angle_report([("Е", 30, 30.4), ("И", 60, 80.0)]).verdict == "иное"
 
 
 # --- RED 7 ---------------------------------------------------------------------------------------------------------

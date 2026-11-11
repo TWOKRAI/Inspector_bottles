@@ -451,7 +451,7 @@ def _d_missing_m() -> dict:
 def test_g11a_feed_angle_noise_passes_but_wrong_letter_fails() -> None:
     inp = TL._b_inputs()
     TL._sub(2, "диск 'Е' 30.0°", "диск 'Е' 33.0°")(inp)  # сеть +3° от подачи
-    TL._sub(2, "r-30.0°", "r-33.0°")(inp)  # r в окне −30 ± 5
+    TL._sub(2, "r-30.0°", "r-33.0°")(inp)  # r в окне ±15 (временно)
     res = TL._judge("B", inp)
     assert res.ok is True, [r for r in res.rows if not r.ok]
     assert "Δугла +3.0°" in res.rows[2].observed
@@ -509,24 +509,16 @@ def _keys(reasons: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def test_g11d_real_stand_dump_b_and_d() -> None:
-    # B: те же FAIL по окнам, что в alpha_run2.out (литералы со стенда), без «feed подано … сеть …» по углам
+    # B: со стенда 2026-11-10 (pick y -340.9…-343.2, ARGS[2] 4617, ARGS[3] до 62132, Δугла до 11.9°) —
+    # в расширенных окнах (решение владельца 2026-11-11) все строки проходят; вернуть красные при возврате окон
     res_b = _judge_fixture("B", 0)
     got = {r.index: _keys(r.reasons) for r in res_b.rows if not r.ok}
-    assert got == {
-        3: ("pick", "ARGS[3]"),
-        4: ("pick", "ARGS[3]"),
-        5: ("pick", "ARGS[3]"),
-        7: ("r", "ARGS[9]"),
-        8: ("pick", "r", "ARGS[3]", "ARGS[9]"),
-        9: ("pick", "ARGS[3]"),
-        11: ("pick", "r", "ARGS[2]", "ARGS[3]", "ARGS[9]"),
-        12: ("pick", "r", "ARGS[3]", "ARGS[9]"),
-    }
+    assert got == {}
     assert not any("feed" in reason for r in res_b.rows for reason in r.reasons)
     assert all(c.ok for c in res_b.checks)
     assert len(res_b.pairs) == 12
     rep = L.angle_report(list(res_b.pairs))
-    assert rep.verdict == "иное"  # шум сети до 12°: все |Δ| ≤ 5 не выполнено
+    assert rep.verdict == "совпала"  # шум сети до 12°: в окне ±15 (временно); при ±5 было бы «иное»
     assert rep.n_used == 9  # Р0, А0, Б0 не участвуют
     assert rep.median_delta == pytest.approx(1.6, abs=0.05)
     assert rep.max_abs_delta == pytest.approx(11.9, abs=0.05)
