@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import statistics
 import subprocess
@@ -49,14 +50,21 @@ _SHELL_PUNCTUATION = set("();<>|&")
 
 
 def _has_shell_syntax(command):
-    """Есть ли в команде синтаксис оболочки (`|`, `>`, `2>&1`, `&&`, `;`, `$(..)`, обратные кавычки, `$VAR`)."""
-    if "`" in command or "$" in command:
+    """Нужна ли оболочка, чтобы выполнить команду как агент: повтор без неё был бы другим вызовом.
+
+    Да: операторы `| > < & && ; ( )` и `2>&1`, подстановки `$..`, обратные кавычки, glob `* ? [`, `~` в начале слова,
+    перевод строки, `#`-комментарий, присваивание `VAR=..` перед командой, незакрытая кавычка. Нет: слова, кавычки,
+    дефисы, точки, слэши. Ошибка в сторону «да» безопасна (вызов станет «неизвестным»), в сторону «нет» — нет.
+    """
+    if any(char in command for char in "`$*?[\n") or re.search(r"(^|\s)#", command):
         return True
     try:
         tokens = list(shlex.shlex(command, posix=True, punctuation_chars=True))
     except ValueError:  # незакрытая кавычка: как оболочка это не разобрать
         return True
-    return any(token and set(token) <= _SHELL_PUNCTUATION for token in tokens)
+    if tokens and re.match(r"[A-Za-z_]\w*=", tokens[0]):
+        return True
+    return any(token.startswith("~") or (token and set(token) <= _SHELL_PUNCTUATION) for token in tokens)
 
 
 def _atlas_texts(repeat):

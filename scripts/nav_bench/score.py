@@ -12,9 +12,11 @@
           лишает hit (при ``sure`` ответ — ``false``, иначе ``miss``).
           «Адрес» здесь — одна заявка «путь + строка или диапазон» (см. грамматику ниже): список
           ``a.py:52,289-327`` — две заявки, ровно как ``["a.py:52", "a.py:289-327"]``; и потолок, и «лишний адрес»
-          считаются по заявкам, поэтому список не обходит потолок и не маскирует лишнее. Внутри одной строки ответа
-          пересекающиеся и соседние диапазоны одного пути сливаются (``a.py:50-52,53-55`` = ``a.py:50-55``); между
-          разными строками — нет.
+          считаются по заявкам: список из несмежных строк потолок не обходит и лишнее не маскирует. Перед подсчётом
+          заявки ВСЕГО ответа сливаются: пересекающиеся, соседние (``end + 1 >= start``) и одинаковые диапазоны одного
+          пути — один адрес, в одной строке ответа или в разных (``a.py:54``, ``a.py:55``, ``a.py:56`` в трёх строках =
+          ``a.py:54-56``; одна строка, названная трижды, — один адрес). Для соседних строк список потолок обходит:
+          это одна область.
   false — уверенность ``sure`` и (адрес, не совпавший ни с одной записью, или лишние адреса сверх потолка), при этом
           нет чистого попадания: лишние адреса сверх потолка делают ответ ложным даже при закрытом эталоне;
   miss  — всё остальное: нет ответа, «malformed», ``sure`` без адресов, неуверенный промах, неполное совпадение.
@@ -54,7 +56,7 @@ FIX_WIDTH = 2
 
 # Грамматика строки адреса (``locations[i]``); разбор — ``parse_claims``, остаток — ``unparsed``::
 #
-#   location := claim ( SEP claim )*          SEP — «;», «,», пробелы, перевод строки между заявками (необязателен)
+#   location := claim ( SEP claim )*          SEP — «;», перевод строки, «,» с пробелом после неё (необязателен)
 #   claim    := path ":" lines ( ":" col ){0,2}
 #   lines    := item ( "," ws* item )*        «a.py:52, 289-327»: после запятой допустим пробел или табуляция
 #   item     := N | N "-" M | N "-"           «-» и «–»; N, M — до 9 цифр; M < N — переставляется; «N-» — строка N
@@ -62,20 +64,24 @@ FIX_WIDTH = 2
 # Заявка кончается там, где за последней цифрой не идёт буква, цифра, «_», «/» или «\»: так «:8080/» в
 # ``http://h:8080/a.py:12`` и «:2/» в ``pkg:2/a.py:5`` остаются частью пути. «:col» (строка:колонка) — не строка и
 # отбрасывается; колонок не больше двух.
-# Путь — всё от конца предыдущей заявки (без ведущих «;», «,», пробелов) до «:» этой заявки. Внутри пути допустимы
-# «:», «,», «;», пробел (``dir/a,b.py:5``), на границе заявок они разделители, и мусор перед путём становится частью
-# пути: ``a.py:5,abc,b.py:7`` даёт пути ``a.py`` и ``abc,b.py``; ``a.py:12-15 and a.py:30-31`` - ``a.py`` и
-# ``and a.py``. Пробел сам заявки не разделяет: ``a.py:5 6 7`` — одна заявка 5, а «6 7» отброшено.
+# Путь — всё от конца предыдущей заявки (без ведущих «;», «,», пробелов) до «:» этой заявки, но обрезанное справа
+# налево по последнему «;», переводу строки или «,» с пробелом после неё: ``a.py, b.py:7`` даёт путь ``b.py``
+# (``a.py`` без строки отбрасывается). Голая запятая, пробел и «:» остаются в пути: ``dir/a,b.py:5``,
+# ``my dir/a.py:5``, ``pkg:2/a.py:5``. ГРАНИЦА: ``a.py,b.py:7`` (запятая без пробела) неразрешима — один путь
+# ``a.py,b.py``, ``b.py`` теряется. Мусор перед путём тоже часть пути: ``a.py:5,abc,b.py:7`` даёт ``a.py`` и
+# ``abc,b.py``; ``a.py:12-15 and a.py:30-31`` — ``a.py`` и ``and a.py``. Один пробел заявки не разделяет:
+# ``a.py:5 6 7`` — заявка 5, «6 7» отброшено.
 # Отбрасывается (не создаёт заявку) и попадает в ``unparsed``, если есть цифры: хвост после последней заявки без
 # «путь:строка» (``a.py:12:5,20-25`` даёт только 12, ``a.py:5;6`` — 5, ``a.py:52,abc,10-`` — 52), заявка без пути
 # (``:12``) и целая строка, где есть «:цифра», но заявок нет (``a.py:12abc``): тогда остаётся один адрес «только
 # путь» (строка ``None``), как до правки. Хвост без цифр (``a.py:5, b.py``: путь без строки) отбрасывается молча.
-# Повтор заявки сохраняется (``a.py:5,5`` — две заявки); сливает их только ``merge_claims`` перед подсчётом потолка.
+# Повтор заявки сохраняется (``a.py:5,5`` — две заявки); сливает их только ``merge_claims`` в ``classify``.
 _NUM = r"\d{1,9}"
 _ITEM = rf"{_NUM}(?:[-–]\d{{0,9}})?"
 _ANCHOR_RE = re.compile(rf":(?P<spec>{_ITEM}(?:,[ \t]*{_ITEM})*)(?::{_NUM}){{0,2}}(?![\w/\\])")
 _ITEM_RE = re.compile(r"(?P<start>\d+)(?:[-–](?P<end>\d*))?")
 _BOUNDARY = " \t\r\n;,"
+_PATH_CUT_RE = re.compile(r";|\n|,(?=\s)")  # где обрывается путь перед заявкой: «;», перевод строки, «,» и пробел
 _COLON_DIGIT_RE = re.compile(r":\s*\d")
 
 type Claim = tuple[str, int | None, int | None]  # (путь, первая строка, последняя строка); строки None — без строки
@@ -106,7 +112,9 @@ def _scan(text: str, prefixes: tuple[str, ...]) -> tuple[list[Claim], list[str]]
     dropped: list[str] = []
     cursor = 0
     for anchor in _ANCHOR_RE.finditer(raw):
-        path = raw[cursor : anchor.start()].lstrip(_BOUNDARY).strip().strip("`'\"")
+        *skipped, head = _PATH_CUT_RE.split(raw[cursor : anchor.start()].lstrip(_BOUNDARY))
+        dropped.extend(piece.strip() for piece in skipped if piece.strip())
+        path = head.strip().strip("`'\"")
         cursor = anchor.end()
         if not path:
             dropped.append(anchor.group(0))
@@ -136,22 +144,23 @@ def unparsed(text: str) -> list[str]:
 
 
 def merge_claims(claims: list[Claim]) -> list[Claim]:
-    """Сливает пересекающиеся и соседние (``end + 1 >= start``) диапазоны одного пути; заявки без строки не трогает.
+    """Сливает пересекающиеся, соседние (``end + 1 >= start``) и одинаковые диапазоны одного пути.
 
-    Применяется к заявкам ОДНОЙ строки ответа: ``a.py:50-52,53-55,56-60`` -> ``a.py:50-60``; между разными строками
-    ответа заявки остаются отдельными адресами. Порядок: пути по первому появлению, диапазоны по возрастанию.
+    ``classify`` применяет её ко всем заявкам ответа сразу: ``a.py:50-52,53-55,56-60`` и три строки ``a.py:50-52``,
+    ``a.py:53-55``, ``a.py:56-60`` оба дают ``a.py:50-60``. Заявки без строки («только путь») не сливаются с
+    диапазонами, одинаковые схлопываются. Порядок: диапазоны по путям (первое появление) и по возрастанию,
+    затем заявки «только путь».
     """
     ranges: dict[str, list[list[int]]] = {}
+    path_only: list[Claim] = []
     for path, start, end in claims:
         if start is None or end is None:
-            ranges.setdefault(path, [])
+            if (path, None, None) not in path_only:
+                path_only.append((path, None, None))
             continue
         ranges.setdefault(path, []).append([start, end])
     merged: list[Claim] = []
     for path, spans in ranges.items():
-        if not spans:
-            merged.append((path, None, None))
-            continue
         spans.sort()
         current = spans[0]
         for span in spans[1:]:
@@ -161,7 +170,7 @@ def merge_claims(claims: list[Claim]) -> list[Claim]:
                 merged.append((path, current[0], current[1]))
                 current = span
         merged.append((path, current[0], current[1]))
-    return merged
+    return merged + path_only
 
 
 def parse_location_range(text: str, prefixes: tuple[str, ...] = ()) -> tuple[str, int | None, int | None]:
@@ -258,7 +267,7 @@ def classify(
     if answer is None:
         return "miss"
     cap = len(expected) + 1
-    claims = [claim for loc in answer["locations"] for claim in merge_claims(parse_claims(loc, prefixes))]
+    claims = merge_claims([claim for loc in answer["locations"] for claim in parse_claims(loc, prefixes)])
     over = len(claims) > cap
     covered = [any(_claim_matches(claim, exp) for claim in claims) for exp in expected]
     need_all = question.get("require", "any") == "all"

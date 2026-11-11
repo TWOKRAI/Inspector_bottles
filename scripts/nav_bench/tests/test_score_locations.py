@@ -148,10 +148,13 @@ def test_repeated_claims_are_kept_by_parser():
     assert score.parse_claims("a.py:5,6,5") == [("a.py", 5, 5), ("a.py", 6, 6), ("a.py", 5, 5)]
 
 
-def test_repeats_in_separate_strings_count_separately():
+def test_repeats_in_separate_strings_are_one_address():
     q = _question([_exp(55)])  # потолок 2 заявки
     assert _verdict(q, ["a.py:55", "a.py:55"], "sure") == "hit"
-    assert _verdict(q, ["a.py:55", "a.py:55", "a.py:55"], "sure") == "false"  # три отдельные строки - над потолком
+    assert (
+        _verdict(q, ["a.py:55", "a.py:55", "a.py:55"], "sure") == "hit"
+    )  # одна строка, названная трижды, - один адрес
+    assert _verdict(q, ["a.py:55,55,55"], "sure") == "hit"
 
 
 # --- прежнее поведение одиночных адресов -------------------------------------------------------------------
@@ -224,10 +227,24 @@ def test_merged_list_equals_one_range_in_classify():
     assert _verdict(q, ["a.py:" + many], "sure") == "hit"
 
 
-def test_merge_is_not_applied_across_strings():
+def test_merge_applies_across_strings_of_one_answer():
     q = _question([_exp(55)])  # потолок 2 заявки
-    assert _verdict(q, ["a.py:50-52", "a.py:53-55", "a.py:56-60"], "sure") == "false"  # три отдельных адреса
-    assert _verdict(q, ["a.py:50-52,53-55,56-60"], "sure") == "hit"  # одна строка -> один диапазон
+    assert _verdict(q, ["a.py:50-52", "a.py:53-55", "a.py:56-60"], "sure") == "hit"  # = a.py:50-60, один адрес
+    assert _verdict(q, ["a.py:54", "a.py:55", "a.py:56"], "sure") == "hit"  # = a.py:54-56
+    assert _verdict(q, ["a.py:50-52,53-55", "a.py:56-60"], "sure") == "hit"  # и смешанно
+    assert _verdict(q, ["a.py:50", "a.py:60", "a.py:70"], "sure") == "false"  # щели между строками: три адреса
+    assert (
+        _verdict(q, ["a.py:50-52", "b.py:53-55", "a.py:56-60"], "sure") == "false"
+    )  # другой путь не сливается: 3 адреса
+
+
+def test_merge_keeps_path_only_claims_apart_from_ranges():
+    assert score.merge_claims([("a.py", None, None), ("a.py", 5, 6), ("a.py", None, None)]) == [
+        ("a.py", 5, 6),
+        ("a.py", None, None),
+    ]
+    q = _question([_exp(55)])
+    assert _verdict(q, ["a.py", "a.py:55", "b.py:1"], "sure") == "false"  # a.py без строки - лишний адрес, всего 3
 
 
 # --- пути с «:», «,» и числами; граница заявки; отброшенное ------------------------------------------------
