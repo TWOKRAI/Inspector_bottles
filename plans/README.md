@@ -156,6 +156,7 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [camera-device-service](2026-10-18_camera-device-service/plan.md) | feat/camera-device-service | — | 0/42 | ACTIVE | 2026-10-18 |
 | [release-1.0](release-1.0/plan.md) | docs/release-1.0-plan | phase 1 | 0/5 | DRAFT | 2026-10-25 |
 | [recipe-save-noise](2026-10-26_recipe-save-noise/plan.md) | fix/recipe-save-noise | phase 1 | 0/16 | ACTIVE | 2026-10-26 |
+| [draw-universal](2026-11-11_draw-universal/plan.md) | feat/draw-universal | phase 0 | 0/11 | DRAFT | 2026-11-11 |
 
 ## Архив
 

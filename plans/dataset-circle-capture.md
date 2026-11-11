@@ -1,5 +1,7 @@
 # План: Сбор датасета (детекция круга + crop) и hand-eye калибровка камера↔робот
 
+> **2026-11-11, группа:** план входит в группу «рисование, разметка, датасет, синтетика, обучение» — состав, владение и пересечения в [`plans/queue/group-draw-dataset.md`](queue/group-draw-dataset.md).
+
 > **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** рецепт `dataset_circle_capture.yaml` переводится на `hikvision` ядра — Task 4.3 (`device_select`/`device_serial`, `frame_rate` вместо `camera_index`/`fps`); вкладка камеры — Task 4.4.
 
 > Slug при реализации: `dataset-circle-capture` (Часть 1) и `camera-robot-calibration` (Часть 2).
