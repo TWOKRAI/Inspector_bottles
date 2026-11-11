@@ -29,13 +29,18 @@ Task 3.4 меняет только то, ЧТО рисуется в кадре �
 ``src="__replay__"``. :meth:`_on_deltas` обрабатывает обе формы одним и тем же
 кодом независимо от их происхождения.
 
-**Протухшее значение — предупреждение, не экстраполяция.** Позиция объектов
-всегда считается из ПОСЛЕДНЕЙ ДОСТАВЛЕННОЙ дельты (нет отдельного пути
-«время идёт — двигай сцену по времени»), поэтому «заморозка» между двумя
-кадрами на неизменном мире — не отдельный код, а прямое следствие того, что
-между ними не пришло новой дельты. Единственный НАБЛЮДАЕМЫЙ эффект протухания
-в этой версии — предупреждение через ``ctx.log_warning`` (де-дублировано по
-``t``, чтобы не заспамить лог на неизменном протухшем значении).
+**Досчёт энкодера между батчами (C-87).** Мир приходит батчами раз в
+~170 мс (publish 50 мс + dispatch 120 мс), а кадр рисуется каждые ~33 мс:
+без досчёта диск стоит ~3 кадра и прыгает на 16.5-24.7 px. Поэтому
+:meth:`_read_world_encoder` отдаёт ``value + mm_s * clamp(age_s, 0, stale_ms/1000)
+/ FACTOR_MM``, ``age_s = self._clock() - t`` — позиция продолжает движение по
+скорости последней дельты. Досчёт всегда идёт от ПОСЛЕДНЕЙ дельты (нет
+max/монотонного зажима между дельтами), потолок — ``stale_ms``. Нет ``t``/``mm_s``
+или они не конечные числа -> ``value`` как раньше. Протухание (``age > stale_ms``)
+по-прежнему даёт предупреждение ``ctx.log_warning``, де-дублированное по ``t``.
+Это ОТМЕНА прежнего решения «протухшее значение — предупреждение, не
+экстраполяция»; причины, формула, часы и последствия — в
+``DECISIONS.md`` (ADR-SCN-001).
 
 **Task 3.4 — реальный движок вместо заглушки-спрайта.** ``configure()`` строит
 ``ScenePreset``/``ObjectFactory``/``ObjectSpawner``/``SceneCompositor`` из
@@ -58,7 +63,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 import cv2
 import numpy as np
@@ -77,6 +82,7 @@ from Services.dataset_gen.core.catalog import imread_unicode
 from Services.layer_render import ScrollingTile, SolidFill, background_layers_from_config
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
 from Services.line_sim.core import (
+    FACTOR_MM,
     REPO_ROOT,
     BeltGeometry,
     JobDone,
@@ -147,6 +153,12 @@ _BACKGROUND_BGR = (60, 60, 60)
 #: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
 _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
 
+
+def _is_finite_number(x: object) -> TypeGuard[float]:
+    """C-87: конечное число (int/float, не bool) — иначе досчёт энкодера не применяется."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 #: Служебные ключи транспорта в `data` команды: роутер добавляет `correlation_id` в `data` любого
 #: request-response вызова (`RouterManager.request`; список фреймворка — приватный
 #: `message_module.contracts.registry._TRANSPORT_KEYS`, не импортируется). Строгая проверка набора ключей
@@ -207,6 +219,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._height: int = cfg.get("resolution_height", _DEFAULT_HEIGHT)
         self._spawn_encoder: int = cfg.get("spawn_encoder", _DEFAULT_SPAWN_ENCODER)
         self._stale_ms: float = cfg.get("stale_ms", _DEFAULT_STALE_MS)
+        # C-87: шов часов для досчёта энкодера; тесты подменяют ПОСЛЕ configure()
+        self._clock = time.monotonic
         self._camera_id = cfg.get("camera_id", _DEFAULT_CAMERA_ID)
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
@@ -1058,17 +1072,26 @@ class SceneSourcePlugin(ProcessModulePlugin):
             )
 
     def _read_world_encoder(self) -> float:
-        """Снимок текущего значения энкодера из мира + предупреждение о протухании."""
+        """Снимок энкодера из мира, досчитанный до «сейчас» (C-87), + предупреждение о протухании.
+
+        ``value + mm_s * clamp(age_s, 0, stale_ms/1000) / FACTOR_MM``, ``age_s = _clock() - t``.
+        Снимок берётся один раз под локом (value/mm_s/t из одного состояния). Нет ``t``/``mm_s``
+        или они не конечные числа -> ``value`` без исключения; ``now < t`` -> возраст 0."""
         with self._lock:
             snapshot = dict(self._world)
 
-        value = snapshot.get("value", self._spawn_encoder)
+        value = float(snapshot.get("value", self._spawn_encoder))
         t = snapshot.get("t")
-        if t is not None:
-            age_ms = (time.monotonic() - t) * 1000.0
-            if age_ms > self._stale_ms:
-                self._warn_stale(t, age_ms)
-        return float(value)
+        if not _is_finite_number(t):
+            return value
+        age_s = self._clock() - t
+        if age_s * 1000.0 > self._stale_ms:
+            self._warn_stale(t, age_s * 1000.0)
+        mm_s = snapshot.get("mm_s")
+        if not _is_finite_number(mm_s):
+            return value
+        capped_age_s = min(max(age_s, 0.0), self._stale_ms / 1000.0)
+        return value + mm_s * capped_age_s / FACTOR_MM
 
     def _background_only_frame(self) -> np.ndarray:
         """Кадр одного фона В RGB (не BGR!) — движок недоступен, см. `configure()`.
@@ -1154,5 +1177,5 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_warned_t = t
         self._ctx.log_warning(
             f"scene_source: значение мира устарело на {age_ms:.0f} мс (> stale_ms={self._stale_ms}) — "
-            f"позиция объектов не экстраполируется"
+            f"досчёт позиции по скорости ограничен stale_ms"
         )
