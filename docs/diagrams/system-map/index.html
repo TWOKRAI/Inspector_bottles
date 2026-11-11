@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Карта системы: конструктор → сервисы → плагины → прототип «Инспектор». Снимок 2026-11-11 (main bde970616).
+     Собрано по коду: ls Services/ Plugins/ multiprocess_framework/modules/, рецепты letter_robot_sim и dataset_circle_capture.
+     Снимок, не генерируется: при сомнении сверять с кодом. Mermaid грузится с CDN — нужен интернет. -->
+<title>Карта системы Инспектор</title>
+<style>
+:root { --bg:#ffffff; --fg:#1b1f24; --muted:#5b6470; --line:#d8dde3; --surface:#f6f8fa; --ok:#2e7d32; --part:#b07d00; --no:#888; --task:#b3261e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; --ok:#66bb6a; --part:#e0a526; --no:#9aa4b2; --task:#ef6b61; } }
+:root[data-theme="dark"] { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; --ok:#66bb6a; --part:#e0a526; --no:#9aa4b2; --task:#ef6b61; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:1200px; margin:0 auto; padding:24px 16px 64px; }
+h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 6px; } h3 { font-size:16px; margin:20px 0 4px; }
+p, li { color:var(--muted); } p { margin:4px 0 12px; } strong { color:var(--fg); }
+code { font-size:13px; background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+nav { display:flex; flex-wrap:wrap; gap:6px 14px; margin:12px 0 4px; font-size:14px; }
+nav a { color:inherit; }
+a { color:#1f6feb; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) a { color:#6ea8ff; } }
+:root[data-theme="dark"] a { color:#6ea8ff; }
+.frame { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; }
+pre.mermaid { margin:0; background:#fff; border-radius:6px; }
+pre.mermaid p, pre.mermaid span { color:#111 !important; margin:0; }
+.layers { display:flex; flex-direction:column; gap:0; }
+.band { border:1px solid var(--line); border-left:6px solid var(--c); border-radius:8px; padding:10px 12px; background:var(--surface); }
+.band h3 { margin:0 0 2px; font-size:15px; color:var(--fg); }
+.band > p { margin:0 0 8px; font-size:13px; }
+.chips { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; }
+.chip { border:1px solid var(--line); border-radius:6px; padding:6px 9px; background:var(--bg); font-size:13px; color:var(--muted); }
+.chip b { display:block; color:var(--fg); font-size:13px; margin-bottom:2px; }
+.arrow { text-align:center; color:var(--muted); font-size:13px; padding:3px 0; }
+.b4 { --c:#b3261e; } .b3 { --c:#b07d00; } .b2 { --c:#2e7d32; } .b1 { --c:#2f5fa7; }
+.idea { border-left:4px solid var(--ok); background:var(--surface); padding:10px 14px; border-radius:0 8px 8px 0; margin:12px 0; }
+.idea p { margin:4px 0; }
+.legend { display:flex; flex-wrap:wrap; gap:8px 18px; font-size:13px; color:var(--muted); margin:8px 0; }
+.legend span::before { content:""; display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; border:2px solid; }
+.l-ok::before { border-color:var(--ok) !important; background:#e6f4ea; }
+.l-part::before { border-color:var(--part) !important; background:#fff3d6; }
+.l-no::before { border-color:var(--no) !important; border-style:dashed !important; background:#f4f4f4; }
+.l-task::before { border-color:var(--task) !important; border-width:3px !important; }
+.tbl { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+table { border-collapse:collapse; width:100%; font-size:14px; min-width:720px; }
+th, td { text-align:left; vertical-align:top; padding:7px 10px; border-bottom:1px solid var(--line); }
+th { background:var(--surface); color:var(--fg); font-weight:600; }
+td { color:var(--fg); } tr:last-child td { border-bottom:none; }
+.s { white-space:nowrap; font-weight:600; }
+.s-ok { color:var(--ok); } .s-part { color:var(--part); } .s-no { color:var(--no); }
+ol li, ul li { margin:4px 0; }
+footer { margin-top:40px; font-size:13px; color:var(--muted); border-top:1px solid var(--line); padding-top:12px; }
+</style>
+</head>
+<body><main>
+<h1>Карта системы: конструктор, сервисы, плагины, Инспектор</h1>
+<p>Снимок 2026-11-11, <code>main</code> bde970616. Как устроена система, какие инструменты в ней есть, как они связаны и где их улучшать. Соседние страницы: <a href="../foundation-audit/index.html">аудит фундамента</a> (внутренности framework), <a href="../layer-render/editor-system.html">редактор слоёв</a>, <a href="../lifecycle/lifecycle-system.html">жизненный цикл</a>.</p>
+<nav>
+  <a href="#idea">Главная идея</a><a href="#layers">1. Ярусы</a><a href="#loop">2. Контур зрения</a><a href="#plug">3. Как узел встаёт в систему</a><a href="#proto">4. Прототип сегодня</a><a href="#catalog">5. Каталог</a><a href="#letters">6. Где сидят буквы</a><a href="#next">7. Что улучшать</a>
+</nav>
+
+<section id="idea">
+<h2>Главная идея</h2>
+<div class="idea">
+<p><strong>Framework — универсальный конструктор многопроцессных приложений.</strong> Он не знает ни о камерах, ни о буквах: процессы, сообщения, разделяемая память для кадров, регистры, состояние, цепочки узлов, GUI-каркас.</p>
+<p><strong>Компьютерное зрение — один из наборов поверх него</strong> (опциональный): сервисы и плагины для камер, обработки, нейросети, сохранения, синтетики и обучения.</p>
+<p><strong>Инспектор (прототип) — одно приложение, собранное из этого набора.</strong> Для него контур зрения — основной сервис. Буквы — это <em>задача</em>, заданная моделью, рецептом и одним узлом решения (<code>word_layout</code>), а не свойство системы.</p>
+<p><strong>Новый продукт = новый рецепт и новая модель, а не новый код.</strong> Код пишут только для нового <em>вида</em> узла: новый детектор, новое правило решения, новый приёмник.</p>
+</div>
+</section>
+
+<section id="layers">
+<h2>1. Ярусы: кто кого знает</h2>
+<p>Импорты идут только сверху вниз: прототип → плагины → сервисы → framework. Обратные импорты запрещены и проверяются <code>sentrux check .</code> (<code>.sentrux/rules.toml</code>). Плагин знает только <code>PluginContext</code> (ADR-120).</p>
+<div class="layers">
+  <div class="band b4"><h3>④ multiprocess_prototype — приложение «Инспектор»</h3><p>Composition root: собирает приложение из нижних ярусов. Только сюда — то, что относится к конкретной задаче.</p>
+    <div class="chips">
+      <div class="chip"><b>Рецепты YAML</b>letter_robot_sim, dataset_circle_capture, letter_angle_inspect, color_inspect …</div>
+      <div class="chip"><b>GUI-вкладки</b>Сервисы → Нейросеть (вырез эталона, датасет, обучение, инференс), Камеры, Робот, ПЧ, Телефон</div>
+      <div class="chip"><b>Сборка</b>регистры приложения, оркестратор, run.py</div>
+    </div></div>
+  <div class="arrow">↓ собирает из</div>
+  <div class="band b3"><h3>③ Plugins — словарь узлов конвейера</h3><p>59 плагинов в <code>Plugins/</code> и ещё 6 внутри <code>Services/*/plugin</code>. Узел = порты + регистры + команды.</p>
+    <div class="chips">
+      <div class="chip"><b>sources · 5</b>camera_service, capture, synthetic_frame_source, frame_counter, heartbeat</div>
+      <div class="chip"><b>processing · 29</b>roi_crop, hsv_mask, morphology, circle_detector, blob_detector, segmentation, center_crop, pixel_to_robot, word_layout …</div>
+      <div class="chip"><b>filter · calibration · control</b>line_filter, camera_robot, robot_control</div>
+      <div class="chip"><b>render · 4</b>circle_draw, overlay_draw, render_overlay, renderer_compositor</div>
+      <div class="chip"><b>io · sinks · 8</b>frame_saver, robot_io, database, drawing_io, modbus_sink, telemetry_sink, otel_export, robot_draw</div>
+      <div class="chip"><b>sim · 5</b>scene_source, layer_preview, robot_host, pult_web, mjpeg_sink</div>
+      <div class="chip"><b>runtime · hub · utility</b>chain_executor, worker_pool, device_hub, pilot_widgets</div>
+    </div></div>
+  <div class="arrow">↓ вызывает</div>
+  <div class="band b2"><h3>② Services — прикладные сервисы (18)</h3><p>Логика без конвейера: её можно вызвать из плагина, из CLI или из GUI.</p>
+    <div class="chips">
+      <div class="chip"><b>Зрение и ML</b>ml_inference, ml_train, dataset_gen, layer_render, line_sim</div>
+      <div class="chip"><b>Камеры</b>camera_device, hikvision_camera, code_reader, phone_gateway</div>
+      <div class="chip"><b>Устройства</b>device_hub, modbus, robot_comm, vfd_comm, control_panel</div>
+      <div class="chip"><b>Данные и учёт</b>sql, documents, auth, otel_export</div>
+    </div></div>
+  <div class="arrow">↓ стоит на</div>
+  <div class="band b1"><h3>① multiprocess_framework — универсальный конструктор (27 модулей)</h3><p>Ничего не знает о зрении. Подробно — <a href="../foundation-audit/index.html">аудит фундамента</a>.</p>
+    <div class="chips">
+      <div class="chip"><b>Процессы</b>process_manager, process_module, app_module, recipe</div>
+      <div class="chip"><b>Связь</b>message, router, channel_routing, shared_resources (SHM для кадров), event, dispatch</div>
+      <div class="chip"><b>Данные и состояние</b>data_schema, config, registers, state_store</div>
+      <div class="chip"><b>Исполнение и команды</b>chain (DAG), worker, command, actions, service, console</div>
+      <div class="chip"><b>Наблюдаемость</b>logger, error, statistics, telemetry_readmodel</div>
+      <div class="chip"><b>GUI-каркас</b>frontend, display</div>
+    </div></div>
+</div>
+</section>
+
+<section id="loop">
+<h2>2. Контур компьютерного зрения — главная схема</h2>
+<p>Два кольца. <strong>Боевое</strong> идёт каждый кадр: от камеры до действия. <strong>Обучающее</strong> идёт вне такта линии: кадры и синтетика превращаются в модель, а модель возвращается в боевое кольцо через реестр <code>data/models</code>. Буквы появляются только в узле 7 и в выбранной модели.</p>
+<div class="legend"><span class="l-ok">есть и работает</span><span class="l-part">есть частично</span><span class="l-no">нет, план</span><span class="l-task">привязано к задаче «буквы»</span></div>
+<div class="frame"><pre class="mermaid">
+flowchart TB
+    classDef ok fill:#e6f4ea,stroke:#2e7d32,color:#111
+    classDef part fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef no fill:#f4f4f4,stroke:#888,stroke-dasharray:5 4,color:#555
+    classDef task stroke:#b3261e,stroke-width:3px
+
+    subgraph RUN["Боевое кольцо · каждый кадр"]
+        src["1 · Источник кадров&lt;br/&gt;camera_service (веб, сим) · hikvision_camera&lt;br/&gt;code_reader · phone_gateway"]:::ok
+        pre["2 · Предобработка&lt;br/&gt;roi_crop · color_convert · hsv_mask&lt;br/&gt;morphology · blur · image_adjust · resize"]:::ok
+        det["3 · Поиск объекта&lt;br/&gt;circle_detector · blob_detector&lt;br/&gt;contour_finder · segmentation"]:::ok
+        trk["4 · Триггер и трекинг&lt;br/&gt;line_filter: объект пересёк линию, track_id"]:::ok
+        cut["5 · Вырез объекта&lt;br/&gt;center_crop · crop · pixel_to_robot (px → мм)"]:::ok
+        inf["6 · Распознавание&lt;br/&gt;ml_inference: класс · уверенность · угол&lt;br/&gt;ONNX / Torch, модель из реестра"]:::ok
+        dec["7 · Решение задачи&lt;br/&gt;word_layout: буквы → слово роботу&lt;br/&gt;robot_control: брак по площади дефекта&lt;br/&gt;решения по классу сети — нет"]:::part
+        act["8 · Действие и учёт&lt;br/&gt;robot_io → робот · modbus_sink → PLC&lt;br/&gt;database · documents"]:::ok
+        show["Показ оператору&lt;br/&gt;circle_draw · overlay_draw → GUI"]:::ok
+        src --> pre --> det --> trk --> cut --> inf --> dec --> act
+        det -.-> show
+        inf -.-> show
+    end
+
+    subgraph LEARN["Обучающее кольцо · вне такта"]
+        buf["Буфер кадров · frame_saver&lt;br/&gt;кадр + .json, папка на день&lt;br/&gt;сортировка по полям — DS-1 · видео — нет"]:::part
+        lab["Разметка&lt;br/&gt;руками в проводнике&lt;br/&gt;GUI-разметчик — нет"]:::no
+        syn["Синтетика&lt;br/&gt;layer_render: слои, редактор&lt;br/&gt;dataset_gen: эталон → поворот → фон"]:::ok
+        sim["Сим линии · line_sim&lt;br/&gt;объект из слоёв едет по энкодеру"]:::ok
+        trn["Обучение · ml_train&lt;br/&gt;CLI + вкладка «Нейросеть»&lt;br/&gt;классы + опц. угол, выбор лучшей"]:::ok
+        reg[("Реестр моделей · data/models&lt;br/&gt;.onnx + .yaml + классы")]:::ok
+        buf --> lab --> trn
+        syn --> trn
+        trn -->|export| reg
+    end
+
+    cut -.->|чистый вырез| buf
+    inf -.->|предсказание в .json — DS-1| buf
+    reg -->|загрузка модели| inf
+    syn --> sim
+    sim -.->|кадры вместо камеры| src
+    class dec,inf task
+</pre></div>
+<p>Почему узел 6 помечен как привязанный к задаче, хотя код <code>ml_inference</code> универсален: к буквам его привязывает только выбранная модель (<code>mobilenet_v3_large_20260616_050828</code>) и надпись, которую он рисует прямо на кадр. Это и мешает сохранять чистые кадры после него (подробно — в DS-1).</p>
+</section>
+
+<section id="plug">
+<h2>3. Как любой узел встаёт в систему</h2>
+<p>Любой инструмент из каталога подключается одинаково. Поэтому модернизация почти всегда — это новый плагин или новый регистр, а не правка framework.</p>
+<div class="frame"><pre class="mermaid">
+flowchart TB
+    classDef fw fill:#e8eefc,stroke:#2f5fa7,color:#111
+    classDef pl fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef pr fill:#fde2e1,stroke:#b3261e,color:#111
+
+    gui["GUI: выбор рецепта,&lt;br/&gt;редактор конвейера,&lt;br/&gt;инспектор регистров"]:::pr
+    rec[("Рецепт YAML&lt;br/&gt;процессы · плагины · провода · виды")]:::pr
+    pm["ProcessManager&lt;br/&gt;применяет топологию headless"]:::fw
+    gp["GenericProcess&lt;br/&gt;один процесс рецепта"]:::fw
+    chain["Цепочка плагинов&lt;br/&gt;process(items) → items"]:::fw
+    plug["Плагин =&lt;br/&gt;порты (Port) + регистры (FieldMeta)&lt;br/&gt;+ команды + configure/shutdown"]:::pl
+    svc["Сервис (по желанию)&lt;br/&gt;логика без framework:&lt;br/&gt;движок модели, драйвер, рендер"]:::pl
+    nxt["Следующий процесс&lt;br/&gt;chain_targets"]:::fw
+    ctl["backend_ctl (MCP)&lt;br/&gt;те же сообщения, что у GUI"]:::fw
+
+    gui -->|выбор| rec --> pm --> gp --> chain --> plug
+    plug -->|вызывает| svc
+    chain -->|кадр через SHM, остальное — dict| nxt
+    plug -.->|регистры видны| gui
+    ctl --> pm
+</pre></div>
+<p><strong>Правило выбора места для нового кода.</strong> Логика без зависимости от конвейера (движок, драйвер, рендер) — в <code>Services/</code>. Узел конвейера, который её вызывает, — в <code>Plugins/</code> или в <code>Services/&lt;x&gt;/plugin</code>. Настройка конкретной задачи — в рецепте, не в коде. GUI только выбирает рецепт и правит регистры, сам ничего не запускает (принцип владельца 6).</p>
+</section>
+
+<section id="proto">
+<h2>4. Прототип сегодня: рецепт <code>letter_robot_sim</code></h2>
+<p>Процессы и плагины боевого рецепта «буквы на ленте → робот складывает слово». Каждый блок — отдельный процесс (жирное имя), внутри — цепочка плагинов по порядку. <code>frame_saver</code> в этом рецепте нет: кадры для датасета собирает отдельный рецепт <code>dataset_circle_capture</code> (там после <code>center_crop</code> стоит процесс <code>saver</code>, нейросети нет).</p>
+<div class="frame"><pre class="mermaid">
+flowchart TB
+    classDef p fill:#fff3d6,stroke:#b07d00,color:#111
+    classDef task fill:#fff3d6,stroke:#b3261e,stroke-width:3px,color:#111
+    classDef ext fill:#e8eefc,stroke:#2f5fa7,color:#111
+
+    c1["&lt;b&gt;camera_0&lt;/b&gt;&lt;br/&gt;camera_service"]:::p
+    v1["&lt;b&gt;vision&lt;/b&gt;&lt;br/&gt;color_convert → roi_crop → hsv_mask&lt;br/&gt;→ morphology → circle_detector"]:::p
+    l1["&lt;b&gt;line&lt;/b&gt;&lt;br/&gt;line_filter"]:::p
+    r1["&lt;b&gt;recog&lt;/b&gt;&lt;br/&gt;center_crop → pixel_to_robot&lt;br/&gt;→ ml_inference (рисует надпись на кадр)"]:::task
+    w1["&lt;b&gt;layout&lt;/b&gt;&lt;br/&gt;word_layout → robot_io"]:::task
+    d1["&lt;b&gt;draw&lt;/b&gt;&lt;br/&gt;circle_draw → overlay_draw"]:::p
+    m1["&lt;b&gt;maskview&lt;/b&gt;&lt;br/&gt;mask_to_frame"]:::p
+    ph["&lt;b&gt;phone&lt;/b&gt;&lt;br/&gt;phone_camera"]:::p
+    dh["&lt;b&gt;devices&lt;/b&gt;&lt;br/&gt;device_hub: робот Delta (TCP) · ПЧ ленты"]:::ext
+    gui["&lt;b&gt;GUI&lt;/b&gt;"]:::ext
+
+    c1 --> v1
+    v1 -->|detections| l1
+    v1 -->|кадр| r1
+    l1 -->|сработал центр| r1
+    v1 --> d1
+    l1 --> d1
+    v1 -->|маска| m1
+    r1 -->|predictions| w1
+    ph -->|слово, возврат| w1
+    w1 -.->|задание роботу| dh
+    r1 --> gui
+    d1 --> gui
+    m1 --> gui
+    ph --> gui
+</pre></div>
+</section>
+
+<section id="catalog">
+<h2>5. Каталог инструментов контура зрения</h2>
+<p>Только то, что участвует в контуре зрения. Полный список модулей — <a href="../../../multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md">карта ответственности</a> и <code>Services/STATUS.md</code>.</p>
+<div class="tbl"><table>
+<thead><tr><th>Инструмент</th><th>Ярус</th><th>Роль в контуре</th><th>Состояние</th><th>Что улучшать</th></tr></thead>
+<tbody>
+<tr><td><code>camera_service</code>, <code>hikvision_camera</code>, <code>camera_device</code></td><td>Plugin / Service</td><td>1 · кадры с веб-камеры, промышленной камеры, сима</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>phone_gateway</code>, <code>code_reader</code></td><td>Service</td><td>1 · фото и слово с телефона; считыватель кодов</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>roi_crop</code>, <code>color_convert</code>, <code>hsv_mask</code>, <code>morphology</code> …</td><td>Plugin</td><td>2 · предобработка</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>circle_detector</code>, <code>blob_detector</code>, <code>contour_finder</code>, <code>segmentation</code></td><td>Plugin</td><td>3 · поиск объекта</td><td class="s s-ok">есть</td><td>один формат <code>detections</code> у всех детекторов, чтобы трекинг и вырез не зависели от формы объекта (совпадает ли он сейчас — не сверял)</td></tr>
+<tr><td><code>line_filter</code></td><td>Plugin</td><td>4 · триггер по линии, <code>track_id</code></td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>center_crop</code>, <code>pixel_to_robot</code></td><td>Plugin</td><td>5 · вырез + <code>sidecar</code> (track_id, frame_id); пиксели → мм</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>ml_inference</code></td><td>Service + plugin</td><td>6 · класс, уверенность, угол; реестр моделей</td><td class="s s-ok">есть</td><td><strong>решено 2026-11-11:</strong> выдаёт только данные (<code>predictions</code>), на кадр не рисует; подпись рисует <code>overlay_draw</code>. Версию модели — в предсказание</td></tr>
+<tr><td><code>word_layout</code></td><td>Plugin</td><td>7 · задача «буквы → слово роботу»</td><td class="s s-ok">есть</td><td>оставить как одну из задач; отдавать итог по объекту (<code>verdict</code>) для сохранения</td></tr>
+<tr><td><code>robot_control</code></td><td>Plugin</td><td>7 · брак/годен по площади дефекта, статистика</td><td class="s s-part">частично</td><td>общий узел «решение по предсказанию»: правила «класс + уверенность → действие»</td></tr>
+<tr><td><code>robot_io</code>, <code>modbus_sink</code>, <code>device_hub</code>, <code>robot_comm</code>, <code>vfd_comm</code></td><td>Plugin / Service</td><td>8 · робот, PLC, ПЧ ленты</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>circle_draw</code>, <code>overlay_draw</code>, <code>render_overlay</code></td><td>Plugin</td><td>показ оператору</td><td class="s s-part">частично</td><td><code>overlay_draw</code> принимает подпись у <code>ml_inference</code>: текст с кириллицей (сейчас <code>cv2.putText</code> рисует «???») и подпись по шаблону из полей item</td></tr>
+<tr><td><code>frame_saver</code></td><td>Plugin</td><td>буфер кадров: поток / по триггеру, кадр + <code>.json</code></td><td class="s s-part">частично</td><td>раскладка по шаблону полей, уникальные имена, пара «json → картинка» (DS-1); запись видео</td></tr>
+<tr><td>Разметчик</td><td>—</td><td>перенос кадра в нужный класс</td><td class="s s-no">нет</td><td>вкладка GUI, переносит картинку и <code>.json</code> вместе</td></tr>
+<tr><td><code>layer_render</code></td><td>Service</td><td>слои объекта и фона, пресет сцены, редактор</td><td class="s s-ok">есть</td><td>см. <a href="../layer-render/editor-system.html">страницу редактора</a></td></tr>
+<tr><td><code>dataset_gen</code> + вкладка «Вырез эталона»</td><td>Service + GUI</td><td>синтетика: эталон → поворот → фон</td><td class="s s-ok">есть</td><td>эталон по маске любой формы, не только диск</td></tr>
+<tr><td><code>line_sim</code>, <code>scene_source</code>, <code>robot_host</code></td><td>Service / Plugin</td><td>виртуальная линия вместо камеры и робота</td><td class="s s-ok">есть</td><td>—</td></tr>
+<tr><td><code>ml_train</code> + вкладка «Нейросеть»</td><td>Service + GUI</td><td>обучение: классы + опц. угол, выбор лучшей, export</td><td class="s s-ok">есть</td><td>читать датасет из папок <code>frame_saver</code> (картинка + <code>.json</code>); задача как пресет</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<section id="letters">
+<h2>6. Где сидят буквы и как от них отвязаться</h2>
+<p>Буквенного кода немного. Почти везде «буквы» — это настройка, а не код.</p>
+<div class="tbl"><table>
+<thead><tr><th>Место</th><th>Что буквенное</th><th>Как отвязать</th></tr></thead>
+<tbody>
+<tr><td>Модель в <code>data/models</code></td><td>классы — буквы</td><td>ничего менять не нужно: другая задача — другая модель в реестре</td></tr>
+<tr><td><code>ml_inference</code></td><td>только надпись поверх кадра</td><td>решено: надпись рисует <code>overlay_draw</code> на ветке показа; сам узел распознавания уже универсален</td></tr>
+<tr><td><code>word_layout</code></td><td>вся задача «собрать слово»</td><td>это задача, ей и место в узле 7. Рядом — общий узел решения для инспекции (годен/брак/действие)</td></tr>
+<tr><td><code>dataset_gen</code>, <code>ml_train</code></td><td>задача «класс + угол»</td><td>оставить как один пресет задачи; другие пресеты — только классы, позже детекция</td></tr>
+<tr><td><code>center_crop</code>, <code>circle_detector</code>, «Вырез эталона (диск)»</td><td>объект — круг</td><td>вырез уже идёт по центру от любого детектора; эталон — по маске</td></tr>
+<tr><td>Рецепты <code>letter_*</code></td><td>имена, пороги, слово</td><td>новый продукт — новый рецепт</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<section id="next">
+<h2>7. Что улучшать, по порядку</h2>
+<p>Порядок выбран так, чтобы каждый шаг сразу давал рабочий результат и не ломал соседей.</p>
+<ol>
+<li><strong>DS-1: сохранение по полям.</strong> <code>frame_saver</code> раскладывает кадры по шаблону пути (<code>{verdict.label}/{verdict.angle_deg|45}</code>), отдельная папка «не распознана», имена без гонок, <code>.json</code> пишется раньше картинки. Решение «распознано» отдаёт <code>word_layout</code>. Saver — в своём процессе, а не рядом с роботом.</li>
+<li><strong>Чистый кадр (решение владельца 2026-11-11).</strong> <code>ml_inference</code> выдаёт результат данными и на кадр не рисует. Подпись рисует существующий <code>overlay_draw</code> — тот же узел, что рисует линии, точки и подписи. Три условия:
+  <ul>
+  <li><code>overlay_draw</code> стоит <em>на ветке показа</em> (свой процесс, как <code>draw</code>), а не в основной цепочке: любой узел рисования перезаписывает <code>frame</code>, и всё, что ниже по цепочке, получило бы грязный кадр;</li>
+  <li>текст рисуется с кириллицей: функцию на PIL переносят из <code>ml_inference</code> в общее место, и подписи точек тоже перестают давать «???»;</li>
+  <li><code>overlay_draw</code> не знает формат нейросети: подпись берётся по шаблону полей item (<code>{predictions.0.label} {predictions.0.confidence}</code>) — тот же механизм шаблона, что раскладка папок в DS-1.</li>
+  </ul>
+  Затронуты рецепты с <code>draw_overlay: true</code>: <code>letter_robot_sim</code>, <code>hikvision_letter_robot</code>, <code>letter_angle_inspect</code>. Регистр <code>draw_overlay</code> замораживают, а не удаляют (FREEZE, не KILL).</li>
+<li><strong>Универсальный модуль рисования и разметки (предложение владельца 2026-11-11, до плана).</strong> Вместо пяти узлов рисования (<code>circle_draw</code>, <code>contour_draw</code>, <code>overlay_draw</code>, <code>render_overlay</code>, надпись в <code>ml_inference</code>) — один узел, который рисует по конфигу:
+  <ul>
+  <li><em>фигуры</em> — общий словарь-dict: точка, линия, контур, круг, рамка, маска, текст;</li>
+  <li><em>сопоставление</em> в конфиге: какое поле item во что превращается (<code>detections</code> → круги, <code>contours</code> → контуры, <code>predictions</code> → текст по шаблону);</li>
+  <li><em>стили</em> — таблица цветов по типу, группе и условию (основа уже есть в <code>overlay_draw</code>);</li>
+  <li><em>разметка</em> — те же фигуры пишутся в <code>.json</code> рядом с кадром (<code>frame_saver</code>), откуда их читает обучение.</li>
+  </ul>
+  Ядро отрисовки — чистая функция в <code>Services/</code>, плагин тонкий. Старые узлы замораживают, рецепты переводят постепенно.
+  <br><strong>Основа — <code>overlay_draw</code>:</strong> его уже сделали общим (7e1640c97, 2026-10-15: рамки и надписи <code>code_reader</code> из рецепта; отдельный <code>code_view</code> отклонили). <code>render_overlay</code> пишет в <code>rendered_frame</code>; в рецептах <code>recipes/</code> его нет, но он живой в топологиях <code>backend/topology/inspection_basic.yaml</code> и <code>inspection_full.yaml</code> (дисплей там привязан прямо к <code>rendered_frame</code>), поэтому перевод требует миграции этих топологий, а не просто заморозки.
+  <br><strong>Урок истории:</strong> в старом прототипе был общий <code>RendererService</code> (апрель–май 2026, удалён в 261b90f13). Он рисовал рамки, контуры и маску, но ещё сохранял кадры и решал «брак» (<code>should_reject</code>). Новый модуль только рисует и отдаёт фигуры; сохранение — у <code>frame_saver</code>, решение — у узла решения.<br>Наглядно «как сейчас / как будет»: <a href="draw-before-after.html">рисовальщик до и после</a>.</li>
+<li><strong>Запись видео.</strong> Режим в <code>frame_saver</code> или отдельный приёмник: тот же буфер, другой формат на выходе.</li>
+<li><strong>Общий узел решения.</strong> Правила «класс + уверенность → годен / брак / действие» для инспекции; <code>word_layout</code> остаётся отдельной задачей.</li>
+<li><strong>Датасет из папок в обучение.</strong> <code>ml_train</code> читает папки <code>frame_saver</code> и синтетику <code>dataset_gen</code> одним форматом.</li>
+<li><strong>Разметчик в GUI.</strong> Перенос кадра между классами вместе с <code>.json</code>.</li>
+</ol>
+<p>После шагов 1–5 кольцо «камера → модель → кадры → обучение → новая модель» замыкается без ручных скриптов и без привязки к буквам.</p>
+</section>
+
+<footer>Снимок по коду на 2026-11-11 (main bde970616): опись <code>Services/</code>, <code>Plugins/</code>, <code>multiprocess_framework/modules/</code>, рецепты <code>letter_robot_sim</code> и <code>dataset_circle_capture</code>. Статусы «нет» проверены грепом: записи видео (<code>cv2.VideoWriter</code>) в коде нет, разметчика нет. Страница не генерируется: при расхождении правду говорит код.</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", flowchart: { htmlLabels: true }, maxTextSize: 200000 });</script>
+</body>
+</html>
