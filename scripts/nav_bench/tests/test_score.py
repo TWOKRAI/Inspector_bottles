@@ -121,7 +121,11 @@ def test_tolerance_zero_separates_adjacent_symbols():
 
 def test_extra_locations_over_cap_are_false():
     q = [_question()]  # один эталон -> учитываются первые 2 адреса
-    shotgun = ["x.py:1", "x.py:2", "pkg/mod.py:100"]  # верный — третий, за потолком
+    shotgun = [
+        "x.py:1",
+        "x.py:50",
+        "pkg/mod.py:100",
+    ]  # верный — третий, за потолком; строки несмежные (смежные слились бы)
     sure = score.score_run(q, _text("Q1", shotgun, "sure"))
     assert sure["per_question"][0]["verdict"] == "false" and sure["false"] == 1
     assert score.score_run(q, _text("Q1", shotgun, "unsure"))["per_question"][0]["verdict"] == "miss"
@@ -132,7 +136,9 @@ def test_extra_locations_over_cap_are_false():
 def test_extra_locations_over_cap_with_sure_is_false():
     # верный адрес первый, за ним 7 чужих: эталон закрыт, но «дробовик» при sure — ложный адрес
     q = [_question()]  # один эталон -> потолок 2 адреса
-    shotgun = ["pkg/mod.py:100"] + [f"x.py:{n}" for n in range(1, 8)]
+    shotgun = ["pkg/mod.py:100"] + [
+        f"x.py:{n * 10}" for n in range(1, 8)
+    ]  # несмежные строки: смежные сливаются в один адрес
     sure = score.score_run(q, _text("Q1", shotgun, "sure"))
     assert (sure["per_question"][0]["verdict"], sure["hits"], sure["false"]) == ("false", 0, 1)
     unsure = score.score_run(q, _text("Q1", shotgun, "unsure"))

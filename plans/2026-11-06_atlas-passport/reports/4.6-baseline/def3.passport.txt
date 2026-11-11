@@ -6,7 +6,7 @@ purpose: Подавить дефолтный access-лог в stderr (не на�
 interface: layer plugins/sim; signature (format: str, *args: Any) -> None
   all: —
   members: не искали
-links: найдено 0; не видно: динамика, аннотации, упоминания
+links: найдено 0; не видно: динамика, аннотации, упоминания, импорт через фасад __init__
   из продукта 0, из тестов 0
   used_by: —
   call_sites: —

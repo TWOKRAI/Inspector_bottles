@@ -54,9 +54,9 @@ def _renames(root: str | Path, ref: str) -> dict[str, str]:
 
 
 def translate_node(node: str, renames: dict[str, str]) -> str:
-    """`doc:<путь>` и `test:<путь>::<имя>` -> имя после переноса; остальные узлы без изменений."""
+    """`doc:<путь>`, `file:<путь>` и `test:<путь>::<имя>` -> имя после переноса; остальные узлы без изменений."""
     kind, _, ident = node.partition(":")
-    if kind not in ("doc", "test"):
+    if kind not in ("doc", "file", "test"):
         return node
     path, sep, rest = ident.partition("::")
     return f"{kind}:{renames.get(path, path)}{sep}{rest}"

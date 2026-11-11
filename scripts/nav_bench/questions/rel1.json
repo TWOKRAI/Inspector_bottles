@@ -1,0 +1,806 @@
+{
+  "name": "rel1",
+  "repo_sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+  "copy": "clone",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory",
+    "docs/claude/OPEN_QUESTIONS.md"
+  ],
+  "note": "Relation questions (answer = a SET of addresses). Reference built by rel1_truth/truth.py (ast on git archive of repo_sha) and checked by reading (rel1_truth/crosscheck.py); never by atlas. Scoring: scripts/nav_bench/relset.py (recall/precision of the address set, one-to-one matching, window +-1: addresses are exact token lines for both tools, +-1 absorbs a statement-start line). bench hits (require all) is a floor here and is not the metric.",
+  "questions": [
+    {
+      "id": "A1",
+      "kind": "a-callers",
+      "expected_winner": "atlas",
+      "winner_reason": "atlas call_sites are resolved through imports: they skip the robot_comm namesake and include calls through the recipe.service re-export; grep returns 53 lines (namesake, tests, imports, docstrings) to filter by reading",
+      "allowed_names": [
+        "compute_rev"
+      ],
+      "question": "The framework's recipe package defines a function `compute_rev` that computes the revision of a recipe file's bytes. List every call site of THIS function in production code (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). Count calls made through any import path that reaches this same function object; do not count calls of other functions that happen to have the same name, and do not count imports, the definition, or mentions in docstrings and comments. One location per call (path:line of the call).",
+      "require": "all",
+      "scored": true,
+      "note": "relation callers; namesake Services/robot_comm/store.py::compute_rev (different function) excluded; calls through the recipe.service re-export (Plugins) included: same function object",
+      "expected": [
+        {
+          "path": "Plugins/sim/layer_preview/plugin.py",
+          "line": 292,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "Plugins/sim/scene_source/plugin.py",
+          "line": 863,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "Plugins/sim/scene_source/plugin.py",
+          "line": 941,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/manager.py",
+          "line": 419,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/manager.py",
+          "line": 441,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/manager.py",
+          "line": 543,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/manager.py",
+          "line": 578,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/service.py",
+          "line": 345,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/service.py",
+          "line": 364,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/service.py",
+          "line": 373,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/service.py",
+          "line": 417,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/recipe/service.py",
+          "line": 418,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_prototype/frontend/app.py",
+          "line": 51,
+          "symbol": "compute_rev",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "A2",
+      "kind": "a-callers",
+      "expected_winner": "tie",
+      "winner_reason": "no namesake: grep lists all calls plus imports, tests and docs that are easy to drop by path and line text; atlas lists the same calls but cuts the list at the passport budget",
+      "allowed_names": [
+        "severity_of"
+      ],
+      "question": "List every call site of `severity_of` (the function that turns a log level into its numeric severity) in production code (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). Calls at module level count too; imports, re-exports, the definition and mentions in docstrings or comments do not. One location per call (path:line).",
+      "require": "all",
+      "scored": true,
+      "note": "relation callers; no manual decisions",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/levels.py",
+          "line": 158,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/levels.py",
+          "line": 174,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/observability/record_display.py",
+          "line": 109,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+          "line": 45,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+          "line": 416,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+          "line": 440,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/core/logger_core.py",
+          "line": 246,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/core/logger_core.py",
+          "line": 247,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/core/sampling.py",
+          "line": 198,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/core/sampling.py",
+          "line": 203,
+          "symbol": "severity_of",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "B1",
+      "kind": "b-implementations",
+      "expected_winner": "tie",
+      "winner_reason": "both need several rounds (direct subclasses, then subclasses of each); atlas gives direct subclasses per passport, grep finds `class X(Base` lines per round; 32 test subclasses are noise for both",
+      "allowed_names": [
+        "IChannel"
+      ],
+      "question": "List every production class that derives from the channel interface `IChannel` of channel routing, directly or through intermediate classes; abstract intermediate classes count as well (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). One location per class (path:line of its `class` statement).",
+      "require": "all",
+      "scored": true,
+      "note": "relation subclasses; transitive; abstract intermediates (ILogChannel, IMessageChannel, MessageChannel, LogChannel) included; 32 test subclasses excluded",
+      "expected": [
+        {
+          "path": "Services/modbus/channels/modbus_channel.py",
+          "line": 35,
+          "symbol": "ModbusChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/observability/bounded_channel.py",
+          "line": 31,
+          "symbol": "BoundedChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/observability/record_forward_channel.py",
+          "line": 50,
+          "symbol": "RecordForwardChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/observability/store_tap.py",
+          "line": 109,
+          "symbol": "StoreTapChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/console_module/channels/console_log_channel.py",
+          "line": 16,
+          "symbol": "ConsoleLogChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 43,
+          "symbol": "LogChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 962,
+          "symbol": "FileChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 1043,
+          "symbol": "ConsoleChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 1116,
+          "symbol": "HttpChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 1135,
+          "symbol": "FrameTraceChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 1315,
+          "symbol": "MemoryChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+          "line": 1415,
+          "symbol": "NullChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/channels/router_push_channel.py",
+          "line": 30,
+          "symbol": "RouterPushChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/interfaces.py",
+          "line": 28,
+          "symbol": "ILogChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/base_channel.py",
+          "line": 26,
+          "symbol": "MessageChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/queue_channel.py",
+          "line": 24,
+          "symbol": "QueueChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+          "line": 43,
+          "symbol": "SocketChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/interfaces.py",
+          "line": 173,
+          "symbol": "IMessageChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/statistics_module/channels/file_stats_channel.py",
+          "line": 13,
+          "symbol": "FileStatsChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/statistics_module/channels/hub_stats_channel.py",
+          "line": 45,
+          "symbol": "HubStatsChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/statistics_module/channels/log_stats_channel.py",
+          "line": 25,
+          "symbol": "LogStatsChannel",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "B2",
+      "kind": "b-implementations",
+      "expected_winner": "grep",
+      "winner_reason": "the implementation does not name the protocol as a base, so subclass links are empty; grep on the protocol's member names finds it; a same-named class in shared_resources_module is a trap for both",
+      "allowed_names": [
+        "ConfigStore"
+      ],
+      "question": "The prototype's domain layer declares a Protocol `ConfigStore` for a reactive configuration store. Which production classes satisfy this protocol structurally, that is, provide all of its members, whether or not they name it as a base class? Do not count the protocol itself (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). One location per class (path:line of its `class` statement).",
+      "require": "all",
+      "scored": true,
+      "note": "relation structural; namesake shared_resources_module/config_store/config_store.py::ConfigStore is a different class (no get_section/list_keys/subscribe); no near-miss classes (flagged empty)",
+      "expected": [
+        {
+          "path": "multiprocess_prototype/adapters/stores/config_store.py",
+          "line": 65,
+          "symbol": "ConfigStoreFromManager",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "C1",
+      "kind": "c-importers",
+      "expected_winner": "tie",
+      "winner_reason": "the module name is not in the question; once it is found (one search), grep on it lists every import statement and atlas `map <file>` lists importers; grep output also carries tests and docs",
+      "allowed_names": [],
+      "question": "In the router package's middleware there is a module that defines the contract of the \"not inspected\" marker (building markers and gaps, recognising them in messages). Which production modules outside that module import it (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py)? One location per import statement (path:line of the statement).",
+      "require": "all",
+      "scored": true,
+      "note": "relation importers; no manual decisions",
+      "expected": [
+        {
+          "path": "Plugins/control/robot_control/plugin.py",
+          "line": 53,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/data_receiver.py",
+          "line": 21,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/pipeline_executor.py",
+          "line": 24,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/plugin_operation_step.py",
+          "line": 30,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/generic/plugin_runner.py",
+          "line": 44,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py",
+          "line": 45,
+          "symbol": "not_inspected_marker",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "kind": "c-importers",
+      "expected_winner": "tie",
+      "winner_reason": "grep on the package name gives 90 lines (71 in docs), easy to filter; atlas `map <unit>` gives importing units with one sample address each",
+      "allowed_names": [],
+      "question": "The framework has a unit that holds the Qt-free read model of telemetry. Which production files outside that unit import it, that is, name one of its modules in an import statement? Imports of its names re-exported through a third module do not count (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). Answer with file paths, one per file.",
+      "require": "all",
+      "scored": true,
+      "note": "relation importers; frontend_module/__init__.py, interfaces.py, state/__init__.py import DEFAULT_TRACKED_SUFFIXES through telemetry_view_model (third module): excluded by rule",
+      "expected": [
+        {
+          "path": "backend_ctl/driver.py",
+          "line": null,
+          "symbol": "telemetry_readmodel_module",
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "backend_ctl/recorder.py",
+          "line": null,
+          "symbol": "telemetry_readmodel_module",
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/frontend_module/state/telemetry_view_model.py",
+          "line": null,
+          "symbol": "telemetry_readmodel_module",
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "D1",
+      "kind": "d-paraphrase",
+      "expected_winner": "atlas",
+      "winner_reason": "the routing unit's passport lists its thread constructions directly; grep on `Thread(` in the directory gives 51 lines, 44 of them in tests",
+      "allowed_names": [],
+      "question": "Where does the message-routing package of the framework create its background threads? List every place in its production code that constructs a thread object (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). One location per construction (path:line).",
+      "require": "all",
+      "scored": true,
+      "note": "relation threads; no manual decisions",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/queue_channel.py",
+          "line": 153,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+          "line": 162,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+          "line": 329,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+          "line": 474,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/channels/socket_client.py",
+          "line": 250,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/core/_receiver.py",
+          "line": 76,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/router_module/core/_sender.py",
+          "line": 86,
+          "symbol": "Thread",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "D2",
+      "kind": "d-paraphrase",
+      "expected_winner": "grep",
+      "winner_reason": "atlas has no facts about environment variables; grep on the two variable names (named in the project instructions) finds every read, mixed with 233 lines of writes, probes, tests and docs",
+      "allowed_names": [],
+      "question": "Which places in production code of the framework, the prototype application, Services and Plugins read the environment variables that override the root directory of log files, in order to decide the log directory? Count reads only: not writes into the environment, not a table that copies variables between alias names, not documentation; backend_ctl probes and tools/ are out of scope (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). One location per reading expression (path:line).",
+      "require": "all",
+      "scored": true,
+      "note": "relation env_reads; excluded by rule: app_module/env.py:37 (alias table; the generic copier apply_env_aliases does not decide the log dir); launch.py:682 and :684 (writes); docstrings and comments; backend_ctl/probes and tools/ are outside the question scope",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py",
+          "line": 136,
+          "symbol": "MULTIPROCESS_LOG_DIR",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/logger_module/core/log_paths.py",
+          "line": 21,
+          "symbol": "MULTIPROCESS_LOG_DIR",
+          "tolerance": 1,
+          "source": "manual",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/configs/process_launch_config.py",
+          "line": 157,
+          "symbol": "MULTIPROCESS_LOG_DIR",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+          "line": 119,
+          "symbol": "MULTIPROCESS_LOG_DIR",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_prototype/backend/launch.py",
+          "line": 54,
+          "symbol": "MULTIPROCESS_LOG_DIR",
+          "tolerance": 1,
+          "source": "manual",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_prototype/frontend/app.py",
+          "line": 224,
+          "symbol": "INSPECTOR_LOG_DIR",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "E1",
+      "kind": "e-known-gap",
+      "expected_winner": "grep",
+      "winner_reason": "a private method called only through self in one file: grep on the name gives 27 lines in one place; atlas passports do not carry private members today (diagnosis-opus.md, item 3)",
+      "allowed_names": [
+        "_pm_stopping",
+        "ProcessManagerProcess"
+      ],
+      "question": "Which places in production code call the private method `ProcessManagerProcess._pm_stopping`? A reference stored for later invocation does not count, only calls (tests are excluded: files under a tests/ directory, test_*.py, *_test.py, conftest.py). One location per call (path:line).",
+      "require": "all",
+      "scored": true,
+      "note": "relation self_callers; excluded by rule: process_manager_process.py:233 stop_abort = self._pm_stopping (reference stored for later invocation, not a call); :576 definition",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 765,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 1215,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 1313,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 2577,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 4422,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 4918,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 4939,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 5074,
+          "symbol": "_pm_stopping",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "kind": "e-known-gap",
+      "expected_winner": "grep",
+      "winner_reason": "atlas `uses` is always null today; reading the function body (one Read) answers it",
+      "allowed_names": [
+        "stop_budget"
+      ],
+      "question": "Which module-level constants does the function `stop_budget` of the process manager read directly in its own body (not through the functions it calls)? One location per constant (path:line of the constant's definition).",
+      "require": "all",
+      "scored": true,
+      "note": "relation uses; no manual decisions",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 48,
+          "symbol": "TERMINATE_GRACE_S",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 49,
+          "symbol": "KILL_CONFIRM_S",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 51,
+          "symbol": "PM_TEARDOWN_MARGIN_S",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 55,
+          "symbol": "INFRA_STOP_S",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 57,
+          "symbol": "CHILD_STOP_FRACTION",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 70,
+          "symbol": "LAST_WAVE_S",
+          "tolerance": 1,
+          "source": "ast",
+          "manual_check": true
+        }
+      ]
+    }
+  ]
+}

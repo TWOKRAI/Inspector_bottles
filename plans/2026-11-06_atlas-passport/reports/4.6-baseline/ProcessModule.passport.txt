@@ -10,7 +10,7 @@ interface: layer process_module; signature —
     initialize() -> bool  :226
     attach_stop_budget(budget: dict) -> None  :371
     ещё 29; --full
-links: найдено 158 (формы: import, name-call); не видно: динамика, аннотации, упоминания
+links: найдено 158 (формы: import, name-call); не видно: динамика, аннотации, упоминания, импорт через фасад __init__
   из продукта 9, из тестов 149
   used_by: 48
     <module> — multiprocess_framework/modules/process_module/__init__.py:42 (import)

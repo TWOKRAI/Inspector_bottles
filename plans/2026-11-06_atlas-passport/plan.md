@@ -3,12 +3,12 @@
 > **Карта плана:** [atlas-plan-map.html](atlas-plan-map.html)
 
 - **Slug:** atlas-passport
-- **Дата:** 2026-11-07 (каталог — день решения владельца и CTO, 11-06)
+- **Дата:** 2026-11-07 (каталог — день решения, 11-06)
 - **Статус:** IN PROGRESS
 - **Plan review:** PENDING
-- **Ветка:** `feat/atlas-passport` от `main` **после** влития `nav_bench` (Task 1.1); A1 — `git checkout 75f818845 -- scripts/atlas` в неё (В5; ветку создаёт лид). `feat/atlas-lookup-map` @ `75f818845` и `feat/arch-map` @ `930c5f2a3` — архивы
+- **Ветка:** `feat/atlas-passport` от `main` после влития `nav_bench` (Task 1.1); A1 — `git checkout 75f818845 -- scripts/atlas` в неё (В5; ветку создаёт лид). `feat/atlas-lookup-map` @ `75f818845` и `feat/arch-map` @ `930c5f2a3` — архивы
 - **Владелец решений:** владелец проекта; вердикты — CTO; исполнение — лид трека
-- **Преемник для:** `plans/2026-10-04_atlas/` (будет FROZEN: В2 = да, поправка 8; Task 6.1) и плана ветки `feat/atlas-lookup-map`. Ф9.7 `constructor-master` — отдельная фаза (`design.md` §1, `design-open.md` §7).
+- **Преемник для:** `plans/2026-10-04_atlas/` (будет FROZEN: В2 = да, поправка 8; Task 6.1) и плана ветки `feat/atlas-lookup-map`.
 
 ## Что где живёт
 
@@ -17,11 +17,11 @@
 | Контракт: цель, мерило, kill и стопы, задачи, бюджет | этот файл |
 | Решения, судьба старого, дефекты, ведомость, стопы, уровни (§1–§6, §10) | `design.md` |
 | Соседи, вопросы владельцу, расхождения (§7–§9) | `design-open.md` |
-| Идеи (П / С1 / Н, цена) | `ideas.md` |
-| Тело задачи; бриф второй роли — `tasks/<id>.<role>.md` | `tasks/<id>.md` |
-| Поправки | `amendments.md` |
+| Идеи (П/С1/Н) | `ideas.md` |
+| Тело задачи; бриф второй роли `tasks/<id>.<role>.md` | `tasks/<id>.md` |
+| Поправки | `amendments.md`, `amendments-26.md` (№ 26) |
 | Цепь план → коммит → код → документ (Phase 7) | `chain.md` |
-| Основания | `docs/reports/2026-11-06_atlas-plans-compare.md`, `2026-11-0{6,7}_cto-*.md` (`design.md` «Опора»); stage 0 — `reports/` |
+| Основания | `design.md` «Опора»; stage 0 — `reports/` |
 
 ## Цель
 
@@ -121,6 +121,10 @@
 - Task 7.3: `atlas origin <путь|символ|ADR-id>` [PENDING] (после 2.2, 7.1a, 7.1b, 7.1c, 7.1b-validate, 7.2b; если Kill-3 не сработал)
 - Task 7.3b: прогон С1-origin и вердикт вида [PENDING] (после 7.3)
 
+### Phase 8: Справочник из файлов (поправка 26)
+
+Пункты 8.0–8.7 (T0–T7) — `phase-8-reference.md`; решения — `amendments-26.md`. Kill-2 не запускать до 8.3 и 8.6.
+
 ### После С1 — не задачи, пока Kill-2 не пройден
 
 B2′ страница-карта → стоп 2 → B1 → A2 (`design.md` §5) → дороги (IPC из `scripts/channel_map`) → стоп 3 (тест R3) → route/find. Каждый пункт — Task поправкой после С1. Идеи — `ideas.md`.
@@ -154,7 +158,7 @@ B2′ страница-карта → стоп 2 → B1 → A2 (`design.md` §5)
 
 ## Соседи и порядок
 
-Ссылки и предлагаемые правки `plans/queue/ORDER.md` (`:71`, `:254`, `:266`, `:318`), шапки старого плана, Ф9.7, `OPEN_QUESTIONS.md` — `design-open.md` §7–§8; план их **не правит**, вносит лид после approve.
+Правки `plans/queue/ORDER.md` (строки — в `design-open.md` §8), шапки старого плана, Ф9.7, `OPEN_QUESTIONS.md` — `design-open.md` §7–§8; план их **не правит**, вносит лид после approve.
 
 ## Что остаётся открытым / ненадёжным
 

@@ -1,0 +1,3 @@
+{"G5": {"T2": ["ref SystemBuilder.build", "ref multiprocess_prototype/backend/launch.py::SystemBuilder.build"]},
+ "G3": {"X": ["ref _pick", "ref ParkMachine._advance_locked ProgramMixin._program_loop"]},
+ "G7": {"X": ["ref BackendDriver._poll_shutdown_outcomes"]}}

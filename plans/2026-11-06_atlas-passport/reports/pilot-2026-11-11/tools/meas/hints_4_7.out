@@ -1,0 +1,9 @@
+F files compile ok: 41
+a.py line28: 'if LIMIT:' line31: 'else:'
+RecipeBlueprint [(0.839, 'recipe_blueprint'), (0.667, 'SystemBlueprint'), (0.667, 'blueprint'), (0.65, 'validate_recipe_blueprint'), (0.649, 'TestNormalizeBlueprint')]
+is_valid_window [(0.828, 'valid_window_s'), (0.741, 'build_window'), (0.72, 'is_windows'), (0.714, 'stale_windows'), (0.696, 'is_valid')]
+F ick [(0.75, '_pick')] | casefold: []
+F STOP [] | casefold: ['stop']
+F stop [(1.0, 'stop'), (0.667, 'setup')] | casefold: ['stop']
+F driver [(0.833, 'Driver')] | casefold: ['Driver']
+F Driverr [(0.923, 'Driver')] | casefold: []

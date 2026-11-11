@@ -6,7 +6,7 @@ purpose: Текущий конфиг.
 interface: layer services/vfd_comm; signature -> VfdConfig
   all: Services/vfd_comm/core/__init__.py, Services/vfd_comm/__init__.py
   members: не искали
-links: найдено 0; не видно: динамика, аннотации, упоминания
+links: найдено 0; не видно: динамика, аннотации, упоминания, импорт через фасад __init__
   из продукта 0, из тестов 0
   used_by: —
   call_sites: —
