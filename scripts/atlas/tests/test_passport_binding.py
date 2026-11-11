@@ -276,3 +276,65 @@ def test_binding_json_roundtrip(repo: GitRepo) -> None:
     p = _build(repo, C + "LIMIT")
     assert json.loads(json.dumps(p)) == p
     assert list(p)[:7] == ["passport", "kind", "id", "path", "line", "sha", "scanner"]
+
+
+_FLOW = "\n".join(
+    [
+        "try:",  # 1
+        "    T1 = 1",  # 2
+        "except Exception:",  # 3
+        "    T2 = 2",  # 4
+        'with open("x") as fh:',  # 5
+        "    W1 = 1",  # 6
+        "for i in range(3):",  # 7
+        "    F1 = 1",  # 8
+        "while False:",  # 9
+        "    WH = 1",  # 10
+        "OK = 1",  # 11
+        "",
+    ]
+)
+
+
+def test_try_with_for_while_names_not_bindings(repo: GitRepo) -> None:
+    """Стадия 3 (инъекция 05c): имена из `try`/`except`/`with`/`for`/`while` модуля — не привязки (`[]`); прямой
+    оператор `OK` (строка 11) в том же файле — привязка (контроль: тест не пустой)."""
+    _commit(repo, {"pkg/__init__.py": "", "pkg/flow.py": _FLOW})
+    assert _resolve(repo, "pkg/flow.py::OK") == ["pkg/flow.py::OK"]
+    assert _build(repo, "pkg/flow.py::OK")["line"] == 11
+    for name in ("T1", "T2", "W1", "F1", "WH"):
+        assert _resolve(repo, f"pkg/flow.py::{name}") == [], name
+
+
+def test_broken_facts_file_has_no_bindings(repo: GitRepo, monkeypatch) -> None:
+    """Стадия 3 (инъекция 14): файл с `v2_error` (разбор полей v2 упал, `ast.parse` цел) и файл с `error` (упал разбор
+    полей A1, `ast.parse` цел) привязок не дают — как и символов (контракт `Pre`/`Raises` `build_passport`). Контроль:
+    тот же текст в файле без сбоя — привязка есть. Сбой — подмена `scan._collect_v2` / `scan.read_freeze`: у файла
+    с настоящей синтаксической ошибкой охрану прикрывает `ast.parse`, и убрать её тест не заметил бы."""
+    import ast
+
+    from scripts.atlas import scan
+    from scripts.atlas.passport import _Ctx
+
+    def failing(real):
+        def wrapper(tree, *args, **kwargs):
+            if any(isinstance(n, ast.Name) and n.id == "TRIGGER_FAIL" for n in ast.walk(tree)):
+                raise ValueError("boom")
+            return real(tree, *args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(scan, "_collect_v2", failing(scan._collect_v2))
+    text = "GOOD = 2\n"
+    _commit(repo, {"pkg/__init__.py": "", "pkg/ok.py": text, "pkg/v2.py": text + "TRIGGER_FAIL = 1\n"})
+    facts = run_with_deadline(lambda: _Ctx.open(repo.path, "HEAD", ()).facts, 120.0)
+    assert facts["pkg/ok.py"].error is None and facts["pkg/ok.py"].v2_error is None
+    assert facts["pkg/v2.py"].v2_error == "ValueError" and facts["pkg/v2.py"].error is None
+    assert _resolve(repo, "pkg/ok.py::GOOD") == ["pkg/ok.py::GOOD"]
+    assert _resolve(repo, "pkg/v2.py::GOOD") == []
+
+    monkeypatch.setattr(scan, "read_freeze", failing(scan.read_freeze))
+    _commit(repo, {"pkg/a1.py": "GOOD = 3\nTRIGGER_FAIL = 1\n"})  # другой текст: тот же blob взял бы факты из кэша
+    facts = run_with_deadline(lambda: _Ctx.open(repo.path, "HEAD", ()).facts, 120.0)
+    assert facts["pkg/a1.py"].error == "ValueError"
+    assert _resolve(repo, "pkg/a1.py::GOOD") == []
