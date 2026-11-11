@@ -5,7 +5,11 @@ purpose: —
   declared_at: не искали
 interface: layer services/auth; signature —
   all: Services/auth/__init__.py
-  members: —
+  members: публичных методов нет; полей 4:
+    table_name = 'auth_sessions'  :262
+    indexes = [('user_id', 'login_at')]  :263
+    unique_together: tuple = ()  :264
+    primary_key = ['session_id']  :265
 links: найдено 0; не видно: динамика, аннотации, упоминания
   из продукта 0, из тестов 0
   used_by: —

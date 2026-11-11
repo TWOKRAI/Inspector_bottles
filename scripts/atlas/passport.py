@@ -61,7 +61,11 @@ Post: паспорт детерминирован: та же ревизия -> �
                                       (как `reference._sig`); у `property` — `-> T` или `""`; у класса `""`
   members    list[dict] | null        у класса: члены из `defs` 4.1, отбор как `reference._methods` (неприватные +
                                       `codemap.DUNDERS`), порядок исходника; `[]` — членов нет. У функции, метода
-                                      `null`. В тексте режется (Task 4.5c): минимум 3, хвост `ещё N; --full`
+                                      `null`. В тексте режется (Task 4.5c): минимум 3, хвост `ещё N; --full`.
+                                      Класс без публичных методов (Task 4.6b): члены — его поля, прямые привязки
+                                      тела (`_body_bindings`, по строке; имя метода или вложенного класса — нет),
+                                      `signature` формы привязки 4.6a; текст — `публичных методов нет; полей N:` и
+                                      `<имя><signature>  :строка`; у класса с публичным методом поля не входят
                                       Запись `{"name": str, "signature": str, "where": "путь:строка"}`; `signature` — по
                                       правилу `signature` выше; `where` — строка `def` члена (не `null`)
 
@@ -194,8 +198,10 @@ Post: паспорт детерминирован: та же ревизия -> �
   interface.members        форма A — по ПРОД-ФАЙЛАМ: `{name: путь,       форма B — по символам: `{name: qualname,
                            signature: null, where: "путь:1",             signature, where}`, верхний уровень,
                            top: [имена без `_`], doc: FileFacts.doc}`,    имена на `_` тоже; классы и функции,
-                           порядок `(-операторов импорта с целью в       методы не входят
-                           файле, путь)`
+                           порядок `(-операторов импорта с целью в       методы не входят; с Task 4.6b — и
+                           файле, путь)`                                 привязки модуля (`_body_bindings`, имя не
+                                                                         из `defs`; `signature` формы 4.6a), всё по
+                                                                         строке; срез текста — class/def первыми
   links.used_by            `{name: id юнита-импортёра, where, how:       то же, цель — файл (реэкспорт через
                            "import", count}`, `where` — min по (путь,    `__init__` у файла не виден); импортёры —
                            строка); `count` — операторов импорта, включая кроме самого файла и `__init__.py` его
@@ -649,6 +655,14 @@ class _Ctx:
                 for m in _methods(node):
                     sig = _tail(m, _drop_first(m, True))
                     members.append({"name": m.name, "signature": sig, "where": f"{path}:{m.lineno}"})
+                # Task 4.6b: публичных методов нет — члены класса его поля (порядок `_body_bindings` — порядок
+                # операторов); имя метода или вложенного класса (`DefFact`) полем не считается
+                if not members:
+                    members = [
+                        {"name": name, "signature": sig, "where": f"{path}:{line}"}
+                        for name, (line, sig) in _body_bindings(node.body).items()
+                        if self.find(path, f"{d.qualname}.{name}") is None
+                    ]
         return {
             "layer": module_of(path, rows),
             "all": self._all_chain(path, d.qualname, facts, rows),
@@ -997,6 +1011,15 @@ class _Ctx:
             node = _find_node(tree, d.qualname, d.line) if tree is not None else None
             sig = "" if d.kind == "class" else _tail(node, False) if isinstance(node, _FUNCS) else d.signature
             out.append({"name": d.qualname, "signature": sig, "where": f"{path}:{d.line}"})
+        if isinstance(tree, ast.Module):  # Task 4.6b: привязки модуля; имя из `defs` верхнего уровня — не привязка
+            top = {d.qualname for d in facts.defs if "." not in d.qualname}
+            bound = [
+                {"name": name, "signature": sig, "where": f"{path}:{line}"}
+                for name, (line, sig) in _body_bindings(tree.body).items()
+                if name not in top
+            ]
+            if bound:  # без привязок порядок и байты прежние
+                out = sorted([*out, *bound], key=lambda m: _split(m["where"])[1])  # устойчиво: форма B — по строке
         return out
 
     def _map_file(self, path: str, rows: list[dict]) -> dict:
@@ -1076,6 +1099,18 @@ def _member_row(m: dict) -> str:
     return f"{prefix}{m['name']}{' ' + sig if sig.startswith('->') else sig}  :{_split(m['where'])[1]}"
 
 
+def _is_binding_sig(sig: str) -> bool:
+    """`signature` привязки (форма `_binding_sig`), не функции (`(`/`async `/`->`) и не класса (`""`)."""
+    return sig.startswith((": ", "= ", "type = ", "type["))
+
+
+def _field_row(m: dict) -> str:
+    """Поле класса или привязка модуля (без отступа): `l1: float = 325.0  :101`, `READY = 'ready'  :25`,
+    `Alias type = int | str  :4` (`signature` с `:` клеится к имени, прочие — через пробел)."""
+    sig = m["signature"]
+    return f"{m['name']}{sig if sig.startswith(':') else ' ' + sig}  :{_split(m['where'])[1]}"
+
+
 def _value(value: object) -> str:
     if value is None:
         return _NOT_SEARCHED
@@ -1144,7 +1179,10 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     add(f"interface: layer {itf['layer']}; signature {itf['signature'] or _EMPTY}")
     add(f"  all: {', '.join(itf['all']) if itf['all'] else _value(itf['all'])}")
     members = itf["members"]
-    if members:
+    if members and _is_binding_sig(members[0]["signature"]):  # Task 4.6b: у класса без публичных методов — поля
+        add(f"  members: публичных методов нет; полей {len(members)}:")
+        add_list("members", "    ", members, _field_row, keep_order=True)
+    elif members:
         add("  members:")
         add_list("members", "    ", members, _member_row, keep_order=True)  # порядок исходника, срез — `ещё N; --full`
     else:
@@ -1298,9 +1336,13 @@ def _emit(
         if kind == "line":
             out.append(item)  # type: ignore[arg-type]
             continue
-        name, indent, rows, row = item  # type: ignore[misc]
+        name, indent, rows, row, *prio = item  # type: ignore[misc]
         keep = give.get(name, len(rows))
-        out += [f"{indent}{row(r)}" for r in rows[:keep]]
+        if prio and keep < len(rows):  # Task 4.6b: остаются `keep` записей с меньшим `prio`, печать — по порядку
+            kept = sorted(sorted(range(len(rows)), key=lambda i: (prio[0][i], i))[:keep])
+            out += [f"{indent}{row(rows[i])}" for i in kept]
+        else:
+            out += [f"{indent}{row(r)}" for r in rows[:keep]]
         if keep < len(rows):
             mark = (
                 f"ещё {len(rows) - keep}; --full"
@@ -1336,6 +1378,8 @@ def _unit_member_row(m: dict) -> str:
 def _file_member_row(m: dict) -> str:
     """`class A  :4`, `def f(x: int) -> int  :7`, `async def g() -> None  :9` (вид — по `signature`: `""` у класса)."""
     sig, line = m["signature"], _split(m["where"])[1]
+    if _is_binding_sig(sig):  # Task 4.6b: привязка модуля
+        return _field_row(m)
     if not sig:
         return f"class {m['name']}  :{line}"
     if sig.startswith("async "):
@@ -1355,8 +1399,9 @@ def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: boo
     def add(text: str) -> None:
         fixed.append(("line", text))
 
-    def add_list(name: str, entries: list, row) -> None:
-        fixed.append(("list", (name, "    ", entries, row)))  # порядок записей — как в паспорте
+    def add_list(name: str, entries: list, row, prio: list[int] | None = None) -> None:
+        # порядок записей — как в паспорте; `prio` (Task 4.6b) — приоритет при срезе, меньше — держится первым
+        fixed.append(("list", (name, "    ", entries, row, *([prio] if prio else []))))
 
     add(f"== {p['kind']} {p['id']} ==")
     add(f"{p['path']}; sha {p['sha']}; scanner {p['scanner']}")
@@ -1370,7 +1415,15 @@ def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: boo
     add(f"  all: {', '.join(all_) if all_ else (_EMPTY if searched or all_ == [] else _NOT_SEARCHED)}")
     if itf["members"]:
         add("  members:")
-        add_list("members", itf["members"], _unit_member_row if unit else _file_member_row)
+        if unit:
+            add_list("members", itf["members"], _unit_member_row)
+        else:  # class/def файла держатся первыми, привязки модуля заполняют остаток
+            add_list(
+                "members",
+                itf["members"],
+                _file_member_row,
+                [int(_is_binding_sig(m["signature"])) for m in itf["members"]],
+            )
     else:
         add(f"  members: {_value(itf['members'])}")
     used = lnk["used_by"]
