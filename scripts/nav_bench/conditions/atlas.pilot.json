@@ -1,0 +1,30 @@
+{
+  "name": "atlas-pilot",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "context_files": [],
+  "max_turns": 60,
+  "max_budget_usd": 1.0,
+  "thresholds": {
+    "hits_min": 0,
+    "false_max": 99
+  },
+  "prompt_prefix": "Navigate the code with Read, Grep and Glob, and with one extra tool, the code passport `atlas`, run through Bash (only these two commands are allowed, nothing else): `python {repo_root}/pilot_atlas.py ref <id> [<id> ...]` prints a passport of a symbol (address file:line, signature, call sites, members, subclasses, tests); an id is a bare name (class, function, method, module constant) or `<repo path>::<Symbol>` for an exact one; and `python {repo_root}/pilot_atlas.py map <repo file or module path>` prints a skeleton of a file or module. Use it to find and understand code instead of reading whole files, then Read to verify. Paths in its output are relative to your working directory.",
+  "expected_tokens": 85000,
+  "bash_allow": [
+    "python {repo_root}/pilot_atlas.py ref *",
+    "python {repo_root}/pilot_atlas.py map *"
+  ]
+}
