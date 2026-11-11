@@ -220,10 +220,12 @@ def test_h6_done_twice_join_until_and_close_lingers_once() -> None:
 
     _, dt_first = _timed(lambda: cs.join_until(time.monotonic() + 5.0))
     _status(pm)  # наблюдатель снова «свеж»
+    # Снимок ``done`` второй раз отдан, событие сброшено: без флага второй проход ждал бы весь потолок.
+    pm._status_done_served_event.clear()
     _, dt_close = _timed(cs.close)
 
     assert dt_first >= CAP_S - 0.05
-    assert dt_close < 0.05  # второго ожидания нет
+    assert dt_close < CAP_S / 2  # второго ожидания нет
 
 
 def test_h6_once_flag_is_taken_even_when_first_call_returned_at_once() -> None:
@@ -233,10 +235,44 @@ def test_h6_once_flag_is_taken_even_when_first_call_returned_at_once() -> None:
 
     _, dt_first = _timed(lambda: cs.join_until(time.monotonic() + 5.0))  # метки нет: выход сразу
     _status(pm)  # потом наблюдатель появился
+    pm._status_done_served_event.clear()  # снимок ``done`` отдан, событие сброшено: без флага ждали бы потолок
     _, dt_close = _timed(cs.close)
 
     assert dt_first < 0.05
-    assert dt_close < 0.05  # флаг взят первым вызовом, хотя тот ничего не ждал
+    assert dt_close < CAP_S / 2  # флаг взят первым вызовом, хотя тот ничего не ждал
+
+
+# --------------------------------------------------------------------------- #
+# Вызовы ожидания в двух остальных местах ``done``: ветка F1 и первый ``close()``
+# --------------------------------------------------------------------------- #
+
+
+def test_f1_branch_group_not_built_after_kill_lingers_and_returns_false() -> None:
+    pm = _make_pm()
+    cs = _ChildrenStop(pm)  # группы нет, сборка провалилась (F1, ADR-PMM-042)
+    cs._start_failed = True
+    pm._children_stop = cs
+    _begin_stop(pm)
+    cs.kill()
+    _status(pm)  # свежий наблюдатель
+
+    result, dt = _timed(lambda: cs.join_until(time.monotonic() + 5.0))
+
+    assert result is False
+    assert pm._system_stop_snapshot()["phase"] == "done"
+    assert CAP_S - 0.05 <= dt <= CAP_S + EPS_S  # ожидание в этой ветке есть и ограничено потолком
+
+
+def test_first_close_without_prior_join_until_lingers_up_to_cap_only() -> None:
+    pm = _make_pm()
+    cs, _ = _make_stop(pm)
+    _begin_stop(pm)
+    _status(pm)  # свежий наблюдатель
+
+    _, dt = _timed(cs.close)
+
+    assert pm._system_stop_snapshot()["phase"] == "done"
+    assert CAP_S - 0.05 <= dt <= CAP_S + EPS_S  # ``close`` без срока: только потолок
 
 
 # --------------------------------------------------------------------------- #
