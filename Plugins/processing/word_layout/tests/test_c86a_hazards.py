@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from Plugins.processing.word_layout.plugin import WordLayoutPlugin
@@ -160,3 +162,58 @@ def test_no_prediction_line_literal_for_missing_key() -> None:
     p, s = _make()
     _run(p, {"sidecar": {"track_id": 9}, "pick_xy": dict(_PICK)})
     assert _lines(s) == [_NO_PRED]
+
+
+def test_h9_threshold_text_follows_own_min_confidence() -> None:
+    """H9: порог в скобках — свой min_confidence (0.70), а при conf == min_confidence с флагом — ml_inference."""
+    p, s = _make({"min_confidence": 0.7})
+    _run(p, _disc("М", 1, 300.0, confidence=0.6, below=False))
+    _run(p, _disc("М", 2, 300.0, confidence=0.7, below=True))
+    assert _lines(s) == [
+        "WordLayoutPlugin: диск 'М' 300.0° → пропуск: уверенность ниже порога (М 0.60 < 0.70)",
+        "WordLayoutPlugin: диск 'М' 300.0° → пропуск: уверенность ниже порога (М 0.70 < порог ml_inference)",
+    ]
+
+
+def test_h9_boundary_default_min_confidence_flag_true() -> None:
+    """H9: min_confidence 0.5 по умолчанию, conf 0.50 с флагом -> «(М 0.50 < порог ml_inference)»."""
+    p, s = _make()
+    _run(p, _disc("М", 1, 300.0, confidence=0.5, below=True))
+    assert _lines(s) == [
+        "WordLayoutPlugin: диск 'М' 300.0° → пропуск: уверенность ниже порога (М 0.50 < порог ml_inference)"
+    ]
+
+
+def test_h10_weak_frame_does_not_disturb_settle_counter() -> None:
+    """H10: settle_frames 2; слабый, уверенный, уверенный кадр одного tid -> задание только на 3-м кадре.
+
+    Хелпер не трогает _settle/_cur_label: иначе счёт стабильности сбился бы."""
+    p, _ = _make({"settle_frames": 2})
+    outs = [
+        _run(p, _weak(1)),
+        _run(p, _disc("М", 1, 300.0, confidence=0.9, below=False)),
+        _run(p, _disc("М", 1, 300.0, confidence=0.9, below=False)),
+    ]
+    assert ["robot_job" in o for o in outs] == [False, False, True]
+    assert p._reg.jobs_emitted == 1
+
+
+@pytest.mark.parametrize(
+    "preds",
+    [[{"confidence": 0.9}], [{"label": "", "confidence": 0.9}], ["x"], [None], "abc"],
+    ids=["no-label", "empty-label", "str-top", "none-top", "str-preds"],
+)
+def test_h11_malformed_predictions_with_tid_no_prediction_line(preds: object) -> None:
+    """H11: кривые predictions с tid -> строка «нет предсказания», ошибок в журнале нет."""
+    p, s = _make()
+    out = _run(p, {"predictions": preds, "sidecar": {"track_id": 1}, "pick_xy": dict(_PICK)})
+    assert _lines(s) == [_NO_PRED]
+    assert _errors(s) == []
+    assert "robot_job" not in out
+
+
+def test_h12_lowercase_label_printed_uppercase() -> None:
+    """H12: метка «м» в нижнем регистре печатается как «М» (как в ячейках слова)."""
+    p, s = _make()
+    _run(p, _weak(1, label="м"))
+    assert _lines(s) == [_WEAK_M_TID]
