@@ -93,7 +93,10 @@ class MLInferencePlugin(ProcessModulePlugin):
             name="predictions",
             dtype="list[dict]",
             shape="N",
-            description="Топ-K: class_id, label, confidence, below_threshold",
+            description=(
+                "Топ-K: class_id, label, confidence, below_threshold; "
+                "у топ-1 (если есть голова угла): angle_deg, angle_valid, angle_symmetry"
+            ),
         ),
     ]
 
@@ -206,7 +209,9 @@ class MLInferencePlugin(ProcessModulePlugin):
         # overlay пишем в 'frame' (его читает дисплей; SHM-middleware стрипует
         # именно 'frame'). Отдельный 'rendered_frame' НЕ заводим — он поехал бы
         # полным кадром через pickle на каждом кадре (грабли line_filter).
-        return {**item, "frame": result_frame, "predictions": preds}
+        # model_id — имя модели из регистра (не путь, не display-name sidecar); только у
+        # успешного инференса: pass-through и ветка ошибки его не ставят
+        return {**item, "frame": result_frame, "predictions": preds, "model_id": self._reg.model}
 
     def _mark_below_threshold(self, preds: list[dict]) -> list[dict]:
         """Копии предсказаний с `below_threshold = not (confidence >= confidence_threshold)`.

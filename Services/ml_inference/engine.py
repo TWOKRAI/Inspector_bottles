@@ -165,6 +165,9 @@ class InferenceEngine:
             if angle_raw is not None:
                 sym = self._symmetry_for(preds[0]["label"])
                 preds[0].update(angle_postprocess(angle_raw, sym))
+                # режим, которым декодирован угол: потребителю (датасет-sidecar) нужен
+                # он, а не карта симметрий модели
+                preds[0]["angle_symmetry"] = sym
         return preds
 
     def unload(self) -> None:
