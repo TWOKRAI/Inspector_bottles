@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from scripts.atlas.adapters.code import _read
-from scripts.atlas.adapters.parse import LAYERS
 from scripts.atlas.adapters.modules import modules_for
+from scripts.atlas.adapters.parse import LAYERS
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, code_of, dotted, is_test
@@ -385,7 +385,7 @@ _CLASS_LAYERS = LAYERS | {"tools"}  # белый список слоёв стр�
 def _public_classes(tree: Tree, modules: list[dict[str, Any]]) -> dict[str, set[str]]:
     """{id юнита: имена публичных классов верхнего уровня} нетестовых .py слоёв `_CLASS_LAYERS`.
 
-    Файл принадлежит самому длинному `paths` (`module_of`). Не читаемый, не utf-8, больше MAX_BLOB_BYTES или не
+    Файл принадлежит самому длинному `paths` (`module_of`). Нечитаемый, не utf-8, больше MAX_BLOB_BYTES или не
     разбираемый файл молча пропускается (образец — adapters/parse.py): `index` из-за него не падает.
     """
     layer_of = {r["id"]: r["layer"] for r in modules}
@@ -411,7 +411,7 @@ def _public_classes(tree: Tree, modules: list[dict[str, Any]]) -> dict[str, set[
 
 
 def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[str]:
-    """Весь проект: «id — purpose» в порядке modules.yaml и до 5 главных интерфейсов модуля."""
+    """Весь проект: «id — purpose» в порядке modules.yaml, до 5 главных интерфейсов и строка `классы:` юнита."""
     sha = resolve(root, ref)
     tree = Tree(root, sha)
     modules = modules_for(tree)
