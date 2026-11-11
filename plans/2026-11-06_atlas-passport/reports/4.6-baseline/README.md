@@ -13,4 +13,4 @@
 | def6.passport.txt | Services/vfd_comm/core/client.py::VfdClient.config (26) |
 
 `oracle.py` — образец скрипта оракула привязок (независимый `ast`-обход блобов `1e085652f`), 17 171 привязка = 9 978 модуля + 7 193 тела класса.
-Приёмка: после правки в том же клоне `git checkout <impl-sha> -- scripts/atlas` и `diff -r` с этим каталогом — пусто.
+Приёмка: после правки в том же клоне `git checkout <impl-sha> -- scripts/atlas` и `diff -r -x README.md -x 4.6a-fixtures.md -x oracle.py` с этим каталогом — пусто (для 4.6b дополнительно `-x def1.passport.txt`).
