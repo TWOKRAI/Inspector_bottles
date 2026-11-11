@@ -70,22 +70,37 @@ def _owned(item: dict) -> dict:
     return {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in item.items()}
 
 
+# Служебные ключи .json: порядок слияния ставит их ПОСЛЕ extras, значения из sidecar_keys перекрываются.
+_RESERVED_SIDECAR_KEYS = frozenset({"file", "width", "height", "saved_ts", "source"})
+
+
 class _NdarrayInValue(Exception):
     """В значении sidecar-ключа найден ndarray: JSON его не выражает, ключ пропускается."""
+
+
+def _json_key(key: Any) -> Any:
+    """Ключ dict -> JSON-допустимый: np.generic -> .item(), прочие не-JSON ключи (tuple и т.п.) -> str()."""
+    if isinstance(key, np.generic):
+        key = key.item()
+    if key is None or isinstance(key, (str, int, float, bool)):
+        return key
+    return str(key)
 
 
 def _json_native(value: Any) -> Any:
     """Рекурсивно привести значение к JSON-нативному виду (dict/list/tuple, np.generic -> .item()).
 
     ndarray на любой глубине -> _NdarrayInValue (вызывающий пропускает весь ключ верхнего уровня).
-    Без конвертации json.dumps(default=str) записал бы np.float32 строкой.
+    Ключи dict тоже приводятся (_json_key). Без конвертации json.dumps(default=str) записал бы
+    np.float32 строкой, а np.int64-ключ уронил бы весь .json (TypeError).
+    Самоссылающееся значение даёт RecursionError — его ловит вызывающий.
     """
     if isinstance(value, np.ndarray):
         raise _NdarrayInValue
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, dict):
-        return {k: _json_native(v) for k, v in value.items()}
+        return {_json_key(k): _json_native(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_native(v) for v in value]
     return value
@@ -131,16 +146,6 @@ class FrameSaverPlugin(ProcessModulePlugin):
         # camera_id из cfg (не входит в register — идентификатор хоста, для логов).
         self._camera_id: int = ctx.config.get("camera_id", 0)
 
-        # sidecar_keys: разбираем один раз (пробелы срезаем, пустые сегменты отбрасываем).
-        self._sidecar_keys: tuple[str, ...] = tuple(
-            k for k in (seg.strip() for seg in self._reg.sidecar_keys.split(",")) if k
-        )
-        for reserved in ("frame", self._reg.sidecar_key):
-            if reserved in self._sidecar_keys:
-                raise ValueError(f"frame_saver: sidecar_keys не может содержать ключ {reserved!r}")
-        self._collision_warned: bool = False  # предупреждение о коллизии с payload — один раз за жизнь узла
-        self._ndarray_warned: set[str] = set()  # ключи, пропущенные из-за ndarray (не спамим по кадру)
-
         # Состояние (общий lock — буфер + индекс + папка + счётчики).
         self._lock = threading.Lock()
         self._buffer: deque[dict] = deque(maxlen=max(1, self._reg.buffer_size))
@@ -157,6 +162,23 @@ class FrameSaverPlugin(ProcessModulePlugin):
         self._wired_trigger: bool = False  # последнее значение с провода (вход trigger)
         self._prev_trigger: bool = False  # предыдущее объединённое состояние (для детекта фронта)
         self._last_frame_item: dict | None = None  # последний кадр (для триггера в stream-режиме)
+        self._collision_warned: bool = False  # предупреждение о коллизии с payload — один раз за жизнь узла
+        self._skipped_warned: set[str] = set()  # ключи, пропущенные (ndarray / самоссылка): один warning на ключ
+
+        # sidecar_keys: разбираем один раз (пробелы срезаем, пустые сегменты отбрасываем).
+        # Валидация ПОСЛЕ инициализации состояния: фреймворк зовёт shutdown() и после неудачного
+        # configure(), ему нужны _lock/_buffer/_saved_count.
+        keys = tuple(k for k in (seg.strip() for seg in self._reg.sidecar_keys.split(",")) if k)
+        for reserved in ("frame", self._reg.sidecar_key):
+            if reserved in keys:
+                raise ValueError(f"frame_saver: sidecar_keys не может содержать ключ {reserved!r}")
+        shadowed = sorted(_RESERVED_SIDECAR_KEYS.intersection(keys))
+        if shadowed:
+            ctx.log_warning(
+                f"FrameSaverPlugin[{self._camera_id}]: sidecar_keys содержит служебные ключи {shadowed} — "
+                "их значения перекрываются полями кадра/регистром (file/width/height/saved_ts/source)"
+            )
+        self._sidecar_keys: tuple[str, ...] = keys
 
         # Папку НЕ создаём заранее — папка дня создаётся лениво в _resolve_dir.
         ctx.log_info(
@@ -318,11 +340,12 @@ class FrameSaverPlugin(ProcessModulePlugin):
                 continue
             try:
                 extras[key] = _json_native(item[key])
-            except _NdarrayInValue:
-                if key not in self._ndarray_warned:
-                    self._ndarray_warned.add(key)
+            except (_NdarrayInValue, RecursionError) as exc:
+                if key not in self._skipped_warned:
+                    self._skipped_warned.add(key)
+                    reason = "ndarray" if isinstance(exc, _NdarrayInValue) else "самоссылку (RecursionError)"
                     self._ctx.log_warning(
-                        f"FrameSaverPlugin[{self._camera_id}]: значение ключа {key!r} содержит ndarray — "
+                        f"FrameSaverPlugin[{self._camera_id}]: значение ключа {key!r} содержит {reason} — "
                         "ключ в .json не пишется"
                     )
         source = {"source": self._reg.sidecar_source} if self._reg.sidecar_source else {}
