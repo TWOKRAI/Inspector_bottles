@@ -14,7 +14,7 @@ ACCEPTANCE: литералы REDS в задачах 1.1a (8 тестов), 1.1b 
 PIPELINE: как в .claude/CLAUDE.md «Task launch convention»; stage 0 по планам уже пройден (r1, r2), по задачам не повторять.
   Порядок: слепой tester (по ACCEPTANCE и design.md §4, без DESIGN-шагов и без кода плагинов; один раз на механизм, до кода,
   в worktree от коммита до реализации) → developer sonnet (REDS → GREEN) → break-injection → reviewer sonnet stage 5.
-  Первая волна: 1.1a, 1.1b, 2.1 параллельно, не больше трёх писателей, у каждого свой worktree от docs/ds-1-sidecar-truth
+  Первая волна: 1.1a ∥ 1.1b — ровно ДВА писателя (владелец 2026-11-11: третий слот занят полосой Р2); 2.1 стартует, когда закончил любой из двух. У каждого свой worktree от docs/ds-1-sidecar-truth
   (ветки feat/ds1-1a, feat/ds1-1b, feat/ds1-2-1). Субагенты только диагностика и файлы; коммитит лид (protect-branch).
   Task 0.1 (разведка стенда: задержка, e_capture, имена классов, байты на вырез, п.7 доля верных) — investigator,
   нужно окно heavy/stand через machine_gate.sh; отчёт возвращается сообщением, файл reports/0.1.md пишет лид.
