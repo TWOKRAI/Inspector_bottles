@@ -190,6 +190,8 @@ class WordLayoutPlugin(ProcessModulePlugin):
         pred = self._top_pred(item)
         tid = self._disk_id(item)
         if not self._should_take(pred, tid):
+            if pred is None:
+                self._note_unconfident(item, tid)
             return item
         assert pred is not None
 
@@ -301,6 +303,41 @@ class WordLayoutPlugin(ProcessModulePlugin):
             return
         self._logged_skip_key = key
         self._log_disk(pred, f"пропуск: {reason}")
+
+    def _note_unconfident(self, item: dict, tid: object | None) -> None:
+        """Строка журнала для диска без уверенного предсказания (C-86а) — один раз на ``track_id``.
+
+        Зовётся после ``_should_take`` и пишет только своё ``_logged_skip_key``: решение
+        (нет задания, item без изменений) и состояние ``_should_take`` не трогаются.
+        Строки нет: триггер-режим (там нет ключа диска), кадр без ``track_id`` (пауза, не диск),
+        диск уже взят/пропущен (``_taken_track``) или по нему строка уже была.
+        Ошибка построения строки не должна менять решение — как в ``_note_skip_guarded``.
+        """
+        try:
+            if self._reg.use_trigger or tid is None or tid == self._taken_track:
+                return
+            key = ("tid", tid)
+            if key == self._logged_skip_key:
+                return
+            self._logged_skip_key = key
+
+            preds = item.get(self._reg.predictions_source)
+            top = preds[0] if isinstance(preds, list) and preds else None
+            if not isinstance(top, dict) or not top.get("label"):
+                self._log_disk({"label": "?", "angle_deg": 0.0}, "пропуск: нет предсказания")
+                return
+            conf = float(top.get("confidence", 1.0))
+            min_conf = float(self._reg.min_confidence)
+            # Порог в скобках: свой (min_confidence), если уверенность ниже него; иначе диск
+            # отклонил только флаг below_threshold — порог ml_inference здесь неизвестен.
+            threshold = f"{min_conf:.2f}" if not (conf >= min_conf) else "порог ml_inference"
+            pred = {"label": str(top["label"]), "angle_deg": float(top.get("angle_deg", 0.0))}
+            self._log_disk(
+                pred,
+                f"пропуск: уверенность ниже порога ({self._label_of(pred)} {conf:.2f} < {threshold})",
+            )
+        except Exception as exc:  # noqa: BLE001 — журнал вторичен; значения входа в сообщение не кладём
+            self._ctx.log_error(f"WordLayoutPlugin: строка пропуска 'ниже порога' не записана: {type(exc).__name__}")
 
     def _write_word(self, w: str, log: bool = True) -> bool:
         """Записать слово в регистр «Слово» (единственное хранилище). False — регистр отказал."""
