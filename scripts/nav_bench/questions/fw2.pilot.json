@@ -1,6 +1,7 @@
 {
   "name": "fw2-pilot",
   "repo_sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+  "copy": "clone",
   "exclude": [
     "scripts/nav_bench",
     "scripts/atlas/tests",
