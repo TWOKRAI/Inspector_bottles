@@ -69,6 +69,14 @@ _SYSTEM_STOP_STORE_KEYS = ("phase", "mode", "initiator", "started_at")
 _SHUTDOWN_SENDER_KEY = "_sender"
 #: Предел длины ``initiator`` в ``system.stop`` (символов): отправитель конверта — чужая строка.
 _SHUTDOWN_INITIATOR_MAX = 64
+#: C-88 (ADR-PMM-045): после ``done`` PM ещё недолго отвечает на ``supervision.status``, если снимок
+#: опрашивают прямо сейчас. Читаются в момент вызова (не параметры по умолчанию): тесты подменяют.
+#: Свежесть: последний ответ ``supervision.status`` во время стопа моложе этого срока (с).
+_STATUS_OBSERVER_FRESH_S = 0.25
+#: Потолок ожидания снимка с ``done`` (с).
+_STATUS_LINGER_S = 0.5
+#: Пауза после снимка с ``done``: ответ уходит потоком адаптера моста уже после возврата обработчика (с).
+_STATUS_FLUSH_S = 0.05
 
 
 class _EnvelopeSender(str):
@@ -590,6 +598,18 @@ class ProcessManagerProcess(ProcessModule):
     def _system_stop_lock(self) -> threading.Lock:
         """Листовой лок словаря хода стопа: под ним только чтение, запись и проверка-и-установка."""
         return self.__dict__.setdefault("_system_stop_lock_obj", threading.Lock())
+
+    @property
+    def _status_done_served_event(self) -> threading.Event:
+        """Событие «снимок ``supervision.status`` с фазой ``done`` отдан» (C-88, ADR-PMM-045).
+
+        Создаётся при первом чтении (``__dict__.get`` → ``setdefault`` только если нет): обработчик
+        и ожидание в ``_ChildrenStop`` берут ОДНО и то же событие; чтение через ``getattr`` с
+        умолчанием дало бы ожидающему ``None`` и мгновенный выход."""
+        ev = self.__dict__.get("_status_done_served_ev")
+        if ev is None:
+            ev = self.__dict__.setdefault("_status_done_served_ev", threading.Event())
+        return ev
 
     @property
     def _system_stop_publish_lock(self) -> threading.Lock:
@@ -1353,6 +1373,12 @@ class ProcessManagerProcess(ProcessModule):
                     self._stop_deadline_at(registry, name, signalled_at, force_deadline) if proc is not None else None
                 ),
             }
+        if system_stop is not None:
+            # C-88 (ADR-PMM-045): наблюдатель опрашивает статус во время стопа; снимок с ``done`` отдан —
+            # ожидание в ``_ChildrenStop`` отпускает. Значение ``system_stop`` — копия из ``_system_stop_snapshot``.
+            self._status_served_during_stop_at = time.monotonic()
+            if system_stop.get("phase") == "done":
+                self._status_done_served_event.set()
         return {"success": True, "epoch": epoch, "processes": processes, "system_stop": system_stop}
 
     def _stop_wave(self, name: str) -> str:
@@ -5193,6 +5219,8 @@ class _ChildrenStop:
     _force_at: float | None = None
     #: ``kill()`` уже звали — срок ``force`` больше не применяется.
     _killed: bool = False
+    #: Ожидание наблюдателя статуса (C-88) уже было — один раз на экземпляр, в том числе у ``__new__``-двойников.
+    _linger_done: bool = False
 
     def __init__(self, pm: ProcessManagerProcess) -> None:
         self._pm = pm
@@ -5303,6 +5331,7 @@ class _ChildrenStop:
             # ``done`` ставится здесь, иначе «после ``done`` ``null`` = PM не подтвердил» не исполнится.
             if self._killed:
                 self._announce_phase("done")
+                self._linger_for_status_observer(deadline)
             return False
         force_at = self._force_at
         if force_at is not None and not self._killed:
@@ -5314,6 +5343,7 @@ class _ChildrenStop:
             # (``_finish_stoppable`` зовёт ``close()`` только при ``True``): выжившие получают ``done``
             # здесь, потребитель судит по ``alive``.
             self._announce_phase("done")
+            self._linger_for_status_observer(deadline)
         return stopped
 
     def _on_last_wave(self, wave: str, deadline: float) -> None:
@@ -5355,6 +5385,40 @@ class _ChildrenStop:
             # Task 1.2a: запасной путь ``done`` (основной — ``join_until`` после ``kill()``). Уже ``done`` —
             # ни изменения, ни записи в стор.
             self._announce_phase("done")
+            self._linger_for_status_observer(None)
+
+    def _linger_for_status_observer(self, deadline: float | None) -> None:
+        """Дать наблюдателю забрать снимок ``supervision.status`` с фазой ``done`` (C-88, ADR-PMM-045).
+
+        Без неё последний итог ребёнка не доходит: ``done`` объявлен сразу после записи итога, область
+        закрывает message_processor через ~1 мс, и ответ со снимком уже не отдаётся. Ждём, только если
+        статус опрашивают прямо сейчас (последний ответ во время стопа моложе ``_STATUS_OBSERVER_FRESH_S``);
+        иначе выход сразу — цена нулевая. Ждём событие «снимок с ``done`` отдан» не дольше
+        ``min(_STATUS_LINGER_S, остаток срока)``; после него пауза ``_STATUS_FLUSH_S`` (ответ уходит
+        потоком адаптера моста уже после возврата обработчика: это время, не гарантия доставки).
+        ``deadline=None`` (путь ``close``) — только потолок. Один раз на экземпляр: флаг берётся
+        независимо от результата. Лок PM не держим. Сбой — ERROR в лог, стоп идёт (принцип 5).
+        """
+        if self._linger_done:
+            return
+        self._linger_done = True
+        pm = self._pm
+        try:
+            stamp = getattr(pm, "_status_served_during_stop_at", None)
+            if stamp is None or time.monotonic() - stamp > _STATUS_OBSERVER_FRESH_S:
+                return
+            wait_s = _STATUS_LINGER_S
+            if deadline is not None:
+                wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
+            if wait_s <= 0.0 or not pm._status_done_served_event.wait(wait_s):
+                return
+            flush_s = _STATUS_FLUSH_S
+            if deadline is not None:
+                flush_s = min(flush_s, max(0.0, deadline - time.monotonic()))
+            if flush_s > 0.0:
+                time.sleep(flush_s)
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: ожидание наблюдателя supervision.status: {exc}")
 
     def _announce_phase(self, phase: str, *, begin: bool = False) -> None:
         """Фаза хода стопа PM + публикация в стор. Сбой не ломает стоп детей (ERROR в лог)."""
