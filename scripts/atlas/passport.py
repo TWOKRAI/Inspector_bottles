@@ -1,4 +1,5 @@
-"""Паспорт символа Д1 (Task 4.2a): один объект про класс, функцию или метод — для `ref --format`, бенча и агента.
+"""Паспорт символа Д1 (Task 4.2a): один объект про класс, функцию, метод или привязку имени (Task 4.6a) — для `ref
+--format`, бенча и агента.
 Тот же конверт и шесть разделов у юнита и файла (`build_map`, Task 4.2b-2) — для `atlas map`.
 
 Purpose: по ревизии git (`ref`) и идентификатору символа собирает паспорт: конверт и шесть разделов с постоянными
@@ -24,7 +25,7 @@ Post: паспорт детерминирован: та же ревизия -> �
 
   ключ       тип   значение
   passport   int   `1`
-  kind       str   `class` | `function` | `method` (`DefFact.kind`); у `build_map` — `unit` | `file`
+  kind       str   `class` | `function` | `method` (`DefFact.kind`) | `binding` (4.6a); у `build_map` — `unit` | `file`
   id         str   `путь::qualname`; у `build_map` — id юнита реестра (`unit`) или путь файла (`file`)
   path       str   путь файла символа; у `build_map` — `paths[0]` юнита как в реестре (`unit`) или путь файла (`file`)
   line       int | null   строка `def`/`class` (`DefFact.line`); `null` у `build_map` (юнит и файл без строки)
@@ -32,7 +33,7 @@ Post: паспорт детерминирован: та же ревизия -> �
   scanner    str   `scan.SCANNER` (версия сканера фактов)
 
 Шесть разделов, порядок ключей верхнего уровня: `purpose`, `interface`, `links`, `runtime`, `checks`, `status`.
-Ключи разделов есть у всех видов (класс, функция, метод); не относящееся к виду — `null`.
+Ключи разделов есть у всех видов (класс, функция, метод, привязка); не относящееся к виду — `null`.
 Идентификатора `io` среди разделов нет: ввод-вывод — ключ `runtime.io` (Д1).
 
 `purpose` — зачем символ:
@@ -148,6 +149,31 @@ Post: паспорт детерминирован: та же ревизия -> �
                              Без повторов. Звено цепочки с `error` пропускается. `[]` — искали, нет. `null` у
                              `frozen` в v1 не бывает
 
+Паспорт привязки (Task 4.6a). Привязка — имя из прямого оператора тела модуля или класса (`Cls`, `Outer.Inner`,
+`f.Cls`, у которого есть `DefFact` `kind == "class"`): `Assign` — каждая цель `ast.Name` (`A = B = 1` — две;
+`a, b = ...` — нет), `AnnAssign` с целью `Name` (со значением и без), `ast.TypeAlias`. Не привязка: операторы внутри
+`if`/`try`/`with`/`for`/`while`, `self.x`, локальные имена функций, `+=`. Побеждает первый оператор (его `lineno` —
+`line`). id — `путь::ИМЯ`, `путь::Cls.ИМЯ`, `путь::Outer.Inner.ИМЯ`; ищется только при промахе `find` (имя из `defs`
+даёт прежний паспорт). Голое имя (`ref ИМЯ` без пути) привязку не находит: `not found`.
+Те же конверт и шесть разделов, `kind: "binding"`; значения:
+
+  ключ                    значение
+  purpose                 `text`, `called_from`, `declared_at`: `null`; `called_from_more`: `0`
+  interface.layer, .all   как у метода: слой файла; `all` — звенья `__all__` по первому сегменту qualname
+  interface.signature     `AnnAssign` — `: <ann>` [+ ` = <value>`]; `Assign` — `= <value>`; `TypeAlias` — `type` [+
+                          `[<params>]`] + ` = <value>`; части — `ast.unparse`; `<value>` длиннее 120 символов — первые
+                          120 и `…` (ровно 120 — без среза); аннотация не режется
+  interface.members       `null`
+  links.used_by           у привязки модуля — `Links.imports_of(path, qualname)` (from-импорт любого имени); у привязки
+                          класса `[]` (`Schema.KIND` не наследует импорт модульного `KIND`)
+  links.*  (прочие)       `null` (`uses`, `subclasses`, `call_sites`, `call_sites_unresolved`, `bases`, `structural`,
+                          `call_sites_by_name`)
+  runtime.*, checks.*     `null` (`processes`, `threads`, `commands`, `io`, `findings`, `tests`)
+  status                  `tier`, `stale`, `frozen` как у символа; `doc_missing`, `dynamic`: `null`
+
+Текст — `_render_binding`: строки «не искали» — литералы; значения только у `signature`, `all`, `used_by`, `tier`,
+`stale`, `frozen`. Срез `used_by` — `SHOW_ALL_SECTIONS`.
+
 Паспорт юнита и файла (`build_map`, Task 4.2b-2). Конверт и шесть разделов — те же, ключи постоянны; `kind` — `unit`
 | `file`, `line` — `null`. Цель: id строки реестра (`modules_for(Tree(root, sha))`, не `load_modules()`) -> `unit`;
 иначе путь `.py` ревизии вне `exclude` -> `file`; обратная косая черта в цели читается как `/`. Члены юнита — файлы
@@ -218,7 +244,7 @@ Post: паспорт детерминирован: та же ревизия -> �
     `  __call__(key: str, old_value: Any, new_value: Any) -> None  :17`;
   - связь с адресом: `<имя> — <путь:строка> (<how>)`, `<имя>` — `name` у основы, `enclosing` у прочих связей;
   - связь с `where: null`: `<имя> — строка не указана`;
-  - срез и имена среза: у class/function/method — `SHOW_ALL_SECTIONS`; у `kind` unit/file (Task 4.2b-2) —
+  - срез и имена среза: у class/function/method/binding — `SHOW_ALL_SECTIONS`; у `kind` unit/file (Task 4.2b-2) —
     `MAP_SHOW_ALL`; `render_text` выбирает набор по `kind` паспорта. Метка среза входит в бюджет. Текст `map`
     — образец `map-form.md` п. 3 (`== unit u ==`, вторая строка `<path>; sha <sha>; scanner <scanner>` без `:line`);
   - статус (Task 4.2b-1): строка `status:` несёт `tier`, `doc_missing`, `dynamic`; затем строки с отступом в 2
@@ -269,6 +295,7 @@ _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _PATHSPEC_MAX = 100  # `status.stale`: больше путей — `git diff` без pathspec (предел argv), пересечение в Python
 _TOP_SHOWN = 6  # `top` члена юнита в тексте: до 6 имён, остаток `, +N`
 _STALE_SHOWN = 5  # `stale` в тексте `map`: первые 5 путей, остаток `; ещё N`
+_VALUE_MAX = 120  # `signature` привязки (4.6a): значение длиннее — первые 120 символов и `…`
 
 
 def _norm_exclude(exclude: tuple[str, ...], root: Path) -> tuple[str, ...]:
@@ -352,6 +379,57 @@ def _drop_first(fn: ast.FunctionDef | ast.AsyncFunctionDef, is_method: bool) -> 
     return is_method and "staticmethod" not in {_tag(d) for d in fn.decorator_list}
 
 
+@dataclass(frozen=True)
+class _Binding:
+    """Привязка имени (Task 4.6a): `qualname` — `ИМЯ` модуля или `Cls.ИМЯ`; `line` — строка первого оператора."""
+
+    qualname: str
+    line: int
+    signature: str
+
+
+def _cut_value(node: ast.expr) -> str:
+    """`ast.unparse` значения; длиннее `_VALUE_MAX` символов — первые `_VALUE_MAX` и `…` (ровно столько — без среза)."""
+    text = ast.unparse(node)
+    return text[:_VALUE_MAX] + "…" if len(text) > _VALUE_MAX else text
+
+
+def _binding_sig(stmt: ast.stmt) -> str:
+    """`signature` привязки по оператору: `AnnAssign` — `: <ann>` [+ ` = <value>`]; `Assign` — `= <value>`;
+    `TypeAlias` — `type` [+ `[<params>]`] + ` = <value>`. Части — `ast.unparse`; аннотация не режется."""
+    if isinstance(stmt, ast.AnnAssign):
+        value = f" = {_cut_value(stmt.value)}" if stmt.value is not None else ""
+        return f": {ast.unparse(stmt.annotation)}{value}"
+    if isinstance(stmt, ast.TypeAlias):
+        params = f"[{', '.join(ast.unparse(p) for p in stmt.type_params)}]" if stmt.type_params else ""
+        return f"type{params} = {_cut_value(stmt.value)}"
+    assert isinstance(stmt, ast.Assign)
+    return f"= {_cut_value(stmt.value)}"
+
+
+def _body_bindings(body: list[ast.stmt]) -> dict[str, tuple[int, str]]:
+    """Привязки прямых операторов тела модуля или класса: `имя -> (строка оператора, signature)`.
+
+    Привязка — каждая цель-`Name` у `Assign` (`A = B = 1` — две; `a, b = ...` и `self.x = ...` — нет), цель-`Name` у
+    `AnnAssign` (со значением и без), имя `TypeAlias`. Операторы внутри `if`/`try`/`with`/`for`/`while`, вложенных
+    `def`/`class` и `+=` не входят. Побеждает первый оператор имени. Не бросает."""
+    out: dict[str, tuple[int, str]] = {}
+    for stmt in body:
+        if isinstance(stmt, ast.Assign):
+            names = [t.id for t in stmt.targets if isinstance(t, ast.Name)]
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names = [stmt.target.id]
+        elif isinstance(stmt, ast.TypeAlias):
+            names = [stmt.name.id]
+        else:
+            continue
+        if names:
+            sig = _binding_sig(stmt)
+            for name in names:
+                out.setdefault(name, (stmt.lineno, sig))
+    return out
+
+
 @dataclass
 class _Ctx:
     """Факты, связи и слой одной ревизии; строится один раз на вызов `passports_for`."""
@@ -363,6 +441,7 @@ class _Ctx:
     links: Links
     _rows: list[dict] | None = None
     _ranks: dict[tuple[str, str], int] = field(default_factory=dict)
+    _asts: dict[str, ast.Module | None] = field(default_factory=dict)  # разбор файла один раз на `_Ctx` (4.6a)
 
     @classmethod
     def open(cls, root: Path, ref: str, exclude: tuple[str, ...], *, with_links: bool = True) -> _Ctx:
@@ -396,8 +475,44 @@ class _Ctx:
         path, sep, qualname = ident.partition("::")
         path = norm_path(path, self.root)
         if sep:
-            return [f"{path}::{qualname}"] if qualname and self.find(path, qualname) is not None else []
+            found = qualname and (self.find(path, qualname) is not None or self.binding(path, qualname) is not None)
+            return [f"{path}::{qualname}"] if found else []
         return [f"{p}::{path}" for p in sorted(self.facts) if self.find(p, path) is not None]
+
+    def _module_ast(self, path: str) -> ast.Module | None:
+        """Разбор файла ревизии один раз на `_Ctx` (как `_node`: `decode`, `removeprefix` BOM); ошибка — None."""
+        if path not in self._asts:
+            try:
+                self._asts[path] = ast.parse(self.tree.read(path).decode("utf-8").removeprefix("﻿"))
+            except Exception:  # noqa: BLE001 — привязку не найти; паспорт def/class от этого не зависит
+                self._asts[path] = None
+        return self._asts[path]
+
+    def binding(self, path: str, qualname: str) -> _Binding | None:
+        """Привязка `qualname` в файле `path` (запасной поиск при промахе `find`; правила — `_body_bindings`).
+
+        Pre: `path` — путь файла ревизии; `qualname` — `ИМЯ` (тело модуля) или `Cls.ИМЯ`/`Outer.Inner.ИМЯ`, где
+            владелец — `DefFact` `kind == "class"` (тело модуля и тело этого класса — прямые операторы).
+        Post: `None`, если файла нет в фактах или он с `error`/`v2_error` (символы таких файлов не находятся), владелец
+            не класс (функция, метод, нет), файл не разбирается или имени в прямых операторах нет. Не бросает."""
+        facts = self.facts.get(path)
+        if facts is None or facts.error is not None or facts.v2_error is not None:
+            return None
+        module = self._module_ast(path)
+        if module is None:
+            return None
+        if "" in qualname.split("."):  # пустой сегмент (`.X`, `X.`, `A..b`) — не привязка
+            return None
+        owner, _, name = qualname.rpartition(".")
+        body = module.body
+        if owner:
+            d = self.find(path, owner)
+            node = _find_node(module, owner, d.line) if d is not None and d.kind == "class" else None
+            if not isinstance(node, ast.ClassDef):
+                return None
+            body = node.body
+        hit = _body_bindings(body).get(name)
+        return None if hit is None else _Binding(qualname, *hit)
 
     def rank(self, path: str, enclosing: str) -> int:
         """Число вызовов из продукта у `путь::enclosing`; `<module>` — 0."""
@@ -423,7 +538,10 @@ class _Ctx:
         path, _, qualname = ident.partition("::")
         d = self.find(path, qualname)
         if d is None:
-            raise AtlasError(f"atlas: symbol not found: {ident}")
+            bound = self.binding(path, qualname)
+            if bound is None:
+                raise AtlasError(f"atlas: symbol not found: {ident}")
+            return self._binding_passport(ident, path, bound)
         facts = self.facts[path]
         got = self.links.of(ident) or {}
         node = self._node(path, d)
@@ -447,6 +565,52 @@ class _Ctx:
                 "dynamic": got.get("call_sites_unresolved", 0) + self._dynamic(path, d, facts),
                 "stale": None,  # ниже: `_stale` читает уже собранные разделы
                 "frozen": self._frozen(path, facts, self.rows()),
+            },
+        }
+        p["status"]["stale"] = self._stale(p)
+        return p
+
+    def _binding_passport(self, ident: str, path: str, bound: _Binding) -> dict:
+        """Паспорт привязки (Task 4.6a, `kind: "binding"`): ключи и порядок — как у символа, значения без источника —
+        `null` (таблица «Паспорт привязки» модуля). `used_by` — из индекса `Links` у привязки модуля, `[]` у привязки
+        класса (имя члена не наследует импорт одноимённого модульного)."""
+        facts = self.facts[path]
+        rows = self.rows()
+        qualname = bound.qualname
+        used_by = [] if "." in qualname else self.links.imports_of(path, qualname)
+        p = {
+            "passport": 1,
+            "kind": "binding",
+            "id": ident,
+            "path": path,
+            "line": bound.line,
+            "sha": self.sha,
+            "scanner": SCANNER,
+            "purpose": {"text": None, "called_from": None, "called_from_more": 0, "declared_at": None},
+            "interface": {
+                "layer": module_of(path, rows),
+                "all": self._all_chain(path, qualname, facts, rows),
+                "signature": bound.signature,
+                "members": None,
+            },
+            "links": {
+                "used_by": used_by,
+                "uses": None,
+                "subclasses": None,
+                "call_sites": None,
+                "call_sites_unresolved": None,
+                "bases": None,
+                "structural": None,
+                "call_sites_by_name": None,
+            },
+            "runtime": {"processes": None, "threads": None, "commands": None, "io": None},
+            "checks": {"findings": None, "tests": None},
+            "status": {
+                "tier": facts.tier,
+                "doc_missing": None,
+                "dynamic": None,
+                "stale": None,  # ниже: `_stale` читает уже собранные разделы
+                "frozen": self._frozen(path, facts, rows),
             },
         }
         p["status"]["stale"] = self._stale(p)
@@ -487,16 +651,16 @@ class _Ctx:
                     members.append({"name": m.name, "signature": sig, "where": f"{path}:{m.lineno}"})
         return {
             "layer": module_of(path, rows),
-            "all": self._all_chain(path, d, facts, rows),
+            "all": self._all_chain(path, d.qualname, facts, rows),
             "signature": signature,
             "members": members,
         }
 
-    def _all_chain(self, path: str, d: DefFact, facts: FileFacts, rows: list[dict]) -> list[str] | None:
+    def _all_chain(self, path: str, qualname: str, facts: FileFacts, rows: list[dict]) -> list[str] | None:
         links = self._init_chain(path, rows)
         # `__all__` у файла символа или у звена цепочки; звено с `error` даёт `all=None` и идёт дальше, как до 4.2b-1
         seen_all = facts.all is not None or any(pkg.all is not None for _, pkg in links)
-        name = d.qualname.split(".")[0]
+        name = qualname.split(".")[0]
         chain = [init for init, pkg in links if pkg.all is not None and name in pkg.all]
         if facts.all is not None and name in facts.all and path not in chain:  # В14: файл символа — первое звено
             chain.insert(0, path)  # (`path` в `chain` — символ в самом `__init__.py`, он уже звено)
@@ -1067,6 +1231,52 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     return _emit(fixed, budget, show, full, _SYMBOL_CUT, _FULL_ONLY)
 
 
+def _render_binding(passport: dict, budget: int, show_all: frozenset[str], full: bool) -> str:
+    """Текст `kind: "binding"` (Task 4.6a; образцы — `4.6a-fixtures.md` §4). Значения печатаются только у `signature`,
+    `all`, `used_by`, `tier`, `stale`, `frozen`; остальное — литерал `не искали` в коде, а не `_value(раздел)`: тест
+    закрепляет текст, а `null` в JSON — отдельно. `used_by` режется как у символа (`_emit`, `--all used_by`)."""
+    p = passport
+    itf, lnk, st = p["interface"], p["links"], p["status"]
+    fixed: list[tuple[str, object]] = []
+
+    def add(text: str) -> None:
+        fixed.append(("line", text))
+
+    add(f"== {p['id']} ==")
+    add(f"{p['path']}:{p['line']}; sha {p['sha']}; scanner {p['scanner']}")
+    add(f"purpose: {_NOT_SEARCHED}")
+    add(f"  зовут из: {_NOT_SEARCHED}")
+    add(f"  declared_at: {_NOT_SEARCHED}")
+    add(f"interface: layer {itf['layer']}; signature {itf['signature'] or _EMPTY}")
+    add(f"  all: {', '.join(itf['all']) if itf['all'] else _value(itf['all'])}")
+    add(f"  members: {_NOT_SEARCHED}")
+    used = lnk["used_by"]
+    forms = [f for f in _FORMS if any(e["how"] == f for e in used)]
+    add(f"links: найдено {len(used)}" + (f" (формы: {', '.join(forms)})" if forms else "") + f"; {_UNSEEN}")
+    prod = sum(1 for e in used if e["scope"] == "prod")
+    add(f"  из продукта {prod}, из тестов {len(used) - prod}")
+    if used:
+        add(f"  used_by: {len(used)}")
+        fixed.append(("list", ("used_by", "    ", sorted(used, key=_order), _link_row)))
+    else:
+        add(f"  used_by: {_EMPTY}")
+    for name in ("call_sites", "subclasses", "call_sites_unresolved", "uses", "bases", "structural"):
+        add(f"  {name}: {_NOT_SEARCHED}")
+    add(f"runtime: processes {_NOT_SEARCHED}")
+    for name in ("threads", "commands", "io"):
+        add(f"  {name}: {_NOT_SEARCHED}")
+    add(f"checks: findings {_NOT_SEARCHED}")
+    add(f"  tests: {_NOT_SEARCHED}")
+    add(f"status: tier {st['tier'] or 'нет шапки'}; doc_missing {_NOT_SEARCHED}; dynamic {_NOT_SEARCHED}")
+    add(f"  stale: {', '.join(st['stale']) if st['stale'] else _value(st['stale'])}")
+    if st["frozen"]:
+        for head in st["frozen"]:
+            add(f"  frozen: {head['date']} {head['text']} ({head['where']})")
+    else:
+        add(f"  frozen: {_value(st['frozen'])}")
+    return _emit(fixed, budget, show_all, full, _SYMBOL_CUT, _FULL_ONLY)
+
+
 def _emit(
     fixed: list[tuple[str, object]],
     budget: int,
@@ -1220,8 +1430,9 @@ def _render_map(passport: dict, budget: int, show_all: frozenset[str], full: boo
 def build_passport(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] = ()) -> dict:
     """Паспорт одного символа (структура — в докстринге модуля).
 
-    Pre: `ident` — полный идентификатор `путь::qualname` символа, определённого в ревизии `ref` (голое имя разбирает
-        `resolve_ident`); `root` и `ref` — см. модуль.
+    Pre: `ident` — полный идентификатор `путь::qualname` символа, определённого в ревизии `ref`, либо привязки имени
+        (`путь::ИМЯ`, `путь::Cls.ИМЯ`; Task 4.6a, правила — «Паспорт привязки» модуля); голое имя разбирает
+        `resolve_ident` и привязку не находит; `root` и `ref` — см. модуль.
     Post: JSON-совместимый `dict`: конверт (`passport`, `kind`, `id`, `path`, `line`, `sha`, `scanner`) и шесть
         разделов (`purpose`, `interface`, `links`, `runtime`, `checks`, `status`) — все ключи всегда, `null` против
         `[]`/`0` по таблицам модуля. `json.dumps(result)` проходит без `default=`. Не меняет репозиторий (кроме
@@ -1278,7 +1489,8 @@ def resolve_ident(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] 
     """Полные `путь::qualname` по `ident`.
 
     Pre: `ident` — `путь::qualname` либо голый `qualname` (`Cls.method`, `func`) без `::`.
-    Post: с `::` — `[ident]`, если символ есть в `defs` файла ревизии, иначе `[]`. Без `::` — все файлы ревизии
+    Post: с `::` — `[ident]`, если символ есть в `defs` файла ревизии или это привязка имени (Task 4.6a; файл с
+        `error`/`v2_error` привязок не даёт, как и символов), иначе `[]`. Без `::` — все файлы ревизии
         (кроме `exclude`) с символом, чей `qualname` ТОЧНО равен `ident` (не подстрока, не регистр), список отсортирован
         по пути. `[]` — не найден (`not found`), больше одного — `ambiguous`; решение о тексте ошибки принимает
         вызывающий (`passports_for`). Не бросает на отсутствии символа.
@@ -1289,7 +1501,8 @@ def resolve_ident(root: Path, ref: str, ident: str, *, exclude: tuple[str, ...] 
 def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = frozenset(), full: bool = False) -> str:
     """Текст паспорта (образцы строк — в докстринге модуля). Без завершающего перевода строки.
 
-    Pre: `passport` — результат `build_passport` (или `build_map`); `show_all` ⊆ `SHOW_ALL_SECTIONS` (у `kind` unit/file
+    Pre: `passport` — результат `build_passport` (в том числе `kind: binding`, Task 4.6a: текст `_render_binding`) или
+        `build_map`; `show_all` ⊆ `SHOW_ALL_SECTIONS` (у `kind` unit/file
         — ⊆ `MAP_SHOW_ALL`: имена среза берутся по `kind` паспорта, текст unit/file — `_render_map`); `budget` — число
         строк на ЭТОТ паспорт (у каждого id независимо). Записи раздела из `show_all` входят в расход бюджета.
     Post: `full=True` — без среза (сильнее `budget` и `show_all`). Иначе строк <= max(`budget`, минимум); минимум —
@@ -1309,15 +1522,18 @@ def render_text(passport: dict, *, budget: int = 40, show_all: frozenset[str] = 
     unknown = set(show_all) - set(MAP_SHOW_ALL if is_map else SHOW_ALL_SECTIONS)
     if unknown:
         raise ValueError(f"show_all: неизвестные разделы {sorted(unknown)}")
-    return (_render_map if is_map else _render)(passport, budget, frozenset(show_all), full)
+    kind = passport.get("kind")
+    render = _render_map if is_map else _render_binding if kind == "binding" else _render
+    return render(passport, budget, frozenset(show_all), full)
 
 
 def passports_for(root: Path, ref: str, idents: list[str], *, exclude: tuple[str, ...] = ()) -> list[dict]:
     """Паспорта по списку идентификаторов, в порядке `idents`.
 
     Pre: `idents` — не пусто; каждый — `путь::qualname` или голое имя.
-    Post: список той же длины и порядка. Разрешённый id -> результат `build_passport` (только символы class/function/
-        method: цели unit/file — `build_map`; имена среза `render_text` берутся по `kind` паспорта). Ошибочный id ->
+    Post: список той же длины и порядка. Разрешённый id -> результат `build_passport` (символы class/function/method и
+        привязки имени `путь::ИМЯ` — Task 4.6a, `kind: binding`; цели unit/file — `build_map`; имена среза
+        `render_text` берутся по `kind` паспорта). Ошибочный id ->
         запись `{"id": <как дан>, "error": "not found"}` (0 совпадений) либо `{"id": <как дан>, "error": "ambiguous",
         "candidates": [<путь::qualname>, ...]}` (больше одного; `candidates` отсортированы по пути; ключа нет у
         `not found`). Ошибка одного id не отменяет остальные: их паспорта полные. Дубли `idents` дают дубли записей.

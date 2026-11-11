@@ -537,6 +537,18 @@ M2 (1.9f) — blocker+major классов `fact`, `dryrun`, `form`: их лов
 Без источника в 4.1 — всегда `null`: `links.uses`, `runtime.processes`, `purpose.declared_at`, `checks.findings`
 (в v1 `node` реестра не `путь::qualname`; запроса к сборке нет). `stale`/`frozen` — ключи, значения 4.2b.
 
+Task 4.6a — вид `binding` («привязка имени»): паспорт константы, алиаса, поля класса, члена `Enum` по id `путь::ИМЯ`
+или `путь::Cls.ИМЯ`. Привязка — имя из прямого оператора тела модуля или класса (у которого есть `DefFact` `class`):
+`Assign` (каждая цель `Name`), `AnnAssign` с целью `Name`, `TypeAlias`; первый оператор побеждает; оператор внутри
+`if`/`try`/`with`/`for`/`while`, кортежная цель, `self.x`, `+=` — не привязка. Ищется только при промахе `find`
+(`def`/`class` — прежний паспорт, байт в байт), разбором файла в `_Ctx`, не сканером (привязки в `DefFact` запрещены
+записью 16 `amendments.md`). Ключи и порядок конверта и шести разделов прежние; `null` — `purpose.text`,
+`called_from`, `declared_at`, `interface.members`, `links.uses/subclasses/call_sites/call_sites_unresolved/bases/
+structural/call_sites_by_name`, весь `runtime`, `checks.*`, `status.doc_missing`, `status.dynamic` (источника нет — «не
+искали»); `links.used_by` — из индекса `Links` (`imports_of`: from-импорт любого имени) у привязки модуля, `[]` у
+привязки класса; `signature` — `: <ann> = <значение>` по `ast.unparse`, значение режется на 120 символах. Голое имя
+(`ref ИМЯ`) привязку не ищет: нужен разбор всех файлов (~43 с на 4 387 файлах против ~2 с у `defs`).
+
 **R1 — источник.** Факты v2 `scan(Tree(root, ref), *.py без exclude, cache=scan_cache)` -> `build_links` в памяти
 (кэша `links` нет). Паспорт не меняет репозиторий и рабочее дерево; пишет только кэш фактов `data/atlas.sqlite`
 (таблица `scan_cache`) через `scan()`. Тёплый вызов (`ref ConfigFileWatcher --format passport`) — 1,64–1,72 с.

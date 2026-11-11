@@ -1,0 +1,31 @@
+== Plugins/sim/pult_web/plugin.py::_build_handler._PultHandler ==
+Plugins/sim/pult_web/plugin.py:1862; sha 1e085652f6a7a5b3825f87157769be6de47ad928; scanner 1-d8b9d44d5b0d
+purpose: —
+  зовут из: —
+  declared_at: не искали
+interface: layer plugins/sim; signature —
+  all: —
+  members:
+    log_message(format: str, *args: Any) -> None  :1872
+    handle() -> None  :1924
+    do_GET() -> None  :2023
+    do_POST() -> None  :2054
+links: найдено 0; не видно: динамика, аннотации, упоминания
+  из продукта 0, из тестов 0
+  used_by: —
+  call_sites: —
+  subclasses: —
+  call_sites_unresolved: —
+  uses: не искали
+  bases:
+    http.server.BaseHTTPRequestHandler — строка не указана
+  structural: обязательные log_message, handle, do_GET, do_POST
+runtime: processes не искали
+  threads: — (ищет: Thread, Timer, Observer)
+  commands: форма command_specs() не объявлена (ищет только def command_specs(); register_command(...) не читает)
+  io: — (ищет: Observer.schedule, os.rename, os.replace, shutil.move)
+checks: findings не искали
+  tests: —
+status: tier нет шапки; doc_missing да; dynamic —
+  stale: —
+  frozen: —
