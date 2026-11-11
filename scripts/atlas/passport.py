@@ -294,6 +294,7 @@ _MEMBERS_MIN = 3  # `members` класса в тексте: меньше 3 ст�
 _FULL_ONLY = {"members": _MEMBERS_MIN}  # списки без своего `--all`: снимает только `--full`; значение — минимум строк
 _FORMS = ("import", "name-call", "same-file", "test-body")  # порядок форм — порядок упоминания в `links.py`
 _UNSEEN = "не видно: динамика, аннотации, упоминания"
+_UNSEEN_SYMBOL = _UNSEEN + ", импорт через фасад __init__"  # паспорт символа и привязки; карта юнита/файла — `_UNSEEN`
 _NOT_SEARCHED = "не искали"
 _EMPTY = "—"
 _NO_SPECS = "форма command_specs() не объявлена"
@@ -1194,7 +1195,7 @@ def _render(passport: dict, budget: int, show_all: frozenset[str], full: bool) -
     entries = [*lnk["used_by"], *lnk["call_sites"], *lnk["subclasses"]]
     forms = [f for f in _FORMS if any(e["how"] == f for e in entries)]
     head = f"links: найдено {len(entries)}" + (f" (формы: {', '.join(forms)})" if forms else "")
-    add(f"{head}; {_UNSEEN}")
+    add(f"{head}; {_UNSEEN_SYMBOL}")
     prod = sum(1 for e in entries if e["scope"] == "prod")
     add(f"  из продукта {prod}, из тестов {len(entries) - prod}")
     for name in ("used_by", "call_sites", "subclasses"):
@@ -1294,7 +1295,7 @@ def _render_binding(passport: dict, budget: int, show_all: frozenset[str], full:
     add(f"  members: {_NOT_SEARCHED}")
     used = lnk["used_by"]
     forms = [f for f in _FORMS if any(e["how"] == f for e in used)]
-    add(f"links: найдено {len(used)}" + (f" (формы: {', '.join(forms)})" if forms else "") + f"; {_UNSEEN}")
+    add(f"links: найдено {len(used)}" + (f" (формы: {', '.join(forms)})" if forms else "") + f"; {_UNSEEN_SYMBOL}")
     prod = sum(1 for e in used if e["scope"] == "prod")
     add(f"  из продукта {prod}, из тестов {len(used) - prod}")
     if used:

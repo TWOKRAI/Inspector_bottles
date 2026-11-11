@@ -6,7 +6,7 @@ purpose: Вид записи: ``"resource"``, ``"thread"``, ``"scope"`` или �
 interface: layer base_manager; signature -> str
   all: multiprocess_framework/modules/base_manager/interfaces.py
   members: не искали
-links: найдено 0; не видно: динамика, аннотации, упоминания
+links: найдено 0; не видно: динамика, аннотации, упоминания, импорт через фасад __init__
   из продукта 0, из тестов 0
   used_by: —
   call_sites: —

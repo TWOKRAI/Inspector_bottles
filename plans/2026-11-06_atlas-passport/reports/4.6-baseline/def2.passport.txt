@@ -10,7 +10,7 @@ interface: layer plugins/sim; signature —
     handle() -> None  :1924
     do_GET() -> None  :2023
     do_POST() -> None  :2054
-links: найдено 0; не видно: динамика, аннотации, упоминания
+links: найдено 0; не видно: динамика, аннотации, упоминания, импорт через фасад __init__
   из продукта 0, из тестов 0
   used_by: —
   call_sites: —
