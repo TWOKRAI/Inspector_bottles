@@ -1836,7 +1836,7 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--reference", type=Path, help="JSON эталона 3.1 или `atlas ref --format json`")
     source.add_argument("--text", type=Path, help="JSON целей (форма — README): паспорта atlas на repo_sha набора")
     ceil.add_argument("--root", type=Path, default=Path("."), help="репозиторий-источник клона на repo_sha (с --text)")
-    ceil.add_argument("--min", type=int, default=None, help="код 1, если достижимых вопросов меньше N")
+    ceil.add_argument("--min", type=int, default=None, help="код 1, если достижимых меньше N (--text: K по окну)")
 
     args = parser.parse_args(argv)
     if args.command == "ceiling":
