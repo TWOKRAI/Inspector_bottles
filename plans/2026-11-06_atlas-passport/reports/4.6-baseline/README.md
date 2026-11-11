@@ -5,7 +5,7 @@
 | файл | id |
 |---|---|
 | ProcessModule.passport.txt | ProcessModule (41 строка) |
-| def1.passport.txt | Services/auth/models.py::SessionEntry.SQLMeta (26) |
+| def1.passport.txt | Services/auth/models.py::SessionEntry.SQLMeta (30; с 4.6b — вывод ПОСЛЕ правки, +4 строки полей; остальные семь — «до») |
 | def2.passport.txt | Plugins/sim/pult_web/plugin.py::_build_handler._PultHandler (31) |
 | def3.passport.txt | …::_build_handler._PultHandler.log_message (26) |
 | def4.passport.txt | multiprocess_framework/modules/base_manager/interfaces.py::IHandle.kind (26) |
