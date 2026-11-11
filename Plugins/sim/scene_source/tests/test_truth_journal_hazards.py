@@ -60,9 +60,9 @@ def _make_catalog(root: Path) -> Path:
     return classes_dir
 
 
-def _make_plugin(tmp_path: Path, health: Any = None) -> tuple[SceneSourcePlugin, Path, _FakeStateProxy]:
+def _make_ctx(tmp_path: Path, overrides: dict[str, Any] | None = None, health: Any = None) -> tuple[Any, Path, Any]:
     journal_dir = tmp_path / "journal"
-    journal_dir.mkdir()
+    journal_dir.mkdir(exist_ok=True)
     state_proxy = _FakeStateProxy()
     ctx = MagicMock()
     ctx.state_proxy = state_proxy
@@ -79,20 +79,36 @@ def _make_plugin(tmp_path: Path, health: Any = None) -> tuple[SceneSourcePlugin,
         "truth_journal_dir": str(journal_dir),
         # enc не должен мешать счёту записей: период 1 час, пишется только самая первая строка
         "truth_journal_enc_hz": 1.0 / 3600.0,
+        **(overrides or {}),
     }
-    plugin = SceneSourcePlugin()
-    plugin.configure(ctx)
-    plugin.start(ctx)
+    return ctx, journal_dir, state_proxy
+
+
+def _push_encoder(state_proxy: _FakeStateProxy, value: float) -> None:
     state_proxy.emit(
         [
             Delta(
                 path="sim.belt.encoder",
                 old_value=object(),
-                new_value={"value": 0, "mm_s": 0.0, "t": time.monotonic()},
+                new_value={"value": value, "mm_s": 0.0, "t": time.monotonic()},
                 source="robot",
             )
         ]
     )
+
+
+def _make_plugin(
+    tmp_path: Path,
+    health: Any = None,
+    overrides: dict[str, Any] | None = None,
+    world: bool = True,
+) -> tuple[SceneSourcePlugin, Path, _FakeStateProxy]:
+    ctx, journal_dir, state_proxy = _make_ctx(tmp_path, overrides, health)
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    if world:
+        _push_encoder(state_proxy, 0)
     return plugin, journal_dir, state_proxy
 
 
@@ -203,3 +219,149 @@ def test_write_error_after_open_reports_once_and_stops_writing(tmp_path: Path) -
     assert handle.closed_calls == 1, "мёртвый файл должен быть закрыт ровно один раз"
     published = [value for path, value in sp.set_calls if path == "sim.objects"]
     assert published, "setup sanity: сцена продолжила спавнить после отказа журнала"
+
+
+# --------------------------------------------------------------------------- #
+# Ревью, раунд 1                                                              #
+# --------------------------------------------------------------------------- #
+
+
+def _kinds(journal_dir: Path) -> list[str]:
+    return [rec["kind"] for rec in _lines(journal_dir)]
+
+
+def test_no_world_delta_writes_header_only(tmp_path: Path) -> None:
+    """Журнал включён, мира ещё не было: три `produce()` -> в файле ровно `header` (ни `enc`, ни `spawn`)."""
+    plugin, journal_dir, _sp = _make_plugin(tmp_path, world=False)
+    for _ in range(3):
+        time.sleep(0.03)
+        plugin.produce()
+    assert _kinds(journal_dir) == ["header"]
+
+
+@pytest.mark.parametrize("bad_hz", [0, -1.0, True, "5", None, float("nan"), float("inf")])
+def test_bad_enc_hz_rejected_even_when_journal_off(tmp_path: Path, bad_hz: Any) -> None:
+    """Ключ частоты проверяется и при `truth_journal_dir=""`; `true`, строка, `null`, NaN, inf — тоже отказ."""
+    ctx, _journal_dir, _sp = _make_ctx(tmp_path, {"truth_journal_dir": "", "truth_journal_enc_hz": bad_hz})
+    with pytest.raises(ValueError, match="truth_journal_enc_hz"):
+        SceneSourcePlugin().configure(ctx)
+
+
+def test_missing_journal_dir_is_created(tmp_path: Path) -> None:
+    """Каталога `a/b` нет: после `configure()` он существует и в нём лежит файл с `header`."""
+    target = tmp_path / "a" / "b"
+    assert not target.exists(), "setup sanity: каталог не должен существовать до configure()"
+    ctx, _jd, _sp = _make_ctx(tmp_path, {"truth_journal_dir": str(target)})
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    assert target.is_dir()
+    assert _kinds(target) == ["header"]
+    plugin.shutdown(ctx)
+
+
+def test_second_configure_closes_first_handle_and_keeps_earlier_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Два `configure()` одного экземпляра: первый дескриптор закрыт, строки первого не потеряны.
+
+    Время зафиксировано: имя файла (секундная метка + pid) одинаково, поэтому второй `configure()` открывает
+    ТОТ ЖЕ файл — режим "w" затёр бы первый `header`."""
+    monkeypatch.setattr(time, "time", lambda: 1_800_000_000.0)
+    ctx, journal_dir, _sp = _make_ctx(tmp_path)
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    first = plugin._journal
+    assert first is not None
+    plugin.configure(ctx)
+    assert first.closed, "прежний дескриптор должен быть закрыт повторным configure()"
+    assert plugin._journal is not first
+    assert _kinds(journal_dir) == ["header", "header"]
+    plugin.shutdown(ctx)
+
+
+def test_journal_off_never_reads_wall_clock(tmp_path: Path) -> None:
+    """Журнал выключен: `_wall` не вызван ни разу за N `produce()` (ноль стоимости при выключенном)."""
+    plugin, _jd, _sp = _make_plugin(tmp_path, overrides={"truth_journal_dir": ""})
+    calls: list[float] = []
+    plugin._wall = lambda: calls.append(1.0) or 1.0  # type: ignore[assignment]
+    for _ in range(5):
+        time.sleep(0.03)
+        plugin.produce()
+    assert calls == [], f"при выключенном журнале _wall() вызван {len(calls)} раз"
+
+
+def test_shutdown_closes_file_and_later_produce_writes_nothing(tmp_path: Path) -> None:
+    """`shutdown()` закрывает файл; `produce()` после него не бросает, не пишет и не плодит ошибок health."""
+    health = HealthReporter(HealthState(log_only=True), source="scene_source")
+    ctx, journal_dir, sp = _make_ctx(tmp_path, health=health)
+    plugin = SceneSourcePlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    _push_encoder(sp, 0)
+    handle = plugin._journal
+    assert handle is not None
+    plugin.produce()  # enc + возможно spawn
+    before = (journal_dir / next(journal_dir.glob("truth_*.jsonl")).name).read_text(encoding="utf-8")
+
+    plugin.shutdown(ctx)
+    assert handle.closed
+    for _ in range(3):
+        time.sleep(0.03)
+        assert plugin.produce(), "кадр после shutdown обязан выдаваться"
+    after = next(journal_dir.glob("truth_*.jsonl")).read_text(encoding="utf-8")
+    assert after == before, "после shutdown в журнал что-то записано"
+    assert health.error_count == 0
+
+
+def test_shutdown_after_failed_configure_does_not_raise(tmp_path: Path) -> None:
+    """Оркестратор зовёт `shutdown()` и после упавшего `configure()`: атрибутов журнала может не быть."""
+    ctx, _jd, _sp = _make_ctx(tmp_path, {"truth_journal_enc_hz": 0})
+    plugin = SceneSourcePlugin()
+    with pytest.raises(ValueError, match="truth_journal_enc_hz"):
+        plugin.configure(ctx)
+    plugin.shutdown(ctx)
+
+
+def test_write_to_closed_file_is_reported_once_not_raised(tmp_path: Path) -> None:
+    """Запись в закрытый файл — `ValueError`, а не `OSError`: тоже одна ошибка health, кадры идут, журнал выключен."""
+    health = HealthReporter(HealthState(log_only=True), source="scene_source")
+    plugin, _jd, _sp = _make_plugin(tmp_path, health=health)
+    assert plugin._journal is not None
+    plugin._journal.close()  # файл закрыт, но атрибут жив: путь «ValueError: I/O operation on closed file»
+    for _ in range(3):
+        assert plugin.produce()
+    assert health.error_count == 1
+    assert plugin._journal is None
+
+
+def test_non_finite_encoder_writes_no_enc_and_null_encoder_in_spawn(tmp_path: Path) -> None:
+    """Энкодер мира NaN: строки `enc` нет; `spawn` пишется с `encoder: null`; файл — валидный строгий JSON."""
+    plugin, journal_dir, sp = _make_plugin(tmp_path, world=False)
+    _push_encoder(sp, float("nan"))
+    for _ in range(4):
+        time.sleep(0.03)
+        plugin.produce()
+
+    def _strict(constant: str) -> Any:
+        raise AssertionError(f"в журнале нестрогая константа {constant}")
+
+    text = next(journal_dir.glob("truth_*.jsonl")).read_text(encoding="utf-8")
+    records = [json.loads(ln, parse_constant=_strict) for ln in text.split("\n") if ln]
+    kinds = [rec["kind"] for rec in records]
+    assert "enc" not in kinds
+    spawns = [rec for rec in records if rec["kind"] == "spawn"]
+    assert spawns, f"setup sanity: ни одного spawn при NaN-энкодере: {kinds}"
+    assert all(rec["encoder"] is None and rec["passport"]["spawn_encoder"] is None for rec in spawns)
+
+
+def test_wall_clock_jump_backward_resyncs_enc(tmp_path: Path) -> None:
+    """Часы: 1000.0, затем 900.0, 900.2: после скачка назад `enc` не молчит до 1000.1, а пишется на 900.0."""
+    plugin, journal_dir, _sp = _make_plugin(
+        tmp_path, overrides={"truth_journal_enc_hz": 10.0, "spawn_interval_s": [3600.0, 3600.0]}
+    )
+    values = iter([1000.0, 900.0, 900.05, 900.2])
+    plugin._wall = lambda: next(values)  # type: ignore[assignment]
+    for _ in range(4):
+        plugin.produce()
+    stamps = [rec["t_wall"] for rec in _lines(journal_dir) if rec["kind"] == "enc"]
+    assert stamps == [1000.0, 900.0, 900.2], f"t_wall строк enc: {stamps}"

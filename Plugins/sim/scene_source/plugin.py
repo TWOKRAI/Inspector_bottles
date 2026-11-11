@@ -234,15 +234,17 @@ class SceneSourcePlugin(ProcessModulePlugin):
         # DS-1 1.1b: частота enc проверяется и при выключенном журнале — кривой ключ стенда виден сразу.
         # Ошибка конфигурации, как оба spawn_*: ValueError выходит из configure().
         journal_enc_hz_cfg = cfg.get("truth_journal_enc_hz", _DEFAULT_TRUTH_JOURNAL_ENC_HZ)
-        try:
-            journal_enc_hz = float(journal_enc_hz_cfg)
-        except (TypeError, ValueError):
-            journal_enc_hz = math.nan
-        if not journal_enc_hz > 0.0:  # `not >` ловит и NaN, и нечисло
+        # Только int/float: bool (`true`) и строка («5») — ошибка конфигурации, а не молчаливое 1.0/5.0 Гц.
+        if (
+            isinstance(journal_enc_hz_cfg, bool)
+            or not isinstance(journal_enc_hz_cfg, (int, float))
+            or not math.isfinite(journal_enc_hz_cfg)
+            or journal_enc_hz_cfg <= 0
+        ):
             raise ValueError(
                 f"scene_source: truth_journal_enc_hz должен быть числом > 0, получено {journal_enc_hz_cfg!r}"
             )
-        self._journal_enc_period_s = 1.0 / journal_enc_hz
+        self._journal_enc_period_s = 1.0 / float(journal_enc_hz_cfg)
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
@@ -1193,18 +1195,30 @@ class SceneSourcePlugin(ProcessModulePlugin):
             }
         )
 
+    def shutdown(self, ctx: PluginContext) -> None:
+        """STOPPED: закрыть журнал истины. Зовётся и после упавшего `configure()` — атрибута может не быть.
+
+        `_journal` обнуляется ДО закрытия: `produce()`, не успевший остановиться, больше не пишет в файл."""
+        journal = getattr(self, "_journal", None)
+        self._journal = None
+        if journal is not None:
+            try:
+                journal.close()
+            except OSError as exc:
+                ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+
     def _journal_write(self, record: dict[str, Any]) -> None:
         """Единственная точка записи журнала: строка JSON + `flush()`. Выключен — ничего не делает.
 
-        `OSError` -> одна ошибка в health, файл закрыт, журнал выключен до конца жизни узла (без повторов:
-        иначе при полном диске каждый кадр платил бы за отказ)."""
+        `OSError` (и `ValueError` — запись в закрытый файл) -> одна ошибка в health, файл закрыт, журнал
+        выключен до конца жизни узла (без повторов: иначе при полном диске каждый кадр платил бы за отказ)."""
         journal = self._journal
         if journal is None:
             return
         try:
             journal.write(json.dumps(record, ensure_ascii=False) + "\n")
             journal.flush()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self._journal = None
             self._ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
             try:
@@ -1218,7 +1232,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if not self._world_ready:
             return
         last = self._journal_last_enc_t
-        if last is not None and now - last < self._journal_enc_period_s:
+        if not math.isfinite(encoder):
+            return  # NaN/inf в строке дал бы невалидный строгий JSON; следующий конечный кадр запишет enc
+        # `now < last`: настенные часы прыгнули назад -> пересинхронизация, иначе enc молчит до прежней отметки
+        if last is not None and 0 <= now - last < self._journal_enc_period_s:
             return
         self._journal_last_enc_t = now
         self._journal_write({"kind": "enc", "t_wall": now, "encoder": encoder})
@@ -1251,13 +1268,17 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 self._truth.on_despawn(object_id)
         if journal_now is not None:
             # запись на диск — вне `_truth_lock`: медленный диск не должен держать `truth.status` потока команд
+            finite = math.isfinite(encoder)
             for object_id in sorted(new_ids):
+                passport = after[object_id].to_dict()
+                if not finite:
+                    passport["spawn_encoder"] = None  # паспорт несёт тот же NaN, что и энкодер кадра
                 self._journal_write(
                     {
                         "kind": "spawn",
                         "t_wall": journal_now,
-                        "encoder": encoder,
-                        "passport": after[object_id].to_dict(),
+                        "encoder": encoder if finite else None,
+                        "passport": passport,
                     }
                 )
 
