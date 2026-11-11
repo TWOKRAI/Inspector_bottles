@@ -666,30 +666,30 @@ def atlas_texts(
     return texts
 
 
-def text_addresses(text: str) -> set[tuple[str, int | None]]:
-    """Адреса ``(путь, строка | None)`` из текста паспортов atlas; других правил нет.
+def text_blocks(text: str) -> list[tuple[str, set[tuple[str, int | None]]]]:
+    """Блоки текста паспортов: ``(id, адреса)`` на каждую строку ``== … ==``, в порядке текста.
 
-    а) ``== … ==`` открывает паспорт; следующая строка ``<path>[:<line>]; sha …`` задаёт его путь, если тот кончается
-       на ``.py``, иначе пути нет; блок без такой строки (``not found``, ``ambiguous``) адресов не даёт;
-    б) токен ``путь:строка`` — как ``_ADDR_LINE_RE``, поиском, с границей слева;
-    в) токен целиком ``путь.py`` (без ``:N`` и ``::имя``) — ``(путь, None)``;
-    г) конец строки ``  :N`` (член класса или файла) — ``(путь паспорта, N)``.
+    id — строка заголовка без ``== `` и `` ==`` как есть (``unit u``, ``file p``, ``путь::qualname``, id ошибки).
+    Адреса блока — по правилам ``text_addresses`` (а–г); строки до первого заголовка и после строки без конверта
+    (``not found``, ``ambiguous``) до следующего заголовка адресов не дают.
     """
-    found: set[tuple[str, int | None]] = set()
+    blocks: list[tuple[str, set[tuple[str, int | None]]]] = []
+    found: set[tuple[str, int | None]] | None = None  # адреса открытого блока; None — блок не открыт или закрыт
     path: str | None = None
-    open_block = False
     expect_envelope = False
     for line in text.splitlines():
         if _HEAD_RE.match(line):
-            path, open_block, expect_envelope = None, True, True
+            found = set()
+            blocks.append((line[3:-3], found))
+            path, expect_envelope = None, True
             continue
-        if not open_block:
+        if found is None:
             continue
         if expect_envelope:
             expect_envelope = False
             envelope = _ENVELOPE_RE.match(line)
             if envelope is None:
-                open_block = False
+                found = None
                 continue
             candidate = envelope.group("path")
             path = candidate if candidate.endswith(".py") else None
@@ -698,17 +698,49 @@ def text_addresses(text: str) -> set[tuple[str, int | None]]:
         member = _MEMBER_LINE_RE.search(line)
         if member is not None and path is not None:
             found.add((path, int(member.group(1))))
-    return found
+    return blocks
 
 
-def ceiling_text(qset: dict[str, Any], texts: dict[str, tuple[str, list[str]]]) -> tuple[list[str], int, int]:
+def text_addresses(text: str) -> set[tuple[str, int | None]]:
+    """Адреса ``(путь, строка | None)`` из текста паспортов atlas; других правил нет.
+
+    а) ``== … ==`` открывает паспорт; следующая строка ``<path>[:<line>]; sha …`` задаёт его путь, если тот кончается
+       на ``.py``, иначе пути нет; блок без такой строки (``not found``, ``ambiguous``) адресов не даёт;
+    б) токен ``путь:строка`` — как ``_ADDR_LINE_RE``, поиском, с границей слева;
+    в) токен целиком ``путь.py`` (без ``:N`` и ``::имя``) — ``(путь, None)``;
+    г) конец строки ``  :N`` (член класса или файла) — ``(путь паспорта, N)``.
+
+    Объединение адресов всех блоков ``text_blocks``.
+    """
+    return set().union(*(addrs for _, addrs in text_blocks(text)))
+
+
+def _strict_key(item: dict[str, Any]) -> str | None:
+    """Id блока, который должен найти запись: ``путь::symbol``; записи без ``symbol`` (непустая строка) — ``None``."""
+    symbol = item.get("symbol")
+    if not isinstance(symbol, str) or not symbol:
+        return None
+    return f"{score.normalize_path(str(item['path']))}::{symbol}"
+
+
+def ceiling_text_both(
+    qset: dict[str, Any], texts: dict[str, tuple[str, list[str]]]
+) -> tuple[list[str], int, int | None, int]:
     """Как ``ceiling``, но адреса вопроса — только из текста ЕГО целей (``texts[qid]``): общего пула нет.
 
-    Вопрос без записи в ``texts`` — «нет целей», недостижим. Строки отчёта: ``<qid> reachable=yes|no``; на каждую
-    запись ``expected`` ``  <путь>[:<строка> ±<допуск>] -> найден|нет в тексте``; проблемы atlas; ``  нет целей``.
+    Возвращает (строки отчёта, K по окну, K' строгое | ``None``, N). Вопрос без записи в ``texts`` — «нет целей»,
+    недостижим. Строгое чтение (Task 3.4): запись с ``symbol`` (непустая строка) строго найдена, только если в блоках
+    текста ЕЁ вопроса есть блок с id ``путь::symbol`` и адрес этого блока попал в окно записи; запись без ``symbol`` —
+    как по окну. K' — число вопросов, достижимых по строгим флагам (``require`` тот же); ``None``, если ни у одной
+    записи оцениваемых вопросов нет ``symbol``.
+
+    Строки отчёта: ``<qid> reachable=yes|no`` (при ok и не строгом ok — ``reachable=yes (строго no)``); на каждую
+    запись ``expected`` ``  <путь>[:<строка> ±<допуск>] -> найден|найден вне блока записи|нет в тексте``; проблемы
+    atlas; ``  нет целей``.
     """
     report: list[str] = []
-    reached = total = 0
+    reached = strict_reached = total = 0
+    any_symbol = False
     for question in qset["questions"]:
         items = question.get("expected") or []
         if not question.get("scored", True) or not items:
@@ -716,20 +748,38 @@ def ceiling_text(qset: dict[str, Any], texts: dict[str, tuple[str, list[str]]]) 
         total += 1
         qid = question["id"]
         text, problems = texts.get(qid, ("", []))
-        addrs = text_addresses(text)
+        blocks = text_blocks(text)
+        addrs = set().union(*(block_addrs for _, block_addrs in blocks))
         flags = [_reachable(item, addrs) for item in items]
-        ok = all(flags) if question.get("require", "any") == "all" else any(flags)
-        reached += ok
-        report.append(f"{qid} reachable={'yes' if ok else 'no'}")
+        strict_flags = []
         for item, flag in zip(items, flags, strict=True):
+            key = _strict_key(item)
+            any_symbol |= key is not None
+            strict_flags.append(
+                flag if key is None else flag and any(bid == key and _reachable(item, ba) for bid, ba in blocks)
+            )
+        all_required = question.get("require", "any") == "all"
+        ok = all(flags) if all_required else any(flags)
+        strict_ok = all(strict_flags) if all_required else any(strict_flags)
+        reached += ok
+        strict_reached += strict_ok
+        report.append(f"{qid} reachable={'yes' if ok else 'no'}{' (строго no)' if ok and not strict_ok else ''}")
+        for item, flag, strict_flag in zip(items, flags, strict_flags, strict=True):
             if item.get("line") is None:
                 where = str(item["path"])
             else:
                 where = f"{item['path']}:{item['line']} ±{int(item.get('tolerance', score.TOLERANCE_LINES))}"
-            report.append(f"  {where} -> {'найден' if flag else 'нет в тексте'}")
+            verdict = ("найден" if strict_flag else "найден вне блока записи") if flag else "нет в тексте"
+            report.append(f"  {where} -> {verdict}")
         report.extend(problems)
         if qid not in texts:
             report.append("  нет целей")
+    return report, reached, strict_reached if any_symbol else None, total
+
+
+def ceiling_text(qset: dict[str, Any], texts: dict[str, tuple[str, list[str]]]) -> tuple[list[str], int, int]:
+    """``ceiling_text_both`` без строгого числа: ``(строки отчёта, K по окну, N)``."""
+    report, reached, _, total = ceiling_text_both(qset, texts)
     return report, reached, total
 
 
@@ -760,8 +810,10 @@ def ceiling_text_command(
     runner: AtlasRunner | None = None,
     code_root: Path | None = None,
 ) -> int:
-    """Код: 0; с ``minimum`` при достижимых меньше него — 1; ошибка ввода, git, таймаут atlas, Q/T или код atlas не в
-    коммите — 2.
+    """Код: 0; с ``minimum`` при достижимых по окну (K, не строгое K') меньше него — 1; ошибка ввода, git, таймаут
+    atlas, Q/T или код atlas не в коммите — 2.
+
+    Итог ``ceiling-text <набор>: K/N``; при строгом числе K' (есть запись с ``symbol``) — ``… (строго K'/N)``.
 
     Первая строка вывода — ``atlas-код: <HEAD дерева с кодом atlas>`` (``code_root``, по умолчанию корень репозитория
     этого ``bench.py``; `` +правки``, если ``scripts/atlas`` с незакоммиченными правками). С ``minimum`` набор, цели
@@ -783,11 +835,12 @@ def ceiling_text_command(
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
         return 2
-    report, reached, total = ceiling_text(qset, texts)
+    report, reached, strict, total = ceiling_text_both(qset, texts)
     print(f"atlas-код: {code_sha}{' +правки' if code_dirty else ''}", file=out)
     for row in report:
         print(row, file=out)
-    print(f"ceiling-text {qset['name']}: {reached}/{total}", file=out)
+    suffix = "" if strict is None else f" (строго {strict}/{total})"
+    print(f"ceiling-text {qset['name']}: {reached}/{total}{suffix}", file=out)
     return 1 if minimum is not None and reached < minimum else 0
 
 
