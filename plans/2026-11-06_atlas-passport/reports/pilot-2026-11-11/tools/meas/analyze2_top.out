@@ -1,0 +1,53 @@
+ТОП-20 имён по числу кандидатов при R1+прод-правило:
+  __init__                1607 (в тире 1607, тир=def_tail)
+  __all__                  704 (в тире 704, тир=bind_exact)
+  name                     309 (в тире 309, тир=def_tail)
+  main                     183 (в тире 183, тир=def_exact)
+  close                    164 (в тире 164, тир=def_tail)
+  start                    127 (в тире 127, тир=def_tail)
+  configure                109 (в тире 109, тир=def_tail)
+  category                  97 (в тире 97, тир=def_tail)
+  initialize                91 (в тире 91, тир=def_tail)
+  inputs                    79 (в тире 79, тир=def_tail)
+  outputs                   79 (в тире 79, тир=def_tail)
+  shutdown                  78 (в тире 78, тир=def_tail)
+  commands                  77 (в тире 77, тир=def_tail)
+  to_dict                   71 (в тире 71, тир=def_tail)
+  get                       70 (в тире 70, тир=def_tail)
+  setUp                     69 (в тире 69, тир=def_tail)
+  REPO_ROOT                 66 (в тире 66, тир=bind_exact)
+  _on_shutdown              64 (в тире 64, тир=def_tail)
+  plugin_class              63 (в тире 63, тир=bind_tail)
+  __call__                  62 (в тире 62, тир=def_tail)
+то же только публичные прод def-имена:
+  name                     309
+  main                     183
+  close                    164
+  start                    127
+  configure                109
+  category                  97
+  initialize                91
+  inputs                    79
+  outputs                   79
+  shutdown                  78
+  commands                  77
+  to_dict                   71
+  get                       70
+  get_status                57
+  kind                      52
+  count                     50
+  request                   50
+  target                    49
+  path                      47
+  subscribe                 47
+run R0: 19 R1+прод: 19 плоско: 107
+build R0: 2 R1+прод: 2 плоско: 31
+get R0: 0 R1+прод: 70 плоско: 70
+name R0: 0 R1+прод: 309 плоско: 309
+__init__ R0: 0 R1+прод: 1607 плоско: 1607
+main R0: 183 R1+прод: 183 плоско: 185
+start R0: 0 R1+прод: 127 плоско: 127
+R4 изменённых 85 -> однозначных прод: 41 ; неоднозначных: 44
+имён, где точный def есть И есть хвостовые кандидаты (их R1 скрывает): 502 из 19486 имён с точным def
+  топ скрытых: [('write', 3, 105), ('run', 19, 88), ('process', 4, 66), ('enabled', 2, 53), ('load', 2, 47), ('clear', 1, 42), ('connect', 1, 38), ('port', 1, 36), ('handler', 1, 30), ('build', 2, 29)]
+  из них скрыто >=5 хвостовых кандидатов: 115 ; >=1 хвостовых при одном точном: 268

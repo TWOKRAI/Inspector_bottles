@@ -1,0 +1,40 @@
+популяции: все 40441 ; с прод-кандидатом 16379 ; публичные прод 10337 ; публичные прод с def/class/method 6426
+-- все имена
+R0 сегодня                                         имён  40441 ед  18094 (44.7%) неод  1392 (3.4%) нет 20955 | N90=5 N95=9 N99=21 max=183 | 3:80% 5:90% 8:95% 10:96% 15:98% 20:99% 30:100%
+R0 сегодня +прод-правило                           имён  40441 ед  18216 (45.0%) неод  1270 (3.1%) нет 20955 | N90=6 N95=9 N99=21 max=183 | 3:79% 5:90% 8:95% 10:96% 15:98% 20:99% 30:100%
+R1 тиры                                            имён  40441 ед  35701 (88.3%) неод  4740 (11.7%) нет     0 | N90=7 N95=12 N99=37 max=1607 | 3:73% 5:85% 8:92% 10:94% 15:97% 20:98% 30:99%
+R1 тиры +прод-правило                              имён  40441 ед  36067 (89.2%) неод  4374 (10.8%) нет     0 | N90=7 N95=12 N99=40 max=1607 | 3:73% 5:85% 8:92% 10:94% 15:96% 20:97% 30:99%
+R4 прод-вперёд                                     имён  40441 ед  36054 (89.2%) неод  4387 (10.8%) нет     0 | N90=6 N95=10 N99=29 max=809 | 3:76% 5:87% 8:94% 10:96% 15:98% 20:98% 30:99%
+-- имена с прод-кандидатом
+R0 сегодня                                         имён  16379 ед   4818 (29.4%) неод   704 (4.3%) нет 10857 | N90=5 N95=9 N99=21 max=183 | 3:81% 5:90% 8:94% 10:96% 15:98% 20:99% 30:100%
+R0 сегодня +прод-правило                           имён  16379 ед   4940 (30.2%) неод   582 (3.6%) нет 10857 | N90=5 N95=9 N99=25 max=183 | 3:80% 5:90% 8:94% 10:96% 15:98% 20:98% 30:99%
+R1 тиры                                            имён  16379 ед  13114 (80.1%) неод  3265 (19.9%) нет     0 | N90=8 N95=14 N99=46 max=1607 | 3:71% 5:83% 8:91% 10:93% 15:95% 20:97% 30:98%
+R1 тиры +прод-правило                              имён  16379 ед  13480 (82.3%) неод  2899 (17.7%) нет     0 | N90=9 N95=15 N99=48 max=1607 | 3:69% 5:82% 8:90% 10:92% 15:95% 20:96% 30:98%
+R4 прод-вперёд                                     имён  16379 ед  13467 (82.2%) неод  2912 (17.8%) нет     0 | N90=7 N95=11 N99=36 max=809 | 3:75% 5:86% 8:93% 10:95% 15:97% 20:98% 30:99%
+-- публичные имена с прод-кандидатом
+R0 сегодня                                         имён  10337 ед   3310 (32.0%) неод   343 (3.3%) нет  6684 | N90=5 N95=9 N99=25 max=183 | 3:83% 5:92% 8:95% 10:96% 15:97% 20:98% 30:99%
+R0 сегодня +прод-правило                           имён  10337 ед   3343 (32.3%) неод   310 (3.0%) нет  6684 | N90=5 N95=9 N99=25 max=183 | 3:82% 5:92% 8:95% 10:96% 15:97% 20:98% 30:99%
+R1 тиры                                            имён  10337 ед   7951 (76.9%) неод  2386 (23.1%) нет     0 | N90=9 N95=17 N99=47 max=309 | 3:67% 5:81% 8:89% 10:92% 15:95% 20:96% 30:98%
+R1 тиры +прод-правило                              имён  10337 ед   8162 (79.0%) неод  2175 (21.0%) нет     0 | N90=10 N95=18 N99=49 max=309 | 3:66% 5:79% 8:89% 10:91% 15:94% 20:96% 30:98%
+R4 прод-вперёд                                     имён  10337 ед   8133 (78.7%) неод  2204 (21.3%) нет     0 | N90=7 N95=12 N99=38 max=190 | 3:71% 5:84% 8:92% 10:94% 15:96% 20:98% 30:99%
+-- публичные def-имена с прод-кандидатом
+R0 сегодня                                         имён   6426 ед   3284 (51.1%) неод   330 (5.1%) нет  2812 | N90=4 N95=9 N99=25 max=183 | 3:85% 5:92% 8:95% 10:96% 15:97% 20:98% 30:99%
+R0 сегодня +прод-правило                           имён   6426 ед   3317 (51.6%) неод   297 (4.6%) нет  2812 | N90=5 N95=9 N99=28 max=183 | 3:84% 5:92% 8:95% 10:96% 15:97% 20:98% 30:99%
+R1 тиры                                            имён   6426 ед   4917 (76.5%) неод  1509 (23.5%) нет     0 | N90=11 N95=22 N99=50 max=309 | 3:63% 5:77% 8:87% 10:90% 15:93% 20:94% 30:97%
+R1 тиры +прод-правило                              имён   6426 ед   5039 (78.4%) неод  1387 (21.6%) нет     0 | N90=12 N95=24 N99=57 max=309 | 3:62% 5:76% 8:86% 10:89% 15:92% 20:94% 30:97%
+R4 прод-вперёд                                     имён   6426 ед   5019 (78.1%) неод  1407 (21.9%) нет     0 | N90=8 N95=15 N99=43 max=190 | 3:69% 5:82% 8:90% 10:93% 15:95% 20:97% 30:98%
+
+R4: из сегодня-однозначных ( 18094 ) изменилось: 85 примеры: ['_by_name', '_capture', '_client_preset', '_confirm', '_create', '_draw', '_find_keys', '_journal']
+   из них единственным кандидатом сегодня был ТЕСТ, а прод-кандидат есть: 85
+R1+прод: неоднозначных имён 4374; из них с >=2 кандидатов в ОДНОМ файле (сортировка только по пути даёт ничью): 582; ничьи у ключа (путь,строка,qualname): 0
+(путь,строка) с >1 разными qualname во всём наборе: 3
+   примеры: [(('Services/code_reader/tests/test_sdk_trigger_hazards.py', 464), ['_capture_info._Rec.debug', '_capture_info._Rec.error', '_capture_info._Rec.info', '_capture_info._Rec.warning']), (('Services/ml_train/tests/test_acceptance_6_4_holdout_crop.py', 146), ['_install_log_recorder._Rec.debug', '_install_log_recorder._Rec.error', '_install_log_recorder._Rec.info', '_install_log_recorder._Rec.warning']), (('Services/ml_train/tests/test_hazards_6_4_holdout_crop.py', 71), ['_log_recorder._Rec.debug', '_log_recorder._Rec.error', '_log_recorder._Rec.info', '_log_recorder._Rec.warning'])]
+имён с >5 кандидатами (R1): 703; из них где порядок только по пути ставит в первые 5 больше тестов, чем порядок с группами: 208
+run кандидатов 19 тестов в первых 10: по пути 3 ; с группами 0 ; .claude/docs/plans в первых 10 по пути: 3
+close кандидатов 164 тестов в первых 10: по пути 2 ; с группами 0 ; .claude/docs/plans в первых 10 по пути: 0
+start кандидатов 127 тестов в первых 10: по пути 1 ; с группами 0 ; .claude/docs/plans в первых 10 по пути: 0
+main кандидатов 183 тестов в первых 10: по пути 0 ; с группами 0 ; .claude/docs/plans в первых 10 по пути: 10
+build кандидатов 2 тестов в первых 10: по пути 0 ; с группами 0 ; .claude/docs/plans в первых 10 по пути: 0
+повторяющихся (path,qualname,kind): 9 [(('Plugins/processing/points_render/geometry.py', 'render_points.to_px_pt', 'nested_function'), 2), (('Plugins/processing/points_render/geometry.py', 'render_points.to_px_corner', 'nested_function'), 2), (('Services/device_hub/drivers/robot_driver_v2/driver.py', '_RobotDriverCore._ready', 'method'), 2), (('Services/otel_export/tests/test_f2_task24_acceptance.py', '_real_sdk_exporter._post', 'nested_function'), 2), (('multiprocess_framework/modules/process_manager_module/process/process_manager_process.py', 'ProcessManagerProcess._telemetry_runtime_delta', 'method'), 2)]
+повторяющихся (path,qualname) любого вида: 9
+[('Plugins/processing/points_render/geometry.py', 'render_points.to_px_pt'), ('Plugins/processing/points_render/geometry.py', 'render_points.to_px_corner'), ('Services/device_hub/drivers/robot_driver_v2/driver.py', '_RobotDriverCore._ready'), ('Services/otel_export/tests/test_f2_task24_acceptance.py', '_real_sdk_exporter._post'), ('multiprocess_framework/modules/process_manager_module/process/process_manager_process.py', 'ProcessManagerProcess._telemetry_runtime_delta'), ('multiprocess_framework/modules/recipe/tests/test_migrations.py', 'test_two_same_named_steps_different_doc_type_do_not_collide.v1_to_v2'), ('multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py', 'LayoutController.gui_positions'), ('multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py', 'LayoutController.locked_nodes'), ('multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py', 'LayoutController.placed_display_ids')]

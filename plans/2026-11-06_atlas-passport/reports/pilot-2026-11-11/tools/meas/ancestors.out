@@ -1,0 +1,12 @@
+units 89
+предок multiprocess_framework 35
+предок multiprocess_framework/modules 35
+предок Services 18
+предок Plugins 12
+предок multiprocess_prototype 11
+предок scripts 2
+предок backend_ctl 2
+exact paths[0]==scripts: [('scripts', ['scripts/'])]
+id scripts: ['scripts']
+file paths[0]: [('framework_meta', 'multiprocess_framework/__init__.py'), ('services_shared', 'Services/__init__.py'), ('plugins_shared', 'Plugins/__init__.py'), ('prototype_root', 'multiprocess_prototype/ARCHITECTURE.md')]
+units under scripts/: ['scripts', 'scripts/atlas']

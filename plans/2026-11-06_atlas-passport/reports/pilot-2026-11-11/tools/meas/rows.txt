@@ -1,0 +1,50 @@
+ref stop
+ref _pick
+ref b._pick
+ref B.c.deep
+ref ick
+ref STOP
+ref driver
+ref helper
+ref only_test
+ref Driver.stop
+ref twice
+ref LIMIT
+ref Schema.KIND
+ref KIND
+ref MODE
+ref NOTE
+ref dup
+ref run
+ref setup
+ref __init__
+ref Driver
+ref outer
+ref A
+ref Schema
+ref Holder
+ref zf
+ref Schema2
+ref Nope
+ref lib
+ref pkg/b.py
+ref Driverr
+ref pkg/a.py::Drivr
+ref pkg/a.py::Driver Nope
+ref Nope Nada
+ref _pick dup
+ref _pick Nope
+ref ../x.py::f pkg/a.py::Driver
+map z
+map z/
+map pkg/
+map .
+map deep
+map Z
+map z/m
+map pkg/tests
+map pkg/a.py
+map tools/z
+map p2
+map pkg
+map ../x
