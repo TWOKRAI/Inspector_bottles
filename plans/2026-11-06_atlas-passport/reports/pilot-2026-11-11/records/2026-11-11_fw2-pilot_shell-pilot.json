@@ -1,0 +1,1479 @@
+{
+  "set": "fw2-pilot",
+  "repo_sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+  "source_root": "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/869199f2-e18c-4258-a517-1084ab45a695/scratchpad/atlas-src",
+  "root": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+  "prefixes": [
+    "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+    "/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460"
+  ],
+  "date": "2026-11-11",
+  "condition": "shell-pilot",
+  "model": "haiku",
+  "condition_def": {
+    "allowed_tools": [
+      "Read",
+      "Grep",
+      "Glob"
+    ],
+    "disallowed_tools": [
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "Agent",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "context_files": [],
+    "prompt_prefix": "Navigate the code with Read, Grep and Glob and with read-only shell commands (ls, find, grep, cat) run through Bash.",
+    "max_turns": 60,
+    "max_budget_usd": 1.0,
+    "expected_tokens": 85000,
+    "thresholds": {
+      "hits_min": 0,
+      "false_max": 99
+    },
+    "output_format": "stream-json",
+    "audit_reads": false,
+    "bash_allow": [
+      "ls *"
+    ],
+    "mcp_config": null,
+    "requires": [],
+    "name": "shell-pilot",
+    "model": "haiku"
+  },
+  "thresholds": {
+    "hits_min": 0,
+    "false_max": 99
+  },
+  "baseline": null,
+  "command": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "haiku",
+    "--no-session-persistence",
+    "--tools",
+    "Read,Grep,Glob,Bash",
+    "--allowedTools",
+    "Read,Grep,Glob,Bash(ls *)",
+    "--setting-sources",
+    "user",
+    "--disallowedTools",
+    "Edit,Write,NotebookEdit,Agent,WebFetch,WebSearch",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "1.0",
+    "--append-system-prompt",
+    "Navigate the code with Read, Grep and Glob and with read-only shell commands (ls, find, grep, cat) run through Bash."
+  ],
+  "questions": [
+    {
+      "id": "G1",
+      "question": "A child process must be able to declare its own stop window, in seconds, in its process config, and the orchestrator config must be able to cap such windows with a ceiling. The window value travels as-is (any type) from the recipe blueprint schema to the launch dictionary and is judged only later: a valid window is a finite number above zero and not a boolean. Which two schema classes get the new optional field, which module holds the two string constants that name the per-child key and the ceiling key, and which function in that module decides whether such a value is valid?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 183,
+          "symbol": "ProcessConfig.stop_window_s"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/configs/process_launch_config.py",
+          "line": 94,
+          "symbol": "ProcessLaunchConfig.stop_window_s"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 63,
+          "symbol": "STOP_WINDOW_KEY"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 64,
+          "symbol": "MAX_STOP_WINDOW_KEY"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+          "line": 138,
+          "symbol": "valid_window_s"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from b1e695121 (lifecycle-stop-ownership Task 1.11). git show b1e695121: new typed field stop_window_s in ProcessConfig and ProcessLaunchConfig (Annotated field, declaration spans ~9 lines), new constants STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY, new function valid_window_s in stop_budget.py. Weak spots: the two constants are on adjacent lines so their +-3 windows overlap; the registry/spawner/PM sites of the same commit (ProcessRegistry, ProcessSpawner.stop, the PM budget code) are not in the reference, the question asks only for the config surface.",
+      "require": "all"
+    },
+    {
+      "id": "G3",
+      "question": "In the robot v2 driver the 'park' sequence (go home, then servo off) runs its home move as a background program. When the transport drops during that program, the program thread notices the error before the periodic tick guard does, and the sequence ends with the generic 'home move failed' text instead of the 'link to the robot lost' reason. The program thread must report a distinct outcome for transport errors (but not for errors reported by the robot or for compile errors), and the park state machine must map that outcome to the link-lost text. Which method runs the program thread and which park method turns the outcome into the final text?",
+      "expected": [
+        {
+          "path": "Services/device_hub/drivers/robot_driver_v2/programs.py",
+          "line": 130,
+          "symbol": "ProgramMixin._program_loop"
+        },
+        {
+          "path": "Services/device_hub/drivers/robot_driver_v2/park.py",
+          "line": 260,
+          "symbol": "ParkMachine._advance_locked"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from 57f4a3dee (robot-protocol-v2 T5.3e.1, A8 flake). git show 57f4a3dee: ProgramMixin._program_loop (link_lost flag, outcome 'link' passed to program_finished) and ParkMachine._advance_locked (outcome == 'link' -> TEXT_PARK_LINK) changed; RobotState.program_finished changed only a comment (not in the reference). Weak spot: both edits are 15-30 lines below the def line the reference points at.",
+      "require": "all"
+    },
+    {
+      "id": "G5",
+      "question": "The system configuration (system.yaml) must get a new section about closing the system. It holds a list of pre-stop steps whose items are free-form (each step is validated later by the process manager, so a bad step must not reject loading the config), and a bare 'pre_stop:' key with no value must mean an empty list. The root config schema class gets a field for the new section, and the system builder must put the list into the orchestrator config dictionary as an independent deep copy so the process manager can read it. Which new section class, which root-schema field and which builder method?",
+      "expected": [
+        {
+          "path": "multiprocess_prototype/backend/config/schemas.py",
+          "line": 195,
+          "symbol": "ShutdownSection"
+        },
+        {
+          "path": "multiprocess_prototype/backend/config/schemas.py",
+          "line": 235,
+          "symbol": "SystemConfig.shutdown"
+        },
+        {
+          "path": "multiprocess_prototype/backend/launch.py",
+          "line": 623,
+          "symbol": "SystemBuilder.build"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from f1f904d6e (gui-graceful-close Task 1.4m, merged by 220bd757a). git show f1f904d6e: new class ShutdownSection (field pre_stop, validator), new field SystemConfig.shutdown, one new orchestrator_config entry inside SystemBuilder.build. Weak spots: ShutdownSection is a new class; the edit in SystemBuilder.build is at line 757, ~134 lines below the def line the reference points at; no window covers the changed line.",
+      "require": "all"
+    },
+    {
+      "id": "G7",
+      "question": "`BackendDriver.system_shutdown` returns outcomes=None. After the shutdown command is accepted it must poll the process manager's supervision status and return the stop outcome of every child, the names without a confirmed outcome and a timed-out flag. Polling ends when every child has an outcome, or the system stop phase is 'done', or the connection is lost. Which method does the polling, and in the MCP tool module which wrapper function must forward an optional wait_timeout to the driver and which module-level registry list holds the tool's description and input schema where that parameter is documented?",
+      "expected": [
+        {
+          "path": "backend_ctl/driver.py",
+          "line": 680,
+          "symbol": "BackendDriver.system_shutdown"
+        },
+        {
+          "path": "backend_ctl/driver.py",
+          "line": 777,
+          "symbol": "BackendDriver._poll_shutdown_outcomes"
+        },
+        {
+          "path": "backend_ctl/mcp_tools.py",
+          "line": 308,
+          "symbol": "_system_shutdown"
+        },
+        {
+          "path": "backend_ctl/mcp_tools.py",
+          "line": 545,
+          "symbol": "TOOLS"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 6fb83337e (gui-graceful-close Task 1.4, driver part). git show 6fb83337e: BackendDriver.system_shutdown rewritten, new helper BackendDriver._poll_shutdown_outcomes, mcp_tools._system_shutdown forwards wait_timeout, the system_shutdown entry of the TOOLS list got a new description and a wait_timeout schema property. Weak spots: the polling helper is new; the TOOLS edit is at line 856, ~310 lines below the declaration line of the list (the reference points at the declaration).",
+      "require": "all"
+    },
+    {
+      "id": "G9",
+      "question": "`ProcessConfig.as_generic_config` merges typed fields and the extras dict through a nested helper that logs a WARNING when the two values differ. Two distinct NaN float objects (also inside dict, list or tuple values, which happens after the process boundary) compare as different, so a false conflict warning is logged. Which nested function inside `as_generic_config` makes the comparison, and which module-level function must provide an equality in which NaN equals NaN at any depth of dict, list and tuple (while a list and a tuple with the same items still differ)?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 342,
+          "symbol": "ProcessConfig.as_generic_config._pick"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 54,
+          "symbol": "_same_config_value"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 4caf78912 (lifecycle-stop-ownership C-79). git show 4caf78912: new module-level _same_config_value, one changed comparison line inside the nested _pick of ProcessConfig.as_generic_config. Weak spots: _same_config_value is new; the edited line is ~15 lines below the def of the nested _pick; nested function symbol 'ProcessConfig.as_generic_config._pick' is matched by its last part only.",
+      "require": "all"
+    },
+    {
+      "id": "G11",
+      "question": "Pipeline-tab Save, the layout autosave and the Recipes-tab Save must not overwrite a recipe file that was changed outside the editor after it was loaded. `TopologySession` remembers the revision the editor was built on, and a method of it returns that remembered revision only when asked for the same recipe slug (None for another slug). `LayoutController` must pass that revision as the expected one in the autosave method and in the manual save-to-active-recipe method and report a conflict (a dialog in Save, a log warning in the autosave); `RecipesPresenter` does the same in its save handler. The message shown to the operator lives in a module-level constant in each of the two modules. Which methods and constants?",
+      "expected": [
+        {
+          "path": "multiprocess_prototype/domain/topology_session.py",
+          "line": 138,
+          "symbol": "TopologySession.base_rev_for"
+        },
+        {
+          "path": "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py",
+          "line": 289,
+          "symbol": "LayoutController._persist_layout_to_recipe"
+        },
+        {
+          "path": "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py",
+          "line": 411,
+          "symbol": "LayoutController.save_to_active_recipe"
+        },
+        {
+          "path": "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py",
+          "line": 52,
+          "symbol": "_CONFLICT_MESSAGE"
+        },
+        {
+          "path": "multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py",
+          "line": 561,
+          "symbol": "RecipesPresenter.on_save"
+        },
+        {
+          "path": "multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py",
+          "line": 35,
+          "symbol": "_CONFLICT_MESSAGE"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 12c4f906b (recipe-save-noise Task 1.8). git show 12c4f906b: new TopologySession.base_rev_for (and capture_base, rebase, a new slot), LayoutController._persist_layout_to_recipe and save_to_active_recipe changed, new _CONFLICT_MESSAGE constants in both layout_controller.py and recipes/presenter.py (same text twice), RecipesPresenter.on_save changed. Weak spots: base_rev_for is new; capture_base and rebase of the same commit are not in the reference; edits inside the three long methods are 10-40 lines below their def lines; the question names the constant's role, not its text.",
+      "require": "all"
+    }
+  ],
+  "repeats": [
+    {
+      "index": 1,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 45,
+      "tool_calls": 44,
+      "final_context_tokens": 111365,
+      "cumulative_tokens": 115659,
+      "cache_read_tokens": 2975223,
+      "wall_s": 166.958,
+      "cost_usd": 0.48510454999999997,
+      "over_max_turns": false,
+      "violations": [
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -n \"class SystemBuilder\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx800",
+        "bash-pattern:grep -n \"def system_shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx800",
+        "bash-pattern:grep -n \"system_shutdown\\|system\\.shutdown\" /private/var/folders/qr/q5h4tcf14556",
+        "bash-pattern:grep -n \"as_generic_config\\|_same_config_value\" /private/var/folders/qr/q5h4tcf1",
+        "bash-pattern:grep -rn \"def.*equal\\|NaN\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000g",
+        "bash-pattern:grep -rn \"def.*equal\\|nan.*equal\\|math\\.isnan\" /private/var/folders/qr/q5h4tcf14",
+        "bash-pattern:head -50 /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e08",
+        "bash-pattern:grep -rn \"G9\\|C-79\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav",
+        "bash-pattern:grep -rn \"TopologySession\\|LayoutController\\|RecipesPresenter\\|file.*changed.*ou",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -rn \"class RecipesPresenter\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0y",
+        "bash-pattern:grep -n \"def on_.*save\\|def save_handler\\|RecipeConflict\" /private/var/folders/q"
+      ],
+      "tool_uses": [
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "ls -la /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+          "denied": false
+        },
+        {
+          "name": "Glob",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+          "pattern": "**/*.py"
+        },
+        {
+          "name": "Grep",
+          "target": "stop.*window|stop_window",
+          "pattern": "stop.*window|stop_window"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module/configs/process_launch_config.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/core/stop_budget.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Grep",
+          "target": "park|home move failed|link to the robot lost",
+          "pattern": "park|home move failed|link to the robot lost"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/park.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/programs.py"
+        },
+        {
+          "name": "Grep",
+          "target": "pre_stop|pre-stop",
+          "pattern": "pre_stop|pre-stop"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Grep",
+          "target": "orchestrator.*config|build.*orchestrator",
+          "pattern": "orchestrator.*config|build.*orchestrator"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/launcher/builder.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class SystemBuilder\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Grep",
+          "target": "system_shutdown|supervision.*status|poll.*process",
+          "pattern": "system_shutdown|supervision.*status|poll.*process"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def system_shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"system_shutdown\\|system\\.shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"as_generic_config\\|_same_config_value\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"def.*equal\\|NaN\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/ --include=\"*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"def.*equal\\|nan.*equal\\|math\\.isnan\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/ --include=\"*.py\" | grep -i equal",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "head -50 /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py | grep \"^from\\|^import\"",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"G9\\|C-79\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" --include=\"*.md\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"TopologySession\\|LayoutController\\|RecipesPresenter\\|file.*changed.*outside\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" | grep -E \"TopologySession|LayoutController|RecipesPresenter\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*topology_session*\" -type f",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/domain/topology_session.py"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*layout*controller*\" -o -name \"*recipes*presenter*\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*recipes*\" -type f | grep -i presenter",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"class RecipesPresenter\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\"",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def on_.*save\\|def save_handler\\|RecipeConflict\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py"
+        }
+      ],
+      "final_text": "I'll now search systematically through the codebase to answer each question. Let me compile my findings:\n\nFor **G1**, I've found:\n- ProcessLaunchConfig (stop_window_s field at line 94-101)\n- ProcessConfig (stop_window_s field at line 183-190)\n- stop_budget.py has STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY\n- valid_window_s function validates the window\n\nFor **G3**, I've found in programs.py:\n- _program_loop runs the program thread\n- It sets link_lost based on exception type at line 169\n\nFor **G5**, I've found in schemas.py and launch.py:\n- ShutdownSection class at line 195\n- shutdown field in SystemConfig at line 235\n- pre_stop is put into orchestrator_config in SystemBuilder.build()\n\nFor **G7**, I've found:\n- _poll_shutdown_outcomes in driver.py at line 777\n- _system_shutdown wrapper in mcp_tools.py at line 308\n\nFor **G9**, I've found in blueprint.py:\n- _pick function at line 342 inside as_generic_config\n- _same_config_value function at line 54\n\nFor **G11**, I've found:\n- base_rev_for in TopologySession at line 138\n- Methods in LayoutController and RecipesPresenter that use expected_rev\n- _CONFLICT_MESSAGE constants in both modules\n\n```json\n{\"id\": \"G1\", \"answer\": \"ProcessLaunchConfig and ProcessConfig get stop_window_s field. stop_budget.py holds STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY string constants. valid_window_s() function validates: finite number > 0, not boolean.\", \"locations\": [\"multiprocess_framework/modules/process_module/configs/process_launch_config.py:94\", \"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:138\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G3\", \"answer\": \"_program_loop() (line 130) runs program thread; determines link_lost on transport error (line 169); park._advance_locked() (line 260) maps 'link' outcome to TEXT_PARK_LINK (line 293).\", \"locations\": [\"Services/device_hub/drivers/robot_driver_v2/programs.py:130\", \"Services/device_hub/drivers/robot_driver_v2/programs.py:169\", \"Services/device_hub/drivers/robot_driver_v2/park.py:260\", \"Services/device_hub/drivers/robot_driver_v2/park.py:292\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G5\", \"answer\": \"ShutdownSection class holds pre_stop list. SystemConfig.shutdown field (line 235) references it. SystemBuilder.build() (line 757) deep-copies pre_stop into orchestrator_config.\", \"locations\": [\"multiprocess_prototype/backend/config/schemas.py:195\", \"multiprocess_prototype/backend/config/schemas.py:235\", \"multiprocess_prototype/backend/launch.py:757\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G7\", \"answer\": \"_poll_shutdown_outcomes() method polls supervision.status. _system_shutdown() wrapper forwards wait_timeout parameter. Tool spec at line 856 defines system_shutdown with wait_timeout documented in input schema (line 881-886).\", \"locations\": [\"backend_ctl/driver.py:777\", \"backend_ctl/mcp_tools.py:308\", \"backend_ctl/mcp_tools.py:856\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G9\", \"answer\": \"_pick() nested function (line 342) makes comparison via _same_config_value(). _same_config_value() module-level function (line 54) provides NaN equality: NaN==NaN at any dict/list/tuple depth, list/tuple still differ.\", \"locations\": [\"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:342\", \"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:54\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G11\", \"answer\": \"TopologySession.base_rev_for(slug) returns remembered revision or None. LayoutController._persist_layout_to_recipe() (line 314) and save_to_active_recipe() (line 478) pass expected_rev. RecipesPresenter.on_save() (line 605) also passes expected_rev. Messages: _CONFLICT_MESSAGE in layout_controller.py:52 and presenter.py:35.\", \"locations\": [\"multiprocess_prototype/domain/topology_session.py:138\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:314\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:478\", \"multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py:605\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:52\", \"multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py:35\"], \"confidence\": \"sure\"}\n```",
+      "score": {
+        "per_question": [
+          {
+            "id": "G1",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_framework/modules/process_module/configs/process_launch_config.py:94",
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183",
+              "multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63",
+              "multiprocess_framework/modules/process_manager_module/core/stop_budget.py:138"
+            ]
+          },
+          {
+            "id": "G3",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "Services/device_hub/drivers/robot_driver_v2/programs.py:130",
+              "Services/device_hub/drivers/robot_driver_v2/programs.py:169",
+              "Services/device_hub/drivers/robot_driver_v2/park.py:260",
+              "Services/device_hub/drivers/robot_driver_v2/park.py:292"
+            ]
+          },
+          {
+            "id": "G5",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_prototype/backend/config/schemas.py:195",
+              "multiprocess_prototype/backend/config/schemas.py:235",
+              "multiprocess_prototype/backend/launch.py:757"
+            ]
+          },
+          {
+            "id": "G7",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "backend_ctl/driver.py:777",
+              "backend_ctl/mcp_tools.py:308",
+              "backend_ctl/mcp_tools.py:856"
+            ]
+          },
+          {
+            "id": "G9",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:342",
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:54"
+            ]
+          },
+          {
+            "id": "G11",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_prototype/domain/topology_session.py:138",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:314",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:478",
+              "multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py:605",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:52",
+              "multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py:35"
+            ]
+          }
+        ],
+        "hits": 2,
+        "false": 4,
+        "scored": 6,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "files_hit": 6,
+        "total_hits": 2,
+        "total_false": 4,
+        "total": 6
+      }
+    },
+    {
+      "index": 2,
+      "returncode": 1,
+      "subtype": "error_max_budget_usd",
+      "error": "error_max_budget_usd",
+      "turns": 83,
+      "tool_calls": 82,
+      "final_context_tokens": 144474,
+      "cumulative_tokens": 147643,
+      "cache_read_tokens": 7281764,
+      "wall_s": 294.202,
+      "cost_usd": 1.0048200000000003,
+      "over_max_turns": true,
+      "violations": [
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"max_stop_window\" --include=\"*.py\" /private/var/folders/qr/q5h4tcf14556l",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -n \"class.*Config\\|max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_r",
+        "bash-pattern:grep -n \"max_stop_window_s\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000",
+        "bash-pattern:grep -n \"_read_stop_window_ceiling\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"class.*Config.*SchemaBase\\|register_schema.*Orchestrator\" --include=\"*.",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -n \"class.*Config\\|max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_r",
+        "bash-pattern:grep -r \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn",
+        "bash-pattern:grep -n \"orchestrator\\|Orchestrator\" /private/var/folders/qr/q5h4tcf14556l_ry9kb",
+        "bash-pattern:grep -n \"orchestrator_config\\|OrchestratorConfig\\|ProcessManagerConfig\" /private",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -n \"max_stop_window\\|class.*Config\" /private/var/folders/qr/q5h4tcf14556l_r",
+        "bash-pattern:grep -n \"class.*Config\\|max_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0y",
+        "bash-pattern:grep -r \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn",
+        "bash-pattern:grep -n \"class.*Config\\|stop_window\\|max_stop\" /private/var/folders/qr/q5h4tcf14",
+        "bash-pattern:grep -n \"class ProcessModule\\|class ProcessManagerProcess\" /private/var/folders/",
+        "bash-pattern:grep \"class ProcessManagerProcess\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0",
+        "bash-pattern:grep -r \"max_stop_window_s\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000",
+        "bash-pattern:grep -r \"park\\|Park\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/na",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -n \"def.*program\\|def.*launch\\|def.*home\" /private/var/folders/qr/q5h4tcf14",
+        "bash-pattern:grep -n \"class.*ShutdownSection\\|class.*Section\" /private/var/folders/qr/q5h4tcf",
+        "bash-pattern:grep -rn \"pre_stop\\|ShutdownSection\" /private/var/folders/qr/q5h4tcf14556l_ry9kb",
+        "bash-pattern:grep -n \"pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_",
+        "bash-pattern:grep -n \"_setup_pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn",
+        "bash-pattern:grep -n \"shutdown.*=\\|pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx8",
+        "bash-pattern:grep -rn \"pre_stop\\|shutdown\\|orchestrator.*config\\|ProcessManagerConfig\" /priva",
+        "bash-pattern:grep -n \"def.*assemb\\|pre_stop\\|shutdown\" /private/var/folders/qr/q5h4tcf14556l_",
+        "bash-pattern:grep -rn \"deep_copy\\|deepcopy\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80",
+        "bash-pattern:grep -rn \"pre_stop\\|orchestrator_config\\|ProcessManager.*config\" /private/var/fo",
+        "bash-pattern:grep -n \"def \" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_benc",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"class BackendDriver\\|def system_shutdown\" --include=\"*.py\" /private/var",
+        "bash-pattern:grep -n \"def system_shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx800",
+        "bash-pattern:grep -rn \"system_shutdown\\|system\\.shutdown\" /private/var/folders/qr/q5h4tcf1455",
+        "bash-pattern:grep -n \"ToolSpec\\|MCP_TOOLS\\|TOOLS.*=\\|registry\" /private/var/folders/qr/q5h4tc",
+        "bash-pattern:grep -rn \"class TopologySession\\|class LayoutController\\|class RecipesPresenter\"",
+        "bash-pattern:grep -n \"base_rev_for\\|conflict\\|expected\" /private/var/folders/qr/q5h4tcf14556l",
+        "bash-pattern:grep -n \"def.*save\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav",
+        "bash-pattern:grep -n \"_CONFLICT_MESSAGE\\|CONFLICT\" /private/var/folders/qr/q5h4tcf14556l_ry9k"
+      ],
+      "tool_uses": [
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "ls -la /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+          "denied": false
+        },
+        {
+          "name": "Grep",
+          "target": "stop_window|stop.window",
+          "pattern": "stop_window|stop.window"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/core/stop_budget.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Grep",
+          "target": "MAX_STOP_WINDOW_KEY|max_stop_window_s",
+          "pattern": "MAX_STOP_WINDOW_KEY|max_stop_window_s"
+        },
+        {
+          "name": "Grep",
+          "target": "max_stop_window|ceiling",
+          "pattern": "max_stop_window|ceiling"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window\" --include=\"*.py\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/core/process_registry.py"
+        },
+        {
+          "name": "Grep",
+          "target": "class.*OrchestratorConfig|class.*SystemConfig",
+          "pattern": "class.*OrchestratorConfig|class.*SystemConfig"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*.py\" -path \"*process_manager*\" | grep -i \"config\\|orchestrat\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class.*Config\\|max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py | head -30",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"max_stop_window_s\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"_read_stop_window_ceiling\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*.py\" -type f | xargs grep -l \"OrchestratorConfig\\|SystemOrchestratorConfig\" | head -5",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"class.*Config.*SchemaBase\\|register_schema.*Orchestrator\" --include=\"*.py\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/ | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module -name \"__init__.py\" -exec grep -l \"Config\\|register\" {} \\;",
+          "denied": true
+        },
+        {
+          "name": "Glob",
+          "target": "multiprocess_framework/modules/process_manager_module/**/__init__.py",
+          "pattern": "multiprocess_framework/modules/process_manager_module/**/__init__.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/__init__.py"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module -name \"*.py\" -type f | xargs grep -l \"class.*Config.*SchemaBase\" | head -5",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module/configs/process_launch_config.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class.*Config\\|max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module/configs/*.py | grep -i \"ProcessManager\\|Orchestrator\\|max_stop\"",
+          "denied": true
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module --include=\"*.py\"",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"orchestrator\\|Orchestrator\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"orchestrator_config\\|OrchestratorConfig\\|ProcessManagerConfig\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"system.yaml\" -o -name \"*system*config*.yaml\" | head -5",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"max_stop_window\\|class.*Config\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py | head -50",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class.*Config\\|max_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/assembly/assembler.py | head -30",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype --include=\"*.py\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class.*Config\\|stop_window\\|max_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py | grep -i \"class\\|max_stop\\|ceiling\"",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class ProcessModule\\|class ProcessManagerProcess\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module/*.py /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "denied": true
+        },
+        {
+          "name": "Bash",
+          "target": "grep \"class ProcessManagerProcess\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window_s\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" -B 3 -A 1 | head -40",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"park\\|Park\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" -l | grep -i robot | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/park.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/park.py"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2 -name \"*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def.*program\\|def.*launch\\|def.*home\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/programs.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/programs.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/programs.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"class.*ShutdownSection\\|class.*Section\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"pre_stop\\|ShutdownSection\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend --include=\"*.py\" | grep -i \"build\\|assemble\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"_setup_pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"shutdown.*=\\|pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"pre_stop\\|shutdown\\|orchestrator.*config\\|ProcessManagerConfig\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/assembly --include=\"*.py\" | grep -i \"def\\|class\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def.*assemb\\|pre_stop\\|shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/assembly/assembler.py | head -40",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"deep_copy\\|deepcopy\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module --include=\"*.py\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/process/process_manager_process.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"pre_stop\\|orchestrator_config\\|ProcessManager.*config\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend --include=\"*.py\" -A 2 | grep -E \"def |pre_stop\" | head -30",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def \" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py | grep -E \"6[0-5]:|7[0-8]:\" | head -5",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"*backend*driver*\" -o -name \"*BackendDriver*\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"class BackendDriver\\|def system_shutdown\" --include=\"*.py\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def system_shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/driver.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"system_shutdown\\|system\\.shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl --include=\"*.py\" | grep -v \"test\" | grep -v \".pyc\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"ToolSpec\\|MCP_TOOLS\\|TOOLS.*=\\|registry\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/backend_ctl/mcp_tools.py | head -40",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -rn \"class TopologySession\\|class LayoutController\\|class RecipesPresenter\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/domain/topology_session.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"base_rev_for\\|conflict\\|expected\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py | head -20",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def.*save\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"_CONFLICT_MESSAGE\\|CONFLICT\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py",
+          "denied": false
+        }
+      ],
+      "final_text": "I'll navigate through the codebase to answer these questions. Let me start by exploring the repository structure.\nLet me search for relevant files systematically. I'll start with G1 - stop window schema:\nLet me search for where max_stop_window_s is used:\nLet me search for the orchestrator config schema:\nLet me search for the system/orchestrator configuration schema:\nNow let me search for G3 - robot v2 driver and park sequence:\nLet me search for where the program thread is executed in robot driver v2:\nNow let me search for answers to G5 - system configuration schema:\nLet me verify the SystemConfig has shutdown field and search for the builder that puts pre_stop into orchestrator config:\nNow let me search for G7 - BackendDriver.system_shutdown:\nLet me search for MCP tools related to system_shutdown:\nNow let me search for G9 - ProcessConfig.as_generic_config and NaN comparison. I already found part of this earlier - let me look at the _same_config_value function I found in blueprint.py:\nNow let me search for G11 - TopologySession and revision tracking:\nDue to token limits, I need to provide answers based on what I've found. Let me compile the answers:\n\nBased on my investigation, here are the answers to the navigation questions:\n\n```json\n{\"id\": \"G1\", \"answer\": \"Two schema classes: ProcessConfig (blueprint.py) with stop_window_s field and ProcessLaunchConfig (process_launch_config.py) with stop_window_s field. Module stop_budget.py contains string constants STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY. The validation function valid_window_s() validates that a value is a finite number above zero (not boolean or NaN).\", \"locations\": [\"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183\", \"multiprocess_framework/modules/process_module/configs/process_launch_config.py:94\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:138\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G3\", \"answer\": \"_program_loop() method (line 130) runs the program thread in a separate thread. It sets link_lost flag for transport errors (line 169). The _advance_locked() method (line 260) in ParkMachine maps the outcome to final text: if outcome=='link' maps to TEXT_PARK_LINK (line 292-293), distinguishing from other error types.\", \"locations\": [\"Services/device_hub/drivers/robot_driver_v2/programs.py:130\", \"Services/device_hub/drivers/robot_driver_v2/programs.py:169\", \"Services/device_hub/drivers/robot_driver_v2/park.py:260\", \"Services/device_hub/drivers/robot_driver_v2/park.py:292\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G5\", \"answer\": \"ShutdownSection schema class holds pre_stop list with free-form items. SystemConfig has shutdown field for the section. The build() method in launch.py (line 623) assembles the orchestrator config, putting pre_stop as deep copy at line 757.\", \"locations\": [\"multiprocess_prototype/backend/config/schemas.py:195\", \"multiprocess_prototype/backend/config/schemas.py:235\", \"multiprocess_prototype/backend/launch.py:623\", \"multiprocess_prototype/backend/launch.py:757\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G7\", \"answer\": \"_poll_shutdown_outcomes() method polls the process manager and returns outcomes, unconfirmed names, and timed_out flag. _system_shutdown() wrapper function (line 308 in mcp_tools.py) forwards wait_timeout parameter. TOOLS list (line 545 in mcp_tools.py) holds the tool description and input schema for system_shutdown.\", \"locations\": [\"backend_ctl/driver.py:777\", \"backend_ctl/mcp_tools.py:308\", \"backend_ctl/mcp_tools.py:545\", \"backend_ctl/mcp_tools.py:881\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G9\", \"answer\": \"_pick() nested function inside as_generic_config (line 342) uses _same_config_value() for comparison. _same_config_value() is the module-level function (line 54 in blueprint.py) that provides NaN-equal comparison where two NaN objects compare equal at any depth of dict, list, and tuple values.\", \"locations\": [\"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:342\", \"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:54\"], \"confidence\": \"sure\"}\n```\n\n```json\n{\"id\": \"G11\", \"answer\": \"TopologySession.base_rev_for() method returns remembered revision when asked for same recipe slug. LayoutController._persist_layout_to_recipe() (line 289) uses base_rev_for in autosave method and save_to_active_recipe() (line 411) for manual save, with _CONFLICT_MESSAGE constant at line 52. RecipesPresenter has similar save handler using base_rev_for and conflict message constant.\", \"locations\": [\"multiprocess_prototype/domain/topology_session.py:138\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:289\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:411\", \"multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:52\"], \"confidence\": \"unsure\"}\n```",
+      "score": {
+        "per_question": [
+          {
+            "id": "G1",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183",
+              "multiprocess_framework/modules/process_module/configs/process_launch_config.py:94",
+              "multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63",
+              "multiprocess_framework/modules/process_manager_module/core/stop_budget.py:138"
+            ]
+          },
+          {
+            "id": "G3",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "Services/device_hub/drivers/robot_driver_v2/programs.py:130",
+              "Services/device_hub/drivers/robot_driver_v2/programs.py:169",
+              "Services/device_hub/drivers/robot_driver_v2/park.py:260",
+              "Services/device_hub/drivers/robot_driver_v2/park.py:292"
+            ]
+          },
+          {
+            "id": "G5",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_prototype/backend/config/schemas.py:195",
+              "multiprocess_prototype/backend/config/schemas.py:235",
+              "multiprocess_prototype/backend/launch.py:623",
+              "multiprocess_prototype/backend/launch.py:757"
+            ]
+          },
+          {
+            "id": "G7",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "backend_ctl/driver.py:777",
+              "backend_ctl/mcp_tools.py:308",
+              "backend_ctl/mcp_tools.py:545",
+              "backend_ctl/mcp_tools.py:881"
+            ]
+          },
+          {
+            "id": "G9",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:342",
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:54"
+            ]
+          },
+          {
+            "id": "G11",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unsure",
+            "locations": [
+              "multiprocess_prototype/domain/topology_session.py:138",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:289",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:411",
+              "multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py:52"
+            ]
+          }
+        ],
+        "hits": 3,
+        "false": 2,
+        "scored": 6,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "files_hit": 5,
+        "total_hits": 3,
+        "total_false": 2,
+        "total": 6
+      }
+    },
+    {
+      "index": 3,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 48,
+      "tool_calls": 47,
+      "final_context_tokens": 116780,
+      "cumulative_tokens": 111466,
+      "cache_read_tokens": 3006794,
+      "wall_s": 167.209,
+      "cost_usd": 0.4790394000000001,
+      "over_max_turns": false,
+      "violations": [
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"max_stop_window\\|MAX_STOP_WINDOW\" --include=\"*.py\" | grep -v \"test_\" | ",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"class.*Config.*SchemaBase\" --include=\"*.py\" | grep -i \"process_manager\\",
+        "bash-pattern:grep -B 5 -A 5 \"orchestrator_config\\|OrchestratorConfig\\|class.*Launcher\" /priva",
+        "bash-pattern:grep -r \"class.*System.*SchemaBase\" --include=\"*.py\" | head -20",
+        "bash-pattern:grep -n \"^class SystemBlueprint\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx",
+        "bash-pattern:grep -n \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn",
+        "bash-pattern:grep -r \"max_stop_window_s\\|MAX_STOP_WINDOW\" --include=\"*.py\" | grep -v test | g",
+        "bash-pattern:grep -n \"stop_window\\|max_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx8",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"park\\|program thread\" --include=\"*.py\" | grep -v test | grep \"def\\|clas",
+        "bash-pattern:grep -n \"def.*program\\|program_thread\\|start_park_home\" /private/var/folders/qr/",
+        "bash-pattern:grep -r \"program_thread\\|start_park_home\" /private/var/folders/qr/q5h4tcf14556l_",
+        "bash-pattern:grep -r \"shutdown\\|pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx8000",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"SystemConfig\\|load_system_config\\|shutdown\" /private/var/folders/qr/q5h",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652",
+        "bash-pattern:grep -r \"class SystemBuilder\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx800"
+      ],
+      "tool_uses": [
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*.py\" | head -30",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "ls -la /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/",
+          "denied": false
+        },
+        {
+          "name": "Grep",
+          "target": "stop_window|stop window",
+          "pattern": "stop_window|stop window"
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*config*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_module/configs/process_launch_config.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/core/stop_budget.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Grep",
+          "target": "class.*Config.*SchemaBase|class.*Schema.*SchemaBase",
+          "pattern": "class.*Config.*SchemaBase|class.*Schema.*SchemaBase",
+          "glob": "**/*.py"
+        },
+        {
+          "name": "Grep",
+          "target": "class OrchestratorConfig|MAX_STOP_WINDOW_KEY|max_stop_window",
+          "pattern": "class OrchestratorConfig|MAX_STOP_WINDOW_KEY|max_stop_window"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/core/process_registry.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window\\|MAX_STOP_WINDOW\" --include=\"*.py\" | grep -v \"test_\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*process_manager*config*.py\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"class.*Config.*SchemaBase\" --include=\"*.py\" | grep -i \"process_manager\\|orchestr\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "ls -la /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -B 5 -A 5 \"orchestrator_config\\|OrchestratorConfig\\|class.*Launcher\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/launcher/spawner.py | head -40",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"class.*System.*SchemaBase\" --include=\"*.py\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"^class SystemBlueprint\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/topology/blueprint.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"max_stop_window\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"max_stop_window_s\\|MAX_STOP_WINDOW\" --include=\"*.py\" | grep -v test | grep \"class\\|def\\|=\" | head -40",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"stop_window\\|max_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*robot*\" -name \"*.py\" | grep -i v2 | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"park\\|program thread\" --include=\"*.py\" | grep -v test | grep \"def\\|class\" | head -30",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/park.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/park.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -n \"def.*program\\|program_thread\\|start_park_home\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/*.py | head -50",
+          "denied": true
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"program_thread\\|start_park_home\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/ --include=\"*.py\" | head -30",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/Services/device_hub/drivers/robot_driver_v2/programs.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/config/schemas.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"shutdown\\|pre_stop\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" | grep -i builder | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -type f -name \"*assem*\" -o -name \"*build*\" | grep -E \"\\.py$\" | head -20",
+          "denied": true
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 -name \"assembler.py\" -o -name \"*builder*.py\" | head -10",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_framework/modules/process_manager_module/launcher/builder.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"SystemConfig\\|load_system_config\\|shutdown\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" | grep -v test | grep \"def\\|load_system\" | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype -name \"*.py\" -type f | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend -name \"*.py\" -type f | head -20",
+          "denied": false
+        },
+        {
+          "name": "Bash",
+          "target": "find /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/assembly -name \"*.py\" -type f | head -20",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/assembly/assembler.py"
+        },
+        {
+          "name": "Bash",
+          "target": "grep -r \"class SystemBuilder\" /private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460 --include=\"*.py\" | head -5",
+          "denied": false
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        },
+        {
+          "name": "Read",
+          "target": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/1e085652f6a7a5b3825f87157769be6de47ad928-d174c55460/multiprocess_prototype/backend/launch.py"
+        }
+      ],
+      "final_text": "Due to the token limit, let me provide the answers I've found so far for the navigation questions:\n\n{\"id\": \"G1\", \"answer\": \"ProcessLaunchConfig and ProcessConfig get the stop_window_s field. stop_budget module has STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY constants. valid_window_s() validates the window value.\", \"locations\": [\"multiprocess_framework/modules/process_module/configs/process_launch_config.py:94\", \"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63\"], \"confidence\": \"sure\"}\n\n{\"id\": \"G3\", \"answer\": \"_program_loop() runs the program thread and sets link_lost outcome. _advance_locked() in park.py maps outcome to TEXT_PARK_LINK or TEXT_PARK_HOME_FAILED text based on outcome value.\", \"locations\": [\"Services/device_hub/drivers/robot_driver_v2/programs.py:130\", \"Services/device_hub/drivers/robot_driver_v2/park.py:260\"], \"confidence\": \"sure\"}\n\n{\"id\": \"G5\", \"answer\": \"ShutdownSection is the new section class with pre_stop field. SystemConfig has shutdown field. SystemBuilder.build() method puts the list into orchestrator_config as deep copy.\", \"locations\": [\"multiprocess_prototype/backend/config/schemas.py:195\", \"multiprocess_prototype/backend/config/schemas.py:235\", \"multiprocess_prototype/backend/launch.py:757\"], \"confidence\": \"sure\"}\nDue to the token limit, let me provide the answers I've found so far for the navigation questions:\n\n{\"id\": \"G1\", \"answer\": \"ProcessLaunchConfig and ProcessConfig get the stop_window_s field. stop_budget module has STOP_WINDOW_KEY and MAX_STOP_WINDOW_KEY constants. valid_window_s() validates the window value.\", \"locations\": [\"multiprocess_framework/modules/process_module/configs/process_launch_config.py:94\", \"multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183\", \"multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63\"], \"confidence\": \"sure\"}\n\n{\"id\": \"G3\", \"answer\": \"_program_loop() runs the program thread and sets link_lost outcome. _advance_locked() in park.py maps outcome to TEXT_PARK_LINK or TEXT_PARK_HOME_FAILED text based on outcome value.\", \"locations\": [\"Services/device_hub/drivers/robot_driver_v2/programs.py:130\", \"Services/device_hub/drivers/robot_driver_v2/park.py:260\"], \"confidence\": \"sure\"}\n\n{\"id\": \"G5\", \"answer\": \"ShutdownSection is the new section class with pre_stop field. SystemConfig has shutdown field. SystemBuilder.build() method puts the list into orchestrator_config as deep copy.\", \"locations\": [\"multiprocess_prototype/backend/config/schemas.py:195\", \"multiprocess_prototype/backend/config/schemas.py:235\", \"multiprocess_prototype/backend/launch.py:757\"], \"confidence\": \"sure\"}",
+      "score": {
+        "per_question": [
+          {
+            "id": "G1",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_framework/modules/process_module/configs/process_launch_config.py:94",
+              "multiprocess_framework/modules/process_manager_module/topology/blueprint.py:183",
+              "multiprocess_framework/modules/process_manager_module/core/stop_budget.py:63"
+            ]
+          },
+          {
+            "id": "G3",
+            "scored": true,
+            "verdict": "hit",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "Services/device_hub/drivers/robot_driver_v2/programs.py:130",
+              "Services/device_hub/drivers/robot_driver_v2/park.py:260"
+            ]
+          },
+          {
+            "id": "G5",
+            "scored": true,
+            "verdict": "false",
+            "facts": null,
+            "confidence": "sure",
+            "locations": [
+              "multiprocess_prototype/backend/config/schemas.py:195",
+              "multiprocess_prototype/backend/config/schemas.py:235",
+              "multiprocess_prototype/backend/launch.py:757"
+            ]
+          },
+          {
+            "id": "G7",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unknown",
+            "locations": []
+          },
+          {
+            "id": "G9",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unknown",
+            "locations": []
+          },
+          {
+            "id": "G11",
+            "scored": true,
+            "verdict": "miss",
+            "facts": null,
+            "confidence": "unknown",
+            "locations": []
+          }
+        ],
+        "hits": 1,
+        "false": 1,
+        "scored": 6,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "files_hit": 3,
+        "total_hits": 1,
+        "total_false": 1,
+        "total": 6
+      }
+    }
+  ],
+  "aggregate": {
+    "repeats": 3,
+    "hits": {
+      "min": 1,
+      "median": 2,
+      "max": 3
+    },
+    "false": {
+      "min": 1,
+      "median": 2,
+      "max": 4
+    },
+    "facts_hit": {
+      "min": null,
+      "median": null,
+      "max": null
+    },
+    "tool_calls": {
+      "min": 44,
+      "median": 47,
+      "max": 82
+    },
+    "final_context_tokens": {
+      "min": 111365,
+      "median": 116780,
+      "max": 144474
+    },
+    "cumulative_tokens": {
+      "min": 111466,
+      "median": 115659,
+      "max": 147643
+    },
+    "cache_read_tokens": {
+      "min": 2975223,
+      "median": 3006794,
+      "max": 7281764
+    },
+    "wall_s": {
+      "min": 166.958,
+      "median": 167.209,
+      "max": 294.202
+    }
+  },
+  "verdict": {
+    "pass": false,
+    "band": "TAINTED",
+    "checks": {
+      "false": {
+        "value": 4,
+        "limit": 99,
+        "ok": true
+      }
+    },
+    "unmeasured": []
+  }
+}
