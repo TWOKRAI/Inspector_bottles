@@ -30,6 +30,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -67,6 +68,27 @@ def _owned(item: dict) -> dict:
     слот перезапишут, пока кадр лежит в буфере/``_last_frame_item``.
     """
     return {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in item.items()}
+
+
+class _NdarrayInValue(Exception):
+    """В значении sidecar-ключа найден ndarray: JSON его не выражает, ключ пропускается."""
+
+
+def _json_native(value: Any) -> Any:
+    """Рекурсивно привести значение к JSON-нативному виду (dict/list/tuple, np.generic -> .item()).
+
+    ndarray на любой глубине -> _NdarrayInValue (вызывающий пропускает весь ключ верхнего уровня).
+    Без конвертации json.dumps(default=str) записал бы np.float32 строкой.
+    """
+    if isinstance(value, np.ndarray):
+        raise _NdarrayInValue
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _json_native(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_native(v) for v in value]
+    return value
 
 
 @register_plugin(
@@ -108,6 +130,16 @@ class FrameSaverPlugin(ProcessModulePlugin):
 
         # camera_id из cfg (не входит в register — идентификатор хоста, для логов).
         self._camera_id: int = ctx.config.get("camera_id", 0)
+
+        # sidecar_keys: разбираем один раз (пробелы срезаем, пустые сегменты отбрасываем).
+        self._sidecar_keys: tuple[str, ...] = tuple(
+            k for k in (seg.strip() for seg in self._reg.sidecar_keys.split(",")) if k
+        )
+        for reserved in ("frame", self._reg.sidecar_key):
+            if reserved in self._sidecar_keys:
+                raise ValueError(f"frame_saver: sidecar_keys не может содержать ключ {reserved!r}")
+        self._collision_warned: bool = False  # предупреждение о коллизии с payload — один раз за жизнь узла
+        self._ndarray_warned: set[str] = set()  # ключи, пропущенные из-за ndarray (не спамим по кадру)
 
         # Состояние (общий lock — буфер + индекс + папка + счётчики).
         self._lock = threading.Lock()
@@ -265,14 +297,39 @@ class FrameSaverPlugin(ProcessModulePlugin):
     def _write_sidecar(self, path: Path, item: dict, meta: dict) -> None:
         """Записать .json с метаданными рядом с кадром (для разметки датасета).
 
-        Источник — item[sidecar_key] (dict), дополненный полями кадра (w/h/ts/file).
+        Источник — item[sidecar_key] (dict) + ключи item из sidecar_keys + source (если задан),
+        дополненные полями кадра (w/h/ts/file).
         Атомарно (*.tmp + replace). Ошибки не роняют сохранение кадра.
         """
         payload = item.get(self._reg.sidecar_key)
         if not isinstance(payload, dict):
             return
+        extras: dict[str, Any] = {}
+        for key in self._sidecar_keys:
+            if key not in item:
+                continue  # ключа нет в item — в .json его нет (не null)
+            if key in payload:
+                if not self._collision_warned:
+                    self._collision_warned = True
+                    self._ctx.log_warning(
+                        f"FrameSaverPlugin[{self._camera_id}]: ключ {key!r} из sidecar_keys занят в "
+                        f"item[{self._reg.sidecar_key!r}] — берётся значение payload (дальше без повторов)"
+                    )
+                continue
+            try:
+                extras[key] = _json_native(item[key])
+            except _NdarrayInValue:
+                if key not in self._ndarray_warned:
+                    self._ndarray_warned.add(key)
+                    self._ctx.log_warning(
+                        f"FrameSaverPlugin[{self._camera_id}]: значение ключа {key!r} содержит ndarray — "
+                        "ключ в .json не пишется"
+                    )
+        source = {"source": self._reg.sidecar_source} if self._reg.sidecar_source else {}
         data = {
             **payload,
+            **extras,
+            **source,
             "file": path.name,
             "width": meta["w"],
             "height": meta["h"],
