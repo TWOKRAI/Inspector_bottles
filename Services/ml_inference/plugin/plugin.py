@@ -183,6 +183,9 @@ class MLInferencePlugin(ProcessModulePlugin):
                 # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
                 # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
                 preds = self._mark_below_threshold(self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0))
+                # id читаем под тем же локом, что и predict: именно эта модель дала preds,
+                # а не та, что сейчас в регистре (set_model на другом потоке)
+                model_id = self._engine.current_model_id
         except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
             self._reg.last_error = str(exc)
             self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
@@ -209,9 +212,12 @@ class MLInferencePlugin(ProcessModulePlugin):
         # overlay пишем в 'frame' (его читает дисплей; SHM-middleware стрипует
         # именно 'frame'). Отдельный 'rendered_frame' НЕ заводим — он поехал бы
         # полным кадром через pickle на каждом кадре (грабли line_filter).
-        # model_id — имя модели из регистра (не путь, не display-name sidecar); только у
-        # успешного инференса: pass-through и ветка ошибки его не ставят
-        return {**item, "frame": result_frame, "predictions": preds, "model_id": self._reg.model}
+        # model_id — id модели, которая реально отработала (ключ каталога, не путь и не
+        # display-name sidecar); только у успешного инференса и только если модель ещё загружена
+        result = {**item, "frame": result_frame, "predictions": preds}
+        if model_id:
+            result["model_id"] = model_id
+        return result
 
     def _mark_below_threshold(self, preds: list[dict]) -> list[dict]:
         """Копии предсказаний с `below_threshold = not (confidence >= confidence_threshold)`.
