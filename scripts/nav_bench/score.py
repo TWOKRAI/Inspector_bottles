@@ -10,6 +10,9 @@
           пересекает окно ``line ± tolerance`` (``tolerance`` записи, по умолчанию 3; у эталона ``line: null`` —
           достаточно пути). Учитываются только первые ``len(expected)+1`` адресов: остальные — лишние, и их наличие
           лишает hit (при ``sure`` ответ — ``false``, иначе ``miss``).
+          «Адрес» здесь — одна заявка «путь + строка или диапазон» (см. грамматику ниже): список
+          ``a.py:52,289-327`` — две заявки, ровно как ``["a.py:52", "a.py:289-327"]``; и потолок, и «лишний адрес»
+          считаются по заявкам, поэтому список не обходит потолок и не маскирует лишнее.
   false — уверенность ``sure`` и (адрес, не совпавший ни с одной записью, или лишние адреса сверх потолка), при этом
           нет чистого попадания: лишние адреса сверх потолка делают ответ ложным даже при закрытом эталоне;
   miss  — всё остальное: нет ответа, «malformed», ``sure`` без адресов, неуверенный промах, неполное совпадение.
@@ -47,8 +50,22 @@ DEFAULT_THRESHOLDS: dict[str, Any] = {
 # задан, а метрики нет; TAINTED — нарушен доступ.
 FIX_WIDTH = 2
 
-# «путь:строка», допускает «путь:10-20», «путь:10:5», «путь:10,12» — первая строка, диапазон «a-b» целиком.
-_LOCATION_RE = re.compile(r"^(?P<path>.+?):(?P<start>\d+)(?:[-–](?P<end>\d+))?(?:[:,]\d+)*(?:[-–]\d+)?$")
+# Грамматика строки адреса (``locations[i]``), см. ``parse_claims``::
+#
+#   location := claim ( SEP claim )*          SEP: «;», «,», перевод строки или пробелы между заявками
+#   claim    := path ":" lines ( ":" col )*   «:col» (строка:колонка) — не строка, отбрасывается
+#   lines    := item ( "," ws* item )*        «a.py:52, 289-327» — пробел после запятой допустим
+#   item     := N | N "-" M | N "-"           «-» и «–»; M < N — переставляется; «N-» (обрыв) — одна строка N
+#
+# Путь — всё между предыдущей заявкой и «:» перед первой цифрой; «:» не перед цифрой (``C:\x\a.py``) — часть
+# пути; запятая и «;» в пути не поддерживаются. Хвост без номера строки после последней заявки (``(func)``,
+# ``,abc``) отбрасывается. Строка вообще без заявок — один адрес «только путь» (строка ``None``). Заявка без пути
+# (``:12``, ``52,289``) не создаётся. Повтор одной заявки внутри одной строки (``a.py:5,5``) схлопывается.
+_ANCHOR_RE = re.compile(r":(?P<spec>\d+(?:[-–]\d*)?(?:,[ \t]*\d+(?:[-–]\d*)?)*)(?::\d+)*")
+_ITEM_RE = re.compile(r"(?P<start>\d+)(?:[-–](?P<end>\d*))?")
+_PATH_SEPARATORS_RE = re.compile(r"[;,\n]")
+
+type Claim = tuple[str, int | None, int | None]  # (путь, первая строка, последняя строка); строки None — без строки
 
 
 def _key(question_id: Any) -> str:
@@ -69,15 +86,34 @@ def normalize_path(path: str, prefixes: tuple[str, ...] = ()) -> str:
     return posix
 
 
-def parse_location_range(text: str, prefixes: tuple[str, ...] = ()) -> tuple[str, int | None, int | None]:
-    """``"a/b.py:12-20"`` -> ``("a/b.py", 12, 20)``; ``"a/b.py:12"`` -> ``(.., 12, 12)``; без строки — ``None``."""
+def parse_claims(text: str, prefixes: tuple[str, ...] = ()) -> list[Claim]:
+    """Строка адреса -> заявки ``(путь, start, end)`` по грамматике выше; ``a.py:52,289-327`` -> две заявки.
+
+    Не бросает исключений: мусор отбрасывается, строка без разбираемых заявок даёт один адрес «только путь».
+    """
     raw = text.strip().strip("`'\"")
-    found = _LOCATION_RE.match(raw)
-    if found is None:
-        return normalize_path(raw, prefixes), None, None
-    start = int(found.group("start"))
-    end = int(found.group("end")) if found.group("end") else start
-    return normalize_path(found.group("path"), prefixes), min(start, end), max(start, end)
+    claims: list[Claim] = []
+    cursor = 0
+    for anchor in _ANCHOR_RE.finditer(raw):
+        path = _PATH_SEPARATORS_RE.split(raw[cursor : anchor.start()])[-1].strip().strip("`'\"")
+        cursor = anchor.end()
+        if not path:
+            continue
+        for item in anchor.group("spec").split(","):
+            parts = _ITEM_RE.fullmatch(item.strip())
+            if parts is None:  # недостижимо по _ANCHOR_RE; не падаем, если грамматики разойдутся
+                continue
+            start = int(parts.group("start"))
+            end = int(parts.group("end")) if parts.group("end") else start
+            claim = (normalize_path(path, prefixes), min(start, end), max(start, end))
+            if claim not in claims:
+                claims.append(claim)
+    return claims or [(normalize_path(raw, prefixes), None, None)]
+
+
+def parse_location_range(text: str, prefixes: tuple[str, ...] = ()) -> tuple[str, int | None, int | None]:
+    """Первая заявка: ``"a/b.py:12-20"`` -> ``("a/b.py", 12, 20)``; ``"a/b.py:12"`` -> ``(.., 12, 12)``."""
+    return parse_claims(text, prefixes)[0]
 
 
 def parse_location(text: str, prefixes: tuple[str, ...] = ()) -> tuple[str, int | None]:
@@ -86,18 +122,9 @@ def parse_location(text: str, prefixes: tuple[str, ...] = ()) -> tuple[str, int 
     return path, start
 
 
-def location_matches(
-    location: str,
-    expected: dict[str, Any],
-    tolerance: int | None = None,
-    prefixes: tuple[str, ...] = (),
-) -> bool:
-    """Совпадает ли адрес агента с одной записью эталона ``{"path","line","symbol","tolerance"}``.
-
-    Допуск: аргумент ``tolerance``, иначе ``expected["tolerance"]``, иначе ``TOLERANCE_LINES``.
-    Диапазон строк агента совпадает, если пересекает окно ``[line - tol, line + tol]``.
-    """
-    path, start, end = parse_location_range(location, prefixes)
+def _claim_matches(claim: Claim, expected: dict[str, Any], tolerance: int | None = None) -> bool:
+    """Одна заявка против одной записи эталона ``{"path","line","symbol","tolerance"}``."""
+    path, start, end = claim
     if path != normalize_path(str(expected["path"])):
         return False
     expected_line = expected.get("line")
@@ -108,6 +135,20 @@ def location_matches(
     if start is None or end is None:
         return False
     return start <= int(expected_line) + tolerance and end >= int(expected_line) - tolerance
+
+
+def location_matches(
+    location: str,
+    expected: dict[str, Any],
+    tolerance: int | None = None,
+    prefixes: tuple[str, ...] = (),
+) -> bool:
+    """Совпадает ли адрес агента хотя бы одной заявкой с одной записью эталона.
+
+    Допуск: аргумент ``tolerance``, иначе ``expected["tolerance"]``, иначе ``TOLERANCE_LINES``.
+    Заявка-диапазон совпадает, если пересекает окно ``[line - tol, line + tol]``.
+    """
+    return any(_claim_matches(claim, expected, tolerance) for claim in parse_claims(location, prefixes))
 
 
 def _normalize_answer(obj: Any) -> dict[str, Any] | None:
@@ -164,14 +205,14 @@ def classify(
     if answer is None:
         return "miss"
     cap = len(expected) + 1
-    locations = answer["locations"]
-    kept = locations[:cap]
-    over = len(locations) > cap
-    covered = [any(location_matches(loc, exp, prefixes=prefixes) for loc in kept) for exp in expected]
+    claims = [claim for loc in answer["locations"] for claim in parse_claims(loc, prefixes)]
+    kept = claims[:cap]
+    over = len(claims) > cap
+    covered = [any(_claim_matches(claim, exp) for claim in kept) for exp in expected]
     need_all = question.get("require", "any") == "all"
     if (all(covered) if need_all else any(covered)) and not over:
         return "hit"
-    stray = over or any(not any(location_matches(loc, exp, prefixes=prefixes) for exp in expected) for loc in kept)
+    stray = over or any(not any(_claim_matches(claim, exp) for exp in expected) for claim in kept)
     return "false" if answer["confidence"] == "sure" and stray else "miss"
 
 
@@ -195,7 +236,7 @@ def classify_facts(question: dict[str, Any], answer: dict[str, Any] | None) -> s
 
 def _files_named(question: dict[str, Any], locations: list[str], prefixes: tuple[str, ...]) -> bool:
     """Названы ли в адресах агента пути эталона вопроса (по ``require``); строки не важны."""
-    named = {parse_location_range(loc, prefixes)[0] for loc in locations}
+    named = {claim[0] for loc in locations for claim in parse_claims(loc, prefixes)}
     found = [normalize_path(str(exp["path"])) in named for exp in question["expected"]]
     return all(found) if question.get("require", "any") == "all" else any(found)
 

@@ -41,18 +41,38 @@ def _found(record, repeat, qid, entry):
     return any(score.location_matches(loc, entry, prefixes=prefixes) for loc in _answer_locations(repeat, qid))
 
 
+# Поля вызова в записи, где мог бы лежать вывод; текущий bench.py их не пишет (только name/target/denied).
+_RECORDED_TEXT_KEYS = ("output", "stdout", "result_text")
+
+
 def _atlas_texts(repeat):
-    """Тексты вывода atlas по вызовам Bash повтора (воспроизведение команд трассы)."""
-    texts = []
+    """(тексты, неизвестные) вывода atlas по вызовам Bash повтора.
+
+    Источник текста вызова: (1) поле вывода в самой записи (`_RECORDED_TEXT_KEYS`), если есть — берём его,
+    даже если вызов помечен `denied`; (2) иначе вызов без `denied` воспроизводится по трассе (warm-кэш, платных
+    вызовов нет); (3) иначе вызов попадает в «неизвестные»: `denied` в бенче = `is_error` результата, то есть отказ
+    разрешения ИЛИ код выхода != 0 (bench.py, разбор stream-json), а текст вывода бенч не хранит. Частично успешный
+    вызов (паспорта выведены, код 2) и настоящий отказ по записи неразличимы; не воспроизводим, чтобы не выдавать
+    повторный запуск за наблюдение. Неизвестные вызовы не считаются ни доставленными, ни недоставленными.
+    """
+    texts, unknown = [], []
     for use in repeat["tool_uses"]:
-        if str(use.get("name")).casefold() != "bash" or use.get("denied") or not use.get("target"):
+        target = str(use.get("target") or "")
+        if str(use.get("name")).casefold() != "bash" or "pilot_atlas.py" not in target:
             continue
-        argv = shlex.split(use["target"])
-        if "pilot_atlas.py" not in " ".join(argv) or argv[-1] == "":
+        recorded = next((use[k] for k in _RECORDED_TEXT_KEYS if isinstance(use.get(k), str)), None)
+        if recorded is not None:
+            texts.append(recorded)
+            continue
+        if use.get("denied"):
+            unknown.append(target)
+            continue
+        argv = shlex.split(target)
+        if argv[-1] == "":
             continue
         done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         texts.append(done.stdout)
-    return texts
+    return texts, unknown
 
 
 def _delivered(texts, entry):
@@ -65,6 +85,7 @@ def _delivered(texts, entry):
 
 def summarize(record, label, with_atlas):
     exp = _expected(record)
+    unknown_atlas = []
     rows, per_q, cls = (
         [],
         {},
@@ -89,7 +110,8 @@ def summarize(record, label, with_atlas):
             and not any(str(u["target"]).startswith(p) for p in (record.get("prefixes") or []))
         )
         if with_atlas:
-            texts = _atlas_texts(rep)
+            texts, unknown = _atlas_texts(rep)
+            unknown_atlas.append(len(unknown))
             for (qid, e), ok in zip(exp, got):
                 d = _delivered(texts, e)
                 cls[
@@ -137,6 +159,15 @@ def summarize(record, label, with_atlas):
     ]
     if with_atlas:
         lines += ["", "доставлено / использовано (адрес × повтор): " + "; ".join(f"{k} {v}" for k, v in cls.items())]
+        if any(unknown_atlas):
+            lines += [
+                "",
+                "ОГОВОРКА: вызовов atlas с неизвестным выводом по повторам: "
+                + ", ".join(str(n) for n in unknown_atlas)
+                + ". Бенч помечает `denied` и отказ, и код выхода != 0, а текст вывода не хранит: что такой вызов "
+                "доставил (например, паспорта при коде 2), по записи не узнать, повторно не запускалось. Эти вызовы "
+                "не учтены ни как доставленные, ни как недоставленные; «не доставлен» выше может быть занижением.",
+            ]
     return "\n".join(lines), rows
 
 
