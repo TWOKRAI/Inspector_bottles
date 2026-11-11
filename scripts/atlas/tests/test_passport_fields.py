@@ -108,12 +108,29 @@ _MANY = "\n".join(
     ]
 )
 
+_T = "\n".join(
+    [
+        "class TypeFirst:",  # 1
+        "    type Alias = int | str",  # 2
+        "    type Gen[T] = list[T]",  # 3
+        "",  # 4
+        "",  # 5
+        "class DunderOnly:",  # 6
+        "    size: int = 3",  # 7
+        "",  # 8
+        "    def __init__(self) -> None:",  # 9
+        "        pass",  # 10
+        "",
+    ]
+)
+
 _FILES = {
     "modules.yaml": _registry(_row("pkg", "pkg/", purpose="Пакет.")),
     "pkg/__init__.py": "",
     "pkg/s.py": _S,
     "pkg/m.py": _M,
     "pkg/many.py": _MANY,
+    "pkg/t.py": _T,
 }
 
 
@@ -195,6 +212,28 @@ def test_class_with_methods_unchanged(fx: GitRepo) -> None:
     """Защита: `Mixed` (поля `n`, `m` + публичный `run`) — только метод, поля не добавляются (убивает «поля всегда»)."""
     assert _members(fx, "pkg/s.py::Mixed") == [{"name": "run", "signature": "() -> None", "where": "pkg/s.py:27"}]
     assert _block(_render(_build(fx, "pkg/s.py::Mixed"), full=True)) == ["  members:", "    run() -> None  :27"]
+
+
+def test_class_with_only_dunder_method_unchanged(fx: GitRepo) -> None:
+    """Защита (стадия 3, инъекция `_methods(node, False)`): `DunderOnly` (поле `size` + `__init__`) — только `__init__`,
+    поля не добавляются; без dunder в `_methods` класс считался бы «без публичных методов»."""
+    assert _members(fx, "pkg/t.py::DunderOnly") == [
+        {"name": "__init__", "signature": "() -> None", "where": "pkg/t.py:9"}
+    ]
+    assert _block(_render(_build(fx, "pkg/t.py::DunderOnly"), full=True)) == [
+        "  members:",
+        "    __init__() -> None  :9",
+    ]
+
+
+def test_fields_text_first_field_type_alias(fx: GitRepo) -> None:
+    """Стадия 3 (инъекция «без веток `type = `/`type[`»): заголовок полей берётся по первому члену — класс, у которого
+    первое поле `type Alias = ...`, всё равно печатается как поля."""
+    assert _block(_render(_build(fx, "pkg/t.py::TypeFirst"), full=True)) == [
+        "  members: публичных методов нет; полей 2:",
+        "    Alias type = int | str  :2",
+        "    Gen type[T] = list[T]  :3",
+    ]
 
 
 def test_empty_class_still_dash(fx: GitRepo) -> None:
