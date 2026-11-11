@@ -128,3 +128,21 @@ def test_stale_warning_dedup_per_t() -> None:
         plugin._read_world_encoder()
     assert ctx.log_warning.call_count == 2
     assert "stale_ms" in ctx.log_warning.call_args.args[0]
+
+
+def test_smaller_delta_after_a_reading_does_not_clamp_to_previous_reading() -> None:
+    """Добавлено лидом после инъекции I4 (монотонный clamp по чтениям): слепой RED 5 читает
+    только после второй дельты, поэтому clamp «не ниже прошлого чтения» его не краснит. Здесь
+    чтение идёт и ДО меньшей дельты — как на стенде, где produce() читает мир каждый кадр.
+
+    Литералы: чтение в 100.1 от (1000, 20, t=100.0) = 1000 + 20*0.1/0.144473 = 1013.84342;
+    новая дельта (900, 20, t=100.2), чтение в 100.26 = 900 + 20*0.06/0.144473 = 908.30605."""
+    plugin, _ctx, sp = _make_plugin()
+    sp.emit(_leaf_batch(1000, 20.0, 100.0))
+    plugin._clock = lambda: 100.1
+    first = plugin._read_world_encoder()
+    assert abs(first - 1013.84342) < 1e-4, first
+    sp.emit(_leaf_batch(900, 20.0, 100.2))
+    plugin._clock = lambda: 100.26
+    second = plugin._read_world_encoder()
+    assert abs(second - 908.30605) < 1e-4, f"чтение после меньшей дельты {second}, ждали 908.30605"
