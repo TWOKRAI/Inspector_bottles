@@ -29,20 +29,12 @@
 
 ## Следующий шаг (новый чат)
 
-1. **Ревью плана.** Запустить `reviewer` в режиме `MODE: plan`, `model: sonnet`, `effort: xhigh`, синхронно.
-   - В старом чате ревью запускалось, но вердикт мог не дойти. Если вердикта нет, запустить заново.
-   - Что проверить:
-     - контракты Task 1.1 против `overlay_draw`: вход `image/*` (code-reader-gui), побайтная копия кадра (camera-device-service 3.4), необязательный `overlay` (topology-port-join);
-     - Task 2.1: живая правка регистра `list[dict]` — хука в `registers_module` не нашли, запасной путь через сравнение `is`;
-     - Task 2.1: новые optional-порты без `join`;
-     - Task 3.1: `draw_overlay` по умолчанию становится false — кто полагается на прожжённую надпись;
-     - слои по `.sentrux/rules.toml`;
-     - цепочка без слепого tester в 2.2/3.1/4.2: допустимо ли по «Task launch convention»;
-     - намеренно красный слепой тест `test_overlay_port_join_catalog.py:55-57` в 2.1: фиксировать в amendments;
-     - пункт (g) — бюджет.
-   - На `CHANGES REQUESTED` правит `manager`, одна итерация. Вторую итерацию правит лид.
+1. **Ревью плана — раунд 1 есть: CHANGES REQUESTED** (18 замечаний, 5 блокеров; бюджет по ревьюеру ~6,0M / ~48 запусков против 5,0M / 41 в плане) — [`plans/2026-11-11_draw-universal/review-plan-r1.md`](../../plans/2026-11-11_draw-universal/review-plan-r1.md).
+   - Заново ревью **не запускать**. Передать список `manager` (`model: opus`, `effort: xhigh`) на одну итерацию правок; потом ревью раунд 2 (свежий `reviewer`, `model: sonnet`, с файлом r1 и диффом).
+   - Замечание 16 (объём conformance и фильтров `ItemTemplate`) — вопрос владельцу, не менеджеру.
+   - Замечание 9: до Task 1.1 лид дописывает поправку в `plans/2026-10-18_camera-device-service` Task 3.4 (убрать `overlay_draw/plugin.py` из её FILES).
 2. **Вопросы владельцу.** Задать В1–В4 из `plan.md`:
-   - **В1.** DejaVu в репозиторий: два файла, 704 128 и 756 072 байт. Сначала проверить лицензию. Без ответа Task 1.2 не стартует.
+   - **В1.** DejaVu в репозиторий: два файла, 704 128 и 756 072 байт; `LICENSE_DEJAVU` рядом в matplotlib (ревьюер проверил наличие). Задать **при approve** (замечание 12), с веткой «нет».
    - **В2.** Свести `dataset-annotation` с `Services/labeling` в один пакет.
    - **В3.** Экспорт:
      - перевод фигур в YOLO/COCO — `Services/draw/export.py`;
