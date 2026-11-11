@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -142,9 +143,15 @@ def test_several_addresses_in_one_string():
     assert _match("a.py:5; b.py:70", 70, path="a.py") is False  # строка 70 принадлежит b.py, не a.py
 
 
-def test_repeated_claim_in_one_string_collapses():
-    assert score.parse_claims("a.py:5,5,5-5") == [("a.py", 5, 5)]
-    assert score.parse_claims("a.py:5,6,5") == [("a.py", 5, 5), ("a.py", 6, 6)]
+def test_repeated_claims_are_kept_by_parser():
+    assert score.parse_claims("a.py:5,5,5-5") == [("a.py", 5, 5), ("a.py", 5, 5), ("a.py", 5, 5)]
+    assert score.parse_claims("a.py:5,6,5") == [("a.py", 5, 5), ("a.py", 6, 6), ("a.py", 5, 5)]
+
+
+def test_repeats_in_separate_strings_count_separately():
+    q = _question([_exp(55)])  # потолок 2 заявки
+    assert _verdict(q, ["a.py:55", "a.py:55"], "sure") == "hit"
+    assert _verdict(q, ["a.py:55", "a.py:55", "a.py:55"], "sure") == "false"  # три отдельные строки - над потолком
 
 
 # --- прежнее поведение одиночных адресов -------------------------------------------------------------------
@@ -185,9 +192,10 @@ def test_stray_claim_inside_list_counts_like_separate_address():
 def test_list_does_not_bypass_ceiling():
     q = _question([_exp(55)])  # потолок: 2 заявки
     assert _verdict(q, ["a.py:55,900"], "unsure") == "hit"  # в пределах потолка
-    assert _verdict(q, ["a.py:54,55,56"], "sure") == "false"  # три заявки > потолка, хотя строка одна
-    assert _verdict(q, ["a.py:54,55,56"], "unsure") == "miss"
-    assert _verdict(q, ["a.py:54", "a.py:55", "a.py:56"], "sure") == "false"  # эквивалентно отдельным строкам
+    assert _verdict(q, ["a.py:54,60,66"], "sure") == "false"  # три несмежные заявки > потолка, хотя строка одна
+    assert _verdict(q, ["a.py:54,60,66"], "unsure") == "miss"
+    assert _verdict(q, ["a.py:54", "a.py:60", "a.py:66"], "sure") == "false"  # эквивалентно отдельным строкам
+    assert _verdict(q, ["a.py:54,55,56"], "sure") == "hit"  # соседние строки слиты в один диапазон 54-56
 
 
 def test_require_all_with_lists():
@@ -195,6 +203,120 @@ def test_require_all_with_lists():
     assert _verdict(q, ["a.py:52,289-327"]) == "hit"
     assert _verdict(q, ["a.py:52,100"], "sure") == "false"  # 300 не закрыт, 100 лишний
     assert _verdict(q, ["a.py:52"], "unsure") == "miss"
+
+
+# --- слияние диапазонов внутри одной строки ----------------------------------------------------------------
+
+
+def test_merge_intersecting_and_adjacent_ranges_literals():
+    assert score.merge_claims(score.parse_claims("a.py:50-52,53-55,56-60")) == [("a.py", 50, 60)]
+    assert score.merge_claims(score.parse_claims("a.py:50-52,54-55")) == [("a.py", 50, 52), ("a.py", 54, 55)]  # щель 53
+    assert score.merge_claims(score.parse_claims("a.py:10-20,15-30,5")) == [("a.py", 5, 5), ("a.py", 10, 30)]
+    assert score.merge_claims(score.parse_claims("a.py:55,55,55")) == [("a.py", 55, 55)]  # одинаковые пересекаются
+    assert score.merge_claims(score.parse_claims("a.py:1-3; b.py:4-6")) == [("a.py", 1, 3), ("b.py", 4, 6)]
+    assert score.merge_claims([("a.py", None, None)]) == [("a.py", None, None)]
+
+
+def test_merged_list_equals_one_range_in_classify():
+    q = _question([_exp(55)])
+    assert _verdict(q, ["a.py:50-52,53-55,56-60"], "sure") == _verdict(q, ["a.py:50-60"], "sure") == "hit"
+    many = ",".join(f"{n}-{n}" for n in range(40, 80))  # 40 соседних строк -> один диапазон, потолок не превышен
+    assert _verdict(q, ["a.py:" + many], "sure") == "hit"
+
+
+def test_merge_is_not_applied_across_strings():
+    q = _question([_exp(55)])  # потолок 2 заявки
+    assert _verdict(q, ["a.py:50-52", "a.py:53-55", "a.py:56-60"], "sure") == "false"  # три отдельных адреса
+    assert _verdict(q, ["a.py:50-52,53-55,56-60"], "sure") == "hit"  # одна строка -> один диапазон
+
+
+# --- пути с «:», «,» и числами; граница заявки; отброшенное ------------------------------------------------
+
+
+def test_paths_with_colons_digits_and_commas():
+    assert score.parse_claims("http://h:8080/a.py:12") == [("http://h:8080/a.py", 12, 12)]
+    assert score.parse_claims("pkg:2/a.py:5") == [("pkg:2/a.py", 5, 5)]
+    assert score.parse_claims("C:2024/x.py:5") == [("C:2024/x.py", 5, 5)]
+    assert score.parse_claims("dir/a,b.py:5") == [("dir/a,b.py", 5, 5)]
+    assert score.parse_claims("my dir/a b.py:7-9") == [("my dir/a b.py", 7, 9)]
+    assert score.parse_claims("dir/a,b.py:5, c.py:7") == [("dir/a,b.py", 5, 5), ("c.py", 7, 7)]
+    assert _match("pkg:2/a.py:5", 5, path="pkg:2/a.py") is True
+    assert _match("http://h:8080/a.py:12", 8080, path="http://h") is False  # порт не строка
+
+
+def test_claim_boundary_literals():
+    assert score.parse_claims("a.py:12-15 and a.py:30-31") == [("a.py", 12, 15), ("and a.py", 30, 31)]
+    assert score.parse_claims("a.py:5,abc,b.py:7") == [("a.py", 5, 5), ("abc,b.py", 7, 7)]
+    assert score.parse_claims("a.py:5 6 7") == [("a.py", 5, 5)]  # пробел заявки не разделяет
+    assert score.parse_claims("a.py:5;6") == [("a.py", 5, 5)]
+    assert score.parse_claims("a.py:12:5,20-25") == [("a.py", 12, 12)]
+    assert score.parse_claims("a.py:12abc") == [("a.py:12abc", None, None)]  # за цифрами буква: не заявка
+    assert score.parse_claims("a.py:5.") == [("a.py", 5, 5)]  # точка в конце фразы заявку не рвёт
+
+
+def test_unparsed_reports_dropped_fragments_with_digits():
+    assert score.unparsed("a.py:5 6 7") == ["6 7"]
+    assert score.unparsed("a.py:5;6") == ["6"]
+    assert score.unparsed("a.py:12:5,20-25") == ["20-25"]
+    assert score.unparsed("a.py:52,abc,10-") == ["abc,10-"]
+    assert score.unparsed("a.py:5, 7, :9") == [":9"]
+    assert score.unparsed("a.py:12abc") == ["a.py:12abc"]
+    assert score.unparsed(":12") == [":12"]
+    assert score.unparsed("a.py:5, b.py") == []  # отброшено без цифр: молча
+    assert score.unparsed("a.py") == []
+    assert score.unparsed("") == []
+    assert score.unparsed("a.py:52,289-327") == []
+    assert score.unparsed("a.py:12:34") == []  # колонка - часть заявки, не остаток
+    assert score.unparsed("http://h:8080/a.py:12") == []
+
+
+def test_huge_numbers_do_not_raise():
+    big = "1" * 4301  # длиннее лимита int() в Python
+    assert score.parse_claims("a.py:" + big) == [("a.py:" + big, None, None)]
+    assert score.parse_claims("a.py:5," + big) == [("a.py", 5, 5)]
+    assert score.parse_claims("a.py:123456789") == [("a.py", 123456789, 123456789)]
+    assert score.parse_claims("a.py:1234567890") == [("a.py:1234567890", None, None)]  # 10 цифр - не строка
+    assert score.unparsed("a.py:" + big) == ["a.py:" + big]
+
+
+def test_long_inputs_are_fast():
+    distinct = "a.py:" + ",".join(str(2 * n) for n in range(20_000))  # 20 000 различных несмежных заявок
+    started = time.perf_counter()
+    claims = score.parse_claims(distinct)
+    merged = score.merge_claims(claims)
+    elapsed = time.perf_counter() - started
+    assert (len(claims), len(merged)) == (20_000, 20_000)
+    assert elapsed < 0.2, f"{elapsed:.3f} s"
+    for hostile in (":1" * 20_000, "a.py:1-" * 5_000, "a:" * 20_000 + "1", "a.py:" + "1," * 20_000 + "x"):
+        started = time.perf_counter()
+        score.parse_claims(hostile)
+        score.unparsed(hostile)
+        assert time.perf_counter() - started < 0.5, hostile[:20]
+
+
+# --- мутанты, пережившие первое ревью ----------------------------------------------------------------------
+
+
+def test_parse_location_range_returns_first_claim():
+    assert score.parse_location_range("a.py:5,9-12") == ("a.py", 5, 5)
+    assert score.parse_location_range("a.py:40-50, b.py:7") == ("a.py", 40, 50)
+    assert score.parse_location("a.py:5,9") == ("a.py", 5)
+
+
+def test_files_named_sees_every_claim_of_a_string():
+    q = _question([_exp(5, "a.py"), _exp(7, "b.py")], require="all")
+    answer = {"id": "Q1", "answer": "x", "locations": ["a.py:5; b.py:7"], "confidence": "unsure"}
+    result = score.score_run([q], json.dumps(answer))
+    assert (result["files_hit"], result["hits"]) == (1, 1)
+    only_second = {**answer, "locations": ["b.py:7"]}
+    assert score.score_run([q], json.dumps(only_second))["files_hit"] == 0  # a.py не назван
+
+
+def test_files_named_applies_prefixes():
+    q = _question([_exp(5, "pkg/a.py")])
+    answer = {"id": "Q1", "answer": "x", "locations": ["/root/pkg/a.py:5"], "confidence": "unsure"}
+    assert score.score_run([q], json.dumps(answer), prefixes=("/root",))["files_hit"] == 1
+    assert score.score_run([q], json.dumps(answer))["files_hit"] == 0
 
 
 # --- запись пилота: A r1 (grep-read), списки строк ---------------------------------------------------------
@@ -245,9 +367,9 @@ _ITEMS = st.lists(
 @settings(max_examples=300, deadline=None)
 @given(path=_PATHS, items=_ITEMS, space=st.sampled_from(["", " "]), dash=st.sampled_from(["-", "\u2013"]))
 def test_property_list_round_trip(path, items, space, dash):
-    """Форматирование списка ``путь:N,M-K,…`` и разбор дают то же множество строк (порядок и повторы схлопнуты)."""
+    """Форматирование списка ``путь:N,M-K,…`` и разбор возвращают те же заявки в том же порядке, повторы сохранены."""
     text = path + ":" + ("," + space).join(spec.replace("-", dash) for _, _, spec in items)
-    expected = list(dict.fromkeys((score.normalize_path(path), lo, hi) for lo, hi, _ in items))
+    expected = [(score.normalize_path(path), lo, hi) for lo, hi, _ in items]
     assert score.parse_claims(text) == expected
 
 
@@ -278,3 +400,30 @@ def test_property_no_list_parsing_equals_old(path, lines, expected_line):
     old_start, old_end = _old_parse_location_range(text)[1:]
     old_hit = old_start is not None and old_start <= expected_line + 3 and old_end >= expected_line - 3
     assert score.location_matches(text, {"path": path, "line": expected_line}) is old_hit
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    spans=st.lists(st.tuples(_LINE, _LINE).map(lambda t: (min(t), max(t))), min_size=1, max_size=12),
+    probe=_LINE,
+)
+def test_property_merge_idempotent_and_preserves_covered_lines(spans, probe):
+    """Слияние идемпотентно, не меняет множество покрытых строк, оставляет между диапазонами щель."""
+    claims = [("a.py", lo, hi) for lo, hi in spans]
+    merged = score.merge_claims(claims)
+    assert score.merge_claims(merged) == merged
+    assert any(lo <= probe <= hi for _, lo, hi in merged) == any(lo <= probe <= hi for lo, hi in spans)
+    for (_, _, prev_hi), (_, next_lo, _) in zip(merged, merged[1:]):
+        assert next_lo > prev_hi + 1
+    ordered = sorted(spans)
+    if all(b[0] > a[1] + 1 for a, b in zip(ordered, ordered[1:])):
+        assert merged == [("a.py", lo, hi) for lo, hi in ordered]  # несмежные и непересекающиеся - без изменений
+
+
+@settings(max_examples=200, deadline=None)
+@given(text=st.text(alphabet="ab.py:;, \t\n-–_0123456789/\\`'\"", max_size=40))
+def test_property_parser_never_raises_and_returns_claims(text):
+    claims = score.parse_claims(text)
+    assert claims and all(len(c) == 3 for c in claims)
+    assert all(c[1] is None or c[1] <= c[2] for c in claims)
+    score.unparsed(text)

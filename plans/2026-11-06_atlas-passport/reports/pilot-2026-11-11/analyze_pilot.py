@@ -4,7 +4,9 @@
 (путь тот же, строка в окне ±3, правило `score.location_matches`), считая каждый адрес отдельно, по повторам.
 Рядом: `hits` бенча (вопрос засчитан, если названы ВСЕ адреса вопроса, `require: all`), вызовы, токены, время.
 Для условия atlas — диагностика «доставлено / использовано»: адрес «доставлен», если он есть в тексте вывода atlas
-хотя бы одного вызова повтора (вызовы воспроизводятся по трассе повторно — warm-кэш, платных вызовов нет).
+хотя бы одного вызова повтора (вызовы воспроизводятся по трассе без оболочки: реконструкция, не наблюдение;
+вызовы с `denied`, синтаксисом оболочки или сбоем повтора — «неизвестные», см. `_atlas_texts`).
+`hits` и ложные считаются заново текущим `score.score_run`, из записи не берутся.
 
 Запуск: python analyze_pilot.py <запись_grep.json> <запись_atlas.json> [--atlas-wrapper <путь к pilot_atlas.py>]
 """
@@ -43,17 +45,32 @@ def _found(record, repeat, qid, entry):
 
 # Поля вызова в записи, где мог бы лежать вывод; текущий bench.py их не пишет (только name/target/denied).
 _RECORDED_TEXT_KEYS = ("output", "stdout", "result_text")
+_SHELL_PUNCTUATION = set("();<>|&")
+
+
+def _has_shell_syntax(command):
+    """Есть ли в команде синтаксис оболочки (`|`, `>`, `2>&1`, `&&`, `;`, `$(..)`, обратные кавычки, `$VAR`)."""
+    if "`" in command or "$" in command:
+        return True
+    try:
+        tokens = list(shlex.shlex(command, posix=True, punctuation_chars=True))
+    except ValueError:  # незакрытая кавычка: как оболочка это не разобрать
+        return True
+    return any(token and set(token) <= _SHELL_PUNCTUATION for token in tokens)
 
 
 def _atlas_texts(repeat):
-    """(тексты, неизвестные) вывода atlas по вызовам Bash повтора.
+    """(тексты, неизвестные) вывода atlas по вызовам Bash повтора; неизвестные — список (команда, причина).
 
-    Источник текста вызова: (1) поле вывода в самой записи (`_RECORDED_TEXT_KEYS`), если есть — берём его,
-    даже если вызов помечен `denied`; (2) иначе вызов без `denied` воспроизводится по трассе (warm-кэш, платных
-    вызовов нет); (3) иначе вызов попадает в «неизвестные»: `denied` в бенче = `is_error` результата, то есть отказ
-    разрешения ИЛИ код выхода != 0 (bench.py, разбор stream-json), а текст вывода бенч не хранит. Частично успешный
-    вызов (паспорта выведены, код 2) и настоящий отказ по записи неразличимы; не воспроизводим, чтобы не выдавать
-    повторный запуск за наблюдение. Неизвестные вызовы не считаются ни доставленными, ни недоставленными.
+    Источник текста вызова: (1) поле вывода в самой записи (`_RECORDED_TEXT_KEYS`), если есть; (2) иначе вызов
+    воспроизводится через `shlex.split` БЕЗ оболочки — это реконструкция, не наблюдение: тот же вывод получится, только
+    если окружение и копия репозитория те же, что у агента; (3) иначе вызов «неизвестный» и не считается ни
+    доставленным, ни недоставленным. Причины неизвестности:
+      - `denied` без текста в записи: в бенче это `is_error` результата, то есть отказ разрешения ИЛИ код выхода != 0
+        (bench.py), а вывод бенч не хранит; частично успешный вызов (паспорта выведены, код 2) и отказ неразличимы;
+      - синтаксис оболочки (`|`, `>`, `2>&1`, `&&`, `;`, `$..`): без оболочки это был бы другой вызов (`| head`
+        обрезал вывод агенту, `2>/dev/null` прятал ошибки), повтор не показал бы, что он видел;
+      - повтор дал код != 0 и пустой stdout, либо упал по времени.
     """
     texts, unknown = [], []
     for use in repeat["tool_uses"]:
@@ -63,15 +80,25 @@ def _atlas_texts(repeat):
         recorded = next((use[k] for k in _RECORDED_TEXT_KEYS if isinstance(use.get(k), str)), None)
         if recorded is not None:
             texts.append(recorded)
-            continue
-        if use.get("denied"):
-            unknown.append(target)
-            continue
-        argv = shlex.split(target)
-        if argv[-1] == "":
-            continue
-        done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
-        texts.append(done.stdout)
+        elif use.get("denied"):
+            unknown.append((target, "denied: отказ или код != 0, текста в записи нет"))
+        elif _has_shell_syntax(target):
+            unknown.append((target, "синтаксис оболочки: повтор без оболочки был бы другим вызовом"))
+        else:
+            argv = shlex.split(target)
+            if argv[-1] == "":
+                continue
+            try:
+                done = subprocess.run(
+                    argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                unknown.append((target, f"повтор не удался: {type(exc).__name__}"))
+                continue
+            if done.returncode != 0 and not done.stdout.strip():
+                unknown.append((target, f"повтор дал код {done.returncode} и пустой вывод"))
+            else:
+                texts.append(done.stdout)
     return texts, unknown
 
 
@@ -85,7 +112,8 @@ def _delivered(texts, entry):
 
 def summarize(record, label, with_atlas):
     exp = _expected(record)
-    unknown_atlas = []
+    unknown_atlas, unknown_reasons, stored_diff, leftovers = [], {}, [], []
+    prefixes = tuple(record.get("prefixes") or ())
     rows, per_q, cls = (
         [],
         {},
@@ -112,19 +140,38 @@ def summarize(record, label, with_atlas):
         if with_atlas:
             texts, unknown = _atlas_texts(rep)
             unknown_atlas.append(len(unknown))
+            for _, reason in unknown:
+                unknown_reasons[reason.split(":")[0]] = unknown_reasons.get(reason.split(":")[0], 0) + 1
             for (qid, e), ok in zip(exp, got):
                 d = _delivered(texts, e)
                 cls[
                     ("доставлен" if d else "не доставлен")
                     + (" и назван" if d and ok else ", не назван" if d else ", назван" if ok else ", не назван")
                 ] += 1
+        # hits/scored/false считаются ЗАНОВО текущим score.score_run по тексту ответа, а не берутся из записи
+        # (запись хранит оценку старого разбора адресов)
+        fresh = score.score_run(record["questions"], rep["final_text"], prefixes)
+        stored = rep["score"]
+        if (fresh["hits"], fresh["false"], fresh["scored"]) != (stored["hits"], stored["false"], stored["scored"]):
+            stored_diff.append(
+                f"повтор {len(rows) + 1}: в записи hits {stored['hits']}, ложных {stored['false']}; "
+                f"новым разбором hits {fresh['hits']}, ложных {fresh['false']}"
+            )
+        leftovers.append(
+            [
+                (row["id"], loc, score.unparsed(loc))
+                for row in stored["per_question"]
+                for loc in row["locations"]
+                if score.unparsed(loc)
+            ]
+        )
         rows.append(
             dict(
                 recall=sum(got),
                 n=len(got),
-                hits=rep["score"]["hits"],
-                scored=rep["score"]["scored"],
-                false=rep["score"]["false"],
+                hits=fresh["hits"],
+                scored=fresh["scored"],
+                false=fresh["false"],
                 calls=rep["tool_calls"],
                 ctx=rep["final_context_tokens"],
                 cum=rep["cumulative_tokens"],
@@ -157,16 +204,36 @@ def summarize(record, label, with_atlas):
         "по вопросам (найдено адресов из возможных по всем повторам): "
         + ", ".join(f"{q} {a}/{b}" for q, (a, b) in per_q.items()),
     ]
+    lines += [
+        "",
+        "hits / ложных пересчитаны текущим `score.score_run` по тексту ответа (запись хранит оценку старого разбора "
+        "адресов). Расхождения с записью: " + ("; ".join(stored_diff) if stored_diff else "нет") + ".",
+    ]
+    n_left = [len(items) for items in leftovers]
+    lines += [
+        "",
+        "адресов ответа с неразобранным остатком, где есть цифры (`score.unparsed`; «не разобрал» ≠ «данных нет»), "
+        "по повторам: " + ", ".join(str(n) for n in n_left) + ".",
+    ]
+    for i, items in enumerate(leftovers, 1):
+        for qid, loc, rest in items[:3]:
+            lines.append(f"  - повтор {i}, {qid}: `{loc}` -> остаток {rest}")
     if with_atlas:
-        lines += ["", "доставлено / использовано (адрес × повтор): " + "; ".join(f"{k} {v}" for k, v in cls.items())]
+        lines += [
+            "",
+            "доставлено / использовано (адрес × повтор; оценка ПОВТОРОМ команд без оболочки, не наблюдением): "
+            + "; ".join(f"{k} {v}" for k, v in cls.items()),
+        ]
         if any(unknown_atlas):
             lines += [
                 "",
                 "ОГОВОРКА: вызовов atlas с неизвестным выводом по повторам: "
                 + ", ".join(str(n) for n in unknown_atlas)
-                + ". Бенч помечает `denied` и отказ, и код выхода != 0, а текст вывода не хранит: что такой вызов "
-                "доставил (например, паспорта при коде 2), по записи не узнать, повторно не запускалось. Эти вызовы "
-                "не учтены ни как доставленные, ни как недоставленные; «не доставлен» выше может быть занижением.",
+                + " (причины: "
+                + ", ".join(f"{k} {v}" for k, v in unknown_reasons.items())
+                + "). Такие вызовы не учтены ни как доставленные, ни как недоставленные; «не доставлен» выше может "
+                "быть занижением. Бенч помечает `denied` и отказ, и код выхода != 0 и не хранит вывод; команды с "
+                "`|`, `>`, `2>&1`, `&&` без оболочки были бы другими вызовами. Повтор не заменяет наблюдение.",
             ]
     return "\n".join(lines), rows
 
