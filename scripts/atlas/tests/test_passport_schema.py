@@ -88,6 +88,30 @@ _COMMON = {
 
 def _schema(kind: str) -> dict[str, dict[str, tuple[type, ...]]]:
     """Схема «раздел -> ключ -> допустимые типы» для вида символа; не относящееся к виду — `null`."""
+    if kind == "binding":  # Task 4.6a: `_COMMON` не используется — своя таблица (`4.6a-fixtures.md` §3)
+        return {
+            "purpose": {"text": (NONE,), "called_from": (NONE,), "called_from_more": (int,), "declared_at": (NONE,)},
+            "interface": {"layer": (str,), "all": (list, NONE), "signature": (str,), "members": (NONE,)},
+            "links": {
+                "used_by": (list,),
+                "uses": (NONE,),
+                "subclasses": (NONE,),
+                "call_sites": (NONE,),
+                "call_sites_unresolved": (NONE,),
+                "bases": (NONE,),
+                "structural": (NONE,),
+                "call_sites_by_name": (NONE,),
+            },
+            "runtime": {"processes": (NONE,), "threads": (NONE,), "commands": (NONE,), "io": (NONE,)},
+            "checks": {"findings": (NONE,), "tests": (NONE,)},
+            "status": {
+                "tier": (str, NONE),
+                "doc_missing": (NONE,),
+                "dynamic": (NONE,),
+                "stale": (list,),
+                "frozen": (list,),
+            },
+        }
     is_class = kind == "class"
     return {
         **_COMMON,
@@ -345,3 +369,25 @@ def test_method_by_name_receiver_forms_class_name_and_dotted(repo: GitRepo) -> N
         ("pkg/forms.py:5", "by-name", "use"),
         ("pkg/forms.py:6", "by-name", "use"),
     ]
+
+
+# ---------------------------------------------------------------- Task 4.6a: паспорт привязки (RED 10)
+
+
+def test_binding_schema(repo: GitRepo) -> None:
+    """RED 10: паспорт привязки модуля и поля класса — по `_schema("binding")` (`null` у `subclasses`, `call_sites`,
+    `call_sites_unresolved`, `doc_missing`, `dynamic`, `tests`); `json.dumps` без `default=` проходит в `_check`."""
+    _commit(
+        repo,
+        {
+            "pkg/__init__.py": "",
+            "pkg/consts.py": "LIMIT: int = 16\n\n\nclass Schema:\n    rate: float = 1.5\n",
+            "pkg/user.py": "from pkg.consts import LIMIT\n",
+        },
+    )
+    module = _build(repo, "pkg/consts.py::LIMIT")
+    field = _build(repo, "pkg/consts.py::Schema.rate")
+    _check(module, "binding")
+    _check(field, "binding")
+    assert [e["where"] for e in module["links"]["used_by"]] == ["pkg/user.py:1"]
+    assert field["links"]["used_by"] == []

@@ -515,6 +515,15 @@ class Links:
             items.append((where, line, entry))
         return {"count": len(found), "items": _sorted(items)}
 
+    def imports_of(self, path: str, name: str) -> list[dict]:
+        """Записи `used_by` для любого имени файла `path`, не только из `defs` (Task 4.6a: константы, алиасы).
+
+        Pre: `path` — путь файла, `name` — имя, импортированное оператором `from m import name`.
+        Post: записи `{where, how: "import", scope, enclosing: "<module>"}` в порядке `(where, line)`, как у
+            `of(...)["used_by"]`; `[]` — импортов нет. Реэкспорт — запись `(__init__.py, имя)`, как в DESIGN 6 Task
+            4.5a. Индекс не меняется (`.get`, не `[]`). Не бросает."""
+        return _sorted(self._used_by.get((path, name), []))
+
     def of(self, ident: str) -> dict | None:
         """Связи символа `"путь::qualname"` (разделы — в докстринге модуля).
 
