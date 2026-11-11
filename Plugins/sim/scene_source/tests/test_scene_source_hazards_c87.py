@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import uuid
 from typing import Callable
@@ -103,11 +104,17 @@ def test_concurrent_deltas_vs_read_no_torn_value() -> None:
             stop.set()
 
     threads = [threading.Thread(target=writer, daemon=True), threading.Thread(target=reader, daemon=True)]
-    for th in threads:
-        th.start()
-    for th in threads:
-        th.join(_JOIN_S)
-    stop.set()
+    # частые переключения потоков: без них GIL (5 мс) прячет гонку, и тест не ловит снятый лок
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(_JOIN_S)
+        stop.set()
+    finally:
+        sys.setswitchinterval(old_interval)
     assert not any(th.is_alive() for th in threads), "потоки не завершились за дедлайн"
     assert not errors, f"исключение в потоке: {errors!r}"
     assert len(readings) == _READS
@@ -146,3 +153,13 @@ def test_smaller_delta_after_a_reading_does_not_clamp_to_previous_reading() -> N
     plugin._clock = lambda: 100.26
     second = plugin._read_world_encoder()
     assert abs(second - 908.30605) < 1e-4, f"чтение после меньшей дельты {second}, ждали 908.30605"
+
+
+def test_bool_mm_s_or_t_is_not_a_number_reading_equals_value() -> None:
+    """bool — не число для досчёта (ADR-SCN-001): ``mm_s=True`` и ``t=True`` дали бы 1.0 и
+    молча сдвинули энкодер; чтение обязано вернуть ``value`` как есть."""
+    plugin, _ctx, sp = _make_plugin()
+    sp.emit([Delta(path=_PATH, old_value=None, new_value={"value": 1000, "mm_s": True, "t": 99.9}, source="robot")])
+    assert plugin._read_world_encoder() == 1000.0
+    sp.emit([Delta(path=_PATH, old_value=None, new_value={"value": 2000, "mm_s": 20.0, "t": True}, source="robot")])
+    assert plugin._read_world_encoder() == 2000.0
