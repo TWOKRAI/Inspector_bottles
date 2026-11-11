@@ -1,7 +1,8 @@
 """Виды справочника: `ref <module>` и `index`, файл docs/atlas/INDEX.md (Task 1.6b, ADR-ATL-001 §1-3).
 
 Purpose: `ref` — интерфейсы модуля с сигнатурами, фразами docstring и тестами (AST корневого interfaces.py
-    ревизии сборки + SQLite по build_id); `index` — весь проект: «id — purpose» и главные интерфейсы;
+    ревизии сборки + SQLite по build_id); `index` — весь проект: «id — purpose», главные интерфейсы и строка `классы:`
+    (публичные классы верхнего уровня юнита вне строки интерфейсов; слои framework, services, plugins, tools);
     `index_file` пишет и сверяет docs/atlas/INDEX.md. Вид возвращает список строк; соединение приходит от
     вызывающего, `store.connect` здесь не зовётся.
 Public API: INDEX_PATH, index, index_file, ref.
@@ -19,13 +20,15 @@ from pathlib import Path
 from typing import Any
 
 from scripts.atlas.adapters.code import _read
+from scripts.atlas.adapters.parse import LAYERS
 from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import DUNDERS, USAGE_UNKNOWN, code_of, dotted, is_test
 from scripts.atlas.modules import resolve as module_of
 from scripts.atlas.rules import Scan, all_of
-from scripts.atlas.tree import AtlasError, Tree, resolve
+from scripts.atlas.scan import MAX_BLOB_BYTES
+from scripts.atlas.tree import AtlasError, Tree, read_blobs, resolve
 from scripts.atlas.views import purpose
 
 __all__ = ["INDEX_PATH", "index", "index_file", "ref"]
@@ -376,10 +379,43 @@ def ref(
     return lines
 
 
+_CLASS_LAYERS = LAYERS | {"tools"}  # белый список слоёв строки `классы:`; `tools` без FILE_NOT_PARSED
+
+
+def _public_classes(tree: Tree, modules: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """{id юнита: имена публичных классов верхнего уровня} нетестовых .py слоёв `_CLASS_LAYERS`.
+
+    Файл принадлежит самому длинному `paths` (`module_of`). Не читаемый, не utf-8, больше MAX_BLOB_BYTES или не
+    разбираемый файл молча пропускается (образец — adapters/parse.py): `index` из-за него не падает.
+    """
+    layer_of = {r["id"]: r["layer"] for r in modules}
+    near = tuple(e for r in modules if r["layer"] in _CLASS_LAYERS for e in r["paths"])
+    owner: dict[str, str] = {}
+    for path in sorted(tree.oids()):
+        if path.endswith(".py") and "\n" not in path and path.startswith(near) and not is_test(path):
+            unit = module_of(path, modules)
+            if layer_of.get(unit) in _CLASS_LAYERS:
+                owner[path] = unit
+    found: dict[str, set[str]] = {}
+    for path, blob in read_blobs(tree.root, tree.ref, list(owner), strict=False).items():
+        if blob is None or len(blob) > MAX_BLOB_BYTES:
+            continue
+        try:
+            body = ast.parse(blob.decode("utf-8").removeprefix("\ufeff")).body
+        except Exception:  # noqa: BLE001 — один сбойный файл не роняет index
+            continue
+        names = {n.name for n in body if isinstance(n, ast.ClassDef) and not n.name.startswith("_")}
+        if names:
+            found.setdefault(owner[path], set()).update(names)
+    return found
+
+
 def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[str]:
     """Весь проект: «id — purpose» в порядке modules.yaml и до 5 главных интерфейсов модуля."""
     sha = resolve(root, ref)
-    modules = modules_for(Tree(root, sha))
+    tree = Tree(root, sha)
+    modules = modules_for(tree)
+    classes = _public_classes(tree, modules)
     bid = build(con, root, ref, main_ref)
     found: dict[str, list[str]] = {}
     paths: dict[str, str] = {}
@@ -393,16 +429,20 @@ def index(con: sqlite3.Connection, root: Path, ref: str, main_ref: str) -> list[
     for row in modules:
         lines.append(f"{row['id']} — {purpose(row)}")
         names = found.get(row["id"])
-        if not names:
-            continue
-        defs = scanned[paths[row["id"]]]
-        sized = sorted(
-            ((len(_methods(defs[n][1], False)) if defs.get(n, ("",))[0] == "class" else 0, n) for n in names),
-            key=lambda t: (-t[0], t[1]),
-        )
-        shown = [f"{n} ({k})" if defs.get(n, ("",))[0] == "class" else n for k, n in sized[:5]]
-        more = f", … ещё {len(sized) - 5}" if len(sized) > 5 else ""
-        lines.append("  " + ", ".join(shown) + more)
+        printed: set[str] = set()
+        if names:
+            defs = scanned[paths[row["id"]]]
+            sized = sorted(
+                ((len(_methods(defs[n][1], False)) if defs.get(n, ("",))[0] == "class" else 0, n) for n in names),
+                key=lambda t: (-t[0], t[1]),
+            )
+            shown = [f"{n} ({k})" if defs.get(n, ("",))[0] == "class" else n for k, n in sized[:5]]
+            more = f", … ещё {len(sized) - 5}" if len(sized) > 5 else ""
+            lines.append("  " + ", ".join(shown) + more)
+            printed = {n for _, n in sized[:5]}
+        rest = sorted(classes.get(row["id"], set()) - printed)
+        if rest:
+            lines.append("  классы: " + ", ".join(rest))
     return lines
 
 

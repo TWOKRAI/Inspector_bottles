@@ -167,8 +167,8 @@ _PIN_API = {
 
 def test_index_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     lines = _ok(atlas(pinned, "index", *_PINNED))
-    assert len(lines) == 133
-    assert len(lines) <= 200
+    assert len(lines) == 202
+    assert len(lines) <= 260  # IDX1: лимит поднят с 200 (владелец 2026-11-11)
     assert lines[0] == _HEADER
 
     from scripts.atlas.modules import parse_modules
@@ -179,8 +179,22 @@ def test_index_on_origin_main_pin(pinned: GitRepo, atlas: Any) -> None:
     assert len(ids) == 87
     module_lines = [line for line in lines[1:] if not line.startswith("  ")]
     assert module_lines == [f"{module_id} — нет purpose в modules.yaml" for module_id in ids]
-    assert sum(1 for line in lines if line.startswith("  ")) == 45
+    assert sum(1 for line in lines if line.startswith("  ")) == 114
+    assert sum(1 for line in lines if line.startswith("  классы: ")) == 69
+    assert len(("\n".join(lines) + "\n").encode("utf-8")) == 29539
+    assert len(("\n".join(lines) + "\n").encode("utf-8")) <= 45 * 1024
 
     for module_id, api in _PIN_API.items():
         at = lines.index(f"{module_id} — нет purpose в modules.yaml")
         assert lines[at + 1] == api, module_id
+
+    at = lines.index("chain_module — нет purpose в modules.yaml")
+    assert lines[at + 1] == (
+        "  IChainLogger (3), IExecutionStep (2), IChainRunnable (1), IRemoteExecutable (1), INodeConnection (0),"
+        " … ещё 2"
+    )
+    assert lines[at + 2] == (
+        "  классы: ChainContext, ChainResult, ChainRunnable, ChainThreadPool, DagRunnable, IChainContext,"
+        " IRunnableChain, IStepNode, IStepNodeWithWorker, LatencyTracker, ParallelChainRunnable, PendingTask,"
+        " RunnableStep, WorkerPoolDispatcher, WorkerPoolExecutor, WorkerTaskRequest, WorkerTaskResponse"
+    )

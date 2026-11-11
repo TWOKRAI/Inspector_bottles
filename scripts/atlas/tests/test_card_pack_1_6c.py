@@ -293,6 +293,7 @@ _F1_INDEX = [
     "# Индекс проекта — собран командой `python -m scripts.atlas index --write`, руками не править",
     "m — нет purpose в modules.yaml",
     "  IA (3), IPlain (1), IP (0), Sized (0)",
+    "  классы: Child, Duck, Impl, One, Qt1, Solo, Sub",
     "b — нет purpose в modules.yaml",
     "  IBase (1)",
     "u — нет purpose в modules.yaml",
@@ -337,9 +338,9 @@ def test_index_output_and_check_are_unchanged(
     target = repo.path / "docs" / "atlas" / "INDEX.md"
     res = atlas(repo, "index", "--check", *REFS)
     assert (res.code, res.out, res.err) == (1, "", "atlas index: INDEX.md отстал — запусти atlas index --write\n")
-    assert lines_of(atlas(repo, "index", "--write", *REFS)) == ["atlas index: docs/atlas/INDEX.md, 6 строк"]
+    assert lines_of(atlas(repo, "index", "--write", *REFS)) == ["atlas index: docs/atlas/INDEX.md, 7 строк"]
     assert target.read_bytes() == ("\n".join(_F1_INDEX) + "\n").encode("utf-8")
-    assert lines_of(atlas(repo, "index", "--check", *REFS)) == ["atlas index: docs/atlas/INDEX.md свежий, 6 строк"]
+    assert lines_of(atlas(repo, "index", "--check", *REFS)) == ["atlas index: docs/atlas/INDEX.md свежий, 7 строк"]
 
 
 def _fingerprints(repo: GitRepo) -> list[str]:
