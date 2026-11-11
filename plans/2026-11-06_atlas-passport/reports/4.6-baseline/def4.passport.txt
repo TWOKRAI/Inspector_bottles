@@ -1,0 +1,26 @@
+== multiprocess_framework/modules/base_manager/interfaces.py::IHandle.kind ==
+multiprocess_framework/modules/base_manager/interfaces.py:602; sha 1e085652f6a7a5b3825f87157769be6de47ad928; scanner 1-d8b9d44d5b0d
+purpose: Вид записи: ``"resource"``, ``"thread"``, ``"scope"`` или свой.
+  зовут из: —
+  declared_at: не искали
+interface: layer base_manager; signature -> str
+  all: multiprocess_framework/modules/base_manager/interfaces.py
+  members: не искали
+links: найдено 0; не видно: динамика, аннотации, упоминания
+  из продукта 0, из тестов 0
+  used_by: —
+  call_sites: —
+  subclasses: —
+  call_sites_unresolved: —
+  uses: не искали
+  bases: не искали
+  structural: не искали
+runtime: processes не искали
+  threads: — (ищет: Thread, Timer, Observer)
+  commands: форма command_specs() не объявлена (ищет только def command_specs(); register_command(...) не читает)
+  io: — (ищет: Observer.schedule, os.rename, os.replace, shutil.move)
+checks: findings не искали
+  tests: —
+status: tier нет шапки; doc_missing нет; dynamic —
+  stale: —
+  frozen: —
