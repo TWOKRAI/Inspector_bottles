@@ -3,7 +3,7 @@
 - **Slug:** draw-universal
 - **Дата:** 2026-11-11
 - **Статус:** DRAFT
-- **Plan review:** r1 CHANGES REQUESTED, 18 замечаний ([`review-plan-r1.md`](review-plan-r1.md)); правки внесены до approve, повторное ревью — впереди
+- **Plan review:** r1 CHANGES REQUESTED, 18 ([`review-plan-r1.md`](review-plan-r1.md)); r2 CHANGES REQUESTED, 6 блокеров + 7 мелких ([`review-plan-r2.md`](review-plan-r2.md)) — правки внесены, третьего раунда нет; ждёт владельца
 - **Ветка:** feat/draw-universal
 
 ## Контекст
@@ -38,38 +38,24 @@
 
 | Этот план | Что |
 |---|---|
-| Владеет | `Services/draw` (фигуры, `lower`, бэкенд cv2, шрифты, текст-патч, conformance, mapping/styles); плагин `overlay_draw`; `ItemTemplate`/`get_path`/`RateGate` в SDK плагинов framework |
+| Владеет | `Services/draw` (фигуры, `lower`, cv2, шрифты, текст-патч, conformance, mapping/styles); `overlay_draw`; `ItemTemplate`/`get_path`/`RateGate` в SDK плагинов |
 | Берёт | ничего: нижний слой группы |
 | Даёт | шрифты и текст-патч → layer-render Ф7; словарь фигур → разметка и layer-render Ф9; `ItemTemplate`/`RateGate` → DS-1 (`backlog.md:77`); `scene` → пары 5a |
 | Порядок | первым. Task 1.4 открывает DS-1 (∥ Ф2–Ф3; общий `dataset_circle_capture.yaml` — Task 2.2, не в одной волне). layer-render — после Ф1 (решение 9); dataset-annotation — после В2, DS-1 и Ф1 |
 
-Пересечения с dataset-annotation, где этот план — сторона (рекомендации — в В2–В4):
-хранение меток — решение 8 новее отказа от `.json` (`dataset-annotation/plan.md:73-74`): истина — пара кадр + `.json`;
-формат фигуры — пиксели `Services/draw` (r1 `:60-66`), доли YOLO только в экспорте (`phase-1-dataset-service.md:27-28`);
-экспорт — перевод фигур в `Services/draw/export.py`, снимок датасета — сервис датасета; рамки на канве — интерактив у
-canvas layer-render, фигуры и стили у `draw`; обучение — только на чистом кадре (`dataset-annotation/plan.md:100`).
+Пересечения с dataset-annotation (рекомендации — в В2–В4): истина меток — пара кадр + `.json` (решение 8 новее
+`dataset-annotation/plan.md:73-74`); фигура — пиксели `Services/draw` (r1 `:60-66`), доли YOLO только в экспорте; экспорт —
+`Services/draw/export.py`, снимок датасета — сервис датасета; интерактив на канве — layer-render; обучение — на чистом
+кадре (`dataset-annotation/plan.md:100`).
 
-`overlay_draw` правят ещё четыре плана, контракты держит Task 1.1: три — в [`design.md`](design.md) §4, четвёртый
-(`plans/dataset-circle-capture.md:29`) только называет плагин. `plans/draw-mode-rework/` — плоттер: совпадение имени, не сосед.
+`overlay_draw` правят ещё четыре плана, контракты держит Task 1.1: три — [`design.md`](design.md) §4, четвёртый
+(`plans/dataset-circle-capture.md:29`) только называет плагин. `plans/draw-mode-rework/` — плоттер, не сосед.
 
 ## Бюджет
 
-Оценка, не замер. Формула: **участники × ~56k стартового контекста + работа**. Ставки: ревью спеки ~70k, тестер ~150k,
-исполнитель 150–300k, инъекции ~50k, ревью ~100–150k. Числа ревью r1 (п. g) приняты.
-
-| Фаза | Задач | Запусков: план → r1 | Токенов: план → r1 |
-|---|---|---|---|
-| Ф0 | 1 | 4 → 4 | 0,35M → ~0,37M |
-| Ф1 | 4 | ~20 → 24 (по 6) | 2,5M → ~2,7M |
-| Ф2 | 3 | ~11 → 13 | 1,3M → ~1,4M |
-| Ф3 | 1 | ~4 → 4 | 0,5M → ~0,5M |
-| Приёмка `cto` ×2 | — | 2 → 2 | 0,4M → ~0,8M |
-| Повторные ревью | — | — → ~1 | — → ~0,35M |
-| **Итого Ф0–Ф3** | 9 | ~41 → **~48** | 5,0M → **~6,0M** (5,2–6,8M) |
-| Ф4 (опц.) | 2 | ~9 | 1,0M → ~1,1M |
-
-48 × 56k ≈ 2,7M старта + ~3,4M работы. Сумма строк 6,1M, ревью округлило до 6,0M; иной ошибки нет. Задача за 2× своей
-доли — стоп и вопрос владельцу. Пересчёт — записью в `amendments.md` после каждой фазы.
+Оценка: **участники × ~56k стартового контекста + работа**. Ф0–Ф3 — **~6,2M токенов (5,4–7,0M), ~49 запусков**
+(в первой редакции 5,0M / ~41); Ф4 ~1,1M. Таблица — [`amendments.md`](amendments.md) §1. Задача за 2× своей доли — стоп и
+вопрос владельцу; пересчёт — записью в `amendments.md` после каждой фазы.
 
 ## Порядок выполнения
 
@@ -93,7 +79,7 @@ canvas layer-render, фигуры и стили у `draw`; обучение — 
 **Цель фазы:** узел рисует по правилам из рецепта; одна копия кадра на ветку.
 
 - Task 2.1: регистры `mapping`, `styles`, `burn`, `max_fps`, `backend`; выход `scene`; входы данных [PENDING] (после 1.3, 1.4);
-  затем `docs-writer` (`overlay_draw/README.md`) → reviewer; литералы A11 — приложение `tasks/2.1-literals.md` (не задача)
+  затем `docs-writer` (`overlay_draw/README.md`, раздел «Mapping» в `Services/draw/README.md`) → reviewer; литералы A11 — приложение `tasks/2.1-literals.md` (не задача)
 - Task 2.2: рецепты: `circle_draw`, `contour_draw` → правила `overlay_draw` [PENDING] (после 2.1)
 - Task 2.3: опись остальных мест рисования; пометки FROZEN [PENDING] (Middle, developer; выход «D — неясно»; после 2.2)
 
@@ -112,35 +98,36 @@ canvas layer-render, фигуры и стили у `draw`; обучение — 
 
 ## Гейты
 
-- Каждая задача — стадии 0–5 (`.claude/CLAUDE.md` → «Task launch convention»), цепочка — в `Handoff`. Новый механизм —
-  слепой `tester` до кода; подключение готового — REDS у исполнителя (`team-protocol` §3, Д47).
-- До 1.1 лид правит Task 3.4 плана camera-device-service (`tasks/3.4.md:6,20`): `Plugins/render/overlay_draw/plugin.py` и
-  `test_overlay_copy.py` — из её FILES, `:113` → `:120`; запись в её `amendments.md`. Иначе два владельца `plugin.py`.
+- Каждая задача — стадии 0–5 (`.claude/CLAUDE.md`), цепочка — в `Handoff`. Новый механизм — слепой `tester` до кода;
+  подключение готового — REDS у исполнителя (`team-protocol` §3, Д47).
+- Владелец полосы camera-device-service правит её Task 3.4 через `amend` (`tasks/3.4.md:6,20`: `overlay_draw/plugin.py` и
+  `test_overlay_copy.py` — из FILES, `:113` → `:120`); 1.1 стартует после записи или после его подтверждения, что 3.4 не
+  стартует раньше 1.1. Если 3.4 придёт первой: 1.1 берёт её базу `test_overlay_copy.py` и снимает свой дубль.
 - `sentrux check .` после 1.1, 1.4, 2.1 — 0 нарушений; границы `Services/draw` вводит Task 1.1.
-- Тесты — через `machine_gate.sh`; полный suite — у лида на границе фазы. Рецепт — тем же `SystemBlueprint.check`, что у
-  загрузчика (урок `feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md`); `test_topology_recipes_check.py`
-  видит только `backend/topology/`.
+- Тесты — через `machine_gate.sh`; полный suite — у лида на границе фазы. Рецепт — путём загрузчика
+  (`SystemBuilder.from_manifest(...).build()`, урок `feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md`);
+  `test_topology_recipes_check.py` видит только `backend/topology/`.
 - Приёмка `cto` — после Ф1 и Ф3 (Ф2 вместе с Ф3). FREEZE: старые плагины, регистры, тесты не удаляются.
 
 ## Риски
 
-- Подписи меняют вид: Hershey → FreeType (1.2), Arial Bold → DejaVu Bold (3.1); принимает владелец глазами на стенде.
-- Слепой тест A11 (`overlay_draw/tests/test_overlay_port_join_catalog.py:55-57`) краснеет в 2.1 намеренно; литерал — запись лида.
+- Подписи меняют вид: Hershey → FreeType (1.2), Arial Bold → DejaVu Bold (3.1); принимает владелец на стенде.
+- Слепой тест A11 (`test_overlay_port_join_catalog.py:55-57`) краснеет в 2.1 намеренно; литерал — запись лида.
 - Снимок полей регистров `catalog_register_fields.txt`: 9 новых полей краснят `test_catalog_kind_roundtrip.py` (2.1).
 - Снимок сборки `hikvision_letter_robot.build.json` краснеет в 2.2 и 3.1: лид — `UPDATE_BUILD_SNAPSHOTS=1`, читает дифф.
 - Регистр `show_labels` (`overlay_draw/plugin.py:159`) без пина молча перестаёт работать после 1.2: RED в 1.2.
-- Потокобезопасность: `overlay_draw.thread_safe = True` — замок на `drawn`/`skipped` и подмену правил (2.1); `FreeTypeFont` (1.2).
+- Потокобезопасность (`thread_safe = True`): замок на `drawn`/`skipped` и подмену правил (2.1); `FreeTypeFont` (1.2).
 - `letter_robot_sim` и `hikvision_letter_robot` правятся одинаково: `test_letter_robot_sim_diff.py` сверяет их.
 - Числа CTO — macOS arm64; Ф0 первой. Остальное — [`design.md`](design.md) §5.
 
 ## Следующие планы
 
 Не задачи плана; порядок — CTO r1 §5, r2 §3.
-- 5a: пары `labeling` + `frame_saver` с DS-1 (баги `frame_saver` — handoff `:47`; вопрос r2 №4). 5b: сортировщик. 5c: экспорт
-  YOLO/COCO из `scene`; `validate_scene`, `transform_scene`.
+- 5a: пары `labeling` + `frame_saver` с DS-1 (handoff `:47`; вопрос r2 №4). 5b: сортировщик. 5c: экспорт YOLO/COCO из
+  `scene`; `validate_scene`, `transform_scene`.
 - L2/L3: контуры и режим «Разметка» — после пересмотра layer-render; вопросы r2 №2 (LR-001 при Ф7), №5 (L2 до/после Ф5).
 - Ф6: второй бэкенд — только если ветка показа после Ф4 дороже 5 мс p95 на Orin.
-- Остальные места рисования из описи Task 2.3; пересечения синтетики O1–O5 — при пересмотре layer-render.
+- Остальные места рисования (опись 2.3); синтетика O1–O5 — при пересмотре layer-render.
 
 ## Открытые вопросы
 
@@ -148,25 +135,26 @@ canvas layer-render, фигуры и стили у `draw`; обучение — 
   лицензия `LICENSE_DEJAVU` — лид цитирует в вопросе) в `Services/draw/fonts/`? Спрашивается **при одобрении плана**,
   параллельно с Ф0, 1.1, 1.4 (они не ждут; 1.2 ждёт). Умолчание — да. «Нет» = только системный шрифт (список как
   `_FONT_CANDIDATES`, `ml_inference/plugin/plugin.py:40-45`); реестр и `data/fonts/` остаются, `fonts/` не создаётся.
-  Видимо: вид и ширина подписей зависят от машины (DejaVu Bold 252 px, Arial Bold 200 px, r2 `:197`), тесты текста — с
-  допуском. Пересборки 1.2 нет: лид правит её шаг 0 записью в `amendments.md`. — владелец
+  Видимо: вид и ширина подписей зависят от машины (DejaVu Bold 252 px, Arial Bold 200 px, r2 `:197`). Поправка «нет»
+  меняет ровно: 1.2 шаги 0 и 1 (нет встроенных `dejavu-*` и файла `DEFAULT_FONT`; задача стартует); 3.1 `styles` — без
+  `font` (системный шрифт); пин текста — с допуском. Запись — лид, в `amendments.md`. — владелец
 - [ ] **В2.** Сведение `dataset-annotation` и `Services/labeling` (таблица выше). Рекомендация: один пакет; план
   dataset-annotation пересобрать на паре и фигурах `draw` после DS-1. Блокирует только dataset-annotation. — владелец
 - [ ] **В3 (O6, O7).** Экспорт для `ml_train` и YOLO/COCO планируют трое: layer-render (`plan.md:156-157`), dataset-annotation
-  (`phase-4-quality-export.md:108`), CTO (`Services/draw/export.py`). Рекомендация: перевод фигур — одна функция в
-  `draw/export.py`; раскладка папок — сервис датасета. Задач этого плана не блокирует. — владелец
+  (`phase-4-quality-export.md:108`), CTO. Рекомендация: перевод фигур — одна функция в `draw/export.py`; раскладка папок —
+  сервис датасета. Задач этого плана не блокирует. — владелец
 - [ ] **В4 (O8).** Сбор кадров: новый `dataset_capture` (`dataset-annotation/phase-3-capture.md:18-20`) или `frame_saver` с
   DS-1 (`backlog.md:77`). Рекомендация: `frame_saver`. Задач этого плана не блокирует. — владелец
 - [ ] **В5 (ревью r1, п. 16).** Оставить ли в плане набор conformance 1.3 под второй бэкенд (`check_backend`, `exact_as`,
-  `reference=`, `auto`, три фейковых бэкенда, ≥ 8 сцен) и фильтры `bucket`/`safe` 1.4 (только для DS-1, плана нет) или отложить?
+  `reference=`, `auto`, три фейковых бэкенда, ≥ 8 сцен) и фильтры `bucket`/`safe` 1.4 (только DS-1, плана нет) или отложить?
   Ревью (ponytail): отложить — второй бэкенд не раньше Ф6, ценность для cv2 (двойное смешивание, защита вне рамки) — 2–3
   пиксельных теста, фильтры — в DS-1. CTO (r1 §5; решения владельца 2, 6): оставить — набор есть контракт сменной
-  реализации, фильтры идут в общий помощник сразу. Не решено; бюджет при «отложить» не пересчитан. — владелец
+  реализации, фильтры идут в общий помощник сразу. `auto` — [cv2], остаётся при любом ответе. Не решено; бюджет при
+  «отложить» не пересчитан. Точка решения — при одобрении плана, вместе с В1. — владелец
 
 ## Решения (decisions log)
 
-- **2026-11-11:** план собран по handoff и CTO r1/r2; 9 задач на Ф0–Ф3 и 2 на Ф4 вместо фаз 0–6, остальное — «Следующие
-  планы» (владелец: «план не раздувать»).
+- **2026-11-11:** 9 задач на Ф0–Ф3 и 2 на Ф4 вместо фаз 0–6, остальное — «Следующие планы» (владелец: «план не раздувать»).
 - **2026-11-11:** старые плагины — эталон для литералов sha256 до правки, не оракул в тестах.
 
 ## Итог
