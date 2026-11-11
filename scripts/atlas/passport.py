@@ -501,6 +501,8 @@ class _Ctx:
         module = self._module_ast(path)
         if module is None:
             return None
+        if "" in qualname.split("."):  # пустой сегмент (`.X`, `X.`, `A..b`) — не привязка
+            return None
         owner, _, name = qualname.rpartition(".")
         body = module.body
         if owner:

@@ -99,6 +99,14 @@ def _setup(repo: GitRepo) -> None:
     _commit(repo, _FILES)
 
 
+def test_empty_qualname_segment_is_not_binding(repo: GitRepo) -> None:
+    """Ревью r1: пустой сегмент qualname (`.LIMIT`, `Schema..rate`, …) — не привязка, `[]` как до 4.6a."""
+    _setup(repo)
+    for bad in (".LIMIT", "LIMIT.", "Schema..rate", "Schema.rate.", ".Schema.rate", "."):
+        assert _resolve(repo, C + bad) == [], bad
+    assert _resolve(repo, C + "LIMIT") == ["pkg/consts.py::LIMIT"]
+
+
 def test_module_constant_passport(repo: GitRepo) -> None:
     """RED 1: `LIMIT: int = 0x10` (строка 3, первый оператор) -> `binding`, строка 3, `: int = 16` (unparse)."""
     _setup(repo)
