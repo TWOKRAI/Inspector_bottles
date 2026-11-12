@@ -40,6 +40,7 @@ import time
 from typing import TYPE_CHECKING, Callable
 
 from ...config_module.feature_flags import resolve
+from ..plugins.base import PluginState
 from ..plugins.port import validate_items_against_ports
 from ...router_module.middleware.not_inspected_marker import is_marker
 
@@ -157,13 +158,19 @@ class PluginRunner:
         (io-debug видит ноду как pass-through). Нужно, чтобы выключить «тяжёлую»/
         зависающую ноду (напр. circle_detector) и спокойно тюнить остальную цепочку.
 
+        Тот же bypass — если plugin.state == PluginState.PAUSED (Task 1.9 run-state): пауза
+        режет поток. Это не фейл для circuit breaker; в ``plugin_ms`` такой вызов не попадает;
+        тег ``inspection_status`` на bypass не ставится (как при enabled == False). Состояние
+        читается через getattr — двойники без ``state`` идут как раньше. ``call_produce`` не
+        меняется: источник гейтится ``run_event`` в SourceProducer.
+
         F2 (ревью 2026-07-13): после получения outputs системные поля кадра
         (trace_id/capture_ts/frame_hops) переносятся из items в каждый output, если
         плагин их не поставил сам — см. модульную ``_carry_system_fields``. Плагины
         НЕ трогаем по одному — перенос в этом единственном месте покрывает всех.
         """
         self._run_pre(plugin, "process", items)
-        if getattr(plugin, "enabled", True):
+        if getattr(plugin, "enabled", True) and getattr(plugin, "state", None) != PluginState.PAUSED:
             # 4.7d-2b: маркер не несёт кадра/детекций — порты на нём не проверяются. Фильтр — по ITEM, а не
             # по коллекции: маркерный вход не должен пропускать невалидный НЕмаркерный выход (и наоборот).
             if self._validate_ports:
@@ -174,7 +181,7 @@ class PluginRunner:
             if self._validate_ports:
                 self._validate_non_markers(plugin, "output", outputs)
         else:
-            outputs = items  # bypass: кадр без обработки (свои Port-декларации не проверяем)
+            outputs = items  # bypass (enabled=False или PAUSED): кадр без обработки, порты не проверяем
         _carry_system_fields(items, outputs)
         self._run_post(plugin, "process", items, outputs)
         return outputs
