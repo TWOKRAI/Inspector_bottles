@@ -19,7 +19,7 @@ pre.mermaid { margin:0; background:#fff; border-radius:6px; }
 </head>
 <body><main>
 <h1>Аудит фундамента framework — схемы</h1>
-<p>2026-10-26, HEAD 71bfc55fe (framework) / f63f68403 (Services, backend_ctl). Опись: <code>docs/reports/2026-10-26_foundation-audit-inventory.md</code>, сырьё карты: <code>docs/maps/framework-core.md</code>, опись 1б: <code>docs/reports/2026-10-26_foundation-audit-1b-*.md</code>. Карта сервисов, плагинов и контура зрения поверх framework — <a href="../system-map/index.html">карта системы</a>.</p>
+<p>2026-10-26, HEAD 71bfc55fe (framework) / f63f68403 (Services, backend_ctl). Опись: <code>docs/reports/2026-10-26_foundation-audit-inventory.md</code>, сырьё карты: <code>docs/maps/framework-core.md</code>, опись 1б: <code>docs/reports/2026-10-26_foundation-audit-1b-*.md</code>. Карта сервисов, плагинов и контура зрения поверх framework — карта системы — <code>docs/diagrams/system-map/index.html</code>.<!-- Ссылку на system-map здесь не делать: sentrux считает href импортом, взаимные ссылки страниц дают цикл (docs/claude/memory/feedback_sentrux_html_href_is_an_import_edge.md). --></p>
 <section><h2>Процессы системы (C4 L2)</h2><p>Что где живёт: PM, GUI, дочерние процессы по рецепту, процесс devices с драйверами Services, backend_ctl, устройства. Исходник: <code>system-containers.mmd</code>.</p><div class="frame"><pre class="mermaid">
 %% Аудит фундамента 2026-10-26 — процессы системы и что в них живёт (C4 L2)
 %% Источники: docs/maps/framework-core.md (уровень 2), docs/reports/2026-10-26_foundation-audit-1b-services.md (хостинг),
@@ -73,7 +73,7 @@ flowchart LR
     src --&gt; phone
     gui --&gt; mltrain
     src -.-&gt; sdkapp
-</pre></div></section><section><h2>Связи модулей по контурам (C4 L3)</h2><p>27 модулей framework, рёбра от 3 импортов, подпись «всего / вглубь». Пунктир — ярус optional. Исходник: <code>module-deps.mmd</code>.</p><div class="frame"><pre class="mermaid">
+</pre></div></section><section><h2>Связи модулей по контурам (C4 L3)</h2><p>27 модулей framework, рёбра от 3 импортов, подпись «всего / вглубь». Пунктир — ярус optional. Исходник: <code>module-deps.mmd</code>. Порог «от 3 импортов» прячет ленивые рёбра, которые замыкают циклы между модулями (<code>data_schema→logger</code>, <code>base_manager→channel_routing</code>/<code>error</code>, <code>statistics→process</code>, <code>process→process_manager</code>): цикл без ленивых рёбер не виден — полный список и замеры в <code>docs/reports/2026-11-12_opus-arch-review.md</code> и записи 2026-11-12 в <code>docs/claude/OPEN_QUESTIONS.md</code>.</p><div class="frame"><pre class="mermaid">
 %% Аудит фундамента 2026-10-26 — связи модулей framework по контурам (C4 L3)
 %% Сгенерировано из ast-разбора импортов production-кода, HEAD 71bfc55fe; данные: docs/maps/framework-core.md
 %% Показаны рёбра от 3 импортов; подпись «всего / вглубь» (вглубь = мимо interfaces.py и корня пакета).

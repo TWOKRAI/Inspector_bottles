@@ -238,9 +238,9 @@
      ИМПОРТЕ пакета, то есть по одной строке на каждый процесс сборки и на любой CLI,
      импортирующий модуль, а сообщает СТАТИЧЕСКИЙ факт кода, а не рантайм-происшествие;
      всегда-истинный `WARNING` приучает не читать `WARNING`'и) «…никто не читает…»
-     звучит РОВНО один раз за жизнь экземпляра через `get_std_logger(__name__)` (не голый
-     `logging.getLogger` — та же причина, что у Ф6.2/Ф6.3: у stdlib-root в процессах
-     фреймворка нет хендлеров).
+     звучит РОВНО один раз за жизнь экземпляра через дверь `_fallback.FallbackLogger(__name__)`
+     (с 2026-11-12; до того — `get_std_logger(__name__)`; не голый `logging.getLogger` — та
+     же причина, что у Ф6.2/Ф6.3: у stdlib-root в процессах фреймворка нет хендлеров).
   5. `record_metric` перестал значить «перезаписать» и стал counter-семантикой
      (`prev_value + value`), как `increment` — три `record_metric(name, 1)` дают
      `value == 3`. Проверено перед правкой: ни один боевой сайт и ни один
@@ -249,8 +249,10 @@
      `record_timing`/`increment_metric`, так что смена семантики никого не задела.
   6. Экземпляр потокобезопасен (`RLock` на всё мутируемое состояние, включая флаг
      голоса) — глобальный `_metrics_collector` общий на процесс.
-  7. Импорт `get_std_logger` — **ленивый** (внутри `_std_logger()`, не на уровне
-     модуля): `core/metrics.py` грузится как часть `core/__init__.py`, то есть на
+  7. Логгер подтягивается **лениво** (с 2026-11-12 — `FallbackLogger.resolve()` внутри
+     `_std_logger()`; прямого импорта `logger_module` в файле нет, ни на уровне модуля, ни
+     в теле функции; до того — ленивый импорт `get_std_logger` там же):
+     `core/metrics.py` грузится как часть `core/__init__.py`, то есть на
      LAYER 0 инициализации `data_schema_module`, а `logger_module` (через
      `configs/logger_manager_config.py` → `channel_routing_module`) на этом же
      старте тянет `from ...data_schema_module import SchemaBase` — модульный импорт
@@ -259,6 +261,28 @@
      `registry/process_registry.py` (проверено воспроизведением: fresh `import
      data_schema_module` падает `ImportError`, если импорт не отложен до первого
      вызова).
+- Шов `data_schema_module -> logger_module` через дверь (2026-11-12, ветка
+  `fix/framework-acyclicity`): `core/metrics.py` и `core/field_meta.py` пишут через
+  `_fallback.FallbackLogger(__name__)`, прямых импортов `logger_module` у них нет
+  (страж — `tests/test_logger_seam_no_direct_logger_import.py`).
+  1. **Резолв идёт ДО флага голоса.** `_std_logger()` зовёт `FallbackLogger.resolve()` под
+     `try/except ImportError` и только при успехе отдаёт логгер; сборщик ставит
+     `_voice_sounded` после этого. На каждом обычном импорте пакета первый резолв трижды
+     заходит рекурсивно под `RLock` и попадает в кольцо `logger_module -> channel_routing_module
+     -> data_schema_module`; без резолва под `try` запись бросила бы уже после флага (голос
+     проглочен), а «`logger_module` первым» в чистом процессе даёт rc=1 (`ImportError: cannot
+     import name 'ChannelRoutingManager' from partially initialized module`). Страж —
+     `test_logger_module_first_survives_the_voice_ring` и
+     `test_std_logger_returns_none_instead_of_raising_on_a_circular_import`.
+  2. **stdlib-имя логгера этих двух модулей теперь БЕЗ префикса `mpf.`**
+     (`multiprocess_framework.modules.data_schema_module.core.field_meta` / `...core.metrics`,
+     было `mpf.<то же>`). Это только запасное имя без менеджера; `module=` записи и файловый
+     маршрут при живом менеджере не изменились (A/B ревью Opus, побайтно).
+  3. **Единственный санкционированный шов** — ленивое ребро двери
+     `_fallback.py -> logger_module/adapters/std_facade.py`
+     (`SANCTIONED_SEAMS` в `modules/tests/test_import_cycles_ratchet.py`). Храповик по швам
+     меряет циклы framework без него (38 -> 19 файлов в наибольшей SCC этим швом), строгий —
+     со всеми рёбрами. Список швов растёт ТОЛЬКО записью здесь, а не правкой теста.
 - Причина: контракт назначен владельцем ДО реализации (Task 5.4) — потолок и явная
   потеря числа не дают сборщику расти в пустоту, голос делает молчаливый факт
   («никто не читает») видимым один раз, а не спамом на каждый вызов.

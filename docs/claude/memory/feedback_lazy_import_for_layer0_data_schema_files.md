@@ -49,3 +49,5 @@ tool for a resolvable-by-laziness cycle).
 See also [[project_metrics_freeze_s27]] for the task this was found in, and
 `multiprocess_framework/modules/data_schema_module/DECISIONS.md` ADR-DS-009
 for the full writeup.
+
+**Обновление 2026-11-12:** фикс теперь — не ленивый `get_std_logger`, а «цикло-безопасная дверь» `_fallback.FallbackLogger(__name__)` на уровне модуля (field_meta, metrics): единственный шов к logger_module живёт в `_fallback.py`. Если вызывающему надо ОТЛОЖИТЬ голос на кольце (metrics), вид подтягивают под `try/except ImportError` ДО выставления флага «сделано»: на каждом обычном импорте первый резолв трижды заходит рекурсивно под RLock и попадает в кольцо, без резолва «logger_module первым» даёт `ImportError: cannot import name 'ChannelRoutingManager'`. Ловушка проверки: `python -I -c 'import pkg.X'` НЕ делает X первым — `multiprocess_framework/__init__.py` первым тянет base_manager; для настоящего порядка подменяют корневой пакет (types.ModuleType + `__path__`). Связь: [[feedback_sentrux_html_href_is_an_import_edge]], [[feedback_pytest_import_order_hides_a_cycle]].
