@@ -39,6 +39,28 @@ def _cores_default() -> int:
     return cv2.getNumThreads()
 
 
+def _opencv_ignores_set_num_threads() -> bool:
+    """OpenCV с backend GCD (macOS) молча игнорирует ``setNumThreads``: ``getNumThreads`` остаётся
+    числом ядер. Тогда тесты «значение дошло до OpenCV» не могут быть зелёными по построению —
+    это свойство сборки OpenCV, а не дефект передачи ``cv_threads`` (она проверяется на Windows/Linux)."""
+    try:
+        import cv2
+    except ImportError:
+        return False
+    before = cv2.getNumThreads()
+    try:
+        cv2.setNumThreads(2 if before == 1 else 1)
+        return cv2.getNumThreads() == before
+    finally:
+        cv2.setNumThreads(before)
+
+
+_needs_effective_set_num_threads = pytest.mark.skipif(
+    _opencv_ignores_set_num_threads(),
+    reason="OpenCV (backend GCD, macOS) игнорирует setNumThreads — значение до OpenCV не доходит по построению",
+)
+
+
 def _run_child(tmp_path, monkeypatch, config: dict, block_cv2: bool = False) -> dict:
     report = tmp_path / "report.json"
     monkeypatch.setenv("T46_REPORT", str(report))  # spawn наследует os.environ
@@ -89,12 +111,14 @@ def recipe_value() -> int:
     return 4 if _cores_default() != 4 else 3
 
 
+@_needs_effective_set_num_threads
 def test_recipe_value_four_is_applied_in_child(tmp_path, monkeypatch, recipe_value) -> None:
     got = _run_child(tmp_path, monkeypatch, _child_config(cv_threads=recipe_value))
     assert got.get("_hung") is False, got
     assert got.get("run", _MISSING) == recipe_value, got
 
 
+@_needs_effective_set_num_threads
 def test_default_is_two_when_key_absent(tmp_path, monkeypatch) -> None:
     if _cores_default() == 2:
         pytest.skip("дефолт OpenCV на этой машине уже 2 — тест не различал бы реализацию")
@@ -103,6 +127,7 @@ def test_default_is_two_when_key_absent(tmp_path, monkeypatch) -> None:
     assert got.get("run", _MISSING) == 2, got
 
 
+@_needs_effective_set_num_threads
 def test_threads_set_before_process_class_init(tmp_path, monkeypatch, recipe_value) -> None:
     got = _run_child(tmp_path, monkeypatch, _child_config(cv_threads=recipe_value))
     assert got.get("init_done") is True, got  # класс процесса действительно создан
@@ -119,6 +144,7 @@ def test_child_starts_without_cv2_and_reports_none(tmp_path, monkeypatch) -> Non
     assert got.get("status", _MISSING) is None, got
 
 
+@_needs_effective_set_num_threads
 def test_top_level_key_is_fallback_for_flat_configs(tmp_path, monkeypatch, recipe_value) -> None:
     # Запасной путь для не-Generic процессов: плоский конфиг без вложенного "config".
     got = _run_child(tmp_path, monkeypatch, {"cv_threads": recipe_value})
@@ -126,6 +152,7 @@ def test_top_level_key_is_fallback_for_flat_configs(tmp_path, monkeypatch, recip
     assert got.get("run", _MISSING) == recipe_value, got
 
 
+@_needs_effective_set_num_threads
 def test_recipe_to_child_chain_via_real_build(tmp_path, monkeypatch, recipe_value) -> None:
     # Вся цепочка без ручной сборки конфига: extras рецепта -> as_generic_config().build()
     # -> bundle -> настоящий runner в spawn-ребёнке -> реальное getNumThreads().
@@ -178,6 +205,7 @@ def _status() -> dict:
     return cm.dispatch("introspect.status")
 
 
+@_needs_effective_set_num_threads
 def test_introspect_status_reports_effective_cv_threads() -> None:
     import cv2
 

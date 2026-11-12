@@ -142,16 +142,18 @@ def test_reload_on_atomic_replace(tmp_path):
     try:
         time.sleep(0.4)
         for expected in ("first", "second", "third"):
-            before = len(reloads)
             # Пауза больше дебаунса: без неё запись приходит через ~0.05с после
             # предыдущей перезагрузки и отбрасывается КАК ДУБЛЬ — тест падал бы
             # на работающем механизме (поймано при первом прогоне).
             time.sleep(0.3)
             _atomic_write(config_file, {"value": expected})
+            # Ждём ЗНАЧЕНИЕ, а не счётчик вызовов: FSEvents (macOS) отдаёт события с
+            # запозданием и дублями, и отложенный повтор от ПРЕДЫДУЩЕЙ записи увеличивал
+            # счётчик раньше, чем доходила текущая — тест видел «second» вместо «third».
             deadline = time.monotonic() + 5.0
-            while len(reloads) == before and time.monotonic() < deadline:
+            while cfg.get("value") != expected and time.monotonic() < deadline:
                 time.sleep(0.05)
-            assert len(reloads) > before, f"атомарная запись '{expected}' не разбудила watcher"
+            assert cfg.get("value") == expected, f"атомарная запись '{expected}' не разбудила watcher"
         assert cfg.get("value") == "third"
     finally:
         watcher.stop()
@@ -308,9 +310,13 @@ def test_foreign_file_in_the_same_directory_is_ignored(tmp_path):
     watcher.start()
     try:
         time.sleep(0.4)
+        # FSEvents (macOS) при старте переигрывает недавнее событие самого config.json
+        # (его создали за миг до start()) — это не сосед. Считаем только то, что
+        # пришло ПОСЛЕ записи соседей.
+        before = len(reloads)
         _atomic_write(tmp_path / "neighbour.json", {"value": "not ours"})
         (tmp_path / "plain.txt").write_text("hello", encoding="utf-8")
         time.sleep(1.0)
-        assert reloads == [], f"чужой файл разбудил watcher: {len(reloads)}"
+        assert len(reloads) == before, f"чужой файл разбудил watcher: {len(reloads) - before}"
     finally:
         watcher.stop()

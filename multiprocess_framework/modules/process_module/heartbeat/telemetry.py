@@ -277,6 +277,7 @@ def build_router_shm_telemetry(router: Any) -> dict:
         (публикатор логирует и пропускает тик; опрос отдаёт секцию ``None``).
     """
     narrow = getattr(router, "get_shm_stats", None)
+    rs: dict[str, Any]
     if callable(narrow):
         rs = narrow()
     else:
