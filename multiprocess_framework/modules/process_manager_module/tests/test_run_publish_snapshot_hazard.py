@@ -62,3 +62,20 @@ def test_stale_snapshot_does_not_roll_back_published_state() -> None:
     assert pm._run_state == "stopping"
     assert store.values("system.run.state")[-1] == "stopping", store.writes
     assert store.values("system.run.since")[-1] == pm._run_since, store.writes
+
+
+def test_tick_updates_ready_even_when_state_does_not_change() -> None:
+    """``tick(ready=False)`` в ``stopping`` — no-op по состоянию, но обновляет ``_run_ready`` (DESIGN п.2).
+
+    Следом ``settled`` без явного ``ready`` читает ``_run_ready`` и даёт ``not_ready``, а не ``ready``.
+    Инъекция «tick не пишет _run_ready» оставляла набор зелёным (стадия 3, I16).
+    """
+    pm = make_run_pm(True)
+    assert pm._run_apply("start")[0] == "running"
+    assert pm._run_apply("stop")[0] == "stopping"
+
+    new, code, prev = pm._run_apply("tick", ready=False)
+    assert (new, code, prev) == ("stopping", None, "stopping")
+
+    new, code, prev = pm._run_apply("settled")
+    assert (new, code, prev) == ("not_ready", None, "stopping")
