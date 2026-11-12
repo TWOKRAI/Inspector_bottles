@@ -304,6 +304,7 @@ def run_process_function(
     exit_report: Optional[Any] = None,
     *,
     system_ready_event: Optional[Event] = None,
+    run_event: Optional[Event] = None,
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -325,6 +326,12 @@ def run_process_function(
         на экземпляр ДО ``initialize()``; ребёнок его только читает (источники ждут
         перед первым produce()), взводит один PM. НЕ ``attach_ready_event``: тот — про
         СОБСТВЕННУЮ готовность ребёнка.
+
+    run_event: событие работы системы (Task 1.1 плана system-run-state) — только kwarg,
+        как ``system_ready_event``. Кладётся атрибутом ``_run_event`` на экземпляр ДО
+        ``initialize()``; ребёнок его только читает (``SourceProducer`` не зовёт produce()
+        при снятом событии), взводит и снимает один PM. None (PM спавнится без реестра)
+        — атрибут не трогается.
 
     new_session: POSIX — сделать setsid() (стать лидером новой сессии/группы),
         чтобы ВСЕ потомки этого процесса попали в одну process group. Тогда
@@ -410,6 +417,9 @@ def run_process_function(
         # SourceProducer уже в initialize(), а не только в run().
         if system_ready_event is not None:
             process_instance._sources_ready_event = system_ready_event
+        # Task 1.1 (system-run-state): событие работы — тем же путём, ДО initialize().
+        if run_event is not None:
+            process_instance._run_event = run_event
 
         if hasattr(process_instance, "initialize"):
             try:

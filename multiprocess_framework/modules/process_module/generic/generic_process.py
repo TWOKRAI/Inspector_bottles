@@ -351,6 +351,11 @@ class GenericProcess(ProcessModule):
                 # экземпляр до initialize(); нет (юниты, SRM-mode) → без ожидания.
                 ready_event=getattr(self, "_sources_ready_event", None),
                 log_warning=self._log_warning,
+                # Task 1.1 (system-run-state): событие работы системы — runner кладёт его
+                # атрибутом ``_run_event`` до initialize(); нет → гейта нет. ``run_gated: false``
+                # в конфиге source-плагина — источник гейт не смотрит (превью).
+                run_event=getattr(self, "_run_event", None),
+                run_gated=self._orchestrator.config_of(source_plugin).get("run_gated", True) is not False,
             )
             self._source_producers.append(producer)
 
