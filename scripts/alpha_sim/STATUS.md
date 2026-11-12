@@ -16,7 +16,8 @@
 - Каскад `word_line`: `judge_case(prev_filled=…)`, раннер берёт `slots_filled` регистра перед случаем.
 - Класс FAIL: `Row.klass`, `CaseResult.unrecognized`, блок `класс …` / `МЕХАНИЗМ:` / `ТОЧНОСТЬ:` перед `итог:`.
 - `--hard-out` и `--hard-angle-thr`: правило «трудного» — `logic.hard_reasons` (дубль DS-1 §6, заменить импортом после DS-1 1.1c).
-- Тесты: `scripts/alpha_sim/tests` и `test_p3_disk_journal.py`, 212 passed (89 приёмочных `test_alpha_split_acceptance.py`); ревью и break-injection — у лида.
+- Тесты: `scripts/alpha_sim/tests` и `test_p3_disk_journal.py`, 224 passed (89 приёмочных `test_alpha_split_acceptance.py`, сторожа автора `test_alpha_split_hazards.py`: верная буква ниже порога, «объяснена» для `r`/`ARGS[9]`/`progress`, метки прогона, код выхода после уборки); ревью и break-injection — у лида.
+- После ревью стадии 5 (раунд 1): `r`/`ARGS[9]` объяснены только при угле журнала вне допуска; `progress` — только уменьшение `k` на ≤ `U_before`; метка из шага уборки не ставит код 3.
 - Не проверено на стенде: прогон на живом симе после правки не делался.
 
 ## Стенд: прогон 6 (macOS, 2026-11-10, код 1)

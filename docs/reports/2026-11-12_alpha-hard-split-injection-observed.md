@@ -57,3 +57,33 @@
 
 После отката: `214 passed` (212 + 2 новых), `ruff check scripts/alpha_sim` и `ruff format --check` по новому файлу и `logic.py`/`run_alpha.py` чисто; `git diff --stat` пуст (изменения — только два неотслеживаемых файла: новый тест и этот отчёт).
 Замечание: новый файл импортирует приватные помощники приёмочного файла (`_Net`, `_patch_cases`, `_run`, `_a2`, `_read_hard`, `_pre`, `_full`); переименование там сломает сторож.
+
+## Раунд 2 (после ревью стадии 5, раунд 1; спека — редакция 3)
+
+Что изменено (developer, не коммитил): `run_alpha.py` — `mark(label, precond=True)`, `_cleanup_step` зовёт `mark("ошибка ДОМОЙ/СТОП", precond=False)` (blocker: `word_set`-FAIL в B + исключение `robot_park_all` в уборке теперь rc 1, как в main); артефакт форматирования у `self.marks` убран.
+`logic.py` — `_explained` / `_disc_klass(…, angle_off)`: `r` и `ARGS[9]` «вне окна» объяснены только при `|wrap180(угол строки − угол истины)| > _R_TOL + _EPS` (истина — подача из `feed`, иначе литерал), `ARGS[9] нет` — никогда, `progress` — при том же `n` и `0 ≤ k_лит − k_факт ≤ U_before`; `_hard_record`: `pred.below_threshold` берётся из `"below_threshold" in reasons` (regex остался только для чисел).
+README (раздел «Класс FAIL»: правило «объяснена», ограничение повторяющихся букв, оговорка про `МЕХАНИЗМ: PASS`, метка из уборки) и STATUS (224 passed, hazards-файл) обновлены.
+
+Приёмочные тесты слепого tester, поправленные по списку лида (только ожидаемый класс; мутации не менялись), `test_alpha_split_acceptance.py::test_a2_row_reasons_decide_klass`:
+- `[only_r]` (в журнале верный угол, `r` 60→40): ТОЧНОСТЬ → МЕХАНИЗМ;
+- `[only_ARGS9]` (верный угол, `ARGS[9]` 64536 вне окна): ТОЧНОСТЬ → МЕХАНИЗМ;
+- `[r_and_ARGS9]` (то же вместе): ТОЧНОСТЬ → МЕХАНИЗМ.
+Причина: при угле журнала в допуске красное по `r`/`ARGS[9]` — дефект механики (ред. 3). Контроль «угол журнала вне допуска → ТОЧНОСТЬ» перенесён в новые тесты (`test_r_and_args9_off_with_angle_misread_over_tolerance_is_accuracy[r_only|r_and_args9]`). `[r_plus_pick]`, `[progress_without_losses]` и остальные не менялись (до правки красными были ровно эти три).
+
+Новые тесты (`test_alpha_split_hazards.py`, 12 всего с прежними двумя; все зелёные с первого прогона по литералам спеки): S1 `ARGS[9]` нет при `argc 10` (`_NoArg9`), S2 `ARGS[9]` +1000 у всех заданий B, S3 знак `r` перевёрнут у B#3 — все три `МЕХАНИЗМ: FAIL (B #1, B #3, …)`/`(B #3)`, верный угол; контроль (сеть прочла Е 30° как 50°, `r-50.0`, при необходимости и `ARGS[9]`) → `класс B #3: ТОЧНОСТЬ`, `МЕХАНИЗМ: PASS`, `ТОЧНОСТЬ: 1 трудных (B #3)`; `[4/3]` при `[3/3]` и потере диска раньше → `класс D #5: МЕХАНИЗМ`; `word_set` в B + исключение park в уборке → rc 1, `МЕХАНИЗМ: FAIL (B word_set, ДОМОЙ, ошибка ДОМОЙ/СТОП, не выполнены: D, C)`; исключение внутри случая → `(ошибка, не выполнены: B, D, C)`, rc 3; Ctrl-C в `normal_tail` → `(прервано, не выполнены: ДОМОЙ, СТОП)`; пропуск `уверенность ниже порога` без скобок → `pred.below_threshold true`, `confidence null`.
+
+Механика: копии `logic.py`/`run_alpha.py` для отката взяты из РАБОЧЕГО дерева (правки раунда 2 не закоммичены; лид закоммитит после), откат — `cp`; после каждой инъекции `md5(git diff)` равен исходному (`7a1f2cf9e2e6874b91791a6d1989aa60`), харнесс — `inj-alpha/harness_r2.py`.
+
+| № | Правка | Фактический красный набор | Совпало | Примечание |
+|---|---|---|---|---|
+| I21 | `logic.py` `_explained`: `r` → `True`, `ARGS[9]` → `True` (угол журнала не учитывается) | H:test_args9_missing…, test_args9_shifted…, test_r_sign_flipped… + A:test_a2_row_reasons_decide_klass[only_r], [only_ARGS9], [r_and_ARGS9] (6) | НЕТ (сверх на 3) | Сверх — три приёмочных параметра, которые теперь ждут МЕХАНИЗМ (те же свойства); контроль «угол вне допуска → ТОЧНОСТЬ» зелёный, как предсказано |
+| I22 | `run_alpha.py:725` `mark(…, precond=False)` → `mark(…)` | H:test_word_set_fail_plus_park_exception_in_cleanup_keeps_exit_code_1 (1) | ДА | — |
+| I23 | `logic.py` `0 <= k_exp - k <= u_before` → `abs(k_exp - k) <= u_before` | H:test_progress_k_above_literal_is_mechanism_even_with_loss_before (1) | ДА | `a2_progress_cascade_limited…`, `a2_run_lost_disc_in_middle…` зелёные |
+| I24 | `run_alpha.py:725` в `_cleanup_step` метка не ставится | H:test_word_set_fail_plus_park_exception_in_cleanup_keeps_exit_code_1 (1) | ДА | тот же тест держит и rc (I22), и метку (строка `mech`); `a2_run_home_exception_in_tail…` зелёный |
+| I25 | `run_alpha.py:~892` метка `ошибка` в случае → только `self.precond = True` | H:test_unexpected_exception_inside_case_is_error_label (1) | ДА | `a2_run_unexpected_exception_in_p1…` зелёный |
+| I26 | `run_alpha.py:~903` метка `прервано` в `normal_tail` → только `self.precond = True` | H:test_ctrl_c_in_normal_tail_is_interrupted_label (1) | ДА | `a2_run_ctrl_c_in_case…` зелёный |
+| I27 | `logic.py` `below_threshold` в `pred` из `bool(below)` (regex) | H:test_below_threshold_skip_without_parentheses_still_flags_below_threshold (1) | ДА | — |
+
+Итог: 6 из 7 точно (I22–I27); I21 — красные сверх предсказания (три приёмочных параметра с обновлёнными ожиданиями). Полный набор на откате: `224 passed`; `ruff check scripts/alpha_sim` и `ruff format --check` по изменённым py-файлам чисты.
+
+Что оставил открытым / ненадёжно (раунд 2): (1) `angle_off` сравнивает угол журнала с подачей из `feed` (иначе литерал); окно `r` в `_judge_taken` ждёт литерал `e.angle`, поэтому при `feed` с углом, сильно отличающимся от литерала, `r` может краснеть там, где `angle_off` ложно — безопасное направление (МЕХАНИЗМ); отдельным тестом не покрыто. (2) I22/I24 ловит один и тот же тест (две гарантии в одном); если его ослабить, обе инъекции пройдут вместе. (3) Копии для отката из рабочего дерева, а не из коммита — до коммита лида проверка «откат = исходник» опирается на `md5(git diff)`. (4) Не прогонялся реальный стенд.

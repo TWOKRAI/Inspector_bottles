@@ -389,7 +389,12 @@ def _hard_record(case_id: str, index: int, truth: tuple[str, float], line: DiskL
                 conf_thr = float(below.group(2))
             except ValueError:  # «порог ml_inference»
                 conf_thr = None
-        pred = {"class": line.letter, "angle_deg": line.angle, "confidence": conf, "below_threshold": bool(below)}
+        pred = {
+            "class": line.letter,
+            "angle_deg": line.angle,
+            "confidence": conf,
+            "below_threshold": "below_threshold" in reasons,
+        }
         delta = _delta_deg(line.angle, truth[1])
     return {
         "case": case_id,
@@ -415,17 +420,31 @@ def _unrecognized(line: DiskLine, reasons: list[str]) -> bool:
     return skip.startswith((_SKIP_BELOW, _SKIP_NO_PRED)) or any(_reason_key(r) in ("letter", "feed") for r in reasons)
 
 
-def _disc_klass(reasons: list[str], unrec: bool, u_before: int, line: DiskLine | None, e: Expect | None) -> str:
+def _explained(reason: str, u_before: int, line: DiskLine | None, e: Expect | None, angle_off: bool) -> bool:
+    """Причина строки признанного диска объяснена шумом сети или потерей диска раньше (спека, редакция 3).
+
+    ``r`` и ``ARGS[9]`` «вне окна» — только если угол САМОЙ строки журнала разошёлся с истиной больше допуска
+    (плагин считает их из своего угла; при верном угле это дефект механики); «ARGS[9] нет» — никогда.
+    ``progress`` — тот же ``n`` и ``k`` меньше литерала не больше чем на ``u_before`` (потеря диска уменьшает ``k``).
+    """
+    key = _reason_key(reason)
+    if key == "r":
+        return angle_off
+    if key == "ARGS[9]":
+        return angle_off and reason != "ARGS[9] нет"
+    if key == "progress" and line is not None and e is not None and line.progress and e.progress:
+        (k, n), (k_exp, n_exp) = line.progress, e.progress
+        return n == n_exp and 0 <= k_exp - k <= u_before
+    return False
+
+
+def _disc_klass(
+    reasons: list[str], unrec: bool, u_before: int, line: DiskLine | None, e: Expect | None, angle_off: bool
+) -> str:
     if unrec:
         return ACC
-    keys = {_reason_key(r) for r in reasons}
-    if keys <= {"r", "ARGS[9]"}:
+    if reasons and all(_explained(r, u_before, line, e, angle_off) for r in reasons):
         return ACC
-    if keys <= {"progress", "r", "ARGS[9]"} and "progress" in keys and line is not None and e is not None:
-        if line.progress is not None and e.progress is not None:  # каскад от потери взятого диска раньше в списке
-            (k, n), (k_exp, n_exp) = line.progress, e.progress
-            if n == n_exp and abs(k - k_exp) <= u_before:
-                return ACC
     return MECH
 
 
@@ -671,7 +690,11 @@ def judge_case(
     for row, line, e, fed, unrec in draft:
         if not row.ok:
             u_before = sum(1 for i in unrec_at if i < (row.index or 0))
-            klass = _disc_klass(list(row.reasons), unrec, u_before, line, e) if reliable else MECH
+            angle_off = False
+            if line is not None and e is not None:
+                truth_angle = fed[1] if fed is not None else e.angle
+                angle_off = abs(wrap180(line.angle - truth_angle)) > _R_TOL + _EPS
+            klass = _disc_klass(list(row.reasons), unrec, u_before, line, e, angle_off) if reliable else MECH
             row = replace(row, klass=klass)
         rows.append(row)
         if reliable and line is not None and e is not None and row.index is not None:

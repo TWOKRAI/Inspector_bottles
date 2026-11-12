@@ -260,9 +260,8 @@ class _Alpha:
         self.statuses: dict[str, str | None] = {k: None for k in ("B", "D", "C", "ДОМОЙ", "СТОП")}
         self.results: list[L.CaseResult | L.Row] = []
         self.precond = False
-        self.marks: list[
-            str
-        ] = []  # метки прогона для строки «МЕХАНИЗМ: …» (предусловие, ошибка, прервано, ошибка ДОМОЙ/СТОП)
+        # метки прогона для строки «МЕХАНИЗМ: …» (предусловие, ошибка, прервано, ошибка ДОМОЙ/СТОП)
+        self.marks: list[str] = []
         self.shown: list[tuple[str, L.Row]] = []  # напечатанные строки с префиксом, в порядке печати
         self.paused = False  # пауза сима поставлена нами и не снята
         self.changed_defect_rate = False
@@ -282,9 +281,10 @@ class _Alpha:
         if flush is not None:
             flush()
 
-    def mark(self, label: str) -> None:
-        """Метка прогона для блока «МЕХАНИЗМ»: один раз на путь."""
-        self.precond = True
+    def mark(self, label: str, precond: bool = True) -> None:
+        """Метка прогона для блока «МЕХАНИЗМ»: один раз на путь; ``precond`` — ставить ли код выхода 3."""
+        if precond:
+            self.precond = True
         if label not in self.marks:
             self.marks.append(label)
 
@@ -722,7 +722,7 @@ class _Alpha:
                 row = L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",))
                 self.results.append(row)
                 self.shown.append((name, row))
-                self.mark("ошибка ДОМОЙ/СТОП")
+                self.mark("ошибка ДОМОЙ/СТОП", precond=False)  # в main шаг уборки код выхода 3 не ставил
         else:
             self.emit(f"cleanup: {name} → {outcome}")
 

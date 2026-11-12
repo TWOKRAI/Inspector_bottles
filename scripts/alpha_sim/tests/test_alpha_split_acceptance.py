@@ -263,9 +263,9 @@ def test_a2_progress_off_by_one_without_unrecognized_before_is_mechanism() -> No
         pytest.param((TL._arg(0, 3, 62000),), 1, MECH, id="ARGS3"),
         pytest.param((TL._jobf(0, "res_status", 0),), 1, MECH, id="res_status"),
         pytest.param((TL._sub(3, "[3/9]", "[4/9]"),), 4, MECH, id="progress_without_losses"),
-        pytest.param((TL._sub(6, "r60.0°", "r40.0°"),), 7, ACC, id="only_r"),
-        pytest.param((TL._arg(4, 9, 64536),), 7, ACC, id="only_ARGS9"),
-        pytest.param((TL._sub(6, "r60.0°", "r40.0°"), TL._arg(4, 9, 64536)), 7, ACC, id="r_and_ARGS9"),
+        pytest.param((TL._sub(6, "r60.0°", "r40.0°"),), 7, MECH, id="only_r"),
+        pytest.param((TL._arg(4, 9, 64536),), 7, MECH, id="only_ARGS9"),
+        pytest.param((TL._sub(6, "r60.0°", "r40.0°"), TL._arg(4, 9, 64536)), 7, MECH, id="r_and_ARGS9"),
         pytest.param(
             (TL._sub(0, "r0.0°", "r40.0°"), TL._sub(0, "взять(458.2,-343.0)", "взять(458.2,-350.0)")),
             1,
