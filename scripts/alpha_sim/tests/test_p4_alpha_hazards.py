@@ -510,10 +510,19 @@ def _keys(reasons: tuple[str, ...]) -> tuple[str, ...]:
 
 def test_g11d_real_stand_dump_b_and_d() -> None:
     # B: со стенда 2026-11-10 (pick y -340.9…-343.2, ARGS[2] 4617, ARGS[3] до 62132, Δугла до 11.9°) —
-    # в расширенных окнах (решение владельца 2026-11-11) все строки проходят; вернуть красные при возврате окон
+    # окна съёма §2.8 (запись 23): красные по pick/ARGS[2]/ARGS[3];
+    # угол в расширенном допуске ±15 (временно): r, ARGS[9] проходят
     res_b = _judge_fixture("B", 0)
     got = {r.index: _keys(r.reasons) for r in res_b.rows if not r.ok}
-    assert got == {}
+    assert got == {
+        3: ("pick", "ARGS[3]"),
+        4: ("pick", "ARGS[3]"),
+        5: ("pick", "ARGS[3]"),
+        8: ("pick", "ARGS[3]"),
+        9: ("pick", "ARGS[3]"),
+        11: ("pick", "ARGS[2]", "ARGS[3]"),
+        12: ("pick", "ARGS[3]"),
+    }
     assert not any("feed" in reason for r in res_b.rows for reason in r.reasons)
     assert all(c.ok for c in res_b.checks)
     assert len(res_b.pairs) == 12
