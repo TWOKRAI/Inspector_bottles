@@ -44,3 +44,8 @@
 - Зависимость C-55b не выполнена: `PreflightFinding` в `main` нет, ветки нет; файл `plugins/base.py` правит и она. C-60 влита (`request_stop`, `base.py:1569`).
 - Номера строк: `system_threads.py` лежит в `process_module/threads/`; `_on_heartbeat_received` — `process_monitor.py:254`; `pause/resume` — `base.py:1540/1546` (верно); `heartbeat_msg` — `process_heartbeat.py:362-378`; `_announce_ready` — `process_module.py:1320`.
 - `plan.md` «Порядок выполнения»: фраза «`pre_stop.py` ещё не существует» устарела — он в `main` (2026-11-09).
+
+**Уточнение §4 (2026-11-12, ответ координатора `inspector-bottles-2e`, сверено лидом: `PreflightFinding` в `main` нет; `d216e2ffa` — предок `main`):** C-55b влита версией v3 (`plans/word-layout/tasks/C-55b.md`, вариант A): ошибка проверки ассетов идёт в плоскость ошибок, health процесса `degraded`, регистр `last_error`, pass-through, старт не блокируется (`ml_inference` сам проверяет ассеты через `ModelRegistry.diagnose`). Классового хука `preflight(config) -> list[PreflightFinding]`, сборщика в `plugins/manifest.py` и вызова в `SystemLauncher` в `main` не будет; `plugins/base.py` C-55b не правила (merge `592e94b29` по `base.py` пуст). Следствия:
+- Task 1.2 не ждёт C-55b — посылка снята; конфликта с хуком `readiness()` в `base.py` нет.
+- Task 1.6 остаётся без своего источника: причины `not_ready` брать из `readiness()` (1.2), health `degraded` и `last_error`. Как переписать 1.6 — решает лид Ф на её стадии 0 (design.md §3.6 «Preflight C-55b → причины», строки 17, 32, 130–133, 226, 241 — версия v1/v2).
+- Решение В5 (рецепт с ошибкой при смене не активируется) требует перепроверки на стадии 0 Task 1.6: оно опиралось на отказ `recipe.activate` из C-55b.3.

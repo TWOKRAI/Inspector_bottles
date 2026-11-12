@@ -82,7 +82,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 ### Ф1 — framework
 - Task 1.1: **[VERTICAL SLICE]** `run_event` PM → ребёнок → `SourceProducer`; `system.run.start/stop/status`; `ready ↔ running`; `run_gate` **[РЕАЛИЗОВАНА 2026-11-09; стадии 3–5 пройдены 2026-11-12 (инъекции 16/16, стенд 0/91/0/90, ревью APPROVED); слияние в main — см. отчёт docs/reports/2026-11-12_system-run-state_1.1.md]** (после 0.1, merge LSO 1.10)
   - **Module contract:** public-api-change
-- Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [PENDING] (после 1.1, merge C-55b и C-60)
+- Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [PENDING] (после 1.1; C-60 влита; **посылка «merge C-55b» устарела 2026-11-12** — C-55b влита версией v3 без хука `preflight`/`PreflightFinding`, `plugins/base.py` не меняла: ждать нечего, см. `amendments.md` §4)
   - **Module contract:** public-api-change
 - Task 1.9: `PluginRunner.call_process` в `PAUSED` — bypass; `PAUSED` перестаёт быть ярлыком (вердикт cto К6) [PENDING] (после 1.2; до 1.3)
   - **Module contract:** impl-only
@@ -92,7 +92,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 1.5: `topology.apply` в `running` — отказ `running`; после применения — `booting`, не `running` [PENDING] (после 1.3)
   - **Module contract:** impl-only
-- Task 1.6: preflight C-55b при `run_gate` — причины `not_ready` вместо отказа boot [PENDING] (после 1.3, merge C-55b)
+- Task 1.6: preflight C-55b при `run_gate` — причины `not_ready` вместо отказа boot [PENDING] (после 1.3; **источник причин устарел 2026-11-12:** хука `preflight`/`PreflightFinding` в `main` нет — C-55b v3: `error` идёт в плоскость ошибок, health `degraded`, регистр `last_error`, старт не блокируется; 1.6 переписывается на стадии 0 — причины брать из `readiness()` (1.2), health и `last_error`)
   - **Module contract:** public-api-change
 - Task 1.7: квитирование — `system.run.ack`, `fault` держится до него, START в `fault` отказан (В4) [PENDING] (после 1.4)
   - **Module contract:** public-api-change
