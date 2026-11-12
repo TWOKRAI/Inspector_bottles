@@ -1035,3 +1035,44 @@ initialize: configure → start            (IDLE → READY → RUNNING)
 
 Тесты: `tests/test_plugin_stop_request_acceptance.py` (слепая приёмка R1–R5), `tests/test_plugin_stop_request_hazards.py`
 (автор, H1–H7, H2b).
+
+## Прогресс загрузки: лист `system.progress.<id>` (Task 1.3b)
+
+Любой узел сообщает прогресс одним вызовом: пишет в стор dict по пути `system.progress.<id>` (`progress_path(id)`,
+корень `PROGRESS_ROOT`; файл `progress.py`). Чистый модуль: без IO, Qt и стора — писатель сам кладёт возвращённый dict
+в свой API записи (PM — через `_state_op("handle_state_set", ...)`).
+
+Лист (pickle-safe, ровно эти четыре ключа):
+
+```
+{"percent": int 0..100, "label": str, "done": bool, "updated_at": float}
+```
+
+* `ProgressTracker(steps: list[tuple[str, int]])` — шаги с весами в процентах (сумма 100; выше 100 процент обрезается).
+  `advance(step, fraction=1.0, *, label="")` — шаг выполнен на долю 0..1 (вне диапазона обрезается, `nan` = 0);
+  `finish(label="")` — 100 % и `done=True`. `done` ставит только `finish`: 100 % через `advance` ещё не `done`.
+* Процент **монотонный**: не убывает никогда; доля каждого шага тоже (отступивший шаг не занижает итог).
+* Неизвестный шаг — `ValueError` без значения шага в тексте; состояние трекера цело.
+* Трекер **не потокобезопасен**: им владеет один писатель.
+
+### Издатель `boot` (ProcessManager)
+
+`ProcessManagerProcess.initialize()` ведёт `system.progress.boot` трекером `[("store", 5), ("started", 45), ("ready", 50)]`.
+Веса — по ФАЗАМ, не по времени: стор поднят — 5 %; «запущен» растёт на k/N по числу стартовавших (N — процессы,
+прошедшие валидацию конфига); «готов» — по объединению готовых из ВСЕХ вызовов барьера (гейты волн `depends_on`
+возвращают подмножества — процент не откатывается на итоговом барьере). Для N = 3 без `depends_on`: 5, 20, 35, 50,
+затем 100 с `done: true`.
+
+* **Закрытие.** `finish` вызывается один раз в конце `initialize()` рядом с итогом `booting`, и при `ready`, и при
+  `not_ready`. При k < N метка `запущено k из N` (100 % без неё скрыл бы неподнятый процесс). N = 0 — сразу `finish`.
+  Провал `initialize()` оставляет лист с `done: false`.
+* **Ступенька 50 %.** `_wait_processes_ready` возвращает результат только на выходе, поэтому на плоском boot (без
+  `depends_on`) шкала стоит на 50 % до `boot_ready_timeout_s` (по умолчанию 5 с) и прыгает на 100. Барьер не менялся.
+  При `boot_ready_timeout_s: 0` барьера нет: шаг «готов» не двигается, шкалу закрывает `finish`.
+* **Фолбэк барьера.** На дедлайне ожидающие процессы считаются готовыми (фолбэк по liveness), поэтому 100 % шкалы
+  **не** означает готовность узлов: готовность — это `system.run.*` и `processes.<n>.readiness`.
+* **Чего лист не трогает:** итог STOP, `topology.apply`, рестарт процесса. Без стора шкалы нет (boot прежний);
+  от `run_gate` шкала не зависит. Сбой записи лист теряет, но процент не откатывает и boot не валит.
+
+Тесты: `tests/test_progress.py`, `tests/test_progress_hazards.py`; `process_manager_module/tests/test_boot_progress.py`,
+`test_boot_progress_hazards.py`.

@@ -29,6 +29,7 @@ from ...logger_module.channels.log_channel import (
 from ...process_module import ProcessModule
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
 from ...process_module.health.schema import READINESS_FIELDS, readiness_path
+from ...process_module.progress import ProgressTracker, progress_path
 from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
@@ -170,6 +171,17 @@ class ProcessManagerProcess(ProcessModule):
     #: Task 1.3: листья ``processes.<n>.readiness``, уже записанные в стор (``{имя: {поле: значение}}``);
     #: пишет только ``_publish_readiness_leaves`` под ``_readiness_publish_lock``.
     _readiness_published: dict | None = None
+    #: Task 1.3b: шкала загрузки ``system.progress.boot``. Ведёт ТОЛЬКО ``initialize()`` (initialize-поток, один
+    #: писатель: ``ProgressTracker`` не потокобезопасен). ``None`` — шкалы нет (нет стора) или она закрыта
+    #: ``finish``; тогда все хуки шкалы ничего не делают (рестарт, apply, итог STOP лист ``boot`` не трогают).
+    _boot_progress: ProgressTracker | None = None
+    #: Число процессов, прошедших валидацию (N), и число стартованных (k) — для долей и метки «запущено k из N».
+    _boot_total: int = 0
+    _boot_started: int = 0
+    #: Объединение готовых по ВСЕМ вызовам барьера (гейты волн возвращают подмножества); ``None`` — шкалы нет.
+    _boot_ready: set | None = None
+    #: Веса шкалы по фазам, не по времени: стор поднят 5, «запущен» 45 (k из N), «готов» 50 (результат барьера).
+    _BOOT_PROGRESS_STEPS = [("store", 5), ("started", 45), ("ready", 50)]
     #: Task 1.3: интервал heartbeat по умолчанию, сек — как ``ProcessHeartbeat.start()`` (``heartbeat_interval``, 5.0).
     _DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
     #: Task 1.3: молчание = ``3 x`` интервал heartbeat (design.md §3.3).
@@ -395,6 +407,8 @@ class ProcessManagerProcess(ProcessModule):
             self._setup_state_store()
             # Task 1.1 system-run-state: первая публикация состояния работы (booting) — как только есть стор.
             self._publish_run_state()
+            # Task 1.3b: шкала загрузки — «стор поднят» (5 %); дальше хуки в старте процессов и барьерах.
+            self._boot_progress_begin()
             self._register_builtin_commands()
             self._log_active_feature_flags()
 
@@ -451,6 +465,9 @@ class ProcessManagerProcess(ProcessModule):
             # (молчание = не готов), а не по барьеру. Первый heartbeat с ``readiness`` приходит позже —
             # до тех пор ``not_ready`` с причинами ``liveness``; дальше состояние ведёт такт монитора.
             self._settle_run_state()
+            # Task 1.3b: шкала закрывается ОДИН раз и при ready, и при not_ready (окно закрывается по выходу
+            # из booting; причины «не готов» видны в system.run.*). Провал выше оставляет boot с done: false.
+            self._boot_progress_finish()
 
             # Готовность оркестратора для SystemLauncher (ADR-116) объявляется ТЕМ ЖЕ
             # примитивом, что и у детей: _announce_ready() ПОСЛЕДНЕЙ строкой run() —
@@ -1139,6 +1156,66 @@ class ProcessManagerProcess(ProcessModule):
         """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
         ready, reasons = self._evaluate_run_readiness()
         self._run_apply("settled", ready=ready, reasons=reasons)
+
+    def _boot_progress_begin(self) -> None:
+        """Завести шкалу загрузки и записать «стор поднят» (5 %). Стора нет — шкалы нет, boot прежний."""
+        if getattr(self, "_state_store_manager", None) is None:
+            return
+        self._boot_progress = ProgressTracker(list(self._BOOT_PROGRESS_STEPS))
+        self._boot_total = 0
+        self._boot_started = 0
+        self._boot_ready = set()
+        self._boot_progress_advance("store")
+
+    def _boot_progress_advance(self, step: str, fraction: float = 1.0) -> None:
+        """Продвинуть шаг шкалы и записать лист ``system.progress.boot``.
+
+        Сначала трекер (процент монотонный и держится в нём), затем запись: сбой записи лист теряет, но процент
+        не откатывает и boot не валит. Шкалы нет (``None``) — ничего не делает.
+        """
+        tracker = self._boot_progress
+        if tracker is None:
+            return
+        try:
+            self._boot_progress_write(tracker.advance(step, fraction))
+        except Exception as exc:  # noqa: BLE001 — шкала не имеет права уронить boot
+            self._log_warning(f"шкала загрузки: шаг '{step}' не записан: {exc}")
+
+    def _boot_progress_started(self, started: int) -> None:
+        """Стартовало ``started`` из N процессов -> шаг «запущен» растёт на k/N."""
+        self._boot_started = started
+        if self._boot_total > 0:
+            self._boot_progress_advance("started", started / self._boot_total)
+
+    def _boot_progress_ready(self, ready: dict[str, bool]) -> None:
+        """Результат барьера: готовые добавляются в объединение по всем вызовам (процент не берёт «последний гейт»)."""
+        if self._boot_ready is None or self._boot_total <= 0:
+            return
+        self._boot_ready.update(name for name, ok in ready.items() if ok)
+        self._boot_progress_advance("ready", len(self._boot_ready) / self._boot_total)
+
+    def _boot_progress_finish(self) -> None:
+        """Закрыть шкалу: 100 % и ``done``; при k < N метка «запущено k из N» (иначе 100 % скроет неподнятый процесс).
+
+        Шкалу снимает ДО записи: повторный вызов и поздние хуки (рестарт, apply) становятся пустыми.
+        """
+        tracker = self._boot_progress
+        if tracker is None:
+            return
+        self._boot_progress = None
+        label = f"запущено {self._boot_started} из {self._boot_total}" if self._boot_started < self._boot_total else ""
+        try:
+            self._boot_progress_write(tracker.finish(label))
+        except Exception as exc:  # noqa: BLE001 — шкала не имеет права уронить boot
+            self._log_warning(f"шкала загрузки: итог не записан: {exc}")
+
+    def _boot_progress_write(self, leaf: dict) -> None:
+        """Записать лист шкалы как ``_publish_run_state``: через ``_state_op`` (стора нет — no-op)."""
+        self._state_op(
+            "handle_state_set",
+            {"path": progress_path("boot"), "value": leaf, "source": "ProcessManager"},
+            "boot_progress",
+        )
 
     def _run_readiness_tick(self) -> None:
         """Один такт готовности (зовёт монитор из ``_run_iteration``): оценка -> ``tick`` -> листы в стор.
@@ -4507,6 +4584,7 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources:
                 self.shared_resources.register_process(name, proc_config)
 
+        self._boot_total = len(valid)  # N шкалы загрузки: процессы, прошедшие валидацию
         ordered_names = [n for n, _ in valid]
         config_by_name = {n: c for n, c in valid}
         waves = self._plan_boot_waves(ordered_names, config_by_name)
@@ -4521,6 +4599,7 @@ class ProcessManagerProcess(ProcessModule):
                 )
                 if upstreams:
                     ready = self._wait_processes_ready(upstreams, timeout_s, "boot-deps")
+                    self._boot_progress_ready(ready)
                     # Не глотать сигнал: подтверждённо не-ready апстрим → зависимые
                     # волны стартуют ВСЁ РАВНО (boot не блокируем), но это должно быть
                     # видно на уровне гейта, а не тонуть в generic-warning примитива.
@@ -4533,6 +4612,7 @@ class ProcessManagerProcess(ProcessModule):
             for name in wave:
                 if self._boot_create_and_start(config_by_name[name], name):
                     started.add(name)
+                    self._boot_progress_started(len(started))
 
     def _boot_create_and_start(self, proc_config: dict[str, Any], name: str) -> bool:
         """Создать+стартовать один процесс на boot. ``True`` если реально стартован.
@@ -5370,6 +5450,7 @@ class ProcessManagerProcess(ProcessModule):
         if not names:
             return
         ready = self._wait_processes_ready(names, timeout_s, "boot")
+        self._boot_progress_ready(ready)
         not_ready = sorted(n for n, ok in ready.items() if not ok)
         if not_ready:
             self._log_warning(
