@@ -81,7 +81,7 @@ footer { margin-top:40px; font-size:13px; color:var(--muted); border-top:1px sol
       <div class="chip"><b>Сборка</b>регистры приложения, оркестратор, run.py</div>
     </div></div>
   <div class="arrow">↓ собирает из</div>
-  <div class="band b3"><h3>③ Plugins — словарь узлов конвейера</h3><p>59 плагинов в <code>Plugins/</code> и ещё 6 внутри <code>Services/*/plugin</code>. Узел = порты + регистры + команды.</p>
+  <div class="band b3"><h3>③ Plugins — словарь узлов конвейера</h3><p>58 плагинов в <code>Plugins/</code> и ещё 6 внутри <code>Services/*/plugin</code>. Узел = порты + регистры + команды.</p>
     <div class="chips">
       <div class="chip"><b>sources · 5</b>camera_service, capture, synthetic_frame_source, frame_counter, heartbeat</div>
       <div class="chip"><b>processing · 29</b>roi_crop, hsv_mask, morphology, circle_detector, blob_detector, segmentation, center_crop, pixel_to_robot, word_layout …</div>
@@ -102,6 +102,7 @@ footer { margin-top:40px; font-size:13px; color:var(--muted); border-top:1px sol
   <div class="arrow">↓ стоит на</div>
   <div class="band b1"><h3>① multiprocess_framework — универсальный конструктор (27 модулей)</h3><p>Ничего не знает о зрении. Подробно — <a href="../foundation-audit/index.html">аудит фундамента</a>.</p>
     <div class="chips">
+      <div class="chip"><b>Основа</b>base_manager (BaseManager — база менеджеров)</div>
       <div class="chip"><b>Процессы</b>process_manager, process_module, app_module, recipe</div>
       <div class="chip"><b>Связь</b>message, router, channel_routing, shared_resources (SHM для кадров), event, dispatch</div>
       <div class="chip"><b>Данные и состояние</b>data_schema, config, registers, state_store</div>
