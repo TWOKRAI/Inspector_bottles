@@ -80,7 +80,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - Task 0.1: вердикт `cto` по машине состояний, сигналу готовности, механизму `run_event`, К1–К7 [DONE 2026-11-02 — вердикт cto ACCEPT WITH CONDITIONS, условия внесены; ответы владельца В1–В8 получены 2026-11-02]
 
 ### Ф1 — framework
-- Task 1.1: **[VERTICAL SLICE]** `run_event` PM → ребёнок → `SourceProducer`; `system.run.start/stop/status`; `ready ↔ running`; `run_gate` **[РЕАЛИЗОВАНА 2026-11-09 — НЕ ВЛИТА В main: ветка `feat/run-state-1.1`, коммиты `00e2990b1` (тесты) и `a8a8d19d4` (код); осталось: инъекции, живой стенд, ревью стадии 5, слияние]** (после 0.1, merge LSO 1.10)
+- Task 1.1: **[VERTICAL SLICE]** `run_event` PM → ребёнок → `SourceProducer`; `system.run.start/stop/status`; `ready ↔ running`; `run_gate` **[РЕАЛИЗОВАНА 2026-11-09; стадии 3–5 пройдены 2026-11-12 (инъекции 16/16, стенд 0/91/0/90, ревью APPROVED); слияние в main — см. отчёт docs/reports/2026-11-12_system-run-state_1.1.md]** (после 0.1, merge LSO 1.10)
   - **Module contract:** public-api-change
 - Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [PENDING] (после 1.1, merge C-55b и C-60)
   - **Module contract:** public-api-change
