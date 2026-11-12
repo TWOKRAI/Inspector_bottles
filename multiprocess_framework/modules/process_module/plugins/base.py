@@ -1541,13 +1541,50 @@ class ProcessModulePlugin(ABC):
         """Приостановка. Default: no-op.
 
         Transition: RUNNING → PAUSED.
+
+        Зовётся наблюдателем ``run_event`` (Task 1.2 плана system-run-state) из
+        отдельного потока, параллельно ``process()``/``produce()`` — как
+        :meth:`request_stop` (C-60): потокобезопасность на плагине. Должен быть
+        идемпотентным. Исключение не роняет остальные плагины: состояние остаётся
+        прежним, в снимке готовности появляется причина ``failure``, вызов
+        повторяется не чаще раза в 1 с. ``produce()`` источника может начаться
+        РАНЬШЕ :meth:`resume` и закончиться позже ``pause()``: источник сам
+        режется ``run_event`` в ``SourceProducer``.
         """
 
     def resume(self, ctx: PluginContext) -> None:
         """Возобновление. Default: no-op.
 
         Transition: PAUSED → RUNNING.
+
+        Тот же контракт потоков, что у :meth:`pause`: зовётся наблюдателем
+        ``run_event`` из отдельного потока, параллельно ``process()``/``produce()``;
+        идемпотентен; исключение не роняет остальные плагины.
         """
+
+    def readiness(self, ctx: PluginContext) -> list[dict]:
+        """Самоотчёт готовности плагина (Task 1.2 плана system-run-state). Default: ``[]``.
+
+        Возвращает список причин неготовности; пустой список — плагин готов.
+        Элемент — ``{"severity": "failure|check_function|out_of_spec|maintenance",
+        "reason": str}``:
+
+        - ``failure`` и ``check_function`` блокируют готовность процесса;
+          ``out_of_spec`` и ``maintenance`` — нет (видны в причинах);
+        - ``reason`` — короткий текст БЕЗ значений входа: путь, ключ конфига,
+          данные — в ``log_*``; длиннее 200 символов обрезается.
+
+        Хук зовёт отдельный системный поток снимка (не heartbeat, не поток
+        сверки), не чаще 2 раз в секунду. Требования: быстро, без IO, без
+        замков; не бросает (исключение становится причиной ``failure`` без
+        текста исключения, текст — в журнал). Форма вне контракта — причина
+        ``failure`` «readiness() вернул неверную форму».
+
+        Плагин отчитывается устойчивым состоянием: переподключение в процессе —
+        ``out_of_spec``, не ``failure``, пока не истёк его собственный срок
+        (дребезг — обязанность плагина).
+        """
+        return []
 
     def configure_managers(self, ctx: PluginContext) -> None:
         """Ранняя инициализация менеджеров ДО основного lifecycle. Default: no-op.
@@ -1626,18 +1663,29 @@ class ProcessModulePlugin(ABC):
         self.state = PluginState.RUNNING
 
     def _do_pause(self, ctx: PluginContext) -> None:
-        """RUNNING → PAUSED."""
+        """RUNNING → PAUSED.
+
+        Состояние присваивается ПОСЛЕ хука и только если оно всё ещё ``RUNNING``:
+        медленный ``pause()`` на потоке наблюдателя мог пересечься с ``shutdown``,
+        и ``PAUSED`` поверх ``STOPPED`` воскресил бы закрытый плагин (Task 1.2, Д6).
+        Исключение хука оставляет прежнее состояние.
+        """
         if self.state != PluginState.RUNNING:
             return
         self.pause(ctx)
-        self.state = PluginState.PAUSED
+        if self.state == PluginState.RUNNING:
+            self.state = PluginState.PAUSED
 
     def _do_resume(self, ctx: PluginContext) -> None:
-        """PAUSED → RUNNING."""
+        """PAUSED → RUNNING.
+
+        Присваивание только при прежнем ``PAUSED`` — та же защита, что в :meth:`_do_pause`.
+        """
         if self.state != PluginState.PAUSED:
             return
         self.resume(ctx)
-        self.state = PluginState.RUNNING
+        if self.state == PluginState.PAUSED:
+            self.state = PluginState.RUNNING
 
     def _do_request_stop(self, ctx: PluginContext) -> None:
         """Весть о стопе (C-60): зовёт :meth:`request_stop` в READY/RUNNING/PAUSED.

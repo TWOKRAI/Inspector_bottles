@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
@@ -375,6 +376,18 @@ class ProcessHeartbeat:
                 if isinstance(w, dict):
                     w.pop("metrics", None)
             heartbeat_msg["workers_status"] = workers
+        # Task 1.2 (system-run-state): готовность процесса — последний снимок потока
+        # ``readiness_snapshot`` (ProcessModule). Здесь только чтение готового dict и
+        # его копия: ``readiness()`` плагинов на потоке heartbeat не зовётся никогда.
+        # Свой try: битый снимок не должен съесть liveness-сообщение. Нет снимка —
+        # поля нет (PM по молчанию считает процесс не готовым, Task 1.3).
+        try:
+            snapshot = getattr(self._services, "_readiness_snapshot", None)
+            if isinstance(snapshot, dict):
+                heartbeat_msg["readiness"] = copy.deepcopy(snapshot)
+        except Exception as exc:  # noqa: BLE001 — сбой копии снимка не роняет heartbeat
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"heartbeat: снимок готовности не прочитан: {type(exc).__name__}", module="heartbeat")
         self._services.send_message("ProcessManager", heartbeat_msg)
 
     def _warn_capped_metrics(self, config: Any) -> None:

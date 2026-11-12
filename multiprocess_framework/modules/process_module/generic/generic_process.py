@@ -160,9 +160,9 @@ class GenericProcess(ProcessModule):
         critical = app_cfg.get("error_critical_plugins", [])
 
         # Плагины через orchestrator. Список — реестр для shutdown (инвариант H-2),
-        # а НЕ «живые»: в нём остаётся и плагин, не дошедший до RUNNING (бросил
+        # а НЕ «живые»: в нём остаётся и плагин, не дошедший до RUNNING/PAUSED (бросил
         # configure() ИЛИ start() — RUNNING ставится ПОСЛЕ вызова start,
-        # plugins/base.py::_do_start).
+        # plugins/base.py::_do_start; PAUSED — первая пауза boot(), Task 1.2).
         all_plugins = self._orchestrator.plugins
 
         # Разделить плагины на source и processing.
@@ -178,11 +178,17 @@ class GenericProcess(ProcessModule):
         # items `inspection_status="not_inspected"`. Убери его из списка — и
         # пропадут и позиция, и тег: батч уедет молча, как будто инспекция была.
         # Поэтому processing идёт списком оркестратора, как и до правки.
+        #
+        # «Поднят» = RUNNING ИЛИ PAUSED (Task 1.2 плана system-run-state, Н1): ребёнок,
+        # рождённый при снятом run_event, получает первую паузу в boot() оркестратора
+        # (источник к этому месту уже в PAUSED); отбросить его здесь значило бы не
+        # создать воркер source_producer_<имя> — и после START кадров не будет.
+        # IDLE/READY (упавший configure/start) по-прежнему отбрасываются.
         source_plugins = []
         for plugin in all_plugins:
             if not plugin.is_source:
                 continue
-            if plugin.state != PluginState.RUNNING:
+            if plugin.state not in (PluginState.RUNNING, PluginState.PAUSED):
                 # Громко и поимённо: молчаливое выпадение источника выглядит как
                 # «камера просто не отдаёт кадры».
                 self._log_error(

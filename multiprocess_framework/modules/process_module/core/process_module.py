@@ -7,6 +7,7 @@
 
 import importlib
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -28,6 +29,11 @@ from ..managers import ProcessManagers
 from ..state import ProcessState
 from ..threads import SystemThreads
 from ..types import ProcessStatus
+
+#: Такт воркера ``run_watch`` (сверка ``run_event`` с плагинами), сек: как у ``SourceProducer``.
+_RUN_WATCH_PERIOD_SEC = 0.05
+#: Такт воркера ``readiness_snapshot``, сек: пересчёт снимка готовности не чаще 2 Гц.
+_READINESS_SNAPSHOT_PERIOD_SEC = 0.5
 
 
 class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
@@ -216,6 +222,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
         self._orchestrator = None
+
+        # Task 1.2 (system-run-state): последний снимок готовности процесса — dict
+        # ``{"ready", "reasons", "paused", "at"}`` или None (воркер ``readiness_snapshot``
+        # ещё не считал). Пишет только этот воркер (подменой целого dict), читает
+        # heartbeat (``getattr(services, "_readiness_snapshot", None)``).
+        self._readiness_snapshot: dict | None = None
+        # Защёлка «процесс объявил готовность»: один раз увидев статус running/paused,
+        # держится навсегда (``worker.pause_all`` не должен превращаться в потерю готовности).
+        self._readiness_announced: bool = False
 
         # initialize() вызывается явно после создания
 
@@ -1040,6 +1055,94 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Plugin boot (если orchestrator создан в _init_custom_managers)
         if self._orchestrator is not None:
             self._orchestrator.boot()
+
+        # Task 1.2: воркеры снимка готовности и наблюдателя run_event — ВНЕ ветки
+        # оркестратора: процесс без плагинов тоже публикует снимок (ready = защёлка).
+        self._init_run_state_workers()
+
+    # --- Task 1.2 (system-run-state): снимок готовности и наблюдатель run_event ---
+
+    def _run_watch_enabled(self) -> bool:
+        """Есть ли у процесса наблюдатель ``run_event``: событие положил раннер и есть ``worker_manager``."""
+        return getattr(self, "_run_event", None) is not None and getattr(self, "worker_manager", None) is not None
+
+    def _init_run_state_workers(self) -> None:
+        """Создать воркеры ``run_watch`` (сверка, 0,05 с) и ``readiness_snapshot`` (снимок, 0,5 с).
+
+        Оба — ``WorkerType.SYSTEM`` (как ``heartbeat_sender``): иначе ``worker.pause_all`` их
+        заглушил бы (``worker_manager.py`` пропускает только SYSTEM) — и пауза процесса сняла бы
+        собственного наблюдателя. Два потока, а не один: зависший ``readiness()`` одного плагина
+        не должен морозить паузу остальных, а зависший ``pause()`` — снимок (``at`` перестал бы расти).
+        """
+        wm = getattr(self, "worker_manager", None)
+        if not wm:
+            return
+        from ...worker_module import ThreadConfig, ThreadPriority, WorkerType
+
+        try:
+            if self._run_watch_enabled():
+                wm.create_worker(
+                    "run_watch",
+                    self._run_watch_loop,
+                    ThreadConfig(priority=ThreadPriority.BACKGROUND, worker_type=WorkerType.SYSTEM),
+                    auto_start=True,
+                )
+            wm.create_worker(
+                "readiness_snapshot",
+                self._readiness_snapshot_loop,
+                ThreadConfig(priority=ThreadPriority.BACKGROUND, worker_type=WorkerType.SYSTEM),
+                auto_start=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — без снимка PM считает процесс не готовым (безопасная сторона)
+            self._log_error(f"Process '{self.name}': воркеры run_watch/readiness_snapshot не созданы: {exc}")
+
+    def _run_watch_loop(self, stop_event, pause_event) -> None:
+        """Цикл ``run_watch``: сверка цели (``run_event``) с состоянием плагинов, такт 0,05 с."""
+        last_error: str | None = None
+        while not stop_event.is_set():
+            orchestrator = self._orchestrator
+            if orchestrator is not None:
+                try:
+                    orchestrator.reconcile_run_event()
+                    last_error = None
+                except Exception as exc:  # noqa: BLE001 — наблюдатель живёт, лог один раз на серию
+                    if last_error != repr(exc):
+                        last_error = repr(exc)
+                        self._log_error(f"Process '{self.name}': сверка run_event упала: {exc}", module="run_state")
+            stop_event.wait(timeout=_RUN_WATCH_PERIOD_SEC)
+
+    def _readiness_snapshot_loop(self, stop_event, pause_event) -> None:
+        """Цикл ``readiness_snapshot``: пересчёт снимка не чаще 2 раз в секунду."""
+        last_error: str | None = None
+        while not stop_event.is_set():
+            try:
+                self._refresh_readiness_snapshot()
+                last_error = None
+            except Exception as exc:  # noqa: BLE001 — старый снимок остаётся, его ``at`` перестаёт расти
+                if last_error != repr(exc):
+                    last_error = repr(exc)
+                    self._log_error(f"Process '{self.name}': снимок готовности не посчитан: {exc}", module="run_state")
+            stop_event.wait(timeout=_READINESS_SNAPSHOT_PERIOD_SEC)
+
+    def _refresh_readiness_snapshot(self) -> None:
+        """Один расчёт: защёлка «объявил готовность» + снимок оркестратора (или форма процесса без плагинов)."""
+        if not self._readiness_announced and self._current_process_status in (
+            ProcessStatus.RUNNING.value,
+            ProcessStatus.PAUSED.value,
+        ):
+            self._readiness_announced = True
+        orchestrator = self._orchestrator
+        if orchestrator is not None:
+            snapshot = orchestrator.readiness_snapshot(announced=self._readiness_announced)
+        else:
+            event = getattr(self, "_run_event", None)
+            snapshot = {
+                "ready": self._readiness_announced,
+                "reasons": [],
+                "paused": event is not None and not event.is_set(),
+                "at": time.time(),
+            }
+        self._readiness_snapshot = snapshot
 
     def _create_workers_from_config(self, workers_config: dict[str, Any]) -> None:
         """Создать воркеры из config. worker_dict: {class: path, config: {...}, thread: {...}}."""
