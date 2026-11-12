@@ -252,7 +252,9 @@ class PluginOrchestrator:
         Task 1.2 (Д6): сначала замок сверки ``run_watch`` с таймаутом ``_SHUTDOWN_LOCK_SEC``
         (медленный ``pause()/resume()`` на потоке наблюдателя не должен пересечься с
         ``shutdown()`` плагина); по таймауту — ``log_error`` и идём дальше без замка (+≤ 2 с
-        к закрытию). Присваивание ``PAUSED`` поверх ``STOPPED`` закрыто в ``base.py``.
+        к закрытию; оценка НИЖНЯЯ: при зависшем хуке поток ``run_watch`` не выходит, и шаг ``workers``
+        закрытия ждёт его до конца окна ``work`` ещё ДО этого замка). Присваивание ``PAUSED`` поверх
+        ``STOPPED`` закрыто в ``base.py``.
         """
         self._stopping = True
         locked = self._reconcile_lock.acquire(timeout=_SHUTDOWN_LOCK_SEC)
@@ -371,6 +373,11 @@ class PluginOrchestrator:
         Исключение хука плагина не обрывает обход соседей: оно становится причиной
         ``failure`` в снимке, повтор — не чаще ``_HOOK_RETRY_SEC`` на плагин.
         Событие читается заново перед каждым плагином. Нет события — ничего не делает.
+
+        Свойство прохода (m5 раннего ревью): он держит замок сверки на весь обход и идёт плагинами
+        по очереди, поэтому ЗАВИСШИЙ ``pause()/resume()`` одного плагина не даёт сверить плагины
+        после него — они остаются в прежнем состоянии, ``paused`` в снимке ложно (для STOP 1.4 это
+        ожидание ``paused`` до таймаута). Изоляция хуков друг от друга DESIGN не требует.
         """
         event = self._run_event()
         if event is None:
@@ -394,6 +401,18 @@ class PluginOrchestrator:
                 if self._hook_retry_pending(plugin, pause):
                     continue
                 self._apply_hook(plugin, ctx, pause)
+
+    def release_paused(self) -> None:
+        """Снять паузу ярлыков: ``_do_resume`` каждому ``PAUSED`` плагину (под замком сверки).
+
+        Для отказа создания воркера ``run_watch`` после первой паузы в boot (m6 раннего ревью):
+        без наблюдателя, который её снимет, плагины остались бы в ``PAUSED`` навсегда, а ``PAUSED``
+        режет ``call_process``. Исключение хука плагина — как в сверке: причина ``failure`` в снимке.
+        """
+        with self._reconcile_lock:
+            for plugin, ctx in zip(self._plugins, self._contexts):
+                if plugin.state is PluginState.PAUSED:
+                    self._apply_hook(plugin, ctx, False)
 
     def _run_event(self) -> Any | None:
         """Событие работы системы процесса (``_run_event`` кладёт раннер) или ``None``."""
@@ -488,21 +507,45 @@ class PluginOrchestrator:
         try:
             raw = plugin.readiness(ctx)
         except Exception as exc:  # noqa: BLE001 — хук плагина не роняет снимок
+            # Серия отказов — по ТИПУ исключения: текст может меняться на каждом вызове
+            # (счётчик, время, адрес) и гнал бы лог с частотой снимка (2 Гц).
             self._log_readiness_once(
-                key, f"{type(exc).__name__}: {exc}", f"readiness() '{plugin.name}': {type(exc).__name__}: {exc}"
+                key, f"exc:{type(exc).__name__}", f"readiness() '{plugin.name}': {type(exc).__name__}: {exc}"
             )
             return [self._reason(node, "failure", f"readiness() упал: {type(exc).__name__}")]
-        valid = isinstance(raw, list) and all(
-            isinstance(item, dict) and item.get("severity") in _SEVERITIES and isinstance(item.get("reason"), str)
-            for item in raw
-        )
-        if not valid:
+        canonical = self._canonical_items(raw)
+        if canonical is None:
             self._log_readiness_once(
                 key, "malformed", f"readiness() '{plugin.name}' вернул неверную форму: {type(raw).__name__}"
             )
             return [self._reason(node, "failure", "readiness() вернул неверную форму")]
         self._readiness_logged.pop(key, None)  # серия отказов кончилась — следующий отказ снова в лог
-        return [self._reason(node, item["severity"], item["reason"]) for item in raw]
+        return [self._reason(node, severity, reason) for severity, reason in canonical]
+
+    @staticmethod
+    def _canonical_items(raw: Any) -> list[tuple[str, str]] | None:
+        """Элементы ``readiness()`` как пары ``(severity, reason)`` ВСТРОЕННЫХ типов или ``None`` (неверная форма).
+
+        Снимок уходит через границу процесса (heartbeat -> очередь PM, Dict at Boundary): подкласс
+        ``str`` из плагина (``StrEnum`` и т.п.) пиклится ссылкой на класс плагина, и получатель без
+        этого класса не распакует сообщение — потеряется liveness. Поэтому ``severity`` берётся
+        из ``_SEVERITIES`` (литерал словаря, найденный по значению), а не объект плагина;
+        ``reason`` — ``str(...)``.
+        """
+        if not isinstance(raw, list):
+            return None
+        try:
+            items: list[tuple[str, str]] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    return None
+                severity, reason = item.get("severity"), item.get("reason")
+                if not isinstance(reason, str) or severity not in _SEVERITIES:
+                    return None
+                items.append((_SEVERITIES[_SEVERITIES.index(severity)], str(reason)))
+        except Exception:  # noqa: BLE001 — враждебный __eq__/__str__ плагина = неверная форма, а не падение снимка
+            return None
+        return items
 
     def _log_readiness_once(self, key: int, series_id: str, message: str) -> None:
         """Лог отказа ``readiness()`` — один раз на серию (снимок считается 2 раза в секунду)."""
@@ -517,9 +560,10 @@ class PluginOrchestrator:
         return {"node": node, "severity": severity, "reason": reason[:_REASON_MAX_LEN], "source": "readiness"}
 
     def _cap_reasons(self, reasons: list[dict], process_name: str) -> list[dict]:
-        """Не больше ``_REASONS_MAX`` причин (с маркером): лишние отбрасываются, блокирующие — последними.
+        """Не больше ``_REASONS_MAX`` причин (с маркером): лишние отбрасываются, блокирующие причины остаются первыми.
 
-        ``ready`` к этому моменту уже посчитан по полному списку.
+        Пересортировка (блокирующие первыми, порядок внутри группы прежний) — добавление к DESIGN п.2:
+        блокирующая причина не теряется при обрезке. ``ready`` к этому моменту уже посчитан по полному списку.
         """
         if len(reasons) <= _REASONS_MAX:
             return reasons

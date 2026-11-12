@@ -1063,11 +1063,21 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
     # --- Task 1.2 (system-run-state): снимок готовности и наблюдатель run_event ---
 
     def _run_watch_enabled(self) -> bool:
-        """Есть ли у процесса наблюдатель ``run_event``: событие положил раннер и есть ``worker_manager``."""
-        return getattr(self, "_run_event", None) is not None and getattr(self, "worker_manager", None) is not None
+        """Есть ли у процесса наблюдатель ``run_event``: событие положил раннер, есть ``worker_manager`` и оркестратор.
+
+        Без оркестратора (``ProcessManagerProcess``, процессы без плагинов) сверять нечего: воркер
+        ``run_watch`` там был бы пустым циклом 20 Гц, а первая пауза в ``boot()`` не нужна. Снимок
+        готовности такому процессу всё равно публикуется (``paused`` — по событию, см.
+        :meth:`_refresh_readiness_snapshot`). Предикат стоит и на создании воркера, и на первой паузе.
+        """
+        return (
+            getattr(self, "_run_event", None) is not None
+            and getattr(self, "worker_manager", None) is not None
+            and getattr(self, "_orchestrator", None) is not None
+        )
 
     def _init_run_state_workers(self) -> None:
-        """Создать воркеры ``run_watch`` (сверка, 0,05 с) и ``readiness_snapshot`` (снимок, 0,5 с).
+        """Создать воркеры ``run_watch`` (сверка, 0,05 с; только при оркестраторе) и ``readiness_snapshot`` (0,5 с).
 
         Оба — ``WorkerType.SYSTEM`` (как ``heartbeat_sender``): иначе ``worker.pause_all`` их
         заглушил бы (``worker_manager.py`` пропускает только SYSTEM) — и пауза процесса сняла бы
@@ -1079,14 +1089,20 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return
         from ...worker_module import ThreadConfig, ThreadPriority, WorkerType
 
-        try:
-            if self._run_watch_enabled():
+        if self._run_watch_enabled():
+            try:
                 wm.create_worker(
                     "run_watch",
                     self._run_watch_loop,
                     ThreadConfig(priority=ThreadPriority.BACKGROUND, worker_type=WorkerType.SYSTEM),
                     auto_start=True,
                 )
+            except Exception as exc:  # noqa: BLE001 — без наблюдателя первая пауза boot() некому снять
+                self._log_error(
+                    f"Process '{self.name}': воркер run_watch не создан: {exc} — плагины возвращаются из паузы"
+                )
+                self._orchestrator.release_paused()
+        try:
             wm.create_worker(
                 "readiness_snapshot",
                 self._readiness_snapshot_loop,
@@ -1094,7 +1110,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 auto_start=True,
             )
         except Exception as exc:  # noqa: BLE001 — без снимка PM считает процесс не готовым (безопасная сторона)
-            self._log_error(f"Process '{self.name}': воркеры run_watch/readiness_snapshot не созданы: {exc}")
+            self._log_error(f"Process '{self.name}': воркер readiness_snapshot не создан: {exc}")
 
     def _run_watch_loop(self, stop_event, pause_event) -> None:
         """Цикл ``run_watch``: сверка цели (``run_event``) с состоянием плагинов, такт 0,05 с."""

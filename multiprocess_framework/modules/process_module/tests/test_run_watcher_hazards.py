@@ -29,6 +29,7 @@ from multiprocess_framework.modules.process_module.plugins.base import (
     ProcessModulePlugin,
 )
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
+from multiprocess_framework.modules.worker_module import WorkerManager
 
 _THIS = "multiprocess_framework.modules.process_module.tests.test_run_watcher_hazards"
 _PROC = "rwh_proc"
@@ -550,3 +551,185 @@ def test_no_observer_means_no_boot_pause() -> None:
     # контрольное плечо: со стендом, умеющим ловить паузу
     _, _, plugins_watched = _boot([HzA], event=_event(False), watch=True)
     assert plugins_watched["hz_a"].state is PluginState.PAUSED
+
+
+# --------------------------------------------------------------------------- #
+# Раунд 2 (после раннего ревью Opus): уровень, замок shutdown, release_paused, два воркера
+# --------------------------------------------------------------------------- #
+
+
+def test_level_not_edge_forced_running_is_paused_again() -> None:
+    """Сверка по УРОВНЮ: плагин принудительно в ``RUNNING`` при снятом событии без фронта -> снова ``PAUSED``."""
+    event = _event(True)
+    orch, _, plugins = _boot([HzA], event=event)
+    plugin = plugins["hz_a"]
+    event.clear()
+    orch.reconcile_run_event()
+    assert plugin.state is PluginState.PAUSED
+
+    plugin.state = PluginState.RUNNING  # кто-то вернул ярлык; фронта события не было
+    orch.reconcile_run_event()
+
+    assert plugin.state is PluginState.PAUSED
+    assert _hooks("hz_a") == {"pause": 2, "resume": 0}
+
+
+def test_level_not_edge_forced_paused_is_resumed_again() -> None:
+    """Зеркало: плагин принудительно в ``PAUSED`` при взведённом событии без фронта -> проход возвращает ``RUNNING``."""
+    event = _event(True)
+    orch, _, plugins = _boot([HzA], event=event)
+    plugin = plugins["hz_a"]
+
+    plugin.state = PluginState.PAUSED
+    orch.reconcile_run_event()
+
+    assert plugin.state is PluginState.RUNNING
+    assert _hooks("hz_a") == {"pause": 0, "resume": 1}
+
+
+ORDER: list[str] = []
+
+
+class HzSlowPause(HzPlain):
+    """``pause()`` короче таймаута замка shutdown (0,6 с < 2 с); пишет порядок событий."""
+
+    name = "hz_slow_pause"
+
+    def pause(self, ctx: PluginContext) -> None:
+        ORDER.append("pause_start")
+        time.sleep(0.6)
+        ORDER.append("pause_end")
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        ORDER.append("shutdown")
+
+
+def test_shutdown_waits_short_pause_hook_and_does_not_resurrect() -> None:
+    """Замок держит порядок БЕЗ защиты ``base.py``: ``shutdown()`` ждёт короткий ``pause()`` и лишь потом закрывает."""
+    ORDER.clear()
+    event = _event(True)
+    orch, _, plugins = _boot([HzSlowPause], event=event)
+    plugin = plugins["hz_slow_pause"]
+    event.clear()
+    worker = _in_thread(orch.reconcile_run_event)
+    end = time.monotonic() + 10.0
+    while ORDER != ["pause_start"] and time.monotonic() < end:
+        time.sleep(0.005)
+    assert ORDER == ["pause_start"], ORDER
+
+    closer = _in_thread(orch.shutdown)
+    time.sleep(0.2)
+    assert closer.is_alive(), "shutdown() не дождался замка сверки: плагин закрывается под идущим хуком"
+    assert ORDER == ["pause_start"], ORDER  # plugin.shutdown() ещё не позван
+    _join(closer, "shutdown()", 10.0)
+    _join(worker, "проход сверки")
+
+    assert ORDER == ["pause_start", "pause_end", "shutdown"], ORDER
+    assert plugin.state is PluginState.STOPPED
+
+
+def test_release_paused_resumes_all_paused_plugins() -> None:
+    """``release_paused()`` возвращает из паузы каждый ``PAUSED`` плагин (отказ создания ``run_watch``, m6)."""
+    event = _event(False)
+    orch, _, plugins = _boot([HzA, HzBadResume], event=event)
+    assert {p.state for p in plugins.values()} == {PluginState.PAUSED}
+
+    orch.release_paused()
+
+    assert plugins["hz_a"].state is PluginState.RUNNING
+    # упавший resume() не обрывает обход и не бросает наружу; плагин остаётся PAUSED (цель событием не менялась)
+    assert plugins["hz_bad_resume"].state is PluginState.PAUSED
+    assert _hooks("hz_bad_resume")["resume"] == 1
+
+
+def _start_real(plugin_classes: list[type], event: Any) -> tuple[threading.Thread, threading.Event, Any]:
+    SHARED["event"] = event
+    SHARED["proc"] = None
+    plugins = [{"plugin_class": f"{_THIS}.{c.__name__}", "plugin_name": c.name} for c in plugin_classes]
+    cfg = {"config": {"plugins": plugins, "chain_targets": []}}
+    own_ready = multiprocessing.Event()
+    bundle = {
+        "queues": {"data": multiprocessing.Queue()},
+        "config": cfg,
+        "custom": {"process_config": cfg, "ready_event": own_ready},
+    }
+    stop = threading.Event()
+    thread = _in_thread(lambda: run_process_function(f"{_THIS}.WatchedGenericProcess", "rwh_gp2", stop, bundle, None))
+    return thread, stop, own_ready
+
+
+def _stop_real(thread: threading.Thread, stop: threading.Event) -> None:
+    GATE.set()
+    stop.set()
+    thread.join(_JOIN_S)
+    assert not thread.is_alive(), "run_process_function не вышел после stop"
+
+
+@pytest.mark.timeout(120)
+def test_run_watch_creation_failure_releases_boot_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``create_worker("run_watch")`` бросил: плагины, спаузенные в boot(), возвращены из паузы (m6); процесс жив."""
+    original = WorkerManager.create_worker
+
+    def create_worker(self: Any, worker_name: str, *args: Any, **kwargs: Any) -> Any:
+        if worker_name == "run_watch":
+            raise RuntimeError("create_worker сломан")
+        return original(self, worker_name, *args, **kwargs)
+
+    monkeypatch.setattr(WorkerManager, "create_worker", create_worker)
+    event = multiprocessing.Event()  # снято с рождения: boot() паузит плагины
+    thread, stop, own_ready = _start_real([HzA], event)
+    try:
+        assert own_ready.wait(_JOIN_S), "процесс не объявил готовность"
+        proc = SHARED["proc"]
+        plugin = proc._orchestrator.plugins[0]
+        assert plugin.state is PluginState.RUNNING, "плагин остался в PAUSED без наблюдателя"
+        assert _hooks("hz_a") == {"pause": 1, "resume": 1}
+        workers = proc.worker_manager.get_all_workers_status()
+        assert "run_watch" not in workers and "readiness_snapshot" in workers, sorted(workers)
+    finally:
+        _stop_real(thread, stop)
+
+
+@pytest.mark.timeout(120)
+def test_process_with_orchestrator_has_two_separate_state_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """В процессе с оркестратором два ОТДЕЛЬНЫХ воркера с разными целевыми функциями (Д1: не один общий цикл)."""
+    original = WorkerManager.create_worker
+    targets: dict[str, Any] = {}
+
+    def create_worker(self: Any, worker_name: str, target: Any = None, *args: Any, **kwargs: Any) -> Any:
+        targets[worker_name] = target
+        return original(self, worker_name, target, *args, **kwargs)
+
+    monkeypatch.setattr(WorkerManager, "create_worker", create_worker)
+    event = multiprocessing.Event()
+    event.set()
+    thread, stop, own_ready = _start_real([HzA], event)
+    try:
+        assert own_ready.wait(_JOIN_S)
+        workers = SHARED["proc"].worker_manager.get_all_workers_status()
+        assert "run_watch" in workers and "readiness_snapshot" in workers, sorted(workers)
+        assert targets["run_watch"].__name__ == "_run_watch_loop", targets
+        assert targets["readiness_snapshot"].__name__ == "_readiness_snapshot_loop", targets
+    finally:
+        _stop_real(thread, stop)
+
+
+@pytest.mark.timeout(120)
+def test_real_process_blocked_readiness_does_not_stall_pause() -> None:
+    """Настоящий процесс: ``readiness()`` завис в потоке снимка — пауза остальных идёт (потоки раздельны)."""
+    event = multiprocessing.Event()
+    event.set()
+    thread, stop, own_ready = _start_real([HzBlockReadiness, HzA], event)
+    try:
+        assert own_ready.wait(_JOIN_S)
+        assert ENTERED.wait(10.0), "readiness() не вызван потоком снимка"
+        plugins = {p.name: p for p in SHARED["proc"]._orchestrator.plugins}
+
+        event.clear()
+
+        end = time.monotonic() + 8.0
+        while plugins["hz_a"].state is not PluginState.PAUSED and time.monotonic() < end:
+            time.sleep(0.02)
+        assert plugins["hz_a"].state is PluginState.PAUSED, "зависший readiness() остановил сверку"
+    finally:
+        _stop_real(thread, stop)

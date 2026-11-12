@@ -13,7 +13,11 @@ heartbeat получает КОПИЮ снимка.
 
 from __future__ import annotations
 
+import enum
 import multiprocessing
+import pickle
+import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -281,11 +285,31 @@ class PluginGenericProcess(GenericProcess):
         SHARED["proc"] = self
 
 
-def _start(process_cls: str, plugin_classes: list[type], event: Any) -> tuple[threading.Thread, threading.Event, Any]:
+class ChainProcess(PluginGenericProcess):
+    """Настоящий процесс, чей ``send_message`` кладёт heartbeat в настоящую spawn-очередь теста."""
+
+    def send_message(self, target: str, message: Any, *args: Any, **kwargs: Any) -> Any:
+        out = SHARED.get("queue")
+        if out is not None and isinstance(message, dict) and message.get("command") == "heartbeat":
+            out.put(message)
+            return True
+        return super().send_message(target, message, *args, **kwargs)
+
+
+def _start(
+    process_cls: str,
+    plugin_classes: list[type],
+    event: Any,
+    heartbeat_interval: float | None = None,
+) -> tuple[threading.Thread, threading.Event, Any]:
     SHARED["event"] = event
     SHARED["proc"] = None
     plugins = [{"plugin_class": f"{_THIS}.{c.__name__}", "plugin_name": c.name} for c in plugin_classes]
-    cfg = {"config": {"plugins": plugins, "chain_targets": []}}
+    cfg: dict[str, Any] = {"config": {"plugins": plugins, "chain_targets": []}}
+    if heartbeat_interval is not None:
+        cfg["heartbeat_interval"] = (
+            heartbeat_interval  # ``ProcessHeartbeat.start`` читает ``get_config("heartbeat_interval")``
+        )
     own_ready = multiprocessing.Event()
     bundle = {
         "queues": {"data": multiprocessing.Queue()},
@@ -441,23 +465,132 @@ def test_blocking_readiness_does_not_stall_heartbeat() -> None:
         _stop(thread, stop)
 
 
-@pytest.mark.timeout(120)
-def test_paused_flag_follows_event_within_budget() -> None:
-    """``paused`` в снимке меняется <= 0,8 с после ``clear()``/``set()`` (0,05 с сверка + 0,5 с снимок + запас).
+class _Sev(enum.StrEnum):
+    FAILURE = "failure"
 
-    Heartbeat с ``heartbeat_interval = 0,2`` добавляет не больше такта: бюджет приёмки 1.2 — <= 1 с целиком.
+
+class _Txt(enum.StrEnum):
+    CAMERA_DOWN = "camera down"
+
+
+def test_severity_enum_is_normalized_to_builtin_types_and_unpickles_clean() -> None:
+    """``StrEnum`` из плагина уходит наружу встроенным ``str``: снимок не пиклится ссылкой на класс плагина.
+
+    Иначе получатель без этого класса не распакует heartbeat (потеря liveness, раннее ревью MAJOR-1).
+    Проверка в чистом интерпретаторе (``-I``): ни плагина, ни фреймворка там не импортировать.
     """
+    HzRet.value = [{"severity": _Sev.FAILURE, "reason": _Txt.CAMERA_DOWN}]
+    orch, _ = _snapshot_of(HzRet)
+
+    snap = orch.readiness_snapshot()
+
+    [reason] = snap["reasons"]
+    assert type(reason["severity"]) is str and reason["severity"] == "failure", reason
+    assert type(reason["reason"]) is str and reason["reason"] == "camera down", reason
+    blob = pickle.dumps(snap)
+    assert b"test_readiness_hazards" not in blob, "снимок ссылается на модуль плагина"
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import pickle, sys; print(pickle.loads(sys.stdin.buffer.read())['reasons'][0]['severity'])",
+        ],
+        input=blob,
+        capture_output=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr.decode(errors="replace")
+    assert done.stdout.decode().strip() == "failure"
+
+
+def test_readiness_failure_log_key_is_exception_type_not_text() -> None:
+    """Серия отказов ``readiness()`` — по типу исключения: меняющийся текст не гонит лог с частотой снимка."""
+
+    services = MockProcessServices(name=_PROC)
+    services._current_process_status = "running"  # type: ignore[attr-defined]
+    orch = PluginOrchestrator(services=services)
+    orch.load_and_configure_managers([{"plugin_class": f"{_THIS}.HzRet", "plugin_name": "hz_ret"}])
+    orch.boot()
+    orch._plugins[0].readiness = lambda ctx: (_ for _ in ()).throw(RuntimeError(f"сбой {time.monotonic()}"))  # type: ignore[method-assign]
+
+    for _ in range(5):
+        orch.readiness_snapshot()
+
+    errors = [rec["msg"] for rec in services.logs if rec["level"] == "ERROR" and "readiness()" in rec["msg"]]
+    assert len(errors) == 1, errors
+
+
+@pytest.mark.timeout(120)
+def test_process_without_orchestrator_has_no_run_watch_worker() -> None:
+    """Процесс без плагинов (как PM или headless GUI): воркера ``run_watch`` нет, ``readiness_snapshot`` есть."""
     event = multiprocessing.Event()
     event.set()
-    thread, stop, own_ready = _start("PluginGenericProcess", [HzRet], event)
+    thread, stop, own_ready = _start("PlainProcess", [], event)
     try:
         assert own_ready.wait(_JOIN_S)
-        assert _wait(lambda: (_snap() or {}).get("paused") is False, 5.0), _snap()
-        for target_paused, change in ((True, event.clear), (False, event.set)):
-            started = time.monotonic()
-            change()
-            assert _wait(lambda: _snap()["paused"] is target_paused, 3.0), f"paused не стал {target_paused}"
-            elapsed = time.monotonic() - started
-            assert elapsed <= 0.8, f"paused стал {target_paused} через {elapsed:.2f} с (> 0,8 с)"
+        workers = SHARED["proc"].worker_manager.get_all_workers_status()
+        assert "readiness_snapshot" in workers, sorted(workers)
+        assert "run_watch" not in workers, sorted(workers)
     finally:
         _stop(thread, stop)
+
+
+@pytest.mark.timeout(120)
+def test_acceptance_chain_paused_flag_reaches_received_heartbeat_message() -> None:
+    """ACCEPTANCE 1.2 целиком: воркер снимка -> настоящий ``ProcessHeartbeat`` (0,2 с) -> spawn-очередь -> ``paused``.
+
+    ``heartbeat_interval = 0.2`` задан ключом верхнего уровня конфига процесса (``get_config`` его видит;
+    тест проверяет это по разнице ``timestamp`` соседних сообщений). Граница 1,5 с: номинально
+    0,05 (сверка) + 0,5 (снимок) + 0,2 (heartbeat) = 0,75 с, остальное — запас от мигания.
+    """
+    out = multiprocessing.get_context("spawn").Queue()
+    SHARED["queue"] = out
+    event = multiprocessing.Event()
+    event.set()
+    thread, stop, own_ready = _start("ChainProcess", [HzRet], event, heartbeat_interval=0.2)
+
+    def drain() -> None:
+        try:
+            while True:
+                out.get_nowait()
+        except Exception:  # noqa: BLE001 — очередь пуста
+            return
+
+    def receive_until(predicate: Any, deadline_s: float) -> list[dict]:
+        got: list[dict] = []
+        end = time.monotonic() + deadline_s
+        while time.monotonic() < end:
+            try:
+                msg = out.get(timeout=0.05)
+            except Exception:  # noqa: BLE001 — таймаут очереди
+                continue
+            got.append(msg)
+            if predicate(msg):
+                break
+        return got
+
+    try:
+        assert own_ready.wait(_JOIN_S)
+        warm = receive_until(lambda m: m.get("readiness", {}).get("ready") is True, 15.0)
+        assert warm and warm[-1]["readiness"]["paused"] is False, [m.get("readiness") for m in warm]
+        # темп heartbeat — настоящий 0,2 с (а не умолчание 5 с): 5 сообщений подряд с шагом < 0,6 с, поле в КАЖДОМ
+        steady = receive_until(lambda m: False, 1.3)
+        assert len(steady) >= 4, f"heartbeat реже 0,2 с: {len(steady)} сообщений за 1,3 с"
+        assert all("readiness" in m for m in steady), [sorted(m) for m in steady]
+
+        for target_paused, change in ((True, event.clear), (False, event.set)):
+            drain()
+            started = time.monotonic()
+            change()
+            got = receive_until(lambda m: m["readiness"]["paused"] is target_paused, 1.5)
+            elapsed = time.monotonic() - started
+            assert got and got[-1]["readiness"]["paused"] is target_paused, (
+                f"paused не стал {target_paused} за 1,5 с: {[m['readiness']['paused'] for m in got]}"
+            )
+            assert elapsed <= 1.5, elapsed
+    finally:
+        SHARED["queue"] = None
+        _stop(thread, stop)
+        out.close()
+        out.cancel_join_thread()
