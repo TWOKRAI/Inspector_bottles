@@ -58,12 +58,13 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 from __future__ import annotations
 
 import collections
+import json
 import math
 import os
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import TYPE_CHECKING, Any, TextIO, TypeGuard
 
 import cv2
 import numpy as np
@@ -125,6 +126,12 @@ _RECENT_MAXLEN = 32
 #: накопленное без применения). Тот же порядок величины, что _RECENT_MAXLEN — четырёх
 #: ручек стенда оператор физически не нажмёт быстрее этого числа раз между кадрами.
 _CONTROL_MAXLEN = 64
+
+#: DS-1 Task 1.1b: журнал истины (JSONL на диске, design.md §3). Каталог ``""`` — выключено.
+_DEFAULT_TRUTH_JOURNAL_ENC_HZ = 10.0
+_JOURNAL_SCHEMA = 1
+_JOURNAL_ERROR_CONTEXT = "scene_source.truth_journal"
+_JOURNAL_ERROR_THROTTLE_S = 30.0
 
 #: Task 5.2 (контракт лида §2) + 5.1b (§3): правда на проводе — TruthLedger + шесть
 #: уровней (пятый исходный + ``truth_false_alarm_frozen_xy`` — причина «те же X/Y с
@@ -221,7 +228,23 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._stale_ms: float = cfg.get("stale_ms", _DEFAULT_STALE_MS)
         # C-87: шов часов для досчёта энкодера; тесты подменяют ПОСЛЕ configure()
         self._clock = time.monotonic
+        # DS-1 1.1b: шов настенных часов журнала истины; тесты подменяют ПОСЛЕ configure()
+        self._wall = time.time
         self._camera_id = cfg.get("camera_id", _DEFAULT_CAMERA_ID)
+        # DS-1 1.1b: частота enc проверяется и при выключенном журнале — кривой ключ стенда виден сразу.
+        # Ошибка конфигурации, как оба spawn_*: ValueError выходит из configure().
+        journal_enc_hz_cfg = cfg.get("truth_journal_enc_hz", _DEFAULT_TRUTH_JOURNAL_ENC_HZ)
+        # Только int/float: bool (`true`) и строка («5») — ошибка конфигурации, а не молчаливое 1.0/5.0 Гц.
+        if (
+            isinstance(journal_enc_hz_cfg, bool)
+            or not isinstance(journal_enc_hz_cfg, (int, float))
+            or not math.isfinite(journal_enc_hz_cfg)
+            or journal_enc_hz_cfg <= 0
+        ):
+            raise ValueError(
+                f"scene_source: truth_journal_enc_hz должен быть числом > 0, получено {journal_enc_hz_cfg!r}"
+            )
+        self._journal_enc_period_s = 1.0 / float(journal_enc_hz_cfg)
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
@@ -393,6 +416,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
         else:
             background_desc = f"цвет {_BACKGROUND_BGR}"
 
+        # DS-1 1.1b: файл журнала — последним, после всех ValueError конфигурации (иначе кривой конфиг
+        # оставлял бы за собой созданный файл).
+        self._open_truth_journal(ctx, str(cfg.get("truth_journal_dir") or ""), geometry_cfg)
+
         ctx.log_info(
             f"scene_source: {self._width}x{self._height}, px_per_mm={px_per_mm}, belt_y_px={belt_y_px}, "
             f"spawner_kwargs={spawner_kwargs}, preset_path={preset_path!r}, фон={background_desc}, "
@@ -472,6 +499,12 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._drain_control()
         self._apply_pending_factory()
         now_encoder = self._read_world_encoder()
+        # DS-1 1.1b: ровно одно чтение настенных часов на produce() и только при включённом журнале;
+        # то же `now` решает об enc и уходит в строки spawn этого кадра.
+        journal_now: float | None = None
+        if self._journal is not None:
+            journal_now = self._wall()
+            self._journal_write_enc(journal_now, now_encoder)
 
         if self._spawner is not None and self._compositor is not None:
             if self._world_ready:
@@ -486,7 +519,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл  # no-health: ДОЛГ — вечный отказ фабрики виден только в log_error, health не видит (OPEN_QUESTIONS, Task 5.5c)
                     self._warn_factory_error(exc)
                 after_passports = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
-                self._update_truth_belt(before_ids, after_passports)
+                self._update_truth_belt(before_ids, after_passports, journal_now=journal_now, encoder=now_encoder)
             frame_rgb, _passports_in_view = self._compositor.render(
                 now_encoder, camera_rect=(0.0, 0.0, float(self._width), float(self._height))
             )
@@ -1122,12 +1155,107 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if self._ctx.state_proxy is not None:
             self._ctx.state_proxy.set(_OBJECTS_PATH, {oid: passport.to_dict() for oid, passport in current.items()})
 
-    def _update_truth_belt(self, before_ids: set[str], after: dict[str, Any]) -> None:
+    # ------------------------------------------------------------------ #
+    # Журнал истины (DS-1 Task 1.1b, design.md §3)
+    # ------------------------------------------------------------------ #
+
+    def _open_truth_journal(self, ctx: PluginContext, journal_dir: str, geometry_cfg: dict[str, Any]) -> None:
+        """Создать файл журнала и записать `header`. Пустой `journal_dir` — выключено: ни каталога, ни файла.
+
+        Повторный `configure()` закрывает прежний файл. Любой `OSError` (каталог, файл, заголовок) — одна
+        ошибка в health и журнал выключен до конца жизни узла: кадры идут дальше."""
+        previous = getattr(self, "_journal", None)
+        if previous is not None:
+            try:
+                previous.close()
+            except OSError as exc:
+                ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+        self._journal: TextIO | None = None
+        self._journal_last_enc_t: float | None = None
+        if not journal_dir:
+            return
+        t_wall = self._wall()
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(t_wall))
+        path = Path(journal_dir) / f"truth_{stamp}_{os.getpid()}.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # "a": повторный configure() в ту же секунду не затирает уже записанное
+            self._journal = path.open("a", encoding="utf-8", newline="\n")
+        except OSError as exc:
+            ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+            return
+        self._journal_write(
+            {
+                "kind": "header",
+                "schema": _JOURNAL_SCHEMA,
+                "t_wall": t_wall,
+                "px_per_mm": self._px_per_mm,
+                "geometry": geometry_cfg,
+                "camera_id": self._camera_id,
+            }
+        )
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        """STOPPED: закрыть журнал истины. Зовётся и после упавшего `configure()` — атрибута может не быть.
+
+        `_journal` обнуляется ДО закрытия: `produce()`, не успевший остановиться, больше не пишет в файл."""
+        journal = getattr(self, "_journal", None)
+        self._journal = None
+        if journal is not None:
+            try:
+                journal.close()
+            except OSError as exc:
+                ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+
+    def _journal_write(self, record: dict[str, Any]) -> None:
+        """Единственная точка записи журнала: строка JSON + `flush()`. Выключен — ничего не делает.
+
+        `OSError` (и `ValueError` — запись в закрытый файл) -> одна ошибка в health, файл закрыт, журнал
+        выключен до конца жизни узла (без повторов: иначе при полном диске каждый кадр платил бы за отказ)."""
+        journal = self._journal
+        if journal is None:
+            return
+        try:
+            journal.write(json.dumps(record, ensure_ascii=False) + "\n")
+            journal.flush()
+        except (OSError, ValueError) as exc:
+            self._journal = None
+            self._ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+            try:
+                journal.close()
+            except OSError:  # no-health: отказ записи уже заявлен выше; закрытие мёртвого файла — тот же инцидент
+                pass
+
+    def _journal_write_enc(self, now: float, encoder: float) -> None:
+        """Строка `enc`: только когда мир готов; первая — сразу, дальше — не раньше чем через период от
+        ПРЕДЫДУЩЕЙ записанной строки (не сетка: `last = now`, а не `last += period`)."""
+        if not self._world_ready:
+            return
+        last = self._journal_last_enc_t
+        if not math.isfinite(encoder):
+            return  # NaN/inf в строке дал бы невалидный строгий JSON; следующий конечный кадр запишет enc
+        # `now < last`: настенные часы прыгнули назад -> пересинхронизация, иначе enc молчит до прежней отметки
+        if last is not None and 0 <= now - last < self._journal_enc_period_s:
+            return
+        self._journal_last_enc_t = now
+        self._journal_write({"kind": "enc", "t_wall": now, "encoder": encoder})
+
+    def _update_truth_belt(
+        self,
+        before_ids: set[str],
+        after: dict[str, Any],
+        *,
+        journal_now: float | None = None,
+        encoder: float = 0.0,
+    ) -> None:
         """Task 5.2 (контракт лида §2): id, появившиеся между снимком до и после
         `spawner.tick()`, -> `ledger.on_spawn(passport)`; id, исчезнувшие -> `ledger.
         on_despawn(id)`. Объект, снятый заданием в ЭТОМ ЖЕ кадре (`_drain_jobs` идёт до
         `tick()`), уже отсутствует и в `before_ids` — diff его не видит, поэтому такой
-        объект не попадает в `on_despawn` дважды (он уже решён через `on_match`)."""
+        объект не попадает в `on_despawn` дважды (он уже решён через `on_match`).
+
+        DS-1 1.1b: на каждый реально новый id — строка `spawn` в журнал истины (если он включён и
+        `produce()` передал `journal_now`); своего чтения часов у спавна нет."""
         after_ids = set(after)
         new_ids = after_ids - before_ids
         gone_ids = before_ids - after_ids
@@ -1138,6 +1266,21 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 self._truth.on_spawn(after[object_id])
             for object_id in gone_ids:
                 self._truth.on_despawn(object_id)
+        if journal_now is not None:
+            # запись на диск — вне `_truth_lock`: медленный диск не должен держать `truth.status` потока команд
+            finite = math.isfinite(encoder)
+            for object_id in sorted(new_ids):
+                passport = after[object_id].to_dict()
+                if not finite:
+                    passport["spawn_encoder"] = None  # паспорт несёт тот же NaN, что и энкодер кадра
+                self._journal_write(
+                    {
+                        "kind": "spawn",
+                        "t_wall": journal_now,
+                        "encoder": encoder if finite else None,
+                        "passport": passport,
+                    }
+                )
 
     def _publish_truth_metrics(self) -> None:
         """Task 5.2 (контракт лида §2) + 5.1b (§3): шесть уровней `truth_*` на своём

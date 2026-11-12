@@ -153,6 +153,8 @@ frame_saver.output_dir
 frame_saver.save_every_n
 frame_saver.save_mode
 frame_saver.sidecar_key
+frame_saver.sidecar_keys
+frame_saver.sidecar_source
 frame_saver.subfolder_by_date
 frame_saver.trigger_key
 frame_saver.write_sidecar

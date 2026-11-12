@@ -52,7 +52,9 @@ scene_source ── журнал JSONL ──┐          center_crop → pixel_
 
 ## 4. `.json` кадра
 
-**`frame_saver` (Task 1.1a).** Существующие ключи не меняются. Регистры: `sidecar_keys: str = ""` — ключи верхнего
+### 4.1 `frame_saver` (Task 1.1a)
+
+Существующие ключи не меняются. Регистры: `sidecar_keys: str = ""` — ключи верхнего
 уровня item через запятую, копируются под своим именем; `sidecar_source: Literal["", "synthetic", "real"] = ""` —
 пишется как `source`, пусто — ключа нет. Слияние: `{**payload, **extras_без_коллизий, "source", "file", "width",
 "height", "saved_ts"}`; ключ, занятый в `payload`, пропускается (одна строка `log_warning` за жизнь узла). `frame` и
@@ -60,7 +62,9 @@ scene_source ── журнал JSONL ──┐          center_crop → pixel_
 конвертацию по `dict`/`list`/`tuple`: `np.generic` → `.item()`; `ndarray` на любой глубине — ключ верхнего уровня
 пропускается с предупреждением. Без неё `default=str` (`plugin.py:286`) записал бы `np.float32` строкой.
 
-**`join_frame_truth` (Task 1.1c)** дописывает ключи; ключи `frame_saver` не трогает:
+### 4.2 Ключи `join_frame_truth` (Task 1.1c)
+
+`join_frame_truth` дописывает ключи; ключи `frame_saver` не трогает:
 
 | Ключ | Тип | Смысл |
 |---|---|---|
@@ -68,11 +72,102 @@ scene_source ── журнал JSONL ──┐          center_crop → pixel_
 | `pred` | dict \| null | из `predictions[0]`: `class` (= `label`), `class_id`, `confidence`, `below_threshold`, `angle_deg`, `angle_valid`, `angle_mode` (= `angle_symmetry`), `model_id` (из item); null — список пуст |
 | `delta_angle_deg` | float \| null | §5 |
 | `hard`, `hard_reasons` | bool, list[str] | §6 |
-| `truth_join` | dict | `tool: "join_frame_truth"`, `schema: 1`, `status` (`matched` \| `no_object` \| `no_pick` \| `out_of_window` \| `ambiguous_journal`), `journal` (имя файла), `radius_mm`, `time_offset_ms`; без времени запуска — повторный прогон даёт те же байты |
+| `truth_join` | dict | `tool: "join_frame_truth"`, `schema: 1`, `status` (`matched` \| `no_object` \| `no_pick` \| `out_of_window` \| `ambiguous_journal`), `journal` (basename файла; `null`, если журнал не выбран: `no_pick`, `out_of_window`, `ambiguous_journal`), `radius_mm`, `time_offset_ms`, `angle_thr` (три флага прогона: по `.json` видно, чем посчитаны `truth` и `hard`); без времени запуска — повторный прогон с теми же флагами даёт те же байты |
 
-**Выбор журнала.** Окно журнала — `[header.t_wall, t_wall последней enc]`. Кадр (`saved_ts − offset`) относится к
-журналу, чьё окно его содержит; ни одного — `out_of_window`, больше одного — `ambiguous_journal`; в обоих случаях
-`truth = null`. `object_id` сравниваются только внутри одного журнала.
+### 4.3 Выбор и чтение журнала
+
+**Выбор журнала.** Окно журнала — `[t_wall первой enc, t_wall последней enc]`, границы включены. `header.t_wall` в окно
+не входит: между `header` (`Plugins/sim/scene_source/plugin.py:1177-1195`) и первой `enc` (пишется только при
+`_world_ready`, `:1232-1233`) лежит время запуска мира, интерполировать там нечем. Кадр (`t = saved_ts − offset/1000`)
+относится к журналу, чьё окно его содержит; ни одного (в том числе `t` в `[header.t_wall, первая enc)`) —
+`out_of_window`, больше одного — `ambiguous_journal`; в обоих случаях `truth = null`. Журнал без `header`, без `enc`
+или с одной `enc` — окно пусто: ни один кадр в него не попадает (`IndexError` исключён). `object_id` сравниваются только
+внутри одного журнала.
+
+**Чтение журнала** (`load_journal`; ничего из списка не бросает исключение). `Journal` — frozen dataclass: `name: str`
+(basename файла), `header: dict | None`, `passports: dict[str, ObjectPassport]` (по `object_id`), `enc: tuple[tuple[float,
+float], ...]` (`(t_wall, encoder)`), `t_from`, `t_to: float | None` (`t_wall` первой и последней `enc`; `None` — окно
+пусто).
+- Побеждает первый `header` (режим `"a"` даёт повторные, `plugin.py:1183`); следующие игнорируются. `header` без
+  `px_per_mm > 0` или с `geometry`, которую не принимает `BeltGeometry.from_dict`, — как отсутствующий.
+- `spawn` с `encoder: null`, без `passport` или с паспортом, который не разобрал `ObjectPassport.from_dict`
+  (`spawn_encoder: null` даёт `TypeError`), — пропуск, не считается. Повтор `object_id` в файле — остаётся первый.
+- `enc` с нечисловым или неконечным `t_wall`/`encoder` — пропуск. `t_wall` меньше последнего принятого (скачок часов) —
+  пропуск, остаётся более ранняя; равный — заменяет предыдущую (остаётся последняя).
+- Оборванная последняя строка и нечитаемая строка посередине — игнорируются. Если что-то пропущено, одна строка
+  предупреждения в stderr на журнал.
+
+### 4.4 Сведение кадра
+
+`join_sidecar` — только для `source == "synthetic"`:
+1. Проверки по порядку. `saved_ts` не конечное число (в том числе `bool`, строка, нет ключа) — `error`. `pick_xy` нет или
+   `null` — `no_pick` (журнал не выбирается). `pick_xy` не dict, нет `x_mm`/`y_mm` или они не конечные числа — `error`.
+   `predictions` нет/`null`/`[]` — `pred = null`; не список или `predictions[0]` не dict — `error`.
+2. `t = saved_ts − time_offset_ms / 1000`; `pick_journal` — `out_of_window` / `ambiguous_journal`.
+3. `ecap` — линейная интерполяция по двум соседним `enc` журнала на `t`, затем `int(round(...))` (встроенный `round`);
+   дальше везде только это целое.
+4. `match_job(journal.passports.values(), JobDone(index=-1, x_mm, y_mm, ecap=ecap, t=t), BeltGeometry.from_dict(header
+   ["geometry"]), match_radius_mm=radius_mm, px_per_mm=header["px_per_mm"])` — `Services/line_sim/core/matching.py:160`.
+   Все паспорта идут как `active` (`removed` пуст, `dup` недостижим). `matched` — невязка строго меньше радиуса
+   (`matching.py:196`).
+5. `matched` → `truth`: `class` = `class_name`; `angle_deg` = `passport.angle_deg % 360.0`, и если результат ≥ 360.0
+   (`(-1e-17) % 360.0 == 360.0`) — `0.0`; `ecap`; `along_mm` — проекция `pick − object_robot_xy(passport.spawn_encoder,
+   ecap, geometry, lateral_px=passport.lateral_px, px_per_mm=header["px_per_mm"])` на `(BELT_UX, BELT_UY)` —
+   `Services/line_sim/core/belt.py:10`; без `lateral_px`/`px_per_mm` проекция разошлась бы с невязкой `match_job`.
+6. `pred`: восемь ключей всегда — `class`, `class_id`, `confidence`, `below_threshold`, `angle_deg`, `angle_valid`,
+   `angle_mode`, `model_id`; отсутствующее в `predictions[0]` (модель без головы угла) — `null`; `model_id` — из
+   `sidecar["model_id"]`, нет — `null`. `pred` не зависит от `status`. `angle_valid` не `true` — `delta_angle_deg = null`.
+7. Нет истины (`truth = null`): `delta_angle_deg = null`, `hard = false`, `hard_reasons = []`.
+
+### 4.5 CLI и итоговая строка
+
+**CLI** (`main`). Флаги: `--frames DIR`, `--journal FILE` (обязательный, повторяемый), `--radius-mm` (> 0),
+`--time-offset-ms` (конечное), `--angle-thr` (> 0, умолчание 5.0). Нарушение или нечитаемый `--journal` — код 2 до первой
+записи.
+- Обход: `DIR` рекурсивно, `*.json` в порядке сортировки пути. Пара = `.json` + `parent / data["file"]` существует; нет
+  картинки (или `file` не строка) — пропуск, в `N` не считается. `.json`, который не разобрать как dict, — `error`, в `N`
+  считается. `source != "synthetic"` — в `N` считается, на запись не открывается, байты равны.
+- Для `synthetic` все шесть ключей (`truth`, `pred`, `delta_angle_deg`, `hard`, `hard_reasons`, `truth_join`)
+  пересчитываются с нуля, а не дополняются: повтор с другими флагами не оставляет старую машинную метку (радиус 20 → 5:
+  `matched` → `truth: null`, `hard: false`, `hard_reasons: []`). Остальные ключи файла не трогаются.
+- Запись: `json.dumps(..., ensure_ascii=False, indent=2)` как в `frame_saver` (`Plugins/io/frame_saver/plugin.py:366`); tmp
+  `<имя>.json.<pid>.tmp` (суффикс `.tmp`: обход не примет его за вход, два CLI не делят имя), `replace`, при сбое
+  `unlink(missing_ok=True)`. `frame_saver` при входе в папку удаляет все `*.tmp` (`:389`, `:406-412`) — CLI на живом
+  каталоге может потерять tmp: это `error` файла, прежний `.json` цел. Потеря обновления при живой перезаписи того же
+  имени возможна только при `index_source: frame_id` (§8) — принято.
+- Ошибка файла (`error`): любое исключение разбора, `ValueError` из `match_job`/`object_robot_xy` (`radius <= 0`,
+  `lateral_px != 0` без `frame_down`), `OSError` записи. Одна строка в stderr, файл не тронут, счёт `E`; остальные файлы
+  идут дальше. Статус `error` в `.json` не пишется. Код выхода 1, если `E > 0`, иначе 0.
+
+**Итоговая строка** — одна строка в stdout, порядок и слова фиксированы:
+`пар N, synthetic S, matched M, no_object O, no_pick P, out_of_window W, ambiguous A, error E, hard H, медиана |Δ| D°, медиана along_mm L мм, предложение --time-offset-ms X`.
+Счётчики — целые; `S = M + O + P + W + A` (`E` в `S` не входит); `H` — файлы прогона с `hard = true`. `D`, `L`, `X` — одна
+цифра после точки (`2.0`, `-1.7`, `103.8`; `-0.0` печатается `0.0`). `D` — медиана `|delta_angle_deg|` по файлам, где
+дельта не `null`; `L` — медиана `along_mm` по `matched`; медиана чётного ряда — среднее двух средних. Нет значения —
+токен `n/a` без единицы: `медиана |Δ| n/a`, `медиана along_mm n/a`, `предложение --time-offset-ms n/a`.
+`X = offset − L / v × 1000` (мм / (мм/с) → с → мс); `v` журнала = `(enc[-1] − enc[0]) × FACTOR_MM / (t_to − t_from)`
+(`FACTOR_MM` — `Services/line_sim/core/belt.py:10`), `v` для `X` — среднее по журналам (по одному разу), которые
+использовали `matched`-файлы. `v <= 0` или `M == 0` — `L` и `X` — `n/a`, без исключения. `X` — **диагностика**, не
+поправка: в нём смешаны задержка и постоянный сдвиг вдоль хода (~1,7 мм по 0.1, на ленте 20 мм/с это ~84 мс).
+
+### 4.6 Тесты автора (hazards, Task 1.1c)
+
+Файл `Services/line_sim/tests/test_join_frame_truth_hazards.py`; на каждый пункт — тест с литералами:
+- сбой `replace` (подмена) — прежний `.json` цел, `<имя>.json.<pid>.tmp` удалён, `E = 1`;
+- одинаковый `object_id` в двух журналах не путается (`truth_join.journal`, `truth.class` разные);
+- журнал с двумя `header`, `spawn` без `encoder`/`passport`, `spawn_encoder: null`, немонотонными и равными `t_wall`,
+  оборванной последней строкой и мусором посередине — без исключения, по правилам §4.3;
+- журнал без `header`, без `enc`, с одной `enc` — все кадры `out_of_window`, без `IndexError`;
+- `v == 0` (две `enc` с равным `encoder`) и `M == 0` — `n/a`, без исключения и без `median([])`;
+- `error` (§4.5): нет/нечисловой `saved_ts`, `pick_xy` не dict, битый JSON, `ValueError` из `match_job`
+  (`lateral_px != 0` без `frame_down`) — байты файла целы, соседний файл обработан, код выхода 1;
+- argparse: радиус ≤ 0, offset `nan`/`inf`, `--angle-thr` ≤ 0 — код 2, ни одной записи;
+- повтор с другими флагами (радиус 20 → 5; `--angle-thr` 5 → 20): `truth: null`, `hard: false`, `hard_reasons: []`,
+  `truth_join` с новыми значениями флагов — старая метка не переживает;
+- `truth.angle_deg`: `-1e-17` → `0.0`; `360.0` → `0.0`; `-30.0` → `330.0`; `390.0` → `30.0`;
+- `lateral_px != 0` при `frame_down` в `geometry`: `matched`, `along_mm` верен (`px_per_mm` и `lateral_px` переданы).
+
+### 4.7 Машинная метка
 
 **Контракт «машинная метка».** Машинная метка обучения — только `truth` от `join_frame_truth`. Инструмент открывает на
 запись только `.json` с `source == "synthetic"`; у остальных байты до и после равны. `training_label(sidecar) -> dict |
