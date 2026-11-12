@@ -1,0 +1,127 @@
+# Task A — break-injection: наблюдённое (developer)
+
+Код `4115ad9b9` (рабочее дерево ему равно: `git diff 4115ad9b9 --stat -- scripts` пуст). Предсказания лида: `docs/reports/2026-11-12_alpha-hard-split-injection-predictions.md` (`bacec8e19`), не правились.
+Механика: скрипт `inj-alpha/harness.py` в scratch (`/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/6d8921bd-b379-4dca-9d10-4c41378d1707/scratchpad/inj-alpha`): оригиналы `logic.py`/`run_alpha.py` из `git show 4115ad9b9:…`; на инъекцию — одна `str.replace` по точной строке (assert: ровно 1 вхождение; неприменимых нет), прогон гейтом `light` (`pytest -q --tb=no -rf scripts/alpha_sim/tests Plugins/processing/word_layout/tests/test_p3_disk_journal.py`, `< /dev/null`), откат `cp` из scratch и `git diff --stat` после каждой (везде пуст; исходящие результаты — `inj-alpha/results.json`, `out.txt`).
+Префикс `A:` = `test_alpha_split_acceptance.py::`. «Совпало» = красный набор равен предсказанному.
+
+| № | Применённая правка | Фактический красный набор | Совпало | Расхождение и диагноз |
+|---|---|---|---|---|
+| I1 | `logic.py:687` `if prev_filled is not None:` → `if False:` | A:a1_d_line_with_filled_8, a1_none_means_literal, a1_k9, a1_case_c_follows, a1_run_expected_d_line…, a1_run_snapshot_after_b…, a1_run_c_gets…, a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle…; ex: g14 (10) | НЕТ (сверх) | Красных больше. `a1_none_means_literal` предсказан зелёным, но его вторая половина — пара `prev_filled=8` + литерал 9/9 → ожидает FAIL; тест не слаб, предсказание неточно. `a1_case_c_follows`, `a1_run_snapshot_after_b` — те же свойства для C и пары «до/после». `a2_run_unrecognized_last…` / `…lost_disc_in_middle…` краснеют, потому что мир плагина печатает 8/9 (2/3), а без каскада `D/C word_line` FAIL, `D случай: PASS` не выполняется. Предсказанные красные все есть. Контроли зелёные (`a1_other_word_change`, `a1_case_b_ignores`, `a1_run_without_flip`) |
+| I2 | `run_alpha.py:~526` `prev_filled` из `self.dump["cases"][prev]["regs_after"]` (регистры на конец прошлого случая, как «снимок после B»), не из регистров перед случаем | A:a1_run_expected_d_line…, a1_run_snapshot_after_b… (2) | НЕТ (сверх на 1) | `a1_run_snapshot_after_b_would_be_wrong_pair` — парный тест того же свойства «до, а не после» (регистр 8 на начало D, 9 после B): краснеет правомерно, предсказание «других нет» неполно. Допущение: «регистры после случая» понял как снимок конца прошлого случая (то, что в тестах названо «снимок после B»); регистры после ТЕКУЩЕГО случая дали бы красными все прогоны с D (слово 3/9), я их не брал |
+| I3 | `logic.py` `_unrecognized`: `startswith((_SKIP_BELOW, _SKIP_NO_PRED))` → `startswith(_SKIP_NO_PRED)` | A:a3_below_threshold_alone_when_class_and_angle_match (1) | НЕТ | Предсказанные `a2_unrecognized_last_disc_below_threshold…` и `a2_run_unrecognized_last_disc…` остались ЗЕЛЁНЫМИ: у B#12 строка читает «И», не «М», поэтому причины `letter`/`feed` и так помечают диск непризнанным (критерий избыточен). Тест не слаб по заявленной гарантии: пропуск «ниже порога» при верной букве ловит только `a3_below_threshold_alone…` (`klass == ACC`, `unrecognized == 1`). Предсказание лида ошибочно |
+| I4 | `logic.py` `_check_klass` `jobs.count`: `<= u` → `<= u + 1` | A:a2_checks_are_mechanism_when_nothing_unrecognized[jobs_count], a2_checks_off_by_two… (2) | ДА | Расхождение `jobs.count` в параметре = 1, поэтому он краснеет |
+| I5 | `logic.py` `_check_klass`: `u = 0` первой строкой | A:a2_unrecognized_last_disc_below_threshold…, a2_unrecognized_without_prediction_whole_row…, a2_jobs_emitted_uses_growth_over_before, a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle… (5) | НЕТ (сверх на 1) | Сверх: `a2_unrecognized_without_prediction_whole_row…` — он тоже утверждает ТОЧНОСТЬ четырёх проверок D при U=1; краснеет правомерно. Контроли зелёные |
+| I6 | `logic.py` `_disc_klass`: `n == n_exp and` убрано | A:a2_progress_cascade_requires_equal_n (1) | ДА | — |
+| I7 | `logic.py` `_disc_klass`: `abs(k - k_exp) <= u_before` убрано (только `n == n_exp`) | A:a2_progress_cascade_limited_by_unrecognized_before, a2_progress_off_by_one_without_unrecognized_before…, a2_row_reasons_decide_klass[progress_without_losses] (3) | НЕТ (сверх на 1) | Сверх: параметр `progress_without_losses` ([4/9] вместо [3/9], U=0) — то же свойство «без потерь progress = МЕХАНИЗМ»; правомерно |
+| I8 | `logic.py:627` `reliable = True` | A:a2_unreliable_alignment_all_mechanism_no_u_no_hard (1) | ДА | — |
+| I9 | `logic.py` `hard_reasons`: `> angle_thr` → `>= angle_thr` | A:a3_angle_boundary…[delta_exactly_5_0], […[delta_5_04_rounds_to_5_0]], a3_run_angle_reason_threshold_flag_and_boundary (3) | ДА | Оба параметра дают Δ ровно 5,0 после округления |
+| I10 | `logic.py` `hard_reasons`: убран ранний `return ["no_prediction"]` (причина добавляется, остальные считаются) | A:a2_unrecognized_without_prediction_whole_row…, a3_no_prediction_skips_class_and_angle_reasons, a3_run_no_prediction_record (3) | НЕТ (сверх на 1) | Сверх: `a2_unrecognized_without_prediction…` утверждает `_hard == [(2, ["no_prediction"])]`; правомерно |
+| I11 | `logic.py` `_delta_deg`: `wrap180(net - truth)` → `net - truth` | A:a3_angle_difference_wraps_around_360 (1) | ДА | B#12 (−174,2) зелёный, как предсказано |
+| I12 | `logic.py` `_delta_deg`: округление до 0,1° убрано | A:a3_angle_boundary…[delta_5_04_rounds_to_5_0], a3_run_angle_reason_threshold_flag_and_boundary (2) | НЕТ (сверх на 1) | Сверх: run-тест сравнивает `delta_angle_deg == 5.8`, а сырая разность 35,8−30,0 = 5.800000000000001; тест ловит и округление в записи, а не только в границе. Правомерно |
+| I13 | `run_alpha.py:~810` блок A2 печатается ПОСЛЕ строки `итог:` | 28 красных: 14 `a2_run_*` (все печатающие блок, включая exchange/layout_log), a1_run_expected_d_line…, a1_run_without_flip…, a3_run_angle_reason…, a3_run_records_ordered…, a3_run_empty_flag…, a3_run_write_error[2]; ex: g6, g8, g9, g14, g15, runner `test_full_run_on_fakes`, `test_full_run_failing_job_still_does_home_and_stop` | НЕТ (сверх на 5 приёмочных; существующие — ровно 7 предсказанных) | Сверх: `a1_run_expected…`, `a1_run_without_flip…` (`lines[-1] == _SUMMARY_OK`), `a3_run_angle…`, `a3_run_records_ordered…`, `a3_run_empty_flag…` (читают хвост через `_a2`) — все опираются на «итог последний»; правомерно |
+| I14 | `run_alpha.py:288` `mark()`: метка `прервано` не добавляется (`precond` ставится) | A:a2_run_ctrl_c_in_case_is_interrupted_label (1) | ДА | — |
+| I15 | `logic.py` `runner_check_klass`: всегда `MECH` | A:a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle… (2) | ДА | Класс `feed` при U≥1 покрыт обоими |
+| I16 | `logic.py` `exit_code`: код 0, если среди FAIL `CaseResult` нет строк класса ≠ ТОЧНОСТЬ | A:a1_run_c_gets_prev_filled_from_d_register, a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle…, a3_run_b12_record_literal…, a3_run_records_ordered…, a3_run_empty_flag…, a3_run_write_error[2]; ex: `test_p4_alpha_logic.py::test_exit_code` (9) | НЕТ (сверх на 7) | Сверх приёмочных: все `a3_run_*`/`a1_run_c…`, где assert `rc == 1` при FAIL только класса ТОЧНОСТЬ — правомерно. `test_exit_code` — артефакт моей формулировки инъекции: он строит `CaseResult("B", (), (), ok=False)` без строк, перебор по строкам даёт «нет не-ТОЧНОСТЬ FAIL» → 0; существующий тест не слаб и не связан с гарантией |
+| I17 | `logic.py` `judge_case`: у диска без строки журнала подставляется `DiskLine("?", 0, … "нет предсказания")` и ожидание → пишется запись `hard` | A:a2_missing_line_is_mechanism_and_not_hard…, a3_run_disc_without_journal_line_is_not_in_file_pair (2) | ДА | — |
+| I18 | `run_alpha.py:~830` `if not hard_out:` → `if hard_out is None:` | A:a3_run_empty_flag_value_means_not_set (1) | ДА | — |
+| I19 | `run_alpha.py`: вызов `write_hard_out` убран из `finish()` и поставлен в `_end` после `finish()` | A:a3_run_file_created_on_p0_failure, a3_run_write_error[no_dir], […[dir_instead_of_file]] (3) | ДА | Контроли `…on_ctrl_c`, `…on_precondition_in_p1` зелёные |
+| I20 | `run_alpha.py:640` `replace(result, …)` → `L.CaseResult(cid, result.rows, checks, ok, result.pairs)` (теряются `unrecognized`/`hard`) | A:a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle…, a3_run_b12_record_literal…, a3_run_no_prediction_record, a3_run_angle_reason…, a3_run_below_threshold_with_ml_inference…, a3_run_records_ordered…, a3_run_disc_without_journal_line…, a3_run_empty_flag…, a3_run_write_error[2] (11) | ДА | Все `a3_run_*` с непустым файлом и `a2_run_*` с ТОЧНОСТЬ-каскадом |
+
+Итог: совпало точно 11 из 20 (I4, I6, I8, I9, I11, I14, I15, I17, I18, I19, I20); 8 — красные сверх предсказания (I1, I2, I5, I7, I10, I12, I13, I16), во всех сверхкрасные объяснены одним и тем же свойством гарантии, а не слабостью; 1 — предсказанные красные остались зелёными (I3). Ни одного случая «красный предсказан, а зелёный» кроме I3. Предсказанные контроли, ставшие красными: только `a1_none_means_literal` (I1).
+
+## Откат
+
+После последней инъекции и отката: `pytest -q --tb=no scripts/alpha_sim/tests Plugins/processing/word_layout/tests/test_p3_disk_journal.py` → `212 passed, 1 warning in 3.02s`. `git diff --stat` пуст, `git status --short` пуст (отчёты предсказаний/наблюдённого лежат отдельно). Тесты и код не правились, кроме временных инъекций с откатом `cp`.
+
+## Что оставил открытым / ненадёжно
+
+- I3: критерии «не признан сетью» избыточны на сценарии B#12 (причина `letter`/`feed` уже помечает диск), поэтому предсказанные приёмочные тесты не ловят выпадение «ниже порога» из критерия; ловит только `a3_below_threshold_alone…`. Слабости нет, но защита в `run()`-уровне держится на одном judge-тесте.
+- I2: формулировка «регистры после случая» неоднозначна; я взял «регистры на конец прошлого случая» (`regs_after`). Если лид имел в виду регистры после ТЕКУЩЕГО случая, результат другой (красных намного больше).
+- I16 и I17: инъекции написаны мной по описанию (I16 — через строки; I17 — подмена пустой строки журнала «нет предсказания»). Другая реализация той же поломки может дать другой набор (пример: `test_exit_code` в I16).
+- I20: инъекция теряет и `unrecognized`, и `hard` вместе, поэтому по отдельности потерю `unrecognized` (виден только через класс `feed`) этот прогон не разделяет; I15 косвенно покрывает класс `feed`.
+- Каждая инъекция проверена одним прогоном; повторяемость/флаки не измерялись (тесты на фейковых часах, детерминированы).
+
+## Повтор I3 после добавления сторожа
+
+Дыра I3: критерий «пропуск ниже порога» в `_unrecognized` на уровне `run()` не держал ни один тест (у B#12 буква «И» ≠ «М», диск «не признан» и по `letter`/`feed`).
+Новый файл `scripts/alpha_sim/tests/test_alpha_split_hazards.py` (hazard-тест автора, два параметра): сеть отдаёт ВЕРНУЮ букву «М» 300,0° с пропуском
+`(М 0.43 < 0.50)` / `(М 0.31 < порог ml_inference)`. Ожидание (литералы): `класс B #12: ТОЧНОСТЬ` и пять каскадных строк B
+(`jobs.count`, `regs.slots_filled`, `regs.jobs_emitted`, `regs.done`, `feed`) — ТОЧНОСТЬ; `МЕХАНИЗМ: PASS`; `ТОЧНОСТЬ: 1 трудных (B #12)`; `итог:` последняя, rc 1;
+в `--hard-out` одна запись целиком: `hard_reasons == ["below_threshold"]`, `pred == {"class": "М", "angle_deg": 300.0, "confidence": 0.43 | 0.31, "below_threshold": true}`,
+`conf_thr == 0.5 | null`, `delta_angle_deg == 0.0`.
+
+| Прогон | Предсказание лида | Факт | Совпало |
+|---|---|---|---|
+| Новые тесты на коде `4115ad9b9` | зелёные | `2 passed` | ДА |
+| I3 повторно (та же правка `_unrecognized`: `startswith(_SKIP_NO_PRED)`) | красные ровно новые тесты и `a3_below_threshold_alone_when_class_and_angle_match` | `3 failed, 211 passed`: `a3_below_threshold_alone_when_class_and_angle_match`, `test_right_letter_below_threshold_is_accuracy_and_hard[numeric_threshold]`, `[ml_inference_threshold]` | ДА |
+
+После отката: `214 passed` (212 + 2 новых), `ruff check scripts/alpha_sim` и `ruff format --check` по новому файлу и `logic.py`/`run_alpha.py` чисто; `git diff --stat` пуст (изменения — только два неотслеживаемых файла: новый тест и этот отчёт).
+Замечание: новый файл импортирует приватные помощники приёмочного файла (`_Net`, `_patch_cases`, `_run`, `_a2`, `_read_hard`, `_pre`, `_full`); переименование там сломает сторож.
+
+## Раунд 2 (после ревью стадии 5, раунд 1; спека — редакция 3)
+
+Что изменено (developer, не коммитил): `run_alpha.py` — `mark(label, precond=True)`, `_cleanup_step` зовёт `mark("ошибка ДОМОЙ/СТОП", precond=False)` (blocker: `word_set`-FAIL в B + исключение `robot_park_all` в уборке теперь rc 1, как в main); артефакт форматирования у `self.marks` убран.
+`logic.py` — `_explained` / `_disc_klass(…, angle_off)`: `r` и `ARGS[9]` «вне окна» объяснены только при `|wrap180(угол строки − угол истины)| > _R_TOL + _EPS` (истина — подача из `feed`, иначе литерал), `ARGS[9] нет` — никогда, `progress` — при том же `n` и `0 ≤ k_лит − k_факт ≤ U_before`; `_hard_record`: `pred.below_threshold` берётся из `"below_threshold" in reasons` (regex остался только для чисел).
+README (раздел «Класс FAIL»: правило «объяснена», ограничение повторяющихся букв, оговорка про `МЕХАНИЗМ: PASS`, метка из уборки) и STATUS (224 passed, hazards-файл) обновлены.
+
+Приёмочные тесты слепого tester, поправленные по списку лида (только ожидаемый класс; мутации не менялись), `test_alpha_split_acceptance.py::test_a2_row_reasons_decide_klass`:
+- `[only_r]` (в журнале верный угол, `r` 60→40): ТОЧНОСТЬ → МЕХАНИЗМ;
+- `[only_ARGS9]` (верный угол, `ARGS[9]` 64536 вне окна): ТОЧНОСТЬ → МЕХАНИЗМ;
+- `[r_and_ARGS9]` (то же вместе): ТОЧНОСТЬ → МЕХАНИЗМ.
+Причина: при угле журнала в допуске красное по `r`/`ARGS[9]` — дефект механики (ред. 3). Контроль «угол журнала вне допуска → ТОЧНОСТЬ» перенесён в новые тесты (`test_r_and_args9_off_with_angle_misread_over_tolerance_is_accuracy[r_only|r_and_args9]`). `[r_plus_pick]`, `[progress_without_losses]` и остальные не менялись (до правки красными были ровно эти три).
+
+Новые тесты (`test_alpha_split_hazards.py`, 12 всего с прежними двумя; все зелёные с первого прогона по литералам спеки): S1 `ARGS[9]` нет при `argc 10` (`_NoArg9`), S2 `ARGS[9]` +1000 у всех заданий B, S3 знак `r` перевёрнут у B#3 — все три `МЕХАНИЗМ: FAIL (B #1, B #3, …)`/`(B #3)`, верный угол; контроль (сеть прочла Е 30° как 50°, `r-50.0`, при необходимости и `ARGS[9]`) → `класс B #3: ТОЧНОСТЬ`, `МЕХАНИЗМ: PASS`, `ТОЧНОСТЬ: 1 трудных (B #3)`; `[4/3]` при `[3/3]` и потере диска раньше → `класс D #5: МЕХАНИЗМ`; `word_set` в B + исключение park в уборке → rc 1, `МЕХАНИЗМ: FAIL (B word_set, ДОМОЙ, ошибка ДОМОЙ/СТОП, не выполнены: D, C)`; исключение внутри случая → `(ошибка, не выполнены: B, D, C)`, rc 3; Ctrl-C в `normal_tail` → `(прервано, не выполнены: ДОМОЙ, СТОП)`; пропуск `уверенность ниже порога` без скобок → `pred.below_threshold true`, `confidence null`.
+
+Механика: копии `logic.py`/`run_alpha.py` для отката взяты из РАБОЧЕГО дерева (правки раунда 2 не закоммичены; лид закоммитит после), откат — `cp`; после каждой инъекции `md5(git diff)` равен исходному (`7a1f2cf9e2e6874b91791a6d1989aa60`), харнесс — `inj-alpha/harness_r2.py`.
+
+| № | Правка | Фактический красный набор | Совпало | Примечание |
+|---|---|---|---|---|
+| I21 | `logic.py` `_explained`: `r` → `True`, `ARGS[9]` → `True` (угол журнала не учитывается) | H:test_args9_missing…, test_args9_shifted…, test_r_sign_flipped… + A:test_a2_row_reasons_decide_klass[only_r], [only_ARGS9], [r_and_ARGS9] (6) | НЕТ (сверх на 3) | Сверх — три приёмочных параметра, которые теперь ждут МЕХАНИЗМ (те же свойства); контроль «угол вне допуска → ТОЧНОСТЬ» зелёный, как предсказано |
+| I22 | `run_alpha.py:725` `mark(…, precond=False)` → `mark(…)` | H:test_word_set_fail_plus_park_exception_in_cleanup_keeps_exit_code_1 (1) | ДА | — |
+| I23 | `logic.py` `0 <= k_exp - k <= u_before` → `abs(k_exp - k) <= u_before` | H:test_progress_k_above_literal_is_mechanism_even_with_loss_before (1) | ДА | `a2_progress_cascade_limited…`, `a2_run_lost_disc_in_middle…` зелёные |
+| I24 | `run_alpha.py:725` в `_cleanup_step` метка не ставится | H:test_word_set_fail_plus_park_exception_in_cleanup_keeps_exit_code_1 (1) | ДА | тот же тест держит и rc (I22), и метку (строка `mech`); `a2_run_home_exception_in_tail…` зелёный |
+| I25 | `run_alpha.py:~892` метка `ошибка` в случае → только `self.precond = True` | H:test_unexpected_exception_inside_case_is_error_label (1) | ДА | `a2_run_unexpected_exception_in_p1…` зелёный |
+| I26 | `run_alpha.py:~903` метка `прервано` в `normal_tail` → только `self.precond = True` | H:test_ctrl_c_in_normal_tail_is_interrupted_label (1) | ДА | `a2_run_ctrl_c_in_case…` зелёный |
+| I27 | `logic.py` `below_threshold` в `pred` из `bool(below)` (regex) | H:test_below_threshold_skip_without_parentheses_still_flags_below_threshold (1) | ДА | — |
+
+Итог: 6 из 7 точно (I22–I27); I21 — красные сверх предсказания (три приёмочных параметра с обновлёнными ожиданиями). Полный набор на откате: `224 passed`; `ruff check scripts/alpha_sim` и `ruff format --check` по изменённым py-файлам чисты.
+
+Что оставил открытым / ненадёжно (раунд 2): (1) `angle_off` сравнивает угол журнала с подачей из `feed` (иначе литерал); окно `r` в `_judge_taken` ждёт литерал `e.angle`, поэтому при `feed` с углом, сильно отличающимся от литерала, `r` может краснеть там, где `angle_off` ложно — безопасное направление (МЕХАНИЗМ); отдельным тестом не покрыто. (2) I22/I24 ловит один и тот же тест (две гарантии в одном); если его ослабить, обе инъекции пройдут вместе. (3) Копии для отката из рабочего дерева, а не из коммита — до коммита лида проверка «откат = исходник» опирается на `md5(git diff)`. (4) Не прогонялся реальный стенд.
+
+## Раунд 3 (Opus-ревью ветки, спека — редакция 4)
+
+Что изменено (developer, не коммитил): `logic.py` — `U` (`CaseResult.unrecognized`, `U_before`, `U` проверок, условие `U ≥ 1` у `regs.done`/`feed`) считает только не признанные диски, СДВИГАЮЩИЕ счёт
+(`(e.skip is None) != (line.skip is None)`); не признанный диск с совпавшим «взят/пропущен» остаётся ТОЧНОСТЬ-строкой и записью `hard`, но в `U` не входит (B1). `_disc_klass`: не признанный диск — ТОЧНОСТЬ, КРОМЕ причин
+`pick`, `ARGS[2..6]`, `ARGS[8]`, `argc`, `res_status`, `res_errno`, «нет задания» (набор `_MECH_KEYS`) — тогда МЕХАНИЗМ (S3). README — одним абзацем правило `U` и исключения S3; STATUS — 232 passed и отложенное.
+
+Приёмочный тест слепого tester, противоречащий ред. 4 (правка — только число, остальное не менялось): `test_alpha_split_acceptance.py::test_a2_unrecognized_by_letter_key_and_by_feed_key`:
+- `res_l.unrecognized` (ошибка буквы «Й» вместо «И» у B#4, ячейка взята): 1 → 0 (счёт не сдвинут);
+- `res_f.unrecognized` (подана другая буква у B#3, ячейка взята): 1 → 0.
+Класс строк (`{4: ACC}`, `{3: ACC}`) не менялся. До правки красным был ровно этот один приёмочный тест.
+
+Новые тесты (`test_alpha_split_hazards.py`, +8: 5 B1 и 3 S3; все зелёные с первого прогона): (а) D#1 «П» ниже порога + `done=False` — judge и `run()`: `unrecognized == 0`, `класс D #1: ТОЧНОСТЬ`, `класс D regs.done: МЕХАНИЗМ`, `МЕХАНИЗМ: FAIL (D regs.done)`, `ТОЧНОСТЬ: 1 трудных (D #1)`;
+(б) сдвиг `jobs_emitted` на 1: judge на D#1 (13 при before 9) и `run()` на C#4 (верная буква «Е» ниже порога там, где литерал и так пропуск; `jobs_emitted` 16 вместо 15) — `МЕХАНИЗМ: FAIL (C regs.jobs_emitted)`. В `run()` для D сдвиг счётчика невозможен: хвост D ждёт заданий по `jobs_emitted` следующего случая и уходит в предусловие, поэтому `run()`-вариант (б) сделан на последнем случае C;
+(в) контроль: `_b_lost_last` — `unrecognized == 1`, четыре проверки ТОЧНОСТЬ; S3: ошибка буквы у B#4 + `pick` вне окна / `res_status 0` / `ARGS[2]` вне окна — `{4: МЕХАНИЗМ}` (контроль: одна ошибка буквы — `{4: ТОЧНОСТЬ}`).
+
+Механика: копии для отката из РАБОЧЕГО дерева (правки раунда 3 не закоммичены), `md5(git diff)` после каждой инъекции равен исходному (`ddae81c63261ab7fb63ee5817395e179`), харнесс `inj-alpha/harness_r3.py`.
+
+| № | Правка | Фактический красный набор | Совпало | Примечание |
+|---|---|---|---|---|
+| I28 | `logic.py` условие `U`: убрано «взят/пропущен не совпал» (считаются все не признанные) | A:a2_unrecognized_by_letter_key_and_by_feed_key; H: два judge-теста B1 и два run-теста B1 (5) | НЕТ (сверх на 1) | Сверх — приёмочный параметр, ставший 0 (то же свойство); `a2_unrecognized_last_disc_below_threshold…` зелёный, как предсказано; предсказанные (а), (б) красные |
+| I29 | `logic.py`: условие перевёрнуто (`==` вместо `!=`) | 21 красный: A:a2_unrecognized_last_disc…, a2_unrecognized_by_letter_key…, a2_unrecognized_without_prediction…, a2_progress_cascade_limited…, a2_checks_off_by_two…, a2_jobs_emitted_uses_growth…, a2_other_checks…[word_norm, slots_total, word_line], a2_unreliable_alignment…, a3_below_threshold_alone…, a2_run_unrecognized_last_disc…, a2_run_lost_disc_in_middle…; H: right_letter_below_threshold[2], progress_k_above_literal, b1_judge[2], b1_run[2], b1_control | НЕТ (сверх на 17) | Предсказанные три приёмочных и контроль красные; сверх — все тесты, где нужен корректный `U ≥ 1` (инверсия ломает его и для сдвигающих дисков). `a2_checks_are_mechanism_when_nothing_unrecognized` зелёный, как предсказано. Инъекция «шире, чем задумано» — тест не слаб |
+| I30 | `logic.py` `_disc_klass`: не признанный диск всегда ТОЧНОСТЬ | H:test_s3_…[pick_out_of_window], […res_status_0], […ARGS2_out_of_window] (3) | ДА | A2-тесты «не признан → ТОЧНОСТЬ целиком» зелёные |
+| I31 | `logic.py`: `_MECH_KEYS` расширен на `cell` и `place` | красных нет (`232 passed`) | НЕТ | Находка: ни один тест не держит «не признанный диск с причиной `cell`/`place` остаётся ТОЧНОСТЬ». Предсказанные тесты (`…letter_key_and_by_feed_key`, `…without_prediction…`) причин `cell`/`place` не содержат; новые S3 зелёные, как предсказано. Слабое место теста, не кода |
+
+Итог раунда: полный набор на откате `232 passed` (224 + 8 новых), `ruff check scripts/alpha_sim` и `ruff format --check` по изменённым py-файлам чисты, `git diff` после инъекций неизменен. Точно совпали I30; I28 и I29 — сверх предсказания по объяснимым причинам; I31 — зелёный набор (находка).
+
+Отложено в этом раунде по решению лида: S1 (assert results/shown), S2 (вынос фейков в `_fakes.py`), nit-ы.
+
+Что оставил открытым / ненадёжно (раунд 3): (1) I31 — класс причин `cell`/`place` у не признанного диска (`ТОЧНОСТЬ` по спеке) ничем не защищён; нужен тест «ошибка буквы + плагин занял другую ячейку → строка ТОЧНОСТЬ» (если лид хочет — одно judge-правило в hazards). (2) `run()`-вариант (б) для D невозможен без изменения `_tail_of_previous` (хвост опирается на `jobs_emitted`), поэтому для D — judge-уровень, для `run()` — C#4. (3) Критерий «сдвигает» — `(e.skip is None) != (line.skip is None)`: диск, у которого оба — пропуск, но с разным текстом (например «нет в слове» и «ячейки заняты»), не сдвигает; тестом отдельно не проверен. (4) Копии для отката из рабочего дерева, не из коммита. (5) Стенд не запускался.
+
+### Раунд 3, дополнение: закрытие находки I31
+
+Добавлен judge-тест `test_alpha_split_hazards.py::test_unrecognized_disc_with_cell_place_args7_cascade_stays_accuracy`: B#4 «И» прочитан как «Й», плагин занял ячейку 4 вместо 5 (`y100.0`, `ARGS[7] = 0`) — причины `letter`, `feed`, `cell`, `place`, `ARGS[7]` (тест сам проверяет, что они есть) и нет причин из `_MECH_KEYS` → `{4: ТОЧНОСТЬ}`.
+На коде — зелёный (`21 passed` в hazards-файле). Повтор I31 (`_MECH_KEYS` расширен на `cell`, `place`): красным стал ровно этот новый тест (`1 failed, 232 passed`), совпало с предсказанием лида; `md5(git diff)` после отката неизменен (`2fe22c18a0fa2c197b1368977246c26b`). Находка I31 закрыта.
+README: записано осознанное решение — диск, у которого и литерал, и строка — пропуск с разным текстом («нет в слове» против «ячейки заняты»), счёт не сдвигает и в `U` не входит.
+Полный набор на откате: `233 passed`; `ruff check scripts/alpha_sim` и `ruff format --check` по изменённым py-файлам чисты.
+Остаётся открытым: критерий «пропуск против пропуска с разным текстом не сдвигает» зафиксирован в README, отдельным тестом не защищён.

@@ -655,6 +655,7 @@ def _lossy_cases(monkeypatch) -> None:
     b["discs"], b["decisions"] = b["discs"][:-1], b["decisions"][:-1]
     b["jobs"] = b["jobs"][:-1]
     b["regs"].update(slots_filled=8, jobs_emitted=8, done=False)
+    cases["D"]["word_line"] = cases["D"]["word_line"].replace("9/9", "8/9")  # плагин: после B заполнено 8
     cases["D"]["regs"]["jobs_emitted"] = 11
     cases["C"]["regs"]["jobs_emitted"] = 14
     monkeypatch.setattr(T, "_CASES", cases)
