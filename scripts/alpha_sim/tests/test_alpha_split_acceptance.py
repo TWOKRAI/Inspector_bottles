@@ -205,11 +205,11 @@ def test_a2_unrecognized_by_letter_key_and_by_feed_key() -> None:
     # причина с ключом letter: сеть прочла «Й» вместо «И» (диск 4)
     res_l = _judge("B", _apply(TL._b_inputs(), TL._sub(3, "диск 'И'", "диск 'Й'")))
     assert _row_klass(res_l) == {4: ACC}
-    assert res_l.unrecognized == 1
+    assert res_l.unrecognized == 0  # ячейка взята, как в литерале: счёт не сдвинут (редакция 4)
     # причина с ключом feed: подана другая буква (диск 3)
     res_f = _judge("B", _apply(TL._b_inputs(), TL._feed(2, ("И", 30.0))))
     assert _row_klass(res_f) == {3: ACC}
-    assert res_f.unrecognized == 1
+    assert res_f.unrecognized == 0  # то же: решение «взят» совпало (редакция 4)
     # пара: без этих причин - ни непризнанных, ни FAIL-строк
     assert _judge("B", TL._b_inputs()).unrecognized == 0
 

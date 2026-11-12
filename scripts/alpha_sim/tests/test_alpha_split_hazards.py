@@ -15,6 +15,7 @@ import pytest
 
 from scripts.alpha_sim.tests import test_alpha_split_acceptance as A
 from scripts.alpha_sim.tests import test_p4_alpha_hazards as H
+from scripts.alpha_sim.tests import test_p4_alpha_logic as TL
 from scripts.alpha_sim.tests import test_p4_alpha_runner as T
 
 
@@ -217,3 +218,103 @@ def test_below_threshold_skip_without_parentheses_still_flags_below_threshold(mo
             "conf_thr": None,
         }
     ]
+
+
+# --- Opus-ревью, B1: U считает только диски, СДВИГАЮЩИЕ счёт (редакция 4) ------------------------------------------
+
+_D1_BELOW = "уверенность ниже порога (П 0.43 < 0.50)"  # D#1 «П»: литерал и так пропуск «нет в слове 'МИР'»
+
+
+def _d1_below_inputs(**regs) -> dict:
+    inp = TL._d_inputs()
+    inp["lines"][0] = TL._msg("П", 0.0, TL._skip(_D1_BELOW))
+    inp["regs"].update(regs)
+    return inp
+
+
+def test_b1_judge_below_threshold_where_literal_skips_does_not_enter_u() -> None:
+    res = A._judge("D", _d1_below_inputs(done=False))
+    assert res.unrecognized == 0  # решение «пропущен» совпало с литералом: счёт не сдвинут
+    assert A._row_klass(res) == {1: A.ACC}  # строка по-прежнему не признана сетью: ТОЧНОСТЬ
+    assert A._chk_klass(res) == {"regs.done": A.MECH}
+    assert A._hard(res) == [(1, ["below_threshold"])]  # и «трудный»: запись остаётся
+
+
+def test_b1_judge_jobs_emitted_shift_by_one_is_mechanism_with_non_shifting_disc() -> None:
+    res = A._judge("D", _d1_below_inputs(jobs_emitted=13))  # before 9, прирост 4 против 3
+    assert res.unrecognized == 0
+    assert A._chk_klass(res) == {"regs.jobs_emitted": A.MECH}
+
+
+def test_b1_run_below_threshold_where_literal_skips_plus_done_false_is_mechanism_fail(monkeypatch) -> None:
+    cases = copy.deepcopy(T._CASES)
+    cases["D"]["regs"]["done"] = False
+    monkeypatch.setattr(T, "_CASES", cases)
+    net = {("D", A._pre("П", 0.0)): A._full(f"{A._pre('П', 0.0)} → пропуск: {_D1_BELOW}")}
+    rc, out = A._run(A._Net(rewrites=net))
+    cls, mech, acc, lines, _ = A._a2(out)
+    assert rc == 1, out
+    assert cls == ["класс D #1: ТОЧНОСТЬ", "класс D regs.done: МЕХАНИЗМ"]
+    assert mech == "МЕХАНИЗМ: FAIL (D regs.done)"
+    assert acc == "ТОЧНОСТЬ: 1 трудных (D #1)"
+    assert lines[-1].startswith("итог: B=PASS D=FAIL C=PASS ДОМОЙ=PASS СТОП=PASS → код 1 ")
+
+
+def test_b1_run_below_threshold_where_literal_skips_plus_jobs_emitted_shift_is_mechanism_fail(monkeypatch) -> None:
+    cases = copy.deepcopy(T._CASES)
+    cases["C"]["regs"]["jobs_emitted"] = 16  # до C 12, прирост 4 против 3 (C последний: хвост регистр не читает)
+    monkeypatch.setattr(T, "_CASES", cases)
+    net = {
+        ("C", A._pre("Е", 90.0)): A._full(f"{A._pre('Е', 90.0)} → пропуск: уверенность ниже порога (Е 0.43 < 0.50)")
+    }  # C#4: литерал и так пропуск «ячейки заняты»
+    rc, out = A._run(A._Net(rewrites=net))
+    cls, mech, acc, _, _ = A._a2(out)
+    assert rc == 1, out
+    assert cls == ["класс C #4: ТОЧНОСТЬ", "класс C regs.jobs_emitted: МЕХАНИЗМ"]
+    assert mech == "МЕХАНИЗМ: FAIL (C regs.jobs_emitted)"
+    assert acc == "ТОЧНОСТЬ: 1 трудных (C #4)"
+
+
+def test_b1_control_lost_taken_disc_still_cascades_to_accuracy() -> None:
+    res = A._judge("B", A._b_lost_last())  # ожидалось взятие, строка — пропуск: сдвигает счёт
+    assert res.unrecognized == 1
+    assert A._chk_klass(res) == {
+        "jobs.count": A.ACC,
+        "regs.slots_filled": A.ACC,
+        "regs.jobs_emitted": A.ACC,
+        "regs.done": A.ACC,
+    }
+
+
+# --- Opus-ревью, S3: не признанный диск + причина механики → МЕХАНИЗМ ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mech_mut",
+    [
+        pytest.param(TL._sub(3, "взять(458.2,-343.0)", "взять(458.2,-350.0)"), id="pick_out_of_window"),
+        pytest.param(TL._jobf(2, "res_status", 0), id="res_status_0"),
+        pytest.param(TL._arg(2, 2, 4700), id="ARGS2_out_of_window"),
+    ],
+)
+def test_s3_unrecognized_disc_with_mechanism_reason_is_mechanism(mech_mut) -> None:
+    letter_only = A._apply(TL._b_inputs(), TL._sub(3, "диск 'И'", "диск 'Й'"))  # ошибка буквы у B#4: ТОЧНОСТЬ
+    assert A._row_klass(A._judge("B", letter_only)) == {4: A.ACC}  # контроль: без причины механики — ТОЧНОСТЬ
+    res = A._judge("B", A._apply(letter_only, mech_mut))
+    assert A._row_klass(res) == {4: A.MECH}
+
+
+def test_unrecognized_disc_with_cell_place_args7_cascade_stays_accuracy() -> None:
+    # B#4: сеть прочла «Й» вместо «И», плагин занял другую ячейку (4 вместо 5): причины letter, feed, cell, place,
+    # ARGS[7]; причин механики (pick, ARGS[2..6, 8], argc, res_*, нет задания) нет: каскад сети — ТОЧНОСТЬ целиком
+    inp = A._apply(
+        TL._b_inputs(),
+        TL._sub(3, "диск 'И'", "диск 'Й'"),
+        TL._sub(3, "→ ячейка 5:", "→ ячейка 4:"),
+        TL._sub(3, "y110.0", "y100.0"),
+        TL._arg(2, 7, 0),
+    )
+    res = A._judge("B", inp)
+    reasons = {r.split(" ", 1)[0] for r in A._row(res, 4).reasons}
+    assert {"letter", "feed", "cell", "place", "ARGS[7]"} <= reasons  # вход действительно содержит каскад
+    assert A._row_klass(res) == {4: A.ACC}

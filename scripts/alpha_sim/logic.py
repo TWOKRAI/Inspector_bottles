@@ -325,7 +325,9 @@ class CaseResult:
     checks: tuple[Row, ...]
     ok: bool
     pairs: tuple[tuple[str, float, float], ...] = ()  # (буква, подача, сеть) только у дисков с совпавшей буквой
-    unrecognized: int = 0  # U: сколько дисков сеть не признала (потеряла, ниже порога, иная буква, иная подача)
+    unrecognized: int = (
+        0  # U: сколько не признанных сетью дисков СДВИГАЮТ счёт («взят / пропущен» не совпал с литералом)
+    )
     hard: tuple[dict, ...] = ()  # записи «трудных» дисков (строки --hard-out), по возрастанию index
 
 
@@ -438,11 +440,16 @@ def _explained(reason: str, u_before: int, line: DiskLine | None, e: Expect | No
     return False
 
 
+# Причины, которых ошибка сети объяснить не может: геометрия забора и обмен с роботом от буквы и угла не зависят.
+_MECH_KEYS = frozenset({"pick", "ARGS[2]", "ARGS[3]", "ARGS[4]", "ARGS[5]", "ARGS[6]", "ARGS[8]", "argc"})
+_MECH_KEYS |= {"res_status", "res_errno", "нет"}  # «нет» — «нет задания»
+
+
 def _disc_klass(
     reasons: list[str], unrec: bool, u_before: int, line: DiskLine | None, e: Expect | None, angle_off: bool
 ) -> str:
-    if unrec:
-        return ACC
+    if unrec:  # не признан: ТОЧНОСТЬ целиком, пока нет причин из _MECH_KEYS (они прятались бы за ошибкой сети)
+        return MECH if any(_reason_key(r) in _MECH_KEYS for r in reasons) else ACC
     if reasons and all(_explained(r, u_before, line, e, angle_off) for r in reasons):
         return ACC
     return MECH
@@ -683,7 +690,17 @@ def judge_case(
         if line.letter == fed_letter:
             angle_pairs.append((line.letter, fed_angle, line.angle))
 
-    unrec_at = [row.index for row, _, _, _, unrec in draft if unrec and not row.ok] if reliable else []
+    # U — только не признанные диски, СДВИГАЮЩИЕ счёт: «взят / пропущен» в строке не совпал с литералом. Не признанный
+    # диск с совпавшим решением (например «П» ниже порога там, где литерал и так пропуск) потерей ничего не объясняет.
+    unrec_at = (
+        [
+            row.index
+            for row, line, e, _, unrec in draft
+            if unrec and not row.ok and line is not None and e is not None and (e.skip is None) != (line.skip is None)
+        ]
+        if reliable
+        else []
+    )
     u_total = len(unrec_at)
     rows: list[Row] = []
     hard: list[dict] = []
