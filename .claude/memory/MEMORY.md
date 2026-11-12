@@ -41,6 +41,7 @@ rail — `.claude/CLAUDE.md` → «Memory (OVERRIDE)». Механический
 - [Сигнал «отпусти соседа» — в момент факта](feedback_unblocking_signal_at_the_moment_of_fact.md) — 13 тестов зелёные, живой стоп как до правки
 - [Новый план — среди соседей](feedback_a_new_plan_must_be_placed_among_its_neighbours.md) — таблица владения + обратные ссылки в чужие планы
 - [Имена отчётов — с префиксом плана](feedback_review_file_names_need_plan_prefix.md) — task-1.2-* заняты параллельным планом
+- [Параллельным агентам — свой каталог в scratchpad](feedback_parallel_agents_need_own_scratch_dir.md) — общий inj_run.sh затёрли, чужой checkout
 - [Bash heredoc схлопывает обратные слеши](feedback_bash_heredoc_collapses_backslashes.md) — `\xff` в литерале → байт; такие файлы — через Write
 - [ctypes setattr по чужому имени молчит](feedback_ctypes_setattr_unknown_field_is_silent.md) — тест подаёт нули и зеленеет; проверять _fields_
 - [Страховка маскирует основную правку](feedback_safety_net_masks_primary_fix.md) — ломать основное при живой страховке
@@ -76,7 +77,7 @@ _(empty)_
 > Не путать с `~/.claude/projects/<project>/memory/` (нативный путь Claude
 > Code) — мы намеренно переопределяем его на `.claude/memory/` ради
 > портативности. Per-project, не входит в seed.
-- [CTO: pass model fable explicitly](feedback_cto_spawn_explicit_fable.md) — frontmatter alone ran cto on Opus
+- [Ревью Opus, merge gate Sonnet, CTO редко](feedback_cto_spawn_explicit_fable.md) — CTO (Fable) только в тяжёлых случаях (owner 11-08)
 - [Windows CPU: psutil is tick-sampled](feedback_windows_cpu_psutil_tick_sampled.md) — use QueryProcessCycleTime; monotonic has 15.6 ms steps
 - [line_sim stand: preset.commit from a worktree](feedback_line_sim_stand_preset_from_worktree.md) — temp .yaml + catalog beside it; revert via sed, restore CRLF
 - [cv_threads: OpenCV pool per process](feedback_cv_threads_tuning.md) — tune per recipe by measurement; default 2, not our workers
@@ -85,3 +86,8 @@ _(empty)_
 - [pydantic assignment keeps the rejected value](feedback_pydantic_assignment_keeps_rejected_value.md) — model_validator(after) raise doesn't roll back; snapshot+restore, not full revalidation
 - [Always the latest models](feedback_always_latest_models.md) — Opus 5.5 / Sonnet 5.5 now; tier aliases over version pins; update lint allow-list on release
 - [Explicit model per agent role](feedback_explicit_model_per_agent_role.md) — pass `model` on every Agent call: reviewer/teamlead opus, developer/tester sonnet, cto (super-reviewer) fable
+- [BRIEF-OVERRIDE для не-TDD агентов](feedback_lint_brief_override_for_non_tdd_agents.md) — слепой tester, живой прогон, инъекции; откат cp, не checkout
+- [Основное дерево может стоять на чужой ветке](feedback_primary_tree_may_sit_on_another_branch.md) — merge в нём идёт в неё; сливать через detached worktree
+- [Токены подписки — можно тратить](feedback_subscription_tokens_allowed.md) — агентов запускать без вопроса, если помогает плану; платные прогоны — по Ш2
+- [allowedTools Bash не ограничивает read-only](feedback_allowedtools_bash_does_not_restrict_readonly.md) — ls/find/grep идут мимо шаблона; atlas-arm = grep+shell
+- [Координатор: статус из main, не из ORDER.md](feedback_coordinator_status_from_main_not_order.md) — ORDER отстаёт; писать через worktree от main
