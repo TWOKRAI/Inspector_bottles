@@ -970,9 +970,8 @@ class ProcessManagerProcess(ProcessModule):
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
             if event == "tick":
                 self._run_ready = ready
-            if new is not prev:
-                self._run_state = new
-                self._run_since = time.time()
+            # Событие переключаем ДО записи состояния: если set()/clear() бросит (семафор закрыт при гашении),
+            # состояние остаётся прежним и не расходится с событием (ревью стадии 5, N1).
             run_event = self._run_event
             if self._run_gate and run_event is not None:
                 want_set = new is RunState.running
@@ -981,6 +980,9 @@ class ProcessManagerProcess(ProcessModule):
                         run_event.set()
                     else:
                         run_event.clear()
+            if new is not prev:
+                self._run_state = new
+                self._run_since = time.time()
         self._publish_run_state()
         return new, code, prev
 

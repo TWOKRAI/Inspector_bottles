@@ -79,3 +79,33 @@ def test_tick_updates_ready_even_when_state_does_not_change() -> None:
 
     new, code, prev = pm._run_apply("settled")
     assert (new, code, prev) == ("not_ready", None, "stopping")
+
+
+def test_event_switch_failure_leaves_state_unchanged() -> None:
+    """Если ``set()`` бросает (семафор закрыт при гашении), состояние не уезжает вперёд события (ревью стадии 5, N1).
+
+    Иначе ``state == running`` при снятом событии, и следующий ``start`` отвечает ``already_running``.
+    """
+    pm = make_run_pm(True)
+    real = pm._run_event
+
+    class _Broken:
+        def is_set(self) -> bool:
+            return real.is_set()
+
+        def set(self) -> None:
+            raise OSError("closed")
+
+        def clear(self) -> None:
+            real.clear()
+
+    pm._run_event = _Broken()
+    try:
+        pm._run_apply("start")
+    except OSError:
+        pass
+    else:
+        raise AssertionError("set() должен был бросить")
+
+    assert pm._run_state == "ready"
+    assert real.is_set() is False
