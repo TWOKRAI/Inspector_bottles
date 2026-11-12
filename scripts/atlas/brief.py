@@ -166,7 +166,8 @@ def brief(
         raise AtlasError(f"brief: символ {symbol} не найден в модулях {', '.join(chosen) or '—'}")
     objects = [(names[i], i) for i in wanted if i in names][:3]
     if not objects and not symbol:  # публичные символы файлов «из текста задачи» (как их выбирает pack)
-        text_files = views._text_sources(tree, plan[1], tid, rows)[1]
+        present = set(tree.files())  # новый файл из FILES в дереве ещё не лежит: блобы читаются строго
+        text_files = [f for f in views._text_files(tree, plan[1], tid, rows)[1] if f in present and not is_test(f)]
         objects = [(module_of(p, rows), n.name) for p, ns in _symbols(root, sha, text_files) for n in ns][:3]
     if not objects:
         print("brief: объект задачи не найден — задать --symbol", file=sys.stderr)

@@ -21,7 +21,7 @@ from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import USAGE_UNKNOWN, code_of, is_test
-from scripts.atlas.modules import OTHER, resolve as module_of
+from scripts.atlas.modules import OTHER, norm_path, resolve as module_of
 from scripts.atlas.result_form import TAILS, is_none, section
 from scripts.atlas.rules import Scan
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
@@ -318,7 +318,9 @@ def _tails(
     ]
 
 
-def _text_sources(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tuple[list[str], list[str]]:
+def _text_sources(
+    tree: Tree, plan_path: str, tid: str, rows: list[dict], skip_ambiguous_bare: bool = False
+) -> tuple[list[str], list[str]]:
     """(модули, пути) из строки задачи `- Task {id}:` плана: токены — id модуля либо путь (точный или суффикс)."""
     lines = _text(tree, plan_path).split("\n")
     start = next((i for i, line in enumerate(lines) if line.startswith(f"- Task {tid}:")), None)
@@ -336,11 +338,95 @@ def _text_sources(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tup
         if token in ids:
             found.add(token)
         if "/" in token or token.endswith(".py"):
-            for path in (f for f in files if f == token or f.endswith("/" + token)):
+            matches = [f for f in files if f == token or f.endswith("/" + token)]
+            if skip_ambiguous_bare and "/" not in token and len(matches) > 1:
+                continue  # голое имя с несколькими совпадениями (controller.py) при блоке FILES не берётся
+            for path in matches:
                 if module_of(path, rows) != OTHER:
                     found.add(module_of(path, rows))
                     paths.add(path)
     return sorted(found), sorted(paths)
+
+
+_FILES_LABEL = re.compile(r"^[ \t]*FILES \(complete list")
+_NEXT_LABEL = re.compile(
+    r"^[ \t]*[A-Z][A-Z \-/]{2,}(?:[ \t]*\(.*)?:"
+)  # метка раздела брифа (REDS, DESIGN…), как plans_ledger
+_FILES_ENTRY = re.compile(r"^[ \t]*\d+\.[ \t]+(.+)$")
+_DASH = re.compile(r"[ \t][—–][ \t]")
+_LINE_SUFFIX = re.compile(r":\d+(?:[-–]\d+)?$")
+_FILE_NAME = re.compile(r"[A-Za-z0-9_./-]+\.[A-Za-z0-9]+")
+
+
+def _entry_paths(item: str) -> list[str]:
+    """Имена файлов одного пункта FILES: список через запятую до « — », у каждого первое слово, без `:N`.
+
+    Берётся только то, что выглядит файлом (есть расширение); слово без расширения, путь с пробелом (первое слово
+    `scripts/atlas/my` от `my file.py`), каталог на «/» — мусор и отбрасываются, а не печатаются как кандидат.
+    """
+    names: list[str] = []
+    for piece in _DASH.split(item, maxsplit=1)[0].split(","):
+        words = piece.split()
+        word = _LINE_SUFFIX.sub("", words[0].strip("`*")) if words else ""
+        if _FILE_NAME.fullmatch(word):
+            names.append(word)
+    return names
+
+
+def _canonical(path: str) -> bool:
+    try:
+        return norm_path(path) == path
+    except AtlasError:
+        return False
+
+
+def _files_block(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tuple[list[str], list[str]]:
+    """(модули, пути) из блока `FILES (complete list …)` файла `tasks/<id>.md` плана; пусто, если блока нет.
+
+    Пути берутся как написаны в нумерованных пунктах (файла может не быть в дереве — новый), если они канонические
+    (`norm_path(p) == p`: без `./`, `..`) и лежат в модуле `modules.yaml`. Голое имя без «/» (`close.py`) берётся по
+    правилу голых имён: один файл с таким именем в дереве — он, иначе (несколько или ни одного) не берётся.
+    Блок кончается пустой строкой, заголовком `#` или меткой следующего раздела (`REDS:`); блоков в файле может быть
+    несколько (по ролям) — берутся все; «Только читать» и продолжения пунктов не нумерованы и в счёт не идут.
+    """
+    path = plan_path[: -len("plan.md")] + f"tasks/{tid}.md"
+    present = set(tree.files())
+    if not plan_path.endswith("/plan.md") or path not in present:
+        return [], []
+    found: set[str] = set()
+    paths: set[str] = set()
+    inside = False
+    for line in _text(tree, path).splitlines():
+        if _FILES_LABEL.match(line):
+            inside = True
+        elif not inside:
+            continue
+        elif not line.strip() or line.startswith("#") or _NEXT_LABEL.match(line):
+            inside = False  # блоков может быть несколько (по ролям): берутся все
+        elif m := _FILES_ENTRY.match(line):
+            for name in _entry_paths(m[1]):
+                bare = [f for f in present if f.endswith("/" + name)] if "/" not in name else [name]
+                for p in bare if len(bare) == 1 else []:
+                    if _canonical(p) and module_of(p, rows) != OTHER:
+                        found.add(module_of(p, rows))
+                        paths.add(p)
+    return sorted(found), sorted(paths)
+
+
+def _text_files(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tuple[list[str], list[str]]:
+    """(модули, пути) «из текста задачи»: блок FILES файла `tasks/<id>.md` плюс однозначные пути строки плана.
+
+    Блок FILES — главный (точные пути); из строки плана к нему добавляются пути, названные однозначно: с «/» или
+    голое имя с одним совпадением (блок бывает по ролям и называет не все файлы задачи, как `watcher.py` на пине
+    K0 1.2). Голое имя с несколькими совпадениями (`controller.py` в строке T5.3e.6) при блоке FILES не берётся.
+    Нет блока или его пути вне модулей — прежний разбор строки плана целиком (контракт 1.6c: неоднозначное имя —
+    все совпадения). Один выбор для `pack` и `brief` (объект задачи).
+    """
+    listed = _files_block(tree, plan_path, tid, rows)
+    if not listed[0]:
+        return _text_sources(tree, plan_path, tid, rows)
+    paths = sorted(set(listed[1]) | set(_text_sources(tree, plan_path, tid, rows, True)[1]))
+    return sorted({module_of(p, rows) for p in paths}), paths
 
 
 def _text_blocks(con: sqlite3.Connection, bid: int, chosen: list[str], own_slug: str) -> list[str]:
@@ -397,7 +483,7 @@ def pack(con: sqlite3.Connection, root: Path, ref: str, main_ref: str, task: str
         chosen, source = sorted(set(modules)), "--module"
     elif mods.get(tid):
         chosen, source = sorted(mods[tid]), "коммиты задачи"
-    elif (text := _text_sources(tree, node[1], tid, rows)) and text[0]:
+    elif (text := _text_files(tree, node[1], tid, rows)) and text[0]:
         (chosen, text_paths), source = text, "из текста задачи"
     elif latest:
         newest = max(latest, key=lambda t: (latest[t], _natural(t)))
