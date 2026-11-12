@@ -8,6 +8,8 @@
 
 ## 1. Вердикт ветки (часть A): CHANGES REQUESTED (итерация 1 из 2)
 
+**Раунд 2 (коммит `148f5c25b`, спека ред. 4): APPROVED.** B1 и S3 закрыты: `probe_u.py` → `МЕХАНИЗМ: FAIL (D regs.done)` и `МЕХАНИЗМ: FAIL (D #2, D #4, D #5, D regs.slots_filled, D regs.done)`; `233 passed`, `ruff: All checks passed!`; обе правки только переводят ТОЧНОСТЬ → МЕХАНИЗМ (новых ложных PASS быть не может); `probe_r2.py`: чужая ячейка → безопасное МЕХАНИЗМ-FAIL, у неверно прочитанного взятого диска с забором в окне регресса S3 нет (ТОЧНОСТЬ). Отложены S1, S2, nit (в STATUS). Открыто: встречные сдвиги (потеря + лишний взятый) гасят друг друга в `|Δ| ≤ U` — не воспроизведено.
+
 Воспроизведение тестов: `machine_gate.sh light … pytest -q scripts/alpha_sim/tests Plugins/processing/word_layout/tests/test_p3_disk_journal.py`
 → `224 passed, 1 warning in 3.48s`. Тесты зелёные, но один ложный `МЕХАНИЗМ: PASS` они не ловят (B1).
 
