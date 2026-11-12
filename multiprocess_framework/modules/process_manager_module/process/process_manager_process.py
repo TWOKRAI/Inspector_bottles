@@ -28,6 +28,7 @@ from ...logger_module.channels.log_channel import (
 )
 from ...process_module import ProcessModule
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
+from ...process_module.health.schema import READINESS_FIELDS, readiness_path
 from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
@@ -51,7 +52,7 @@ from .backend_ctl_endpoint import (
 )
 from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
-from .run_state import RunState, transition
+from .run_state import RunState, evaluate, transition
 from .topology_manager import TopologyManager
 
 #: 4.4 (ревью, R4): ленивое создание брокера зовут два read-потока канала
@@ -161,6 +162,18 @@ class ProcessManagerProcess(ProcessModule):
     _run_ready: bool = True
     #: Значения ``system.run.*``, уже записанные в стор (под ``_run_publish_lock``); ``None`` — ни одной.
     _run_published: dict | None = None
+    #: Task 1.3: текущие причины готовности (``evaluate``) и последняя авария ``{at, reasons, acknowledged_at}``.
+    #: Пишет только ``_run_apply`` под ``_run_lock`` и ЗАМЕНЯЕТ значение целиком (никогда не мутирует на месте:
+    #: значение уровня класса общее для всех PM). ``tuple`` — неизменяемое пустое умолчание.
+    _run_reasons: tuple | list = ()
+    _run_last_fault: dict | None = None
+    #: Task 1.3: листья ``processes.<n>.readiness``, уже записанные в стор (``{имя: {поле: значение}}``);
+    #: пишет только ``_publish_readiness_leaves`` под ``_readiness_publish_lock``.
+    _readiness_published: dict | None = None
+    #: Task 1.3: интервал heartbeat по умолчанию, сек — как ``ProcessHeartbeat.start()`` (``heartbeat_interval``, 5.0).
+    _DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
+    #: Task 1.3: молчание = ``3 x`` интервал heartbeat (design.md §3.3).
+    _READINESS_STALE_FACTOR = 3.0
 
     def __init__(
         self,
@@ -434,9 +447,10 @@ class ProcessManagerProcess(ProcessModule):
             # По таймауту всё равно сигналим готовность (boot не блокировать
             # навсегда) + WARNING со списком не-ready.
             self._wait_boot_ready()
-            # Task 1.1 system-run-state: подъём закончен — booting -> ready. Готовность в 1.1 — барьер
-            # как сейчас (ready=True); честная оценка готовности — Task 1.3.
-            self._run_apply("settled", ready=True)
+            # Task 1.3 system-run-state: подъём закончен — booting -> ready/not_ready по оценке агрегата
+            # (молчание = не готов), а не по барьеру. Первый heartbeat с ``readiness`` приходит позже —
+            # до тех пор ``not_ready`` с причинами ``liveness``; дальше состояние ведёт такт монитора.
+            self._settle_run_state()
 
             # Готовность оркестратора для SystemLauncher (ADR-116) объявляется ТЕМ ЖЕ
             # примитивом, что и у детей: _announce_ready() ПОСЛЕДНЕЙ строкой run() —
@@ -954,7 +968,12 @@ class ProcessManagerProcess(ProcessModule):
         return self.__dict__.setdefault("_run_publish_lock_obj", threading.Lock())
 
     def _run_apply(
-        self, event: str, *, ready: bool | None = None, stop_done: bool = False
+        self,
+        event: str,
+        *,
+        ready: bool | None = None,
+        stop_done: bool = False,
+        reasons: list[dict] | None = None,
     ) -> tuple[RunState, str | None, RunState]:
         """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
 
@@ -962,6 +981,10 @@ class ProcessManagerProcess(ProcessModule):
         независимо от смены состояния. При ``run_gate`` true в том же замке событие доводится до
         ``is_set() == (state == running)``; при false событие не трогается никогда. После замка —
         ``_publish_run_state()``.
+
+        ``reasons`` (Task 1.3) — результат ``evaluate``, считанный ВНЕ замка: ``None`` — причины не
+        меняются; список заменяет текущие причины. Переход в ``fault`` по ``tick`` записывает
+        ``last_fault`` = причины этого такта.
         """
         with self._run_lock:
             if ready is None:
@@ -970,6 +993,15 @@ class ProcessManagerProcess(ProcessModule):
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
             if event == "tick":
                 self._run_ready = ready
+            if reasons is not None:
+                self._run_reasons = [dict(r) for r in reasons]
+            if new is RunState.fault and prev is not RunState.fault:
+                # ``fault`` липкий: последняя авария не перезаписывается, пока машина в ``fault``.
+                self._run_last_fault = {
+                    "at": time.time(),
+                    "reasons": [dict(r) for r in self._run_reasons],
+                    "acknowledged_at": None,
+                }
             # Событие переключаем ДО записи состояния: если set()/clear() бросит (семафор закрыт при гашении),
             # состояние остаётся прежним и не расходится с событием (ревью стадии 5, N1).
             run_event = self._run_event
@@ -991,8 +1023,16 @@ class ProcessManagerProcess(ProcessModule):
         with self._run_lock:
             return self._run_state, self._run_since
 
+    def _run_detail_snapshot(self) -> tuple[list[dict], dict | None]:
+        """Копии ``(причины, last_fault)`` под ``_run_lock`` (Task 1.3): значения наружу уходят без общих ссылок."""
+        with self._run_lock:
+            reasons = [dict(r) for r in self._run_reasons]
+            fault = self._run_last_fault
+            last_fault = None if fault is None else {**fault, "reasons": [dict(r) for r in fault["reasons"]]}
+            return reasons, last_fault
+
     def _publish_run_state(self) -> None:
-        """Записать в стор изменившиеся ``system.run.state`` / ``system.run.since`` из ТЕКУЩЕГО снимка.
+        """Записать в стор изменившиеся ``system.run.*`` (state, since, reasons, start_allowed, last_fault) из СНИМКА.
 
         Порядок — как ``_publish_system_stop``: снимок берётся под ``_run_publish_lock``, поэтому поздний
         издатель не перезапишет новое состояние старым. Неизменённые значения пропускаются. Стора нет —
@@ -1002,10 +1042,17 @@ class ProcessManagerProcess(ProcessModule):
             return
         with self._run_publish_lock:
             state, since = self._run_snapshot()
+            reasons, last_fault = self._run_detail_snapshot()
             published = self._run_published
             if published is None:
                 published = self._run_published = {}
-            for key, value in (("state", state.value), ("since", since)):
+            for key, value in (
+                ("state", state.value),
+                ("since", since),
+                ("reasons", reasons),
+                ("start_allowed", state is RunState.ready),
+                ("last_fault", last_fault),
+            ):
                 if key in published and published[key] == value:
                     continue
                 self._state_op(
@@ -1014,6 +1061,126 @@ class ProcessManagerProcess(ProcessModule):
                     "run_state",
                 )
                 published[key] = value
+
+    # -------------------------------------------------------------------------
+    # Агрегат готовности (Task 1.3 system-run-state, design.md §3.3)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _readiness_publish_lock(self) -> threading.Lock:
+        """Сериализует публикацию листьев ``processes.<n>.readiness`` (зовут разные потоки)."""
+        return self.__dict__.setdefault("_readiness_publish_lock_obj", threading.Lock())
+
+    def _run_expected_names(self) -> list[str]:
+        """Требуемый набор: процессы применённой топологии (ключи ``_process_configs``).
+
+        Ключ ``run_required: false`` на верхнем уровне конфига процесса исключает его (умолчание true);
+        сам PM в набор не входит. ``list(dict.items())`` — атомарная копия под GIL: топологию мутируют
+        потоки жизненного цикла.
+        """
+        configs = list((getattr(self, "_process_configs", None) or {}).items())
+        return [
+            name
+            for name, cfg in configs
+            if name != self.name and not (isinstance(cfg, dict) and cfg.get("run_required") is False)
+        ]
+
+    def _run_stale_s(self) -> float:
+        """Срок молчания снимка готовности: ``3 x`` интервал heartbeat.
+
+        Интервал — наибольший из положительных ключей конфига PM ``heartbeat_interval`` (загрузочный,
+        его читает ``ProcessHeartbeat.start``) и ``heartbeat_interval_sec`` (рантайм-правка): большее
+        значение даёт меньше ложных ``fault``. Негодные/нулевые значения не учитываются; ни одного —
+        умолчание 5.0 с.
+        """
+        candidates: list[float] = []
+        for key in ("heartbeat_interval", "heartbeat_interval_sec"):
+            try:
+                value = float(self.get_config(key) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0.0:
+                candidates.append(value)
+        interval = max(candidates) if candidates else self._DEFAULT_HEARTBEAT_INTERVAL_S
+        return self._READINESS_STALE_FACTOR * interval
+
+    def _process_alive(self, name: str) -> bool:
+        """Процесс ``name`` жив по реестру ОС-процессов; нет записи или сбой опроса — не жив."""
+        registry = getattr(self, "_process_registry", None)
+        if registry is None:
+            return False
+        try:
+            proc = registry.get_process_by_name(name)
+            return bool(proc is not None and proc.is_alive())
+        except Exception as exc:  # noqa: BLE001 — опрос живости не роняет оценку: молчание = не готов
+            self._log_error(f"readiness: опрос живости '{name}' не удался: {exc}")
+            return False
+
+    def _readiness_leaves(self) -> dict[str, dict]:
+        """Копия карты листов ``readiness`` монитора (под его листовым замком); нет монитора — пусто."""
+        monitor = getattr(self, "_process_monitor", None)
+        snapshot = getattr(monitor, "readiness_snapshot", None)
+        leaves = snapshot() if callable(snapshot) else None
+        return leaves if isinstance(leaves, dict) else {}
+
+    def _evaluate_run_readiness(self) -> tuple[bool, list[dict]]:
+        """Готовность системы сейчас: ``(ready, reasons)`` по ``run_state.evaluate``.
+
+        Не берёт ``_run_lock`` и не ждёт ничего: безопасна на ``message_processor`` (``system.run.start``,
+        DECISIONS.md:125) и на потоке монитора. Копия листов берётся под замком монитора, ``evaluate`` —
+        уже без замков.
+        """
+        expected = self._run_expected_names()
+        leaves = self._readiness_leaves()
+        alive = {name: self._process_alive(name) for name in expected}
+        return evaluate(expected, leaves, alive, time.time(), self._run_stale_s())
+
+    def _settle_run_state(self) -> None:
+        """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
+        ready, reasons = self._evaluate_run_readiness()
+        self._run_apply("settled", ready=ready, reasons=reasons)
+
+    def _run_readiness_tick(self) -> None:
+        """Один такт готовности (зовёт монитор из ``_run_iteration``): оценка -> ``tick`` -> листы в стор.
+
+        Пока PM гасится или идёт системный стоп — такт пропускается: останавливаемые дети молчат, и
+        это не авария работы (подачу ``shutdown`` в машину добавляет Task 1.4).
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            return
+        ready, reasons = self._evaluate_run_readiness()
+        self._run_apply("tick", ready=ready, reasons=reasons)
+        self._publish_readiness_leaves()
+
+    def _publish_readiness_leaves(self) -> None:
+        """Записать листья ``processes.<n>.readiness.<поле>`` в стор (для GUI); неизменённые значения пропускаются.
+
+        Гейт от стора не зависит — сюда доходят и без него (нет стора: no-op, кэш не пополняется).
+        Процесс, пропавший из карты монитора, забывается и в кэше записанного.
+        """
+        if getattr(self, "_state_store_manager", None) is None:
+            return
+        leaves = self._readiness_leaves()
+        with self._readiness_publish_lock:
+            published = self._readiness_published
+            if published is None:
+                published = self._readiness_published = {}
+            for gone in set(published) - set(leaves):
+                del published[gone]
+            for name, leaf in leaves.items():
+                written = published.setdefault(name, {})
+                for field in READINESS_FIELDS:
+                    if field not in leaf:
+                        continue
+                    value = leaf[field]
+                    if field in written and written[field] == value:
+                        continue
+                    self._state_op(
+                        "handle_state_set",
+                        {"path": readiness_path(name, field), "value": value, "source": "ProcessManager"},
+                        "readiness",
+                    )
+                    written[field] = value
 
     def _in_transition(self, name: str) -> bool:
         """Процесс ``name`` в операции жизненного цикла (идёт или стоит в очереди исполнителя)."""
@@ -1258,31 +1425,38 @@ class ProcessManagerProcess(ProcessModule):
     def _cmd_system_run_status(self, data=None, **kwargs) -> dict:
         """``system.run.status`` (Task 1.1 system-run-state): снимок машины работы.
 
-        ``reasons`` и ``last_fault`` — пустая форма design.md §4 (наполняют Tasks 1.3/1.7).
+        ``reasons`` — причины последней оценки готовности (Task 1.3), ``last_fault`` — последняя авария
+        ``{at, reasons, acknowledged_at}`` или ``None`` (квитирование — Task 1.7).
         """
         state, since = self._run_snapshot()
+        reasons, last_fault = self._run_detail_snapshot()
         return {
             "state": state.value,
             "since": since,
             "run_gate": self._run_gate,
             "start_allowed": state is RunState.ready,
-            "reasons": [],
-            "last_fault": None,
+            "reasons": reasons,
+            "last_fault": last_fault,
         }
 
     def _cmd_system_run_start(self, data=None, **kwargs) -> dict:
-        """``system.run.start``: ``ready`` -> ``running``; иначе отказ с кодом и ТЕКУЩИМ состоянием машины.
+        """``system.run.start``: ``ready`` -> ``running``; иначе отказ с кодом, ТЕКУЩИМ состоянием и причинами.
 
         Пока PM гасится (``_pm_stopping()``) или начат ход системного стопа — отказ ``shutting_down``,
-        событие не взводится (подачу ``shutdown`` в машину добавляет Task 1.4).
+        событие не взводится (подачу ``shutdown`` в машину добавляет Task 1.4). Иначе готовность
+        оценивается заново (Task 1.3, вне замка машины): из ``ready`` при потере готовности START даёт
+        отказ ``not_ready`` с причинами; в ``fault`` — ``fault_unacknowledged`` с причинами ``last_fault``.
         """
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             state, _since = self._run_snapshot()
             return {"success": False, "state": state.value, "error": "shutting_down", "reasons": []}
-        new, code, _prev = self._run_apply("start")
+        ready, reasons = self._evaluate_run_readiness()
+        new, code, _prev = self._run_apply("start", ready=ready, reasons=reasons)
         if code is None:
             return {"success": True, "state": new.value}
-        return {"success": False, "state": new.value, "error": code, "reasons": []}
+        current, last_fault = self._run_detail_snapshot()
+        refusal_reasons = last_fault["reasons"] if new is RunState.fault and last_fault is not None else current
+        return {"success": False, "state": new.value, "error": code, "reasons": refusal_reasons}
 
     def _cmd_system_run_stop(self, data=None, **kwargs) -> dict:
         """``system.run.stop``: принимается мгновенно; из ``running`` — ``stop``, затем сразу ``settled``.
@@ -1619,6 +1793,17 @@ class ProcessManagerProcess(ProcessModule):
         debounced = self._topology_debounce_reject()
         if debounced is not None:
             return debounced
+        # Task 1.3 system-run-state: применение топологии — снова ``booting``; итог (успех, откат или
+        # исключение) закрывает ``settled`` по оценке агрегата. Отказ ``apply`` в ``running`` — Task 1.5:
+        # код отказа машины здесь пока не читается, поведение применения прежнее.
+        self._run_apply("apply")
+        try:
+            return self._topology_apply_retargeted(args, td)
+        finally:
+            self._settle_run_state()
+
+    def _topology_apply_retargeted(self, args: dict, td: Any) -> dict:
+        """Тело ``topology.apply`` после debounce: ретаргет адреса рецепта, ``apply_topology``, откат адреса."""
         # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
         # правка нового файла молча не применяется, а правка старого — применяется,
         # и оба симптома читаются как «hot-reload сломался».

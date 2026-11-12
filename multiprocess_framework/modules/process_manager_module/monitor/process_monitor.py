@@ -105,6 +105,14 @@ class ProcessMonitor:
         # Heartbeat: время последнего heartbeat от каждого процесса
         self._last_heartbeat: dict[str, float] = {}
 
+        # Task 1.3 system-run-state: последний снимок готовности каждого процесса — поле ``readiness``
+        # heartbeat-сообщения (``{ready, reasons, paused, at}``, Task 1.2). Пишет message_processor
+        # (``_on_heartbeat_received``), читает PM на такте монитора и в ``system.run.start`` через
+        # ``readiness_snapshot()``. Лист в слое НЕ мутируется — каждый heartbeat кладёт новый dict; замок
+        # листовой (держится только на копию/запись, никогда не на ожидание).
+        self._readiness: dict[str, dict] = {}
+        self._readiness_lock = threading.Lock()
+
         # Статус воркеров: последние данные из heartbeat per process
         # Ключ — имя процесса, значение — dict[worker_name, worker_status_dict]
         self._workers_status: dict[str, dict] = {}
@@ -265,6 +273,15 @@ class ProcessMonitor:
             return
         self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
+        # Task 1.3: снимок готовности процесса. Свежесть судится по ``readiness["at"]`` (время расчёта
+        # снимка наблюдателем), а не по ``_last_heartbeat``: живой heartbeat при мёртвом потоке-наблюдателе
+        # не должен выглядеть «готов». Поля нет (старый ребёнок / процесс без наблюдателя) — прежний лист
+        # не трогаем: он состарится по ``at`` и PM увидит «нет отчёта о готовности».
+        readiness = msg.get("readiness")
+        if isinstance(readiness, dict):
+            with self._readiness_lock:
+                self._readiness[sender] = dict(readiness)
+
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
         # каждый процесс делает это сам (self-publish — ProcessHeartbeat.
@@ -286,6 +303,20 @@ class ProcessMonitor:
                 self._handle_state_change(sender, prev, snap)
                 self.previous_states[sender] = snap.copy()
                 self.process._log_debug(f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}")
+
+    def readiness_snapshot(self) -> dict[str, dict]:
+        """Копия карты ``{процесс: лист readiness}`` под листовым замком (Task 1.3).
+
+        Копия внешнего dict достаточна: лист каждого процесса заменяется целиком, не мутируется.
+        Оценку (``run_state.evaluate``) вызывающий делает уже ВНЕ замка.
+        """
+        with self._readiness_lock:
+            return dict(self._readiness)
+
+    def _forget_readiness(self, process_name: str) -> None:
+        """Снять лист готовности: новое воплощение процесса не наследует отчёт прежнего."""
+        with self._readiness_lock:
+            self._readiness.pop(process_name, None)
 
     def _publish_state(self, path: str, value: Any) -> None:
         """Опубликовать значение в общий StateStore (если доступен).
@@ -684,8 +715,23 @@ class ProcessMonitor:
             time.sleep(self.poll_interval)
         self.process._log_info("Process monitor loop stopped")
 
+    def _tick_run_readiness(self) -> None:
+        """Task 1.3: оценка готовности системы на такте монитора — ``PM._run_readiness_tick()``.
+
+        Отдельный try: сбой оценки не должен глушить остальную итерацию, а сбой итерации — оценку.
+        Вызывается ДО проверки ``shared_resources`` — оценка от state-plane не зависит (cto К2).
+        """
+        tick = getattr(self.process, "_run_readiness_tick", None)
+        if tick is None:
+            return
+        try:
+            tick()
+        except Exception as e:  # noqa: BLE001 — потеря тика не роняет монитор; ошибка громкая
+            self.process._log_error(f"Error in run readiness tick: {e}")
+
     def _run_iteration(self) -> None:
         """Одна итерация мониторинга (вызывается под ``_iteration_lock``)."""
+        self._tick_run_readiness()
         try:
             if not self.process.shared_resources:
                 return
@@ -1506,6 +1552,7 @@ class ProcessMonitor:
             # в окне backoff и heartbeat поднялся, здесь снова обнуляем: рестарт
             # исполняется, и следующий recovery-сигнал — heartbeat новой инкарнации.
             self._last_heartbeat.pop(name, None)
+            self._forget_readiness(name)  # Task 1.3: и отчёт о готовности прежнего воплощения
             try:
                 comm = getattr(self.process, "communication", None)
                 sent = (
@@ -1585,6 +1632,7 @@ class ProcessMonitor:
         заменённого имени также отменяется (Task 3.1).
         """
         self._last_heartbeat.pop(process_name, None)
+        self._forget_readiness(process_name)  # Task 1.3
         self._restart_history.pop(process_name, None)
         self._workers_status.pop(process_name, None)
         self._first_seen.pop(process_name, None)
