@@ -19,7 +19,7 @@ import subprocess
 import sys
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -260,6 +260,10 @@ class _Alpha:
         self.statuses: dict[str, str | None] = {k: None for k in ("B", "D", "C", "ДОМОЙ", "СТОП")}
         self.results: list[L.CaseResult | L.Row] = []
         self.precond = False
+        self.marks: list[
+            str
+        ] = []  # метки прогона для строки «МЕХАНИЗМ: …» (предусловие, ошибка, прервано, ошибка ДОМОЙ/СТОП)
+        self.shown: list[tuple[str, L.Row]] = []  # напечатанные строки с префиксом, в порядке печати
         self.paused = False  # пауза сима поставлена нами и не снята
         self.changed_defect_rate = False
         self.changed_belt = False
@@ -277,6 +281,17 @@ class _Alpha:
         flush = getattr(self._out, "flush", None)
         if flush is not None:
             flush()
+
+    def mark(self, label: str) -> None:
+        """Метка прогона для блока «МЕХАНИЗМ»: один раз на путь."""
+        self.precond = True
+        if label not in self.marks:
+            self.marks.append(label)
+
+    def show(self, prefix: str, row: L.Row) -> None:
+        """Печать строки и запоминание её префикса: по ним ``finish`` строит блок «класс …»."""
+        self.shown.append((prefix, row))
+        self.emit(L.format_row(prefix, row))
 
     def proto_cmd(self, target: str, command: str, args: dict, **kw: Any) -> dict:
         return _res(self.proto.send_command(target, command, args, **kw))
@@ -505,13 +520,16 @@ class _Alpha:
         jobs0, done0 = self.sim_journal()
         self.layout.drain()
         dropped0 = self.layout.dropped
-        before = L.regs_from_introspect(self.proto.introspect_registers("layout")).get("jobs_emitted", 0)
+        regs0 = L.regs_from_introspect(self.proto.introspect_registers("layout"))
+        before = regs0.get("jobs_emitted", 0)
+        filled0 = regs0.get("slots_filled")  # каскад word_line: «было заполнено k/n» несёт регистр ПЕРЕД случаем
+        prev_filled = filled0 if isinstance(filled0, int) and not isinstance(filled0, bool) else None
         seen_before = self._object_ids()
         # слово
         verified = self.proto.set_register_verified("layout", "word_layout", "target_word", case.word)
         if not (isinstance(verified, dict) and verified.get("verified") is True):
             row = L.Row(None, "word_set", case.word, str(verified), False, (f"word_set verified не True: {verified}",))
-            self.emit(L.format_row(cid, row))
+            self.show(cid, row)
             self.statuses[cid] = "FAIL"
             self.results.append(row)
             raise CaseFail(row)
@@ -544,11 +562,28 @@ class _Alpha:
         snap = self.state_value(self.proto, "processes.layout.state.word_layout")
         feed = list(feed_seen.values()) if len(feed_seen) == len(case.discs) else None
         jobs = L.parse_cvt_jobs(exch.texts())
-        result = L.judge_case(cid, msgs, jobs, regs, feed, int(before))
+        result = L.judge_case(
+            cid,
+            msgs,
+            jobs,
+            regs,
+            feed,
+            int(before),
+            prev_filled=prev_filled,
+            hard_angle_thr=getattr(self.args, "hard_angle_thr", 5.0),
+        )
         extra: list[L.Row] = []
         if exch.dropped:
             extra.append(
-                L.Row(None, "exchange", "", f"dropped={exch.dropped}", False, (f"exchange dropped {exch.dropped} ≠ 0",))
+                L.Row(
+                    None,
+                    "exchange",
+                    "",
+                    f"dropped={exch.dropped}",
+                    False,
+                    (f"exchange dropped {exch.dropped} ≠ 0",),
+                    L.runner_check_klass("exchange", result.unrecognized),
+                )
             )
         layout_dropped = self.layout.dropped - dropped0
         if layout_dropped:
@@ -560,13 +595,15 @@ class _Alpha:
                     f"dropped={layout_dropped}",
                     False,
                     (f"layout_log dropped {layout_dropped} ≠ 0",),
+                    L.runner_check_klass("layout_log", result.unrecognized),
                 )
             )
         if not arrived:
             extra.append(
                 L.Row(None, "feed", "", f"sequence={done_info.get('seq')} journal.done+{done_info.get('done')}", False,
                       (f"feed не пришло за 180 с: sequence={done_info.get('seq')}, "
-                       f"journal.done +{done_info.get('done')} из {case.jobs}",))
+                       f"journal.done +{done_info.get('done')} из {case.jobs}",),
+                      L.runner_check_klass("feed", result.unrecognized))
             )  # fmt: skip
         self._finish_case(cid, case, result, extra, feed, msgs, snap, regs, exch)
         self.prev = _CaseState(case, n0, jobs0, done0, int(before))
@@ -600,15 +637,15 @@ class _Alpha:
     ) -> None:
         checks = (*result.checks, *extra)
         ok = result.ok and not extra
-        result = L.CaseResult(cid, result.rows, checks, ok, result.pairs)
+        result = replace(result, checks=checks, ok=ok)
         word = [c for c in checks if c.check == "word_line"]
         for row in word:
-            self.emit(L.format_row(cid, row))
+            self.show(cid, row)
         for row in result.rows:
-            self.emit(L.format_row(cid, row))
+            self.show(cid, row)
         for row in checks:
             if row.check != "word_line":
-                self.emit(L.format_row(cid, row))
+                self.show(cid, row)
         self.emit(f"{cid} INFO state processes.layout.state.word_layout: {snap}")
         if feed is None:
             self.emit(f"{cid} подача: sim.objects не дал полный список — углы по списку")
@@ -645,7 +682,7 @@ class _Alpha:
         row = L.judge_home(reply, state, exch.texts())
         self.statuses["ДОМОЙ"] = "PASS" if row.ok else "FAIL"
         self.results.append(row)
-        self.emit(L.format_row("ДОМОЙ", row))
+        self.show("ДОМОЙ", row)
 
     def p6(self) -> None:
         shutdown_at = self._wall_clock() if self._wall_clock is not None else None
@@ -671,8 +708,8 @@ class _Alpha:
         ok = shutdown_row.ok and stop_row.ok
         self.statuses["СТОП"] = "PASS" if ok else "FAIL"
         self.results.extend([shutdown_row, stop_row])
-        self.emit(L.format_row("СТОП", shutdown_row))
-        self.emit(L.format_row("СТОП", stop_row))
+        self.show("СТОП", shutdown_row)
+        self.show("СТОП", stop_row)
 
     # --- cleanup и итог -------------------------------------------------------------------------------------------
     def _cleanup_step(self, name: str, fn: Callable[[], str | None]) -> None:
@@ -682,7 +719,10 @@ class _Alpha:
             self.emit(f"cleanup: {name} → ошибка {_fmt_exc(exc)}")
             if name in self.statuses:
                 self.statuses[name] = "FAIL"
-                self.results.append(L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",)))
+                row = L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",))
+                self.results.append(row)
+                self.shown.append((name, row))
+                self.mark("ошибка ДОМОЙ/СТОП")
         else:
             self.emit(f"cleanup: {name} → {outcome}")
 
@@ -729,8 +769,10 @@ class _Alpha:
                 self.emit(f"{name}: ошибка {_fmt_exc(exc)}")
                 self.emit(traceback.format_exc().rstrip())
                 self.statuses[name] = "FAIL"
-                self.precond = True
-                self.results.append(L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",)))
+                self.mark("ошибка ДОМОЙ/СТОП")
+                row = L.Row(None, name, "", _fmt_exc(exc), False, (f"{name} ошибка {_fmt_exc(exc)}",))
+                self.results.append(row)
+                self.shown.append((name, row))
         try:
             self.emit(f"сим: режим подачи → {self._restore_random()}")
         except Exception as exc:  # noqa: BLE001 — возврат режима вторичен, на код выхода не влияет
@@ -763,6 +805,10 @@ class _Alpha:
             changed.append("лента 10 Гц (vfd_run прототипа)")
         if changed:
             self.emit("изменено в симе/на стенде: " + ", ".join(changed))
+        hard = [rec for res in self.results if isinstance(res, L.CaseResult) for rec in res.hard]
+        self.write_hard_out(hard)
+        for line in L.format_split_block(self.shown, self.marks, self.statuses, hard):
+            self.emit(line)
         self.emit(L.format_summary(self.statuses, rc))
         return rc
 
@@ -774,6 +820,20 @@ class _Alpha:
                 drv.close()
             except Exception as exc:  # noqa: BLE001
                 self.emit(f"close: ошибка {_fmt_exc(exc)}")
+
+    def write_hard_out(self, hard: list[dict]) -> None:
+        """``--hard-out``: JSONL «трудных» дисков; файл создаётся всегда (пустой без трудных).
+
+        Ошибка записи — строка ``hard-out: ошибка …``, код выхода прежний.
+        """
+        hard_out = getattr(self.args, "hard_out", None)  # Namespace старых тестов без флага
+        if not hard_out:
+            return
+        text = "".join(json.dumps(rec, ensure_ascii=False) + "\n" for rec in hard)
+        try:
+            Path(hard_out).write_bytes(text.encode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 — запись вторична, на код выхода не влияет
+            self.emit(f"hard-out: ошибка {_fmt_exc(exc)}")
 
     def write_dump(self) -> None:
         if not self.args.dump:
@@ -793,7 +853,7 @@ class _Alpha:
             self.emit(f"предусловие: не удалось определить слушателя порта: {exc}")
             clean = False
         if not clean:
-            self.precond = True
+            self.mark("предусловие")
             return self.finish()
         try:
             self.connect()
@@ -802,13 +862,13 @@ class _Alpha:
             self.p3()
         except Precondition as exc:
             self.emit(f"предусловие: {exc}")
-            self.precond = True
+            self.mark("предусловие")
             self.angle_note = " (сети нет)"
             return self._end()
         except Exception as exc:  # noqa: BLE001 — до P3 ничего не уборки: park/shutdown не зовутся
             self.emit(f"ошибка: {_fmt_exc(exc)}")
             self.emit(traceback.format_exc().rstrip())
-            self.precond = True
+            self.mark("ошибка")
             return self._end()
         aborted = False
         interrupt: KeyboardInterrupt | None = None
@@ -817,19 +877,19 @@ class _Alpha:
                 self.run_case(cid)
             except KeyboardInterrupt as exc:  # Ctrl-C: уборка (ДОМОЙ, СТОП, пауза) и повторный raise
                 self.emit("прервано (Ctrl-C): уборка")
-                self.precond = True
+                self.mark("прервано")
                 aborted = True
                 interrupt = exc
             except CaseFail:
                 aborted = True
             except Precondition as exc:
                 self.emit(f"предусловие: {exc}")
-                self.precond = True
+                self.mark("предусловие")
                 aborted = True
             except Exception as exc:  # noqa: BLE001
                 self.emit(f"ошибка: {_fmt_exc(exc)}")
                 self.emit(traceback.format_exc().rstrip())
-                self.precond = True
+                self.mark("ошибка")
                 aborted = True
             if aborted:
                 break
@@ -840,7 +900,7 @@ class _Alpha:
                 self.normal_tail()
             except KeyboardInterrupt as exc:
                 self.emit("прервано (Ctrl-C) в ДОМОЙ/СТОП")
-                self.precond = True
+                self.mark("прервано")
                 interrupt = exc
         rc = self._end()
         if interrupt is not None:
@@ -864,6 +924,12 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--proto-port", type=int, default=8765)
     p.add_argument("--sim-port", type=int, default=8766)
     p.add_argument("--dump", default=None, help="файл .json: собранные записи (доказательство для Task 1.2)")
+    p.add_argument(
+        "--hard-out", default=None, help="файл .jsonl: «трудные» диски (DS-1 §6); пустое значение — не задан"
+    )
+    p.add_argument(
+        "--hard-angle-thr", type=float, default=5.0, help="порог угла «трудного» диска, градусы (умолчание 5.0)"
+    )
     return p
 
 

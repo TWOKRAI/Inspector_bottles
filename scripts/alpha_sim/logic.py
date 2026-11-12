@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import re
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 _PREFIX = "WordLayoutPlugin: "
 _NUM = r"-?\d+(?:\.\d+)?"
@@ -315,6 +315,7 @@ class Row:
     observed: str
     ok: bool
     reasons: tuple[str, ...]  # каждая начинается ключом поля
+    klass: str | None = None  # у FAIL-строки: MECH / ACC; у PASS None; у строк вне judge_case None трактуется как MECH
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,129 @@ class CaseResult:
     checks: tuple[Row, ...]
     ok: bool
     pairs: tuple[tuple[str, float, float], ...] = ()  # (буква, подача, сеть) только у дисков с совпавшей буквой
+    unrecognized: int = 0  # U: сколько дисков сеть не признала (потеряла, ниже порога, иная буква, иная подача)
+    hard: tuple[dict, ...] = ()  # записи «трудных» дисков (строки --hard-out), по возрастанию index
+
+
+# --- Класс FAIL (МЕХАНИЗМ / ТОЧНОСТЬ) и «трудные» диски --------------------------------------------------------------
+
+MECH = "МЕХАНИЗМ"
+ACC = "ТОЧНОСТЬ"
+_SKIP_BELOW = "уверенность ниже порога"
+_SKIP_NO_PRED = "нет предсказания"
+_BELOW_RE = re.compile(rf"^{_SKIP_BELOW} \([^ ]+ ({_NUM}) < (.+)\)$")
+_HARD_RU = {
+    "no_prediction": "нет ответа",
+    "class_mismatch": "класс не совпал",
+    "below_threshold": "ниже порога",
+    "angle": "угол > порога",
+}
+
+
+def _delta_deg(net: float, truth: float) -> float:
+    """Δ угла: wrap180(сеть − истина), округлена до 0,1° (период всегда 360: в журнале нет ``angle_mode``)."""
+    return round(wrap180(net - truth), 1) + 0.0
+
+
+def hard_reasons(truth_letter: str, truth_angle: float, line: DiskLine, angle_thr: float) -> list[str]:
+    """Причины «трудного» диска по строке журнала и истине; пусто — диск не трудный.
+
+    Правило принадлежит DS-1 (``join_frame_truth``, plans/2026-11-11_dataset-sidecar-truth/tasks/1.1c.md, design.md §6):
+    пока его кода в main нет, эта функция — единственная реализация и обязана совпадать с §6 по входам и выходам.
+    Порядок причин: ``no_prediction``, ``class_mismatch``, ``below_threshold``, ``angle`` (``|Δ| > angle_thr``, строго).
+    «Нет предсказания» — единственная причина (буква ``?`` и угол 0.0 не сравниваются).
+    Отличия от DS-1 §5: период угла всегда 360 и Δ округлена до 0,1°.
+    """
+    # ponytail: дубль правила DS-1 §6, заменить импортом после DS-1 1.1c
+    skip = line.skip or ""
+    if skip.startswith(_SKIP_NO_PRED):
+        return ["no_prediction"]
+    reasons: list[str] = []
+    if line.letter != truth_letter:
+        reasons.append("class_mismatch")
+    if skip.startswith(_SKIP_BELOW):
+        reasons.append("below_threshold")
+    if abs(_delta_deg(line.angle, truth_angle)) > angle_thr:
+        reasons.append("angle")
+    return reasons
+
+
+def _hard_record(case_id: str, index: int, truth: tuple[str, float], line: DiskLine, thr: float) -> dict | None:
+    """Запись --hard-out (DS-1 §6) для диска со строкой журнала; ``None`` — диск не трудный."""
+    reasons = hard_reasons(truth[0], truth[1], line, thr)
+    if not reasons:
+        return None
+    skip = line.skip or ""
+    pred: dict | None = None
+    delta: float | None = None
+    conf_thr: float | None = None
+    if reasons != ["no_prediction"]:
+        below = _BELOW_RE.match(skip)
+        conf = float(below.group(1)) if below else None
+        if below:
+            try:
+                conf_thr = float(below.group(2))
+            except ValueError:  # «порог ml_inference»
+                conf_thr = None
+        pred = {"class": line.letter, "angle_deg": line.angle, "confidence": conf, "below_threshold": bool(below)}
+        delta = _delta_deg(line.angle, truth[1])
+    return {
+        "case": case_id,
+        "index": index,
+        "truth": {"class": truth[0], "angle_deg": truth[1]},
+        "pred": pred,
+        "delta_angle_deg": delta,
+        "hard": True,
+        "hard_reasons": reasons,
+        "hard_reasons_ru": [_HARD_RU[r] for r in reasons],
+        "angle_thr": thr,
+        "conf_thr": conf_thr,
+    }
+
+
+def _reason_key(reason: str) -> str:
+    return reason.split(" ", 1)[0]
+
+
+def _unrecognized(line: DiskLine, reasons: list[str]) -> bool:
+    """Диск не признан сетью: буква или подача разошлись, либо пропуск «ниже порога» / «нет предсказания»."""
+    skip = line.skip or ""
+    return skip.startswith((_SKIP_BELOW, _SKIP_NO_PRED)) or any(_reason_key(r) in ("letter", "feed") for r in reasons)
+
+
+def _disc_klass(reasons: list[str], unrec: bool, u_before: int, line: DiskLine | None, e: Expect | None) -> str:
+    if unrec:
+        return ACC
+    keys = {_reason_key(r) for r in reasons}
+    if keys <= {"r", "ARGS[9]"}:
+        return ACC
+    if keys <= {"progress", "r", "ARGS[9]"} and "progress" in keys and line is not None and e is not None:
+        if line.progress is not None and e.progress is not None:  # каскад от потери взятого диска раньше в списке
+            (k, n), (k_exp, n_exp) = line.progress, e.progress
+            if n == n_exp and abs(k - k_exp) <= u_before:
+                return ACC
+    return MECH
+
+
+def _check_klass(c: Row, case: Case, jobs: list[CvtJob] | None, regs: dict | None, before: int, u: int) -> str:
+    """Класс FAIL-проверки случая: расхождение счёта не больше U — ТОЧНОСТЬ, иначе МЕХАНИЗМ."""
+    if c.check == "regs.done":
+        return ACC if u >= 1 else MECH
+    if c.check == "jobs.count" and jobs is not None:
+        return ACC if abs(len(jobs) - case.jobs) <= u else MECH
+    if c.check in ("regs.slots_filled", "regs.jobs_emitted") and regs is not None:
+        got = regs.get(c.check.removeprefix("regs."))
+        if not isinstance(got, int) or isinstance(got, bool):
+            return MECH
+        if c.check == "regs.slots_filled":
+            return ACC if abs(got - case.regs["slots_filled"]) <= u else MECH
+        return ACC if abs(got - before - case.jobs) <= u else MECH
+    return MECH
+
+
+def runner_check_klass(check: str, unrecognized: int) -> str:
+    """Класс строк, которые создаёт раннер (``feed``, ``exchange``, ``layout_log``): ``feed`` — ТОЧНОСТЬ при U ≥ 1."""
+    return ACC if check == "feed" and unrecognized >= 1 else MECH
 
 
 def _given(letter: str, angle: float) -> str:
@@ -468,8 +592,15 @@ def judge_case(
     regs: dict | None,
     feed: list[tuple[str, float]] | None,
     jobs_emitted_before: int,
+    prev_filled: int | None = None,
+    hard_angle_thr: float = 5.0,
 ) -> CaseResult:
-    """Судья случая. ``jobs``/``regs``/``feed`` равны ``None`` — эти проверки не делаются (только журнал layout)."""
+    """Судья случая. ``jobs``/``regs``/``feed`` равны ``None`` — эти проверки не делаются (только журнал layout).
+
+    ``prev_filled`` — ``slots_filled`` регистра перед случаем: подставляется в «было заполнено k/n» ожидаемой строки
+    смены слова (каскад от прошлого случая); ``None`` — литерал ``Case.word_line``. ``hard_angle_thr`` — порог угла
+    «трудного».
+    """
     case = CASES[case_id]
     disks: list[tuple[str, DiskLine]] = []  # (сообщение, разбор) строк диска по порядку
     word_msg: str | None = None
@@ -491,7 +622,11 @@ def judge_case(
         pairs = _align([f[0] for f in feed], [ln.letter for _, ln in disks])
     else:  # без подачи или при равном числе строк — по позиции
         pairs = [(i if i < n_exp else None, i if i < len(disks) else None) for i in range(max(len(disks), n_exp))]
-    rows: list[Row] = []
+    # Выравнивание ненадёжно: пары идут по позиции, а строк не столько, сколько дисков — сдвиг после потерянного диска
+    # выглядит как ошибка буквы; тогда нет ни U, ни «трудных», все FAIL строк диска — МЕХАНИЗМ.
+    reliable = use_feed or len(disks) == n_exp
+    # draft: (строка, её строка журнала, ожидание, подача, не признан)
+    draft: list[tuple[Row, DiskLine | None, Expect | None, tuple[str, float] | None, bool]] = []
     angle_pairs: list[tuple[str, float, float]] = []
     taken_seen = 0
     extra = 0
@@ -501,14 +636,16 @@ def judge_case(
             e = case.expects[fi]
             given = _given(e.letter, e.angle)
             why = (f"нет строки у диска №{fi + 1} (вход {given})",)
-            rows.append(Row(fi + 1, "disk", given, "нет строки", False, why))
+            draft.append((Row(fi + 1, "disk", given, "нет строки", False, why), None, None, None, False))
             continue
         msg, line = disks[di]
         observed = msg[len(_PREFIX) :] if msg.startswith(_PREFIX) else msg
         if fi is None:
             extra += 1
             given = _given(line.letter, line.angle)
-            rows.append(Row(n_exp + extra, "disk", given, observed, False, ("лишняя строка",)))
+            draft.append(
+                (Row(n_exp + extra, "disk", given, observed, False, ("лишняя строка",)), None, None, None, False)
+            )
             continue
         e = case.expects[fi]
         fed = feed[fi] if feed is not None and fi < len(feed) else None
@@ -521,18 +658,39 @@ def judge_case(
                 why_list.extend(_judge_job(e, job) if e.skip is None else [])
                 observed += _job_suffix(job)
             taken_seen += 1
-        rows.append(Row(fi + 1, "disk", _given(e.letter, e.angle), observed, not why_list, tuple(why_list)))
+        row = Row(fi + 1, "disk", _given(e.letter, e.angle), observed, not why_list, tuple(why_list))
+        draft.append((row, line, e, fed, _unrecognized(line, why_list)))
         fed_letter, fed_angle = fed if fed is not None else (e.letter, e.angle)
         if line.letter == fed_letter:
             angle_pairs.append((line.letter, fed_angle, line.angle))
 
+    unrec_at = [row.index for row, _, _, _, unrec in draft if unrec and not row.ok] if reliable else []
+    u_total = len(unrec_at)
+    rows: list[Row] = []
+    hard: list[dict] = []
+    for row, line, e, fed, unrec in draft:
+        if not row.ok:
+            u_before = sum(1 for i in unrec_at if i < (row.index or 0))
+            klass = _disc_klass(list(row.reasons), unrec, u_before, line, e) if reliable else MECH
+            row = replace(row, klass=klass)
+        rows.append(row)
+        if reliable and line is not None and e is not None and row.index is not None:
+            truth = fed if fed is not None else (e.letter, e.angle)
+            record = _hard_record(case_id, row.index, truth, line, hard_angle_thr)
+            if record is not None:
+                hard.append(record)
+    hard.sort(key=lambda rec: rec["index"])
+
     checks: list[Row] = []
     word_reasons: list[str] = []
+    expected_line = case.word_line
+    if prev_filled is not None:  # каскад: у D и C «было заполнено k/n» несёт регистр перед случаем; n и слова — литерал
+        expected_line = re.sub(r"было заполнено \d+/", f"было заполнено {prev_filled}/", expected_line)
     if word_msg is None:
         word_reasons.append("word_line нет строки слова")
     else:
-        if word_msg != case.word_line:
-            word_reasons.append(f"word_line {word_msg!r} ≠ {case.word_line!r}")
+        if word_msg != expected_line:
+            word_reasons.append(f"word_line {word_msg!r} ≠ {expected_line!r}")
         if first_disk_pos is not None and word_pos is not None and word_pos > first_disk_pos:
             word_reasons.append("word_line после первой строки диска")
     checks.append(_check("word_line", word_msg if word_msg is not None else "нет строки", word_reasons))
@@ -543,8 +701,11 @@ def judge_case(
         checks.append(_check("jobs.count", str(len(jobs)), cnt))
     if regs is not None:
         checks.extend(_judge_regs(case, regs, jobs_emitted_before))
+    checks = [
+        c if c.ok else replace(c, klass=_check_klass(c, case, jobs, regs, jobs_emitted_before, u_total)) for c in checks
+    ]
     ok = all(r.ok for r in rows) and all(c.ok for c in checks)
-    return CaseResult(case_id, tuple(rows), tuple(checks), ok, tuple(angle_pairs))
+    return CaseResult(case_id, tuple(rows), tuple(checks), ok, tuple(angle_pairs), u_total, tuple(hard))
 
 
 def judge_journal(case_id: str, lines: list[str]) -> CaseResult:
@@ -744,6 +905,32 @@ def format_row(case_id: str, row: Row) -> str:
 def format_summary(statuses: dict[str, str | None], rc: int) -> str:
     parts = " ".join(f"{key}={statuses.get(key) or '—'}" for key in ("B", "D", "C", "ДОМОЙ", "СТОП"))
     return f"итог: {parts} → код {rc} (вердикт α — Task 1.2, не этот скрипт)"
+
+
+def format_split_block(
+    shown: list[tuple[str, Row]], marks: list[str], statuses: dict[str, str | None], hard: list[dict]
+) -> list[str]:
+    """Строки перед ``итог:``: ``класс …`` по FAIL-строкам, ``МЕХАНИЗМ: …``, ``ТОЧНОСТЬ: N трудных …``.
+
+    ``shown`` — напечатанные строки с их префиксами в порядке печати; ``marks`` — метки прогона раннера.
+    """
+    lines: list[str] = []
+    mech: list[str] = []
+    for prefix, row in shown:
+        if row.ok:
+            continue
+        key = f"#{row.index}" if row.index is not None else ("" if row.check == prefix else row.check)
+        label = f"{prefix} {key}" if key else prefix
+        klass = row.klass or MECH
+        lines.append(f"класс {label}: {klass}")
+        if klass != ACC:
+            mech.append(label)
+    not_run = [key for key in ("B", "D", "C", "ДОМОЙ", "СТОП") if statuses.get(key) is None]
+    detail = [*mech, *marks, *([f"не выполнены: {', '.join(not_run)}"] if not_run else [])]
+    lines.append(f"{MECH}: FAIL ({', '.join(detail)})" if detail else f"{MECH}: PASS")
+    listing = f" ({', '.join(f'{rec["case"]} #{rec["index"]}' for rec in hard)})" if hard else ""
+    lines.append(f"{ACC}: {len(hard)} трудных{listing}")
+    return lines
 
 
 def exit_code(results: list[CaseResult | Row], precondition_error: bool = False) -> int:
