@@ -6,9 +6,11 @@ Purpose:
     модели. Правка модели переносится на ``base_doc`` дельтой
     ``apply_delta(base, M(base), M(edited), on_insert=minimize)``: всё, что вызывающий не менял, остаётся в канонической
     форме как есть.
-    ``M`` — форма ``RecipeStoreFromManager._denormalize(Recipe.to_dict())`` (meta поднята на верхний уровень).
+    ``M`` — форма ``denormalize_recipe_dict(Recipe.to_dict())`` (meta поднята на верхний уровень).
 
 Public API:
+    ``denormalize_recipe_dict(data) -> dict`` — ``meta`` -> верхний уровень, порядок секций (Q2 Variant A);
+    ``RecipeStoreFromManager._denormalize`` делегирует сюда.
     ``recipe_from_canonical(doc) -> Recipe``.
     ``recipe_to_canonical(recipe, base_doc) -> dict`` — ``base_doc`` не мутируется; ``recipe_to_canonical(
     recipe_from_canonical(d), d) == d`` для любого канонического ``d``.
@@ -21,7 +23,8 @@ Public API:
 
 Stability:
     Новый публичный модуль слоя адаптеров (new-lite). Зависит от ``domain`` и ``multiprocess_framework.modules.recipe``;
-    НЕ импортирует ``recipes.save`` / ``backend`` (``recipes.save`` в Task 1.2 импортирует этот модуль).
+    НЕ импортирует ``recipes.save`` / ``backend`` / ``adapters.stores.recipe_store``: ``recipes.save`` (Task 1.2)
+    и ``RecipeStoreFromManager`` импортируют этот модуль.
     Файл читает backend-модель ``SystemBlueprint`` (умолчания другие, чем у доменной модели, design.md §10.2 В-П2):
     минимальная форма допустима, только если backend строит из неё то же, что из полной (поля ``ProcessConfig``,
     ``as_generic_config``, восстановленные конфиги плагинов, плоский конфиг плагина; ``adapters/tests/
@@ -33,8 +36,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_framework.modules.recipe.yaml_io import apply_delta
-from multiprocess_prototype.adapters.stores.recipe_store import RecipeStoreFromManager
 from multiprocess_prototype.domain.entities.display import DisplayDefinition
 from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.entities.process import Process
@@ -43,7 +46,13 @@ from multiprocess_prototype.domain.entities.topology import Topology
 from multiprocess_prototype.domain.entities.wire import Wire
 from multiprocess_prototype.domain.entities.worker import WorkerSpec
 
-__all__ = ["minimize", "recipe_from_canonical", "recipe_to_canonical", "topology_to_canonical"]
+__all__ = [
+    "denormalize_recipe_dict",
+    "minimize",
+    "recipe_from_canonical",
+    "recipe_to_canonical",
+    "topology_to_canonical",
+]
 
 # Путь списка сущностей (индекс элемента — ``*``) -> тип элемента.
 _LIST_ENTITIES: dict[tuple, Any] = {
@@ -115,9 +124,61 @@ def _shape(path: tuple) -> tuple:
     return tuple("*" if isinstance(part, int) else part for part in path)
 
 
+def denormalize_recipe_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Денормализовать meta -> top-level для backward-compat с live YAML.
+
+    Recipe.to_dict() выдаёт: {"meta": {"name": ..., "version": ..., ...}, "blueprint": ..., ...}
+    Live YAML формат (v2):   {"name": ..., "version": ..., "blueprint": ..., ...}
+
+    Решение Q2 Variant A: извлечь все поля из meta на верхний уровень,
+    удалить ключ meta. Это сохраняет совместимость с:
+    - RecipeManager.read_recipe() (raw YAML reader)
+    - Recipe.from_dict() (понимает оба формата)
+    - Legacy GUI reader'ы (ожидают top-level name/version)
+
+    Порядок ключей в результирующем YAML для читаемости (Task 1.3):
+        1. meta-поля (name, version, description, created_at)
+        2. displays — определения дисплеев (DisplayDefinition, top-level секция)
+        3. blueprint — топология рецепта
+        4. остальные поля (active_services, display_bindings, gui_positions, ...)
+
+    Поле ``displays`` (tuple[DisplayDefinition,...]) сохраняется автоматически
+    через denormalized.update(result) — оно НЕ входит в meta и не требует
+    специальной обработки. Явное позиционирование перед blueprint — только
+    для читаемости итогового YAML файла.
+    """
+    result = dict(data)
+    meta = result.pop("meta", {})
+    if isinstance(meta, dict):
+        # 1. Сначала meta-поля (верхний уровень, читаемость YAML)
+        denormalized: dict[str, Any] = {}
+        for key in ("name", "version", "description", "created_at"):
+            if key in meta:
+                denormalized[key] = meta[key]
+        # Оставшиеся meta-поля (если появятся в будущем)
+        for key, value in meta.items():
+            if key not in denormalized:
+                denormalized[key] = value
+
+        # 2. displays — определения дисплеев рецепта (перед blueprint для читаемости).
+        #    Сохраняется как top-level секция, НЕ внутри blueprint.
+        #    (blueprint.displays = привязки node_id→display_id — другая секция)
+        if "displays" in result:
+            denormalized["displays"] = result.pop("displays")
+
+        # 3. blueprint — топология (процессы, провода, привязки дисплеев)
+        if has_top_level_blueprint(result):
+            denormalized["blueprint"] = result.pop("blueprint")
+
+        # 4. Остальные поля Recipe (active_services, display_bindings, gui_positions, ...)
+        denormalized.update(result)
+        return denormalized
+    return result
+
+
 def _model_form(recipe: Recipe) -> dict:
-    """``M``: ``RecipeStoreFromManager._denormalize(Recipe.to_dict())`` (meta на верхнем уровне)."""
-    return RecipeStoreFromManager._denormalize(recipe.to_dict())
+    """``M``: ``denormalize_recipe_dict(Recipe.to_dict())`` (meta на верхнем уровне)."""
+    return denormalize_recipe_dict(recipe.to_dict())
 
 
 def _topology_view(blueprint: dict) -> dict:
