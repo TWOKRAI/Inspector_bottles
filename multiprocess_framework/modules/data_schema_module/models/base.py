@@ -11,15 +11,9 @@ from pydantic import BaseModel, Field, computed_field, model_validator, ConfigDi
 
 from .types import ComponentType
 
-# Импорт для расширенной ДНК (опционально)
-try:
-    from .dna import ComponentDNA, ComponentLocation, ResourceReference, ResourceType
-except ImportError:
-    # Для обратной совместимости
-    ComponentDNA = None
-    ComponentLocation = None
-    ResourceReference = None
-    ResourceType = None
+# Расширенная ДНК (dna.py) здесь не импортируется: dna.py сам импортирует base.py, и прежний
+# ``try: from .dna import ...`` всегда падал по циклу base <-> dna, молча оставляя имена None.
+# Имена ComponentDNA и др. в base не использовались и из base никем не брались — берите их из .dna.
 
 
 class BaseComponentModel(BaseModel):
