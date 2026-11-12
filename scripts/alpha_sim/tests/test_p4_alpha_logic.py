@@ -403,29 +403,29 @@ def test_case_b_feed_checks_letter_only_not_angle() -> None:
 
 
 _EDGES = [
-    # окно забора (временно расширено, решение владельца 2026-11-11): px ∈ [454.9, 462.0], py ∈ [−344.0, −340.0]
+    # окно забора (design.md §2.8, запись 23): px ∈ [454.9, 461.5], py ∈ [−344.0, −342.0]
     pytest.param(_sub(0, "взять(458.2,", "взять(454.9,"), True, "pick", id="pick_x_lo_in"),
     pytest.param(_sub(0, "взять(458.2,", "взять(454.8,"), False, "pick", id="pick_x_lo_out"),
-    pytest.param(_sub(0, "взять(458.2,", "взять(462.0,"), True, "pick", id="pick_x_hi_in"),
-    pytest.param(_sub(0, "взять(458.2,", "взять(462.1,"), False, "pick", id="pick_x_hi_out"),
+    pytest.param(_sub(0, "взять(458.2,", "взять(461.5,"), True, "pick", id="pick_x_hi_in"),
+    pytest.param(_sub(0, "взять(458.2,", "взять(461.6,"), False, "pick", id="pick_x_hi_out"),
     pytest.param(_sub(0, "-343.0)", "-344.0)"), True, "pick", id="pick_y_lo_in"),
     pytest.param(_sub(0, "-343.0)", "-344.1)"), False, "pick", id="pick_y_lo_out"),
-    pytest.param(_sub(0, "-343.0)", "-340.0)"), True, "pick", id="pick_y_hi_in"),
-    pytest.param(_sub(0, "-343.0)", "-339.9)"), False, "pick", id="pick_y_hi_out"),
+    pytest.param(_sub(0, "-343.0)", "-342.0)"), True, "pick", id="pick_y_hi_in"),
+    pytest.param(_sub(0, "-343.0)", "-341.9)"), False, "pick", id="pick_y_hi_out"),
     # r ∈ wrap180(0 − подача) ± 15,0 (временно); диск 1 — подача 0°
     pytest.param(_sub(0, "r0.0°", "r15.0°"), True, "r", id="r_hi_in"),
     pytest.param(_sub(0, "r0.0°", "r-15.0°"), True, "r", id="r_lo_in"),
     pytest.param(_sub(0, "r0.0°", "r15.1°"), False, "r", id="r_hi_out"),
     pytest.param(_sub(0, "r0.0°", "r-15.1°"), False, "r", id="r_lo_out"),
-    # ARGS[2] ∈ 4549…4620, ARGS[3] ∈ 62096…62136 (временно)
+    # ARGS[2] ∈ 4549…4615, ARGS[3] ∈ 62096…62116 (design.md §2.8, запись 23)
     pytest.param(_arg(0, 2, 4549), True, "ARGS[2]", id="args2_lo_in"),
     pytest.param(_arg(0, 2, 4548), False, "ARGS[2]", id="args2_lo_out"),
-    pytest.param(_arg(0, 2, 4620), True, "ARGS[2]", id="args2_hi_in"),
-    pytest.param(_arg(0, 2, 4621), False, "ARGS[2]", id="args2_hi_out"),
+    pytest.param(_arg(0, 2, 4615), True, "ARGS[2]", id="args2_hi_in"),
+    pytest.param(_arg(0, 2, 4616), False, "ARGS[2]", id="args2_hi_out"),
     pytest.param(_arg(0, 3, 62096), True, "ARGS[3]", id="args3_lo_in"),
     pytest.param(_arg(0, 3, 62095), False, "ARGS[3]", id="args3_lo_out"),
-    pytest.param(_arg(0, 3, 62136), True, "ARGS[3]", id="args3_hi_in"),
-    pytest.param(_arg(0, 3, 62137), False, "ARGS[3]", id="args3_hi_out"),
+    pytest.param(_arg(0, 3, 62116), True, "ARGS[3]", id="args3_hi_in"),
+    pytest.param(_arg(0, 3, 62117), False, "ARGS[3]", id="args3_hi_out"),
     # ARGS[9] для 0°: 64386…64686 включительно (временно, ±150)
     pytest.param(_arg(0, 9, 64386), True, "ARGS[9]", id="args9_lo_in"),
     pytest.param(_arg(0, 9, 64385), False, "ARGS[9]", id="args9_lo_out"),
