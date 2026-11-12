@@ -21,7 +21,7 @@ from scripts.atlas.adapters.modules import modules_for
 from scripts.atlas import store
 from scripts.atlas.build import build, code_fingerprint, fingerprint
 from scripts.atlas.codemap import USAGE_UNKNOWN, code_of, is_test
-from scripts.atlas.modules import OTHER, resolve as module_of
+from scripts.atlas.modules import OTHER, norm_path, resolve as module_of
 from scripts.atlas.result_form import TAILS, is_none, section
 from scripts.atlas.rules import Scan
 from scripts.atlas.tree import AtlasError, Tree, resolve, run_git
@@ -349,30 +349,67 @@ def _text_sources(
 
 
 _FILES_LABEL = re.compile(r"^[ \t]*FILES \(complete list")
-_FILES_ENTRY = re.compile(r"^[ \t]*\d+\.[ \t]+`?([A-Za-z0-9_./-]+)`?(?:[ \t]|$)")
+_NEXT_LABEL = re.compile(
+    r"^[ \t]*[A-Z][A-Z \-/]{2,}(?:[ \t]*\(.*)?:"
+)  # метка раздела брифа (REDS, DESIGN…), как plans_ledger
+_FILES_ENTRY = re.compile(r"^[ \t]*\d+\.[ \t]+(.+)$")
+_DASH = re.compile(r"[ \t][—–][ \t]")
+_LINE_SUFFIX = re.compile(r":\d+(?:[-–]\d+)?$")
+_FILE_NAME = re.compile(r"[A-Za-z0-9_./-]+\.[A-Za-z0-9]+")
+
+
+def _entry_paths(item: str) -> list[str]:
+    """Имена файлов одного пункта FILES: список через запятую до « — », у каждого первое слово, без `:N`.
+
+    Берётся только то, что выглядит файлом (есть расширение); слово без расширения, путь с пробелом (первое слово
+    `scripts/atlas/my` от `my file.py`), каталог на «/» — мусор и отбрасываются, а не печатаются как кандидат.
+    """
+    names: list[str] = []
+    for piece in _DASH.split(item, maxsplit=1)[0].split(","):
+        words = piece.split()
+        word = _LINE_SUFFIX.sub("", words[0].strip("`*")) if words else ""
+        if _FILE_NAME.fullmatch(word):
+            names.append(word)
+    return names
+
+
+def _canonical(path: str) -> bool:
+    try:
+        return norm_path(path) == path
+    except AtlasError:
+        return False
 
 
 def _files_block(tree: Tree, plan_path: str, tid: str, rows: list[dict]) -> tuple[list[str], list[str]]:
     """(модули, пути) из блока `FILES (complete list …)` файла `tasks/<id>.md` плана; пусто, если блока нет.
 
-    Пути берутся точно, как написаны в нумерованных пунктах: файла может не быть в дереве (новый), а путь вне
-    модулей `modules.yaml` отбрасывается. Блок кончается пустой строкой или заголовком `#`; блоков в файле может быть
-    несколько (по ролям) — берутся все; строки «Только читать» и продолжения пунктов не нумерованы и в счёт не идут.
+    Пути берутся как написаны в нумерованных пунктах (файла может не быть в дереве — новый), если они канонические
+    (`norm_path(p) == p`: без `./`, `..`) и лежат в модуле `modules.yaml`. Голое имя без «/» (`close.py`) берётся по
+    правилу голых имён: один файл с таким именем в дереве — он, иначе (несколько или ни одного) не берётся.
+    Блок кончается пустой строкой, заголовком `#` или меткой следующего раздела (`REDS:`); блоков в файле может быть
+    несколько (по ролям) — берутся все; «Только читать» и продолжения пунктов не нумерованы и в счёт не идут.
     """
     path = plan_path[: -len("plan.md")] + f"tasks/{tid}.md"
-    if not plan_path.endswith("/plan.md") or path not in set(tree.files()):
+    present = set(tree.files())
+    if not plan_path.endswith("/plan.md") or path not in present:
         return [], []
     found: set[str] = set()
     paths: set[str] = set()
     inside = False
-    for line in _text(tree, path).split("\n"):
-        if not inside:
-            inside = bool(_FILES_LABEL.match(line))
-        elif not line.strip() or line.startswith("#"):
+    for line in _text(tree, path).splitlines():
+        if _FILES_LABEL.match(line):
+            inside = True
+        elif not inside:
+            continue
+        elif not line.strip() or line.startswith("#") or _NEXT_LABEL.match(line):
             inside = False  # блоков может быть несколько (по ролям): берутся все
-        elif (m := _FILES_ENTRY.match(line)) and ("/" in m[1] or "." in m[1]) and module_of(m[1], rows) != OTHER:
-            found.add(module_of(m[1], rows))
-            paths.add(m[1])
+        elif m := _FILES_ENTRY.match(line):
+            for name in _entry_paths(m[1]):
+                bare = [f for f in present if f.endswith("/" + name)] if "/" not in name else [name]
+                for p in bare if len(bare) == 1 else []:
+                    if _canonical(p) and module_of(p, rows) != OTHER:
+                        found.add(module_of(p, rows))
+                        paths.add(p)
     return sorted(found), sorted(paths)
 
 

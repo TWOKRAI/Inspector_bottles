@@ -40,6 +40,13 @@ _PLAN = """\
 - Task 1.7: правка n/X.py [PENDING]
 - Task 1.8: правка controller.py [PENDING]
 - Task 1.9: объект без имени в строке [PENDING]
+- Task 2.1: два блока FILES [PENDING]
+- Task 2.2: правка helper.py [PENDING]
+- Task 2.3: пункты со списком [PENDING]
+- Task 2.4: файл с CRLF [PENDING]
+- Task 2.5: мусор в пунктах [PENDING]
+- Task 2.6: блок без пустой строки перед REDS [PENDING]
+- Task 2.7: новый файл в FILES [PENDING]
 """
 _FILES_11 = """\
 # Task 1.1
@@ -78,6 +85,23 @@ FILES (complete list — nothing else; need another file -> stop and ask the lea
   1. m/tests/test_widget.py — REDS
   2. m/widget.py — правка
 """
+_FILES_21 = (
+    "FILES (complete list — роль A):\n  1. m/a.py\n\nТекст между блоками.\n\n"
+    "FILES (complete list — роль B):\n  1. n/X.py\n"
+)
+_FILES_22 = "FILES (complete list):\n  1. m/a.py\n"
+_FILES_23 = (
+    "FILES (complete list):\n"
+    "  1. m/a.py, m/tools/helper.py:12 — новые\n"
+    "  2. widget.py, controller.py, newfile.py — голые имена\n"
+)
+_FILES_24 = "FILES (complete list):\r\n  1. m/a.py\r\n  2. `m/widget.py`\r\n  3. m/tools/helper.py\r\n"
+_FILES_25 = (
+    "FILES (complete list):\n"
+    "  1. ./m/a.py\n  2. m/tools/../a.py\n  3. m/my file.py\n  4. m/tools/\n  5. m/widget.py — единственный\n"
+)
+_FILES_26 = "FILES (complete list):\n  1. m/a.py\nREDS (predicted red tests):\n  1. n/X.py — красный тест\n"
+_FILES_27 = "FILES (complete list):\n  1. m/newthing.py — новый\n  2. m/widget.py — правка\n"
 _WIDGET = 'class Widget:\n    """Виджет."""\n\n    def run(self) -> int:\n        return 1\n'
 _HEAD = "Задача gamma#{id} — статус pending, план plans/2026-11-01_gamma/plan.md"
 _TAIL = "Хвосты прошлых задач плана ("
@@ -93,6 +117,16 @@ def _repo(factory: RepoFactory, mp: pytest.MonkeyPatch, name: str = "pfb") -> Gi
     put(repo, "plans/2026-11-01_gamma/tasks/1.7.md", _FILES_17)
     put(repo, "plans/2026-11-01_gamma/tasks/1.8.md", _FILES_18)
     put(repo, "plans/2026-11-01_gamma/tasks/1.9.md", _FILES_19)
+    for tid, text in {
+        "2.1": _FILES_21,
+        "2.2": _FILES_22,
+        "2.3": _FILES_23,
+        "2.4": _FILES_24,
+        "2.5": _FILES_25,
+        "2.6": _FILES_26,
+        "2.7": _FILES_27,
+    }.items():
+        put(repo, f"plans/2026-11-01_gamma/tasks/{tid}.md", text)
     put(repo, "m/widget.py", _WIDGET)
     put(
         repo,
@@ -225,3 +259,100 @@ def test_brief_object_comes_from_files_block(
     assert "файл объекта Widget" in out
     assert "m/widget.py" in out
     # три test_* из FILES идут в пути раньше m/widget.py: объекты «первые три» их бы заняли, Widget выпал бы
+
+
+# ---------------------------------------------------------------- разбор блока FILES
+
+
+def _candidates(lines: list[str]) -> list[str]:
+    start = next(i for i, line in enumerate(lines) if line.startswith("Файлы-кандидаты в FILES ("))
+    end = next(i for i, line in enumerate(lines) if line.startswith(_TAIL))
+    return lines[start:end]
+
+
+def test_several_files_blocks_are_all_read(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    lines = lines_of(atlas(repo, "pack", "gamma#2.1", *REFS))
+    assert lines[1] == "Модули: m, n (из текста задачи)"
+    assert _candidates(lines) == [
+        "Файлы-кандидаты в FILES (2):",
+        "  m/a.py — из текста задачи",
+        "  n/X.py — из текста задачи",
+    ]
+
+
+def test_unambiguous_bare_name_of_plan_line_is_added_to_block(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    # блок называет только m/a.py; `helper.py` строки плана — единственный m/tools/helper.py
+    lines = lines_of(atlas(repo, "pack", "gamma#2.2", *REFS))
+    assert _candidates(lines) == [
+        "Файлы-кандидаты в FILES (2):",
+        "  m/a.py — из текста задачи",
+        "  m/tools/helper.py — из текста задачи",
+    ]
+
+
+def test_entry_with_list_and_line_suffix_and_bare_names(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    # `m/a.py, m/tools/helper.py:12` — оба; голое widget.py — один файл в дереве; controller.py — их три (не берётся);
+    # newfile.py — файла нет, каталог неизвестен (не берётся)
+    lines = lines_of(atlas(repo, "pack", "gamma#2.3", *REFS))
+    assert _candidates(lines) == [
+        "Файлы-кандидаты в FILES (3):",
+        "  m/a.py — из текста задачи",
+        "  m/tools/helper.py — из текста задачи",
+        "  m/widget.py — из текста задачи",
+    ]
+
+
+def test_crlf_task_file_keeps_all_entries(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    lines = lines_of(atlas(repo, "pack", "gamma#2.4", *REFS))
+    assert _candidates(lines) == [
+        "Файлы-кандидаты в FILES (3):",
+        "  m/a.py — из текста задачи",
+        "  m/tools/helper.py — из текста задачи",
+        "  m/widget.py — из текста задачи",
+    ]
+
+
+def test_non_canonical_spaced_and_directory_entries_are_dropped(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    # `./m/a.py`, `m/tools/../a.py` — не канонические; `m/my file.py` — путь с пробелом; `m/tools/` — каталог
+    lines = lines_of(atlas(repo, "pack", "gamma#2.5", *REFS))
+    assert _candidates(lines) == ["Файлы-кандидаты в FILES (1):", "  m/widget.py — из текста задачи"]
+
+
+def test_block_ends_at_next_label_without_blank_line(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(repo_factory, monkeypatch)
+    lines = lines_of(atlas(repo, "pack", "gamma#2.6", *REFS))
+    assert _candidates(lines) == ["Файлы-кандидаты в FILES (1):", "  m/a.py — из текста задачи"]
+
+
+def test_new_file_in_block_does_not_break_pack_and_brief(
+    repo_factory: RepoFactory, atlas: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    repo = _repo(repo_factory, monkeypatch)
+    packed = lines_of(atlas(repo, "pack", "gamma#2.7", *REFS))
+    assert _candidates(packed) == [
+        "Файлы-кандидаты в FILES (2):",
+        "  m/newthing.py — из текста задачи",
+        "  m/widget.py — из текста задачи",
+    ]
+    # m/newthing.py в дереве нет: brief читает блобы строго, объект берётся из существующего m/widget.py
+    res = atlas(repo, "brief", "gamma#2.7")
+    assert res.code == 0, res.err
+    assert "файл объекта Widget" in res.out
