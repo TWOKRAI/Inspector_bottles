@@ -733,3 +733,58 @@ def test_real_process_blocked_readiness_does_not_stall_pause() -> None:
         assert plugins["hz_a"].state is PluginState.PAUSED, "зависший readiness() остановил сверку"
     finally:
         _stop_real(thread, stop)
+
+
+# --------------------------------------------------------------------------- #
+# Раунд 3 (дыры, найденные матрицей инъекций 1.2)
+# --------------------------------------------------------------------------- #
+
+
+def test_stale_hook_failure_does_not_resurrect_after_target_round_trip() -> None:
+    """Упавший ``pause()`` забывается, когда цель перевернулась и плагин уже совпал с ней (сверка чистит запись).
+
+    Разворот ``set()`` -> проход (плагин ``RUNNING`` = цель «работа», запись чистится) -> ``clear()`` ДО следующего
+    прохода: старая причина не воскресает в снимке, а новая попытка паузы идёт сразу, без ожидания 1 с троттлинга.
+    """
+    event = _event(True)
+    orch, _, _ = _boot([HzBadPause], event=event)
+    event.clear()
+    orch.reconcile_run_event()
+    assert _reasons(orch, "hz_bad_pause") == ["pause() упал: RuntimeError"]
+    assert _hooks("hz_bad_pause")["pause"] == 1
+
+    event.set()
+    orch.reconcile_run_event()  # состояние совпало с целью -> запись об отказе снята
+    event.clear()  # новый разворот цели до следующего прохода
+
+    assert _reasons(orch, "hz_bad_pause") == [], "старый отказ pause() воскрес из несвоевременно оставленной записи"
+    orch.reconcile_run_event()
+    assert _hooks("hz_bad_pause")["pause"] == 2, "повторная пауза после разворота цели упёрлась в старый троттлинг"
+
+
+def test_snapshot_returns_fast_while_slow_hook_holds_reconcile_lock() -> None:
+    """Хук держит замок сверки >= 1 с: ``readiness_snapshot()`` из другого потока ответит <= 0,3 с."""
+    event = _event(True)
+    orch, _, _ = _boot([HzBlockResume], event=event)
+    event.clear()
+    orch.reconcile_run_event()
+    event.set()
+    reconcile = _in_thread(orch.reconcile_run_event)  # resume() блокируется и держит замок сверки
+    assert ENTERED.wait(_JOIN_S), "resume() не вызван"
+    time.sleep(1.0)
+    assert reconcile.is_alive(), "хук не держит замок сверки: стенд не проверяет свойство"
+
+    done = threading.Event()
+    result: dict[str, Any] = {}
+
+    def call() -> None:
+        started = time.monotonic()
+        result["snap"] = orch.readiness_snapshot()
+        result["elapsed"] = time.monotonic() - started
+        done.set()
+
+    _in_thread(call)
+    assert done.wait(0.3), "readiness_snapshot() ждёт замок сверки, который держит медленный хук"
+    assert result["elapsed"] <= 0.3, result["elapsed"]
+    GATE.set()
+    _join(reconcile, "проход сверки")

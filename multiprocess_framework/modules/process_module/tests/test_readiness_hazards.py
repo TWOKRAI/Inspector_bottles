@@ -594,3 +594,32 @@ def test_acceptance_chain_paused_flag_reaches_received_heartbeat_message() -> No
         _stop(thread, stop)
         out.close()
         out.cancel_join_thread()
+
+
+def test_orchestrator_snapshot_at_is_wall_clock_and_grows() -> None:
+    """``at`` снимка оркестратора — ``time.time()`` расчёта и растёт от вызова к вызову (по нему судит 1.3)."""
+    orch, _ = _snapshot_of(HzRet)
+
+    first = orch.readiness_snapshot()
+    time.sleep(0.1)
+    second = orch.readiness_snapshot()
+
+    assert isinstance(first["at"], float) and isinstance(second["at"], float)
+    assert second["at"] > first["at"], (first["at"], second["at"])
+    assert abs(second["at"] - time.time()) < 1.0, (second["at"], time.time())
+
+
+@pytest.mark.timeout(120)
+def test_snapshot_at_grows_in_process_with_orchestrator() -> None:
+    """Процесс С плагинами: воркер снимка идёт через оркестратор, ``at`` растёт и близок к ``time.time()``."""
+    event = multiprocessing.Event()
+    event.set()
+    thread, stop, own_ready = _start("PluginGenericProcess", [HzRet], event)
+    try:
+        assert own_ready.wait(_JOIN_S)
+        assert _wait(lambda: _snap() is not None, 5.0)
+        first = _snap()["at"]
+        assert _wait(lambda: _snap()["at"] > first, 3.0), "at не растёт у процесса с оркестратором"
+        assert abs(_snap()["at"] - time.time()) < 2.0
+    finally:
+        _stop(thread, stop)
