@@ -1018,7 +1018,7 @@ class ProcessManagerProcess(ProcessModule):
         event: str,
         *,
         ready: bool | None = None,
-        stop_done: bool = False,
+        stop_done: bool | None = None,
         reasons: list[dict] | None = None,
         hold_event: bool = False,
     ) -> tuple[RunState, str | None, RunState]:
@@ -1033,6 +1033,11 @@ class ProcessManagerProcess(ProcessModule):
         меняются; список заменяет текущие причины. Переход в ``fault`` по ``tick`` записывает
         ``last_fault`` = причины этого такта.
 
+        ``stop_done`` (Task 1.7) — для ``ack``: ``None`` — признак ``_fault_stop_done`` читается ТУТ, под
+        ``_run_lock``, вместе с записью состояния (гонка ``ack`` и завершения остановки в аварии — один исход);
+        явное значение передаёт тест. Успешный ``ack`` пишет ``last_fault.acknowledged_at``; успешный ``start``
+        обнуляет ``last_fault`` (до него авария остаётся видимой).
+
         ``hold_event`` (Task 1.4) — только для ``stop`` из ``running``: событие остаётся взведённым в ``stopping``
         (идут шаги ``pre_stop``); снимает его последовательность STOP (``_run_stop_clear_event``). Остальные
         вызовы в ``stopping`` событие не трогают; при выходе из ``stopping`` оно доводится по таблице как всегда.
@@ -1041,6 +1046,8 @@ class ProcessManagerProcess(ProcessModule):
             if ready is None:
                 ready = self._run_ready
             prev = self._run_state
+            if stop_done is None:
+                stop_done = self._fault_stop_done
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
             if event == "tick":
                 self._run_ready = ready
@@ -1048,6 +1055,10 @@ class ProcessManagerProcess(ProcessModule):
                 self._run_reasons = [dict(r) for r in reasons]
             if prev is RunState.fault and new is not RunState.fault:
                 self._fault_stop_done = False
+                if event == "ack" and code is None and self._run_last_fault is not None:
+                    self._run_last_fault = {**self._run_last_fault, "acknowledged_at": time.time()}
+            if event == "start" and code is None and new is RunState.running:
+                self._run_last_fault = None
             if new is RunState.stopping and prev is not RunState.stopping:
                 self._run_stop_hold = hold_event
             elif new is not RunState.stopping:
@@ -1083,6 +1094,11 @@ class ProcessManagerProcess(ProcessModule):
         with self._run_lock:
             return self._run_state, self._run_since
 
+    def _run_ack_allowed(self) -> bool:
+        """``ack`` разрешён: ``fault`` и остановка в аварии завершена (под ``_run_lock``, как решает ``_run_apply``)."""
+        with self._run_lock:
+            return self._run_state is RunState.fault and self._fault_stop_done
+
     def _run_detail_snapshot(self) -> tuple[list[dict], dict | None]:
         """Копии ``(причины, last_fault)`` под ``_run_lock`` (Task 1.3): значения наружу уходят без общих ссылок."""
         with self._run_lock:
@@ -1111,6 +1127,7 @@ class ProcessManagerProcess(ProcessModule):
                 ("since", since),
                 ("reasons", reasons),
                 ("start_allowed", state is RunState.ready),
+                ("ack_allowed", self._run_ack_allowed()),
                 ("last_fault", last_fault),
             ):
                 if key in published and published[key] == value:
@@ -1403,6 +1420,10 @@ class ProcessManagerProcess(ProcessModule):
                 "Состояние работы системы: state/since/run_gate/start_allowed/reasons/last_fault",
             ),
             "system.run.start": (self._cmd_system_run_start, "Начать работу: ready -> running (кадры идут)"),
+            "system.run.ack": (
+                self._cmd_system_run_ack,
+                "Квитировать аварию: fault -> ready/not_ready (после завершённой остановки в аварии)",
+            ),
             "system.run.stop": (self._cmd_system_run_stop, "Остановить работу: running -> stopping -> ready"),
             "system.stats": (self._cmd_system_stats, "Статистика системы"),
             "supervision.status": (
@@ -1604,6 +1625,7 @@ class ProcessManagerProcess(ProcessModule):
             "since": since,
             "run_gate": self._run_gate,
             "start_allowed": state is RunState.ready,
+            "ack_allowed": self._run_ack_allowed(),
             "reasons": reasons,
             "last_fault": last_fault,
         }
@@ -1626,6 +1648,21 @@ class ProcessManagerProcess(ProcessModule):
         current, last_fault = self._run_detail_snapshot()
         refusal_reasons = last_fault["reasons"] if new is RunState.fault and last_fault is not None else current
         return {"success": False, "state": new.value, "error": code, "reasons": refusal_reasons}
+
+    def _cmd_system_run_ack(self, data=None, **kwargs) -> dict:
+        """``system.run.ack`` (Task 1.7): квитирование аварии, класс R — быстрая, без ожиданий.
+
+        ``fault`` с завершённой остановкой -> ``ready``/``not_ready`` по СВЕЖЕЙ оценке готовности (вне замка
+        машины); остановка не завершена — отказ ``fault_stopping``; вне ``fault`` — ``no_fault``; пока PM гасится
+        или идёт системный стоп — ``shutting_down``. ``last_fault`` остаётся (с ``acknowledged_at``) до
+        успешного START. Признак остановки читает ``_run_apply`` под ``_run_lock`` — не отдельно от записи.
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            state, _since = self._run_snapshot()
+            return {"success": False, "state": state.value, "error": "shutting_down"}
+        ready, reasons = self._evaluate_run_readiness()
+        new, code, _prev = self._run_apply("ack", ready=ready, reasons=reasons)
+        return {"success": code is None, "state": new.value, "error": code}
 
     def _cmd_system_run_stop(self, data=None, **kwargs) -> dict:
         """``system.run.stop``: принимается мгновенно; из ``running`` — ``stopping`` и последовательность (Task 1.4).
@@ -1670,7 +1707,13 @@ class ProcessManagerProcess(ProcessModule):
             if not (self._run_gate and self._run_event is not None):
                 if self._run_state is RunState.fault:
                     self._fault_stop_done = True
-                return
+                    publish = True
+                else:
+                    publish = False
+        if not (self._run_gate and self._run_event is not None):
+            if publish:
+                self._publish_run_state()  # ack_allowed
+            return
         self._submit_run_sequence(lambda: self._run_stop_sequence(fault=True, seq=seq), "run-fault-stop")
 
     def _submit_run_sequence(

@@ -92,7 +92,15 @@ def test_run_command_replies(run_gate: bool) -> None:
     pm = make_run_pm(run_gate)
 
     status = pm._cmd_system_run_status()
-    assert set(status) == {"state", "since", "run_gate", "start_allowed", "reasons", "last_fault"}, status
+    assert set(status) == {
+        "state",
+        "since",
+        "run_gate",
+        "start_allowed",
+        "ack_allowed",
+        "reasons",
+        "last_fault",
+    }, status
     assert status["state"] == "ready"
     assert isinstance(status["since"], float) and status["since"] > 0.0, status["since"]
     assert status["run_gate"] is run_gate
