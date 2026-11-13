@@ -2176,6 +2176,12 @@ class ProcessManagerProcess(ProcessModule):
         Маршрутизирует в ``apply_topology`` (не напрямую в менеджер) —
         чтобы транзакция, snapshot, rollback и debounce не обходились.
         """
+        # Task 1.5 system-run-state: гейт по состоянию машины — ПЕРВЫМ, до разбора аргументов, debounce, ретаргета
+        # адреса рецепта и любых записей (работает и при ``run_gate: false``: машина ведётся всегда). Применение
+        # допустимо только из ``booting``/``not_ready``/``ready``; одна точка — покрывает и ``recipe.activate``.
+        refusal = self._topology_apply_gate(self._run_snapshot()[0])
+        if refusal is not None:
+            return refusal
         args = _merge_cmd_args(data, kwargs)
         td = args.get("topology_dict")
         if td is None:
@@ -2190,13 +2196,31 @@ class ProcessManagerProcess(ProcessModule):
         if debounced is not None:
             return debounced
         # Task 1.3 system-run-state: применение топологии — снова ``booting``; итог (успех, откат или
-        # исключение) закрывает ``settled`` по оценке агрегата. Отказ ``apply`` в ``running`` — Task 1.5:
-        # код отказа машины здесь пока не читается, поведение применения прежнее.
-        self._run_apply("apply")
+        # исключение) закрывает ``settled`` по оценке агрегата. Состояние могло уйти в ``running`` и т.п. между
+        # гейтом выше и этим переходом (START/STOP параллельно): отказ машины — тот же ответ, без побочных эффектов.
+        new, code, _prev = self._run_apply("apply")
+        if code is not None:
+            return self._topology_apply_refusal(code)
         try:
             return self._topology_apply_retargeted(args, td)
         finally:
             self._settle_run_state()
+
+    def _topology_apply_gate(self, state: RunState) -> dict | None:
+        """Отказ ``topology.apply`` по состоянию машины (чистая проверка таблицей, без записи) или ``None``."""
+        new, code = transition(state, "apply", ready=True)
+        return None if code is None else self._topology_apply_refusal(code)
+
+    @staticmethod
+    def _topology_apply_refusal(code: str) -> dict:
+        """Ответ-отказ: ``error`` — код машины (``fault_unacknowledged`` для аварии), ``message`` — что сделать."""
+        if code == "fault_unacknowledged":
+            message = "сначала Квитировать"
+        elif code == "shutting_down":
+            message = "система завершает работу"
+        else:
+            message = "сначала ОСТАНОВИТЬ"
+        return {"success": False, "error": code, "message": message}
 
     def _topology_apply_retargeted(self, args: dict, td: Any) -> dict:
         """Тело ``topology.apply`` после debounce: ретаргет адреса рецепта, ``apply_topology``, откат адреса."""
