@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
@@ -427,6 +428,9 @@ class ProcessHeartbeat:
             # ``introspect.status`` в тех же условиях отвечает ``"unknown"``;
             # два разных ответа на один вопрос — хуже, чем один незнающий.
             "status": getattr(self._services, "_current_process_status", "unknown"),
+            # Task 1.7c: идентичность воплощения. Супервизор по ``pid`` отличает ребёнка, которого убьёт рестарт,
+            # от нового (после рестарта pid другой). Поле аддитивное: без него heartbeat принимается как раньше.
+            "pid": os.getpid(),
         }
         if getattr(self._services, "worker_manager", None):
             for w in workers.values():

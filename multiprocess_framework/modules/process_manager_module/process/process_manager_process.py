@@ -1208,6 +1208,19 @@ class ProcessManagerProcess(ProcessModule):
         leaves = snapshot() if callable(snapshot) else None
         return leaves if isinstance(leaves, dict) else {}
 
+    def _readiness_view(self) -> tuple[dict[str, dict], frozenset[str]]:
+        """Листы готовности и имена «перезапускается» одним снимком монитора (Task 1.7c): ``(листы, перезапускаемые)``.
+
+        Воплощение процесса знает только супервизор (``ProcessMonitor``) — PM его не копит. Монитор без
+        ``readiness_view`` (двойник) — листы из ``readiness_snapshot``, перезапускаемых нет.
+        """
+        monitor = getattr(self, "_process_monitor", None)
+        view = getattr(monitor, "readiness_view", None)
+        result = view() if callable(view) else None
+        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], dict):
+            return result[0], frozenset(result[1])
+        return self._readiness_leaves(), frozenset()
+
     def _admission_stale_s(self) -> float:
         """Порог свежести листа для ДОПУСКА (``ack``/START): ``stale_s`` минус интервал heartbeat (2/3 ``stale_s``).
 
@@ -1234,14 +1247,16 @@ class ProcessManagerProcess(ProcessModule):
         Флаг без ``enabled: true`` — ``failure`` / ``config`` на каждой оценке, в любом состоянии.
         """
         expected = self._run_expected_names()
-        leaves = self._readiness_leaves()
+        leaves, restarting = self._readiness_view()
         alive = {name: self._process_alive(name) for name in expected}
         stale_s = self._admission_stale_s() if admission else self._run_stale_s()
         now = time.time()
         auto_restart, config_reasons = self._run_auto_restart_flags(expected)
         running = self._run_state is RunState.running  # одно чтение атрибута: ``_run_lock`` оценка не берёт
         if track_restart:
-            down_since = self._advance_restart_window(expected, leaves, alive, now, stale_s, running, auto_restart)
+            down_since = self._advance_restart_window(
+                expected, leaves, alive, now, stale_s, running, auto_restart, restarting
+            )
         else:
             down_since = self._run_down_since
         given_up = self._supervisor_gave_up(auto_restart) if running and auto_restart else frozenset()
@@ -1256,6 +1271,7 @@ class ProcessManagerProcess(ProcessModule):
             down_since=down_since,
             grace_s=self._run_restart_grace(),
             given_up=given_up,
+            restarting=restarting,
         )
         # Task 1.4: процессы, не подтвердившие остановку, — отдельные причины на КАЖДОЙ оценке (tick их не стирает).
         extra = config_reasons + self._unconfirmed_stop_reasons(expected, leaves, alive)
@@ -1299,6 +1315,7 @@ class ProcessManagerProcess(ProcessModule):
         stale_s: float,
         running: bool,
         auto_restart: frozenset[str],
+        restarting: frozenset[str],
     ) -> dict[str, float]:
         """Новая запись окна перезапуска по тику (``run_state.restart_window``): читается и заменяется под замком."""
         with self._run_restart_lock:
@@ -1311,6 +1328,7 @@ class ProcessManagerProcess(ProcessModule):
                 running=running,
                 auto_restart=auto_restart,
                 down_since=self._run_down_since,
+                restarting=restarting,
             )
             self._run_down_since = window
             return window
@@ -1906,12 +1924,17 @@ class ProcessManagerProcess(ProcessModule):
         return True
 
     def _paused_pending(self) -> list[str]:
-        """Процессы набора, от которых ждём ``paused``: лист не ``paused: true``, процесс жив (мёртвый = остановлен)."""
-        leaves = self._readiness_leaves()
+        """Процессы набора, от которых ждём ``paused``: лист не ``paused: true``, процесс жив (мёртвый = остановлен).
+
+        Процесс из «перезапускается» (Task 1.7c) тоже считается остановленным: его воплощение приговорено и будет
+        остановлено исполнением рестарта, лист его не принимается (``paused`` от него не придёт), а новое воплощение
+        поднимается при снятом ``run_event``. Без этого ``ack`` из ``fault`` ждал бы ``run_stop_timeout_s`` (10 с).
+        """
+        leaves, restarting = self._readiness_view()
         pending: list[str] = []
         for name in self._run_expected_names():
             leaf = leaves.get(name)
-            if isinstance(leaf, dict) and leaf.get("paused") is True:
+            if name in restarting or (isinstance(leaf, dict) and leaf.get("paused") is True):
                 continue
             if self._process_alive(name):
                 pending.append(name)
@@ -5439,6 +5462,12 @@ class ProcessManagerProcess(ProcessModule):
         if not config:
             self._log_error(f"No saved config for '{process_name}'")
             return False
+        # Task 1.7c: с этого момента процесс «перезапускается» (pid прежнего воплощения запоминается до замены) —
+        # лист и поздний heartbeat прежнего воплощения не допускают ``ack`` / START. Авто-рестарт монитора уже
+        # поставил пометку при решении; повтор здесь идемпотентен (реестр ещё держит то же воплощение).
+        mark = getattr(getattr(self, "_process_monitor", None), "mark_restarting", None)
+        if callable(mark):
+            mark(process_name)
         # ADR-PMM-030: метку НЕ ставить — очереди переиспользуются новым воплощением.
         if not self.stop_process(process_name, mark_reader_gone=False):
             return False

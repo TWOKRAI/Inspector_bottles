@@ -64,10 +64,21 @@ def _crash(pm: Any, name: str = "cam") -> None:
 
 
 def _revive(pm: Any, monitor: Any, name: str = "cam") -> None:
+    """Процесс вернулся НОВЫМ воплощением (Task 1.7c: оживший старый процесс пометку «перезапускается» не снимает —
+    ее снимает heartbeat с ``pid`` нового воплощения): другой pid в реестре и в heartbeat."""
     proc = pm._process_registry.get_process_by_name(name)
     proc._alive = True
     proc.exitcode = None
-    beat(monitor, name)
+    proc.pid = 50_000 + (proc.pid or 0) % 1000 + 1
+    now = time.time()
+    monitor._on_heartbeat_received(
+        {
+            "sender": name,
+            "timestamp": now,
+            "pid": proc.pid,
+            "readiness": {"ready": True, "reasons": [], "paused": False, "at": now},
+        }
+    )
 
 
 def _raw_tick(monitor: Any) -> None:

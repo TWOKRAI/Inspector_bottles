@@ -66,10 +66,21 @@ def _crash(pm: Any, name: str) -> None:
 
 
 def _revive(pm: Any, monitor: Any, name: str) -> None:
+    """Процесс вернулся НОВЫМ воплощением (Task 1.7c: решение супервизора о рестарте после падения необратимо —
+    «перезапускается» снимает только heartbeat с ``pid`` нового воплощения): другой pid в реестре и в heartbeat."""
     proc = pm._process_registry.get_process_by_name(name)
     proc._alive = True
     proc.exitcode = None
-    beat(monitor, name)
+    proc.pid = 50_000 + (proc.pid or 0) % 1000 + 1
+    now = time.time()
+    monitor._on_heartbeat_received(
+        {
+            "sender": name,
+            "timestamp": now,
+            "pid": proc.pid,
+            "readiness": {"ready": True, "reasons": [], "paused": False, "at": now},
+        }
+    )
 
 
 def _reason_texts(pm: Any) -> list[str]:
@@ -244,7 +255,8 @@ def test_flagged_processes_have_independent_windows() -> None:
     _tick(monitor)
     assert pm._run_state == "fault"
     texts = [r["reason"] for r in pm._cmd_system_run_status()["last_fault"]["reasons"]]
-    assert texts == ["b: перезапуск не завершён за 30 с", "процесс не жив"], texts  # у a и c причин нет
+    # у a и c причин нет; деталь b — решение супервизора (Task 1.7c), а не «процесс не жив»
+    assert texts == ["b: перезапуск не завершён за 30 с", "b: перезапускается супервизором"], texts
 
 
 # --------------------------------------------------------------------------- #

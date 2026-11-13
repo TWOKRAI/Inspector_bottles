@@ -47,8 +47,17 @@ def _reason(node: str, reason: str, source: str, severity: str = "failure") -> d
     return {"node": node, "severity": severity, "reason": reason, "source": source}
 
 
-def _process_reasons(name: str, leaves: dict, alive: dict, now: float, stale_s: float) -> tuple[list[dict], bool]:
-    """Причины одного процесса и признак «молчит»: ``(причины, не жив или нет свежего листа)``."""
+def _process_reasons(
+    name: str, leaves: dict, alive: dict, now: float, stale_s: float, restarting: frozenset[str] = frozenset()
+) -> tuple[list[dict], bool]:
+    """Причины одного процесса и признак «молчит»: ``(причины, перезапускается / не жив / нет свежего листа)``.
+
+    Процесс из ``restarting`` (супервизор решил его перезапустить или перезапускает; Task 1.7c) — одна ``failure``
+    «<процесс>: перезапускается супервизором» независимо от листа и живости: лист воплощения, которое убьёт рестарт,
+    готовности не доказывает.
+    """
+    if name in restarting:
+        return [_reason(name, f"{name}: перезапускается супервизором", "liveness")], True
     if not alive.get(name, False):
         return [_reason(name, "процесс не жив", "liveness")], True
     leaf = leaves.get(name)
@@ -82,6 +91,7 @@ def evaluate(
     down_since: dict[str, float] | None = None,
     grace_s: float = 30.0,
     given_up: frozenset[str] = frozenset(),
+    restarting: frozenset[str] = frozenset(),
 ) -> tuple[bool, list[dict]]:
     """Готовность системы по процессам набора: ``(ready, reasons)`` (Task 1.3, design.md §3.3).
 
@@ -113,12 +123,18 @@ def evaluate(
     оператору видно, почему процесс не поднялся.
     Ведёт ``down_since`` не эта функция, а ``restart_window``.
 
+    Воплощение процесса (Task 1.7c): процесс из ``restarting`` (решение супервизора о рестарте или ручной
+    ``process.restart``, новое воплощение ещё не отчиталось) даёт одну ``failure`` / ``liveness`` «<процесс>:
+    перезапускается супервизором» независимо от листа и живости — она блокирует ``ready`` (``ack`` / START). В
+    ``running`` без флага это ``fault``; с флагом процесс «молчит» (окно 1.8 от первого такта с решением):
+    ``out_of_spec`` «перезапуск <процесс>», а после окна — итоговая ``failure`` и эта причина как деталь.
+
     ``ready`` = среди итоговых причин нет ``failure`` и ``check_function``.
     """
     since = down_since or {}
     reasons: list[dict] = []
     for name in expected:
-        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s)
+        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s, restarting)
         if running and _restarting(name, silent, process_reasons, auto_restart, since):
             summary = restart_reason(name, now - since.get(name, now), grace_s, name in given_up)
             reasons.append(summary)
@@ -154,6 +170,7 @@ def restart_window(
     running: bool,
     auto_restart: frozenset[str],
     down_since: dict[str, float],
+    restarting: frozenset[str] = frozenset(),
 ) -> dict[str, float]:
     """Новый ``down_since`` после очередного тика: ``{процесс: когда началось окно перезапуска}`` (Task 1.8).
 
@@ -168,7 +185,7 @@ def restart_window(
         return {}
     window: dict[str, float] = {}
     for name in expected:
-        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s)
+        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s, restarting)
         if _restarting(name, silent, process_reasons, auto_restart, down_since):
             window[name] = down_since.get(name, now)
     return window
