@@ -286,16 +286,17 @@ def test_no_paused_change_no_extra_heartbeat(stand_factory) -> None:
 
 @pytest.mark.timeout(120)
 def test_flapping_event_is_debounced_and_final_state_delivered(stand_factory) -> None:
-    """20 переключений за 1 с (clear/set подряд): <= 3 heartbeat за секунду; после затишья последний — актуальный.
+    """21 переключение за ~1 с (clear/set подряд): <= 3 heartbeat за секунду; после затишья последний — актуальный.
 
-    Серия начинается с ``clear()`` и кончается ``set()`` (чётное число): итоговое ``paused`` = ``False`` отличается
-    от пика серии (``True``), так что «последний heartbeat актуален» не выполняется само собой.
+    Серия начинается и кончается ``clear()`` (НЕЧЁТНОЕ число, правка лида 2026-11-13): итоговое ``paused`` = ``True``
+    отличается от уже ушедшего ``False`` — иначе (чётная серия) итог равен прежнему значению, и по DESIGN сообщения
+    быть не должно (находка автора 1.2c: слепой tester ошибся в модели).
     """
     stand = stand_factory("PpPluginProcess")
     stand.warm_up()
 
     started = time.monotonic()
-    for i in range(20):
+    for i in range(21):
         (stand.event.clear if i % 2 == 0 else stand.event.set)()
         time.sleep(0.05)
     flaps_end = time.monotonic()
@@ -303,11 +304,11 @@ def test_flapping_event_is_debounced_and_final_state_delivered(stand_factory) ->
 
     assert len(in_window) <= 3, f"дребезг не подавлен: {len(in_window)} heartbeat за {flaps_end - started:.2f} с"
 
-    # затишье: итоговый paused (False) обязан дойти до получателя последним сообщением
+    # затишье: итоговый paused (True) обязан дойти до получателя последним сообщением
     time.sleep(2.5)
     got = [m for _, m in stand.collector.items()]
     assert got, "после серии переключений ни одного heartbeat (итог не доставлен)"
-    assert _paused_of(got[-1]) is False, (
+    assert _paused_of(got[-1]) is True, (
         f"последний heartbeat не актуален: paused по порядку = {[_paused_of(m) for m in got]}"
     )
 

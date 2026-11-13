@@ -1128,7 +1128,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             stop_event.wait(timeout=_RUN_WATCH_PERIOD_SEC)
 
     def _readiness_snapshot_loop(self, stop_event, pause_event) -> None:
-        """Цикл ``readiness_snapshot``: пересчёт снимка не чаще 2 раз в секунду."""
+        """Цикл ``readiness_snapshot``: пересчёт не чаще 2 Гц, затем внеочередной heartbeat при смене ``paused``."""
         last_error: str | None = None
         while not stop_event.is_set():
             try:
@@ -1138,7 +1138,25 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 if last_error != repr(exc):
                     last_error = repr(exc)
                     self._log_error(f"Process '{self.name}': снимок готовности не посчитан: {exc}", module="run_state")
+            self._push_readiness_change()
             stop_event.wait(timeout=_READINESS_SNAPSHOT_PERIOD_SEC)
+
+    def _push_readiness_change(self) -> None:
+        """Task 1.2c: после пересчёта снимка попросить heartbeat отправить внеочередное сообщение при смене ``paused``.
+
+        Heartbeat создаётся в ``run()``, воркер снимка — раньше (``initialize()``): пока его нет, ничего не делаем.
+        Антидребезг, сравнение с ушедшим значением и лог сбоя — внутри ``ProcessHeartbeat.push_if_paused_changed``;
+        здесь страховка: что бы ни случилось, воркер снимка не падает.
+        """
+        heartbeat = getattr(self, "_heartbeat", None)
+        if heartbeat is None:
+            return
+        try:
+            heartbeat.push_if_paused_changed()
+        except Exception as exc:  # noqa: BLE001 — внеочередная отправка не имеет права убить воркер снимка
+            self._log_error(
+                f"Process '{self.name}': внеочередной heartbeat: {type(exc).__name__}: {exc}", module="run_state"
+            )
 
     def _refresh_readiness_snapshot(self) -> None:
         """Один расчёт: защёлка «объявил готовность» + снимок оркестратора (или форма процесса без плагинов)."""
