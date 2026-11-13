@@ -360,6 +360,14 @@ class ProcessMonitor:
             self._restarting[process_name] = pid
             self._readiness.pop(process_name, None)
 
+    def _is_replaced_incarnation(self, proc: Any) -> bool:
+        """Мёртвый ``proc`` — то самое воплощение, которое супервизор решил заменить (его pid в ``_restarting``)."""
+        pid = proc.pid
+        if type(pid) is not int:
+            return False
+        with self._readiness_lock:
+            return self._restarting.get(proc.name) == pid
+
     def readiness_view(self) -> tuple[dict[str, dict], frozenset[str]]:
         """Один снимок под одним замком: ``(листы, имена «перезапускается»)`` (Task 1.7c)."""
         with self._readiness_lock:
@@ -897,8 +905,8 @@ class ProcessMonitor:
 
             # Ф4-добор: авто-восстановление. Процесс, которому запланирован рестарт,
             # снова жив И прислал heartbeat → «восстановился». Heartbeat как критерий
-            # (а не статус-переход) надёжен: после рестарта prev_status="crashed" не
-            # проходит промоушен выше, а heartbeat — однозначный сигнал живости.
+            # (а не статус-переход) — потому что промоушен выше срабатывает уже на живом
+            # объекте процесса, а heartbeat — однозначный сигнал, что воплощение поднялось.
             # R2 (ADR-PMM-015): критерий «heartbeat ПОСЛЕ планирования». _last_heartbeat
             # обнуляется уже при постановке рестарта в план (_try_auto_restart), а не
             # только в _dispatch_due_restarts — иначе для ЖИВОГО-но-сломанного процесса
@@ -1030,6 +1038,12 @@ class ProcessMonitor:
         # ``STOPPED`` в PSR записью ``final_status`` ДО смерти, ранний выход ниже его бы съел.
         if exitcode == EXIT_SURVIVORS:
             self._report_survivors_once(proc)
+
+        # Task 1.8b: смерть воплощения, которое супервизор сам заменяет (его pid запомнил ``mark_restarting``), —
+        # исход собственного решения о рестарте, а не новое падение: ни события ``crashed``, ни статуса в PSR, ни
+        # второй попытки. Смерть ДРУГОГО pid (новое воплощение до первого heartbeat) проходит ниже как честное падение.
+        if self._is_replaced_incarnation(proc):
+            return
 
         # Не обрабатываем повторно уже зафиксированные терминальные статусы
         if prev_status in ("stopped", "error", "crashed", "failed"):

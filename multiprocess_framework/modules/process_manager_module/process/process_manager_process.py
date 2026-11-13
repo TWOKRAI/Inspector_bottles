@@ -5465,6 +5465,11 @@ class ProcessManagerProcess(ProcessModule):
         ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
+            # Task 1.8b: новое воплощение рождается со статусом нового воплощения (как boot и switch: запись PSR
+            # создаётся с ``initializing``). Здесь запись переживает замену (очереди/metadata/custom), а
+            # ``register_process`` существующей записи статус не трогает — без сброса воплощение наследует
+            # ``crashed`` / ``unresponsive`` / ``stopped`` прежнего и супервизор пропускает его следующий сбой.
+            self.shared_resources.process_state_registry.update_state(process_name, status="initializing")
             # Дренаж переиспользованных очередей: новый инстанс стартует чистым.
             self._drain_process_queues(process_name)
         ids_after = self._process_queue_ids(process_name)
