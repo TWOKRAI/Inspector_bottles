@@ -1200,7 +1200,18 @@ class ProcessManagerProcess(ProcessModule):
         leaves = snapshot() if callable(snapshot) else None
         return leaves if isinstance(leaves, dict) else {}
 
-    def _evaluate_run_readiness(self) -> tuple[bool, list[dict]]:
+    def _admission_stale_s(self) -> float:
+        """Порог свежести листа для ДОПУСКА (``ack``/START): ``stale_s`` минус интервал heartbeat (2/3 ``stale_s``).
+
+        Гистерезис (Task 1.7b): допуск строже удержания. Лист возрастом 10-15 с ещё держит ``running`` (удержание — на
+        полном ``stale_s``), но допустить по нему нельзя: до пересечения 15 с новый снимок может не успеть и работа
+        упала бы в ``fault`` сразу после допуска.
+        """
+        stale = self._run_stale_s()
+        interval = stale / self._READINESS_STALE_FACTOR
+        return stale - interval
+
+    def _evaluate_run_readiness(self, *, admission: bool = False) -> tuple[bool, list[dict]]:
         """Готовность системы сейчас: ``(ready, reasons)`` по ``run_state.evaluate``.
 
         Не берёт ``_run_lock`` и не ждёт ничего: безопасна на ``message_processor`` (``system.run.start``,
@@ -1210,7 +1221,8 @@ class ProcessManagerProcess(ProcessModule):
         expected = self._run_expected_names()
         leaves = self._readiness_leaves()
         alive = {name: self._process_alive(name) for name in expected}
-        ready, reasons = evaluate(expected, leaves, alive, time.time(), self._run_stale_s())
+        stale_s = self._admission_stale_s() if admission else self._run_stale_s()
+        ready, reasons = evaluate(expected, leaves, alive, time.time(), stale_s)
         # Task 1.4: процессы, не подтвердившие остановку, — отдельные причины на КАЖДОЙ оценке (tick их не стирает).
         extra = self._unconfirmed_stop_reasons(expected, leaves, alive)
         if extra:
@@ -1641,7 +1653,7 @@ class ProcessManagerProcess(ProcessModule):
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             state, _since = self._run_snapshot()
             return {"success": False, "state": state.value, "error": "shutting_down", "reasons": []}
-        ready, reasons = self._evaluate_run_readiness()
+        ready, reasons = self._evaluate_run_readiness(admission=True)
         new, code, _prev = self._run_apply("start", ready=ready, reasons=reasons)
         if code is None:
             return {"success": True, "state": new.value}
@@ -1660,7 +1672,7 @@ class ProcessManagerProcess(ProcessModule):
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             state, _since = self._run_snapshot()
             return {"success": False, "state": state.value, "error": "shutting_down"}
-        ready, reasons = self._evaluate_run_readiness()
+        ready, reasons = self._evaluate_run_readiness(admission=True)
         new, code, _prev = self._run_apply("ack", ready=ready, reasons=reasons)
         return {"success": code is None, "state": new.value, "error": code}
 
