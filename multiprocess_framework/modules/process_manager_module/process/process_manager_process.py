@@ -55,8 +55,10 @@ from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
 from .run_state import (
     RunState,
+    auto_restart_config_reason,
     evaluate,
     has_blocking,
+    restart_window,
     stop_unconfirmed_reason,
     transition,
     unconfirmed_stop,
@@ -181,6 +183,12 @@ class ProcessManagerProcess(ProcessModule):
     #: Task 1.4: «не подтвердили остановку» ``{процесс: N}`` (N — срок ожидания ``paused``); пишет только код под
     #: ``_unconfirmed_lock`` и ЗАМЕНЯЕТ значение целиком (как ``_run_reasons``: уровень класса общий для всех PM).
     _run_unconfirmed: dict = {}
+    #: Task 1.8: окно перезапуска процессов с флагом ``run_auto_restart`` — ``{процесс: когда у него появился failure}``
+    #: (``time.time()``, часы листов готовности) и срок окна по умолчанию (конфиг PM ``run_restart_grace_s``), с.
+    #: Ведёт только тик под ``_run_restart_lock`` (``restart_window``) и ЗАМЕНЯЕТ значение целиком (как
+    #: ``_run_unconfirmed``: уровень класса общий для всех PM); остальные оценки только читают ссылку.
+    _DEFAULT_RUN_RESTART_GRACE_S = 30.0
+    _run_down_since: dict = {}
     #: Task 1.4: остановка в аварии завершена (все ``paused``/не живы или срок истёк); ``ack`` (Task 1.7) читает
     #: признак. Сбрасывается при входе в ``fault`` и выходе из него (под ``_run_lock``); ``_fault_seq`` — номер аварии:
     #: поздняя последовательность старой аварии признак новой не ставит.
@@ -1211,24 +1219,128 @@ class ProcessManagerProcess(ProcessModule):
         interval = stale / self._READINESS_STALE_FACTOR
         return stale - interval
 
-    def _evaluate_run_readiness(self, *, admission: bool = False) -> tuple[bool, list[dict]]:
+    def _evaluate_run_readiness(
+        self, *, admission: bool = False, track_restart: bool = False
+    ) -> tuple[bool, list[dict]]:
         """Готовность системы сейчас: ``(ready, reasons)`` по ``run_state.evaluate``.
 
         Не берёт ``_run_lock`` и не ждёт ничего: безопасна на ``message_processor`` (``system.run.start``,
         DECISIONS.md:125) и на потоке монитора. Копия листов берётся под замком монитора, ``evaluate`` —
         уже без замков.
+
+        Task 1.8: в ``running`` процесс с флагом ``run_auto_restart`` (и ``enabled: true``) в перезапуске даёт
+        ``out_of_spec`` вместо ``failure`` (``evaluate``). ``track_restart`` — оценка тика монитора: только она
+        ведёт окно перезапуска (``down_since``); остальные оценки (START, ``ack``, итог подъёма/STOP) его читают.
+        Флаг без ``enabled: true`` — ``failure`` / ``config`` на каждой оценке, в любом состоянии.
         """
         expected = self._run_expected_names()
         leaves = self._readiness_leaves()
         alive = {name: self._process_alive(name) for name in expected}
         stale_s = self._admission_stale_s() if admission else self._run_stale_s()
-        ready, reasons = evaluate(expected, leaves, alive, time.time(), stale_s)
+        now = time.time()
+        auto_restart, config_reasons = self._run_auto_restart_flags(expected)
+        running = self._run_state is RunState.running  # одно чтение атрибута: ``_run_lock`` оценка не берёт
+        if track_restart:
+            down_since = self._advance_restart_window(expected, leaves, alive, now, stale_s, running, auto_restart)
+        else:
+            down_since = self._run_down_since
+        given_up = self._supervisor_gave_up(auto_restart) if running and auto_restart else frozenset()
+        ready, reasons = evaluate(
+            expected,
+            leaves,
+            alive,
+            now,
+            stale_s,
+            running=running,
+            auto_restart=auto_restart,
+            down_since=down_since,
+            grace_s=self._run_restart_grace(),
+            given_up=given_up,
+        )
         # Task 1.4: процессы, не подтвердившие остановку, — отдельные причины на КАЖДОЙ оценке (tick их не стирает).
-        extra = self._unconfirmed_stop_reasons(expected, leaves, alive)
+        extra = config_reasons + self._unconfirmed_stop_reasons(expected, leaves, alive)
         if extra:
             reasons = reasons + extra
             ready = not has_blocking(reasons)
         return ready, reasons
+
+    @property
+    def _run_restart_lock(self) -> threading.Lock:
+        """Листовой замок окна перезапуска ``_run_down_since`` (Task 1.8; не ``_run_lock``: оценка его не берёт)."""
+        return self.__dict__.setdefault("_run_restart_lock_obj", threading.Lock())
+
+    def _run_auto_restart_flags(self, expected: list[str]) -> tuple[frozenset[str], list[dict]]:
+        """Процессы набора с флагом ``run_auto_restart`` и причины конфига: ``(флаг действует, ошибки конфига)``.
+
+        Флаг лежит в сыром dict ``_process_configs[name]["restart_policy"]`` (``True`` строго, не «похожее на
+        истину»). Супервизор поднимает процесс только при ``enabled: true`` там же: флаг без него не действует
+        (окна перезапуска нет) и объявляется ошибкой конфига ``failure`` / ``config`` (``not_ready``).
+        """
+        configs = getattr(self, "_process_configs", None) or {}
+        active: set[str] = set()
+        reasons: list[dict] = []
+        for name in expected:
+            cfg = configs.get(name)
+            policy = cfg.get("restart_policy") if isinstance(cfg, dict) else None
+            if not isinstance(policy, dict) or policy.get("run_auto_restart") is not True:
+                continue
+            if policy.get("enabled") is True:
+                active.add(name)
+            else:
+                reasons.append(auto_restart_config_reason(name))
+        return frozenset(active), reasons
+
+    def _advance_restart_window(
+        self,
+        expected: list[str],
+        leaves: dict,
+        alive: dict,
+        now: float,
+        stale_s: float,
+        running: bool,
+        auto_restart: frozenset[str],
+    ) -> dict[str, float]:
+        """Новая запись окна перезапуска по тику (``run_state.restart_window``): читается и заменяется под замком."""
+        with self._run_restart_lock:
+            window = restart_window(
+                expected,
+                leaves,
+                alive,
+                now,
+                stale_s,
+                running=running,
+                auto_restart=auto_restart,
+                down_since=self._run_down_since,
+            )
+            self._run_down_since = window
+            return window
+
+    def _run_restart_grace(self) -> float:
+        """Окно перезапуска: конфиг PM ``run_restart_grace_s`` (умолчание 30.0 с); негодное — умолчание."""
+        raw = self.get_config("run_restart_grace_s")
+        if raw is None:
+            return self._DEFAULT_RUN_RESTART_GRACE_S
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
+            return float(raw)
+        self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
+        return self._DEFAULT_RUN_RESTART_GRACE_S
+
+    def _supervisor_gave_up(self, names: frozenset[str]) -> frozenset[str]:
+        """Процессы ``names``, от перезапуска которых супервизор отказался (``status == "failed"`` в его снимке).
+
+        Только чтение публичного ``get_supervision_snapshot()``. Нет монитора или сбой снимка — пусто: окно
+        перезапуска остаётся предохранителем (без него «сдался» не виден, но ``fault`` по сроку наступит).
+        """
+        monitor = getattr(self, "_process_monitor", None)
+        snapshot = getattr(monitor, "get_supervision_snapshot", None)
+        if not callable(snapshot):
+            return frozenset()
+        try:
+            statuses = snapshot()
+            return frozenset(n for n in names if (statuses.get(n) or {}).get("status") == "failed")
+        except Exception as exc:  # noqa: BLE001 — сбой снимка не роняет тик: остаётся окно перезапуска
+            self._log_error(f"readiness: снимок супервизора не получен: {exc}")
+            return frozenset()
 
     @property
     def _unconfirmed_lock(self) -> threading.Lock:
@@ -1344,7 +1456,7 @@ class ProcessManagerProcess(ProcessModule):
         """
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             return
-        ready, reasons = self._evaluate_run_readiness()
+        ready, reasons = self._evaluate_run_readiness(track_restart=True)
         new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons)
         if new is RunState.fault and prev is not RunState.fault:
             self._start_fault_stop()  # Task 1.4: остановка в аварии идёт не на потоке монитора

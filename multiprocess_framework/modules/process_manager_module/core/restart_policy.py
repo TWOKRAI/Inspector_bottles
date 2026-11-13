@@ -42,6 +42,12 @@ class RestartPolicy(SchemaBase):
             плагин/breaker объявил фатальный отказ). H4 (Ф4-добор). Срабатывает
             только при включённом env-флаге ``FW_HEALTH_RESTART`` (default off) —
             liveness-рестарт (crash/unresponsive) от этого флага не зависит.
+        run_auto_restart: Падение процесса в работе системы (``running``) не останавливает линию:
+            пока супервизор перезапускает процесс (окно ``run_restart_grace_s`` конфига PM), PM держит
+            ``running`` с причиной ``out_of_spec`` «перезапуск», а не уходит в ``fault`` (Task 1.8
+            system-run-state). Флаг читает только ProcessManager; на решение монитора «поднимать или нет»
+            он не влияет — поднимает процесс ``enabled: true`` (флаг без него PM считает ошибкой
+            конфига). Форма в рецепте: ``{enabled: true, run_auto_restart: true}``.
 
     ВНИМАНИЕ (exponential + окно give-up, NEW-6a → уточняется в NEW-6b): счётчик
     попыток (``max_retries``/``window_sec``) считает метки рестартов В ОКНЕ, а сама
@@ -77,3 +83,4 @@ class RestartPolicy(SchemaBase):
     restart_on_crash: bool = True
     restart_on_unresponsive: bool = True
     restart_on_health_failed: bool = True
+    run_auto_restart: bool = False
