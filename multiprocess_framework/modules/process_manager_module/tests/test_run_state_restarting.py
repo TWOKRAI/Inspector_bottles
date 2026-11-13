@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Task 1.7c (system-run-state) — слепые приёмочные тесты чистой ``run_state.evaluate`` с ``restarting``.
 
-Контракт (из брифа; interface.py нет): ``evaluate(expected, leaves, alive, now, stale_s, *, running=False,
+Контракт (из брифа; interface.py нет): ``evaluate(EvalInput(expected, leaves, alive, now, stale_s, running=False,
 auto_restart=..., down_since=..., grace_s=30.0, given_up=..., restarting: frozenset[str] = frozenset())``. Процесс из
 ``restarting`` (и из ``expected``) даёт РОВНО ОДНУ причину ``failure`` «<процесс>: перезапускается супервизором»
 (``node`` = процесс, ``source`` = ``liveness``) независимо от листа и от того, жив ли процесс; ``ready`` False.
@@ -92,7 +92,9 @@ def test_restarting_process_gives_exactly_one_failure(
     """Процесс из ``restarting`` -> одна ``failure``/``liveness`` «cam: перезапускается супервизором» при любом листе и
     любой живости; здоровый сосед причин не даёт; ``ready`` False (True, если причин нет)."""
     ready, reasons = run_state_mod.evaluate(
-        expected, leaves, alive, _NOW, _STALE_S, running=running, restarting=frozenset(restarting)
+        run_state_mod.EvalInput(
+            expected, leaves, alive, _NOW, _STALE_S, running=running, restarting=frozenset(restarting)
+        )
     )
 
     assert _shape(reasons) == want_reasons, reasons
@@ -115,7 +117,7 @@ def test_guard_calls_without_restarting_unchanged(
     leaves: dict, alive: dict, want_ready: bool, want_reasons: list[tuple]
 ) -> None:
     """Охранный (зелёный до реализации): вызов без ``restarting`` даёт прежние литералы."""
-    ready, reasons = run_state_mod.evaluate(["cam"], leaves, alive, _NOW, _STALE_S)
+    ready, reasons = run_state_mod.evaluate(run_state_mod.EvalInput(["cam"], leaves, alive, _NOW, _STALE_S))
 
     assert ready is want_ready
     assert _shape(reasons) == want_reasons, reasons

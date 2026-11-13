@@ -177,16 +177,18 @@ def test_given_up_wins_over_expired_window() -> None:
     """Окно истекло И супервизор отказался -> итоговая причина «cam: супервизор отказался от перезапуска» (не «не
     завершён за N с»: авария называет настоящую причину, а не следствие); за ней — деталь «процесс не жив»."""
     ready, reasons = run_state_mod.evaluate(
-        ["cam"],
-        {},
-        {"cam": False},
-        1000.0,
-        3.0,
-        running=True,
-        auto_restart=frozenset({"cam"}),
-        down_since={"cam": 1000.0 - 3600.0},
-        grace_s=5.5,
-        given_up=frozenset({"cam"}),
+        run_state_mod.EvalInput(
+            ["cam"],
+            {},
+            {"cam": False},
+            1000.0,
+            3.0,
+            running=True,
+            auto_restart=frozenset({"cam"}),
+            down_since={"cam": 1000.0 - 3600.0},
+            grace_s=5.5,
+            given_up=frozenset({"cam"}),
+        )
     )
 
     assert ready is False
@@ -422,8 +424,12 @@ def test_default_restart_grace_is_thirty_seconds() -> None:
     assert _reason_texts(pm)[0] == "cam: перезапуск не завершён за 30 с"
 
     kwargs: dict[str, Any] = {"running": True, "auto_restart": frozenset({"cam"})}
-    ready_in, _ = run_state_mod.evaluate(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 990.0}, **kwargs)
-    ready_out, _ = run_state_mod.evaluate(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 960.0}, **kwargs)
+    ready_in, _ = run_state_mod.evaluate(
+        run_state_mod.EvalInput(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 990.0}, **kwargs)
+    )
+    ready_out, _ = run_state_mod.evaluate(
+        run_state_mod.EvalInput(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 960.0}, **kwargs)
+    )
     assert (ready_in, ready_out) == (True, False)
 
 

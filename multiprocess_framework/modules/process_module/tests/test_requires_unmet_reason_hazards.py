@@ -53,6 +53,18 @@ class RhNeedsC(_Plain):
     REQUIRES = ("manager:rh_missing_c",)
 
 
+class RhDupFirst(_Plain):
+    """Два плагина с ОДНИМ именем и разными недостающими REQUIRES (C4: ключ — индекс, не имя)."""
+
+    name = "rh_dup"
+    REQUIRES = ("manager:rh_missing_dup_first",)
+
+
+class RhDupSecond(_Plain):
+    name = "rh_dup"
+    REQUIRES = ("manager:rh_missing_dup_second",)
+
+
 class RhNeedsLate(_Plain):
     """Нужен ``services.rh_late``, которого в первом ``boot()`` ещё нет."""
 
@@ -190,3 +202,16 @@ def test_neighbour_with_satisfied_requires_works_as_before() -> None:
     assert healthy[0].process([{"k": 1}]) == [{"k": 1}]
     reasons = orch.readiness_snapshot()["reasons"]
     assert [r["node"] for r in reasons] == [f"{_PROC}.rh_needs_a"], reasons
+
+
+def test_two_plugins_with_same_name_both_report_their_unmet_requires() -> None:
+    """Два пропущенных плагина с одним именем -> две причины (по одной на плагин, порядок рецепта), а не одна."""
+    orch, _ = _orch(RhDupFirst, RhDupSecond)
+    orch.boot()
+
+    reasons = [r for r in orch.readiness_snapshot()["reasons"] if r["reason"].startswith(_PREFIX)]
+
+    assert [(r["node"], r["reason"]) for r in reasons] == [
+        (f"{_PROC}.rh_dup", f"{_PREFIX} manager:rh_missing_dup_first (ctx.rh_missing_dup_first отсутствует)"),
+        (f"{_PROC}.rh_dup", f"{_PREFIX} manager:rh_missing_dup_second (ctx.rh_missing_dup_second отсутствует)"),
+    ]

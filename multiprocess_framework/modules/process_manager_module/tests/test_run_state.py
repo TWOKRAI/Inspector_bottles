@@ -181,7 +181,7 @@ def _failure(node: str, source: str = "plugin") -> dict:
 
 
 def _evaluate(expected: list[str], leaves: dict, alive: dict) -> tuple[bool, list[dict]]:
-    return run_state_mod.evaluate(expected, leaves, alive, _NOW, _STALE_S)
+    return run_state_mod.evaluate(run_state_mod.EvalInput(expected, leaves, alive, _NOW, _STALE_S))
 
 
 def test_missing_leaf_is_not_ready_liveness_reason() -> None:

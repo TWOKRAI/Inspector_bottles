@@ -74,11 +74,13 @@ class PluginOrchestrator:
         self._hook_failures_lock = threading.Lock()
         # Последний залогированный отказ readiness() плагина (id -> ключ): лог один раз на серию.
         self._readiness_logged: dict[int, str] = {}
-        # Task 1.6: плагины, пропущенные в boot() из-за REQUIRES: ``имя плагина -> текст причины``.
-        # Пишет boot() (поток старта), читает снимок готовности (поток снимка, ~2 Гц) — под
-        # коротким своим замком (не ``_reconcile_lock``: его держит сверка на время долгого хука).
-        # Порядок вставки = порядок плагинов в рецепте, порядок причин в снимке стабилен.
-        self._skipped_requires: dict[str, str] = {}
+        # Task 1.6: плагины, пропущенные в boot() из-за REQUIRES: ``((индекс в рецепте, имя плагина, текст), ...)``.
+        # Ключ — индекс, а не имя: два плагина с одним именем дают две причины. Значение НЕИЗМЕНЯЕМО и заменяется
+        # целиком: снимок готовности (поток снимка, ~2 Гц) читает ссылку без замка и видит либо прежний, либо новый
+        # кортеж — читателю замок не нужен. Замок — только писателям (``boot()`` дописывает, ``_clear`` сбрасывает:
+        # чтение-замена одним куском), не ``_reconcile_lock`` (его держит сверка на время долгого хука).
+        # Порядок = порядок плагинов в рецепте, порядок причин в снимке стабилен.
+        self._skipped_requires: tuple[tuple[int, str, str], ...] = ()
         self._skipped_requires_lock = threading.Lock()
 
     # --- Публичный API ---
@@ -165,7 +167,7 @@ class PluginOrchestrator:
         registers_manager = self._init_registers(self._early_plugins)
 
         # Фаза 1: IDLE -> READY (configure + авторегистрация команд)
-        for plugin, ctx in self._early_plugins:
+        for index, (plugin, ctx) in enumerate(self._early_plugins):
             try:
                 # Обновить ctx с registers
                 if registers_manager is not None:
@@ -200,8 +202,9 @@ class PluginOrchestrator:
                         f"удовлетворены, плагин пропущен: {'; '.join(missing)}"
                     )
                     # Task 1.6: пропущенный плагин остаётся причиной ``failure`` в снимке готовности.
+                    skipped = (index, plugin.name, f"REQUIRES не удовлетворены: {'; '.join(missing)}")
                     with self._skipped_requires_lock:
-                        self._skipped_requires[plugin.name] = f"REQUIRES не удовлетворены: {'; '.join(missing)}"
+                        self._skipped_requires = (*self._skipped_requires, skipped)
                     continue
 
                 # H-2: append ДО _do_configure — если configure() бросит, плагин уже
@@ -363,9 +366,7 @@ class PluginOrchestrator:
             if hook_reason is not None:
                 reasons.append(self._reason(node, "failure", hook_reason))
         # Task 1.6: пропущенные по REQUIRES — в ``_plugins`` их нет, причина ровно одна на плагин.
-        with self._skipped_requires_lock:
-            skipped = list(self._skipped_requires.items())
-        for plugin_name, text in skipped:
+        for _index, plugin_name, text in self._skipped_requires:  # неизменяемый кортеж: чтение без замка
             reasons.append(self._reason(f"{process_name}.{plugin_name}", "failure", text))
 
         ready = bool(announced) and not any(r["severity"] in _BLOCKING_SEVERITIES for r in reasons)
@@ -381,7 +382,7 @@ class PluginOrchestrator:
 
     def _clear_skipped_requires(self) -> None:
         with self._skipped_requires_lock:
-            self._skipped_requires.clear()
+            self._skipped_requires = ()
 
     def reconcile_run_event(self) -> None:
         """Один проход сверки: цель (``run_event``) против состояния плагинов, по УРОВНЮ.

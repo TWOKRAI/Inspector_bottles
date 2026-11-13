@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -47,22 +49,47 @@ def _reason(node: str, reason: str, source: str, severity: str = "failure") -> d
     return {"node": node, "severity": severity, "reason": reason, "source": source}
 
 
-def _process_reasons(
-    name: str, leaves: dict, alive: dict, now: float, stale_s: float, restarting: frozenset[str] = frozenset()
-) -> tuple[list[dict], bool]:
+@dataclass(frozen=True, slots=True)
+class EvalInput:
+    """Вход ``evaluate`` / ``restart_window``: наблюдение за системой и контекст автоперезапуска (C6, Task 1.8/1.7c).
+
+    Наблюдение (обязательно): ``expected`` — имена процессов применённой топологии; ``leaves[name]`` — dict
+    ``readiness`` процесса (``{"ready", "reasons", "paused", "at"}``), нет ключа = нет листа; ``alive[name]`` —
+    процесс жив (нет ключа = не жив); ``now`` и ``stale_s`` — время и срок молчания листа (часов функция не читает).
+
+    Контекст (умолчания = прежнее поведение без автоперезапуска): ``running`` — система в работе (флаг действует только
+    тогда); ``auto_restart`` — процессы с флагом ``run_auto_restart``; ``down_since`` — когда у процесса открылось окно
+    перезапуска; ``grace_s`` — срок окна; ``given_up`` — процессы, от перезапуска которых супервизор отказался;
+    ``restarting`` — процессы, чьё воплощение супервизор решил перезапустить (Task 1.7c).
+    """
+
+    expected: Sequence[str]
+    leaves: Mapping[str, dict]
+    alive: Mapping[str, bool]
+    now: float
+    stale_s: float
+    running: bool = False
+    auto_restart: frozenset[str] = frozenset()
+    down_since: Mapping[str, float] = field(default_factory=dict)
+    grace_s: float = 30.0
+    given_up: frozenset[str] = frozenset()
+    restarting: frozenset[str] = frozenset()
+
+
+def _process_reasons(name: str, inp: EvalInput) -> tuple[list[dict], bool]:
     """Причины одного процесса и признак «молчит»: ``(причины, перезапускается / не жив / нет свежего листа)``.
 
     Процесс из ``restarting`` (супервизор решил его перезапустить или перезапускает; Task 1.7c) — одна ``failure``
     «<процесс>: перезапускается супервизором» независимо от листа и живости: лист воплощения, которое убьёт рестарт,
     готовности не доказывает.
     """
-    if name in restarting:
+    if name in inp.restarting:
         return [_reason(name, f"{name}: перезапускается супервизором", "liveness")], True
-    if not alive.get(name, False):
+    if not inp.alive.get(name, False):
         return [_reason(name, "процесс не жив", "liveness")], True
-    leaf = leaves.get(name)
+    leaf = inp.leaves.get(name)
     at = leaf.get("at") if isinstance(leaf, dict) else None
-    if not isinstance(at, (int, float)) or now - at > stale_s:
+    if not isinstance(at, (int, float)) or inp.now - at > inp.stale_s:
         return [_reason(name, "нет отчёта о готовности", "liveness")], True
     reasons = [dict(r) for r in (leaf.get("reasons") or []) if isinstance(r, dict)]
     if not leaf.get("ready", False) and not any(r.get("severity") == "failure" for r in reasons):
@@ -74,32 +101,16 @@ def _has_failure(reasons: list[dict]) -> bool:
     return any(r.get("severity") == "failure" for r in reasons)
 
 
-def _restarting(name: str, silent: bool, reasons: list[dict], auto_restart: frozenset[str], down_since: dict) -> bool:
+def _restarting(name: str, silent: bool, reasons: list[dict], inp: EvalInput) -> bool:
     """Процесс из ``auto_restart`` в перезапуске: молчит, либо поднялся, но ``failure`` ещё не ушли (запись есть)."""
-    return name in auto_restart and (silent or (name in down_since and _has_failure(reasons)))
+    return name in inp.auto_restart and (silent or (name in inp.down_since and _has_failure(reasons)))
 
 
-def evaluate(
-    expected: list[str],
-    leaves: dict,
-    alive: dict,
-    now: float,
-    stale_s: float,
-    *,
-    running: bool = False,
-    auto_restart: frozenset[str] = frozenset(),
-    down_since: dict[str, float] | None = None,
-    grace_s: float = 30.0,
-    given_up: frozenset[str] = frozenset(),
-    restarting: frozenset[str] = frozenset(),
-) -> tuple[bool, list[dict]]:
+def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
     """Готовность системы по процессам набора: ``(ready, reasons)`` (Task 1.3, design.md §3.3).
 
-    Чистая функция без IO и без чтения часов: ``now`` и ``stale_s`` приходят снаружи.
-
-    ``expected`` — имена процессов применённой топологии; ``leaves[name]`` — сам dict ``readiness``
-    процесса (``{"ready", "reasons", "paused", "at"}``), нет ключа = нет листа; ``alive[name]`` —
-    процесс жив (нет ключа = не жив: молчание = не готов). Процессы вне ``expected`` не читаются.
+    Чистая функция без IO и без чтения часов: все входы — поля ``EvalInput`` (``now`` и ``stale_s`` приходят
+    снаружи). Молчание = не готов. Процессы вне ``inp.expected`` не читаются.
 
     Для каждого процесса набора, по порядку ``expected``:
       * не жив -> ``failure`` / ``liveness`` «процесс не жив»;
@@ -131,12 +142,12 @@ def evaluate(
 
     ``ready`` = среди итоговых причин нет ``failure`` и ``check_function``.
     """
-    since = down_since or {}
     reasons: list[dict] = []
-    for name in expected:
-        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s, restarting)
-        if running and _restarting(name, silent, process_reasons, auto_restart, since):
-            summary = restart_reason(name, now - since.get(name, now), grace_s, name in given_up)
+    for name in inp.expected:
+        process_reasons, silent = _process_reasons(name, inp)
+        if inp.running and _restarting(name, silent, process_reasons, inp):
+            elapsed_s = inp.now - inp.down_since.get(name, inp.now)
+            summary = restart_reason(name, elapsed_s, inp.grace_s, name in inp.given_up)
             reasons.append(summary)
             if summary["severity"] == "failure":  # окно закрыто: за итогом идут детали, почему процесс не поднялся
                 reasons.extend(process_reasons)
@@ -160,34 +171,23 @@ def auto_restart_config_reason(name: str) -> dict:
     return _reason(name, f"{name}: `run_auto_restart` требует `enabled: true`", "config")
 
 
-def restart_window(
-    expected: list[str],
-    leaves: dict,
-    alive: dict,
-    now: float,
-    stale_s: float,
-    *,
-    running: bool,
-    auto_restart: frozenset[str],
-    down_since: dict[str, float],
-    restarting: frozenset[str] = frozenset(),
-) -> dict[str, float]:
+def restart_window(inp: EvalInput) -> dict[str, float]:
     """Новый ``down_since`` после очередного тика: ``{процесс: когда началось окно перезапуска}`` (Task 1.8).
 
-    Чистая функция без IO: возвращает новый словарь, ``down_since`` не меняет. Вне ``running`` окон нет (``{}``):
+    Чистая функция без IO: возвращает новый словарь, ``inp.down_since`` не меняет. Вне ``running`` окон нет (``{}``):
     запись не переживает ``running -> stopping -> ready``. В ``running`` запись есть только у процесса в перезапуске
     (``_restarting``: он из ``auto_restart`` и молчит, либо поднялся, но ``failure`` ещё не ушли и запись была): она
     сохраняется, а у нового — ``now``. Сбой живого процесса со свежим листом без записи — не перезапуск; жив, лист
     свежий, ``failure`` нет — записи нет (окно закрыто, следующее падение откроет новое). Процесс, вышедший из
     ``expected`` / ``auto_restart``, из записи уходит (она не растёт).
     """
-    if not running:
+    if not inp.running:
         return {}
     window: dict[str, float] = {}
-    for name in expected:
-        process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s, restarting)
-        if _restarting(name, silent, process_reasons, auto_restart, down_since):
-            window[name] = down_since.get(name, now)
+    for name in inp.expected:
+        process_reasons, silent = _process_reasons(name, inp)
+        if _restarting(name, silent, process_reasons, inp):
+            window[name] = inp.down_since.get(name, inp.now)
     return window
 
 

@@ -2,7 +2,7 @@
 """Task 1.8 (system-run-state) — слепые приёмочные тесты чистой ``run_state.evaluate`` с автоперезапуском.
 
 Контракт (из брифа задачи; interface.py нет — тестируется текст требований):
-``evaluate(expected, leaves, alive, now, stale_s, *, running=False, auto_restart=frozenset(), down_since=None,
+``evaluate(EvalInput(expected, leaves, alive, now, stale_s, running=False, auto_restart=frozenset(), down_since=None,
 grace_s=30.0, given_up=frozenset()) -> (ready, reasons)``. Флаг действует только при ``running=True``: процесс из
 ``auto_restart``, который не жив или без свежего листа, у которого окно ``now - down_since.get(name, now) < grace_s``
 не истекло и которого нет в ``given_up``, даёт ОДНУ причину ``out_of_spec`` «перезапуск <процесс>» (source
@@ -40,7 +40,9 @@ def _plugin_failure(node: str, text: str) -> dict:
 
 
 def _evaluate(expected: list[str], leaves: dict, alive: dict, **kwargs) -> tuple[bool, list[dict]]:
-    return run_state_mod.evaluate(expected, leaves, alive, _NOW, _STALE_S, **kwargs)
+    if kwargs.get("down_since", ...) is None:  # «down_since не передан» = умолчание ``EvalInput`` (пустое окно)
+        del kwargs["down_since"]
+    return run_state_mod.evaluate(run_state_mod.EvalInput(expected, leaves, alive, _NOW, _STALE_S, **kwargs))
 
 
 def _flagged(**extra) -> dict:

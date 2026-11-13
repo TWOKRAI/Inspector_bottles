@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+from dataclasses import replace
 import inspect
 import math
 import os
@@ -54,6 +55,7 @@ from .backend_ctl_endpoint import (
 from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
 from .run_state import (
+    EvalInput,
     RunState,
     auto_restart_config_reason,
     evaluate,
@@ -1038,7 +1040,8 @@ class ProcessManagerProcess(ProcessModule):
         ``_publish_run_state()``.
 
         ``reasons`` (Task 1.3) — результат ``evaluate``, считанный ВНЕ замка: ``None`` — причины не
-        меняются; список заменяет текущие причины. Переход в ``fault`` по ``tick`` записывает
+        меняются; список заменяет текущие причины, кроме отказа, не сменившего состояние (C10: причины допуска
+        отказанного START/ack в статус не попадают). Переход в ``fault`` по ``tick`` записывает
         ``last_fault`` = причины этого такта.
 
         ``stop_done`` (Task 1.7) — для ``ack``: ``None`` — признак ``_fault_stop_done`` читается ТУТ, под
@@ -1059,7 +1062,9 @@ class ProcessManagerProcess(ProcessModule):
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
             if event == "tick":
                 self._run_ready = ready
-            if reasons is not None:
+            # Отказ команды, не сменивший состояние (``already_running``, ``fault_unacknowledged``...), причины своей
+            # оценки в статус не пишет: статус отражает последний такт, а не оценку по порогу допуска (C10).
+            if reasons is not None and (code is None or new is not prev):
                 self._run_reasons = [dict(r) for r in reasons]
             if prev is RunState.fault and new is not RunState.fault:
                 self._fault_stop_done = False
@@ -1253,14 +1258,7 @@ class ProcessManagerProcess(ProcessModule):
         now = time.time()
         auto_restart, config_reasons = self._run_auto_restart_flags(expected)
         running = self._run_state is RunState.running  # одно чтение атрибута: ``_run_lock`` оценка не берёт
-        if track_restart:
-            down_since = self._advance_restart_window(
-                expected, leaves, alive, now, stale_s, running, auto_restart, restarting
-            )
-        else:
-            down_since = self._run_down_since
-        given_up = self._supervisor_gave_up(auto_restart) if running and auto_restart else frozenset()
-        ready, reasons = evaluate(
+        inp = EvalInput(
             expected,
             leaves,
             alive,
@@ -1268,11 +1266,14 @@ class ProcessManagerProcess(ProcessModule):
             stale_s,
             running=running,
             auto_restart=auto_restart,
-            down_since=down_since,
+            down_since=self._run_down_since,
             grace_s=self._run_restart_grace(),
-            given_up=given_up,
+            given_up=self._supervisor_gave_up(auto_restart) if running and auto_restart else frozenset(),
             restarting=restarting,
         )
+        if track_restart:
+            inp = replace(inp, down_since=self._advance_restart_window(inp))
+        ready, reasons = evaluate(inp)
         # Task 1.4: процессы, не подтвердившие остановку, — отдельные причины на КАЖДОЙ оценке (tick их не стирает).
         extra = config_reasons + self._unconfirmed_stop_reasons(expected, leaves, alive)
         if extra:
@@ -1306,30 +1307,10 @@ class ProcessManagerProcess(ProcessModule):
                 reasons.append(auto_restart_config_reason(name))
         return frozenset(active), reasons
 
-    def _advance_restart_window(
-        self,
-        expected: list[str],
-        leaves: dict,
-        alive: dict,
-        now: float,
-        stale_s: float,
-        running: bool,
-        auto_restart: frozenset[str],
-        restarting: frozenset[str],
-    ) -> dict[str, float]:
+    def _advance_restart_window(self, inp: EvalInput) -> dict[str, float]:
         """Новая запись окна перезапуска по тику (``run_state.restart_window``): читается и заменяется под замком."""
         with self._run_restart_lock:
-            window = restart_window(
-                expected,
-                leaves,
-                alive,
-                now,
-                stale_s,
-                running=running,
-                auto_restart=auto_restart,
-                down_since=self._run_down_since,
-                restarting=restarting,
-            )
+            window = restart_window(replace(inp, down_since=self._run_down_since))
             self._run_down_since = window
             return window
 
