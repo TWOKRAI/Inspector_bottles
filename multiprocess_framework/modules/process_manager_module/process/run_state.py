@@ -84,6 +84,41 @@ def evaluate(expected: list[str], leaves: dict, alive: dict, now: float, stale_s
     return ready, reasons
 
 
+def unconfirmed_stop(
+    expected: list[str], unconfirmed: dict[str, float], leaves: dict, alive: dict
+) -> tuple[dict[str, float], list[dict]]:
+    """Множество «не подтвердили остановку» после оценки: ``(оставшиеся, причины)`` (Task 1.4, design.md §3.2 п.3).
+
+    Чистая функция без IO. ``unconfirmed`` — ``{процесс: N}``, где ``N`` — срок ожидания ``paused``, за который
+    процесс не ответил. Процесс выходит из множества, когда его лист показывает ``paused: true``, или он не жив
+    (``alive == False``: остановленным считается мёртвый), или его нет в ``expected`` (топология сменилась).
+    Для каждого оставшегося, по порядку ``expected``, — ``failure`` / ``report`` «<процесс> не подтвердил остановку
+    за <N> с» (``node`` = процесс; тот же текст на каждой оценке, не накапливается).
+    """
+    remaining: dict[str, float] = {}
+    reasons: list[dict] = []
+    for name in expected:
+        n = unconfirmed.get(name)
+        if n is None:
+            continue
+        leaf = leaves.get(name)
+        if not alive.get(name, False) or (isinstance(leaf, dict) and leaf.get("paused") is True):
+            continue
+        remaining[name] = n
+        reasons.append(stop_unconfirmed_reason(name, n))
+    return remaining, reasons
+
+
+def stop_unconfirmed_reason(name: str, timeout_s: float) -> dict:
+    """Причина «<процесс> не подтвердил остановку за <N> с» (``{:g}``: 0.5 -> «0.5», 10.0 -> «10»)."""
+    return _reason(name, f"{name} не подтвердил остановку за {timeout_s:g} с", "report")
+
+
+def has_blocking(reasons: list[dict]) -> bool:
+    """Среди причин есть блокирующая START (``failure`` / ``check_function``)."""
+    return any(r.get("severity") in BLOCKING_SEVERITIES for r in reasons)
+
+
 def _r(ready: bool) -> RunState:
     """Ячейка ``R`` таблицы: ``ready`` при ``ready=True``, иначе ``not_ready``."""
     return RunState.ready if ready else RunState.not_ready

@@ -347,7 +347,10 @@ def test_publish_rejected_warns_and_not_marked() -> None:
     paths: list[str] = []
 
     def rejecting(msg: dict, *args: Any, **kwargs: Any) -> dict:
-        paths.append(msg["data"]["path"])
+        # Task 1.4 system-run-state: shutdown подаётся в машину и публикует ``system.run.*`` тем же стором —
+        # здесь считаются только ключи хода стопа (``system.stop.*``); отказ действует на все ключи.
+        if msg["data"]["path"].startswith("system.stop."):
+            paths.append(msg["data"]["path"])
         return {"status": "rejected", "reason": "middleware"}
 
     light.pm._state_store_manager.handle_state_set = rejecting
