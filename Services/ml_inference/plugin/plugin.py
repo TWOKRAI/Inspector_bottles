@@ -321,6 +321,19 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._ctx.log_info(diagnosis.message)
             self._clear_asset_degraded()
 
+    def readiness(self, ctx: PluginContext) -> list[dict]:
+        """Причина неготовности: непригодные ассеты модели (Task 1.6). Только чтение полей.
+
+        Зовётся из потока снимка готовности (~2 Гц): БЕЗ ``_engine_lock`` (под ним идёт долгая
+        загрузка модели — снимок замёрз бы вместе с ней) и без IO. Порядок чтения — сначала
+        текст, потом флаг: ``_fail_assets`` пишет текст до флага, ``_clear_asset_degraded``
+        снимает флаг до текста, так что полупрочитанная пара даёт ``[]``, а не пустую причину.
+        """
+        reason = getattr(self, "_asset_reason", "")
+        if getattr(self, "_asset_degraded", False) and reason:
+            return [{"severity": "failure", "reason": reason}]
+        return []
+
     def _fail_assets(self, message: str, last_error: str) -> None:
         """Ассеты модели непригодны: регистр, инцидент, health degraded. Зовётся под _engine_lock.
 

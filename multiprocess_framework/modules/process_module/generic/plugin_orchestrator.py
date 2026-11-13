@@ -74,6 +74,12 @@ class PluginOrchestrator:
         self._hook_failures_lock = threading.Lock()
         # Последний залогированный отказ readiness() плагина (id -> ключ): лог один раз на серию.
         self._readiness_logged: dict[int, str] = {}
+        # Task 1.6: плагины, пропущенные в boot() из-за REQUIRES: ``имя плагина -> текст причины``.
+        # Пишет boot() (поток старта), читает снимок готовности (поток снимка, ~2 Гц) — под
+        # коротким своим замком (не ``_reconcile_lock``: его держит сверка на время долгого хука).
+        # Порядок вставки = порядок плагинов в рецепте, порядок причин в снимке стабилен.
+        self._skipped_requires: dict[str, str] = {}
+        self._skipped_requires_lock = threading.Lock()
 
     # --- Публичный API ---
 
@@ -147,6 +153,7 @@ class PluginOrchestrator:
         Плагины уже загружены в load_and_configure_managers().
         Здесь только configure -> start lifecycle + registers.
         """
+        self._clear_skipped_requires()  # повторный сбор не копит записи прошлого boot()
         if not self._early_plugins:
             self._services.log_info(f"PluginOrchestrator[{self._services.name}]: нет плагинов")
             return
@@ -192,6 +199,9 @@ class PluginOrchestrator:
                         f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' REQUIRES не "
                         f"удовлетворены, плагин пропущен: {'; '.join(missing)}"
                     )
+                    # Task 1.6: пропущенный плагин остаётся причиной ``failure`` в снимке готовности.
+                    with self._skipped_requires_lock:
+                        self._skipped_requires[plugin.name] = f"REQUIRES не удовлетворены: {'; '.join(missing)}"
                     continue
 
                 # H-2: append ДО _do_configure — если configure() бросит, плагин уже
@@ -257,6 +267,7 @@ class PluginOrchestrator:
         ``STOPPED`` закрыто в ``base.py``.
         """
         self._stopping = True
+        self._clear_skipped_requires()  # плагины остановлены: причина пропуска больше не актуальна
         locked = self._reconcile_lock.acquire(timeout=_SHUTDOWN_LOCK_SEC)
         if not locked:
             self._services.log_error(
@@ -351,6 +362,11 @@ class PluginOrchestrator:
             hook_reason = self._hook_failure_reason(plugin, state, target_pause)
             if hook_reason is not None:
                 reasons.append(self._reason(node, "failure", hook_reason))
+        # Task 1.6: пропущенные по REQUIRES — в ``_plugins`` их нет, причина ровно одна на плагин.
+        with self._skipped_requires_lock:
+            skipped = list(self._skipped_requires.items())
+        for plugin_name, text in skipped:
+            reasons.append(self._reason(f"{process_name}.{plugin_name}", "failure", text))
 
         ready = bool(announced) and not any(r["severity"] in _BLOCKING_SEVERITIES for r in reasons)
         paused = target_pause is True and not any(
@@ -362,6 +378,10 @@ class PluginOrchestrator:
             "paused": paused,
             "at": time.time(),
         }
+
+    def _clear_skipped_requires(self) -> None:
+        with self._skipped_requires_lock:
+            self._skipped_requires.clear()
 
     def reconcile_run_event(self) -> None:
         """Один проход сверки: цель (``run_event``) против состояния плагинов, по УРОВНЮ.
