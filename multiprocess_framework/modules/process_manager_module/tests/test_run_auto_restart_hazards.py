@@ -163,8 +163,8 @@ def test_parallel_ticks_keep_one_window_start(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_given_up_wins_over_expired_window() -> None:
-    """Окно истекло И супервизор отказался -> одна причина «cam: супервизор отказался от перезапуска» (не «не
-    завершён за N с»): авария называет настоящую причину, а не следствие."""
+    """Окно истекло И супервизор отказался -> итоговая причина «cam: супервизор отказался от перезапуска» (не «не
+    завершён за N с»: авария называет настоящую причину, а не следствие); за ней — деталь «процесс не жив»."""
     ready, reasons = run_state_mod.evaluate(
         ["cam"],
         {},
@@ -180,7 +180,8 @@ def test_given_up_wins_over_expired_window() -> None:
 
     assert ready is False
     assert [(r["node"], r["severity"], r["source"], r["reason"]) for r in reasons] == [
-        ("cam", "failure", "liveness", "cam: супервизор отказался от перезапуска")
+        ("cam", "failure", "liveness", "cam: супервизор отказался от перезапуска"),
+        ("cam", "failure", "liveness", "процесс не жив"),
     ]
 
 
@@ -243,7 +244,7 @@ def test_flagged_processes_have_independent_windows() -> None:
     _tick(monitor)
     assert pm._run_state == "fault"
     texts = [r["reason"] for r in pm._cmd_system_run_status()["last_fault"]["reasons"]]
-    assert texts == ["b: перезапуск не завершён за 30 с"], texts
+    assert texts == ["b: перезапуск не завершён за 30 с", "процесс не жив"], texts  # у a и c причин нет
 
 
 # --------------------------------------------------------------------------- #
@@ -325,6 +326,28 @@ def test_supervision_snapshot_error_does_not_break_tick() -> None:
     pm._run_readiness_tick()
 
     assert pm._run_state == "fault"
+
+
+# --------------------------------------------------------------------------- #
+# 9. Истёкшее окно: last_fault объясняет, почему процесс не поднялся
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_last_fault_after_expired_window_keeps_leaf_detail() -> None:
+    """``cam`` с флагом поднялся, но лист говорит «модель не загружена», окно истекло -> ``fault``: ``last_fault``
+    содержит итоговую «cam: перезапуск не завершён за 30 с» и деталь листа «модель не загружена» (в этом порядке)."""
+    pm, monitor = _pm("cam", grace_s=30.0, run_gate=False)
+    _running(pm, monitor, "cam")
+    detail = {"node": "cam.detect", "severity": "failure", "reason": "модель не загружена", "source": "plugin"}
+    pm._run_down_since = {"cam": time.time() - 3600.0}  # окно истекло; процесс жив, лист свежий, но с failure
+    beat(monitor, "cam", ready=False, reasons=[detail])
+
+    _tick(monitor)
+
+    assert pm._run_state == "fault", pm._cmd_system_run_status()
+    texts = [r["reason"] for r in pm._cmd_system_run_status()["last_fault"]["reasons"]]
+    assert texts == ["cam: перезапуск не завершён за 30 с", "модель не загружена"], texts
 
 
 # --------------------------------------------------------------------------- #

@@ -101,13 +101,16 @@ def evaluate(
 
     Автоперезапуск в работе (Task 1.8) — только при ``running=True``; иначе флаг не действует и мёртвый
     процесс остаётся ``failure``. Процесс из ``auto_restart``, который молчит (не жив / нет свежего листа)
-    или поднялся, но его ``failure`` ещё не ушли и запись в ``down_since`` есть, вместо ВСЕХ своих причин
-    даёт одну (``node`` = процесс, ``source`` = ``liveness``):
+    или поднялся, но его ``failure`` ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
+    (``node`` = процесс, ``source`` = ``liveness``):
       * процесс в ``given_up`` (супервизор отказался) -> ``failure`` «<процесс>: супервизор отказался от
         перезапуска» — выигрывает у окна и действует сразу;
       * ``now - down_since[процесс] >= grace_s`` -> ``failure`` «<процесс>: перезапуск не завершён за
         <grace_s> с» (записи нет — окно началось сейчас, ``0``);
       * иначе ``out_of_spec`` «перезапуск <процесс>»: на ``ready`` не влияет.
+    В окне итоговая причина ЗАМЕНЯЕТ все причины процесса (одна ``out_of_spec``). При истёкшем окне и при ``given_up``
+    за итоговой ``failure`` идут прежние причины процесса как есть («процесс не жив», «модель не загружена»...):
+    оператору видно, почему процесс не поднялся.
     Ведёт ``down_since`` не эта функция, а ``restart_window``.
 
     ``ready`` = среди итоговых причин нет ``failure`` и ``check_function``.
@@ -117,7 +120,10 @@ def evaluate(
     for name in expected:
         process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s)
         if running and _restarting(name, silent, process_reasons, auto_restart, since):
-            reasons.append(restart_reason(name, now - since.get(name, now), grace_s, name in given_up))
+            summary = restart_reason(name, now - since.get(name, now), grace_s, name in given_up)
+            reasons.append(summary)
+            if summary["severity"] == "failure":  # окно закрыто: за итогом идут детали, почему процесс не поднялся
+                reasons.extend(process_reasons)
         else:
             reasons.extend(process_reasons)
     ready = not has_blocking(reasons)
@@ -125,7 +131,7 @@ def evaluate(
 
 
 def restart_reason(name: str, elapsed_s: float, grace_s: float, given_up: bool) -> dict:
-    """Единственная причина процесса в перезапуске (см. ``evaluate``); ``elapsed_s`` — сколько идёт окно."""
+    """Итоговая причина процесса в перезапуске (см. ``evaluate``); ``elapsed_s`` — сколько идёт окно."""
     if given_up:
         return _reason(name, f"{name}: супервизор отказался от перезапуска", "liveness")
     if elapsed_s >= grace_s:
