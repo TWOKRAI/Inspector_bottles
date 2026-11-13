@@ -158,20 +158,16 @@ def restart_window(
     """Новый ``down_since`` после очередного тика: ``{процесс: когда началось окно перезапуска}`` (Task 1.8).
 
     Чистая функция без IO: возвращает новый словарь, ``down_since`` не меняет. Вне ``running`` окон нет (``{}``):
-    запись не переживает ``running -> stopping -> ready``. В ``running`` запись есть только у процесса из
-    ``auto_restart`` из ``expected``:
-      * молчит (не жив / нет свежего листа) -> запись сохраняется, а у нового — ``now``;
-      * в перезапуске (``_restarting``: молчит, либо поднялся, но ``failure`` ещё не ушли) -> запись сохраняется, у
-        нового — ``now``. Сбой живого процесса со свежим листом, у которого записи не было, — не перезапуск;
-      * иначе (жив, лист свежий, ``failure`` нет) записи нет: окно закрыто, следующее падение откроет новое.
-    Процесс, вышедший из ``expected`` / ``auto_restart``, из записи уходит (она не растёт).
+    запись не переживает ``running -> stopping -> ready``. В ``running`` запись есть только у процесса в перезапуске
+    (``_restarting``: он из ``auto_restart`` и молчит, либо поднялся, но ``failure`` ещё не ушли и запись была): она
+    сохраняется, а у нового — ``now``. Сбой живого процесса со свежим листом без записи — не перезапуск; жив, лист
+    свежий, ``failure`` нет — записи нет (окно закрыто, следующее падение откроет новое). Процесс, вышедший из
+    ``expected`` / ``auto_restart``, из записи уходит (она не растёт).
     """
     if not running:
         return {}
     window: dict[str, float] = {}
     for name in expected:
-        if name not in auto_restart:
-            continue
         process_reasons, silent = _process_reasons(name, leaves, alive, now, stale_s)
         if _restarting(name, silent, process_reasons, auto_restart, down_since):
             window[name] = down_since.get(name, now)

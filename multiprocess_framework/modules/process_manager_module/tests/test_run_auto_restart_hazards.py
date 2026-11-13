@@ -351,6 +351,71 @@ def test_last_fault_after_expired_window_keeps_leaf_detail() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 10. Окно ведёт только тик монитора; остальные оценки его читают
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_only_monitor_tick_moves_restart_window() -> None:
+    """Оценки вне тика (``_evaluate_run_readiness()``, START, ``ack``, итог подъёма) запись окна не пишут и не снимают:
+    ``cam`` упал, такта не было -> записи нет, после оценок записи всё ещё нет; ``cam`` вернулся при записи
+    ``{cam: 1.0}`` -> оценки её не снимают; снимает только тик."""
+    pm, monitor = _pm("cam", grace_s=30.0, run_gate=False)
+    _running(pm, monitor, "cam")
+
+    def evaluations_outside_tick() -> None:
+        pm._evaluate_run_readiness()
+        pm._evaluate_run_readiness(admission=True)
+        pm._cmd_system_run_start()
+        pm._cmd_system_run_ack()
+        pm._settle_run_state()
+
+    _crash(pm, "cam")
+    evaluations_outside_tick()
+    assert pm._run_down_since == {}, pm._run_down_since  # падение без тика окна не открывает
+
+    _tick(monitor)
+    assert list(pm._run_down_since) == ["cam"]
+    _revive(pm, monitor, "cam")
+    pm._run_down_since = {"cam": 1.0}
+    evaluations_outside_tick()
+    assert pm._run_down_since == {"cam": 1.0}, pm._run_down_since  # возвращение без тика окна не закрывает
+
+    _tick(monitor)
+    assert pm._run_down_since == {}, pm._run_down_since
+
+
+# --------------------------------------------------------------------------- #
+# 11. Умолчание окна — 30 с (литерал, не через константу)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_default_restart_grace_is_thirty_seconds() -> None:
+    """Без ключа ``run_restart_grace_s`` окно 30.0 с: запись возрастом 10 с держит ``running``, возрастом 40 с даёт
+    ``fault`` с «cam: перезапуск не завершён за 30 с». Чистая ``evaluate`` без ``grace_s`` — то же умолчание."""
+    pm, monitor = _pm("cam", run_gate=False)
+    _running(pm, monitor, "cam")
+    _crash(pm, "cam")
+    _tick(monitor)
+
+    assert pm._run_restart_grace() == 30.0
+    pm._run_down_since = {"cam": time.time() - 10.0}
+    _tick(monitor)
+    assert pm._run_state == "running", pm._cmd_system_run_status()
+
+    pm._run_down_since = {"cam": time.time() - 40.0}
+    _tick(monitor)
+    assert pm._run_state == "fault"
+    assert _reason_texts(pm)[0] == "cam: перезапуск не завершён за 30 с"
+
+    kwargs: dict[str, Any] = {"running": True, "auto_restart": frozenset({"cam"})}
+    ready_in, _ = run_state_mod.evaluate(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 990.0}, **kwargs)
+    ready_out, _ = run_state_mod.evaluate(["cam"], {}, {"cam": False}, 1000.0, 3.0, down_since={"cam": 960.0}, **kwargs)
+    assert (ready_in, ready_out) == (True, False)
+
+
+# --------------------------------------------------------------------------- #
 # Модель RestartPolicy: поле run_auto_restart (решение лида: объявлено в модели)
 # --------------------------------------------------------------------------- #
 
