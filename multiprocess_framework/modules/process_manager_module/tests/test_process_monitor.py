@@ -1122,6 +1122,7 @@ class TestRecoveredCriterionAfterScheduling:
         proc.pid = 999
         proc.exitcode = None
         pm._process_registry.os_processes = [proc]
+        pm._process_registry.get_process_by_name.return_value = proc  # pid воплощения (Task 1.7c)
         return proc
 
     @staticmethod
@@ -1215,35 +1216,32 @@ class TestRecoveredCriterionAfterScheduling:
 
     # -- честное recovered остаётся -------------------------------------------
 
-    def test_honest_recovered_self_heal_before_dispatch(self) -> None:
-        """Процесс сам ожил: НОВЫЙ heartbeat после планирования (до диспатча) →
-        честное recovered. Запланированный рестарт при этом сознательно НЕ
-        отменяется (см. docstring фикса) — процесс всё равно будет перезапущен."""
+    def test_self_heal_before_dispatch_is_not_recovered(self) -> None:
+        """Процесс сам ожил: heartbeat СТАРОГО воплощения после планирования (до диспатча) — НЕ recovered
+        (Task 1.7c: решение о рестарте необратимо, рестарт его ещё убьёт; ``recovered`` — только по heartbeat нового
+        воплощения). Запланированный рестарт не отменяется (R2, ADR-PMM-015), watchdog H3 не снят."""
         ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=2, window_sec=60.0)
-        self._live_proc(pm)
+        proc = self._live_proc(pm)
         m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
         m._last_heartbeat["cam"] = time.time() - 999.0  # устаревший → unresponsive
 
         m._check_heartbeats()  # планирует рестарт (устаревший heartbeat снят)
         assert "cam" in m._pending_recovery
 
-        # Процесс самовосстановился: пришёл НОВЫЙ heartbeat уже после планирования.
-        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time()})
+        # Процесс самовосстановился: пришёл НОВЫЙ heartbeat уже после планирования — того же воплощения (pid 999).
+        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time(), "pid": proc.pid})
         m._check_heartbeats()
 
-        assert self._event(ssm) == "recovered"
-        assert "cam" not in m._pending_recovery
-        assert "cam" not in m._recovery_deadline
-        # Preserved-поведение (R2): recovered — только событие; pending-рестарт
-        # НЕ снимается (иначе непрерывно heartbeat'ящий H4-процесс никогда бы не
-        # рестартнулся). Восстановившийся процесс всё равно будет перезапущен.
+        assert self._event(ssm) != "recovered"
+        assert "cam" in m._pending_recovery
+        assert "cam" in m._recovery_deadline
         assert "cam" in m._pending_restarts
 
     def test_honest_recovered_after_executed_restart(self) -> None:
         """Рестарт исполнен (dispatch очистил heartbeat), новая инкарнация шлёт
         heartbeat → честное recovered."""
         ssm, pm, m = self._live_monitor(backoff_sec=0.0, max_retries=2, window_sec=60.0)
-        self._live_proc(pm)
+        proc = self._live_proc(pm)
         m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
         m._last_heartbeat["cam"] = time.time() - 999.0
 
@@ -1252,8 +1250,9 @@ class TestRecoveredCriterionAfterScheduling:
         assert "cam" in m._pending_recovery
         assert m._last_heartbeat.get("cam") is None
 
-        # Новая инкарнация прислала первый heartbeat.
-        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time()})
+        # Новая инкарнация (другой pid в реестре) прислала первый heartbeat (Task 1.7c: с pid воплощения).
+        proc.pid = 1000
+        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time(), "pid": 1000})
         m._check_heartbeats()
 
         assert self._event(ssm) == "recovered"

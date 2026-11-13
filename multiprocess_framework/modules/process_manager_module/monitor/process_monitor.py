@@ -105,6 +105,23 @@ class ProcessMonitor:
         # Heartbeat: время последнего heartbeat от каждого процесса
         self._last_heartbeat: dict[str, float] = {}
 
+        # Task 1.3 system-run-state: последний снимок готовности каждого процесса — поле ``readiness``
+        # heartbeat-сообщения (``{ready, reasons, paused, at}``, Task 1.2). Пишет message_processor
+        # (``_on_heartbeat_received``), читает PM на такте монитора и в ``system.run.start`` через
+        # ``readiness_snapshot()``. Лист в слое НЕ мутируется — каждый heartbeat кладёт новый dict; замок
+        # листовой (держится только на копию/запись, никогда не на ожидание).
+        self._readiness: dict[str, dict] = {}
+        self._readiness_lock = threading.Lock()
+
+        # Task 1.7c: воплощение процесса. ``{имя: pid воплощения на момент РЕШЕНИЯ о рестарте}`` — процесс
+        # «перезапускается» с решения супервизора (``_try_auto_restart`` / ``_cascade_restart``) или ручного
+        # ``process.restart`` до первого heartbeat НОВОГО воплощения (``pid`` heartbeat == pid реестра, != pid решения).
+        # Пока имя здесь, лист готовности НЕ принимается: heartbeat старого воплощения (оживший процесс, поздний
+        # heartbeat после исполнения рестарта) не делает лист «свежим» и не даёт ``recovered``. Источник правды —
+        # здесь; PM читает копию вместе с листами (``readiness_view``). Под ``_readiness_lock``: листы и пометка —
+        # один снимок.
+        self._restarting: dict[str, int | None] = {}
+
         # Статус воркеров: последние данные из heartbeat per process
         # Ключ — имя процесса, значение — dict[worker_name, worker_status_dict]
         self._workers_status: dict[str, dict] = {}
@@ -265,6 +282,15 @@ class ProcessMonitor:
             return
         self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
+        # Task 1.3: снимок готовности процесса. Свежесть судится по ``readiness["at"]`` (время расчёта
+        # снимка наблюдателем), а не по ``_last_heartbeat``: живой heartbeat при мёртвом потоке-наблюдателе
+        # не должен выглядеть «готов». Поля нет (старый ребёнок / процесс без наблюдателя) — прежний лист
+        # не трогаем: он состарится по ``at`` и PM увидит «нет отчёта о готовности».
+        # Task 1.7c: пока процесс «перезапускается», heartbeat учитывается как жизнь (``_last_heartbeat`` выше), но
+        # лист не принимается; пометку снимает только первый heartbeat нового воплощения (``_accept_leaf``).
+        readiness = msg.get("readiness")
+        self._accept_readiness(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None)
+
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
         # каждый процесс делает это сам (self-publish — ProcessHeartbeat.
@@ -286,6 +312,80 @@ class ProcessMonitor:
                 self._handle_state_change(sender, prev, snap)
                 self.previous_states[sender] = snap.copy()
                 self.process._log_debug(f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}")
+
+    def _accept_readiness(self, sender: str, pid: Any, readiness: dict | None) -> None:
+        """Принять лист heartbeat только от воплощения, которое сейчас в реестре; heartbeat нового воплощения
+        снимает пометку «перезапускается».
+
+        Идентичность проверяется ВСЕГДА, не только в перезапуске: heartbeat с ``pid``, отличным от pid процесса в
+        реестре (если реестр его знает), — жизнь (``_last_heartbeat`` учтён выше), но лист не принимается (поздний
+        heartbeat старого воплощения не перетирает лист нового). Heartbeat без ``pid`` (старый ребёнок) принимается
+        как раньше — вне перезапуска.
+
+        Новое воплощение (снимает пометку) — ``pid`` целый, равен pid реестра и отличен от pid на момент решения;
+        heartbeat без ``pid`` пометку не снимает (строго). Pid реестра читается ДО листового замка (реестр свой
+        замок; здесь — только копия и запись).
+        """
+        registry_pid = self._registry_pid(sender)
+        with self._readiness_lock:
+            if sender in self._restarting:
+                is_new = type(pid) is int and pid == registry_pid and pid != self._restarting[sender]
+                if not is_new:
+                    return
+                del self._restarting[sender]
+            elif pid is not None and registry_pid is not None and pid != registry_pid:
+                return
+            if readiness is not None:
+                self._readiness[sender] = dict(readiness)
+
+    def _registry_pid(self, process_name: str) -> int | None:
+        """pid процесса в реестре PM (``None`` — нет записи / не стартован / сбой опроса)."""
+        registry = getattr(self.process, "_process_registry", None)
+        try:
+            proc = registry.get_process_by_name(process_name) if registry is not None else None
+            pid = getattr(proc, "pid", None)
+        except Exception:  # noqa: BLE001 — сбой опроса реестра: pid неизвестен, пометка не снимется по догадке
+            return None
+        return pid if type(pid) is int else None
+
+    def mark_restarting(self, process_name: str) -> None:
+        """Процесс «перезапускается»: решение о рестарте принято (или идёт ручной ``process.restart``).
+
+        Запоминает pid воплощения ДО рестарта и снимает его лист (одним замком): новое воплощение не наследует отчёт
+        прежнего, а лист прежнего поздно приходящий heartbeat не вернёт. Повторное решение перезаписывает pid
+        текущим pid реестра (прежний рестарт уже исполнен — убить предстоит и его воплощение).
+        """
+        pid = self._registry_pid(process_name)
+        with self._readiness_lock:
+            self._restarting[process_name] = pid
+            self._readiness.pop(process_name, None)
+
+    def _is_replaced_incarnation(self, proc: Any) -> bool:
+        """Мёртвый ``proc`` — то самое воплощение, которое супервизор решил заменить (его pid в ``_restarting``)."""
+        pid = proc.pid
+        if type(pid) is not int:
+            return False
+        with self._readiness_lock:
+            return self._restarting.get(proc.name) == pid
+
+    def readiness_view(self) -> tuple[dict[str, dict], frozenset[str]]:
+        """Один снимок под одним замком: ``(листы, имена «перезапускается»)`` (Task 1.7c)."""
+        with self._readiness_lock:
+            return dict(self._readiness), frozenset(self._restarting)
+
+    def readiness_snapshot(self) -> dict[str, dict]:
+        """Копия карты ``{процесс: лист readiness}`` под листовым замком (Task 1.3).
+
+        Копия внешнего dict достаточна: лист каждого процесса заменяется целиком, не мутируется.
+        Оценку (``run_state.evaluate``) вызывающий делает уже ВНЕ замка.
+        """
+        with self._readiness_lock:
+            return dict(self._readiness)
+
+    def _forget_readiness(self, process_name: str) -> None:
+        """Снять лист готовности: новое воплощение процесса не наследует отчёт прежнего."""
+        with self._readiness_lock:
+            self._readiness.pop(process_name, None)
 
     def _publish_state(self, path: str, value: Any) -> None:
         """Опубликовать значение в общий StateStore (если доступен).
@@ -684,8 +784,23 @@ class ProcessMonitor:
             time.sleep(self.poll_interval)
         self.process._log_info("Process monitor loop stopped")
 
+    def _tick_run_readiness(self) -> None:
+        """Task 1.3: оценка готовности системы на такте монитора — ``PM._run_readiness_tick()``.
+
+        Отдельный try: сбой оценки не должен глушить остальную итерацию, а сбой итерации — оценку.
+        Вызывается ДО проверки ``shared_resources`` — оценка от state-plane не зависит (cto К2).
+        """
+        tick = getattr(self.process, "_run_readiness_tick", None)
+        if tick is None:
+            return
+        try:
+            tick()
+        except Exception as e:  # noqa: BLE001 — потеря тика не роняет монитор; ошибка громкая
+            self.process._log_error(f"Error in run readiness tick: {e}")
+
     def _run_iteration(self) -> None:
         """Одна итерация мониторинга (вызывается под ``_iteration_lock``)."""
+        self._tick_run_readiness()
         try:
             if not self.process.shared_resources:
                 return
@@ -790,8 +905,8 @@ class ProcessMonitor:
 
             # Ф4-добор: авто-восстановление. Процесс, которому запланирован рестарт,
             # снова жив И прислал heartbeat → «восстановился». Heartbeat как критерий
-            # (а не статус-переход) надёжен: после рестарта prev_status="crashed" не
-            # проходит промоушен выше, а heartbeat — однозначный сигнал живости.
+            # (а не статус-переход) — потому что промоушен выше срабатывает уже на живом
+            # объекте процесса, а heartbeat — однозначный сигнал, что воплощение поднялось.
             # R2 (ADR-PMM-015): критерий «heartbeat ПОСЛЕ планирования». _last_heartbeat
             # обнуляется уже при постановке рестарта в план (_try_auto_restart), а не
             # только в _dispatch_due_restarts — иначе для ЖИВОГО-но-сломанного процесса
@@ -810,6 +925,7 @@ class ProcessMonitor:
             if (
                 proc.name in self._pending_recovery
                 and proc.name not in self._induced_restarts
+                and proc.name not in self._restarting  # Task 1.7c: heartbeat старого воплощения — не восстановление
                 and self._last_heartbeat.get(proc.name) is not None
             ):
                 self._pending_recovery.discard(proc.name)
@@ -922,6 +1038,12 @@ class ProcessMonitor:
         # ``STOPPED`` в PSR записью ``final_status`` ДО смерти, ранний выход ниже его бы съел.
         if exitcode == EXIT_SURVIVORS:
             self._report_survivors_once(proc)
+
+        # Task 1.8b: смерть воплощения, которое супервизор сам заменяет (его pid запомнил ``mark_restarting``), —
+        # исход собственного решения о рестарте, а не новое падение: ни события ``crashed``, ни статуса в PSR, ни
+        # второй попытки. Смерть ДРУГОГО pid (новое воплощение до первого heartbeat) проходит ниже как честное падение.
+        if self._is_replaced_incarnation(proc):
+            return
 
         # Не обрабатываем повторно уже зафиксированные терминальные статусы
         if prev_status in ("stopped", "error", "crashed", "failed"):
@@ -1347,6 +1469,7 @@ class ProcessMonitor:
         # здесь делает базу None, и только новый heartbeat (само-исцеление до
         # диспатча ИЛИ новая инкарнация после рестарта) снова её поднимет.
         self._last_heartbeat.pop(process_name, None)
+        self.mark_restarting(process_name)  # Task 1.7c: с момента РЕШЕНИЯ, не исполнения
         # H3: дедлайн восстановления. Успешный рестарт вернёт heartbeat задолго до
         # него (backoff + boot + первый heartbeat). Истёк, а имя ещё в
         # _pending_recovery → рестарт тихо провалился → watchdog пере-инициирует.
@@ -1463,6 +1586,7 @@ class ProcessMonitor:
             self._induced_restarts.add(name)
             self._pending_recovery.add(name)
             self._last_heartbeat.pop(name, None)
+            self.mark_restarting(name)  # Task 1.7c
             self._recovery_deadline[name] = now_m + delay + self.heartbeat_timeout + 5.0
             self._emit_supervisor_event(
                 name,
@@ -1506,6 +1630,7 @@ class ProcessMonitor:
             # в окне backoff и heartbeat поднялся, здесь снова обнуляем: рестарт
             # исполняется, и следующий recovery-сигнал — heartbeat новой инкарнации.
             self._last_heartbeat.pop(name, None)
+            self._forget_readiness(name)  # Task 1.3: и отчёт о готовности прежнего воплощения
             try:
                 comm = getattr(self.process, "communication", None)
                 sent = (
@@ -1585,6 +1710,9 @@ class ProcessMonitor:
         заменённого имени также отменяется (Task 3.1).
         """
         self._last_heartbeat.pop(process_name, None)
+        self._forget_readiness(process_name)  # Task 1.3
+        with self._readiness_lock:
+            self._restarting.pop(process_name, None)  # Task 1.7c: имя переиспользуется — пометка прежнего не тянется
         self._restart_history.pop(process_name, None)
         self._workers_status.pop(process_name, None)
         self._first_seen.pop(process_name, None)

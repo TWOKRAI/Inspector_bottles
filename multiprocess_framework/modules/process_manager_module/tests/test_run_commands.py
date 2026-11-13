@@ -18,10 +18,11 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ..monitor.process_monitor import ProcessMonitor
 from ..process.process_manager_process import ProcessManagerProcess
 from .conftest import make_pm
 
@@ -91,7 +92,15 @@ def test_run_command_replies(run_gate: bool) -> None:
     pm = make_run_pm(run_gate)
 
     status = pm._cmd_system_run_status()
-    assert set(status) == {"state", "since", "run_gate", "start_allowed", "reasons", "last_fault"}, status
+    assert set(status) == {
+        "state",
+        "since",
+        "run_gate",
+        "start_allowed",
+        "ack_allowed",
+        "reasons",
+        "last_fault",
+    }, status
     assert status["state"] == "ready"
     assert isinstance(status["since"], float) and status["since"] > 0.0, status["since"]
     assert status["run_gate"] is run_gate
@@ -398,3 +407,174 @@ def test_run_state_published_in_order() -> None:
     assert pm2._run_state == "stopping"
     assert slow.values("system.run.state")[-1] == "stopping", slow.writes
     assert slow.values("system.run.since")[-1] == pm2._run_since, slow.writes
+
+
+# --------------------------------------------------------------------------- #
+# Task 1.3 (system-run-state) — агрегат готовности: слепые приёмочные тесты
+#
+# Контракт — DESIGN п.1-3 ``plans/2026-10-27_system-run-state/tasks/1.3.md``. Ожидаемые значения — литералы.
+# Стенд собирает НАСТОЯЩИЕ объекты: ``ProcessManagerProcess`` (``_create_components`` под патчем реестра/монитора,
+# как у ``make_run_pm``) + настоящий ``ProcessMonitor``, привязанный к этому PM. Входы — только то, что PM видит
+# в бою: heartbeat-сообщение с полем ``readiness`` в ``monitor._on_heartbeat_received(msg)`` и такт монитора
+# ``monitor._run_iteration()``; выходы — ответы ``system.run.status`` / ``system.run.start``, состояние машины
+# и ``_run_event``. API оценки в PM не называется ни в одном тесте.
+#
+# Решения тестера (ASSUMPTION; список — в отчёте, «ВОПРОС ЛИДУ»):
+#   * «такт монитора» = одна итерация ``monitor._run_iteration()`` под ``monitor._iteration_lock``;
+#   * состав ожидаемых процессов = ключи ``pm._process_configs``; ``run_required`` лежит на верхнем уровне
+#     конфига процесса (как ключ ``protected``); живость процесса — ``MockProcess.is_alive()`` реестра;
+#   * причина — dict с ключами ``severity`` / ``source`` / ``node`` (``severity``: standards.md §9.2);
+#   * ``stale_s`` = 3 x интервал heartbeat; интервал задан обоими ключами конфига (5.0 с), устаревший снимок в
+#     тестах — на час в прошлом (не зависит от того, какой из ключей прочтёт PM).
+# --------------------------------------------------------------------------- #
+
+_STALE_AGE_S = 3600.0
+
+
+def _reason(severity: str, node: str, source: str = "plugin") -> dict:
+    return {"severity": severity, "source": source, "node": node, "message": f"{node}: {severity}"}
+
+
+def make_readiness_pm(configs: dict[str, dict], *, run_gate: bool = True) -> tuple[ProcessManagerProcess, Any]:
+    """PM с настоящим монитором для оценки готовности: ``(pm, monitor)``; после boot — состояние ``ready``.
+
+    ``configs`` — конфиги процессов топологии (``_process_configs``); все процессы реестра живы.
+    """
+    pm = make_pm(process_configs=configs)
+    registry = pm._process_registry  # MockProcessRegistry с живыми MockProcess по ключам configs
+    pm.update_config("run_gate", run_gate)
+    pm.update_config("heartbeat_interval", 5.0)
+    pm.update_config("heartbeat_interval_sec", 5.0)
+    with (
+        patch(f"{_PM_MOD}.ProcessRegistry"),
+        patch(f"{_PM_MOD}.ProcessPriority"),
+        patch(f"{_PM_MOD}.ProcessStatusMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.QueueRegistry"),
+    ):
+        pm._create_components()
+    pm._process_registry = registry
+    monitor = ProcessMonitor(pm, poll_interval=0.01, heartbeat_timeout=15.0)
+    pm._process_monitor = monitor
+    pm.communication = MagicMock()
+    pm.communication.broadcast.return_value = 1  # число получателей: монитор сравнивает его с нулём
+    pm.router_manager = MagicMock()
+    pm._run_apply("settled", ready=True)  # итог boot-барьера, как в make_run_pm
+    return pm, monitor
+
+
+def beat(
+    monitor: ProcessMonitor,
+    name: str,
+    *,
+    ready: bool = True,
+    reasons: list[dict] | None = None,
+    age_s: float = 0.0,
+    with_readiness: bool = True,
+) -> None:
+    """Heartbeat ребёнка ``name`` с полем ``readiness`` (``at`` = сейчас - ``age_s``); heartbeat всегда свежий."""
+    now = time.time()
+    msg: dict[str, Any] = {"sender": name, "timestamp": now}
+    if with_readiness:
+        msg["readiness"] = {"ready": ready, "reasons": list(reasons or []), "paused": False, "at": now - age_s}
+    monitor._on_heartbeat_received(msg)
+
+
+def tick(pm: ProcessManagerProcess, monitor: ProcessMonitor) -> None:
+    """Один такт монитора. Предусловие стенда: такт не сообщил об ошибке (иначе красный был бы от стенда)."""
+    with monitor._iteration_lock:
+        monitor._run_iteration()
+    errors = [c.args[0] for c in pm._log_error.call_args_list if c.args]
+    assert errors == [], f"такт монитора сообщил об ошибке: {errors}"
+
+
+def _failure_nodes(reasons: list[dict]) -> list[str]:
+    return sorted(r["node"] for r in reasons if r["severity"] == "failure")
+
+
+def _to_running(pm: ProcessManagerProcess, monitor: ProcessMonitor, name: str = "cam") -> None:
+    """Здоровый процесс ``name`` отчитался -> такт -> START -> ``running``."""
+    beat(monitor, name)
+    tick(pm, monitor)
+    assert pm._run_state == "ready"
+    assert pm._cmd_system_run_start() == {"success": True, "state": "running"}
+    assert pm._run_event.is_set() is True
+
+
+@pytest.mark.timeout(60)
+def test_start_in_not_ready_refused_with_reasons() -> None:
+    """Процесс топологии молчит -> START из ``ready`` отказан ``not_ready`` с причиной ``failure`` по узлу;
+    событие не взведено. Свежий отчёт -> тот же START проходит (причины берутся из отчётов, не константа)."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    assert pm._run_state == "ready"  # без такта: оценка должна пройти внутри самой команды START
+
+    reply = pm._cmd_system_run_start()
+
+    assert reply["success"] is False, reply
+    assert reply["error"] == "not_ready", reply
+    assert reply["state"] == "not_ready", reply
+    assert _failure_nodes(reply["reasons"]) == ["cam"], reply
+    assert [r["source"] for r in reply["reasons"]] == ["liveness"], reply
+    assert pm._run_event.is_set() is False, "событие взведено при отказе START"
+    status = pm._cmd_system_run_status()
+    assert status["state"] == "not_ready" and status["start_allowed"] is False, status
+    assert _failure_nodes(status["reasons"]) == ["cam"], status
+
+    beat(monitor, "cam")  # процесс отчитался
+    tick(pm, monitor)
+    assert pm._cmd_system_run_start() == {"success": True, "state": "running"}
+    assert pm._run_event.is_set() is True
+
+
+@pytest.mark.timeout(60)
+def test_fault_clears_run_event() -> None:
+    """``running`` + отчёт ``ready: false`` с причиной ``failure`` -> такт -> ``fault``, ``run_event`` снято;
+    причина и ``last_fault`` видны в ``system.run.status``."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    _to_running(pm, monitor)
+
+    beat(monitor, "cam", ready=False, reasons=[_reason("failure", "cam")])
+    tick(pm, monitor)
+
+    assert pm._run_state == "fault"
+    assert pm._run_event.is_set() is False, "run_event не снят при потере готовности в running"
+    status = pm._cmd_system_run_status()
+    assert status["state"] == "fault", status
+    assert status["start_allowed"] is False, status
+    assert _failure_nodes(status["reasons"]) == ["cam"], status
+    # ASSUMPTION: форма last_fault не названа в DESIGN — проверяем только, что аварийные причины в нём есть
+    assert status["last_fault"] is not None, status
+    assert "cam" in repr(status["last_fault"]), status["last_fault"]
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    ("gui_extra", "gui_beat", "aux_silent", "expected_nodes"),
+    [
+        pytest.param({}, None, False, ["gui"], id="no-key-silent"),
+        pytest.param({"run_required": True}, None, False, ["gui"], id="required-true-silent"),
+        pytest.param({}, "no_readiness_field", False, ["gui"], id="heartbeat-without-readiness-field"),
+        # run_required false исключает GUI из набора; блокирует только другой молчащий процесс aux
+        pytest.param({"run_required": False}, None, True, ["aux"], id="required-false-excluded"),
+    ],
+)
+def test_process_without_heartbeat_in_topology_blocks_ready(
+    gui_extra: dict, gui_beat: str | None, aux_silent: bool, expected_nodes: list[str]
+) -> None:
+    """Процесс топологии без отчёта о готовности (в т.ч. GUI без ``ProcessHeartbeat``) блокирует START
+    причиной ``failure`` по его узлу; ``run_required: false`` исключает процесс из набора."""
+    configs: dict[str, dict] = {"cam": {"class": "pkg.Cam"}, "gui": {"class": "pkg.Gui", **gui_extra}}
+    if aux_silent:
+        configs["aux"] = {"class": "pkg.Aux"}
+    pm, monitor = make_readiness_pm(configs)
+    beat(monitor, "cam")  # здоровый, отчитывается
+    if gui_beat == "no_readiness_field":
+        beat(monitor, "gui", with_readiness=False)  # heartbeat жив, поля readiness нет
+
+    reply = pm._cmd_system_run_start()
+
+    assert reply["success"] is False, reply
+    assert reply["error"] == "not_ready", reply
+    assert _failure_nodes(reply["reasons"]) == expected_nodes, reply
+    assert pm._run_event.is_set() is False
+    assert pm._cmd_system_run_status()["state"] == "not_ready"

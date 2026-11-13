@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import pytest
 
+from ..process import run_state as run_state_mod
 from ..process.run_state import RunState, transition
+from .test_run_commands import _failure_nodes, _reason, _to_running, beat, make_readiness_pm, tick
 
 STATES = ["booting", "not_ready", "ready", "running", "stopping", "fault", "shutting_down"]
 EVENTS = ["start", "stop", "ack", "apply", "shutdown", "settled", "tick"]
@@ -150,3 +152,153 @@ def test_transition_table(state: str, event: str, ready: bool, stop_done: bool, 
     if not stop_done:
         # stop_done по умолчанию False: вызов без аргумента даёт тот же результат
         assert transition(current, event, ready=ready) == result
+
+
+# --------------------------------------------------------------------------- #
+# Task 1.3 (system-run-state) — агрегат готовности: слепые приёмочные тесты
+#
+# Контракт — DESIGN п.1 и п.3 ``plans/2026-10-27_system-run-state/tasks/1.3.md`` (``evaluate`` и ``fault``).
+# Ожидаемые значения — литералы. ``evaluate`` берётся как атрибут модуля (а не ``from ... import``): пока функции
+# нет, красным становится сам тест (``AttributeError``), а не сбор модуля со 196 прогонами таблицы 1.1.
+#
+# Решения тестера (ASSUMPTION; список — в отчёте, «ВОПРОС ЛИДУ»):
+#   * ``leaves[name]`` — сам dict ``readiness`` (``{"ready", "reasons", "paused", "at"}``); нет ключа = нет листа;
+#   * ``alive[name]`` — ``bool``; причина — dict с ключами ``severity`` / ``source`` / ``node``;
+#   * в причинах-литералах ``message`` не проверяется (имя ключа текста в DESIGN не названо).
+# --------------------------------------------------------------------------- #
+
+_NOW = 1000.0
+_STALE_S = 3.0
+
+
+def _leaf(*, ready: bool = True, reasons: list[dict] | None = None, age_s: float = 0.0) -> dict:
+    """Лист ``readiness`` процесса; ``at`` = ``_NOW - age_s``."""
+    return {"ready": ready, "reasons": list(reasons or []), "paused": False, "at": _NOW - age_s}
+
+
+def _failure(node: str, source: str = "plugin") -> dict:
+    return {"severity": "failure", "source": source, "node": node, "message": f"{node}: failure"}
+
+
+def _evaluate(expected: list[str], leaves: dict, alive: dict) -> tuple[bool, list[dict]]:
+    return run_state_mod.evaluate(run_state_mod.EvalInput(expected, leaves, alive, _NOW, _STALE_S))
+
+
+def test_missing_leaf_is_not_ready_liveness_reason() -> None:
+    """Листа нет (процесс не прислал ``readiness``) -> не готов; одна причина ``failure`` / ``liveness`` по узлу."""
+    ready, reasons = _evaluate(["cam"], {}, {"cam": True})
+
+    assert ready is False
+    assert len(reasons) == 1, reasons
+    assert reasons[0]["severity"] == "failure"
+    assert reasons[0]["source"] == "liveness"
+    assert reasons[0]["node"] == "cam"
+
+
+@pytest.mark.parametrize("age_s", [3.5, 3600.0], ids=["just-over-stale_s", "an-hour-old"])
+def test_stale_leaf_is_not_ready(age_s: float) -> None:
+    """Лист, рассчитанный (``at``) раньше ``stale_s`` назад, — не готов, причина ``liveness`` по узлу;
+    тот же лист со свежим ``at`` (2.5 с при ``stale_s`` 3 с) — готов без причин."""
+    assert _evaluate(["cam"], {"cam": _leaf(age_s=2.5)}, {"cam": True}) == (True, [])  # свежий: контроль
+
+    ready, reasons = _evaluate(["cam"], {"cam": _leaf(age_s=age_s)}, {"cam": True})
+
+    assert ready is False
+    assert len(reasons) == 1, reasons
+    assert reasons[0]["severity"] == "failure"
+    assert reasons[0]["source"] == "liveness"
+    assert reasons[0]["node"] == "cam"
+
+
+def test_live_process_without_report_is_not_ready() -> None:
+    """Из двух живых процессов отчитался один: итог — не готов; причина ровно одна и только по молчащему."""
+    ready, reasons = _evaluate(["cam", "rec"], {"cam": _leaf()}, {"cam": True, "rec": True})
+
+    assert ready is False
+    assert len(reasons) == 1, reasons
+    assert reasons[0]["node"] == "rec"
+    assert reasons[0]["severity"] == "failure"
+    assert reasons[0]["source"] == "liveness"
+
+
+def test_process_outside_recipe_not_required() -> None:
+    """Процессы вне ``expected`` (чужой лист ``ready: false``, мёртвый, без листа) на готовность не влияют."""
+    leaves = {
+        "cam": _leaf(),
+        "stranger": _leaf(ready=False, reasons=[_failure("stranger")]),
+        "stale_ghost": _leaf(age_s=3600.0),
+    }
+    alive = {"cam": True, "stranger": False, "stale_ghost": False, "no_leaf_ghost": False}
+
+    assert _evaluate(["cam"], leaves, alive) == (True, [])
+
+
+@pytest.mark.parametrize(
+    ("leaf_reasons", "expected_sources"),
+    [
+        pytest.param([], ["report"], id="no-reasons"),
+        pytest.param(
+            [{"severity": "out_of_spec", "source": "plugin", "node": "cam"}],
+            ["plugin", "report"],
+            id="only-out_of_spec",
+        ),
+        pytest.param([_failure("cam.detect")], ["plugin"], id="own-failure-not-duplicated"),
+    ],
+)
+def test_fresh_leaf_not_ready_without_reasons_is_failure(leaf_reasons: list[dict], expected_sources: list[str]) -> None:
+    """Свежий лист ``ready: false`` без собственной ``failure`` -> процесс не готов, добавлена ``failure`` /
+    ``report`` по узлу (причины листа сохранены); с собственной ``failure`` — ничего не добавляется."""
+    ready, reasons = _evaluate(["cam"], {"cam": _leaf(ready=False, reasons=leaf_reasons)}, {"cam": True})
+
+    assert ready is False
+    assert sorted(r["source"] for r in reasons) == sorted(expected_sources), reasons
+    assert any(r["severity"] == "failure" for r in reasons), reasons
+    if "report" in expected_sources:
+        added = [r for r in reasons if r["source"] == "report"]
+        assert len(added) == 1 and added[0]["severity"] == "failure" and added[0]["node"] == "cam", reasons
+
+
+# --------------------------------------------------------------------------- #
+# Потеря готовности в running -> fault (PM с настоящим монитором, см. test_run_commands.py)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_running_loses_readiness_goes_fault() -> None:
+    """``running``; процесс шлёт СВЕЖИЕ heartbeat, но его снимок готовности (``readiness.at``) остановился
+    (мёртвый поток-наблюдатель при живом heartbeat) -> такт -> ``fault``, причина ``failure`` по узлу."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    _to_running(pm, monitor)
+
+    beat(monitor, "cam", age_s=3600.0)  # heartbeat сейчас, снимок часовой давности
+    tick(pm, monitor)
+
+    assert pm._run_state == "fault"
+    status = pm._cmd_system_run_status()
+    assert status["state"] == "fault", status
+    assert _failure_nodes(status["reasons"]) == ["cam"], status
+    assert status["reasons"][0]["source"] == "liveness", status
+
+
+@pytest.mark.timeout(60)
+def test_fault_stays_fault_when_readiness_returns() -> None:
+    """После ``fault`` готовность вернулась (свежий отчёт ``ready: true``, несколько тактов) — состояние остаётся
+    ``fault``, START отказан ``fault_unacknowledged``, ``run_event`` снято; выход из ``fault`` — не по готовности."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    _to_running(pm, monitor)
+    beat(monitor, "cam", ready=False, reasons=[_reason("failure", "cam")])
+    tick(pm, monitor)
+    assert pm._run_state == "fault"
+
+    for _ in range(3):  # несколько тактов подряд со свежим отчётом о готовности
+        beat(monitor, "cam", ready=True)
+        tick(pm, monitor)
+
+    assert pm._run_state == "fault"
+    status = pm._cmd_system_run_status()
+    assert status["state"] == "fault" and status["start_allowed"] is False, status
+    reply = pm._cmd_system_run_start()
+    assert reply["success"] is False and reply["state"] == "fault", reply
+    assert reply["error"] == "fault_unacknowledged", reply
+    assert pm._run_state == "fault"
+    assert pm._run_event.is_set() is False

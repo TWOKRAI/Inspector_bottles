@@ -8,17 +8,37 @@ Lifecycle:
     load_and_configure_managers(plugin_defs) — загрузка + early init
     boot() — IDLE -> READY -> RUNNING + registers
     shutdown() — * -> STOPPED (обратный порядок)
+
+Task 1.2 (system-run-state): оркестратор ещё и считает снимок готовности процесса
+(:meth:`PluginOrchestrator.readiness_snapshot`) и сверяет цель ``run_event`` с
+состоянием плагинов (:meth:`PluginOrchestrator.reconcile_run_event`); потоки для
+обоих заводит ``ProcessModule`` (воркеры ``WorkerType.SYSTEM``).
 """
 
 from __future__ import annotations
 
 import importlib
+import threading
+import time
 from typing import Any
 
 from . import frame_trace
 from ..plugins.base import PluginContext, PluginState, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
+
+#: Словарь ``severity`` в элементе ``readiness()`` плагина (контракт хука).
+_SEVERITIES: tuple[str, ...] = ("failure", "check_function", "out_of_spec", "maintenance")
+#: Эти два уровня блокируют готовность процесса (``out_of_spec``/``maintenance`` — нет).
+_BLOCKING_SEVERITIES: tuple[str, ...] = ("failure", "check_function")
+#: Потолок текста причины, символов (длиннее — обрезается).
+_REASON_MAX_LEN = 200
+#: Потолок числа причин на процесс, включая маркер «причин больше 32».
+_REASONS_MAX = 32
+#: Не чаще раза в это время сверка повторяет упавший ``pause()/resume()`` одного плагина, сек.
+_HOOK_RETRY_SEC = 1.0
+#: Сколько ``shutdown()`` ждёт замок сверки (медленный хук наблюдателя), сек.
+_SHUTDOWN_LOCK_SEC = 2.0
 
 
 class PluginOrchestrator:
@@ -40,6 +60,28 @@ class PluginOrchestrator:
         self._contexts: list[PluginContext] = []
         self._early_plugins: list[tuple[ProcessModulePlugin, PluginContext]] = []
         self._registers_manager: Any | None = None
+        # Task 1.2 (Д6): флаг «процесс останавливается». Ставится request_stop() ПЕРВЫМ
+        # действием и БЕЗ замка (контракт C-60: хук стопа не ждёт); сверка смотрит его
+        # перед каждым хуком паузы/возобновления.
+        self._stopping = False
+        # Замок сверки: держит поток ``run_watch`` на время обхода плагинов; shutdown()
+        # ждёт его не дольше ``_SHUTDOWN_LOCK_SEC``. Снимок готовности замок НЕ берёт
+        # (зависший ``pause()`` одного плагина не должен замораживать снимок).
+        self._reconcile_lock = threading.Lock()
+        # Упавшие pause()/resume(): ``id(plugin) -> {"pause": bool, "type": str, "retry_at": float}``.
+        # Пишет сверка, читает снимок готовности (другой поток) — доступ под коротким замком.
+        self._hook_failures: dict[int, dict[str, Any]] = {}
+        self._hook_failures_lock = threading.Lock()
+        # Последний залогированный отказ readiness() плагина (id -> ключ): лог один раз на серию.
+        self._readiness_logged: dict[int, str] = {}
+        # Task 1.6: плагины, пропущенные в boot() из-за REQUIRES: ``((индекс в рецепте, имя плагина, текст), ...)``.
+        # Ключ — индекс, а не имя: два плагина с одним именем дают две причины. Значение НЕИЗМЕНЯЕМО и заменяется
+        # целиком: снимок готовности (поток снимка, ~2 Гц) читает ссылку без замка и видит либо прежний, либо новый
+        # кортеж — читателю замок не нужен. Замок — только писателям (``boot()`` дописывает, ``_clear`` сбрасывает:
+        # чтение-замена одним куском), не ``_reconcile_lock`` (его держит сверка на время долгого хука).
+        # Порядок = порядок плагинов в рецепте, порядок причин в снимке стабилен.
+        self._skipped_requires: tuple[tuple[int, str, str], ...] = ()
+        self._skipped_requires_lock = threading.Lock()
 
     # --- Публичный API ---
 
@@ -113,6 +155,7 @@ class PluginOrchestrator:
         Плагины уже загружены в load_and_configure_managers().
         Здесь только configure -> start lifecycle + registers.
         """
+        self._clear_skipped_requires()  # повторный сбор не копит записи прошлого boot()
         if not self._early_plugins:
             self._services.log_info(f"PluginOrchestrator[{self._services.name}]: нет плагинов")
             return
@@ -124,7 +167,7 @@ class PluginOrchestrator:
         registers_manager = self._init_registers(self._early_plugins)
 
         # Фаза 1: IDLE -> READY (configure + авторегистрация команд)
-        for plugin, ctx in self._early_plugins:
+        for index, (plugin, ctx) in enumerate(self._early_plugins):
             try:
                 # Обновить ctx с registers
                 if registers_manager is not None:
@@ -158,6 +201,10 @@ class PluginOrchestrator:
                         f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' REQUIRES не "
                         f"удовлетворены, плагин пропущен: {'; '.join(missing)}"
                     )
+                    # Task 1.6: пропущенный плагин остаётся причиной ``failure`` в снимке готовности.
+                    skipped = (index, plugin.name, f"REQUIRES не удовлетворены: {'; '.join(missing)}")
+                    with self._skipped_requires_lock:
+                        self._skipped_requires = (*self._skipped_requires, skipped)
                     continue
 
                 # H-2: append ДО _do_configure — если configure() бросит, плагин уже
@@ -200,6 +247,8 @@ class PluginOrchestrator:
                 )
             except Exception as e:
                 self._services.log_error(f"PluginOrchestrator[{self._services.name}]: start '{plugin.name}': {e}")
+                continue
+            self._boot_pause(plugin, ctx)
 
         self._services.log_info(f"PluginOrchestrator[{self._services.name}]: {len(self._plugins)} плагин(ов)")
 
@@ -211,15 +260,37 @@ class PluginOrchestrator:
             self._boot_registers(registers_manager)
 
     def shutdown(self) -> None:
-        """* -> STOPPED для всех плагинов (в обратном порядке)."""
-        for plugin, ctx in reversed(list(zip(self._plugins, self._contexts))):
-            try:
-                plugin._do_shutdown(ctx)
-                self._services.log_info(
-                    f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' {plugin.state.value}"
-                )
-            except Exception as e:
-                self._services.log_error(f"PluginOrchestrator[{self._services.name}]: shutdown '{plugin.name}': {e}")
+        """* -> STOPPED для всех плагинов (в обратном порядке).
+
+        Task 1.2 (Д6): сначала замок сверки ``run_watch`` с таймаутом ``_SHUTDOWN_LOCK_SEC``
+        (медленный ``pause()/resume()`` на потоке наблюдателя не должен пересечься с
+        ``shutdown()`` плагина); по таймауту — ``log_error`` и идём дальше без замка (+≤ 2 с
+        к закрытию; оценка НИЖНЯЯ: при зависшем хуке поток ``run_watch`` не выходит, и шаг ``workers``
+        закрытия ждёт его до конца окна ``work`` ещё ДО этого замка). Присваивание ``PAUSED`` поверх
+        ``STOPPED`` закрыто в ``base.py``.
+        """
+        self._stopping = True
+        self._clear_skipped_requires()  # плагины остановлены: причина пропуска больше не актуальна
+        locked = self._reconcile_lock.acquire(timeout=_SHUTDOWN_LOCK_SEC)
+        if not locked:
+            self._services.log_error(
+                f"PluginOrchestrator[{self._services.name}]: замок сверки run_event не освободился "
+                f"за {_SHUTDOWN_LOCK_SEC} с (хук pause/resume завис) — shutdown плагинов идёт без него"
+            )
+        try:
+            for plugin, ctx in reversed(list(zip(self._plugins, self._contexts))):
+                try:
+                    plugin._do_shutdown(ctx)
+                    self._services.log_info(
+                        f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' {plugin.state.value}"
+                    )
+                except Exception as e:
+                    self._services.log_error(
+                        f"PluginOrchestrator[{self._services.name}]: shutdown '{plugin.name}': {e}"
+                    )
+        finally:
+            if locked:
+                self._reconcile_lock.release()
 
     def request_stop(self) -> None:
         """Весть о стопе процесса всем плагинам (C-60), в обратном порядке загрузки.
@@ -228,7 +299,11 @@ class PluginOrchestrator:
         до ожидания воркеров и исполнителей и до :meth:`shutdown`. Исключение
         одного плагина логируется и не отменяет хук соседа; наружу не выходит.
         Фильтр состояний — в ``ProcessModulePlugin._do_request_stop``.
+
+        Первым действием ставит ``_stopping`` БЕЗ замка (Task 1.2, Д6): после этого
+        сверка ``run_event`` не зовёт новых ``pause()/resume()``.
         """
+        self._stopping = True
         for plugin, ctx in reversed(list(zip(self._plugins, self._contexts))):
             try:
                 plugin._do_request_stop(ctx)
@@ -247,6 +322,278 @@ class PluginOrchestrator:
             if p is plugin:
                 return dict(ctx.config)
         return {}
+
+    # --- Готовность и событие работы (Task 1.2 плана system-run-state) ---
+
+    def readiness_snapshot(self, announced: bool | None = None) -> dict:
+        """Снимок готовности процесса: ``{"ready", "reasons", "paused", "at"}``.
+
+        Считает отдельный поток-снимок процесса (≤ 2 Гц); heartbeat только читает
+        готовый результат. ``announced`` — защёлка «процесс объявил готовность»
+        (держит вызывающий); ``None`` → читаем статус процесса сами:
+        ``_current_process_status in ("running", "paused")``.
+
+        * ``reasons`` — по плагину: причины его ``readiness()`` (под собственным ``try``),
+          «плагин не поднят (<состояние>)» для плагина вне ``RUNNING/PAUSED``
+          (``readiness()`` у такого плагина не зовётся), причина упавшего
+          ``pause()/resume()``. Элемент — ровно ``node, severity, reason, source``.
+        * ``ready`` — процесс объявил готовность и нет ``failure``/``check_function``;
+          считается ДО обрезки списка причин.
+        * ``paused`` — цель «пауза» (``run_event`` снято) и ни один плагин, к которому
+          применимо :meth:`_should_pause`, не в ``RUNNING``. До Task 1.9 это состояние
+          ярлыков: воркеры плагинов идут.
+        * ``at`` — ``time.time()`` расчёта: PM судит «молчание» по нему, а не по heartbeat.
+
+        Замок сверки не берёт: зависший хук одного плагина снимок не замораживает.
+        """
+        if announced is None:
+            announced = getattr(self._services, "_current_process_status", None) in ("running", "paused")
+        target_pause = self._target_pause()
+        process_name = self._services.name
+        plugins = list(self._plugins)
+        contexts = list(self._contexts)
+
+        reasons: list[dict] = []
+        for plugin, ctx in zip(plugins, contexts):
+            node = f"{process_name}.{plugin.name}"
+            state = plugin.state
+            if state not in (PluginState.RUNNING, PluginState.PAUSED):
+                # IDLE после упавшего configure, READY после упавшего start (design.md §3.3).
+                reasons.append(self._reason(node, "failure", f"плагин не поднят ({state.value})"))
+                continue
+            reasons.extend(self._plugin_reasons(plugin, ctx, node))
+            hook_reason = self._hook_failure_reason(plugin, state, target_pause)
+            if hook_reason is not None:
+                reasons.append(self._reason(node, "failure", hook_reason))
+        # Task 1.6: пропущенные по REQUIRES — в ``_plugins`` их нет, причина ровно одна на плагин.
+        for _index, plugin_name, text in self._skipped_requires:  # неизменяемый кортеж: чтение без замка
+            reasons.append(self._reason(f"{process_name}.{plugin_name}", "failure", text))
+
+        ready = bool(announced) and not any(r["severity"] in _BLOCKING_SEVERITIES for r in reasons)
+        paused = target_pause is True and not any(
+            p.state is PluginState.RUNNING and self._should_pause(p) for p in plugins
+        )
+        return {
+            "ready": ready,
+            "reasons": self._cap_reasons(reasons, process_name),
+            "paused": paused,
+            "at": time.time(),
+        }
+
+    def _clear_skipped_requires(self) -> None:
+        with self._skipped_requires_lock:
+            self._skipped_requires = ()
+
+    def reconcile_run_event(self) -> None:
+        """Один проход сверки: цель (``run_event``) против состояния плагинов, по УРОВНЮ.
+
+        Зовёт воркер ``run_watch`` (0,05 с). Событие снято → ``_do_pause`` каждому ``RUNNING``
+        плагину, для которого :meth:`_should_pause`; взведено → ``_do_resume`` каждому
+        ``PAUSED``. Не по фронту: событие, изменившееся пока хук блокирован, сходится
+        следующим проходом; мигание ``clear()→set()`` быстрее опроса не вызывает хуков.
+        Исключение хука плагина не обрывает обход соседей: оно становится причиной
+        ``failure`` в снимке, повтор — не чаще ``_HOOK_RETRY_SEC`` на плагин.
+        Событие читается заново перед каждым плагином. Нет события — ничего не делает.
+
+        Свойство прохода (m5 раннего ревью): он держит замок сверки на весь обход и идёт плагинами
+        по очереди, поэтому ЗАВИСШИЙ ``pause()/resume()`` одного плагина не даёт сверить плагины
+        после него — они остаются в прежнем состоянии, ``paused`` в снимке ложно (для STOP 1.4 это
+        ожидание ``paused`` до таймаута). Изоляция хуков друг от друга DESIGN не требует.
+        """
+        event = self._run_event()
+        if event is None:
+            return
+        with self._reconcile_lock:
+            for plugin, ctx in zip(self._plugins, self._contexts):
+                # Перед КАЖДЫМ хуком и под замком: request_stop() ставит флаг без замка.
+                if self._stopping:
+                    return
+                pause = not event.is_set()
+                state = plugin.state
+                if pause:
+                    due = state is PluginState.RUNNING and self._should_pause(plugin)
+                else:
+                    due = state is PluginState.PAUSED
+                if not due:
+                    # Состояние совпало с целью (или к плагину цель не применима):
+                    # прежний отказ хука больше не актуален.
+                    self._clear_hook_failure(plugin)
+                    continue
+                if self._hook_retry_pending(plugin, pause):
+                    continue
+                self._apply_hook(plugin, ctx, pause)
+
+    def release_paused(self) -> None:
+        """Снять паузу ярлыков: ``_do_resume`` каждому ``PAUSED`` плагину (под замком сверки).
+
+        Для отказа создания воркера ``run_watch`` после первой паузы в boot (m6 раннего ревью):
+        без наблюдателя, который её снимет, плагины остались бы в ``PAUSED`` навсегда, а ``PAUSED``
+        режет ``call_process``. Исключение хука плагина — как в сверке: причина ``failure`` в снимке.
+        """
+        with self._reconcile_lock:
+            for plugin, ctx in zip(self._plugins, self._contexts):
+                if plugin.state is PluginState.PAUSED:
+                    self._apply_hook(plugin, ctx, False)
+
+    def _run_event(self) -> Any | None:
+        """Событие работы системы процесса (``_run_event`` кладёт раннер) или ``None``."""
+        return getattr(self._services, "_run_event", None)
+
+    def _target_pause(self) -> bool | None:
+        """Цель наблюдателя: ``True`` — «пауза» (событие снято), ``False`` — «работа», ``None`` — события нет."""
+        event = self._run_event()
+        if event is None:
+            return None
+        return not event.is_set()
+
+    def _run_watch_enabled(self) -> bool:
+        """Есть ли у процесса наблюдатель события (предикат процесса; нет предиката → нет наблюдателя)."""
+        predicate = getattr(self._services, "_run_watch_enabled", None)
+        return bool(predicate()) if callable(predicate) else False
+
+    def _should_pause(self, plugin: ProcessModulePlugin) -> bool:
+        """Применима ли к плагину цель «пауза» — ОДНА функция для сверки и первой паузы в boot().
+
+        Ложь для источника с ``run_gated: false`` (превью живёт при снятом событии, как в
+        ``generic_process.py``: ``is_source`` и ``config_of(plugin).get("run_gated", True) is False``).
+        """
+        return not (plugin.is_source and self.config_of(plugin).get("run_gated", True) is False)
+
+    def _boot_pause(self, plugin: ProcessModulePlugin, ctx: PluginContext) -> None:
+        """Первая пауза в boot() (К5): ребёнок, рождённый при снятом событии, объявляет готовность в ``PAUSED``.
+
+        Устройство не должно успеть отдать кадр до START. Только при наблюдателе
+        (``_run_watch_enabled()``), который эту паузу снимет, — иначе плагины остаются ``RUNNING``.
+        """
+        if plugin.state is not PluginState.RUNNING or not self._run_watch_enabled():
+            return
+        if self._target_pause() is not True or not self._should_pause(plugin):
+            return
+        self._apply_hook(plugin, ctx, True)
+
+    def _apply_hook(self, plugin: ProcessModulePlugin, ctx: PluginContext, pause: bool) -> bool:
+        """``_do_pause``/``_do_resume`` под своим ``try``. Отказ — запись в ``_hook_failures`` (причина ``failure``)."""
+        name = "pause" if pause else "resume"
+        key = id(plugin)
+        try:
+            (plugin._do_pause if pause else plugin._do_resume)(ctx)
+        except Exception as exc:  # noqa: BLE001 — сосед не должен пострадать от чужого хука
+            with self._hook_failures_lock:
+                previous = self._hook_failures.get(key)
+                first_of_series = previous is None or previous["pause"] != pause
+                self._hook_failures[key] = {
+                    "pause": pause,
+                    "type": type(exc).__name__,
+                    "retry_at": time.monotonic() + _HOOK_RETRY_SEC,
+                }
+            if first_of_series:  # один лог на серию отказов, не на каждый повтор
+                self._services.log_error(
+                    f"PluginOrchestrator[{self._services.name}]: {name}() '{plugin.name}': {type(exc).__name__}: {exc}"
+                )
+            return False
+        self._clear_hook_failure(plugin)
+        return True
+
+    def _hook_retry_pending(self, plugin: ProcessModulePlugin, pause: bool) -> bool:
+        """Идёт ли ещё интервал до повтора упавшего хука ТОГО ЖЕ направления для плагина."""
+        with self._hook_failures_lock:
+            entry = self._hook_failures.get(id(plugin))
+        return entry is not None and entry["pause"] == pause and time.monotonic() < entry["retry_at"]
+
+    def _clear_hook_failure(self, plugin: ProcessModulePlugin) -> None:
+        if self._hook_failures:  # быстрый путь: отказов нет — замок не берём
+            with self._hook_failures_lock:
+                self._hook_failures.pop(id(plugin), None)
+
+    def _hook_failure_reason(
+        self, plugin: ProcessModulePlugin, state: PluginState, target_pause: bool | None
+    ) -> str | None:
+        """Текст причины упавшего ``pause()/resume()`` или ``None``.
+
+        Причина снимается, когда состояние плагина совпало с целью наблюдателя ИЛИ цель
+        сменилась (иначе ``pause()`` упал при уже взведённом событии — плагин ``RUNNING`` = цель,
+        перехода нет, причина висела бы вечно).
+        """
+        with self._hook_failures_lock:
+            entry = self._hook_failures.get(id(plugin))
+        if entry is None or target_pause is None or entry["pause"] != target_pause:
+            return None
+        if state is (PluginState.PAUSED if entry["pause"] else PluginState.RUNNING):
+            return None
+        return f"{'pause' if entry['pause'] else 'resume'}() упал: {entry['type']}"
+
+    def _plugin_reasons(self, plugin: ProcessModulePlugin, ctx: PluginContext, node: str) -> list[dict]:
+        """Причины ``plugin.readiness(ctx)``; сбой и неверная форма — ``failure`` без текста исключения."""
+        key = id(plugin)
+        try:
+            raw = plugin.readiness(ctx)
+        except Exception as exc:  # noqa: BLE001 — хук плагина не роняет снимок
+            # Серия отказов — по ТИПУ исключения: текст может меняться на каждом вызове
+            # (счётчик, время, адрес) и гнал бы лог с частотой снимка (2 Гц).
+            self._log_readiness_once(
+                key, f"exc:{type(exc).__name__}", f"readiness() '{plugin.name}': {type(exc).__name__}: {exc}"
+            )
+            return [self._reason(node, "failure", f"readiness() упал: {type(exc).__name__}")]
+        canonical = self._canonical_items(raw)
+        if canonical is None:
+            self._log_readiness_once(
+                key, "malformed", f"readiness() '{plugin.name}' вернул неверную форму: {type(raw).__name__}"
+            )
+            return [self._reason(node, "failure", "readiness() вернул неверную форму")]
+        self._readiness_logged.pop(key, None)  # серия отказов кончилась — следующий отказ снова в лог
+        return [self._reason(node, severity, reason) for severity, reason in canonical]
+
+    @staticmethod
+    def _canonical_items(raw: Any) -> list[tuple[str, str]] | None:
+        """Элементы ``readiness()`` как пары ``(severity, reason)`` ВСТРОЕННЫХ типов или ``None`` (неверная форма).
+
+        Снимок уходит через границу процесса (heartbeat -> очередь PM, Dict at Boundary): подкласс
+        ``str`` из плагина (``StrEnum`` и т.п.) пиклится ссылкой на класс плагина, и получатель без
+        этого класса не распакует сообщение — потеряется liveness. Поэтому ``severity`` берётся
+        из ``_SEVERITIES`` (литерал словаря, найденный по значению), а не объект плагина;
+        ``reason`` — ``str(...)``.
+        """
+        if not isinstance(raw, list):
+            return None
+        try:
+            items: list[tuple[str, str]] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    return None
+                severity, reason = item.get("severity"), item.get("reason")
+                if not isinstance(reason, str) or severity not in _SEVERITIES:
+                    return None
+                items.append((_SEVERITIES[_SEVERITIES.index(severity)], str(reason)))
+        except Exception:  # noqa: BLE001 — враждебный __eq__/__str__ плагина = неверная форма, а не падение снимка
+            return None
+        return items
+
+    def _log_readiness_once(self, key: int, series_id: str, message: str) -> None:
+        """Лог отказа ``readiness()`` — один раз на серию (снимок считается 2 раза в секунду)."""
+        if self._readiness_logged.get(key) == series_id:
+            return
+        self._readiness_logged[key] = series_id
+        self._services.log_error(f"PluginOrchestrator[{self._services.name}]: {message}")
+
+    @staticmethod
+    def _reason(node: str, severity: str, reason: str) -> dict:
+        """Элемент ``reasons``: ровно ``node, severity, reason, source``; текст не длиннее ``_REASON_MAX_LEN``."""
+        return {"node": node, "severity": severity, "reason": reason[:_REASON_MAX_LEN], "source": "readiness"}
+
+    def _cap_reasons(self, reasons: list[dict], process_name: str) -> list[dict]:
+        """Не больше ``_REASONS_MAX`` причин (с маркером): лишние отбрасываются, блокирующие причины остаются первыми.
+
+        Пересортировка (блокирующие первыми, порядок внутри группы прежний) — добавление к DESIGN п.2:
+        блокирующая причина не теряется при обрезке. ``ready`` к этому моменту уже посчитан по полному списку.
+        """
+        if len(reasons) <= _REASONS_MAX:
+            return reasons
+        ordered = sorted(
+            reasons, key=lambda r: r["severity"] not in _BLOCKING_SEVERITIES
+        )  # устойчиво: блокирующие первыми
+        kept = ordered[: _REASONS_MAX - 1]
+        kept.append(self._reason(process_name, "out_of_spec", f"причин больше {_REASONS_MAX}"))
+        return kept
 
     # --- Properties ---
 
