@@ -96,11 +96,12 @@ def _warn_legacy_registry(resolved: Path, legacy: Path, log_warning: Callable[[s
         if not (legacy.is_file() or (legacy.parent / "robot").is_dir()):
             return
     except OSError as exc:  # no-health: проверка прежнего места не критична для запуска
-        log_warning(f"DeviceHubPlugin: проверка прежнего места реестра не удалась: {exc!r}")
+        log_warning(f"DeviceHubPlugin: проверка прежнего места реестра не удалась ({legacy.parent}): {exc!r}")
         return
     log_warning(
         f"DeviceHubPlugin: реестр устройств ожидается в {resolved}, но данные найдены по прежнему пути {legacy} "
-        "(корень проекта раньше считался на уровень выше); перенесите вручную, если это ваш реестр: "
+        f"(каталог данных {legacy.parent}; корень проекта раньше считался на уровень выше); "
+        "перенесите вручную, если это ваш реестр: "
         "devices.yaml и каталог robot/"
     )
 
@@ -202,9 +203,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
             # Резолв пути к реестру (У6)
             raw_path = self._reg.registry_path
             resolved = _resolve_registry_path(raw_path)
-            # Прежнее место (корень считался на уровень выше): предупреждаем, только если путь пришёл из корня
-            # проекта (не абсолютный, не INSPECTOR_DATA_DIR). Однократность — следствие: после первого
-            # сохранения реестр существует, и функция молчит.
+            # Прежнее место (корень считался на уровень выше): зовём, только если путь пришёл из корня проекта
+            # (не INSPECTOR_DATA_DIR). Для абсолютного пути условие тоже истинно, но legacy == resolved, и функция
+            # молчит. Однократность — следствие: после первого сохранения реестр существует.
             if resolved == _PROJECT_ROOT / raw_path:
                 _warn_legacy_registry(resolved, _PROJECT_ROOT.parent / raw_path, ctx.log_warning)
             resolved.parent.mkdir(parents=True, exist_ok=True)
