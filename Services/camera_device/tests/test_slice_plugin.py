@@ -133,3 +133,32 @@ def test_frames_публикуется_метрикой(rig):
 
 def test_commands_содержит_take_device():
     assert {"take_device", "release_device", "get_status"} <= set(CameraDevicePlugin.commands)
+
+
+def test_регистр_настоящего_плагина_равен_состоянию_сеанса(monkeypatch):
+    """Опаздывает только доставка on_state в потоке вызывающего; строка `_on_state` плагина — настоящая."""
+    port = make_port(busy_for_s=60.0, frame_period_s=0.02)
+    monkeypatch.setattr(plugin_base, "create_port", lambda driver: port)
+    config = {"auto_start": False, "camera_id": 3}
+    ctx = PluginContext(services=MockProcessServices(name=PROCESS_NAME, config=config), config=config)
+    plugin = CameraDevicePlugin()
+    plugin.configure(ctx)
+    plugin.start(ctx)
+    real = CameraDevicePlugin._on_state
+
+    def late(old: str, new: str) -> None:
+        if threading.current_thread().name != "camera_device-owner":
+            time.sleep(0.05)
+        real(plugin, old, new)
+
+    monkeypatch.setattr(plugin, "_on_state", late)
+    try:
+        for _ in range(5):
+            assert plugin.cmd_take_device({})["status"] == "error"
+            end = time.monotonic() + 2
+            while plugin._session.device_held and time.monotonic() < end:
+                time.sleep(0.005)
+            time.sleep(0.12)
+            assert plugin._reg.device_state == plugin._session.state == "busy"
+    finally:
+        plugin.shutdown(ctx)

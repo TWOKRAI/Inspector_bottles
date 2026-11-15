@@ -380,22 +380,14 @@ def test_committed_но_start_grabbing_дольше_watchdog_откат_по_с�
     assert _names(port).count("close") == 1
 
 
-@pytest.mark.timeout(30)
-def test_регистр_плагина_не_устаревает_при_гонке_on_state(rig):
-    import threading as th
+@pytest.mark.timeout(20)
+def test_ответ_start_равен_состоянию_при_медленном_on_state(rig):
+    def on_state(old: str, new: str) -> None:
+        if new == "grabbing":
+            time.sleep(0.2)  # потребитель on_state зовётся вне замка, до возврата владельца к циклу
 
-    for _ in range(10):
-        reg = {"device_state": "closed"}
-        holder: dict = {}
-
-        def on_state(old: str, new: str) -> None:
-            if th.current_thread().name != "camera_device-owner":
-                time.sleep(0.05)  # поток вызывающего start(): событие опаздывает
-            reg["device_state"] = holder["session"].state  # как plugin_base._on_state
-
-        port, session = rig.make(busy_for_s=60.0, on_state=on_state)
-        holder["session"] = session
-        session.start(1.0)
-        _await(lambda: session.device_held is False, "владелец вышел")
-        time.sleep(0.12)
-        assert reg["device_state"] == session.state == "busy"
+    port, session = rig.make(timeout_ms=100, watchdog_s=0.5, on_state=on_state)
+    _slow_start_grabbing(port, 0.5)
+    result = session.start(0.1)
+    time.sleep(0.4)
+    assert result is (session.state == "grabbing")  # ответ не врёт про захват

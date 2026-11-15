@@ -293,8 +293,11 @@ class DeviceSession:
             abort = cmd.cancelled or stop_evt.is_set()
             if not abort:
                 self._set_locked("grabbing", pending)
+            # Итог выставляется под тем же замком, что и решение: вызывающий по сроку (start) видит либо
+            # `done`, либо ещё не принятое решение — но не «решено, итога нет» (иначе медленный on_state даёт
+            # ответ False при state grabbing).
+            cmd.finish(not abort)
         self._fire_states(pending)
-        cmd.finish(not abort)
         return not abort
 
     def _apply_run(self) -> None:
