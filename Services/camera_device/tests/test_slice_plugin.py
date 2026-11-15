@@ -29,7 +29,7 @@ class _Rig:
     """Плагин + фейковый порт + `SourceProducer` в daemon-потоке; собранные item лежат в `items`."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, **cfg) -> None:
-        self.port = make_port()
+        self.port = make_port(frame_period_s=0.02)
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: self.port)
         config = {"auto_start": True, "camera_id": 3, **cfg}
         services = MockProcessServices(name=PROCESS_NAME, config=config)
