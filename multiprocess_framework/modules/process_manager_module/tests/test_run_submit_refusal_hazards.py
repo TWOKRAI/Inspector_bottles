@@ -260,3 +260,80 @@ def test_queued_stop_dropped_on_executor_close_still_finishes(rig_factory) -> No
         assert rig.pm._run_event.is_set() is False
     finally:
         real.close()
+
+
+# --------------------------------------------------------------------------- #
+# Нарушения контракта: False без ответа; две причины обхода на одну подачу
+# --------------------------------------------------------------------------- #
+
+
+class _FalseWithoutReplySubmit:
+    """Двойник подачи, нарушающий контракт: ``False`` и ``reply`` не вызван вовсе."""
+
+    def submit(self, action: Any, key: Any, reply: Any, *, inline_if_idle: bool = False) -> bool:
+        return False
+
+    def busy(self) -> bool:
+        return False
+
+    def in_transition(self, name: str) -> bool:
+        return False
+
+
+class _RefuseThenRaiseSubmit:
+    """Двойник подачи с двумя причинами обхода подряд: ``reply`` с отказом ``executor_busy``, затем исключение."""
+
+    def submit(self, action: Any, key: Any, reply: Any, *, inline_if_idle: bool = False) -> bool:
+        reply({"success": False, "error": "executor_busy"})
+        raise RuntimeError("boom after refusal")
+
+    def busy(self) -> bool:
+        return False
+
+    def in_transition(self, name: str) -> bool:
+        return False
+
+
+@pytest.mark.timeout(60)
+def test_false_without_reply_still_finishes_stop_and_fault_stop(rig_factory) -> None:
+    """``submit`` вернул ``False`` без ``reply``: STOP доходит до ``ready``, авария — до ``ack_allowed: True``."""
+    rig = rig_factory(("cam",), timeout_s=5.0)
+    rig.pm._lifecycle_submit = _FalseWithoutReplySubmit()
+    rig.to_running()
+
+    assert rig.stop() == _STOP_REPLY
+    assert rig.wait_not_stopping(), f"машина осталась в stopping: {rig.log}"
+    assert rig.state == "ready"
+
+    assert rig.pm._cmd_system_run_start() == _START_OK
+    rig.sim.set("cam", ready=False, reasons=_FAILURE)
+    rig.sim.beat_now()
+    rig.tick()
+    assert rig.state == "fault"
+    assert _wait(lambda: _status(rig)["ack_allowed"] is True, _DEADLINE_S), _status(rig)
+
+
+@pytest.mark.timeout(60)
+def test_two_bypass_causes_run_action_exactly_once(rig_factory) -> None:
+    """Отказ через ``reply`` и затем исключение из ``submit`` на ОДНУ подачу: ``action`` исполнена ровно один раз,
+    ``reply`` вызван ровно один раз."""
+    rig = rig_factory(("cam",), timeout_s=5.0)
+    rig.pm._lifecycle_submit = _RefuseThenRaiseSubmit()
+    calls: list[int] = []
+    replies: list[Any] = []
+    replied = threading.Event()
+
+    def action() -> str:
+        calls.append(1)
+        return "done"
+
+    def reply(result: Any) -> None:
+        replies.append(result)
+        replied.set()
+
+    rig.pm._submit_run_sequence(action, "run-test", reply)
+
+    assert replied.wait(_DEADLINE_S), "ответ не пришёл"
+    time.sleep(0.2)  # окно для второго (лишнего) прохода
+    assert calls == [1]
+    assert replies == ["done"]
