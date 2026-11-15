@@ -14,10 +14,13 @@ UX-ограничения:
 from __future__ import annotations
 
 import copy
+import math
 import time
 from typing import Any
 
 from PySide6.QtCore import QTimer
+
+from multiprocess_prototype.frontend.state.bindings import DELETED
 
 from .presenter import RobotPresenter
 from .widget import RobotControlWidget
@@ -28,6 +31,25 @@ from .widget import RobotControlWidget
 _STALE_THRESHOLD_S = 3.0
 
 _TXT_PARK_ACCEPTED = "Основная остановка принята: домой, затем серво OFF…"
+
+# Срок ожидания итога «Остановить»: timeout_s из ответа хаба + запас на тик хаба после срока
+# (1,5 с) и путь хаб -> PM -> GUI с таймером Qt (ещё 1,5 с).
+_PARK_RESULT_GRACE_S = 3.0
+# Потолок park_timeout_s хаба: берём, если в ответе нет внятного timeout_s.
+_PARK_TIMEOUT_FALLBACK_S = 60.0
+
+
+def _apply_leaf(view: dict, rel: str, value: Any) -> None:
+    """Положить лист ``rel`` (путь через точку) в вид ``view``; недостающие родители — ``dict``."""
+    node = view
+    *parents, leaf = rel.split(".")
+    for key in parents:
+        child = node.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            node[key] = child
+        node = child
+    node[leaf] = copy.deepcopy(value)
 
 
 class RobotWidgetController:
@@ -45,6 +67,7 @@ class RobotWidgetController:
         self._bindings = bindings
         self._device_id: str | None = None
         self._status_handles: list[Any] = []
+        self._fanout_handles: list[Any] = []  # хэндлы bind_fanout: status и park
 
         # «Остановить» (robot_park): вид devices.state.<id>.park собирается из дельт,
         # итог показывается только для seq из ответа на команду (T5.3e.4).
@@ -52,6 +75,9 @@ class RobotWidgetController:
         self._park_state_seq: Any = None  # seq вида, к которому относится последний state
         self._park_seq: Any = None  # seq из ответа accepted; None — park не ждём
         self._park_text: str | None = None  # липкий текст статуса, пока его не снял другой стоп
+        # Срок итога park: QTimer.singleShot + токен поколения (второй QTimer() запрещён стражем G6 R2).
+        self._park_gen: int = 0
+        self._park_wait_s: float = 0.0
 
         # н5 ревью Fable: QTimer для периодической проверки устаревания
         # данных. Если hub упал — пуши прекращаются, но индикатор
@@ -62,9 +88,14 @@ class RobotWidgetController:
         # DeviceDetailPage.cleanup() при снятии страницы устройства со стека
         # (см. devices_common/master_detail.py, robot/section.py).
         self._last_status_ts: float | None = None
+        self._status_view: dict[str, Any] = {}  # вид devices.state.<id>.status, собранный из листьев
+        self._link_ok: bool = False  # «Связь с роботом активна.» пишем только на переходе в ok
+        self._widget_gone: bool = False
         self._stale_timer = QTimer()
         self._stale_timer.setInterval(2000)  # 2 с
         self._stale_timer.timeout.connect(self._check_stale)
+        # Слоты таймеров переживают виджет: после его удаления они не должны его трогать.
+        widget.destroyed.connect(self._on_widget_destroyed)
 
         self._connect()
 
@@ -100,15 +131,18 @@ class RobotWidgetController:
         self._unbind_state()
         self._device_id = device_id
         self._last_status_ts = None
+        self._status_view = {}
+        self._link_ok = False
         self._reset_park()
         if not device_id:
             self._stale_timer.stop()
             self._widget.set_status("Робот: устройство не выбрано.")
             self._widget.set_mode_switch_enabled(False)
             return
+        # Текст «выбрано…» — ДО подписки: replay кэша идёт внутри bind_fanout и должен его перекрыть.
+        self._widget.set_status(f"Робот: выбрано устройство {device_id}.")
         self._bind_state(device_id)
         self._stale_timer.start()
-        self._widget.set_status(f"Робот: выбрано устройство {device_id}.")
 
     # ------------------------------------------------------------------ #
     # Bindings
@@ -117,7 +151,14 @@ class RobotWidgetController:
     def unbind(self) -> None:
         """Остановить таймер и отвязать bindings (при скрытии вкладки)."""
         self._stale_timer.stop()
+        self._park_gen += 1  # срок итога park не переживает отвязку
         self._unbind_state()
+
+    def _on_widget_destroyed(self, *_args: Any) -> None:
+        """Виджет удалён: таймеры и срок park больше его не трогают."""
+        self._widget_gone = True
+        self._stale_timer.stop()
+        self._park_gen += 1
 
     def _check_stale(self) -> None:
         """н5: периодическая проверка устаревания данных (QTimer callback).
@@ -125,10 +166,11 @@ class RobotWidgetController:
         Если hub упал и пуши прекратились, через _STALE_THRESHOLD_S
         индикатор переходит в stale.
         """
-        if self._last_status_ts is None:
+        if self._widget_gone or self._last_status_ts is None:
             return
         age = time.time() - self._last_status_ts
         if age > _STALE_THRESHOLD_S:
+            self._link_ok = False
             self._widget.set_status(
                 f"Нет связи с hub (данные устарели на {age:.1f} с). Процесс devices может быть недоступен."
             )
@@ -141,7 +183,13 @@ class RobotWidgetController:
                     self._bindings.unbind(h)
                 except Exception:
                     pass
+            for fh in self._fanout_handles:
+                try:
+                    self._bindings.unbind_fanout(fh)
+                except Exception:
+                    pass
         self._status_handles.clear()
+        self._fanout_handles.clear()
 
     def _bind_state(self, device_id: str) -> None:
         """Привязать виджет к devices.state.<id>.status (push-телеметрия)."""
@@ -150,24 +198,60 @@ class RobotWidgetController:
             return
         base = f"devices.state.{device_id}"
         if hasattr(self._bindings, "bind_fanout"):
-            self._bindings.bind_fanout(
-                f"{base}.status",
-                self._on_telemetry_push,
-                owner=self._widget,
+            # Хаб публикует ``.status`` листовыми дельтами (state_proxy.merge): ``**`` ловит и сам узел,
+            # и листья, и проигрыш кэша при подписке. Вид собирается в _on_telemetry_push.
+            self._fanout_handles.append(
+                self._bindings.bind_fanout(
+                    f"{base}.status.**",
+                    self._on_telemetry_push,
+                    owner=self._widget,
+                )
             )
-            # ``**`` ловит и сам узел ``.park``, и вложенные листья, и проигрыш кэша при подписке
-            self._bindings.bind_fanout(
-                f"{base}.park.**",
-                self._on_park_push,
-                owner=self._widget,
+            self._fanout_handles.append(
+                self._bindings.bind_fanout(
+                    f"{base}.park.**",
+                    self._on_park_push,
+                    owner=self._widget,
+                )
             )
 
-    def _on_telemetry_push(self, _path: str, value: Any) -> None:
-        """Push-телеметрия из state-дерева."""
-        if isinstance(value, dict):
-            # н5: запомнить время последнего пуша для stale-timer
-            self._last_status_ts = time.time()
-            self._apply_telemetry(value)
+    def _on_telemetry_push(self, path: str, value: Any) -> None:
+        """Дельта ``devices.state.<id>.status[.leaf]``: собрать вид и перерисовать виджет."""
+        prefix = f"devices.state.{self._device_id}.status"
+        if path == prefix:
+            rel = ""
+        elif path.startswith(prefix + "."):
+            rel = path[len(prefix) + 1 :]
+        else:
+            return  # чужое устройство (отвязка bindings не гарантирована)
+        if value is DELETED:
+            # Страж удаления — не значение: без этой ветки float(DELETED) падает в _apply_telemetry.
+            if rel == "":
+                self._status_view = {}
+            else:
+                self._drop_leaf(self._status_view, rel)
+            return
+        if rel == "":
+            if not isinstance(value, dict):
+                return
+            self._status_view = copy.deepcopy(value)
+        else:
+            _apply_leaf(self._status_view, rel, value)
+        # н5: запомнить время последней дельты для stale-timer
+        self._last_status_ts = time.time()
+        self._apply_telemetry(self._status_view)
+
+    @staticmethod
+    def _drop_leaf(view: dict, rel: str) -> None:
+        """Удалить лист ``rel`` из вида, если он там есть."""
+        node: Any = view
+        *parents, leaf = rel.split(".")
+        for key in parents:
+            node = node.get(key) if isinstance(node, dict) else None
+            if node is None:
+                return
+        if isinstance(node, dict):
+            node.pop(leaf, None)
 
     def _apply_telemetry(self, data: dict) -> None:
         """Обновить виджет по snapshot телеметрии робота."""
@@ -176,6 +260,7 @@ class RobotWidgetController:
         if ts is not None:
             age = time.time() - float(ts)
             if age > _STALE_THRESHOLD_S:
+                self._link_ok = False
                 self._widget.set_status(
                     f"Нет связи с hub (данные устарели на {age:.1f} с). Процесс devices может быть недоступен."
                 )
@@ -184,8 +269,10 @@ class RobotWidgetController:
 
         telemetry = data.get("telemetry")
         if isinstance(telemetry, dict):
-            if self._park_text is None:  # итог «Остановить» не затираем
-                self._widget.set_status("Связь с роботом активна.")
+            if not self._link_ok:  # текст связи — только на переходе: текст кнопки живёт до следующего действия
+                self._link_ok = True
+                # итог «Остановить» не затираем
+                self._widget.set_status(self._park_text if self._park_text is not None else "Связь с роботом активна.")
             self._widget.set_telemetry(
                 float(telemetry.get("x_mm", 0)),
                 float(telemetry.get("y_mm", 0)),
@@ -266,6 +353,7 @@ class RobotWidgetController:
         self._park_view = {}
         self._park_state_seq = None
         self._park_seq = None
+        self._park_gen += 1  # срок прошлого park не должен сработать на новом устройстве
         self._clear_park_text()
 
     def _clear_park_text(self) -> None:
@@ -290,10 +378,27 @@ class RobotWidgetController:
             self._park_seq = data.get("seq")
             self._park_text = _TXT_PARK_ACCEPTED
             self._widget.set_status(self._park_text)
-            self._render_park()  # итог мог прийти раньше ответа
+            self._start_park_deadline(data.get("timeout_s"))  # до _render_park: итог мог прийти раньше ответа
+            self._render_park()
             return
         message = data.get("message") if isinstance(data, dict) else None
         self._park_text = message or "Основная остановка не принята."
+        self._widget.set_status(self._park_text)
+
+    def _start_park_deadline(self, timeout_s: Any) -> None:
+        """Взвести срок итога park: timeout_s хаба (или потолок) + запас. Токен — ``_park_gen``."""
+        valid = isinstance(timeout_s, (int, float)) and not isinstance(timeout_s, bool) and 0 < timeout_s <= 60
+        t = float(timeout_s) if valid else _PARK_TIMEOUT_FALLBACK_S
+        self._park_wait_s = t + _PARK_RESULT_GRACE_S
+        self._park_gen += 1
+        gen = self._park_gen
+        QTimer.singleShot(int(self._park_wait_s * 1000), lambda: self._on_park_deadline(gen))
+
+    def _on_park_deadline(self, gen: int) -> None:
+        """Срок вышел, а итога park нет: сказать об этом (опоздавший итог того же seq покажется поверх)."""
+        if gen != self._park_gen or self._widget_gone or self._park_seq is None:
+            return
+        self._park_text = f"Основная остановка: итог не получен за {math.ceil(self._park_wait_s)} с. Проверьте робота."
         self._widget.set_status(self._park_text)
 
     def _on_force_stop(self) -> None:
@@ -331,15 +436,7 @@ class RobotWidgetController:
             self._park_view = {"seq": value}  # новый запуск: листья прошлого сброшены
             self._park_state_seq = None
         else:
-            node = view
-            *parents, leaf = rel.split(".")
-            for key in parents:
-                child = node.get(key)
-                if not isinstance(child, dict):
-                    child = {}
-                    node[key] = child
-                node = child
-            node[leaf] = copy.deepcopy(value)
+            _apply_leaf(view, rel, value)
             if rel == "state":
                 self._park_state_seq = view.get("seq")
         self._render_park()
@@ -358,6 +455,7 @@ class RobotWidgetController:
             text = f"Основная остановка не выполнена: {reason}." if reason else "Основная остановка не выполнена."
         else:
             return  # parking и прочее: статус не меняется
+        self._park_gen += 1  # итог получен — срок аннулирован
         self._park_text = text
         self._widget.set_status(text)
 
@@ -443,6 +541,7 @@ class RobotWidgetController:
         if not self._device_id:
             self._widget.set_status("Робот: устройство не выбрано.")
             return
+        self._link_ok = False  # ответ на опрос (или следующий пуш) снова пишет текст связи / итог park
         if self._park_text is None:  # итог «Остановить» не затираем
             self._widget.set_status("Опрос робота…")
         self._presenter.get_telemetry(self._device_id, self._on_telemetry_response)
@@ -451,6 +550,7 @@ class RobotWidgetController:
     def _on_telemetry_response(self, data: dict) -> None:
         """Обработчик ответа get_telemetry (pull)."""
         if not data or not data.get("telemetry"):
+            self._link_ok = False  # следующий живой пуш вернёт текст связи / итог park
             self._widget.set_status("Робот не отвечает (телеметрия пуста).")
             self._widget.set_mode_switch_enabled(False)
             return
