@@ -30,8 +30,9 @@ from collections.abc import Callable, Sequence
 
 from .interface import DeviceIdentity, DevicePort, DeviceSdk, PortError, RawFrame
 from .params import Step
+from .profiles import ProfileRunner, ProfileState
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("camera_device.session")
 
 # Подряд идущих ошибок `get_frame` до перехода в `error`.
 MAX_CONSECUTIVE_ERRORS = 3
@@ -116,10 +117,8 @@ class DeviceSession:
         self._errors = 0
         self._last_error: str | None = None
         self._device: DeviceIdentity | None = None
-        # Наполняет Task 2.2.
-        self.params: dict = {}
-        self.params_status: dict = {}
-        self.param_errors: dict = {}
+        self._profile = ProfileState()  # профили run/rest (Task 2.2); замок и данные принадлежат сеансу
+        self._runner: ProfileRunner | None = None
 
     # ------------------------------------------------------------------ #
     # Свойства
@@ -131,7 +130,23 @@ class DeviceSession:
 
     @property
     def errors(self) -> int:
-        return self._errors
+        """Ошибки кадров за жизнь сеанса + отказы узлов профилей (не сбрасывается `start()`)."""
+        return self._errors + self._profile.node_errors
+
+    @property
+    def params(self) -> dict:
+        with self._profile.lock:
+            return dict(self._profile.params)
+
+    @property
+    def params_status(self) -> dict:
+        with self._profile.lock:
+            return {k: dict(v) for k, v in self._profile.status.items()}
+
+    @property
+    def param_errors(self) -> dict:
+        with self._profile.lock:
+            return dict(self._profile.errors)
 
     @property
     def last_error(self) -> str | None:
@@ -270,6 +285,9 @@ class DeviceSession:
             if name in _TIMED:
                 self._notify(self._on_timing, name, time.perf_counter() - call.t0)
 
+    def _timing(self, name: str, seconds: float) -> None:
+        self._notify(self._on_timing, name, seconds)
+
     def _fail(self, state: str, exc: BaseException) -> None:
         self._last_error = describe_error(exc)
         logger.error("session: %s", self._last_error)
@@ -301,10 +319,15 @@ class DeviceSession:
         return not abort
 
     def _apply_run(self) -> None:
-        """Точка вставки Task 2.2: профиль `run` между `open` и `start_grabbing`."""
+        """Профиль `run` между `open` и `start_grabbing` (владелец)."""
+        self._runner.apply_plan(self._run)  # type: ignore[union-attr]
 
-    def _apply_rest(self) -> None:
-        """Точка вставки Task 2.2: профиль `rest` после `stop_grabbing` до `close`."""
+    def _apply_rest(self, grabbing: bool) -> bool:
+        """Профиль `rest` после `stop_grabbing` до `close`; `False` — `open` ветки reopen упал, `close` не зовётся."""
+        if not self._rest:
+            return True
+        direct = "restart_regrab" in self._port.capabilities or not grabbing  # H1: NETER снимает только close
+        return self._runner.run_rest(self._rest, direct)  # type: ignore[union-attr]
 
     def _owner_main(self, cmd: _StartCmd, stop_evt: threading.Event) -> None:
         watchdog_stop = threading.Event()
@@ -312,6 +335,7 @@ class DeviceSession:
             target=self._watchdog, args=(watchdog_stop,), name="camera_device-watchdog", daemon=True
         ).start()
         acquired = opened = grabbing = run_applied = failed = False
+        self._profile.reset()  # начало run каждого start(): params / params_status / param_errors заново
         try:
             self._port_call("acquire", self._sdk.acquire)
             acquired = True
@@ -319,6 +343,7 @@ class DeviceSession:
             self._port_call("open", self._port.open, ident)
             opened = True
             self._device = ident
+            self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing)
             self._apply_run()
             run_applied = True
             if self._commit(cmd, stop_evt):
@@ -362,10 +387,13 @@ class DeviceSession:
             steps.append(("close", self._port.close))
         if acquired:
             steps.append(("release", self._sdk.release))
+        skip_close = False
         for name, fn in steps:
+            if name == "close" and skip_close:
+                continue  # reopen не удался: порт уже закрыт
             try:
                 if name == "rest":
-                    fn()
+                    skip_close = fn(grabbing) is False
                 else:
                     self._port_call(name, fn)
             except Exception as exc:  # noqa: BLE001 — остальные шаги закрытия обязаны выполниться
