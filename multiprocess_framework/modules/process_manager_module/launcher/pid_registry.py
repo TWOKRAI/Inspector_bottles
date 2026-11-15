@@ -77,7 +77,7 @@ def default_pid_file_name(app_name: str | None = None) -> str:
 
     ``tag`` — 8 hex-символов sha1 от корня checkout (область: приложение И checkout).
     """
-    tag = hashlib.sha1(str(_checkout_root()).encode("utf-8")).hexdigest()[:8]  # nosec B324 — не криптография
+    tag = hashlib.sha1(str(_checkout_root()).encode("utf-8", "surrogateescape")).hexdigest()[:8]  # nosec B324 — не криптография
     return f"{app_name_slug(app_name)}_{tag}_system_pids.jsonl"
 
 
