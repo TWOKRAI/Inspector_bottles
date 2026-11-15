@@ -193,3 +193,37 @@ def test_heartbeat_admitted_before_restart_decision_is_not_recovery() -> None:
         assert monitor.readiness_view()[1] == frozenset({"cam"})
 
     _bounded(scenario)
+
+
+@pytest.mark.timeout(_DEADLINE_S + 30)
+def test_heartbeat_between_baseline_reset_and_mark_is_not_recovery() -> None:
+    """Обратное чередование: решение о рестарте уже сбросило базу heartbeat (``pop`` в ``_try_auto_restart``), пометки
+    ещё нет — и в этот момент приходит heartbeat текущего pid: допуск проходит и пишет время. Затем решение ставит
+    пометку. Время того heartbeat не должно пережить пометку (``mark_restarting`` сбрасывает его под тем же замком):
+    ``recovered`` нет, сторож H3 стоит, пометка «перезапускается» стоит."""
+
+    def scenario() -> None:
+        pm, monitor = make_readiness_pm(
+            {"cam": {"class": "X", "restart_policy": {"enabled": True, "backoff_sec": 5.0}}}
+        )
+        proc = pm._process_registry.get_process_by_name("cam")
+        original = monitor.mark_restarting
+
+        def heartbeat_then_mark(process_name: str) -> None:
+            # настоящий heartbeat ДО пометки: допуск проходит (пометки ещё нет), время записано
+            monitor._on_heartbeat_received({"sender": "cam", "timestamp": time.time(), "pid": proc.pid})
+            original(process_name)
+
+        monitor.mark_restarting = heartbeat_then_mark
+        monitor._try_auto_restart("cam", "unresponsive")
+        monitor.mark_restarting = original
+
+        events: list[tuple[str, str]] = []
+        monitor._emit_supervisor_event = lambda name, event, **kw: events.append((name, event))
+        monitor._check_heartbeats()
+
+        assert events == [], events
+        assert "cam" in monitor._recovery_deadline
+        assert monitor.readiness_view()[1] == frozenset({"cam"})
+
+    _bounded(scenario)
