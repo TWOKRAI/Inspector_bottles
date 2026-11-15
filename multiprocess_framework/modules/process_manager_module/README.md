@@ -511,6 +511,13 @@ config = {
 `system_stop_event`, штатному lifecycle даётся 1.5 с, затем `os._exit(75)`. Сам PM (его запускает spawner
 без `parent_pid`) и SRM-режим тестов не сторожатся; Windows — no-op; forkserver не взводится.
 
+### PID-реестр: область «приложение И checkout» (ADR-PMM-046)
+
+Дефолтный реестр процессов системы — `<app>_<tag>_system_pids.jsonl` в temp (`tag` — 8 hex от корня checkout, то есть
+каталога над пакетом `multiprocess_framework`). Два checkout одного приложения на одной машине не делят файл и не реапают
+процессы друг друга. Файл прежнего неразделённого имени `<app>_system_pids.jsonl` не реапается и не удаляется. Реап
+пишет в журнал строку на каждую жертву: `PID-реестр: убит pid=<pid> (<имя процесса>)`.
+
 ## CommandManager — встроенные команды
 
 `ProcessManagerProcess` регистрирует встроенные команды при инициализации:
