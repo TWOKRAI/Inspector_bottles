@@ -288,9 +288,9 @@ class ProcessMonitor:
         # не должен выглядеть «готов». Поля нет (старый ребёнок / процесс без наблюдателя) — прежний лист
         # не трогаем: он состарится по ``at`` и PM увидит «нет отчёта о готовности».
         readiness = msg.get("readiness")
-        if not self._admit_heartbeat(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None):
+        stamp = ts if isinstance(ts, (int, float)) else time.time()
+        if not self._admit_heartbeat(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None, stamp):
             return
-        self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
@@ -314,7 +314,7 @@ class ProcessMonitor:
                 self.previous_states[sender] = snap.copy()
                 self.process._log_debug(f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}")
 
-    def _admit_heartbeat(self, sender: str, pid: Any, readiness: dict | None) -> bool:
+    def _admit_heartbeat(self, sender: str, pid: Any, readiness: dict | None, stamp: float) -> bool:
         """Единственная проверка воплощения на входе heartbeat: ``True`` — сообщение текущего воплощения.
 
         Чужое (``False``) — вызывающий не трогает ни время heartbeat, ни статус:
@@ -324,8 +324,10 @@ class ProcessMonitor:
             (старый контракт) в перезапуске пометку не снимает — и принятым не считается (воплощение неизвестно).
         Вне перезапуска heartbeat без ``pid`` принимается как раньше.
 
-        Решение, снятие пометки и приём листа — под одним листовым замком (``mark_restarting`` берёт тот же): между
-        решением и записью листа пометка не успеет встать. Pid реестра читается ДО замка (реестр свой замок).
+        Допуск, снятие пометки, приём листа и запись времени ``_last_heartbeat[sender] = stamp`` — под одним листовым
+        замком; ``mark_restarting`` берёт тот же замок и сам сбрасывает время. Пара «допуск + время» атомарна
+        относительно пары «пометка + сброс»: принятое ДО решения время решение сотрёт, принятое после — не пройдёт
+        допуск. Pid реестра читается ДО замка (реестр свой замок).
         """
         registry_pid = self._registry_pid(sender)
         pid_is_int = type(pid) is int
@@ -338,6 +340,7 @@ class ProcessMonitor:
                 return False
             if readiness is not None:
                 self._readiness[sender] = dict(readiness)
+            self._last_heartbeat[sender] = stamp
         return True
 
     def _registry_pid(self, process_name: str) -> int | None:
@@ -361,6 +364,7 @@ class ProcessMonitor:
         with self._readiness_lock:
             self._restarting[process_name] = pid
             self._readiness.pop(process_name, None)
+            self._last_heartbeat.pop(process_name, None)  # база heartbeat — с той же пометкой (N1: атомарно с допуском)
 
     def _is_replaced_incarnation(self, proc: Any) -> bool:
         """Мёртвый ``proc`` — то самое воплощение, которое супервизор решил заменить (его pid в ``_restarting``)."""
@@ -914,16 +918,19 @@ class ProcessMonitor:
             # только в _dispatch_due_restarts — иначе для ЖИВОГО-но-сломанного процесса
             # (unresponsive / health-failed H4) с backoff_sec>0 устаревший (до-план)
             # heartbeat в окне до диспатча давал ложное 'recovered' и снимал watchdog
-            # H3. Здесь не-None => heartbeat пришёл после сброса: само-исцеление до
-            # диспатча ИЛИ новая инкарнация после рестарта — оба легитимны.
+            # H3. Здесь не-None => heartbeat пришёл после сброса. После fix-B (M3) такой
+            # heartbeat — только НОВОГО воплощения: heartbeat прежнего pid при пометке
+            # «перезапускается» не принимается (``_admit_heartbeat``), время пишется и
+            # сбрасывается под одним замком (N1), поэтому само-исцеление того же pid до
+            # диспатча ``recovered`` не даёт.
             # NEW-6b: у INDUCED-члена каскада heartbeat до диспатча — НЕ recovery.
             # Он жив и heartbeat'ит штатно (в отличие от триггера он ничем не болел),
             # его тик приходит раньше диспатча (интервал heartbeat < backoff) → это
             # давало бы ложное 'recovered', снимало watchdog H3, а рестарт всё равно
             # выполнялся → член пересоздавался БЕЗ watchdog, и тихий провал его рестарта
             # снова стал бы невидим (рецидив R2/ADR-PMM-015 для нового класса участников).
-            # Семантика ТРИГГЕРА не тронута: его self-heal до диспатча остаётся честным
-            # recovered (осознанное решение R2 — рестарт при этом не отменяется).
+            # Рестарт не отменяется ни при каком heartbeat до диспатча; ``recovered`` —
+            # только после первого heartbeat нового воплощения.
             if (
                 proc.name in self._pending_recovery
                 and proc.name not in self._induced_restarts

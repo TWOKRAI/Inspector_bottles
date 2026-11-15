@@ -18,6 +18,7 @@ import time
 
 import pytest
 
+from .test_run_commands import make_readiness_pm
 from .test_supervisor_restart_incarnation import _DEADLINE_S, _NAME, _bounded, _Rig
 from .test_supervisor_restart_incarnation_hazards import _restarted_rig
 
@@ -150,5 +151,45 @@ def test_gave_up_clears_restarting_reason() -> None:
         rig.tick()  # следующий такт пересчитывает готовность PM уже без пометки
         reasons = rig.pm._cmd_system_run_status()["reasons"]
         assert [r["reason"] for r in reasons] == ["процесс не жив"], reasons
+
+    _bounded(scenario)
+
+
+# --------------------------------------------------------------------------- #
+# fix-B2 / N1. Приём heartbeat × решение о рестарте: пара «допуск + время» атомарна относительно «пометка + сброс»
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(_DEADLINE_S + 30)
+def test_heartbeat_admitted_before_restart_decision_is_not_recovery() -> None:
+    """Принудительное чередование (поток монитора успевает принять решение о рестарте между допуском heartbeat и
+    записью его времени): heartbeat принят ДО решения, решение (``unresponsive``) сбросило базу и поставило пометку.
+    Время того heartbeat не должно пережить сброс: ``recovered`` нет, сторож H3 (``_recovery_deadline``) стоит,
+    пометка «перезапускается» стоит. Иначе рестарт, который тихо провалится, никто не повторит."""
+
+    def scenario() -> None:
+        pm, monitor = make_readiness_pm(
+            {"cam": {"class": "X", "restart_policy": {"enabled": True, "backoff_sec": 5.0}}}
+        )
+        proc = pm._process_registry.get_process_by_name("cam")
+        original = monitor._admit_heartbeat
+
+        def interleaved(*args, **kwargs):  # любая сигнатура допуска: тест не привязан к ней
+            admitted = original(*args, **kwargs)
+            if admitted:
+                monitor._try_auto_restart("cam", "unresponsive")
+            return admitted
+
+        monitor._admit_heartbeat = interleaved
+        monitor._on_heartbeat_received({"sender": "cam", "timestamp": time.time(), "pid": proc.pid})
+        monitor._admit_heartbeat = original
+
+        events: list[tuple[str, str]] = []
+        monitor._emit_supervisor_event = lambda name, event, **kw: events.append((name, event))
+        monitor._check_heartbeats()
+
+        assert events == [], events
+        assert "cam" in monitor._recovery_deadline
+        assert monitor.readiness_view()[1] == frozenset({"cam"})
 
     _bounded(scenario)

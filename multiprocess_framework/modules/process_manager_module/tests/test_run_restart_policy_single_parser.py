@@ -160,3 +160,65 @@ def test_monitor_resolve_policy_reports_validity() -> None:
     none, none_ok = monitor.resolve_policy("none")
     assert (none_ok, none is monitor.restart_policy) == (True, True)
     assert isinstance(good, RestartPolicy)
+
+
+# --------------------------------------------------------------------------- #
+# fix-B2 / N2. Глобальный флаг не включается у protected: супервизор его не поднимает
+# --------------------------------------------------------------------------- #
+
+
+def _two_process_pm() -> tuple[Any, Any]:
+    """``gui`` (protected) и ``cam``; ГЛОБАЛЬНАЯ политика монитора ``enabled`` + ``run_auto_restart``."""
+    pm, monitor = make_readiness_pm({"gui": {"class": "pkg.Gui", "protected": True}, "cam": {"class": "pkg.Cam"}})
+    monitor.restart_policy = RestartPolicy(enabled=True, run_auto_restart=True, backoff_sec=_BACKOFF)
+    beat(monitor, "gui")
+    beat(monitor, "cam")
+    tick(pm, monitor)
+    assert pm._cmd_system_run_start() == {"success": True, "state": "running"}
+    return pm, monitor
+
+
+def _kill(pm: Any, name: str) -> None:
+    proc = pm._process_registry.get_process_by_name(name)
+    proc._alive = False
+    proc.exitcode = -9
+
+
+@pytest.mark.timeout(60)
+def test_global_flag_protected_process_down_is_failure_not_restart_window() -> None:
+    """Падение ``gui`` (protected) в ``running`` при глобальном флаге: супервизор его не поднимает, окна перезапуска
+    нет — одна ``failure`` «процесс не жив», не готов. До правки флаг включался и у gui: ``out_of_spec`` «перезапуск
+    gui» на 30 с, ``ready``."""
+    pm, _monitor = _two_process_pm()
+
+    _kill(pm, "gui")
+    ready, reasons = pm._evaluate_run_readiness()
+
+    assert ready is False
+    assert [(r["node"], r["severity"], r["reason"]) for r in reasons] == [("gui", "failure", "процесс не жив")], reasons
+
+
+@pytest.mark.timeout(60)
+def test_global_flag_unprotected_process_down_gets_restart_window() -> None:
+    """Охрана: тот же глобальный флаг у обычного ``cam`` действует — падение даёт ``out_of_spec`` «перезапуск cam»."""
+    pm, _monitor = _two_process_pm()
+
+    _kill(pm, "cam")
+    ready, reasons = pm._evaluate_run_readiness()
+
+    assert ready is True
+    assert [(r["node"], r["severity"], r["reason"]) for r in reasons] == [("cam", "out_of_spec", "перезапуск cam")], (
+        reasons
+    )
+
+
+@pytest.mark.timeout(60)
+def test_global_flag_protected_process_crash_in_running_goes_to_fault_at_once() -> None:
+    """Такт монитора после падения ``gui`` (protected): состояние ``fault`` сразу, без 30 с окна перезапуска."""
+    pm, monitor = _two_process_pm()
+
+    _kill(pm, "gui")
+    with monitor._iteration_lock:
+        monitor._run_iteration()
+
+    assert pm._run_state == "fault", pm._run_state

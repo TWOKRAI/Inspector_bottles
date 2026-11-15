@@ -1308,7 +1308,8 @@ class ProcessManagerProcess(ProcessModule):
         """Процессы набора с флагом ``run_auto_restart`` и причины конфига: ``(флаг действует, ошибки конфига)``.
 
         Политику решает ОДИН разборщик — ``ProcessMonitor.resolve_policy`` (fix-B, M2); здесь сырой dict не читается.
-        Флаг действует, если ``policy.enabled and policy.run_auto_restart`` (супервизор процесс поднимет). Ошибки
+        Флаг действует, если ``policy.enabled and policy.run_auto_restart`` и процесс не ``protected`` (супервизор
+        protected не поднимает: падение такого в ``running`` — сразу ``fault``, не окно перезапуска). Ошибки
         конфига — ``failure`` / ``config`` (``not_ready``), без значений входа:
           * per-process ``restart_policy`` негоден (схема его отвергла) -> «restart_policy негоден: <процесс>»;
           * схема годна, флаг включён, ``enabled`` выключен -> ``auto_restart_config_reason``.
@@ -1318,6 +1319,7 @@ class ProcessManagerProcess(ProcessModule):
         resolve = getattr(monitor, "resolve_policy", None)
         if not callable(resolve):
             return frozenset(), []
+        protected = self._get_protected_names()
         active: set[str] = set()
         reasons: list[dict] = []
         for name in expected:
@@ -1328,7 +1330,8 @@ class ProcessManagerProcess(ProcessModule):
             if not valid:
                 reasons.append(_restart_policy_invalid_reason(name))
             elif policy.run_auto_restart and policy.enabled:
-                active.add(name)
+                if name not in protected:  # protected супервизор не поднимает (``_try_auto_restart`` выходит сразу)
+                    active.add(name)
             elif policy.run_auto_restart:
                 reasons.append(auto_restart_config_reason(name))
         return frozenset(active), reasons

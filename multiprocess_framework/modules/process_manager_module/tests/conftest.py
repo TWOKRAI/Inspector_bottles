@@ -9,7 +9,7 @@ Shared mock-классы и фабрики для тестов process_manager_m
     - make_pm: фабрика PM с TopologyManager + FakePlanner wired.
     - wire_planner: подключить FakePlanner к TopologyManager PM.
     - _join_run_sequence_threads: autouse-фикстура, дожидающаяся одноразовых потоков последовательностей
-      останова (``run-stop``, ``run-fault-stop``) PM без исполнителя.
+      останова (``run-stop``, ``run-fault-stop``, ``run-shutdown``) PM без исполнителя.
 
 Phase 2.3: общий код вынесен из test_apply_topology / test_replace_blueprint.
 """
@@ -24,7 +24,7 @@ import pytest
 from ..process.process_manager_process import ProcessManagerProcess
 
 # Имена одноразовых потоков, которые ``_submit_run_sequence`` заводит у PM без исполнителя ``pm-lifecycle``.
-_RUN_SEQUENCE_THREAD_NAMES = frozenset({"run-stop", "run-fault-stop"})
+_RUN_SEQUENCE_THREAD_NAMES = frozenset({"run-stop", "run-fault-stop", "run-shutdown"})
 _RUN_SEQUENCE_JOIN_DEADLINE_S = 2.0
 
 # PM, созданные ``make_pm`` в текущем тесте (список чистит фикстура ниже).
@@ -33,7 +33,8 @@ _PMS_OF_THIS_TEST: list[ProcessManagerProcess] = []
 
 @pytest.fixture(autouse=True)
 def _join_run_sequence_threads():
-    """После теста дождаться (не дольше 2 с суммарно) потоков ``run-stop``/``run-fault-stop``, начатых В ЭТОМ тесте.
+    """После теста дождаться (не дольше 2 с суммарно) потоков ``run-stop``/``run-fault-stop``/``run-shutdown``
+    этого теста.
 
     Источник потоков — ветка одноразовых потоков в ``_submit_run_sequence``; без ожидания они переживают тест
     (стражи жизненного цикла G4 и предупреждения pytest). Такой поток ждёт ``paused`` у живых процессов набора до

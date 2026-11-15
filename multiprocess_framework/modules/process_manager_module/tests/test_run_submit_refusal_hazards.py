@@ -337,3 +337,24 @@ def test_two_bypass_causes_run_action_exactly_once(rig_factory) -> None:
     time.sleep(0.2)  # окно для второго (лишнего) прохода
     assert calls == [1]
     assert replies == ["done"]
+
+
+@pytest.mark.timeout(60)
+def test_graceful_shutdown_from_running_without_steps_refused_executor_still_shuts_down(rig_factory) -> None:
+    """Graceful ``system.shutdown`` из ``running`` БЕЗ шагов ``pre_stop`` идёт через ``run-shutdown`` (подача в
+    ``pm-lifecycle``). Исполнитель отказал: обход выполняет проход на своём потоке — в машину подано ``shutdown``
+    (``shutting_down``), ``run_event`` снят, события стопа взведены уже в ``shutting_down``; без обхода машина
+    осталась бы в ``running`` и система не остановилась."""
+    rig = rig_factory(("cam",), timeout_s=5.0)  # steps=False: ветка ``with_steps`` ложна
+    rig.to_running()
+    refusing = _RefusingSubmit("executor_busy")
+    rig.pm._lifecycle_submit = refusing
+
+    reply = rig.pm._cmd_system_shutdown({"mode": "graceful"})
+
+    assert reply["accepted"] is True, reply
+    assert _wait(lambda: rig.pm._system_stop_event.is_set(), _DEADLINE_S), rig.log
+    assert refusing.calls == 1
+    assert rig.state == "shutting_down"
+    assert rig.pm._run_event.is_set() is False
+    assert set(rig.state_at_stop_events) == {"shutting_down"}, rig.state_at_stop_events
