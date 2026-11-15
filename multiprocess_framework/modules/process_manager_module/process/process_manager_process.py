@@ -171,6 +171,9 @@ class ProcessManagerProcess(ProcessModule):
     _run_state: RunState = RunState.booting
     _run_gate: bool = False
     _run_since: float = 0.0
+    #: ``time.monotonic()`` последнего входа в ``running`` (ревью Ф1, m2): такт, чья оценка начата раньше, устарел.
+    #: Наружу не публикуется — ``since`` остаётся ``time.time()``.
+    _run_running_mono: float = 0.0
     _run_ready: bool = True
     #: Значения ``system.run.*``, уже записанные в стор (под ``_run_publish_lock``); ``None`` — ни одной.
     _run_published: dict | None = None
@@ -1031,6 +1034,7 @@ class ProcessManagerProcess(ProcessModule):
         stop_done: bool | None = None,
         reasons: list[dict] | None = None,
         hold_event: bool = False,
+        eval_started: float | None = None,
     ) -> tuple[RunState, str | None, RunState]:
         """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
 
@@ -1052,8 +1056,15 @@ class ProcessManagerProcess(ProcessModule):
         ``hold_event`` (Task 1.4) — только для ``stop`` из ``running``: событие остаётся взведённым в ``stopping``
         (идут шаги ``pre_stop``); снимает его последовательность STOP (``_run_stop_clear_event``). Остальные
         вызовы в ``stopping`` событие не трогают; при выходе из ``stopping`` оно доводится по таблице как всегда.
+
+        ``eval_started`` (ревью Ф1, m2) — только для ``tick``: ``time.monotonic()`` начала оценки такта (оценка идёт
+        вне замка). Начата раньше последнего входа в ``running`` — такт устарел: не применяется совсем (ни состояние,
+        ни ``_run_ready``, ни причины, ни публикация), возврат ``(текущее, None, текущее)``.
         """
         with self._run_lock:
+            if event == "tick" and eval_started is not None and eval_started < self._run_running_mono:
+                current = self._run_state
+                return current, None, current
             if ready is None:
                 ready = self._run_ready
             prev = self._run_state
@@ -1099,6 +1110,8 @@ class ProcessManagerProcess(ProcessModule):
             if new is not prev:
                 self._run_state = new
                 self._run_since = time.time()
+                if new is RunState.running:
+                    self._run_running_mono = time.monotonic()
         self._publish_run_state()
         return new, code, prev
 
@@ -1455,8 +1468,11 @@ class ProcessManagerProcess(ProcessModule):
         """
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             return
+        # Ревью Ф1, m2: оценка идёт вне ``_run_lock``; START между оценкой и применением делает такт устаревшим —
+        # ``_run_apply`` отбросит его по метке начала оценки.
+        eval_started = time.monotonic()
         ready, reasons = self._evaluate_run_readiness(track_restart=True)
-        new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons)
+        new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons, eval_started=eval_started)
         if new is RunState.fault and prev is not RunState.fault:
             self._start_fault_stop()  # Task 1.4: остановка в аварии идёт не на потоке монитора
         self._publish_readiness_leaves()
@@ -1844,18 +1860,57 @@ class ProcessManagerProcess(ProcessModule):
     ) -> None:
         """Отдать ``action`` исполнителю жизненного цикла (``pm-lifecycle``); он последовательный, ожидание ``paused``
         не держит ни ``_run_lock``, ни замок монитора. PM без исполнителя (двойник из ``__new__``) — одноразовый
-        daemon-поток. Сбой подачи — ERROR и итог сразу: ``stopping`` не должно зависнуть."""
+        daemon-поток.
+
+        Ревью Ф1, M1: исполнитель не взял последовательность — один путь для всех видов (STOP, авария, проход
+        shutdown): та же ``action`` на одноразовом daemon-потоке, ``reply`` — после неё. «Не взял» — это отказ по
+        контракту ``OrderedExecutor.submit`` (``reply`` с ``executor_busy`` / ``system_stopping``: сразу или позже,
+        когда закрытие снимает очередь), возврат ``False`` без ``reply`` и исключение подачи. Ожиданию ``paused``
+        сериализация с очередью L не нужна; прерывание системным стопом последовательность видит сама и итог не ставит
+        (машину ведёт ``shutdown``). Так ``stopping`` и ``fault`` не остаются без итога. Обход — не больше одного на
+        подачу. Отказ — WARNING, исключение — ERROR. Поток не стартовал — ERROR; STOP получает итог сразу.
+        """
         done = reply or (lambda _result: None)
         submit = self._lifecycle_submit
-        try:
-            if submit is not None:
-                submit.submit(action, None, done)
-            else:
+        refusals = ("executor_busy", "system_stopping")
+        once = threading.Lock()
+        taken: list[bool] = []
+        replied: list[bool] = []
+
+        def detached() -> None:
+            with once:
+                if taken:
+                    return
+                taken.append(True)
+            try:
                 threading.Thread(target=lambda: done(action()), daemon=True, name=name).start()
-        except Exception as exc:  # noqa: BLE001 — граница подачи: машина не должна застрять в stopping
+            except Exception as exc:  # noqa: BLE001 — поток не стартовал: машина не должна застрять в stopping
+                self._log_error(f"{name}: поток последовательности не стартовал ({type(exc).__name__})")
+                if name == "run-stop":
+                    self._run_stop_finish(fault=False, seq=0, names=[], timeout_s=0.0)
+
+        def on_reply(result: Any) -> None:
+            replied.append(True)
+            if isinstance(result, dict) and result.get("success") is False and result.get("error") in refusals:
+                self._log_warning(
+                    f"{name}: исполнитель отказал ({result['error']}) — последовательность на своём потоке"
+                )
+                detached()
+                return
+            done(result)
+
+        if submit is None:
+            detached()
+            return
+        try:
+            queued = submit.submit(action, None, on_reply)
+        except Exception as exc:  # noqa: BLE001 — граница подачи: тот же путь, что у отказа
             self._log_error(f"{name}: исполнитель не принял последовательность ({type(exc).__name__})")
-            if name == "run-stop":
-                self._run_stop_finish(fault=False, seq=0, names=[], timeout_s=0.0)
+            detached()
+            return
+        if queued is False and not replied:
+            self._log_warning(f"{name}: исполнитель вернул False без ответа — последовательность на своём потоке")
+            detached()
 
     def _run_stop_cancel_source(self) -> str | None:
         """Почему STOP/авария прерваны: общие причины шагов (``force``, события стопа) или ``shutdown`` в машине."""
@@ -2096,7 +2151,14 @@ class ProcessManagerProcess(ProcessModule):
                 f"shutdown из running: шагов pre_stop {len(steps) if with_steps else 0}, затем ожидание paused"
             )
             action = lambda: self._run_shutdown_pass(with_steps)  # noqa: E731
-            finish = lambda _result: self._finish_pre_stop()  # noqa: E731
+
+            def finish(_result: Any) -> None:
+                # Ревью Ф1, m1: отказ исполнителя шагов зовёт ``finish`` без прохода — ``shutdown`` в машину подаётся и
+                # тут, до событий стопа. После прохода повтор — no-op (``shutdown`` из ``shutting_down`` не меняет
+                # ни состояние, ни ``since``; публикация пропускает неизменённые значения).
+                self._run_apply("shutdown")
+                self._finish_pre_stop()
+
             if with_steps:
                 executor.submit(action, frozenset({"system"}), finish)
             else:
