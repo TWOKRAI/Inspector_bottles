@@ -25,7 +25,8 @@
     (двойник исполнителя ``submit(action, key, reply)`` на daemon-потоке) + ``pm.router_manager.request_async``;
   * ожидаемые процессы = ключи ``pm._process_configs``; ожидание ``paused`` читает листы ``readiness`` монитора само
     (такты монитора в тестах ручные, ожидание на них не висит);
-  * признак «остановка в аварии завершена» — атрибут PM, имя которого содержит ``fault_stop_done`` (ищется по имени);
+  * признак «остановка в аварии завершена» — публичное поле ``ack_allowed`` статуса ``system.run.status`` (в ``fault``
+    оно истинно ровно тогда, когда остановка завершена и ``ack`` будет принят);
   * число ``<N>`` в тексте причины — ``0.5`` (одинаково пишется и ``str(0.5)``, и ``{:g}``).
 """
 
@@ -79,12 +80,12 @@ def _bounded(fn: Callable[[], Any], deadline_s: float) -> Any:
     return box.get("value")
 
 
-def _fault_stop_done(pm: ProcessManagerProcess) -> Any:
-    """Значение признака «остановка в аварии завершена»; ``None`` — такого атрибута у PM нет совсем."""
-    for name in sorted(set(vars(pm)) | set(dir(type(pm)))):
-        if "fault_stop_done" in name:
-            return getattr(pm, name)
-    return None
+def _fault_stop_done(pm: ProcessManagerProcess) -> bool:
+    """Остановка в аварии завершена: публичный статус ``system.run.status`` разрешает ``ack`` (``ack_allowed``).
+
+    Вне ``fault`` ``ack_allowed`` ложно, как и прежний признак после выхода из аварии.
+    """
+    return pm._cmd_system_run_status()["ack_allowed"]
 
 
 def _unconfirmed(reasons: list[dict], node: str) -> list[dict]:

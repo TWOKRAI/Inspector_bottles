@@ -30,7 +30,7 @@ import pytest
 
 from multiprocess_framework.modules.process_manager_module.tests.test_run_apply_gate import _effects, _pm_in
 
-_REPO = Path(__file__).resolve().parents[4]
+_REPO = Path(__file__).resolve().parents[3]
 _RECIPE_SRC = _REPO / "multiprocess_prototype" / "recipes" / "bridge_synth.yaml"
 _DEADLINE_S = 20.0
 
