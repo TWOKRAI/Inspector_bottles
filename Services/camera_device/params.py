@@ -30,12 +30,18 @@ NOT_SET = "<не задано>"
 
 @dataclass(frozen=True)
 class Step:
-    """Один шаг плана: поле register'а, его привязка, значение и причина пропуска (`None` — писать)."""
+    """Один шаг плана: поле register'а, его привязка, значение и причина пропуска (`None` — писать).
+
+    `parent` — первый ключ `enabled_if` поля, не являющийся флагом группы `*_managed` (флаг не пишется
+    в прибор и в ошибки параметров не попадает; `None`, если такого ключа нет); по нему сеанс (2.2)
+    пропускает потомков отказавшего родителя.
+    """
 
     field: str
     binding: Binding
     value: Any
     skip: str | None = None
+    parent: str | None = None
 
 
 def _is_flag(name: str) -> bool:
@@ -88,7 +94,8 @@ def build_plan(register_cls: type, values: Mapping[str, Any], bindings: Mapping[
             continue
         if reason is None and name not in values:
             raise ValueError(f"нет значения для поля {name}")
-        plan.append(Step(field=name, binding=binding, value=values.get(name), skip=reason))
+        parent = next((key for key in (meta.enabled_if or {}) if not _is_flag(key)), None)
+        plan.append(Step(field=name, binding=binding, value=values.get(name), skip=reason, parent=parent))
     return plan
 
 

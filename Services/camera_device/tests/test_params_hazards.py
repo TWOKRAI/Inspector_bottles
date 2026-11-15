@@ -119,3 +119,19 @@ def test_флаг_и_vendor_fields_не_требуют_привязки():
         check_bindings(Exposure, partial, vendor_fields=())
     assert "label" in str(exc_info.value)
     check_bindings(Exposure, partial, vendor_fields=("label",))  # поле вендор обслуживает мимо таблицы
+
+
+def test_parent_none_если_enabled_if_только_флаг_группы_и_первый_не_флаг_выигрывает():
+    values = {"exposure_managed": True, "gain": 1.0, "black_level": 4, "label": "q", "free_gain": 7}
+    plan = {s.field: s for s in build_plan(Exposure, values, EXPOSURE_BINDINGS)}
+    assert plan["gain"].parent is None  # enabled_if = {exposure_managed}
+    assert plan["free_gain"].parent is None  # enabled_if нет вовсе
+
+    class Mixed(SchemaBase):
+        mode_managed: Annotated[bool, FieldMeta("m", ui_group="g")] = True
+        mode: Annotated[str, FieldMeta("mode", ui_group="g", enabled_if={"mode_managed": [True]})] = "On"
+        level: Annotated[int, FieldMeta("level", ui_group="g", enabled_if={"mode_managed": [True], "mode": ["On"]})] = 1
+
+    bindings = {"mode": Binding("genicam", "Mode", "enum"), "level": Binding("genicam", "Level", "int")}
+    mixed = {s.field: s for s in build_plan(Mixed, {"mode_managed": True, "mode": "On", "level": 1}, bindings)}
+    assert mixed["level"].parent == "mode"  # флаг стоит первым в enabled_if, но пропускается

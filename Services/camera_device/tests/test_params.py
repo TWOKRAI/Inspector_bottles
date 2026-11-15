@@ -110,3 +110,12 @@ def test_порядок_шагов_порядок_полей_класса():
     values = {"trigger_managed": True, "trigger_mode": "On", "trigger_source": "SelfTrigger", "trigger_period_ms": 40}
     plan = build_plan(TriggerRegister, values, BINDINGS)
     assert [s.field for s in plan] == ["trigger_mode", "trigger_source", "trigger_period_ms"]
+
+
+def test_parent_первый_ключ_enabled_if_кроме_флага_группы():
+    values = {"trigger_managed": True, "trigger_mode": "On", "trigger_source": "Line0", "trigger_period_ms": 40}
+    plan = {s.field: s for s in build_plan(TriggerRegister, values, BINDINGS)}
+    assert plan["trigger_mode"].parent is None  # enabled_if только из флага группы
+    assert plan["trigger_source"].parent == "trigger_mode"
+    assert plan["trigger_period_ms"].parent == "trigger_source"
+    assert plan["trigger_period_ms"].skip is not None  # parent заполнен и у пропущенных шагов
