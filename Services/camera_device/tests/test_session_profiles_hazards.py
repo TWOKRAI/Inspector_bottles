@@ -87,13 +87,17 @@ class _Rig:
         self.sessions: list[DeviceSession] = []
         self.timings: list[tuple[str, float]] = []
 
-    def make(self, *, port=None, run=(), rest=(), **opts) -> DeviceSession:
+    def make(self, *, port=None, run=(), rest=(), timeout_ms=500, watchdog_s=5.0, **opts) -> DeviceSession:
         opts.setdefault("frame_period_s", 0.01)
         self.port = port if port is not None else make_port(**opts)
+        self.stalls: list[tuple[str, float]] = []
         session = DeviceSession(
             self.port,
             self.port.sdk,
             None,
+            timeout_ms=timeout_ms,
+            watchdog_s=watchdog_s,
+            on_stall=lambda call, seconds: self.stalls.append((call, seconds)),
             on_frame=lambda frame: None,
             on_timing=lambda name, seconds: self.timings.append((name, seconds)),
             run=tuple(run),
@@ -276,3 +280,40 @@ def test_on_timing_apply_по_каждому_полю(rig):
     applies = [t for t in rig.timings if t[0] == "apply"]
     assert len(applies) == 3
     assert all(seconds >= 0 for _, seconds in applies)
+
+
+def test_сторож_видит_зависший_set_param_профиля(rig):
+    port = make_port(frame_period_s=0.01)
+    original = port.set_param
+    port.set_param = lambda b, value: (time.sleep(0.8), original(b, value))[1]
+    session = rig.make(port=port, run=[_mode("On")], timeout_ms=100, watchdog_s=0.5)
+    assert session.start(3.0) is True
+    assert [name for name, _ in rig.stalls] == ["set_param"]  # ровно один on_stall на вызов
+    assert rig.stalls[0][1] >= 0.5
+
+
+def test_сторож_видит_open_ветки_reopen(rig):
+    session = rig.make(
+        rest=[_mode("On")], open_delay_s=0.8, capabilities=NO_RESTART_REGRAB, timeout_ms=100, watchdog_s=0.5
+    )
+    assert rig.cycle(session) is True
+    assert [name for name, _ in rig.stalls].count("open") == 2  # open старта и open reopen
+    assert all(seconds >= 0.5 for _, seconds in rig.stalls)
+
+
+def test_start_сбрасывает_params_status_params_и_ошибки_прошлого_цикла(rig):
+    """Ловит инъекцию «в ProfileState.reset убран status.clear()» (и params.clear / errors.clear).
+
+    Один сеанс, два цикла: rest первого цикла пишет `exposure_time`, которого нет в run. Без сброса на втором
+    `start()` статус/значение этого поля пережило бы начало нового run.
+    """
+    exposure = Step("exposure_time", Binding("genicam", "ExposureTime", "float"), 900.0, None, None)
+    session = rig.make(run=[_mode("On")], rest=[exposure])
+    assert rig.cycle(session) is True
+    assert sorted(session.params_status) == ["exposure_time", "trigger_mode"]  # rest дописал
+    _await(lambda: not session.device_held, "владелец первого цикла вышел")
+
+    assert session.start(3.0) is True
+    assert sorted(session.params_status) == ["trigger_mode"]  # начало run сбросило прошлый цикл
+    assert sorted(session.params) == ["trigger_mode"]
+    assert session.param_errors == {}

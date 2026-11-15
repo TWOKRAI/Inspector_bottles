@@ -69,12 +69,15 @@ class ProfileRunner:
         state: ProfileState,
         log: logging.Logger,
         on_timing: Callable[[str, float], None] | None = None,
+        call: Callable[..., Any] | None = None,
     ) -> None:
         self._port = port
         self._ident = ident
         self._state = state
         self._log = log
         self._on_timing = on_timing
+        # Вызов порта через сеанс (`DeviceSession._port_call`): его видит сторож, `open` попадает в on_timing.
+        self._call = call or (lambda name, fn, *args: fn(*args))
         self._inc: dict[str, float | None] = {}  # шаг узла: один раз до первого `set_param` узла
 
     def apply_plan(self, steps: Sequence[Step]) -> None:
@@ -102,7 +105,7 @@ class ProfileRunner:
         inc = self._step_of(binding)
         write_error: PortError | None = None
         try:
-            self._port.set_param(binding, target)
+            self._call("set_param", self._port.set_param, binding, target)
         except PortError as exc:
             write_error = exc
         rc = write_error.kind if write_error is not None else None
@@ -115,7 +118,7 @@ class ProfileRunner:
                 self._fail(field, rc, status={"verified": False, "rc": rc})
         else:
             try:
-                read = self._port.get_param(binding)
+                read = self._call("get_param", self._port.get_param, binding)
             except PortError as exc:
                 self._fail(field, f"чтение не удалось: {exc.kind}", status={"verified": False, "rc": rc})
             else:
@@ -150,8 +153,8 @@ class ProfileRunner:
         """
         if not restart_regrab:
             try:
-                self._port.close()
-                self._port.open(self._ident)  # type: ignore[arg-type]
+                self._call("close", self._port.close)
+                self._call("open", self._port.open, self._ident)
             except Exception as exc:  # noqa: BLE001 — отказ reopen: итоговый close не зовётся, errors += 1
                 self._log.warning("rest: reopen не удался: %s", type(exc).__name__)
                 with self._state.lock:
@@ -168,7 +171,7 @@ class ProfileRunner:
             info = None
             if "node_describe" in self._port.capabilities:
                 try:
-                    info = self._port.describe_param(binding)
+                    info = self._call("describe_param", self._port.describe_param, binding)
                 except PortError:
                     info = None
             self._inc[binding.key] = None if info is None else info.inc

@@ -343,7 +343,7 @@ class DeviceSession:
             self._port_call("open", self._port.open, ident)
             opened = True
             self._device = ident
-            self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing)
+            self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing, self._port_call)
             self._apply_run()
             run_applied = True
             if self._commit(cmd, stop_evt):
