@@ -94,21 +94,26 @@ Chose B + R3. Ядро знает вендоров только по строк�
 - *V2. Каждую запись проверять чтением.* Выбран.
 
 ### Decision
-Chose A + P2 + V2. Идентичность прибора обязательна, `select: first` — только явно (Р3). Допуск чтения: float/int —
-`|read − target| ≤ max(inc or 0, 1e-3·|target|, eps_abs)`, `eps_abs` — поле `Binding` (умолчание `1e-6`: у float-узлов MVS шага нет,
-`Services/hikvision_camera/sdk/structures.py:196-204`); enum — по символьному имени; в `params` пишется прочитанное. При H5 (код ≠ 0, чтение = цель) —
-`verified: True` плюс `rc`. Без capability `read_back` — статус `unverified` (не ошибка и не «подтверждено»). Пауза перезапуска ≥ 10 с — это
+Chose A + P2 + V2. Идентичность прибора обязательна, `select: first` — только явно (Р3). Допуск чтения: float —
+`|read − target| ≤ max(inc or 0, 1e-3·|target|, eps_abs)`, int — `|read − target| < max(inc or 1, 1)` (без относительного члена; амендмент 3, Р6), `eps_abs` — поле `Binding` (умолчание `1e-6`: у float-узлов MVS шага нет,
+`Services/hikvision_camera/sdk/structures.py:196-204`); enum — по символьному имени; в `params[поле]` пишется прочитанное скаляром, статус — в `params_status[поле] = {verified, rc}`. При H5 (код ≠ 0, чтение = цель) —
+`verified: True` плюс `rc`. Без capability `read_back` — статус `unverified` (не ошибка и не «подтверждено»): форма `params_status = {"verified": False, "rc": None}`, `params[поле]` — записанная цель (`profiles.py:116`). Пауза перезапуска ≥ 10 с — это
 `restart_policy.backoff_sec: 10.0` процесса в рецепте (Task 3.3, 4.3), поля плагина нет (ревью B3). Живая правка исполняется потоком-владельцем из очереди (Р12).
 
+**Уточнение W2 (2026-11-15):** очереди владельца в Task 2.1 нет — `session.py` исполняет только `start`/`stop`; почтовый ящик владельца и политику `apply` строит Task 2.4. Решение выше не меняется.
+
 ### Consequences
-- Architectural changes: `session.py` (поток, очередь, профили), `params.py` (план записи); порт вызывается только из потока-владельца.
+- Architectural changes: `session.py` (поток-владелец, переходы, сторож), `profiles.py` (профили run/rest, проверка чтением, `within_tolerance`), `params.py` (план записи); порт вызывается только из потока-владельца.
+  Уточнение W2 (2026-11-15): раскладка фактическая — `session.py` (≈ 450 строк против ≈ 200 по плану 2.1), `profiles.py` (`ProfileRunner`, `ProfileState`), `params.py` (`build_plan`, `Step`, `check_bindings`); очередь владельца — Task 2.4.
 - Migration: `code_reader_sdk` теряет ADR-CR-010 (возврат исходных) — ADR-CR-011 в Task 3.2.
-- Constraints: два экземпляра плагина в одном процессе запрещены (инвариант идёт в README ядра); убитый процесс оставляет камеру в профиле run (риск принят).
+- Constraints: два экземпляра плагина в одном процессе запрещены (инвариант записан в README ядра, «Boundaries»; кодом не проверяется); убитый процесс оставляет камеру в профиле run (риск принят).
 - Known risks: **основание «поток-владелец» — устранение класса дефектов, не доказанный отказ.** Опыты не подтвердили H1 (запись после
   `stop_grabbing` отвергается): ID3013 21/21 `rc=OK` (`tasks/6.2.result.md`), MVS `rc=0x0` при паузе 0 и 1,0 с (`tasks/0.5.result.md`, по одному прогону);
   H2 (SDK привязан к потоку): ID3013 `split` 9/9, `same` 12/12 OK, MVS оба режима OK; H5 не спровоцирована (ID3013 NETER 0 из 30; у MVS `Width` при
   захвате честно отказан `0x80000106`, значение не менялось). Поток-владелец остаётся дешёвой страховкой; перезахват `stop -> план -> start_grabbing`
   в том же handle у `mvcr` не измерен (шлюз Task 6.4). Шторм `EnumDevices` из трёх процессов не проверен.
+
+- Запись в `ALLOWLIST` G6 R1 для потоков сеанса (`session.py`) запрошена: решение владельца ожидается; investigator проверяет `KeyedExecutor` (2026-11-15).
 
 ### Links
 - Related: ADR-CAM-001, ADR-CAM-003; `amendments.md` §4 (умолчания `mvcr`); `docs/handoffs/2026-10-17_camera-service-handoff.md` §4.1, §4.3
