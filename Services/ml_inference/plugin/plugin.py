@@ -302,7 +302,7 @@ class MLInferencePlugin(ProcessModulePlugin):
             if diagnosis.severity == "error":
                 self._engine.unload()
                 self._reg.loaded_model = ""
-                self._fail_assets(diagnosis.message, last_error=diagnosis.message)
+                self._fail_assets(diagnosis.message, last_error=diagnosis.message, reason=diagnosis.reason)
                 return
             try:
                 self._engine.load_model(self._reg.model, device=self._reg.device)
@@ -316,6 +316,7 @@ class MLInferencePlugin(ProcessModulePlugin):
                 self._fail_assets(
                     f"не удалось загрузить '{self._reg.model}': {type(exc).__name__}",
                     last_error=str(exc),
+                    reason="не удалось загрузить модель",
                 )
                 return
             self._ctx.log_info(diagnosis.message)
@@ -334,16 +335,19 @@ class MLInferencePlugin(ProcessModulePlugin):
             return [{"severity": "failure", "reason": reason}]
         return []
 
-    def _fail_assets(self, message: str, last_error: str) -> None:
+    def _fail_assets(self, message: str, last_error: str, reason: str) -> None:
         """Ассеты модели непригодны: регистр, инцидент, health degraded. Зовётся под _engine_lock.
 
         Одна дверь для инцидента — `report_error` (правило одного коннектора), `log_error` рядом
         не ставим. Исключение не пробрасываем: старт системы не блокируется.
+
+        ``message`` (со значениями: путь, id модели) идёт в health и журнал; ``reason`` — короткий
+        текст без значений для ``readiness()`` (контракт хука: путь и id в причину не кладём).
         """
         self._reg.last_error = last_error
-        self._asset_reason = f"ml_inference: {message}"
+        self._asset_reason = f"ml_inference: {reason}"
         self._ctx.health.report_error(ModelAssetError(message), context="ml_inference.model")
-        self._ctx.health.degraded(self._asset_reason)
+        self._ctx.health.degraded(f"ml_inference: {message}")
         self._asset_degraded = True
 
     def _clear_asset_degraded(self) -> None:

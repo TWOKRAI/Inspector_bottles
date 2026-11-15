@@ -8,14 +8,53 @@ Shared mock-классы и фабрики для тестов process_manager_m
     - FakePlanner: framework-level планировщик (5 фаз, без импорта prototype).
     - make_pm: фабрика PM с TopologyManager + FakePlanner wired.
     - wire_planner: подключить FakePlanner к TopologyManager PM.
+    - _join_run_sequence_threads: autouse-фикстура, дожидающаяся одноразовых потоков последовательностей
+      останова (``run-stop``, ``run-fault-stop``) PM без исполнителя.
 
 Phase 2.3: общий код вынесен из test_apply_topology / test_replace_blueprint.
 """
 
 import copy
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ..process.process_manager_process import ProcessManagerProcess
+
+# Имена одноразовых потоков, которые ``_submit_run_sequence`` заводит у PM без исполнителя ``pm-lifecycle``.
+_RUN_SEQUENCE_THREAD_NAMES = frozenset({"run-stop", "run-fault-stop"})
+_RUN_SEQUENCE_JOIN_DEADLINE_S = 2.0
+
+# PM, созданные ``make_pm`` в текущем тесте (список чистит фикстура ниже).
+_PMS_OF_THIS_TEST: list[ProcessManagerProcess] = []
+
+
+@pytest.fixture(autouse=True)
+def _join_run_sequence_threads():
+    """После теста дождаться (не дольше 2 с суммарно) потоков ``run-stop``/``run-fault-stop``, начатых В ЭТОМ тесте.
+
+    Источник потоков — ветка одноразовых потоков в ``_submit_run_sequence``; без ожидания они переживают тест
+    (стражи жизненного цикла G4 и предупреждения pytest). Такой поток ждёт ``paused`` у живых процессов набора до
+    ``run_stop_timeout_s`` (до 10 с), а в тесте дети молчат; поэтому перед ожиданием процессы-двойники PM этого теста
+    помечаются остановленными: «мёртвый процесс считается остановленным» (``_paused_pending``), поток завершается на
+    ближайшем шаге опроса. Это делается ПОСЛЕ проверок теста (teardown); src PM не меняется. Поток, начатый до теста,
+    не трогаем.
+    """
+    _PMS_OF_THIS_TEST.clear()
+    before = {t.ident for t in threading.enumerate() if t.name in _RUN_SEQUENCE_THREAD_NAMES}
+    yield
+    for pm in _PMS_OF_THIS_TEST:
+        processes = getattr(getattr(pm, "_process_registry", None), "_processes", None)
+        if isinstance(processes, dict):
+            for proc in processes.values():
+                proc._alive = False
+    _PMS_OF_THIS_TEST.clear()
+    deadline = time.monotonic() + _RUN_SEQUENCE_JOIN_DEADLINE_S
+    for thread in threading.enumerate():
+        if thread.name in _RUN_SEQUENCE_THREAD_NAMES and thread.ident not in before:
+            thread.join(max(0.0, deadline - time.monotonic()))
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +375,8 @@ def make_pm(
 
     pm.get_config = _get_config
     pm.update_config = _update_config
+
+    _PMS_OF_THIS_TEST.append(pm)
 
     # TopologyManager с реальными сидами PM (как _setup_topology_manager)
     from ..process.topology_manager import TopologyManager

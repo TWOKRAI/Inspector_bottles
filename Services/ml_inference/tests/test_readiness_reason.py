@@ -1,15 +1,17 @@
 """Task 1.6 (system-run-state) — слепая приёмка ``MLInferencePlugin.readiness(ctx)`` при непригодных ассетах.
 
 Требование (из брифа, реализации нет): при непригодных ассетах модели (``_fail_assets``, health ``degraded``)
-``readiness(ctx)`` возвращает ровно одну причину ``severity="failure"``, текст = тот же, что плагин кладёт в health
-``degraded`` (начинается с «ml_inference: »). При пригодной модели или после исправления ассетов
+``readiness(ctx)`` возвращает ровно одну причину ``severity="failure"`` с коротким текстом БЕЗ значений
+(контракт ``plugins/base.py::readiness``: ни путь каталога, ни id модели в причину не идут; они остаются в health
+``degraded`` и ``last_error``). Текст начинается с «ml_inference: ». При пригодной модели или после исправления ассетов
 (повторная загрузка -> ``_clear_asset_degraded``) — пусто. ``readiness()`` не ждёт ``_engine_lock``: пока другой поток
 держит замок (долгая загрузка), вызов возвращается быстро (< 1 с).
 
 Решения тестера (``# ASSUMPTION``, подробности в отчёте):
   * форма элемента — контракт ``ProcessModulePlugin.readiness`` из ``plugins/base.py``: ``{"severity", "reason"}``;
     для «пар (severity, reason)» из брифа ``_pairs`` принимает и кортеж, и dict, так что тест не зависит от формы;
-  * «тот же текст, что в health» = ``HealthState.snapshot()["degraded_reason"]`` настоящего ``HealthState``;
+  * текст health = ``HealthState.snapshot()["degraded_reason"]`` настоящего ``HealthState`` (со значениями, формат
+    не менялся); текст причины readiness — короткий, литералы ниже;
   * вызов ``readiness`` ДО ``configure`` не проверяется.
 
 Ожидаемые значения — литералы. Блокирующие вызовы идут в daemon-потоке с дедлайном ``join``.
@@ -105,8 +107,8 @@ def _pairs(raw: Any) -> list[tuple[str, str]]:
     return out
 
 
-def test_missing_weights_gives_single_failure_with_health_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Нет весов: одна причина ``failure``, текст = ``degraded_reason`` health, с префиксом и id модели."""
+def test_missing_weights_gives_single_failure_with_short_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Нет весов: одна причина ``failure`` с коротким текстом; health по-прежнему несёт id модели."""
     _write_assets(tmp_path, weights=False)
     plugin, state, ctx = _configured(tmp_path, monkeypatch)
     snap = state.snapshot()
@@ -117,9 +119,8 @@ def test_missing_weights_gives_single_failure_with_health_text(tmp_path: Path, m
     assert len(got) == 1, got
     severity, reason = got[0]
     assert severity == "failure", got
-    assert reason == snap["degraded_reason"], (reason, snap)
-    assert reason.startswith("ml_inference: "), reason
-    assert "m1" in reason, reason
+    assert reason == "ml_inference: ассеты модели непригодны: нет весов модели", reason
+    assert "m1" in snap["degraded_reason"], snap  # формат health не менялся: значения остались там
 
 
 def test_healthy_model_has_no_reasons(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +153,6 @@ def test_readiness_does_not_wait_for_engine_lock(tmp_path: Path, monkeypatch: py
     """Пока другой поток держит ``_engine_lock``, ``readiness()`` отвечает за < 1 с с той же причиной."""
     _write_assets(tmp_path, weights=False)
     plugin, state, ctx = _configured(tmp_path, monkeypatch)
-    expected_text = state.snapshot()["degraded_reason"]
 
     acquired = threading.Event()
     release = threading.Event()
@@ -171,4 +171,64 @@ def test_readiness_does_not_wait_for_engine_lock(tmp_path: Path, monkeypatch: py
         release.set()
         holder.join(5.0)
 
-    assert got == [("failure", expected_text)], got
+    assert got == [("failure", "ml_inference: ассеты модели непригодны: нет весов модели")], got
+
+
+class _FailingBackend(_FakeBackend):
+    """Backend, чья загрузка падает: ассеты на диске в порядке, ломается сама загрузка."""
+
+    def load(self, spec: ModelSpec, device: str = "cpu") -> None:
+        raise RuntimeError("boom /abs/secret/path m1")
+
+
+def _reason_of(plugin: MLInferencePlugin, ctx: MagicMock) -> str:
+    got = _pairs(_call_with_deadline(lambda: plugin.readiness(ctx)))
+    assert len(got) == 1, got
+    return got[0][1]
+
+
+def test_reason_has_no_path_or_model_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Каталога моделей нет: в причине нет ни ``/``, ни пути каталога, ни id модели ``m1``."""
+    missing = tmp_path / "no_such_dir"
+    plugin, state, ctx = _configured(missing, monkeypatch)
+
+    reason = _reason_of(plugin, ctx)
+
+    assert reason == "ml_inference: ассеты модели непригодны: нет каталога моделей", reason
+    assert "/" not in reason and "\\" not in reason, reason
+    assert str(missing) not in reason and "no_such_dir" not in reason, reason
+    assert "m1" not in reason, reason
+    assert str(missing) in state.snapshot()["degraded_reason"], state.snapshot()  # значения - в health
+
+
+def test_reason_for_missing_sidecar_has_no_model_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Веса есть, sidecar нет: причина без id модели и без имени файла sidecar."""
+    (tmp_path / "m1.onnx").write_bytes(b"x")
+    plugin, state, ctx = _configured(tmp_path, monkeypatch)
+
+    reason = _reason_of(plugin, ctx)
+
+    assert reason == "ml_inference: ассеты модели непригодны: нет sidecar для модели", reason
+    assert "m1" not in reason and "m1.yaml" not in reason, reason
+    assert "m1" in state.snapshot()["degraded_reason"], state.snapshot()
+
+
+def test_reason_for_load_failure_has_no_model_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ассеты в порядке, загрузка падает: причина без id модели, без типа и текста исключения."""
+    _write_assets(tmp_path)
+    monkeypatch.setattr("Services.ml_inference.engine._make_backend", lambda _t: _FailingBackend())
+    state = HealthState(log=lambda m: None, track=lambda exc, payload=None: None, log_only=False)
+    ctx = MagicMock()
+    ctx.config = {"model": "m1", "models_dir": str(tmp_path)}
+    ctx.registers = None
+    ctx.state_proxy = None
+    ctx.process_name = "ml_proc"
+    ctx.health = HealthReporter(state, source="ml_inference")
+    plugin = MLInferencePlugin()
+    _call_with_deadline(lambda: plugin.configure(ctx))
+
+    reason = _reason_of(plugin, ctx)
+
+    assert reason == "ml_inference: не удалось загрузить модель", reason
+    assert "m1" not in reason and "/" not in reason and "RuntimeError" not in reason and "boom" not in reason, reason
+    assert plugin._reg.last_error == "boom /abs/secret/path m1"  # last_error: формат не менялся

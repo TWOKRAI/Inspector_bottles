@@ -44,12 +44,15 @@ class ModelDiagnosis:
     `info` (всё в порядке). message — текст для оператора: без сырого id и без `str(exc)`
     (у pydantic это многострочный ввод). path — файл/каталог, из-за которого находка
     (None — id недопустим, путь строить нельзя). spec — только при `info`.
+    reason — короткий текст причины неготовности БЕЗ значений (путь, id модели, исключение):
+    его читает `readiness()` плагина; пусто, если находка не `error`.
     """
 
     severity: Literal["error", "warning", "info"]
     message: str
     path: Path | None
     spec: ModelSpec | None = None
+    reason: str = ""
 
 
 class ModelAssetError(RuntimeError):
@@ -118,36 +121,68 @@ class ModelRegistry:
                 "недопустимый id модели — разрешены буквы, цифры, подчёркивание, точка, дефис "
                 "и пробел внутри имени; две точки подряд запрещены",
                 None,
+                reason="ассеты модели непригодны: недопустимый id модели",
             )
         if not root.is_dir():
-            return ModelDiagnosis("error", f"каталог моделей не найден: {root}", root)
+            return ModelDiagnosis(
+                "error",
+                f"каталог моделей не найден: {root}",
+                root,
+                reason="ассеты модели непригодны: нет каталога моделей",
+            )
 
         weights = self._weight_files().get(model_id)
         if weights is None:
             suffixes = "|".join(_WEIGHT_SUFFIXES)
             return ModelDiagnosis(
-                "error", f"нет весов модели ({model_id} + один из {suffixes}) в {root}", root / model_id
+                "error",
+                f"нет весов модели ({model_id} + один из {suffixes}) в {root}",
+                root / model_id,
+                reason="ассеты модели непригодны: нет весов модели",
             )
 
         sidecar = weights.with_suffix(".yaml")
         if not sidecar.is_file():
-            return ModelDiagnosis("error", f"нет sidecar {sidecar.name} для модели '{model_id}'", sidecar)
+            return ModelDiagnosis(
+                "error",
+                f"нет sidecar {sidecar.name} для модели '{model_id}'",
+                sidecar,
+                reason="ассеты модели непригодны: нет sidecar для модели",
+            )
         try:
             spec = self._load_one(weights)
         except Exception as exc:  # noqa: BLE001 — диагноз не падает; str(exc) в текст не идёт
-            return ModelDiagnosis("error", f"sidecar {sidecar.name} не читается: {type(exc).__name__}", sidecar)
+            return ModelDiagnosis(
+                "error",
+                f"sidecar {sidecar.name} не читается: {type(exc).__name__}",
+                sidecar,
+                reason="ассеты модели непригодны: sidecar не читается",
+            )
 
         if not spec.weights_path.is_file():
-            return ModelDiagnosis("error", f"файл весов из sidecar {sidecar.name} не найден", spec.weights_path)
+            return ModelDiagnosis(
+                "error",
+                f"файл весов из sidecar {sidecar.name} не найден",
+                spec.weights_path,
+                reason="ассеты модели непригодны: нет файла весов из sidecar",
+            )
         if spec.labels_path is not None:
             try:
                 labels = spec.load_labels()
             except Exception as exc:  # noqa: BLE001 — нечитаемый файл меток — та же находка
                 return ModelDiagnosis(
-                    "error", f"файл меток из sidecar не читается: {type(exc).__name__}", spec.labels_path
+                    "error",
+                    f"файл меток из sidecar не читается: {type(exc).__name__}",
+                    spec.labels_path,
+                    reason="ассеты модели непригодны: файл меток не читается",
                 )
             if labels is None:
-                return ModelDiagnosis("error", "файл меток из sidecar отсутствует или пуст", spec.labels_path)
+                return ModelDiagnosis(
+                    "error",
+                    "файл меток из sidecar отсутствует или пуст",
+                    spec.labels_path,
+                    reason="ассеты модели непригодны: нет файла меток",
+                )
         return ModelDiagnosis(
             "info",
             f"модель '{model_id}': {spec.weights_path.name}, backend {spec.backend}",
