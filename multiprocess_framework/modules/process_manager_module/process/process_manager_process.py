@@ -124,6 +124,11 @@ HUB_QUEUES: dict[str, Any] = {
 }
 
 
+def _restart_policy_invalid_reason(name: str) -> dict:
+    """Причина «per-process ``restart_policy`` негоден»: ``failure`` / ``config``, значения входа не называет."""
+    return {"node": name, "severity": "failure", "reason": f"restart_policy негоден: {name}", "source": "config"}
+
+
 class ProcessManagerProcess(ProcessModule):
     """
     Процесс-оркестратор: управляет всеми процессами системы.
@@ -1302,21 +1307,29 @@ class ProcessManagerProcess(ProcessModule):
     def _run_auto_restart_flags(self, expected: list[str]) -> tuple[frozenset[str], list[dict]]:
         """Процессы набора с флагом ``run_auto_restart`` и причины конфига: ``(флаг действует, ошибки конфига)``.
 
-        Флаг лежит в сыром dict ``_process_configs[name]["restart_policy"]`` (``True`` строго, не «похожее на
-        истину»). Супервизор поднимает процесс только при ``enabled: true`` там же: флаг без него не действует
-        (окна перезапуска нет) и объявляется ошибкой конфига ``failure`` / ``config`` (``not_ready``).
+        Политику решает ОДИН разборщик — ``ProcessMonitor.resolve_policy`` (fix-B, M2); здесь сырой dict не читается.
+        Флаг действует, если ``policy.enabled and policy.run_auto_restart`` (супервизор процесс поднимет). Ошибки
+        конфига — ``failure`` / ``config`` (``not_ready``), без значений входа:
+          * per-process ``restart_policy`` негоден (схема его отвергла) -> «restart_policy негоден: <процесс>»;
+          * схема годна, флаг включён, ``enabled`` выключен -> ``auto_restart_config_reason``.
+        Нет монитора (нет и супервизора) — флагов нет.
         """
-        configs = getattr(self, "_process_configs", None) or {}
+        monitor = getattr(self, "_process_monitor", None)
+        resolve = getattr(monitor, "resolve_policy", None)
+        if not callable(resolve):
+            return frozenset(), []
         active: set[str] = set()
         reasons: list[dict] = []
         for name in expected:
-            cfg = configs.get(name)
-            policy = cfg.get("restart_policy") if isinstance(cfg, dict) else None
-            if not isinstance(policy, dict) or policy.get("run_auto_restart") is not True:
-                continue
-            if policy.get("enabled") is True:
+            resolved = resolve(name)
+            if not (isinstance(resolved, tuple) and len(resolved) == 2):
+                continue  # монитор-двойник (MagicMock в тестах PM) без разбора политики: у такого процесса флага нет
+            policy, valid = resolved
+            if not valid:
+                reasons.append(_restart_policy_invalid_reason(name))
+            elif policy.run_auto_restart and policy.enabled:
                 active.add(name)
-            else:
+            elif policy.run_auto_restart:
                 reasons.append(auto_restart_config_reason(name))
         return frozenset(active), reasons
 

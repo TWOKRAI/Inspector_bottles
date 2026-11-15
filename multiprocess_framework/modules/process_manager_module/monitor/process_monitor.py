@@ -280,16 +280,17 @@ class ProcessMonitor:
         ts = msg.get("timestamp")
         if not sender:
             return
-        self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
+        # fix-B (M3): забор воплощения — ОДИН раз на входе. Heartbeat чужого воплощения (поздний heartbeat старого
+        # pid) не трогает ни ``_last_heartbeat``, ни статус, ни лист, ни пометку «перезапускается».
         # Task 1.3: снимок готовности процесса. Свежесть судится по ``readiness["at"]`` (время расчёта
         # снимка наблюдателем), а не по ``_last_heartbeat``: живой heartbeat при мёртвом потоке-наблюдателе
         # не должен выглядеть «готов». Поля нет (старый ребёнок / процесс без наблюдателя) — прежний лист
         # не трогаем: он состарится по ``at`` и PM увидит «нет отчёта о готовности».
-        # Task 1.7c: пока процесс «перезапускается», heartbeat учитывается как жизнь (``_last_heartbeat`` выше), но
-        # лист не принимается; пометку снимает только первый heartbeat нового воплощения (``_accept_leaf``).
         readiness = msg.get("readiness")
-        self._accept_readiness(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None)
+        if not self._admit_heartbeat(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None):
+            return
+        self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
         # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
@@ -313,30 +314,31 @@ class ProcessMonitor:
                 self.previous_states[sender] = snap.copy()
                 self.process._log_debug(f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}")
 
-    def _accept_readiness(self, sender: str, pid: Any, readiness: dict | None) -> None:
-        """Принять лист heartbeat только от воплощения, которое сейчас в реестре; heartbeat нового воплощения
-        снимает пометку «перезапускается».
+    def _admit_heartbeat(self, sender: str, pid: Any, readiness: dict | None) -> bool:
+        """Единственная проверка воплощения на входе heartbeat: ``True`` — сообщение текущего воплощения.
 
-        Идентичность проверяется ВСЕГДА, не только в перезапуске: heartbeat с ``pid``, отличным от pid процесса в
-        реестре (если реестр его знает), — жизнь (``_last_heartbeat`` учтён выше), но лист не принимается (поздний
-        heartbeat старого воплощения не перетирает лист нового). Heartbeat без ``pid`` (старый ребёнок) принимается
-        как раньше — вне перезапуска.
+        Чужое (``False``) — вызывающий не трогает ни время heartbeat, ни статус:
+          * ``pid`` целый, pid реестра известен и не равен ему;
+          * процесс «перезапускается» (``_restarting``), а ``pid`` не новое воплощение. Новое — ``pid`` целый, равен
+            pid реестра и отличен от pid на момент решения; такой heartbeat снимает пометку. Heartbeat БЕЗ ``pid``
+            (старый контракт) в перезапуске пометку не снимает — и принятым не считается (воплощение неизвестно).
+        Вне перезапуска heartbeat без ``pid`` принимается как раньше.
 
-        Новое воплощение (снимает пометку) — ``pid`` целый, равен pid реестра и отличен от pid на момент решения;
-        heartbeat без ``pid`` пометку не снимает (строго). Pid реестра читается ДО листового замка (реестр свой
-        замок; здесь — только копия и запись).
+        Решение, снятие пометки и приём листа — под одним листовым замком (``mark_restarting`` берёт тот же): между
+        решением и записью листа пометка не успеет встать. Pid реестра читается ДО замка (реестр свой замок).
         """
         registry_pid = self._registry_pid(sender)
+        pid_is_int = type(pid) is int
         with self._readiness_lock:
             if sender in self._restarting:
-                is_new = type(pid) is int and pid == registry_pid and pid != self._restarting[sender]
-                if not is_new:
-                    return
+                if not (pid_is_int and pid == registry_pid and pid != self._restarting[sender]):
+                    return False
                 del self._restarting[sender]
-            elif pid is not None and registry_pid is not None and pid != registry_pid:
-                return
+            elif pid_is_int and registry_pid is not None and pid != registry_pid:
+                return False
             if readiness is not None:
                 self._readiness[sender] = dict(readiness)
+        return True
 
     def _registry_pid(self, process_name: str) -> int | None:
         """pid процесса в реестре PM (``None`` — нет записи / не стартован / сбой опроса)."""
@@ -925,7 +927,6 @@ class ProcessMonitor:
             if (
                 proc.name in self._pending_recovery
                 and proc.name not in self._induced_restarts
-                and proc.name not in self._restarting  # Task 1.7c: heartbeat старого воплощения — не восстановление
                 and self._last_heartbeat.get(proc.name) is not None
             ):
                 self._pending_recovery.discard(proc.name)
@@ -1218,6 +1219,26 @@ class ProcessMonitor:
     # Авто-рестарт
     # ----------------------------------------------------------------
 
+    def resolve_policy(self, process_name: str) -> tuple[RestartPolicy, bool]:
+        """Решённая политика процесса и признак «per-process dict годен»: ``(политика, valid)``.
+
+        Единственный разбор ``restart_policy`` для супервизора и PM (fix-B, M2): PM читает поля готовой схемы, своего
+        разбора сырого dict у него нет. Per-process политика из рецепта перекрывает глобальную ``self.restart_policy``;
+        пустой/отсутствующий dict -> глобальная, ``valid=True``. Негодный dict (схема его отвергла) -> глобальная,
+        ``valid=False``. Не пишет в журнал (PM зовёт на каждой оценке готовности) — предупреждает ``_resolve_policy``.
+        """
+        configs = getattr(self.process, "_process_configs", None)
+        if isinstance(configs, dict):
+            cfg = configs.get(process_name)
+            if isinstance(cfg, dict):
+                rp = cfg.get("restart_policy")
+                if isinstance(rp, dict) and rp:
+                    try:
+                        return RestartPolicy(**rp), True
+                    except Exception:  # nosec B110 — кривой per-process конфиг → глобальная политика, valid=False
+                        return self.restart_policy, False
+        return self.restart_policy, True
+
     def _resolve_policy(self, process_name: str) -> RestartPolicy:
         """Резолвить RestartPolicy процесса: per-process из рецепта или глобальная.
 
@@ -1228,22 +1249,14 @@ class ProcessMonitor:
         → глобальная (дефолт ``enabled=False`` — прод без рецепт-флага не меняется).
 
         Ссылка на ``_process_configs`` берётся живьём (как ``_active_wires`` в Ф3.5):
-        монитор читает актуальный конфиг PM без своей копии/рассинхрона.
+        монитор читает актуальный конфиг PM без своей копии/рассинхрона. Разбор — ``resolve_policy``.
         """
-        configs = getattr(self.process, "_process_configs", None)
-        if isinstance(configs, dict):
-            cfg = configs.get(process_name)
-            if isinstance(cfg, dict):
-                rp = cfg.get("restart_policy")
-                if isinstance(rp, dict) and rp:
-                    try:
-                        return RestartPolicy(**rp)
-                    except Exception:  # nosec B110 — кривой per-process конфиг → глобальная политика
-                        self.process._log_warning(
-                            f"Process '{process_name}': некорректный restart_policy в конфиге — "
-                            f"используется глобальная политика"
-                        )
-        return self.restart_policy
+        policy, valid = self.resolve_policy(process_name)
+        if not valid:
+            self.process._log_warning(
+                f"Process '{process_name}': некорректный restart_policy в конфиге — используется глобальная политика"
+            )
+        return policy
 
     @staticmethod
     def _topo_order(names: list[str], deps: dict[str, list[str]]) -> list[str]:
@@ -1422,6 +1435,8 @@ class ProcessMonitor:
             self._pending_recovery.discard(process_name)
             self._recovery_deadline.pop(process_name, None)  # H3: сдались — watchdog больше не нужен
             self._given_up.add(process_name)  # H4: гейт против health-restart-шторма
+            with self._readiness_lock:
+                self._restarting.pop(process_name, None)  # fix-B (m3): супервизор сдался — «перезапускается» неправда
             self._emit_supervisor_event(
                 process_name,
                 "gave_up",

@@ -350,8 +350,8 @@ def test_restarting_reaches_evaluation_and_gone_process_leaves_no_record() -> No
 @pytest.mark.timeout(60)
 def test_late_old_pid_heartbeat_after_lift_does_not_overwrite_new_leaf() -> None:
     """Пометка снята heartbeat нового pid (лист нового воплощения принят); затем приходит поздний heartbeat СТАРОГО
-    pid со «свежим» листом другого содержания: лист нового не перетёрт, но heartbeat учтён как жизнь
-    (``_last_heartbeat`` обновлён); heartbeat без ``pid`` и с pid реестра по-прежнему принимаются."""
+    pid со «свежим» листом другого содержания: лист нового не перетёрт, и heartbeat жизнью НЕ считается
+    (``_last_heartbeat`` не обновлён); heartbeat без ``pid`` и с pid реестра по-прежнему принимаются."""
     pm, monitor = _pm(backoff=0.3)
     _booted(pm, monitor)
     _decided(pm, monitor)
@@ -363,7 +363,7 @@ def test_late_old_pid_heartbeat_after_lift_does_not_overwrite_new_leaf() -> None
     _beat(monitor, pid=_OLD_PID, at_age=-5.0)  # лист «из будущего»: перетёр бы лист нового, будь он принят
 
     assert monitor.readiness_snapshot()["cam"]["at"] == new_at
-    assert monitor._last_heartbeat.get("cam") is not None  # heartbeat старого воплощения — всё же жизнь
+    assert monitor._last_heartbeat.get("cam") is None  # heartbeat старого воплощения жизнью НЕ считается
     fresh_at = _beat(monitor, pid=None)  # совместимость: без pid принимается
     assert monitor.readiness_snapshot()["cam"]["at"] == fresh_at
     fresher_at = _beat(monitor, pid=_NEW_PID)  # pid реестра принимается
