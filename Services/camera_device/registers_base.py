@@ -43,7 +43,11 @@ class CameraDeviceRegisters(SchemaBase):
     # --- Телеметрия (readonly — GUI смотрит, не правит) ---
     device_state: Annotated[
         str,
-        FieldMeta("Состояние прибора", info="closed | grabbing | error", readonly=True),
+        FieldMeta(
+            "Состояние прибора",
+            info="idle | opening | grabbing | stopping | closed | busy | not_found | error",
+            readonly=True,
+        ),
     ] = "closed"
 
     frames: Annotated[

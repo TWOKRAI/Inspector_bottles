@@ -8,11 +8,14 @@
 Состояния: `idle` (до первого `start`), `opening`, `grabbing`, `stopping`, `closed` (покой после остановки),
 `busy`, `not_found`, `error` (отказ; автопереподключения нет, ADR-CR-009). Переходы — только
 compare-and-set под замком состояния; `on_state`, `on_stall`, `on_timing` зовутся вне замка.
+`on_state` приходит из потока, сменившего состояние (вызывающего или владельца), поэтому из РАЗНЫХ потоков и
+может прийти не по порядку: истина — свойство `state`, потребитель при событии перечитывает его.
 
 Свойство для вызывающего: задержка исполнения команды ≤ таймаута кадра (≤ 500 мс): `stop()` ждёт выхода
 владельца не дольше `timeout + timeout_ms/1000`, потому что `get_frame` не будится `close`. GigE `open`
 (1–3 с) держит командный поток — допустимо при Р1. Поток исполнения команд фреймворка один, поэтому
-блокирующие `start(timeout)` (до `timeout`) и `stop(timeout)` (до `timeout + 0,5 с`) задерживают приём команд
+блокирующие `start(timeout)` (до `timeout`; после того как владелец перешёл к `start_grabbing` — ещё до
+`watchdog_s`) и `stop(timeout)` (до `timeout + 0,5 с`) задерживают приём команд
 процесса.
 
 Слой: только stdlib и `.interface`/`.params`; без `multiprocess_prototype` и вендоров.
@@ -36,8 +39,6 @@ MAX_CONSECUTIVE_ERRORS = 3
 _FAILED = frozenset({"busy", "not_found", "error"})
 # Вызовы порта, для которых зовётся `on_timing` (секунды).
 _TIMED = frozenset({"open", "stop_grabbing", "get_frame"})
-# Сколько ждать итога владельца после `committed` (он уже зовёт `start_grabbing`).
-_COMMIT_WAIT_S = 2.0
 
 
 class _StartCmd:
@@ -186,14 +187,19 @@ class DeviceSession:
         with self._lock:
             if cmd.done.is_set():
                 return cmd.result
-            if creator and not cmd.committed:
+            if not creator:
+                return False  # свой срок joiner'а: чужой цикл не отменяется
+            if not cmd.committed:
                 cmd.cancelled = True  # владелец откатит цикл после open / _apply_run
                 return False
-            committed = creator
-        if committed:
-            cmd.done.wait(_COMMIT_WAIT_S)
+        # Владелец уже зовёт `start_grabbing`: ждём итог не дольше `watchdog_s` (дольше — зависание, его ловит сторож).
+        if cmd.done.wait(self._watchdog_s):
             return cmd.result
-        return False
+        with self._lock:
+            if cmd.done.is_set():
+                return cmd.result
+            cmd.cancelled = True  # владелец, вернувшись из `start_grabbing`, откатит цикл
+            return False
 
     def stop(self, timeout: float = 2.0) -> None:
         """Остановить захват; не отбрасывается. `timeout` — только срок ожидания вызывающего."""
@@ -277,6 +283,20 @@ class DeviceSession:
             cmd.committed = True
             return True
 
+    def _enter_grabbing(self, cmd: _StartCmd, stop_evt: threading.Event) -> bool:
+        """После `start_grabbing` под замком: отмена/стоп -> откат (`False`), иначе `grabbing` и итог `True`.
+
+        Ответ `start()` всегда равен реальному состоянию: `True` только если цикл остался `grabbing`.
+        """
+        pending: list[tuple[str, str]] = []
+        with self._lock:
+            abort = cmd.cancelled or stop_evt.is_set()
+            if not abort:
+                self._set_locked("grabbing", pending)
+        self._fire_states(pending)
+        cmd.finish(not abort)
+        return not abort
+
     def _apply_run(self) -> None:
         """Точка вставки Task 2.2: профиль `run` между `open` и `start_grabbing`."""
 
@@ -301,12 +321,11 @@ class DeviceSession:
             if self._commit(cmd, stop_evt):
                 self._port_call("start_grabbing", self._port.start_grabbing)
                 grabbing = True
-                self._cas(("opening",), "grabbing")  # stop() успел -> `stopping` остаётся, цикл завершится по stop_evt
-                cmd.finish(True)
-                failed = not self._grab_loop(stop_evt)
+                if self._enter_grabbing(cmd, stop_evt):
+                    failed = not self._grab_loop(stop_evt)
         except PortError as exc:
             failed = True
-            self._fail(_failed_state(exc, opening=not grabbing), exc)
+            self._fail(_failed_state(exc, opening=not opened), exc)
         except Exception as exc:  # noqa: BLE001 — любой отказ владельца -> error, порт закрывается ниже
             failed = True
             self._fail("error", exc)

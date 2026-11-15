@@ -91,6 +91,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._seq = 0
         self._frames = 0
         self._session: DeviceSession | None = None
+        self._session_lock = threading.Lock()  # ленивое создание сеанса: start() и команда из другого потока
         ctx.declare_metric("frames")
 
     def start(self, ctx: PluginContext) -> None:
@@ -111,7 +112,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._slot = (self._seq, time.time(), time.monotonic(), raw)
 
     def _on_state(self, old: str, new: str) -> None:
-        self._reg.device_state = new
+        # События приходят из разных потоков и могут опередить друг друга: истина — `session.state`.
+        session = self._session
+        self._reg.device_state = session.state if session is not None else new
 
     def produce(self) -> list[dict]:
         """Забрать кадр из слота в item. Пусто — норма. Не блокирует."""
@@ -147,7 +150,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _ensure_session(self) -> DeviceSession:
-        if self._session is None:
+        with self._session_lock:
+            if self._session is not None:
+                return self._session
             port = create_port(self._reg.driver)
             self._session = DeviceSession(
                 port,

@@ -212,9 +212,6 @@ def test_grabbing_не_перезаписывает_stopping(rig):
     a.join(5.0)
     assert ("opening", "grabbing") not in rig.states
     assert session.state == "closed"
-    # compare-and-set напрямую: из `closed` переход «в grabbing» не проходит
-    assert session._cas(("opening",), "grabbing") is False
-    assert session.state == "closed"
 
 
 @pytest.mark.timeout(20)
@@ -225,10 +222,10 @@ def test_внешний_stop_не_держит_замок_пока_ждёт_вл
     box: dict = {}
     stopper = _in_thread(lambda: session.stop(2.0), box, "stop")
     _await(lambda: session.state == "stopping", "state == stopping", deadline=1.0)
-    # Пока stop() ждёт владельца (~0,5 с): замок свободен — состояние читается, start() отвечает сразу.
-    assert session._lock.acquire(timeout=0.05), "stop() держит замок состояния на join владельца"
-    session._lock.release()
+    # Пока stop() ждёт владельца (~0,5 с), замок свободен: start() отвечает отказом сразу (< 0,1 с).
+    t0 = time.perf_counter()
     assert session.start(1.0) is False
+    assert time.perf_counter() - t0 < 0.1
     stopper.join(3.0)
     assert not stopper.is_alive()
     _await(lambda: session.state == "closed", "state == closed")
@@ -267,3 +264,138 @@ def test_on_stall_из_потока_сторожа_и_потоки_daemon(rig):
     assert owners and all(t.daemon for t in owners)
     session.stop(2.0)
     _await(lambda: session.state == "closed", "state == closed")
+
+
+def _stop_in_thread(session, timeout: float, box: dict):
+    return _in_thread(lambda: session.stop(timeout), box, "stop")
+
+
+@pytest.mark.timeout(20)
+def test_срок_stop_владелец_завис_в_get_frame(rig):
+    port, session = rig.make(timeout_ms=100, watchdog_s=0.5, get_frame_hang_s=1.0)
+    assert session.start(2.0) is True
+    time.sleep(0.05)
+    box: dict = {}
+    stopper = _stop_in_thread(session, 0.05, box)
+    stopper.join(1.0)
+    assert not stopper.is_alive()
+    assert box["stop"][1] <= 0.25  # срок stop() = timeout + timeout_ms/1000, а не выход владельца (~1 с)
+    assert session.state == "stopping"
+    assert session.device_held is True
+    t0 = time.perf_counter()
+    assert session.start(0.5) is False
+    assert time.perf_counter() - t0 < 0.05
+    _await(lambda: session.state == "closed", "state == closed", deadline=3.0)
+    names = _names(port)
+    assert names[-3:] == ["stop_grabbing", "close", "release"]
+    assert names.count("open") == 1
+
+
+@pytest.mark.timeout(20)
+def test_после_stop_владелец_вышел_device_held_False(rig):
+    port, session = rig.make()
+    assert session.start(2.0) is True
+    session.stop(2.0)
+    assert session.device_held is False  # владелец успел выйти за срок stop()
+    assert session.state == "closed"
+
+
+@pytest.mark.timeout(20)
+def test_start_из_on_frame_и_из_on_state_closed_отказывает(rig):
+    box: dict = {}
+
+    def on_frame(frame) -> None:
+        box.setdefault("frame", session.start(0.5))
+
+    def on_state(old: str, new: str) -> None:
+        if new == "closed":
+            box.setdefault("closed", session.start(0.5))
+
+    port, session = rig.make(on_frame=on_frame, on_state=on_state)
+    assert session.start(2.0) is True
+    _await(lambda: "frame" in box, "on_frame вызван")
+    assert box["frame"] is False  # из потока владельца: сразу False, самосоединения нет
+    session.stop(2.0)
+    _await(lambda: "closed" in box, "on_state(closed) вызван")
+    assert box["closed"] is False
+    _await(lambda: session.device_held is False, "владелец вышел")
+    assert _names(port).count("open") == 1
+
+
+@pytest.mark.timeout(20)
+def test_busy_на_start_grabbing_это_error_а_не_busy(rig):
+    from Services.camera_device.interface import PortError
+
+    port, session = rig.make()
+
+    def refuse() -> None:
+        raise PortError("busy", "start_grabbing")
+
+    port.start_grabbing = refuse
+    assert session.start(2.0) is False
+    _await(lambda: session.device_held is False, "владелец вышел")
+    assert session.state == "error"
+    assert "PortError" in session.last_error
+    names = _names(port)
+    assert names.count("close") == names.count("open") == 1
+
+
+def _slow_start_grabbing(port, seconds: float) -> None:
+    original = port.start_grabbing
+
+    def slow() -> None:
+        time.sleep(seconds)
+        original()
+
+    port.start_grabbing = slow
+
+
+@pytest.mark.timeout(20)
+def test_stop_после_committed_ответ_start_равен_состоянию(rig):
+    port, session = rig.make(open_delay_s=0.1)
+    _slow_start_grabbing(port, 0.2)
+    box: dict = {}
+    a = _in_thread(lambda: session.start(5.0), box, "a")
+    time.sleep(0.2)  # владелец уже в start_grabbing (committed)
+    session.stop(2.0)
+    a.join(5.0)
+    _await(lambda: session.device_held is False, "владелец вышел")
+    assert box["a"][0] is False  # цикл откатан стопом: ответ не врёт про захват
+    assert session.state == "closed"
+    assert ("opening", "grabbing") not in rig.states
+    assert _names(port)[-3:] == ["stop_grabbing", "close", "release"]
+
+
+@pytest.mark.timeout(20)
+def test_committed_но_start_grabbing_дольше_watchdog_откат_по_сроку(rig):
+    port, session = rig.make(timeout_ms=100, watchdog_s=0.5)
+    _slow_start_grabbing(port, 1.0)
+    t0 = time.perf_counter()
+    assert session.start(0.1) is False
+    seconds = time.perf_counter() - t0
+    assert 0.5 <= seconds < 0.9  # timeout 0,1 + ожидание после commit не дольше watchdog_s
+    _await(lambda: session.device_held is False, "владелец вышел", deadline=3.0)
+    assert session.state == "closed"  # ответ False и состояние согласованы
+    assert ("opening", "grabbing") not in rig.states
+    assert _names(port).count("close") == 1
+
+
+@pytest.mark.timeout(30)
+def test_регистр_плагина_не_устаревает_при_гонке_on_state(rig):
+    import threading as th
+
+    for _ in range(10):
+        reg = {"device_state": "closed"}
+        holder: dict = {}
+
+        def on_state(old: str, new: str) -> None:
+            if th.current_thread().name != "camera_device-owner":
+                time.sleep(0.05)  # поток вызывающего start(): событие опаздывает
+            reg["device_state"] = holder["session"].state  # как plugin_base._on_state
+
+        port, session = rig.make(busy_for_s=60.0, on_state=on_state)
+        holder["session"] = session
+        session.start(1.0)
+        _await(lambda: session.device_held is False, "владелец вышел")
+        time.sleep(0.12)
+        assert reg["device_state"] == session.state == "busy"
