@@ -45,8 +45,9 @@ from Services.robot_comm.store import RobotDataStore
 
 from .registers import DeviceHubRegisters
 
-# Корень проекта — для резолва относительных путей
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+# Корень проекта — для резолва относительных путей.
+# <repo>/Plugins/hub/device_hub/plugin.py: [0]=device_hub, [1]=hub, [2]=Plugins, [3]=<repo> (как segmentation/plugin.py)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Бюджет корня области потоков хаба, с (О8): окно ``work`` процесса 3.0 с минус запас 0.5 с
 _SCOPE_BUDGET_S = 2.5
@@ -80,6 +81,29 @@ def _resolve_registry_path(raw_path: str) -> Path:
             return base.parent / raw_path
         return base / raw_path
     return _PROJECT_ROOT / raw_path
+
+
+def _warn_legacy_registry(resolved: Path, legacy: Path, log_warning: Callable[[str], None]) -> None:
+    """Одно предупреждение, если данных по новому пути нет, а по прежнему (над корнем проекта) есть.
+
+    Ничего не копирует, не читает из ``legacy`` и не создаёт: перенос — руками владельца.
+    Все проверки существования — под одним ``try``: ``OSError`` (например, ``PermissionError``) на любом пути
+    не роняет ``configure``, а попадает в лог.
+    """
+    try:
+        if resolved.exists() or (resolved.parent / "robot").exists():
+            return
+        if not (legacy.is_file() or (legacy.parent / "robot").is_dir()):
+            return
+    except OSError as exc:  # no-health: проверка прежнего места не критична для запуска
+        log_warning(f"DeviceHubPlugin: проверка прежнего места реестра не удалась ({legacy.parent}): {exc!r}")
+        return
+    log_warning(
+        f"DeviceHubPlugin: реестр устройств ожидается в {resolved}, но данные найдены по прежнему пути {legacy} "
+        f"(каталог данных {legacy.parent}; корень проекта раньше считался на уровень выше); "
+        "перенесите вручную, если это ваш реестр: "
+        "devices.yaml и каталог robot/"
+    )
 
 
 @register_plugin(
@@ -177,7 +201,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._reg: DeviceHubRegisters = self._init_register(ctx)
 
             # Резолв пути к реестру (У6)
-            resolved = _resolve_registry_path(self._reg.registry_path)
+            raw_path = self._reg.registry_path
+            resolved = _resolve_registry_path(raw_path)
+            # Прежнее место (корень считался на уровень выше): зовём, только если путь пришёл из корня проекта
+            # (не INSPECTOR_DATA_DIR). Для абсолютного пути условие тоже истинно, но legacy == resolved, и функция
+            # молчит. Однократность — следствие: после первого сохранения реестр существует.
+            if resolved == _PROJECT_ROOT / raw_path:
+                _warn_legacy_registry(resolved, _PROJECT_ROOT.parent / raw_path, ctx.log_warning)
             resolved.parent.mkdir(parents=True, exist_ok=True)
 
             store = RegistryStore(resolved)
