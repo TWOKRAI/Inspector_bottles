@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import threading
 import time
@@ -68,6 +69,31 @@ def _state_snapshot_from_process_data(process_data: Any) -> dict[str, Any] | Non
         "metadata": dict(meta) if isinstance(meta, dict) else {},
         "custom": safe_custom,
     }
+
+
+def normalize_leaf(name: str, raw: dict) -> dict:
+    """Лист готовности процесса ``name`` с границы heartbeat: годный — копия как есть, негодный — заменяющий лист.
+
+    Форма (контракт ``readiness()``): ``at`` — конечное число (не ``bool``), ``reasons`` — список dict, ``ready`` и
+    ``paused`` — ``bool``, если присутствуют. Негодная форма даёт лист ``ready: false`` с одной причиной ``failure`` /
+    ``report`` «лист готовности негоден: <процесс>» и ``at`` = сейчас (значений входа в причине нет): процесс
+    ``not_ready``, но оценка остальных процессов не падает на чужом мусоре (fix-B3, F1). ``paused`` у заменяющего листа
+    ложен: остановку мусорный лист подтвердить не может.
+    """
+    at = raw.get("at")
+    reasons = raw.get("reasons", [])
+    valid = (
+        type(at) in (int, float)
+        and math.isfinite(at)
+        and isinstance(reasons, list)
+        and all(isinstance(r, dict) for r in reasons)
+        and type(raw.get("ready", False)) is bool
+        and type(raw.get("paused", False)) is bool
+    )
+    if valid:
+        return dict(raw)
+    reason = {"node": name, "severity": "failure", "reason": f"лист готовности негоден: {name}", "source": "report"}
+    return {"ready": False, "reasons": [reason], "paused": False, "at": time.time()}
 
 
 class ProcessMonitor:
@@ -288,8 +314,10 @@ class ProcessMonitor:
         # не должен выглядеть «готов». Поля нет (старый ребёнок / процесс без наблюдателя) — прежний лист
         # не трогаем: он состарится по ``at`` и PM увидит «нет отчёта о готовности».
         readiness = msg.get("readiness")
+        if readiness is not None and not isinstance(readiness, dict):
+            readiness = {}  # поле есть, но не dict — негодный лист (``normalize_leaf``), а не «поля нет»
         stamp = ts if isinstance(ts, (int, float)) else time.time()
-        if not self._admit_heartbeat(sender, msg.get("pid"), readiness if isinstance(readiness, dict) else None, stamp):
+        if not self._admit_heartbeat(sender, msg.get("pid"), readiness, stamp):
             return
 
         # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
@@ -339,7 +367,7 @@ class ProcessMonitor:
             elif pid_is_int and registry_pid is not None and pid != registry_pid:
                 return False
             if readiness is not None:
-                self._readiness[sender] = dict(readiness)
+                self._readiness[sender] = normalize_leaf(sender, readiness)
             self._last_heartbeat[sender] = stamp
         return True
 
@@ -365,6 +393,16 @@ class ProcessMonitor:
             self._restarting[process_name] = pid
             self._readiness.pop(process_name, None)
             self._last_heartbeat.pop(process_name, None)  # база heartbeat — с той же пометкой (N1: атомарно с допуском)
+
+    def unmark_restarting(self, process_name: str) -> None:
+        """Снять пометку «перезапускается» при ПРОВАЛЕ замены воплощения (fix-B3, F4).
+
+        У пометки два владельца исхода: успех снимает первый heartbeat нового pid (``_admit_heartbeat``), провал
+        ``restart_process`` — этот метод. Время heartbeat не трогает (``mark_restarting`` уже сбросил базу; живой
+        процесс вернёт её следующим heartbeat).
+        """
+        with self._readiness_lock:
+            self._restarting.pop(process_name, None)
 
     def _is_replaced_incarnation(self, proc: Any) -> bool:
         """Мёртвый ``proc`` — то самое воплощение, которое супервизор решил заменить (его pid в ``_restarting``)."""

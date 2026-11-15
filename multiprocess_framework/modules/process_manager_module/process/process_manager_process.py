@@ -5527,6 +5527,20 @@ class ProcessManagerProcess(ProcessModule):
         mark = getattr(getattr(self, "_process_monitor", None), "mark_restarting", None)
         if callable(mark):
             mark(process_name)
+        # fix-B3 (F4): у пометки два владельца исхода — успех (heartbeat нового pid) и провал (здесь): любой выход без
+        # ``True`` (``stop_process`` ложь, воплощение не создано, исключение) снимает пометку, иначе живой процесс
+        # остаётся «перезапускающимся» навсегда, а его heartbeat отбрасывается как чужой.
+        replaced = False
+        try:
+            replaced = self._restart_process_replace(process_name, config)
+            return replaced
+        finally:
+            unmark = getattr(getattr(self, "_process_monitor", None), "unmark_restarting", None)
+            if not replaced and callable(unmark):
+                unmark(process_name)
+
+    def _restart_process_replace(self, process_name: str, config: dict[str, Any]) -> bool:
+        """Замена воплощения после пометки ``mark_restarting``: stop -> снять с реестра -> create -> start -> ready."""
         # ADR-PMM-030: метку НЕ ставить — очереди переиспользуются новым воплощением.
         if not self.stop_process(process_name, mark_reader_gone=False):
             return False
