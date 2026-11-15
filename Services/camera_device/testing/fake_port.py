@@ -6,7 +6,7 @@
 
 Опции: `neter_after_stop`, `applied_but_error` (`bool | frozenset[str]`), `busy_for_s`, `capabilities`;
 для сеанса (Task 2.1): `open_delay_s`, `frame_period_s`, `get_frame_hang_s` (+ `arm_hang`), `get_frame_errors`,
-`get_frame_script` (умолчания сохраняют поведение 1.5).
+`get_frame_script`, `read_offset` (умолчания сохраняют поведение 1.5).
 Журнал вызовов `FakePort.calls` — список `(имя, args, threading.get_ident())`; пишется ДО проверок
 состояния, поэтому отказ тоже виден. Фейковый `DeviceSdk` пишет в тот же журнал.
 """
@@ -179,6 +179,7 @@ class FakePort:
         get_frame_hang_s: float = 0.0,
         get_frame_errors: int = 0,
         get_frame_script: tuple[str, ...] = (),
+        read_offset: dict[str, float] | None = None,
     ) -> None:
         script = ("err",) * get_frame_errors + tuple(get_frame_script)
         unknown = sorted(set(script) - SCRIPT_STEPS)
@@ -199,6 +200,7 @@ class FakePort:
         self._frame_period_s = frame_period_s
         self._hang_s = get_frame_hang_s  # разовое: `arm_hang` взводит повторно
         self._script = script
+        self._read_offset = dict(read_offset or {})  # ключ — Binding.key; только чтение, узел не меняется
         self._get_frame_calls = 0  # вызовы `get_frame` с последнего `start_grabbing`
         self._next_frame_at = 0.0
 
@@ -274,6 +276,10 @@ class FakePort:
             raise PortError("access", "get_param", node.closed_code)
         if node.value is None:
             raise PortError("other", "get_param", node.read_rc or None)
+        offset = self._read_offset.get(b.key)
+        if offset is not None and node.type in ("int", "float"):
+            shifted = node.value + offset
+            return int(shifted) if node.type == "int" else shifted
         return node.value
 
     def set_param(self, b: Binding, value: object) -> None:
@@ -384,6 +390,7 @@ def make_port(
     get_frame_hang_s: float = 0.0,
     get_frame_errors: int = 0,
     get_frame_script: tuple[str, ...] = (),
+    read_offset: dict[str, float] | None = None,
 ) -> FakePort:
     """Фейк с узлами по умолчанию."""
     return FakePort(
@@ -397,6 +404,7 @@ def make_port(
         get_frame_hang_s=get_frame_hang_s,
         get_frame_errors=get_frame_errors,
         get_frame_script=get_frame_script,
+        read_offset=read_offset,
     )
 
 
@@ -412,6 +420,7 @@ def from_recording(
     get_frame_hang_s: float = 0.0,
     get_frame_errors: int = 0,
     get_frame_script: tuple[str, ...] = (),
+    read_offset: dict[str, float] | None = None,
 ) -> FakePort:
     """Фейк с узлами из записи (относительный путь читается от cwd; тесты идут из корня репозитория)."""
     return FakePort(
@@ -425,4 +434,5 @@ def from_recording(
         get_frame_hang_s=get_frame_hang_s,
         get_frame_errors=get_frame_errors,
         get_frame_script=get_frame_script,
+        read_offset=read_offset,
     )

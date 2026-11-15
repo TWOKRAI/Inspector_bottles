@@ -14,11 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from Services.camera_device.interface import DeviceIdentity, PortError
+from Services.camera_device.interface import Binding, DeviceIdentity, PortError
 from Services.camera_device.testing.fake_port import from_recording, make_port
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MVCR_RECORDING = REPO_ROOT / "Services/camera_device/testing/recordings/mvcr_ID3013.json"
+MVS_RECORDING = REPO_ROOT / "Services/camera_device/testing/recordings/mvs_MV-CS020-10GC.json"
 IDENT = DeviceIdentity("serial", "FAKE-0001")
 
 
@@ -179,3 +180,80 @@ def test_from_recording_принимает_те_же_опции():
     with pytest.raises(PortError):
         port.get_frame(10)
     assert port.get_frame(100) is not None
+
+
+# --- read_offset (Task 2.2, шаг 1): чтение = записанное + смещение для числовых узлов ---------------------
+
+TRIGGER_MODE = Binding("genicam", "TriggerMode", "enum")
+TRIGGER_SOURCE = Binding("genicam", "TriggerSource", "enum")
+PERIOD = Binding("genicam", "TriggerSelfTriggerPeriod", "int")
+EXPOSURE = Binding("genicam", "ExposureTime", "float")
+
+
+def _open_period(port) -> None:
+    """Открыть закрытый узел периода: TriggerMode=On -> TriggerSource=SelfTrigger (правило родителей фейка)."""
+    port.open(IDENT)
+    port.set_param(TRIGGER_MODE, "On")
+    port.set_param(TRIGGER_SOURCE, "SelfTrigger")
+
+
+def test_read_offset_умолчание_чтение_равно_записи():
+    port = make_port()
+    _open_period(port)
+    port.set_param(PERIOD, 40)
+    port.set_param(EXPOSURE, 2000.0)
+    assert port.get_param(PERIOD) == 40
+    assert port.get_param(EXPOSURE) == 2000.0
+    assert port.get_param(TRIGGER_MODE) == "On"
+
+
+def test_read_offset_int_узел_записано_40_прочитано_41_внутреннее_значение_не_меняется():
+    port = make_port(read_offset={"TriggerSelfTriggerPeriod": 1})
+    _open_period(port)
+    port.set_param(PERIOD, 40)
+    assert port.get_param(PERIOD) == 41
+    assert port.get_param(PERIOD) == 41  # смещение не накапливается: внутреннее значение осталось 40
+    other = make_port()
+    _open_period(other)
+    other.set_param(PERIOD, 40)
+    assert other._nodes["TriggerSelfTriggerPeriod"].value == 40 == port._nodes["TriggerSelfTriggerPeriod"].value
+
+
+def test_read_offset_float_узел_из_записи_mvs():
+    port = from_recording(MVS_RECORDING, read_offset={"ExposureTime": 1e-7})
+    port.open(IDENT)
+    port.set_param(EXPOSURE, 2000.0)  # inc=None: шага у узла нет
+    assert port.get_param(EXPOSURE) == 2000.0 + 1e-7
+    assert port._nodes["ExposureTime"].value == 2000.0
+
+
+def test_read_offset_enum_узел_смещение_игнорируется():
+    port = make_port(read_offset={"TriggerMode": 5, "TriggerSource": 1.5})
+    port.open(IDENT)
+    port.set_param(TRIGGER_MODE, "On")
+    assert port.get_param(TRIGGER_MODE) == "On"
+
+
+def test_read_offset_только_для_ключей_из_словаря():
+    port = make_port(read_offset={"TriggerSelfTriggerPeriod": 1})
+    _open_period(port)
+    port.set_param(EXPOSURE, 2000.0)
+    assert port.get_param(EXPOSURE) == 2000.0  # у ExposureTime смещения нет
+
+
+def test_read_offset_журнал_get_param_по_прежнему_имя_args_thread_id():
+    port = make_port(read_offset={"ExposureTime": 1.0})
+    port.open(IDENT)
+    port.get_param(EXPOSURE)
+    assert [(name, args) for name, args, _ in port.calls] == [
+        ("open", ("serial", "FAKE-0001")),
+        ("get_param", ("ExposureTime",)),
+    ]
+    assert port.calls[1][2] == threading.get_ident()
+
+
+def test_read_offset_from_recording_умолчание_пусто():
+    port = from_recording(MVS_RECORDING)
+    port.open(IDENT)
+    port.set_param(EXPOSURE, 2000.0)
+    assert port.get_param(EXPOSURE) == 2000.0
