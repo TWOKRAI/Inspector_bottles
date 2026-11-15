@@ -12,17 +12,25 @@
 - env-ручка (обе формы пары) перекрывает дефолт;
 - легаси-реестр прежнего имени НЕ осиротел: он реапается и удаляется;
 - легаси-реестр НЕ трогается, когда он же является текущим (приложение с тем
-  самым именем) — иначе уборка снесла бы рабочий файл.
+  самым именем) — иначе уборка снесла бы рабочий файл;
+- (D2) имя по умолчанию включает отпечаток корня checkout: два checkout одного
+  приложения не делят реестр и не реапают друг друга; прежнее неразделённое имя D4
+  не реапается и не удаляется.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+import psutil
 import pytest
 
+import multiprocess_framework
 from multiprocess_framework.modules.process_manager_module.launcher import pid_registry
 
 
@@ -59,7 +67,8 @@ class TestDefaultNameIsAppScoped:
 
     def test_app_name_appears_in_file_name(self, monkeypatch):
         monkeypatch.setenv("MPF_APP_NAME", "Inspector Bottles")
-        assert pid_registry.pid_file_path().name == "Inspector_Bottles_system_pids.jsonl"
+        name = pid_registry.pid_file_path().name
+        assert re.fullmatch(r"Inspector_Bottles_[0-9a-f]{8}_system_pids\.jsonl", name), name
 
     @pytest.mark.parametrize("env_key", ["MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE"])
     def test_env_handle_overrides_default(self, monkeypatch, tmp_path, env_key):
@@ -96,14 +105,50 @@ class TestLegacyRegistryIsNotOrphaned:
         assert pid_registry.legacy_pid_file_path() is None
 
     def test_legacy_not_reported_when_it_is_the_current_file(self, monkeypatch, legacy_file):
-        """Приложение с именем 'inspector': файл — свой рабочий, а не чужой хвост.
+        """Явная ручка указывает на легаси-файл: он — свой рабочий, а не чужой хвост.
 
         Без этой развилки уборка удаляла бы реестр прямо под работающей системой.
+        (С D2 дефолтное имя приложения 'inspector' с ним уже не совпадает — см. тест ниже.)
         """
-        monkeypatch.setenv("MPF_APP_NAME", "inspector")
+        monkeypatch.setenv("MULTIPROCESS_PID_FILE", str(legacy_file))
         legacy_file.write_text('{"pid": 1, "ct": null}\n', encoding="utf-8")
         assert pid_registry.pid_file_path() == legacy_file
         assert pid_registry.legacy_pid_file_path() is None
+
+    def test_inspector_app_unscoped_file_is_not_legacy(self, monkeypatch, legacy_file):
+        """Приложение 'inspector': ``inspector_system_pids.jsonl`` — неразделённый реестр D4.
+
+        Он не легаси «до D4» (его не реапают и не удаляют), и текущий реестр теперь другой.
+        """
+        monkeypatch.setenv("MPF_APP_NAME", "inspector")
+        legacy_file.write_text('{"pid": 1, "ct": null}\n', encoding="utf-8")
+        assert pid_registry.pid_file_path() != legacy_file
+        assert pid_registry.legacy_pid_file_path() is None
+
+    def test_case_insensitive_fs_same_file_is_not_legacy(self, monkeypatch, tmp_path, legacy_file):
+        """``MPF_APP_NAME=Inspector`` на регистронезависимой ФС — тот же файл, другая строка."""
+        probe = tmp_path / "CaseProbe"
+        probe.write_text("", encoding="utf-8")
+        if not (tmp_path / "caseprobe").exists():
+            pytest.skip("регистрозависимая ФС: имена Inspector_… и inspector_… — разные файлы")
+        monkeypatch.setenv("MPF_APP_NAME", "Inspector")
+        legacy_file.write_text('{"pid": 1, "ct": null}\n', encoding="utf-8")
+        assert pid_registry.legacy_pid_file_path() is None
+
+    def test_legacy_of_other_app_is_still_reaped(self, monkeypatch, legacy_file):
+        """Граница D2 (зелёный пин ДО и ПОСЛЕ): другое приложение по-прежнему реапает легаси."""
+        monkeypatch.setenv("MPF_APP_NAME", "AppOne")
+        victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            ct = psutil.Process(victim.pid).create_time()
+            legacy_file.write_text(json.dumps({"pid": victim.pid, "ct": ct}) + "\n", encoding="utf-8")
+            pid_registry.reap_and_reset()
+            victim.wait(timeout=10)
+            assert not legacy_file.exists()
+        finally:
+            if victim.poll() is None:
+                victim.kill()
+                victim.wait(timeout=5)
 
     def test_reap_removes_legacy_file(self, monkeypatch, tmp_path, legacy_file):
         """reap_and_reset подбирает легаси-реестр и удаляет его; текущий остаётся пустым."""
@@ -147,3 +192,81 @@ class TestRegisterSelfFollowsAppName:
         for path in (one, two):
             entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
             assert len(entries) == 1, f"{path.name}: чужие записи протекли в реестр приложения"
+
+
+class TestCheckoutScope:
+    """Область реестра — приложение И checkout (D2)."""
+
+    @pytest.fixture
+    def root_of(self, monkeypatch):
+        """Подмена шва ``_checkout_root``: имитирует checkout в другом каталоге."""
+
+        def _set(path: str) -> None:
+            monkeypatch.setattr(pid_registry, "_checkout_root", lambda: Path(path))
+
+        return _set
+
+    @staticmethod
+    def _live_victim_registered(path: Path) -> subprocess.Popen:
+        victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        ct = psutil.Process(victim.pid).create_time()
+        path.write_text(json.dumps({"pid": victim.pid, "ct": ct}) + "\n", encoding="utf-8")
+        return victim
+
+    def test_two_checkouts_two_files(self, root_of):
+        root_of("/work/checkout_a")
+        first = pid_registry.default_pid_file_name("AppOne")
+        root_of("/work/checkout_b")
+        second = pid_registry.default_pid_file_name("AppOne")
+        assert first != second
+        for name in (first, second):
+            assert re.fullmatch(r"AppOne_[0-9a-f]{8}_system_pids\.jsonl", name), name
+
+    def test_same_checkout_same_file(self, root_of):
+        root_of("/work/checkout_a")
+        assert pid_registry.default_pid_file_name("AppOne") == pid_registry.default_pid_file_name("AppOne")
+        assert pid_registry.pid_file_path() == pid_registry.pid_file_path()
+
+    def test_real_root_is_the_dir_containing_the_package(self):
+        """Шов без подмены: корень — каталог над пакетом (литерал из ``__file__``, не из кода под тестом)."""
+        expected = Path(multiprocess_framework.__file__).resolve().parent.parent
+        assert pid_registry._checkout_root() == expected
+
+    def test_unscoped_d4_file_is_never_reaped(self, monkeypatch, tmp_path):
+        """Файл прежнего имени ``<app>_system_pids.jsonl`` — не реапается и не удаляется."""
+        monkeypatch.setenv("MPF_APP_NAME", "AppOne")
+        d4_file = tmp_path / "AppOne_system_pids.jsonl"
+        victim = self._live_victim_registered(d4_file)
+        try:
+            before = d4_file.read_bytes()
+            assert pid_registry.pid_file_path() != d4_file
+            pid_registry.reap_and_reset()
+            assert victim.poll() is None, "реестр прежнего имени реапнут — убит процесс чужого запуска"
+            assert d4_file.read_bytes() == before, "реестр прежнего имени изменён/удалён"
+        finally:
+            victim.kill()
+            victim.wait(timeout=5)
+
+    def test_neighbour_checkout_survives_reap(self, monkeypatch, root_of):
+        monkeypatch.setenv("MPF_APP_NAME", "AppOne")
+        root_of("/work/checkout_a")
+        reg_a = pid_registry.pid_file_path()
+        victim = self._live_victim_registered(reg_a)
+        try:
+            before = reg_a.read_bytes()
+            root_of("/work/checkout_b")
+            assert pid_registry.pid_file_path() != reg_a
+            assert pid_registry.reap_and_reset() == 0
+            assert victim.poll() is None, "реап из checkout B убил процесс checkout A"
+            assert reg_a.read_bytes() == before
+        finally:
+            victim.kill()
+            victim.wait(timeout=5)
+
+    def test_checkout_root_failure_degrades_not_raises(self, monkeypatch):
+        """Корень не определился -> общее имя, а не исключение (``clear()`` считает путь вне try)."""
+        monkeypatch.setattr(multiprocess_framework, "__path__", None)
+        assert pid_registry._checkout_root() == Path("unknown-checkout")
+        name = pid_registry.default_pid_file_name("AppOne")
+        assert re.fullmatch(r"AppOne_[0-9a-f]{8}_system_pids\.jsonl", name), name
+        pid_registry.clear()  # не падает

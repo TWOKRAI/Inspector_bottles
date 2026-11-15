@@ -19,10 +19,19 @@ PID операционной системой (не убьём чужой про
 приложения на фреймворке делили ОДИН реестр в общей temp-директории, поэтому старт
 второго реапал живые процессы первого. Теперь имя — ``<app>_system_pids.jsonl`` по
 ``MPF_APP_NAME``, и приложения друг друга не видят.
+
+**И от checkout** (D2). Область реестра — приложение И корень checkout: в имя входит
+отпечаток каталога, содержащего пакет ``multiprocess_framework``
+(``<app>_<tag>_system_pids.jsonl``). Иначе два клона/worktree ОДНОГО приложения на одной
+машине делили файл, и старт одного убивал живые процессы другого (``create_time``
+защищает только от переиспользования PID, не от «чужого, но живого»). Реестр прежнего
+неразделённого имени ``<app>_system_pids.jsonl`` не реапается и не удаляется: его записи
+нельзя отнести к конкретному checkout. Лог реапа называет pid и имя каждой жертвы.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -39,9 +48,37 @@ _ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
 _LEGACY_DEFAULT_NAME = "inspector_system_pids.jsonl"
 
 
-def default_pid_file_name(app_name: str | None = None) -> str:
-    """Имя дефолтного файла-реестра для приложения (``<app>_system_pids.jsonl``)."""
+#: Запасной «корень» на случай, когда корень checkout определить не удалось: имя
+#: деградирует до общего для всех checkout (как до D2), но не падает.
+_UNKNOWN_CHECKOUT = Path("unknown-checkout")
+
+
+def _checkout_root() -> Path:
+    """Корень checkout — каталог, содержащий пакет ``multiprocess_framework``.
+
+    Берётся из ``__path__`` (он есть и у namespace-пакета, ``__file__`` может быть
+    ``None``). Любая ошибка -> запасной корень: ``clear()`` считает путь вне ``try``.
+    """
+    try:
+        import multiprocess_framework as _pkg
+
+        return Path(list(_pkg.__path__)[0]).resolve().parent
+    except Exception:  # noqa: BLE001 — не определили корень = общее имя, не падение
+        return _UNKNOWN_CHECKOUT
+
+
+def _unscoped_default_name(app_name: str | None = None) -> str:
+    """Прежнее (D4) неразделённое имя ``<app>_system_pids.jsonl`` — только для сверки легаси."""
     return f"{app_name_slug(app_name)}_system_pids.jsonl"
+
+
+def default_pid_file_name(app_name: str | None = None) -> str:
+    """Имя дефолтного файла-реестра: ``<app>_<tag>_system_pids.jsonl``.
+
+    ``tag`` — 8 hex-символов sha1 от корня checkout (область: приложение И checkout).
+    """
+    tag = hashlib.sha1(str(_checkout_root()).encode("utf-8")).hexdigest()[:8]  # nosec B324 — не криптография
+    return f"{app_name_slug(app_name)}_{tag}_system_pids.jsonl"
 
 
 def pid_file_path() -> Path:
@@ -53,15 +90,32 @@ def pid_file_path() -> Path:
     return Path(tempfile.gettempdir()) / default_pid_file_name()
 
 
+def _same_file(first: Path, second: Path) -> bool:
+    """Один и тот же файл: ``samefile``; если файла нет — сравнение ``normcase`` имён.
+
+    На регистронезависимой ФС ``Inspector_…`` и ``inspector_…`` — одна сущность при разных
+    строках, поэтому строкового ``resolve() ==`` мало.
+    """
+    try:
+        return os.path.samefile(first, second)
+    except OSError:  # одного из файлов нет / недоступен
+        pass
+    return os.path.normcase(str(first)) == os.path.normcase(str(second))
+
+
 def legacy_pid_file_path() -> Path | None:
     """Реестр прежнего продуктового имени, если он ещё лежит в temp и это НЕ текущий.
 
-    Возвращает ``None``, когда легаси-файла нет либо когда текущий реестр — он же
-    (приложение с ``MPF_APP_NAME=inspector``: файл не «чужой хвост», а свой рабочий).
+    Возвращает ``None``, когда легаси-файла нет либо когда он — тот же файл, что текущий
+    реестр или неразделённый дефолт D4 (приложение ``inspector``: файл не «чужой хвост»,
+    а реестр прежней версии, который D2 не трогает).
     """
-    legacy = Path(tempfile.gettempdir()) / _LEGACY_DEFAULT_NAME
+    tmp = Path(tempfile.gettempdir())
+    legacy = tmp / _LEGACY_DEFAULT_NAME
     try:
         if not legacy.exists():
+            return None
+        if _same_file(legacy, tmp / _unscoped_default_name()):
             return None
         if legacy.resolve() == pid_file_path().resolve():
             return None
@@ -183,10 +237,19 @@ def _reap_file(path: Path, *, log=None) -> int:
                     continue
             for p in victims:
                 try:
+                    name = p.name()
+                except Exception:  # noqa: BLE001 — имя нужно только для журнала
+                    name = "?"
+                try:
                     p.kill()
                     killed += 1
                 except Exception:  # noqa: BLE001
-                    pass
+                    continue
+                if log is not None:
+                    try:
+                        log(f"PID-реестр: убит pid={p.pid} ({name})")
+                    except Exception:  # noqa: BLE001
+                        pass
             if victims:
                 psutil.wait_procs(victims, timeout=3.0)
 

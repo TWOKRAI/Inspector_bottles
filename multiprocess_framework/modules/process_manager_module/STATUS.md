@@ -217,3 +217,7 @@
 ## Последний итог стопа доезжает до опроса (2026-11-11, C-88, ADR-PMM-045)
 
 - После `done` PM до `_STATUS_LINGER_S` (0.5 с) отвечает на `supervision.status`, если статус опрашивают прямо сейчас (метка моложе 0.25 с); без наблюдателя цена нулевая. Hazard-тесты H1-H10: `tests/test_c88_status_linger_hazards.py`; живой стенд и ревью — за лидом.
+
+## PID-реестр: область «приложение И checkout» (2026-11-15, D2, ADR-PMM-046)
+
+- Имя дефолтного реестра — `<app>_<tag>_system_pids.jsonl` (`tag` — отпечаток корня checkout): два checkout одного приложения не реапают друг друга. Прежний неразделённый файл `<app>_system_pids.jsonl` не реапается и не удаляется. Лог реапа: строка на жертву `убит pid=… (имя)`. Границы (легаси не-`inspector` приложений, параллельный запуск того же checkout, SHM/порт/логи вне реестра) — в ADR-PMM-046. Тесты: `tests/test_pid_registry_app_scoped.py`, `tests/test_pid_registry.py`, `tests/test_pid_registry_checkout_acceptance.py`.
