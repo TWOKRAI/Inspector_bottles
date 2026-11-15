@@ -287,6 +287,17 @@ class FakePlanner:
 # ---------------------------------------------------------------------------
 
 
+def make_monitor_double() -> MagicMock:
+    """Двойник ``ProcessMonitor`` с ответами настоящей формы: политика по умолчанию годна, листов и рестартов нет."""
+    from ..core.restart_policy import RestartPolicy
+    from ..monitor.process_monitor import ProcessMonitor
+
+    monitor = MagicMock(spec=ProcessMonitor)
+    monitor.resolve_policy.return_value = (RestartPolicy(), True)
+    monitor.readiness_view.return_value = ({}, frozenset())
+    return monitor
+
+
 def make_pm(
     process_configs: dict[str, dict] | None = None,
     *,
@@ -320,8 +331,8 @@ def make_pm(
         registry._next_process_factory = next_process_factory
     pm._process_registry = registry
 
-    # ProcessMonitor
-    pm._process_monitor = MagicMock()
+    # ProcessMonitor: двойник с формой настоящего (r2 N3) — PM зовёт resolve_policy / readiness_view без проверки формы.
+    pm._process_monitor = make_monitor_double()
     pm._process_monitor._monitoring = True
 
     # Priority

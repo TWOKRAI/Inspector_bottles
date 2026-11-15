@@ -26,7 +26,7 @@ import pytest
 
 from ..core.process_registry import ProcessRegistry
 from ..runner.process_runner import run_process_function
-from .conftest import make_pm
+from .conftest import make_monitor_double, make_pm
 
 _PM_MOD = "multiprocess_framework.modules.process_manager_module.process.process_manager_process"
 _RUNNER_MOD = "multiprocess_framework.modules.process_manager_module.runner.process_runner"
@@ -49,7 +49,7 @@ def test_process_manager_hands_run_event_to_registry(run_gate: bool) -> None:
         patch(f"{_PM_MOD}.ProcessRegistry") as reg_cls,
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
     ):
         pm._create_components()

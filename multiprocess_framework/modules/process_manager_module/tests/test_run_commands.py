@@ -24,7 +24,7 @@ import pytest
 
 from ..monitor.process_monitor import ProcessMonitor
 from ..process.process_manager_process import ProcessManagerProcess
-from .conftest import make_pm
+from .conftest import make_monitor_double, make_pm
 
 _PM_MOD = "multiprocess_framework.modules.process_manager_module.process.process_manager_process"
 _JOIN_S = 20.0
@@ -40,7 +40,7 @@ def make_run_pm(run_gate: Any = True, *, boot: bool = True) -> ProcessManagerPro
         patch(f"{_PM_MOD}.ProcessRegistry"),
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
     ):
         pm._create_components()
@@ -449,7 +449,7 @@ def make_readiness_pm(configs: dict[str, dict], *, run_gate: bool = True) -> tup
         patch(f"{_PM_MOD}.ProcessRegistry"),
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
     ):
         pm._create_components()

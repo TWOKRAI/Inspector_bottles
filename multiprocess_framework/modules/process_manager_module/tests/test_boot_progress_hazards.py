@@ -167,9 +167,9 @@ def test_finish_called_exactly_once_on_ready_and_not_ready(reported: bool, expec
     pm = _bare_boot_pm(configs, _Registry(set(), set()))
     if reported:
         now = time.time()
-        pm._process_monitor.readiness_snapshot.return_value = {
-            n: {"ready": True, "reasons": [], "paused": False, "at": now} for n in ("a", "b")
-        }
+        leaves = {n: {"ready": True, "reasons": [], "paused": False, "at": now} for n in ("a", "b")}
+        pm._process_monitor.readiness_snapshot.return_value = leaves
+        pm._process_monitor.readiness_view.return_value = (leaves, frozenset())
     finish_calls: list[str] = []
     real_finish = ProgressTracker.finish
 

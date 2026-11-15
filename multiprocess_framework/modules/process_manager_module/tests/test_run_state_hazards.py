@@ -22,6 +22,7 @@ import pytest
 
 from ..process import process_manager_process as pm_mod
 from ..process.process_manager_process import ProcessManagerProcess
+from .conftest import make_monitor_double
 from .test_run_commands import (
     _PM_MOD,
     _failure_nodes,
@@ -421,7 +422,7 @@ def _initialize_bare_pm(configs: dict[str, dict]) -> ProcessManagerProcess:
         patch(f"{_PM_MOD}.ProcessRegistry"),
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
         patch.object(ProcessManagerProcess, "get_config", return_value=None),
     ):
@@ -446,10 +447,11 @@ def test_initialize_settles_by_evaluation(configs, reported, expected_state, exp
     registry = MagicMock()
     registry.get_process_by_name.side_effect = lambda n: MagicMock(is_alive=MagicMock(return_value=True))
     pm._process_registry = registry
-    monitor = MagicMock()
+    monitor = make_monitor_double()
     now = time.time()
     leaves = {"cam": {"ready": True, "reasons": [], "paused": False, "at": now}} if reported else {}
     monitor.readiness_snapshot.return_value = leaves
+    monitor.readiness_view.return_value = (leaves, frozenset())
     pm._process_monitor = monitor
 
     with (

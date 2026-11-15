@@ -1234,15 +1234,16 @@ class ProcessManagerProcess(ProcessModule):
     def _readiness_view(self) -> tuple[dict[str, dict], frozenset[str]]:
         """Листы готовности и имена «перезапускается» одним снимком монитора (Task 1.7c): ``(листы, перезапускаемые)``.
 
-        Воплощение процесса знает только супервизор (``ProcessMonitor``) — PM его не копит. Монитор без
-        ``readiness_view`` (двойник) — листы из ``readiness_snapshot``, перезапускаемых нет.
+        Воплощение процесса знает только супервизор (``ProcessMonitor``) — PM его не копит. Монитора нет — листы из
+        ``_readiness_leaves``, перезапускаемых нет. Форма ответа монитора не проверяется (r2 N3): двойник в тестах —
+        ``MagicMock(spec=ProcessMonitor)`` с ответом настоящей формы.
         """
         monitor = getattr(self, "_process_monitor", None)
         view = getattr(monitor, "readiness_view", None)
-        result = view() if callable(view) else None
-        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], dict):
-            return result[0], frozenset(result[1])
-        return self._readiness_leaves(), frozenset()
+        if not callable(view):
+            return self._readiness_leaves(), frozenset()
+        leaves, restarting = view()
+        return leaves, frozenset(restarting)
 
     def _admission_stale_s(self) -> float:
         """Порог свежести листа для ДОПУСКА (``ack``/START): ``stale_s`` минус интервал heartbeat (2/3 ``stale_s``).
@@ -1317,16 +1318,16 @@ class ProcessManagerProcess(ProcessModule):
         """
         monitor = getattr(self, "_process_monitor", None)
         resolve = getattr(monitor, "resolve_policy", None)
-        if not callable(resolve):
+        if not callable(resolve) or not expected:
+            # Пустой набор — флагов и ошибок конфига нет. Проверка ДО ``_get_protected_names``: тот читает
+            # ``_process_configs`` строго, а набор (``_run_expected_names``) — терпимо к его отсутствию (PM до загрузки
+            # конфигов); непустой набор взят из ``_process_configs``, значит он есть (fix-A3).
             return frozenset(), []
         protected = self._get_protected_names()
         active: set[str] = set()
         reasons: list[dict] = []
         for name in expected:
-            resolved = resolve(name)
-            if not (isinstance(resolved, tuple) and len(resolved) == 2):
-                continue  # монитор-двойник (MagicMock в тестах PM) без разбора политики: у такого процесса флага нет
-            policy, valid = resolved
+            policy, valid = resolve(name)
             if not valid:
                 reasons.append(_restart_policy_invalid_reason(name))
             elif policy.run_auto_restart and policy.enabled:
@@ -1413,8 +1414,27 @@ class ProcessManagerProcess(ProcessModule):
 
     def _settle_run_state(self) -> None:
         """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
-        ready, reasons = self._evaluate_run_readiness()
+        ready, reasons = self._evaluate_or_fail()
         self._run_apply("settled", ready=ready, reasons=reasons)
+
+    def _evaluate_or_fail(self) -> tuple[bool, list[dict]]:
+        """Оценка готовности для итога ``settled``, которая не бросает (свежее ревью Ф1, F2 / совет С1).
+
+        У ``booting`` и ``stopping`` выход — только ``settled``: исключение оценки оставило бы машину там навсегда
+        (START -> ``not_ready`` без причин). Сбой — ERROR с типом исключения и итог «не готов» с причиной
+        ``failure`` / ``report`` «оценка готовности не удалась» (узел — PM); следующий такт оценивает заново.
+        """
+        try:
+            return self._evaluate_run_readiness()
+        except Exception as exc:  # noqa: BLE001 — итог машины не имеет права не случиться
+            self._log_error(f"readiness: оценка готовности не удалась ({type(exc).__name__})")
+            reason = {
+                "node": getattr(self, "name", "ProcessManager"),
+                "severity": "failure",
+                "source": "report",
+                "reason": "оценка готовности не удалась",
+            }
+            return False, [reason]
 
     def _boot_progress_begin(self) -> None:
         """Завести шкалу загрузки и записать «стор поднят» (5 %). Стора нет — шкалы нет, boot прежний."""
@@ -2030,7 +2050,7 @@ class ProcessManagerProcess(ProcessModule):
             if self._run_state is not RunState.stopping:
                 return  # system.shutdown обогнал: машину ведёт он
         self._mark_unconfirmed(added)
-        ready, reasons = self._evaluate_run_readiness()
+        ready, reasons = self._evaluate_or_fail()  # F2: итог STOP случается и при сбое оценки
         self._run_apply("settled", ready=ready, reasons=reasons)
 
     def _cmd_system_shutdown(self, data=None, **kwargs) -> dict:
