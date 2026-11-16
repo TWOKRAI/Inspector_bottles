@@ -432,7 +432,7 @@ _STALE_AGE_S = 3600.0
 
 
 def _reason(severity: str, node: str, source: str = "plugin") -> dict:
-    return {"severity": severity, "source": source, "node": node, "message": f"{node}: {severity}"}
+    return {"severity": severity, "source": source, "node": node, "reason": f"{node}: {severity}"}
 
 
 def make_readiness_pm(configs: dict[str, dict], *, run_gate: bool = True) -> tuple[ProcessManagerProcess, Any]:

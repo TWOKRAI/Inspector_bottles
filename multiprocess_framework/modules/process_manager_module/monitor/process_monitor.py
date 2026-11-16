@@ -16,7 +16,7 @@ from multiprocessing import Event
 from typing import Any
 
 from ...config_module.feature_flags import is_enabled
-from ...process_module.health.schema import HealthField, HealthStatus, health_path
+from ...process_module.health.schema import HealthField, HealthStatus, health_path, readiness_reasons_are_valid
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.alert_rules import (
     DEFAULT_RULES,
@@ -74,9 +74,13 @@ def _state_snapshot_from_process_data(process_data: Any) -> dict[str, Any] | Non
 def normalize_leaf(name: str, raw: dict) -> dict:
     """Лист готовности процесса ``name`` с границы heartbeat: годный — копия как есть, негодный — заменяющий лист.
 
-    Форма (контракт ``readiness()``): ``at`` — конечное число (не ``bool``), ``reasons`` — список dict, ``ready`` и
-    ``paused`` — ``bool``, если присутствуют. Негодная форма даёт лист ``ready: false`` с одной причиной ``failure`` /
-    ``report`` «лист готовности негоден: <процесс>» и ``at`` = сейчас (значений входа в причине нет): процесс
+    Форма (контракт ``readiness()``): ``at`` — конечное число (не ``bool``); ``reasons`` — список причин, каждая годна
+    по ``readiness_reasons_are_valid`` (``node`` / ``severity`` / ``reason`` / ``source`` — ``str``, ``severity`` из
+    шкалы, текст и число причин ограничены; те же правила и константы у отправителя-ребёнка); ``ready`` и ``paused`` —
+    ``bool``, если присутствуют. Негодна одна причина — негоден весь лист: контракт нарушен, остальным причинам такого
+    листа верить нельзя (отправитель сам обрезает и приводит поля, так что годный лист этого правила не касается).
+    Негодная форма даёт лист ``ready: false`` с одной причиной ``failure`` / ``report`` «лист готовности негоден:
+    <процесс>» и ``at`` = сейчас (значений входа в причине нет): процесс
     ``not_ready``, но оценка остальных процессов не падает на чужом мусоре (fix-B3, F1). ``paused`` у заменяющего листа
     ложен: остановку мусорный лист подтвердить не может.
     """
@@ -85,8 +89,7 @@ def normalize_leaf(name: str, raw: dict) -> dict:
     valid = (
         type(at) in (int, float)
         and math.isfinite(at)
-        and isinstance(reasons, list)
-        and all(isinstance(r, dict) for r in reasons)
+        and readiness_reasons_are_valid(reasons)
         and type(raw.get("ready", False)) is bool
         and type(raw.get("paused", False)) is bool
     )

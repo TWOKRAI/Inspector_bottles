@@ -1511,11 +1511,39 @@ class ProcessManagerProcess(ProcessModule):
         # Ревью Ф1, m2: оценка идёт вне ``_run_lock``; START между оценкой и применением делает такт устаревшим —
         # ``_run_apply`` отбросит его по метке начала оценки.
         eval_started = time.monotonic()
-        ready, reasons = self._evaluate_run_readiness(track_restart=True)
+        try:
+            ready, reasons = self._evaluate_run_readiness(track_restart=True)
+        except Exception as exc:  # noqa: BLE001 — сбой оценки: серия, а не потерянный такт (ниже)
+            ready, reasons = self._evaluation_failed(exc)
+        else:
+            self._eval_fail_since = None  # первый успешный такт сбрасывает серию
         new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons, eval_started=eval_started)
         if new is RunState.fault and prev is not RunState.fault:
             self._start_fault_stop()  # Task 1.4: остановка в аварии идёт не на потоке монитора
         self._publish_readiness_leaves()
+
+    def _evaluation_failed(self, exc: Exception) -> tuple[bool | None, list[dict]]:
+        """Сбой оценки готовности на такте: ``(ready, reasons)`` для ``tick`` (fix-B4, совет ревью Ф1).
+
+        Подряд идущие сбои — серия (``_eval_fail_since`` — ``time.monotonic()`` первого). ERROR — один раз на серию, не
+        на каждом такте (монитор крутит такт ~2 Гц). В статус кладётся причина ``failure`` «оценка готовности не
+        удалась» (без текста исключения). Пока серия короче срока молчания (``_run_stale_s``), ``ready`` остаётся
+        прежним (``None`` — последний результат ``tick``): состояние не дребезжит от одиночного сбоя. Серия дольше
+        срока — то же молчание, что «нет отчёта о готовности» (R2/R3): ``ready=False``, в ``running`` это ``fault``.
+        Выполняется только на потоке монитора (такт), замок не нужен.
+        """
+        now = time.monotonic()
+        since = getattr(self, "_eval_fail_since", None)
+        if since is None:
+            since = self._eval_fail_since = now
+            self._log_error(f"оценка готовности не удалась: {type(exc).__name__}: {exc}")
+        reason = {
+            "node": self.name,
+            "severity": "failure",
+            "reason": "оценка готовности не удалась",
+            "source": "liveness",
+        }
+        return (False if now - since >= self._run_stale_s() else None), [reason]
 
     def _publish_readiness_leaves(self) -> None:
         """Записать листья ``processes.<n>.readiness.<поле>`` в стор (для GUI); неизменённые значения пропускаются.
@@ -2037,16 +2065,23 @@ class ProcessManagerProcess(ProcessModule):
         авария — состояние остаётся ``fault``, ``fault_stop_done``, причины срока — в ``last_fault.reasons``."""
         added = {name: timeout_s for name in names}
         if fault:
+            append_failed: Exception | None = None
             with self._run_lock:
                 last = self._run_last_fault
                 if self._fault_seq != seq or self._run_state is not RunState.fault or last is None:
                     return
-                if added:
-                    have = {(r.get("node"), r.get("reason")) for r in last["reasons"]}
-                    fresh = [stop_unconfirmed_reason(n, timeout_s) for n in names]
-                    fresh = [r for r in fresh if (r["node"], r["reason"]) not in have]
-                    self._run_last_fault = {**last, "reasons": [dict(r) for r in last["reasons"]] + fresh}
-                self._fault_stop_done = True
+                try:
+                    if added:
+                        have = {(r.get("node"), r.get("reason")) for r in last["reasons"]}
+                        fresh = [stop_unconfirmed_reason(n, timeout_s) for n in names]
+                        fresh = [r for r in fresh if (r["node"], r["reason"]) not in have]
+                        self._run_last_fault = {**last, "reasons": [dict(r) for r in last["reasons"]] + fresh}
+                except Exception as exc:  # noqa: BLE001 — дописывание причин срока не должно оставить ``ack`` без выхода
+                    append_failed = exc
+                finally:
+                    self._fault_stop_done = True  # выход из ``fault`` (``ack``) гарантирован при любом сбое выше
+            if append_failed is not None:
+                self._log_error(f"остановка в аварии: причины срока не дописаны ({type(append_failed).__name__})")
             self._mark_unconfirmed(added)
             self._publish_run_state()
             return

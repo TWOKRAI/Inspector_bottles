@@ -23,18 +23,22 @@ import time
 from typing import Any
 
 from . import frame_trace
+from ..health.schema import (
+    READINESS_BLOCKING_SEVERITIES,
+    READINESS_REASON_MAX_LEN,
+    READINESS_REASONS_MAX,
+    READINESS_SEVERITIES,
+)
 from ..plugins.base import PluginContext, PluginState, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
 
-#: Словарь ``severity`` в элементе ``readiness()`` плагина (контракт хука).
-_SEVERITIES: tuple[str, ...] = ("failure", "check_function", "out_of_spec", "maintenance")
-#: Эти два уровня блокируют готовность процесса (``out_of_spec``/``maintenance`` — нет).
-_BLOCKING_SEVERITIES: tuple[str, ...] = ("failure", "check_function")
-#: Потолок текста причины, символов (длиннее — обрезается).
-_REASON_MAX_LEN = 200
-#: Потолок числа причин на процесс, включая маркер «причин больше 32».
-_REASONS_MAX = 32
+#: Словарь ``severity``, блокирующие уровни и потолки причин — из контракта (``health/schema.py``): те же значения
+#: проверяет получатель (монитор PM, ``readiness_reasons_are_valid``), расхождения быть не может.
+_SEVERITIES = READINESS_SEVERITIES
+_BLOCKING_SEVERITIES = READINESS_BLOCKING_SEVERITIES
+_REASON_MAX_LEN = READINESS_REASON_MAX_LEN  # длиннее — обрезается
+_REASONS_MAX = READINESS_REASONS_MAX  # включая маркер «причин больше 32»
 #: Не чаще раза в это время сверка повторяет упавший ``pause()/resume()`` одного плагина, сек.
 _HOOK_RETRY_SEC = 1.0
 #: Сколько ``shutdown()`` ждёт замок сверки (медленный хук наблюдателя), сек.

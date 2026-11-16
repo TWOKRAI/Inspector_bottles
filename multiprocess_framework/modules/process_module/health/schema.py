@@ -122,6 +122,42 @@ READINESS_REASON_KEYS: tuple[str, ...] = (
     ReadinessReasonKey.SOURCE,
 )
 
+#: Шкала ``severity`` причины готовности (NE 107; порядок — по убыванию тяжести).
+READINESS_SEVERITIES: tuple[str, ...] = ("failure", "check_function", "out_of_spec", "maintenance")
+#: Уровни ``severity``, блокирующие готовность (``out_of_spec`` / ``maintenance`` — нет).
+READINESS_BLOCKING_SEVERITIES: tuple[str, ...] = ("failure", "check_function")
+#: Потолок текста причины, символов (отправитель обрезает, получатель длиннее не принимает).
+READINESS_REASON_MAX_LEN = 200
+#: Потолок числа причин одного листа, включая маркер «причин больше N».
+READINESS_REASONS_MAX = 32
+
+
+def readiness_reason_is_valid(reason: object) -> bool:
+    """Форма одной причины ``reasons``: единый источник правды для отправителя (ребёнок) и получателя (монитор PM).
+
+    Годна: dict, где ``node`` / ``severity`` / ``reason`` / ``source`` — ровно ``str`` (подклассы и контейнеры не
+    проходят: поля хешируются и пиклятся дальше), ``severity`` из ``READINESS_SEVERITIES``, текст не длиннее
+    ``READINESS_REASON_MAX_LEN``. Лишние ключи не запрещены (контракт — не меньше четырёх).
+    """
+    if not isinstance(reason, dict):
+        return False
+    for key in READINESS_REASON_KEYS:
+        if type(reason.get(key)) is not str:
+            return False
+    return (
+        reason[ReadinessReasonKey.SEVERITY] in READINESS_SEVERITIES
+        and len(reason[ReadinessReasonKey.REASON]) <= READINESS_REASON_MAX_LEN
+    )
+
+
+def readiness_reasons_are_valid(reasons: object) -> bool:
+    """Список причин годен: ``list`` не длиннее ``READINESS_REASONS_MAX``, каждая причина годна."""
+    return (
+        isinstance(reasons, list)
+        and len(reasons) <= READINESS_REASONS_MAX
+        and all(readiness_reason_is_valid(r) for r in reasons)
+    )
+
 
 def health_root(process: str) -> str:
     """Корень поддерева здоровья процесса: ``processes.<process>.health``."""
