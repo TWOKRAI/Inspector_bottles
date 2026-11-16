@@ -691,7 +691,21 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         interval = params.get("poll_interval_s", 0.5)
                         if isinstance(interval, str):
                             interval = float(interval)
-                        self._read_conn_stale(did, params.get("conn_stale_s"))
+                        stale = self._read_tune(
+                            did, "conn_stale_s", params.get("conn_stale_s"), integer=False, zero_is_off=True
+                        )
+                        if stale is None:
+                            self._conn_stale_s.pop(did, None)
+                        else:
+                            self._conn_stale_s[did] = float(stale)
+                        # Лимит исключений такта подряд при живой связи; умолчание — политика, не подтверждённая
+                        # владельцем (ADR-PH-004)
+                        fails_limit = (
+                            self._read_tune(
+                                did, "tick_fails_limit", params.get("tick_fails_limit"), integer=True, zero_is_off=False
+                            )
+                            or _TICK_FAILS_LIMIT
+                        )
                         # Новый воркер — новое начало отсчёта возраста (зависание первого такта тоже видно)
                         self._tick_ok_at[did] = _clock()
                         fails = 0  # исключений ``drv.tick`` подряд
@@ -703,7 +717,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             try:
                                 tick_n += 1
                                 snapshot = drv.tick(stop_evt)
-                                self._tick_ok_at[did] = _clock()
+                                # Воркер, снятый во время такта, возраст не пишет: иначе он воскресил бы запись,
+                                # снятую ``_stop_device_worker``, и новый воркер получил бы чужой возраст
+                                if not stop_evt.is_set():
+                                    self._tick_ok_at[did] = _clock()
                                 fails = 0
                                 if snapshot is not None:
                                     self._publish_state(f"devices.state.{did}.status", snapshot)
@@ -722,12 +739,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                         {"method": "modbus", **io},
                                     )
                             except Exception as exc:
-                                if self._ctx:
-                                    self._ctx.health.report_error(exc, context=f"device_hub.tick.{did}", throttle=30.0)
-                                self._publish_state(f"devices.state.{did}.last_error", str(exc))
-                                # Исключение такта не оставляет факт устаревшим: оборванная связь — сразу, живая —
-                                # после ``_TICK_FAILS_LIMIT`` подряд. Локальный ``snapshot`` сюда НЕ идёт
-                                # (значение прошлого такта)
+                                # Сначала факт связи: оборванная связь — сразу, живая — после ``_TICK_FAILS_LIMIT``
+                                # исключений подряд. Локальный ``snapshot`` сюда НЕ идёт (значение прошлого такта)
                                 fails += 1
                                 try:
                                     conn = _conn_of(drv, None)
@@ -735,8 +748,20 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                     conn = "error"
                                 if conn != "connected":
                                     self._set_conn(did, conn, ts=tick_n)
-                                elif fails >= _TICK_FAILS_LIMIT:
+                                elif fails >= fails_limit:
                                     self._set_conn(did, "error", ts=tick_n)
+                                # Затем отчёты, каждый в своём try: сбой health или публикации не убивает поток воркера
+                                if self._ctx:
+                                    try:
+                                        self._ctx.health.report_error(
+                                            exc, context=f"device_hub.tick.{did}", throttle=30.0
+                                        )
+                                    except Exception:  # no-health: сам канал health сбойнул — поток воркера жив
+                                        pass
+                                try:
+                                    self._publish_state(f"devices.state.{did}.last_error", str(exc))
+                                except Exception:  # no-health: публикация last_error не должна убить воркер
+                                    pass
                             stop_evt.wait(interval)
 
                     return tick_loop
@@ -770,18 +795,25 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             exc, context="device_hub.create_worker", device_id=dev_id, worker=wname
                         )
 
-    def _read_conn_stale(self, dev_id: str, value: Any) -> None:
-        """``params.conn_stale_s`` -> ``_conn_stale_s``: число > 0 включает порог (с), ``None`` / 0 — выключен.
+    def _read_tune(self, dev_id: str, key: str, value: Any, *, integer: bool, zero_is_off: bool) -> int | float | None:
+        """Ключ подстройки устройства (``params.<key>``) при старте воркера: годное число > 0 или ``None``.
 
-        Негодное значение (строка, ``bool``, отрицательное) — порог выключен и одна WARNING на запуск воркера.
+        ``integer`` — только ``int`` (иначе ``int`` и ``float``); ``bool`` не годится. ``None`` (ключа нет) — молча
+        ``None``; ``0`` — молча ``None`` при ``zero_is_off`` (порог выключен), иначе негоден. Негодное значение
+        (строка, ``bool``, отрицательное, дробное при ``integer``) — ``None`` и одна WARNING на запуск воркера; что
+        значит ``None`` (выключено или умолчание), решает вызывающий.
         """
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-            self._conn_stale_s[dev_id] = float(value)
-            return
-        self._conn_stale_s.pop(dev_id, None)
-        zero = isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0
-        if value is not None and not zero and self._ctx:
-            self._ctx.log_warning(f"device_hub: {dev_id}: params.conn_stale_s негоден — возраст связи не проверяется")
+        if value is None:
+            return None
+        typed = isinstance(value, int) if integer else isinstance(value, (int, float))
+        if typed and not isinstance(value, bool):
+            if value > 0:
+                return value
+            if value == 0 and zero_is_off:
+                return None
+        if self._ctx:
+            self._ctx.log_warning(f"device_hub: {dev_id}: params.{key} негоден — подстройка не применена")
+        return None
 
     def _stop_device_worker(self, dev_id: str) -> None:
         """Остановить и ПОЛНОСТЬЮ удалить per-device воркер из WorkerManager.

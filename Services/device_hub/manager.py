@@ -293,7 +293,6 @@ class DeviceManager(BaseManager, ObservableMixin):
         словарь не меняет. Не трогает ``request_stop_all``, ``_shutdown`` и очереди драйверов.
         """
         results: dict[str, dict] = {}
-        call_state = {"closed": False}  # под _pause_lock: вызов закрыт, поздние потоки в results не пишут
         targets: list[tuple[str, str, dict]] = []
         for entry in self.snapshot_registry():
             dev_id = entry.id
@@ -324,7 +323,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             try:
                 handles.append(
                     self._spawn(
-                        lambda _ev, d=dev_id, o=op, a=args: self._pause_one(d, o, a, results, call_state),
+                        lambda _ev, d=dev_id, o=op, a=args: self._pause_one(d, o, a, results),
                         name=f"pause-{dev_id}-{_next_stop_k()}",
                     )
                 )
@@ -334,7 +333,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                     text = f"device_hub: поток паузы не запущен ({type(exc).__name__}) — пауза идёт в этом потоке"
                     (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
         for dev_id, op, args in inline:
-            self._pause_one(dev_id, op, args, results, call_state)
+            self._pause_one(dev_id, op, args, results)
         for handle in handles:
             try:
                 report = handle.close(max(0.0, deadline - time.monotonic()))
@@ -344,7 +343,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             if report.survivors:
                 logger.warning(f"device_hub: поток паузы не вышел к сроку: {list(report.survivors)}")
         with self._pause_lock:
-            call_state["closed"] = True
+            # Поздний поток пишет в ``results`` и после возврата, но вернулась копия: защита — копия под замком
             for dev_id, op, _args in targets:
                 results.setdefault(dev_id, {"status": "error", "op": op, "message": "нет ответа к сроку"})
             return dict(results)
@@ -392,9 +391,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             return None
         return op, args or {}
 
-    def _pause_one(
-        self, dev_id: str, op: str, args: dict, results: dict[str, dict], call_state: dict[str, bool]
-    ) -> None:
+    def _pause_one(self, dev_id: str, op: str, args: dict, results: dict[str, dict]) -> None:
         """Одна команда паузы устройству (поток ``pause-<id>-<k>`` или вызывающий поток); итог — в ``results``."""
         try:
             reply = self.call(dev_id, op, dict(args))  # копия: dict внутри ClassVar общий, драйвер вправе его менять
@@ -408,8 +405,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             with self._pause_lock:
                 self._pause_inflight.discard(dev_id)
         with self._pause_lock:
-            if not call_state["closed"]:
-                results[dev_id] = outcome
+            results[dev_id] = outcome
 
     def _on_shutdown(self) -> bool:
         """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""

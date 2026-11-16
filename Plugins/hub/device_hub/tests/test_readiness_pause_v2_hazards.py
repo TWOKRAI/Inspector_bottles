@@ -13,17 +13,23 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from Plugins.hub.device_hub.plugin import TEXT_STATE_UNAVAILABLE
+import pytest
+
+from multiprocess_framework.modules.process_module.generic import plugin_orchestrator
+from Plugins.hub.device_hub.plugin import _PAUSE_EPISODE_S, TEXT_STATE_UNAVAILABLE
 from Plugins.hub.device_hub.tests.test_readiness_and_pause import make_hub
 from Plugins.hub.device_hub.tests.test_readiness_pause_v2 import (
     _DEV,
+    _LINK_ERROR,
     _NOT_CONNECTED,
     _STALE_FAIL,
     _TCP,
     _THREE,
     Hang,
     Scene,
+    Steps,
     bounded,
     make_scene,
     until,
@@ -196,6 +202,102 @@ def test_b4c_desired_false_then_true_does_not_inherit_old_age(make_scene: Callab
     assert f"dev_{_DEV}" not in sc.ctx.worker_manager.workers, "обвязка: воркер должен быть снят"
     sc.plugin._desired_connected[_DEV] = True
     assert sc.readiness() == [], "до первого хода нового воркера возраст не проверяется"
+
+
+def test_b4d_zombie_tick_returning_after_disconnect_does_not_write_age(make_scene: Callable[..., Scene]) -> None:
+    """Такт завис, воркер снят (disconnect), такт вернулся ПОЗДНО: снятый воркер возраст не пишет. Иначе после паузы
+    дольше ``conn_stale_s`` и ``connect`` новый воркер получил бы чужой возраст -> ложное «нет обновления связи»."""
+    sc = make_scene(params=_STALE, clock=True)
+    hang = sc.hook(_DEV, Hang())
+    sc.start_worker()
+    sc.wait_readiness(_STALE_FAIL, 2.5)
+    assert sc.plugin.cmd_device_disconnect({"device_id": _DEV})["status"] == "ok"
+    bounded(sc.plugin._process_conn_queue)
+    for evt in sc.stop_events:  # настоящий remove_worker взводит stop_evt воркера; ``FakeWorkerManager`` — нет
+        evt.set()
+    hang.release()  # зависший такт возвращается после снятия воркера
+    for thread in sc.threads:
+        thread.join(3.0)
+    assert not any(t.is_alive() for t in sc.threads)
+    assert sc.clock is not None
+    sc.clock.jump(5.0)  # устройство отключено дольше порога
+    assert sc.plugin.cmd_device_connect({"device_id": _DEV})["status"] == "ok"
+    bounded(sc.plugin._process_conn_queue)
+    assert sc.readiness() == [], "до первого хода нового воркера возраст не проверяется"
+
+
+def test_b7_health_failure_in_tick_exception_branch_keeps_worker_and_fact(make_scene: Callable[..., Scene]) -> None:
+    """Исключение такта + сбой ``health.report_error``: факт связи уже опубликован, поток воркера жив, следующий
+    успешный такт освежает возраст (порог 1,0 с, часы +5 с)."""
+    sc = make_scene(params={"poll_interval_s": 0.05, "conn_stale_s": 1.0}, clock=True)
+    steps = sc.hook(_DEV, Steps(["raise", "ok"]))
+    thread = sc.start_worker()
+    steps.wait_first_entry()
+    sc.drivers[_DEV].up = False
+    sc.ctx.health.report_error.side_effect = RuntimeError("health boom")
+    steps.step()
+    assert thread.is_alive(), "воркер умер от сбоя health в ветке исключения такта"
+    assert sc.readiness() == _NOT_CONNECTED, "факт связи должен быть опубликован до отчётов"
+    sc.drivers[_DEV].up = True
+    assert sc.clock is not None
+    sc.clock.jump(5.0)
+    steps.step()
+    assert thread.is_alive()
+    assert sc.readiness() == [], "успешный такт после сбоя health освежает возраст"
+
+
+def _fail_scene(make_scene: Callable[..., Scene], outcomes: list[str], **params: Any) -> tuple[Scene, Steps]:
+    sc = make_scene(params={"poll_interval_s": 0.05, **params})
+    steps = sc.hook(_DEV, Steps(outcomes))
+    sc.start_worker()
+    steps.wait_first_entry()
+    return sc, steps
+
+
+def _tune_warnings(sc: Scene, key: str) -> list[str]:
+    return [str(c) for c in sc.ctx.log_warning.call_args_list if key in str(c)]
+
+
+def test_b8_tick_fails_limit_one_reports_link_error_from_first_exception(make_scene: Callable[..., Scene]) -> None:
+    sc, steps = _fail_scene(make_scene, ["raise"], tick_fails_limit=1)
+    steps.step()
+    sc.wait_readiness(_LINK_ERROR, 1.5)
+    assert _tune_warnings(sc, "tick_fails_limit") == []
+
+
+def test_b8_tick_fails_limit_two_waits_for_second_exception(make_scene: Callable[..., Scene]) -> None:
+    sc, steps = _fail_scene(make_scene, ["raise", "raise"], tick_fails_limit=2)
+    steps.step()
+    assert sc.readiness() == [], "после одного исключения при лимите 2 связь ещё не ошибочна"
+    steps.step()
+    sc.wait_readiness(_LINK_ERROR, 1.5)
+
+
+@pytest.mark.parametrize("value", [0, -1, 2.5, "3", True, "abc"], ids=["zero", "neg", "float", "str3", "true", "abc"])
+def test_b8_invalid_tick_fails_limit_falls_back_to_default_three_with_one_warning(
+    make_scene: Callable[..., Scene], value: Any
+) -> None:
+    sc, steps = _fail_scene(make_scene, ["raise", "raise", "raise"], tick_fails_limit=value)
+    steps.step()
+    steps.step()
+    assert sc.readiness() == [], "негодный лимит: умолчание 3, после двух исключений связь ещё не ошибочна"
+    steps.permits.release()
+    sc.wait_readiness(_LINK_ERROR, 1.5)
+    assert len(_tune_warnings(sc, "tick_fails_limit")) == 1, _tune_warnings(sc, "tick_fails_limit")
+
+
+def test_b8_absent_tick_fails_limit_is_silent_default_three(make_scene: Callable[..., Scene]) -> None:
+    sc, steps = _fail_scene(make_scene, ["raise", "raise"])
+    steps.step()
+    steps.step()
+    assert sc.readiness() == []
+    assert _tune_warnings(sc, "tick_fails_limit") == []
+
+
+def test_b9_episode_window_covers_two_orchestrator_retries() -> None:
+    """Окно эпизода паузы не меньше двух повторов хука оркестратора: ``_HOOK_RETRY_SEC`` приватна, читается через
+    модуль оркестратора (публичного имени нет) — иначе сужение ретрая или окна молча ломает «повтор не шлёт стоп»."""
+    assert _PAUSE_EPISODE_S >= 2 * plugin_orchestrator._HOOK_RETRY_SEC
 
 
 # --------------------------------------------------------------------------------------------------
