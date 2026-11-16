@@ -125,7 +125,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public API (`RunFlag`)
 - Сделано в ветке `fix/run-state-phase1-review`: F1 (С2 форма листа на входе), F2 (С1 итог `settled` гарантирован), F4 (С4 снятие пометки рестарта), N3 (С7), регресс N2 — отчёты `docs/reviews/2026-11-15_fix-{A3,B3}.md`.
 
-- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — до слияния; Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [PENDING] (после слияния; Q1 — до)
+- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — ВЛИТ (`b74783413`); Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [PENDING] (после слияния; Q1 влит; задача — `tasks/1.11.md`)
   - **Module contract:** impl-only
 - Советы A1–A5 итоговой проверки (мёртвый фильтр в `run_state.evaluate:94`, причина «оценка не удалась» строится в двух местах с разным `source`, докстринг `readiness_reason_is_valid`, негодный лист не пишется в журнал PM, `_eval_fail_since` не объявлен на классе) — вместе с 3.7 [PENDING]
 
