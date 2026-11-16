@@ -12,6 +12,8 @@ from __future__ import annotations
 
 
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.state_store_module.core import static_prefix
+from multiprocess_framework.modules.state_store_module.core.leaf_copy import project_leaves
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TYPE_CHECKING, runtime_checkable
@@ -187,14 +189,15 @@ class GuiStateBindings:
         self.read_model = read_model
         bridge.set_state_callback(self._on_state_msg)
 
-    def _replay_snapshot(self) -> dict[str, Any]:
-        """Снимок read-model для replay ({path: value}); пусто, если модели нет."""
+    def _replay_projection(self, pattern: str) -> list[tuple[str, Any]]:
+        """Выдача из копии при привязке — та же проекция, что replay стора (ADR-SS-024 A3)."""
         if self.read_model is None:
-            return {}
+            return []
         try:
-            return self.read_model.snapshot("")
+            snap = self.read_model.snapshot(static_prefix(pattern.strip(".")))
         except Exception:
-            return {}
+            return []
+        return project_leaves(pattern, snap)
 
     # ------------------------------------------------------------------
     # Авто-подписка (5.9): bind/unbind ↔ proxy.ensure/release_subscription
@@ -268,9 +271,8 @@ class GuiStateBindings:
         # Replay: сразу применить последнее известное значение из read-model.
         # Нужно для ленивых вкладок, созданных ПОСЛЕ прохождения разовых дельт
         # (например processes.X.state.status публикуется один раз при смене статуса).
-        for cached_path, cached_value in self._replay_snapshot().items():
-            if match_glob(handle.pattern, cached_path):
-                self._apply_to_widget(handle, cached_value)
+        for _cached_path, cached_value in self._replay_projection(handle.pattern):
+            self._apply_to_widget(handle, cached_value)
 
         return handle
 
@@ -320,12 +322,11 @@ class GuiStateBindings:
             owner.destroyed.connect(lambda *_: self.unbind_fanout(handle))
 
         # Replay значений из read-model.
-        for cached_path, cached_value in self._replay_snapshot().items():
-            if match_glob(pattern, cached_path):
-                try:
-                    callback(cached_path, cached_value)
-                except Exception:
-                    pass
+        for cached_path, cached_value in self._replay_projection(pattern):
+            try:
+                callback(cached_path, cached_value)
+            except Exception:
+                pass
 
         return handle
 

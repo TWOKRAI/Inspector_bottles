@@ -29,6 +29,11 @@
 - `frontend_module.state.TelemetryViewModel` (Qt) — композирует ядро.
 - `backend_ctl` driver (headless) — композирует ядро, наполняет `state.changed`.
 
+## Копия хранит листья (Task 2.8a)
+
+`_state` — `LeafCopy`: dict-дельта заменяет поддерево, push-запись идёт через
+`_apply_put` (один `write_seq` на дельту). Раздел «Третий инвариант» в DECISIONS.md.
+
 ## Границы / вне охвата
 
 - Qt-обёртки и коалесинг сигналов — у потребителя, не в ядре.

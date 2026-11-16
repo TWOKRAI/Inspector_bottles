@@ -28,6 +28,7 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...router_module.core.router_manager import RouterReentrantRequestError
 from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
+from ..core.leaf_copy import LeafCopy
 from ..interfaces import IRouter, IStateProxy
 
 # Sentinel для отличия "default не передан" от None
@@ -85,7 +86,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._router = router
         self._server_target = server_target
         # Кэш подписанных данных: path → значение
-        self._cache: dict[str, Any] = {}
+        self._cache = LeafCopy()
         # Реестр callbacks: sub_id → список Callable[[list[Delta]], None]
         self._callbacks: dict[str, list[Callable]] = {}
         # sub_id → pattern (нужен для фильтрации входящих дельт по подписке)
@@ -1167,6 +1168,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
                 self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
                 continue
+            if isinstance(delta.new_value, dict):
+                # dict-дельта заменяет поддерево (LeafCopy.put): корень защищается, как удаление.
+                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # dict-корень
             # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
             # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
             # раскладывает её в листья: пометить корень значило бы защитить путь,
@@ -1305,36 +1309,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             return []
 
     def _cache_put(self, path: str, value: Any) -> None:
-        """Положить значение в кэш, РАЗВЕРНУВ словарь в листья.
+        """Положить значение в кэш по правилу копии: только листья, dict-дельта заменяет поддерево.
 
-        Инвариант «в кэше только листья» в этом классе уже существовал, но
-        соблюдался лишь половиной кода: :meth:`_apply_resync_snapshot` словари
-        пропускает явно (``not isinstance(value, dict)``), а приёмная сторона
-        дельт клала ``delta.new_value`` сырым. Дельта СОЗДАНИЯ поддерева
-        приходит со словарём целиком, поэтому нелистовая запись в кэше
-        появлялась и жила там вечно.
-
-        Чем это плохо (воспроизведено на живом стенде 2026-08-23, дефект
-        наблюдался у DB-стока, разделяющего ту же модель кэша):
-
-        * запись протухает — дальнейшие обновления идут полистовыми дельтами
-          и словаря не касаются (в строках БД жили ``14.5`` в словаре и
-          ``14.3`` в листе одновременно);
-        * префикс-чистка по MISSING-дельте её не видит: удаление
-          ``…plugins.capture`` снимает лист ``…plugins.capture.capture_fps``,
-          но ПРЕДКА ``…plugins`` не трогает — числа ушедшего писателя
-          переживают собственное снятие.
-
-        Пустой словарь листьев не даёт вовсе и в кэш не кладётся: узел есть,
-        значений нет.
+        Инвариант и причины — в :mod:`..core.leaf_copy` (ADR-SS-024 A3); сама
+        запись — :meth:`LeafCopy.put`. Пустой словарь листьев не даёт: узел есть,
+        значений нет, и старое поддерево он снимает.
         """
-        if isinstance(value, dict):
-            if not value:
-                return
-            for key, nested in value.items():
-                self._cache_put(f"{path}.{key}", nested)
-            return
-        self._cache[path] = value
+        self._cache.put(path, value)
 
     def _update_cache(self, deltas: list[Delta]) -> None:
         """Обновить кэш на основе списка дельт.
@@ -1368,11 +1349,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         for delta in deltas:
             if delta.new_value is MISSING:
                 # Удаление узла — вместе с поддеревом (см. докстринг).
-                self._cache.pop(delta.path, None)
-                dotted = delta.path + "."
-                stale = [key for key in self._cache if key.startswith(dotted)]
-                for key in stale:
-                    del self._cache[key]
+                self._cache.drop(delta.path)
             else:
                 self._cache_put(delta.path, delta.new_value)
 

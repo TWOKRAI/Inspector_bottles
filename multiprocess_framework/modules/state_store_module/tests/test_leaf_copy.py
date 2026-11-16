@@ -16,7 +16,6 @@ import pytest
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
 from multiprocess_framework.modules.state_store_module.proxy.state_proxy import StateProxy
 
-from .test_resync_offthread_hazards import _d, _Stand
 from .test_state_proxy import MockRouter
 
 
@@ -109,40 +108,8 @@ def test_h4_put_after_drop_does_not_see_dropped_subtree():
     assert copy.drop("a") == ["a"]
 
 
-# --------------------------------------------------------------------------- #
-#  H5: ресинк StateProxy, окно открыто, dict-дельта заменила поддерево         #
-# --------------------------------------------------------------------------- #
-
-
-def test_h5_resync_snapshot_does_not_resurrect_leaf_removed_by_window_dict_delta():
-    """Живая dict-дельта окна заменила ``n`` на ``{x: 3}``; снимок постарше с ``y`` не воскрешает ``y``.
-
-    Стенд подписан на ``foo.**``, поэтому вместо литерального ``a`` из брифа — ``foo``
-    (шаблон снимка ``foo.**``). К литералам брифа добавлен якорь ``foo.extra``: он
-    доказывает, что снимок применён, а не выброшен целиком.
-    """
-    stand = _Stand("h5_leaf")
-    try:
-        # Кэш: foo.n.x = 0, foo.n.y = 5 (rev 1).
-        stand.deliver(
-            [_d("foo.n", {"x": 0, "y": 5}, revision=1, old=MISSING)],
-            first_revision=1,
-            revision=1,
-        )
-        assert dict(stand.proxy.cache) == {"foo.n.x": 0, "foo.n.y": 5}, "стартовый кэш не собран — стенд неисправен"
-
-        # Живая dict-дельта rev 10 с разрывом (ожидался rev 2) — открывает окно ресинка.
-        stand.deliver(
-            [_d("foo.n", {"x": 3}, revision=10, old={"x": 0, "y": 5})],
-            first_revision=10,
-            revision=10,
-        )
-        assert stand.proxy._resync_inflight_id is not None, "окно ресинка не открыто — сценарий не воспроизведён"
-
-        # Снимок rev 7 (старше дельты) — со старым y и посторонним якорем.
-        stand.answer_resync({"foo": {"n": {"x": 0, "y": 5}, "extra": 42}}, revision=7)
-        cache = dict(stand.proxy.cache)
-    finally:
-        stand.close()
-
-    assert cache == {"foo.n.x": 3, "foo.extra": 42}, cache
+# H5 слепого файла снят лидом 2026-11-17: сценарий «пакет с разрывом сам открывает окно»
+# упирается в дефект базы (пакет-триггер применяется к кэшу до открытия окна и не
+# защищён от старого снимка, воспроизведено и на листовой дельте). Эквивалент с окном,
+# открытым отдельным пакетом, — test_leaf_copy_hazards.py::test_h5_window_dict_delta_*.
+# Дефект базы — в docs/claude/OPEN_QUESTIONS.md.
