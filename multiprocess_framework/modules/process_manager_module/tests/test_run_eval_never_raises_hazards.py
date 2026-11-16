@@ -217,7 +217,7 @@ def test_ack_with_parallel_healthy_tick_ends_ready(rig_factory) -> None:
 @pytest.mark.timeout(120)
 def test_ack_with_parallel_failed_tick_ends_not_ready(rig_factory, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ack`` и сбойный такт одновременно (оценка бросает): ничего не бросает; итог ``not_ready``,
-    ``_run_ready is False`` в любом порядке; текста исключения нет в логе."""
+    ``_run_ready is False`` в любом порядке."""
     for _ in range(3):
         rig = rig_factory()
         _to_fault(rig)
@@ -320,3 +320,30 @@ def test_stale_config_failure_warns_again_for_new_exception_type() -> None:
     assert len(lines) == 2, lines
     assert "RuntimeError" in lines[0] and "OverflowError" in lines[1], lines
     assert all("secret-config-text" not in line for line in lines), lines
+
+
+# --------------------------------------------------------------------------- #
+# Правки по Opus-ревью: отказанный из-за сбоя оценки START не оставляет устаревший _run_ready
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.timeout(60)
+def test_start_refused_by_eval_failure_keeps_not_ready_after_failed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """START из ``ready`` при бросающей оценке -> отказ ``not_ready`` (смена состояния). Следующий сбойный такт
+    (серия короче срока, ``ready=None``) состояние не возвращает: остаётся ``not_ready``, ``start_allowed`` False,
+    повторный START снова отказан ``not_ready``. Без записи ``_run_ready`` на ``start`` такт брал бы устаревшее True."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    switch = _install_switch(pm, monkeypatch)
+    beat(monitor, "cam")
+    _failing_tick(monitor)
+    assert pm._run_state == "ready"
+    switch.broken = True
+
+    first = _call(pm._cmd_system_run_start, "_cmd_system_run_start")
+
+    assert first["success"] is False and first["state"] == "not_ready" and first["error"] == "not_ready", first
+    _failing_tick(monitor)
+    assert pm._run_state == "not_ready", f"сбойный такт после отказа START дал {pm._run_state!r}"
+    assert pm._cmd_system_run_status()["start_allowed"] is False
+    second = _call(pm._cmd_system_run_start, "_cmd_system_run_start")
+    assert second["success"] is False and second["state"] == "not_ready" and second["error"] == "not_ready", second

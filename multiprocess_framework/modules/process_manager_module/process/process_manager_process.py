@@ -1049,8 +1049,8 @@ class ProcessManagerProcess(ProcessModule):
         """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
 
         ``ready=None`` — последняя принятая оценка (``_run_ready``); ``tick`` обновляет ``_run_ready``
-        независимо от смены состояния, ``settled``/``ack`` — только когда событие сменило состояние
-        (``start`` и отказанные команды ``_run_ready`` не трогают). При ``run_gate`` true в том же замке событие
+        независимо от смены состояния, ``settled``/``ack``/``start`` — только когда событие сменило состояние
+        (no-op ``settled`` и отказанные команды ``_run_ready`` не трогают). При ``run_gate`` true в том же замке событие
         доводится до ``is_set() == (state == running)``; при false событие не трогается никогда. После замка —
         ``_publish_run_state()``.
 
@@ -1082,10 +1082,11 @@ class ProcessManagerProcess(ProcessModule):
             if stop_done is None:
                 stop_done = self._fault_stop_done
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
-            # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``, РЕАЛЬНО сменившие
-            # состояние (no-op ``settled`` и отказанная команда его не трогают); иначе одиночный сбойный такт
-            # после ``settled``/``ack`` брал бы устаревший ``False`` и переводил ``running`` в ``fault``.
-            if event == "tick" or (event in ("settled", "ack") and new is not prev):
+            # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``/``start``, РЕАЛЬНО
+            # сменившие состояние (no-op ``settled`` и отказ без смены состояния его не трогают); иначе одиночный
+            # сбойный такт после них брал бы устаревшее значение: ``False`` после ``settled``/``ack`` переводил бы
+            # ``running`` в ``fault``, ``True`` после START, отказанного ``not_ready``, возвращал бы ``ready``.
+            if event == "tick" or (event in ("settled", "ack", "start") and new is not prev):
                 self._run_ready = ready
             # Отказ команды, не сменивший состояние (``already_running``, ``fault_unacknowledged``...), причины своей
             # оценки в статус не пишет: статус отражает последний такт, а не оценку по порогу допуска (C10).
@@ -1444,7 +1445,7 @@ class ProcessManagerProcess(ProcessModule):
         self._run_apply("settled", ready=ready, reasons=reasons)
 
     def _evaluate_or_fail(self, *, admission: bool = False) -> tuple[bool, list[dict]]:
-        """Оценка готовности для ``settled``, START и ``ack``, которая не бросает (свежее ревью Ф1, F2 / совет С1).
+        """Оценка готовности для ``settled``, START и ``ack``, которая не бросает.
 
         У ``booting`` и ``stopping`` выход — только ``settled``: исключение оценки оставило бы машину там навсегда
         (START -> ``not_ready`` без причин). START и ``ack`` не бросают тоже: исключение ушло бы в диспетчер
