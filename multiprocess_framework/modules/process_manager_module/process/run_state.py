@@ -22,6 +22,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
+from multiprocess_framework.modules.process_module.health.schema import READINESS_BLOCKING_SEVERITIES
+
 
 class RunState(str, Enum):
     """Состояние работы системы (значения — design.md §3.2)."""
@@ -40,8 +42,9 @@ EVENTS: frozenset[str] = frozenset({"start", "stop", "ack", "apply", "shutdown",
 
 
 #: Степени причины, блокирующие START (К3 CTO: ``check_function`` блокирует START и в ``running`` равен
-#: потере готовности); ``out_of_spec`` / ``maintenance`` не блокируют.
-BLOCKING_SEVERITIES: frozenset[str] = frozenset({"failure", "check_function"})
+#: потере готовности); ``out_of_spec`` / ``maintenance`` не блокируют. Единственное определение набора —
+#: ``health/schema.py`` (``READINESS_BLOCKING_SEVERITIES``).
+BLOCKING_SEVERITIES: frozenset[str] = frozenset(READINESS_BLOCKING_SEVERITIES)
 
 
 def _reason(node: str, reason: str, source: str, severity: str = "failure") -> dict:
@@ -92,18 +95,14 @@ def _process_reasons(name: str, inp: EvalInput) -> tuple[list[dict], bool]:
     if not isinstance(at, (int, float)) or inp.now - at > inp.stale_s:
         return [_reason(name, "нет отчёта о готовности", "liveness")], True
     reasons = [dict(r) for r in (leaf.get("reasons") or []) if isinstance(r, dict)]
-    if not leaf.get("ready", False) and not any(r.get("severity") == "failure" for r in reasons):
+    if not leaf.get("ready", False) and not has_blocking(reasons):
         reasons.append(_reason(name, f"{name} не готов", "report"))
     return reasons, False
 
 
-def _has_failure(reasons: list[dict]) -> bool:
-    return any(r.get("severity") == "failure" for r in reasons)
-
-
 def _restarting(name: str, silent: bool, reasons: list[dict], inp: EvalInput) -> bool:
-    """Процесс из ``auto_restart`` в перезапуске: молчит, либо поднялся, но ``failure`` ещё не ушли (запись есть)."""
-    return name in inp.auto_restart and (silent or (name in inp.down_since and _has_failure(reasons)))
+    """Процесс из ``auto_restart`` в перезапуске: молчит либо поднялся, но блокирующие причины не ушли (запись есть)."""
+    return name in inp.auto_restart and (silent or (name in inp.down_since and has_blocking(reasons)))
 
 
 def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
@@ -117,12 +116,12 @@ def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
       * нет листа или ``at`` старше ``stale_s`` (судим по ``at`` — времени расчёта снимка, а не по
         heartbeat: мёртвый поток-наблюдатель при живом heartbeat иначе выглядел бы готовым) ->
         ``failure`` / ``liveness`` «нет отчёта о готовности»;
-      * иначе причины листа как есть; лист ``ready: false`` без ``failure`` среди его причин ->
+      * иначе причины листа как есть; лист ``ready: false`` без блокирующей причины среди его причин ->
         добавлена ``failure`` / ``report`` «<процесс> не готов».
 
     Автоперезапуск в работе (Task 1.8) — только при ``running=True``; иначе флаг не действует и мёртвый
     процесс остаётся ``failure``. Процесс из ``auto_restart``, который молчит (не жив / нет свежего листа)
-    или поднялся, но его ``failure`` ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
+    или поднялся, но блокирующие причины ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
     (``node`` = процесс, ``source`` = ``liveness``):
       * процесс в ``given_up`` (супервизор отказался) -> ``failure`` «<процесс>: супервизор отказался от
         перезапуска» — выигрывает у окна и действует сразу;
