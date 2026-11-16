@@ -8,6 +8,17 @@
 Task 2.3a: база для вендорских плагинов. Хуки: `create_port(self)` (по умолчанию — модульная `create_port(driver)`,
 знает только `"fake"`) и `bindings(self)` (по умолчанию `FAKE_BINDINGS`); порт создаётся один раз в
 `_ensure_session`, SDK берётся как `port.sdk`. Идентичность прибора, таймаут и сторож берутся из register'а.
+
+Task 2.3b: наблюдаемость средствами framework. Уровни (`fps`, `frames`, `errors`, `dropped`, `pending`,
+`param_errors_count`) — `ctx.declare_metric` + `ctx.publish_metric` (`frames` на учтённый кадр, остальные — окном
+`_TICK_S` из `produce()`). События (`state`, `device`, `device_held`, `profile`, `params`, `params_status`,
+`param_errors`, `last_error`, `capabilities`, `ts`) — один `state_proxy.merge` в `processes.<p>.state.plugins.<name>`
+ТОЛЬКО при смене (`_sync_events`: из `on_state` и из окна). Инциденты — `ctx.health.report_error` (переход в
+`busy`/`not_found`/`error` вместе с `degraded`, новый ключ `param_errors`, `on_stall` вместе с
+`flight_dump("owner_stall")`). Замеры сеанса: `open` -> `open_ms`,
+`apply` -> `apply` (секунды), `get_frame` агрегируется окном в одну запись `get_frame_ms` (среднее за окно).
+Логгер сеанса `camera_device.session` пробрасывается в `ctx.log_*` (`_SessionLogBridge`): стандартный `logging` в файлы
+framework не попадает.
 При КАЖДОМ `take_device` план run/rest строится из register'а (`params.build_plan`) и передаётся сеансу через
 `set_cycle` (идущий цикл не меняется). Публикация — `ctx.declare_metric("frames")` + `ctx.publish_metric`
 (путь `processes.<p>.state.plugins.camera_device.frames`), без прямого `merge`.
@@ -19,8 +30,10 @@ Item по Р10: `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monoton
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
+import traceback
 
 import numpy as np
 
@@ -41,8 +54,41 @@ _START_TIMEOUT_S = 5.0
 _STOP_TIMEOUT_S = 2.0
 # Каналов на пиксель для 8-битных форматов; `bayer_*` — один канал (дебайер — не в ядре).
 _CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3}
+# Окно публикации уровней, агрегата замеров и сверки событий, с (в тестах подменяется).
+_TICK_S = 1.0
+# Состояния отказа сеанса: инцидент `report_error` и `health.degraded`.
+_FAILED = frozenset({"busy", "not_found", "error"})
+# Профиль, записанный/записываемый в прибор, по состоянию сеанса; остальные состояния — `None`.
+_PROFILE_OF_STATE = {"opening": "run", "grabbing": "run", "stopping": "rest", "closed": "rest"}
+# Поля-словари события: ушедшие ключи удаляются из дерева (`merge` их не снимает).
+_DICT_EVENTS = ("params", "params_status", "param_errors")
+_MISSING = object()
 # Группа триггера в плане rest: привязки только `trigger_*`, иначе `build_plan` потребует значения остальных полей.
 _TRIGGER_PREFIX = "trigger_"
+
+
+class CameraDeviceError(RuntimeError):
+    """Инцидент плагина камеры для `ctx.health.report_error`: текст без значений рецепта."""
+
+
+class _SessionLogBridge(logging.Handler):
+    """Строки логгера сеанса (`camera_device.session`, стандартный `logging`) -> `ctx.log_*` (файлы framework)."""
+
+    def __init__(self, ctx: PluginContext) -> None:
+        super().__init__(logging.INFO)
+        self._ctx = ctx
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            text = self.format(record)
+            if record.levelno >= logging.ERROR:
+                self._ctx.log_error(text)
+            elif record.levelno >= logging.WARNING:
+                self._ctx.log_warning(text)
+            else:
+                self._ctx.log_info(text)
+        except Exception:  # noqa: BLE001 — запись лога не должна ронять поток сеанса
+            self.handleError(record)
 
 
 def create_port(driver: str) -> DevicePort:
@@ -103,10 +149,21 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._session_lock = threading.Lock()  # ленивое создание сеанса: start() и команда из другого потока
         self._item_error = ""  # последняя причина отброшенного кадра (сборка item)
         self._dropped = 0
+        self._events_lock = threading.Lock()  # сверка событий: снимок сеанса, инциденты и `merge` — одним куском
+        self._published: dict = {}  # что уже в дереве; `merge` — только отличия
+        self._seen_state: str | None = None
+        self._reported_param_errors: set[str] = set()
+        self._timing_lock = threading.Lock()  # `on_timing("get_frame")` приходит из потока-владельца на каждый кадр
+        self._get_frame_n = 0
+        self._get_frame_sum = 0.0
+        self._tick_t0 = time.monotonic()
+        self._tick_frames = 0
+        self._log_bridge: _SessionLogBridge | None = None
         self._identity(warn=True)  # отказ рецепта — здесь, а не в take_device
         if self._reg.watchdog_s <= self._reg.timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
-        ctx.declare_metric("frames")
+        for level in ("fps", "frames", "errors", "dropped", "pending", "param_errors_count"):
+            ctx.declare_metric(level)
 
     # ------------------------------------------------------------------ #
     # Хуки вендора
@@ -160,6 +217,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def shutdown(self, ctx: PluginContext) -> None:
         self.cmd_release_device({})
+        bridge, self._log_bridge = self._log_bridge, None
+        if bridge is not None:
+            logging.getLogger("camera_device.session").removeHandler(bridge)
 
     # ------------------------------------------------------------------ #
     # Поток данных
@@ -175,9 +235,116 @@ class CameraDevicePlugin(ProcessModulePlugin):
         # События приходят из разных потоков и могут опередить друг друга: истина — `session.state`.
         session = self._session
         self._reg.device_state = session.state if session is not None else new
+        self._sync_events()
+
+    def _on_stall(self, call: str, seconds: float) -> None:
+        """Сторож сеанса: вызов порта завис. Инцидент, затем дамп кольца (запись обязана в него попасть)."""
+        self._ctx.health.report_error(
+            CameraDeviceError(f"вызов порта {call} завис на {seconds:.1f} с"), context="camera_device.stall"
+        )
+        self._ctx.flight_dump("owner_stall", call=call, seconds=round(seconds, 1))
+
+    def _on_timing(self, name: str, seconds: float) -> None:
+        """Замер вызова порта (секунды). `get_frame` идёт на каждый кадр — копится, пишется окном (`_tick`)."""
+        if name == "get_frame":
+            with self._timing_lock:
+                self._get_frame_n += 1
+                self._get_frame_sum += seconds
+        elif name == "open":
+            self._ctx.record_timing("open_ms", seconds)
+        elif name == "apply":
+            self._ctx.record_timing("apply", seconds)
+
+    def _tick(self) -> None:
+        """Раз в `_TICK_S`: уровни, агрегат замера `get_frame`, сверка событий."""
+        now = time.monotonic()
+        elapsed = now - self._tick_t0
+        if elapsed < _TICK_S:
+            return
+        frames = self._frames
+        ctx, session = self._ctx, self._session
+        if elapsed > 0:
+            ctx.publish_metric("fps", (frames - self._tick_frames) / elapsed)
+        ctx.publish_metric("frames", frames)  # и без кадров: уровень виден с нулём, а не отсутствует
+        ctx.publish_metric("errors", session.errors if session is not None else 0)
+        ctx.publish_metric("dropped", self._dropped)
+        ctx.publish_metric("pending", 0 if self._slot is None else 1)
+        ctx.publish_metric("param_errors_count", len(session.param_errors) if session is not None else 0)
+        with self._timing_lock:
+            count, total = self._get_frame_n, self._get_frame_sum
+            self._get_frame_n, self._get_frame_sum = 0, 0.0
+        if count:
+            ctx.record_timing("get_frame_ms", total / count)
+        self._tick_t0, self._tick_frames = now, frames
+        self._sync_events()
+
+    def _sync_events(self) -> None:
+        """Перечитать сеанс и опубликовать ОТЛИЧИЯ одним `merge`; инциденты — по смене, а не на каждый вызов.
+
+        Зовётся из `on_state` (потоки вызывающего и владельца, не по порядку) и из окна: истина — свойства сеанса.
+        `params`/`params_status`/`param_errors` берут замок профиля — из потока кадра не читаются.
+        """
+        session = self._session
+        if session is None:
+            return
+        try:
+            with self._events_lock:
+                state = session.state
+                param_errors = session.param_errors
+                last_error = session.last_error
+                self._report_incidents(state, last_error, param_errors)
+                device = session.device
+                snapshot = {
+                    "state": state,
+                    "device": None
+                    if device is None
+                    else {"kind": device.kind, "value": device.value, "name": device.name},
+                    "device_held": session.device_held,
+                    "profile": _PROFILE_OF_STATE.get(state),
+                    "params": session.params,
+                    "params_status": session.params_status,
+                    "param_errors": param_errors,
+                    "last_error": last_error,
+                    "capabilities": sorted(self._port.capabilities) if self._port is not None else [],
+                }
+                self._publish_events(snapshot)
+        except Exception as exc:  # noqa: BLE001 — сбой публикации не должен ронять колбэк сеанса или `produce()`
+            self._ctx.health.report_error(exc, context="camera_device.events", throttle=30.0)
+
+    def _report_incidents(self, state: str, last_error: str | None, param_errors: dict) -> None:
+        """Инцидент на переход в отказ и на каждый НОВЫЙ ключ `param_errors`; выход из отказа снимает `degraded`."""
+        health = self._ctx.health
+        previous, self._seen_state = self._seen_state, state
+        if state != previous:
+            if state in _FAILED:
+                health.report_error(CameraDeviceError(f"{state}: {last_error or ''}"), context="camera_device.session")
+                health.degraded(f"camera_device: {state}")
+            elif previous in _FAILED:
+                health.set_status("ok")
+        for field, text in param_errors.items():
+            if field not in self._reported_param_errors:
+                health.report_error(CameraDeviceError(f"{field}: {text}"), context="camera_device.param")
+        self._reported_param_errors = set(param_errors)
+
+    def _publish_events(self, snapshot: dict) -> None:
+        """Один `merge` отличий от уже опубликованного (под `_events_lock`); ушедшие ключи словарей — `delete`."""
+        proxy = self._ctx.state_proxy
+        if proxy is None:
+            return
+        changed = {key: value for key, value in snapshot.items() if self._published.get(key, _MISSING) != value}
+        if not changed:
+            return
+        base = f"processes.{self._ctx.process_name}.state.plugins.{self.name}"
+        for key in _DICT_EVENTS:
+            for gone in (self._published.get(key) or {}).keys() - snapshot[key].keys():
+                proxy.delete(f"{base}.{key}.{gone}")
+        changed["ts"] = time.time()
+        proxy.merge(base, changed)
+        self._published = snapshot
 
     def produce(self) -> list[dict]:
         """Забрать кадр из слота в item. Пусто — норма. Не блокирует."""
+        self._tick()
         with self._lock:
             slot, self._slot = self._slot, None
         if slot is None:
@@ -248,12 +415,21 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 watchdog_s=self._reg.watchdog_s,
                 on_frame=self._on_frame,
                 on_state=self._on_state,
-                on_stall=lambda call, seconds: self._ctx.log_error(
-                    f"CameraDevicePlugin: вызов порта {call} завис на {seconds:.1f} с"
-                ),
+                on_stall=self._on_stall,
+                on_timing=self._on_timing,
             )
-            self._port, self._session = port, session  # атрибут не залипает на неудачной попытке (объект порта при этом теряется без close(): SDK ещё не acquire'нут)
+            self._attach_log_bridge()
+            # атрибут не залипает на неудачной попытке (объект порта теряется без close(): SDK ещё не acquire'нут)
+            self._port, self._session = port, session
         return session
+
+    def _attach_log_bridge(self) -> None:
+        """Строки `camera_device.session` -> журнал framework; уровень INFO ставится, только если не задан явно."""
+        session_logger = logging.getLogger("camera_device.session")
+        if session_logger.level == logging.NOTSET:
+            session_logger.setLevel(logging.INFO)
+        self._log_bridge = _SessionLogBridge(self._ctx)
+        session_logger.addHandler(self._log_bridge)
 
     def cmd_take_device(self, data: dict) -> dict:
         """Открыть прибор и начать захват. Отказ — `status: error`, не исключение."""
@@ -272,7 +448,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         except Exception as exc:  # noqa: BLE001 — контракт 1.8: отказ команды = status error, исключение наружу не идёт
             # хук вендора (`create_port`, `port.sdk`) может бросить что угодно: PortError, ImportError, OSError
             text = str(exc) if isinstance(exc, ValueError) else describe_error(exc)  # без значений рецепта
-            self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {text}")
+            # `describe_error` отдаёт только тип (`ImportError`, `OSError`): какая DLL — видно по следу в журнале
+            detail = "" if isinstance(exc, ValueError) else f"\n{traceback.format_exc()}"
+            self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {text}{detail}")
             return {"status": "error", "device_state": self._reg.device_state, "error": text}
         t0 = time.monotonic()
         ok = session.start(_START_TIMEOUT_S)
