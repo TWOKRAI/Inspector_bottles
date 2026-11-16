@@ -149,3 +149,18 @@ Opus-ревью волны W2: код 1.6/1.8/2.1/2.2 рабочий, швы с�
 | # | Дата | Почему | Δ задач | Δ бюджета |
 |---|---|---|---|---|
 | 5 | 2026-11-16 | MODIFIED `plan.md` (3.1, 3.2, 3.3, 6.4 `[DEFERRED]`, зависимость 4.2a от 3.2 снята), `tasks/4.2a.md` (Dependencies), `tasks/4.1.md` (ACCEPTANCE: контрактный набор на трёх источниках), `wave-protocol.md` (W3) | 0 (задачи не удалены, отложены) | −4 задачи в объёме 1.0 (3.1, 3.2, 3.3, 6.4) |
+
+## 6. Разрез 2.3a по стадии 0 (2026-11-16, лид полосы К)
+
+Стадия 0 (reviewer sonnet, раунд 1) вернула CHANGES REQUESTED: 8 блокеров. Решения лида:
+
+| Что | Было | Стало |
+|---|---|---|
+| Размер 2.3a | register, команды Р7, item, план run/rest (оценка ревьюера 33–40 ходов Sonnet, предел ~30) | 2.3a — register, идентичность прибора (`device_select` по умолчанию `serial`, `device_id` убран), план run/rest при каждом `take_device` (`DeviceSession.set_profiles`), item; **2.3c** (после 2.4) — команды Р7, `commands.py` |
+| Команды, которым нужен порт | вызов порта из потока команды | только через почтовый ящик владельца (2.4); единственное исключение из Р1 — `list_devices` (`acquire/enum/release` без handle), запись в README и ADR-CAM-002 |
+| Поля trigger/exposure/rest | в 2.3a не определены, у вендоров (4.2a) | в базовом register'е (`trigger_*`, `exposure_time`, `rest_*`), `FAKE_BINDINGS` в `testing/fake_port.py`, хук `bindings()` |
+| `readiness(ctx)` | — | работа лида Ф; решение К: нового свойства сеанса не нужно, хватает `state`, `device_held`, `last_error` (чтения без замков, `session.py:149-151,173-184`) |
+| Зависимости | 1.3 и 4.2a от 2.3a | 1.3 от 2.3c; 4.2a от 2.3c и 2.4 |
+
+- ADDED `tasks/2.3c.md` (черновик, стадия 0 после 2.4). MODIFIED `tasks/2.3a.md` (DESIGN, FILES, ACCEPTANCE; +`session.py` (`set_profiles`), `testing/fake_port.py` (`FAKE_BINDINGS`), `test_slice_plugin.py` (конфиг `_Rig`), `recipes/camera_device_demo.yaml`; `Module contract: impl-only`), `tasks/1.3.md`, `tasks/4.2a.md`, `plan.md`, `matrix.md`, `wave-protocol.md`. Δ задач +1, Δ бюджета ≈ 0 (объём тот же, делится на две).
+- Порядок W3: {2.3a, 4.1} → 2.3b → 2.4 → 2.3c. 2.3c — до W4 (4.2a ждёт её).
