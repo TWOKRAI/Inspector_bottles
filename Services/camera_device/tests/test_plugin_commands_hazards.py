@@ -9,9 +9,11 @@
 
 import threading
 import time
+from typing import Annotated
 
 import pytest
 
+from multiprocess_framework.modules.data_schema_module import FieldMeta
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.registers_module import RegistersManager
@@ -28,6 +30,19 @@ pytestmark = pytest.mark.timeout(60)
 REG = "camera_device"
 CFG = {"auto_start": False, "camera_id": 3, "device_select": "serial", "device_serial": "FAKE-0001"}
 _NOISE = frozenset({"get_frame", "describe_param"})
+
+
+class _GainRegisters(CameraDeviceRegisters):
+    """Register с привязанным полем, которое меняется только с уровнем доступа 1 (проба на копии прав не проверяет)."""
+
+    gain: Annotated[float, FieldMeta("Усиление", access_level=1, apply="live")] = 1.0
+
+
+class _GainPlugin(CameraDevicePlugin):
+    register_class = _GainRegisters
+
+    def bindings(self) -> dict[str, Binding]:
+        return {**FAKE_BINDINGS, "gain": Binding("genicam", "Gain", "float")}
 
 
 class _ReadonlyBoundPlugin(CameraDevicePlugin):
@@ -67,13 +82,15 @@ def _wait(predicate, what: str, timeout: float = 5.0) -> None:
 class _Rig:
     """Настоящие плагин, `RegistersManager` (или без него) и `WorkerManager`; фейк только у порта."""
 
-    def __init__(self, monkeypatch, *, plugin_cls=CameraDevicePlugin, with_registers: bool = True) -> None:
+    def __init__(
+        self, monkeypatch, *, plugin_cls=CameraDevicePlugin, reg_cls=CameraDeviceRegisters, with_registers: bool = True
+    ) -> None:
         self.port = make_port(frame_period_s=0.02)
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: self.port)
         services = MockProcessServices(name="cam_haz", config=dict(CFG))
         self.wm = WorkerManager("test_cam_haz")
         services.worker_manager = self.wm
-        self.rm = RegistersManager(registers={REG: CameraDeviceRegisters()}) if with_registers else None
+        self.rm = RegistersManager(registers={REG: reg_cls()}) if with_registers else None
         self.ctx = PluginContext(services=services, config=dict(CFG), registers=self.rm, plugin_name=REG)
         self.plugin = plugin_cls()
         self.plugin.configure(self.ctx)
@@ -350,6 +367,19 @@ def test_apply_params_проверки_идут_в_порядке_модель_r
     assert readonly.reg.frames == 0
 
 
+def test_apply_params_поле_с_уровнем_доступа_отвергается_до_первой_записи(make):
+    """`set_field_value` проверяет права (`access_level=0`), проба на копии — нет: пакет не должен писаться частично."""
+    rig = make(plugin_cls=_GainPlugin, reg_cls=_GainRegisters)
+    seen = rig.spy_writes()
+
+    result = rig.apply({"exposure_time": 900.0, "gain": 2.0})
+
+    assert result == {"success": False, "error": "недостаточно прав для поля: gain"}
+    assert seen == []
+    assert rig.reg.exposure_time == 10000.0
+    assert rig.reg.gain == 1.0
+
+
 def test_apply_params_пустой_пакет_ничего_не_пишет(make):
     rig = make()
     seen = rig.spy_writes()
@@ -397,6 +427,46 @@ def test_apply_params_on_device_ложен_после_release_и_истинен_
     assert restart == {"success": True, "applied": ["trigger_mode"], "on_device": True}
     assert _bounded(lambda: rig.plugin.cmd_release_device({}))["status"] == "ok"
     assert rig.apply({"exposure_time": 902.0}) == {"success": True, "applied": ["exposure_time"], "on_device": False}
+
+
+def test_apply_params_журнал_без_значений_полей(make):
+    """INFO `apply_params fields=[…] ok=…` называет поля, но не значения: ни при успехе, ни при отказе."""
+    rig = make()
+    lines: list[str] = []
+    for level in ("log_info", "log_warning", "log_error"):
+        setattr(rig.ctx, level, lambda text, *args, **kwargs: lines.append(str(text)))
+
+    assert rig.apply({"exposure_time": 123456.0})["success"] is True
+    assert rig.apply({"exposure_time": 777.0, "trigger_mode": "SECRET-42"})["success"] is False
+    refused = _bounded(lambda: rig.plugin.cmd_apply_params({"params": {"exposure_time": 888.0}, "token": "SECRET-42"}))
+    assert refused["success"] is False
+
+    assert any("apply_params fields=['exposure_time'] ok=True" in line for line in lines), lines
+    assert any("apply_params fields=[] ok=False" in line for line in lines), lines
+    text = "\n".join(lines)
+    for secret in ("123456", "SECRET-42", "777", "888"):
+        assert secret not in text, f"значение {secret} попало в журнал: {lines}"
+
+
+def test_reset_stats_сдвигает_окно_fps_без_подмены_часов_после_сброса(make, monkeypatch):
+    """Окно после сброса начинается со сброса: 1 кадр за миллисекунды — это сотни кадров/с, а не 1 кадр за 100 с."""
+    rig = make()
+    plugin = rig.plugin
+    published: list[tuple[str, object]] = []
+    publish = rig.ctx.publish_metric
+    rig.ctx.publish_metric = lambda name, value: (published.append((name, value)), publish(name, value))[0]
+    plugin._tick_t0 = time.monotonic() - 100.0  # окно давно открыто; сброс обязан начать новое
+
+    assert plugin.cmd_reset_stats({}) == {"success": True}
+    plugin._on_frame(_good_frame(1))
+    monkeypatch.setattr(plugin_base, "_TICK_S", 1e9)  # окно не созрело: кадр посчитан без публикации окна
+    assert len(plugin.produce()) == 1
+    monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)  # окно созрело сразу, `_tick_t0` не трогаем
+    mark = len(published)
+    plugin.produce()
+
+    fps = [value for name, value in published[mark:] if name == "fps"]
+    assert fps and fps[-1] > 0.5, f"окно fps не сдвинуто сбросом: {published[mark:]}"
 
 
 # ---------------------------------------------------------------------------------------------- #
