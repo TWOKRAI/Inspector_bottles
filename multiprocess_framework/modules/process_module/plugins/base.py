@@ -40,6 +40,9 @@ from .manifest import PLUGIN_API_VERSION
 
 # Ключи опций регистрации команды (хук command_options) — именованные аргументы CommandManager.register_command
 _COMMAND_OPTION_KEYS: frozenset[str] = frozenset({"executor", "key_from", "targets", "metadata"})
+#: Task 2.7d M1 (ADR-PM-062): хвост текста причины ``failure`` (``source: "config"``) при ``run_locked_invalid``;
+#: полный текст — ``"<плагин>: неверный run_locked_commands"`` (собирает оркестратор).
+RUN_LOCKED_INVALID_REASON: str = "неверный run_locked_commands"
 
 if TYPE_CHECKING:
     from ..health import HealthReporter
@@ -1381,6 +1384,12 @@ class ProcessModulePlugin(ABC):
     # Автоматически регистрируются в CommandManager при configure
     commands: dict[str, str] = {}
 
+    #: Task 2.7d M1 (ADR-PM-062): ключ плагина ``run_locked_commands`` негоден — не список строк или в нём есть имена
+    #: вне ``commands``. Пишет только разбор ключа при регистрации команд (``_auto_register_commands``); оркестратор
+    #: читает в снимке готовности: ``True`` -> причина ``failure`` с ``source: "config"`` — ключ безопасности при
+    #: негодном значении закрывает (узел не готов), а не открывает. Ключа нет или он годен -> ``False``.
+    run_locked_invalid: bool = False
+
     # Thread-safety контракт (Q8):
     # False (default) — sequential, safe by default.
     # True — разрешает параллельный вызов process() (для stateless плагинов).
@@ -1805,14 +1814,17 @@ class ProcessModulePlugin(ABC):
         """
         # Двойники контекста без ``config`` (как заглушки менеджера команд ниже) — ключа нет.
         raw = (getattr(ctx, "config", None) or {}).get("run_locked_commands")
+        self.run_locked_invalid = False
         if raw is None:
             return frozenset()
         if not isinstance(raw, (list, tuple)) or any(not isinstance(name, str) for name in raw):
+            self.run_locked_invalid = True
             ctx.log_error(f"Plugin '{self.name}': run_locked_commands негоден (нужен список имён команд) — запрета нет")
             return frozenset()
         names = frozenset(raw)
         unknown = names - set(self.commands)
         if unknown:
+            self.run_locked_invalid = True
             shown = [n[:40] for n in sorted(unknown)[:5]]
             extra = len(unknown) - len(shown)
             tail = f" (+{extra})" if extra else ""

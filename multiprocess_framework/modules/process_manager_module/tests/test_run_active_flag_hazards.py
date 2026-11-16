@@ -502,3 +502,60 @@ def test_begin_system_stop_clears_flag_under_run_lock_before_stop_visible() -> N
     assert _bounded(lambda: pm._begin_system_stop("graceful", "event", None), _DEADLINE_S) is False
     assert spy.log == [("running", False, True)], spy.log
     assert spy.is_set() is False
+
+
+# --------------------------------------------------------------------------- #
+# 12. M1: негодный run_locked_commands закрывает — причина config, узел не готов, START отказан
+# --------------------------------------------------------------------------- #
+
+_PARK_CONFIG_REASON = {
+    "node": "hazard_node.park",
+    "severity": "failure",
+    "reason": "park: неверный run_locked_commands",
+    "source": "config",
+}
+
+
+def _start_with_child_readiness(snap: dict) -> tuple[str, dict]:
+    """Снимок готовности узла -> heartbeat ребёнка ``cam`` в настоящий монитор PM -> такт -> START."""
+    rig = _Rig(("cam",))
+    try:
+        rig.sim.set("cam", ready=snap["ready"], reasons=snap["reasons"])
+        rig.sim.beat_now()
+        rig.tick()
+        state = rig.state
+        return state, _bounded(rig.pm._cmd_system_run_start, _DEADLINE_S)
+    finally:
+        rig.close()
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    "bad",
+    ["robot_park_all", [1], ["robot_park_all", "no_such_command"]],
+    ids=["string", "list_of_int", "unknown_name"],
+)
+def test_invalid_run_locked_key_gives_config_reason_and_refuses_start(bad: Any) -> None:
+    """Негодный ключ: ERROR в журнале остаётся; снимок готовности узла — ровно одна причина ``failure``
+    ``source: "config"`` «park: неверный run_locked_commands», ``ready`` ложно; PM по такому heartbeat —
+    ``not_ready``, START отказан ``not_ready``."""
+    plugin_rig = _PluginRig(ParkPlugin, bad, RunFlag())
+    errors = [str(rec["msg"]) for rec in plugin_rig.orch._services.logs if rec["level"] == "ERROR"]
+    assert len(errors) == 1 and "run_locked_commands" in errors[0], errors
+    snap = plugin_rig.orch.readiness_snapshot(announced=True)
+    assert [r for r in snap["reasons"] if r["source"] == "config"] == [_PARK_CONFIG_REASON], snap["reasons"]
+    assert snap["ready"] is False
+    state, reply = _start_with_child_readiness(snap)
+    assert state == "not_ready"
+    assert (reply["success"], reply["error"]) == (False, "not_ready"), reply
+
+
+@pytest.mark.timeout(60)
+def test_valid_run_locked_key_no_config_reason_start_accepted() -> None:
+    """Годный ключ (контроль): причины config нет, узел готов, START принят."""
+    plugin_rig = _PluginRig(ParkPlugin, ["robot_park_all"], RunFlag())
+    snap = plugin_rig.orch.readiness_snapshot(announced=True)
+    assert snap["reasons"] == [] and snap["ready"] is True, snap
+    state, reply = _start_with_child_readiness(snap)
+    assert state == "ready"
+    assert reply == {"success": True, "state": "running"}, reply

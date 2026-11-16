@@ -37,7 +37,7 @@ from ..health.schema import (
     READINESS_REASONS_MAX,
     READINESS_SEVERITIES,
 )
-from ..plugins.base import PluginContext, PluginState, ProcessModulePlugin
+from ..plugins.base import RUN_LOCKED_INVALID_REASON, PluginContext, PluginState, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
 
@@ -541,6 +541,17 @@ class PluginOrchestrator:
         return f"{'pause' if entry['pause'] else 'resume'}() упал: {entry['type']}"
 
     def _plugin_reasons(self, plugin: ProcessModulePlugin, ctx: PluginContext, node: str) -> list[dict]:
+        """Причины плагина: негодные ключи безопасности его конфига (``source: "config"``), затем ``readiness()``.
+
+        Task 2.7d M1 (ADR-PM-062): негодный ``run_locked_commands`` (``plugin.run_locked_invalid``, разбор — в базе
+        плагина при регистрации команд) — причина ``failure``: узел не готов, START отказан ``not_ready``.
+        """
+        reasons = self._readiness_reasons(plugin, ctx, node)
+        if getattr(plugin, "run_locked_invalid", False) is True:  # плагины-двойники без базы — ключа нет
+            reasons.insert(0, self._config_invalid(node, f"{plugin.name}: {RUN_LOCKED_INVALID_REASON}"))
+        return reasons
+
+    def _readiness_reasons(self, plugin: ProcessModulePlugin, ctx: PluginContext, node: str) -> list[dict]:
         """Причины ``plugin.readiness(ctx)``; сбой и неверная форма — ``failure`` без текста исключения."""
         key = id(plugin)
         try:
@@ -564,7 +575,7 @@ class PluginOrchestrator:
         policy = self._readiness_policy_of(plugin, ctx)
         if isinstance(policy, str):
             own = [self._reason(node, severity, reason) for severity, reason in canonical]
-            return [self._reason(node, "failure", CONFIG_INVALID_REASON, source="config"), *own]
+            return [self._config_invalid(node, CONFIG_INVALID_REASON), *own]
         items, self._readiness_memory[key] = apply_policy(
             canonical, policy, self._readiness_memory.get(key, NEVER_CLEAN), self._clock()
         )
@@ -618,6 +629,15 @@ class PluginOrchestrator:
     def _reason(node: str, severity: str, reason: str, source: str = "readiness") -> dict:
         """Элемент ``reasons``: ровно ``node, severity, reason, source``; текст не длиннее ``_REASON_MAX_LEN``."""
         return {"node": node, "severity": severity, "reason": reason[:_REASON_MAX_LEN], "source": source}
+
+    @classmethod
+    def _config_invalid(cls, node: str, reason: str) -> dict:
+        """Причина негодного ключа безопасности в конфиге узла: ``failure`` с ``source: "config"`` (Task 2.9, 2.7d M1).
+
+        Единое правило: ключ безопасности (``readiness``, ``run_locked_commands``) при негодном значении закрывает —
+        узел не готов; ключ подстройки (``run_*``, ``conn_stale_s``) — WARNING и умолчание.
+        """
+        return cls._reason(node, "failure", reason, source="config")
 
     def _cap_reasons(self, reasons: list[dict], process_name: str) -> list[dict]:
         """Не больше ``_REASONS_MAX`` причин (с маркером): лишние отбрасываются, блокирующие причины остаются первыми.

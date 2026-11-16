@@ -4452,6 +4452,13 @@ Free-threaded Python — пересмотреть.
   ERROR `Plugin '<имя>': run_locked_commands негоден (нужен список имён команд) — запрета нет`, запрета нет. Имена вне
   `self.commands` -> одна строка ERROR `Plugin '<имя>': run_locked_commands — нет таких команд [...]` (не больше 5
   имён по алфавиту, каждое до 40 символов, хвост ` (+N)`); остальные имена берутся.
+- *Негодный ключ закрывает (M1 сквозного обзора).* Обе ERROR-ситуации выше ставят публичный атрибут плагина
+  `run_locked_invalid = True` (один разбор ключа — в базе плагина; ключа нет или он годен -> `False`). Оркестратор в
+  `_plugin_reasons` добавляет причину `failure` с `source: "config"` «`<плагин>: неверный run_locked_commands`» общим
+  помощником `_config_invalid` (тот же, что у негодной политики `readiness`, ADR-PM-061): узел не готов, START отказан
+  `not_ready`, пока ключ не исправлен. ERROR в журнале остаётся. Правило для всех ключей: ключи безопасности
+  (`readiness`, `run_locked_commands`) при негодном значении закрывают; ключи подстройки (`run_*`, `conn_stale_s`) —
+  WARNING и умолчание.
 - *Обёртка.* Имя из списка регистрируется `_run_guarded(ctx, method)` (`functools.wraps`, тот же вызов
   `register_command` / `_register_command_with_options`, опции хука `command_options` сохраняются). Флаг
   `getattr(ctx.services, "_run_active", None)` (ADR-PMM-051) читается **в момент вызова** — для команды с исполнителем
