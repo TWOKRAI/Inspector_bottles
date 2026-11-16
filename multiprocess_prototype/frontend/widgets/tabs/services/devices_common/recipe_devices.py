@@ -10,19 +10,48 @@
 (если сессия передана): ручная правка файла до записи — конфликт, а своя запись двигает базу, и Save
 редактора не видит ложного конфликта (C-30, Task 1.9). Чтение списка при отсутствии активного рецепта возвращает
 ``[]``; модификация (upsert/remove) без активного рецепта — ``RecipeDevicesError``
-(GUI показывает подсказку и блокирует добавление).
+(GUI показывает подсказку и блокирует добавление). Отказ чтения/записи файла рецепта (блокировка, формат,
+запрет записи, ввод-вывод) тоже переводится в ``RecipeDevicesError`` с текстом без пути и содержимого
+(F3, ``_WRITE_FAILURES``).
 
 Refs: plans/device-tree-recipe.md Фаза B
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from multiprocess_framework.modules.logger_module import get_std_logger
-from multiprocess_framework.modules.recipe import RecipeConflict, RecipeFormatError
+from multiprocess_framework.modules.recipe import (
+    RecipeConflict,
+    RecipeFormatError,
+    RecipeLockTimeout,
+    YamlPatchConflict,
+    YamlWriteRefused,
+)
 
 logger = get_std_logger(__name__)
+
+# Отказы чтения/записи рецепта, которые GUI показывает пользователем текстом (литералы без пути и содержимого).
+# Порядок существенен: берётся первое совпадение по isinstance, подкласс должен идти ДО предка
+# (RecipeLockTimeout — подкласс OSError, поэтому раньше него).
+_WRITE_FAILURES: tuple[tuple[type[BaseException], str], ...] = (
+    (RecipeLockTimeout, "Рецепт занят другим процессом — повторите через несколько секунд"),
+    (RecipeFormatError, "Файл рецепта не читается или имеет неподдерживаемый формат — устройства не изменены"),
+    (YamlWriteRefused, "Не удалось безопасно записать рецепт — файл не изменён"),
+    (
+        YamlPatchConflict,
+        "Рецепт нельзя изменить точечно: общий узел YAML (якорь или алиас) — правьте файл вручную",
+    ),
+    (
+        OSError,
+        "Не удалось прочитать или записать файл рецепта "
+        "(например, нет доступа или места на диске) — устройства не изменены",
+    ),
+)
+_WRITE_FAILURE_TYPES: tuple[type[BaseException], ...] = tuple(cls for cls, _ in _WRITE_FAILURES)
 
 
 class RecipeDevicesError(Exception):
@@ -110,25 +139,27 @@ class RecipeDevicesStore:
         ``save_raw`` (минимальная дельта — комментарии рецепта сохраняются).
 
         Raises:
-            RecipeDevicesError: нет активного рецепта, у ``entry`` пустой ``id``
-                или файл рецепта изменён снаружи (конфликт ревизии).
+            RecipeDevicesError: нет активного рецепта, у ``entry`` пустой ``id``,
+                файл рецепта изменён снаружи (конфликт ревизии) или отказ записи/чтения
+                файла рецепта (блокировка, формат, запрет записи, ввод-вывод).
         """
         slug = self._require_active()
         dev_id = entry.get("id")
         if not dev_id:
             raise RecipeDevicesError("у устройства пустой id — upsert невозможен")
 
-        devices, read_rev = self._read_canonical_devices(slug)
-        replaced = False
-        for i, existing in enumerate(devices):
-            if existing.get("id") == dev_id:
-                devices[i] = {**existing, **entry}
-                replaced = True
-                break
-        if not replaced:
-            devices.append(dict(entry))
+        with self._translating(slug):
+            devices, read_rev = self._read_canonical_devices(slug)
+            replaced = False
+            for i, existing in enumerate(devices):
+                if existing.get("id") == dev_id:
+                    devices[i] = {**existing, **entry}
+                    replaced = True
+                    break
+            if not replaced:
+                devices.append(dict(entry))
 
-        self._write_devices(slug, devices, read_rev)
+            self._write_devices(slug, devices, read_rev)
 
     def remove(self, device_id: str) -> None:
         """Удалить устройство из секции ``devices:`` рецепта.
@@ -136,18 +167,36 @@ class RecipeDevicesStore:
         Если id не найден — ничего не пишет (файл и база не тронуты).
 
         Raises:
-            RecipeDevicesError: нет активного рецепта или файл рецепта изменён снаружи.
+            RecipeDevicesError: нет активного рецепта, файл рецепта изменён снаружи
+                или отказ записи/чтения файла рецепта (блокировка, формат, запрет записи, ввод-вывод).
         """
         slug = self._require_active()
-        devices, read_rev = self._read_canonical_devices(slug)
-        kept = [d for d in devices if d.get("id") != device_id]
-        if len(kept) == len(devices):
-            return
-        self._write_devices(slug, kept, read_rev)
+        with self._translating(slug):
+            devices, read_rev = self._read_canonical_devices(slug)
+            kept = [d for d in devices if d.get("id") != device_id]
+            if len(kept) == len(devices):
+                return
+            self._write_devices(slug, kept, read_rev)
 
     # ------------------------------------------------------------------ #
     # Внутреннее
     # ------------------------------------------------------------------ #
+
+    @contextmanager
+    def _translating(self, slug: str) -> Iterator[None]:
+        """Перевести отказ чтения/записи рецепта (``_WRITE_FAILURES``) в ``RecipeDevicesError``.
+
+        В лог — только имя класса исключения (текст может нести путь к рецепту); исходное
+        исключение остаётся в цепочке (``from exc``). Прочие исключения проходят как есть.
+        """
+        try:
+            yield
+        except _WRITE_FAILURE_TYPES as exc:
+            logger.warning("Рецепт '%s': операция с устройствами отклонена: %s", slug, type(exc).__name__)
+            for cls, message in _WRITE_FAILURES:
+                if isinstance(exc, cls):
+                    raise RecipeDevicesError(message) from exc
+            raise  # недостижимо: кортеж для except строится из той же таблицы
 
     def _read_canonical_devices(self, slug: str) -> tuple[list[dict], str | None]:
         """Список устройств (только валидные dict) и ``rev`` одного чтения канона рецепта.

@@ -3,7 +3,7 @@
 
 Порт одного прибора держит поток-владелец сеанса (Task 2.1): `take_device -> session.start(timeout)`,
 `release_device -> session.stop(timeout)`, `get_status.state <- session.state`. `on_frame` кладёт кадр в слот
-для `produce()` (потеря кадра допустима). Публикация метрик, `device_held`, `last_error` в дерево — Task 2.3b.
+для `produce()` (потеря кадра допустима). Уровни и события в дерево — Task 2.3b (ниже).
 
 Task 2.3a: база для вендорских плагинов. Хуки: `create_port(self)` (по умолчанию — модульная `create_port(driver)`,
 знает только `"fake"`) и `bindings(self)` (по умолчанию `FAKE_BINDINGS`); порт создаётся один раз в
@@ -20,8 +20,9 @@ Task 2.3b: наблюдаемость средствами framework. Уровн
 Логгер сеанса `camera_device.session` пробрасывается в `ctx.log_*` (`_SessionLogBridge`): стандартный `logging` в файлы
 framework не попадает.
 При КАЖДОМ `take_device` план run/rest строится из register'а (`params.build_plan`) и передаётся сеансу через
-`set_cycle` (идущий цикл не меняется). Публикация — `ctx.declare_metric("frames")` + `ctx.publish_metric`
-(путь `processes.<p>.state.plugins.camera_device.frames`), без прямого `merge`.
+`set_cycle` (идущий цикл не меняется). Уровни публикуются через `ctx.declare_metric` + `ctx.publish_metric` (путь
+`processes.<p>.state.plugins.camera_device.<имя>`), без прямого `merge`; прямой `state_proxy.merge` — только у
+событий (см. Task 2.3b выше), уровни им не пишутся.
 Item по Р10: `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic) + `device_id`, `ts` (wall),
 `pixel_format`, `width`, `height`, `device_frame_num`. Форма кадра — по `pixel_format` (rgb8/bgr8 — h x w x 3).
 
@@ -216,10 +217,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self.cmd_take_device({})
 
     def shutdown(self, ctx: PluginContext) -> None:
-        self.cmd_release_device({})
-        bridge, self._log_bridge = self._log_bridge, None
-        if bridge is not None:
-            logging.getLogger("camera_device.session").removeHandler(bridge)
+        try:
+            self.cmd_release_device({})
+        finally:  # отказ release не оставляет мост на общем логгере
+            bridge, self._log_bridge = self._log_bridge, None
+            if bridge is not None:
+                logging.getLogger("camera_device.session").removeHandler(bridge)
 
     # ------------------------------------------------------------------ #
     # Поток данных
@@ -300,7 +303,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
                     if device is None
                     else {"kind": device.kind, "value": device.value, "name": device.name},
                     "device_held": session.device_held,
-                    "profile": _PROFILE_OF_STATE.get(state),
+                    # rest в прибор пишется только после открытия: при отказе открытия (device None) профиля нет
+                    "profile": _PROFILE_OF_STATE.get(state) if device is not None else None,
                     "params": session.params,
                     "params_status": session.params_status,
                     "param_errors": param_errors,
@@ -344,6 +348,11 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def produce(self) -> list[dict]:
         """Забрать кадр из слота в item. Пусто — норма. Не блокирует."""
+        session = self._session
+        # Сеанс при отказе снимает `device_held` без `on_state` (session.py): дереву не ждать окна `_TICK_S`.
+        # Проверка — два чтения без замков; `merge` только если снимок действительно изменился (держит diff).
+        if session is not None and self._published.get("device_held") is True and not session.device_held:
+            self._sync_events()
         self._tick()
         with self._lock:
             slot, self._slot = self._slot, None
@@ -425,6 +434,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def _attach_log_bridge(self) -> None:
         """Строки `camera_device.session` -> журнал framework; уровень INFO ставится, только если не задан явно."""
+        if self._log_bridge is not None:  # второй мост тому же плагину удвоил бы каждую строку
+            return
         session_logger = logging.getLogger("camera_device.session")
         if session_logger.level == logging.NOTSET:
             session_logger.setLevel(logging.INFO)
