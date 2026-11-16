@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -76,7 +77,7 @@ def run(recipe: str, secs: float, port: int, run_gate: bool = True) -> dict:
     with tempfile.TemporaryDirectory(prefix="bench_logs_", ignore_cleanup_errors=True) as log_dir:
         # Без гейта kwargs не передаём вовсе: baseline-дерево A/B может быть старше Task 2.1 (у его
         # BackendHarness нет run_gate), а умолчание harness там и так «без гейта».
-        gate_kwargs = {"run_gate": True} if run_gate else {}
+        gate_kwargs: dict[str, Any] = {"run_gate": True} if run_gate else {}
         h = BackendHarness(recipe=recipe, port=port, ready_timeout=90, log_dir=log_dir, **gate_kwargs)
         drv = h.start()
         try:

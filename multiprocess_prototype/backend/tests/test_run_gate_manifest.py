@@ -168,12 +168,13 @@ def test_build_nested_sys_config_carries_the_same_run_gate(tmp_path: Path, value
 def test_build_for_the_prototype_manifest_equals_the_loaded_config() -> None:
     """Манифест прототипа: значение в конфиге оркестратора = ``run_gate`` загруженного боевого ``system.yaml``.
 
-    Ожидание берётся из ЗАГРУЗКИ yaml (``load_system_config``), а не хардкодом: значение в манифесте сменится.
-    Побочно проверяем тип: ``bool``, не ``None``.
+    Ожидание — ЛИТЕРАЛ значения в боевом ``system.yaml``: производное от загрузки yaml (``load_system_config``)
+    краснело бы только при расхождении ``build()`` с загрузкой, но не при смене самого ключа. Коммит B (``true``)
+    меняет литерал ``False -> True``. Побочно проверяем тип: ``bool``, не ``None``.
     """
     from multiprocess_prototype.main import CONFIG_PATH
 
-    expected = load_system_config(CONFIG_PATH).run_gate  # AttributeError, пока поля нет
+    expected = False  # system.yaml: run_gate: false (коммит A)
 
     launcher = _build(CONFIG_PATH)
 
@@ -191,7 +192,7 @@ def test_build_for_the_prototype_manifest_nested_sys_config() -> None:
     """
     from multiprocess_prototype.main import CONFIG_PATH
 
-    expected = load_system_config(CONFIG_PATH).run_gate
+    expected = False  # system.yaml: run_gate: false (коммит A); в коммите B станет True
 
     launcher = _build(CONFIG_PATH)
 

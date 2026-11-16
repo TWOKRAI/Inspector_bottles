@@ -510,6 +510,11 @@ class BackendHarness:
         START не судится (``success`` без смены состояния — не запуск, ``already_running`` — не
         ошибка). Без гейта работает так же: START из ``ready`` допустим.
 
+        ВНИМАНИЕ: после ``start_run`` машина в ``running`` даже без гейта (START из ``ready`` допустим),
+        а ``topology.apply`` и ``recipe.activate`` в ``running`` отказаны (``error: running``) до
+        ``run_stop()``. Тест, который применяет топологию или активирует рецепт, ``start_run`` не зовёт:
+        без гейта он и так стоит в ``ready``, где apply разрешён.
+
         START шлётся только при ``start_allowed`` и не чаще раза в ``_RUN_START_MIN_INTERVAL_S``: при
         «принят, но ``running`` нет» не заливаем PM десятью START в секунду. ``fault`` липкий (без
         ``run_ack`` ``running`` не наступит) — выход сразу, без ожидания таймаута.
