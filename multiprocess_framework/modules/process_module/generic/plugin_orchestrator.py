@@ -563,7 +563,6 @@ class PluginOrchestrator:
         self._readiness_logged.pop(key, None)  # серия отказов кончилась — следующий отказ снова в лог
         policy = self._readiness_policy_of(plugin, ctx)
         if isinstance(policy, str):
-            self._readiness_memory[key] = NEVER_CLEAN  # политика негодна: удержания нет
             own = [self._reason(node, severity, reason) for severity, reason in canonical]
             return [self._reason(node, "failure", CONFIG_INVALID_REASON, source="config"), *own]
         items, self._readiness_memory[key] = apply_policy(
