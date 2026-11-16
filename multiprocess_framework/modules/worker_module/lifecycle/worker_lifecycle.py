@@ -44,10 +44,18 @@ class WorkerLifecycle(IWorkerLifecycle):
 
     Thread-safety:
         Работает с WorkerRegistry (потокобезопасен) и threading.Thread (потокобезопасен).
+        Решение «стартовать ли поток» и подмена потока в реестре идут под
+        self._start_lock (ADR-WRK-007): start_worker, _restart_worker_internal
+        и короткий снимок в stop_worker. Порядок замков единственный:
+        _start_lock → registry._lock. Под _start_lock нет join, sleep, вызова
+        target и логирования.
     """
 
     def __init__(self, manager):
         self.manager = manager
+        # Простой Lock, не RLock: вложенных захватов нет, а RLock скрыл бы
+        # случайную вложенность (ADR-WRK-007).
+        self._start_lock = threading.Lock()
 
     # ---- Создание ----
 
@@ -89,37 +97,77 @@ class WorkerLifecycle(IWorkerLifecycle):
     # ---- Запуск ----
 
     def start_worker(self, worker_name: str) -> bool:
-        """Запустить воркер. Создаёт новый поток если предыдущий завершился."""
-        worker_info = self.manager._worker_registry.get(worker_name)
-        if not worker_info:
-            return False
+        """Запустить воркер — честно по таблице A/B/C (C-91, ADR-WRK-007).
 
-        if worker_info["status"] == WorkerStatus.RUNNING:
-            return True
+        Состояние читается под self._start_lock (T — поток из реестра, E — его stop_event):
+          A. T жив, статус RUNNING, E не взведён → True, нового потока нет (идемпотентно).
+          B. T жив, иначе (STOPPING; RUNNING при взведённом E; ERROR в окне
+             авто-рестарта; COMPLETED/STOPPED, пока обёртка дорабатывает finally) →
+             False, нового потока над живым нет, предупреждение в лог. Повторить вызов позже.
+          C. T не жив (не запускался, завершился, залипший статус) → новый поток
+             с тем же именем, свежие события, статус RUNNING → True. Если
+             Thread.start() бросил — реестр возвращён как был, исключение проброшено.
+        """
+        registry = self.manager._worker_registry
+        with self._start_lock:
+            worker_info = registry.get(worker_name)
+            if not worker_info:
+                return False
 
-        if not worker_info["thread"].is_alive():
-            stop_event = threading.Event()
-            pause_event = threading.Event()
-            thread = threading.Thread(
-                name=f"{self.manager.manager_name}_{worker_name}",
-                target=self._worker_wrapper,
-                args=(worker_name, worker_info["target"], stop_event, pause_event),
-                daemon=True,
-            )
-            worker_info["thread"] = thread
-            worker_info["stop_event"] = stop_event
-            worker_info["pause_event"] = pause_event
+            if not worker_info["thread"].is_alive():
+                # C: мёртвый поток → всегда новый, даже при залипшем статусе RUNNING.
+                self._spawn_thread_locked(worker_name, worker_info, count_restart=True)
+                return True
 
-            if worker_info["has_been_started"]:
-                worker_info["restart_count"] += 1
-            worker_info["has_been_started"] = True
+            status = worker_info["status"]
+            if status == WorkerStatus.RUNNING and not worker_info["stop_event"].is_set():
+                return True  # A
 
-            worker_info["stop_event"].clear()
-            worker_info["pause_event"].clear()
-            self.manager._worker_registry.update_status(worker_name, WorkerStatus.RUNNING)
-            worker_info["thread"].start()
+        # B: лог — вне замка; в тексте только имя воркера и статус.
+        status_text = getattr(status, "value", status)
+        self.manager._log_warning(
+            f"старт воркера '{worker_name}' отклонён: прежний поток ещё жив (статус {status_text})"
+        )
+        return False
 
-        return True
+    def _spawn_thread_locked(self, worker_name: str, worker_info: dict, count_restart: bool) -> None:
+        """Создать и запустить новый поток воркера. Вызывать только под self._start_lock.
+
+        Имя потока f"{manager_name}_{worker_name}" — на нём держится
+        ExecutorManager.is_executor_thread (ADR-WRK-006).
+        count_restart=True — старт по start_worker: restart_count растёт, если воркер
+        уже запускался; авто-рестарт считает restart_count сам (в _worker_wrapper).
+        Если Thread.start() бросил — поля реестра и статус возвращены, исключение проброшено.
+        """
+        registry = self.manager._worker_registry
+        saved = {
+            key: worker_info[key]
+            for key in ("thread", "stop_event", "pause_event", "restart_count", "has_been_started")
+        }
+        saved_status = worker_info["status"]
+
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+        thread = threading.Thread(
+            name=f"{self.manager.manager_name}_{worker_name}",
+            target=self._worker_wrapper,
+            args=(worker_name, worker_info["target"], stop_event, pause_event),
+            daemon=True,
+        )
+        worker_info["thread"] = thread
+        worker_info["stop_event"] = stop_event
+        worker_info["pause_event"] = pause_event
+        if count_restart and worker_info["has_been_started"]:
+            worker_info["restart_count"] += 1
+        worker_info["has_been_started"] = True
+        registry.update_status(worker_name, WorkerStatus.RUNNING)
+
+        try:
+            thread.start()
+        except BaseException:
+            worker_info.update(saved)
+            registry.update_status(worker_name, saved_status)
+            raise
 
     # ---- Остановка ----
 
@@ -134,28 +182,48 @@ class WorkerLifecycle(IWorkerLifecycle):
         (остаётся STOPPING), возвращается False. Раньше метод безусловно
         возвращал True и ставил STOPPED даже для зависшего потока — система
         считала воркер остановленным, хотя тред был жив (docs/audits/2026-07-20_bug-hunt.md, H-1).
+
+        Запрос остановки не теряется авто-рестартом (C-91, ADR-WRK-007): снимок
+        (поток, stop_event), статус STOPPING и stop_event.set() делаются одним шагом
+        под self._start_lock — тем же замком, под которым _restart_worker_internal
+        сверяет stop_event. join — снаружи замка. После join — страховка: если в
+        реестре уже другой живой поток, взвести его stop_event и ждать его в
+        пределах остатка timeout, пока поток в реестре не перестанет меняться.
         """
-        worker_info = self.manager._worker_registry.get(worker_name)
-        if not worker_info:
-            return False
+        registry = self.manager._worker_registry
+        with self._start_lock:
+            worker_info = registry.get(worker_name)
+            if not worker_info:
+                return False
+            # Единый снимок (T, E) под замком: между чтениями поток в реестре не
+            # подменится (H-1, п.3; C-91 H2).
+            thread = worker_info["thread"]
+            registry.update_status(worker_name, WorkerStatus.STOPPING)
+            worker_info["stop_event"].set()
 
-        self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPING)
-        worker_info["stop_event"].set()
-
-        # Единое чтение thread в локальную переменную вместо двух обращений к
-        # worker_info["thread"] (было :137 is_alive, :138 join) — устраняет TOCTOU-гонку:
-        # между двумя чтениями _restart_worker_internal мог подменить объект в реестре
-        # на новый несстартованный Thread → join() на нём бросает RuntimeError (H-1, п.3).
-        thread = worker_info["thread"]
-
+        deadline = time.monotonic() + timeout
         try:
             if thread.is_alive():
                 thread.join(timeout=timeout)
         except RuntimeError:
-            # Поток ещё не был запущен (start() не вызван) — join невозможен,
-            # но и останавливать нечего: считаем воркер остановленным.
-            self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
+            # join невозможен (поток не запущен или stop_worker вызван из самого
+            # потока воркера) — ждать нечего: считаем воркер остановленным.
+            registry.update_status(worker_name, WorkerStatus.STOPPED)
             return True
+
+        # Страховка: авто-рестарт мог подменить поток до снимка (T2 мог дать T3).
+        while not thread.is_alive():
+            with self._start_lock:
+                current = worker_info["thread"]
+                if current is thread or not current.is_alive():
+                    break
+                current_stop_event = worker_info["stop_event"]
+                registry.update_status(worker_name, WorkerStatus.STOPPING)
+                current_stop_event.set()
+            thread = current
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                thread.join(timeout=remaining)
 
         if thread.is_alive():
             # Таймаут истёк, поток всё ещё жив — не врём реестру про STOPPED.
@@ -165,7 +233,7 @@ class WorkerLifecycle(IWorkerLifecycle):
             )
             return False
 
-        self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
+        registry.update_status(worker_name, WorkerStatus.STOPPED)
         return True
 
     # ---- Перезапуск ----
@@ -242,34 +310,36 @@ class WorkerLifecycle(IWorkerLifecycle):
 
             if should_restart:
                 time.sleep(0.1)
-                self._restart_worker_internal(worker_name)
+                # stop_event умирающего потока: если остановку уже запросили,
+                # _restart_worker_internal отменит рестарт (C-91 H2). Вызов через
+                # экземплярный атрибут — тесты подменяют его.
+                self._restart_worker_internal(worker_name, stop_event)
             else:
                 current_status = self.manager._worker_registry.get_status(worker_name)
                 # Не перезаписываем COMPLETED и ERROR (при превышении лимита перезапусков)
                 if current_status not in (WorkerStatus.ERROR, WorkerStatus.COMPLETED):
                     self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
 
-    def _restart_worker_internal(self, worker_name: str) -> bool:
-        """Внутренний перезапуск после ошибки (вызывается из потока воркера)."""
-        worker_info = self.manager._worker_registry.get(worker_name)
-        if not worker_info:
+    def _restart_worker_internal(self, worker_name: str, stop_event: threading.Event) -> bool:
+        """Внутренний перезапуск после ошибки (вызывается из потока воркера).
+
+        stop_event — событие остановки умирающего потока. Его сверяют под
+        self._start_lock, тем же замком, под которым stop_worker взводит его:
+        если остановку уже запросили, рестарт отменяется, статус STOPPED,
+        возврат False. Запрос остановки не теряется (C-91 H2, ADR-WRK-007).
+        """
+        registry = self.manager._worker_registry
+        with self._start_lock:
+            worker_info = registry.get(worker_name)
+            if not worker_info:
+                return False
+            cancelled = stop_event.is_set()
+            if cancelled:
+                registry.update_status(worker_name, WorkerStatus.STOPPED)
+            else:
+                self._spawn_thread_locked(worker_name, worker_info, count_restart=False)
+
+        if cancelled:
+            self.manager._log_info(f"авто-рестарт воркера '{worker_name}' отменён: запрошена остановка")
             return False
-
-        stop_event = threading.Event()
-        pause_event = threading.Event()
-        thread = threading.Thread(
-            name=f"{self.manager.manager_name}_{worker_name}",
-            target=self._worker_wrapper,
-            args=(worker_name, worker_info["target"], stop_event, pause_event),
-            daemon=True,
-        )
-        worker_info["thread"] = thread
-        worker_info["stop_event"] = stop_event
-        worker_info["pause_event"] = pause_event
-
-        worker_info["stop_event"].clear()
-        worker_info["pause_event"].clear()
-        self.manager._worker_registry.update_status(worker_name, WorkerStatus.RUNNING)
-        worker_info["has_been_started"] = True
-        worker_info["thread"].start()
         return True
