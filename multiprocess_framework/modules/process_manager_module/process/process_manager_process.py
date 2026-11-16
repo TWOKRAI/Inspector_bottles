@@ -1921,10 +1921,10 @@ class ProcessManagerProcess(ProcessModule):
             if publish:
                 self._publish_run_state()  # ack_allowed
             return
-        self._submit_run_sequence(lambda: self._run_stop_sequence(fault=True, seq=seq), "run-fault-stop")
+        self._submit_run_sequence(lambda: self._run_stop_sequence(fault=True, seq=seq), "run-fault-stop", seq=seq)
 
     def _submit_run_sequence(
-        self, action: Callable[[], Any], name: str, reply: Callable[[Any], None] | None = None
+        self, action: Callable[[], Any], name: str, reply: Callable[[Any], None] | None = None, *, seq: int = 0
     ) -> None:
         """Отдать ``action`` исполнителю жизненного цикла (``pm-lifecycle``); он последовательный, ожидание ``paused``
         не держит ни ``_run_lock``, ни замок монитора. PM без исполнителя (двойник из ``__new__``) — одноразовый
@@ -1936,7 +1936,8 @@ class ProcessManagerProcess(ProcessModule):
         когда закрытие снимает очередь), возврат ``False`` без ``reply`` и исключение подачи. Ожиданию ``paused``
         сериализация с очередью L не нужна; прерывание системным стопом последовательность видит сама и итог не ставит
         (машину ведёт ``shutdown``). Так ``stopping`` и ``fault`` не остаются без итога. Обход — не больше одного на
-        подачу. Отказ — WARNING, исключение — ERROR. Поток не стартовал — ERROR; STOP получает итог сразу.
+        подачу. Отказ — WARNING, исключение — ERROR. Поток не стартовал — ERROR; STOP и авария (``seq`` — номер аварии
+        подачи) получают итог сразу.
         """
         done = reply or (lambda _result: None)
         submit = self._lifecycle_submit
@@ -1956,6 +1957,8 @@ class ProcessManagerProcess(ProcessModule):
                 self._log_error(f"{name}: поток последовательности не стартовал ({type(exc).__name__})")
                 if name == "run-stop":
                     self._run_stop_finish(fault=False, seq=0, names=[], timeout_s=0.0)
+                elif name == "run-fault-stop":
+                    self._run_stop_finish(fault=True, seq=seq, names=[], timeout_s=0.0)  # ``ack`` не застрянет
 
         def on_reply(result: Any) -> None:
             replied.append(True)
