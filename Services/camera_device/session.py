@@ -19,7 +19,8 @@ compare-and-set под замком состояния; `on_state`, `on_stall`, 
 `watchdog_s`) и `stop(timeout)` (до `timeout + 0,5 с`) задерживают приём команд
 процесса.
 
-Слой: только stdlib и `.interface`/`.params`; без `multiprocess_prototype` и вендоров.
+Слой: stdlib, `.interface`/`.params`/`.profiles` и публичный `multiprocess_framework.modules.worker_module`;
+без `multiprocess_prototype` и вендоров.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import weakref
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -44,6 +46,10 @@ MAX_CONSECUTIVE_ERRORS = 3
 _FAILED = frozenset({"busy", "not_found", "error"})
 # Вызовы порта, для которых зовётся `on_timing` (секунды).
 _TIMED = frozenset({"open", "stop_grabbing", "get_frame"})
+
+
+# Занятые имена воркеров по менеджеру: второй сеанс с тем же `worker_prefix` запустил бы цель первого.
+_CLAIMS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 class _StartCmd:
@@ -126,6 +132,8 @@ class DeviceSession:
         self._owner: threading.Thread | None = None
         self._cmd: _StartCmd | None = None
         self._stop_evt = threading.Event()
+        self._exited = threading.Event()  # цикл вышел: создаётся в start() под замком, ставится владельцем
+        self._exited.set()
         self._current: _Call | None = None
         self._cycle_t0 = 0.0
         self._errors = 0
@@ -203,6 +211,7 @@ class DeviceSession:
                 cmd = self._cmd = _StartCmd()
                 creator = True
                 self._stop_evt = threading.Event()
+                self._exited = threading.Event()
                 self._held = True
                 self._cycle_t0 = time.monotonic()
                 self._set_locked("opening", pending)
@@ -237,16 +246,16 @@ class DeviceSession:
             state = self._state
             if state in ("idle", "closed", "stopping"):
                 return
-            owner = self._owner
+            exited = self._exited
             if state in _FAILED:
                 self._set_locked("closed", pending)  # порт не зовётся: владелец уже закрывает его сам
             else:
                 self._set_locked("stopping", pending)
                 self._stop_evt.set()
         self._fire_states(pending)
-        if owner is None or threading.current_thread() is owner:
+        if threading.current_thread() is self._owner:
             return  # из on_frame: самосоединения нет, владелец сам завершит цикл
-        owner.join(timeout + self._timeout_ms / 1000.0)
+        exited.wait(timeout + self._timeout_ms / 1000.0)  # событие цикла, а не Thread: владелец мог ещё не стартовать
 
     # ------------------------------------------------------------------ #
     # Состояние
@@ -321,7 +330,9 @@ class DeviceSession:
                 if not self._workers.start_worker(self._owner_name):
                     reason = "воркер владельца не запущен"
             except Exception as exc:  # noqa: BLE001 — отказ менеджера воркеров -> откат цикла
-                reason = describe_error(exc)
+                reason = (
+                    str(exc) if isinstance(exc, ValueError) else describe_error(exc)
+                )  # текст ValueError — наш, без значений
         if not reason:
             return True
         self._last_error = reason
@@ -330,12 +341,25 @@ class DeviceSession:
         with self._lock:
             self._set_locked("error", pending)
             self._held = False
+            self._exited.set()
         self._fire_states(pending)
         cmd.finish(False)
         return False
 
     def _ensure_workers(self) -> None:
-        """Лениво зарегистрировать воркеры: владелец (TASK на цикл) и сторож (LOOP, опрос)."""
+        """Лениво зарегистрировать воркеры: владелец (TASK на цикл) и сторож (LOOP, опрос).
+
+        Имя занято другим сеансом -> `ValueError` (его ловит `_launch_owner`): `worker_prefix` уникален на сеанс.
+        """
+        try:
+            claims = _CLAIMS.setdefault(self._workers, {})
+        except TypeError:  # менеджер без weakref: проверка занятости недоступна
+            claims = {}
+        for name in (self._owner_name, self._wd_name):
+            holder = claims.get(name)
+            if holder is not None and holder() not in (None, self):
+                raise ValueError("worker_prefix занят другим сеансом")
+            claims[name] = weakref.ref(self)
         for name, target, mode in (
             (self._owner_name, self._owner_main, ExecutionMode.TASK),
             (self._wd_name, self._watchdog_main, ExecutionMode.LOOP),
@@ -384,7 +408,7 @@ class DeviceSession:
         """TASK-воркер на цикл `open -> close`: поток-владелец порта. Стоп процесса (`worker_stop`) = стоп цикла."""
         self._owner = threading.current_thread()
         with self._lock:
-            cmd, cycle_stop = self._cmd, self._stop_evt
+            cmd, cycle_stop, exited = self._cmd, self._stop_evt, self._exited
         assert cmd is not None
         stop_evt = lambda: cycle_stop.is_set() or worker_stop.is_set()  # noqa: E731
         self._start_watchdog()
@@ -420,6 +444,7 @@ class DeviceSession:
                 if self._state not in _FAILED:
                     self._set_locked("closed", pending)
                 self._held = False  # снимается вместе с финальным состоянием
+                exited.set()
             self._fire_states(pending)
 
     def _resolve_ident(self) -> DeviceIdentity:

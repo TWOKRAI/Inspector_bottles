@@ -435,3 +435,38 @@ def test_немедленный_повтор_start_из_busy_без_зависа
             pass  # сразу следующий start() после снятия held
         assert session.device_held is False
         assert _names(port).count("open") == i  # ровно один open за цикл
+
+
+@pytest.mark.timeout(60)
+def test_stop_сразу_после_start_ждёт_выхода_цикла(rig):
+    for _ in range(30):
+        port, session = rig.make(open_delay_s=0.05)
+        box: dict = {}
+        a = _in_thread(lambda s=session: s.start(3.0), box, "a")
+        _await(lambda s=session: s.state == "opening", "state == opening", deadline=1.0)
+        session.stop(2.0)
+        assert session.device_held is False  # stop() дождался выхода владельца, а не мёртвого прежнего потока
+        a.join(5.0)
+
+
+@pytest.mark.timeout(20)
+def test_занятый_worker_prefix_отказ_без_зависания_в_opening(rig):
+    first_port, first = rig.make()
+    assert first.start(2.0) is True
+    second_port = make_port(frame_period_s=0.01)
+    second = DeviceSession(
+        second_port,
+        second_port.sdk,
+        None,
+        on_frame=lambda frame: None,
+        workers=rig.wm,
+        worker_prefix="camera_device_0",  # тот же префикс, что у первого сеанса rig
+    )
+    rig.sessions.append(second)
+    before = len(first_port.calls)
+    assert second.start(1.0) is False
+    assert second.state == "error"
+    assert second.device_held is False
+    assert "worker_prefix занят" in (second.last_error or "")
+    assert second_port.calls == []  # порт второго не тронут
+    assert len(first_port.calls) >= before  # первый сеанс продолжает работать

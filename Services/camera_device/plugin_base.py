@@ -175,8 +175,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def cmd_take_device(self, data: dict) -> dict:
         """Открыть прибор и начать захват. Отказ — `status: error`, не исключение."""
-        if self._ctx.worker_manager is None:
+        workers = self._ctx.worker_manager
+        if workers is None:
             return {"status": "error", "device_state": self._reg.device_state, "error": "нет менеджера воркеров"}
+        if not (hasattr(workers, "has_worker") and hasattr(workers, "create_worker")):
+            error = "worker_manager не поддерживает create_worker/has_worker"
+            return {"status": "error", "device_state": self._reg.device_state, "error": error}
         session = self._ensure_session()
         t0 = time.monotonic()
         ok = session.start(_START_TIMEOUT_S)
