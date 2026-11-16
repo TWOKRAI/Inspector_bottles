@@ -146,7 +146,10 @@ def test_list_devices_при_медленном_close_после_stop_отказ
 
     assert (rig.count("acquire"), rig.count("enum_devices"), rig.count("release")) == (acquires, enums, releases)
     _join(worker, box)
-    _await(lambda: rig.port.sdk.refs == 0, "владелец вышел и отпустил SDK", deadline=5.0)
+    # `refs == 0` не признак выхода владельца: `release` идёт раньше снятия `device_held` (после него стоп сторожа).
+    # Выход виден по `release_device`: он отвечает `ok` только когда `device_held` снят.
+    _await(lambda: rig.plugin.cmd_release_device({})["status"] == "ok", "владелец вышел", deadline=6.0)
+    assert rig.port.sdk.refs == 0
     # владельца больше нет: теперь перечисление идёт потоком команды (контроль: путь выбирался по `device_held`)
     base = len(rig.port.calls)
     assert _call(lambda: rig.plugin.cmd_list_devices({})) == LISTED
