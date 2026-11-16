@@ -22,8 +22,9 @@
 | 2.2 | P0 | W2 | 1.6, 2.1 | `developer` (sonnet); 3-я -> `teamlead` | reviewer (sonnet) | да | Opus сразу + волна W2 | нет; ветку по умолчанию выбирают 6.2/0.5 | light |
 | 2.3a | P0 | W3 | 2.2 | `developer` (sonnet) | reviewer (sonnet) | да | волна W3 (Opus) | нет | light |
 | 2.3b | P0 | W3 | 2.3a | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; живой — 6.1 (`camera_device_demo`) | light |
-| 2.4 | P0 | W3 | 2.3b | `developer` (sonnet) после Opus stage 0; 3-я -> `teamlead` (opus) | reviewer (sonnet) | да | Opus сразу + волна W3 | нет; ветка по умолчанию — после 6.2 | medium (`Services/camera_device/tests`) |
-| 2.3c | P0 | W3 | 2.4 | `developer` (sonnet) | reviewer (sonnet) | да | волна W3 (Opus) | нет | light |
+| 2.4a | P0 | W3 | 2.3b | `developer` (sonnet) после Opus stage 0 (пройдена, раунд 1); 3-я -> `teamlead` (opus) | reviewer (sonnet)  | да | Opus сразу после 2.4a+2.4b + волна W3 | нет | light |
+| 2.4b | P0 | W3 | 2.4a | `developer` (sonnet); 3-я -> `teamlead` (opus) | в составе стадии 0 2.4 | да | Opus сразу после 2.4a+2.4b + волна W3 | нет; стенд `camera_device_demo` (fake) — окно лида | light |
+| 2.3c | P0 | W3 | 2.4a, 2.4b | `developer` (sonnet) | reviewer (sonnet) | да | волна W3 (Opus) | нет | light |
 | 4.1 | P0 | W3 | 0.3, 1.5 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; запись дерева 0.5 — данные фейка; на камере — 6.3 | light |
 | 3.1 | P0 | W3 | 1.5 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; `hardware`-вариант — 6.2 | light |
 | 3.2 | P0 | W3 | 2.4, 3.1 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; живой — 6.4 | medium (`Services/code_reader/tests`) |
