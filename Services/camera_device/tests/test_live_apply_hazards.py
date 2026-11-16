@@ -117,7 +117,7 @@ class _Rig:
         self.timings: list[tuple[str, float]] = []
         self.wm = WorkerManager("test_cam_live_hazards")
 
-    def make(self, *, run=(), on_frame=None, **port_opts) -> DeviceSession:
+    def make(self, *, run=(), rest=(), on_frame=None, **port_opts) -> DeviceSession:
         port_opts.setdefault("frame_period_s", 0.01)
         self.port = make_port(**port_opts)
         session = DeviceSession(
@@ -132,6 +132,7 @@ class _Rig:
             workers=self.wm,
             worker_prefix=f"camera_device_hz_{len(self.sessions)}",
             run=tuple(run),
+            rest=tuple(rest),
         )
         self.sessions.append(session)
         return session
@@ -243,18 +244,24 @@ def test_отказ_start_grabbing_перезахвата_error_закрывае
 # -- ящик: исключение fn, submit, срок, поток владельца -------------------------------------------
 
 
-def test_исключение_fn_не_валит_цикл_и_отвечает_отказом(rig):
+@pytest.mark.parametrize(
+    ("exc_type", "answer"),
+    [(RuntimeError, "RuntimeError"), (ZeroDivisionError, "ZeroDivisionError"), (KeyError, "KeyError")],
+)
+def test_исключение_fn_не_валит_цикл_и_отвечает_отказом(rig, exc_type, answer):
     session = rig.make(run=_run_plan(40))
     assert rig.start(session) is True
 
     def boom():
-        raise ZeroDivisionError("x")
+        raise exc_type("x")
 
-    assert _call(lambda: session.call(boom, 1.0)) == (False, "ZeroDivisionError")
+    assert _call(lambda: session.call(boom, 1.0)) == (False, answer)
     frames = _count(rig.port, "get_frame")
     assert _call(lambda: session.call(lambda: 7, 1.0)) == (True, 7)  # владелец жив и опрашивает ящик
     _await(lambda: _count(rig.port, "get_frame") > frames, "кадры идут после исключения fn")
     assert session.state == "grabbing"
+    assert session.device_held is True
+    assert rig.events == [("idle", "opening"), ("opening", "grabbing")]
 
 
 def test_submit_не_в_захвате_возвращает_false_и_в_захвате_исполняет_в_потоке_владельца(rig):
@@ -447,6 +454,9 @@ def test_apply_restart_в_opening_один_перезахват_после_вх�
         "start_grabbing",
     ]
     assert rig.events == [("idle", "opening"), ("opening", "grabbing")]  # перезахват состояния не меняет
+    calls = [name for name, _args, _tid in rig.port.calls]
+    first_start = calls.index("start_grabbing")
+    assert "get_frame" not in calls[first_start : calls.index("stop_grabbing")]  # перезахват до первого get_frame
 
 
 def test_apply_в_opening_и_сразу_stop_закрывает_без_start_grabbing(rig):
@@ -477,6 +487,77 @@ def test_apply_в_closed_не_принимается_порт_не_зовётс�
     assert rig.start(session) is True  # следующий цикл строится из плана run, остаточной правки нет
     assert session.params["trigger_period_ms"] == 40
     assert _names(rig.port).count("stop_grabbing") == 1  # только из `_cleanup` первого цикла
+
+
+# -- стоп в разные моменты перезахвата (детерминированно: хук порта зовёт `stop()` из потока владельца) ----
+
+
+def test_стоп_после_записи_до_start_grabbing_перезахват_не_зовёт_start_grabbing(rig):
+    session = rig.make(run=_run_plan(40))  # умолчание фейка: restart_regrab, запись шагов пакета в открытый порт
+    assert rig.start(session) is True
+    armed = [True]
+    original_get_param = rig.port.get_param
+
+    def get_param_then_stop(binding):
+        value = original_get_param(binding)
+        if armed and binding.key == "TriggerSelfTriggerPeriod":
+            armed.clear()
+            session.stop(0.1)  # из потока владельца: стоп запрошен посреди записи пакета, возврат сразу
+        return value
+
+    rig.port.get_param = get_param_then_stop
+    _call(lambda: session.apply([_step("trigger_period_ms", trigger_period_ms=60)], "restart"))
+    _await(lambda: session.state == "closed" and not session.device_held, "closed и held False")
+    names = _names(rig.port)
+    assert names[names.index("start_grabbing") + 1 :] == [
+        "stop_grabbing",
+        "set_param(TriggerSelfTriggerPeriod,60)",
+        "get_param",
+        "close",
+    ]  # второго start_grabbing нет; `_cleanup` не зовёт stop_grabbing остановленного порта
+    assert rig.port.open_handles == 0
+
+
+def test_стоп_между_close_и_open_перезахвата_rest_не_пишется_в_закрытый_порт(rig):
+    session = rig.make(run=_run_plan(40), rest=_run_plan(99), capabilities=NO_RESTART_REGRAB)
+    assert rig.start(session) is True
+    armed = [True]
+    original_close = rig.port.close
+
+    def close_then_stop():
+        original_close()
+        if armed:
+            armed.clear()
+            session.stop(0.1)  # порт закрыт, `open` перезахвата ещё не начат
+
+    rig.port.close = close_then_stop
+    _call(lambda: session.apply([_step("trigger_period_ms", trigger_period_ms=60)], "restart"))
+    _await(lambda: session.state == "closed" and not session.device_held, "closed и held False")
+    names = _names(rig.port)
+    assert names[names.index("start_grabbing") + 1 :] == [
+        "stop_grabbing",
+        "close",
+    ]  # нет open, нет rest, нет второго close
+    assert "set_param(TriggerSelfTriggerPeriod,99)" not in names
+    assert session.errors == 0  # запись rest в закрытый порт дала бы отказы узлов
+    assert rig.port.open_handles == 0
+
+
+def test_правка_из_opening_цикла_1_не_попадает_в_прибор_цикла_2(rig):
+    session = rig.make(run=_run_plan(40), open_delay_s=0.3)
+    worker, box = _bg(lambda: session.start(5.0))
+    _await_opening(rig, session)
+    _call(lambda: session.apply([_step("trigger_period_ms", trigger_period_ms=61)], "restart"))
+    _call(lambda: session.stop(2.0))
+    assert _join(worker, box) is False
+    _await(lambda: session.state == "closed" and not session.device_held, "цикл 1 закрыт")
+    assert rig.start(session) is True  # цикл 2
+    _call(lambda: session.apply([_step("exposure_time", exposure_time=1200.0)], "live"))
+    _await(lambda: session.params.get("exposure_time") == 1200.0, "правка цикла 2 применена")
+    names = _names(rig.port)
+    assert "set_param(TriggerSelfTriggerPeriod,61)" not in names  # правка цикла 1 в прибор цикла 2 не попала
+    assert "stop_grabbing" not in names
+    assert session.params["trigger_period_ms"] == 40
 
 
 # -- наблюдаемость ---------------------------------------------------------------------------------

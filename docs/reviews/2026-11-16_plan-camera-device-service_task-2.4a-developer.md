@@ -153,3 +153,38 @@ AssertionError: assert [('idle', 'op..., 'stopping')] == [('idle', 'op...g', 'cl
 3. `apply` в `opening` читает `_run` старого цикла: если `set_cycle` меняет цикл между `start()` и `grabbing`, `set_cycle` отказывает (`device_held`), поэтому план `run` и правка согласованы.
 4. Остальные пункты «осталось открытым» основного отчёта (2-10) в силе, п.1 снят.
 5. Второй старый флейк (`test_plugin_observability`, `assert None == 'run'`) не исследован.
+
+---
+
+# Дополнение 2: выжившие мутации break-injection (K6, K8, K9, K11, K12)
+
+Прогон Haiku на `c4af315e2`: 12 мутаций, пять выжили (28/0). Правки только в `tests/test_live_apply_hazards.py`; `session.py` не менялся (`git diff HEAD -- Services/camera_device/session.py` пуст). Мутации прогнаны скриптом `inj_24a.py` на моём дереве с откатом `cp` и `diff -q` (пуст после каждой): красный с новым тестом, затем зелёный на восстановленном коде.
+
+| Мутация | Тест, который её убивает | Результат на мутанте | Что красное (assert) |
+|---|---|---|---|
+| K6: убран опрос ящика до первого `get_frame` | усилен `test_apply_restart_в_opening_один_перезахват_после_входа_в_grabbing`: между первым `start_grabbing` и `stop_grabbing` в журнале нет `get_frame` | 2 failed, 31 passed | `assert 'get_frame' not in ['start_grabbing', 'get_frame']` (+ уже ловивший тест (а): `assert 17 < 16`) |
+| K8: убрана проверка стопа перед `start_grabbing` в `_regrab` | новый `test_стоп_после_записи_до_start_grabbing_перезахват_не_зовёт_start_grabbing`: хук на `port.get_param` узла периода зовёт `session.stop(0.1)` из потока владельца сразу после записи шага пакета | 1 failed, 32 passed | журнал после первого `start_grabbing` не равен `[stop_grabbing, set_param(...,60), get_param, close]` (появляется второй `start_grabbing`) |
+| K9: `rest` в `_cleanup` пишется и на закрытом порту | новый `test_стоп_между_close_и_open_перезахвата_rest_не_пишется_в_закрытый_порт`: сеанс с `rest`, фейк без `restart_regrab`, хук на `port.close` зовёт `stop(0.1)` сразу после `close` | 1 failed, 32 passed | журнал `[stop_grabbing, ..., get_param]` вместо `[stop_grabbing, close]`: `rest` писался в закрытый порт |
+| K12: исключение `fn` ловится не как `Exception` | `test_исключение_fn_не_валит_цикл_и_отвечает_отказом` параметризован: `RuntimeError`, `ZeroDivisionError`, `KeyError` (раньше был только `ZeroDivisionError`, мутант ловил именно его) | 2 failed, 31 passed (`RuntimeError`, `KeyError`) | `assert (False, 'команда прервана') == (False, 'RuntimeError')` |
+| K11: `_pending` не сбрасывается в `start()` | новый `test_правка_из_opening_цикла_1_не_попадает_в_прибор_цикла_2` | **выжил: 33 passed** — мутант эквивалентен, доказательство ниже | — |
+
+**K11 — эквивалентная мутация (доказано запуском):** `_pending` не бывает непустым к моменту нового `start()`: `apply` принимает правку только при незакрытом ящике (под тем же замком), а ящик закрывается и `_pending` очищается в `_close_box` при выходе владельца и в `_launch_owner` при отказе запуска; новый `start()` возможен только после `_held = False`, то есть после этих мест. Сброс в `start()` — дублирующая защита (оставил в коде).
+- K11b (K11 + убран сброс в `_close_box`): 2 failed, 31 passed — `test_очередь_не_переходит_в_следующий_цикл` (`assert 2 == 1`) и новый `test_правка_из_opening_цикла_1…` (`'set_param(TriggerSelfTriggerPeriod,61)' not in [...]` не выполнено): тесты чувствительны к утечке, если ни одна из двух защит не работает.
+- K11c (в `start()` вместо сброса стоит `assert not self._pending`): весь `Services/camera_device/tests` — 225 passed, 10 skipped: ассерт ни разу не сработал, то есть место недостижимо в этих тестах.
+
+## Числа (дерево `cam-2-4a-dev`, код `session.py` как в `c4af315e2`)
+
+| Что | Результат |
+|---|---|
+| `test_live_apply_hazards.py` | **25 passed** (было 20; параметризация исключений +2, новых тестов +3) |
+| `test_live_apply_session.py` + `test_live_apply_hazards.py`, 6 прогонов подряд | 33 passed ×6, 8,0 с на прогон |
+| весь `Services/camera_device/tests` | **225 passed, 10 skipped** (было 220 passed, 10 skipped), 0 failed в этом прогоне |
+| `ruff check` / `ruff format --check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed / 3 files already formatted |
+
+## Что осталось открытым / ненадёжно (дополнение 2)
+
+1. K11 остаётся «выжившим» по построению: убить его тестом нельзя, пока в коде две другие защиты (`_close_box`, `_launch_owner`). Доказательство эквивалентности (K11b, K11c) — запуск на этом наборе тестов, а не формальное; рассуждение о замке выше.
+2. Тесты K8/K9 подменяют методы порта (`get_param`, `close`) в экземпляре фейка и зовут `session.stop` из потока владельца: это моделирует «стоп пришёл в нужный момент», но не настоящую гонку двух потоков. Остаточное окно между проверкой стопа и вызовом `start_grabbing` (п.4 основного отчёта) тестом не закрыто и закрыто быть не может.
+3. K12 в мутанте превращает любое исключение, кроме `ZeroDivisionError`, в гибель владельца с ответом «команда прервана»; тест проверяет ответ и живой цикл на `RuntimeError`/`KeyError`/`ZeroDivisionError`, но не `BaseException`-ветку (`KeyboardInterrupt`/`SystemExit`): её отдельно не прогонял.
+4. Флейки старых тестов W2 из «Дополнения» (`test_старт_прерван_стопом`, `test_plugin_observability`) в этом прогоне не проявились; прогнано по одному полному каталогу и 6 повторам двух файлов, 8-кратной серии не повторял.
+5. Остальные пункты основного отчёта и «Дополнения» остаются в силе.
