@@ -188,3 +188,39 @@ AssertionError: assert [('idle', 'op..., 'stopping')] == [('idle', 'op...g', 'cl
 3. K12 в мутанте превращает любое исключение, кроме `ZeroDivisionError`, в гибель владельца с ответом «команда прервана»; тест проверяет ответ и живой цикл на `RuntimeError`/`KeyError`/`ZeroDivisionError`, но не `BaseException`-ветку (`KeyboardInterrupt`/`SystemExit`): её отдельно не прогонял.
 4. Флейки старых тестов W2 из «Дополнения» (`test_старт_прерван_стопом`, `test_plugin_observability`) в этом прогоне не проявились; прогнано по одному полному каталогу и 6 повторам двух файлов, 8-кратной серии не повторял.
 5. Остальные пункты основного отчёта и «Дополнения» остаются в силе.
+
+---
+
+# Дополнение 3: порядок «родитель раньше потомка» в слитом пакете (находка 2 ревью Opus)
+
+Правки только в `tests/test_live_apply_hazards.py`; `session.py` не менялся (`git diff HEAD -- Services/camera_device/session.py` пуст, мутация откатана `cp`, `diff -q` пуст).
+
+Новые тесты (пакет = две правки, слитые за зависшим `get_frame`, потомок приходит первым; ожидаемое — литералами):
+- `test_пакет_потомок_и_родитель_с_restart_regrab_пишется_родитель_раньше_потомка`: `run` с `trigger_mode=On, trigger_source=Line0` (период закрыт), `apply([trigger_period_ms=60])`, затем `apply([trigger_source=SelfTrigger])`, обе `restart`. Журнал после первого `start_grabbing` ровно `stop_grabbing, set_param(TriggerSource,SelfTrigger), get_param, set_param(TriggerSelfTriggerPeriod,60), get_param, start_grabbing`; `param_errors == {}`; `params` = `SelfTrigger` и `60`.
+- `test_пакет_потомок_и_родитель_без_restart_regrab_run_цикла_в_порядке_родитель_потомок`: тот же сценарий на фейке без `restart_regrab`; журнал `stop_grabbing, close, open, set_param(TriggerMode,On), get_param, set_param(TriggerSource,SelfTrigger), get_param, set_param(TriggerSelfTriggerPeriod,60), get_param, set_param(ExposureTime,10000.0), get_param, start_grabbing`, `param_errors == {}`.
+- `test_пакет_источник_и_режим_триггера_режим_пишется_раньше_источника` (образец ревьюера: `run` с `Off`, источник пришёл раньше режима): журнал `stop_grabbing, set_param(TriggerMode,On), get_param, set_param(TriggerSource,SelfTrigger), get_param, start_grabbing`, `param_errors == {}`.
+
+Мутация «сортировка убрана» (удалены две строки `live.sort(...)`/`regrab.sort(...)` в `_drain`), на моём дереве с откатом:
+
+| Состояние кода | `test_live_apply_hazards.py` | Что красное |
+|---|---|---|
+| сортировка убрана | **2 failed, 26 passed** | `restart_regrab`: `At index 1 diff: 'set_param(TriggerSelfTriggerPeriod,60)' != 'set_param(TriggerSource,SelfTrigger)'`; режим/источник: `At index 1 diff: 'set_param(TriggerSource,SelfTrigger)' != 'set_param(TriggerMode,On)'` |
+| после отката | 28 passed | — |
+
+Вариант без `restart_regrab` на мутанте остаётся ЗЕЛЁНЫМ (он в числе 26 passed): там весь `run` переигрывается по позиции в `_run` (`_replace_in_run` заменяет шаги на месте), сортировка пакета на него не влияет. Тест нужен как защита этой второй опоры порядка, но «убрать сортировку» он не ловит; ловят первый и третий.
+
+## Числа
+
+| Что | Результат |
+|---|---|
+| `test_live_apply_hazards.py` | **28 passed** (было 25; +3) |
+| оба файла 2.4a (`test_live_apply_session.py` + hazards), 5 прогонов подряд | 36 passed ×5, около 9,0 с |
+| весь `Services/camera_device/tests` | **228 passed, 10 skipped** (было 225 passed, 10 skipped), 0 failed |
+| `ruff check` / `ruff format --check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed / 3 files already formatted |
+
+## Что осталось открытым / ненадёжно (дополнение 3)
+
+1. **НАХОДКА для лида (дефект порядка вне сортировки), не исправлялась (`session.py` вне FILES):** поля пакета, которых нет в `_run` цикла (например, группа trigger не управлялась: `trigger_managed=False` в `run`), дописываются в конец `_run` в порядке прихода `apply`, а сортировка по `_run` их не переупорядочивает. Проба на текущем коде (скрипт `absent_from_run.py` в scratchpad, не в дереве): `run` с `['exposure_time']`; `apply` в порядке потомок, источник, режим (`period=60`, `source=SelfTrigger`, `mode=On`, все `restart`) даёт записи `TriggerSelfTriggerPeriod, TriggerSource, TriggerMode` и `param_errors = {'trigger_period_ms': 'чтение не удалось: access', 'trigger_source': 'чтение не удалось: access'}`. Лечится топологической сортировкой пакета по `Step.parent` (или хотя бы порядком `register_cls.get_all_fields_meta()` в 2.4b). Тестом не закрыт: красный тест в наборе нельзя оставить, решение по `session.py` за лидом.
+2. Пара родитель/потомок в РАЗНЫХ группах (`live` при `live_write` и перезахват): `live` пишется раньше родителя из группы перезахвата (п.6 основного отчёта) — тестом не закрыто.
+3. Порядок цепочки из трёх звеньев (режим, источник, период) в одном пакете проверен только по парам (источник/период и режим/источник), тремя полями за раз не прогонял.
+4. Остальные пункты основного отчёта и дополнений 1-2 остаются в силе.
