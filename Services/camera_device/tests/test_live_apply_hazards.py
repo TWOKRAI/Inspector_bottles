@@ -36,6 +36,12 @@ def _step(field: str, **overrides) -> Step:
     return next(s for s in build_plan(CameraDeviceRegisters, _values(**overrides), FAKE_BINDINGS) if s.field == field)
 
 
+def _plan(**values) -> list[Step]:
+    """План из полей register'а, группа `trigger_managed: true`; значения полей — как заданы, остальные — умолчания."""
+    registers = CameraDeviceRegisters(trigger_managed=True, **values).model_dump()
+    return build_plan(CameraDeviceRegisters, registers, FAKE_BINDINGS)
+
+
 def _run_plan(period: int = 40) -> list[Step]:
     return build_plan(CameraDeviceRegisters, _values(trigger_period_ms=period), FAKE_BINDINGS)
 
@@ -558,6 +564,88 @@ def test_правка_из_opening_цикла_1_не_попадает_в_при�
     assert "set_param(TriggerSelfTriggerPeriod,61)" not in names  # правка цикла 1 в прибор цикла 2 не попала
     assert "stop_grabbing" not in names
     assert session.params["trigger_period_ms"] == 40
+
+
+# -- порядок «родитель раньше потомка» в слитом пакете правок --------------------------------------------
+
+
+def _wait_regrab_end(rig) -> None:
+    """Перезахват завершён: второй `start_grabbing` последний в журнале (значение поля не ждём: при отказе его нет)."""
+    _await(
+        lambda: _names(rig.port)[-1:] == ["start_grabbing"] and _names(rig.port).count("start_grabbing") >= 2,
+        "перезахват завершён",
+    )
+
+
+def test_пакет_потомок_и_родитель_с_restart_regrab_пишется_родитель_раньше_потомка(rig):
+    # `trigger_source` открывает узел периода, пока он не `SelfTrigger`, период закрыт; в пакете потомок пришёл первым
+    session = rig.make(run=_plan(trigger_mode="On", trigger_source="Line0"))
+    assert rig.start(session) is True
+    rig.hang(0.3)  # обе правки ложатся в один пакет
+    period = _step("trigger_period_ms", trigger_period_ms=60)
+    source = _step("trigger_source")
+    _call(lambda: session.apply([period], "restart"))
+    _call(lambda: session.apply([source], "restart"))
+    _wait_regrab_end(rig)
+    names = _names(rig.port)
+    assert names[names.index("start_grabbing") + 1 :] == [
+        "stop_grabbing",
+        "set_param(TriggerSource,SelfTrigger)",
+        "get_param",
+        "set_param(TriggerSelfTriggerPeriod,60)",
+        "get_param",
+        "start_grabbing",
+    ]
+    assert session.param_errors == {}
+    assert session.params["trigger_source"] == "SelfTrigger"
+    assert session.params["trigger_period_ms"] == 60
+
+
+def test_пакет_потомок_и_родитель_без_restart_regrab_run_цикла_в_порядке_родитель_потомок(rig):
+    session = rig.make(run=_plan(trigger_mode="On", trigger_source="Line0"), capabilities=NO_RESTART_REGRAB)
+    assert rig.start(session) is True
+    rig.hang(0.3)
+    _call(lambda: session.apply([_step("trigger_period_ms", trigger_period_ms=60)], "restart"))
+    _call(lambda: session.apply([_step("trigger_source")], "restart"))
+    _wait_regrab_end(rig)
+    names = _names(rig.port)
+    assert names[names.index("start_grabbing") + 1 :] == [
+        "stop_grabbing",
+        "close",
+        "open",
+        "set_param(TriggerMode,On)",
+        "get_param",
+        "set_param(TriggerSource,SelfTrigger)",
+        "get_param",
+        "set_param(TriggerSelfTriggerPeriod,60)",
+        "get_param",
+        "set_param(ExposureTime,10000.0)",
+        "get_param",
+        "start_grabbing",
+    ]
+    assert session.param_errors == {}
+
+
+def test_пакет_источник_и_режим_триггера_режим_пишется_раньше_источника(rig):
+    # режим `Off` закрывает узел источника; шаг источника пришёл раньше шага режима
+    session = rig.make(run=_plan(trigger_mode="Off", trigger_source="SelfTrigger"))
+    assert rig.start(session) is True
+    rig.hang(0.3)
+    on = _plan(trigger_mode="On", trigger_source="SelfTrigger")
+    _call(lambda: session.apply([next(step for step in on if step.field == "trigger_source")], "restart"))
+    _call(lambda: session.apply([next(step for step in on if step.field == "trigger_mode")], "restart"))
+    _wait_regrab_end(rig)
+    names = _names(rig.port)
+    assert names[names.index("start_grabbing") + 1 :] == [
+        "stop_grabbing",
+        "set_param(TriggerMode,On)",
+        "get_param",
+        "set_param(TriggerSource,SelfTrigger)",
+        "get_param",
+        "start_grabbing",
+    ]
+    assert session.param_errors == {}
+    assert session.params["trigger_mode"] == "On"
 
 
 # -- наблюдаемость ---------------------------------------------------------------------------------
