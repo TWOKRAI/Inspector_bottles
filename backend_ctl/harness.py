@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from backend_ctl.driver import BackendDriver, _find_payload
 from backend_ctl.endpoint_config import resolve_endpoint
+from backend_ctl.protocol import _leaf_result
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
@@ -60,6 +61,10 @@ GUI_PROCESS_NAME = "gui"
 #: ``test_pid_file_env_pair_matches_the_framework`` — он сверяет его с источником.
 _PID_FILE_ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
 
+#: ``start_run``: срок одного запроса status/START и пауза между опросами (сек).
+_RUN_REQUEST_TIMEOUT_S = 5.0
+_RUN_POLL_PERIOD_S = 0.1
+
 
 # ---------------------------------------------------------------------------
 # Сборка headless-launcher'а
@@ -71,6 +76,7 @@ def build_headless_launcher(
     recipe: Optional[Path | str] = None,
     with_base: bool = False,
     log_dir: Optional[Path | str] = None,
+    run_gate: Optional[bool] = None,
 ) -> "SystemLauncher":
     """Собрать ``SystemLauncher`` из топологии прототипа без презентационного overlay.
 
@@ -97,6 +103,9 @@ def build_headless_launcher(
 
             Env по-прежнему СИЛЬНЕЕ (``resolve_log_dir_root``: env → yaml → дефолт),
             так что живые зонды со своим ``logs_live/`` этот параметр не задевает.
+        run_gate: гейт запуска линии (Task 2.1). ``None`` → как в ``system.yaml``;
+            ``True``/``False`` перебивает манифест. ``BackendHarness`` по умолчанию
+            передаёт сюда ``False``: существующие стенды ждут работу сразу после старта.
 
     Использует только ПУБЛИЧНЫЕ помощники прототипа — прод-код не меняется.
     """
@@ -119,6 +128,10 @@ def build_headless_launcher(
         # Присваивание полю, а не model_copy(update=...): copy не валидирует, и опечатка
         # в имени поля прошла бы молча, оставив каталог прежним.
         sys_config.system.log_dir = str(log_dir)
+    if run_gate is not None:
+        # Тот же приём: присваивание полю (validate_assignment ловит не-bool и помечает поле
+        # заданным, так что ключ доедет и до вложенного ``sys_config`` оркестратора).
+        sys_config.run_gate = run_gate
 
     builder = SystemBuilder(
         sys_config=sys_config,
@@ -341,13 +354,25 @@ class BackendHarness:
         log: Optional[Callable[[str], None]] = None,
         launcher_factory: Optional[Callable[[], "SystemLauncher"]] = None,
         log_dir: Optional[Path | str] = None,
+        run_gate: Optional[bool] = False,
     ) -> None:
+        if run_gate is True and launcher_factory is not None:
+            # factory собирает launcher сам, build_headless_launcher не зовётся: включать гейт
+            # нечем, и тихо проигнорированный True дал бы стенд «без гейта» под видом «с гейтом».
+            raise ValueError(
+                "run_gate=True несовместим с launcher_factory: фабрика сама отвечает за гейт "
+                "(build_headless_launcher не вызывается)"
+            )
         self._recipe = recipe
         self._with_base = with_base
         #: Корень дерева логов поднятой системы. ``None`` → как в yaml. Дефолт НЕ меняли
         #: намеренно: 28 из 34 живых зондов не задают каталог сами, и подмена дефолта на
         #: временный увела бы их логи туда, где оператор их не ищет (задача 3.3).
         self._log_dir = log_dir
+        #: Гейт запуска линии (Task 2.1). Умолчание ``False`` ПЕРЕОПРЕДЕЛЯЕТ ``system.yaml``:
+        #: harness не должен менять поведение существующих стендов, когда манифест включит
+        #: гейт. ``True`` — стенд «как в бою» (потом ``start_run()``); ``None`` — как в манифесте.
+        self._run_gate = run_gate
         # Резолв через единый источник: явный порт > env BACKEND_CTL_PORT > DEFAULT_PORT.
         # Harness затем сам фиксирует BACKEND_CTL_PORT для дочернего процесса (start()).
         self._port = resolve_endpoint(port=port)[1]
@@ -413,7 +438,10 @@ class BackendHarness:
                 self._launcher = self._launcher_factory()
             else:
                 self._launcher = build_headless_launcher(
-                    recipe=self._recipe, with_base=self._with_base, log_dir=self._log_dir
+                    recipe=self._recipe,
+                    with_base=self._with_base,
+                    log_dir=self._log_dir,
+                    run_gate=self._run_gate,
                 )
             self._launcher.start()
             # pid оркестратора + снимок его поддерева СРАЗУ после старта, ДО wait_until_ready
@@ -467,6 +495,44 @@ class BackendHarness:
             # __exit__ не зовётся при исключении в __enter__). stop() идемпотентен.
             self.stop()
             raise
+
+    def start_run(self, timeout: float = 30.0) -> None:
+        """Запустить линию (``system.run.start``) и дождаться ``state == "running"``.
+
+        Алгоритм один: опрос ``system.run.status`` до ``start_allowed``, затем START. Окно
+        ``not_ready`` после boot (~4 с: узлы ещё не подтвердили liveness) и гонка «status сказал
+        ready, START получил ``not_ready``» закрываются тем же циклом: после любого неудачного
+        START идёт новый опрос и новый START, всё в пределах ``timeout``.
+
+        Вердикт выносит только итоговое ``state == "running"`` из следующего опроса; ответ самого
+        START не судится (``success`` без смены состояния — не запуск, ``already_running`` — не
+        ошибка). Без гейта работает так же: START из ``ready`` допустим.
+
+        Raises:
+            AssertionError: за ``timeout`` ``running`` не наступило — в тексте последнее
+                состояние и узлы-причины (``reasons`` ответа ``status``).
+        """
+        drv = self.driver
+        deadline = time.monotonic() + timeout
+        last: Dict[str, Any] = {}
+        while True:
+            # Опрос, начатый после дедлайна, — последний: START в нём уже не шлём.
+            expired = time.monotonic() >= deadline
+            status = _leaf_result(drv.run_status(timeout=_RUN_REQUEST_TIMEOUT_S))
+            last = status if isinstance(status, dict) else {}
+            if last.get("state") == "running":
+                return
+            if expired:
+                break
+            if last.get("start_allowed"):
+                # Ответ не судим: итог читает следующий опрос (отказ not_ready, already_running и
+                # «принят, но не running» различаются там по состоянию, а не по тексту ответа).
+                drv.run_start(timeout=_RUN_REQUEST_TIMEOUT_S)
+            time.sleep(_RUN_POLL_PERIOD_S)
+        raise AssertionError(
+            f"start_run: за {timeout}s система не вошла в running; "
+            f"state={last.get('state')!r}, reasons={last.get('reasons')!r}, last_fault={last.get('last_fault')!r}"
+        )
 
     def stop(self) -> None:
         """Закрыть driver и гарантированно погасить систему (watchdog + kill дерева)."""

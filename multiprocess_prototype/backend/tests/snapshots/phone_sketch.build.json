@@ -922,7 +922,8 @@
                       "value": false
                     }
                   ],
-                  "panel_id": "pult"
+                  "panel_id": "pult",
+                  "run_gated": false
                 },
                 "fps": 25,
                 "plugin_class": "Services.control_panel.plugin.plugin.ControlPanelPlugin",
@@ -1109,6 +1110,7 @@
     ],
     "presentation_overlay": null,
     "replace_debounce_s": 1.0,
+    "run_gate": false,
     "state_throttle_rules": {
       "processes.**.state.capture_fps": 0.05,
       "processes.**.state.drops": 0.05,
@@ -1232,6 +1234,7 @@
       "processing": {
         "worker_pool_size": 0
       },
+      "run_gate": false,
       "shutdown": {
         "pre_stop": [
           {
@@ -4052,7 +4055,8 @@
                   "value": false
                 }
               ],
-              "panel_id": "pult"
+              "panel_id": "pult",
+              "run_gated": false
             },
             "controls": [],
             "fps": 25,

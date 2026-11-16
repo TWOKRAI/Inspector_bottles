@@ -755,6 +755,9 @@ class SystemBuilder:
                 # Task 1.4m: манифест pre_stop (читает PM, parse_pre_stop); ключ есть всегда,
                 # глубокая копия — Dict at Boundary, вложенный args не общий с sys_config.
                 "pre_stop": copy.deepcopy(sys_config.shutdown.pre_stop),
+                # Task 2.1: гейт запуска линии (system.yaml: run_gate). PM читает ключ один раз
+                # в __init__; плоский ключ orchestrator_config склеивается в конфиг PM как есть.
+                "run_gate": sys_config.run_gate,
                 # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
                 # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
                 # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и

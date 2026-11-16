@@ -677,6 +677,26 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         msg = build_system_command_message(command, sender=self._sender, reply_to=self._reply_to)
         return self.request(msg, timeout=timeout)
 
+    def run_start(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """``system.run.start``: запустить линию (из ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.start"}, timeout=timeout)
+
+    def run_stop(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """``system.run.stop``: остановить линию (возврат в ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.stop"}, timeout=timeout)
+
+    def run_ack(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """``system.run.ack``: квитировать аварию (``fault`` -> ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.ack"}, timeout=timeout)
+
+    def run_status(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """``system.run.status``: состояние линии. Конверт ответа — как есть.
+
+        ``result`` = ``{state, since, run_gate, start_allowed, ack_allowed, reasons, last_fault}``;
+        развернуть — на вызывающем (``backend_ctl.protocol._leaf_result``).
+        """
+        return self.system_command({"cmd": "system.run.status"}, timeout=timeout)
+
     def system_shutdown(
         self,
         mode: str = "graceful",

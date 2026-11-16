@@ -335,8 +335,15 @@ def _rc(drv: Any) -> Any:
 
 
 # --- кейс -------------------------------------------------------------------------
-def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int) -> dict:
-    """Один кейс профиля quick → dict JSON. Сбой подъёма → :class:`StandRunError`."""
+def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int, run_gate: bool = True) -> dict:
+    """Один кейс профиля quick → dict JSON. Сбой подъёма → :class:`StandRunError`.
+
+    ``run_gate`` (Task 2.1, умолчание вкл): стенд «как в бою» — гейт запуска включён, после boot
+    система в «готов», и стенд сам шлёт ``system.run.start`` (``BackendHarness.start_run``) ПЕРЕД
+    ожиданием кадров. Ключ метрики ``first_frame_after_ready_s`` остаётся прежним, но точка
+    отсчёта при гейте — возврат ``start_run`` (без гейта — возврат ``harness.start()``): числа с
+    гейтом и без него несравнимы. Точка отсчёта пишется в JSON: ``first_frame_ref``.
+    """
     for k in [k for k in os.environ if k.startswith("FW_SHM_")]:
         del os.environ[k]
     from backend_ctl.harness import BackendHarness
@@ -352,8 +359,10 @@ def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int) -> d
         "reject_delay_ms": 0,
         "transit_ms": transit_ms,
         "case_dir": str(case_dir),
+        "run_gate": run_gate,
+        "first_frame_ref": "start_run" if run_gate else "boot",
     }
-    harness = BackendHarness(recipe=recipe, port=port, ready_timeout=90, log_dir=log_dir)
+    harness = BackendHarness(recipe=recipe, port=port, ready_timeout=90, log_dir=log_dir, run_gate=run_gate)
     t_boot = time.perf_counter()
     try:
         drv = harness.start()
@@ -361,6 +370,13 @@ def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int) -> d
         raise StandRunError(f"стенд не поднялся: {type(exc).__name__}: {exc}") from exc
     res["start_s"] = round(time.perf_counter() - t_boot, 2)
     try:
+        if run_gate:
+            t_start_run = time.perf_counter()
+            try:
+                harness.start_run()
+            except AssertionError as exc:
+                raise StandRunError(f"стенд не вошёл в running: {exc}") from exc
+            res["start_run_s"] = round(time.perf_counter() - t_start_run, 2)
         t_ready = time.perf_counter()
         first = None
         while time.perf_counter() - t_ready < 5:

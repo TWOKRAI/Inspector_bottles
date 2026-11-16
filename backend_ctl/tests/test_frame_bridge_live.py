@@ -118,6 +118,10 @@ def test_external_client_receives_frames_through_the_bridge(tmp_path: Path, capf
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: _launcher(manifest))
     drv = harness.start()
     try:
+        # Task 2.1: launcher собирает launcher_factory (через main.build_launcher), поэтому гейт здесь —
+        # значение system.yaml, а не параметр harness. С гейтом без START кадров не будет; без гейта START
+        # из ready безвреден.
+        harness.start_run()
         # Предусловие стенда: gui поднят именно мостом, иначе дальше проверять нечего.
         stats = drv.send_command("gui", "frames.stats", {}, timeout=8.0)
         assert (stats.get("result") or stats).get("success") is True, f"gui не мост (нет frames.stats): {stats}"
