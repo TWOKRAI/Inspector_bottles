@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable
 
 import pytest
@@ -236,3 +237,86 @@ def test_ack_with_parallel_failed_tick_ends_not_ready(rig_factory, monkeypatch: 
         assert replies == [{"success": True, "state": "not_ready", "error": None}], replies
         assert pm._run_state == "not_ready"
         assert pm._run_ready is False
+
+
+# --------------------------------------------------------------------------- #
+# Правки по ревью: сбой чтения конфига на путях остановки и срока молчания
+# --------------------------------------------------------------------------- #
+
+
+def _break_config_keys(pm: ProcessManagerProcess, errors_by_key: dict[str, BaseException | None]) -> None:
+    """``get_config`` бросает заданное исключение на ключах из ``errors_by_key``; остальные ключи — как у фейка."""
+    original = pm.get_config
+
+    def bad(key: str, default: Any = None) -> Any:
+        exc = errors_by_key.get(key)
+        if exc is not None:
+            raise exc
+        return original(key, default)
+
+    pm.get_config = bad
+
+
+@pytest.mark.timeout(60)
+def test_fault_stop_completes_when_stop_timeout_config_raises(rig_factory) -> None:
+    """``get_config("run_stop_timeout_s")`` бросает: поток остановки в аварии не умирает, ``_fault_stop_done``
+    становится True за дедлайн, ``ack`` не отвечает ``fault_stopping``."""
+    rig = rig_factory()
+    pm = rig.pm
+    _break_config_keys(pm, {"run_stop_timeout_s": RuntimeError("config handler broken")})
+
+    _to_fault(rig, wait_done=False)
+
+    deadline = time.monotonic() + _DEADLINE_S
+    while time.monotonic() < deadline and not pm._cmd_system_run_status()["ack_allowed"]:
+        time.sleep(0.02)
+    assert pm._cmd_system_run_status()["ack_allowed"] is True, "остановка в аварии не завершилась"
+    reply = _call(pm._cmd_system_run_ack, "_cmd_system_run_ack")
+    assert reply["error"] != "fault_stopping", reply
+    assert reply["error"] is None and reply["success"] is True, reply
+
+
+def _stale_warnings(pm: ProcessManagerProcess) -> list[str]:
+    return [" ".join(str(a) for a in c.args) for c in pm._log_warning.call_args_list]
+
+
+@pytest.mark.timeout(60)
+def test_stale_config_failure_warns_once_per_exception_type() -> None:
+    """Два вызова ``_run_stale_s`` при бросающем ``get_config`` (один тип исключения на обоих ключах): одна строка
+    WARNING с типом исключения и именем ключа, без текста исключения; срок молчания — умолчание 15.0 с."""
+    pm, _monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    _break_config_keys(
+        pm,
+        {
+            "heartbeat_interval": RuntimeError("secret-config-text"),
+            "heartbeat_interval_sec": RuntimeError("secret-config-text"),
+        },
+    )
+    pm._log_warning.reset_mock()
+
+    first = pm._run_stale_s()
+    second = pm._run_stale_s()
+
+    assert first == second == pytest.approx(15.0)
+    lines = _stale_warnings(pm)
+    assert len(lines) == 1, lines
+    assert "RuntimeError" in lines[0] and "heartbeat_interval" in lines[0], lines
+    assert "secret-config-text" not in lines[0], lines
+
+
+@pytest.mark.timeout(60)
+def test_stale_config_failure_warns_again_for_new_exception_type() -> None:
+    """Новый тип исключения — новая строка WARNING (один раз на тип): ``RuntimeError`` на одном ключе и
+    ``OverflowError`` (``float(10**400)``) на другом, два вызова -> две строки, по одной на тип."""
+    pm, _monitor = make_readiness_pm({"cam": {"class": "pkg.Cam"}})
+    _break_config_keys(pm, {"heartbeat_interval": RuntimeError("secret-config-text")})
+    pm.update_config("heartbeat_interval_sec", 10**400)
+    pm._log_warning.reset_mock()
+
+    pm._run_stale_s()
+    pm._run_stale_s()
+
+    lines = _stale_warnings(pm)
+    assert len(lines) == 2, lines
+    assert "RuntimeError" in lines[0] and "OverflowError" in lines[1], lines
+    assert all("secret-config-text" not in line for line in lines), lines
