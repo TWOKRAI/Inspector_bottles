@@ -68,6 +68,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     register_class = CameraDeviceRegisters
 
+    # Потоки сеанса — воркеры `WorkerManager` процесса (ctx.worker_manager).
+    REQUIRES: tuple[str, ...] = ("manager:worker_manager",)
+
     inputs: list[Port] = []
     outputs: list[Port] = [
         Port(name="frame", dtype="image/gray", shape="(H, W)", description="Кадр прибора uint8"),
@@ -158,6 +161,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 port,
                 port.sdk,
                 None,
+                workers=self._ctx.worker_manager,
+                worker_prefix=f"{self.name}_{self._reg.camera_id}",
                 timeout_ms=_TIMEOUT_MS,
                 watchdog_s=_WATCHDOG_S,
                 on_frame=self._on_frame,
@@ -170,6 +175,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def cmd_take_device(self, data: dict) -> dict:
         """Открыть прибор и начать захват. Отказ — `status: error`, не исключение."""
+        if self._ctx.worker_manager is None:
+            return {"status": "error", "device_state": self._reg.device_state, "error": "нет менеджера воркеров"}
         session = self._ensure_session()
         t0 = time.monotonic()
         ok = session.start(_START_TIMEOUT_S)

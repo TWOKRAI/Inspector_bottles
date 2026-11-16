@@ -18,6 +18,7 @@ import time
 import pytest
 
 from Services.camera_device.interface import DeviceIdentity
+from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device.testing.fake_port import make_port
 
 # Журнал одного цикла `start -> кадры -> stop` без повторов `get_frame` (литерал ACCEPTANCE).
@@ -80,6 +81,7 @@ class _Rig:
 
     def __init__(self) -> None:
         self._before = set(threading.enumerate())
+        self.wm = WorkerManager("test_cam")  # потоки сеанса — воркеры настоящего менеджера
         self.sessions: list = []
         self.port = None
         self.frames: list = []
@@ -103,6 +105,8 @@ class _Rig:
             timeout_ms=timeout_ms,
             watchdog_s=watchdog_s,
             on_frame=frame_cb,
+            workers=self.wm,
+            worker_prefix=f"camera_device_{len(self.sessions)}",
             on_stall=lambda call, seconds: self.stalls.append((call, seconds)),
         )
         self.sessions.append(session)
@@ -125,6 +129,7 @@ class _Rig:
         for thread in threading.enumerate():
             if thread not in self._before and thread is not me and thread.daemon:
                 thread.join(3.0)  # владелец и сторож — daemon; зависание фейка (≤ 1,5 с) кончается само
+        self.wm.stop_all_workers(2.0)
 
 
 @pytest.fixture

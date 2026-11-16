@@ -13,6 +13,7 @@ import time
 import pytest
 
 from Services.camera_device.session import DeviceSession
+from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device.testing.fake_port import make_port
 
 OPEN_THEN_CLOSE = ["acquire", "enum_devices", "open", "close", "release"]
@@ -46,6 +47,7 @@ def _in_thread(fn, box: dict, key: str) -> threading.Thread:
 class _Rig:
     def __init__(self) -> None:
         self._before = set(threading.enumerate())
+        self.wm = WorkerManager("test_cam")
         self.sessions: list[DeviceSession] = []
         self.states: list[tuple[str, str]] = []
         self.frames: list = []
@@ -73,6 +75,8 @@ class _Rig:
             on_frame=frame_cb,
             on_state=state_cb,
             on_stall=on_stall,
+            workers=self.wm,
+            worker_prefix=f"camera_device_{len(self.sessions)}",
         )
         self.sessions.append(session)
         return port, session
@@ -86,6 +90,7 @@ class _Rig:
         for thread in threading.enumerate():
             if thread not in self._before and thread is not me and thread.daemon:
                 thread.join(3.0)
+        self.wm.stop_all_workers(2.0)
 
 
 @pytest.fixture
@@ -260,7 +265,7 @@ def test_on_stall_из_потока_сторожа_и_потоки_daemon(rig):
     owner_ids = {c[2] for c in list(port.calls)}
     assert stall_threads[0].ident not in owner_ids  # колбэк — из потока сторожа, не владельца
     assert stall_threads[0].daemon is True
-    owners = [t for t in threading.enumerate() if t.name == "camera_device-owner"]
+    owners = [t for t in threading.enumerate() if t.name.endswith("_owner")]
     assert owners and all(t.daemon for t in owners)
     session.stop(2.0)
     _await(lambda: session.state == "closed", "state == closed")
@@ -391,3 +396,42 @@ def test_ответ_start_равен_состоянию_при_медленно�
     result = session.start(0.1)
     time.sleep(0.4)
     assert result is (session.state == "grabbing")  # ответ не врёт про захват
+
+
+@pytest.mark.timeout(20)
+def test_стоп_области_воркеров_во_время_захвата_закрывает_порт(rig):
+    port, session = rig.make()
+    assert session.start(2.0) is True
+    _await(lambda: len(rig.frames) >= 2, "кадры идут")
+    rig.wm.stop_all_workers(2.0)  # завершение процесса: стоп воркеров, а не stop() сеанса
+    _await(lambda: session.state == "closed", "state == closed", deadline=3.0)
+    names = _names(port)
+    assert names[-3:] == ["stop_grabbing", "close", "release"]
+    assert names.count("close") == 1
+    assert session.device_held is False
+
+
+@pytest.mark.timeout(20)
+def test_воркер_владельца_не_стартовал_state_error_held_False(rig):
+    port, session = rig.make()
+    rig.wm.start_worker = lambda name: False  # менеджер отказал: потока владельца нет
+    assert session.start(1.0) is False
+    assert session.state == "error"
+    assert session.device_held is False
+    assert "воркер владельца не запущен" in (session.last_error or "")
+    assert _names(port) == []  # порт не тронут
+    del rig.wm.start_worker  # вернуть настоящий метод класса
+    assert session.start(2.0) is True  # после отката цикл стартует заново
+
+
+@pytest.mark.timeout(60)
+def test_немедленный_повтор_start_из_busy_без_зависания_и_второго_open_за_цикл(rig):
+    port, session = rig.make(busy_for_s=600.0)
+    for i in range(1, 31):
+        assert session.start(1.0) is False
+        assert session.state == "busy"  # ни «True без потока», ни зависания в opening
+        end = time.monotonic() + 2
+        while session.device_held and time.monotonic() < end:
+            pass  # сразу следующий start() после снятия held
+        assert session.device_held is False
+        assert _names(port).count("open") == i  # ровно один open за цикл

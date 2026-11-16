@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from Services.camera_device.interface import Binding
+from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device.params import Step
 from Services.camera_device.session import DeviceSession
 from Services.camera_device.testing.fake_port import ALL_CAPABILITIES, from_recording, make_port
@@ -111,6 +112,7 @@ class _Rig:
     def __init__(self) -> None:
         self.sessions: list[DeviceSession] = []
         self.port = None
+        self.wm = WorkerManager("test_cam")  # потоки сеанса — воркеры настоящего менеджера
 
     def make(self, *, run=(), rest=(), port=None, **port_opts) -> DeviceSession:
         port_opts.setdefault("frame_period_s", 0.01)
@@ -122,6 +124,8 @@ class _Rig:
             timeout_ms=500,
             watchdog_s=5.0,
             on_frame=lambda frame: None,
+            workers=self.wm,
+            worker_prefix=f"camera_device_{len(self.sessions)}",
             run=tuple(run),
             rest=tuple(rest),
         )
@@ -150,6 +154,7 @@ def rig():
             _call(lambda s=session: s.stop(2.0))
         except Exception:  # noqa: BLE001 — teardown не маскирует падение теста
             pass
+    r.wm.stop_all_workers(2.0)
 
 
 @pytest.fixture

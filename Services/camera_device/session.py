@@ -3,7 +3,8 @@
 
 Все вызовы порта и `DeviceSdk` (`acquire`, `enum_devices`, `open`, `start_grabbing`, `get_frame`,
 `stop_grabbing`, `close`, `release`) идут ТОЛЬКО из потока-владельца: один владелец на цикл
-`open -> close`, новый `start()` после остановки — новый поток. Потоки владельца и сторожа — `daemon`.
+`open -> close`, новый `start()` после остановки — новый поток. Потоки владельца и сторожа — воркеры `WorkerManager`
+процесса (параметр `workers`; `worker_prefix` уникален на сеанс в менеджере).
 
 Состояния: `idle` (до первого `start`), `opening`, `grabbing`, `stopping`, `closed` (покой после остановки),
 `busy`, `not_found`, `error` (отказ; автопереподключения нет, ADR-CR-009). Переходы — только
@@ -27,6 +28,9 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
+from typing import Any
+
+from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig, WorkerType
 
 from .interface import DeviceIdentity, DevicePort, DeviceSdk, PortError, RawFrame
 from .params import Step
@@ -86,6 +90,8 @@ class DeviceSession:
         timeout_ms: int = 500,
         watchdog_s: float = 5.0,
         on_frame: Callable[[RawFrame], None],
+        workers: Any,
+        worker_prefix: str = "camera_device",
         on_stall: Callable[[str, float], None] | None = None,
         on_state: Callable[[str, str], None] | None = None,
         on_timing: Callable[[str, float], None] | None = None,
@@ -94,6 +100,14 @@ class DeviceSession:
     ) -> None:
         if watchdog_s <= timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
+        # Потоки владельца и сторожа — воркеры `WorkerManager` процесса (утиный интерфейс: create_worker,
+        # start_worker, has_worker); сеанс сам потоков не создаёт. Имена должны быть уникальны в менеджере.
+        self._workers = workers
+        self._owner_name = f"{worker_prefix}_owner"
+        self._wd_name = f"{worker_prefix}_watchdog"
+        self._wd_stop = threading.Event()
+        self._wd_thread: threading.Thread | None = None
+        self._wd_started = threading.Event()
         self._port = port
         self._sdk = sdk
         self._ident = ident
@@ -174,6 +188,7 @@ class DeviceSession:
             return False
         pending: list[tuple[str, str]] = []
         creator = False
+        prev: threading.Thread | None = None
         with self._lock:
             state = self._state
             if state == "grabbing":
@@ -191,12 +206,11 @@ class DeviceSession:
                 self._held = True
                 self._cycle_t0 = time.monotonic()
                 self._set_locked("opening", pending)
-                self._owner = threading.Thread(
-                    target=self._owner_main, args=(cmd, self._stop_evt), name="camera_device-owner", daemon=True
-                )
-                self._owner.start()
+                prev = self._owner
         self._fire_states(pending)
         assert cmd is not None
+        if creator and not self._launch_owner(prev, cmd):
+            return False
         if cmd.done.wait(timeout):
             return cmd.result
         with self._lock:
@@ -293,22 +307,59 @@ class DeviceSession:
         logger.error("session: %s", self._last_error)
         self._cas(("opening", "grabbing"), state)
 
-    def _commit(self, cmd: _StartCmd, stop_evt: threading.Event) -> bool:
+    def _launch_owner(self, prev: threading.Thread | None, cmd: _StartCmd) -> bool:
+        """Запустить воркер владельца. `start_worker` вернёт `True` без нового потока, пока прежний жив, поэтому
+        сначала ждём его выхода (вне замка, не дольше `watchdog_s`). Отказ -> откат цикла: `error`, `held` снят."""
+        reason = ""
+        if prev is not None and prev is not threading.current_thread():
+            prev.join(self._watchdog_s)
+            if prev.is_alive():
+                reason = "прежний поток-владелец не завершился"
+        if not reason:
+            try:
+                self._ensure_workers()
+                if not self._workers.start_worker(self._owner_name):
+                    reason = "воркер владельца не запущен"
+            except Exception as exc:  # noqa: BLE001 — отказ менеджера воркеров -> откат цикла
+                reason = describe_error(exc)
+        if not reason:
+            return True
+        self._last_error = reason
+        logger.error("session: %s", reason)
+        pending: list[tuple[str, str]] = []
+        with self._lock:
+            self._set_locked("error", pending)
+            self._held = False
+        self._fire_states(pending)
+        cmd.finish(False)
+        return False
+
+    def _ensure_workers(self) -> None:
+        """Лениво зарегистрировать воркеры: владелец (TASK на цикл) и сторож (LOOP, опрос)."""
+        for name, target, mode in (
+            (self._owner_name, self._owner_main, ExecutionMode.TASK),
+            (self._wd_name, self._watchdog_main, ExecutionMode.LOOP),
+        ):
+            if not self._workers.has_worker(name):
+                config = ThreadConfig(worker_type=WorkerType.SYSTEM, restart_on_failure=False, execution_mode=mode)
+                self._workers.create_worker(name, target, config, auto_start=False)
+
+    def _commit(self, cmd: _StartCmd, stop_evt: Callable[[], bool]) -> bool:
         """Решение «откат или фиксация» под замком: кто первый — тот решил."""
         with self._lock:
-            if cmd.cancelled or stop_evt.is_set():
+            if cmd.cancelled or stop_evt():
                 return False
             cmd.committed = True
             return True
 
-    def _enter_grabbing(self, cmd: _StartCmd, stop_evt: threading.Event) -> bool:
+    def _enter_grabbing(self, cmd: _StartCmd, stop_evt: Callable[[], bool]) -> bool:
         """После `start_grabbing` под замком: отмена/стоп -> откат (`False`), иначе `grabbing` и итог `True`.
 
         Ответ `start()` всегда равен реальному состоянию: `True` только если цикл остался `grabbing`.
         """
         pending: list[tuple[str, str]] = []
         with self._lock:
-            abort = cmd.cancelled or stop_evt.is_set()
+            abort = cmd.cancelled or stop_evt()
             if not abort:
                 self._set_locked("grabbing", pending)
             # Итог выставляется под тем же замком, что и решение: вызывающий по сроку (start) видит либо
@@ -329,11 +380,14 @@ class DeviceSession:
         direct = "restart_regrab" in self._port.capabilities or not grabbing  # H1: NETER снимает только close
         return self._runner.run_rest(self._rest, direct)  # type: ignore[union-attr]
 
-    def _owner_main(self, cmd: _StartCmd, stop_evt: threading.Event) -> None:
-        watchdog_stop = threading.Event()
-        threading.Thread(
-            target=self._watchdog, args=(watchdog_stop,), name="camera_device-watchdog", daemon=True
-        ).start()
+    def _owner_main(self, worker_stop: threading.Event, pause: threading.Event) -> None:
+        """TASK-воркер на цикл `open -> close`: поток-владелец порта. Стоп процесса (`worker_stop`) = стоп цикла."""
+        self._owner = threading.current_thread()
+        with self._lock:
+            cmd, cycle_stop = self._cmd, self._stop_evt
+        assert cmd is not None
+        stop_evt = lambda: cycle_stop.is_set() or worker_stop.is_set()  # noqa: E731
+        self._start_watchdog()
         acquired = opened = grabbing = run_applied = failed = False
         self._profile.reset()  # начало run каждого start(): params / params_status / param_errors заново
         try:
@@ -360,7 +414,7 @@ class DeviceSession:
         finally:
             cmd.finish(False)  # no-op, если итог уже `True`
             self._cleanup(grabbing, run_applied and not failed, opened, acquired)
-            watchdog_stop.set()
+            self._stop_watchdog()
             with self._lock:
                 pending: list[tuple[str, str]] = []
                 if self._state not in _FAILED:
@@ -401,10 +455,10 @@ class DeviceSession:
                 if self._last_error is None:
                     self._last_error = describe_error(exc)
 
-    def _grab_loop(self, stop_evt: threading.Event) -> bool:
+    def _grab_loop(self, stop_evt: Callable[[], bool]) -> bool:
         """Читать кадры до `stop_evt`; `False` — три ошибки подряд (состояние уже `error`)."""
         consecutive = 0
-        while not stop_evt.is_set():
+        while not stop_evt():
             try:
                 raw = self._port_call("get_frame", self._port.get_frame, self._timeout_ms)
             except PortError as exc:
@@ -428,10 +482,29 @@ class DeviceSession:
     # Сторож
     # ------------------------------------------------------------------ #
 
-    def _watchdog(self, stop: threading.Event) -> None:
-        """Один `on_stall(call, seconds)` на вызов порта, длящийся дольше `watchdog_s`; порт не зовёт."""
+    def _start_watchdog(self) -> None:
+        self._wd_stop = threading.Event()
+        self._wd_started.clear()
+        try:
+            if self._workers.start_worker(self._wd_name):
+                self._wd_started.wait(self._watchdog_s)
+        except Exception:  # noqa: BLE001 — без сторожа захват работает, но зависание не будет замечено
+            logger.exception("session: сторож не запущен")
+
+    def _stop_watchdog(self) -> None:
+        """Остановить сторожа и дождаться его выхода: иначе следующий `start_worker` вернёт `True` без потока."""
+        self._wd_stop.set()
+        thread = self._wd_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(self._watchdog_s)
+
+    def _watchdog_main(self, worker_stop: threading.Event, pause: threading.Event) -> None:
+        """LOOP-воркер: один `on_stall(call, seconds)` на вызов порта, длящийся дольше `watchdog_s`; порт не зовёт."""
+        self._wd_thread = threading.current_thread()
+        stop = self._wd_stop
+        self._wd_started.set()
         tick = min(0.05, self._watchdog_s / 4)
-        while not stop.wait(tick):
+        while not (worker_stop.is_set() or stop.wait(tick)):
             call = self._current
             if call is None or call.reported:
                 continue

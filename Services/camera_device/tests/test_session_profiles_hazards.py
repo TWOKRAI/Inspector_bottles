@@ -17,6 +17,7 @@ from Services.camera_device.interface import Binding, DeviceIdentity, PortError
 from Services.camera_device.params import Step, build_plan
 from Services.camera_device.profiles import ProfileRunner, ProfileState
 from Services.camera_device.session import DeviceSession
+from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device.testing.fake_port import ALL_CAPABILITIES, make_port
 from Services.camera_device.tests.test_params import BINDINGS, TriggerRegister
 
@@ -85,6 +86,7 @@ def _read_raises(port, key: str, kind: str = "timeout") -> None:
 class _Rig:
     def __init__(self) -> None:
         self.sessions: list[DeviceSession] = []
+        self.wm = WorkerManager("test_cam")
         self.timings: list[tuple[str, float]] = []
 
     def make(self, *, port=None, run=(), rest=(), timeout_ms=500, watchdog_s=5.0, **opts) -> DeviceSession:
@@ -99,6 +101,8 @@ class _Rig:
             watchdog_s=watchdog_s,
             on_stall=lambda call, seconds: self.stalls.append((call, seconds)),
             on_frame=lambda frame: None,
+            workers=self.wm,
+            worker_prefix=f"camera_device_{len(self.sessions)}",
             on_timing=lambda name, seconds: self.timings.append((name, seconds)),
             run=tuple(run),
             rest=tuple(rest),
@@ -121,8 +125,9 @@ def rig():
         session.stop(2.0)
     me = threading.current_thread()
     for thread in threading.enumerate():
-        if thread is not me and thread.name.startswith("camera_device"):
+        if thread is not me and thread.name.startswith("test_cam_"):
             thread.join(3.0)
+    r.wm.stop_all_workers(2.0)
 
 
 @pytest.fixture

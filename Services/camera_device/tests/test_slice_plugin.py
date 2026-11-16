@@ -20,6 +20,7 @@ from multiprocess_framework.modules.process_module.plugins.testing import MockPr
 from Services.camera_device import plugin_base
 from Services.camera_device.plugin_base import CameraDevicePlugin
 from Services.camera_device.testing.fake_port import make_port
+from multiprocess_framework.modules.worker_module import WorkerManager
 
 PROCESS_NAME = "cam_fake"
 ITEM_KEYS = {"frame", "camera_id", "device_id", "seq_id", "frame_id", "timestamp", "ts", "pixel_format"}
@@ -33,6 +34,8 @@ class _Rig:
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: self.port)
         config = {"auto_start": True, "camera_id": 3, **cfg}
         services = MockProcessServices(name=PROCESS_NAME, config=config)
+        self.wm = WorkerManager("test_cam")
+        services.worker_manager = self.wm  # настоящий менеджер: MockWorkerManager потоков не создаёт
         self.ctx = PluginContext(services=services, config=config)
         self.plugin = CameraDevicePlugin()
         self.plugin.configure(self.ctx)
@@ -58,6 +61,7 @@ class _Rig:
         self.stop.set()
         self.thread.join(2.0)
         self.plugin.shutdown(self.ctx)
+        self.wm.stop_all_workers(2.0)
 
 
 @pytest.fixture
@@ -140,14 +144,17 @@ def test_регистр_настоящего_плагина_равен_сост�
     port = make_port(busy_for_s=60.0, frame_period_s=0.02)
     monkeypatch.setattr(plugin_base, "create_port", lambda driver: port)
     config = {"auto_start": False, "camera_id": 3}
-    ctx = PluginContext(services=MockProcessServices(name=PROCESS_NAME, config=config), config=config)
+    services = MockProcessServices(name=PROCESS_NAME, config=config)
+    wm = WorkerManager("test_cam")
+    services.worker_manager = wm
+    ctx = PluginContext(services=services, config=config)
     plugin = CameraDevicePlugin()
     plugin.configure(ctx)
     plugin.start(ctx)
     real = CameraDevicePlugin._on_state
 
     def late(old: str, new: str) -> None:
-        if threading.current_thread().name != "camera_device-owner":
+        if not threading.current_thread().name.endswith("_owner"):
             time.sleep(0.05)
         real(plugin, old, new)
 
@@ -162,3 +169,4 @@ def test_регистр_настоящего_плагина_равен_сост�
             assert plugin._reg.device_state == plugin._session.state == "busy"
     finally:
         plugin.shutdown(ctx)
+        wm.stop_all_workers(2.0)
