@@ -785,6 +785,7 @@ ADR-RCP-009 («`before` строит менеджер»). Связанные: AD
    `RecipeFormatError` и `YamlWriteRefused` вылетают из слота Qt, и при занятом локе GUI-поток ждёт до 5 с. Как
    показать эти ошибки пользователю — отдельная задача после merge (решение владельца 2026-10-28), не часть C-30;
    строку в `ORDER` заводит лид, вопрос записан в `docs/claude/OPEN_QUESTIONS.md`.
+   Закрыто F3 (слияние `d89188e7b`): перевод пяти классов (`RecipeLockTimeout`, `RecipeFormatError`, `YamlWriteRefused`, `YamlPatchConflict`, `OSError`).
 
 ### Нарушения политики на момент решения и кто их чинит
 

@@ -20,7 +20,8 @@
 - **`RecipeDevicesStore`** (`recipe_devices.py`) — чистый (без Qt) CRUD устройств в
   секции `devices:` через `read_canonical` / `save_raw(expected_rev)` с базой
   `TopologySession` (комментарии сохраняются). Нет активного рецепта → `list()` пуст, `upsert/remove` →
-  `RecipeDevicesError`.
+  `RecipeDevicesError`; тем же `RecipeDevicesError` (литерал без пути) — отказ записи/чтения файла рецепта
+  (блокировка занята, формат, запрет записи, ввод-вывод).
 - Активация рецепта зовёт hub-команду `device_sync_set` (идемпотентно: upsert набора
   + удаление чужих `recipe:*`-устройств; manual-устройства не трогаются).
 

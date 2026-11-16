@@ -1,6 +1,8 @@
 ---
 name: diff-live-logs-to-find-an-observable
-description: when a RED criterion needs "an observable, not code reading" and the implementation files are forbidden, run both paths live and diff their per-process log files instead of guessing a marker name
+description: "Когда RED-критерий требует «observable, not code reading», а файлы реализации запрещены: прогнать оба пути вживую и сравнить per-process логи, а не угадывать имя маркера; run both paths live and diff the log files"
+mechanism: [live-stand, acceptance]
+role: tester
 metadata:
   type: feedback
 ---

@@ -4353,3 +4353,27 @@ Free-threaded Python — пересмотреть.
 **Reversible:** yes (убрать крюк и его вызов; пустая база безвредна).
 **Refs:** ADR-PMM-040, ADR-PM-054, ADR-PM-055, ADR-PM-057, `plans/2026-10-20_gui-graceful-close/plan.md`,
 `process_module/core/process_module.py` (`_own_work_late`).
+
+### ADR-PM-060 — heartbeat грузится при импорте `core.process_module`; `ProcessHeartbeat` в пакете `heartbeat` отдаётся лениво (2026-11-16, C-92)
+
+Ребёнок-процесс импортировал `heartbeat.process_heartbeat` (а с ним `cpu_clock`) лениво: из `run()` и из потока
+`message_processor` (через `from ...heartbeat import telemetry`, который тянул `heartbeat/__init__` и тот —
+`process_heartbeat`). Два потока заходили в цепочку импорта одновременно и брали блокировки модулей в разном порядке:
+`_DeadlockError` на `heartbeat.cpu_clock`. Решение из двух частей.
+
+- *П1.* `from ..heartbeat.process_heartbeat import ProcessHeartbeat` — в шапке `core/process_module.py`; ленивый импорт
+  в `run()` удалён. Цепочка грузится при импорте класса процесса, до запуска потоков ребёнка.
+- *П3.* `heartbeat/__init__.py` больше не импортирует `process_heartbeat` при загрузке: `ProcessHeartbeat` отдаётся через
+  PEP 562 `__getattr__` (для прочих имён — `AttributeError`, его ловит `hasattr` в `_handle_fromlist` при
+  `from ...heartbeat import telemetry`). `__all__` прежний; для анализаторов — импорт под `TYPE_CHECKING`. Поток,
+  импортирующий подмодуль пакета, цепочку `process_heartbeat` больше не запускает.
+- *Побочный эффект.* `declare_metric("shm" | "cpu" | "plugin_ms")` из `process_heartbeat.py` теперь исполняется при
+  импорте `core.process_module`, а не при первом `run()`; в том числе при голом `import multiprocess_framework`
+  (`multiprocess_framework/__init__.py:90` лениво берёт `ProcessModule`), то есть и в GUI-процессе. Каталог метрик пополняется
+  раньше, не иначе: повторное `declare_metric` с тем же именем — no-op.
+- *Отвергнуто.* Правка `builtin_commands.py` (обход в вызывающем коде, а не причина) и блокировка импорта в `run()`
+  (лечит один из двух входов).
+
+**Reversible:** yes (вернуть прямой импорт в `heartbeat/__init__.py` и ленивый в `run()`).
+**Refs:** `plans/framework-heartbeat-import-race/plan.md`, `process_module/core/process_module.py`,
+`process_module/heartbeat/__init__.py`, `tests/test_heartbeat_import_race.py`.
