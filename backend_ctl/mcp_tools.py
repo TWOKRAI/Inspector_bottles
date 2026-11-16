@@ -316,6 +316,22 @@ def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return _jsonable(drv.system_shutdown(**kw))
 
 
+def _run_start(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_start(**_kw_timeout(args))
+
+
+def _run_stop(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_stop(**_kw_timeout(args))
+
+
+def _run_ack(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_ack(**_kw_timeout(args))
+
+
+def _run_status(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_status(**_kw_timeout(args))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -851,6 +867,35 @@ TOOLS: List[ToolSpec] = [
             ["process"],
         ),
         _process_restart_verified,
+    ),
+    ToolSpec(
+        "run_status",
+        "Состояние линии (system.run.status): result = {state (not_ready | ready | starting | running | "
+        "stopping | fault), since, run_gate, start_allowed, ack_allowed, reasons (узлы-причины "
+        "not_ready/fault), last_fault}. Только чтение. Ответ — конверт process.command.response как есть.",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_status,
+    ),
+    ToolSpec(
+        "run_start",
+        "Запустить линию (system.run.start) из ready. Ранний START в окне not_ready (~4 с после boot) "
+        "отказан: внешний success=false, result.error='not_ready' + reasons — повторить после "
+        "run_status.start_allowed. Меняет поведение бэкенда (источники начинают производить).",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_start,
+    ),
+    ToolSpec(
+        "run_stop",
+        "Остановить линию (system.run.stop): running -> stopping -> ready (~3 с). "
+        "Процессы не гасятся — система остаётся в ready и ждёт нового run_start.",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_stop,
+    ),
+    ToolSpec(
+        "run_ack",
+        "Квитировать аварию линии (system.run.ack): fault -> ready, если ack_allowed (см. run_status).",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_ack,
     ),
     ToolSpec(
         "system_shutdown",
@@ -1536,6 +1581,8 @@ TOOL_SAFETY: Dict[str, str] = {
     # Task 3.5: чтение sqlite-стора истории read-only соединением — бэкенд не мутируется.
     "history_query": SAFETY_READ,
     "supervision_status": SAFETY_READ,
+    # Task 2.1: system.run.status — только чтение состояния линии
+    "run_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,
     "state_get": SAFETY_READ,
@@ -1579,6 +1626,10 @@ TOOL_SAFETY: Dict[str, str] = {
     "logger_sink_disable": SAFETY_WRITE,
     "telemetry_reconfigure": SAFETY_WRITE,
     "telemetry_set": SAFETY_WRITE,
+    # Task 2.1: управление run-состоянием линии (system.run.*) — меняет поведение бэкенда
+    "run_start": SAFETY_WRITE,
+    "run_stop": SAFETY_WRITE,
+    "run_ack": SAFETY_WRITE,
     # escalated
     "send_command": SAFETY_ESCALATED,
     "system_command": SAFETY_ESCALATED,

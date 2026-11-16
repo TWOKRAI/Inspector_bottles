@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from backend_ctl.driver import BackendDriver, _find_payload
 from backend_ctl.endpoint_config import resolve_endpoint
+from backend_ctl.protocol import _leaf_result
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
@@ -60,6 +61,12 @@ GUI_PROCESS_NAME = "gui"
 #: ``test_pid_file_env_pair_matches_the_framework`` — он сверяет его с источником.
 _PID_FILE_ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
 
+#: ``start_run``: срок одного запроса status/START и пауза между опросами (сек).
+_RUN_REQUEST_TIMEOUT_S = 5.0
+_RUN_POLL_PERIOD_S = 0.1
+#: ``start_run``: минимальный интервал между двумя START (сек).
+_RUN_START_MIN_INTERVAL_S = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Сборка headless-launcher'а
@@ -71,6 +78,7 @@ def build_headless_launcher(
     recipe: Optional[Path | str] = None,
     with_base: bool = False,
     log_dir: Optional[Path | str] = None,
+    run_gate: bool | None = None,
 ) -> "SystemLauncher":
     """Собрать ``SystemLauncher`` из топологии прототипа без презентационного overlay.
 
@@ -97,6 +105,9 @@ def build_headless_launcher(
 
             Env по-прежнему СИЛЬНЕЕ (``resolve_log_dir_root``: env → yaml → дефолт),
             так что живые зонды со своим ``logs_live/`` этот параметр не задевает.
+        run_gate: гейт запуска линии (Task 2.1). ``None`` → как в ``system.yaml``;
+            ``True``/``False`` перебивает манифест. ``BackendHarness`` по умолчанию
+            передаёт сюда ``False``: существующие стенды ждут работу сразу после старта.
 
     Использует только ПУБЛИЧНЫЕ помощники прототипа — прод-код не меняется.
     """
@@ -119,6 +130,10 @@ def build_headless_launcher(
         # Присваивание полю, а не model_copy(update=...): copy не валидирует, и опечатка
         # в имени поля прошла бы молча, оставив каталог прежним.
         sys_config.system.log_dir = str(log_dir)
+    if run_gate is not None:
+        # Тот же приём: присваивание полю (validate_assignment ловит не-bool и помечает поле
+        # заданным, так что ключ доедет и до вложенного ``sys_config`` оркестратора).
+        sys_config.run_gate = run_gate
 
     builder = SystemBuilder(
         sys_config=sys_config,
@@ -341,13 +356,25 @@ class BackendHarness:
         log: Optional[Callable[[str], None]] = None,
         launcher_factory: Optional[Callable[[], "SystemLauncher"]] = None,
         log_dir: Optional[Path | str] = None,
+        run_gate: bool | None = False,
     ) -> None:
+        if run_gate is True and launcher_factory is not None:
+            # factory собирает launcher сам, build_headless_launcher не зовётся: включать гейт
+            # нечем, и тихо проигнорированный True дал бы стенд «без гейта» под видом «с гейтом».
+            raise ValueError(
+                "run_gate=True несовместим с launcher_factory: фабрика сама отвечает за гейт "
+                "(build_headless_launcher не вызывается)"
+            )
         self._recipe = recipe
         self._with_base = with_base
         #: Корень дерева логов поднятой системы. ``None`` → как в yaml. Дефолт НЕ меняли
         #: намеренно: 28 из 34 живых зондов не задают каталог сами, и подмена дефолта на
         #: временный увела бы их логи туда, где оператор их не ищет (задача 3.3).
         self._log_dir = log_dir
+        #: Гейт запуска линии (Task 2.1). Умолчание ``False`` ПЕРЕОПРЕДЕЛЯЕТ ``system.yaml``:
+        #: harness не должен менять поведение существующих стендов, когда манифест включит
+        #: гейт. ``True`` — стенд «как в бою» (потом ``start_run()``); ``None`` — как в манифесте.
+        self._run_gate = run_gate
         # Резолв через единый источник: явный порт > env BACKEND_CTL_PORT > DEFAULT_PORT.
         # Harness затем сам фиксирует BACKEND_CTL_PORT для дочернего процесса (start()).
         self._port = resolve_endpoint(port=port)[1]
@@ -413,7 +440,10 @@ class BackendHarness:
                 self._launcher = self._launcher_factory()
             else:
                 self._launcher = build_headless_launcher(
-                    recipe=self._recipe, with_base=self._with_base, log_dir=self._log_dir
+                    recipe=self._recipe,
+                    with_base=self._with_base,
+                    log_dir=self._log_dir,
+                    run_gate=self._run_gate,
                 )
             self._launcher.start()
             # pid оркестратора + снимок его поддерева СРАЗУ после старта, ДО wait_until_ready
@@ -467,6 +497,70 @@ class BackendHarness:
             # __exit__ не зовётся при исключении в __enter__). stop() идемпотентен.
             self.stop()
             raise
+
+    def start_run(self, timeout: float = 30.0) -> None:
+        """Запустить линию (``system.run.start``) и дождаться ``state == "running"``.
+
+        Алгоритм один: опрос ``system.run.status`` до ``start_allowed``, затем START. Окно
+        ``not_ready`` после boot (~4 с: узлы ещё не подтвердили liveness) и гонка «status сказал
+        ready, START получил ``not_ready``» закрываются тем же циклом: после любого неудачного
+        START идёт новый опрос и новый START, всё в пределах ``timeout``.
+
+        Вердикт выносит только итоговое ``state == "running"`` из следующего опроса; ответ самого
+        START не судится (``success`` без смены состояния — не запуск, ``already_running`` — не
+        ошибка). Без гейта работает так же: START из ``ready`` допустим.
+
+        ВНИМАНИЕ: после ``start_run`` машина в ``running`` даже без гейта (START из ``ready`` допустим),
+        а ``topology.apply`` и ``recipe.activate`` в ``running`` отказаны (``error: running``) до
+        ``run_stop()``. Тест, который применяет топологию или активирует рецепт, ``start_run`` не зовёт:
+        без гейта он и так стоит в ``ready``, где apply разрешён.
+
+        START шлётся только при ``start_allowed`` и не чаще раза в ``_RUN_START_MIN_INTERVAL_S``: при
+        «принят, но ``running`` нет» не заливаем PM десятью START в секунду. ``fault`` липкий (без
+        ``run_ack`` ``running`` не наступит) — выход сразу, без ожидания таймаута.
+
+        Raises:
+            AssertionError: ``running`` не наступило за ``timeout`` или система в ``fault`` — в тексте
+                последнее состояние, узлы-причины (``reasons``), ``last_fault``, число опросов, из них без
+                ``state`` (ответ без поля — не «не готов»), и последний сырой ответ ``status``.
+        """
+        drv = self.driver
+        deadline = time.monotonic() + timeout
+        last: dict[str, Any] = {}
+        raw: Any = None
+        polls = without_state = 0
+        last_start = float("-inf")
+
+        def failure(why: str) -> AssertionError:
+            return AssertionError(
+                f"start_run: {why}; state={last.get('state')!r}, reasons={last.get('reasons')!r}, "
+                f"last_fault={last.get('last_fault')!r}, опросов={polls} (без state: {without_state}), "
+                f"последний ответ status: {str(raw)[:300]}"
+            )
+
+        while True:
+            # Опрос, начатый после дедлайна, — последний: START в нём уже не шлём.
+            expired = time.monotonic() >= deadline
+            raw = drv.run_status(timeout=_RUN_REQUEST_TIMEOUT_S)
+            status = _leaf_result(raw)
+            last = status if isinstance(status, dict) else {}
+            polls += 1
+            if "state" not in last:
+                without_state += 1
+            if last.get("state") == "running":
+                return
+            if last.get("state") == "fault":
+                raise failure("система в fault (нужен run_ack), running не наступит")
+            if expired:
+                break
+            now = time.monotonic()
+            if last.get("start_allowed") and now - last_start >= _RUN_START_MIN_INTERVAL_S:
+                # Ответ не судим: итог читает следующий опрос (отказ not_ready, already_running и
+                # «принят, но не running» различаются там по состоянию, а не по тексту ответа).
+                drv.run_start(timeout=_RUN_REQUEST_TIMEOUT_S)
+                last_start = now
+            time.sleep(_RUN_POLL_PERIOD_S)
+        raise failure(f"за {timeout}s система не вошла в running")
 
     def stop(self) -> None:
         """Закрыть driver и гарантированно погасить систему (watchdog + kill дерева)."""
