@@ -72,7 +72,8 @@ class _Stack:
         self.router = _SpyRouter()
         self.bridge = _SyncBridge()
         proxy = GuiStateProxy("gui", router=self.router, delta_sink=lambda _deltas: None)
-        proxy.subscribe("system.**", lambda _d: None, exclude_self=True)  # стартовый wildcard GUI
+        # стартовый wildcard GUI — как в проде (frontend/process.py): sync=False, не подтверждён
+        proxy.subscribe("system.**", lambda _d: None, exclude_self=True, sync=False)
         self.read_model = TelemetryViewModel(initial_cache=dict(proxy.cache))
         self.bridge.add_state_listener(self.read_model.on_state_delta)
         self.bindings = GuiStateBindings(
@@ -159,11 +160,11 @@ def test_deltas_drive_run_control_through_real_bindings(qtbot) -> None:
     assert state.text() == "Нет данных"
     assert not _btn(window, "RunStopButton").isEnabled()
 
-    # подписка system.run.* покрыта стартовым system.** — блокирующего IPC нет
-    assert stack.router.blocking_requests == [] or all(
-        m.get("data", {}).get("pattern") != "system.run.*" for m in stack.router.blocking_requests
-    )
-    assert [m for m in stack.router.async_subscribes if m.get("data", {}).get("pattern") == "system.run.*"] == []
+    # Факт прода: стартовый system.** не подтверждён (sync=False), поэтому connect_bindings
+    # заводит ровно одну отдельную async-подписку system.run.* и ни одного блокирующего request.
+    assert stack.router.blocking_requests == []
+    run_subscribes = [m for m in stack.router.async_subscribes if m.get("data", {}).get("pattern") == "system.run.*"]
+    assert len(run_subscribes) == 1
 
 
 def test_values_before_connect_bindings_are_replayed(qtbot) -> None:
@@ -336,6 +337,26 @@ def test_reason_text_is_plain_text_not_html(qtbot) -> None:
         assert _lbl(w, name).textFormat() == Qt.TextFormat.PlainText, name
     assert "<b>x</b>" in _lbl(w, "RunDetailLabel").text()
     assert "<b>x</b>" in _lbl(w, "RunFaultLabel").text()
+
+
+def test_start_tooltip_is_escaped_and_keeps_line_breaks(qtbot) -> None:
+    """Подсказка ЗАПУСТИТЬ: причина «<b>x</b>» не разметка, строки остаются раздельными."""
+    w = RunControlWidget()
+    qtbot.addWidget(w)
+    w.apply_leaf("system.run.state", "not_ready")
+    w.apply_leaf("system.run.start_allowed", False)
+    w.apply_leaf(
+        "system.run.reasons",
+        [
+            {"node": "n", "severity": "failure", "reason": "<b>x</b>"},
+            {"node": "m", "severity": "check_function", "reason": "y"},
+        ],
+    )
+
+    assert _btn(w, "RunStartButton").toolTip() == ("<p style='white-space:pre'>n: &lt;b&gt;x&lt;/b&gt;\nm: y</p>")
+    # нет причин -> подсказки нет
+    w.apply_leaf("system.run.reasons", [])
+    assert _btn(w, "RunStartButton").toolTip() == ""
 
 
 def test_set_commands_survives_failing_seed_request(qtbot) -> None:

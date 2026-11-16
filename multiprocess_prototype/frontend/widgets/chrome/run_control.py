@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import time
 from dataclasses import dataclass
@@ -434,7 +435,12 @@ class RunControlWidget(QWidget):
         self._fault_label.setVisible(bool(view.fault_text))
 
         self._start_btn.setEnabled(view.start_enabled)
-        self._start_btn.setToolTip(view.start_tooltip)
+        # Подсказка рисуется Qt как rich text, если похожа на HTML: причины PM — данные,
+        # поэтому экранируем, а переводы строк сохраняем через white-space:pre.
+        tooltip = view.start_tooltip
+        if tooltip:
+            tooltip = f"<p style='white-space:pre'>{html.escape(tooltip)}</p>"
+        self._start_btn.setToolTip(tooltip)
         self._stop_btn.setEnabled(view.stop_enabled)
         self._ack_btn.setVisible(view.ack_visible)
         self._ack_btn.setEnabled(view.ack_enabled)
