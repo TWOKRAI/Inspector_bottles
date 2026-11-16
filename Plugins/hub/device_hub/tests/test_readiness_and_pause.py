@@ -120,7 +120,7 @@ def make_hub(tmp_path: Path, recipe_ids: tuple[str, ...] = ()) -> tuple[DeviceHu
 
 
 def publish(plugin: DeviceHubPlugin, dev_id: str, conn: str, **extra: Any) -> None:
-    plugin._publish_state(_conn_path(dev_id), {"conn": conn, **extra})
+    plugin._set_conn(dev_id, conn, **extra)
 
 
 def readiness(plugin: DeviceHubPlugin, ctx: Any) -> list[dict]:
@@ -251,19 +251,6 @@ def test_red2_no_publication_lists_every_desired_device_in_recipe_order(tmp_path
 def test_red2_empty_recipe_is_ready(tmp_path: Path) -> None:
     """RED 2 (DESIGN П.1): рецепт без устройств -> ``readiness == []``."""
     plugin, ctx = make_hub(tmp_path, ())
-
-    assert readiness(plugin, ctx) == []
-
-
-def test_red2_publications_that_are_not_a_conn_value_leave_snapshot_alone(tmp_path: Path) -> None:
-    """RED 2 (DESIGN П.1): снимок меняют только ``….conn`` с dict, где есть строка ``conn``; прочее — не трогает."""
-    plugin, ctx = make_hub(tmp_path, ("robot_main",))
-    publish(plugin, "robot_main", "connected")
-
-    plugin._publish_state("devices.state.robot_main.last_error", "boom")
-    plugin._publish_state("devices.state.robot_main.status", {"conn": "error"})
-    plugin._publish_state(_conn_path("robot_main"), {"ts": 5})
-    plugin._publish_state("devices.state.robot_main", {})
 
     assert readiness(plugin, ctx) == []
 
@@ -447,7 +434,16 @@ class PauseHub:
         self.plugin.start(self.ctx)
 
     def _build(self, entry: Any, proto: Any) -> FakeDriver:
-        driver = self.driver_cls.get(entry.id, FakeDriver)(entry, proto, calls=self.calls)
+        cls = self.driver_cls.get(entry.id, FakeDriver)
+        # Действие паузы — данные класса драйвера (ADR-DH-015): двойник без ``pause_action`` паузой не останавливается
+        if entry.kind == "vfd":
+            action: tuple[str, dict] = ("stop", {})
+        elif entry.protocol == "delta_v2":
+            action = ("stop", {"level": "SOFT"})
+        else:
+            action = ("abort", {"mode": 3})
+        cls = type(f"{cls.__name__}Paused", (cls,), {"pause_action": action})
+        driver = cls(entry, proto, calls=self.calls)
         self.drivers[entry.id] = driver
         return driver
 
