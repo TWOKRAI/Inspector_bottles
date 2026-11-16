@@ -31,7 +31,7 @@
 Сеанс и профили — вне `__all__` (импорт по модулю):
 
 - `session.DeviceSession(port, sdk, ident=None, *, timeout_ms=500, watchdog_s=5.0, on_frame, on_stall=None, on_state=None, on_timing=None, run=(), rest=())` —
-  сеанс одного прибора; `watchdog_s` должен быть больше `timeout_ms/1000`, иначе `ValueError`. Все вызовы порта и `DeviceSdk` идут из потока-владельца
+  сеанс одного прибора; `watchdog_s` должен быть больше `timeout_ms/1000`, иначе `ValueError`. `set_cycle(ident, run, rest) -> bool` (2.3a) заменяет идентичность и план для СЛЕДУЮЩЕГО цикла (`False` при `device_held`, цикл не меняется); `timeout_ms` и `watchdog_s` заморожены при создании сеанса — их правка вступает в силу только после перезапуска процесса. Все вызовы порта и `DeviceSdk` идут из потока-владельца
   (один на цикл `open -> close`, `daemon`); вызывающие потоки только ставят команды.
   - `start(timeout=5.0) -> bool` — `True`, если захват идёт; `stop(timeout=2.0)` — не отбрасывается, `timeout` — срок ожидания вызывающего.
   - Свойства: `state`, `errors` (ошибки кадров + отказы узлов профилей), `params` (прочитанное, скаляры), `params_status` (`{поле: {"verified", "rc"}}`),

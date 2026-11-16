@@ -18,7 +18,7 @@ from multiprocess_framework.modules.process_module.plugins.base import PluginCon
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device import plugin_base
-from Services.camera_device.interface import Binding, RawFrame
+from Services.camera_device.interface import Binding, PortError, RawFrame
 from Services.camera_device.plugin_base import CameraDevicePlugin
 from Services.camera_device.registers_base import CameraDeviceRegisters
 from Services.camera_device.testing.fake_port import FAKE_BINDINGS, make_port
@@ -210,3 +210,47 @@ def test_форма_кадра_по_pixel_format_битый_кадр_отбра�
         assert plugin._frames == 0
         assert plugin._reg.frames == 0
         assert plugin.cmd_get_status({})["last_error"] != ""
+
+
+def test_rest_selftrigger_пишет_период_run(rig):
+    """`rest_trigger_source=SelfTrigger`: в покое пишется и период самотриггера из run (40), ошибки плана нет."""
+    built = rig({"rest_managed": True, "rest_trigger_mode": "On", "rest_trigger_source": "SelfTrigger"})
+    assert built.take()["status"] == "ok"
+    assert built.plugin.cmd_release_device({})["status"] == "ok"
+    names = _names(built.port)
+    tail = built.port.calls[names.index("stop_grabbing") + 1 :]
+    assert [args for name, args, _ in tail if name == "set_param"] == [
+        ("TriggerMode", "On"),
+        ("TriggerSource", "SelfTrigger"),
+        ("TriggerSelfTriggerPeriod", 40),
+    ]
+
+
+def test_правка_device_serial_между_циклами_доходит_до_сеанса(rig):
+    """Р12: `device_serial` правится после `release_device` -> следующий `take_device` ищет НОВЫЙ серийник."""
+    built = rig()
+    assert built.take()["status"] == "ok"
+    assert built.plugin.cmd_release_device({})["status"] == "ok"
+    built.plugin._reg.device_serial = "NOPE"
+    assert built.take()["status"] == "error"
+    assert built.plugin._session.state == "not_found"
+    assert [call[:2] for call in built.port.calls if call[0] == "open"] == [("open", ("serial", "FAKE-0001"))]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [PortError("access", "make_port"), ImportError("dll"), OSError("x")],
+    ids=["PortError", "ImportError", "OSError"],
+)
+def test_create_port_бросает_не_ValueError_take_device_отвечает_error(rig, error):
+    """Хук вендора бросил не ValueError: `status: error`, исключения наружу нет, сеанс не создан."""
+
+    class _Failing(CameraDevicePlugin):
+        def create_port(self):
+            raise error
+
+    built = rig(plugin_cls=_Failing)
+    answer = built.take()
+    assert answer["status"] == "error"
+    assert answer["error"] != ""
+    assert built.plugin._session is None

@@ -34,7 +34,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 from .interface import Binding, DeviceIdentity, DevicePort, RawFrame
 from .params import build_plan
 from .registers_base import CameraDeviceRegisters
-from .session import DeviceSession
+from .session import DeviceSession, describe_error
 
 # Срок ожидания `start`/`stop` в командах плагина, с.
 _START_TIMEOUT_S = 5.0
@@ -237,8 +237,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
         with self._session_lock:
             if self._session is not None:
                 return self._session
-            port = self._port = self.create_port()
-            self._session = DeviceSession(
+            port = self.create_port()
+            session = DeviceSession(
                 port,
                 port.sdk,
                 self._identity(),
@@ -252,7 +252,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
                     f"CameraDevicePlugin: вызов порта {call} завис на {seconds:.1f} с"
                 ),
             )
-        return self._session
+            self._port, self._session = port, session  # только после успешного создания сеанса: порта-сироты нет
+        return session
 
     def cmd_take_device(self, data: dict) -> dict:
         """Открыть прибор и начать захват. Отказ — `status: error`, не исключение."""
@@ -268,9 +269,11 @@ class CameraDevicePlugin(ProcessModulePlugin):
             run, rest = self._plan()
             # идущий цикл не меняется (повторный take_device при opening/grabbing — по-прежнему ok): результат не нужен
             session.set_cycle(ident, run, rest)
-        except ValueError as exc:  # текст называет поля и ключи, не значения рецепта
-            self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {exc}")
-            return {"status": "error", "device_state": self._reg.device_state, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — контракт 1.8: отказ команды = status error, исключение наружу не идёт
+            # хук вендора (`create_port`, `port.sdk`) может бросить что угодно: PortError, ImportError, OSError
+            text = str(exc) if isinstance(exc, ValueError) else describe_error(exc)  # без значений рецепта
+            self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {text}")
+            return {"status": "error", "device_state": self._reg.device_state, "error": text}
         t0 = time.monotonic()
         ok = session.start(_START_TIMEOUT_S)
         ms = int((time.monotonic() - t0) * 1000)
