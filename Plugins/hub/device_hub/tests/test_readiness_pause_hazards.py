@@ -383,7 +383,7 @@ def test_red12_manager_error_reply_is_a_failure_and_pause_raises_after_the_walk(
 
     assert str(excinfo.value) == "pause: сбой останова устройств"
     # r_a: команда до драйвера не дошла (ответил менеджер); соседи после него в обходе остановлены
-    assert sorted(hub.ops()) == [("r_c", "abort", {"mode": 1}), ("v_b", "stop", {})]
+    assert sorted(hub.ops()) == [("r_c", "abort", {"mode": 3}), ("v_b", "stop", {})]
 
 
 @pytest.mark.parametrize(
@@ -402,3 +402,159 @@ def test_red12_any_reply_other_than_status_ok_is_a_failure(hub: PauseHub, reply:
 
     assert str(excinfo.value) == "pause: сбой останова устройств"
     assert sorted(hub.ops()) == [("r_a", "stop", {"level": "SOFT"}), ("v_b", "stop", {})]
+
+
+# --------------------------------------------------------------------------------------------------
+# Правки ревью (итерация 1): окно sync_set, сбой чтения связи, сбой логгера, серия логов readiness
+# --------------------------------------------------------------------------------------------------
+
+
+class _SlowDisconnectDriver(FakeDriver):
+    """``disconnect`` ждёт события: ``remove`` устаревшего в ``device_sync_set`` идёт долго (disconnect-IO)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def disconnect(self) -> None:
+        self.entered.set()
+        self.release.wait(10.0)
+        super().disconnect()
+
+
+def test_review_sync_set_window_lists_the_new_device_instead_of_an_empty_answer(hub: PauseHub) -> None:
+    """Ревью, находка 2: пока идёт ``device_sync_set`` (``remove`` старого устройства блокирован в ``disconnect``),
+    новое устройство уже в реестре и не подключено — ``readiness`` перечисляет его, а не отвечает ложным ``[]``."""
+    hub.driver_cls["r_old"] = _SlowDisconnectDriver
+    _sync_set(hub, [_entry("r_old", "robot", "delta_v2")])
+    _connect_all(hub)
+    assert readiness(hub.plugin, hub.ctx) == []
+    old = hub.drivers["r_old"]
+    assert isinstance(old, _SlowDisconnectDriver)
+    box: dict[str, Any] = {}
+
+    def run_sync() -> None:
+        try:
+            box["result"] = hub.plugin.cmd_device_sync_set(
+                {"devices": [_entry("r_new", "robot", "delta_v2")], "origin": "recipe:alpha"}
+            )
+        except BaseException as exc:  # noqa: BLE001 — переносится в поток теста
+            box["error"] = exc
+
+    thread = threading.Thread(target=run_sync, daemon=True, name="review-sync-set")
+    thread.start()
+    try:
+        assert old.entered.wait(5.0), "обвязка: sync_set не дошёл до disconnect старого устройства"
+        assert readiness(hub.plugin, hub.ctx) == [_not_connected("r_new")]  # в окне команды
+    finally:
+        old.release.set()
+        thread.join(10.0)
+    assert not thread.is_alive(), "sync_set не завершился"
+    assert "error" not in box, box
+    assert box["result"]["removed"] == ["r_old"]
+    assert readiness(hub.plugin, hub.ctx) == [_not_connected("r_new")]  # после команды
+
+
+def test_review_sync_set_failed_upsert_is_not_listed_and_keeps_the_previous_wish(hub: PauseHub) -> None:
+    """Ревью, находка 2: ``id``, чей ``upsert`` не прошёл, не попадает в ``readiness`` и не оставляет желания
+    «подключать» (нет прежнего желания — снято; оператор отключил вручную — остаётся ``False``)."""
+    assert hub.plugin.cmd_device_upsert(_entry("r_x", "robot", "delta_v2"))["status"] == "ok"
+    assert hub.plugin.cmd_device_disconnect({"device_id": "r_x"})["status"] == "ok"  # прежнее желание False
+    bad = {**_entry("r_bad", "robot", "delta_v2"), "kind": "no_such_kind"}
+    bad_x = {**_entry("r_x", "robot", "delta_v2"), "kind": "no_such_kind"}
+
+    res = hub.plugin.cmd_device_sync_set(
+        {"devices": [_entry("r_ok", "robot", "delta_v2"), bad, bad_x], "origin": "recipe:alpha"}
+    )
+
+    assert res["status"] == "ok" and res["upserted"] == ["r_ok"], res
+    assert readiness(hub.plugin, hub.ctx) == [_not_connected("r_ok")]
+    assert hub.plugin._desired_connected.get("r_bad") is None  # приватное чтение: желание не утекло
+    assert hub.plugin._desired_connected.get("r_x") is False  # прежнее желание оператора сохранено
+
+    # id с упавшим upsert не остался в наборе рецепта: позже добавленное вручную и «подключаемое» устройство с тем же
+    # id в readiness не входит (оно вне рецепта)
+    assert hub.plugin.cmd_device_upsert(_entry("r_bad", "robot", "delta_v2"))["status"] == "ok"
+    assert hub.plugin.cmd_device_connect({"device_id": "r_bad"})["status"] == "ok"
+    assert readiness(hub.plugin, hub.ctx) == [_not_connected("r_ok")]
+
+
+class _BrokenLinkReadDriver(FakeDriver):
+    """Чтение ``is_connected`` бросает (после ``broken = True``): сокет умер на чтении флага."""
+
+    broken = False
+
+    @property
+    def is_connected(self) -> bool:
+        if self.broken:
+            raise OSError("сокет мёртв")
+        return self.up
+
+
+def test_review_is_connected_raising_stops_the_others_then_raises_once(hub: PauseHub) -> None:
+    """Ревью, находка 4: у первого в обходе устройства ``is_connected`` бросает — соседи после него остановлены, затем
+    ровно одно ``RuntimeError`` с литералом; само устройство команды не получило."""
+    hub.add("r_a", "robot", "delta_v2", driver_cls=_BrokenLinkReadDriver)
+    hub.add("v_b", "vfd", "gd20_bridge")
+    hub.add("r_c", "robot", "delta_universal3")
+    broken = hub.drivers["r_a"]
+    assert isinstance(broken, _BrokenLinkReadDriver)
+    broken.broken = True
+    try:
+        with pytest.raises(RuntimeError) as excinfo:
+            hub.pause()
+    finally:
+        broken.broken = False  # уборка фикстуры читает связь при shutdown
+
+    assert str(excinfo.value) == "pause: сбой останова устройств"
+    assert sorted(hub.ops()) == [("r_c", "abort", {"mode": 3}), ("v_b", "stop", {})]
+
+
+def test_review_logger_failure_inside_pause_does_not_abort_the_walk(hub: PauseHub) -> None:
+    """Ревью, находка 3: логгер бросает при записи сбоя первого устройства — второе всё равно остановлено, наружу —
+    контрактное ``RuntimeError``, а не ``OSError`` логгера."""
+    hub.add("r_a", "robot", "delta_v2")
+    hub.add("v_b", "vfd", "gd20_bridge")
+    hub.drivers["r_a"].reply = {"status": "error"}
+
+    def dead_log(_text: str) -> None:
+        raise OSError("приёмник лога мёртв")
+
+    hub.ctx.log_warning = dead_log
+
+    with pytest.raises(RuntimeError) as excinfo:
+        hub.pause()
+
+    assert str(excinfo.value) == "pause: сбой останова устройств"
+    assert sorted(hub.ops()) == [("r_a", "stop", {"level": "SOFT"}), ("v_b", "stop", {})]
+
+
+class _BrokenSnapshot:
+    """Снимок, у которого чтение бросает."""
+
+    def get(self, _key: str) -> str:
+        raise RuntimeError("снимок повреждён")
+
+
+def test_review_readiness_logs_only_the_first_failure_of_a_series(tmp_path: Path) -> None:
+    """Ревью, находка 5: при сломанном снимке 10 вызовов ``readiness`` дают ОДНУ запись лога; после успешного чтения
+    следующий сбой снова пишется (всего 2 записи на две серии)."""
+    plugin, ctx = make_hub(tmp_path, ("robot_main",))
+    publish(plugin, "robot_main", "connected")
+    real = plugin._conn_snapshot
+    ctx.log_error.reset_mock()
+    fallback = [{"severity": "failure", "reason": "device_hub: состояние устройств недоступно"}]
+
+    plugin._conn_snapshot = _BrokenSnapshot()
+    answers = [readiness(plugin, ctx) for _ in range(10)]
+    assert answers == [fallback] * 10
+    assert ctx.log_error.call_count == 1
+
+    plugin._conn_snapshot = real
+    assert readiness(plugin, ctx) == []  # успешное чтение закрывает серию
+
+    plugin._conn_snapshot = _BrokenSnapshot()
+    assert [readiness(plugin, ctx) for _ in range(5)] == [fallback] * 5
+    plugin._conn_snapshot = real
+    assert ctx.log_error.call_count == 2

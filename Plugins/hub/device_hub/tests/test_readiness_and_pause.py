@@ -11,7 +11,7 @@ Purpose:
     * REDS 8: симулятор v2 (``E2eRig`` над ``RobotSimCore``) — ФАКТ: после ``pause`` драйвер принимает новое
       движение, а поставленные в очередь задания продолжают уходить (стоп очередь не удерживает).
 
-    Ожидаемые значения — литералы DESIGN (тексты причин, ``SOFT``, ``mode == 1``). Каждый вызов, который может
+    Ожидаемые значения — литералы DESIGN (тексты причин, ``SOFT``, ``mode == 3``). Каждый вызов, который может
     повиснуть, идёт в daemon-потоке с join-дедлайном (``bounded``); ожидание состояния — опрос с дедлайном.
 
 Public API:
@@ -525,13 +525,13 @@ def test_red6_pause_vfd_gets_stop(pause_hub: PauseHub) -> None:
 
 
 def test_red6_pause_v1_robot_gets_abort_mode_1(pause_hub: PauseHub) -> None:
-    """RED 6: подключённый робот v1 получает ``abort`` с ``mode == 1`` (и ничего больше)."""
+    """RED 6: подключённый робот v1 получает ``abort`` с ``mode == 3`` (и ничего больше)."""
     pause_hub.add("r1", "robot", "delta_universal3")
 
     pause_hub.pause()
 
     ops = pause_hub.ops()
-    assert ops == [("r1", "abort", {"mode": 1})], ops
+    assert ops == [("r1", "abort", {"mode": 3})], ops
     assert isinstance(ops[0][2]["mode"], int)
 
 
@@ -544,7 +544,7 @@ def test_red6_pause_covers_every_connected_robot_and_vfd(pause_hub: PauseHub) ->
     pause_hub.pause()
 
     assert sorted(pause_hub.ops(), key=lambda item: item[0]) == [
-        ("r1", "abort", {"mode": 1}),
+        ("r1", "abort", {"mode": 3}),
         ("r2", "stop", {"level": "SOFT"}),
         ("v1", "stop", {}),
     ]
@@ -585,7 +585,7 @@ def test_red7_failure_of_one_device_stops_the_rest_then_raises(
     assert str(excinfo.value) == "pause: сбой останова устройств"
     assert sorted(pause_hub.ops(), key=lambda item: item[0]) == [
         ("r_a", "stop", {"level": "SOFT"}),
-        ("r_b", "abort", {"mode": 1}),
+        ("r_b", "abort", {"mode": 3}),
         ("v_c", "stop", {}),
     ], "каждое устройство, включая отказавшее и стоящие после него, получило свою команду"
 
