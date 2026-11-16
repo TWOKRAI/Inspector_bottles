@@ -177,7 +177,7 @@ def _leaf(*, ready: bool = True, reasons: list[dict] | None = None, age_s: float
 
 
 def _failure(node: str, source: str = "plugin") -> dict:
-    return {"severity": "failure", "source": source, "node": node, "message": f"{node}: failure"}
+    return {"severity": "failure", "source": source, "node": node, "reason": f"{node}: failure"}
 
 
 def _evaluate(expected: list[str], leaves: dict, alive: dict) -> tuple[bool, list[dict]]:

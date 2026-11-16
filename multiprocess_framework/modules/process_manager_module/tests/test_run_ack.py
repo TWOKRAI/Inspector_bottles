@@ -40,7 +40,7 @@ from .test_run_commands import _Store, make_run_pm
 from .test_run_stop import _DEADLINE_S, _Rig, _bounded, _fault_stop_done, _wait
 
 # причина аварии, которую шлёт «cam» (литерал: форма листа readiness, как её отдают плагины)
-_FAILURE = {"severity": "failure", "source": "plugin", "node": "cam", "message": "cam: failure"}
+_FAILURE = {"severity": "failure", "source": "plugin", "node": "cam", "reason": "cam: failure"}
 
 
 @pytest.fixture
