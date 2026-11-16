@@ -500,7 +500,9 @@ def test_r9_thread_name_after_auto_restart(env):
 
     assert wait_until(lambda: len(target.names) == 2), "авто-рестарт не произошёл"
     assert target.names == [f"{env.name}_w", f"{env.name}_w"]
-    assert [t.name for t in env.live("w")] == [f"{env.name}_w"]
+    # Прежний поток к этому моменту может ещё доходить до выхода из finally обёртки
+    # (он сам создал новый и завершается): ждём, пока живым останется один с тем же именем.
+    assert wait_until(lambda: [t.name for t in env.live("w")] == [f"{env.name}_w"]), env.live("w")
 
 
 # ---------------------------------------------------------------------------
