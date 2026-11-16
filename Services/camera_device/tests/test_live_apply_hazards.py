@@ -318,11 +318,26 @@ def test_сторож_видит_зависший_fn_из_call(rig):
     assert rig.stalls[0][1] >= 0.2
 
 
-def test_сторож_не_срабатывает_на_быстрый_fn_из_call(rig):
-    session = rig.make(run=_run_plan(40), timeout_ms=100, watchdog_s=0.2)
+def test_сторож_не_срабатывает_после_быстрого_fn_из_call_пока_владелец_вне_вызова_порта(rig):
+    """Сторож следит только за вызовом порта: `_current` сбрасывается в `finally` и между вызовами пуст.
+
+    Владелец стоит в `on_frame` (не вызов порта) дольше `watchdog_s`: застрявший `_current` дал бы ложный `on_stall`.
+    """
+    stuck = threading.Event()
+    slow = threading.Event()
+
+    def on_frame(frame) -> None:
+        if slow.is_set():
+            slow.clear()
+            stuck.set()
+            time.sleep(0.8)  # дольше watchdog_s = 0.2
+
+    session = rig.make(run=_run_plan(40), on_frame=on_frame, timeout_ms=100, watchdog_s=0.2)
     assert rig.start(session) is True
     assert _call(lambda: session.call(lambda: "быстро", 3.0)) == (True, "быстро")
-    time.sleep(0.5)  # дольше watchdog_s: сторож успел бы увидеть застрявший `_current`
+    slow.set()
+    assert stuck.wait(3.0), "on_frame не вызван"
+    time.sleep(0.9)  # владелец всё это время в `on_frame`, порт не зовёт
     assert rig.stalls == []
 
 
