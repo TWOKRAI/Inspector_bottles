@@ -65,9 +65,6 @@ from .params import Step, build_plan
 from .registers_base import CameraDeviceRegisters
 from .session import DeviceSession, describe_error
 
-# Срок ожидания `start`/`stop` в командах плагина, с.
-_START_TIMEOUT_S = 5.0
-_STOP_TIMEOUT_S = 2.0
 # Каналов на пиксель для 8-битных форматов; `bayer_*` — один канал (дебайер — не в ядре).
 _CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3}
 # Окно публикации уровней, агрегата замеров и сверки событий, с (в тестах подменяется).
@@ -654,8 +651,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
     def cmd_apply_params(self, data: dict) -> dict:
         """Записать пакет `{поле: значение}` в register; на прибор значение доходит колбэком подписки 2.4b.
 
-        Порядок проверок (всё до первой записи): модель -> `ctx.registers` -> поле из `bindings()` -> не `readonly`
-        -> пробная запись всего пакета на копии register'а. `session.apply` отсюда не зовётся (удвоение с колбэком).
+        Порядок проверок (всё до первой записи): модель -> `ctx.registers` -> поле из `bindings()` -> не `readonly` и
+        хватает прав (`FieldMeta.can_modify(0)`, как у `set_field_value`) -> пробная запись всего пакета на копии
+        register'а. `session.apply` отсюда не зовётся (удвоение с колбэком).
         `applied` = «принято register'ом»; результат на приборе приходит позже (`read_params` -> `param_errors`).
         """
         try:
@@ -673,17 +671,20 @@ class CameraDevicePlugin(ProcessModulePlugin):
         fields_meta = type(self._reg).get_all_fields_meta()
         for field in params:
             meta = fields_meta.get(field)
-            if (
-                meta is not None and meta.readonly
-            ):  # текст register'а («Недостаточно прав доступа») вводит в заблуждение
+            if meta is None:
+                continue
+            # проба на копии права не проверяет, а `set_field_value` — да (`access_level=0`): пакет писался бы частично
+            if meta.readonly:  # свой текст: «Недостаточно прав доступа» register'а вводит в заблуждение
                 return self._apply_refused(f"поле только для чтения: {field}")
+            if not meta.can_modify(0):
+                return self._apply_refused(f"недостаточно прав для поля: {field}")
         ok, error = self._reg.model_copy(deep=True).apply_values(params)  # проба всего пакета: всё или ничего
         if not ok:
             return self._apply_refused(error or "значение отвергнуто")
         applied: list[str] = []
         for field, value in params.items():  # порядок словаря: зависимые поля работают только в нём
             ok, error = registers.set_field_value(self.name, field, value)
-            if not ok:  # остаточный случай: между пробой и записью значение изменил другой писатель
+            if not ok:  # остаточный случай: между пробой и записью значение register'а изменил другой писатель
                 self._log_apply(applied, False)
                 return {"success": False, "error": error or "значение отвергнуто", "applied": applied}
             applied.append(field)

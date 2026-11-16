@@ -13,7 +13,7 @@ Public API:
 
 Stability:
     Имена и поля моделей читают Task 1.3 (`command_contracts`) и Task 4.2a: менять только вместе с ними.
-    Умолчания сроков совпадают с `_START_TIMEOUT_S`/`_STOP_TIMEOUT_S` плагина. У `TakeDeviceArgs` и
+    Умолчания сроков (`_START_TIMEOUT_S`/`_STOP_TIMEOUT_S`) живут только здесь. У `TakeDeviceArgs` и
     `ReleaseDeviceArgs` лишние ключи `data` игнорируются (как до задачи), у `ApplyParamsArgs` — запрещены.
 
 Слой: Services -> pydantic (стороннее), framework не нужен.
@@ -27,6 +27,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["ApplyParamsArgs", "ReleaseDeviceArgs", "TakeDeviceArgs"]
 
+# Сроки `DeviceSession.start`/`stop` в командах плагина по умолчанию, с.
+_START_TIMEOUT_S = 5.0
+_STOP_TIMEOUT_S = 2.0
 # Верхняя граница срока: системный поток процесса ждёт `start`/`stop` весь срок (`timeout_s=3600` держал бы его час).
 _MAX_TIMEOUT_S = 30.0
 
@@ -34,13 +37,13 @@ _MAX_TIMEOUT_S = 30.0
 class TakeDeviceArgs(BaseModel):
     """`take_device`: срок ожидания открытия прибора, с."""
 
-    timeout_s: float = Field(5.0, gt=0, le=_MAX_TIMEOUT_S)
+    timeout_s: float = Field(_START_TIMEOUT_S, gt=0, le=_MAX_TIMEOUT_S)
 
 
 class ReleaseDeviceArgs(BaseModel):
     """`release_device`: срок ожидания остановки и закрытия, с."""
 
-    timeout_s: float = Field(2.0, gt=0, le=_MAX_TIMEOUT_S)
+    timeout_s: float = Field(_STOP_TIMEOUT_S, gt=0, le=_MAX_TIMEOUT_S)
 
 
 class ApplyParamsArgs(BaseModel):
