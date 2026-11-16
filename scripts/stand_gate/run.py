@@ -347,6 +347,7 @@ def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int, run_
     for k in [k for k in os.environ if k.startswith("FW_SHM_")]:
         del os.environ[k]
     from backend_ctl.harness import BackendHarness
+    from backend_ctl.mcp_errors import BackendUnavailable
 
     case_dir = Path(tempfile.mkdtemp(prefix=f"stand_gate_{tag}_"))
     log_dir = case_dir / "logs"
@@ -374,7 +375,7 @@ def run_case(tree: Path, tag: str, transit_ms: int, pause: bool, port: int, run_
             t_start_run = time.perf_counter()
             try:
                 harness.start_run()
-            except AssertionError as exc:
+            except (AssertionError, BackendUnavailable) as exc:
                 raise StandRunError(f"стенд не вошёл в running: {exc}") from exc
             res["start_run_s"] = round(time.perf_counter() - t_start_run, 2)
         t_ready = time.perf_counter()

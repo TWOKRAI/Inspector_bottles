@@ -64,6 +64,8 @@ _PID_FILE_ENV_KEYS = ("MULTIPROCESS_PID_FILE", "INSPECTOR_PID_FILE")
 #: ``start_run``: срок одного запроса status/START и пауза между опросами (сек).
 _RUN_REQUEST_TIMEOUT_S = 5.0
 _RUN_POLL_PERIOD_S = 0.1
+#: ``start_run``: минимальный интервал между двумя START (сек).
+_RUN_START_MIN_INTERVAL_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ def build_headless_launcher(
     recipe: Optional[Path | str] = None,
     with_base: bool = False,
     log_dir: Optional[Path | str] = None,
-    run_gate: Optional[bool] = None,
+    run_gate: bool | None = None,
 ) -> "SystemLauncher":
     """Собрать ``SystemLauncher`` из топологии прототипа без презентационного overlay.
 
@@ -354,7 +356,7 @@ class BackendHarness:
         log: Optional[Callable[[str], None]] = None,
         launcher_factory: Optional[Callable[[], "SystemLauncher"]] = None,
         log_dir: Optional[Path | str] = None,
-        run_gate: Optional[bool] = False,
+        run_gate: bool | None = False,
     ) -> None:
         if run_gate is True and launcher_factory is not None:
             # factory собирает launcher сам, build_headless_launcher не зовётся: включать гейт
@@ -508,31 +510,52 @@ class BackendHarness:
         START не судится (``success`` без смены состояния — не запуск, ``already_running`` — не
         ошибка). Без гейта работает так же: START из ``ready`` допустим.
 
+        START шлётся только при ``start_allowed`` и не чаще раза в ``_RUN_START_MIN_INTERVAL_S``: при
+        «принят, но ``running`` нет» не заливаем PM десятью START в секунду. ``fault`` липкий (без
+        ``run_ack`` ``running`` не наступит) — выход сразу, без ожидания таймаута.
+
         Raises:
-            AssertionError: за ``timeout`` ``running`` не наступило — в тексте последнее
-                состояние и узлы-причины (``reasons`` ответа ``status``).
+            AssertionError: ``running`` не наступило за ``timeout`` или система в ``fault`` — в тексте
+                последнее состояние, узлы-причины (``reasons``), ``last_fault``, число опросов, из них без
+                ``state`` (ответ без поля — не «не готов»), и последний сырой ответ ``status``.
         """
         drv = self.driver
         deadline = time.monotonic() + timeout
-        last: Dict[str, Any] = {}
+        last: dict[str, Any] = {}
+        raw: Any = None
+        polls = without_state = 0
+        last_start = float("-inf")
+
+        def failure(why: str) -> AssertionError:
+            return AssertionError(
+                f"start_run: {why}; state={last.get('state')!r}, reasons={last.get('reasons')!r}, "
+                f"last_fault={last.get('last_fault')!r}, опросов={polls} (без state: {without_state}), "
+                f"последний ответ status: {str(raw)[:300]}"
+            )
+
         while True:
             # Опрос, начатый после дедлайна, — последний: START в нём уже не шлём.
             expired = time.monotonic() >= deadline
-            status = _leaf_result(drv.run_status(timeout=_RUN_REQUEST_TIMEOUT_S))
+            raw = drv.run_status(timeout=_RUN_REQUEST_TIMEOUT_S)
+            status = _leaf_result(raw)
             last = status if isinstance(status, dict) else {}
+            polls += 1
+            if "state" not in last:
+                without_state += 1
             if last.get("state") == "running":
                 return
+            if last.get("state") == "fault":
+                raise failure("система в fault (нужен run_ack), running не наступит")
             if expired:
                 break
-            if last.get("start_allowed"):
+            now = time.monotonic()
+            if last.get("start_allowed") and now - last_start >= _RUN_START_MIN_INTERVAL_S:
                 # Ответ не судим: итог читает следующий опрос (отказ not_ready, already_running и
                 # «принят, но не running» различаются там по состоянию, а не по тексту ответа).
                 drv.run_start(timeout=_RUN_REQUEST_TIMEOUT_S)
+                last_start = now
             time.sleep(_RUN_POLL_PERIOD_S)
-        raise AssertionError(
-            f"start_run: за {timeout}s система не вошла в running; "
-            f"state={last.get('state')!r}, reasons={last.get('reasons')!r}, last_fault={last.get('last_fault')!r}"
-        )
+        raise failure(f"за {timeout}s система не вошла в running")
 
     def stop(self) -> None:
         """Закрыть driver и гарантированно погасить систему (watchdog + kill дерева)."""

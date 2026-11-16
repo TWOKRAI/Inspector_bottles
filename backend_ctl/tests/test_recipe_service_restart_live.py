@@ -65,6 +65,7 @@ def test_activate_survives_backend_restart(tmp_path: Path) -> None:
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(manifest))
     drv = harness.start()
     try:
+        harness.start_run()  # Task 2.1: launcher из build_launcher -> гейт по system.yaml; без гейта START безвреден
         listed = _payload(drv.send_command("ProcessManager", "recipe.list", {}, timeout=8.0))
         assert listed["active"] == BOOT_RECIPE, listed
         assert _TARGET_PROCESS not in _process_names(drv)
@@ -86,6 +87,7 @@ def test_activate_survives_backend_restart(tmp_path: Path) -> None:
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(manifest))
     drv = harness.start()
     try:
+        harness.start_run()  # Task 2.1: launcher из build_launcher -> гейт по system.yaml; без гейта START безвреден
         listed = _payload(drv.send_command("ProcessManager", "recipe.list", {}, timeout=8.0))
         assert listed["active"] == _TARGET, listed
         assert _TARGET_PROCESS in _process_names(drv), "после рестарта поднят не активированный рецепт"

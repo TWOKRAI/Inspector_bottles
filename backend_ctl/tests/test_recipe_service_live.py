@@ -85,6 +85,7 @@ def recipe_backend(tmp_path_factory: pytest.TempPathFactory):
     harness = BackendHarness(port=_PORT, launcher_factory=lambda: manifest_launcher(tmp_manifest))
     drv = harness.start()
     try:
+        harness.start_run()  # Task 2.1: launcher из build_launcher -> гейт по system.yaml; без гейта START безвреден
         yield drv, tmp_recipes
     finally:
         harness.stop()

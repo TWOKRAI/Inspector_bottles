@@ -45,6 +45,8 @@ python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...]
 
 Числа в отчёте без порога: `actuation_fired_items/missed_items/late_fires/unscheduled_items` (5.2), `start_s`, `first_frame_after_ready_s` (5.4), lag processor, строки отпуска фидеров (живой режим).
 
+**Точка отсчёта `first_frame_after_ready_s` (Task 2.1):** при `--run-gate` (умолчание) стенд после `start()` шлёт `system.run.start` (`BackendHarness.start_run`) и отсчитывает метрику от возврата `start_run`; при `--no-run-gate` — от возврата `harness.start()`, как в замерах до гейта (`reports/stand/2026-10-03_first-run/*.json`). Числа с гейтом и без него НЕСРАВНИМЫ. В JSON кейса это видно по `run_gate`, `first_frame_ref` (`start_run`/`boot`), `start_run_s`; в Markdown-отчёт `analyze.py` их не переносит.
+
 Кейс определяется по JSON: есть `pause` → P10; иначе `transit_ms > 0` → D100; иначе E.
 
 ## Живой прогон: как снимаются числа

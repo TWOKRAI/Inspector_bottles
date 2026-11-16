@@ -316,19 +316,19 @@ def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return _jsonable(drv.system_shutdown(**kw))
 
 
-def _run_start(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+def _run_start(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return drv.run_start(**_kw_timeout(args))
 
 
-def _run_stop(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+def _run_stop(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return drv.run_stop(**_kw_timeout(args))
 
 
-def _run_ack(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+def _run_ack(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return drv.run_ack(**_kw_timeout(args))
 
 
-def _run_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+def _run_status(drv: BackendDriver, args: dict[str, Any]) -> Any:
     return drv.run_status(**_kw_timeout(args))
 
 
