@@ -22,6 +22,7 @@ import pytest
 
 from ..process import process_manager_process as pm_mod
 from ..process.process_manager_process import ProcessManagerProcess
+from .conftest import make_monitor_double
 from .test_run_commands import (
     _PM_MOD,
     _failure_nodes,
@@ -249,16 +250,31 @@ def test_forgotten_process_loses_its_report() -> None:
 
 
 @pytest.mark.timeout(60)
-def test_stale_s_follows_heartbeat_interval_keys() -> None:
-    """``stale_s`` = 3 x наибольший положительный из двух ключей интервала heartbeat; по умолчанию 15."""
-    pm, _monitor = make_readiness_pm(_CAM)
-    assert pm._run_stale_s() == 15.0  # оба ключа 5.0
-    pm.update_config("heartbeat_interval", 2.0)
-    pm.update_config("heartbeat_interval_sec", 10.0)
-    assert pm._run_stale_s() == 30.0
-    pm.update_config("heartbeat_interval", "junk")
-    pm.update_config("heartbeat_interval_sec", 0)
-    assert pm._run_stale_s() == 15.0  # негодные значения не учитываются: умолчание 5.0 с
+@pytest.mark.parametrize(
+    ("interval", "interval_sec", "age_s", "state"),
+    [
+        (5.0, 5.0, 14.0, "running"),  # оба ключа 5.0: срок 15 с
+        (5.0, 5.0, 16.0, "fault"),
+        (2.0, 10.0, 28.0, "running"),  # наибольший из двух ключей (10.0): срок 30 с
+        (2.0, 10.0, 32.0, "fault"),
+        ("junk", 0, 14.0, "running"),  # негодные значения не учитываются: умолчание 5.0 с, срок 15 с
+        ("junk", 0, 16.0, "fault"),
+    ],
+)
+def test_run_hold_threshold_follows_heartbeat_interval_keys(
+    interval: Any, interval_sec: Any, age_s: float, state: str
+) -> None:
+    """Срок молчания листа в ``running`` = 3 x наибольший положительный из двух ключей интервала heartbeat
+    (по умолчанию 15 с). Эффект: лист возрастом чуть меньше срока держит ``running``, чуть больше — ``fault``."""
+    pm, monitor = make_readiness_pm(_CAM)
+    _to_running(pm, monitor)
+    pm.update_config("heartbeat_interval", interval)
+    pm.update_config("heartbeat_interval_sec", interval_sec)
+    beat(monitor, "cam", age_s=age_s)
+
+    tick(pm, monitor)
+
+    assert pm._cmd_system_run_status()["state"] == state
 
 
 # --------------------------------------------------------------------------- #
@@ -406,7 +422,7 @@ def _initialize_bare_pm(configs: dict[str, dict]) -> ProcessManagerProcess:
         patch(f"{_PM_MOD}.ProcessRegistry"),
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
         patch.object(ProcessManagerProcess, "get_config", return_value=None),
     ):
@@ -431,10 +447,11 @@ def test_initialize_settles_by_evaluation(configs, reported, expected_state, exp
     registry = MagicMock()
     registry.get_process_by_name.side_effect = lambda n: MagicMock(is_alive=MagicMock(return_value=True))
     pm._process_registry = registry
-    monitor = MagicMock()
+    monitor = make_monitor_double()
     now = time.time()
     leaves = {"cam": {"ready": True, "reasons": [], "paused": False, "at": now}} if reported else {}
     monitor.readiness_snapshot.return_value = leaves
+    monitor.readiness_view.return_value = (leaves, frozenset())
     pm._process_monitor = monitor
 
     with (

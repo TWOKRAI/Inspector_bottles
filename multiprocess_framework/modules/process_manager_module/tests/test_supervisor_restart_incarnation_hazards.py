@@ -10,7 +10,7 @@
   H2  настоящий цикл монитора (``poll_interval`` 0,01) + стоп с задержкой: 50 повторов, у каждого ровно один рестарт.
   H3  один и тот же мёртвый объект на многих тактах -> одно событие ``crashed``.
   H4  каскад ``rest_for_one``: выход induced-члена при его рестарте не засчитан ему как падение; watchdog жив.
-  H5  поздний heartbeat старого pid: лист и пометка нового воплощения целы; его статус — xfail (вне 1.8b).
+  H5  поздний heartbeat старого pid: лист, пометка и статус нового воплощения целы (забор на входе heartbeat, fix-B).
 
 Любой сценарий идёт в daemon-потоке с join-дедлайном (``_bounded``); ожидаемые значения — литералы.
 """
@@ -270,12 +270,6 @@ def test_late_old_pid_heartbeat_does_not_touch_new_incarnation_leaf_or_mark() ->
     _bounded(scenario)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="1.8b OUT OF SCOPE (H5): _on_heartbeat_received пишет reported_status (paused/running) в previous_states "
-    "без проверки pid воплощения; поздний heartbeat старого pid со status=paused до такта монитора выдаёт "
-    "новому воплощению чужой статус. Лист и пометка защищены в 1.7c (_accept_readiness), статус — нет.",
-)
 @pytest.mark.timeout(_DEADLINE_S + 30)
 def test_late_old_pid_heartbeat_status_does_not_overwrite_new_incarnation_status() -> None:
     """Поздний heartbeat старого pid 41001 со ``status: paused`` не меняет статус нового воплощения (``running``)."""

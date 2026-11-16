@@ -53,14 +53,33 @@ def _liveness(reasons: list[dict]) -> list[dict]:
 
 
 @pytest.mark.timeout(60)
-def test_admission_threshold_is_two_thirds_of_stale_and_follows_interval(rig_factory) -> None:
+@pytest.mark.parametrize(
+    ("interval_s", "age_s", "accepted"),
+    [
+        (None, 9.5, True),  # интервал 5 с: допуск по 2/3 от 15 с = 10 с
+        (None, 10.5, False),
+        (2.0, 3.5, True),  # интервал 2 с: допуск по 2/3 от 6 с = 4 с
+        (2.0, 4.5, False),
+    ],
+)
+def test_start_admission_threshold_is_two_thirds_of_stale_and_follows_interval(
+    rig_factory, interval_s: float | None, age_s: float, accepted: bool
+) -> None:
+    """Эффект порога допуска: лист возрастом чуть меньше 2/3 ``stale_s`` — START принят, чуть больше — отказан
+    ``not_ready`` с причиной «нет отчёта о готовности»; порог следует за интервалом heartbeat."""
     rig = rig_factory(("cam",))
-    assert rig.pm._run_stale_s() == 15.0
-    assert rig.pm._admission_stale_s() == 10.0
-    for key in ("heartbeat_interval", "heartbeat_interval_sec"):
-        rig.pm.update_config(key, 2.0)
-    assert rig.pm._run_stale_s() == 6.0
-    assert rig.pm._admission_stale_s() == 4.0
+    if interval_s is not None:
+        for key in ("heartbeat_interval", "heartbeat_interval_sec"):
+            rig.pm.update_config(key, interval_s)
+    _leaf(rig, age_s)
+
+    reply = rig.pm._cmd_system_run_start()
+
+    if accepted:
+        assert reply == {"success": True, "state": "running"}, reply
+    else:
+        assert reply["success"] is False and reply["error"] == "not_ready", reply
+        assert len(_liveness(reply["reasons"])) == 1, reply
 
 
 @pytest.mark.timeout(60)

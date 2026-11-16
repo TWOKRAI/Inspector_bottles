@@ -1,0 +1,283 @@
+# Ф1 run-state — свежее ревью Opus (2026-11-15)
+
+Ветка `fix/run-state-phase1-review`, HEAD `810fa88f6`, код как в `9784900d5`. Диапазон: `git diff dd5378bb8..HEAD -- multiprocess_framework Services multiprocess_prototype`.
+За время ревью ветка ушла на `362ebf442` (два коммита только `docs(plans)`; `git diff --stat 9784900d5 362ebf442 -- multiprocess_framework Services multiprocess_prototype` пуст — код тот же).
+Сессия гейта: `rs-review-fresh`, все прогоны — `machine_gate.sh light`. Скрипты: `/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/d2c67523-26b4-41a7-a0e5-4ce5d93d7eca/scratchpad/rs/repro.py` (R1–R5), `/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/d2c67523-26b4-41a7-a0e5-4ce5d93d7eca/scratchpad/rs/inject.py` (инъекции I1–I5, отдельный worktree, откат `cp`).
+memory hits: `scripts/memory/search.py run state readiness heartbeat supervisor` -> `project_plugin_paused_is_a_label.md`, `project_industrial_standards_packml.md` (контекст, находок не даёт).
+
+## 1. Вердикт
+
+**CHANGES REQUESTED (итерация 1 из 2).** Три major с воспроизведением (F1, F2, F3), один major с низкой вероятностью (F4). Остальное — advisory и советы.
+
+## 2. Фаза 1 — независимые находки (записаны ДО чтения отчётов r1/r2, инъекций, known-compromises)
+
+### F1 — major (угол 3, принцип 5): битый лист готовности одного процесса выключает обнаружение аварии во всей системе
+
+- Где: `run_state.py:94` (`for r in (leaf.get("reasons") or [])`), вход без проверки формы — `process_monitor.py` `_admit_heartbeat` (`self._readiness[sender] = dict(readiness)`).
+- Вход: система в `running` (a, b); heartbeat от `a` с `readiness = {"ready": True, "reasons": 5, "paused": False, "at": now}`; затем `b` падает (`_alive=False`, `exitcode=-9`); 3 такта монитора.
+- Наблюдаемо (R1): `state after b died, a sent reasons=5: running`; журнал — `Error in run readiness tick: 'int' object is not iterable` на каждом такте. Контроль (R1ctl, `reasons: []`): `fault`.
+- Причина: `evaluate` бросает на одном листе, такт целиком теряется (`process_monitor._tick_run_readiness` ловит и пишет ERROR). Один узел роняет оценку всех.
+- Решение: проверка формы на ВХОДЕ (одна функция `normalize_leaf` в `run_state.py`, зовёт `_admit_heartbeat`): `reasons` не list / `at` не конечное число / `ready` не bool → лист негоден → у ЭТОГО процесса одна `failure` «лист готовности негоден» (`source: report`). Плюс `math.isfinite(at)` (сейчас `at = nan` даёт «свежий навсегда»: `now - nan > stale_s` ложно — по чтению, не запускал).
+- Вероятность сегодня низкая: единственный отправитель — `ProcessHeartbeat` с санитизированным снимком оркестратора. Это защита границы, а не текущий живой дефект.
+
+### F2 — major (угол 1): `booting` (и `stopping`) — тупик, если итог `settled` один раз не дошёл
+
+- Где: таблица `run_state.transition` + `_settle_run_state` (`process_manager_process.py` ~`:1586`), `_cmd_topology_apply` (`finally: self._settle_run_state()`), `_run_stop_sequence` -> `_run_stop_finish` (оценка вне `try`).
+- Перебор таблицы (R4, все события × `ready` × `stop_done`): выходы `booting` = `[settled, shutdown]`, `stopping` = `[settled, shutdown]`, `fault` = `[ack, shutdown]`; поглощающее — только `shutting_down`; в `running` входит только из `ready`. Таблица сама живая; живость `booting`/`stopping` целиком держится на том, что PM ВСЕГДА подаст `settled`.
+- Вход (R1b): `apply`, затем `_settle_run_state()` бросает (лист из F1), затем лист исправлен, все свежие, 3 такта.
+- Наблюдаемо: `settle raised: TypeError`; `state after 3 clean ticks: booting`; `system.run.start` -> `{'success': False, 'state': 'booting', 'error': 'not_ready', 'reasons': []}` — оператор видит «поднимается» без причин навсегда (выход — только `system.shutdown`).
+- Та же ветка у `stopping`: в `_run_stop_sequence` вызов `_run_stop_finish` стоит после `try/except`, а он зовёт `_evaluate_run_readiness()` — исключение убивает поток, `stopping` навсегда. **По чтению кода, отдельным запуском не проверено.**
+- Решение: итог не имеет права не случиться. `_settle_run_state` и ветка STOP в `_run_stop_finish`: `try: ready, reasons = evaluate…` `except Exception as exc: ready, reasons = False, [failure «оценка готовности не удалась: <Тип>»]`; `settled` подаётся всегда. Тест: `_evaluate_run_readiness` бросает -> после apply и после STOP состояние `not_ready` с этой причиной.
+
+### F3 — major (углы 2, 3; IPC): `run_event` — `multiprocessing.Event`; смерть ребёнка внутри `is_set()` вешает замок машины PM навсегда
+
+- Где: `_run_apply` (`run_event.is_set()` / `set()` / `clear()` под `self._run_lock`), `_run_stop_clear_event` (то же). У `mp.Event` каждый `is_set/set/clear/wait` берёт межпроцессный замок (`with self._cond`, CPython `multiprocessing/synchronize.py`). Дети трогают событие непрерывно: `reconcile_run_event` — на КАЖДЫЙ плагин каждого прохода 20 Гц (`plugin_orchestrator.py:411`), снимок 2 Гц, `SourceProducer` на каждой итерации.
+- Вход (R2): PM с `run_gate: true`; spawn-ребёнок получает `pm._run_event`, берёт `ev._cond.acquire()` (имитация: SIGKILL пришёл внутри `is_set()`), `SIGKILL` ребёнку (`exitcode -9`).
+- Наблюдаемо: `system.run.start -> HUNG>3s`, `system.run.status -> HUNG>3s`, `monitor tick -> HUNG>3s`. `_run_lock` занят навсегда: команды работы, публикация, такт монитора (= супервизор) стоят.
+- Вероятность естественного попадания — оценка, не замер: `is_set` = 1,94 мкс (замер R3) × ~90 вызовов/с на ребёнка ≈ 1–2·10⁻⁴ на одно падение ребёнка (SIGKILL, OOM, segfault нативного драйвера камеры). Редко, но невосстановимо без перезапуска всей системы, и задевает не процесс, а PM целиком. Новое по сравнению с прежними `mp.Event` (`stop_event` свой у процесса; `system_ready_event` — только boot).
+- Решение (fix forward, меньше слоёв): флаг работы без замка — `multiprocessing.RawValue(ctypes.c_bool)` (или байт в shared memory, `shared_resources_module` уже есть): один писатель (PM), читатели без замка; `_run_apply` ничего не ждёт. Минимум, если флаг менять нельзя до 1.0: не трогать `mp.Event` под `_run_lock` (переключать после замка, отдельным потоком с таймаутом и ERROR). Нужен слепой tester (гонка) + стенд `kill -9` серией.
+
+### F4 — major, низкая вероятность (угол 3): провал `restart_process` оставляет пометку «перезапускается» навсегда
+
+- Где: `process_manager_process.py:5527-5532` (пометка до `stop_process`; выходы `return False` после неё — `stop_process` ложь, `create_and_register` None, исключение — пометку не снимают); `process_monitor._admit_heartbeat`.
+- Вход (R5): `running`; `stop_process` возвращает `False` (старое воплощение не подтвердило смерть — `stop_one`), `restart_process("a")`; затем 3 heartbeat от живого `a` с тем же pid.
+- Наблюдаемо: `restart_process -> False`; `restarting: frozenset({'a'})`; `last_hb has a: False` (heartbeat живого процесса отбрасываются все); причины: `['a: перезапускается супервизором']` — навсегда. Следствие по чтению (не запускал): монитор без `_last_heartbeat` сочтёт живой процесс `unresponsive`.
+- Решение: у пометки два владельца исхода — успех (heartbeat нового pid) и провал. Добавить `ProcessMonitor.unmark_restarting(name)` и звать на всех `return False` после `mark` (и в `except`), либо `try/finally` вокруг тела рестарта. Тест на каждый выход.
+
+### Advisory (без воспроизведения запуском или с малым эффектом)
+
+- **A1 (угол 3, по чтению):** `_process_alive` и `_supervisor_gave_up` пишут `log_error(... {exc})` на каждый процесс на каждой оценке (2 Гц + START/ack) без дросселя — постоянный сбой реестра = поток ERROR; текст исключения может нести значения входа (правило ADR-PMM-044 п.1).
+- **A2 (угол 3/8, арифметика):** PM судит молчание по СВОЕМУ `heartbeat_interval` (`_run_stale_s`), а ребёнок шлёт heartbeat по своему (`process_heartbeat.py:141`, `self._services.get_config("heartbeat_interval", 5.0)`). Ребёнок с 12 с при PM 5 с: допуск 10 с — START периодически отказан; с > 15 с — `fault` в `running`. Распространяется ли интервал PM детям — не проверял.
+- **A3 (угол 1, по чтению):** `_paused_pending` принимает `paused: true` листа любого возраста. Процесс, замёрзший в первые ~0,6 с после START, держит лист `paused: true` прошлого STOP; STOP в пределах `stale_s` подтверждает его мгновенно, `settled` по тому же листу даёт `ready`. Окно узкое.
+- **A4 (угол 6):** классовые изменяемые умолчания `_run_unconfirmed: dict = {}`, `_run_down_since: dict = {}`, `_run_reasons: tuple | list = ()` безопасны только дисциплиной «заменять целиком» (общие на все PM). Работает, но хрупко.
+
+## 3. По углам (что проверено и чем)
+
+| угол | проверено | итог |
+|---|---|---|
+| 1. Живость таблицы | R4 — полный перебор `transition` (7 состояний × 7 событий × 4 параметра); R1b — тупик `booting` запуском | таблица живая; тупики `booting`/`stopping` — от PM, не от таблицы (F2) |
+| 2. Замки | граф по чтению: `_run_publish_lock` → `_run_lock` (через `_run_ack_allowed`, `_run_detail_snapshot`); `_run_lock` → межпроцессный замок `mp.Event`; `_readiness_lock`, `_unconfirmed_lock`, `_run_restart_lock` — листовые, под ними нет других замков и вызовов наружу; pid реестра читается до замка. Обратного порядка не нашёл. R2 — запуском | инверсии нет; межпроцессный замок под `_run_lock` — F3 |
+| 3. Отказ внешних вызовов | R1 (битый лист), R5 (рестарт не удался), R2 (ребёнок умер с замком); I3 (отказ исполнителя — тесты краснеют) | F1, F3, F4; отказ исполнителя закрыт |
+| 4. Тесты как доказательство | 5 инъекций (см. §4.1) — все красные; тестов на битую форму листа на стороне PM нет | свойства из списка охранены; пробел — форма входа (F1) |
+| 5. Потребители вне PM | `git grep -F "system.run."` по prototype/Services/Plugins/scripts — 0 совпадений; отправитель heartbeat в PM — только `ProcessHeartbeat`, читатель `pid` — только монитор | контракт ни у кого не сломан; C11 — см. §5 |
+| 6. Избыточность | по чтению | см. «Советы» |
+| 7. Эффективность | R3 `timeit` на настоящих PM + `ProcessMonitor`, N = 8 процессов с политикой: такт 33,5 мкс, оценка 28,8 мкс, `RestartPolicy(**rp)` 1,4 мкс, `mp.Event.is_set` 1,94 мкс; такт монитора 0,5 с | ≈ 0,007 % CPU — горячего пути нет, находки нет |
+| 8. Код ↔ документы | §3.2 таблица = код (R4 + чтение); §3.7 отказ apply = код; amendments §9 порядок shutdown = код (`from_running`); §10 антидребезг 0,5 с = `_PUSH_MIN_INTERVAL_SEC`; отличие: отказ apply в `shutting_down` — «система завершает работу» вместо «сначала ОСТАНОВИТЬ» (1.5 DESIGN) — улучшение, документ поправить | расхождений по смыслу не нашёл; проверено выборочно |
+
+### 4.1. Инъекции (worktree в scratchpad, откат `cp`; предсказание записано до прогона — «краснеет файл X»)
+
+| # | что сломано | предсказание | получено |
+|---|---|---|---|
+| I1 | отброс устаревшего такта (`eval_started < _run_running_mono`) | `test_run_state_hazards.py` / `test_run_commands.py` | **не совпало по файлу**: там 48 passed; красный — `test_run_shutdown_from_running_hazards.py::test_stale_tick_after_start_does_not_fault` (1 failed). Свойство охранено |
+| I2 | ветка `restarting` в `_process_reasons` | `test_run_restart_incarnation*.py` | 5 failed (4 + 1 hazard) |
+| I3 | обход отказа исполнителя в `_submit_run_sequence` | `test_run_submit_refusal_hazards.py` | 5 failed из 8 |
+| I4 | запас допуска (`_admission_stale_s` = `stale_s`) | `test_run_admission_margin.py` | 4 failed из 10 |
+| I5 | забор чужого pid вне перезапуска | `test_monitor_foreign_incarnation_heartbeat.py` | 1 failed из 7 |
+
+## 5. Фаза 2 — сверка с r1 (`phase1.review-opus.md`), r2 (`phase1.review-opus-r2.md`), `phase1.known-compromises.md`
+
+### 5.1. Мои находки против прежних
+
+| моя | статус | пояснение |
+|---|---|---|
+| F1 битый лист роняет оценку всех | **нашёл один я** | r1/r2 форму листа на стороне PM не проверяли |
+| F2 тупик `booting`/`stopping` при исключении оценки | **новая, родственна r1 M1** | M1 — тот же класс («итог не доходит»), но вход — отказ исполнителя; закрыт (моя инъекция I3 это подтверждает). Вход «исключение в оценке» и ветка `booting` не закрыты |
+| F3 `mp.Event` под `_run_lock` | **нашёл один я** | r1 упоминает `is_set()` на `mp.Event` только как цену опроса |
+| F4 провал `restart_process` оставляет пометку | **частично совпало с r2 N1** | r2 назвал «пометка навсегда» следствием микроокна N1 (нет повтора и `gave_up`). N1 закрыт правкой B2 (запись времени под `_readiness_lock` — видел в коде). Мой вход другой — явные `return False` после `mark`. По чтению: у авто-рестарта пометку со временем снимет `gave_up` (fix m3), у ручного `process.restart` и при `enabled: false` — никто |
+| A1–A4 | нашёл один я | advisory |
+
+### 5.2. Прежние находки, которые я не нашёл или оцениваю иначе
+
+| прежняя | моя оценка | чем проверено |
+|---|---|---|
+| r1 M1 отказ исполнителя | согласен, закрыт | I3: откат обхода -> 5 failed в `test_run_submit_refusal_hazards.py` |
+| r1 M2 два разборщика политики | согласен, закрыт | чтение: один `ProcessMonitor.resolve_policy` |
+| r1 M3 / r2 N1 забор воплощения, микроокно | согласен, закрыт | чтение `_admit_heartbeat` (время пишется под замком), I5 — забор краснеет |
+| r1 M4, M5, m1–m5 | не перепроверял, кроме m2 | m2: I1 — краснеет `test_stale_tick_after_start_does_not_fault` |
+| r2 N2 `protected` | согласен, закрыт | чтение `_run_auto_restart_flags` (`name not in protected`) |
+| r2 N3 проверка формы под `MagicMock` | **согласен, НЕ закрыт**: `if not (isinstance(resolved, tuple) and len(resolved) == 2): continue  # монитор-двойник (MagicMock …)` в боевом коде; та же форма в `_readiness_view` | чтение текущего HEAD |
+| r2 «`resolve_policy` — десятки мкс на процесс, кэш» | **не согласен по числу**: `RestartPolicy(**rp)` = 1,4 мкс, вся оценка N = 8 — 28,8 мкс, такт — 33,5 мкс (R3, `timeit` на настоящих объектах). Кэш не нужен | R3 |
+| r1/r2 C2 push только на `paused` | согласен: рекомендация, отдельной задачей (совет С5) | чтение `push_if_paused_changed` |
+| C11 `pid` в heartbeat | согласен с r1: cto не нужен — отправитель один (`ProcessHeartbeat`), читатель один (монитор), оба во framework, поле аддитивно (`git grep` производителей heartbeat). Риск повтора pid ОС — совет С10 | grep |
+| C12 гистерезис + воплощение | согласен с r1: два разных класса отказа, не дубль. После С5 гистерезис станет менее нагруженным, но остаётся честным «запасом в один интервал» | чтение; A/B 1.7b не перепроверял |
+
+## 6. Ответ на вопрос владельца
+
+«Архитектура отличная, без костылей и багов, максимально эффективно и правильно?» — **частично.**
+
+- Да: таблица переходов чистая и живая (R4), одна точка записи `_run_apply`, оценка — чистая функция с объектом входа, свойства из списка охранены тестами (I1–I5 красные), горячего пути нет (R3: 33,5 мкс на такт).
+- Нет: граница входа не защищена (F1 — один битый лист выключает аварии всей системы, против принципа 5); живость `booting`/`stopping` держится на том, что оценка никогда не бросит (F2); межпроцессный замок `mp.Event` взят под центральным замком PM (F3 — смерть одного ребёнка может остановить PM целиком); пометка «перезапускается» без владельца провала (F4). Остался один костыль под тест-двойник (N3).
+
+## 7. Советы по улучшению (по убыванию пользы; находки — разделы 2 и 5)
+
+Пометка: [замер] / [воспроизведено] — подкреплено запуском; [рассуждение] — нет.
+
+**С1. Итог `settled` гарантирован конструкцией, а не дисциплиной** [воспроизведено R1b]. Приоритет: **сейчас**.
+- Где: `_settle_run_state` (`process_manager_process.py` ~`:1586`), `_run_stop_sequence`/`_run_stop_finish` (~`:892-988`).
+- Почему: у `booting` и `stopping` выход только `settled`; любое исключение оценки = тупик без причин. Свойство «из `booting`/`stopping` выходим всегда» станет локальным, а не зависящим от всех вызываемых функций.
+- Как: одна функция «оценка, которая не бросает»:
+  ```python
+  def _evaluate_or_fail(self, **kw) -> tuple[bool, list[dict]]:
+      try:
+          return self._evaluate_run_readiness(**kw)
+      except Exception as exc:  # noqa: BLE001 — итог машины не имеет права не случиться
+          self._log_error(f"readiness: оценка не удалась ({type(exc).__name__})")
+          return False, [{"node": self.name, "severity": "failure", "source": "report",
+                          "reason": "оценка готовности не удалась"}]
+  ```
+  Её зовут `_settle_run_state`, `_run_stop_finish`, `_run_readiness_tick`; в `_run_stop_sequence` итог — в `finally`.
+- Цена/риск: ~15 строк + 2 теста (apply и STOP при бросающей оценке -> `not_ready` с причиной). Стенд не нужен.
+
+**С2. Проверка формы листа на входе, одна функция** [воспроизведено R1]. Приоритет: **сейчас**.
+- Где: `run_state.py` (новая `normalize_leaf`), вызов в `ProcessMonitor._admit_heartbeat`.
+- Почему: Dict at Boundary проверяется там, где dict пересёк границу; `evaluate` перестаёт быть хрупкой к чужому входу; один процесс не роняет оценку соседей (принцип 5).
+- Как:
+  ```python
+  def normalize_leaf(raw: object) -> dict | None:
+      if not isinstance(raw, dict): return None
+      at, reasons, ready, paused = raw.get("at"), raw.get("reasons"), raw.get("ready"), raw.get("paused")
+      if not (type(at) in (int, float) and math.isfinite(at)) or not isinstance(reasons, list) \
+         or type(ready) is not bool or type(paused) is not bool:
+          return {"ready": False, "paused": False, "at": time_of_receipt, "reasons": [BAD_LEAF]}
+      return {"ready": ready, "paused": paused, "at": float(at), "reasons": [r for r in reasons if _valid_reason(r)][:32]}
+  ```
+  (`BAD_LEAF` — `failure`/`report` «лист готовности негоден», без значений.)
+- Цена/риск: ~30 строк + тест-таблица негодных форм на настоящем мониторе. Риск — поменять смысл для `ready` не-bool (сейчас «truthy»): тесты 1.2/1.3 со строгими литералами это покажут.
+
+**С3. Флаг работы без межпроцессного замка** [воспроизведено R2 (имитация попадания), вероятность — оценка]. Приоритет: **сейчас, до стенда серии `kill -9`**; если не успевается — до 1.0 отдельной задачей с записью в known-compromises.
+- Где: `_create_components` (создание `_run_event`), `_run_apply`, `_run_stop_clear_event`; читатели — `source_producer.py`, `plugin_orchestrator.py` (`_run_event()`, `_target_pause`, `reconcile_run_event`), `process_module.py` (`_refresh_readiness_snapshot`).
+- Почему: `mp.Event` = семафор + условие с замком; замок не освобождается при смерти держателя. Флаг одного писателя замка не требует: чтение байта атомарно. Уходит класс «ребёнок умер — PM встал»; `_run_apply` перестаёт делать межпроцессные вызовы под своим замком; опрос дешевле (`is_set` 1,94 мкс [замер] -> чтение `RawValue` ~0,1 мкс [рассуждение]).
+- Как: маленький класс с тем же API, что используют читатели:
+  ```python
+  class RunFlag:  # process_module/run_flag.py, Dict at Boundary не затрагивает (передаётся при spawn, как Event)
+      def __init__(self, ctx): self._v = ctx.RawValue(ctypes.c_bool, False)
+      def is_set(self) -> bool: return bool(self._v.value)
+      def set(self) -> None: self._v.value = True
+      def clear(self) -> None: self._v.value = False
+  ```
+  `wait()` читателям не нужен (все опрашивают). Передача — тем же путём kwargs `Process`, что `run_event` сейчас (Windows spawn наследует `RawValue` так же, как `Event`).
+- Цена/риск: ~25 строк + замена создания в PM; читатели не меняются (тот же API). Нужны слепой tester (гонка, смерть ребёнка с замком больше не вешает), стенд Windows (наследование при spawn).
+
+**С4. Пометка «перезапускается» с владельцем провала** [воспроизведено R5]. Приоритет: **сейчас**.
+- Где: `restart_process` (`:5527-5568`), `ProcessMonitor.mark_restarting`.
+- Почему: сейчас пометку снимает только успех (heartbeat нового pid) и `gave_up`; провал рестарта у ручного пути и при `enabled: false` оставляет живой процесс невидимым навсегда.
+- Как: `ProcessMonitor.unmark_restarting(name)` (pop под `_readiness_lock`, без сброса времени) и `try/finally` в `restart_process`: `ok = False; try: …; ok = True; return True; finally: if not ok: unmark(name)`.
+- Цена/риск: ~10 строк + тест на каждый выход (`stop_process` ложь, `create_and_register` None, исключение). Риск: снять пометку при провале, а старое воплощение уже убито — тогда «процесс не жив», это честнее.
+
+**С5. Внеочередной heartbeat при смене готовности, а не только `paused`** [рассуждение; задержка 3,0–5,7 с — из known-compromises C2, не перемерял]. Приоритет: **после слияния, отдельной задачей** (новый механизм: слепой tester, матрица, стенд с замером).
+- Где: `ProcessHeartbeat.push_if_paused_changed` -> `push_if_changed`.
+- Почему: снимается задержка до `heartbeat_interval` у `ready`/блокирующих причин; окно `fault` при заморозке и порог допуска перестают быть «впритык».
+- Как: сравнивать подпись `(paused, ready, frozenset((r["node"], r["severity"]) for r in reasons if r["severity"] in BLOCKING))` с ушедшей; антидребезг 0,5 с тот же.
+- Цена/риск: ~15 строк; риск — шторм при дребезге плагина: держит тот же антидребезг.
+
+**С6. Срок молчания — от отправителя** [рассуждение, A2]. Приоритет: **после 1.0**.
+- Где: снимок (`plugin_orchestrator.readiness_snapshot`, `process_module._refresh_readiness_snapshot`) и `_run_stale_s`.
+- Почему: убирает связь «PM знает интервал heartbeat каждого ребёнка»; процесс с другим интервалом не даёт ложного `fault`/отказа START.
+- Как: ребёнок кладёт `"stale_after_s": 3 * own_interval` в снимок; PM берёт `min(max(leaf_value, floor), ceiling)`; нет поля — как сейчас.
+- Цена/риск: ~10 строк, аддитивное поле (как `pid`).
+
+**С7. Убрать подгонку под двойник (r2 N3)** [чтение]. Приоритет: **сейчас** (дёшево).
+- Где: `_run_auto_restart_flags` (`isinstance(resolved, tuple) …  # монитор-двойник`), `_readiness_view` (та же форма).
+- Как: в фабрике тестов (`conftest.make_pm`) монитор — `create_autospec(ProcessMonitor, instance=True)` с `resolve_policy.return_value = (RestartPolicy(), True)` и `readiness_view.return_value = ({}, frozenset())`; в боевом коде — прямой вызов.
+- Цена/риск: правка фабрики может покраснить тесты, которые полагались на `MagicMock` без формы — это и нужно увидеть.
+
+**С8. Подтверждение `paused` — снимком, посчитанным после снятия** [рассуждение, A3]. Приоритет: после 1.0.
+- Как: `_run_stop_clear_event`/аварийная ветка запоминают `t_clear = time.time()`; `_paused_pending` принимает лист только при `leaf["at"] >= t_clear`.
+- Цена: ~5 строк + тест «лист `paused: true` старше снятия не подтверждает».
+
+**С9. Номер воплощения от PM вместо pid ОС** [рассуждение]. Приоритет: после 1.0 (вне 1.7c по её тексту).
+- Почему: pid ОС переиспользуется (особенно Windows); номер, выданный PM при spawn (`incarnation` в kwargs, эхо в heartbeat), однозначен и не требует опроса реестра на каждом heartbeat.
+
+**С10. Мелочи** [чтение]: дроссель `log_error` в `_process_alive`/`_supervisor_gave_up` (один лог на серию, без текста исключения — A1); классовые изменяемые умолчания (`_run_unconfirmed`, `_run_down_since`) — в `__init__`/ленивое свойство, как замки (A4); документ 1.5 — текст отказа apply в `shutting_down`.
+
+Разбиение `process_manager_process.py` (Task 3.2) не оценивал — дизайн `pm-split.design.md` не читал.
+
+## 8. Что не проверено / ненадёжно
+
+- Стенд и живой бэкенд не запускал (heavy/стенд запрещены брифом). Все воспроизведения — на `make_readiness_pm` (настоящие PM + `ProcessMonitor`, но `MockProcessRegistry`, `MagicMock` у связи и роутера).
+- F3: попадание `SIGKILL` внутрь `is_set()` имитировано явным `ev._cond.acquire()`; естественная частота — оценка по скважности (1,94 мкс × ~90 вызовов/с), не замер. На Windows (`mp.Event` на семафорах Win32) не проверял.
+- F2, ветка `stopping`: выведена чтением, отдельного запуска нет. Ветка `booting` воспроизведена.
+- F4: следствие «монитор сочтёт живой процесс `unresponsive`» — чтением; снятие пометки через `gave_up` у авто-рестарта — чтением.
+- A1–A4 — без запуска. A2: распространяет ли PM свой `heartbeat_interval` детям — не проверял.
+- Угол 4: настоящий `OrderedExecutor` в тестах STOP/аварии — не проверял, какие файлы его поднимают (видел только упоминание в `test_run_shutdown_from_running_hazards.py`, `test_run_submit_refusal_hazards.py`). Сквозного теста «PM + ProcessMonitor + OrderedExecutor + настоящий процесс» не искал до конца.
+- Инъекций — 5, не 8–10; I1 не совпала по файлу (свойство охранено другим файлом). Остальные свойства (`ack` × `fault_stop_done`, публикация по порядку, `_fault_seq`) инъекцией не проверял.
+- Тесты диффа (~10 тыс. строк) читал выборочно; полный прогон набора не делал (только файлы инъекций, все зелёные без инъекции не перепроверял отдельно — зелёные прогоны видел только как «passed» у непострадавших тестов).
+- Угол 8 — выборочная сверка (§3.2, §3.7, amendments §9, §10), не построчная.
+- Порядок фаз: раздел 2 записан до чтения отчётов r1/r2/known-compromises; раздел 5 — после. Отчёты инъекций (`*injection-result.md`) не открывал.
+
+---
+
+## Итерация 2 (2026-11-16, HEAD `fc72be844`, сессия гейта `rs-review-fresh2`)
+
+Проверял коммиты `4d953a7c2` (fix-B3), `fad63e053` (fix-A3), `213673491` + `8d534d0f8` (Task 1.10). Скрипты те же (`repro.py` дополнен R6/R7), инъекции — `/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/d2c67523-26b4-41a7-a0e5-4ce5d93d7eca/scratchpad/rs/inject2.py` в отдельном worktree `fc72be844`, откат `cp`, worktree удалён.
+
+### Вердикт итерации 2
+
+**CHANGES REQUESTED (итерация 2 из 2).** F2, F3, F4 закрыты. F1 закрыт **не полностью**: форма листа проверяется только до уровня контейнеров, поля причин — нет (новая находка И2-1, два воспроизведения, одно — тупик `fault`). Правка маленькая (см. ниже). Третий круг по правилу роли — эскалация к `teamlead`, не ко мне.
+
+### Закрытие F1–F4
+
+| № | закрыто? | чем проверено |
+|---|---|---|
+| F1 | **частично** | R1 (`reasons: 5`): теперь `fault` (было `running`), контроль R1ctl — `fault`. Инъекция J2 (`normalize_leaf` всегда «годен») -> 17 failed в `test_monitor_bad_readiness_leaf.py`. Но поля причин не проверяются — И2-1 |
+| F2 | да для `booting` и `stopping` | R1b: после сбоя оценки и 3 чистых тактов — `ready`, START -> `running` (было `booting` навсегда). J3 (`_evaluate_or_fail` ловит только `ZeroDivisionError`) -> 2 failed в `test_run_settle_guaranteed_hazards.py` (ветки apply и итога STOP). Ветка `fault` в `_run_stop_finish` не охранена — И2-1 (R7) |
+| F3 | да | R2: ребёнок с `RunFlag` убит `SIGKILL` -> `system.run.start`, `status`, такт отвечают сразу (было HUNG > 3 с). Под `_run_lock` межпроцессных замков больше нет (чтение `_run_apply`, `_run_stop_clear_event`, `_start_fault_stop`, `_run_stop_finish`: только `RunFlag` и dict). J1 (`RunFlag()` -> `mp.Event()`) — 2 прогона, оба: 5 failed в `test_run_flag_pm_wiring.py` (проверка типа + проводка) |
+| F4 | да | R5: `restart_process -> False`, `restarting: frozenset()`, heartbeat живого процесса принят (`last_hb has a: True`), причин нет (было «перезапускается» навсегда). J4 (снятие в `finally` выключено) -> 3 failed в `test_restart_process_failure_unmarks.py` (stop ложь, create None, create бросает) |
+
+### Новые находки итерации 2
+
+#### И2-1 — major (продолжение F1): поля причин листа не проверяются; два входа ломают оценку и выход из `fault`
+
+- Где: `process_monitor.normalize_leaf` проверяет `at`, `ready`, `paused` и «`reasons` — список dict», но не типы `node/severity/reason/source` внутри причины. Дальше по коду эти поля хешируются: `run_state.has_blocking` (`r.get("severity") in BLOCKING_SEVERITIES`), `_run_stop_finish` (`have = {(r.get("node"), r.get("reason")) …}`, `process_manager_process.py:2045`).
+- **R6.** Вход: `running` (a, b); `a` шлёт причину `{"node": "a", "severity": [], "reason": "x", "source": "readiness"}`; `b` падает; 3 такта. Наблюдаемо: лист принят как годный (`leaf stored: x`), `state after b died … : running`, на каждом такте `Error in run readiness tick: unhashable type: 'list'`. Это ровно исходный F1, только через поле, а не через контейнер.
+- **R7.** Вход: `a` шлёт причину `{"node": ["a"], "severity": "out_of_spec", …}` (оценку не ломает: `out_of_spec` не блокирует), `b` отчитывается `failure` -> `fault`; `run_stop_timeout_s = 0.3`. Наблюдаемо: `state: fault`; поток `run-fault-stop` умер — `TypeError: unhashable type: 'list'` в `_run_stop_finish` (`process_manager_process.py:2045`, цепочка `_run_stop_sequence:1980`); через 1,5 с `fault_stop_done False`, `ack -> {'success': False, 'state': 'fault', 'error': 'fault_stopping'}` — навсегда. Тупик `fault`, выход только `system.shutdown`.
+- Вероятность сегодня низкая: настоящий отправитель кладёт в причины только `str` (оркестратор `_plugin_reasons`/`_cap_reasons`). Это дыра границы, которую F1 обещал закрыть, и докстринг `normalize_leaf` («оценка остальных процессов не падает на чужом мусоре») её отрицает.
+- Решение (оба пункта, ~20 строк):
+  1. `normalize_leaf`: причина годна, только если `type(r.get(k)) is str` для `node, severity, reason, source`, `severity` из словаря NE 107, `len(reason) <= 200`, причин `<= 32`. Это те же правила, что у санитайзера ребёнка (`plugin_orchestrator._plugin_reasons` / `_cap_reasons`). Лучше **одна** функция проверки причины в контракте путей (`health/schema.py` или рядом), которую зовут и ребёнок, и монитор: один источник правды о форме. Сейчас огромный список причин (например, 10⁶ dict) проходит границу без обрезки — по чтению, не запускал.
+  2. Выход из `fault` гарантирован так же, как F2 для `booting/stopping`: в `_run_stop_finish` ветка `fault` ставит `_fault_stop_done = True` в `finally` (дописывание причин срока — под `try`, сбой — ERROR). Тест: причина с негодным полем в `last_fault` -> `ack_allowed` становится true.
+
+#### Совет по сбою оценки на такте (вопрос координатора, п. 2)
+
+`_run_readiness_tick` по-прежнему зовёт `_evaluate_run_readiness` без охраны; монитор пишет ERROR на каждом такте (2 Гц, без дросселя — R6: ошибка на каждом из 3 тактов). Решение лида «не переводить в `fault` без слова владельца» обоснованно, пока сбой такта считается только дефектом кода. R6 показывает, что сейчас его вызывает и внешний вход. После И2-1 п.1 такой вход уйдёт, но класс «PM не может оценить готовность» останется.
+
+Моя оценка: это не новое решение владельца, а следствие уже принятых R2 («молчание = не готов») и R3 («потеря во время работы — авария»). Если PM `stale_s` секунд подряд не может оценить готовность, это то же молчание. Предлагаю:
+- считать подряд идущие сбои такта;
+- писать ERROR один раз на серию;
+- в статус класть причину `failure` «оценка готовности не удалась»;
+- если серия длится `stale_s` и дольше, подавать `tick(ready=False)`; в `running` это `fault`.
+
+Одиночный сбой не даёт дребезга. Если лид всё же относит это к владельцу — вопрос одной строкой: «сбой оценки готовности дольше 15 с в работе — авария, да/нет?».
+
+#### Advisory итерации 2 (по чтению, без запуска)
+
+- **Цепочка `stop_event` -> L-исполнитель.** ADR-046 честно оставляет `stop_event` на `mp.Event` (до Task 2.5). Следствие, которое в ADR не названо: ребёнок, умерший внутри своего `stop_event.is_set()`, повесит `stop_event.set()` в `stop_process` на потоке L-исполнителя. Тогда встанет вся очередь L, а последовательность STOP/аварии, поставленная в неё (подача приняла, ответа нет), не выполнится — `stopping` навсегда. Вероятность того же порядка, что F3. Место для лечения — Task 2.5 — принимаю, но цепочку стоит записать в ADR/2.5.
+- **ADR-046 п.5 и «Остаточное».** `pause_event` назван среди `mp.Event` того же класса, но в `worker_module` это `threading.Event` (`worker_lifecycle.py:72,102,259`): межпроцессного замка у него нет. Это неточность текста.
+- **Пометка при раннем выходе.** `restart_process` выходит раньше пометки (`_spawn_refused_after_system_stop`, «нет конфига»). Пометка, поставленная решением монитора в `_try_auto_restart`, тогда остаётся. Её снимет `gave_up` через повторы монитора (fix m3) — самоизлечение есть, но с задержкой.
+- **N3.** Проверка формы под `MagicMock` из боевого кода убрана (`_run_auto_restart_flags`, `_readiness_view` зовут напрямую). Оставшиеся упоминания двойников в PM — запасные пути для PM из `__new__` (`_submit_run_sequence` при `submit is None`, путь `:2110`). Это прежний приём модуля, а не подгонка формы ответа; N3 считаю закрытым.
+
+### Ответы на пункты координатора
+
+1. **F1.** Контейнерные формы закрыты (R1, J2). Поля причин — нет (И2-1: R6, R7). Строгость `at`: `type(at) in (int, float)` исключает `bool` и подклассы `int` (в том числе `numpy.float64` — для настоящего отправителя это не важно, там `time.time()`). «Лист без `at` — негоден» регресса не даёт: оба настоящих отправителя всегда кладут `at` (`readiness_snapshot` оркестратора; ветка процесса без оркестратора в `_refresh_readiness_snapshot`), а heartbeat без снимка поле `readiness` не несёт (лист не трогается). Проверено чтением кода.
+2. **F2.** `booting` и `stopping` закрыты (R1b, J3). Остаток: ветка `fault` в `_run_stop_finish` — И2-1 п.2 (R7); `_mark_unconfirmed` и `_run_apply("settled")` в ветке STOP бросить не могут — замена dict, `RunFlag`, `_state_op` глотает сбой (по чтению). Такт — см. совет выше.
+3. **F3.** `RawValue(c_bool)` в умолчательном контексте согласован с умолчательным `Process` реестра. Передача при spawn (macOS: арена `mmap` с fd; Windows: именованный `mmap`) — по чтению CPython. На macOS подтверждено тестами проводки и стендом S1, Windows не проверен. Атомарность одного байта при одном писателе без зависимых данных — согласен с ADR. Других межпроцессных замков под `_run_lock` нет. `stop_event` и `system_ready_event` — Task 2.5, оговорка про цепочку выше. Тесты различают реализации детерминированно: J1 дважды 5 failed, через проверку типа и проводку. Поведенческое свойство «нет замка ОС» проверяется только вероятностно — этого достаточно, потому что свойство принадлежит типу и закреплено ADR.
+4. **F4.** Все три выхода снимают пометку (R5, J4). Частичный успех (воплощение создано, затем исключение, например в `_wait_processes_ready`): `finally` снимает пометку раньше первого heartbeat нового pid. Вреда по чтению нет: heartbeat нового воплощения проходит как обычный (pid равен pid реестра). Поздний heartbeat старого pid отсекает забор чужого pid (I5 итерации 1 — охранён). Старое воплощение к этому моменту уже остановлено (`stop_process` прошёл до `create`). Гонки «unmark против heartbeat нового воплощения» на успешном пути нет: там `finally` пометку не трогает.
+5. **N3.** Закрыт (см. advisory).
+6. **Комментарии и ADR-046.** Смысл не искажён, кроме двух мест: `pause_event` в ADR и докстринг `normalize_leaf`, обещающий больше, чем делает (И2-1).
+7. **Отчёт стенда 1.10.** Переоценки не вижу. Исполнитель сам записал «кадры ≤ 3,5 с — **не совпало**, 3 из 10» и развёл замер с методикой 1.8b. Своего стенда не гонял.
+   - Связь находки `cpu_clock` (`_DeadlockError` ленивого импорта в `run()` ребёнка) с Ф1 по коду не вижу: потоки Ф1 (`run_watch`, `readiness_snapshot`) `cpu_clock` не импортируют. Но Ф1 добавил два потока, живущих в ребёнке до `run()`. Если на их пути есть ленивый импорт, класс отказа тот же. Не проверял.
+   - «Мёртвая линия consumer_0»: связь с Ф1 концептуальная. Готовность в Ф1 — самоотчёт узла и data-plane не видит (consumer_0 «готов», хотя кадры к нему не доходят). Рестарт идёт тем же `restart_process`, где fix-1.8b сбрасывает статус и fix-B3 добавил `finally`. Причинной связи не проверял — у investigator.
+
+### Ответ владельцу (итерация 2)
+
+«Архитектура отличная, без костылей и багов, максимально эффективно и правильно?» — **частично, ближе к «да».**
+- Да: тупики `booting/stopping` убраны конструкцией (R1b); флаг работы без межпроцессного замка (R2), меньше слоёв, тот же API (ADR-046); провал рестарта не оставляет невидимого процесса (R5); подгонка под тест-двойник убрана; горячий путь дешёвый (R3: 33,5 мкс на такт).
+- Нет пока: граница входа heartbeat закрыта наполовину. Негодное поле причины снова отключает обнаружение аварии (R6) и запирает `fault` без выхода (R7). Сбой оценки на такте молчит в журнале на каждом такте и не переходит ни в причину, ни в `fault`.
+
+### Что не проверено / ненадёжно (итерация 2)
+
+- Стенд и живой бэкенд не запускал. R6/R7 — на `make_readiness_pm` (настоящие PM + `ProcessMonitor`, `MockProcessRegistry`). Природной частоты R6/R7 нет: настоящий отправитель кладёт в причины только `str`.
+- Windows: передача `RawValue` при spawn — только чтением.
+- Огромный список причин на границе (обрезки у PM нет) — по чтению, не запускал.
+- Цепочка `stop_event` -> L-исполнитель -> `stopping` навсегда — по чтению, не воспроизводил.
+- Связь `cpu_clock` и «мёртвой линии» с Ф1 — рассуждение, без проверки.
+- Полный набор тестов не гонял — только файлы инъекций J1–J4 (без инъекции не перепрогонял, зелёные видел как `passed` у незатронутых тестов тех же файлов).

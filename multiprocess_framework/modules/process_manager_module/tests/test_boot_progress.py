@@ -35,6 +35,7 @@ from multiprocess_framework.modules.state_store_module.manager.state_store_manag
 
 from ..process import process_manager_process as pm_mod
 from ..process.process_manager_process import ProcessManagerProcess
+from .conftest import make_monitor_double
 from .test_run_commands import _PM_MOD, make_readiness_pm
 
 BOOT_PATH = "system.progress.boot"
@@ -137,14 +138,14 @@ def _bare_boot_pm(configs: dict[str, dict], registry: _Registry) -> ProcessManag
         patch(f"{_PM_MOD}.ProcessRegistry"),
         patch(f"{_PM_MOD}.ProcessPriority"),
         patch(f"{_PM_MOD}.ProcessStatusMonitor"),
-        patch(f"{_PM_MOD}.ProcessMonitor"),
+        patch(f"{_PM_MOD}.ProcessMonitor", return_value=make_monitor_double()),
         patch(f"{_PM_MOD}.QueueRegistry"),
         patch.object(ProcessManagerProcess, "get_config", return_value=None),
     ):
         pm._create_components()
     pm._process_registry = registry
     pm._priority = MagicMock()
-    monitor = MagicMock()
+    monitor = make_monitor_double()  # r2 N3: форма ответов настоящего монитора
     monitor.readiness_snapshot.return_value = {}  # дети не отчитались -> итог boot not_ready; прогрессу всё равно
     pm._process_monitor = monitor
     return pm

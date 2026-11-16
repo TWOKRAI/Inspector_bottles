@@ -1,0 +1,8 @@
+fix(framework): run-state fix-B3 — форма листа готовности на входе heartbeat, снятие пометки при провале restart_process
+
+Монитор нормализует лист готовности в _admit_heartbeat (normalize_leaf): негодная форма заменяется листом ready:false с одной причиной failure/report "лист готовности негоден: <процесс>" без значений входа, сам heartbeat остаётся фактом жизни (время, статус). Битый лист одного процесса больше не роняет такт оценки и обнаружение аварии соседей. restart_process снимает пометку "перезапускается" (ProcessMonitor.unmark_restarting) на каждом выходе без успеха: stop_process ложь, воплощение не создано, исключение.
+
+Why: свежее ревью Opus Ф1: F1 (битый лист выключает обнаружение аварии во всей системе), F4 (провал restart_process оставляет пометку навсегда)
+Layer: framework
+Refs: plans/2026-10-27_system-run-state/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

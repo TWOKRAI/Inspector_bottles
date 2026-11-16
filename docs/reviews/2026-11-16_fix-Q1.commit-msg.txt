@@ -1,0 +1,8 @@
+fix(framework): run-state Q1 — сбой старта потока run-fault-stop ставит итог аварии
+
+Если Thread.start() одноразового потока подачи бросает исключение, итог ставился только для run-stop; авария оставалась в fault с fault_stop_done False, system.run.ack отвечал fault_stopping до system.shutdown. Теперь и для аварии вызывается _run_stop_finish(fault=True, seq=<номер аварии подачи>, names=[], timeout_s=0.0); seq передаётся в _submit_run_sequence ключевым аргументом. Поведение STOP не меняется. Тесты на настоящих PM и мониторе: авария и контроль STOP.
+
+Why: итог и выход из stopping/fault должны случаться при любом входе (класс И2-1 п.2); поток, не стартовавший, не оставляет машину без выхода
+Layer: framework
+Refs: plans/2026-10-27_system-run-state/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

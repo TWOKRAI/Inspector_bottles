@@ -1,0 +1,6 @@
+test(framework): слепые приёмочные тесты RunFlag — флаг работы без межпроцессного замка (Task 1.10)
+
+Why: смерть ребёнка в момент чтения флага не должна вешать родителя; тесты пинят это 32 прогонами kill в горячем цикле чтения плюс контроль на multiprocessing.Event
+Layer: framework (process_manager_module)
+Refs: plans/2026-10-27_system-run-state/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

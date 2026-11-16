@@ -1,0 +1,9 @@
+fix(framework): run-state fix-B4 — одна проверка причин листа готовности, серия сбоев оценки, выход из fault при сбое срока
+
+Поля причин листа проверяет одна функция (readiness_reasons_are_valid в health/schema.py): её зовут монитор PM (normalize_leaf) и отправитель-ребёнок (константы plugin_orchestrator берутся оттуда же); негодная причина делает негодным весь лист. В ветке fault остановки дописывание причин срока под try/except, _fault_stop_done = True в finally: ack не остаётся без выхода. Сбой оценки на такте — серия: ERROR один раз, причина «оценка готовности не удалась», серия не короче срока молчания — ready=False (fault в running), успешная оценка сбрасывает серию. ADR-PMM-046: pause_event — threading.Event воркера, цепочка через stop_event отложена в Task 2.5.
+
+Why: итерация 2 свежего ревью Ф1 (И2-1, R6/R7) — причина с list вместо str роняла такт монитора или зависала остановку в аварии, одиночный сбой оценки терялся вместе с тактом
+Layer: framework
+Refs: plans/2026-10-27_system-run-state/plan.md
+Decision: ADR-PMM-046 (process_manager_module/DECISIONS.md) — уточнены pause_event и цепочка через stop_event
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

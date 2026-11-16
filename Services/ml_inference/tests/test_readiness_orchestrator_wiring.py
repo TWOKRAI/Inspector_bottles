@@ -74,8 +74,8 @@ def test_missing_weights_reason_reaches_snapshot_and_clears_after_reload(
     assert reason["node"] == f"{_PROC}.ml_inference", reason
     assert reason["severity"] == "failure", reason
     assert reason["source"] == "readiness", reason
-    assert reason["reason"].startswith("ml_inference: "), reason
-    assert "m1" in reason["reason"], reason
+    assert reason["reason"] == "ml_inference: ассеты модели непригодны: нет весов модели", reason
+    assert "m1" not in reason["reason"], reason  # контракт readiness(): значения входа в причину не идут
 
     _write_assets(tmp_path, weights=True)
     orch.plugins[0].cmd_reload_model({})

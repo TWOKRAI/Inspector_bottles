@@ -2580,3 +2580,68 @@ GUI получал `terminate` в окне PM, пока PM ждал зависш
 **Risk:** low — реестр не критичен, ошибки определения корня деградируют до прежнего общего имени.
 **Refs:** `plans/r2-env-isolation-defects/plan.md`, `plans/r2-env-isolation-defects/tasks/D2.md`, ADR-137 (D4),
 `tests/test_pid_registry_app_scoped.py`, `tests/test_pid_registry_checkout_acceptance.py`, `tests/test_pid_registry.py`.
+
+## ADR-PMM-047: `run_event` — `RunFlag` (байт в разделяемой памяти без межпроцессного замка) вместо `multiprocessing.Event` (Task 1.10 system-run-state, F3, 2026-11-15)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст (F3 свежего ревью Ф1).** `run_event` был `multiprocessing.Event`: каждый `is_set/set/clear` берёт
+межпроцессный замок. Дети читают флаг с частотой ~90 обращений/с на ребёнка (`reconcile_run_event`, `SourceProducer`,
+`process_module`). Ребёнок, убитый (SIGKILL/OOM/segfault) внутри `is_set()`, оставляет замок занятым навсегда;
+`_run_apply` трогает флаг под `_run_lock` PM — PM встаёт, а с ним `system.run.*`, публикация состояния и такт монитора
+(воспроизведение: ребёнок держит внутренний замок, SIGKILL — три вызова висят дольше 3 с). Это нарушает принцип
+владельца 5 (сбой одного процесса не валит соседей).
+
+### Решение
+
+1. `core/run_flag.py`: `RunFlag(initial: bool = False)` на `multiprocessing.RawValue(ctypes.c_bool, initial)`;
+   `is_set() -> bool`, `set() -> None`, `clear() -> None`. Имена и смысл как у `Event` — подмена одной строкой:
+   `ProcessManagerProcess._create_components`: `self._run_event = RunFlag()` (имя атрибута сохранено, потребители и
+   раннер не меняются). `wait()` НЕ реализован: блокирующих потребителей в репозитории нет (проверено `git grep`),
+   контракт «только опрос» закреплён в docstring и тесте.
+2. Контекст `RawValue` — умолчательный (`multiprocessing.RawValue`), как у `RawArray("q", 3)` слота отчёта выхода и
+   `Event` в `process_registry.py` (`from multiprocessing import Event, Process, RawArray`): `Process` реестра тоже
+   умолчательный, объект согласован с ним при spawn (macOS, Windows).
+3. **Инвариант ADR-PMM-034 сохранён.** Флаг уходит ребёнку ТОЛЬКО наследованием при spawn — kwargs `Process(...)`
+   (`ProcessRegistry(run_event=...)` -> `run_process_function(..., run_event=...)`), не через bundle `custom`, очередь
+   или Manager. Вне spawn `pickle` падает громко (`TypeError: cannot pickle 'mmap.mmap'`, проверено стадией 0), тихой
+   порчи нет.
+4. **Атомарность без замка и барьера.** Единственный писатель — PM (под своим `_run_lock`); читатели — дети, только
+   `is_set()`. Читатель видит старое или новое значение — оба допустимы (фронт виден за доли секунды, как и раньше).
+   Формально Python барьера памяти не даёт; безопасно по двум причинам: запись/чтение одиночного байта атомарны на
+   x86-64 и arm64, а флаг не публикует зависимых данных (читатель по значению ничего больше не читает из памяти
+   писателя, порядок видимости относительно других записей не нужен). Добавить зависимые данные или второго писателя —
+   пересмотр решения.
+5. Не меняются: `stop_event` (per-process, `process_registry.py`: `Event()` из `multiprocessing`) и
+   `system_ready_event` (остаются `mp.Event`); `pause_event` в ADR не участвует: это `threading.Event` воркера внутри
+   процесса (`worker_module/lifecycle/worker_lifecycle.py:72`), межпроцессного замка у него нет. Аннотации `Optional[Event]` в
+   `process_registry.py` и `process_runner.py` (аннотация, не фабрика; `RunFlag` совместим по утиной форме `is_set`).
+   Обращения PM к флагу под `_run_lock` остаются, но замка ОС больше не берут.
+
+### Отвергнуто
+
+- **Байт в `shared_resources_module`** (реестр, имя, жизненный цикл ради одного флага): лишний слой без выигрыша;
+  рядом уже живёт `RawArray` слота отчёта выхода тем же путём (принцип 4: меньше слоёв при равной функции).
+- **`RawValue` с замком по умолчанию / `mp.Value`:** вернул бы тот же межпроцессный замок.
+- **Оставить `Event` и ловить зависание таймаутом:** замок не отпустить снаружи, `_run_lock` держится — PM всё равно
+  встаёт.
+
+### Известная цена и остаточное
+
+- Читатель может увидеть старое значение дольше одного опроса: гарантии «сразу» нет и не было (темп опроса детей — порядка 90 обращений/с).
+- Windows не проверялся: наследование `RawValue` аргументом `Process` при spawn Windows предполагается по образцу
+  `RawArray` слота, не проверено; стенд с `kill -9` на Windows — отдельная проверка стадии 4.
+- Остальные `mp.Event` в PM/детях (`stop_event`, `system_ready_event`) тот же класс отказа не лечатся
+  этим ADR; решение по ним и по `run_watch` (M1, OPEN_QUESTIONS 2026-11-12/-13) — Task 2.5. (`pause_event` воркера —
+  `threading.Event`, класс отказа к нему не относится.)
+- **Цепочка через `stop_event` (найдена свежим ревью, итерация 2).** Ребёнок, умерший внутри своего
+  `stop_event.is_set()`, оставляет замок этого `mp.Event` занятым; PM затем зовёт `stop_event.set()`
+  (`core/child_process_stop.py`, `request_stop`) — вызов виснет на потоке L-исполнителя, очередь последовательностей
+  стоит, и STOP не выполняется. Флаг `run_event` эту цепочку не закрывает (замок другого события). Лечится в Task 2.5
+  (замена `stop_event` на безблокировочный флаг или ограничение ожидания `set()`); до него остаётся риском.
+
+**Reversible:** yes (одна строка в PM + удалить модуль).
+**Risk:** low — API совпадает с `Event` по используемому подмножеству; покрыт тестами и break-injection.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/1.10.md`, `plans/2026-10-27_system-run-state/reports/phase1.review-opus-fresh.md`
+(F3/С3), ADR-PMM-034, ADR-PMM-033 (`RawArray` слота), OPEN_QUESTIONS 2026-11-12 (M1) / Task 2.5,
+`tests/test_run_flag.py`, `tests/test_run_flag_contract.py`, `tests/test_run_flag_pm_wiring.py`.
