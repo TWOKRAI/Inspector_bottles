@@ -524,6 +524,7 @@ class SystemBuilder:
         pipeline_override: str | None = None,
         *,
         include_presentation: bool = True,
+        run_autostart: bool | None = None,
     ) -> "SystemBuilder":
         """Из главного конфига: system.yaml + (фундамент ⊕ presentation ⊕ активный pipeline).
 
@@ -537,10 +538,16 @@ class SystemBuilder:
                 если тот задан в манифесте/env-overlay. Headless при этом означает
                 не «нет процесса презентации», а «он в дренирующем воплощении»
                 (план D8): процесс объявляет рецепт, патч лишь меняет ему класс.
+            run_autostart: CLI ``--autostart`` (Task 2.7 S3c′): ``None`` — как в system.yaml /
+                user_overrides.yaml; ``True``/``False`` — перебивает их (ключ уходит в PM).
         """
         from .config.schemas import load_system_config
 
         sys_config = load_system_config(app.system)
+        if run_autostart is not None:
+            # Приём ``harness.py``: присваивание полю — validate_assignment ловит не-bool и помечает поле
+            # заданным, поэтому ключ проходит ``exclude_unset`` и доезжает до orchestrator_config.
+            sys_config.run_autostart = run_autostart
         bp_path = _resolve_pipeline(app, pipeline_override)
 
         # Извлекаем raw для device-секции ДО unwrap (Р11 device-hub)
