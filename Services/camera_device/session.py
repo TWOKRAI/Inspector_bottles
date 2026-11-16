@@ -19,6 +19,12 @@ compare-and-set под замком состояния; `on_state`, `on_stall`, 
 `watchdog_s`) и `stop(timeout)` (до `timeout + 0,5 с`) задерживают приём команд
 процесса.
 
+Ящик владельца (Task 2.4a): другие потоки не трогают порт, а кладут команды в ящик цикла (`submit`, `call`,
+`apply`); владелец опрашивает ящик после КАЖДОГО возврата `get_frame` (кадр, `None`, `PortError`), поэтому
+команда ждёт не дольше `timeout_ms` (а при зависании `get_frame` — до его возврата). `apply` не блокирует и
+сливает правки полей в одну команду `_drain`; перезахват порта идёт ВНУТРИ `grabbing`: `state` не меняется,
+`on_state` не зовётся. `apply` принимается и в `opening` (исполняется сразу после входа в `grabbing`).
+
 Слой: stdlib, `.interface`/`.params`/`.profiles` и публичный `multiprocess_framework.modules.worker_module`;
 без `multiprocess_prototype` и вендоров.
 """
@@ -29,6 +35,7 @@ import logging
 import threading
 import time
 import weakref
+from collections import deque
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -65,6 +72,39 @@ class _StartCmd:
         if not self.done.is_set():
             self.result = result
             self.done.set()
+
+
+class _Cmd:
+    """Команда ящика владельца: `fn` исполняет ТОЛЬКО поток-владелец; «исполнить или отменить» решает замок сеанса.
+
+    `error` — текст отказа (`None` — успех, ответ в `result`); `cancelled` — вызывающий истёк по сроку до исполнения;
+    `committed` — владелец взял команду на исполнение, отмена уже невозможна (модель `_StartCmd`).
+    """
+
+    def __init__(self, fn: Callable[[], Any]) -> None:
+        self.fn = fn
+        self.done = threading.Event()
+        self.result: Any = None
+        self.error: str | None = None
+        self.cancelled = False
+        self.committed = False
+
+
+class _Box:
+    """Ящик одного цикла: очередь команд; `closed` ставит владелец при выходе, оба поля — под замком сеанса."""
+
+    def __init__(self, closed: bool = False) -> None:
+        self.cmds: deque[_Cmd] = deque()
+        self.closed = closed
+
+
+class _Hold:
+    """Что владелец держит у порта сейчас (пишет и читает только он): по этому `_cleanup` решает, что закрывать."""
+
+    def __init__(self) -> None:
+        self.acquired = False
+        self.opened = False
+        self.grabbing = False
 
 
 class _Call:
@@ -141,6 +181,12 @@ class DeviceSession:
         self._device: DeviceIdentity | None = None
         self._profile = ProfileState()  # профили run/rest (Task 2.2); замок и данные принадлежат сеансу
         self._runner: ProfileRunner | None = None
+        self._box = _Box(closed=True)  # ящик цикла: создаётся в start() под замком вместе с `_stop_evt`
+        self._pending: dict[str, tuple[Step, str]] = {}  # слитые правки `apply`: поле -> (шаг, политика); под замком
+        self._drain_queued = False  # в ящике уже лежит `_drain`; под замком
+        self._hold = _Hold()
+        self._stop_now: Callable[[], bool] = lambda: True  # стоп цикла или процесса (ставит владелец)
+        self._regrab_failed = False  # перезахват отказал: цикл завершается (пишет и читает только владелец)
 
     # ------------------------------------------------------------------ #
     # Свойства
@@ -226,6 +272,10 @@ class DeviceSession:
                 creator = True
                 self._stop_evt = threading.Event()
                 self._exited = threading.Event()
+                self._box = _Box()
+                self._pending.clear()
+                self._drain_queued = False
+                self._last_error = None  # успешный захват после неудачного не показывает старую ошибку
                 self._held = True
                 self._cycle_t0 = time.monotonic()
                 self._set_locked("opening", pending)
@@ -270,6 +320,78 @@ class DeviceSession:
         if threading.current_thread() is self._owner:
             return  # из on_frame: самосоединения нет, владелец сам завершит цикл
         exited.wait(timeout + self._timeout_ms / 1000.0)  # событие цикла, а не Thread: владелец мог ещё не стартовать
+
+    # ------------------------------------------------------------------ #
+    # Ящик владельца (Task 2.4a): команды из других потоков, исполняет только владелец
+    # ------------------------------------------------------------------ #
+
+    def submit(self, fn: Callable[[], Any]) -> bool:
+        """Положить `fn` в ящик владельца; не блокирует, срока нет. `False` — не поставлено (не `grabbing`/ящик закрыт).
+
+        Результат и исключение `fn` пропадают (для ответа — `call`); `fn` исполняется потоком-владельцем вне замка.
+        """
+        return self._enqueue(fn) is not None
+
+    def call(self, fn: Callable[[], Any], timeout: float) -> tuple[bool, Any]:
+        """`fn` в потоке-владельце и ожидание ответа: `(True, результат)` либо `(False, текст отказа)`.
+
+        По сроку, пока владелец `fn` не взял, команда отменяется (не исполнится и позже), ответ `(False, "срок")`; если
+        владелец уже исполняет `fn`, ждём ещё не дольше `watchdog_s`. Остановка отвечает `(False, "сеанс остановлен")`.
+        Из потока владельца (например, из `on_frame`) — `(False, ...)` сразу: сам себя владелец не дождётся.
+        Блокирующий: колбэк системного потока зовёт только `apply`.
+        """
+        if threading.current_thread() is self._owner:
+            return False, "вызов из потока владельца"
+        cmd = self._enqueue(fn)
+        if cmd is None:
+            return False, "сеанс не в захвате"
+        if cmd.done.wait(timeout):
+            return self._answer(cmd)
+        with self._lock:
+            if cmd.done.is_set():
+                return self._answer(cmd)
+            if not cmd.committed:
+                cmd.cancelled = True  # владелец, дойдя до команды, пропустит её
+                return False, "срок"
+        # Владелец уже исполняет `fn`: отменить нельзя, ждём не дольше `watchdog_s` (дольше — зависание, ловит сторож).
+        if cmd.done.wait(self._watchdog_s):
+            return self._answer(cmd)
+        return False, "срок"
+
+    def apply(self, steps: Sequence[Step], policy: str) -> None:
+        """Применить пакет правок полей к идущему захвату (`policy`: `live`/`restart`); не блокирует, из любого потока.
+
+        Шаги сливаются в `_pending` по полю (последнее значение побеждает), в ящик ставится ОДНА команда `_drain`;
+        порт трогает только владелец. Принимается в `opening` (владелец исполнит `_drain` сразу после входа в
+        `grabbing`, до первого `get_frame`) и в `grabbing`. В `stopping`/`closed`/отказе или при закрытом ящике правка
+        не принимается: значение register'а попадёт в прибор планом `run` следующего цикла.
+        """
+        if policy not in ("live", "restart"):
+            raise ValueError("policy должна быть live или restart")
+        if not steps:
+            return
+        with self._lock:
+            accepted = self._state in ("opening", "grabbing") and not self._box.closed
+            if accepted:
+                for step in steps:
+                    self._pending[step.field] = (step, policy)
+                if not self._drain_queued:
+                    self._drain_queued = True
+                    self._box.cmds.append(_Cmd(self._drain))
+        if not accepted:
+            logger.info("apply policy=%s: цикл не идёт, правка не принята (значения войдут в план run)", policy)
+
+    def _enqueue(self, fn: Callable[[], Any]) -> _Cmd | None:
+        with self._lock:
+            if self._state != "grabbing" or self._box.closed:
+                return None
+            cmd = _Cmd(fn)
+            self._box.cmds.append(cmd)
+            return cmd
+
+    @staticmethod
+    def _answer(cmd: _Cmd) -> tuple[bool, Any]:
+        return (True, cmd.result) if cmd.error is None else (False, cmd.error)
 
     # ------------------------------------------------------------------ #
     # Состояние
@@ -356,6 +478,9 @@ class DeviceSession:
             self._set_locked("error", pending)
             self._held = False
             self._exited.set()
+            self._box.closed = True  # владелец не запускался: принятые в `opening` правки не исполнятся
+            self._pending.clear()
+            self._drain_queued = False
         self._fire_states(pending)
         cmd.finish(False)
         return False
@@ -422,36 +547,41 @@ class DeviceSession:
         """TASK-воркер на цикл `open -> close`: поток-владелец порта. Стоп процесса (`worker_stop`) = стоп цикла."""
         self._owner = threading.current_thread()
         with self._lock:
-            cmd, cycle_stop, exited = self._cmd, self._stop_evt, self._exited
+            cmd, cycle_stop, exited, box = self._cmd, self._stop_evt, self._exited, self._box
         assert cmd is not None
         stop_evt = lambda: cycle_stop.is_set() or worker_stop.is_set()  # noqa: E731
+        self._stop_now = stop_evt
         self._start_watchdog()
-        acquired = opened = grabbing = run_applied = failed = False
+        hold = self._hold = _Hold()
+        self._regrab_failed = False
+        run_applied = failed = False
         self._profile.reset()  # начало run каждого start(): params / params_status / param_errors заново
         try:
             self._port_call("acquire", self._sdk.acquire)
-            acquired = True
+            hold.acquired = True
             ident = self._resolve_ident()
             self._port_call("open", self._port.open, ident)
-            opened = True
+            hold.opened = True
             self._device = ident
             self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing, self._port_call)
             self._apply_run()
             run_applied = True
             if self._commit(cmd, stop_evt):
                 self._port_call("start_grabbing", self._port.start_grabbing)
-                grabbing = True
+                hold.grabbing = True
                 if self._enter_grabbing(cmd, stop_evt):
-                    failed = not self._grab_loop(stop_evt)
+                    failed = not self._grab_loop(stop_evt, box)
         except PortError as exc:
             failed = True
-            self._fail(_failed_state(exc, opening=not opened), exc)
+            self._fail(_failed_state(exc, opening=not hold.opened), exc)
         except Exception as exc:  # noqa: BLE001 — любой отказ владельца -> error, порт закрывается ниже
             failed = True
             self._fail("error", exc)
         finally:
             cmd.finish(False)  # no-op, если итог уже `True`
-            self._cleanup(grabbing, run_applied and not failed, opened, acquired)
+            self._close_box(box)  # до закрытия порта: оставшиеся команды получают ответ раньше, чем вернётся `stop()`
+            # `rest` — только на открытом порту: стоп в окне перезахвата мог оставить порт закрытым
+            self._cleanup(hold.grabbing, run_applied and not failed and hold.opened, hold.opened, hold.acquired)
             self._stop_watchdog()
             with self._lock:
                 pending: list[tuple[str, str]] = []
@@ -494,10 +624,16 @@ class DeviceSession:
                 if self._last_error is None:
                     self._last_error = describe_error(exc)
 
-    def _grab_loop(self, stop_evt: Callable[[], bool]) -> bool:
-        """Читать кадры до `stop_evt`; `False` — три ошибки подряд (состояние уже `error`)."""
+    def _grab_loop(self, stop_evt: Callable[[], bool], box: _Box) -> bool:
+        """Читать кадры до `stop_evt`; `False` — три ошибки подряд или отказ перезахвата (состояние уже `error`).
+
+        Ящик опрашивается после КАЖДОГО возврата `get_frame` (кадр, `None`, `PortError`).
+        """
+        if not self._poll_box(box, stop_evt):  # правки, принятые в `opening`: до первого `get_frame`
+            return False
         consecutive = 0
         while not stop_evt():
+            raw = None
             try:
                 raw = self._port_call("get_frame", self._port.get_frame, self._timeout_ms)
             except PortError as exc:
@@ -507,8 +643,10 @@ class DeviceSession:
                 if consecutive >= MAX_CONSECUTIVE_ERRORS:
                     self._fail("error", exc)
                     return False
-                continue
-            consecutive = 0  # кадр и таймаут (None) — не ошибки
+            else:
+                consecutive = 0  # кадр и таймаут (None) — не ошибки
+            if not self._poll_box(box, stop_evt):
+                return False
             if raw is None:
                 continue
             try:
@@ -516,6 +654,130 @@ class DeviceSession:
             except Exception:  # noqa: BLE001 — исключение колбэка не ошибка порта, захват не останавливается
                 logger.exception("session: on_frame завершился исключением")
         return True
+
+    # ------------------------------------------------------------------ #
+    # Ящик: исполнение команд владельцем
+    # ------------------------------------------------------------------ #
+
+    def _poll_box(self, box: _Box, stop_evt: Callable[[], bool]) -> bool:
+        """Исполнить команды ящика (владелец, вне замка); `False` — перезахват отказал (состояние уже `error`).
+
+        При запрошенном стопе команды не исполняются: их закроет `_close_box` ответом «сеанс остановлен».
+        """
+        while not stop_evt():
+            with self._lock:
+                if not box.cmds:
+                    return True
+                cmd = box.cmds.popleft()
+                if cmd.cancelled:
+                    continue  # вызывающий истёк по сроку: не исполняется и позже
+                cmd.committed = True  # с этого момента `call` по сроку отменить команду не может
+            self._execute(cmd)
+            if self._regrab_failed:
+                return False
+        return True
+
+    @staticmethod
+    def _execute(cmd: _Cmd) -> None:
+        """`fn` команды; исключение -> `error` команды, цикл продолжается."""
+        try:
+            cmd.result = cmd.fn()
+        except Exception as exc:  # noqa: BLE001 — команда другого потока не роняет владельца
+            cmd.error = describe_error(exc)
+            logger.exception("session: команда ящика завершилась исключением")
+        except BaseException:
+            cmd.error = "команда прервана"
+            raise
+        finally:
+            cmd.done.set()
+
+    def _close_box(self, box: _Box) -> None:
+        """Выход владельца: ящик закрывается под замком, оставшиеся команды получают «сеанс остановлен»."""
+        with self._lock:
+            box.closed = True
+            left = list(box.cmds)
+            box.cmds.clear()
+            self._pending.clear()
+            self._drain_queued = False
+        for cmd in left:
+            cmd.error = "сеанс остановлен"
+            cmd.done.set()
+
+    def _drain(self) -> None:
+        """Команда `apply` (владелец): применить все накопленные правки.
+
+        `live` при `live_write` — запись без остановки; остальное (`restart`, `live` без `live_write`) — ОДИН перезахват
+        на пакет. Шаги пакета заменяют шаги тех же полей в плане `run` цикла: следующий перезахват их не откатывает.
+        """
+        with self._lock:
+            batch = list(self._pending.values())
+            self._pending.clear()
+            self._drain_queued = False
+        if not batch:
+            return
+        self._run = self._replace_in_run([step for step, _policy in batch])
+        order = {step.field: i for i, step in enumerate(self._run)}  # родитель раньше потомка, как в плане
+        live_write = "live_write" in self._port.capabilities
+        live = [step for step, policy in batch if policy == "live" and live_write]
+        regrab = [step for step, policy in batch if not (policy == "live" and live_write)]
+        live.sort(key=lambda step: order[step.field])
+        regrab.sort(key=lambda step: order[step.field])
+        if live:
+            t0 = time.perf_counter()
+            self._runner.apply_plan(live)  # type: ignore[union-attr]
+            self._log_apply(live, "live", t0)
+        if regrab:
+            self._regrab(regrab)
+
+    def _replace_in_run(self, steps: Sequence[Step]) -> tuple[Step, ...]:
+        """План `run` цикла, в котором шаги пакета заменили шаги тех же полей (новые поля — в конец)."""
+        new = {step.field: step for step in steps}
+        merged = [new.pop(step.field, step) for step in self._run]
+        merged.extend(new.values())
+        return tuple(merged)
+
+    def _regrab(self, steps: Sequence[Step]) -> None:
+        """Перезахват порта ВНУТРИ `grabbing` (`state`, `on_state` не меняются): `stop_grabbing`, запись, `start`.
+
+        С `restart_regrab` пишутся шаги пакета в открытый порт; без неё — `close`, `open` и весь `run` цикла. Стоп
+        запрошен до `start_grabbing` -> он не зовётся (порт закроет `_cleanup`). Отказ -> `_fail("error")`.
+        """
+        hold, stop = self._hold, self._stop_now
+        t0 = time.perf_counter()
+        try:
+            if stop():
+                return
+            self._port_call("stop_grabbing", self._port.stop_grabbing)
+            hold.grabbing = False
+            if "restart_regrab" in self._port.capabilities:
+                self._runner.apply_plan(steps)  # type: ignore[union-attr]
+            else:
+                self._port_call("close", self._port.close)
+                hold.opened = False
+                if stop():
+                    return
+                self._port_call("open", self._port.open, self._device)
+                hold.opened = True
+                if stop():
+                    return
+                self._runner.apply_plan(self._run)  # type: ignore[union-attr]
+            if stop():
+                return
+            self._port_call("start_grabbing", self._port.start_grabbing)
+            hold.grabbing = True
+        except Exception as exc:  # noqa: BLE001 — любой отказ перезахвата: цикл завершается, `_cleanup` по `hold`
+            self._regrab_failed = True
+            self._fail("error", exc)
+        else:
+            self._log_apply(steps, "restart", t0)
+        finally:
+            self._timing("regrab", time.perf_counter() - t0)
+
+    @staticmethod
+    def _log_apply(steps: Sequence[Step], policy: str, t0: float) -> None:
+        ms = int((time.perf_counter() - t0) * 1000)
+        for step in steps:
+            logger.info("apply field=%s policy=%s ms=%d", step.field, policy, ms)
 
     # ------------------------------------------------------------------ #
     # Сторож

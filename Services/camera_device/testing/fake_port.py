@@ -9,6 +9,9 @@
 `get_frame_script`, `read_offset` (умолчания сохраняют поведение 1.5).
 Журнал вызовов `FakePort.calls` — список `(имя, args, threading.get_ident())`; пишется ДО проверок
 состояния, поэтому отказ тоже виден. Фейковый `DeviceSdk` пишет в тот же журнал.
+Счётчики открытых дескрипторов (Task 2.4a): `open_handles` (+1 после успешного `open`, -1 в `close`, если порт
+был открыт) и `max_open_handles` (максимум за жизнь фейка); ловят вызов порта мимо потока-владельца. Поведение
+`open`/`close` счётчики не меняют.
 """
 
 from __future__ import annotations
@@ -211,6 +214,9 @@ class FakePort:
         self._read_offset = dict(read_offset or {})  # ключ — Binding.key; только чтение, узел не меняется
         self._get_frame_calls = 0  # вызовы `get_frame` с последнего `start_grabbing`
         self._next_frame_at = 0.0
+        self._handles_lock = threading.Lock()
+        self.open_handles = 0
+        self.max_open_handles = 0
 
     def arm_hang(self, seconds: float) -> None:
         """Взвести разовое зависание: следующий `get_frame` спит `seconds`, игнорируя `timeout_ms`."""
@@ -275,6 +281,9 @@ class FakePort:
         if self._state != "closed":
             raise PortError("other", "open")
         self._state = "opened"
+        with self._handles_lock:
+            self.open_handles += 1
+            self.max_open_handles = max(self.max_open_handles, self.open_handles)
 
     def get_param(self, b: Binding) -> object:
         self._record("get_param", (b.key,))
@@ -383,8 +392,12 @@ class FakePort:
 
     def close(self) -> None:
         self._record("close", ())
+        was_open = self._state != "closed"
         self._state = "closed"
         self._neter_active = False
+        if was_open:
+            with self._handles_lock:
+                self.open_handles -= 1
 
 
 def make_port(
