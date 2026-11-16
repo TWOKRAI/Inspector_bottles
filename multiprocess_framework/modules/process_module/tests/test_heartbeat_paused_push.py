@@ -267,16 +267,25 @@ def test_set_event_pushes_paused_false_heartbeat_with_long_interval(stand_factor
 
 @pytest.mark.timeout(120)
 def test_no_paused_change_no_extra_heartbeat(stand_factory) -> None:
-    """Интервал 30 с, событие не трогаем: за 3 с после готовности не больше одного heartbeat (стартового)."""
+    """Интервал 30 с, событие не трогаем: внеочередной heartbeat без смены готовности не уходит.
+
+    Лишним считается heartbeat, чья подпись ``(paused, ready)`` совпадает с подписью предыдущего: смена ``paused``
+    не происходила, а внеочередной уйти не имел права. Смена ``ready`` на boot (защёлка ``False -> True``) —
+    законный внеочередной heartbeat (Task 3.3, ADR-PMM-048), тест её не считает лишней.
+    """
     stand = stand_factory("PpPluginProcess")
     assert stand.own_ready.wait(_JOIN_S), "процесс не объявил готовность"
 
     time.sleep(3.0)
 
-    heartbeats = [m for _, m in stand.collector.items()]
-    assert len(heartbeats) <= 1, (
-        f"поток heartbeat без смены paused: {len(heartbeats)} шт., paused={[_paused_of(m) for m in heartbeats]}"
-    )
+    def _sig(msg: dict) -> tuple[Any, Any]:
+        readiness = msg.get("readiness")
+        return (None, None) if not isinstance(readiness, dict) else (readiness.get("paused"), readiness.get("ready"))
+
+    sigs = [_sig(m) for _, m in stand.collector.items()]
+    duplicates = [(i, sigs[i]) for i in range(1, len(sigs)) if sigs[i] == sigs[i - 1]]
+    assert not duplicates, f"лишний heartbeat без смены paused/ready: {duplicates}; подписи={sigs}"
+    assert all(paused is not True for paused, _ready in sigs), f"paused менялся без команды: {sigs}"
 
 
 # --------------------------------------------------------------------------- #

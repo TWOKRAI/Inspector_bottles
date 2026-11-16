@@ -102,3 +102,16 @@
 ## Агенты и артефакты (для передачи)
 
 Отчёты по задачам лежат в ветках: `docs/reviews/2026-11-16_task-c92-1.1-*.md`, `docs/reviews/2026-11-16_task-c91-1.1-*.md`, `docs/reviews/2026-11-16_task-f3-1.1-*.md`, стенды `2026-11-16_task-c92-stand.md`, `2026-11-16_task-c91-stand.md`. Планы: `plans/framework-heartbeat-import-race/`, `plans/worker-start-honest/`, `plans/devices-tab-recipe-errors/`. Сырые данные стендов и стресс-скрипты — в scratchpad сессии (не в git; сохранить при необходимости).
+
+## Красные `make gate` на слитом `main` (2026-11-16, дерево `09bfaa5ac`)
+
+Команда: `make -k gate UV_RUN=` через `machine_gate heavy D`, venv основного репозитория. Слияние полосы Д (`d89188e7b`) не трогает ни один из файлов ниже (`git diff 4a73cdc9e d89188e7b` по этим путям пуст): красные пришли с чужими слияниями, влитыми в `main` раньше.
+
+| Красное | Откуда | Чьё |
+|---|---|---|
+| ruff E501: `Services/camera_device/plugin_base.py:255` (166 > 120) | W3 (`28720c500`) | полоса К |
+| `logger_module/tests/test_std_logger_guard.py::test_no_bare_stdlib_logger_outside_whitelist`: голый `logging.getLogger` в `Services/camera_device/session.py:41`, `Services/hikvision_camera/driver.py:61`, `multiprocess_prototype/frontend/widgets/chrome/run_control.py:28` | W3 и run-state 2.3 | К; run-state (Ф) |
+| `test_dotted_process_name::test_a5_...` и `test_unapplied_metadata_check::test_m10_...` (23 рецепта вместо 22) | старые, красные и до слияния | рецепты |
+| root pytest не собрался: `Services/otel_export/tests/test_f2_task24_acceptance*.py` — нет `opentelemetry` | окружение | нужен venv с `opentelemetry` или `--ignore`; тесты Services/Plugins/prototype целиком не прогонялись |
+
+Полный прогон `process_manager_module` упирается в лимит семафоров macOS (Errno 28, 314 failed + 11 errors); перепрогон 58 красных файлов по одному дал 3 красных теста (два старых и логгер-страж). Не проверено: bandit (итоговый счёт), причины 54 skipped, красные «между файлами».

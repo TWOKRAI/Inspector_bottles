@@ -97,7 +97,7 @@ def test_no_push_without_change() -> None:
     hb = _started_heartbeat(svc)
     hb._send_heartbeat({})  # регулярный: paused False ушёл
 
-    assert [hb.push_if_paused_changed() for _ in range(5)] == [False] * 5
+    assert [hb.push_if_changed() for _ in range(5)] == [False] * 5
 
     assert _paused_sent(svc) == [False]
 
@@ -107,7 +107,7 @@ def test_first_snapshot_is_not_a_change() -> None:
     svc = _Svc(paused=True)
     hb = _started_heartbeat(svc)
 
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     assert svc.sent == []
 
 
@@ -118,8 +118,8 @@ def test_change_pushes_once_in_regular_format() -> None:
     hb._send_heartbeat({})
     svc.set_paused(True)
 
-    assert hb.push_if_paused_changed() is True
-    assert hb.push_if_paused_changed() is False  # уже ушло
+    assert hb.push_if_changed() is True
+    assert hb.push_if_changed() is False  # уже ушло
 
     regular, pushed = svc.sent
     assert set(pushed) == set(regular), (sorted(pushed), sorted(regular))
@@ -136,7 +136,7 @@ def test_regular_heartbeat_carrying_new_paused_suppresses_push() -> None:
     svc.set_paused(True)
     hb._send_heartbeat({})  # регулярный несёт paused True
 
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     assert _paused_sent(svc) == [False, True]
 
 
@@ -146,12 +146,12 @@ def test_debounce_suppressed_change_is_not_lost() -> None:
     hb = _started_heartbeat(svc)
     hb._send_heartbeat({})
     svc.set_paused(True)
-    assert hb.push_if_paused_changed() is True  # t0
+    assert hb.push_if_changed() is True  # t0
     svc.set_paused(False)
 
-    assert hb.push_if_paused_changed() is False  # внутри окна: подавлено
+    assert hb.push_if_changed() is False  # внутри окна: подавлено
     time.sleep(_GAP_S)
-    assert hb.push_if_paused_changed() is True  # затишье: итог доставлен
+    assert hb.push_if_changed() is True  # затишье: итог доставлен
 
     assert _paused_sent(svc) == [False, True, False]
 
@@ -165,12 +165,12 @@ def test_flapping_snapshot_is_debounced_and_final_state_delivered() -> None:
     pushes = 0
     for i in range(40):
         svc.set_paused(i % 2 == 0)  # последнее значение i=39 -> False; пик серии True
-        pushes += hb.push_if_paused_changed()
+        pushes += hb.push_if_changed()
         time.sleep(0.025)
     window = time.monotonic() - started
     svc.set_paused(True)  # итог серии отличается от последнего ушедшего (False или True по фазе) — сделаем явный
     time.sleep(_GAP_S)
-    hb.push_if_paused_changed()
+    hb.push_if_changed()
 
     assert 1 <= pushes <= 3, f"{pushes} внеочередных за {window:.2f} с"
     assert _paused_sent(svc)[-1] is True, _paused_sent(svc)
@@ -184,21 +184,21 @@ def test_push_send_failure_does_not_raise_and_logs_once_per_exception_type() -> 
     svc.set_paused(True)
     svc.fail = RuntimeError("сбой 1")
 
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     time.sleep(_GAP_S)
     svc.fail = RuntimeError("другой текст, тот же тип")
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     assert len(svc.errors) == 1, svc.errors  # тот же тип — одна серия
 
     time.sleep(_GAP_S)
     svc.fail = None
-    assert hb.push_if_paused_changed() is True  # повтор прошёл: сбой не потерял смену
+    assert hb.push_if_changed() is True  # повтор прошёл: сбой не потерял смену
     assert _paused_sent(svc) == [False, True]
 
     svc.set_paused(False)
     time.sleep(_GAP_S)
     svc.fail = ValueError("новая серия")
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     assert len(svc.errors) == 2, svc.errors
 
 
@@ -209,7 +209,7 @@ def test_regular_heartbeat_unaffected_by_failed_push() -> None:
     hb._send_heartbeat({})
     svc.set_paused(True)
     svc.fail = RuntimeError("сбой")
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     svc.fail = None
 
     hb._send_heartbeat({})
@@ -223,10 +223,10 @@ def test_disabled_heartbeat_does_not_push() -> None:
     svc._config["heartbeat_interval"] = 0
     hb = ProcessHeartbeat(svc)  # type: ignore[arg-type]
     hb.start()
-    hb._last_sent_paused = False  # как если бы регулярный уже уходил
+    hb._last_sent_sig = (False, True, frozenset())  # как если бы регулярный уже уходил
     svc.set_paused(True)
 
-    assert hb.push_if_paused_changed() is False
+    assert hb.push_if_changed() is False
     assert svc.sent == []
 
 
@@ -238,7 +238,7 @@ def test_regular_and_push_share_one_send_lock() -> None:
     svc.set_paused(True)  # регулярный ниже понесёт paused True; push по тому же значению стал бы дублем
     svc.delay = 0.4
     regular = threading.Thread(target=lambda: hb._send_heartbeat({}), daemon=True, name="hbp-regular")
-    pusher = threading.Thread(target=hb.push_if_paused_changed, daemon=True, name="hbp-push")
+    pusher = threading.Thread(target=hb.push_if_changed, daemon=True, name="hbp-push")
     regular.start()
     time.sleep(0.1)  # регулярный внутри send_message (держит замок)
     pusher.start()
@@ -317,7 +317,7 @@ def _real_process(delay: float):
         end = time.monotonic() + 5.0
         while time.monotonic() < end and not (SHARED["proc"]._readiness_snapshot or {}).get("ready"):
             time.sleep(0.02)
-        time.sleep(1.0 + delay)  # стартовый heartbeat ушёл: ``_last_sent_paused`` известен
+        time.sleep(1.0 + delay)  # стартовый heartbeat ушёл: ``_last_sent_sig`` известен
         yield event, out, stop, thread
     finally:
         SHARED["delay"] = 0.0
