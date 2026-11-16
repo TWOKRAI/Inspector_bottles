@@ -36,6 +36,11 @@ Task 2.4b: правка поля из GUI (`register_update` -> `RegistersManage
 Task 2.3c: команды Р7 без порта и ящика (раздел «Команды Р7» ниже): `reset_stats`, `read_params`, `apply_params`; модели
 аргументов — `commands.py`, `timeout_s` читают `take_device`/`release_device`. Счётчики охраняет `_stats_lock`.
 
+Task 2.3d: команды Р7 с портом: `list_devices`, `describe_params`, `trigger_software`. Порт создаётся отдельно от
+сеанса (`_ensure_port`, без сеанса, моста логов и воркеров); порт и SDK зовёт только тот поток, который их держит:
+владелец через `session.call` (срок `_CALL_TIMEOUT_S`), а `list_devices` без владельца — поток команды (`acquire`
+-> `enum_devices` -> `release`). Каждая команда с `call` блокирует приём команд процесса до срока.
+
 Слой: Services -> framework; плагин не импортирует `multiprocess_prototype` и вендорские драйверы.
 """
 
@@ -60,7 +65,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 
 from .commands import ApplyParamsArgs, ReleaseDeviceArgs, TakeDeviceArgs
-from .interface import Binding, DeviceIdentity, DevicePort, RawFrame
+from .interface import Binding, DeviceIdentity, DevicePort, PortError, RawFrame
 from .params import Step, build_plan
 from .registers_base import CameraDeviceRegisters
 from .session import DeviceSession, describe_error
@@ -68,6 +73,9 @@ from .session import DeviceSession, describe_error
 # Срок ожидания `start`/`stop` в командах плагина, с.
 _START_TIMEOUT_S = 5.0
 _STOP_TIMEOUT_S = 2.0
+# Срок ответа владельца на команду через `session.call`, с: больше `timeout_ms/1000` и обычного перезахвата на фейке.
+# Команда блокирует системный поток процесса до срока; худший случай — срок + `watchdog_s` (владелец взял `fn` и завис).
+_CALL_TIMEOUT_S = 2.0
 # Каналов на пиксель для 8-битных форматов; `bayer_*` — один канал (дебайер — не в ядре).
 _CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3}
 # Окно публикации уровней, агрегата замеров и сверки событий, с (в тестах подменяется).
@@ -79,6 +87,8 @@ _PROFILE_OF_STATE = {"opening": "run", "grabbing": "run", "stopping": "rest", "c
 # Поля-словари события: ушедшие ключи удаляются из дерева (`merge` их не снимает).
 _DICT_EVENTS = ("params", "params_status", "param_errors")
 _MISSING = object()
+# Отказ команд с портом, когда владельца нет в `grabbing` (литерал `session.call` и Р7).
+_NOT_GRABBING = "сеанс не в захвате"
 # Группа триггера в плане rest: привязки только `trigger_*`, иначе `build_plan` потребует значения остальных полей.
 _TRIGGER_PREFIX = "trigger_"
 
@@ -140,6 +150,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         reset_stats    — обнулить счётчики кадров и окно fps
         read_params    — снимок параметров прибора последнего цикла
         apply_params   — записать пакет полей register'а (на прибор — колбэком подписки)
+        list_devices   — перечислить приборы (владельцем при захвате, иначе потоком команды)
+        describe_params — границы, шаг, имена enum и доступ узлов (нужен захват)
+        trigger_software — программный триггер (нужен захват и capability `software_trigger`)
     """
 
     name = "camera_device"
@@ -162,6 +175,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         "reset_stats": "cmd_reset_stats",
         "read_params": "cmd_read_params",
         "apply_params": "cmd_apply_params",
+        "list_devices": "cmd_list_devices",
+        "describe_params": "cmd_describe_params",
+        "trigger_software": "cmd_trigger_software",
     }
 
     # ------------------------------------------------------------------ #
@@ -294,6 +310,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
         from .testing.fake_port import FAKE_BINDINGS  # ленивый импорт: ядро не тянет фейк без нужды
 
         return FAKE_BINDINGS
+
+    def software_trigger_binding(self) -> Binding:
+        """Узел программного триггера для `trigger_software`. Вендор переопределяет, если узел называется иначе."""
+        return Binding("genicam", "TriggerSoftware", "command")
 
     def _identity(self, *, warn: bool = False) -> DeviceIdentity | None:
         """Идентичность прибора по `device_select`; пустое поле -> `ValueError` с именем поля (без значения)."""
@@ -535,11 +555,22 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # Команды
     # ------------------------------------------------------------------ #
 
+    def _ensure_port(self) -> DevicePort:
+        """Порт плагина: создаётся один раз хуком `create_port()`; сеанс, мост логов и воркеры не создаются."""
+        with self._session_lock:
+            return self._port_locked()
+
+    def _port_locked(self) -> DevicePort:
+        """Порт при уже взятом `_session_lock` (`Lock` не реентерабелен: из-под замка зовётся только этот вариант)."""
+        if self._port is None:
+            self._port = self.create_port()  # сразу в атрибут; отказ `create_port` оставляет `None`: повтор возможен
+        return self._port
+
     def _ensure_session(self) -> DeviceSession:
         with self._session_lock:
             if self._session is not None:
                 return self._session
-            port = self.create_port()
+            port = self._port_locked()
             session = DeviceSession(
                 port,
                 port.sdk,
@@ -554,8 +585,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 on_timing=self._on_timing,
             )
             self._attach_log_bridge()
-            # атрибут не залипает на неудачной попытке (объект порта теряется без close(): SDK ещё не acquire'нут)
-            self._port, self._session = port, session
+            self._session = session  # порт уже в `self._port`; отказ `DeviceSession` сеанса не оставляет
         return session
 
     def _attach_log_bridge(self) -> None:
@@ -625,7 +655,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         return result
 
     # ------------------------------------------------------------------ #
-    # Команды Р7 (Task 2.3c): порт и ящик владельца не используются, блокирующих вызовов нет
+    # Команды Р7: 2.3c — без порта и ящика владельца, блокирующих вызовов нет; 2.3d (ниже) — через порт и ящик
     # ------------------------------------------------------------------ #
 
     def cmd_reset_stats(self, data: dict) -> dict:
@@ -704,6 +734,121 @@ class CameraDevicePlugin(ProcessModulePlugin):
     def _log_apply(self, fields: list[str], ok: bool) -> None:
         """INFO `apply_params`: имена записанных полей и итог, без значений."""
         self._ctx.log_info(f"CameraDevicePlugin: apply_params fields={fields} ok={ok}")
+
+    # --- Команды Р7 с портом (Task 2.3d): порт зовёт тот поток, который его держит ---
+
+    def _port_or_refusal(self) -> DevicePort | dict:
+        """Порт либо ответ-отказ (`dict`): `ValueError` — свой текст, как в `take_device`, прочее — `describe_error`."""
+        try:
+            return self._ensure_port()
+        except Exception as exc:  # noqa: BLE001 — контракт 1.8: отказ команды — ответ, исключение наружу не идёт
+            text = str(exc) if isinstance(exc, ValueError) else describe_error(exc)
+            detail = "" if isinstance(exc, ValueError) else f"\n{traceback.format_exc()}"
+            self._ctx.log_error(f"CameraDevicePlugin: порт не создан: {text}{detail}")
+            return {"success": False, "error": text}
+
+    def _call_owner(self, fn: Callable[[], Any]) -> tuple[bool, Any]:
+        """`fn` в потоке-владельце: `(True, результат)` либо `(False, текст отказа)`. Блокирует до `_CALL_TIMEOUT_S`."""
+        session = self._session
+        if session is None:
+            return False, _NOT_GRABBING
+        return session.call(fn, _CALL_TIMEOUT_S)
+
+    def cmd_list_devices(self, data: dict) -> dict:
+        """Перечислить приборы: `{"success": True, "devices": [{"kind", "value", "name"}]}`.
+
+        Перечисление исполняет тот, кто держит SDK; путь — по `session.device_held`, а не по `state` (`stop()` на
+        отказном состоянии ставит `closed` СРАЗУ, пока владелец ещё закрывает порт):
+          * владельца нет -> поток команды: `acquire`, затем `enum_devices` и `release` (в `finally`, только после
+            успешного `acquire`), без handle и без сеанса;
+          * владелец есть -> `session.call(enum_devices)`; не `grabbing` (`opening`, `stopping`, отказ при живом
+            владельце) `call` отвечает `"сеанс не в захвате"`, порт не вызывается.
+        Остаточный риск: между проверкой `device_held` и `acquire` команда не конкурирует с `start()` только пока оба
+        идут из системного потока (`cmd_take_device`); `start()` из другого потока не проверялся.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        session = self._session
+        t0 = time.monotonic()
+        path = "command" if session is None or not session.device_held else "owner"
+        try:
+            if path == "command":
+                devices = self._enumerate_here(port)
+            else:
+                ok, result = self._call_owner(lambda: port.sdk.enum_devices())
+                if not ok:
+                    self._ctx.log_info(f"CameraDevicePlugin: list_devices path={path} error={result}")
+                    return {"success": False, "error": result}
+                devices = result
+        except Exception as exc:  # noqa: BLE001 — отказ `acquire`/`enum_devices`/`release` (обычно `PortError`) — ответ
+            error = describe_error(exc)
+            self._ctx.log_error(f"CameraDevicePlugin: list_devices path={path} отказ: {error}")
+            return {"success": False, "error": error}
+        ms = int((time.monotonic() - t0) * 1000)
+        self._ctx.log_info(f"CameraDevicePlugin: list_devices path={path} n={len(devices)} ms={ms}")
+        return {
+            "success": True,
+            "devices": [{"kind": d.kind, "value": d.value, "name": d.name} for d in devices],
+        }
+
+    @staticmethod
+    def _enumerate_here(port: DevicePort) -> list[DeviceIdentity]:
+        """Перечисление потоком команды, пока владельца нет; `release` стартует только после успешного `acquire`."""
+        sdk = port.sdk
+        sdk.acquire()
+        try:
+            return sdk.enum_devices()
+        finally:
+            sdk.release()
+
+    def cmd_describe_params(self, data: dict) -> dict:
+        """Описание узлов по ВСЕМ привязкам `bindings()`: `{"success": True, "params_meta": {поле: {...} | None}}`.
+
+        Снимок текущего состояния, нужен захват: границы и `access` у узлов зависят от соседних (у фейка `TriggerMode`
+        при захвате `RO`). Один `session.call`: `port.describe_param` зовёт владелец. Нет capability `node_describe` ->
+        пустая карта без вызова порта. Узел, давший `None` или `PortError`, -> `null`; остальные не падают.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        if "node_describe" not in port.capabilities:
+            return {"success": True, "params_meta": {}}
+        bindings = self.bindings()
+        t0 = time.monotonic()
+        ok, result = self._call_owner(lambda: {field: self._describe_node(port, b) for field, b in bindings.items()})
+        if not ok:
+            self._ctx.log_info(f"CameraDevicePlugin: describe_params error={result}")
+            return {"success": False, "error": result}
+        ms = int((time.monotonic() - t0) * 1000)
+        self._ctx.log_info(f"CameraDevicePlugin: describe_params n={len(result)} ms={ms}")
+        return {"success": True, "params_meta": result}
+
+    @staticmethod
+    def _describe_node(port: DevicePort, binding: Binding) -> dict | None:
+        """Описание узла словарём (`entries` — список: Dict at Boundary); отказ узла -> `None`. Зовёт владелец."""
+        try:
+            info = port.describe_param(binding)
+        except PortError:
+            return None
+        if info is None:
+            return None
+        entries = None if info.entries is None else list(info.entries)
+        return {"min": info.min, "max": info.max, "inc": info.inc, "entries": entries, "access": info.access}
+
+    def cmd_trigger_software(self, data: dict) -> dict:
+        """Программный триггер: `port.execute(software_trigger_binding())` потоком-владельцем; ~2 Гц (после 1.0).
+
+        Порядок: порт -> capability `software_trigger` (статична на жизнь порта, вызова порта нет) -> захват -> `call`.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        if "software_trigger" not in port.capabilities:
+            return {"success": False, "error": "нет capability software_trigger"}
+        ok, result = self._call_owner(lambda: port.execute(self.software_trigger_binding()))
+        self._ctx.log_info(f"CameraDevicePlugin: trigger_software ok={ok}")
+        return {"success": True} if ok else {"success": False, "error": result}
 
     def cmd_get_status(self, data: dict) -> dict:
         session = self._session
