@@ -33,6 +33,7 @@ class VfdDriver(BaseDeviceDriver):
 
     kind = "vfd"
     OP_SPECS = VFD_OPS  # описания операций _OPS (SPI хаба)
+    pause_action = ("stop", {})  # ОСТАНОВИТЬ: стоп ПЧ (ADR-DH-015)
     RECONNECT_THROTTLE_S = _VFD_RECONNECT_THROTTLE_SEC
 
     def __init__(

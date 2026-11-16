@@ -27,7 +27,7 @@ from Services.device_hub.spi import OpSpec
 
 KIND = "pausedev"
 JOIN_S = 8.0  # срок ожидания потока pause_all, с (с запасом поверх любого сценария ниже)
-MGR_LOGGER = "Services.device_hub.manager"
+MGR_LOGGER = "mpf.Services.device_hub.manager"
 
 OK_STOP = {"status": "ok", "op": "stop"}
 SOFT = ("stop", {"level": "SOFT"})
