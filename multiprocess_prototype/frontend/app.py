@@ -919,6 +919,7 @@ def run_gui(process: "GuiProcess") -> None:
     # после выхода всех детей, кроме gui и самого PM (PM отдаёт о себе alive: True).
     close_coordinator = _build_close_coordinator(app, process, window, command_sender, process_manager_proxy)
     window.set_close_coordinator(close_coordinator)
+    window.set_run_commands(process_manager_proxy)
 
     # Показать startup ошибки в StatusBar
     if not _report.ok:

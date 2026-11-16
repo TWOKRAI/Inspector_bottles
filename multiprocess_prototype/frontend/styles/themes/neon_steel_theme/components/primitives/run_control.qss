@@ -1,0 +1,30 @@
+/* === run_control.qss — Пульт запуска (RunControlWidget) === */
+
+/* --- Состояние системы (dynamic property level="neutral"|"ok"|"warn"|"danger") --- */
+QLabel#RunStateLabel {
+    font-weight: 700;
+    padding: 2px 8px;
+}
+QLabel#RunStateLabel[level="neutral"] {
+    color: @text_2;
+}
+QLabel#RunStateLabel[level="ok"] {
+    color: @success;
+}
+QLabel#RunStateLabel[level="warn"] {
+    color: @warn;
+}
+QLabel#RunStateLabel[level="danger"] {
+    color: @danger;
+}
+
+/* --- Причина, индикаторы, последняя авария --- */
+QLabel#RunDetailLabel {
+    color: @text_1;
+}
+QLabel#RunIndicatorsLabel {
+    color: @warn;
+}
+QLabel#RunFaultLabel {
+    color: @text_2;
+}

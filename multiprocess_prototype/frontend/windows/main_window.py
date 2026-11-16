@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..widgets.chrome.app_header import AppHeaderWidget
 from ..widgets.chrome.error_banner import ErrorBannerWidget
+from ..widgets.chrome.run_control import RunControlWidget
 from .config import MainWindowConfig
 
 if TYPE_CHECKING:
@@ -151,6 +152,10 @@ class MainWindow(QMainWindow):
         # 1.5. Баннер ошибок/предупреждений (скрыт по умолчанию)
         self._error_banner = ErrorBannerWidget()
         self._layout.addWidget(self._error_banner)
+
+        # 1.6. Пульт запуска (Task 2.3): состояние системы + ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать
+        self._run_control = RunControlWidget()
+        self._layout.addWidget(self._run_control)
 
         # 2. Image panel placeholder — будет заменён реальным ImagePanel
         self._image_panel_placeholder = QWidget()
@@ -290,6 +295,10 @@ class MainWindow(QMainWindow):
     def set_close_coordinator(self, coordinator) -> None:
         """Подключить координатор закрытия (Task 1.1): крестик ждёт остановки системы."""
         self._close_coordinator = coordinator
+
+    def set_run_commands(self, commands) -> None:
+        """Подключить команды запуска (ProcessManagerProxy) к пульту ЗАПУСТИТЬ/ОСТАНОВИТЬ."""
+        self._run_control.set_commands(commands)
 
     def closeEvent(self, event) -> None:
         """Закрытие окна.
@@ -627,7 +636,7 @@ class MainWindow(QMainWindow):
         Args:
             bindings: GuiStateBindings (принимает object для обратной совместимости).
         """
-        if bindings is None or not hasattr(bindings, "bind"):
+        if bindings is None or not hasattr(bindings, "bind") or not hasattr(bindings, "bind_fanout"):
             return
 
         bindings.bind(
@@ -662,6 +671,9 @@ class MainWindow(QMainWindow):
             self._error_banner,
             "show_warning",
         )
+
+        # Пульт запуска: шесть листьев system.run.* (last_fault приходит листом целиком).
+        bindings.bind_fanout("system.run.*", self._run_control.apply_leaf, owner=self._run_control)
 
     # -- Обратная совместимость (старый API) --
 

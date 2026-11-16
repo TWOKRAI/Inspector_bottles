@@ -16,6 +16,10 @@ GUI-редактор Pipeline менял топологию только in-memo
     start_process(name)     → cmd="process.start",   data={"process_name": ...}
     stop_process(name)      → cmd="process.stop",    data={"process_name": ...}
     shutdown_system()       → cmd="system.shutdown",  data={}
+    run_start_async(cb)     → cmd="system.run.start"   (Task 2.3, ЗАПУСТИТЬ)
+    run_stop_async(cb)      → cmd="system.run.stop"    (Task 2.3, ОСТАНОВИТЬ)
+    run_ack_async(cb)       → cmd="system.run.ack"     (Task 2.3, Квитировать)
+    run_status_async(cb)    → cmd="system.run.status"  (Task 2.3, затравка пульта)
 
 Backend-приёмник: ``CommandSender.send_system_command`` шлёт сообщение
 ``command="process.command"`` в процесс ``ProcessManager``, где
@@ -132,6 +136,22 @@ class ProcessManagerProxy:
     def stop_process_async(self, process_name: str, on_result: ResultCallback) -> None:
         """Остановить процесс с результатом в ``on_result``."""
         self._dispatch_async("process.stop", {"process_name": process_name}, on_result)
+
+    def run_start_async(self, on_result: ResultCallback) -> None:
+        """ЗАПУСТИТЬ систему (``system.run.start``) с результатом в ``on_result``."""
+        self._dispatch_async("system.run.start", {}, on_result)
+
+    def run_stop_async(self, on_result: ResultCallback) -> None:
+        """ОСТАНОВИТЬ систему (``system.run.stop``) с результатом в ``on_result``."""
+        self._dispatch_async("system.run.stop", {}, on_result)
+
+    def run_ack_async(self, on_result: ResultCallback) -> None:
+        """Квитировать аварию (``system.run.ack``) с результатом в ``on_result``."""
+        self._dispatch_async("system.run.ack", {}, on_result)
+
+    def run_status_async(self, on_result: ResultCallback) -> None:
+        """Запросить состояние запуска (``system.run.status``) с результатом в ``on_result``."""
+        self._dispatch_async("system.run.status", {}, on_result)
 
     # ------------------------------------------------------------------ #
     #  Внутреннее                                                         #
