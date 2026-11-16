@@ -1761,11 +1761,15 @@ class ProcessModulePlugin(ABC):
         if not ctx.command_manager:
             return
 
+        # Task 2.7d (ADR-PM-062): команды из ключа плагина ``run_locked_commands`` в ``running`` отказаны.
+        locked = self._run_locked_names(ctx)
         for cmd_name, method_name in self.commands.items():
             method = getattr(self, method_name, None)
             if method is None:
                 ctx.log_error(f"Plugin '{self.name}': команда '{cmd_name}' → метод '{method_name}' не найден")
                 continue
+            if cmd_name in locked:
+                method = self._run_guarded(ctx, method)
 
             options = self._command_registration_options(ctx, cmd_name)
             if not options:
@@ -1790,6 +1794,46 @@ class ProcessModulePlugin(ABC):
             already = bool(get_info("set_config")) if callable(get_info) else False
             if not already:
                 ctx.command_manager.register_command("set_config", self.cmd_set_config)
+
+    def _run_locked_names(self, ctx: PluginContext) -> frozenset[str]:
+        """Task 2.7d (ADR-PM-062): имена из ключа плагина ``run_locked_commands`` (``ctx.config``), годные к запрету.
+
+        Ключа нет -> пусто. Не список/кортеж строк -> одна строка ERROR, пусто (запрета нет). Имена вне
+        ``self.commands`` -> одна строка ERROR (не больше 5 имён, каждое до 40 символов, хвост ``(+N)``),
+        остальные берутся. Читается один раз — при регистрации команд.
+        """
+        # Двойники контекста без ``config`` (как заглушки менеджера команд ниже) — ключа нет.
+        raw = (getattr(ctx, "config", None) or {}).get("run_locked_commands")
+        if raw is None:
+            return frozenset()
+        if not isinstance(raw, (list, tuple)) or any(not isinstance(name, str) for name in raw):
+            ctx.log_error(f"Plugin '{self.name}': run_locked_commands негоден (нужен список имён команд) — запрета нет")
+            return frozenset()
+        names = frozenset(raw)
+        unknown = names - set(self.commands)
+        if unknown:
+            shown = [n[:40] for n in sorted(unknown)[:5]]
+            extra = len(unknown) - len(shown)
+            tail = f" (+{extra})" if extra else ""
+            ctx.log_error(f"Plugin '{self.name}': run_locked_commands — нет таких команд {shown}{tail}")
+        return names - unknown
+
+    @staticmethod
+    def _run_guarded(ctx: PluginContext, method: Callable) -> Callable:
+        """Task 2.7d (ADR-PM-062): обёртка запертой команды — флаг ``run_active`` читается в момент вызова.
+
+        Флаг — ``ctx.services._run_active`` (кладёт раннер; нет атрибута — запирать нечем, команда исполняется).
+        Взведён -> отказ литералом, метод не вызывается.
+        """
+
+        @functools.wraps(method)
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            flag = getattr(ctx.services, "_run_active", None)
+            if flag is not None and flag.is_set():
+                return {"status": "error", "error": "running", "message": "сначала ОСТАНОВИТЬ"}
+            return method(*args, **kwargs)
+
+        return guarded
 
     def command_options(self, command_name: str) -> Mapping[str, Any] | None:
         """Опции регистрации команды плагина в ``CommandManager`` (хук; умолчание — опций нет).

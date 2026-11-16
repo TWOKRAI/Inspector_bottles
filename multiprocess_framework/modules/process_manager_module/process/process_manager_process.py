@@ -178,6 +178,10 @@ class ProcessManagerProcess(ProcessModule):
     #: ``_run_apply`` под ``_run_lock``; ``_run_event`` — ``RunFlag`` (байт без межпроцессного замка,
     #: ADR-PMM-047), детям уходит через ``ProcessRegistry``.
     _run_event: Any = None
+    #: Task 2.7d (ADR-PMM-051): второй ``RunFlag`` — «``running`` и нет хода системного стопа», при любом
+    #: ``run_gate``; детям уходит путём ``run_event``. Пишет только ``_run_active_sync_locked`` под ``_run_lock``.
+    #: ``None`` — PM из ``__new__`` без ``_create_components()``: писать некуда.
+    _run_active: RunFlag | None = None
     _run_state: RunState = RunState.booting
     _run_gate: bool = False
     #: S3c (ADR-PMM-050): латч автостарта «взведён до первого ready»; решает только под ``_run_lock`` в
@@ -328,6 +332,8 @@ class ProcessManagerProcess(ProcessModule):
         self._run_event = RunFlag()
         if not self._run_gate:
             self._run_event.set()
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — снят до первого ``running``, при любом ``run_gate``.
+        self._run_active = RunFlag()
 
         self._process_registry = ProcessRegistry(
             logger=self,
@@ -346,6 +352,8 @@ class ProcessManagerProcess(ProcessModule):
             max_stop_window_s=self._stop_window_ceiling_s,
             # Task 1.1 system-run-state: событие работы детям на чтение (путь ADR-PMM-034).
             run_event=self._run_event,
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём.
+            run_active=self._run_active,
         )
         # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
         self._process_registry.stop_wait_idle = self._stop_wait_idle
@@ -777,9 +785,14 @@ class ProcessManagerProcess(ProcessModule):
             "deadline_at": started_at + window_s,
             "pre_stop_step": None,
         }
-        with self._system_stop_lock:
+        # Task 2.7d (ADR-PMM-051): единственная точка начала хода стопа — и единственное место, где признак стопа
+        # снимает флаг ``run_active``, каким бы путём стоп ни начинался (команда, ``supervision.status``, стоп детей
+        # корня). Порядок замков ``_run_lock`` -> ``_system_stop_lock``; флаг снимается ДО записи признака — ход
+        # стопа не опережает флаг (как состояние в ``_run_apply``). Вызывающий ``_run_lock`` не держит.
+        with self._run_lock, self._system_stop_lock:
             if self._system_stop_info is not None:
                 return False
+            self._run_active_sync_locked(self._run_state, stop_begun=True)
             self._system_stop_info = info
             return True
 
@@ -1042,7 +1055,11 @@ class ProcessManagerProcess(ProcessModule):
 
     @property
     def _run_lock(self) -> threading.Lock:
-        """Листовой замок машины работы: под ним только ``transition()`` и ``set()/clear()`` события."""
+        """Замок машины работы: под ним только ``transition()``, ``set()/clear()`` события и флага ``run_active``.
+
+        Единственный вложенный — листовой ``_system_stop_lock`` (признак хода стопа для ``run_active``, ADR-PMM-051):
+        порядок ``_run_lock`` -> ``_system_stop_lock``, обратного нет. ``_begin_system_stop`` берёт оба в этом порядке —
+        под ``_run_lock`` его не зовут."""
         return self.__dict__.setdefault("_run_lock_obj", threading.Lock())
 
     @property
@@ -1139,6 +1156,8 @@ class ProcessManagerProcess(ProcessModule):
                         run_event.set()
                     else:
                         run_event.clear()
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд — при любом ``run_gate``, тоже ДО записи состояния.
+            self._run_active_sync_locked(new)
             if new is not prev:
                 self._run_state = new
                 self._run_since = time.time()
@@ -1164,6 +1183,27 @@ class ProcessManagerProcess(ProcessModule):
             self._log_info("автостарт не нужен: линия уже в работе (already_running)")
             return
         self._log_warning(f"автостарт отказан: {error}")
+
+    def _run_active_sync_locked(self, state: RunState, *, stop_begun: bool | None = None) -> None:
+        """Task 2.7d (ADR-PMM-051): довести ``_run_active`` до «``state`` — ``running`` и нет хода системного стопа».
+
+        Единственная функция записи флага; зовётся ТОЛЬКО под ``_run_lock`` из двух точек записи источников:
+        ``_run_apply`` (состояние) и ``_begin_system_stop`` (ход стопа; признак не сбрасывается). ``stop_begun=None`` —
+        признак читается под листовым ``_system_stop_lock`` (порядок ``_run_lock`` -> ``_system_stop_lock``); явное
+        значение передаёт ``_begin_system_stop``, уже держащий ``_system_stop_lock`` (замок не реентерабелен). Своего
+        хранилища у флага нет: поздний такт или START после начала стопа его не взведут.
+        """
+        active = self._run_active
+        if active is None:
+            return
+        if stop_begun is None:
+            stop_begun = self._system_stop_snapshot() is not None
+        want = state is RunState.running and not stop_begun
+        if active.is_set() != want:
+            if want:
+                active.set()
+            else:
+                active.clear()
 
     def _run_snapshot(self) -> tuple[RunState, float]:
         """Пара ``(состояние, since)`` под ``_run_lock``."""
@@ -2317,6 +2357,8 @@ class ProcessManagerProcess(ProcessModule):
         """Проход graceful-shutdown из ``running``: шаги -> ``shutdown`` в машину (снимает событие) -> ждать
         ``paused`` -> события стопа (``finally``, как ``_run_pre_stop``). Не подтвердившие — WARNING: машина уходит."""
         try:
+            # Task 2.7d (ADR-PMM-051): флаг ``run_active`` снят уже в ``_begin_system_stop`` (до постановки прохода);
+            # шаги идут в ``running`` при снятом флаге и взведённом ``run_event`` (Task 1.4).
             if with_steps:
                 self._run_pre_stop_loop()
             self._run_apply("shutdown")

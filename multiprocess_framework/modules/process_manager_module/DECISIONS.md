@@ -2840,3 +2840,54 @@ headless (без GUI) нужен START без оператора. Цикл «ж�
 **Risk:** low — при умолчании (`run_autostart` нет или `false`) латч выключен, `observe` возвращает `False`.
 **Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф7, Ф8, Ф12, Ф14, DESIGN п.10–12а), `tests/test_run_autostart.py`,
 `tests/test_run_autostart_hazards.py`, ADR-PMM-049, ADR-PMM-044.
+
+## ADR-PMM-051: Флаг `run_active` — второй `RunFlag` PM «`running` и нет хода системного стопа» (Task 2.7d system-run-state, 2026-11-17)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Команду плагина, опасную на ходу линии (`release_device` камеры и т.п.), ребёнок должен отказать в
+`running`. `run_event` для этого не годится: при `run_gate` не true он взведён всегда, ребёнок не отличает `running` от
+`ready`. Все пути команды (GUI relay, `request_command`, `backend_ctl`) сходятся в `CommandManager` ребёнка — признак
+нужен там, а состояние знает только PM под `_run_lock`.
+
+### Решение
+
+1. `self._run_active = RunFlag()` в `_create_components()` рядом с `_run_event`, при любом `run_gate`; классовое
+   умолчание `None` (PM из `__new__` — писать некуда). Флаг — производная, своего хранилища нет:
+   `want = state is RunState.running and not stop_begun` (признак — `_system_stop_snapshot() is not None`).
+2. Пишет флаг **одна функция** `_run_active_sync_locked(state, *, stop_begun=None)`, только под `_run_lock`, из
+   **двух точек записи источников** (у каждого источника точка записи единственная):
+   - `_run_apply` (состояние) — после переключения `run_event`, до записи `_run_state` (состояние не опережает флаг),
+     без условия `run_gate`. В `stopping`, `fault`, `shutting_down` флаг снят: шаги `pre_stop` STOP оператора проходят.
+   - `_begin_system_stop` (ход стопа; признак `_system_stop_info` пишет только он, сброса нет) — под
+     `with self._run_lock, self._system_stop_lock:` флаг снимается ДО записи признака (`stop_begun=True`: второй раз
+     `_system_stop_lock` не берётся, замок не реентерабелен). Так флаг верен при любом пути начала стопа:
+     `system.shutdown` (graceful из `running` — флаг снят до постановки прохода, шаги идут в `running` при снятом флаге и
+     взведённом `run_event`, Task 1.4), `supervision.status` при событии стопа, взведённом снаружи (инициатор `event`),
+     стоп детей корня `_ChildrenStop.request_stop` (инициатор `event`). Перечислять пути не нужно.
+   Поздний такт или START, прошедшие проверку стопа вне замка до `_begin_system_stop`, идут через `_run_apply` и читают
+   признак уже под `_run_lock` — флаг обратно не взведут.
+3. **Порядок замков** `_run_lock` -> `_system_stop_lock`. `_system_stop_lock` листовой: в блоках
+   `with self._system_stop_lock:` других замков нет — обратного порядка нет. `_begin_system_stop` берёт оба в этом
+   порядке; под `_run_lock` его не зовут (в блоках `with self._run_lock:` — только переходы, флаги и `_system_stop_lock`).
+4. **Доставка** — путём `run_event`: `ProcessRegistry(..., run_active=)` -> kwargs `Process` ребёнка (каждое воплощение,
+   рестарт тоже) -> `run_process_function(..., run_active=)` -> атрибут `_run_active` экземпляра до `initialize()`.
+   `"run_active"` — в pop-фильтре bundle `custom` (ключ из рецепта не уедет в bundle). `None` (корневой PM от
+   spawner'а, реестр без флага) — атрибут не ставится. Читатель — обёртка ключа плагина `run_locked_commands`
+   (ADR-PM-062).
+5. **Принятое ограничение (TOCTOU у START).** Команда, начавшая исполнение до `set()` флага, исполняется во время
+   `running` — окно = время исполнения одной команды (флаг читается на исполнении, ожидание в очереди не в счёт). Исход
+   в окне — как до защиты: охраняемая команда исполнилась в `running`. `fault` после неё — только у узлов, чья
+   `readiness()` даёт причину (камера — после 2.2c). Закрытие требует замка, общего для PM и ребёнка, — новый
+   межпроцессный слой; на этапе 1 не закрываем.
+
+### Отвергнуто
+
+- Отличать `running` по `run_event`: при `run_gate` false он взведён с boot.
+- Список запрещённых команд в PM (`process.relay`): пути `request_command` и `backend_ctl` идут мимо `CommandManager` PM.
+- Гашение кнопок в GUI: только UX, `backend_ctl` и `request_command` не закрывает.
+- Свой атрибут «стоп начат» у флага: второе хранилище; признак хода стопа уже есть (`_system_stop_info`).
+
+**Reversible:** yes (убрать вызовы `_run_active_sync_locked` и kwarg `run_active`; без ключа плагина поведение прежнее).
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7d.md` (Ф3, Ф4, Ф8, DESIGN п.1, 2, 5), ADR-PM-062, ADR-PMM-047,
+`process_module/tests/test_run_locked_commands.py`, `tests/test_run_active_flag_hazards.py`.

@@ -4377,3 +4377,35 @@ Free-threaded Python — пересмотреть.
 **Reversible:** yes (вернуть прямой импорт в `heartbeat/__init__.py` и ленивый в `run()`).
 **Refs:** `plans/framework-heartbeat-import-race/plan.md`, `process_module/core/process_module.py`,
 `process_module/heartbeat/__init__.py`, `tests/test_heartbeat_import_race.py`.
+
+### ADR-PM-062 — Ключ плагина `run_locked_commands`: команды плагина отказаны, пока система в `running` (2026-11-17, Task 2.7d system-run-state)
+
+**Статус:** принято. **Слой:** framework (`process_module/plugins/base.py`).
+
+- *Место ключа — `config` плагина, не узел.* Пример:
+  `plugins: [{plugin_name: camera_device, config: {run_locked_commands: [release_device]}}]`; плоская форма в элементе
+  `plugins` — тот же ключ (`_extract_plugin_config` сводит обе к `ctx.config`). Ключ на уровне узла (рядом с `plugins:`)
+  в `ctx.config` не попадает и **молча игнорируется** (ни ERROR, ни WARNING).
+- *Чтение.* `_run_locked_names(ctx)` — один раз в `_auto_register_commands`, до регистрации команд; смена ключа без
+  пересборки узла не действует. Нет ключа -> запрета нет (умолчание «открыто»). Не список/кортеж строк -> одна строка
+  ERROR `Plugin '<имя>': run_locked_commands негоден (нужен список имён команд) — запрета нет`, запрета нет. Имена вне
+  `self.commands` -> одна строка ERROR `Plugin '<имя>': run_locked_commands — нет таких команд [...]` (не больше 5
+  имён по алфавиту, каждое до 40 символов, хвост ` (+N)`); остальные имена берутся.
+- *Обёртка.* Имя из списка регистрируется `_run_guarded(ctx, method)` (`functools.wraps`, тот же вызов
+  `register_command` / `_register_command_with_options`, опции хука `command_options` сохраняются). Флаг
+  `getattr(ctx.services, "_run_active", None)` (ADR-PMM-051) читается **в момент вызова** — для команды с исполнителем
+  на его потоке. Взведён -> ответ `{"status": "error", "error": "running", "message": "сначала ОСТАНОВИТЬ"}`, метод не
+  вызывается. Атрибута нет -> команда исполняется. Команды вне списка регистрируются как раньше. Флаг верен при
+  любом пути начала системного стопа: у PM у каждого источника флага одна точка записи (ADR-PMM-051 п.2).
+- *Форма отказа по путям.* GUI `request_command` и `backend_ctl`: конверт `reply_to_request`
+  `{"success": False, "result": {"status": "error", "error": "running", ...}}` (`_result_is_success`: `status == "error"`).
+  Relay (кнопка GUI, fire-and-forget): PM отвечает GUI `{"success": True, "target_process": ...}` до исполнения; отказ
+  виден только WARNING `Command '<имя>' failed: running` в журнале ребёнка.
+- *Не закрыто.* Правки регистров (`register_update`, `set_config`) запрет по имени команды не закрывает — нужен признак
+  на `FieldMeta` (отдельная задача). Проверка ключа до запуска (валидатор рецепта) — вне объёма.
+- *Отвергнуто.* Ключ на уровне узла: не доходит до плагина, политика команд — у владельца команд. Объявление по
+  умолчанию в классе плагина — после 1.0. Обёртка на каждую команду: лишняя проверка на пути всех команд.
+
+**Reversible:** yes (убрать `_run_locked_names`/`_run_guarded` из `_auto_register_commands`; без ключа поведение прежнее).
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7d.md` (Ф6, Ф9, DESIGN п.3, 4, 6), ADR-PMM-051,
+`tests/test_run_locked_commands.py`.
