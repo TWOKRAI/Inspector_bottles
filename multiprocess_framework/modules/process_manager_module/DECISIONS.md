@@ -2536,7 +2536,7 @@ GUI получал `terminate` в окне PM, пока PM ждал зависш
 `tests/test_c88_status_linger_hazards.py`, `backend_ctl/tests/test_c88_shutdown_outcomes_acceptance.py`.
 
 
-## ADR-PMM-046: `run_event` — `RunFlag` (байт в разделяемой памяти без межпроцессного замка) вместо `multiprocessing.Event` (Task 1.10 system-run-state, F3, 2026-11-15)
+## ADR-PMM-047: `run_event` — `RunFlag` (байт в разделяемой памяти без межпроцессного замка) вместо `multiprocessing.Event` (Task 1.10 system-run-state, F3, 2026-11-15)
 
 **Статус:** принято. **Слой:** framework (`process_manager_module`).
 

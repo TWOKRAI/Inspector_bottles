@@ -173,7 +173,7 @@ class ProcessManagerProcess(ProcessModule):
     #: Task 1.1 system-run-state: состояние работы системы и событие ``run_event``. Уровень класса — PM из
     #: ``__new__`` (``make_pm``) отвечает и пишет машину без ``_create_components()``. Пишет только
     #: ``_run_apply`` под ``_run_lock``; ``_run_event`` — ``RunFlag`` (байт без межпроцессного замка,
-    #: ADR-PMM-046), детям уходит через ``ProcessRegistry``.
+    #: ADR-PMM-047), детям уходит через ``ProcessRegistry``.
     _run_event: Any = None
     _run_state: RunState = RunState.booting
     _run_gate: bool = False
@@ -308,7 +308,7 @@ class ProcessManagerProcess(ProcessModule):
         self._run_state = RunState.booting
         self._run_since = time.time()
         self._run_ready = True
-        # Task 1.10 (ADR-PMM-046): ``RunFlag``, не ``mp.Event`` — у того каждое обращение берёт межпроцессный замок,
+        # Task 1.10 (ADR-PMM-047): ``RunFlag``, не ``mp.Event`` — у того каждое обращение берёт межпроцессный замок,
         # а ребёнок, убитый внутри ``is_set()``, держит его вечно и вешает PM под ``_run_lock`` (F3 ревью Ф1).
         self._run_event = RunFlag()
         if not self._run_gate:
@@ -1106,7 +1106,7 @@ class ProcessManagerProcess(ProcessModule):
                     "acknowledged_at": None,
                 }
             # Событие переключаем ДО записи состояния: состояние не опережает событие (ревью стадии 5, N1).
-            # ``RunFlag`` (ADR-PMM-046) не блокируется и не бросает.
+            # ``RunFlag`` (ADR-PMM-047) не блокируется и не бросает.
             run_event = self._run_event
             holding = new is RunState.stopping and self._run_stop_hold
             if self._run_gate and run_event is not None and not holding:
