@@ -49,6 +49,13 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--port", type=int, default=8775, help="порт backend_ctl стенда (по умолчанию %(default)s)")
     ap.add_argument("--out", default="reports/bench", help="каталог отчёта (по умолчанию %(default)s)")
     ap.add_argument(
+        "--run-gate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="гейт запуска включён, замер идёт после system.run.start (умолчание вкл). "
+        "--no-run-gate — для A/B с --baseline на коммите ДО Task 2.1 (там у harness нет run_gate/start_run)",
+    )
+    ap.add_argument(
         "--dry-run", action="store_true", help="паспорт, самопроверка, список кейсов, отчёт; стенд не поднимается"
     )
     return ap
@@ -129,7 +136,7 @@ def run_tests(repo: Path) -> dict:
     return {"rc": rc, "passed": passed, "failed": failed, "duration_s": round(time.perf_counter() - t0, 1)}
 
 
-def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int) -> dict:
+def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int, run_gate: bool = True) -> dict:
     """Один кейс на одном дереве: рендер рецепта -> `run_case.py` в чужом cwd -> JSON."""
     with tempfile.TemporaryDirectory(prefix="bench_case_", ignore_cleanup_errors=True) as tmp:
         recipe = render_recipe(height, fps, Path(tmp))
@@ -146,6 +153,7 @@ def run_one(tree: Path, label: str, height: int, fps: int, secs: int, port: int)
                 str(port),
                 "--out",
                 str(out),
+                "--run-gate" if run_gate else "--no-run-gate",
             ],
             cwd=tree,
             env=dict(os.environ, PYTHONPATH=str(tree), PYTHONIOENCODING="utf-8"),
@@ -182,13 +190,13 @@ def _baseline_worktree(sha: str | None):
                 subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True, timeout=120)
 
 
-def run_matrix(profile: str, baseline: str | None, port: int, cases_out: list) -> None:
+def run_matrix(profile: str, baseline: str | None, port: int, cases_out: list, run_gate: bool = True) -> None:
     """Дописывает результаты в `cases_out` по мере готовности: упавший кейс не теряет прежние."""
     with _baseline_worktree(baseline) as base_tree:
         for height, fps, secs in matrix.cases(profile):
             if base_tree is not None:
-                cases_out.append(run_one(base_tree, "baseline", height, fps, secs, port))
-            cases_out.append(run_one(REPO, "candidate", height, fps, secs, port))
+                cases_out.append(run_one(base_tree, "baseline", height, fps, secs, port, run_gate))
+            cases_out.append(run_one(REPO, "candidate", height, fps, secs, port, run_gate))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,12 +208,13 @@ def main(argv: list[str] | None = None) -> int:
         "selfcheck": clock_selfcheck(),
         "tests": run_tests(REPO) if args.tests else None,
         "profile": args.profile,
+        "run_gate": args.run_gate,
         "cases": [],
     }
     rc = 0
     if not args.dry_run:
         try:
-            run_matrix(args.profile, args.baseline, args.port, result["cases"])
+            run_matrix(args.profile, args.baseline, args.port, result["cases"], args.run_gate)
         except Exception as exc:  # noqa: BLE001 — отчёт пишется всегда, ошибка уходит в rc и stderr
             print(f"capacity_bench: замер прерван: {exc}", file=sys.stderr)
             rc = 1

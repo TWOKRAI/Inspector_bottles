@@ -307,6 +307,7 @@ blueprint:
           category: source
           config:
             panel_id: pult
+            run_gated: false
             controls:
               # Режим робота (выпадающий список) — первым. action → device_hub
               # robot_set_mode. cvt/draw управляются автоматически (драйвер сам

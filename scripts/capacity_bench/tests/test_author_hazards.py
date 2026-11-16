@@ -85,7 +85,7 @@ def test_baseline_runs_before_candidate_per_case(monkeypatch):
 
 
 def test_main_writes_report_with_finished_cases_when_matrix_fails(monkeypatch, tmp_path):
-    def broken_matrix(profile, baseline, port, cases_out):
+    def broken_matrix(profile, baseline, port, cases_out, run_gate=True):
         cases_out.append({"height": 480, "fps": 25, "secs": 30, "sha": "x", "tree": "candidate"})
         raise RuntimeError("второй кейс упал")
 

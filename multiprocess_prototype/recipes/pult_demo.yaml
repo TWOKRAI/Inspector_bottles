@@ -41,6 +41,7 @@ blueprint:
           plugin_name: control_panel
           category: source
           panel_id: pult
+          run_gated: false
           controls:
             - {id: start, type: button, label: "Старт", port: out_1, trigger_value: true}
             - {id: light, type: toggle, label: "Свет", port: out_2}

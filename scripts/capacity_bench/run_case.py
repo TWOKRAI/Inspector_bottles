@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -68,15 +69,21 @@ def _fields(drv, name: str) -> dict:
     return fields.extract_fields(_dig(drv.introspect_telemetry(name), "levels") or {})
 
 
-def run(recipe: str, secs: float, port: int) -> dict:
+def run(recipe: str, secs: float, port: int, run_gate: bool = True) -> dict:
     from backend_ctl.harness import BackendHarness, _find_payload
 
     names = _recipe_processes(recipe)
     probes: dict[str, cpu_probe.ProcessCpu] = {}
     with tempfile.TemporaryDirectory(prefix="bench_logs_", ignore_cleanup_errors=True) as log_dir:
-        h = BackendHarness(recipe=recipe, port=port, ready_timeout=90, log_dir=log_dir)
+        # Без гейта kwargs не передаём вовсе: baseline-дерево A/B может быть старше Task 2.1 (у его
+        # BackendHarness нет run_gate), а умолчание harness там и так «без гейта».
+        gate_kwargs: dict[str, Any] = {"run_gate": True} if run_gate else {}
+        h = BackendHarness(recipe=recipe, port=port, ready_timeout=90, log_dir=log_dir, **gate_kwargs)
         drv = h.start()
         try:
+            if run_gate:
+                # Гейт включён: после boot система в «готов»; замер (прогрев и окно CPU) идёт ПОСЛЕ START.
+                h.start_run()
             time.sleep(WARMUP_S)
             pids = _pids(drv, names, _find_payload)
             probes = {name: cpu_probe.ProcessCpu(pid) for name, pid in pids.items()}
@@ -119,8 +126,9 @@ def main() -> int:
     ap.add_argument("--secs", type=float, required=True)
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--run-gate", action=argparse.BooleanOptionalAction, default=True)
     args = ap.parse_args()
-    result = run(args.recipe, args.secs, args.port)
+    result = run(args.recipe, args.secs, args.port, args.run_gate)
     Path(args.out).write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     print("run_case: total_ext_cores", result["total_ext_cores"], flush=True)
     return 0
