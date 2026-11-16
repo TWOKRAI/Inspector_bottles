@@ -119,6 +119,8 @@ def test_старт_прерван_стопом(rig):
     assert _names(port) == OPEN_THEN_CLOSE
     _await(lambda: session.state == "closed", "state == closed")
     assert session.device_held is False
+    # `on_state` зовётся ПОСЛЕ замка, когда `state` уже closed: истина — свойство, список событий догоняет
+    _await(lambda: len(rig.states) == 3, "колбэк stopping->closed доставлен")
     assert rig.states == [("idle", "opening"), ("opening", "stopping"), ("stopping", "closed")]
 
 

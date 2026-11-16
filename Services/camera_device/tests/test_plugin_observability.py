@@ -349,13 +349,14 @@ def test_профиль_при_отказе_открытия_не_rest_а_при
     busy = make(port=make_port(busy_for_s=60.0))
     assert busy.take()["device_state"] == "busy"
     busy.plugin.cmd_release_device({})
-    assert busy.proxy.merged("state")[-1] == "closed"
+    # событие приходит из колбэка сеанса уже ПОСЛЕ возврата команды: читать дерево надо с ожиданием
+    assert _until(lambda: busy.proxy.merged("state")[-1:] == ["closed"]), busy.proxy.merged("state")
     assert busy.proxy.merged("profile")[-1] is None, "rest в прибор не писался"
     good = make()
     assert good.take()["status"] == "ok"
-    assert good.proxy.merged("profile")[-1] == "run"
+    assert _until(lambda: good.proxy.merged("profile")[-1:] == ["run"]), good.proxy.merged("profile")
     good.plugin.cmd_release_device({})
-    assert good.proxy.merged("profile")[-1] == "rest"
+    assert _until(lambda: good.proxy.merged("profile")[-1:] == ["rest"]), good.proxy.merged("profile")
 
 
 def test_настоящий_StateProxy_ушедший_ключ_снят_из_дерева(make):
