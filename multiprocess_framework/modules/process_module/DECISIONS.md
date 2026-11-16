@@ -4368,7 +4368,9 @@ Free-threaded Python — пересмотреть.
   `from ...heartbeat import telemetry`). `__all__` прежний; для анализаторов — импорт под `TYPE_CHECKING`. Поток,
   импортирующий подмодуль пакета, цепочку `process_heartbeat` больше не запускает.
 - *Побочный эффект.* `declare_metric("shm" | "cpu" | "plugin_ms")` из `process_heartbeat.py` теперь исполняется при
-  импорте `core.process_module`, а не при первом `run()`.
+  импорте `core.process_module`, а не при первом `run()`; в том числе при голом `import multiprocess_framework`
+  (`multiprocess_framework/__init__.py:90` лениво берёт `ProcessModule`), то есть и в GUI-процессе. Каталог метрик пополняется
+  раньше, не иначе: повторное `declare_metric` с тем же именем — no-op.
 - *Отвергнуто.* Правка `builtin_commands.py` (обход в вызывающем коде, а не причина) и блокировка импорта в `run()`
   (лечит один из двух входов).
 
