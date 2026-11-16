@@ -60,11 +60,14 @@ class _Svc:
         self.errors: list[str] = []
         self.debug: list[str] = []
         self.fail: Exception | None = None
+        self.deliver = True
         self._config: dict[str, Any] = {"heartbeat_interval": 30.0}
 
     def send_message(self, target: str, message: dict) -> bool:
         if self.fail is not None:
             raise self.fail
+        if not self.deliver:
+            return False  # недоставка без исключения: так отвечает реальный send_to_process
         self.sent.append(message)
         return True
 
@@ -348,6 +351,57 @@ def test_h5_failed_regular_heartbeat_does_not_mark_change_as_sent() -> None:
     assert _push(hb) is True
 
     assert _readys(svc) == [True, False]
+
+
+def test_h5b_undelivered_push_does_not_mark_change_as_sent() -> None:
+    """``send_message`` вернул ``False`` (недоставка без исключения): push -> ``False``, подпись не записана; после
+    восстановления доставки смена повторяется (после антидребезга), а не теряется."""
+    svc = _Svc(_snap(ready=True))
+    hb = _started(svc)
+    _regular(hb)
+    sig_before = hb._last_sent_sig
+    svc._readiness_snapshot = _snap(ready=False, reasons=_BASE_REASONS)
+    svc.deliver = False
+
+    assert _push(hb) is False
+    assert hb._last_sent_sig == sig_before, "недоставленная смена помечена ушедшей"
+    svc.deliver = True
+    time.sleep(_GAP_S)
+
+    assert _push(hb) is True
+    assert _readys(svc) == [True, False]
+
+
+def test_h5b_undelivery_is_logged_once_per_series_without_values() -> None:
+    """Серия недоставок: ERROR один раз (только факт, без значений причин); после доставки серия закрыта."""
+    svc = _Svc(_snap(ready=True))
+    hb = _started(svc)
+    _regular(hb)
+    svc._readiness_snapshot = _snap(ready=False, reasons=[_reason("SECRET_NODE", text="SECRET_TEXT")])
+    svc.deliver = False
+    results = []
+    for _ in range(3):
+        results.append(_push(hb))
+        time.sleep(_GAP_S)
+
+    assert results == [False] * 3
+    assert len(svc.errors) == 1, svc.errors
+    assert "SECRET" not in svc.errors[0], svc.errors[0]
+    svc.deliver = True
+    assert _push(hb) is True
+    assert len(svc.errors) == 1
+
+
+def test_h5b_regular_path_ignores_undelivery_otherwise_unchanged() -> None:
+    """Регулярный heartbeat при недоставке не бросает и не логирует ERROR (поведение прежнее), подпись не пишет."""
+    svc = _Svc(_snap(ready=True))
+    hb = _started(svc)
+    svc.deliver = False
+
+    _regular(hb)
+
+    assert hb._last_sent_sig is None
+    assert svc.errors == []
 
 
 # --------------------------------------------------------------------------- #

@@ -14,6 +14,8 @@ from .cpu_clock import CpuClock
 
 #: Task 1.2c: не чаще одного внеочередного heartbeat за это время, сек (антидребезг ~2 в секунду).
 _PUSH_MIN_INTERVAL_SEC = 0.5
+#: Ключ серии лога недоставки внеочередного heartbeat (``send_message`` вернул ``False``): не имя исключения.
+_UNDELIVERED = "undelivered"
 
 if TYPE_CHECKING:
     pass
@@ -402,7 +404,8 @@ class ProcessHeartbeat:
         антидребезга (``_PUSH_MIN_INTERVAL_SEC``) — ``False``; подавленная смена не теряется: сравнение с УШЕДШЕЙ
         подписью повторится на следующем пересчёте, и итог уйдёт после затишья. Сообщение — тот же формат, что у
         регулярного (:meth:`_send_heartbeat_locked`); побочные хозяйственные дела такта (телеметрия, health,
-        GC-накачка) остаются на регулярном такте. Сбой отправки или расчёта подписи не бросает: лог ERROR один раз
+        GC-накачка) остаются на регулярном такте. Недоставка (``send_message`` -> ``False``) подпись не записывает:
+        смена повторится после антидребезга. Сбой отправки или расчёта подписи не бросает: лог ERROR один раз
         на серию (ключ — тип исключения; сбой расчёта — только тип, без значений причин), повтор — следующим
         пересчётом.
         """
@@ -428,13 +431,18 @@ class ProcessHeartbeat:
                 return False
             self._last_push_at = now
             try:
-                self._send_heartbeat_locked(self._collect_workers())
+                delivered = self._send_heartbeat_locked(self._collect_workers())
             except Exception as exc:  # noqa: BLE001 — сбой внеочередной отправки не роняет воркер снимка
                 if self._push_error_type != type(exc).__name__:
                     self._push_error_type = type(exc).__name__
                     self._services.log_error(
                         f"heartbeat: внеочередная отправка при смене готовности не удалась: {type(exc).__name__}: {exc}"
                     )
+                return False
+            if not delivered:
+                if self._push_error_type != _UNDELIVERED:
+                    self._push_error_type = _UNDELIVERED
+                    self._services.log_error("heartbeat: внеочередное сообщение при смене готовности не доставлено")
                 return False
             self._push_error_type = None
             return True
@@ -444,8 +452,12 @@ class ProcessHeartbeat:
         with self._send_lock:
             self._send_heartbeat_locked(workers)
 
-    def _send_heartbeat_locked(self, workers: dict) -> None:
+    def _send_heartbeat_locked(self, workers: dict) -> bool:
         """Тело отправки; зовущий держит ``_send_lock`` (регулярный путь и внеочередной — один замок).
+
+        ``False`` — ``send_message`` сообщил о недоставке (реальный ``send_to_process`` глотает исключения и
+        возвращает ``False``): подпись в этом случае НЕ записывается, смена не считается ушедшей. Любой другой
+        результат (``True``, ``None``) — доставлено. Регулярный путь результат не использует.
 
         Тайминг цикла (``effective_hz`` / ``cycle_duration_ms``) подмешан на ВЕРХНИЙ
         уровень статуса воркера (не внутри ``metrics``) и сохраняется; вложенный
@@ -486,9 +498,10 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — сбой копии снимка не роняет heartbeat
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"heartbeat: снимок готовности не прочитан: {type(exc).__name__}", module="heartbeat")
-        self._services.send_message("ProcessManager", heartbeat_msg)
-        if sent_sig is not None:
+        delivered = self._services.send_message("ProcessManager", heartbeat_msg) is not False
+        if delivered and sent_sig is not None:
             self._last_sent_sig = sent_sig
+        return delivered
 
     def _warn_capped_metrics(self, config: Any) -> None:
         """Залогировать WARNING по метрикам, чья частота ограничена телеметрийным тиком.

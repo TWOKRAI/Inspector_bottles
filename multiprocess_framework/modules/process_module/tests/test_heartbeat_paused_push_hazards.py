@@ -223,7 +223,7 @@ def test_disabled_heartbeat_does_not_push() -> None:
     svc._config["heartbeat_interval"] = 0
     hb = ProcessHeartbeat(svc)  # type: ignore[arg-type]
     hb.start()
-    hb._last_sent_paused = False  # как если бы регулярный уже уходил
+    hb._last_sent_sig = (False, True, frozenset())  # как если бы регулярный уже уходил
     svc.set_paused(True)
 
     assert hb.push_if_changed() is False
@@ -317,7 +317,7 @@ def _real_process(delay: float):
         end = time.monotonic() + 5.0
         while time.monotonic() < end and not (SHARED["proc"]._readiness_snapshot or {}).get("ready"):
             time.sleep(0.02)
-        time.sleep(1.0 + delay)  # стартовый heartbeat ушёл: ``_last_sent_paused`` известен
+        time.sleep(1.0 + delay)  # стартовый heartbeat ушёл: ``_last_sent_sig`` известен
         yield event, out, stop, thread
     finally:
         SHARED["delay"] = 0.0
