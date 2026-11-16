@@ -1047,9 +1047,10 @@ class ProcessManagerProcess(ProcessModule):
     ) -> tuple[RunState, str | None, RunState]:
         """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
 
-        ``ready=None`` — последний результат ``tick`` (``_run_ready``); ``tick`` обновляет ``_run_ready``
-        независимо от смены состояния. При ``run_gate`` true в том же замке событие доводится до
-        ``is_set() == (state == running)``; при false событие не трогается никогда. После замка —
+        ``ready=None`` — последняя принятая оценка (``_run_ready``); ``tick`` обновляет ``_run_ready``
+        независимо от смены состояния, ``settled``/``ack`` — только когда событие сменило состояние
+        (``start`` и отказанные команды ``_run_ready`` не трогают). При ``run_gate`` true в том же замке событие
+        доводится до ``is_set() == (state == running)``; при false событие не трогается никогда. После замка —
         ``_publish_run_state()``.
 
         ``reasons`` (Task 1.3) — результат ``evaluate``, считанный ВНЕ замка: ``None`` — причины не
@@ -1080,7 +1081,10 @@ class ProcessManagerProcess(ProcessModule):
             if stop_done is None:
                 stop_done = self._fault_stop_done
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
-            if event == "tick":
+            # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``, РЕАЛЬНО сменившие
+            # состояние (no-op ``settled`` и отказанная команда его не трогают); иначе одиночный сбойный такт
+            # после ``settled``/``ack`` брал бы устаревший ``False`` и переводил ``running`` в ``fault``.
+            if event == "tick" or (event in ("settled", "ack") and new is not prev):
                 self._run_ready = ready
             # Отказ команды, не сменивший состояние (``already_running``, ``fault_unacknowledged``...), причины своей
             # оценки в статус не пишет: статус отражает последний такт, а не оценку по порогу допуска (C10).
@@ -1202,14 +1206,14 @@ class ProcessManagerProcess(ProcessModule):
 
         Интервал — наибольший из положительных ключей конфига PM ``heartbeat_interval`` (загрузочный,
         его читает ``ProcessHeartbeat.start``) и ``heartbeat_interval_sec`` (рантайм-правка): большее
-        значение даёт меньше ложных ``fault``. Негодные/нулевые значения не учитываются; ни одного —
-        умолчание 5.0 с.
+        значение даёт меньше ложных ``fault``. Негодные/нулевые значения и сбой чтения конфига не
+        учитываются (не бросает); ни одного — умолчание 5.0 с.
         """
         candidates: list[float] = []
         for key in ("heartbeat_interval", "heartbeat_interval_sec"):
             try:
                 value = float(self.get_config(key) or 0.0)
-            except (TypeError, ValueError):
+            except Exception:  # noqa: BLE001 — сбой чтения конфига не роняет оценку: ключ не учитывается
                 continue
             if math.isfinite(value) and value > 0.0:
                 candidates.append(value)
@@ -1421,15 +1425,17 @@ class ProcessManagerProcess(ProcessModule):
         ready, reasons = self._evaluate_or_fail()
         self._run_apply("settled", ready=ready, reasons=reasons)
 
-    def _evaluate_or_fail(self) -> tuple[bool, list[dict]]:
-        """Оценка готовности для итога ``settled``, которая не бросает (свежее ревью Ф1, F2 / совет С1).
+    def _evaluate_or_fail(self, *, admission: bool = False) -> tuple[bool, list[dict]]:
+        """Оценка готовности для ``settled``, START и ``ack``, которая не бросает (свежее ревью Ф1, F2 / совет С1).
 
         У ``booting`` и ``stopping`` выход — только ``settled``: исключение оценки оставило бы машину там навсегда
-        (START -> ``not_ready`` без причин). Сбой — ERROR с типом исключения и итог «не готов» с причиной
-        ``failure`` / ``report`` «оценка готовности не удалась» (узел — PM); следующий такт оценивает заново.
+        (START -> ``not_ready`` без причин). START и ``ack`` не бросают тоже: исключение ушло бы в диспетчер
+        командой-ошибкой с текстом исключения. Сбой — ERROR с типом исключения (текста исключения нет ни в логе,
+        ни в ответе) и итог «не готов» с причиной ``failure`` / ``report`` «оценка готовности не удалась» (узел —
+        PM); следующий такт оценивает заново. ``admission`` уходит в оценку только ключом (порог допуска команды).
         """
         try:
-            return self._evaluate_run_readiness()
+            return self._evaluate_run_readiness(admission=admission)
         except Exception as exc:  # noqa: BLE001 — итог машины не имеет права не случиться
             self._log_error(f"readiness: оценка готовности не удалась ({type(exc).__name__})")
             reason = {
@@ -1844,11 +1850,13 @@ class ProcessManagerProcess(ProcessModule):
         событие не взводится (подачу ``shutdown`` в машину добавляет Task 1.4). Иначе готовность
         оценивается заново (Task 1.3, вне замка машины): из ``ready`` при потере готовности START даёт
         отказ ``not_ready`` с причинами; в ``fault`` — ``fault_unacknowledged`` с причинами ``last_fault``.
+        Не бросает и при сбое оценки: сбой даёт ``ready=False`` с причиной ``failure`` (``_evaluate_or_fail``),
+        из ``ready`` это отказ ``not_ready``, из прочих состояний — обычный отказ машины.
         """
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             state, _since = self._run_snapshot()
             return {"success": False, "state": state.value, "error": "shutting_down", "reasons": []}
-        ready, reasons = self._evaluate_run_readiness(admission=True)
+        ready, reasons = self._evaluate_or_fail(admission=True)
         new, code, _prev = self._run_apply("start", ready=ready, reasons=reasons)
         if code is None:
             return {"success": True, "state": new.value}
@@ -1863,11 +1871,13 @@ class ProcessManagerProcess(ProcessModule):
         машины); остановка не завершена — отказ ``fault_stopping``; вне ``fault`` — ``no_fault``; пока PM гасится
         или идёт системный стоп — ``shutting_down``. ``last_fault`` остаётся (с ``acknowledged_at``) до
         успешного START. Признак остановки читает ``_run_apply`` под ``_run_lock`` — не отдельно от записи.
+        Не бросает и при сбое оценки: сбой даёт ``ready=False`` с причиной ``failure`` (``_evaluate_or_fail``),
+        ``ack`` из ``fault`` с завершённой остановкой принимается и ведёт в ``not_ready``; следующий такт оценит заново.
         """
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             state, _since = self._run_snapshot()
             return {"success": False, "state": state.value, "error": "shutting_down"}
-        ready, reasons = self._evaluate_run_readiness(admission=True)
+        ready, reasons = self._evaluate_or_fail(admission=True)
         new, code, _prev = self._run_apply("ack", ready=ready, reasons=reasons)
         return {"success": code is None, "state": new.value, "error": code}
 
