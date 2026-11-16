@@ -19,10 +19,13 @@ from multiprocess_framework.modules.process_module.health import get_or_create_h
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.registers_module import RegistersManager
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+from multiprocess_framework.modules.state_store_module.proxy.state_proxy import StateProxy
 from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device import plugin_base
 from Services.camera_device.plugin_base import CameraDevicePlugin
 from Services.camera_device.registers_base import CameraDeviceRegisters
+from Services.camera_device.testing import fake_port
 from Services.camera_device.testing.fake_port import make_port
 
 pytestmark = pytest.mark.timeout(60)
@@ -35,14 +38,15 @@ _NOISE = frozenset({"get_frame", "describe_param"})
 class _Rig:
     """Настоящий плагин + `RegistersManager` + `PluginOrchestrator` (обработчик `register_update`) + фейк порта."""
 
-    def __init__(self, monkeypatch, port) -> None:
+    def __init__(self, monkeypatch, port, cfg: dict | None = None) -> None:
         self.port = port
+        cfg = {**CFG, **(cfg or {})}
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: port)
-        self.services = MockProcessServices(name="cam_wire", config=CFG)
+        self.services = MockProcessServices(name="cam_wire", config=cfg)
         self.wm = WorkerManager("test_cam_wire")
         self.services.worker_manager = self.wm
         self.rm = RegistersManager(registers={REG: CameraDeviceRegisters()})
-        self.ctx = PluginContext(services=self.services, config=CFG, registers=self.rm, plugin_name=REG)
+        self.ctx = PluginContext(services=self.services, config=cfg, registers=self.rm, plugin_name=REG)
         self.orch = PluginOrchestrator(self.services)
         self.orch._registers_manager = self.rm
         self.plugin = CameraDevicePlugin()
@@ -76,8 +80,8 @@ class _Rig:
 def make(monkeypatch):
     built: list[_Rig] = []
 
-    def factory(port=None) -> _Rig:
-        rig = _Rig(monkeypatch, port if port is not None else make_port(frame_period_s=0.02))
+    def factory(port=None, **cfg) -> _Rig:
+        rig = _Rig(monkeypatch, port if port is not None else make_port(frame_period_s=0.02), cfg)
         built.append(rig)
         return rig
 
@@ -200,3 +204,123 @@ def test_после_повторного_configure_и_shutdown_не_остаёт
 
     time.sleep(0.4)
     assert rig.journal(base) == [], "подписка первого configure пережила shutdown"
+
+
+# --- Дополнение по ревью Opus 2.4 (раунд 1) ---
+
+SELF_TRIGGER = {"trigger_managed": True, "trigger_mode": "On", "trigger_source": "SelfTrigger", "trigger_period_ms": 77}
+SOFTWARE = {**SELF_TRIGGER, "trigger_source": "Software", "trigger_period_ms": 55}
+NO_REGRAB = fake_port.ALL_CAPABILITIES - {"restart_regrab"}
+
+
+def _index_of(port, start: int, name: str) -> int | None:
+    for i in range(start, len(port.calls)):
+        if port.calls[i][0] == name:
+            return i
+    return None
+
+
+def _edit_and_settle(rig: _Rig, field: str, value) -> int:
+    """Правка как из GUI и ожидание перезахвата до `start_grabbing`; возвращает индекс начала окна журнала."""
+    base = len(rig.port.calls)
+    ok, err = rig.rm.set_field_value(REG, field, value)
+    assert ok, err
+    _wait(lambda: _index_of(rig.port, base, "start_grabbing") is not None, "перезахват дошёл до start_grabbing")
+    time.sleep(0.2)
+    return base
+
+
+def _sets(rig: _Rig, base: int) -> list[tuple]:
+    return [args for name, args, _ in rig.port.calls[base:] if name == "set_param"]
+
+
+def test_дерево_обновляется_после_живой_правки_без_вызовов_produce(make):
+    store = TreeStore()
+
+    class Router:
+        def send_async(self, msg, priority="normal"):
+            data = msg["data"]
+            if msg["command"] == "state.merge":
+                store.merge(data["path"], data["data"])
+            elif msg["command"] == "state.delete":
+                store.delete(data["path"])
+
+    rig = make()
+    rig.ctx.state_proxy = StateProxy("cam_wire", router=Router())
+    tree = "processes.cam_wire.state.plugins.camera_device"
+    assert rig.take()["status"] == "ok"
+    # `on_state(grabbing)` может прийти уже после ответа `take_device`: ждём исходное значение register'а в дереве
+    _wait(lambda: store.get(tree).get("params", {}).get("exposure_time") == 10000.0, "исходное значение в дереве")
+    t0 = time.monotonic()
+
+    ok, err = rig.rm.set_field_value(REG, "exposure_time", 900.0)  # produce() не зовётся вовсе
+
+    assert ok, err
+    _wait(lambda: store.get(tree)["params"]["exposure_time"] == 900.0, "дерево получило 900.0", timeout=0.5)
+    assert time.monotonic() - t0 < 0.5
+
+
+def test_перезахват_пишет_regrab_ms_секундами(make):
+    rig = make(**SELF_TRIGGER)
+    timings: list[tuple[str, float]] = []
+    record = rig.ctx.record_timing
+    rig.ctx.record_timing = lambda name, d, tags=None: (timings.append((name, d)), record(name, d, tags))[0]
+    assert rig.take()["status"] == "ok"
+
+    _edit_and_settle(rig, "trigger_period_ms", 60)
+
+    regrab = [value for name, value in timings if name == "regrab_ms"]
+    assert len(regrab) == 1, timings
+    assert 0.0 < regrab[0] < 5.0, "замер в секундах"
+
+
+def test_смена_родителя_без_restart_regrab_не_пишет_закрытый_узел_потомка(make):
+    rig = make(make_port(frame_period_s=0.02, capabilities=NO_REGRAB), **SELF_TRIGGER)
+    assert rig.take()["status"] == "ok"
+
+    base = _edit_and_settle(rig, "trigger_source", "Software")
+
+    session = rig.plugin._session
+    assert session.param_errors == {}, session.param_errors
+    assert ("TriggerSelfTriggerPeriod", 77) not in _sets(rig, base), "период записан в закрытый узел"
+    assert session.params["trigger_source"] == "Software"
+    assert get_or_create_health_state(rig.services).snapshot()["errors"] == 0
+
+
+def test_обратная_смена_родителя_включает_потомка_и_пишет_его_значение(make):
+    rig = make(make_port(frame_period_s=0.02, capabilities=NO_REGRAB), **SOFTWARE)
+    assert rig.take()["status"] == "ok"
+    assert "trigger_period_ms" not in rig.plugin._session.params, "при Software период не пишется"
+
+    base = _edit_and_settle(rig, "trigger_source", "SelfTrigger")
+
+    session = rig.plugin._session
+    assert ("TriggerSelfTriggerPeriod", 55) in _sets(rig, base)
+    assert session.params["trigger_period_ms"] == 55
+    assert session.param_errors == {}, session.param_errors
+
+
+def test_смена_родителя_с_restart_regrab_пишет_только_изменённое_без_ошибок(make):
+    rig = make(**SELF_TRIGGER)
+    assert rig.take()["status"] == "ok"
+
+    base = _edit_and_settle(rig, "trigger_source", "Software")
+
+    assert rig.plugin._session.param_errors == {}
+    assert _sets(rig, base) == [("TriggerSource", "Software")]
+    names = [name for name, _, _ in rig.port.calls[base:]]
+    assert "open" not in names and "close" not in names, names
+
+
+def test_правка_пропущенного_потомка_прибор_не_трогает(make):
+    rig = make(**SOFTWARE)  # источник Software: период самотриггера не пишется
+    assert rig.take()["status"] == "ok"
+    base = len(rig.port.calls)
+
+    assert rig.register_update("trigger_period_ms", 60)["success"] is True
+    time.sleep(0.3)
+    assert rig.journal(base) == [], "пропущенный шаг вызвал перезахват или запись"
+    rig.register_update("exposure_time", 1111.0)  # подписка жива
+
+    _wait(lambda: _wrote(rig, base, 1111.0), "сторожевая правка дошла")
+    assert "stop_grabbing" not in [name for name, _ in rig.journal(base)]

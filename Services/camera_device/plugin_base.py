@@ -56,7 +56,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 
 from .interface import Binding, DeviceIdentity, DevicePort, RawFrame
-from .params import build_plan
+from .params import Step, build_plan
 from .registers_base import CameraDeviceRegisters
 from .session import DeviceSession, describe_error
 
@@ -172,6 +172,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._log_bridge: _SessionLogBridge | None = None
         # (менеджер, поле, колбэк) для `unsubscribe`; повторный `configure` список не обнуляет (старые снимаются)
         self._subscriptions: list[tuple[Any, str, Callable[[Any], None]]] = getattr(self, "_subscriptions", [])
+        self._plan_lock = threading.Lock()  # `_seen_values`: колбэки подписки идут из разных потоков
+        self._seen_values: dict[str, Any] = {}  # значения привязанных полей, из которых построен идущий план run
         self._identity(warn=True)  # отказ рецепта — здесь, а не в take_device
         if self._reg.watchdog_s <= self._reg.timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
@@ -201,6 +203,35 @@ class CameraDevicePlugin(ProcessModulePlugin):
         for registers, field, callback in subscriptions:  # менеджер тот, на котором подписались (ctx мог смениться)
             registers.unsubscribe(self.name, field, callback)
 
+    def _changed_steps(self, field: str, before: Any, value: Any) -> tuple[list[Step], str]:
+        """Шаги плана `run`, которые меняет правка поля: его собственный и шаги потомков по `enabled_if`.
+
+        Сравниваются два полных плана при прочих равных значениях register'а: со старым и с новым значением поля.
+        Смена родителя (`trigger_source`) включает или выключает потомка (`trigger_period_ms`): без этого сеанс
+        переписал бы потомка в закрытый узел при перезахвате без `restart_regrab`. Шаг, остающийся `skip`, не меняется.
+        Возврат: шаги (пусто — прибор не трогать) и причина для лога.
+        """
+        reg, bindings = self._reg, self.bindings()
+        values = reg.model_dump()
+        new = build_plan(type(reg), {**values, field: value}, bindings)
+        own = next((step for step in new if step.field == field), None)
+        if before is _MISSING:  # поле не входило в план, из которого строился цикл: только его собственный шаг
+            steps = [] if own is None or own.skip is not None else [own]
+        else:
+            old = {step.field: step for step in build_plan(type(reg), {**values, field: before}, bindings)}
+            steps = [step for step in new if old.get(step.field) != step and self._needs_apply(step, old)]
+        if steps:
+            return steps, ""
+        return [], "нет шага" if own is None else own.skip or "значение не изменило план"
+
+    @staticmethod
+    def _needs_apply(step: Step, old: dict[str, Step]) -> bool:
+        """Шаг пишется в прибор, либо он стал `skip` (сеанс заменит им прежний шаг в `run`); `skip` -> `skip` — нет."""
+        if step.skip is None:
+            return True
+        before = old.get(step.field)
+        return before is not None and before.skip is None
+
     def _apply_policy(self, field: str) -> str | None:
         """`FieldMeta.apply` поля register'а (`live` | `restart` | `config` | `None`)."""
         meta = type(self._reg).get_all_fields_meta().get(field)
@@ -211,15 +242,16 @@ class CameraDevicePlugin(ProcessModulePlugin):
         try:
             policy = self._apply_policy(field)
             session = self._session
+            with self._plan_lock:
+                before = self._seen_values.get(field, _MISSING)
+                self._seen_values[field] = value
             if policy in (None, "config") or session is None:
                 return  # сеанса нет: значение register'а войдёт в план следующего `take_device`
-            reg = self._reg
-            steps = build_plan(type(reg), {**reg.model_dump(), field: value}, {field: self.bindings()[field]})
-            if not steps or steps[0].skip is not None:
-                reason = "нет шага" if not steps else steps[0].skip
+            steps, reason = self._changed_steps(field, before, value)
+            if not steps:
                 self._ctx.log_info(f"CameraDevicePlugin: apply field={field} skip={reason}")
                 return
-            session.apply(steps, policy)
+            session.apply(steps, policy)  # политика вызвавшего поля — и у шагов его потомков
         except Exception as exc:  # noqa: BLE001 — колбэк идёт в системном потоке процесса: исключение наружу не выпускается
             self._ctx.health.report_error(exc, context="camera_device.live_apply", throttle=30.0)
 
@@ -313,8 +345,13 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 self._get_frame_sum += seconds
         elif name == "open":
             self._ctx.record_timing("open_ms", seconds)
-        elif name == "apply":
-            self._ctx.record_timing("apply", seconds)
+        elif name in ("apply", "regrab"):
+            self._ctx.record_timing("regrab_ms" if name == "regrab" else "apply", seconds)
+            # Правка применена потоком-владельцем: дерево не ждёт окна `produce()` (в паузе процесса его нет вовсе).
+            # Только в `grabbing`: запись плана `run` при открытии покрывает `on_state(grabbing)`, лишних `merge` нет.
+            session = self._session
+            if session is not None and session.state == "grabbing":
+                self._sync_events()
 
     def _tick(self) -> None:
         """Раз в `_TICK_S`: уровни, агрегат замера `get_frame`, сверка событий."""
@@ -513,7 +550,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
             ident = self._identity()
             run, rest = self._plan()
             # идущий цикл не меняется (повторный take_device при opening/grabbing — по-прежнему ok): результат не нужен
-            session.set_cycle(ident, run, rest)
+            if session.set_cycle(ident, run, rest):
+                with self._plan_lock:  # из этих значений построен план run цикла: основа сравнения для живой правки
+                    values = self._reg.model_dump()
+                    self._seen_values = {field: values[field] for field in self.bindings() if field in values}
         except Exception as exc:  # noqa: BLE001 — контракт 1.8: отказ команды = status error, исключение наружу не идёт
             # хук вендора (`create_port`, `port.sdk`) может бросить что угодно: PortError, ImportError, OSError
             text = str(exc) if isinstance(exc, ValueError) else describe_error(exc)  # без значений рецепта
