@@ -383,3 +383,52 @@ def test_настоящий_StateProxy_ушедший_ключ_снят_из_д�
     node = store.get(TREE_PATH)
     assert node["params"] == kept
     assert node["params_status"] == {}
+
+
+def _until(condition, seconds: float = 3.0) -> bool:
+    """Ждать условие с дедлайном (без `sleep` наугад)."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if condition():
+            return True
+        time.sleep(0.005)
+    return condition()
+
+
+def test_degraded_снимается_при_выходе_из_отказа_чужая_заявка_остаётся(make):
+    rig = make(port=make_port(busy_for_s=60.0), real=True)
+    health = get_or_create_health_state(rig.services)
+    assert rig.take()["device_state"] == "busy"
+    assert health.snapshot()["status"] == "degraded"
+    rig.plugin.cmd_release_device({})
+    assert _until(lambda: health.snapshot()["status"] == "ok"), health.snapshot()
+    # чужая заявка переживает выход из отказа: свой `set_status("ok")` снимает только свою
+    health.degraded("other down", owner="other_plugin")
+    assert rig.take()["device_state"] == "busy"
+    assert health.snapshot()["status"] == "degraded"
+    rig.plugin.cmd_release_device({})
+    assert _until(lambda: rig.plugin._seen_state == "closed")
+    with rig.plugin._events_lock:  # сверка закончена: `set_status` вызывается в ней же
+        pass
+    snap = health.snapshot()
+    assert snap["status"] == "degraded"
+    assert "other down" in snap["degraded_reason"], snap
+
+
+def test_device_held_в_дереве_снимается_быстрее_окна_после_отказа(make, monkeypatch):
+    monkeypatch.setattr(plugin_base, "_TICK_S", 5.0)  # окно заведомо больше срока теста: снимает не оно
+    rig = make(port=make_port(busy_for_s=60.0))
+    assert rig.take()["device_state"] == "busy"
+    assert True in rig.proxy.merged("device_held"), (
+        "на отказе в дерево ушло device_held=True (on_state до снятия флага)"
+    )
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.3 and rig.proxy.merged("device_held")[-1] is not False:
+        rig.plugin.produce()
+        time.sleep(0.005)
+    assert rig.proxy.merged("device_held")[-1] is False, "device_held завис в дереве до окна"
+    assert rig.plugin._session.device_held is False
+    before = len(rig.proxy.merges)
+    for _ in range(20):
+        rig.plugin.produce()
+    assert len(rig.proxy.merges) == before, "проверка device_held пишет в дерево без смены"

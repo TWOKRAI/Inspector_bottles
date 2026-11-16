@@ -348,6 +348,11 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     def produce(self) -> list[dict]:
         """Забрать кадр из слота в item. Пусто — норма. Не блокирует."""
+        session = self._session
+        # Сеанс при отказе снимает `device_held` без `on_state` (session.py): дереву не ждать окна `_TICK_S`.
+        # Проверка — два чтения без замков; `merge` только если снимок действительно изменился (держит diff).
+        if session is not None and self._published.get("device_held") is True and not session.device_held:
+            self._sync_events()
         self._tick()
         with self._lock:
             slot, self._slot = self._slot, None
