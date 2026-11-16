@@ -53,3 +53,81 @@
 - **Мои мутанты** — 4 штуки + контроль, подмена методов класса через pytest-плагин; мехпрогон лида в `cam-2-3b-inj` не трогал и результата не видел. Совпало с прогнозом J3/J8; `param_errors`-инцидент и сверка из тика — сверх прогноза.
 - **Стресс-тест** не доказывает отсутствие взаимоблокировок; доказательство — прочитанный порядок замков (выше) по `session.py` и `profiles.py`.
 - README: запись про липкий `_item_error` и дедуп журнала (TRAPS) — вне FILES, не сделана.
+
+---
+
+# Раунд 2 (последний)
+
+Проверен коммит `506883f14` (код и тесты автора); `20c933444` — docs. `Services/` после `506883f14` не менялся, `session.py` и `profiles.py` не тронуты.
+Вердикт: **APPROVED**. Блокеров нет. Остались: nit J9 (нужен тест, 10 строк) и два пункта «открытого» (5, 6), у пункта 6 есть потребитель — хаб 4.6a.
+
+## Закрытие пунктов раунда 1
+
+| П. | Было | Стало (вход -> наблюдаемый результат) | Статус |
+|---|---|---|---|
+| 1 | мутанты выживали, мост и уровни без тестов | 10 новых тестов (6 -> 16). Мутанты `-p mutplug`: см. таблицу ниже, все целевые красные | закрыт |
+| 2 | `profile="rest"` при отказе открытия | busy -> `release`: дерево `state=closed profile=None`, порт `['acquire','enum_devices','open','release']` (scratch `D state closed profile None`); штатный цикл: `run` на grabbing, `rest` после release (тест автора) | закрыт |
+| 3 | `shutdown` без `try/finally`, мост можно повесить дважды | `shutdown` в `try/finally`; `_attach_log_bridge` при `_log_bridge is not None` выходит. Тест `test_мост_снимается_даже_если_release_бросил`; мутанты `no_finally`, `no_attach_guard` красные | закрыт |
+| 4 | докстринг противоречил себе | `plugin_base.py:6` и `:22-25` переписаны: уровни без `merge`, прямой `merge` только у событий | закрыт |
+
+Остаточное по п. 3: плагин создан и `_ensure_session` вызван, `shutdown` не вызван -> handler остаётся (scratch `GLEAK ... 3`). Защита от этого — только вызов `shutdown`; код так и задуман.
+
+## Мутанты (тот же `mutplug.py`, `Services/camera_device/tests/test_plugin_observability.py`, 16 тестов)
+
+| Мутант | Результат | Красные тесты |
+|---|---|---|
+| контроль: убран `flight_dump` в `_on_stall` | `1 failed, 15 passed` | `test_on_stall_вызывает_flight_dump_owner_stall` |
+| снят diff (`_published` не запоминается) | `3 failed` | `test_сверка_без_смен_не_даёт_merge`, `test_ушедшие_ключи_словарей_снимаются_delete`, `test_настоящий_StateProxy_ушедший_ключ_снят_из_дерева` |
+| заглушён `proxy.delete` | `2 failed` | `test_ушедшие_ключи...`, `test_настоящий_StateProxy...` |
+| убран цикл `param_errors` в инцидентах | `1 failed` | `test_новый_ключ_param_errors_один_инцидент_param` |
+| сверка из `_tick` отключена | `1 failed` | `test_тик_сверяет_события_без_on_state` |
+| handler не снимается в `shutdown` (J11) | `2 failed` | `test_мост_логгера_доводит_строки_сеанса_до_ctx_и_снимается`, `test_мост_снимается_даже_если_release_бросил` |
+| `shutdown` без `try/finally` | `1 failed` | `test_мост_снимается_даже_если_release_бросил` |
+| без защиты `_attach_log_bridge` | `1 failed` | `test_мост_снимается_даже_если_release_бросил` |
+| `profile` по старой формуле | `1 failed` | `test_профиль_при_отказе_открытия_не_rest_...` |
+| `dropped` сброшен в 0 | `1 failed` | `test_битый_кадр_виден_в_dropped_и_уровни_несут_значения` |
+| **J9: `health.set_status("ok")` -> pass** | **`16 passed` (выжил)** | — |
+
+## J9 — nit; тест нужен
+
+Выживает честно: ни один тест не проверяет выход из отказа. Свойство при этом названо автором («иначе `degraded` залипает») и проверяемо. Мой scratch-тест (`scratchpad/rev23b/test_j9.py`, не в дереве) без мутанта зелёный (`1 passed`), с J9 красный: после `release` статус остаётся `degraded`, `degraded_reason: 'camera_device: busy'`. Текст теста (10 строк) — для автора:
+
+```python
+def test_выход_из_отказа_снимает_degraded_но_не_чужую_заявку(make):
+    rig = make(port=make_port(busy_for_s=60.0), real=True)
+    hs = get_or_create_health_state(rig.services)
+    assert rig.take()["device_state"] == "busy"
+    assert hs.snapshot()["status"] == "degraded"
+    rig.plugin.cmd_release_device({})
+    time.sleep(0.2)
+    assert hs.snapshot()["status"] == "ok", hs.snapshot()
+    hs.degraded("other down", owner="other_plugin")
+    rig.plugin.cmd_take_device({}); rig.plugin.cmd_release_device({}); time.sleep(0.2)
+    snap = hs.snapshot()
+    assert snap["status"] == "degraded" and "other down" in snap["degraded_reason"], snap
+```
+(`time.sleep(0.2)` лучше заменить на ожидание `rig.plugin._session.state == "closed"` с дедлайном.) Не блокер.
+
+## Прогоны через gate
+
+- `pytest Services/camera_device/tests` (medium): `202 passed, 10 skipped, 2 warnings in 26.90s`.
+- `test_plugin_observability.py` x5 подряд: `16 passed` во всех пяти (5.88 / 5.90 / 5.85 / 5.90 / 5.91 с).
+- Остальные тесты каталога без файла наблюдаемости (186 passed, 10 skipped): handler'ов моста на конец сессии `0` (`BRIDGES LEFT AT END: 0`). Проверка нужна, потому что `test_мост_логгера...` утверждает `len(_bridges()) == 0` на входе: утечка из другого файла сломала бы его.
+- Повтор репродукций раунда 1 на новом коде: A (стресс, 54 merge, состояние в дереве = сеансу), B (`produce` худший `0.2 ms` при `set_param` 0.4 с), F2 (чужая заявка жива) — без изменений; D теперь `profile None`; C и E красные намеренно (п. 5, 6).
+
+## Пункты 5 и 6 — влияние на потребителей
+
+- **`readiness(ctx)` лида Ф — не затронут.** `plans/2026-10-18_camera-device-service/amendments.md:162`: «хватает `state`, `device_held`, `last_error` (чтения без замков, `session.py`)» — читает свойства сеанса, не дерево. Код `readiness` ещё не существует (`git grep -i readiness -- Services/camera_device` пусто), поэтому подтверждено по плану, не по коду.
+- **Хаб 4.6a — затронут (опровержение формулировки «на потребителей не влияет»).** `docs/reviews/2026-10-18_device-hub-camera-integration.md:200-205`: `connect()` = владелец найден и `device_held is True` в снимке ДЕРЕВА; `is_connected` — то же; проверки `state` в `connect()` нет. Воспроизведение п. 6 на новом коде (3 прогона `scratchpad/rev23b/test_win.py`): после отказа `busy` в дереве `state=busy` и `device_held=True` с +0.000 с, `device_held=False` в дереве на +1.004 / +1.003 / +1.005 с, `session.device_held=False` уже сразу. Окно ≈ `_TICK_S` = 1 с (и дольше, если `produce()` не вызывается). Итог для хаба: до секунды после отказа `connect()` вернёт `True` при `state=busy`. Для 2.3b — nit (переходное состояние, в том же снимке `state=busy`); для 4.6a — риск, который надо записать в его задачу: либо `connect()` требует `state` вне `{busy, not_found, error}`, либо плагин синхронизирует события из `produce()`, пока опубликован отказ и `device_held` True (одна проверка в `produce()` до `_tick`).
+- Прецедент: у `code_reader` (`Services/code_reader/plugin/sdk_plugin.py:139-143, 203-205`) тот же дефект «дерево застревало с device_held True» уже ловился ревью 6.3 и закрыт публикацией по смене `device_held` из `produce()`. Здесь тот же приём не применён (корень — `session.py:458-462`).
+
+## Что осталось открытым / ненадёжно
+
+- **J9 без теста** (nit, текст теста выше). Пока теста нет, `set_status("ok")` защищён только ручным репро.
+- **П. 6 (`device_held` в дереве отстаёт ≈1 с после отказа)** — для хаба 4.6a, не для `readiness`. Нужно решение лида: условие `connect()` по `state` в 4.6a ИЛИ плагинная синхронизация из `produce()` (в FILES 2.3b, но автор оставил намеренно). Хаб в коде ещё не реализован: поведение хаба не воспроизводилось, воспроизведено только состояние дерева.
+- **П. 5 (дедуп `param_errors` по ключу, не по циклу)** — второй take с тем же отказом не даёт нового инцидента (scratch `E`: 1 -> 1). Корень: нет номера цикла в `session.py`. Не исправлено.
+- **Мост логгера на общем модульном логгере**: при 2+ сеансах в процессе строки одного идут в журнал другого (раунд 1, `GDUP`); `propagate` не отключается; уровень INFO остаётся после `shutdown`. Штатная замена — `get_std_logger` в `session.py` (вне FILES). Не менялось.
+- **Отказ rest (reopen) без инцидента** — вне FILES (в `session.py` нет хука), DESIGN 2.3b его перечисляет. Не менялось.
+- Не проверено: медленный `merge` под `_events_lock` на настоящем router (двойник 200 мс даёт `produce` 150.5 мс, в проде `send_async` не блокирует); гипотеза «≥5 новых `param_errors` за один `_sync_events` открывают breaker процесса (порог 5)» — без воспроизведения; Windows и стенд 6.1 не гонялись; тест 1 по-прежнему на `frame_period_s=0.012`, не на номинальных 50 кадр/с.
+- Мои мутанты — подмена методов класса из pytest-плагина, не правка файлов; мехпрогон лида в `cam-2-3b-inj` я не видел, сверять с ним нечего. Стресс-тест замков не доказывает отсутствие взаимоблокировок: доказательство — порядок замков из раунда 1.
+- README: запись про липкий `_item_error` и дедуп журнала (TRAPS) по-прежнему не сделана (вне FILES).

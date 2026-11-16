@@ -76,3 +76,23 @@ Import path: `/Users/twokrai/Project_code/Inspector_bottles/.claude/worktrees/ca
 Прежние M1 (merge на кадр) и M2 (log_error вместо report_error) не перепрогонялись после правок.
 
 Открыто (пункты 5 и 6 ревью по заданию лида не делались; корень в `session.py`): дедуп `param_errors` по циклу и отставание `device_held` в дереве. Остальное из первого отчёта в силе (имена `open_ms`/`get_frame_ms` при секундах, reopen при rest без инцидента, `last_error` не сбрасывается на `start()`, общий логгер при двух камерах в процессе, README не обновлён, стенд 6.1 не запускался). Тест `ушедшие_ключи` и `настоящий_StateProxy` вызывают приватный `_publish_events` с искусственным снимком: естественного сужения `params` сеансом в тестах нет (оно появится с 2.4). Тест `тик_сверяет…` меняет приватный `session._last_error`.
+
+## Раунд 2 (APPROVED + две мелочи): J9 и device_held
+
+Не коммичено. Файлы: `plugin_base.py`, `tests/test_plugin_observability.py`.
+
+- `produce()`: до `_tick()` — если в опубликованном снимке `device_held` True, а `session.device_held` уже False, вызывается `_sync_events()` (два чтения без замков, `session.params*` из проверки не читаются; `merge` только при смене — держит diff).
+- Тест J9: настоящий `HealthState`; выход из отказа снимает свой `degraded`, чужая заявка `other down` переживает его. Ожидание — `_until(...)` с дедлайном 3 с, без `sleep`.
+- Тест device_held: `_TICK_S=5.0`, busy, дерево `device_held=True` на отказе, затем False за < 0.3 с через `produce()`; 20 лишних `produce()` не дают новых merge.
+
+Числа (gate, python главного .venv, PYTHONPATH=worktree, import path внутри worktree):
+- `test_plugin_observability.py` 5 прогонов подряд: 18 passed x5.
+- весь `Services/camera_device/tests`: 204 passed, 10 skipped (было 202 passed).
+- `test_one_connector_per_point.py`: 19 passed.
+- `ruff check Services/camera_device` чисто; `ruff format --check` на двух файлах чисто.
+
+Мутации (откат cp, `diff -q` подтвердил):
+- J9 `health.set_status("ok")` -> `pass`: красный `test_degraded_снимается_при_выходе_из_отказа_чужая_заявка_остаётся` (1 failed, 17 passed).
+- проверка device_held убрана (`if False:`): красный `test_device_held_в_дереве_снимается_быстрее_окна_после_отказа` (1 failed, 17 passed).
+
+Открыто: корень в `session.py` (при отказе `on_state` на снятие `_held` не зовётся) не чинился, смягчение живёт в плагине и срабатывает только при вызовах `produce()` (у источника без кадров цикл `SourceProducer` всё равно вызывает его). Остальное из прежних отчётов в силе (имена `open_ms`/`get_frame_ms` при секундах, reopen при rest без инцидента, `last_error` не сбрасывается на `start()`, общий логгер при двух камерах, README, стенд 6.1, дедуп `param_errors` по циклу). Файл `...2.3b-reviewer.md` изменён не мной.
