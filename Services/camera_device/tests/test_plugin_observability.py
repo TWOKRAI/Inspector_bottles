@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -18,8 +19,11 @@ from multiprocess_framework.modules.process_module.health import get_or_create_h
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import PluginLevels
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+from multiprocess_framework.modules.state_store_module.proxy.state_proxy import StateProxy
 from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device import plugin_base
+from Services.camera_device.interface import RawFrame
 from Services.camera_device.plugin_base import CameraDevicePlugin
 from Services.camera_device.testing import fake_port
 from Services.camera_device.testing.fake_port import make_port
@@ -94,6 +98,10 @@ class _Rig:
         self.published: list[tuple[str, object]] = []
         self.timings: list[tuple[str, float]] = []
         self.dumps: list[tuple[str, dict]] = []
+        self.logs: list[tuple[str, str]] = []  # (уровень, текст): `ctx.log_*`, куда идёт мост логгера сеанса
+        self.ctx.log_info = lambda msg, **kw: self.logs.append(("info", msg))
+        self.ctx.log_warning = lambda msg, **kw: self.logs.append(("warning", msg))
+        self.ctx.log_error = lambda msg, **kw: self.logs.append(("error", msg))
         if not real:
             self.ctx._health_reporter = self.health
         publish, timing = self.ctx.publish_metric, self.ctx.record_timing
@@ -215,3 +223,163 @@ def test_настоящие_объекты_health_и_уровни(make, monkeypa
     published = rig.levels.publications()["camera_device"]
     assert set(published) >= LEVELS
     assert published["frames"] == 0
+
+
+# --- Дополнение по ревью 2.3b (раунд 1) ---
+
+# Прибор принимает запись, но читает 500 вместо 1000: узел `exposure_time` не подтверждён чтением -> `param_errors`.
+_UNCONFIRMED = {"read_offset": {"ExposureTime": 500.0}, "exposure_time": 1000.0}
+_SESSION_LOGGER = "camera_device.session"
+
+
+def _bridges() -> list:
+    return [h for h in logging.getLogger(_SESSION_LOGGER).handlers if isinstance(h, plugin_base._SessionLogBridge)]
+
+
+def _unconfirmed_rig(make, **cfg) -> _Rig:
+    rig = make(port=make_port(frame_period_s=0.02, read_offset=_UNCONFIRMED["read_offset"]), **cfg)
+    assert rig.take()["status"] == "ok"
+    return rig
+
+
+def test_сверка_без_смен_не_даёт_merge(make):
+    rig = make()
+    assert rig.take()["status"] == "ok"
+    rig.drive(0.1)
+    before = len(rig.proxy.merges)
+    for _ in range(20):
+        rig.plugin._sync_events()
+    assert len(rig.proxy.merges) - before == 0, "повторная сверка без смен снова пишет в дерево"
+    assert rig.proxy.deletes == []
+
+
+def test_ушедшие_ключи_словарей_снимаются_delete(make):
+    rig = make(port=make_port(frame_period_s=0.02, read_offset={"ExposureTime": 500.0}), exposure_time=1000.0)
+    assert rig.take()["status"] == "ok"
+    rig.drive(0.1)
+    assert set(rig.plugin._published["param_errors"]) == {"exposure_time"}
+    shrunk = dict(rig.plugin._published, params={}, params_status={}, param_errors={})
+    rig.plugin._publish_events(shrunk)
+    assert sorted(rig.proxy.deletes) == [
+        f"{TREE_PATH}.param_errors.exposure_time",
+        f"{TREE_PATH}.params.exposure_time",
+        f"{TREE_PATH}.params_status.exposure_time",
+    ]
+
+
+def test_новый_ключ_param_errors_один_инцидент_param(make):
+    rig = _unconfirmed_rig(make, exposure_time=1000.0)
+    rig.drive(0.1)
+    for _ in range(5):
+        rig.plugin._sync_events()
+    param = [(exc, ctx) for exc, ctx in rig.health.errors if ctx == "camera_device.param"]
+    assert len(param) == 1, f"инцидентов param: {len(param)}"
+    assert str(param[0][0]) == "exposure_time: не подтвердилось чтением"
+    assert len(rig.health.errors) == 1, "состояние grabbing не должно давать инцидентов сеанса"
+
+
+def test_тик_сверяет_события_без_on_state(make, monkeypatch):
+    monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)
+    rig = make()
+    assert rig.take()["status"] == "ok"
+    rig.drive(0.1)
+    # `last_error` меняется без смены состояния (например, отказ закрытия узла): `on_state` не зовётся, только окно
+    rig.plugin._session._last_error = "PortError kind=other: x"
+    rig.drive(0.05)
+    assert rig.proxy.merged("last_error")[-1] == "PortError kind=other: x"
+
+
+def test_мост_логгера_доводит_строки_сеанса_до_ctx_и_снимается(make):
+    rig = make()
+    assert len(_bridges()) == 0
+    assert rig.take()["status"] == "ok"
+    assert len(_bridges()) == 1
+    lines = [text for level, text in rig.logs if level == "info"]
+    assert any(text.startswith("session state=opening->grabbing") for text in lines), lines
+    rig.plugin.shutdown(rig.ctx)
+    assert _bridges() == []
+    count = len(rig.logs)
+    logging.getLogger(_SESSION_LOGGER).warning("после shutdown")
+    assert len(rig.logs) == count, "снятый мост всё ещё пишет в ctx"
+
+
+def test_мост_снимается_даже_если_release_бросил(make):
+    rig = make()
+    assert rig.take()["status"] == "ok"
+
+    def boom(data):
+        raise RuntimeError("release")
+
+    with pytest.MonkeyPatch.context() as local:
+        local.setattr(rig.plugin, "cmd_release_device", boom)
+        with pytest.raises(RuntimeError):
+            rig.plugin.shutdown(rig.ctx)
+    assert _bridges() == []
+    rig.plugin._attach_log_bridge()
+    rig.plugin._attach_log_bridge()  # второй вызов моста не вешает
+    assert len(_bridges()) == 1
+
+
+def test_битый_кадр_виден_в_dropped_и_уровни_несут_значения(make, monkeypatch):
+    monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)
+    rig = make()
+    rig.plugin._on_frame(RawFrame(data=bytearray(3), width=2, height=2, pixel_format="rgb8", frame_num=1, extras={}))
+    rig.plugin.produce()  # битый кадр отброшен: длина буфера 3, нужно 12
+    rig.plugin.produce()  # тик публикует dropped
+    last = {name: value for name, value in rig.published}
+    assert last["dropped"] == 1
+    assert last["frames"] == 0
+    assert last["errors"] == 0
+    assert last["pending"] == 0
+    assert last["param_errors_count"] == 0
+
+
+def test_уровни_errors_param_errors_count_fps_со_значениями(make, monkeypatch):
+    monkeypatch.setattr(plugin_base, "_TICK_S", 0.2)
+    rig = _unconfirmed_rig(make, exposure_time=1000.0)
+    rig.drive(0.8)
+    last = {name: value for name, value in rig.published}
+    assert last["errors"] == 1  # один узел не подтверждён чтением
+    assert last["param_errors_count"] == 1
+    assert last["fps"] > 10, f"fps={last['fps']}"
+    assert last["dropped"] == 0
+
+
+def test_профиль_при_отказе_открытия_не_rest_а_при_штатном_закрытии_rest(make):
+    busy = make(port=make_port(busy_for_s=60.0))
+    assert busy.take()["device_state"] == "busy"
+    busy.plugin.cmd_release_device({})
+    assert busy.proxy.merged("state")[-1] == "closed"
+    assert busy.proxy.merged("profile")[-1] is None, "rest в прибор не писался"
+    good = make()
+    assert good.take()["status"] == "ok"
+    assert good.proxy.merged("profile")[-1] == "run"
+    good.plugin.cmd_release_device({})
+    assert good.proxy.merged("profile")[-1] == "rest"
+
+
+def test_настоящий_StateProxy_ушедший_ключ_снят_из_дерева(make):
+    store = TreeStore()
+
+    class Router:
+        def send_async(self, msg, priority="normal"):
+            data = msg["data"]
+            if msg["command"] == "state.merge":
+                store.merge(data["path"], data["data"])
+            elif msg["command"] == "state.delete":
+                store.delete(data["path"])
+
+    rig = make(trigger_managed=True, trigger_mode="On", trigger_source="Software")
+    rig.ctx.state_proxy = StateProxy(PROCESS_NAME, router=Router())
+    assert rig.take()["status"] == "ok"
+    rig.drive(0.1)
+    node = store.get(TREE_PATH)
+    assert node["state"] == "grabbing"
+    assert node["params"] == rig.plugin._session.params
+    keys = sorted(node["params"])
+    assert len(keys) >= 2, keys
+    kept = {keys[0]: node["params"][keys[0]]}
+    rig.plugin._publish_events(dict(rig.plugin._published, params=kept, params_status={}))
+    node = store.get(TREE_PATH)
+    assert node["params"] == kept
+    assert node["params_status"] == {}
