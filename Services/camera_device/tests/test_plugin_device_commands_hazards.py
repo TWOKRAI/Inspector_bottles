@@ -321,6 +321,55 @@ def test_команда_по_сроку_отвечает_срок_и_позже_
     assert rig.count(journal_name) == before
 
 
+# -- describe_params: все привязки одним call, отказ узла, отказ хука ---------------------------------------------
+
+
+def test_describe_params_все_describe_param_идут_подряд_одним_call(make):
+    rig = make()
+    _take(rig)
+    base = len(rig.port.calls)
+    answer = _call(lambda: rig.plugin.cmd_describe_params({}))
+    assert answer["success"] is True
+    # при одном `call` владелец исполняет весь пакет, не возвращаясь в цикл; при `call` на привязку между
+    # записями был бы `get_frame` (следующий `call` ставится только после ответа предыдущего)
+    names = [name for name, _args, _tid in rig.port.calls[base:]]
+    first = names.index("describe_param")
+    last = len(names) - 1 - names[::-1].index("describe_param")
+    assert names[first : last + 1] == ["describe_param"] * (last - first + 1)
+    assert last - first + 1 == len(answer["params_meta"])  # по записи на привязку
+
+
+def test_describe_params_describe_param_вернул_none_даёт_null_только_для_этого_поля(make):
+    rig = make()
+    _take(rig)
+    original = rig.port.describe_param
+
+    def patched(binding):
+        info = original(binding)  # запись в журнал порта и реальный ответ фейка
+        return None if binding.key == "ExposureTime" else info
+
+    rig.port.describe_param = patched
+    answer = _call(lambda: rig.plugin.cmd_describe_params({}))
+    assert answer["success"] is True
+    meta = answer["params_meta"]
+    assert meta["exposure_time"] is None
+    assert meta["trigger_mode"] == {"min": None, "max": None, "inc": None, "entries": ["Off", "On"], "access": "RO"}
+    assert all(value is not None for field, value in meta.items() if field != "exposure_time")
+
+
+def test_describe_params_исключение_хука_bindings_отвечает_отказом_а_не_исключением(make):
+    rig = make()
+    _take(rig)
+
+    def broken():
+        raise RuntimeError("хук")
+
+    rig.plugin.bindings = broken
+    base = len(rig.port.calls)
+    assert _call(lambda: rig.plugin.cmd_describe_params({})) == {"success": False, "error": "RuntimeError"}
+    assert "describe_param" not in rig.names(base)
+
+
 # -- фейк: замок refs -----------------------------------------------------------------------------------------------
 
 

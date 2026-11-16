@@ -815,7 +815,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
             return port
         if "node_describe" not in port.capabilities:
             return {"success": True, "params_meta": {}}
-        bindings = self.bindings()
+        try:
+            bindings = self.bindings()
+        except Exception as exc:  # noqa: BLE001 — хук вендора: контракт 1.8, исключение наружу не идёт
+            error = describe_error(exc)
+            self._ctx.log_error(f"CameraDevicePlugin: describe_params: bindings() отказал: {error}")
+            return {"success": False, "error": error}
         t0 = time.monotonic()
         ok, result = self._call_owner(lambda: {field: self._describe_node(port, b) for field, b in bindings.items()})
         if not ok:
