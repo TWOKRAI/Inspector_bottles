@@ -119,3 +119,21 @@
 | # | Дата | Почему | Δ задач | Δ бюджета |
 |---|---|---|---|---|
 | 2 | 2026-11-01 | MODIFIED `tasks/1.5.md` (11→12 файлов: `port_contract.py`, `test_fake_port_hazards.py`, `testing/__init__.py`, `tests/__init__.py`, `pyproject.toml`); `tasks/1.1.md` (+`schema_mixin.py`, `multiprocess_framework/DECISIONS.md`); `tasks/2.1.md`, `2.2.md`, `2.4.md` (+`testing/fake_port.py`); `tasks/3.1.md`, `4.1.md`, `5.2.md` (подкласс `PortContractSuite`); `recording-schema.md` (отклонения `mvcr`) — по стадии 0 и ревью ветки W1b | 0 | 0 |
+
+## 7. W2, стадия 0 Task 2.1 и 2.2 — CHANGES, решения лида (2026-11-15, полоса К)
+
+Оба текста вернулись `CHANGES REQUESTED` (reviewer sonnet, раунд 1 из 2): 2.1 — 4 blocker, 8 major, 3 minor; 2.2 — 6 blocker, 5 major, 4 minor (`docs/reviews/2026-11-15_camera-2.1-2.2-stage0.md`). Решения лида:
+- 2.1: публичный API сеанса `DeviceSession` и таблица переходов записаны в DESIGN; `stop` — не команда с дедлайном (синхронно `stopping`), дедлайн только у `start` с откатом; «ошибка кадра» = `PortError` из `get_frame`, `None` сбрасывает счётчик; опции фейка (`open_delay_s`, `frame_period_s`, `get_frame_hang_s` разовый, `get_frame_errors`) + свои тесты; `impl-only`.
+- 2.2: допуск Р6 разведён по `vtype` (int — `< max(inc or 1, 1)`, прежний пример 41/40 при `inc=1` теперь верен); `inc` — из `describe_param`; `params[поле]` — скаляр, статус — `params_status`; `Step.parent` (1.6) для пропуска потомков; `errors` — за узел; логика профилей в `profiles.py`, `session.py` +≤ 30 строк; `test_rest_neter`: `errors == 1`; сеанс отдаёт замеры через `on_timing` (секунды), `apply_ms` у 2.3b заменён на `apply`.
+
+| # | Дата | Почему | Δ задач | Δ бюджета |
+|---|---|---|---|---|
+| 3 | 2026-11-15 | MODIFIED `tasks/2.1.md`, `tasks/2.2.md` (по стадии 0 W2: API сеанса, переходы, допуск по `vtype`, `profiles.py`, `test_fake_port_options.py`); `tasks/1.6.md` (`Step.parent`); `tasks/2.3b.md` (`params_status`, `apply`, `base.py:596`); `decisions.md` Р6 (int, `inc`, `params_status`) | 0 | 0 |
+
+## 8. Ревью волны W2 — пробел плана и заметки следующим задачам (2026-11-15, полоса К)
+
+Opus-ревью волны W2: код 1.6/1.8/2.1/2.2 рабочий, швы сходятся; найден пробел плана — плагин не передаёт сеансу `run`/`rest` (никакая задача не вписывала `build_plan` в плагин). Решение лида: критерий W2 «run и проверка чтением на фейке» выполнен тестами сеанса, подключение плана плагином — в `tasks/2.3a.md` (ACCEPTANCE +1). В `tasks/2.4.md` и `tasks/2.3b.md` записаны ловушки: очереди команд владельца нет (2.4 строит почтовый ящик), `on_timing("get_frame")` на каждый кадр, логгер сеанса вне файлов framework.
+
+| # | Дата | Почему | Δ задач | Δ бюджета |
+|---|---|---|---|---|
+| 4 | 2026-11-15 | MODIFIED `tasks/2.3a.md` (ACCEPTANCE: плагин строит run/rest), `tasks/2.4.md`, `tasks/2.3b.md` (TRAPS), `wave-protocol.md` (критерий W2) — по ревью волны W2 | 0 | 0 |
