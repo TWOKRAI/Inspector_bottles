@@ -225,6 +225,10 @@ STATUS.md явно отмечал: «рантайм ThreadConfig не замен
 `tests/test_worker_start_honest.py` (R1–R10) и `tests/test_worker_start_honest_hazards.py`: R11 — корень, R12 —
 страховка, R13 — запись `STOPPED` под замком, R14 — откат при живом потоке, R15 — `timeout=None`. Замок в
 `_restart_worker_internal` чёрный ящик не доказывает (нет точки между подменой потока и `start()`).
+Остаточный риск: исключение из `Thread.start()` в окне до отметки старта потока (`is_alive()` ещё `False`) даёт откат при
+уже стартующем потоке — осиротевший поток и второй при следующем `start_worker`; в CPython 3.12 достижимо лишь
+пользовательскими хуками трассировки. `stop_all_workers` (`core/worker_manager.py`) замок старта не берёт — узкое окно
+вне этой Task, в очереди дефектов.
 
 **Reversible:** yes (один файл реализации; публичная сигнатура `start_worker(name) -> bool` не менялась, меняется
 только ответ в состоянии B).
