@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import shiboken6
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from multiprocess_prototype.frontend.state.bindings import DELETED
@@ -210,7 +210,7 @@ def build_view(snapshot: dict[str, Any], busy: bool) -> RunView:
     return RunView(
         state_text=state_text,
         level=level,
-        start_enabled=start_allowed and not busy,
+        start_enabled=start_allowed and state == "ready" and not busy,
         start_tooltip=start_tooltip,
         stop_enabled=state == "running" and not busy,
         ack_visible=ack_visible,
@@ -299,6 +299,8 @@ class RunControlWidget(QWidget):
     def _make_label(self, name: str) -> QLabel:
         label = QLabel()
         label.setObjectName(name)
+        # Причины PM — данные, не разметка: «<b>x</b>» показываем как есть.
+        label.setTextFormat(Qt.TextFormat.PlainText)
         return label
 
     def _make_button(self, name: str, text: str, kind: str) -> QPushButton:
@@ -317,7 +319,11 @@ class RunControlWidget(QWidget):
         """
         self._commands = commands
         if commands is not None:
-            commands.run_status_async(self._on_seed_result)
+            try:
+                commands.run_status_async(self._on_seed_result)
+            except Exception:
+                # run_gui зовёт set_commands до цикла Qt: сбой затравки не должен ронять запуск.
+                _logger.exception("RunControlWidget: не удалось отправить run_status_async")
 
     def apply_leaf(self, path: str, value: Any) -> None:
         """Принять лист ``system.run.*`` (``DELETED`` — узел удалён)."""
@@ -376,8 +382,9 @@ class RunControlWidget(QWidget):
             if current and self._busy and self._snapshot.get("state") != self._busy_state:
                 self._release_busy()
         else:
-            self._refusal = _refusal_text(result)
             if current:
+                # Устаревший отказ старого клика не затирает текст нового.
+                self._refusal = _refusal_text(result)
                 self._release_busy()
         self._render()
 

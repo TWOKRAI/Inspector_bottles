@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
@@ -254,7 +254,11 @@ def test_seed_does_not_overwrite_fresher_leaf(qtbot) -> None:
     fake.status_callbacks[0]({"success": True, "result": {"state": "ready", "start_allowed": True}})
 
     assert _lbl(window, "RunStateLabel").text() == "Работает"
-    # ключ, которого лист ещё не принёс, затравка всё же добирает
+    # в running ЗАПУСТИТЬ неактивна даже при start_allowed=True (окно между дельтами)
+    assert not _btn(window, "RunStartButton").isEnabled()
+    assert _btn(window, "RunStopButton").isEnabled()
+    # ключ, которого лист ещё не принёс (start_allowed), затравка всё же добрала
+    stack.leaf("state", "ready")
     assert _btn(window, "RunStartButton").isEnabled()
 
 
@@ -288,3 +292,63 @@ def test_callbacks_after_widget_destroyed_do_not_raise(qtbot, monkeypatch) -> No
     fake.status_callbacks[0]({"success": True, "result": {"state": "ready"}})
     w._on_safety_timeout()  # страховка, сработавшая уже после уничтожения
     qtbot.wait(100)  # настоящий таймер (30 мс) тоже не должен ничего сломать
+
+
+# ---------------------------------------------------------------------------
+# Правки ревью (итерация 1)
+# ---------------------------------------------------------------------------
+
+
+def test_stale_click_answer_does_not_touch_newer_click(qtbot, monkeypatch) -> None:
+    """Ответ-отказ клика 1 после страховки и клика 2: busy и текст клика 2 не тронуты."""
+    monkeypatch.setattr(run_control, "BUSY_SAFETY_MS", 50)
+    w = RunControlWidget()
+    qtbot.addWidget(w)
+    fake = _FakeCommands()
+    w.set_commands(fake)
+    w.apply_leaf("system.run.state", "ready")
+    w.apply_leaf("system.run.start_allowed", True)
+    start = _btn(w, "RunStartButton")
+
+    start.click()  # клик 1
+    qtbot.waitUntil(start.isEnabled, timeout=2000)  # страховка сняла busy
+    start.click()  # клик 2
+    assert fake.calls == ["start", "start"]
+    assert not start.isEnabled()
+
+    fake.start_callbacks[0]({"success": False, "error": "timeout"})  # запоздалый ответ клика 1
+
+    assert not start.isEnabled()  # busy клика 2 держится
+    assert "нет ответа от системы" not in _lbl(w, "RunDetailLabel").text()
+
+
+def test_reason_text_is_plain_text_not_html(qtbot) -> None:
+    """Причины PM — данные: метки в PlainText, «<b>x</b>» показывается литералом."""
+    w = RunControlWidget()
+    qtbot.addWidget(w)
+    reason = {"severity": "failure", "reason": "<b>x</b>", "node": "n", "source": "s"}
+    w.apply_leaf("system.run.state", "not_ready")
+    w.apply_leaf("system.run.start_allowed", False)
+    w.apply_leaf("system.run.reasons", [reason])
+    w.apply_leaf("system.run.last_fault", {"at": 100.0, "reasons": [reason], "acknowledged_at": None})
+
+    for name in ("RunStateLabel", "RunDetailLabel", "RunIndicatorsLabel", "RunFaultLabel"):
+        assert _lbl(w, name).textFormat() == Qt.TextFormat.PlainText, name
+    assert "<b>x</b>" in _lbl(w, "RunDetailLabel").text()
+    assert "<b>x</b>" in _lbl(w, "RunFaultLabel").text()
+
+
+def test_set_commands_survives_failing_seed_request(qtbot) -> None:
+    """run_status_async бросает -> set_commands не бросает, виджет живёт по листам."""
+
+    class _Broken(_FakeCommands):
+        def run_status_async(self, on_result) -> None:
+            raise RuntimeError("нет транспорта")
+
+    w = RunControlWidget()
+    qtbot.addWidget(w)
+
+    w.set_commands(_Broken())  # не бросает
+
+    w.apply_leaf("system.run.state", "running")
+    assert _lbl(w, "RunStateLabel").text() == "Работает"
