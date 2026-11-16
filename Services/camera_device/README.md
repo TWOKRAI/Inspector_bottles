@@ -148,10 +148,53 @@ class TestMyVendorContract(PortContractSuite):
 - Журнал и замеры: `apply field=<поле> policy=live|restart ms=<мс>` (логгер сеанса), `on_timing("apply", с)` на запись шага,
   `on_timing("regrab", с)` на перезахват. Фейк считает открытые дескрипторы (`open_handles`, `max_open_handles`): их >1 значит вызов порта мимо владельца.
 
+## Команды
+
+Форма ответа зависит от команды: три прежние живут на `status`, новые команды Р7 — на `success` (Р7, `decisions.md:16`; перевод
+прежних на `success` — отдельное решение). Потребителю (вкладка 4.4) нужны обе формы. Модели аргументов — `commands.py`
+(`TakeDeviceArgs`, `ReleaseDeviceArgs`, `ApplyParamsArgs`); фреймворк до Task 1.3 `data` не валидирует, обработчик разбирает его сам.
+Текст ошибки валидации строится из `loc` и `msg`, введённое значение в ответ и в журнал не попадает.
+
+| Команда | Аргументы | Ответ |
+|---|---|---|
+| `take_device` | `timeout_s` (0 < с <= 30, по умолчанию 5.0) -> `session.start` | `{"status": "ok"\|"error", "device_state", "error"?}` |
+| `release_device` | `timeout_s` (0 < с <= 30, по умолчанию 2.0) -> `session.stop` | `{"status": "ok"\|"error", "device_state", "error"?}` |
+| `get_status` | нет | `{"status": "ok", "state", "device_state", "device_id", "frames", "last_error"}` |
+| `reset_stats` | нет | `{"success": True}` |
+| `read_params` | нет | `{"success": True, "params": {...}, "param_errors": {...}}` |
+| `apply_params` | `{"params": {поле: значение}}` | `{"success": True, "applied": [...], "on_device": bool}` или `{"success": False, "error": ...}` |
+
+Лишние ключи `data` у `take_device`/`release_device` игнорируются; ошибка валидации (`timeout_s=3600`) -> ответ той же формы
+(`status: error`), `start`/`stop` не вызываются. Команды Р7 этой части не зовут порт и не используют ящик владельца: блокирующих
+вызовов в системном потоке нет.
+
+- **`read_params`** — СНИМОК `params` и `param_errors` последнего цикла сеанса, не живое чтение: порт не зовётся. После
+  `release_device` вернёт прежние значения (сброс — при следующем `start()`). Сеанса нет -> оба пусты.
+- **`reset_stats`** — сбрасывает `frames` (счётчик плагина, поле register'а `frames`, метрика `frames` сразу в 0), `dropped`,
+  причину отброшенного кадра (`last_error` битого кадра) и окно `fps` (иначе следующее окно дало бы отрицательный `fps`).
+  НЕ сбрасывает: `errors` (счётчик жизни сеанса) и `seq_id` (Р10: номер кадра продолжает счёт; битый кадр тоже получает номер).
+  Замок `_stats_lock` охраняет счётчики от гонки `produce()` / сброс; метрики и журнал идут вне замка.
+- **`apply_params`** — единственный путь записи — `RegistersManager.set_field_value`; на прибор значение доходит колбэком
+  подписки 2.4b (Р12) в потоке вызывающего. Команда `session.apply` не зовёт (удвоение) и не ждёт владельца. Порядок проверок (всё
+  до первой записи, при отказе ничего не записано): модель -> `ctx.registers` -> поле из `bindings()` -> не `readonly` -> пробная
+  запись ВСЕГО пакета на копии register'а (всё или ничего). Поля пишутся по одному в порядке словаря (зависимые поля работают
+  только в нём); каждое поле — отдельный `set_field_value`, отдельный `apply`.
+  - `applied` = «принято register'ом»; результат на приборе приходит позже — смотреть `param_errors` через `read_params`.
+  - `on_device` = сеанс в `opening`/`grabbing` на момент ответа И хотя бы у одного записанного поля `FieldMeta.apply` — `live` или
+    `restart`; для `config`/`None` колбэк на прибор ничего не шлёт. Без захвата значение сохранено в register'е и войдёт в план
+    следующего `take_device`. Запись на прибор асинхронна (порядка десятков мс после ответа).
+  - Поля вне `bindings()` (`*_managed`, `timeout_ms`, `watchdog_s`, `device_serial`, `driver`, `camera_id`) отвергаются: подписки
+    на прибор у них нет. Флаги групп (`trigger_managed`, `rest_managed`) действуют только со следующего `take_device`, поэтому
+    порядок «флаг -> поле» через `register_update` работает лишь для полей, остальное — после `take_device`.
+  - Отказ на фазе записи (остаточный случай: значение между пробой и записью изменил другой писатель) -> `{"success": False,
+    "error": ..., "applied": [уже записанные]}`; ранее записанные поля остаются.
+- **`set_config`** (generic `cmd_set_config` базы) пишет через `reg.apply_values` и подписчиков НЕ будит: на прибор не доходит.
+  На прибор — только `apply_params` или `register_update`.
+
 ## Boundaries
 
 - `interface.py` импортирует только stdlib; `cv2` и `numpy` — только `drivers/opencv_driver.py` и `testing/`.
-- Ядро импортирует только `multiprocess_framework` и stdlib.
+- Ядро импортирует только `multiprocess_framework`, `pydantic` (модели `commands.py`) и stdlib.
 - Ядро не импортирует вендоров: драйверы подключаются строками реестра `drivers/__init__.py` (ADR-CAM-001).
   Запрет держат две записи `[[boundaries]]` в `.sentrux/rules.toml`; проверка — `sentrux check .`.
 - Вендорские пакеты импортируют ядро, не наоборот. Services не импортируют `Plugins` и `multiprocess_prototype`.
