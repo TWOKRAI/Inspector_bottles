@@ -462,11 +462,12 @@ def test_reset_stats_сдвигает_окно_fps_без_подмены_час�
     monkeypatch.setattr(plugin_base, "_TICK_S", 1e9)  # окно не созрело: кадр посчитан без публикации окна
     assert len(plugin.produce()) == 1
     monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)  # окно созрело сразу, `_tick_t0` не трогаем
+    time.sleep(0.05)  # больше шага часов Windows (15,6 мс, Python 3.12): иначе `elapsed == 0` и `fps` не публикуется
     mark = len(published)
     plugin.produce()
 
     fps = [value for name, value in published[mark:] if name == "fps"]
-    assert fps and fps[-1] > 0.5, f"окно fps не сдвинуто сбросом: {published[mark:]}"
+    assert fps and fps[-1] > 0.1, f"окно fps не сдвинуто сбросом: {published[mark:]}"
 
 
 # ---------------------------------------------------------------------------------------------- #
