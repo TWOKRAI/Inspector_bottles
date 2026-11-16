@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from multiprocess_framework.modules.process_manager_module.process.run_config import RUN_CONFIG_KEYS
 from multiprocess_prototype.backend.config.schemas import SystemConfig, load_system_config
 from multiprocess_framework.modules.registers_module.core.field_info import FieldInfo, extract_fields
 
@@ -37,6 +38,25 @@ def load_settings(path: Path | None = None) -> SystemConfig:
     return load_system_config(path or SETTINGS_PATH)
 
 
+def _keep_run_keys_as_on_disk(data: dict, target: Path) -> None:
+    """Плоские ключи ``RunConfig`` в ``data`` — как в исходном файле ``target``; нет в файле — не пишем.
+
+    У ключей нет редакторов, поэтому значение в ``cfg`` отличается от файла только умолчанием схемы или
+    ``user_overrides.yaml`` — ни то ни другое в ``system.yaml`` попадать не должно. Файла нет или он не
+    словарь -> исходных ключей нет. Ошибка разбора yaml не глотается.
+    """
+    on_disk: dict = {}
+    if target.exists():
+        loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            on_disk = loaded
+    for key in RUN_CONFIG_KEYS:
+        if key in on_disk:
+            data[key] = on_disk[key]
+        else:
+            data.pop(key, None)
+
+
 def save_settings(cfg: SystemConfig, path: Path | None = None) -> None:
     """Атомарно сохранить SystemConfig в YAML.
 
@@ -52,11 +72,14 @@ def save_settings(cfg: SystemConfig, path: Path | None = None) -> None:
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    data = cfg.model_dump()
+    _keep_run_keys_as_on_disk(data, target)
+
     tmp_path = target.with_suffix(".yaml.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(
-                cfg.model_dump(),
+                data,
                 f,
                 allow_unicode=True,
                 sort_keys=False,

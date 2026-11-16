@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from multiprocess_framework.modules.process_manager_module.process.run_config import RUN_CONFIG_KEYS
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     orchestrator_observability_config,
 )
@@ -756,8 +757,11 @@ class SystemBuilder:
                 # глубокая копия — Dict at Boundary, вложенный args не общий с sys_config.
                 "pre_stop": copy.deepcopy(sys_config.shutdown.pre_stop),
                 # Task 2.1: гейт запуска линии (system.yaml: run_gate). PM читает ключ один раз
-                # в __init__; плоский ключ orchestrator_config склеивается в конфиг PM как есть.
+                # в _create_components(); плоский ключ orchestrator_config склеивается в конфиг PM как есть.
                 "run_gate": sys_config.run_gate,
+                # Task 2.7: остальные ключи RunConfig — только заданные в system.yaml (exclude_unset);
+                # незаданный в PM не идёт, PM берёт умолчание RunConfig.
+                **sys_config.model_dump(include=set(RUN_CONFIG_KEYS) - {"run_gate"}, exclude_unset=True),
                 # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
                 # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
                 # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и

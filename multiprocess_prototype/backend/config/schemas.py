@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, StrictBool, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -14,6 +14,7 @@ from multiprocess_framework.modules.data_schema_module import (
     deep_merge,
 )
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.process_manager_module.process.run_config import RunConfig
 from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     TelemetryPublishConfig,
@@ -220,8 +221,8 @@ class ShutdownSection(SchemaBase):
         return [] if value is None else value
 
 
-class SystemConfig(SchemaBase):
-    """Корневая схема system.yaml."""
+class SystemConfig(RunConfig):
+    """Корневая схема system.yaml; плоские ключи работы PM (``run_*``) наследует от ``RunConfig``."""
 
     system: SystemSection = SystemSection()
     camera: CameraDefaults = CameraDefaults()
@@ -233,11 +234,6 @@ class SystemConfig(SchemaBase):
     observability: ObservabilityConfig = ObservabilityConfig()
     telemetry: TelemetrySection = TelemetrySection()
     shutdown: ShutdownSection = ShutdownSection()
-    #: Гейт запуска линии (Task 2.1): ``True`` — после boot система стоит в «готов» и ждёт
-    #: ``system.run.start``; ``False`` — работа идёт сразу, как до гейта. Читает ProcessManager
-    #: ОДИН раз в ``__init__``: ``config.reload`` на ключ не действует до перезапуска PM.
-    #: ``StrictBool`` — ``1``/``"yes"``/``"true"`` отвергаются, а не молча приводятся.
-    run_gate: StrictBool = False
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.
