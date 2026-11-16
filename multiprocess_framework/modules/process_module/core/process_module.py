@@ -19,6 +19,10 @@ from ...base_manager import BaseManager, ObservableMixin, open_scope
 from ...channel_routing_module.levels import LEVEL_ORDER, normalize_level_name
 from ..communication import ProcessCommunication
 
+# heartbeat грузится при импорте класса процесса, до потоков ребёнка: ленивый импорт пакета
+# из message_processor и run() давал _DeadlockError (C-92)
+from ..heartbeat.process_heartbeat import ProcessHeartbeat
+
 # Публичные контракты и типы
 from ..interfaces import IProcessModule, ISharedResources
 
@@ -1515,8 +1519,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             )
 
         # Heartbeat (composition)
-        from ..heartbeat.process_heartbeat import ProcessHeartbeat
-
         self._heartbeat = ProcessHeartbeat(self)
         self._heartbeat.start()
 

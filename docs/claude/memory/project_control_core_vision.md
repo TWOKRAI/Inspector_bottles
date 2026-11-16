@@ -1,8 +1,8 @@
 ---
 name: project-control-core-vision
 description: "Видение владельца 2026-11-01 — фреймворк как конструктор («блоки как в Майнкрафте»), единое ядро инструментов для ВСЕХ модулей, три фронта (CLI, REPL, MCP), уровни доступа, каталог для ИИ-агентов; безопасность — после фундамента / control core, tool catalog, backend_ctl, God Mode, agents"
-module: [backend_ctl, console_module, command_module, process_module]
-mechanism: [owner-decision, architecture, mcp]
+module: [tools/backend_ctl, console_module, command_module, process_module]
+mechanism: [owner-decision, architecture]
 metadata:
   node_type: memory
   type: project

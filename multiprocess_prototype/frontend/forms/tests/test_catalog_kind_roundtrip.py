@@ -35,50 +35,48 @@ def _repo_root() -> Path:
 def test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields() -> None:
     """_resolve_kind не меняется после to_dict() -> JSON -> from_dict(), по ВСЕМ полям Plugins+Services.
 
-    Без ``PluginRegistry.clear()`` намеренно (см. соседний feedback в
-    ``test_field_info_codec_hazards.py``): ``app_discover()`` после ``clear()`` не
-    переоткрывает уже импортированные модули (декоратор @register_plugin выполняется
-    один раз при первом import) — если этот файл идёт не первым в сессии, clear() увёл
-    бы регистрацию в ноль без возможности восстановить. discover() безопасно ДОБАВЛЯЕТ
-    недостающее в уже населённый реестр (register() того же класса — no-op reload).
+    Без ``PluginRegistry.clear()`` и БЕЗ отката ``restore(snapshot)`` намеренно (см. соседний
+    feedback в ``test_field_info_codec_hazards.py``): декоратор @register_plugin выполняется один раз
+    при первом import модуля, а ``app_discover()`` повторно модуль не исполняет. Здесь ``discover()``
+    впервые импортирует ВСЕ plugin.py Plugins+Services; откат реестра к снимку «до теста» стёр бы эти
+    регистрации, модули остались бы в ``sys.modules``, и любой следующий ``discover()`` не вернул бы их
+    (красными становились ``test_qr_reader_sdk*::test_blueprint_проходит_check_загрузчика`` — порядок
+    тестов, в изоляции зелёные). discover() только ДОБАВЛЯЕТ в реестр (register() того же класса —
+    no-op reload), а состояние, рождённое импортом, монотонно: откатывать его нельзя.
     """
-    snapshot = PluginRegistry.snapshot()
-    try:
-        plugins_dir = _repo_root() / "Plugins"
-        services_dir = _repo_root() / "Services"
-        app_discover(plugin_paths=[str(plugins_dir), str(services_dir)], service_paths=[])
-        entries = PluginRegistry.list()
-        assert entries, "локальный discover(Plugins/+Services/) не нашёл ни одного плагина — фикстура сломана"
+    plugins_dir = _repo_root() / "Plugins"
+    services_dir = _repo_root() / "Services"
+    app_discover(plugin_paths=[str(plugins_dir), str(services_dir)], service_paths=[])
+    entries = PluginRegistry.list()
+    assert entries, "локальный discover(Plugins/+Services/) не нашёл ни одного плагина — фикстура сломана"
 
-        checked = 0
-        found: list[str] = []
-        mismatches: list[str] = []
-        for entry in entries:
-            if not entry.register_classes:
-                continue
-            for fi in extract_fields(entry.name, entry.register_classes[0], entry.category):
-                kind_before = _resolve_kind(fi)
-                roundtripped = FieldInfo.from_dict(json.loads(json.dumps(fi.to_dict())))
-                kind_after = _resolve_kind(roundtripped)
-                checked += 1
-                found.append(f"{fi.plugin_name}.{fi.field_name}")
-                if kind_before != kind_after:
-                    mismatches.append(f"{fi.plugin_name}.{fi.field_name}: {kind_before!r} -> {kind_after!r}")
+    checked = 0
+    found: list[str] = []
+    mismatches: list[str] = []
+    for entry in entries:
+        if not entry.register_classes:
+            continue
+        for fi in extract_fields(entry.name, entry.register_classes[0], entry.category):
+            kind_before = _resolve_kind(fi)
+            roundtripped = FieldInfo.from_dict(json.loads(json.dumps(fi.to_dict())))
+            kind_after = _resolve_kind(roundtripped)
+            checked += 1
+            found.append(f"{fi.plugin_name}.{fi.field_name}")
+            if kind_before != kind_after:
+                mismatches.append(f"{fi.plugin_name}.{fi.field_name}: {kind_before!r} -> {kind_after!r}")
 
-        # Снимок, не "> 0" (ревью 2) и не число (Task 5.5: число 449 перепинивали
-        # трижды за два дня, а падение «450 != 449» не называет поле). "> 0" остаётся
-        # зелёным, даже если discover() потеряет Services/ целиком; снимок делает такую
-        # потерю видимой падением С ИМЕНАМИ полей. Обновлять при изменении регистров
-        # Plugins/Services (новое/удалённое поле) — осознанно, причина в том же коммите.
-        expected = sorted(CATALOG_FIELDS_SNAPSHOT.read_text(encoding="utf-8").split())
-        extra = sorted(set(found) - set(expected))
-        missing = sorted(set(expected) - set(found))
-        assert sorted(found) == expected, (
-            f"register-поля Plugins+Services разошлись со снимком {CATALOG_FIELDS_SNAPSHOT.name}: "
-            f"появились {extra}, пропали {missing} (было {len(expected)}, стало {checked}) — "
-            f"либо discover() что-то потерял (напр. Services/), либо регистры менялись "
-            f"(тогда обновите снимок осознанно)"
-        )
-        assert not mismatches, f"{len(mismatches)}/{checked} расхождений kind после round-trip: {mismatches}"
-    finally:
-        PluginRegistry.restore(snapshot)
+    # Снимок, не "> 0" (ревью 2) и не число (Task 5.5: число 449 перепинивали
+    # трижды за два дня, а падение «450 != 449» не называет поле). "> 0" остаётся
+    # зелёным, даже если discover() потеряет Services/ целиком; снимок делает такую
+    # потерю видимой падением С ИМЕНАМИ полей. Обновлять при изменении регистров
+    # Plugins/Services (новое/удалённое поле) — осознанно, причина в том же коммите.
+    expected = sorted(CATALOG_FIELDS_SNAPSHOT.read_text(encoding="utf-8").split())
+    extra = sorted(set(found) - set(expected))
+    missing = sorted(set(expected) - set(found))
+    assert sorted(found) == expected, (
+        f"register-поля Plugins+Services разошлись со снимком {CATALOG_FIELDS_SNAPSHOT.name}: "
+        f"появились {extra}, пропали {missing} (было {len(expected)}, стало {checked}) — "
+        f"либо discover() что-то потерял (напр. Services/), либо регистры менялись "
+        f"(тогда обновите снимок осознанно)"
+    )
+    assert not mismatches, f"{len(mismatches)}/{checked} расхождений kind после round-trip: {mismatches}"
