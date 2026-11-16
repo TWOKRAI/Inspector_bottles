@@ -203,12 +203,13 @@ class CameraDevicePlugin(ProcessModulePlugin):
         for registers, field, callback in subscriptions:  # менеджер тот, на котором подписались (ctx мог смениться)
             registers.unsubscribe(self.name, field, callback)
 
-    def _changed_steps(self, field: str, before: Any, value: Any) -> tuple[list[Step], str]:
+    def _changed_steps(self, field: str, before: Any, value: Any, retry: bool) -> tuple[list[Step], str]:
         """Шаги плана `run`, которые меняет правка поля: его собственный и шаги потомков по `enabled_if`.
 
         Сравниваются два полных плана при прочих равных значениях register'а: со старым и с новым значением поля.
         Смена родителя (`trigger_source`) включает или выключает потомка (`trigger_period_ms`): без этого сеанс
         переписал бы потомка в закрытый узел при перезахвате без `restart_regrab`. Шаг, остающийся `skip`, не меняется.
+        `retry` — у поля есть отказ записи (`param_errors`): тот же шаг пишется повторно, даже если значение то же.
         Возврат: шаги (пусто — прибор не трогать) и причина для лога.
         """
         reg, bindings = self._reg, self.bindings()
@@ -220,6 +221,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
         else:
             old = {step.field: step for step in build_plan(type(reg), {**values, field: before}, bindings)}
             steps = [step for step in new if old.get(step.field) != step and self._needs_apply(step, old)]
+        if retry and own is not None and own.skip is None and own not in steps:
+            steps.insert(0, own)
         if steps:
             return steps, ""
         return [], "нет шага" if own is None else own.skip or "значение не изменило план"
@@ -247,7 +250,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 self._seen_values[field] = value
             if policy in (None, "config") or session is None:
                 return  # сеанса нет: значение register'а войдёт в план следующего `take_device`
-            steps, reason = self._changed_steps(field, before, value)
+            steps, reason = self._changed_steps(field, before, value, field in session.param_errors)
             if not steps:
                 self._ctx.log_info(f"CameraDevicePlugin: apply field={field} skip={reason}")
                 return

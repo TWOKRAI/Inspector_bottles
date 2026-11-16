@@ -174,6 +174,8 @@ def test_stop_в_окне_перезахвата_закрывает_порт_и_
     _await(lambda: _names(rig.port).count("open") == 2, "перезахват дошёл до open (он спит 0,3 с)")
     _call(lambda: session.stop(0.1))
     _await(lambda: session.state == "closed" and not session.device_held, "closed и held False после стопа")
+    # колбэк on_state зовётся уже после установки состояния: ждём и событие, иначе чтение гонится
+    _await(lambda: len(rig.events) >= 4, "событие stopping->closed дошло до колбэка")
     names = _names(rig.port)
     assert names.count("start_grabbing") == 1  # после стопа второй start_grabbing не зовётся
     assert names[names.index("start_grabbing") + 1 :] == ["stop_grabbing", "close", "open", "close"]

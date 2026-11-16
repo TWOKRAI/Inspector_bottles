@@ -324,3 +324,42 @@ def test_правка_пропущенного_потомка_прибор_не_
 
     _wait(lambda: _wrote(rig, base, 1111.0), "сторожевая правка дошла")
     assert "stop_grabbing" not in [name for name, _ in rig.journal(base)]
+
+
+def test_повтор_того_же_значения_после_отказа_записи_пишет_один_раз_и_снимает_ошибку(make):
+    # прибор читает на 5 больше записанного: 900.0 не подтверждается чтением (допуск 0.9)
+    port = make_port(frame_period_s=0.02, read_offset={"ExposureTime": 5.0})
+    rig = make(port)
+    assert rig.take()["status"] == "ok"
+    base = len(port.calls)
+    rig.register_update("exposure_time", 900.0)
+    _wait(lambda: "exposure_time" in rig.plugin._session.param_errors, "отказ подтверждения записан")
+    assert rig.plugin._session.param_errors["exposure_time"] == "не подтвердилось чтением"
+    port._read_offset.clear()  # сбой снят
+    base = len(port.calls)
+
+    rig.register_update("exposure_time", 900.0)  # то же значение, но поле в `param_errors`
+
+    _wait(lambda: "exposure_time" not in rig.plugin._session.param_errors, "ошибка снята повторной записью")
+    time.sleep(0.2)
+    writes = [call for call in rig.journal(base) if call == ("set_param", ("ExposureTime", 900.0))]
+    assert len(writes) == 1, rig.journal(base)
+    assert rig.plugin._session.params["exposure_time"] == 900.0
+
+
+def test_повтор_того_же_значения_без_отказа_не_пишет_и_не_перезахватывает(make):
+    rig = make(**SELF_TRIGGER)
+    assert rig.take()["status"] == "ok"
+    base = _edit_and_settle(rig, "trigger_period_ms", 60)  # restart: один перезахват
+    assert rig.plugin._session.param_errors == {}
+    base = len(rig.port.calls)
+
+    rig.register_update("trigger_period_ms", 60)
+    rig.register_update("exposure_time", 900.0)
+    _wait(lambda: _wrote(rig, base, 900.0), "первая запись 900.0")
+    mark = len(rig.port.calls)
+    rig.register_update("exposure_time", 900.0)  # повтор без отказа
+    time.sleep(0.4)
+
+    assert rig.journal(mark) == [], "повтор того же значения дошёл до порта"
+    assert "stop_grabbing" not in [name for name, _ in rig.journal(base)], "лишний перезахват"
