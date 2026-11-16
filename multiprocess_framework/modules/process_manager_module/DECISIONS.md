@@ -2781,3 +2781,62 @@ ADR-PMM-047, `process_module/tests/test_heartbeat_readiness_push.py`,
 слепым набором и hazard-тестами автора.
 **Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф4–Ф6, Ф13, DESIGN п.5–8а), `tests/test_run_config_and_view.py`,
 `tests/test_run_config_and_view_hazards.py`, ADR-PMM-044.
+
+## ADR-PMM-050: Автостарт работы — один раз за boot, латч под замком машины PM (Task 2.7 S3c system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** С `run_gate: true` линия после boot стоит в `ready`, пока оператор не подаст `system.run.start`. Боевому
+headless (без GUI) нужен START без оператора. Цикл «ждать `ready` -> START» снаружи PM (в `run.py`, стендах) пришлось бы
+повторять в каждом пути запуска, а готовность и переходы машины известны только PM под `_run_lock`. Первый `ready`
+приходит не только тактом `settled` из `booting`: окно `not_ready` после подъёма детей ~4 с, вход в `ready` — тактом
+`tick` из `not_ready`.
+
+### Решение
+
+1. Ключ конфига PM `run_autostart` (поле `RunConfig`, ADR-PMM-049) читается один раз в `_create_components()` через
+   `run_config_value`, сразу после `run_gate`. Негодное значение -> одна WARNING «run_autostart негоден (нужно true или
+   false) — автостарт выключен»; `true` без `run_gate` -> одна WARNING «run_autostart без run_gate — автостарт не
+   действует» (без гейта событие работы взведено с boot, START ничего не меняет источникам). Значение входа в текст не
+   попадает (ADR-PMM-044 п.1). `config.reload` на ключ не действует (ADR-PMM-049 п.5).
+2. **Латч** `AutostartLatch(enabled)` в `process/run_state.py` — чистый класс без IO, часов и своего замка.
+   `observe(event, prev, new, code) -> bool`: выключенный — `False`; `stop`, `apply`, `ack`, `shutdown` (принятые и
+   отказанные) и принятый `start` — гасят, `False`; `settled`/`tick` без отказа, `new` = `ready`, `prev` в
+   {`booting`, `not_ready`} — гасит и даёт `True`; иначе `False`. Отказанный `start` (`not_ready`) латч не гасит:
+   намерение оператора то же. Погасший латч не взводится — **один раз за жизнь PM**: перезапуск процесса набора
+   (`ready` -> `not_ready` -> `ready`) автостарт не повторяет.
+3. **Контракт замка:** `observe` зовётся только в `_run_apply` под `_run_lock`, сразу после `transition` — латч и
+   машина решают одним шагом, параллельные такты дают ровно одно срабатывание. START подаётся ПОСЛЕ замка и после
+   `_publish_run_state()`: `_run_lock` не реентерабелен, а START сам идёт через `_run_apply`.
+4. START подаёт `_submit_run_sequence(self._run_autostart_start, "run-autostart")` — исполнитель `pm-lifecycle`; не
+   взял (отказ `executor_busy`/`system_stopping`, `False` без ответа, исключение) — одноразовый daemon-поток, как у
+   STOP. `_run_autostart_start()`: WARNING «автостарт: system.run.start (run_autostart)», затем
+   `_cmd_system_run_start({})` (готовность оценивается заново). Успех — всё; `already_running` (оператор успел) —
+   INFO «автостарт не нужен: линия уже в работе (already_running)»; иной отказ — WARNING «автостарт отказан: <код>»
+   (только код, без причин). **Повтора нет.**
+
+### Достижимость (почему таблица шире PM)
+
+В PM взведённый латч бывает только в `booting`/`not_ready`: первые входы в `ready` его гасят, в `stopping`/`fault`
+он уже погашен. Проверка `prev` и гашение принятыми `start`/`ack` в PM недостижимы — их держит только таблица
+`test_run_autostart_hazards.py` (защита от будущей правки `transition`).
+
+### Отвергнуто
+
+- Цикл «ждать `ready` -> START» в `run.py` и стендах: размножается по путям запуска, гонка с машиной PM снаружи замка.
+- Синхронный START внутри `with self._run_lock`: самоблокировка (замок не реентерабелен).
+- `_submit_run_sequence` под замком: эквивалент по исходу, но добавляет порядок `_run_lock -> _routing_lock`
+  (`_LifecycleSubmit._shift`) — риск взаимоблокировки, тестами не ловится.
+- Повтор автостарта после отказа или после перезапуска процесса: решение владельца — один раз за boot; повтор — вне
+  объёма (отдельный текст).
+
+### Известная цена
+
+- Отказанный автостарт (готовность ушла между тактом и START) оставляет линию в `ready`/`not_ready` до START оператора;
+  в журнале — WARNING с кодом.
+- Латч не отличает «первый boot» от `topology.apply`: `apply` гасит латч, после применения топологии автостарта нет.
+
+**Reversible:** yes (убрать вызов `observe` и подачу в `_run_apply`, чтение ключа; без ключа поведение прежнее).
+**Risk:** low — при умолчании (`run_autostart` нет или `false`) латч выключен, `observe` возвращает `False`.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф7, Ф8, Ф12, Ф14, DESIGN п.10–12а), `tests/test_run_autostart.py`,
+`tests/test_run_autostart_hazards.py`, ADR-PMM-049, ADR-PMM-044.

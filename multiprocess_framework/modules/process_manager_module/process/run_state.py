@@ -4,7 +4,7 @@
 Чистая функция без IO: ``transition(state, event, *, ready, stop_done)`` возвращает новое
 состояние и код отказа (``None`` — переход принят или событие — no-op). Держатель состояния,
 замок и событие ``run_event`` живут в ``ProcessManagerProcess`` (``_run_apply``); здесь только
-таблица.
+таблица, чистые оценки и латч автостарта ``AutostartLatch`` (S3c, ADR-PMM-050; решает под замком владельца).
 
 События:
   * ``start`` / ``stop`` — команды ``system.run.start`` / ``system.run.stop``;
@@ -334,3 +334,39 @@ def transition(state: RunState, event: str, *, ready: bool, stop_done: bool = Fa
     if event in ("start", "apply"):
         return state, "fault_unacknowledged"
     return state, None  # stop, settled, tick
+
+
+#: S3c (ADR-PMM-050): события, которые гасят взведённый латч автостарта при любом исходе (принято или отказано).
+_AUTOSTART_CANCEL_EVENTS: frozenset[str] = frozenset({"stop", "apply", "ack", "shutdown"})
+#: Состояния, из которых вход в ``ready`` — «первый ready за boot» (Ф12: взведённый латч бывает только в них).
+_AUTOSTART_FROM: frozenset[RunState] = frozenset({RunState.booting, RunState.not_ready})
+
+
+class AutostartLatch:
+    """Латч автостарта «взведён до первого ``ready``» (S3c, ADR-PMM-050). Чистый: без IO и часов.
+
+    Вызывать только под замком машины владельца (``_run_lock`` PM, вместе с ``transition``); своего замка нет.
+
+    ``observe(event, prev, new, code)`` — шаг машины, уже вычисленный владельцем. Итог ``True`` — ровно один раз:
+    взведённый латч видит вход в ``ready`` из ``booting``/``not_ready`` по ``settled``/``tick`` без отказа и
+    гаснет. Гасят без срабатывания: ``stop``, ``apply``, ``ack``, ``shutdown`` (принятые и отказанные) и принятый
+    ``start``. Отказанный ``start`` (``not_ready``) латч не гасит: намерение оператора то же. Погасший латч
+    больше не взводится — повтора автостарта за жизнь владельца нет.
+    """
+
+    __slots__ = ("_armed",)
+
+    def __init__(self, enabled: bool) -> None:
+        self._armed = enabled is True
+
+    def observe(self, event: str, prev: RunState, new: RunState, code: str | None) -> bool:
+        """Учесть шаг машины; ``True`` — пора подать START автостарта (латч уже погашен)."""
+        if not self._armed:
+            return False
+        if event in _AUTOSTART_CANCEL_EVENTS or (event == "start" and code is None):
+            self._armed = False
+            return False
+        if event in ("settled", "tick") and code is None and new is RunState.ready and prev in _AUTOSTART_FROM:
+            self._armed = False
+            return True
+        return False

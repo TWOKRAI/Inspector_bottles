@@ -57,6 +57,7 @@ from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
 from .run_config import RunConfig, run_config_value
 from .run_state import (
+    AutostartLatch,
     EvalInput,
     RunState,
     auto_restart_config_reason,
@@ -179,6 +180,9 @@ class ProcessManagerProcess(ProcessModule):
     _run_event: Any = None
     _run_state: RunState = RunState.booting
     _run_gate: bool = False
+    #: S3c (ADR-PMM-050): латч автостарта «взведён до первого ready»; решает только под ``_run_lock`` в
+    #: ``_run_apply``. Уровень класса — выключенный (PM из ``__new__`` без ``_create_components()`` не стартует сам).
+    _run_autostart: AutostartLatch = AutostartLatch(False)
     _run_since: float = 0.0
     #: ``time.monotonic()`` последнего входа в ``running`` (ревью Ф1, m2): такт, чья оценка начата раньше, устарел.
     #: Наружу не публикуется — ``since`` остаётся ``time.time()``.
@@ -307,6 +311,14 @@ class ProcessManagerProcess(ProcessModule):
         if not gate_ok:
             self._log_warning("run_gate негоден (нужно true или false) — гейт работы выключен")
         self._run_gate = run_gate is True
+        # S3c (ADR-PMM-050): автостарт один раз за boot — читается один раз, как ``run_gate`` (ADR-PMM-049).
+        # Без гейта событие работы взведено с boot, START источникам ничего не меняет: ключ не действует.
+        autostart, autostart_ok = run_config_value("run_autostart", self.get_config("run_autostart"))
+        if not autostart_ok:
+            self._log_warning("run_autostart негоден (нужно true или false) — автостарт выключен")
+        elif autostart is True and not self._run_gate:
+            self._log_warning("run_autostart без run_gate — автостарт не действует")
+        self._run_autostart = AutostartLatch(autostart is True and self._run_gate)
         self._run_state = RunState.booting
         self._run_since = time.time()
         self._run_ready = True
@@ -1084,6 +1096,9 @@ class ProcessManagerProcess(ProcessModule):
             if stop_done is None:
                 stop_done = self._fault_stop_done
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
+            # S3c (ADR-PMM-050): латч решает только тут, под ``_run_lock`` (своего замка у него нет); START подаётся
+            # после замка — ``_run_lock`` не реентерабелен, а START сам идёт через ``_run_apply``.
+            autostart = self._run_autostart.observe(event, prev, new, code)
             # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``/``start``, РЕАЛЬНО
             # сменившие состояние (no-op ``settled`` и отказ без смены состояния его не трогают); иначе одиночный
             # сбойный такт после них брал бы устаревшее значение: ``False`` после ``settled``/``ack`` переводил бы
@@ -1130,7 +1145,25 @@ class ProcessManagerProcess(ProcessModule):
                 if new is RunState.running:
                     self._run_running_mono = time.monotonic()
         self._publish_run_state()
+        if autostart:
+            self._submit_run_sequence(self._run_autostart_start, "run-autostart")
         return new, code, prev
+
+    def _run_autostart_start(self) -> None:
+        """S3c (ADR-PMM-050): START автостарта на исполнителе жизненного цикла — ровно один раз, без повтора.
+
+        Готовность START оценивает сам (``_cmd_system_run_start``): между тактом и START она могла уйти — тогда отказ.
+        ``already_running`` — оператор успел нажать START: INFO, не WARNING. Иной отказ — WARNING только с кодом.
+        """
+        self._log_warning("автостарт: system.run.start (run_autostart)")
+        reply = self._cmd_system_run_start({})
+        if reply.get("success") is True:
+            return
+        error = reply.get("error")
+        if error == "already_running":
+            self._log_info("автостарт не нужен: линия уже в работе (already_running)")
+            return
+        self._log_warning(f"автостарт отказан: {error}")
 
     def _run_snapshot(self) -> tuple[RunState, float]:
         """Пара ``(состояние, since)`` под ``_run_lock``."""
