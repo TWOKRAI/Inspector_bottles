@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...observability_declarations import declare_metric
+from ..health.schema import READINESS_BLOCKING_SEVERITIES
 from .cpu_clock import CpuClock
 
 #: Task 1.2c: не чаще одного внеочередного heartbeat за это время, сек (антидребезг ~2 в секунду).
@@ -71,6 +72,29 @@ def _observation_port_of(services: Any) -> Any:
     return observation_port(services)
 
 
+def _readiness_signature(readiness: Any) -> tuple[Any, Any, frozenset] | None:
+    """Подпись снимка готовности для решения «слать ли внеочередной heartbeat» (Task 3.3, ADR-PMM-048).
+
+    ``(paused, ready, {(node, severity) блокирующих причин})``. ``at``, ``stale_after_s``, тексты причин,
+    ``out_of_spec`` и ``maintenance`` в подпись не входят: ``at`` растёт на каждом пересчёте (поток ~2 сообщения/с),
+    а остальное в листе PM отстаёт до регулярного heartbeat по решению ADR. ``ready`` отдельно от причин: защёлка
+    boot даёт ``False -> True`` без единой причины. Доступ только ``.get``; ``reasons`` не список и элементы не
+    dict пропускаются, а не бросают. Не dict -> ``None``. Неhashable ``node`` бросит ``TypeError``: зовущий
+    обязан держать вызов в ``try``.
+    """
+    if not isinstance(readiness, dict):
+        return None
+    reasons = readiness.get("reasons")
+    blocking: frozenset = frozenset()
+    if isinstance(reasons, list):
+        blocking = frozenset(
+            (r.get("node"), r.get("severity"))
+            for r in reasons
+            if isinstance(r, dict) and r.get("severity") in READINESS_BLOCKING_SEVERITIES
+        )
+    return (readiness.get("paused"), readiness.get("ready"), blocking)
+
+
 class ProcessHeartbeat:
     """Heartbeat sender через IProcessServices.
 
@@ -127,14 +151,16 @@ class ProcessHeartbeat:
         # process_clock() переносил бы окно между экземплярами и делал «первый тик без cpu»
         # зависимым от порядка тестов. Синглтон остаётся для introspect.status (seconds_total).
         self._cpu_clock = CpuClock()
-        # Task 1.2c (system-run-state): внеочередной heartbeat при смене ``paused`` снимка готовности.
-        # ОДИН замок отправки на регулярный и внеочередной heartbeat: сообщения не перемежаются, а
-        # ``_last_sent_paused`` (последнее ``paused``, УШЕДШЕЕ в PM любым путём; None — готовность в PM ещё
-        # не уходила) не гонится. ``_last_push_at`` — антидребезг; ``_push_error_type`` — ключ серии лога сбоя.
+        # Task 1.2c / 3.3 (system-run-state): внеочередной heartbeat при смене готовности. ОДИН замок отправки на
+        # регулярный и внеочередной heartbeat: сообщения не перемежаются, а ``_last_sent_sig`` (подпись снимка,
+        # УШЕДШЕГО в PM любым путём, :func:`_readiness_signature`; None — готовность в PM ещё не уходила) не гонится.
+        # ``_last_push_at`` — антидребезг; ``_push_error_type`` — ключ серии лога сбоя отправки, ``_sig_error_type`` —
+        # то же для сбоя расчёта подписи.
         self._send_lock = threading.Lock()
-        self._last_sent_paused: bool | None = None
+        self._last_sent_sig: tuple[Any, Any, frozenset] | None = None
         self._last_push_at: float | None = None
         self._push_error_type: str | None = None
+        self._sig_error_type: str | None = None
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -366,27 +392,36 @@ class ProcessHeartbeat:
         except Exception:  # noqa: BLE001 — сбой снятия статуса не должен ронять такт HB
             return {}
 
-    def push_if_paused_changed(self) -> bool:
-        """Внеочередной heartbeat, если ``paused`` снимка готовности отличается от ушедшего в PM (Task 1.2c).
+    def push_if_changed(self) -> bool:
+        """Внеочередной heartbeat, если подпись снимка готовности отличается от ушедшей в PM (Task 1.2c, 3.3).
 
         Зовёт воркер снимка ``ProcessModule`` после каждого пересчёта. ``True`` — сообщение отправлено.
-        Без смены, без снимка, пока в PM не уходила готовность (первый снимок сменой не считается),
-        при выключенном heartbeat (``heartbeat_interval <= 0``) и внутри окна антидребезга
-        (``_PUSH_MIN_INTERVAL_SEC``) — ``False``; подавленная смена не теряется: сравнение с УШЕДШИМ
-        значением повторится на следующем пересчёте, и итог уйдёт после затишья. Сообщение — тот же
-        формат, что у регулярного (:meth:`_send_heartbeat_locked`); побочные хозяйственные дела такта
-        (телеметрия, health, GC-накачка) остаются на регулярном такте. Сбой отправки не бросает:
-        лог один раз на серию (ключ — тип исключения), повтор — следующим пересчётом.
+        Смена — это любое отличие подписи :func:`_readiness_signature`: ``paused``, ``ready`` или набор пар
+        ``(node, severity)`` блокирующих причин. Без смены, без снимка, пока в PM не уходила готовность (первый
+        снимок сменой не считается), при выключенном heartbeat (``heartbeat_interval <= 0``) и внутри окна
+        антидребезга (``_PUSH_MIN_INTERVAL_SEC``) — ``False``; подавленная смена не теряется: сравнение с УШЕДШЕЙ
+        подписью повторится на следующем пересчёте, и итог уйдёт после затишья. Сообщение — тот же формат, что у
+        регулярного (:meth:`_send_heartbeat_locked`); побочные хозяйственные дела такта (телеметрия, health,
+        GC-накачка) остаются на регулярном такте. Сбой отправки или расчёта подписи не бросает: лог ERROR один раз
+        на серию (ключ — тип исключения; сбой расчёта — только тип, без значений причин), повтор — следующим
+        пересчётом.
         """
         if not self._started:
             return False
         snapshot = getattr(self._services, "_readiness_snapshot", None)
-        paused = snapshot.get("paused") if isinstance(snapshot, dict) else None
-        if not isinstance(paused, bool):
+        try:
+            current = _readiness_signature(snapshot)
+        except Exception as exc:  # noqa: BLE001 — сбой расчёта подписи не роняет воркер снимка
+            if self._sig_error_type != type(exc).__name__:
+                self._sig_error_type = type(exc).__name__
+                self._services.log_error(f"heartbeat: подпись снимка готовности не посчитана: {type(exc).__name__}")
+            return False
+        self._sig_error_type = None
+        if current is None:
             return False
         with self._send_lock:
-            last = self._last_sent_paused
-            if last is None or paused == last:
+            last = self._last_sent_sig
+            if last is None or current == last:
                 return False
             now = time.monotonic()
             if self._last_push_at is not None and now - self._last_push_at < _PUSH_MIN_INTERVAL_SEC:
@@ -398,7 +433,7 @@ class ProcessHeartbeat:
                 if self._push_error_type != type(exc).__name__:
                     self._push_error_type = type(exc).__name__
                     self._services.log_error(
-                        f"heartbeat: внеочередная отправка при смене paused не удалась: {type(exc).__name__}: {exc}"
+                        f"heartbeat: внеочередная отправка при смене готовности не удалась: {type(exc).__name__}: {exc}"
                     )
                 return False
             self._push_error_type = None
@@ -415,9 +450,10 @@ class ProcessHeartbeat:
         Тайминг цикла (``effective_hz`` / ``cycle_duration_ms``) подмешан на ВЕРХНИЙ
         уровень статуса воркера (не внутри ``metrics``) и сохраняется; вложенный
         ``metrics`` вырезается для экономии трафика IPC. ``readiness`` — копия снимка;
-        ``paused`` ушедшего снимка запоминается для сравнения внеочередным путём.
+        подпись УШЕДШЕЙ копии запоминается для сравнения внеочередным путём (не подпись снимка, сравнённого до замка:
+        между сравнением и отправкой снимок мог смениться).
         """
-        sent_paused: bool | None = None
+        sent_sig: tuple[Any, Any, frozenset] | None = None
         heartbeat_msg = {
             "type": "system",
             "command": "heartbeat",
@@ -446,14 +482,13 @@ class ProcessHeartbeat:
             snapshot = getattr(self._services, "_readiness_snapshot", None)
             if isinstance(snapshot, dict):
                 heartbeat_msg["readiness"] = copy.deepcopy(snapshot)
-                if isinstance(heartbeat_msg["readiness"].get("paused"), bool):
-                    sent_paused = heartbeat_msg["readiness"]["paused"]
+                sent_sig = _readiness_signature(heartbeat_msg["readiness"])
         except Exception as exc:  # noqa: BLE001 — сбой копии снимка не роняет heartbeat
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"heartbeat: снимок готовности не прочитан: {type(exc).__name__}", module="heartbeat")
         self._services.send_message("ProcessManager", heartbeat_msg)
-        if sent_paused is not None:
-            self._last_sent_paused = sent_paused
+        if sent_sig is not None:
+            self._last_sent_sig = sent_sig
 
     def _warn_capped_metrics(self, config: Any) -> None:
         """Залогировать WARNING по метрикам, чья частота ограничена телеметрийным тиком.
