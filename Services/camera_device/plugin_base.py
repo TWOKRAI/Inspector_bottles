@@ -26,15 +26,25 @@ framework не попадает.
 Item по Р10: `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic) + `device_id`, `ts` (wall),
 `pixel_format`, `width`, `height`, `device_frame_num`. Форма кадра — по `pixel_format` (rgb8/bgr8 — h x w x 3).
 
+Task 2.4b: правка поля из GUI (`register_update` -> `RegistersManager.set_field_value`) доходит до прибора по Р12.
+В `configure` плагин подписывается на каждое поле из `bindings()` (`ctx.registers.subscribe`; без `ctx.registers` —
+один WARNING и подписки нет), в `shutdown` снимает те же колбэки. Колбэк исполняется в потоке вызывающего (системный
+поток процесса) и порт не трогает: политика поля — `FieldMeta.apply` (`config`/`None` — ничего), шаг поля строит
+`params.build_plan` из значений register'а, `DeviceSession.apply` ставит его в ящик владельца (неблокирующе).
+Прямая запись `self._reg.x = v` колбэки не будит: править только через `set_field_value`.
+
 Слой: Services -> framework; плагин не импортирует `multiprocess_prototype` и вендорские драйверы.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import time
 import traceback
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -160,11 +170,58 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._tick_t0 = time.monotonic()
         self._tick_frames = 0
         self._log_bridge: _SessionLogBridge | None = None
+        # (менеджер, поле, колбэк) для `unsubscribe`; повторный `configure` список не обнуляет (старые снимаются)
+        self._subscriptions: list[tuple[Any, str, Callable[[Any], None]]] = getattr(self, "_subscriptions", [])
         self._identity(warn=True)  # отказ рецепта — здесь, а не в take_device
         if self._reg.watchdog_s <= self._reg.timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
         for level in ("fps", "frames", "errors", "dropped", "pending", "param_errors_count"):
             ctx.declare_metric(level)
+        self._subscribe_fields()
+
+    # ------------------------------------------------------------------ #
+    # Живая правка (Task 2.4b)
+    # ------------------------------------------------------------------ #
+
+    def _subscribe_fields(self) -> None:
+        """Подписка на поля из `bindings()`; прежние подписки этого плагина снимаются (повторный `configure`)."""
+        self._unsubscribe_fields()
+        registers = self._ctx.registers
+        if registers is None:
+            self._ctx.log_warning("CameraDevicePlugin: нет RegistersManager, живая правка полей отключена")
+            return
+        for field in self.bindings():
+            callback = functools.partial(self._on_field_update, field)  # свой объект на поле и на configure
+            registers.subscribe(self.name, field, callback)
+            self._subscriptions.append((registers, field, callback))
+
+    def _unsubscribe_fields(self) -> None:
+        """Снять подписки `_subscribe_fields`; повторный вызов — пустая операция."""
+        subscriptions, self._subscriptions = self._subscriptions, []
+        for registers, field, callback in subscriptions:  # менеджер тот, на котором подписались (ctx мог смениться)
+            registers.unsubscribe(self.name, field, callback)
+
+    def _apply_policy(self, field: str) -> str | None:
+        """`FieldMeta.apply` поля register'а (`live` | `restart` | `config` | `None`)."""
+        meta = type(self._reg).get_all_fields_meta().get(field)
+        return None if meta is None else meta.apply
+
+    def _on_field_update(self, field: str, value: Any) -> None:
+        """Колбэк подписки (поток вызывающего `set_field_value`): порт не трогает, не блокирует, не бросает."""
+        try:
+            policy = self._apply_policy(field)
+            session = self._session
+            if policy in (None, "config") or session is None:
+                return  # сеанса нет: значение register'а войдёт в план следующего `take_device`
+            reg = self._reg
+            steps = build_plan(type(reg), {**reg.model_dump(), field: value}, {field: self.bindings()[field]})
+            if not steps or steps[0].skip is not None:
+                reason = "нет шага" if not steps else steps[0].skip
+                self._ctx.log_info(f"CameraDevicePlugin: apply field={field} skip={reason}")
+                return
+            session.apply(steps, policy)
+        except Exception as exc:  # noqa: BLE001 — колбэк идёт в системном потоке процесса: исключение наружу не выпускается
+            self._ctx.health.report_error(exc, context="camera_device.live_apply", throttle=30.0)
 
     # ------------------------------------------------------------------ #
     # Хуки вендора
@@ -217,6 +274,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self.cmd_take_device({})
 
     def shutdown(self, ctx: PluginContext) -> None:
+        self._unsubscribe_fields()
         try:
             self.cmd_release_device({})
         finally:  # отказ release не оставляет мост на общем логгере
