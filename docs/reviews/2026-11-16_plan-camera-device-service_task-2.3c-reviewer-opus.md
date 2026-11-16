@@ -79,3 +79,48 @@ qex не использовал: поиск — `git grep` по точным с�
 
 - `docs/claude/OPEN_QUESTIONS.md`: «`SchemaBase._check_field_constraints` и `FieldMeta.validate_value` печатают введённое число в тексте отказа (`schema_base.py:88,90`, `field_meta.py:411,413`) вопреки ADR-DS-010; `set_field_value` пишет значение в DEBUG (`manager.py:222`)» — задача framework, не 2.3c.
 - Строку (4) DESIGN 2.3c поправить: «не `readonly`» -> «`meta.can_modify(0)`» (п. 1).
+
+## Раунд 2 (код `f0657174c`, 2026-11-17)
+
+Не коммитил, код не правил. Скрипты раунда: `scratchpad/rev23c/r2/mutate2.py` (мутанты на копиях `r2/m1`, `r2/m9`, `r2/macc`, `r2/fix`, `r2/fixm1`) и `scratchpad/rev23c/r2/quantclock.py` (плагин pytest: `time.monotonic` с шагом 15,625 мс).
+
+### Вердикт раунда 2
+
+**CHANGES REQUESTED (итерация 2 из 2), одна находка.** Находки 1, 2, 5 закрыты, 3 закрыта по сути. Новый тест окна `fps` зависит от разрешения часов: при грубых часах он красный без всякой мутации. Это `tests` (major). Правка — две строки теста. После неё блокирующих находок нет.
+
+### Прогоны (через `machine_gate.sh … inspector-bottles-20`)
+
+| Команда | Итог |
+|---|---|
+| `test_plugin_commands.py` + `test_plugin_commands_hazards.py` ×5 (light) | `63 passed` ×5 (2,57–2,83 с) |
+| `Services/camera_device/tests` ×2 (medium) | `324 passed, 10 skipped` ×2 (43,4 с / 43,6 с) |
+| `ruff check -q` (4 файла), `ruff format --check -q` (3 файла) | rc 0 / rc 0 |
+| `git grep -n "_START_TIMEOUT_S\|_STOP_TIMEOUT_S" -- Services Plugins multiprocess_framework multiprocess_prototype` | только `commands.py:16,31,32,40,46`; в `plugin_base.py` — 0 |
+
+### Сверка по находкам раунда 1
+
+| # | Как проверено | Итог |
+|---|---|---|
+| 1 (права поля) | `repro.py access`: `{"exposure_time": 900.0, "gain": 2.0}` -> `{'success': False, 'error': 'недостаточно прав для поля: gain'}`, `reg.exposure_time after: 10000.0`. Мутант `macc` (убрана проверка `can_modify(0)`) -> красный ровно `test_apply_params_поле_с_уровнем_доступа_отвергается_до_первой_записи` (62/1). Прогноз до прогона: тот же один тест | закрыта. Теперь шаги до записи повторяют все проверки `set_field_value`: `validate_field` = `can_modify` + `min`/`max`; `min`/`max` проверяет проба (`_check_field_constraints`) |
+| 2 (журнал без значений) | мутант `m9` -> красный ровно `test_apply_params_журнал_без_значений_полей` (62/1); прогноз совпал | закрыта |
+| 3 (окно `fps`) | мутант `m1` -> красный ровно `test_reset_stats_сдвигает_окно_fps_без_подмены_часов_после_сброса` (62/1); прогноз совпал | гарантия покрыта, но тест хрупок — находка R2-1 ниже |
+| 4 (гонка `frames`) | README: строка «до одного кадра … или окна `_TICK_S` … прежнее число `frames`» | принято, как я рекомендовал |
+| 5 (константы) | `git grep` выше; `Field(_START_TIMEOUT_S…)`, `Field(_STOP_TIMEOUT_S…)` | закрыта: одно место правды |
+| 6 (`on_device`) | README: «`on_device` не обещает записи …» | закрыта |
+| 7 (framework) | `OPEN_QUESTIONS.md` — строка от 2026-11-17; README сужен до модели аргументов и называет исключение `min`/`max`. `repro.py access`: текст `black` прежний (вне задачи) | закрыта для 2.3c |
+
+Поправка в `…2.3c-injections.md` (M1, M9) и строка (4) DESIGN в `tasks/2.3c.md` на месте.
+
+### Находка раунда 2
+
+R2-1. **[Services/camera_device/tests/test_plugin_commands_hazards.py, `test_reset_stats_сдвигает_окно_fps_без_подмены_часов_после_сброса`] [tests, major]** — Проблема: между сбросом и вторым `produce()` проходят микросекунды. При часах с шагом 15,625 мс `elapsed == 0.0`, ветка `if elapsed > 0` (`plugin_base.py:389`) не публикует `fps`, тест красный на неизменённом коде. Такие часы — у `time.monotonic()` на Windows до Python 3.13 (`GetTickCount64`; в 3.13 переход на `QueryPerformanceCounter`). Проект закреплён на 3.12 (`pyproject.toml:5`, `>=3.12,<3.13`), команда TESTS задачи — `.venv/Scripts/python.exe`, то есть Windows.
+Воспроизведение (симуляция грубых часов, не прогон на Windows): дерево `f0657174c` + `-p quantclock`, только этот тест -> `1 failed`, `assert ([])` (`fps` не опубликован).
+Исправление: после `monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)` вставить `time.sleep(0.05)`, порог `fps[-1] > 0.5` заменить на `> 0.1`. Проверено на копии `r2/fix`: с грубыми часами `1 passed`, с настоящими `1 passed`; с мутацией M1 (`r2/fixm1`) — `1 failed` в обоих режимах (`assert ([0.00999531469623614] and 0.00999531469623614 > 0.1)`). Запас: оригинал краснеет, только если между сбросом и окном пройдёт больше 10 с; мутант даёт ~0,01.
+Закрытие проверяется одним прогоном этого теста на Windows или здесь с `-p quantclock`, плюс мутантом M1.
+
+### Что я оставил открытым / ненадёжно (раунд 2)
+
+- R2-1 доказана симуляцией часов, не прогоном на Windows. Разрешение `time.monotonic()` в Windows/3.12 (15,6 мс) я знаю по документации CPython («What's New in 3.13», модуль `time`). Запуском на этой машине не проверял.
+- Остальные тесты с порогами времени в этом файле на грубых часах я не гонял: под `quantclock` запускал только тест окна `fps`. Глобальная подмена часов задела бы `WorkerManager` и дала бы ложные красные (урок `feedback_global_clock_patch_flake.md`).
+- Пункты «открыто» раунда 1 в силе: вендорского register'а с `access_level`/`min`/`max` у привязанного поля в дереве нет; гонку подмены `__dict__` не воспроизвёл (0 из 20000); `on_device` в `opening`/`busy`/`error` руками не гонял.
+- Лид закоммитил мой отчёт раунда 1 в `f0657174c`. Этот раздел — правка рабочего дерева, не закоммичена.
