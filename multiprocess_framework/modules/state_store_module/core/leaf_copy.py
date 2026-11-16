@@ -78,6 +78,10 @@ class LeafCopy(MutableMapping[str, Any]):
 
     # --- сырая запись одного листа ---
 
+    def has_children(self, path: str) -> bool:
+        """Есть ли в копии листья СТРОГО под ``path`` (по индексу, O(1))."""
+        return bool(self._kids.get(path))
+
     def copy(self) -> dict[str, Any]:
         """Копия листьев ОДНИМ вызовом ``dict`` (атомарна под GIL, быстрее ``dict(self)``).
 
@@ -227,7 +231,7 @@ def project_leaves(pattern: str, leaves: Mapping[str, Any]) -> list[tuple[str, A
             if match_pattern(segs, parts[:k]):
                 matched.setdefault(".".join(parts[:k]))
     covered = paths_with_matched_descendants([(p, None) for p in matched])
-    nodes = [p for p in matched if p not in covered]
+    nodes = [p for p in matched if p not in covered or p in leaves]
     return _assemble(nodes, leaves)
 
 
@@ -238,16 +242,16 @@ def _assemble(nodes: list[str], leaves: Mapping[str, Any]) -> list[tuple[str, An
     Результат — по порядку первого появления узла в ``leaves``; лист без узла
     пропускается.
 
-    Лист-предок выигрывает над своими детьми, в любом порядке вставки: если в копии
-    рядом лежат ``a.n`` и ``a.n.x`` (сырая запись опроса или ресинка), узел ``a.n``
-    приходит значением листа, а ``a.n.x`` пропускается. Без этого значение-скаляр
-    принимало бы запись ``["x"] = ...`` и привязка падала ``TypeError``.
+    Скалярный лист — всегда узел (правило стора: лист отдаётся, dict-узел — только если
+    не covered). Если в копии рядом лежат ``a.n`` и ``a.n.x`` (сырая запись опроса или
+    ресинка): под шаблоном без ``**`` (``a.*``) приходит ``a.n`` значением, а ``a.n.x``
+    не вкладывается в него (иначе ``TypeError``); под ``a.**`` приходят оба листа.
     """
     wanted = set(nodes)
     out: dict[str, Any] = {}
     for leaf, value in leaves.items():
         parts = leaf.split(".")
-        for k in range(1, len(parts) + 1):
+        for k in range(len(parts), 0, -1):  # самый глубокий узел: лист-узел побеждает предка
             node = ".".join(parts[:k])
             if node not in wanted:
                 continue

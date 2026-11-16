@@ -246,7 +246,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         with self._write_lock:
             # Снимок кэша под cache-lock — дальше работаем с копией без удержания.
             with self._cache_lock:
-                snapshot = dict(self._cache)
+                snapshot = self._cache.copy()
 
             # Группируем кэш: per-process метрики + сводка system.health.
             procs: dict[str, dict[str, object]] = {}

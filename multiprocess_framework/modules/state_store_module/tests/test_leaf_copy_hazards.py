@@ -432,3 +432,65 @@ def test_one_flattening_for_cache_and_resync_journal(value, expected):
     copy.put("p", value)
     assert dict(copy) == dict(expected)
     assert list(copy) == [path for path, _ in expected]
+
+
+# --------------------------------------------------------------------------- #
+#  ревью П3 раунд 2: R2-1 цена защиты окна, R2-2, R2-3                          #
+# --------------------------------------------------------------------------- #
+
+
+def _proxy_with_cache(n_leaves: int) -> StateProxy:
+    proxy = StateProxy("camera_0", router=MockRouter())
+    for i in range(n_leaves):
+        proxy._cache[f"processes.p{i % 12}.plugins.x{i}.v"] = i
+    proxy._resync_inflight_id = "window"  # окно ресинка «открыто»: _update_cache ведёт журнал
+    return proxy
+
+
+def test_r2_1_protector_cost_does_not_grow_with_window_roots():
+    """500 скалярных замен узлов в окне, затем снимок на кэше 12 000: < 300 мс (было 1362 мс)."""
+    proxy = _proxy_with_cache(12_000)
+    # Скаляры на УЗЛАХ с детьми (…xI имеет лист …xI.v): каждому нужен корень в журнале.
+    deltas = [_d(f"processes.p{i % 12}.plugins.x{i}", i, revision=10 + i, old=MISSING) for i in range(500)]
+    proxy._update_cache(deltas)
+    assert len(proxy._resync_dirty_deletes) == 500, "корни не поставлены — сценарий не воспроизведён"
+    protected = proxy._make_resync_protector(dict(proxy._resync_dirty), dict(proxy._resync_dirty_deletes), 5)
+    box: list[float] = []
+
+    def apply() -> None:
+        t0 = time.perf_counter()
+        proxy._apply_resync_snapshot(["processes.**"], {}, protected=protected)
+        box.append(time.perf_counter() - t0)
+
+    _in_daemon(apply, deadline=15.0)
+    assert box[0] < 0.3, f"применение снимка заняло {box[0] * 1000:.0f} мс, ожидалось < 300 мс"
+    assert len(proxy._cache) == 500, "замененные узлы под защитой, остальное снято снимком"
+
+
+def test_r2_1_scalar_without_children_does_not_set_a_root_and_scalar_with_children_does():
+    proxy = _proxy_with_cache(0)
+    proxy._cache["foo.leaf"] = 1
+    proxy._cache["foo.node.v"] = 2
+    proxy._update_cache([_d("foo.leaf", 5, revision=7, old=1), _d("foo.node", 6, revision=8, old=MISSING)])
+    assert proxy._resync_dirty == {"foo.leaf": 7}  # лист без детей — только в журнале записей
+    assert proxy._resync_dirty_deletes == {"foo.node": 8}  # узел с детьми — корень, без дубля в записях
+
+
+def test_r2_1_protector_uses_prefix_boundary_and_revision():
+    proxy = _proxy_with_cache(0)
+    protect = proxy._make_resync_protector({}, {"foo.n": 6}, 5)
+    assert protect("foo.n") and protect("foo.n.x.y")
+    assert not protect("foo.n2.x") and not protect("foo")
+    # Корень старше снимка — побеждает снимок.
+    assert not proxy._make_resync_protector({}, {"foo.n": 4}, 5)("foo.n.x")
+
+
+def test_r2_2_poll_snapshot_ignores_empty_path_like_ingest():
+    m = TelemetryReadModel()
+    assert m.ingest_poll_snapshot({"": 1, "a.b": 2}, requested_at_seq=m.write_seq) == ["a.b"]
+    assert m.snapshot("") == {"a.b": 2}
+
+
+def test_r2_3_scalar_leaf_ancestor_is_given_under_doublestar_with_its_children():
+    assert project_leaves("a.**", {"a.n": 5, "a.n.x": 1}) == [("a.n", 5), ("a.n.x", 1)]
+    assert project_leaves("a.**", {"a.n.x": 1, "a.n": 5}) == [("a.n.x", 1), ("a.n", 5)]

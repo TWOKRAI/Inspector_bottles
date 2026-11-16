@@ -1145,11 +1145,19 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             rev = dirty.get(path)
             if rev is not None and (snapshot_revision is None or rev >= snapshot_revision):
                 return True
-            for root, del_rev in dirty_deletes.items():
+            if not dirty_deletes:
+                return False
+            # Корень удаления/замены — любой префикс пути по границе-точке (и сам путь):
+            # O(глубина), а не O(число корней окна).
+            prefix = ""
+            for seg in path.split("."):
+                prefix = f"{prefix}.{seg}" if prefix else seg
+                del_rev = dirty_deletes.get(prefix)
+                if del_rev is None:
+                    continue
                 if snapshot_revision is not None and del_rev < snapshot_revision:
                     continue
-                if path == root or path.startswith(root + "."):
-                    return True
+                return True
             return False
 
         return _protected
@@ -1168,9 +1176,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
                 self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
                 continue
-            # Любая запись заменяет поддерево пути (LeafCopy.put снимает старые листья,
-            # dict-дельта и скаляр одинаково): корень защищается, как удаление.
-            self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # корень записи
+            # Запись заменяет поддерево пути (LeafCopy.put снимает старые листья): корень
+            # защищается, как удаление. Скаляру корень нужен только если у пути в кэше есть
+            # дети (иначе защищать нечего, а журнал растёт вдвое); тогда корень защищает и сам
+            # путь, и в ``_resync_dirty`` он не дублируется.
+            if isinstance(delta.new_value, dict) or self._cache.has_children(delta.path):
+                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # корень записи
+                if not isinstance(delta.new_value, dict):
+                    continue
             # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
             # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
             # раскладывает её в листья: пометить корень значило бы защитить путь,

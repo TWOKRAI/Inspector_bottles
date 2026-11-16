@@ -360,6 +360,8 @@ class TelemetryReadModel:
         """
         applied: list[str] = []
         for path, value in values.items():
+            if not path:
+                continue  # пустой путь копия не хранит; как в _apply_put — игнор
             # Порог по умолчанию −1, а не 0: путь без единой push-записи не имеет
             # номера вовсе, и любой ответ по нему свежий (0 > 0 было бы ложью
             # только случайно, −1 — по построению).
