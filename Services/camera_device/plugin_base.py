@@ -252,7 +252,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                     f"CameraDevicePlugin: вызов порта {call} завис на {seconds:.1f} с"
                 ),
             )
-            self._port, self._session = port, session  # только после успешного создания сеанса: порта-сироты нет
+            self._port, self._session = port, session  # атрибут не залипает на неудачной попытке (объект порта при этом теряется без close(): SDK ещё не acquire'нут)
         return session
 
     def cmd_take_device(self, data: dict) -> dict:
