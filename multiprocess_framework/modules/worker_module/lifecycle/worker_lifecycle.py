@@ -137,7 +137,9 @@ class WorkerLifecycle(IWorkerLifecycle):
         ExecutorManager.is_executor_thread (ADR-WRK-006).
         count_restart=True — старт по start_worker: restart_count растёт, если воркер
         уже запускался; авто-рестарт считает restart_count сам (в _worker_wrapper).
-        Если Thread.start() бросил — поля реестра и статус возвращены, исключение проброшено.
+        Если Thread.start() бросил, а поток не стартовал — поля реестра и статус
+        возвращены. Если поток уже жив — реестр не трогаем: иначе живой поток
+        потерян из реестра, а следующий start_worker создаст второй. Исключение проброшено.
         """
         registry = self.manager._worker_registry
         saved = {
@@ -164,14 +166,15 @@ class WorkerLifecycle(IWorkerLifecycle):
 
         try:
             thread.start()
-        except BaseException:
-            worker_info.update(saved)
-            registry.update_status(worker_name, saved_status)
+        except Exception:
+            if not thread.is_alive():  # поток не стартовал — вернуть реестр как был
+                worker_info.update(saved)
+                registry.update_status(worker_name, saved_status)
             raise
 
     # ---- Остановка ----
 
-    def stop_worker(self, worker_name: str, timeout: float = 5.0) -> bool:
+    def stop_worker(self, worker_name: str, timeout: float | None = 5.0) -> bool:
         """Остановить воркер, дождавшись завершения потока (с таймаутом).
 
         Возвращает True, только если поток ДЕЙСТВИТЕЛЬНО завершился (или никогда
@@ -189,6 +192,9 @@ class WorkerLifecycle(IWorkerLifecycle):
         сверяет stop_event. join — снаружи замка. После join — страховка: если в
         реестре уже другой живой поток, взвести его stop_event и ждать его в
         пределах остатка timeout, пока поток в реестре не перестанет меняться.
+        Итоговое «перечитал реестр → записал STOPPED» — в одном захвате замка:
+        start_worker не вклинится между ними (иначе STOPPED при живом потоке).
+        timeout=None — ждать без срока, как join(None).
         """
         registry = self.manager._worker_registry
         with self._start_lock:
@@ -201,7 +207,7 @@ class WorkerLifecycle(IWorkerLifecycle):
             registry.update_status(worker_name, WorkerStatus.STOPPING)
             worker_info["stop_event"].set()
 
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
             if thread.is_alive():
                 thread.join(timeout=timeout)
@@ -211,30 +217,28 @@ class WorkerLifecycle(IWorkerLifecycle):
             registry.update_status(worker_name, WorkerStatus.STOPPED)
             return True
 
-        # Страховка: авто-рестарт мог подменить поток до снимка (T2 мог дать T3).
+        # Страховка: в реестре мог оказаться другой поток (T2 мог дать T3).
         while not thread.is_alive():
             with self._start_lock:
                 current = worker_info["thread"]
                 if current is thread or not current.is_alive():
-                    break
+                    # Перечитал и записал в одном захвате замка.
+                    registry.update_status(worker_name, WorkerStatus.STOPPED)
+                    return True
                 current_stop_event = worker_info["stop_event"]
                 registry.update_status(worker_name, WorkerStatus.STOPPING)
                 current_stop_event.set()
             thread = current
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is None or remaining > 0:
                 thread.join(timeout=remaining)
 
-        if thread.is_alive():
-            # Таймаут истёк, поток всё ещё жив — не врём реестру про STOPPED.
-            self.manager._log_error(
-                f"Worker '{worker_name}' не остановился за {timeout}с (таймаут join) — "
-                f"поток всё ещё жив, статус оставлен STOPPING"
-            )
-            return False
-
-        registry.update_status(worker_name, WorkerStatus.STOPPED)
-        return True
+        # Таймаут истёк, поток всё ещё жив — не врём реестру про STOPPED.
+        self.manager._log_error(
+            f"Worker '{worker_name}' не остановился за {timeout}с (таймаут join) — "
+            f"поток всё ещё жив, статус оставлен STOPPING"
+        )
+        return False
 
     # ---- Перезапуск ----
 
