@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -14,7 +15,7 @@ from multiprocess_framework.modules.data_schema_module import (
     deep_merge,
 )
 from multiprocess_framework.modules.logger_module import get_std_logger
-from multiprocess_framework.modules.process_manager_module.process.run_config import RunConfig
+from multiprocess_framework.modules.process_manager_module.process.run_config import RUN_CONFIG_KEYS, RunConfig
 from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     TelemetryPublishConfig,
@@ -234,6 +235,26 @@ class SystemConfig(RunConfig):
     observability: ObservabilityConfig = ObservabilityConfig()
     telemetry: TelemetrySection = TelemetrySection()
     shutdown: ShutdownSection = ShutdownSection()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unknown_run_keys(cls, data: Any) -> Any:
+        """Опечатка в плоском ключе работы (``run_autostrat``) не молчит (M2 сквозного обзора 2.7).
+
+        Неизвестный ключ с префиксом ``run_`` — одна WARNING на ключ при каждой валидации с подсказкой ближайшего
+        из ``RUN_CONFIG_KEYS`` (difflib) и в конфиг не попадает; отказа нет. Значение в текст не попадает. Ключи без
+        префикса ``run_`` — как раньше (лишний ключ схема отбрасывает молча). Одно место для всех путей загрузки:
+        ``load_system_config`` (system.yaml + user_overrides.yaml), Save вкладки «Система», хуки оркестратора.
+        """
+        if not isinstance(data, dict):
+            return data
+        unknown = [k for k in data if isinstance(k, str) and k.startswith("run_") and k not in cls.model_fields]
+        if not unknown:
+            return data
+        for key in unknown:
+            nearest = difflib.get_close_matches(key, RUN_CONFIG_KEYS, n=1, cutoff=0.0)[0]
+            logger.warning(f"неизвестный ключ {key} (возможно {nearest})")
+        return {k: v for k, v in data.items() if k not in unknown}
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.
