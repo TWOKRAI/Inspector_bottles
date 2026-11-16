@@ -91,7 +91,10 @@ def test_run_active_flag_follows_run_state(run_gate: bool) -> None:
     assert pm._run_state == "fault"
     assert flag.is_set() is False, "после fault"
 
-    assert pm._cmd_system_run_ack()["success"] is True
+    # Ack через автомат: остановку в аварии ставит такт монитора, голый ``_run_apply("tick")`` её
+    # не запускает, и команда ack отказала бы ``fault_stopping`` при любом коде флага (правка лида).
+    pm._run_apply("ack", stop_done=True)
+    assert pm._run_state == "not_ready"
     assert flag.is_set() is False, "после ack"
 
 
