@@ -8,7 +8,9 @@ S3c 12 — исполнитель не взял подачу (отказ ``execu
 S3c 13 — автостарт отказан (готовность ушла между тактом и START) -> одна WARNING «автостарт отказан: not_ready»,
 повтора нет; оператор успел START (``already_running``) -> одна INFO, WARNING об отказе нет.
 S3c 14 — настоящий ``pm-lifecycle`` (``WorkerManager`` + ``ExecutorManager``): START взял исполнитель, не обход.
-Гонки — 20 потоков такта в ``ready`` и START оператора наперегонки с автостартом: ``running`` ровно 1 раз.
+Гонки — 20 потоков такта в ``ready``; START оператора против автостарта: три порядка, вынужденные событиями
+(отказ в ``booting``, победа оператора в окне до START автостарта, автостарт первым) и гонка по времени с окном
+в двойнике стора. Везде ``running`` ровно 1 раз.
 
 Каждая подача события (``_run_apply``, команда, такт) идёт в daemon-потоке с ``join``-дедлайном: синхронный
 START под ``_run_lock`` (замок не реентерабелен) — красный, а не зависший прогон.
@@ -416,28 +418,130 @@ def test_concurrent_ticks_fire_once() -> None:
     assert _texts(pm._log_warning).count(_W_AUTOSTART) == 1, _texts(pm._log_warning)
 
 
+class _GatedStore(_Store):
+    """Двойник стора с окном гонки: первая запись ``system.run.state = ready`` держит пишущий поток (``settled``)
+    внутри публикации — после срабатывания латча, до подачи START автостарта (подача идёт после публикации).
+    Держит до ``release`` либо ``hold_s`` секунд (тогда окно — по времени, без события)."""
+
+    def __init__(self, *, hold_s: float | None = None) -> None:
+        super().__init__()
+        self.hold_s = hold_s
+        self.ready_seen = threading.Event()
+        self.release = threading.Event()
+        self._held = False
+
+    def handle_state_set(self, msg: dict) -> dict:
+        data = msg["data"]
+        hold = False
+        with self._lock:
+            if not self._held and data["path"] == _STATE_PATH and data["value"] == "ready":
+                self._held = hold = True
+        if hold:
+            self.ready_seen.set()
+            self.release.wait(self.hold_s if self.hold_s is not None else _JOIN_S)
+        return super().handle_state_set(msg)
+
+
+def _assert_one_autostart(pm: ProcessManagerProcess, store: _Store, *, info: int) -> None:
+    """Итог при любом порядке: ``running`` ровно 1 раз, WARNING «автостарт: …» ровно 1, «автостарт отказан» нет,
+    INFO ``already_running`` — ровно ``info`` раз."""
+    assert _wait(lambda: store.starts() >= 1), store.writes
+    if info:
+        assert _wait(lambda: _texts(pm._log_info).count(_I_ALREADY_RUNNING) >= info), _texts(pm._log_info)
+    _stay(store, 1, 0.5)
+    assert _texts(pm._log_info).count(_I_ALREADY_RUNNING) == info, _texts(pm._log_info)
+    assert _texts(pm._log_warning).count(_W_AUTOSTART) == 1, _texts(pm._log_warning)
+    assert [w for w in _texts(pm._log_warning) if w.startswith(_W_REFUSED_PREFIX)] == [], _texts(pm._log_warning)
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("schedule", ["operator-refused-in-booting", "operator-in-window", "autostart-first"])
+def test_operator_start_schedules(schedule: str) -> None:
+    """Три порядка START оператора и автостарта, каждый вынужден событиями (детерминированно):
+
+    * ``operator-refused-in-booting`` — START оператора в ``booting`` отказан ``not_ready``, затем boot: латч не
+      погашен, автостарт один раз, INFO нет;
+    * ``operator-in-window`` — латч сработал, поток ``settled`` держит стор на записи ``ready``; START оператора
+      принят в этом окне -> автостарт получает ``already_running``: одна INFO, WARNING об отказе нет;
+    * ``autostart-first`` — автостарт уже в ``running``, START оператора получает ``already_running``, INFO нет.
+    """
+    pm, monitor, _store = _pm()
+    store = _GatedStore()
+    pm._state_store_manager = store
+    if schedule != "operator-in-window":
+        store.release.set()
+    _bounded(lambda: beat(monitor, "cam"))
+
+    if schedule == "operator-refused-in-booting":
+        reply = _bounded(pm._cmd_system_run_start)
+        assert (reply["success"], reply["error"], reply["state"]) == (False, "not_ready", "booting"), reply
+        _bounded(lambda: pm._run_apply("settled", ready=True))
+        _assert_one_autostart(pm, store, info=0)
+    elif schedule == "operator-in-window":
+        box: dict[str, Any] = {}
+        settle = threading.Thread(target=lambda: pm._run_apply("settled", ready=True), daemon=True, name="settle")
+        settle.start()
+        assert store.ready_seen.wait(_JOIN_S), "запись ready не дошла до стора"
+        op = threading.Thread(
+            target=lambda: box.setdefault("reply", pm._cmd_system_run_start()), daemon=True, name="operator"
+        )
+        op.start()
+        assert _wait(lambda: _state(pm) == "running"), pm._run_snapshot()  # START оператора прошёл замок машины
+        store.release.set()
+        settle.join(_JOIN_S)
+        op.join(_JOIN_S)
+        assert not settle.is_alive() and not op.is_alive(), "подача зависла"
+        assert box["reply"]["success"] is True, box
+        _assert_one_autostart(pm, store, info=1)
+    else:
+        _bounded(lambda: pm._run_apply("settled", ready=True))
+        assert _wait(lambda: store.starts() >= 1), store.writes
+        reply = _bounded(pm._cmd_system_run_start)
+        assert (reply["success"], reply["error"]) == (False, "already_running"), reply
+        _assert_one_autostart(pm, store, info=0)
+
+
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize("round_no", range(5))
 def test_operator_start_races_autostart(round_no: int) -> None:
-    """START оператора наперегонки с автостартом (обходной поток): ``running`` ровно 1 раз; WARNING «автостарт
-    отказан» нет ни при каком исходе (проигравший получает ``already_running``)."""
-    pm, monitor, store = _pm()
+    """Гонка по времени (без событий-подсказок): после общего барьера оператор жмёт START каждые ~1 мс, пока
+    ответ ``not_ready``; ``settled`` приходит через 20 мс, запись ``ready`` держит поток ``settled`` 50 мс (окно
+    между срабатыванием латча и START автостарта). Обычно в раунде есть оба исхода: отказы START в ``booting``
+    (латч не гаснет) и победа оператора в окне (автостарт получает ``already_running``). Проверяется инвариант
+    при любом исходе: ``running`` ровно 1 раз, WARNING «автостарт: …» 1, «автостарт отказан» нет; INFO
+    ``already_running`` — ровно когда START оператора принят."""
+    pm, monitor, _store = _pm()
+    store = _GatedStore(hold_s=0.05)
+    pm._state_store_manager = store
     _bounded(lambda: beat(monitor, "cam"))
+    barrier = threading.Barrier(2)
     replies: list[dict] = []
 
     def operator() -> None:
-        replies.append(pm._cmd_system_run_start())
+        barrier.wait(_JOIN_S)
+        end = time.monotonic() + _JOIN_S
+        while time.monotonic() < end:
+            reply = pm._cmd_system_run_start()
+            replies.append(reply)
+            if reply.get("error") != "not_ready":
+                return
+            time.sleep(0.001)
 
-    settle = threading.Thread(target=lambda: pm._run_apply("settled", ready=True), daemon=True, name="settle")
-    op = threading.Thread(target=operator, daemon=True, name="operator")
-    settle.start()
-    op.start()
-    settle.join(_JOIN_S)
-    op.join(_JOIN_S)
-    assert not settle.is_alive() and not op.is_alive(), "подача зависла"
+    def settle() -> None:
+        barrier.wait(_JOIN_S)
+        time.sleep(0.02)
+        pm._run_apply("settled", ready=True)
 
-    assert _wait(lambda: store.starts() >= 1), store.writes
-    _stay(store, 1, 0.5)
-    assert len(replies) == 1
-    assert replies[0].get("success") is True or replies[0].get("error") in ("not_ready", "already_running"), replies
-    assert [w for w in _texts(pm._log_warning) if w.startswith(_W_REFUSED_PREFIX)] == [], _texts(pm._log_warning)
+    threads = [
+        threading.Thread(target=operator, daemon=True, name="operator"),
+        threading.Thread(target=settle, daemon=True, name="settle"),
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(_JOIN_S + 1.0)
+    assert [th.name for th in threads if th.is_alive()] == [], "подача зависла"
+
+    final = replies[-1]
+    assert final.get("success") is True or final.get("error") == "already_running", replies[-3:]
+    _assert_one_autostart(pm, store, info=1 if final.get("success") is True else 0)
