@@ -32,7 +32,7 @@ class _Rig:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, **cfg) -> None:
         self.port = make_port(frame_period_s=0.02)
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: self.port)
-        config = {"auto_start": True, "camera_id": 3, **cfg}
+        config = {"auto_start": True, "camera_id": 3, "device_select": "first", **cfg}
         services = MockProcessServices(name=PROCESS_NAME, config=config)
         self.wm = WorkerManager("test_cam")
         services.worker_manager = self.wm  # настоящий менеджер: MockWorkerManager потоков не создаёт
@@ -143,7 +143,7 @@ def test_регистр_настоящего_плагина_равен_сост�
     """Опаздывает только доставка on_state в потоке вызывающего; строка `_on_state` плагина — настоящая."""
     port = make_port(busy_for_s=60.0, frame_period_s=0.02)
     monkeypatch.setattr(plugin_base, "create_port", lambda driver: port)
-    config = {"auto_start": False, "camera_id": 3}
+    config = {"auto_start": False, "camera_id": 3, "device_select": "first"}
     services = MockProcessServices(name=PROCESS_NAME, config=config)
     wm = WorkerManager("test_cam")
     services.worker_manager = wm

@@ -40,7 +40,7 @@ blueprint:
           category: source
           driver: fake
           camera_id: 0
-          device_id: ""
+          device_select: first
           auto_start: true
 
   wires: []

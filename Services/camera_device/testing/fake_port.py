@@ -55,6 +55,14 @@ FRAME_HEIGHT = 2
 FRAME_PIXEL_FORMAT = "mono8"
 FAKE_SERIAL = "FAKE-0001"
 
+# Таблица привязки полей register'а базового плагина к узлам фейка (`driver: fake`); вендор держит свою (`BINDINGS`).
+FAKE_BINDINGS = {
+    "trigger_mode": Binding("genicam", "TriggerMode", "enum"),
+    "trigger_source": Binding("genicam", "TriggerSource", "enum"),
+    "trigger_period_ms": Binding("genicam", "TriggerSelfTriggerPeriod", "int"),
+    "exposure_time": Binding("genicam", "ExposureTime", "float"),
+}
+
 
 @dataclass
 class _Node:

@@ -187,6 +187,20 @@ class DeviceSession:
     # Команды (потоки вызывающих)
     # ------------------------------------------------------------------ #
 
+    def set_cycle(self, ident: DeviceIdentity | None, run: Sequence[Step], rest: Sequence[Step]) -> bool:
+        """Заменить идентичность прибора и план run/rest для СЛЕДУЮЩЕГО цикла (один сеттер на весь цикл).
+
+        Под замком сеанса (тем же, что у `start()`): пока поток-владелец жив (`device_held`), цикл не меняется
+        и возвращается `False` без исключения; иначе — `True`. `timeout_ms` и `watchdog_s` не меняются.
+        """
+        with self._lock:
+            if self._held:
+                return False
+            self._ident = ident
+            self._run = tuple(run)
+            self._rest = tuple(rest)
+            return True
+
     def start(self, timeout: float = 5.0) -> bool:
         """Начать захват: `True` — захват идёт.
 
