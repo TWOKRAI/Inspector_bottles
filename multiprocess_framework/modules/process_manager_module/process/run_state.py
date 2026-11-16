@@ -225,6 +225,32 @@ def has_blocking(reasons: list[dict]) -> bool:
     return any(r.get("severity") in BLOCKING_SEVERITIES for r in reasons)
 
 
+def run_view(
+    state: RunState,
+    since: float,
+    *,
+    run_gate: bool,
+    ack_allowed: bool,
+    reasons: list[dict],
+    last_fault: dict | None,
+) -> dict:
+    """Вид состояния работы для ``system.run.status`` и листьев ``system.run.*`` (один построитель, ADR-PMM-049).
+
+    Чистая функция без IO. Ключи — в порядке публикации: ``state``, ``since``, ``run_gate``, ``start_allowed``
+    (``state`` = ``ready``), ``stop_allowed`` (``state`` = ``running``), ``ack_allowed``, ``reasons``, ``last_fault``.
+    """
+    return {
+        "state": state.value,
+        "since": since,
+        "run_gate": run_gate,
+        "start_allowed": state is RunState.ready,
+        "stop_allowed": state is RunState.running,
+        "ack_allowed": ack_allowed,
+        "reasons": reasons,
+        "last_fault": last_fault,
+    }
+
+
 def _r(ready: bool) -> RunState:
     """Ячейка ``R`` таблицы: ``ready`` при ``ready=True``, иначе ``not_ready``."""
     return RunState.ready if ready else RunState.not_ready

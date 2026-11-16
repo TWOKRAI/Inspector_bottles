@@ -55,6 +55,7 @@ from .backend_ctl_endpoint import (
 )
 from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
+from .run_config import RunConfig, run_config_value
 from .run_state import (
     EvalInput,
     RunState,
@@ -62,6 +63,7 @@ from .run_state import (
     evaluate,
     has_blocking,
     restart_window,
+    run_view,
     stop_unconfirmed_reason,
     transition,
     unconfirmed_stop,
@@ -190,7 +192,7 @@ class ProcessManagerProcess(ProcessModule):
     _run_reasons: tuple | list = ()
     _run_last_fault: dict | None = None
     #: Task 1.4: срок ожидания ``paused`` по умолчанию (конфиг PM ``run_stop_timeout_s``), срез опроса листьев, с.
-    _DEFAULT_RUN_STOP_TIMEOUT_S = 10.0
+    _DEFAULT_RUN_STOP_TIMEOUT_S: float = RunConfig.model_fields["run_stop_timeout_s"].default
     _STOP_POLL_S = 0.05
     #: Task 1.4: «не подтвердили остановку» ``{процесс: N}`` (N — срок ожидания ``paused``); пишет только код под
     #: ``_unconfirmed_lock`` и ЗАМЕНЯЕТ значение целиком (как ``_run_reasons``: уровень класса общий для всех PM).
@@ -199,7 +201,7 @@ class ProcessManagerProcess(ProcessModule):
     #: (``time.time()``, часы листов готовности) и срок окна по умолчанию (конфиг PM ``run_restart_grace_s``), с.
     #: Ведёт только тик под ``_run_restart_lock`` (``restart_window``) и ЗАМЕНЯЕТ значение целиком (как
     #: ``_run_unconfirmed``: уровень класса общий для всех PM); остальные оценки только читают ссылку.
-    _DEFAULT_RUN_RESTART_GRACE_S = 30.0
+    _DEFAULT_RUN_RESTART_GRACE_S: float = RunConfig.model_fields["run_restart_grace_s"].default
     _run_down_since: dict = {}
     #: Task 1.4: остановка в аварии завершена (все ``paused``/не живы или срок истёк); ``ack`` (Task 1.7) читает
     #: признак. Сбрасывается при входе в ``fault`` и выходе из него (под ``_run_lock``); ``_fault_seq`` — номер аварии:
@@ -301,10 +303,10 @@ class ProcessManagerProcess(ProcessModule):
         # Task 1.1 system-run-state: событие работы — ДО реестра (реестр строится из ``__init__``, позже
         # ``initialize()`` отдал бы ему ``None``). ``run_gate: true`` — снято до ``system.run.start``;
         # иначе взведено сразу и PM его больше не трогает (машина наблюдаемая, не гейтящая).
-        raw_run_gate = self.get_config("run_gate")
-        if raw_run_gate is not None and not isinstance(raw_run_gate, bool):
+        run_gate, gate_ok = run_config_value("run_gate", self.get_config("run_gate"))
+        if not gate_ok:
             self._log_warning("run_gate негоден (нужно true или false) — гейт работы выключен")
-        self._run_gate = raw_run_gate is True
+        self._run_gate = run_gate is True
         self._run_state = RunState.booting
         self._run_since = time.time()
         self._run_ready = True
@@ -1149,7 +1151,7 @@ class ProcessManagerProcess(ProcessModule):
             return reasons, last_fault
 
     def _publish_run_state(self) -> None:
-        """Записать в стор изменившиеся ``system.run.*`` (state, since, reasons, start_allowed, last_fault) из СНИМКА.
+        """Записать в стор изменившиеся листья ``system.run.*`` (вид ``run_view``) из СНИМКА.
 
         Порядок — как ``_publish_system_stop``: снимок берётся под ``_run_publish_lock``, поэтому поздний
         издатель не перезапишет новое состояние старым. Неизменённые значения пропускаются. Стора нет —
@@ -1163,14 +1165,15 @@ class ProcessManagerProcess(ProcessModule):
             published = self._run_published
             if published is None:
                 published = self._run_published = {}
-            for key, value in (
-                ("state", state.value),
-                ("since", since),
-                ("reasons", reasons),
-                ("start_allowed", state is RunState.ready),
-                ("ack_allowed", self._run_ack_allowed()),
-                ("last_fault", last_fault),
-            ):
+            view = run_view(
+                state,
+                since,
+                run_gate=self._run_gate,
+                ack_allowed=self._run_ack_allowed(),
+                reasons=reasons,
+                last_fault=last_fault,
+            )
+            for key, value in view.items():
                 if key in published and published[key] == value:
                     continue
                 self._state_op(
@@ -1365,13 +1368,10 @@ class ProcessManagerProcess(ProcessModule):
 
     def _run_restart_grace(self) -> float:
         """Окно перезапуска: конфиг PM ``run_restart_grace_s`` (умолчание 30.0 с); негодное — умолчание."""
-        raw = self.get_config("run_restart_grace_s")
-        if raw is None:
-            return self._DEFAULT_RUN_RESTART_GRACE_S
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
-            return float(raw)
-        self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
-        return self._DEFAULT_RUN_RESTART_GRACE_S
+        value, ok = run_config_value("run_restart_grace_s", self.get_config("run_restart_grace_s"))
+        if not ok:
+            self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
+        return float(value)  # type: ignore[arg-type]
 
     def _supervisor_gave_up(self, names: frozenset[str]) -> frozenset[str]:
         """Процессы ``names``, от перезапуска которых супервизор отказался (``status == "failed"`` в его снимке).
@@ -1432,12 +1432,10 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:  # noqa: BLE001 — итог остановки не имеет права не случиться
             self._log_warning(f"run_stop_timeout_s не прочитан ({type(exc).__name__}) — взято 10.0 с")
             return self._DEFAULT_RUN_STOP_TIMEOUT_S
-        if raw is None:
-            return self._DEFAULT_RUN_STOP_TIMEOUT_S
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
-            return float(raw)
-        self._log_warning("run_stop_timeout_s негоден (нужно число > 0) — взято 10.0 с")
-        return self._DEFAULT_RUN_STOP_TIMEOUT_S
+        value, ok = run_config_value("run_stop_timeout_s", raw)
+        if not ok:
+            self._log_warning("run_stop_timeout_s негоден (нужно число > 0) — взято 10.0 с")
+        return float(value)  # type: ignore[arg-type]
 
     def _settle_run_state(self) -> None:
         """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
@@ -1847,20 +1845,20 @@ class ProcessManagerProcess(ProcessModule):
     def _cmd_system_run_status(self, data=None, **kwargs) -> dict:
         """``system.run.status`` (Task 1.1 system-run-state): снимок машины работы.
 
+        Вид строит ``run_view`` (тот же, что листья ``system.run.*``; ``stop_allowed`` — ``state`` = ``running``).
         ``reasons`` — причины последней оценки готовности (Task 1.3), ``last_fault`` — последняя авария
         ``{at, reasons, acknowledged_at}`` или ``None`` (квитирование — Task 1.7).
         """
         state, since = self._run_snapshot()
         reasons, last_fault = self._run_detail_snapshot()
-        return {
-            "state": state.value,
-            "since": since,
-            "run_gate": self._run_gate,
-            "start_allowed": state is RunState.ready,
-            "ack_allowed": self._run_ack_allowed(),
-            "reasons": reasons,
-            "last_fault": last_fault,
-        }
+        return run_view(
+            state,
+            since,
+            run_gate=self._run_gate,
+            ack_allowed=self._run_ack_allowed(),
+            reasons=reasons,
+            last_fault=last_fault,
+        )
 
     def _cmd_system_run_start(self, data=None, **kwargs) -> dict:
         """``system.run.start``: ``ready`` -> ``running``; иначе отказ с кодом, ТЕКУЩИМ состоянием и причинами.

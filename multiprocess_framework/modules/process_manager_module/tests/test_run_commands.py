@@ -97,6 +97,7 @@ def test_run_command_replies(run_gate: bool) -> None:
         "since",
         "run_gate",
         "start_allowed",
+        "stop_allowed",
         "ack_allowed",
         "reasons",
         "last_fault",

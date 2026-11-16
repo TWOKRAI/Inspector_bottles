@@ -2737,3 +2737,47 @@ GUI получал `terminate` в окне PM, пока PM ждал зависш
 `plans/2026-10-27_system-run-state/reports/phase1.review-opus-fresh.md` (С5), `reports/1.6-1.8-1.7c.stand.md`,
 ADR-PMM-047, `process_module/tests/test_heartbeat_readiness_push.py`,
 `process_module/tests/test_heartbeat_readiness_push_hazards.py`.
+
+## ADR-PMM-049: `RunConfig` — ключи работы PM одной моделью, `run_view` — один построитель вида (Task 2.7 S3b1 system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Ключи работы PM лежали врассыпную: `run_gate` проверялся в `_create_components()`, `run_stop_timeout_s` и
+`run_restart_grace_s` — каждый своей копией проверки «число > 0» в геттере, прототип знал из них только `run_gate`
+(`SystemConfig` остальные ключи молча отбрасывал). Вид состояния строили два места: `_publish_run_state` (листья) и
+`_cmd_system_run_status` (ответ команды) — разный набор ключей, `stop_allowed` не было нигде.
+
+### Решение
+
+1. `process/run_config.py`: `RunConfig(SchemaBase)` — плоские поля `run_gate: StrictBool = False`,
+   `run_autostart: StrictBool = False`, `run_stop_timeout_s` и `run_restart_grace_s` типа
+   `Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)]` (умолчания 10.0 и 30.0). `RUN_CONFIG_KEYS` —
+   имена полей по порядку. Новый ключ PM — одно поле в одном файле. `StrictBool` и `strict=True` отвергают `1`,
+   `"true"`, `True` для числа, `"2"`: `PositiveFloat` пропускал `True -> 1.0` и `"2" -> 2.0`.
+2. `run_config_value(key, raw) -> (значение, годно)`: `None` (ключа нет) -> `(умолчание, True)`; годное -> `(значение,
+   True)`; негодное -> `(умолчание, False)`; на негодном значении не бросает. Значение входа в результат и в тексты
+   WARNING не попадает (ADR-PMM-044 п.1); тексты WARNING PM прежние, дословно.
+3. PM: `_create_components()` читает `run_gate` через `run_config_value`; геттеры `_run_restart_grace` и
+   `_run_stop_timeout` остаются точками вызова и читают ключ при каждом использовании (как раньше), проверка — вызов
+   `run_config_value`; `_DEFAULT_RUN_*` — псевдонимы умолчаний полей `RunConfig`.
+4. `process/run_state.py`: чистая `run_view(state, since, *, run_gate, ack_allowed, reasons, last_fault) -> dict` с
+   ключами `state, since, run_gate, start_allowed (state is ready), stop_allowed (state is running), ack_allowed,
+   reasons, last_fault`. `_publish_run_state` обходит `run_view(...).items()` (дедупликация по `published` прежняя),
+   `_cmd_system_run_status` возвращает `run_view(...)`. Новые листья `system.run.run_gate` и `system.run.stop_allowed`.
+5. **`run_gate` и `run_autostart` читаются один раз** (в `_create_components()`): `config.reload` на них не действует до
+   перезапуска PM. Числовые ключи читаются при каждом использовании и подхватывают изменение конфига.
+
+### Известная цена
+
+- Импорт `run_config` из прототипа грузит пакет PM (`import ...process.run_state` -> +1053 модуля, ~0,39 с,
+  загружен `process_manager_process`). Принято. Вариант на будущее — вынести `RunConfig` в место, импорт которого не тянет
+  `__init__` пакета PM; не исследован.
+- `run_autostart` в схеме есть, PM его пока не читает (читает срез S3c, ADR-PMM-050).
+- Блокирующий набор степеней причин (`health/schema.py`, `READINESS_BLOCKING_SEVERITIES`) по-прежнему имеет копию в GUI
+  (`run_control.py`); `run_view` её не касается (S5).
+
+**Reversible:** yes (вернуть проверки в геттеры и два построителя вида; удалить `run_config.py`).
+**Risk:** low — поведение при умолчаниях не меняется, добавлены ключ `stop_allowed` в ответе и два листа; покрыто
+слепым набором и hazard-тестами автора.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф4–Ф6, Ф13, DESIGN п.5–8а), `tests/test_run_config_and_view.py`,
+`tests/test_run_config_and_view_hazards.py`, ADR-PMM-044.
