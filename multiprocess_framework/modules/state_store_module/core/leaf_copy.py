@@ -21,16 +21,17 @@ from typing import Any, Iterator
 from .subscription_manager import match_pattern, split_pattern
 
 
-def _flatten(path: str, value: Any) -> list[tuple[str, Any]]:
+def flatten_leaves(path: str, value: Any) -> list[tuple[str, Any]]:
     """Непустой dict -> его листья (в порядке ключей), ``{}`` -> ничего, иначе один лист.
 
-    Семантика та же, что у ``StateProxy._expand_leaf_paths``.
+    Единственная раскладка dict -> листья: ею пользуются ``LeafCopy.put`` и журнал
+    защиты ресинка ``StateProxy`` (иначе он охранял бы не то, что лежит в кэше).
     """
     if not isinstance(value, dict):
         return [(path, value)]
     out: list[tuple[str, Any]] = []
     for key, nested in value.items():
-        out.extend(_flatten(f"{path}.{key}", nested))
+        out.extend(flatten_leaves(f"{path}.{key}", nested))
     return out
 
 
@@ -77,8 +78,24 @@ class LeafCopy(MutableMapping[str, Any]):
 
     # --- сырая запись одного листа ---
 
+    def copy(self) -> dict[str, Any]:
+        """Копия листьев ОДНИМ вызовом ``dict`` (атомарна под GIL, быстрее ``dict(self)``).
+
+        ``dict(LeafCopy)`` идёт через ``keys()`` и Python-уровневый ``__getitem__`` на
+        каждый ключ: читатель в другом потоке ловит ``KeyError`` от писателя и платит
+        в разы дороже. Снимки целой копии берут этот метод.
+        """
+        return dict(self._data)
+
     def __setitem__(self, path: str, value: Any) -> None:
-        """СЫРАЯ запись одного листа: значение кладётся как есть, dict не разворачивается."""
+        """СЫРАЯ запись одного листа: значение кладётся как есть, dict не разворачивается.
+
+        Пустой путь — ``ValueError``: корень ``""`` служит ключом индекса, и лист с таким
+        путём зациклил бы обход (``_kids[""] == {""}``). Хранилище дерева пустой путь не
+        отдаёт (``TreeStore.set``/``delete`` его отвергают, ``merge`` строит непустые).
+        """
+        if not path:
+            raise ValueError("LeafCopy: пустой путь")
         if path not in self._data:
             self._link(path)
         self._data[path] = value
@@ -105,7 +122,11 @@ class LeafCopy(MutableMapping[str, Any]):
         """Снять связи вверх, пока у узла нет ни детей, ни собственного значения."""
         node = path
         while True:
-            if node in self._data or self._kids.get(node):
+            if node in self._data:
+                if not self._kids.get(node):
+                    self._kids.pop(node, None)  # лист без детей: пустое множество не держим
+                return
+            if self._kids.get(node):
                 return
             self._kids.pop(node, None)
             head, _, _ = node.rpartition(".")
@@ -129,7 +150,9 @@ class LeafCopy(MutableMapping[str, Any]):
         а в read-model — кольцо истории. Снимается СТАРОЕ до записи нового: иначе
         снялись бы только что записанные листья.
         """
-        new = _flatten(path, value)
+        if not path:
+            raise ValueError("LeafCopy: пустой путь")
+        new = flatten_leaves(path, value)
         keep = {p for p, _ in new}
         removed = [p for p in self._leaves_under(path) if p not in keep]
         for p in removed:
@@ -147,7 +170,9 @@ class LeafCopy(MutableMapping[str, Any]):
         return [p for p, _ in new], removed
 
     def drop(self, path: str) -> list[str]:
-        """Снять путь и всё поддерево, вернуть снятые листья."""
+        """Снять путь и всё поддерево, вернуть снятые листья. Пустой путь — ничего (``[]``)."""
+        if not path:
+            return []
         gone = self._leaves_under(path)
         for p in gone:
             del self[p]
@@ -166,7 +191,7 @@ class LeafCopy(MutableMapping[str, Any]):
 
 
 # ---------------------------------------------------------------------------
-# Проекция копии-листьев на шаблон (Task 2.8a2) — правило replay стора
+# Проекция копии-листьев на шаблон (Task 2.8a2); серверный replay до Task 2.8 другой
 # ---------------------------------------------------------------------------
 
 
@@ -185,7 +210,7 @@ def paths_with_matched_descendants(pairs: list[tuple[str, Any]]) -> set[str]:
 
 
 def project_leaves(pattern: str, leaves: Mapping[str, Any]) -> list[tuple[str, Any]]:
-    """Проекция копии-листьев на шаблон — правило replay стора (ADR-SS-024 A1, A3).
+    """Клиентская проекция копии-листьев на шаблон (ADR-SS-024 A3).
 
     Пары (путь, значение) по путям, которые матчит шаблон: узел приходит dict-ом
     целиком, если шаблон не матчит его потомков, иначе приходят потомки.
@@ -212,6 +237,11 @@ def _assemble(nodes: list[str], leaves: Mapping[str, Any]) -> list[tuple[str, An
     Узел — префикс листа по границе-точке или сам лист (тогда значение как есть).
     Результат — по порядку первого появления узла в ``leaves``; лист без узла
     пропускается.
+
+    Лист-предок выигрывает над своими детьми, в любом порядке вставки: если в копии
+    рядом лежат ``a.n`` и ``a.n.x`` (сырая запись опроса или ресинка), узел ``a.n``
+    приходит значением листа, а ``a.n.x`` пропускается. Без этого значение-скаляр
+    принимало бы запись ``["x"] = ...`` и привязка падала ``TypeError``.
     """
     wanted = set(nodes)
     out: dict[str, Any] = {}
@@ -223,10 +253,13 @@ def _assemble(nodes: list[str], leaves: Mapping[str, Any]) -> list[tuple[str, An
                 continue
             if k == len(parts):
                 out[node] = value
-            else:
-                target = out.setdefault(node, {})
-                for key in parts[k:-1]:
-                    target = target.setdefault(key, {})
-                target[parts[-1]] = value
+                break
+            # Предок-лист между узлом и этим листом (включая сам узел) — он побеждает.
+            if any(".".join(parts[:j]) in leaves for j in range(k, len(parts))):
+                break
+            target = out.setdefault(node, {})
+            for key in parts[k:-1]:
+                target = target.setdefault(key, {})
+            target[parts[-1]] = value
             break
     return list(out.items())

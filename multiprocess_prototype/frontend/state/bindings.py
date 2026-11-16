@@ -190,7 +190,11 @@ class GuiStateBindings:
         bridge.set_state_callback(self._on_state_msg)
 
     def _replay_projection(self, pattern: str) -> list[tuple[str, Any]]:
-        """Выдача из копии при привязке — та же проекция, что replay стора (ADR-SS-024 A3)."""
+        """Выдача из копии при привязке — КЛИЕНТСКАЯ проекция листьев на шаблон (ADR-SS-024 A3).
+
+        Серверный replay до Task 2.8 другой: ``state_store_manager.py`` (~:464) выбрасывает
+        dict-узел, а не отдаёт его целиком. Правила сойдутся после Task 2.8 (S1 + П2).
+        """
         if self.read_model is None:
             return []
         try:

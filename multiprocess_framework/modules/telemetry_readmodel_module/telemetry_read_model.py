@@ -252,6 +252,11 @@ class TelemetryReadModel:
         этот номер. Счётчик двигается ПОСЛЕ применения записи в ``_state`` — от
         этого зависит граница ``==`` в :meth:`ingest_poll_snapshot`, см. её докстроку.
         """
+        if not path:
+            # Пустой путь копия-листьев отвергает (``LeafCopy.put`` бросает ValueError), а
+            # ingest("") исторически не бросает (test_short_paths_do_not_raise): запись
+            # игнорируется. Хранилище такой путь не отдаёт.
+            return
         written, removed = self._state.put(path, value)
         for p in removed:
             self._history.pop(p, None)
@@ -381,7 +386,7 @@ class TelemetryReadModel:
         prefix → полный снимок read-model.
         """
         if not prefix:
-            return dict(self._state)
+            return self._state.copy()  # одна C-копия: dict(LeafCopy) не атомарна
         dotted = prefix + "."
         return {p: v for p, v in self._state.items() if p == prefix or p.startswith(dotted)}
 

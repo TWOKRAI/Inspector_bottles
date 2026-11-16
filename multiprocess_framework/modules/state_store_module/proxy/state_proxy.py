@@ -28,7 +28,7 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...router_module.core.router_manager import RouterReentrantRequestError
 from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
-from ..core.leaf_copy import LeafCopy
+from ..core.leaf_copy import LeafCopy, flatten_leaves
 from ..interfaces import IRouter, IStateProxy
 
 # Sentinel для отличия "default не передан" от None
@@ -178,7 +178,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     @property
     def cache(self) -> dict[str, Any]:
         """Копия текущего кэша (только для чтения/тестов)."""
-        return dict(self._cache)
+        return self._cache.copy()
 
     @property
     def confirmed_pattern_count(self) -> int:
@@ -1168,9 +1168,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
                 self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
                 continue
-            if isinstance(delta.new_value, dict):
-                # dict-дельта заменяет поддерево (LeafCopy.put): корень защищается, как удаление.
-                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # dict-корень
+            # Любая запись заменяет поддерево пути (LeafCopy.put снимает старые листья,
+            # dict-дельта и скаляр одинаково): корень защищается, как удаление.
+            self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # корень записи
             # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
             # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
             # раскладывает её в листья: пометить корень значило бы защитить путь,
@@ -1187,18 +1187,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     def _expand_leaf_paths(path: str, value: Any) -> list[str]:
         """Пути, которые ``_cache_put`` реально запишет для этого значения.
 
-        Один обход на двоих с :meth:`_cache_put` по смыслу: разъедься они — журнал
-        защиты снова начнёт охранять не то, что лежит в кэше.
+        Раскладка одна на двоих с :meth:`_cache_put` (``flatten_leaves``): разъедься они —
+        журнал защиты начнёт охранять не то, что лежит в кэше. Пустой словарь листьев
+        не даёт — защищать нечего.
         """
-        if not isinstance(value, dict):
-            return [path]
-        if not value:
-            # Пустой словарь листьев не даёт и в кэш не попадает — защищать нечего.
-            return []
-        leaves: list[str] = []
-        for key, nested in value.items():
-            leaves.extend(StateProxy._expand_leaf_paths(f"{path}.{key}", nested))
-        return leaves
+        return [leaf for leaf, _ in flatten_leaves(path, value)]
 
     def _mark_resync_dirty(self, target: dict, path: str, revision: int) -> None:
         """Отметить один путь в журнале защиты, соблюдая потолок ``_RESYNC_DIRTY_MAX``."""
