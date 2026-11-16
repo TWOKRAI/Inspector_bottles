@@ -91,3 +91,6 @@ _(empty)_
 - [Токены подписки — можно тратить](feedback_subscription_tokens_allowed.md) — агентов запускать без вопроса, если помогает плану; платные прогоны — по Ш2
 - [allowedTools Bash не ограничивает read-only](feedback_allowedtools_bash_does_not_restrict_readonly.md) — ls/find/grep идут мимо шаблона; atlas-arm = grep+shell
 - [Координатор: статус из main, не из ORDER.md](feedback_coordinator_status_from_main_not_order.md) — ORDER отстаёт; писать через worktree от main
+- [Использовать Атлас активно](feedback_use_atlas_actively.md) — map/ref в брифы, atlas check после задачи, lint-result для отчётов (владелец 11-13)
+- [Без костылей, архитектура важнее скорости](feedback_no_crutches_architecture_first.md) — причина, а не симптом; список компромиссов Ф1 для ревью (владелец 11-13)
+- [Run-state: очередь после свежего ревью](project_run_state_fresh_review_advice_queue.md) — F3=Task 1.10, советы С5–С10 в плане и очереди
