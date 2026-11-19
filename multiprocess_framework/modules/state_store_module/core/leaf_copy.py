@@ -11,6 +11,18 @@
 поддерева, а не размер копии.
 
 Потокобезопасности нет, как и у ``dict`` до неё: лок держит вызывающий.
+
+Purpose:
+    Единая копия состояния «путь листа -> значение» для клиентов стора: ``put``
+    заменяет поддерево, индекс детей держит цену записи пропорциональной поддереву.
+
+Public API:
+    - LeafCopy — копия-листья (MutableMapping) с индексом детей
+    - flatten_leaves — раскладка dict в листья (единая для копии и журнала ресинка)
+    - project_leaves — проекция копии-листьев на шаблон подписки
+    - paths_with_matched_descendants — пути, у которых среди пар есть потомок
+
+Stability: lite
 """
 
 from __future__ import annotations
@@ -19,6 +31,13 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any, Iterator
 
 from .subscription_manager import match_pattern, split_pattern
+
+__all__ = [
+    "LeafCopy",
+    "flatten_leaves",
+    "paths_with_matched_descendants",
+    "project_leaves",
+]
 
 
 def flatten_leaves(path: str, value: Any) -> list[tuple[str, Any]]:

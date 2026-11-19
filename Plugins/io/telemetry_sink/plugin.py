@@ -8,7 +8,7 @@ GenericProcessApp-процессе. Подписывается на дерево
 Архитектура потока данных::
 
     StateStoreManager --state.changed--> ctx.state_proxy.subscribe callback
-        --> self._cache[path] = value          (только запись в кэш, без I/O)
+        --> self._cache.put(path, value)       (LeafCopy: только запись в кэш, без I/O)
     loop-worker (sample_interval_sec)
         --> снимок _cache --> TelemetrySnapshot[] --> repo.insert_many (sync)
 
