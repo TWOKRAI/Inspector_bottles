@@ -203,13 +203,13 @@ register'а (проба и запись `apply_params`) для значения 
      на время перечисления он не читает кадры.
   3. `device_held` и любое иное состояние (`opening`, `stopping`, отказ при живом владельце): `call` отвечает
      `{"success": False, "error": "сеанс не в захвате"}`, порт не вызывается.
-  Отказ `acquire`/`enum_devices`/`release` на пути 1 (`PortError` и любое исключение) -> `{"success": False, "error": <тип исключения>}`; отказ `call` -> его текст
+  Отказ `acquire`/`enum_devices`/`release` на пути без владельца (`PortError` и любое исключение) -> `{"success": False, "error": <тип исключения>}`; отказ `call` -> его текст
   (`"срок"`, `"сеанс остановлен"`, `"сеанс не в захвате"`). `list_devices` без `take_device` создаёт порт (`_ensure_port()`), но не сеанс,
   не мост логов и не воркеры; последующий `take_device` строит сеанс из того же порта.
 - **`describe_params`** — один `session.call` по ВСЕМ привязкам `bindings()` (в том числе полям, пропущенным в плане run): `describe_param`
   зовёт владелец. Это снимок текущего состояния (границы и `access` у узлов зависят от соседних: у фейка `TriggerMode` при захвате `RO`);
   `entries` в ответе — список. Узел, давший `None` или `PortError`, -> `null`, остальные узлы отвечают. Порт без capability `node_describe` ->
-  `{"success": True, "params_meta": {}}` без вызова порта; с capability, но без захвата -> `{"success": False, "error": "сеанс не в захвате"}`.
+  `{"success": True, "params_meta": {}}` без вызова порта; с capability, но без захвата -> `{"success": False, "error": "сеанс не в захвате"}`. Исключение хука `bindings()` -> `{"success": False, "error": <тип исключения>}`, значения полей в ответ и журнал не попадают.
 - **`trigger_software`** — порядок: порт -> capability `software_trigger` (статична на жизнь порта, порт не вызывается) -> захват -> `session.call`
   `port.execute(self.software_trigger_binding())`. Без capability -> `{"success": False, "error": "нет capability software_trigger"}` (команда
   регистрируется всегда); без захвата -> `"сеанс не в захвате"`; отказ порта -> `{"success": False, "error": <текст>}`. Привязку командного узла
@@ -224,7 +224,7 @@ register'а (проба и запись `apply_params`) для значения 
   - Безопасность `MV_CC_EnumDevices` при открытом handle на MVS не измерена (0.5/6.2, ADR-CAM-002: «Шторм `EnumDevices` из трёх процессов не
     проверен»). Теперь касается только межпроцессного случая (`hikvision_dual.yaml`: процесс B перечисляет, пока процесс A держит GigE-прибор);
     внутри одного процесса `list_devices` при захвате перечисляет владелец.
-  - Гонка `start()` против `acquire` на пути 1: поток команды не конкурирует с `start()`, пока оба идут из системного потока. По чтению
+  - Гонка `start()` против `acquire` на пути без владельца: поток команды не конкурирует с `start()`, пока оба идут из системного потока. По чтению
     (ревью Opus) сегодня недостижима: `session.start()` зовёт только `cmd_take_device`, её вызывают хук `start(ctx)` при `auto_start` из
     `PluginOrchestrator.boot()` (до запуска `message_processor`, `process_module.py:291-312`) и команды в `message_processor`. Не воспроизведено,
     замка нет; новый вызов `cmd_take_device` вне `message_processor` откроет окно. Это не гарантия.
