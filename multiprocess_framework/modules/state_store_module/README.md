@@ -418,6 +418,8 @@ state_store_module/
 │   │                              # match_pattern, split_pattern
 │   ├── tree_store.py              # TreeStore (реализует IStateStore)
 │   ├── delta.py                   # Delta + Transaction (один файл)
+│   ├── leaf_copy.py               # LeafCopy: копия клиента хранит только листья,
+│   │                              # dict-дельта заменяет поддерево (ADR-SS-024)
 │   └── subscription_manager.py    # SubscriptionManager + glob-матчер
 │
 ├── manager/                       # Server-side

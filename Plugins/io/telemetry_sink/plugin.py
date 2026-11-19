@@ -8,7 +8,7 @@ GenericProcessApp-процессе. Подписывается на дерево
 Архитектура потока данных::
 
     StateStoreManager --state.changed--> ctx.state_proxy.subscribe callback
-        --> self._cache[path] = value          (только запись в кэш, без I/O)
+        --> self._cache.put(path, value)       (LeafCopy: только запись в кэш, без I/O)
     loop-worker (sample_interval_sec)
         --> снимок _cache --> TelemetrySnapshot[] --> repo.insert_many (sync)
 
@@ -39,6 +39,7 @@ from multiprocess_framework.modules.process_module.plugins import (
     ThreadConfig,
     register_plugin,
 )
+from multiprocess_framework.modules.state_store_module.core.leaf_copy import LeafCopy
 
 from Services.sql import SQLManager, SQLManagerConfig
 
@@ -82,7 +83,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         # StateProxy._cache намеренно — нужен собственный lock и точка снятия снимка
         # под семпл, независимая от внутренней логики proxy). Заполняется callback'ом,
         # читается sample-worker'ом → под _cache_lock (разные потоки одного процесса).
-        self._cache: dict[str, object] = {}
+        self._cache = LeafCopy()
         self._cache_lock = threading.Lock()
         # Сериализует запись (sample-worker vs _cmd_flush): без него возможны
         # дубль-вставки снимка и потеря инкремента счётчика.
@@ -176,71 +177,33 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
                     self._cache_put(d.path, d.new_value)
 
     def _cache_put(self, path: str, value: object) -> None:
-        """Положить значение в накопитель, РАЗВЕРНУВ словарь в листья.
+        """Положить значение в накопитель по правилу копии: только листья, dict-дельта заменяет поддерево.
 
-        Накопитель обязан держать ЛИСТЬЯ, и это не вкусовщина — иначе ломаются
-        сразу три вещи (все три воспроизведены на живом стенде 2026-08-23):
+        Накопитель обязан держать ЛИСТЬЯ (три дефекта воспроизведены на живом
+        стенде 2026-08-23, дальше — история, почему так):
 
-        1. **Протухание.** Дельта СОЗДАНИЯ поддерева приходит со словарём
-           целиком (``state.plugins`` → ``{'capture': {'capture_fps': 14.5}}``),
-           а дальше обновления идут полистовыми дельтами. Словарь после этого
-           не обновляется никогда: в строке БД рядом жили ``14.5`` в словаре и
-           ``14.3`` в листе.
-        2. **Призрак после ухода писателя.** :meth:`_cache_evict` чистит по
-           границе-точке, поэтому удаление ``…plugins.capture`` снимает лист
-           ``…plugins.capture.capture_fps``, но НЕ трогает ПРЕДКА
-           ``…plugins`` — и числа ушедшего писателя остаются в строках БД
-           навсегда, ровно тот дефект, который Ф2 и убирает.
-        3. **Дубль в строке.** Одно и то же число едет в БД дважды, под двумя
-           разными ключами.
+        1. **Протухание.** Дельта СОЗДАНИЯ поддерева приходит со словарём целиком,
+           дальше идут полистовые дельты, и словарь не обновляется никогда:
+           в строке БД жили ``14.5`` в словаре и ``14.3`` в листе.
+        2. **Призрак после ухода писателя.** Чистка по границе-точке снимала лист,
+           но не его ПРЕДКА — числа ушедшего писателя оставались в строках БД.
+        3. **Дубль в строке.** Одно число ехало в БД дважды под двумя ключами.
 
-        Согласованность: применение снимка ресинка словари уже пропускает
-        (``StateProxy._apply_resync_snapshot``: ``not isinstance(value, dict)``),
-        то есть «в кэше только листья» — существующий инвариант, который
-        приёмная сторона дельт нарушала.
+        Сама запись — :meth:`LeafCopy.put` (ADR-SS-024 A3); она же снимает
+        старые листья поддерева, которых в новой dict-дельте нет.
         """
-        if isinstance(value, dict):
-            if not value:
-                # Пустой словарь листьев не даёт вовсе — узел есть, значений нет.
-                # Молча пропустить правильнее, чем положить {} как значение.
-                return
-            for key, nested in value.items():
-                self._cache_put(f"{path}.{key}", nested)
-            return
-        self._cache[path] = value
+        self._cache.put(path, value)
 
     def _cache_evict(self, path: str) -> None:
-        """Убрать ``path`` и его ПОДДЕРЕВО из кэша по MISSING-дельте.
+        """Убрать ``path`` и его ПОДДЕРЕВО из накопителя по MISSING-дельте.
 
-        Почему поддерево, а не только точное совпадение: кэш хранит ЛИСТЬЯ
-        (``self._cache["...plugins.capture.fps"] = value`` — по одной записи на
-        MERGE-лист), а снятие писателя целиком идёт ОДНОЙ дельтой на КОРЕНЬ
-        поддерева — ``TreeStore.delete`` снимает ровно один узел по пути и
-        возвращает одну ``Delta`` с ``new_value=MISSING`` на этом пути (не по
-        дельте на лист, `core/tree_store.py`). Путь дельты тогда —
-        ``processes.<P>.state.plugins.<writer>``, а ключи кэша —
-        ``processes.<P>.state.plugins.<writer>.fps`` и т.п.: точного совпадения
-        никогда не будет, и точечный ``pop(path)`` — молчаливый no-op, из-за
-        которого сток бессрочно пишет последние числа ушедшего писателя
-        (воспроизведено C5-тестом, `test_f2_acceptance_writer_subtree_cleanup.py`).
-
-        Точечное удаление (MISSING-дельта самого листа — тоже валидный путь,
-        например прямое снятие одного значения) остаётся нужным и покрыто тем
-        же вызовом: ``pop(path)`` снимает точное совпадение, цикл ниже — детей.
-
-        Граница — точка-разделитель, тот же приём, что
-        ``TelemetryReadModel._purge_subtree`` (``telemetry_read_model.py``) и
-        ``StateProxy._update_cache`` (Task 2.1, `proxy/state_proxy.py`): чистим
-        ``path`` и ключи с префиксом ``path + "."``, а НЕ ``path`` как голую
-        подстроку — иначе уход ``...plugins.capture`` задел бы и
-        ``...plugins.capture2.fps`` (общий текстовый префикс "capture", разный
-        сегмент пути).
+        Снятие писателя целиком идёт ОДНОЙ дельтой на КОРЕНЬ поддерева
+        (``TreeStore.delete``), а накопитель хранит листья — точного совпадения
+        ключей нет, нужна чистка поддерева. Граница — точка-разделитель:
+        ``...plugins.capture`` не задевает ``...plugins.capture2.fps``
+        (:meth:`LeafCopy.drop`).
         """
-        self._cache.pop(path, None)
-        dotted_prefix = path + "."
-        stale = [p for p in self._cache if p.startswith(dotted_prefix)]
-        for p in stale:
-            del self._cache[p]
+        self._cache.drop(path)
 
     # --- Семпл ---
 
@@ -283,7 +246,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         with self._write_lock:
             # Снимок кэша под cache-lock — дальше работаем с копией без удержания.
             with self._cache_lock:
-                snapshot = dict(self._cache)
+                snapshot = self._cache.copy()
 
             # Группируем кэш: per-process метрики + сводка system.health.
             procs: dict[str, dict[str, object]] = {}

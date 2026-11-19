@@ -28,6 +28,7 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...router_module.core.router_manager import RouterReentrantRequestError
 from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
+from ..core.leaf_copy import LeafCopy, flatten_leaves
 from ..interfaces import IRouter, IStateProxy
 
 # Sentinel для отличия "default не передан" от None
@@ -85,7 +86,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._router = router
         self._server_target = server_target
         # Кэш подписанных данных: path → значение
-        self._cache: dict[str, Any] = {}
+        self._cache = LeafCopy()
         # Реестр callbacks: sub_id → список Callable[[list[Delta]], None]
         self._callbacks: dict[str, list[Callable]] = {}
         # sub_id → pattern (нужен для фильтрации входящих дельт по подписке)
@@ -177,7 +178,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     @property
     def cache(self) -> dict[str, Any]:
         """Копия текущего кэша (только для чтения/тестов)."""
-        return dict(self._cache)
+        return self._cache.copy()
 
     @property
     def confirmed_pattern_count(self) -> int:
@@ -1144,11 +1145,19 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             rev = dirty.get(path)
             if rev is not None and (snapshot_revision is None or rev >= snapshot_revision):
                 return True
-            for root, del_rev in dirty_deletes.items():
+            if not dirty_deletes:
+                return False
+            # Корень удаления/замены — любой префикс пути по границе-точке (и сам путь):
+            # O(глубина), а не O(число корней окна).
+            prefix = ""
+            for seg in path.split("."):
+                prefix = f"{prefix}.{seg}" if prefix else seg
+                del_rev = dirty_deletes.get(prefix)
+                if del_rev is None:
+                    continue
                 if snapshot_revision is not None and del_rev < snapshot_revision:
                     continue
-                if path == root or path.startswith(root + "."):
-                    return True
+                return True
             return False
 
         return _protected
@@ -1167,6 +1176,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
                 self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
                 continue
+            # Запись заменяет поддерево пути (LeafCopy.put снимает старые листья): корень
+            # защищается, как удаление. Скаляру корень нужен только если у пути в кэше есть
+            # дети (иначе защищать нечего, а журнал растёт вдвое); тогда корень защищает и сам
+            # путь, и в ``_resync_dirty`` он не дублируется.
+            if isinstance(delta.new_value, dict) or self._cache.has_children(delta.path):
+                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # корень записи
+                if not isinstance(delta.new_value, dict):
+                    continue
             # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
             # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
             # раскладывает её в листья: пометить корень значило бы защитить путь,
@@ -1183,18 +1200,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     def _expand_leaf_paths(path: str, value: Any) -> list[str]:
         """Пути, которые ``_cache_put`` реально запишет для этого значения.
 
-        Один обход на двоих с :meth:`_cache_put` по смыслу: разъедься они — журнал
-        защиты снова начнёт охранять не то, что лежит в кэше.
+        Раскладка одна на двоих с :meth:`_cache_put` (``flatten_leaves``): разъедься они —
+        журнал защиты начнёт охранять не то, что лежит в кэше. Пустой словарь листьев
+        не даёт — защищать нечего.
         """
-        if not isinstance(value, dict):
-            return [path]
-        if not value:
-            # Пустой словарь листьев не даёт и в кэш не попадает — защищать нечего.
-            return []
-        leaves: list[str] = []
-        for key, nested in value.items():
-            leaves.extend(StateProxy._expand_leaf_paths(f"{path}.{key}", nested))
-        return leaves
+        return [leaf for leaf, _ in flatten_leaves(path, value)]
 
     def _mark_resync_dirty(self, target: dict, path: str, revision: int) -> None:
         """Отметить один путь в журнале защиты, соблюдая потолок ``_RESYNC_DIRTY_MAX``."""
@@ -1305,36 +1315,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             return []
 
     def _cache_put(self, path: str, value: Any) -> None:
-        """Положить значение в кэш, РАЗВЕРНУВ словарь в листья.
+        """Положить значение в кэш по правилу копии: только листья, dict-дельта заменяет поддерево.
 
-        Инвариант «в кэше только листья» в этом классе уже существовал, но
-        соблюдался лишь половиной кода: :meth:`_apply_resync_snapshot` словари
-        пропускает явно (``not isinstance(value, dict)``), а приёмная сторона
-        дельт клала ``delta.new_value`` сырым. Дельта СОЗДАНИЯ поддерева
-        приходит со словарём целиком, поэтому нелистовая запись в кэше
-        появлялась и жила там вечно.
-
-        Чем это плохо (воспроизведено на живом стенде 2026-08-23, дефект
-        наблюдался у DB-стока, разделяющего ту же модель кэша):
-
-        * запись протухает — дальнейшие обновления идут полистовыми дельтами
-          и словаря не касаются (в строках БД жили ``14.5`` в словаре и
-          ``14.3`` в листе одновременно);
-        * префикс-чистка по MISSING-дельте её не видит: удаление
-          ``…plugins.capture`` снимает лист ``…plugins.capture.capture_fps``,
-          но ПРЕДКА ``…plugins`` не трогает — числа ушедшего писателя
-          переживают собственное снятие.
-
-        Пустой словарь листьев не даёт вовсе и в кэш не кладётся: узел есть,
-        значений нет.
+        Инвариант и причины — в :mod:`..core.leaf_copy` (ADR-SS-024 A3); сама
+        запись — :meth:`LeafCopy.put`. Пустой словарь листьев не даёт: узел есть,
+        значений нет, и старое поддерево он снимает.
         """
-        if isinstance(value, dict):
-            if not value:
-                return
-            for key, nested in value.items():
-                self._cache_put(f"{path}.{key}", nested)
-            return
-        self._cache[path] = value
+        self._cache.put(path, value)
 
     def _update_cache(self, deltas: list[Delta]) -> None:
         """Обновить кэш на основе списка дельт.
@@ -1368,11 +1355,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         for delta in deltas:
             if delta.new_value is MISSING:
                 # Удаление узла — вместе с поддеревом (см. докстринг).
-                self._cache.pop(delta.path, None)
-                dotted = delta.path + "."
-                stale = [key for key in self._cache if key.startswith(dotted)]
-                for key in stale:
-                    del self._cache[key]
+                self._cache.drop(delta.path)
             else:
                 self._cache_put(delta.path, delta.new_value)
 

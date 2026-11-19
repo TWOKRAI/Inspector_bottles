@@ -36,6 +36,8 @@ import collections
 import time
 from typing import Any, Callable
 
+from multiprocess_framework.modules.state_store_module.core.leaf_copy import LeafCopy
+
 # Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны).
 # Это НАБОР ИСТОРИИ read-модели, а НЕ зеркало publish-gate (каталог метрик в
 # ``process_module``): пересекается с ним, но намеренно отличается — ``.state.uptime``
@@ -158,9 +160,10 @@ class TelemetryReadModel:
                 должны нести ЗАПИСАННЫЕ ts (playhead-часы), а не время загрузки.
                 На live-путь не влияет — дефолт остаётся ``time.time``.
         """
-        # Проекция состояния: путь → последнее значение. Пишется в ingest,
+        # Проекция состояния: путь ЛИСТА → последнее значение (копия хранит листья,
+        # dict-дельта заменяет поддерево — ADR-SS-024 A3). Пишется в ingest,
         # читается get()/snapshot() (late-binding).
-        self._state: dict[str, Any] = {}
+        self._state = LeafCopy()
 
         # Кольцевые буферы истории: путь → deque[(ts_wall, число)].
         self._history: dict[str, collections.deque[tuple[float, float]]] = {}
@@ -202,9 +205,7 @@ class TelemetryReadModel:
         for path, value in cache.items():
             if not isinstance(path, str):
                 continue
-            self._state[path] = value
-            self._note_push_write(path)
-            self._record_history(path, value)
+            self._apply_put(path, value, True)
 
     # ------------------------------------------------------------------
     # Приём дельт (envelope-agnostic)
@@ -236,22 +237,35 @@ class TelemetryReadModel:
             # раз, а обратно он может не вернуться никогда).
             self._write_seq += 1
             return
-        self._state[path] = value
-        self._note_push_write(path)
         # История — по каждой дельте ПОТОКА (все точки важны для графика).
         # Источник уровней (record_history=False) в кольцо не пишет: см. Args.
-        if record_history:
-            self._record_history(path, value)
+        self._apply_put(path, value, record_history)
 
-    def _note_push_write(self, path: str) -> None:
-        """Отметить принятую запись push-дороги: сдвинуть счётчик и номер пути.
+    def _apply_put(self, path: str, value: Any, record_history: bool) -> None:
+        """Принять запись push-дороги: заменить поддерево, сдвинуть счётчик, записать историю.
 
-        Счётчик двигается ПОСЛЕ применения записи (вызов идёт следом за
-        присваиванием в ``_state``) — от этого зависит граница ``==`` в
-        :meth:`ingest_poll_snapshot`, см. её докстроку.
+        Единственное место смысловой записи push-дороги (``ingest`` и ``prime``).
+        dict-дельта заменяет поддерево ``path`` листьями (:meth:`LeafCopy.put`);
+        снятым листьям чистятся история и номер записи.
+
+        Одна принятая дельта двигает ``write_seq`` на 1, все её листья получают
+        этот номер. Счётчик двигается ПОСЛЕ применения записи в ``_state`` — от
+        этого зависит граница ``==`` в :meth:`ingest_poll_snapshot`, см. её докстроку.
         """
+        if not path:
+            # Пустой путь копия-листьев отвергает (``LeafCopy.put`` бросает ValueError), а
+            # ingest("") исторически не бросает (test_short_paths_do_not_raise): запись
+            # игнорируется. Хранилище такой путь не отдаёт.
+            return
+        written, removed = self._state.put(path, value)
+        for p in removed:
+            self._history.pop(p, None)
+            self._push_seq.pop(p, None)
         self._write_seq += 1
-        self._push_seq[path] = self._write_seq
+        for p in written:
+            self._push_seq[p] = self._write_seq
+            if record_history:
+                self._record_history(p, self._state[p])
 
     def _purge_subtree(self, path: str) -> None:
         """Убрать путь и всё поддерево под ним из снимка, истории и номеров.
@@ -273,11 +287,15 @@ class TelemetryReadModel:
         номер себе как раз проставляет). Обмен сознательный: вечно растущий
         словарь против узкого окна на редком событии.
         """
+        gone = self._state.drop(path)  # по индексу: цена — размер поддерева
+        for p in gone:
+            self._push_seq.pop(p, None)
+        # В кольцах истории бывают пути только от import_history (их нет в _state),
+        # поэтому история чистится сканом по границе-точке; она мала (только
+        # отслеживаемые суффиксы).
         dotted = path + "."
-        for store in (self._state, self._history, self._push_seq):
-            stale = [p for p in store if p == path or p.startswith(dotted)]
-            for p in stale:
-                del store[p]
+        for p in [p for p in self._history if p == path or p.startswith(dotted)]:
+            del self._history[p]
 
     # ------------------------------------------------------------------
     # Порядок записи: push против ответа опроса (S-1, нога B)
@@ -309,7 +327,7 @@ class TelemetryReadModel:
 
         **Граница ``==`` принимается, и это доказуемо, а не вкус.**
         :attr:`write_seq` увеличивается ПОСЛЕ применения записи
-        (:meth:`_note_push_write` зовётся следом за присваиванием в снимок), и
+        (:meth:`_apply_put` двигает его следом за записью в снимок), и
         путь получает номер, равный уже увеличенному счётчику. Значит равенство
         ``push_seq[path] == requested_at_seq`` означает: эта push-запись была УЖЕ
         учтена в снимке, против которого опрашивающий снимал номер, — то есть
@@ -342,6 +360,8 @@ class TelemetryReadModel:
         """
         applied: list[str] = []
         for path, value in values.items():
+            if not path:
+                continue  # пустой путь копия не хранит; как в _apply_put — игнор
             # Порог по умолчанию −1, а не 0: путь без единой push-записи не имеет
             # номера вовсе, и любой ответ по нему свежий (0 > 0 было бы ложью
             # только случайно, −1 — по построению).
@@ -368,7 +388,7 @@ class TelemetryReadModel:
         prefix → полный снимок read-model.
         """
         if not prefix:
-            return dict(self._state)
+            return self._state.copy()  # одна C-копия: dict(LeafCopy) не атомарна
         dotted = prefix + "."
         return {p: v for p, v in self._state.items() if p == prefix or p.startswith(dotted)}
 
