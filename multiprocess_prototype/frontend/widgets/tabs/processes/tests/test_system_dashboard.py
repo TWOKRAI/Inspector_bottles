@@ -53,8 +53,10 @@ class TestRefresh:
         dash = SystemDashboardSection(["camera_0"], vm)
         qtbot.addWidget(dash)
         dash.refresh()
-        _xs, ys = dash._chart._curves["camera_0"].getData()
-        assert ys is not None and len(ys) >= 1  # ring-история доехала до серии
+        # ring-история доехала до серии: обе точки, значения — литералы поданных дельт
+        # (series_points — исходные данные; getData() режется даунсэмплингом, C-98)
+        pts = dash._chart.series_points("camera_0")
+        assert [v for _ts, v in pts] == [20.0, 21.0]
 
     def test_refresh_none_vm_is_noop(self, qtbot) -> None:
         dash = SystemDashboardSection(["camera_0"], None)
