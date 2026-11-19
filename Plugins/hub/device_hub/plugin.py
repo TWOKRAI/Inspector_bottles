@@ -717,8 +717,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             try:
                                 tick_n += 1
                                 snapshot = drv.tick(stop_evt)
-                                # Воркер, снятый во время такта, возраст не пишет: иначе он воскресил бы запись,
-                                # снятую ``_stop_device_worker``, и новый воркер получил бы чужой возраст
+                                # Воркер, снятый во время такта, ничего не пишет (ни возраст, ни conn/status/stats/
+                                # io_peek): иначе он воскресил бы запись, снятую ``_stop_device_worker``, и состояние
+                                # удалённого устройства, а новый воркер получил бы чужой возраст
+                                if stop_evt.is_set():
+                                    break
                                 if not stop_evt.is_set():
                                     self._tick_ok_at[did] = _clock()
                                 fails = 0
@@ -739,6 +742,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                         {"method": "modbus", **io},
                                     )
                             except Exception as exc:
+                                # Воркер, снятый во время такта (remove закрыл драйвер -> такт бросил), ничего не пишет
+                                if stop_evt.is_set():
+                                    break
                                 # Сначала факт связи: оборванная связь — сразу, живая — после ``_TICK_FAILS_LIMIT``
                                 # исключений подряд. Локальный ``snapshot`` сюда НЕ идёт (значение прошлого такта)
                                 fails += 1
@@ -746,10 +752,17 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                     conn = _conn_of(drv, None)
                                 except Exception:  # no-health: чтение is_connected бросило — связь неизвестна
                                     conn = "error"
-                                if conn != "connected":
-                                    self._set_conn(did, conn, ts=tick_n)
-                                elif fails >= fails_limit:
-                                    self._set_conn(did, "error", ts=tick_n)
+                                try:
+                                    if conn != "connected":
+                                        self._set_conn(did, conn, ts=tick_n)
+                                    elif fails >= fails_limit:
+                                        self._set_conn(did, "error", ts=tick_n)
+                                except Exception as pub_exc:  # сбой записи conn не должен убить поток воркера
+                                    if self._ctx:
+                                        self._ctx.log_warning(
+                                            f"DeviceHubPlugin: запись conn устройства {did} в ветке исключения такта "
+                                            f"не удалась: {pub_exc!r}"
+                                        )
                                 # Затем отчёты, каждый в своём try: сбой health или публикации не убивает поток воркера
                                 if self._ctx:
                                     try:

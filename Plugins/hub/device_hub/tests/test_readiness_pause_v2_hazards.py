@@ -246,6 +246,89 @@ def test_b7_health_failure_in_tick_exception_branch_keeps_worker_and_fact(make_s
     assert sc.readiness() == [], "успешный такт после сбоя health освежает возраст"
 
 
+def test_b4e_zombie_tick_returning_after_remove_writes_nothing_to_store(make_scene: Callable[..., Scene]) -> None:
+    """Такт завис, устройство снято (remove), такт вернулся ПОЗДНО: снятый воркер не пишет в стор ни ``conn``, ни
+    ``status``/``stats``/``io_peek`` — иначе удалённое устройство воскресло бы в дереве состояния (``disconnected``)."""
+    sc = make_scene(params={"poll_interval_s": 0.05})
+    drv = sc.drivers[_DEV]
+    sc.start_worker()
+    until(lambda: drv.tick_count >= 2, 3.0, "два здоровых такта")
+    hang = sc.hook(_DEV, Hang())
+    seen = drv.tick_count
+    until(lambda: drv.tick_count > seen, 3.0, "воркер вошёл в висящий такт")
+    assert sc.plugin.cmd_device_remove({"device_id": _DEV})["status"] == "ok"
+    for evt in sc.stop_events:  # настоящий remove_worker взводит stop_evt воркера; ``FakeWorkerManager`` — нет
+        evt.set()
+    prefix = f"devices.state.{_DEV}."
+    state = sc.ctx.state_proxy
+
+    def writes() -> list[str]:
+        calls = list(state.set.call_args_list) + list(state.merge.call_args_list)
+        return [c.args[0] for c in calls if c.args and str(c.args[0]).startswith(prefix)]
+
+    n_before = len(writes())
+    hang.release()  # зависший такт возвращается после снятия воркера
+    for thread in sc.threads:
+        thread.join(3.0)
+    assert not any(t.is_alive() for t in sc.threads)
+    assert writes()[n_before:] == [], "снятый воркер не должен писать в стор"
+
+
+class _HangThenRaise(Hang):
+    """Тик висит, после ``release()`` бросает (так ведёт себя такт, у которого remove закрыл драйвер)."""
+
+    def __call__(self) -> None:
+        self.gate.wait(30.0)
+        raise RuntimeError("tick boom after remove")
+
+
+def test_b4f_zombie_tick_raising_after_remove_writes_nothing_to_store(make_scene: Callable[..., Scene]) -> None:
+    """Такт завис, устройство снято (remove), такт вернулся ИСКЛЮЧЕНИЕМ: ветка ``except`` снятого воркера не пишет
+    в стор ни ``conn`` (связь оборвана), ни ``last_error``: удалённое устройство не должно воскреснуть в дереве."""
+    sc = make_scene(params={"poll_interval_s": 0.05})
+    drv = sc.drivers[_DEV]
+    sc.start_worker()
+    until(lambda: drv.tick_count >= 2, 3.0, "два здоровых такта")
+    hang = sc.hook(_DEV, _HangThenRaise())
+    seen = drv.tick_count
+    until(lambda: drv.tick_count > seen, 3.0, "воркер вошёл в висящий такт")
+    assert sc.plugin.cmd_device_remove({"device_id": _DEV})["status"] == "ok"
+    drv.up = False  # remove закрыл драйвер
+    for evt in sc.stop_events:  # настоящий remove_worker взводит stop_evt воркера; ``FakeWorkerManager`` — нет
+        evt.set()
+    prefix = f"devices.state.{_DEV}."
+    state = sc.ctx.state_proxy
+
+    def writes() -> list[str]:
+        calls = list(state.set.call_args_list) + list(state.merge.call_args_list)
+        return [c.args[0] for c in calls if c.args and str(c.args[0]).startswith(prefix)]
+
+    n_before = len(writes())
+    hang.release()
+    for thread in sc.threads:
+        thread.join(3.0)
+    assert not any(t.is_alive() for t in sc.threads)
+    assert writes()[n_before:] == [], "снятый воркер не должен писать в стор из ветки исключения"
+
+
+def test_b10_state_write_failure_in_tick_exception_branch_keeps_worker(make_scene: Callable[..., Scene]) -> None:
+    """Исключение такта + сбой записи ``conn`` в ветке исключения (``state_proxy.set`` бросает): поток воркера жив,
+    следующий тик отрабатывает (ADR-PH-004: сбой отчёта не убивает поток воркера)."""
+    sc = make_scene(params={"poll_interval_s": 0.05})
+    steps = sc.hook(_DEV, Steps(["raise", "ok"]))
+    thread = sc.start_worker()
+    steps.wait_first_entry()
+    sc.drivers[_DEV].up = False  # связь оборвана: ветка исключения публикует conn сразу
+    sc.ctx.state_proxy.set.side_effect = RuntimeError("store boom")
+    steps.step()
+    assert thread.is_alive(), "воркер умер от сбоя записи conn в ветке исключения такта"
+    sc.ctx.state_proxy.set.side_effect = None
+    sc.drivers[_DEV].up = True
+    steps.step()
+    assert thread.is_alive()
+    until(lambda: sc.last_conn_record() == {"conn": "connected", "ts": 2}, 2.0, "следующий тик опубликовал conn")
+
+
 def _fail_scene(make_scene: Callable[..., Scene], outcomes: list[str], **params: Any) -> tuple[Scene, Steps]:
     sc = make_scene(params={"poll_interval_s": 0.05, **params})
     steps = sc.hook(_DEV, Steps(outcomes))
