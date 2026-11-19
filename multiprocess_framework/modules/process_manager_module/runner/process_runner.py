@@ -305,6 +305,7 @@ def run_process_function(
     *,
     system_ready_event: Optional[Event] = None,
     run_event: Optional[Event] = None,
+    run_active: Optional[Event] = None,  # ``Event`` тут — функция multiprocessing: ``Event | None`` падает при импорте
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -332,6 +333,7 @@ def run_process_function(
         ``initialize()``; ребёнок его только читает (``SourceProducer`` не зовёт produce()
         при снятом событии), взводит и снимает один PM. None (PM спавнится без реестра)
         — атрибут не трогается.
+    run_active: флаг запрета команд плагина (Task 2.7d, ADR-PMM-051) — атрибут ``_run_active``; None — не ставится.
 
     new_session: POSIX — сделать setsid() (стать лидером новой сессии/группы),
         чтобы ВСЕ потомки этого процесса попали в одну process group. Тогда
@@ -420,6 +422,9 @@ def run_process_function(
         # Task 1.1 (system-run-state): событие работы — тем же путём, ДО initialize().
         if run_event is not None:
             process_instance._run_event = run_event
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём, ДО initialize() (регистрация команд).
+        if run_active is not None:
+            process_instance._run_active = run_active
 
         if hasattr(process_instance, "initialize"):
             try:

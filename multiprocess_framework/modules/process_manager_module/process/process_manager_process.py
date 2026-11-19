@@ -55,13 +55,16 @@ from .backend_ctl_endpoint import (
 )
 from .observability_broker import POINT_COMMANDS
 from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
+from .run_config import RunConfig, run_config_value
 from .run_state import (
+    AutostartLatch,
     EvalInput,
     RunState,
     auto_restart_config_reason,
     evaluate,
     has_blocking,
     restart_window,
+    run_view,
     stop_unconfirmed_reason,
     transition,
     unconfirmed_stop,
@@ -175,8 +178,15 @@ class ProcessManagerProcess(ProcessModule):
     #: ``_run_apply`` под ``_run_lock``; ``_run_event`` — ``RunFlag`` (байт без межпроцессного замка,
     #: ADR-PMM-047), детям уходит через ``ProcessRegistry``.
     _run_event: Any = None
+    #: Task 2.7d (ADR-PMM-051): второй ``RunFlag`` — «``running`` и нет хода системного стопа», при любом
+    #: ``run_gate``; детям уходит путём ``run_event``. Пишет только ``_run_active_sync_locked`` под ``_run_lock``.
+    #: ``None`` — PM из ``__new__`` без ``_create_components()``: писать некуда.
+    _run_active: RunFlag | None = None
     _run_state: RunState = RunState.booting
     _run_gate: bool = False
+    #: S3c (ADR-PMM-050): латч автостарта «взведён до первого ready»; решает только под ``_run_lock`` в
+    #: ``_run_apply``. Уровень класса — выключенный (PM из ``__new__`` без ``_create_components()`` не стартует сам).
+    _run_autostart: AutostartLatch = AutostartLatch(False)
     _run_since: float = 0.0
     #: ``time.monotonic()`` последнего входа в ``running`` (ревью Ф1, m2): такт, чья оценка начата раньше, устарел.
     #: Наружу не публикуется — ``since`` остаётся ``time.time()``.
@@ -190,7 +200,7 @@ class ProcessManagerProcess(ProcessModule):
     _run_reasons: tuple | list = ()
     _run_last_fault: dict | None = None
     #: Task 1.4: срок ожидания ``paused`` по умолчанию (конфиг PM ``run_stop_timeout_s``), срез опроса листьев, с.
-    _DEFAULT_RUN_STOP_TIMEOUT_S = 10.0
+    _DEFAULT_RUN_STOP_TIMEOUT_S: float = RunConfig.model_fields["run_stop_timeout_s"].default
     _STOP_POLL_S = 0.05
     #: Task 1.4: «не подтвердили остановку» ``{процесс: N}`` (N — срок ожидания ``paused``); пишет только код под
     #: ``_unconfirmed_lock`` и ЗАМЕНЯЕТ значение целиком (как ``_run_reasons``: уровень класса общий для всех PM).
@@ -199,7 +209,7 @@ class ProcessManagerProcess(ProcessModule):
     #: (``time.time()``, часы листов готовности) и срок окна по умолчанию (конфиг PM ``run_restart_grace_s``), с.
     #: Ведёт только тик под ``_run_restart_lock`` (``restart_window``) и ЗАМЕНЯЕТ значение целиком (как
     #: ``_run_unconfirmed``: уровень класса общий для всех PM); остальные оценки только читают ссылку.
-    _DEFAULT_RUN_RESTART_GRACE_S = 30.0
+    _DEFAULT_RUN_RESTART_GRACE_S: float = RunConfig.model_fields["run_restart_grace_s"].default
     _run_down_since: dict = {}
     #: Task 1.4: остановка в аварии завершена (все ``paused``/не живы или срок истёк); ``ack`` (Task 1.7) читает
     #: признак. Сбрасывается при входе в ``fault`` и выходе из него (под ``_run_lock``); ``_fault_seq`` — номер аварии:
@@ -301,10 +311,18 @@ class ProcessManagerProcess(ProcessModule):
         # Task 1.1 system-run-state: событие работы — ДО реестра (реестр строится из ``__init__``, позже
         # ``initialize()`` отдал бы ему ``None``). ``run_gate: true`` — снято до ``system.run.start``;
         # иначе взведено сразу и PM его больше не трогает (машина наблюдаемая, не гейтящая).
-        raw_run_gate = self.get_config("run_gate")
-        if raw_run_gate is not None and not isinstance(raw_run_gate, bool):
+        run_gate, gate_ok = run_config_value("run_gate", self.get_config("run_gate"))
+        if not gate_ok:
             self._log_warning("run_gate негоден (нужно true или false) — гейт работы выключен")
-        self._run_gate = raw_run_gate is True
+        self._run_gate = run_gate is True
+        # S3c (ADR-PMM-050): автостарт один раз за boot — читается один раз, как ``run_gate`` (ADR-PMM-049).
+        # Без гейта событие работы взведено с boot, START источникам ничего не меняет: ключ не действует.
+        autostart, autostart_ok = run_config_value("run_autostart", self.get_config("run_autostart"))
+        if not autostart_ok:
+            self._log_warning("run_autostart негоден (нужно true или false) — автостарт выключен")
+        elif autostart is True and not self._run_gate:
+            self._log_warning("run_autostart без run_gate — автостарт не действует")
+        self._run_autostart = AutostartLatch(autostart is True and self._run_gate)
         self._run_state = RunState.booting
         self._run_since = time.time()
         self._run_ready = True
@@ -314,6 +332,8 @@ class ProcessManagerProcess(ProcessModule):
         self._run_event = RunFlag()
         if not self._run_gate:
             self._run_event.set()
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — снят до первого ``running``, при любом ``run_gate``.
+        self._run_active = RunFlag()
 
         self._process_registry = ProcessRegistry(
             logger=self,
@@ -332,6 +352,8 @@ class ProcessManagerProcess(ProcessModule):
             max_stop_window_s=self._stop_window_ceiling_s,
             # Task 1.1 system-run-state: событие работы детям на чтение (путь ADR-PMM-034).
             run_event=self._run_event,
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём.
+            run_active=self._run_active,
         )
         # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
         self._process_registry.stop_wait_idle = self._stop_wait_idle
@@ -763,9 +785,14 @@ class ProcessManagerProcess(ProcessModule):
             "deadline_at": started_at + window_s,
             "pre_stop_step": None,
         }
-        with self._system_stop_lock:
+        # Task 2.7d (ADR-PMM-051): единственная точка начала хода стопа — и единственное место, где признак стопа
+        # снимает флаг ``run_active``, каким бы путём стоп ни начинался (команда, ``supervision.status``, стоп детей
+        # корня). Порядок замков ``_run_lock`` -> ``_system_stop_lock``; флаг снимается ДО записи признака — ход
+        # стопа не опережает флаг (как состояние в ``_run_apply``). Вызывающий ``_run_lock`` не держит.
+        with self._run_lock, self._system_stop_lock:
             if self._system_stop_info is not None:
                 return False
+            self._run_active_sync_locked(self._run_state, stop_begun=True)
             self._system_stop_info = info
             return True
 
@@ -1028,7 +1055,11 @@ class ProcessManagerProcess(ProcessModule):
 
     @property
     def _run_lock(self) -> threading.Lock:
-        """Листовой замок машины работы: под ним только ``transition()`` и ``set()/clear()`` события."""
+        """Замок машины работы: под ним только ``transition()``, ``set()/clear()`` события и флага ``run_active``.
+
+        Единственный вложенный — листовой ``_system_stop_lock`` (признак хода стопа для ``run_active``, ADR-PMM-051):
+        порядок ``_run_lock`` -> ``_system_stop_lock``, обратного нет. ``_begin_system_stop`` берёт оба в этом порядке —
+        под ``_run_lock`` его не зовут."""
         return self.__dict__.setdefault("_run_lock_obj", threading.Lock())
 
     @property
@@ -1082,6 +1113,9 @@ class ProcessManagerProcess(ProcessModule):
             if stop_done is None:
                 stop_done = self._fault_stop_done
             new, code = transition(prev, event, ready=ready, stop_done=stop_done)
+            # S3c (ADR-PMM-050): латч решает только тут, под ``_run_lock`` (своего замка у него нет); START подаётся
+            # после замка — ``_run_lock`` не реентерабелен, а START сам идёт через ``_run_apply``.
+            autostart = self._run_autostart.observe(event, prev, new, code)
             # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``/``start``, РЕАЛЬНО
             # сменившие состояние (no-op ``settled`` и отказ без смены состояния его не трогают); иначе одиночный
             # сбойный такт после них брал бы устаревшее значение: ``False`` после ``settled``/``ack`` переводил бы
@@ -1122,13 +1156,54 @@ class ProcessManagerProcess(ProcessModule):
                         run_event.set()
                     else:
                         run_event.clear()
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд — при любом ``run_gate``, тоже ДО записи состояния.
+            self._run_active_sync_locked(new)
             if new is not prev:
                 self._run_state = new
                 self._run_since = time.time()
                 if new is RunState.running:
                     self._run_running_mono = time.monotonic()
         self._publish_run_state()
+        if autostart:
+            self._submit_run_sequence(self._run_autostart_start, "run-autostart")
         return new, code, prev
+
+    def _run_autostart_start(self) -> None:
+        """S3c (ADR-PMM-050): START автостарта на исполнителе жизненного цикла — ровно один раз, без повтора.
+
+        Готовность START оценивает сам (``_cmd_system_run_start``): между тактом и START она могла уйти — тогда отказ.
+        ``already_running`` — оператор успел нажать START: INFO, не WARNING. Иной отказ — WARNING только с кодом.
+        """
+        self._log_warning("автостарт: system.run.start (run_autostart)")
+        reply = self._cmd_system_run_start({})
+        if reply.get("success") is True:
+            return
+        error = reply.get("error")
+        if error == "already_running":
+            self._log_info("автостарт не нужен: линия уже в работе (already_running)")
+            return
+        self._log_warning(f"автостарт отказан: {error}")
+
+    def _run_active_sync_locked(self, state: RunState, *, stop_begun: bool | None = None) -> None:
+        """Task 2.7d (ADR-PMM-051): довести ``_run_active`` до «``state`` — ``running`` и нет хода системного стопа».
+
+        Единственная функция записи флага; зовётся ТОЛЬКО под ``_run_lock`` из двух точек записи источников:
+        ``_run_apply`` (состояние) и ``_begin_system_stop`` (ход стопа; признак не сбрасывается). ``stop_begun=None`` —
+        признак читается под листовым ``_system_stop_lock`` (порядок ``_run_lock`` -> ``_system_stop_lock``); явное
+        значение передаёт ``_begin_system_stop``, уже держащий ``_system_stop_lock`` (замок не реентерабелен). Своего
+        хранилища у флага нет: поздний такт или START после начала стопа его не взведут.
+        """
+        active = self._run_active
+        if active is None:
+            return
+        if stop_begun is None:
+            stop_begun = self._system_stop_snapshot() is not None
+        want = state is RunState.running and not stop_begun
+        if active.is_set() != want:
+            if want:
+                active.set()
+            else:
+                active.clear()
 
     def _run_snapshot(self) -> tuple[RunState, float]:
         """Пара ``(состояние, since)`` под ``_run_lock``."""
@@ -1149,7 +1224,7 @@ class ProcessManagerProcess(ProcessModule):
             return reasons, last_fault
 
     def _publish_run_state(self) -> None:
-        """Записать в стор изменившиеся ``system.run.*`` (state, since, reasons, start_allowed, last_fault) из СНИМКА.
+        """Записать в стор изменившиеся листья ``system.run.*`` (вид ``run_view``) из СНИМКА.
 
         Порядок — как ``_publish_system_stop``: снимок берётся под ``_run_publish_lock``, поэтому поздний
         издатель не перезапишет новое состояние старым. Неизменённые значения пропускаются. Стора нет —
@@ -1163,14 +1238,15 @@ class ProcessManagerProcess(ProcessModule):
             published = self._run_published
             if published is None:
                 published = self._run_published = {}
-            for key, value in (
-                ("state", state.value),
-                ("since", since),
-                ("reasons", reasons),
-                ("start_allowed", state is RunState.ready),
-                ("ack_allowed", self._run_ack_allowed()),
-                ("last_fault", last_fault),
-            ):
+            view = run_view(
+                state,
+                since,
+                run_gate=self._run_gate,
+                ack_allowed=self._run_ack_allowed(),
+                reasons=reasons,
+                last_fault=last_fault,
+            )
+            for key, value in view.items():
                 if key in published and published[key] == value:
                     continue
                 self._state_op(
@@ -1365,13 +1441,10 @@ class ProcessManagerProcess(ProcessModule):
 
     def _run_restart_grace(self) -> float:
         """Окно перезапуска: конфиг PM ``run_restart_grace_s`` (умолчание 30.0 с); негодное — умолчание."""
-        raw = self.get_config("run_restart_grace_s")
-        if raw is None:
-            return self._DEFAULT_RUN_RESTART_GRACE_S
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
-            return float(raw)
-        self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
-        return self._DEFAULT_RUN_RESTART_GRACE_S
+        value, ok = run_config_value("run_restart_grace_s", self.get_config("run_restart_grace_s"))
+        if not ok:
+            self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
+        return float(value)  # type: ignore[arg-type]
 
     def _supervisor_gave_up(self, names: frozenset[str]) -> frozenset[str]:
         """Процессы ``names``, от перезапуска которых супервизор отказался (``status == "failed"`` в его снимке).
@@ -1432,12 +1505,10 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:  # noqa: BLE001 — итог остановки не имеет права не случиться
             self._log_warning(f"run_stop_timeout_s не прочитан ({type(exc).__name__}) — взято 10.0 с")
             return self._DEFAULT_RUN_STOP_TIMEOUT_S
-        if raw is None:
-            return self._DEFAULT_RUN_STOP_TIMEOUT_S
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0:
-            return float(raw)
-        self._log_warning("run_stop_timeout_s негоден (нужно число > 0) — взято 10.0 с")
-        return self._DEFAULT_RUN_STOP_TIMEOUT_S
+        value, ok = run_config_value("run_stop_timeout_s", raw)
+        if not ok:
+            self._log_warning("run_stop_timeout_s негоден (нужно число > 0) — взято 10.0 с")
+        return float(value)  # type: ignore[arg-type]
 
     def _settle_run_state(self) -> None:
         """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
@@ -1847,20 +1918,20 @@ class ProcessManagerProcess(ProcessModule):
     def _cmd_system_run_status(self, data=None, **kwargs) -> dict:
         """``system.run.status`` (Task 1.1 system-run-state): снимок машины работы.
 
+        Вид строит ``run_view`` (тот же, что листья ``system.run.*``; ``stop_allowed`` — ``state`` = ``running``).
         ``reasons`` — причины последней оценки готовности (Task 1.3), ``last_fault`` — последняя авария
         ``{at, reasons, acknowledged_at}`` или ``None`` (квитирование — Task 1.7).
         """
         state, since = self._run_snapshot()
         reasons, last_fault = self._run_detail_snapshot()
-        return {
-            "state": state.value,
-            "since": since,
-            "run_gate": self._run_gate,
-            "start_allowed": state is RunState.ready,
-            "ack_allowed": self._run_ack_allowed(),
-            "reasons": reasons,
-            "last_fault": last_fault,
-        }
+        return run_view(
+            state,
+            since,
+            run_gate=self._run_gate,
+            ack_allowed=self._run_ack_allowed(),
+            reasons=reasons,
+            last_fault=last_fault,
+        )
 
     def _cmd_system_run_start(self, data=None, **kwargs) -> dict:
         """``system.run.start``: ``ready`` -> ``running``; иначе отказ с кодом, ТЕКУЩИМ состоянием и причинами.
@@ -2286,6 +2357,8 @@ class ProcessManagerProcess(ProcessModule):
         """Проход graceful-shutdown из ``running``: шаги -> ``shutdown`` в машину (снимает событие) -> ждать
         ``paused`` -> события стопа (``finally``, как ``_run_pre_stop``). Не подтвердившие — WARNING: машина уходит."""
         try:
+            # Task 2.7d (ADR-PMM-051): флаг ``run_active`` снят уже в ``_begin_system_stop`` (до постановки прохода);
+            # шаги идут в ``running`` при снятом флаге и взведённом ``run_event`` (Task 1.4).
             if with_steps:
                 self._run_pre_stop_loop()
             self._run_apply("shutdown")

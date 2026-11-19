@@ -278,3 +278,90 @@ def test_control_panel_plugin_has_run_gated_false(recipe: str) -> None:
         values = _run_gated_values(entry)
         assert values, f"{recipe}: у плагина {entry.get('plugin_name')!r} нет ключа run_gated"
         assert all(v is False for v in values), f"{recipe}: {entry.get('plugin_name')!r}: run_gated={values!r}"
+
+
+# ---------------------------------------------------------------------------
+# S3b2 (слепая приёмка): ключи работы PM ``run_autostart`` / ``run_stop_timeout_s`` / ``run_restart_grace_s``
+# ---------------------------------------------------------------------------
+
+
+def test_run_stop_timeout_s_int_is_coerced_to_float(tmp_path: Path) -> None:
+    """Критерий 7: ``run_stop_timeout_s: 2`` -> ``2.0`` (число, не строка и не ``bool``)."""
+    value = _load(tmp_path, "run_stop_timeout_s: 2\n").run_stop_timeout_s
+
+    assert value == 2.0
+    assert isinstance(value, float), type(value)
+
+
+def test_run_restart_grace_s_int_is_coerced_to_float(tmp_path: Path) -> None:
+    value = _load(tmp_path, "run_restart_grace_s: 45\n").run_restart_grace_s
+
+    assert value == 45.0
+    assert isinstance(value, float), type(value)
+
+
+def test_run_keys_defaults_without_the_keys(tmp_path: Path) -> None:
+    """Критерий 7: без ключей умолчания ``10.0`` / ``30.0`` / ``False``."""
+    cfg = _load(tmp_path, "run_gate: false\n")
+
+    assert cfg.run_stop_timeout_s == 10.0
+    assert cfg.run_restart_grace_s == 30.0
+    assert cfg.run_autostart is False
+
+
+@pytest.mark.parametrize("key", ["run_stop_timeout_s", "run_restart_grace_s"])
+@pytest.mark.parametrize(
+    "bad",
+    ["0", "-1", "true", '"5"', ".inf", ".nan"],
+    ids=["zero", "neg", "bool", "str", "inf", "nan"],
+)
+def test_run_timeouts_reject_invalid_values(tmp_path: Path, key: str, bad: str) -> None:
+    """Число > 0, конечное: ноль, минус, ``bool``, строка, inf, nan -> ``ValidationError`` про этот ключ."""
+    with pytest.raises(ValidationError) as info:
+        _load(tmp_path, f"{key}: {bad}\n")
+
+    assert [e["loc"] for e in info.value.errors()] == [(key,)], info.value.errors()
+
+
+@pytest.mark.parametrize("bad", ['"yes"', "1", '"true"'], ids=["str-yes", "int-1", "str-true"])
+def test_run_autostart_rejects_non_bool(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(ValidationError) as info:
+        _load(tmp_path, f"run_autostart: {bad}\n")
+
+    errors = info.value.errors()
+    assert [e["loc"] for e in errors] == [("run_autostart",)], errors
+    assert errors[0]["type"] == "bool_type", errors
+
+
+def test_build_omits_unset_run_keys(tmp_path: Path) -> None:
+    """Критерий 8a: в yaml нет новых ключей -> в ``orchestrator_config`` их нет, ``run_gate`` есть и ``False``."""
+    system = tmp_path / "system.yaml"
+    system.write_text("run_gate: false\n", encoding="utf-8")
+
+    cfg = _build(system)._orchestrator_config
+
+    assert cfg["run_gate"] is False
+    for key in ("run_autostart", "run_stop_timeout_s", "run_restart_grace_s"):
+        assert key not in cfg, (key, cfg[key])
+
+
+def test_build_puts_set_run_keys_into_orchestrator_config(tmp_path: Path) -> None:
+    """Критерий 8b: заданные в yaml ключи попадают в ``orchestrator_config`` значениями нужного типа."""
+    system = tmp_path / "system.yaml"
+    system.write_text("run_restart_grace_s: 45\nrun_autostart: true\n", encoding="utf-8")
+
+    cfg = _build(system)._orchestrator_config
+
+    assert cfg.get("run_restart_grace_s", _ABSENT) == 45.0
+    assert isinstance(cfg["run_restart_grace_s"], float), type(cfg["run_restart_grace_s"])
+    assert cfg.get("run_autostart", _ABSENT) is True
+
+
+def test_build_keeps_only_set_run_keys(tmp_path: Path) -> None:
+    """Заданы два из трёх -> третий (``run_stop_timeout_s``) не появляется."""
+    system = tmp_path / "system.yaml"
+    system.write_text("run_restart_grace_s: 45\nrun_autostart: true\n", encoding="utf-8")
+
+    cfg = _build(system)._orchestrator_config
+
+    assert "run_stop_timeout_s" not in cfg

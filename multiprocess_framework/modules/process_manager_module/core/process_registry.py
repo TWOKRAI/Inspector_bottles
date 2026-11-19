@@ -56,6 +56,9 @@ class ProcessRegistry:
         child_stop_budget: Optional[Dict[str, float]] = None,
         max_stop_window_s: float | None = None,
         run_event: Optional[Event] = None,
+        run_active: Optional[
+            Event
+        ] = None,  # ``Event`` тут — функция multiprocessing: ``Event | None`` падает при импорте
     ) -> None:
         self.logger = logger
         # Task 1.1 (ADR-PMM-035): словарь ``stop_budget(shutdown_timeout PM)`` — каждый ребёнок
@@ -117,6 +120,9 @@ class ProcessRegistry:
         # (``_run_apply``). Ребёнок его только читает (``SourceProducer``). Тот же путь, что
         # у ``system_ready_event``: Process-kwargs (inheritance при spawn), не bundle custom.
         self._run_event: Optional[Event] = run_event
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина «``running`` и нет хода стопа» — пишет ТОЛЬКО PM
+        # (``_run_active_sync_locked``), ребёнок читает (обёртка ``run_locked_commands``). Путь ``run_event``.
+        self._run_active: Optional[Event] = run_active
         # Ф3.1 (routing-epoch): поставщик routing_meta для bundle нового ребёнка
         # ({"epoch": N, "incarnations": {...}}). None → пустой meta (совместимость).
         self._routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = routing_meta_fn
@@ -371,6 +377,7 @@ class ProcessRegistry:
                 "system_ready_event",
                 "system_stop_event",
                 "run_event",
+                "run_active",
             ):
                 custom.pop(key, None)
 
@@ -441,6 +448,8 @@ class ProcessRegistry:
                     "system_ready_event": self._system_ready_event,
                     # Task 1.1 (system-run-state): событие работы — тем же путём.
                     "run_event": self._run_event,
+                    # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём.
+                    "run_active": self._run_active,
                 },
                 name=name,
             )

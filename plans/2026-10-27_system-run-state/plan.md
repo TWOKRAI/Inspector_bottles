@@ -108,10 +108,26 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 2.6: окно начальной загрузки — размороженный `LoadingWindow` + тонкий подписчик `system.progress.**`; в 1.0 шкала загрузки рецепта = `boot`; `recipe_load` при смене — 2.0 (требование владельца 2026-11-12, `amendments.md` §5, §7) [PENDING] (после 1.3b, 2.3; стадия 0 р.1 пройдена, v2)
   - **Module contract:** impl-only
-- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3)
+- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9)
   - **Module contract:** n/a
 - Task 2.5: ADR и карты — PMM, process_module, MODULES_RESPONSIBILITY_MAP [PENDING] (после 2.4)
   - **Module contract:** n/a
+
+### Ф2 — правки до железа (решение владельца 2026-11-16, срок 2026-11-22; тексты — `tasks/`)
+- Task 2.7: PM — чистый `run_state` (`check_function` не прячется), `RunConfig` + `run_view()`, автостарт один раз за boot, флаг `run.py --autostart`; файл `tasks/2.7.md` (срезы S3a, S3b1, S3b2, S3c, S3c′, S3doc) [PENDING] (после 1.11, 3.3)
+  - **Module contract:** public-api-change
+- Task 2.7d: запрет команд плагина в `running` — второй `RunFlag` `run_active`, ключ плагина `run_locked_commands`; файл `tasks/2.7d.md` [PENDING] (после 2.7 S3b1 → S3c)
+  - **Module contract:** public-api-change
+- Task 2.8a: копия клиента хранит листья (read-model, `_cache_put`, `telemetry_sink`, `backend_ctl`), проекция при привязке (П3); файл `tasks/2.8a.md` [PENDING]
+  - **Module contract:** impl-only
+- Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [PENDING] (после 2.8a)
+  - **Module contract:** public-api-change
+- Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [PENDING] (после 1.2)
+  - **Module contract:** public-api-change
+- Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [PENDING] (после 2.9, 2.2b)
+  - **Module contract:** impl-only
+- Task 2.2a2: возраст факта соединения, `pause_action` драйвера, параллельный `pause_all` (S4a «Services», S4b «plugin»); файл `tasks/2.2a2.md` в ветке `feat/run-state-2-2` [PENDING] (после 2.2a)
+  - **Module contract:** impl-only
 
 ### Ф3 — после 1.0 (владелец 2026-11-15)
 - Task 3.2: разбиение `process_manager_process.py` (6493 строки) на пакет `process/pm/` + чистка комментариев и docstring без ссылок на фазы и задачи; чистый перенос, поведение не меняется (закрывает C7; дизайн — `reports/pm-split.design.md`) [PENDING] (после тега 1.0, после слияния правок ревью Ф1 и веток, правящих PM-файл)

@@ -71,11 +71,17 @@ def build_launcher(
     pipeline_override: str | None = None,
     *,
     include_presentation: bool = True,
+    run_autostart: bool | None = None,
 ) -> "SystemLauncher":
-    """Собрать систему из главного конфига (манифеста). Тонкая обёртка над SystemBuilder."""
+    """Собрать систему из главного конфига (манифеста). Тонкая обёртка над SystemBuilder.
+
+    ``run_autostart`` (Task 2.7 S3c′): ``None`` — как в system.yaml; ``True``/``False`` — перебивает его.
+    """
     from multiprocess_prototype.backend.launch import SystemBuilder
 
-    return SystemBuilder.from_manifest(app, pipeline_override, include_presentation=include_presentation).build()
+    return SystemBuilder.from_manifest(
+        app, pipeline_override, include_presentation=include_presentation, run_autostart=run_autostart
+    ).build()
 
 
 def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
@@ -89,7 +95,9 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path).build()
 
 
-def _prototype_launcher_factory(manifest, pipeline_override: str | None, *, headless: bool = False):
+def _prototype_launcher_factory(
+    manifest, pipeline_override: str | None, *, headless: bool = False, autostart: bool | None = None
+):
     """``launcher_factory`` для ``app_module.run_app`` (factory-шов Ф5.11).
 
     Вход прототипа выражен через ``run_app`` (generic-контур: env-алиасы
@@ -118,10 +126,10 @@ def _prototype_launcher_factory(manifest, pipeline_override: str | None, *, head
             f"[run] pipeline: {app.pipeline} (источник: состояние {state_path_for(manifest.source)})",
             file=sys.stderr,
         )
-    return build_launcher(app, pipeline_override, include_presentation=not headless)
+    return build_launcher(app, pipeline_override, include_presentation=not headless, run_autostart=autostart)
 
 
-def main(pipeline_override: str | None = None, *, headless: bool | None = None) -> int:
+def main(pipeline_override: str | None = None, *, headless: bool | None = None, autostart: bool | None = None) -> int:
     """Запуск приложения через ``app_module.run_app`` (Ф5.11).
 
     CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
@@ -135,6 +143,9 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
     ``headless`` (Ф2 T2.2) — явный backend-only режим (см. ``_is_headless``): ``None``
     смотрит env ``INSPECTOR_HEADLESS``; явный ``True``/``False`` (CLI ``--headless``,
     см. ``__main__``) приоритетен. Перебивает presentation, даже если тот задан.
+
+    ``autostart`` (Task 2.7 S3c′, ADR-PMM-050) — CLI ``run.py --autostart``: ``True`` кладёт ``run_autostart: true``
+    в конфиг PM (автостарт один раз за boot, действует только при ``run_gate: true``); ``None`` — как в system.yaml.
     """
     from functools import partial
 
@@ -167,7 +178,7 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None) 
     spec = AppSpec(
         manifest_path=manifest_path,
         pipeline_override=effective_override,
-        launcher_factory=partial(_prototype_launcher_factory, headless=is_headless),
+        launcher_factory=partial(_prototype_launcher_factory, headless=is_headless, autostart=autostart),
     )
     return run_app(spec)
 

@@ -40,6 +40,9 @@ from .manifest import PLUGIN_API_VERSION
 
 # Ключи опций регистрации команды (хук command_options) — именованные аргументы CommandManager.register_command
 _COMMAND_OPTION_KEYS: frozenset[str] = frozenset({"executor", "key_from", "targets", "metadata"})
+#: Task 2.7d M1 (ADR-PM-062): хвост текста причины ``failure`` (``source: "config"``) при ``run_locked_invalid``;
+#: полный текст — ``"<плагин>: неверный run_locked_commands"`` (собирает оркестратор).
+RUN_LOCKED_INVALID_REASON: str = "неверный run_locked_commands"
 
 if TYPE_CHECKING:
     from ..health import HealthReporter
@@ -1381,6 +1384,12 @@ class ProcessModulePlugin(ABC):
     # Автоматически регистрируются в CommandManager при configure
     commands: dict[str, str] = {}
 
+    #: Task 2.7d M1 (ADR-PM-062): ключ плагина ``run_locked_commands`` негоден — не список строк или в нём есть имена
+    #: вне ``commands``. Пишет только разбор ключа при регистрации команд (``_auto_register_commands``); оркестратор
+    #: читает в снимке готовности: ``True`` -> причина ``failure`` с ``source: "config"`` — ключ безопасности при
+    #: негодном значении закрывает (узел не готов), а не открывает. Ключа нет или он годен -> ``False``.
+    run_locked_invalid: bool = False
+
     # Thread-safety контракт (Q8):
     # False (default) — sequential, safe by default.
     # True — разрешает параллельный вызов process() (для stateless плагинов).
@@ -1580,9 +1589,10 @@ class ProcessModulePlugin(ABC):
         текста исключения, текст — в журнал). Форма вне контракта — причина
         ``failure`` «readiness() вернул неверную форму».
 
-        Плагин отчитывается устойчивым состоянием: переподключение в процессе —
-        ``out_of_spec``, не ``failure``, пока не истёк его собственный срок
-        (дребезг — обязанность плагина).
+        Плагин отчитывается фактом, без собственного дребезга: удержание потери
+        и степень узла задаёт рецепт ключом ``readiness: {hold_s, severity}``
+        (умолчание — без удержания, ADR-PM-061). Причины фреймворка («упал»,
+        «неверная форма») политику не проходят.
         """
         return []
 
@@ -1761,11 +1771,15 @@ class ProcessModulePlugin(ABC):
         if not ctx.command_manager:
             return
 
+        # Task 2.7d (ADR-PM-062): команды из ключа плагина ``run_locked_commands`` в ``running`` отказаны.
+        locked = self._run_locked_names(ctx)
         for cmd_name, method_name in self.commands.items():
             method = getattr(self, method_name, None)
             if method is None:
                 ctx.log_error(f"Plugin '{self.name}': команда '{cmd_name}' → метод '{method_name}' не найден")
                 continue
+            if cmd_name in locked:
+                method = self._run_guarded(ctx, method)
 
             options = self._command_registration_options(ctx, cmd_name)
             if not options:
@@ -1790,6 +1804,49 @@ class ProcessModulePlugin(ABC):
             already = bool(get_info("set_config")) if callable(get_info) else False
             if not already:
                 ctx.command_manager.register_command("set_config", self.cmd_set_config)
+
+    def _run_locked_names(self, ctx: PluginContext) -> frozenset[str]:
+        """Task 2.7d (ADR-PM-062): имена из ключа плагина ``run_locked_commands`` (``ctx.config``), годные к запрету.
+
+        Ключа нет -> пусто. Не список/кортеж строк -> одна строка ERROR, пусто (запрета нет). Имена вне
+        ``self.commands`` -> одна строка ERROR (не больше 5 имён, каждое до 40 символов, хвост ``(+N)``),
+        остальные берутся. Читается один раз — при регистрации команд.
+        """
+        # Двойники контекста без ``config`` (как заглушки менеджера команд ниже) — ключа нет.
+        raw = (getattr(ctx, "config", None) or {}).get("run_locked_commands")
+        self.run_locked_invalid = False
+        if raw is None:
+            return frozenset()
+        if not isinstance(raw, (list, tuple)) or any(not isinstance(name, str) for name in raw):
+            self.run_locked_invalid = True
+            ctx.log_error(f"Plugin '{self.name}': run_locked_commands негоден (нужен список имён команд) — запрета нет")
+            return frozenset()
+        names = frozenset(raw)
+        unknown = names - set(self.commands)
+        if unknown:
+            self.run_locked_invalid = True
+            shown = [n[:40] for n in sorted(unknown)[:5]]
+            extra = len(unknown) - len(shown)
+            tail = f" (+{extra})" if extra else ""
+            ctx.log_error(f"Plugin '{self.name}': run_locked_commands — нет таких команд {shown}{tail}")
+        return names - unknown
+
+    @staticmethod
+    def _run_guarded(ctx: PluginContext, method: Callable) -> Callable:
+        """Task 2.7d (ADR-PM-062): обёртка запертой команды — флаг ``run_active`` читается в момент вызова.
+
+        Флаг — ``ctx.services._run_active`` (кладёт раннер; нет атрибута — запирать нечем, команда исполняется).
+        Взведён -> отказ литералом, метод не вызывается.
+        """
+
+        @functools.wraps(method)
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            flag = getattr(ctx.services, "_run_active", None)
+            if flag is not None and flag.is_set():
+                return {"status": "error", "error": "running", "message": "сначала ОСТАНОВИТЬ"}
+            return method(*args, **kwargs)
+
+        return guarded
 
     def command_options(self, command_name: str) -> Mapping[str, Any] | None:
         """Опции регистрации команды плагина в ``CommandManager`` (хук; умолчание — опций нет).

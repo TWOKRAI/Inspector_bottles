@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from multiprocess_framework.modules.process_manager_module.process.run_config import RUN_CONFIG_KEYS
 from multiprocess_framework.modules.process_module.configs.observability_layers import (
     orchestrator_observability_config,
 )
@@ -523,6 +524,7 @@ class SystemBuilder:
         pipeline_override: str | None = None,
         *,
         include_presentation: bool = True,
+        run_autostart: bool | None = None,
     ) -> "SystemBuilder":
         """Из главного конфига: system.yaml + (фундамент ⊕ presentation ⊕ активный pipeline).
 
@@ -536,10 +538,16 @@ class SystemBuilder:
                 если тот задан в манифесте/env-overlay. Headless при этом означает
                 не «нет процесса презентации», а «он в дренирующем воплощении»
                 (план D8): процесс объявляет рецепт, патч лишь меняет ему класс.
+            run_autostart: CLI ``--autostart`` (Task 2.7 S3c′): ``None`` — как в system.yaml /
+                user_overrides.yaml; ``True``/``False`` — перебивает их (ключ уходит в PM).
         """
         from .config.schemas import load_system_config
 
         sys_config = load_system_config(app.system)
+        if run_autostart is not None:
+            # Приём ``harness.py``: присваивание полю — validate_assignment ловит не-bool и помечает поле
+            # заданным, поэтому ключ проходит ``exclude_unset`` и доезжает до orchestrator_config.
+            sys_config.run_autostart = run_autostart
         bp_path = _resolve_pipeline(app, pipeline_override)
 
         # Извлекаем raw для device-секции ДО unwrap (Р11 device-hub)
@@ -756,8 +764,11 @@ class SystemBuilder:
                 # глубокая копия — Dict at Boundary, вложенный args не общий с sys_config.
                 "pre_stop": copy.deepcopy(sys_config.shutdown.pre_stop),
                 # Task 2.1: гейт запуска линии (system.yaml: run_gate). PM читает ключ один раз
-                # в __init__; плоский ключ orchestrator_config склеивается в конфиг PM как есть.
+                # в _create_components(); плоский ключ orchestrator_config склеивается в конфиг PM как есть.
                 "run_gate": sys_config.run_gate,
+                # Task 2.7: остальные ключи RunConfig — только заданные в system.yaml (exclude_unset);
+                # незаданный в PM не идёт, PM берёт умолчание RunConfig.
+                **sys_config.model_dump(include=set(RUN_CONFIG_KEYS) - {"run_gate"}, exclude_unset=True),
                 # Task 5.13: слои наблюдаемости оркестратора — общий шов с generic-дорогой.
                 # Здесь L1 (сырая секция system.yaml), адрес L1 для provenance, адрес L2
                 # (рецепт + спутник рядом, нужен watcher'у и observability.persist) и

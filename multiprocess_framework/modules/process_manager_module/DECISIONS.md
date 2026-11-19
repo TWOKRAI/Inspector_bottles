@@ -2737,3 +2737,158 @@ GUI получал `terminate` в окне PM, пока PM ждал зависш
 `plans/2026-10-27_system-run-state/reports/phase1.review-opus-fresh.md` (С5), `reports/1.6-1.8-1.7c.stand.md`,
 ADR-PMM-047, `process_module/tests/test_heartbeat_readiness_push.py`,
 `process_module/tests/test_heartbeat_readiness_push_hazards.py`.
+
+## ADR-PMM-049: `RunConfig` — ключи работы PM одной моделью, `run_view` — один построитель вида (Task 2.7 S3b1 system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Ключи работы PM лежали врассыпную: `run_gate` проверялся в `_create_components()`, `run_stop_timeout_s` и
+`run_restart_grace_s` — каждый своей копией проверки «число > 0» в геттере, прототип знал из них только `run_gate`
+(`SystemConfig` остальные ключи молча отбрасывал). Вид состояния строили два места: `_publish_run_state` (листья) и
+`_cmd_system_run_status` (ответ команды) — разный набор ключей, `stop_allowed` не было нигде.
+
+### Решение
+
+1. `process/run_config.py`: `RunConfig(SchemaBase)` — плоские поля `run_gate: StrictBool = False`,
+   `run_autostart: StrictBool = False`, `run_stop_timeout_s` и `run_restart_grace_s` типа
+   `Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)]` (умолчания 10.0 и 30.0). `RUN_CONFIG_KEYS` —
+   имена полей по порядку. Новый ключ PM — одно поле в одном файле. `StrictBool` и `strict=True` отвергают `1`,
+   `"true"`, `True` для числа, `"2"`: `PositiveFloat` пропускал `True -> 1.0` и `"2" -> 2.0`.
+2. `run_config_value(key, raw) -> (значение, годно)`: `None` (ключа нет) -> `(умолчание, True)`; годное -> `(значение,
+   True)`; негодное -> `(умолчание, False)`; на негодном значении не бросает. Значение входа в результат и в тексты
+   WARNING не попадает (ADR-PMM-044 п.1); тексты WARNING PM прежние, дословно.
+3. PM: `_create_components()` читает `run_gate` через `run_config_value`; геттеры `_run_restart_grace` и
+   `_run_stop_timeout` остаются точками вызова и читают ключ при каждом использовании (как раньше), проверка — вызов
+   `run_config_value`; `_DEFAULT_RUN_*` — псевдонимы умолчаний полей `RunConfig`.
+4. `process/run_state.py`: чистая `run_view(state, since, *, run_gate, ack_allowed, reasons, last_fault) -> dict` с
+   ключами `state, since, run_gate, start_allowed (state is ready), stop_allowed (state is running), ack_allowed,
+   reasons, last_fault`. `_publish_run_state` обходит `run_view(...).items()` (дедупликация по `published` прежняя),
+   `_cmd_system_run_status` возвращает `run_view(...)`. Новые листья `system.run.run_gate` и `system.run.stop_allowed`.
+5. **`run_gate` и `run_autostart` читаются один раз** (в `_create_components()`): `config.reload` на них не действует до
+   перезапуска PM. Числовые ключи читаются при каждом использовании и подхватывают изменение конфига.
+
+### Известная цена
+
+- Импорт `run_config` из прототипа грузит пакет PM (`import ...process.run_state` -> +1053 модуля, ~0,39 с,
+  загружен `process_manager_process`). Принято. Вариант на будущее — вынести `RunConfig` в место, импорт которого не тянет
+  `__init__` пакета PM; не исследован.
+- `run_autostart` в схеме есть, PM его пока не читает (читает срез S3c, ADR-PMM-050).
+- Блокирующий набор степеней причин (`health/schema.py`, `READINESS_BLOCKING_SEVERITIES`) по-прежнему имеет копию в GUI
+  (`run_control.py`); `run_view` её не касается (S5).
+
+**Reversible:** yes (вернуть проверки в геттеры и два построителя вида; удалить `run_config.py`).
+**Risk:** low — поведение при умолчаниях не меняется, добавлены ключ `stop_allowed` в ответе и два листа; покрыто
+слепым набором и hazard-тестами автора.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф4–Ф6, Ф13, DESIGN п.5–8а), `tests/test_run_config_and_view.py`,
+`tests/test_run_config_and_view_hazards.py`, ADR-PMM-044.
+
+## ADR-PMM-050: Автостарт работы — один раз за boot, латч под замком машины PM (Task 2.7 S3c system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** С `run_gate: true` линия после boot стоит в `ready`, пока оператор не подаст `system.run.start`. Боевому
+headless (без GUI) нужен START без оператора. Цикл «ждать `ready` -> START» снаружи PM (в `run.py`, стендах) пришлось бы
+повторять в каждом пути запуска, а готовность и переходы машины известны только PM под `_run_lock`. Первый `ready`
+приходит не только тактом `settled` из `booting`: окно `not_ready` после подъёма детей ~4 с, вход в `ready` — тактом
+`tick` из `not_ready`.
+
+### Решение
+
+1. Ключ конфига PM `run_autostart` (поле `RunConfig`, ADR-PMM-049) читается один раз в `_create_components()` через
+   `run_config_value`, сразу после `run_gate`. Негодное значение -> одна WARNING «run_autostart негоден (нужно true или
+   false) — автостарт выключен»; `true` без `run_gate` -> одна WARNING «run_autostart без run_gate — автостарт не
+   действует» (без гейта событие работы взведено с boot, START ничего не меняет источникам). Значение входа в текст не
+   попадает (ADR-PMM-044 п.1). `config.reload` на ключ не действует (ADR-PMM-049 п.5).
+2. **Латч** `AutostartLatch(enabled)` в `process/run_state.py` — чистый класс без IO, часов и своего замка.
+   `observe(event, prev, new, code) -> bool`: выключенный — `False`; `stop`, `apply`, `ack`, `shutdown` (принятые и
+   отказанные) и принятый `start` — гасят, `False`; `settled`/`tick` без отказа, `new` = `ready`, `prev` в
+   {`booting`, `not_ready`} — гасит и даёт `True`; иначе `False`. Отказанный `start` (`not_ready`) латч не гасит:
+   намерение оператора то же. Погасший латч не взводится — **один раз за жизнь PM**: перезапуск процесса набора
+   (`ready` -> `not_ready` -> `ready`) автостарт не повторяет.
+3. **Контракт замка:** `observe` зовётся только в `_run_apply` под `_run_lock`, сразу после `transition` — латч и
+   машина решают одним шагом, параллельные такты дают ровно одно срабатывание. START подаётся ПОСЛЕ замка и после
+   `_publish_run_state()`: `_run_lock` не реентерабелен, а START сам идёт через `_run_apply`.
+4. START подаёт `_submit_run_sequence(self._run_autostart_start, "run-autostart")` — исполнитель `pm-lifecycle`; не
+   взял (отказ `executor_busy`/`system_stopping`, `False` без ответа, исключение) — одноразовый daemon-поток, как у
+   STOP. `_run_autostart_start()`: WARNING «автостарт: system.run.start (run_autostart)», затем
+   `_cmd_system_run_start({})` (готовность оценивается заново). Успех — всё; `already_running` (оператор успел) —
+   INFO «автостарт не нужен: линия уже в работе (already_running)»; иной отказ — WARNING «автостарт отказан: <код>»
+   (только код, без причин). **Повтора нет.**
+
+### Достижимость (почему таблица шире PM)
+
+В PM взведённый латч бывает только в `booting`/`not_ready`: первые входы в `ready` его гасят, в `stopping`/`fault`
+он уже погашен. Проверка `prev` и гашение принятыми `start`/`ack` в PM недостижимы — их держит только таблица
+`test_run_autostart_hazards.py` (защита от будущей правки `transition`).
+
+### Отвергнуто
+
+- Цикл «ждать `ready` -> START» в `run.py` и стендах: размножается по путям запуска, гонка с машиной PM снаружи замка.
+- Синхронный START внутри `with self._run_lock`: самоблокировка (замок не реентерабелен).
+- `_submit_run_sequence` под замком: эквивалент по исходу, но добавляет порядок `_run_lock -> _routing_lock`
+  (`_LifecycleSubmit._shift`) — риск взаимоблокировки, тестами не ловится.
+- Повтор автостарта после отказа или после перезапуска процесса: решение владельца — один раз за boot; повтор — вне
+  объёма (отдельный текст).
+
+### Известная цена
+
+- Отказанный автостарт (готовность ушла между тактом и START) оставляет линию в `ready`/`not_ready` до START оператора;
+  в журнале — WARNING с кодом.
+- Латч не отличает «первый boot» от `topology.apply`: `apply` гасит латч, после применения топологии автостарта нет.
+
+**Reversible:** yes (убрать вызов `observe` и подачу в `_run_apply`, чтение ключа; без ключа поведение прежнее).
+**Risk:** low — при умолчании (`run_autostart` нет или `false`) латч выключен, `observe` возвращает `False`.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф7, Ф8, Ф12, Ф14, DESIGN п.10–12а), `tests/test_run_autostart.py`,
+`tests/test_run_autostart_hazards.py`, ADR-PMM-049, ADR-PMM-044.
+
+## ADR-PMM-051: Флаг `run_active` — второй `RunFlag` PM «`running` и нет хода системного стопа» (Task 2.7d system-run-state, 2026-11-17)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Команду плагина, опасную на ходу линии (`release_device` камеры и т.п.), ребёнок должен отказать в
+`running`. `run_event` для этого не годится: при `run_gate` не true он взведён всегда, ребёнок не отличает `running` от
+`ready`. Все пути команды (GUI relay, `request_command`, `backend_ctl`) сходятся в `CommandManager` ребёнка — признак
+нужен там, а состояние знает только PM под `_run_lock`.
+
+### Решение
+
+1. `self._run_active = RunFlag()` в `_create_components()` рядом с `_run_event`, при любом `run_gate`; классовое
+   умолчание `None` (PM из `__new__` — писать некуда). Флаг — производная, своего хранилища нет:
+   `want = state is RunState.running and not stop_begun` (признак — `_system_stop_snapshot() is not None`).
+2. Пишет флаг **одна функция** `_run_active_sync_locked(state, *, stop_begun=None)`, только под `_run_lock`, из
+   **двух точек записи источников** (у каждого источника точка записи единственная):
+   - `_run_apply` (состояние) — после переключения `run_event`, до записи `_run_state` (состояние не опережает флаг),
+     без условия `run_gate`. В `stopping`, `fault`, `shutting_down` флаг снят: шаги `pre_stop` STOP оператора проходят.
+   - `_begin_system_stop` (ход стопа; признак `_system_stop_info` пишет только он, сброса нет) — под
+     `with self._run_lock, self._system_stop_lock:` флаг снимается ДО записи признака (`stop_begun=True`: второй раз
+     `_system_stop_lock` не берётся, замок не реентерабелен). Так флаг верен при любом пути начала стопа:
+     `system.shutdown` (graceful из `running` — флаг снят до постановки прохода, шаги идут в `running` при снятом флаге и
+     взведённом `run_event`, Task 1.4), `supervision.status` при событии стопа, взведённом снаружи (инициатор `event`),
+     стоп детей корня `_ChildrenStop.request_stop` (инициатор `event`). Перечислять пути не нужно.
+   Поздний такт или START, прошедшие проверку стопа вне замка до `_begin_system_stop`, идут через `_run_apply` и читают
+   признак уже под `_run_lock` — флаг обратно не взведут.
+3. **Порядок замков** `_run_lock` -> `_system_stop_lock`. `_system_stop_lock` листовой: в блоках
+   `with self._system_stop_lock:` других замков нет — обратного порядка нет. `_begin_system_stop` берёт оба в этом
+   порядке; под `_run_lock` его не зовут (в блоках `with self._run_lock:` — только переходы, флаги и `_system_stop_lock`).
+4. **Доставка** — путём `run_event`: `ProcessRegistry(..., run_active=)` -> kwargs `Process` ребёнка (каждое воплощение,
+   рестарт тоже) -> `run_process_function(..., run_active=)` -> атрибут `_run_active` экземпляра до `initialize()`.
+   `"run_active"` — в pop-фильтре bundle `custom` (ключ из рецепта не уедет в bundle). `None` (корневой PM от
+   spawner'а, реестр без флага) — атрибут не ставится. Читатель — обёртка ключа плагина `run_locked_commands`
+   (ADR-PM-062). Негодный ключ плагина закрывает: причина `failure` `source: "config"`, узел не готов (ключ
+   безопасности; ключи подстройки `run_*` — WARNING и умолчание).
+5. **Принятое ограничение (TOCTOU у START).** Команда, начавшая исполнение до `set()` флага, исполняется во время
+   `running` — окно = время исполнения одной команды (флаг читается на исполнении, ожидание в очереди не в счёт). Исход
+   в окне — как до защиты: охраняемая команда исполнилась в `running`. `fault` после неё — только у узлов, чья
+   `readiness()` даёт причину (камера — после 2.2c). Закрытие требует замка, общего для PM и ребёнка, — новый
+   межпроцессный слой; на этапе 1 не закрываем.
+
+### Отвергнуто
+
+- Отличать `running` по `run_event`: при `run_gate` false он взведён с boot.
+- Список запрещённых команд в PM (`process.relay`): пути `request_command` и `backend_ctl` идут мимо `CommandManager` PM.
+- Гашение кнопок в GUI: только UX, `backend_ctl` и `request_command` не закрывает.
+- Свой атрибут «стоп начат» у флага: второе хранилище; признак хода стопа уже есть (`_system_stop_info`).
+
+**Reversible:** yes (убрать вызовы `_run_active_sync_locked` и kwarg `run_active`; без ключа плагина поведение прежнее).
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7d.md` (Ф3, Ф4, Ф8, DESIGN п.1, 2, 5), ADR-PM-062, ADR-PMM-047,
+`process_module/tests/test_run_locked_commands.py`, `tests/test_run_active_flag_hazards.py`.

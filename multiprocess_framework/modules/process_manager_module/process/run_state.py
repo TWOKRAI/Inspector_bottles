@@ -4,7 +4,7 @@
 Чистая функция без IO: ``transition(state, event, *, ready, stop_done)`` возвращает новое
 состояние и код отказа (``None`` — переход принят или событие — no-op). Держатель состояния,
 замок и событие ``run_event`` живут в ``ProcessManagerProcess`` (``_run_apply``); здесь только
-таблица.
+таблица, чистые оценки и латч автостарта ``AutostartLatch`` (S3c, ADR-PMM-050; решает под замком владельца).
 
 События:
   * ``start`` / ``stop`` — команды ``system.run.start`` / ``system.run.stop``;
@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+
+from multiprocess_framework.modules.process_module.health.schema import READINESS_BLOCKING_SEVERITIES
 
 
 class RunState(str, Enum):
@@ -40,8 +42,9 @@ EVENTS: frozenset[str] = frozenset({"start", "stop", "ack", "apply", "shutdown",
 
 
 #: Степени причины, блокирующие START (К3 CTO: ``check_function`` блокирует START и в ``running`` равен
-#: потере готовности); ``out_of_spec`` / ``maintenance`` не блокируют.
-BLOCKING_SEVERITIES: frozenset[str] = frozenset({"failure", "check_function"})
+#: потере готовности); ``out_of_spec`` / ``maintenance`` не блокируют. Единственное определение набора —
+#: ``health/schema.py`` (``READINESS_BLOCKING_SEVERITIES``).
+BLOCKING_SEVERITIES: frozenset[str] = frozenset(READINESS_BLOCKING_SEVERITIES)
 
 
 def _reason(node: str, reason: str, source: str, severity: str = "failure") -> dict:
@@ -92,18 +95,14 @@ def _process_reasons(name: str, inp: EvalInput) -> tuple[list[dict], bool]:
     if not isinstance(at, (int, float)) or inp.now - at > inp.stale_s:
         return [_reason(name, "нет отчёта о готовности", "liveness")], True
     reasons = [dict(r) for r in (leaf.get("reasons") or []) if isinstance(r, dict)]
-    if not leaf.get("ready", False) and not any(r.get("severity") == "failure" for r in reasons):
+    if not leaf.get("ready", False) and not has_blocking(reasons):
         reasons.append(_reason(name, f"{name} не готов", "report"))
     return reasons, False
 
 
-def _has_failure(reasons: list[dict]) -> bool:
-    return any(r.get("severity") == "failure" for r in reasons)
-
-
 def _restarting(name: str, silent: bool, reasons: list[dict], inp: EvalInput) -> bool:
-    """Процесс из ``auto_restart`` в перезапуске: молчит, либо поднялся, но ``failure`` ещё не ушли (запись есть)."""
-    return name in inp.auto_restart and (silent or (name in inp.down_since and _has_failure(reasons)))
+    """Процесс из ``auto_restart`` в перезапуске: молчит либо поднялся, но блокирующие причины не ушли (запись есть)."""
+    return name in inp.auto_restart and (silent or (name in inp.down_since and has_blocking(reasons)))
 
 
 def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
@@ -117,12 +116,12 @@ def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
       * нет листа или ``at`` старше ``stale_s`` (судим по ``at`` — времени расчёта снимка, а не по
         heartbeat: мёртвый поток-наблюдатель при живом heartbeat иначе выглядел бы готовым) ->
         ``failure`` / ``liveness`` «нет отчёта о готовности»;
-      * иначе причины листа как есть; лист ``ready: false`` без ``failure`` среди его причин ->
+      * иначе причины листа как есть; лист ``ready: false`` без блокирующей причины среди его причин ->
         добавлена ``failure`` / ``report`` «<процесс> не готов».
 
     Автоперезапуск в работе (Task 1.8) — только при ``running=True``; иначе флаг не действует и мёртвый
     процесс остаётся ``failure``. Процесс из ``auto_restart``, который молчит (не жив / нет свежего листа)
-    или поднялся, но его ``failure`` ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
+    или поднялся, но блокирующие причины ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
     (``node`` = процесс, ``source`` = ``liveness``):
       * процесс в ``given_up`` (супервизор отказался) -> ``failure`` «<процесс>: супервизор отказался от
         перезапуска» — выигрывает у окна и действует сразу;
@@ -226,6 +225,32 @@ def has_blocking(reasons: list[dict]) -> bool:
     return any(r.get("severity") in BLOCKING_SEVERITIES for r in reasons)
 
 
+def run_view(
+    state: RunState,
+    since: float,
+    *,
+    run_gate: bool,
+    ack_allowed: bool,
+    reasons: list[dict],
+    last_fault: dict | None,
+) -> dict:
+    """Вид состояния работы для ``system.run.status`` и листьев ``system.run.*`` (один построитель, ADR-PMM-049).
+
+    Чистая функция без IO. Ключи — в порядке публикации: ``state``, ``since``, ``run_gate``, ``start_allowed``
+    (``state`` = ``ready``), ``stop_allowed`` (``state`` = ``running``), ``ack_allowed``, ``reasons``, ``last_fault``.
+    """
+    return {
+        "state": state.value,
+        "since": since,
+        "run_gate": run_gate,
+        "start_allowed": state is RunState.ready,
+        "stop_allowed": state is RunState.running,
+        "ack_allowed": ack_allowed,
+        "reasons": reasons,
+        "last_fault": last_fault,
+    }
+
+
 def _r(ready: bool) -> RunState:
     """Ячейка ``R`` таблицы: ``ready`` при ``ready=True``, иначе ``not_ready``."""
     return RunState.ready if ready else RunState.not_ready
@@ -309,3 +334,39 @@ def transition(state: RunState, event: str, *, ready: bool, stop_done: bool = Fa
     if event in ("start", "apply"):
         return state, "fault_unacknowledged"
     return state, None  # stop, settled, tick
+
+
+#: S3c (ADR-PMM-050): события, которые гасят взведённый латч автостарта при любом исходе (принято или отказано).
+_AUTOSTART_CANCEL_EVENTS: frozenset[str] = frozenset({"stop", "apply", "ack", "shutdown"})
+#: Состояния, из которых вход в ``ready`` — «первый ready за boot» (Ф12: взведённый латч бывает только в них).
+_AUTOSTART_FROM: frozenset[RunState] = frozenset({RunState.booting, RunState.not_ready})
+
+
+class AutostartLatch:
+    """Латч автостарта «взведён до первого ``ready``» (S3c, ADR-PMM-050). Чистый: без IO и часов.
+
+    Вызывать только под замком машины владельца (``_run_lock`` PM, вместе с ``transition``); своего замка нет.
+
+    ``observe(event, prev, new, code)`` — шаг машины, уже вычисленный владельцем. Итог ``True`` — ровно один раз:
+    взведённый латч видит вход в ``ready`` из ``booting``/``not_ready`` по ``settled``/``tick`` без отказа и
+    гаснет. Гасят без срабатывания: ``stop``, ``apply``, ``ack``, ``shutdown`` (принятые и отказанные) и принятый
+    ``start``. Отказанный ``start`` (``not_ready``) латч не гасит: намерение оператора то же. Погасший латч
+    больше не взводится — повтора автостарта за жизнь владельца нет.
+    """
+
+    __slots__ = ("_armed",)
+
+    def __init__(self, enabled: bool) -> None:
+        self._armed = enabled is True
+
+    def observe(self, event: str, prev: RunState, new: RunState, code: str | None) -> bool:
+        """Учесть шаг машины; ``True`` — пора подать START автостарта (латч уже погашен)."""
+        if not self._armed:
+            return False
+        if event in _AUTOSTART_CANCEL_EVENTS or (event == "start" and code is None):
+            self._armed = False
+            return False
+        if event in ("settled", "tick") and code is None and new is RunState.ready and prev in _AUTOSTART_FROM:
+            self._armed = False
+            return True
+        return False
