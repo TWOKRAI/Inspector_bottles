@@ -314,10 +314,10 @@ class TestGuiProcessInstantiation:
         assert hasattr(process, "_bridge")
         assert isinstance(process._bridge, DataReceiverBridge)
 
-        # create_worker вызван с "data_receiver"
-        mock_wm.create_worker.assert_called_once()
-        call_args = mock_wm.create_worker.call_args
-        assert call_args[0][0] == "data_receiver"
+        # create_worker вызван с "data_receiver" ровно один раз. Считаем по имени: база
+        # создаёт и свои воркеры (readiness_snapshot, _init_run_state_workers) — это намеренно.
+        receiver_calls = [c for c in mock_wm.create_worker.call_args_list if c[0][0] == "data_receiver"]
+        assert len(receiver_calls) == 1
 
 
 # ============================================================================
