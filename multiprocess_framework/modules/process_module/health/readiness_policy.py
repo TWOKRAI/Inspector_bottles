@@ -13,7 +13,7 @@ Public API:
     ``parse_policy(raw)`` — значение ключа рецепта -> ``ReadinessPolicy`` или ``str`` (нарушенное правило);
     ``apply_policy(items, policy, memory, now)`` — пары ``(severity, reason)`` -> пары после политики + новая память;
     ``ReadinessPolicy``, ``NodeMemory``, ``NEVER_CLEAN``; константы ``HOLD_MAX_S``, ``OBSERVATION_GAP_MAX_S``,
-    ``CONFIG_INVALID_REASON``. Вызывает ``PluginOrchestrator._plugin_reasons`` (generic/plugin_orchestrator.py).
+    ``CONFIG_INVALID_REASON``. Вызывается из ``PluginOrchestrator._plugin_reasons`` (generic/plugin_orchestrator.py).
 
 Stability:
     Внутренний контракт фреймворка (new-lite): имена и правила — ADR-PM-061; пределы ``HOLD_MAX_S`` и

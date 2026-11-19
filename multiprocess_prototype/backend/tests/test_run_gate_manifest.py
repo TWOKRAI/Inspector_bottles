@@ -310,7 +310,11 @@ def test_run_keys_defaults_without_the_keys(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("key", ["run_stop_timeout_s", "run_restart_grace_s"])
-@pytest.mark.parametrize("bad", ["0", "-1", "true", '"5"', ".inf", ".nan"], ids=["zero", "neg", "bool", "str", "inf", "nan"])
+@pytest.mark.parametrize(
+    "bad",
+    ["0", "-1", "true", '"5"', ".inf", ".nan"],
+    ids=["zero", "neg", "bool", "str", "inf", "nan"],
+)
 def test_run_timeouts_reject_invalid_values(tmp_path: Path, key: str, bad: str) -> None:
     """Число > 0, конечное: ноль, минус, ``bool``, строка, inf, nan -> ``ValidationError`` про этот ключ."""
     with pytest.raises(ValidationError) as info:

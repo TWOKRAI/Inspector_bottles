@@ -242,9 +242,10 @@ class SystemConfig(RunConfig):
         """Опечатка в плоском ключе работы (``run_autostrat``) не молчит (M2 сквозного обзора 2.7).
 
         Неизвестный ключ с префиксом ``run_`` — одна WARNING на ключ при каждой валидации с подсказкой ближайшего
-        из ``RUN_CONFIG_KEYS`` (difflib) и в конфиг не попадает; отказа нет. Значение в текст не попадает. Ключи без
-        префикса ``run_`` — как раньше (лишний ключ схема отбрасывает молча). Одно место для всех путей загрузки:
-        ``load_system_config`` (system.yaml + user_overrides.yaml), Save вкладки «Система», хуки оркестратора.
+        из ``RUN_CONFIG_KEYS`` (difflib, порог 0.5; ниже порога — без подсказки) и в конфиг не попадает; отказа нет.
+        Имя ключа в тексте обрезано до 40 знаков, значение в текст не попадает. Ключи без префикса ``run_`` — как
+        раньше (лишний ключ схема отбрасывает молча). Одно место для всех путей загрузки: ``load_system_config``
+        (system.yaml + user_overrides.yaml), Save вкладки «Система», хуки оркестратора.
         """
         if not isinstance(data, dict):
             return data
@@ -252,8 +253,10 @@ class SystemConfig(RunConfig):
         if not unknown:
             return data
         for key in unknown:
-            nearest = difflib.get_close_matches(key, RUN_CONFIG_KEYS, n=1, cutoff=0.0)[0]
-            logger.warning(f"неизвестный ключ {key} (возможно {nearest})")
+            shown = key[:40]
+            near = difflib.get_close_matches(key, RUN_CONFIG_KEYS, n=1, cutoff=0.5)
+            hint = f" (возможно {near[0]})" if near else ""
+            logger.warning(f"неизвестный ключ {shown}{hint}")
         return {k: v for k, v in data.items() if k not in unknown}
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
