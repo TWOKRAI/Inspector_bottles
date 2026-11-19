@@ -40,6 +40,14 @@ tests/
   `stop_unconfirmed(_text)`, `last_io`, методы `request_disconnect()` и `set_degraded() -> bool`. Менеджер и плагин
   читают драйвер напрямую, без `getattr`. `stop_aware = True` — драйвер получает стоп фазы 1 остановки
   (`request_stop`), поток рассылки заводится только таким.
+- Пауза: `pause_action` — способность драйвера (атрибут класса `BaseDeviceDriver`, умолчание `None`): `(op, args)`,
+  где `op` из `PAUSE_OPS = {"stop", "abort"}` (одного `immediate=True` мало: `park` и `jog_hold` тоже `immediate`);
+  `RobotDriverV2` — `("stop", {"level": "SOFT"})`, `RobotDriver` — `("abort", {"mode": 3})`, `VfdDriver` —
+  `("stop", {})`. Негодное значение — `TypeError` при объявлении класса. Рецепт может переопределить действие ключом
+  `params.pause_action` (`{"op", "args"}`). `DeviceManager.pause_all(deadline, skip)` шлёт действие всем устройствам
+  параллельно (свой поток на устройство) под общим сроком и возвращает итог по `id`: `ok` / `skipped` / `error`.
+  `DeviceManager(conn_cb=…)` — единственный писатель факта соединения менеджера (плагин хаба передаёт `_set_conn`);
+  без него — прежний `publish_cb`. Подробности: ADR-DH-015, ADR-PH-004.
 - `OpSpec(name, description, args_schema, needs_link, executor, immediate)` — одна операция; `OpSource(prefix, kind,
   route, ops, key_from)` — набор операций одного префикса. Каталоги: `ROBOT_V2_OPS` (20), `ROBOT_V1_OPS` (27),
   `ROBOT_DATA_OPS` (12, офлайн, `executor="device_io"`), `VFD_OPS` (5). Драйвер ссылается на свой каталог

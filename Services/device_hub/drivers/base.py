@@ -31,6 +31,11 @@ from Services.device_hub.spi import OpSpec
 #: отдельный долг, не эта правка.
 logger = get_std_logger(__name__)
 
+#: Операции, допустимые как действие паузы (``pause_action`` драйвера и ``params.pause_action`` записи). Правило
+#: ``immediate=True`` каталога операций не годится одно: ``park`` (возит робота «домой») и ``jog_hold`` (движение)
+#: тоже ``immediate``. Остановка — только ``stop`` и ``abort``.
+PAUSE_OPS: frozenset[str] = frozenset({"stop", "abort"})
+
 
 class BaseDeviceDriver(BaseManager, ObservableMixin):
     """Базовый драйвер устройства.
@@ -56,6 +61,8 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
     # подкласс вправе присвоить имя в ``__init__`` или перекрыть его своим свойством.
     OP_SPECS: ClassVar[tuple[OpSpec, ...]] = ()
     stop_aware: ClassVar[bool] = False  # True — драйвер получает стоп фазы 1 остановки (request_stop)
+    # Действие паузы: (операция из PAUSE_OPS, аргументы) или None — драйвер паузой не останавливается (ADR-DH-015)
+    pause_action: ClassVar[tuple[str, dict] | None] = None
     transport: Any = None  # транспорт регистров или None
     disconnect_pending: bool = False  # «Отключить» нажато, disconnect() не кончился (C-29)
     stop_unconfirmed: bool = False
@@ -123,6 +130,27 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
                 f"{'есть' if hasattr(cls, 'request_stop') else 'отсутствует'} — задай stop_aware = True ровно "
                 f"драйверу с request_stop"
             )
+        cls._check_pause_action()
+
+    @classmethod
+    def _check_pause_action(cls) -> None:
+        """Громко отказать классу с негодным ``pause_action``: допустимы ``None`` или ``(op, args)``.
+
+        ``op`` — из ``PAUSE_OPS``; при непустом ``OP_SPECS`` класса у операции есть описание с ``immediate=True``
+        (пустой ``OP_SPECS`` — тестовые двойники — членство не проверяет). Чтение — без вызова дескрипторов.
+        """
+        action = inspect.getattr_static(cls, "pause_action")
+        if action is None:
+            return
+        well_formed = isinstance(action, tuple) and len(action) == 2
+        if not (well_formed and isinstance(action[0], str) and isinstance(action[1], dict)):
+            raise TypeError(f"{cls.__name__}: pause_action — None или кортеж (op: str, args: dict), задан {action!r}")
+        op = action[0]
+        if op not in PAUSE_OPS:
+            raise TypeError(f"{cls.__name__}: pause_action {op!r} вне PAUSE_OPS {sorted(PAUSE_OPS)}")
+        specs = inspect.getattr_static(cls, "OP_SPECS")
+        if isinstance(specs, tuple) and specs and not any(spec.name == op and spec.immediate is True for spec in specs):
+            raise TypeError(f"{cls.__name__}: pause_action {op!r} — в OP_SPECS нет операции {op!r} с immediate=True")
 
     def _reconnect_due(self) -> bool:
         """Затвор попыток переподключения: True и метка = «сейчас», если прошло ``RECONNECT_THROTTLE_S``.

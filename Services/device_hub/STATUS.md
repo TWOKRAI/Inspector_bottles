@@ -20,6 +20,7 @@
 | GenericModbusDriver | done | test_generic_modbus.py |
 | RobotDriverV2 (пакет `drivers/robot_driver_v2/`) | done (T5.3f; стенд `harness_smoke` 3 passed ×3, 2026-10-20) | test_robot_driver_v2.py, test_robot_v2_state_acceptance.py, test_no_private_driver_state.py |
 | SPI драйвера (`spi.py`, `OpSpec`, команды из описаний) | done (SPI a–g, 2026-10-26; стенд не гонялся) | test_spi_contract.py, test_spi_acceptance.py, test_op_commands.py, test_spi_commands_acceptance.py |
+| Пауза драйверов (`pause_action`, `PAUSE_OPS`, `DeviceManager.pause_all`, `conn_cb`) | done (2.2a2 S4a, ADR-DH-015; на железе время ответа stop v2/v1/ПЧ не измерено) | test_pause_all.py, test_pause_all_acceptance.py |
 | DeviceHubPlugin | done | test_device_hub_plugin.py |
 | DeviceHubClient | done | test_client.py |
 

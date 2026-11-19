@@ -57,6 +57,33 @@ _SHUTDOWN_MARGIN_S = 0.5
 # Постоянный текст инцидента «поток области не вышел за срок» (R8: без входных значений)
 TEXT_SCOPE_SURVIVED = "поток области хаба не вышел за срок"
 TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
+# Постоянные тексты хуков run-state (R8: без входных значений)
+TEXT_STATE_UNAVAILABLE = "device_hub: состояние устройств недоступно"
+TEXT_PAUSE_FAILED = "pause: сбой останова устройств"
+# Часы плагина: возраст связи и окно эпизода паузы. Модульное имя — точка подмены в тестах; срок ``pause_all`` берёт
+# ``time.monotonic()`` (часы менеджера)
+_clock = time.monotonic
+# Срок обхода ``pause_all``, с: строго меньше замка сверки оркестратора ``_SHUTDOWN_LOCK_SEC`` = 2,0
+# (``plugin_orchestrator``): ``shutdown`` не ждёт хук дольше
+_PAUSE_BUDGET_S = 1.5
+# Окно эпизода паузы, с: повтор оркестратора идёт через 1,0 с после конца прошлого вызова; позже — новый эпизод
+_PAUSE_EPISODE_S = 3.0
+# Подряд исключений ``drv.tick`` при живой связи, после которых связь «ошибка» без порога по времени
+_TICK_FAILS_LIMIT = 3
+
+
+def _conn_of(drv: Any, snapshot: dict | None) -> str:
+    """Факт соединения по драйверу: ``connected`` | ``error`` (``quality == "bad"``) | ``failed`` | ``disconnected``.
+
+    ``snapshot`` — итог последнего успешного ``drv.tick`` или ``None`` (такт бросил). Чтение ``drv.is_connected``
+    может бросить — исключение у вызывающего.
+    """
+    if drv.is_connected:
+        return "error" if (snapshot or {}).get("quality") == "bad" else "connected"
+    if drv.reconnect_exhausted:
+        # Драйвер исчерпал попытки и «сдался» — ждёт ручного «Подключить». Отдельное состояние для GUI (не спам)
+        return "failed"
+    return "disconnected"
 
 
 class ScopeThreadSurvived(RuntimeError):
@@ -189,6 +216,20 @@ class DeviceHubPlugin(ProcessModulePlugin):
         Упал код после ``open_scope`` — корень закрывается здесь же (фреймворк всё равно зовёт ``shutdown()``,
         он при ``self._scope is None`` ничего не делает).
         """
+        # Снимок соединений и набор рецепта — ПЕРВЫМИ: ``DeviceManager`` ниже публикует через ``_publish_state``,
+        # который пишет в снимок (иначе публикация изнутри менеджера дала бы AttributeError)
+        # {id устройства: последнее опубликованное значение conn}; пишут несколько потоков одной записью по ключу
+        self._conn_snapshot: dict[str, str] = {}
+        # Возраст связи (ADR-PH-004): момент (``_clock``) последнего УСПЕШНОГО ``drv.tick`` и порог
+        # ``params.conn_stale_s`` устройства; пишет tick-воркер, читает ``readiness`` (``.get``, без замков)
+        self._tick_ok_at: dict[str, float] = {}
+        self._conn_stale_s: dict[str, float] = {}
+        # Пауза: устройства, которым стоп в этом эпизоде уже ушёл, и конец прошлого вызова ``pause`` (потоки хуков —
+        # один ``run_watch``, замка нет)
+        self._pause_stopped: set[str] = set()
+        self._pause_last_end = float("-inf")
+        # Устройства рецепта в порядке рецепта; перезаписывается целым кортежем (start, cmd_device_sync_set)
+        self._recipe_ids: tuple[str, ...] = ()
         self._ctx = ctx
         # Выжившие, о которых reporter уже сообщил в health (по пути): отчёты корня и ``handle.close`` повторяются
         self._scope_seen: set[str] = set()
@@ -219,6 +260,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 spawn=scope.spawn,
                 robot_store=self._robot_store,
                 kinds=self.device_kinds,
+                conn_cb=self._set_conn,
             )
             self._manager.initialize()
 
@@ -254,11 +296,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # (origin="recipe" не позволяет отличить один рецепт от другого).
         recipe_devices = ctx.config.get("recipe_devices", [])
         recipe_origin: str = ctx.config.get("recipe_origin", "recipe")
-        recipe_ids: set[str] = set()
+        recipe_id_list: list[str] = []  # порядок рецепта сохраняется (readiness перечисляет причины в нём)
         for dev_dict in recipe_devices:
             if isinstance(dev_dict, dict) and "id" in dev_dict:
                 self._manager.upsert(dev_dict, origin=recipe_origin)
-                recipe_ids.add(dev_dict["id"])
+                recipe_id_list.append(dev_dict["id"])
+        recipe_ids = set(recipe_id_list)
 
         # Обновить счётчики после recipe upsert
         self._publish_full_registry()
@@ -272,6 +315,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
             if entry.enabled and (entry.auto_connect or entry.id in recipe_ids):
                 self._desired_connected[entry.id] = True
                 self._conn_queue.put(("connect", entry.id))
+        # После записи желаний: id в кортеже при ещё пустом желании не должен давать ложный ``readiness == []``
+        self._recipe_ids = tuple(dict.fromkeys(recipe_id_list))
 
         # Supervisor-worker (LOOP)
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
@@ -335,6 +380,99 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # созданный в окне, удалит shutdown (под замком)
         self._shutting_down = True
         self._manager.request_stop_all_begin(deadline)
+
+    def readiness(self, ctx: PluginContext) -> list[dict]:
+        """Причины неготовности: устройства рецепта, которые оператор не отключал, но связи с ними нет (Task 2.2a).
+
+        Зовётся из потока снимка готовности (~2 Гц): БЕЗ ``_workers_lock``, ``_registry_lock`` и ввода-вывода —
+        только ``.get`` по снимку соединений (его пишет ``_set_conn``), по ``_desired_connected`` и по возрасту связи.
+        Для каждого ``id`` из ``_recipe_ids`` с желанием «подключать»: ``connected`` — причины нет, КРОМЕ случая, когда
+        у устройства задан ``params.conn_stale_s`` и с последнего успешного ``drv.tick`` прошло больше —
+        ``failure`` «<id>: нет обновления связи»; ``error`` / ``failed`` — ``failure`` «<id>: ошибка связи»; иначе
+        (в том числе нет записи) — ``failure`` «<id> не подключено». Порядок — как в рецепте. Дребезга нет по замыслу:
+        любой обрыв связи — потеря готовности. Возраст — только по успешному такту (``_tick_ok_at``): повторная запись
+        ``connected`` кем угодно его не освежает; порог выключен, пока ``conn_stale_s`` не задан (ADR-PH-004).
+        Не бросает: сбой чтения — один ``failure`` с постоянным текстом; в лог идёт только первый сбой серии.
+        До ``configure`` — ``[]``.
+        """
+        try:
+            snapshot = getattr(self, "_conn_snapshot", {})
+            desired = getattr(self, "_desired_connected", {})
+            reasons: list[dict] = []
+            for dev_id in getattr(self, "_recipe_ids", ()):
+                if not desired.get(dev_id):  # оператор отключил вручную (False) или желания ещё нет (None)
+                    continue
+                conn = snapshot.get(dev_id)
+                if conn == "connected":
+                    limit = self._conn_stale_s.get(dev_id)
+                    ok_at = self._tick_ok_at.get(dev_id)
+                    if limit is not None and ok_at is not None and _clock() - ok_at > limit:
+                        reasons.append({"severity": "failure", "reason": f"{dev_id}: нет обновления связи"})
+                    continue
+                if conn in ("error", "failed"):
+                    reasons.append({"severity": "failure", "reason": f"{dev_id}: ошибка связи"})
+                else:
+                    reasons.append({"severity": "failure", "reason": f"{dev_id} не подключено"})
+            if getattr(self, "_readiness_fault_logged", False):  # серия сбоев кончилась: следующий сбой — снова в лог
+                self._readiness_fault_logged = False
+            return reasons
+        except Exception as exc:  # no-health: хук не бросает; причина уходит в снимок готовности, текст — в лог
+            # В лог — только первый сбой серии (хук зовётся ~2 Гц; сброс флага — при следующем успешном чтении)
+            if not getattr(self, "_readiness_fault_logged", False):
+                self._readiness_fault_logged = True
+                try:
+                    ctx.log_error(f"DeviceHubPlugin.readiness: состояние устройств недоступно: {exc!r}")
+                except Exception:  # no-health: сбой самого лога не должен нарушить «не бросает»
+                    pass
+            return [{"severity": "failure", "reason": TEXT_STATE_UNAVAILABLE}]
+
+    def pause(self, ctx: PluginContext) -> None:
+        """RUNNING -> PAUSED: остановить движение роботов и ленту на месте (Task 2.2a); «домой» (``park``) НЕ зовётся.
+
+        Действие — данные драйвера (``pause_action``, ADR-DH-015): плагин видов и протоколов не знает. Обход —
+        ``DeviceManager.pause_all`` по ВСЕМ устройствам реестра (не только рецепта) ПАРАЛЛЕЛЬНО до срока
+        ``_PAUSE_BUDGET_S``: медленный робот не задерживает ленту. Неподключённое и без действия паузы — молча
+        пропущено. Устройствам, которым стоп в этом эпизоде уже ушёл (``_pause_stopped``), повтор команду не шлёт:
+        эпизод — повторы оркестратора с промежутком ≤ ``_PAUSE_EPISODE_S``; конец нормального вызова и ``resume``
+        эпизод закрывают. Сбой (``error``: ответ не ``ok``, исключение, нет ответа к сроку, предыдущий стоп ещё идёт)
+        накапливается, логируется ПОСЛЕ обхода (сбой логгера обход не прерывает) и даёт одно ``RuntimeError`` без
+        значений (оркестратор запишет ``failure`` и повторит вызов раз в секунду). Не ставит ``_shutting_down`` и не
+        зовёт ``request_stop_all_begin`` (он одноразов и защёлкивает срок процесса).
+
+        Граница блокировки — ``_PAUSE_BUDGET_S`` (замок сверки оркестратора 2 с); менеджер без ``spawn`` идёт в этом
+        потоке без соблюдения срока. Очередь заданий драйвера не чистится: поставленные задания после ``stop``
+        продолжают идти. Поток, не вышедший к сроку, даёт инцидент ``device_hub.scope`` (принято, ADR-DH-015).
+        """
+        failures: list[str] = []  # тексты для лога; пишутся после обхода (сбой логгера не должен прервать останов)
+        if _clock() - self._pause_last_end > _PAUSE_EPISODE_S:
+            self._pause_stopped = set()  # новый эпизод
+        try:
+            results = self._manager.pause_all(time.monotonic() + _PAUSE_BUDGET_S, skip=frozenset(self._pause_stopped))
+        except Exception as exc:  # no-health: сбой обхода — в лог после и итоговое исключение
+            results = {}
+            failures.append(f"DeviceHubPlugin.pause: сбой обхода: {exc!r}")
+        for dev_id, res in results.items():
+            status = res.get("status")
+            if status == "ok":
+                self._pause_stopped.add(dev_id)
+            elif status == "error":
+                failures.append(
+                    f"DeviceHubPlugin.pause: {dev_id!r}: {res.get('op', '')} не принят: {res.get('message', '')}"
+                )
+        self._pause_last_end = _clock()
+        if failures:
+            try:
+                for text in failures:
+                    ctx.log_warning(text)
+            except Exception:  # no-health: сбой самого лога не должен подменить контрактное исключение
+                pass
+            raise RuntimeError(TEXT_PAUSE_FAILED)
+        self._pause_stopped = set()  # нормальный возврат: эпизод закрыт
+
+    def resume(self, ctx: PluginContext) -> None:
+        """PAUSED -> RUNNING: ничего не запускает (Task 2.2a, П.4). Движение и лента стартуют своими командами
+        (лента — кнопкой пульта); возобновление не должно само двигать оборудование. Закрывает эпизод паузы."""
+        self._pause_stopped = set()
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
@@ -455,7 +593,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         skip = self._desired_connected.get(dev_id) is False
                     if skip:
                         continue
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "connecting"})
+                    self._set_conn(dev_id, "connecting")
                     ok = self._manager.connect(dev_id)
                     # C-29 (б): «Отключить» пришло во время connect — desired True и сброс лимита не ставятся.
                     # Проверка и запись под одним замком с cmd_device_disconnect (K): либо K раньше, либо позже.
@@ -475,12 +613,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         conn = "disconnecting"
                     else:
                         conn = "connected" if ok else "error"
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
+                    self._set_conn(dev_id, conn)
                 elif op == "disconnect":
                     # C-29: сбой публикации статуса не отменяет disconnect — иначе счётчик «Отключить» драйвера
                     # (request_disconnect) остался бы навсегда. Ошибка уходит в health, как у соседних веток.
                     try:
-                        self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                        self._set_conn(dev_id, "disconnecting")
                     except Exception as pub_exc:
                         if self._ctx:
                             self._ctx.health.report_error(
@@ -491,11 +629,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     if driver is not None:
                         driver.desired_connected = False
                     self._manager.disconnect(dev_id)
-                    self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnected"})
+                    self._set_conn(dev_id, "disconnected")
                     # Остановить per-device воркер
                     self._stop_device_worker(dev_id)
             except Exception as exc:
-                self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "error"})
+                self._set_conn(dev_id, "error")
                 self._publish_state(f"devices.state.{dev_id}.last_error", str(exc))
                 self._reg.last_error = str(exc)
                 if self._ctx:
@@ -529,6 +667,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 remove_fn(wname)
                             except Exception:  # no-health: defensive остановка воркера (desired=False)
                                 pass
+                    # Воркер снят: возраст его последнего такта не наследует следующий воркер (см. _stop_device_worker)
+                    self._tick_ok_at.pop(dev_id, None)
 
             # Создать воркеры для desired=True без существующего воркера
             for dev_id in list(self._desired_connected):
@@ -547,9 +687,28 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     """Замыкание для per-device tick."""
 
                     def tick_loop(stop_evt: threading.Event, pause_evt: threading.Event) -> None:
-                        interval = getattr(drv.entry, "params", {}).get("poll_interval_s", 0.5)
+                        params = getattr(drv.entry, "params", {})
+                        interval = params.get("poll_interval_s", 0.5)
                         if isinstance(interval, str):
                             interval = float(interval)
+                        stale = self._read_tune(
+                            did, "conn_stale_s", params.get("conn_stale_s"), integer=False, zero_is_off=True
+                        )
+                        if stale is None:
+                            self._conn_stale_s.pop(did, None)
+                        else:
+                            self._conn_stale_s[did] = float(stale)
+                        # Лимит исключений такта подряд при живой связи; умолчание — политика, не подтверждённая
+                        # владельцем (ADR-PH-004)
+                        fails_limit = (
+                            self._read_tune(
+                                did, "tick_fails_limit", params.get("tick_fails_limit"), integer=True, zero_is_off=False
+                            )
+                            or _TICK_FAILS_LIMIT
+                        )
+                        # Новый воркер — новое начало отсчёта возраста (зависание первого такта тоже видно)
+                        self._tick_ok_at[did] = _clock()
+                        fails = 0  # исключений ``drv.tick`` подряд
                         tick_n = 0
                         while not stop_evt.is_set():
                             if pause_evt.is_set():
@@ -558,6 +717,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             try:
                                 tick_n += 1
                                 snapshot = drv.tick(stop_evt)
+                                # Воркер, снятый во время такта, ничего не пишет (ни возраст, ни conn/status/stats/
+                                # io_peek): иначе он воскресил бы запись, снятую ``_stop_device_worker``, и состояние
+                                # удалённого устройства, а новый воркер получил бы чужой возраст
+                                if stop_evt.is_set():
+                                    break
+                                if not stop_evt.is_set():
+                                    self._tick_ok_at[did] = _clock()
+                                fails = 0
                                 if snapshot is not None:
                                     self._publish_state(f"devices.state.{did}.status", snapshot)
                                     self._publish_state(f"devices.state.{did}.stats", drv.stats)
@@ -565,15 +732,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 # дедуплицируется StateStore, и поздние подписчики (список,
                                 # страница добавления) видят stale «disconnected». ts меняется
                                 # → дельта проходит. quality снапшота отражает живость чтений.
-                                if drv.is_connected:
-                                    conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
-                                elif drv.reconnect_exhausted:
-                                    # Драйвер исчерпал попытки и «сдался» — ждёт ручного
-                                    # «Подключить». Отдельное состояние для GUI (не спам).
-                                    conn = "failed"
-                                else:
-                                    conn = "disconnected"
-                                self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
+                                self._set_conn(did, _conn_of(drv, snapshot), ts=tick_n)
                                 # io_peek для панели «Вход/Выход» (если драйвер
                                 # накапливает wire-обмен — robot/generic_modbus).
                                 io = drv.last_io
@@ -583,9 +742,39 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                         {"method": "modbus", **io},
                                     )
                             except Exception as exc:
+                                # Воркер, снятый во время такта (remove закрыл драйвер -> такт бросил), ничего не пишет
+                                if stop_evt.is_set():
+                                    break
+                                # Сначала факт связи: оборванная связь — сразу, живая — после ``_TICK_FAILS_LIMIT``
+                                # исключений подряд. Локальный ``snapshot`` сюда НЕ идёт (значение прошлого такта)
+                                fails += 1
+                                try:
+                                    conn = _conn_of(drv, None)
+                                except Exception:  # no-health: чтение is_connected бросило — связь неизвестна
+                                    conn = "error"
+                                try:
+                                    if conn != "connected":
+                                        self._set_conn(did, conn, ts=tick_n)
+                                    elif fails >= fails_limit:
+                                        self._set_conn(did, "error", ts=tick_n)
+                                except Exception as pub_exc:  # сбой записи conn не должен убить поток воркера
+                                    if self._ctx:
+                                        self._ctx.log_warning(
+                                            f"DeviceHubPlugin: запись conn устройства {did} в ветке исключения такта "
+                                            f"не удалась: {pub_exc!r}"
+                                        )
+                                # Затем отчёты, каждый в своём try: сбой health или публикации не убивает поток воркера
                                 if self._ctx:
-                                    self._ctx.health.report_error(exc, context=f"device_hub.tick.{did}", throttle=30.0)
-                                self._publish_state(f"devices.state.{did}.last_error", str(exc))
+                                    try:
+                                        self._ctx.health.report_error(
+                                            exc, context=f"device_hub.tick.{did}", throttle=30.0
+                                        )
+                                    except Exception:  # no-health: сам канал health сбойнул — поток воркера жив
+                                        pass
+                                try:
+                                    self._publish_state(f"devices.state.{did}.last_error", str(exc))
+                                except Exception:  # no-health: публикация last_error не должна убить воркер
+                                    pass
                             stop_evt.wait(interval)
 
                     return tick_loop
@@ -619,6 +808,26 @@ class DeviceHubPlugin(ProcessModulePlugin):
                             exc, context="device_hub.create_worker", device_id=dev_id, worker=wname
                         )
 
+    def _read_tune(self, dev_id: str, key: str, value: Any, *, integer: bool, zero_is_off: bool) -> int | float | None:
+        """Ключ подстройки устройства (``params.<key>``) при старте воркера: годное число > 0 или ``None``.
+
+        ``integer`` — только ``int`` (иначе ``int`` и ``float``); ``bool`` не годится. ``None`` (ключа нет) — молча
+        ``None``; ``0`` — молча ``None`` при ``zero_is_off`` (порог выключен), иначе негоден. Негодное значение
+        (строка, ``bool``, отрицательное, дробное при ``integer``) — ``None`` и одна WARNING на запуск воркера; что
+        значит ``None`` (выключено или умолчание), решает вызывающий.
+        """
+        if value is None:
+            return None
+        typed = isinstance(value, int) if integer else isinstance(value, (int, float))
+        if typed and not isinstance(value, bool):
+            if value > 0:
+                return value
+            if value == 0 and zero_is_off:
+                return None
+        if self._ctx:
+            self._ctx.log_warning(f"device_hub: {dev_id}: params.{key} негоден — подстройка не применена")
+        return None
+
     def _stop_device_worker(self, dev_id: str) -> None:
         """Остановить и ПОЛНОСТЬЮ удалить per-device воркер из WorkerManager.
 
@@ -636,10 +845,24 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     remove_fn(wname)
                 except Exception:  # no-health: defensive остановка воркера при disconnect/remove
                     pass
+        # Воркер остановлен: без записи возраст не проверяется — иначе disconnect -> connect до первого такта нового
+        # воркера дал бы ложное «нет обновления связи»
+        self._tick_ok_at.pop(dev_id, None)
 
     # ------------------------------------------------------------------ #
     # State-публикация
     # ------------------------------------------------------------------ #
+
+    def _set_conn(self, dev_id: str, conn: str, **extra: Any) -> None:
+        """Единственный писатель факта соединения: снимок для ``readiness`` и путь ``devices.state.<id>.conn``.
+
+        Снимок — одна запись по ключу ``dev_id`` (атомарна под GIL; писателей несколько — супервизор, tick-воркеры,
+        менеджер через ``conn_cb``, потоки команд; copy-on-write терял бы запись при двух потоках). Значения — строки.
+        ``extra`` (``ts`` такта) уходит в стор вместе с ``conn``. Возраст связи этот вызов НЕ обновляет: его даёт
+        только успешный ``drv.tick`` (``_tick_ok_at``).
+        """
+        self._conn_snapshot[dev_id] = conn
+        self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn, **extra})
 
     def _publish_state(self, path: str, data: Any) -> None:
         """Публикация в state-дерево (потокобезопасно).
@@ -650,6 +873,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         (``…conn.conn``, ``…io_peek.input.values``), которые НЕ матчат паттерн →
         статус/панель оставались пустыми. Остальное (status/stats/registry) —
         merge (потребители читают листовые поля).
+
+        Снимок соединений сюда не пишется: его единственный писатель — ``_set_conn``.
         """
         if self._ctx and self._ctx.state_proxy is not None:
             if path.endswith(".conn") or path.endswith(".io_peek"):
@@ -820,8 +1045,26 @@ class DeviceHubPlugin(ProcessModulePlugin):
         origin = data.get("origin")
         do_connect = bool(data.get("connect", True))
 
+        # 0. Окно команды: новое устройство появляется в реестре на upsert, а команда идёт долго (``remove``
+        # устаревших — с disconnect-IO). Поэтому ДО upsert, под ``_workers_lock``: желание «подключать» новым id и
+        # расширение ``_recipe_ids`` (старый кортеж + новые id) — иначе ``readiness`` в окне даёт ложный ``[]``.
+        # Порядок «желание -> кортеж»: читатель берёт кортеж, потом желание, поэтому id в кортеже без желания
+        # (ложный ``[]``) не бывает. Только ``str``-id: прочее отсекает upsert, а непригодный к хешу id уронил бы
+        # команду здесь
+        candidate_ids = list(
+            dict.fromkeys(d["id"] for d in devices if isinstance(d, dict) and isinstance(d.get("id"), str))
+        )
+        prev_desired: dict[str, bool | None] = {}  # прежнее желание: вернуть id, чей upsert не прошёл
+        with self._workers_lock:
+            if do_connect:
+                for dev_id in candidate_ids:
+                    prev_desired[dev_id] = self._desired_connected.get(dev_id)
+                    self._desired_connected[dev_id] = True
+            self._recipe_ids = tuple(dict.fromkeys((*self._recipe_ids, *candidate_ids)))
+
         # 1. upsert целевого набора
         new_ids: set[str] = set()
+        new_id_order: list[str] = []  # порядок присланного ``devices`` (для ``_recipe_ids``)
         results = []
         for dev_dict in devices:
             if isinstance(dev_dict, dict) and "id" in dev_dict:
@@ -829,6 +1072,18 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 results.append(r)
                 if r.get("status") == "ok":
                     new_ids.add(dev_dict["id"])
+                    new_id_order.append(dev_dict["id"])
+
+        # id, чей upsert не прошёл: вернуть прежнее желание (нет прежнего — снять), из кортежа он уйдёт в конце команды
+        failed_ids = [dev_id for dev_id in prev_desired if dev_id not in new_ids]
+        if failed_ids:
+            with self._workers_lock:
+                for dev_id in failed_ids:
+                    prev = prev_desired[dev_id]
+                    if prev is None:
+                        self._desired_connected.pop(dev_id, None)
+                    else:
+                        self._desired_connected[dev_id] = prev
 
         # 2. удалить лишние recipe-устройства (bridge-зависимые — первыми)
         stale = [
@@ -854,6 +1109,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     self._desired_connected[dev_id] = True
             for dev_id in new_ids:
                 self._conn_queue.put(("connect", dev_id))
+
+        # Набор рецепта для readiness — целым новым кортежем, ПОСЛЕ записи желаний: иначе в окне новый id в кортеже
+        # при ещё пустом желании. Устройства вне рецепта (ручные) в него не входят
+        self._recipe_ids = tuple(dict.fromkeys(new_id_order))
 
         return {
             "status": "ok",
@@ -884,6 +1143,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # DeltaDispatcher удаляет/замещает устаревший узел devices.registry.<id>,
         # что приводит к исчезновению устройства из комбо в GUI.
         if result.get("status") == "ok":
+            # Запись снимка соединений — только ПОСЛЕ остановки воркера и ``manager.remove``: ещё не снятый tick-воркер
+            # записал бы устаревший ``connected`` обратно. Остаточное (консервативно): ``connect`` снятого id в
+            # очереди даёт ``{"conn": "error"}`` до следующего ``connecting``
+            self._conn_snapshot.pop(dev_id, None)
+            # ``_tick_ok_at`` снял ``_stop_device_worker``; порог — гигиена словаря (новый воркер его перечитает)
+            self._conn_stale_s.pop(dev_id, None)
             self._publish_state(f"devices.state.{dev_id}", {})
             self._publish_full_registry()
         self._update_counters()

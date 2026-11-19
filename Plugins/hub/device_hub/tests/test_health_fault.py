@@ -29,8 +29,9 @@ from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 
 from .conftest import make_ctx
 
-#: Сколько тиков отрабатывает каждый драйвер до самоостановки (детерминизм).
-_TICKS = 5
+#: Сколько итогов тиков пишет каждый драйвер до самоостановки (детерминизм).
+_TICKS = 5  # публикаций снимка / last_error на драйвер
+_STOP_TICK = 6  # драйвер взводит stop_evt на этом тике: его итог уже не пишется
 
 
 class _RecordingStateProxy:
@@ -67,8 +68,8 @@ class _FaultyDriver:
 
     def tick(self, stop_evt: threading.Event) -> dict | None:
         self.tick_calls += 1
-        if self.tick_calls >= _TICKS:
-            stop_evt.set()  # самоостановка после N тиков (детерминизм)
+        if self.tick_calls >= _STOP_TICK:
+            stop_evt.set()  # самоостановка на тике N+1 (после снятия воркера итог тика не пишется), детерминизм
         raise RuntimeError("драйвер выдернут (синтетика)")
 
 
@@ -86,8 +87,8 @@ class _HealthyDriver:
 
     def tick(self, stop_evt: threading.Event) -> dict | None:
         self.tick_calls += 1
-        if self.tick_calls >= _TICKS:
-            stop_evt.set()
+        if self.tick_calls >= _STOP_TICK:
+            stop_evt.set()  # тик N+1: после снятия воркера снимок не пишется, поэтому публикаций ровно N
         return {"quality": "good", "value": self.tick_calls}
 
 
@@ -153,9 +154,9 @@ class TestDriverFaultIsolation:
         assert not t_f.is_alive() and not t_h.is_alive()
         assert esc_f == [] and esc_h == []
         # Падающий драйвер отработал все N тиков (каждый — с исключением)
-        assert faulty.tick_calls == _TICKS
+        assert faulty.tick_calls == _STOP_TICK
         # Сосед не пострадал — тикал независимо
-        assert healthy.tick_calls == _TICKS
+        assert healthy.tick_calls == _STOP_TICK
 
     def test_error_signal_grows(self, tmp_path: Path) -> None:
         """Каждый упавший tick публикует last_error — сигнал ошибки растёт."""

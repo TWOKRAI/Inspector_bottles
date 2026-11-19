@@ -46,6 +46,9 @@ class RobotDriver(BaseDeviceDriver):
 
     kind = "robot"
     OP_SPECS = ROBOT_V1_OPS  # описания операций _OPS (SPI хаба)
+    # ОСТАНОВИТЬ: abort, режим 3 — стоп на месте, серво ON (Services/robot_comm/core/registers.py:41); решение владельца
+    # 2026-11-16, ADR-DH-015. Режим 1 = «домой» — не ставить
+    pause_action = ("abort", {"mode": 3})
     RECONNECT_THROTTLE_S = _RECONNECT_THROTTLE_SEC
 
     def __init__(

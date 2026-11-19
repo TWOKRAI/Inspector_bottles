@@ -22,6 +22,7 @@ from multiprocess_framework.modules.base_manager import BaseManager, ObservableM
 from multiprocess_framework.modules.base_manager.interfaces import IHandle, ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
 
+from Services.device_hub.drivers.base import PAUSE_OPS
 from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_PARKING
 from Services.device_hub.errors import (
     DeviceHubError,
@@ -89,6 +90,9 @@ class DeviceManager(BaseManager, ObservableMixin):
                     драйверу опция — ``TypeError`` его конструктора при создании.
         kinds:      Таблица видов (``Services/device_hub/kinds.py``): фабрики драйверов по умолчанию; допустимый вид
                     записи — вид с фабрикой. По умолчанию ``DEFAULT_KINDS``; повтор вида — ``ValueError``.
+        conn_cb:    ``(dev_id, conn) -> None`` — единственный писатель факта соединения менеджера (``connect`` /
+                    ``disconnect`` / каскад носителя). ``None`` — прежняя публикация ``publish_cb`` по пути
+                    ``devices.state.<id>.conn`` со словарём ``{"conn": conn}`` (ADR-DH-015).
     """
 
     def __init__(
@@ -100,11 +104,14 @@ class DeviceManager(BaseManager, ObservableMixin):
         robot_store: RobotDataStore | None = None,
         driver_options: Mapping[str | tuple[str, str], Mapping[str, Any]] | None = None,
         kinds: Sequence[DeviceKind] = DEFAULT_KINDS,
+        conn_cb: Callable[[str, str], None] | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
+        # Умолчание остаётся на self._publish: подмена его тела на self._conn дала бы бесконечную рекурсию
+        self._conn = conn_cb or (lambda dev_id, conn: self._publish(f"devices.state.{dev_id}.conn", {"conn": conn}))
         self._spawn = spawn
         self._robot_store = robot_store
         # Ключ — вид (все протоколы) или (вид, протокол)
@@ -118,6 +125,12 @@ class DeviceManager(BaseManager, ObservableMixin):
         self._stop_handles: list[IHandle] | None = None
         self._stop_served: list[DeviceDriver] = []
         self._stop_begin_lock = threading.Lock()
+
+        # pause_all: устройства с ещё идущим стопом, уже отмеченные в лог негодные params.pause_action; замок —
+        # только на эти поля и на результаты вызова, без IO
+        self._pause_lock = threading.Lock()
+        self._pause_inflight: set[str] = set()
+        self._pause_warned: set[tuple[str, str]] = set()
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
@@ -257,6 +270,142 @@ class DeviceManager(BaseManager, ObservableMixin):
             request(deadline)
         except Exception:
             logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+
+    # ------------------------------------------------------------------ #
+    # Пауза: действие паузы каждому устройству параллельно (ADR-DH-015)
+    # ------------------------------------------------------------------ #
+
+    def pause_all(self, deadline: float, skip: frozenset[str] = frozenset()) -> dict[str, dict]:
+        """Действие паузы (``pause_action``) всем устройствам реестра ПАРАЛЛЕЛЬНО до общего срока ``deadline``.
+
+        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; ``skip`` — id, которым стоп уже ушёл.
+        Post: по одному результату на запись реестра (ключ — id), копия под замком:
+        ``{"status": "ok", "op": op}``; ``{"status": "skipped", "reason": "not_connected" | "already_stopped" |
+        "no_pause_action"}``; ``{"status": "error", "op": op, "message": ...}`` (ответ не ``ok``, исключение, срок
+        — ``"нет ответа к сроку"``, предыдущий стоп того же устройства ещё идёт — ``"предыдущий стоп ещё идёт"``;
+        сбой отбора устройства — ``op == ""``, соседи идут дальше). Не бросает.
+        Действие — ``pause_action`` класса драйвера (читается ``getattr``: способность не входит в Protocol), либо
+        годное ``params.pause_action`` записи: ``{"op": <из PAUSE_OPS, с immediate=True в OP_SPECS>, "args": dict}``;
+        негодное — действие драйвера и одна WARNING на значение. Каждому — свой поток из ``spawn``
+        (``pause-<id>-<k>``): медленный робот не задерживает ленту. Без ``spawn`` и при его отказе вызовы идут в
+        этом потоке после запуска остальных — срок на этом пути не соблюдается (как у ``request_stop_all``).
+        Поток, не вышедший к сроку, остаётся в ``_pause_inflight`` до своего выхода; его поздний итог возвращённый
+        словарь не меняет. Не трогает ``request_stop_all``, ``_shutdown`` и очереди драйверов.
+        """
+        results: dict[str, dict] = {}
+        targets: list[tuple[str, str, dict]] = []
+        for entry in self.snapshot_registry():
+            dev_id = entry.id
+            try:
+                picked = self._pause_pick(entry, skip)
+                if isinstance(picked, dict):
+                    results[dev_id] = picked
+                    continue
+                op, args = picked
+                with self._pause_lock:
+                    busy = dev_id in self._pause_inflight
+                    if not busy:
+                        self._pause_inflight.add(dev_id)
+                if busy:
+                    results[dev_id] = {"status": "error", "op": op, "message": "предыдущий стоп ещё идёт"}
+                else:
+                    targets.append((dev_id, op, args))
+            except Exception as exc:
+                logger.exception(f"device_hub: отбор паузы {dev_id!r} не прошёл")
+                results[dev_id] = {"status": "error", "op": "", "message": f"{type(exc).__name__}: {exc}"}
+
+        handles: list[IHandle] = []
+        inline: list[tuple[str, str, dict]] = []  # без spawn или отказ spawn: вызовы в этом потоке
+        for dev_id, op, args in targets:
+            if self._spawn is None:
+                inline.append((dev_id, op, args))
+                continue
+            try:
+                handles.append(
+                    self._spawn(
+                        lambda _ev, d=dev_id, o=op, a=args: self._pause_one(d, o, a, results),
+                        name=f"pause-{dev_id}-{_next_stop_k()}",
+                    )
+                )
+            except Exception as exc:  # ScopeClosedError и любой отказ spawn: fail-closed, остановка не пропускается
+                inline.append((dev_id, op, args))
+                if len(inline) == 1:
+                    text = f"device_hub: поток паузы не запущен ({type(exc).__name__}) — пауза идёт в этом потоке"
+                    (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
+        for dev_id, op, args in inline:
+            self._pause_one(dev_id, op, args, results)
+        for handle in handles:
+            try:
+                report = handle.close(max(0.0, deadline - time.monotonic()))
+            except Exception:
+                logger.exception("device_hub: запись потока паузы не закрыта")
+                continue
+            if report.survivors:
+                logger.warning(f"device_hub: поток паузы не вышел к сроку: {list(report.survivors)}")
+        with self._pause_lock:
+            # Поздний поток пишет в ``results`` и после возврата, но вернулась копия: защита — копия под замком
+            for dev_id, op, _args in targets:
+                results.setdefault(dev_id, {"status": "error", "op": op, "message": "нет ответа к сроку"})
+            return dict(results)
+
+    def _pause_pick(self, entry: DeviceEntry, skip: frozenset[str]) -> tuple[str, dict] | dict:
+        """Отбор устройства для паузы: ``(op, args)`` — слать; ``dict`` — готовый результат ``skipped``."""
+        dev_id = entry.id
+        driver = self.get_driver(dev_id)
+        if driver is None or not driver.is_connected:
+            return {"status": "skipped", "reason": "not_connected"}
+        if dev_id in skip:
+            return {"status": "skipped", "reason": "already_stopped"}
+        cls = type(driver)
+        action = getattr(cls, "pause_action", None)
+        override = (getattr(entry, "params", None) or {}).get("pause_action")
+        if override is not None:
+            valid = self._pause_override(override, cls)
+            if valid is not None:
+                action = valid
+            else:
+                with self._pause_lock:
+                    first = (dev_id, repr(override)) not in self._pause_warned
+                    self._pause_warned.add((dev_id, repr(override)))
+                if first:
+                    logger.warning(f"device_hub: {dev_id}: params.pause_action негоден — взято действие драйвера")
+        if action is None:
+            return {"status": "skipped", "reason": "no_pause_action"}
+        return action
+
+    @staticmethod
+    def _pause_override(override: Any, driver_cls: type) -> tuple[str, dict] | None:
+        """Годное ``params.pause_action`` -> ``(op, args)``; негодное -> ``None``.
+
+        Годно: ``dict``; ``op`` — ``str`` из ``PAUSE_OPS``; в ``OP_SPECS`` драйвера есть операция с этим именем и
+        ``immediate is True``; ``args`` — ``None`` или ``dict``. Аргументы по существу проверяет драйвер.
+        """
+        if not isinstance(override, dict):
+            return None
+        op = override.get("op")
+        args = override.get("args")
+        if not isinstance(op, str) or op not in PAUSE_OPS or not (args is None or isinstance(args, dict)):
+            return None
+        specs = getattr(driver_cls, "OP_SPECS", ())
+        if not any(spec.name == op and spec.immediate is True for spec in specs):
+            return None
+        return op, args or {}
+
+    def _pause_one(self, dev_id: str, op: str, args: dict, results: dict[str, dict]) -> None:
+        """Одна команда паузы устройству (поток ``pause-<id>-<k>`` или вызывающий поток); итог — в ``results``."""
+        try:
+            reply = self.call(dev_id, op, dict(args))  # копия: dict внутри ClassVar общий, драйвер вправе его менять
+            if isinstance(reply, dict) and reply.get("status") == "ok":
+                outcome = {"status": "ok", "op": op}
+            else:
+                outcome = {"status": "error", "op": op, "message": repr(reply)}
+        except Exception as exc:
+            outcome = {"status": "error", "op": op, "message": f"{type(exc).__name__}: {exc}"}
+        finally:
+            with self._pause_lock:
+                self._pause_inflight.discard(dev_id)
+        with self._pause_lock:
+            results[dev_id] = outcome
 
     def _on_shutdown(self) -> bool:
         """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""
@@ -523,7 +672,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
             # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
             self._publish(f"devices.state.{dev_id}.last_error", str(exc))
-            self._publish(f"devices.state.{dev_id}.conn", {"conn": "error"})
+            self._conn(dev_id, "error")
             return False
 
         # Bridge: проверить connected-носителя
@@ -539,7 +688,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         # C-29 (В3): connect, прерванный «Отключить», — не ошибка (`is True`: подмены MagicMock дают истинный объект)
         aborted = not ok and driver.disconnect_pending is True
         conn = "connected" if ok else ("disconnecting" if aborted else "error")
-        self._publish(f"devices.state.{dev_id}.conn", {"conn": conn})
+        self._conn(dev_id, conn)
         return ok
 
     def disconnect(self, dev_id: str) -> None:
@@ -558,7 +707,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         driver = self.get_driver(dev_id)
         if driver is not None:
             driver.disconnect()
-            self._publish(f"devices.state.{dev_id}.conn", {"conn": "disconnected"})
+            self._conn(dev_id, "disconnected")
 
         # Cascade degraded для зависимых bridge-устройств (итерация по снапшоту —
         # реестр может мутироваться параллельно; сам disconnect-IO вне лока).
@@ -568,7 +717,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 try:
                     dep_driver = self.get_driver(e.id)
                     if dep_driver is not None and dep_driver.set_degraded():
-                        self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                        self._conn(e.id, "disconnected")
                 except Exception:
                     logger.exception(f"device_hub: деградация зависимого {e.id!r} при отключении носителя не прошла")
 

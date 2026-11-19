@@ -323,7 +323,8 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._clear_asset_degraded()
 
     def readiness(self, ctx: PluginContext) -> list[dict]:
-        """Причина неготовности: непригодные ассеты модели (Task 1.6). Только чтение полей.
+        """Причины неготовности (только чтение полей): непригодные ассеты модели -> ``failure`` (Task 1.6, ветвь
+        первая и возвращает результат); модель не загружена -> ``out_of_spec`` (Task 2.2b, не блокирует готовность).
 
         Зовётся из потока снимка готовности (~2 Гц): БЕЗ ``_engine_lock`` (под ним идёт долгая
         загрузка модели — снимок замёрз бы вместе с ней) и без IO. Порядок чтения — сначала
@@ -333,6 +334,15 @@ class MLInferencePlugin(ProcessModulePlugin):
         reason = getattr(self, "_asset_reason", "")
         if getattr(self, "_asset_degraded", False) and reason:
             return [{"severity": "failure", "reason": reason}]
+        # Task 2.2b: ассеты исправны, но модели в работе нет — кадры идут без распознавания. ``out_of_spec`` не
+        # блокирует готовность (виден в индикаторе). Только голые поля; исключение чтения (гонка с ``unload()``:
+        # ``_backend`` обнулён между проверкой и чтением, engine.py) — тот же ``out_of_spec``, не ``failure``
+        try:
+            not_loaded = not self._reg.model or not self._engine.is_ready
+        except Exception:  # no-health: хук не бросает; сбой чтения = «модель не загружена» (гонка с unload)
+            not_loaded = True
+        if not_loaded:
+            return [{"severity": "out_of_spec", "reason": "модель не загружена: кадры идут без распознавания"}]
         return []
 
     def _fail_assets(self, message: str, last_error: str, reason: str) -> None:
