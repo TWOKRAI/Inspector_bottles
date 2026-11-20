@@ -19,8 +19,9 @@
 | 2.2 | профили run/rest, проверка чтением, допуск по `vtype` | `profiles.py` | 25 (`test_session_profiles*`) |
 | 2.3c | команды Р7 без порта: `commands.py` (модели аргументов), `timeout_s` у `take_device`/`release_device`, `read_params`, `reset_stats`, `apply_params` | `commands.py`, `plugin_base.py` | 50 тестов (`test_plugin_commands*`: 33 + 17, по числу `def test_`, не прогон) |
 | 2.3d | команды Р7 с портом: `_ensure_port`, `list_devices` (путь по `device_held`), `describe_params`, `trigger_software`, сторож `call`, замок `refs` фейка | `plugin_base.py`, `session.py`, `testing/fake_port.py` | 44 теста (`test_plugin_device_commands*`: 30 слепых + 14 автора, по числу `def test_`; каталог целиком 371 passed, 10 skipped, 3 прогона; плюс тесты сторожа в `test_live_apply_hazards.py`) |
+| 2.2c | readiness: Task 2.2c в main, `test_readiness.py`; хук `readiness(ctx)` по состоянию сеанса (README «Готовность», ADR-CAM-005) | `plugin_base.py` | `tests/test_readiness.py` (26 `def test_`, часть параметризована); число прогона — после слияния тестов, правит лид |
 
-Сумма 68 + 17 + 6 + 27 + 25 = 143 (каждая группа прогнана отдельно 2026-11-15). Прежние записи: ADR-CAM-001…004 (Task 0.1),
+Сумма 68 + 17 + 6 + 27 + 25 = 143 (каждая группа прогнана отдельно 2026-11-15). Прежние записи: ADR-CAM-001…004 (Task 0.1), ADR-CAM-005 (readiness камеры, Task 2.2c),
 boundary «ядро -> вендор» (`.sentrux/rules.toml`), записи узлов `testing/recordings/mvcr_ID3013.json` (Task 6.2, 2026-10-19)
 и `mvs_MV-CS020-10GC.json` (Task 0.5, 2026-10-27).
 

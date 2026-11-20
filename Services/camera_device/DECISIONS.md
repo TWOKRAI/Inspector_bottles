@@ -237,3 +237,56 @@ Chose B. Переименование без алиасов (Р8): `open`+`start
 ### Links
 - Related: ADR-CAM-001 (общий набор команд — Р7), ADR-HIK-001 (Task 4.3, будет записан своей задачей)
 - Related: `plans/2026-10-18_camera-device-service/design.md` («Точки коммита»)
+
+## ADR-CAM-005 — Readiness камеры: одна причина по состоянию сеанса; `out_of_spec` только у `stopping`
+
+**Дата:** 2026-11-20 (запись); решение — таблица П.8 задачи 2.2 плана system-run-state, реализация Task 2.2c
+**Статус:** Accepted; пункт про `stopping` при `auto_start` открыт (см. Consequences)
+**Task context:** Task 2.2c плана `plans/2026-10-27_system-run-state/` (таблица П.8 в `tasks/2.2.md:36`; отчёты `reports/2.2c.*.md`)
+
+### Context
+Контракт хука `readiness` и политика готовности узла — ADR-PM-061 (`multiprocess_framework/modules/process_module/DECISIONS.md`):
+плагин отчитывается фактом, степень и удержание задаёт рецепт узла ключом `readiness`. До 2.2c камера всегда отдавала `[]` (запись
+`docs/claude/OPEN_QUESTIONS.md` 2026-11-20), `ready` на boot наступал бы до открытия порта (`tasks/2.2.md:36`). Хук зовёт поток снимка готовности (~2 Гц), поэтому он
+обязан быть быстрым, без замков и IO (`plugin_base.py:361-368`).
+
+### Alternatives
+
+**A. Читать три поля сеанса: `state`, `device_held`, `last_error` (исходная формулировка П.8)**
+- Pros: полная картина сеанса (так была записана П.8 до реализации).
+- Cons: `params*` берут замок профиля, `last_error` несёт серийные номера и пути (`plugin_base.py:363-367`); лишнее чтение — лишняя гонка
+  (`device_held` не меняет ответ: пара `closed` + `device_held=True` — это `closed`, `plugin_base.py:366-368`).
+
+**B. Читать один голый атрибут `session.state`, текст причины — литерал**
+- Pros: хук без замков и IO; текст без значений; ответ — пустой список либо один элемент.
+- Cons: причина не говорит, ПОЧЕМУ камера в `error` (текст `last_error` в `reason` не входит); отступление от «трёх чтений» П.8 одобрено
+  ревью 2.2c (`tasks/2.2.md:36`).
+
+**C. Для `stopping` — блокирующая степень (`check_function`) при `auto_start`**
+- Pros: узел не «зелёный», пока камера останавливается.
+- Cons: причина отказа от C в источниках не записана; источник: Task 2.2c — таблица П.8 задаёт `stopping` -> `out_of_spec`.
+
+### Decision
+Chose B. Таблица (литералы текста, `plugin_base.py:360-387`, тесты — `tests/test_readiness.py`): `grabbing` -> `[]`; `opening` ->
+`check_function`; `stopping` -> `out_of_spec`; `busy`, `not_found`, `error`, неизвестное состояние -> `failure`; `idle`/`closed` ->
+`check_function` «камера не запущена» при `auto_start`, иначе `[]`; `session is None` — как `idle`. Блокируют START `failure` и `check_function`
+(`health/schema.py:128`). Обоснования, записанные в источниках: `opening` блокирует, «иначе на boot система станет `ready` до открытия порта»
+(решение Ф и К 2026-11-16, `tasks/2.2.md:36`); `closed` + `auto_start` блокирует и после `release_device` оператора «намеренно: START
+заблокирован» (там же). Причина выбора `out_of_spec` для `stopping` не записана, источник: Task 2.2c.
+
+### Consequences
+- Architectural changes: метод `CameraDevicePlugin.readiness` (`plugin_base.py:360`); политику узла (`readiness: {hold_s, severity}`) читает
+  `PluginOrchestrator._plugin_reasons`, плагин её не знает (ADR-PM-061). Единственная строка `"out_of_spec"` в ядре — `plugin_base.py:376`.
+- Migration: не нужна; ключа `readiness` в рецепте камеры нет, поведение определяет код плагина.
+- Constraints: хук не берёт замков (`_lock`, `_session_lock`, `session._lock`, `_profile.lock`), не создаёт сеанс, не читает `params*` и
+  `last_error`; текст причины — литерал без значений (тесты `test_readiness_does_not_*`, `test_no_state_leaks_last_error`). Вторая причина
+  `out_of_spec` сломает ключ `severity: {out_of_spec: ...}` (он действует на все причины своей степени, ADR-PM-061); пин-теста у камеры нет.
+- Known risks: **открыто, не решено** — `stopping` при `auto_start` даёт `out_of_spec`, узел остаётся «зелёным» (ревью Opus 2.2c, запись
+  `docs/claude/OPEN_QUESTIONS.md` 2026-11-20). Варианты: (а) в коде `stopping` -> `check_function` при `auto_start`; (б) без кода — ключ
+  `readiness: {severity: {out_of_spec: check_function}}` в рецепте узла камеры. Решение ждёт CTO / владельца. Не покрыты кодом пункты (а)–(г)
+  П.8 (перезахват внутри `grabbing`, `release_device` в `running`, бесконечный `opening` без таймаута, нет `pause`; `reports/2.2c.review.md`);
+  нет теста через настоящий `PluginOrchestrator.readiness_snapshot` и теста на `stopping` на настоящем сеансе (только заглушка).
+
+### Links
+- Related: ADR-PM-061 (контракт хука и политика готовности), ADR-PM-062 (`run_locked_commands`; ключ камеры — Task 4c), ADR-CAM-002 (сеанс и состояния)
+- Related: `plans/2026-10-27_system-run-state/tasks/2.2.md`, `plans/2026-10-27_system-run-state/reports/2.2c.review.md`
