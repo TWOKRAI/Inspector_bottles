@@ -278,7 +278,8 @@ class DeviceManager(BaseManager, ObservableMixin):
     def pause_all(self, deadline: float, skip: frozenset[str] = frozenset()) -> dict[str, dict]:
         """Действие паузы (``pause_action``) всем устройствам реестра ПАРАЛЛЕЛЬНО до общего срока ``deadline``.
 
-        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; ``skip`` — id, которым стоп уже ушёл.
+        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; ``skip`` — id, которым стоп уже ушёл
+        (плагин device_hub не передаёт с 2026-11-20, ADR-PH-004 п.4; контракт заморожен).
         Post: по одному результату на запись реестра (ключ — id), копия под замком:
         ``{"status": "ok", "op": op}``; ``{"status": "skipped", "reason": "not_connected" | "already_stopped" |
         "no_pause_action"}``; ``{"status": "error", "op": op, "message": ...}`` (ответ не ``ok``, исключение, срок

@@ -1,7 +1,8 @@
-"""Авторские hazard-тесты Task 2.2a2 S4b (Б1-Б5): запись снимка из потоков, окно эпизода паузы, возраст с первого
-такта, чистка возраста при remove/disconnect и запас окна медленной паузы.
+"""Авторские hazard-тесты Task 2.2a2 S4b (Б1-Б5): запись снимка из потоков, стоп на каждом вызове pause, возраст с
+первого такта, чистка возраста при remove/disconnect и запас окна медленной паузы.
 
-Слепая приёмка — ``test_readiness_pause_v2.py`` (не правится). Стенд (сцена, двойники, часы) берётся оттуда.
+Слепая приёмка — ``test_readiness_pause_v2.py`` (лид переписал литералы r9b под решение владельца
+2026-11-20). Стенд (сцена, двойники, часы) берётся оттуда.
 Ожидаемые значения — литералы; всё, что может зависнуть, идёт в daemon-потоке с join-дедлайном.
 """
 
@@ -17,8 +18,7 @@ from typing import Any
 
 import pytest
 
-from multiprocess_framework.modules.process_module.generic import plugin_orchestrator
-from Plugins.hub.device_hub.plugin import _PAUSE_EPISODE_S, TEXT_STATE_UNAVAILABLE
+from Plugins.hub.device_hub.plugin import TEXT_STATE_UNAVAILABLE
 from Plugins.hub.device_hub.tests.test_readiness_and_pause import make_hub
 from Plugins.hub.device_hub.tests.test_readiness_pause_v2 import (
     _DEV,
@@ -85,24 +85,51 @@ def test_b1_set_conn_from_many_threads_loses_nothing(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# Б2. Окно эпизода паузы
+# Б2. Стоп на каждом вызове pause; пропуск только при стопе «в полёте» (решение владельца 2026-11-20)
 # --------------------------------------------------------------------------------------------------
 
 
-def test_b2_episode_window_one_second_repeat_skips_robot_and_three_seconds_resends(
-    make_scene: Callable[..., Scene],
-) -> None:
-    sc = make_scene(_THREE, clock=True)
-    sc.drivers["belt"].reply = {"status": "error"}
+def _stops3(sc: Scene) -> tuple[int, int, int]:
+    return (len(sc.drivers["r_v2"].stops()), len(sc.drivers["r_v1"].stops()), len(sc.drivers["belt"].stops()))
+
+
+def test_b2_pause_after_failed_pause_and_start_resends_stop_to_every_device(make_scene: Callable[..., Scene]) -> None:
+    """X1 ревью: pause упал (лента ответила ``error``) -> ЗАПУСТИТЬ -> через 2,0 с pause без ошибки: стоп ушёл ВСЕМ,
+    роботам тоже (прежде повтор пропускал уже остановленных, и ОСТАНОВИТЬ «успешен» без команды роботам)."""
+    sc = make_scene(_THREE)
+    belt = sc.drivers["belt"]
+    belt.reply = {"status": "error"}
     assert isinstance(sc.pause().error, RuntimeError)
-    assert len(sc.drivers["r_v2"].stops()) == 1
-    assert sc.clock is not None
-    sc.clock.jump(1.0)  # повтор оркестратора: тот же эпизод
+    assert _stops3(sc) == (1, 1, 1)
+    time.sleep(2.0)  # оператор: ЗАПУСТИТЬ, затем ОСТАНОВИТЬ
+    belt.reply = {"status": "ok"}
+    assert sc.pause().error is None
+    assert _stops3(sc) == (2, 2, 2), "стоп должен уйти всем на втором вызове"
+
+
+def test_b2_stop_still_in_flight_is_not_resent_and_resent_after_it_ends(make_scene: Callable[..., Scene]) -> None:
+    """Стоп r_v2 из первого вызова ещё идёт (команда дольше бюджета): второй вызов не шлёт r_v2 вторую параллельную
+    команду (счётчик остаётся 1), r_v1 и belt получают стоп (2, 2). После завершения стопа следующий вызов шлёт r_v2
+    стоп снова."""
+    sc = make_scene(_THREE)
+    r_v2 = sc.drivers["r_v2"]
+    r_v2.cmd_delay_s = 30.0  # держится, пока тест не откроет ``cmd_gate``
     assert isinstance(sc.pause().error, RuntimeError)
-    assert len(sc.drivers["r_v2"].stops()) == 1, "повтор через 1,0 с не должен слать стоп уже остановленному"
-    sc.clock.jump(3.1)  # больше окна от конца прошлого вызова: новый эпизод
-    assert isinstance(sc.pause().error, RuntimeError)
-    assert len(sc.drivers["r_v2"].stops()) == 2, "через 3,1 с эпизод новый: стоп должен уйти снова"
+    assert _stops3(sc) == (1, 1, 1)
+    assert isinstance(sc.pause().error, RuntimeError), "r_v2: предыдущий стоп ещё идёт — сбой вызова"
+    assert _stops3(sc) == (1, 2, 2), "r_v2 не получает второй параллельный стоп; r_v1 и belt — получают"
+    r_v2.cmd_gate.set()  # стоп r_v2 завершился
+    until(lambda: sc.pause().error is None, 10.0, "стоп r_v2 завершён, pause без ошибки")
+    assert len(r_v2.stops()) == 2, "после завершения стопа следующий вызов шлёт r_v2 стоп снова"
+
+
+def test_b2_resume_then_pause_sends_stop_to_every_device(make_scene: Callable[..., Scene]) -> None:
+    sc = make_scene(_THREE)
+    assert sc.pause().error is None
+    assert _stops3(sc) == (1, 1, 1)
+    sc.resume()
+    assert sc.pause().error is None
+    assert _stops3(sc) == (2, 2, 2)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -375,12 +402,6 @@ def test_b8_absent_tick_fails_limit_is_silent_default_three(make_scene: Callable
     steps.step()
     assert sc.readiness() == []
     assert _tune_warnings(sc, "tick_fails_limit") == []
-
-
-def test_b9_episode_window_covers_two_orchestrator_retries() -> None:
-    """Окно эпизода паузы не меньше двух повторов хука оркестратора: ``_HOOK_RETRY_SEC`` приватна, читается через
-    модуль оркестратора (публичного имени нет) — иначе сужение ретрая или окна молча ломает «повтор не шлёт стоп»."""
-    assert _PAUSE_EPISODE_S >= 2 * plugin_orchestrator._HOOK_RETRY_SEC
 
 
 # --------------------------------------------------------------------------------------------------
