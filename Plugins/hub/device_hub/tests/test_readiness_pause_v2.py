@@ -599,6 +599,7 @@ def test_r9b_resume_then_pause_stops_robot_again(make_scene: Callable[..., Scene
 
 
 def test_r9c_pause_after_clock_jump_stops_robot_again(make_scene: Callable[..., Scene]) -> None:
+    # После отмены окна эпизода (2026-11-20) сдвиг часов на паузу не влияет: тест оставлен как охранный (дублирует r9d).
     sc = _failing_belt_scene(make_scene, clock=True)
     assert isinstance(sc.pause().error, RuntimeError)
     assert len(sc.drivers["r_v2"].stops()) == 1
