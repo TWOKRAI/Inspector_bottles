@@ -175,7 +175,8 @@ def test_restart_с_restart_regrab_пишет_в_открытый_порт_бе�
 def test_restart_без_restart_regrab_переоткрывает_порт_state_остаётся_grabbing(rig):
     session = rig.make(run=_run_plan(40), capabilities=NO_RESTART_REGRAB, open_delay_s=0.3)
     assert rig.start(session) is True
-    assert rig.events == [("idle", "opening"), ("opening", "grabbing")]
+    # `start()` отвечает по `cmd.done` под замком, `on_state("opening", "grabbing")` приходит после него
+    _await(lambda: rig.events == [("idle", "opening"), ("opening", "grabbing")], "события idle->opening->grabbing")
     _call(lambda: session.apply([_step("trigger_period_ms", trigger_period_ms=60)], "restart"))
     # окно перезахвата: в журнале после stop_grabbing уже есть close, нового start_grabbing ещё нет
     window: list[tuple[str, bool, list]] = []

@@ -24,11 +24,12 @@
 | 2.3b | P0 | W3 | 2.3a | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; живой — 6.1 (`camera_device_demo`) | light |
 | 2.4a | P0 | W3 | 2.3b | `developer` (sonnet) после Opus stage 0 (пройдена, раунд 1); 3-я -> `teamlead` (opus) | reviewer (sonnet)  | да | Opus сразу после 2.4a+2.4b + волна W3 | нет | light |
 | 2.4b | P0 | W3 | 2.4a | `developer` (sonnet); 3-я -> `teamlead` (opus) | в составе стадии 0 2.4 | да | Opus сразу после 2.4a+2.4b + волна W3 | нет; стенд `camera_device_demo` (fake) — окно лида | light |
-| 2.3c | P0 | W3 | 2.4a, 2.4b | `developer` (sonnet) | reviewer (sonnet) | да | волна W3 (Opus) | нет | light |
+| 2.3c | P0 | W3 | 2.4a, 2.4b | `developer` (sonnet) | reviewer (sonnet) | да | Opus сразу (блокеры стадии 0) + волна W3 | нет | light |
+| 2.3d | P0 | W3 | 2.3c, 2.4a, 2.4b | `developer` (sonnet); документы — `tech-writer` (sonnet) после GREEN; 3-я -> `teamlead` (opus) | reviewer (sonnet) | да | Opus сразу (блокеры стадии 0) + волна W3 | нет | light |
 | 4.1 | P0 | W3 | 0.3, 1.5 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; запись дерева 0.5 — данные фейка; на камере — 6.3 | light |
 | 3.1 | P0 | W3 | 1.5 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; `hardware`-вариант — 6.2 | light |
 | 3.2 | P0 | W3 | 2.4, 3.1 | `developer` (sonnet) | нет | нет | волна W3 (Opus) | нет; живой — 6.4 | medium (`Services/code_reader/tests`) |
-| 4.2a | P0 | W4 | 0.2, 2.4, 3.2 (снимок каталога), 4.1 | `developer` (sonnet) | reviewer (sonnet) | да | Opus сразу + волна W4 | нет; на камере — 6.3 | medium (`Services/hikvision_camera/tests`) |
+| 4.2a | P0 | W4 | 0.2, 2.3c, 2.3d, 2.4, 3.2 (снимок каталога), 4.1 | `developer` (sonnet) | reviewer (sonnet) | да | Opus сразу + волна W4 | нет; на камере — 6.3 | medium (`Services/hikvision_camera/tests`) |
 | 4.2b | P0 | W4 | 4.2a | `developer` (sonnet) | нет | нет | волна W4 (Opus) | нет | medium (`Services/hikvision_camera/tests`) |
 | 4.3 | P0 | W4 | 4.2a | `junior` (haiku) по точному диффу из отчёта 4.2a -> `developer` (sonnet) проверка | нет | нет | волна W4 (Opus) | нет | medium (`multiprocess_prototype/recipes/tests`) |
 | 4.4 | P0 | W4 | 4.2a | `developer` (sonnet) | нет | нет | волна W4 (Opus) | GUI unattended — 6.3 | medium (`multiprocess_prototype/frontend/widgets/tabs/services/hikvision/tests`) |
@@ -45,7 +46,7 @@
 | 4.6d | P1 | W6 | 4.6c, 5.1 | `developer` (sonnet) | нет | нет | волна W6 (Opus) | нет | medium (`Plugins/hub/device_hub/tests`) |
 | 5.2 | P1 | W7 | 5.1 | `developer` (sonnet) | нет | нет | волна W7 (Opus) | фейк `VideoCapture`; `hardware` — любая веб-камера машины | light |
 | 5.3 | P1 | W7 | 5.2, 3.1, 4.1 | `developer` (sonnet) | нет | нет | волна W7 (Opus) | стенд без камер (`driver: fake`); веб-камера — по желанию | light (тесты); heavy — только стенд, в окне |
-| 1.3 | P1 | W7 | 0.1, 2.3a | `developer` (sonnet) | reviewer (sonnet) | да | волна W7 (Opus) | живой `backend_ctl capabilities` на любом рецепте без камер | `medium --timed` (`multiprocess_framework/modules/process_module/tests`) |
+| 1.3 | P1 | W7 | 0.1, 2.3a, 2.3c (только часть A: имена моделей) | `developer` (sonnet) | reviewer (sonnet) | да | волна W7 (Opus) | живой `backend_ctl capabilities` на любом рецепте без камер | `medium --timed` (`multiprocess_framework/modules/process_module/tests`) |
 | 1.4 | P1 | W7 | 1.1 | `developer` (sonnet) | нет | нет | волна W7 (Opus) | живой процесс без камер | `medium --timed` (`multiprocess_framework/modules/process_module/tests`) + light (`backend_ctl/tests`, свой файл) |
 | 1.2 | P1 | W7 | 1.1 | `developer` (sonnet) | нет | нет | волна W7 (Opus) | нет; живая проверка — 6.3 (GUI unattended) | medium (`multiprocess_prototype/frontend/forms/tests`) |
 | 1.7 | P1 | W7 | — | `investigator` (opus) — только диагноз; правка — `developer` (sonnet) | нет | нет | волна W7 (Opus) | стенд без камер | heavy (окно; стенд и `process_manager_module/tests`) |

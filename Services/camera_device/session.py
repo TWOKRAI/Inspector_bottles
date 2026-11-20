@@ -342,7 +342,9 @@ class DeviceSession:
         """
         if threading.current_thread() is self._owner:
             return False, "вызов из потока владельца"
-        cmd = self._enqueue(fn)
+        # В ящик идёт обёртка `_port_call("call", fn)`: она выставляет `_current`, и сторож видит зависший `fn`. Именно
+        # здесь, а не в `_execute`: вложенный `_port_call` из `_drain` сбросил бы `_current` внешнего вызова.
+        cmd = self._enqueue(lambda: self._port_call("call", fn))
         if cmd is None:
             return False, "сеанс не в захвате"
         if cmd.done.wait(timeout):

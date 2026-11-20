@@ -158,16 +158,20 @@ class _FakeSdk:
     def __init__(self, journal) -> None:
         self._journal = journal
         self.refs = 0
+        # `acquire`/`release` приходят из потока команды плагина и из потока-владельца: `+= 1` без замка теряет счёт
+        self._refs_lock = threading.Lock()
 
     def acquire(self) -> None:
         self._journal("acquire", ())
-        self.refs += 1
+        with self._refs_lock:
+            self.refs += 1
 
     def release(self) -> None:
         self._journal("release", ())
-        if self.refs <= 0:
-            raise RuntimeError("release without acquire")
-        self.refs -= 1
+        with self._refs_lock:
+            if self.refs <= 0:
+                raise RuntimeError("release without acquire")
+            self.refs -= 1
 
     def enum_devices(self) -> list[DeviceIdentity]:
         self._journal("enum_devices", ())

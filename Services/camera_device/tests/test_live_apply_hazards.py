@@ -121,19 +121,21 @@ class _Rig:
         self.port = None
         self.events: list[tuple[str, str]] = []
         self.timings: list[tuple[str, float]] = []
+        self.stalls: list[tuple[str, float]] = []
         self.wm = WorkerManager("test_cam_live_hazards")
 
-    def make(self, *, run=(), rest=(), on_frame=None, **port_opts) -> DeviceSession:
+    def make(self, *, run=(), rest=(), on_frame=None, timeout_ms=500, watchdog_s=5.0, **port_opts) -> DeviceSession:
         port_opts.setdefault("frame_period_s", 0.01)
         self.port = make_port(**port_opts)
         session = DeviceSession(
             self.port,
             self.port.sdk,
             None,
-            timeout_ms=500,
-            watchdog_s=5.0,
+            timeout_ms=timeout_ms,
+            watchdog_s=watchdog_s,
             on_frame=on_frame or (lambda frame: None),
             on_state=lambda old, new: self.events.append((old, new)),
+            on_stall=lambda call, seconds: self.stalls.append((call, seconds)),
             on_timing=lambda name, seconds: self.timings.append((name, seconds)),
             workers=self.wm,
             worker_prefix=f"camera_device_hz_{len(self.sessions)}",
@@ -301,6 +303,44 @@ def test_call_по_сроку_при_уже_исполняющейся_кома�
     elapsed = time.monotonic() - t0
     assert result == (True, "готово")  # команда уже взята владельцем: отмена невозможна, ответ ждём
     assert elapsed >= 0.25
+
+
+def test_сторож_видит_зависший_fn_из_call(rig):
+    session = rig.make(run=_run_plan(40), timeout_ms=100, watchdog_s=0.2)
+    assert rig.start(session) is True
+
+    def hung():
+        time.sleep(0.8)  # дольше watchdog_s: вызов порта «call» завис
+        return "вернулся"
+
+    assert _call(lambda: session.call(hung, 3.0), deadline=6.0) == (True, "вернулся")
+    assert [name for name, _seconds in rig.stalls] == ["call"]  # ровно один on_stall на вызов, с именем «call»
+    assert rig.stalls[0][1] >= 0.2
+
+
+def test_сторож_не_срабатывает_после_быстрого_fn_из_call_пока_владелец_вне_вызова_порта(rig):
+    """Сторож следит только за вызовом порта: `_current` сбрасывается в `finally` и между вызовами пуст.
+
+    Владелец стоит в `on_frame` (не вызов порта) дольше `watchdog_s`: застрявший `_current` дал бы ложный `on_stall`.
+    Флаг взводит САМ `fn` из `call`: медленный `on_frame` идёт для того же кадра сразу после ответа, и `_current`
+    последнего вызова порта (`call`) не успевает затереться `get_frame`. Иначе тест не отличил бы сброс `_current`
+    после `call` от сброса после прочих вызовов.
+    """
+    stuck = threading.Event()
+    slow = threading.Event()
+
+    def on_frame(frame) -> None:
+        if slow.is_set():
+            slow.clear()
+            stuck.set()
+            time.sleep(0.8)  # дольше watchdog_s = 0.2
+
+    session = rig.make(run=_run_plan(40), on_frame=on_frame, timeout_ms=100, watchdog_s=0.2)
+    assert rig.start(session) is True
+    assert _call(lambda: session.call(lambda: (slow.set(), "быстро")[1], 3.0)) == (True, "быстро")
+    assert stuck.wait(3.0), "on_frame не вызван"
+    time.sleep(0.9)  # владелец всё это время в `on_frame`, порт не зовёт
+    assert rig.stalls == []
 
 
 def test_call_из_потока_владельца_не_блокирует(rig):
@@ -480,7 +520,11 @@ def test_apply_в_opening_и_сразу_stop_закрывает_без_start_gra
     assert "stop_grabbing" not in names
     assert "set_param(TriggerSelfTriggerPeriod,61)" not in names
     assert rig.port.open_handles == 0
-    assert rig.events == [("idle", "opening"), ("opening", "stopping"), ("stopping", "closed")]
+    # `exited.set()` и `device_held = False` идут под замком, `on_state("stopping", "closed")` — после него
+    _await(
+        lambda: rig.events == [("idle", "opening"), ("opening", "stopping"), ("stopping", "closed")],
+        "события idle->opening->stopping->closed",
+    )
 
 
 def test_apply_в_closed_не_принимается_порт_не_зовётся_и_правка_не_копится(rig):

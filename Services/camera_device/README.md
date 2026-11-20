@@ -130,7 +130,8 @@ class TestMyVendorContract(PortContractSuite):
 - `call(fn, timeout) -> (ok, результат)` — `submit` и ожидание. По сроку, пока владелец `fn` не взял, команда отменяется и не исполнится
   позже: `(False, "срок")`; если `fn` уже исполняется, ждём ещё не больше `watchdog_s`. Остановка: `(False, "сеанс остановлен")`; исключение
   `fn` — `(False, <тип исключения>)`, цикл продолжается. Из потока владельца (например, из `on_frame`) — `(False, ...)` сразу.
-  Блокирующий `call` — для команд плагина (2.3c); колбэк подписки (2.4b) зовёт только неблокирующий `apply`.
+  Блокирующий `call` — для команд плагина с портом (2.3d: `list_devices`, `describe_params`, `trigger_software`); колбэк подписки (2.4b) зовёт только
+  неблокирующий `apply`. В ящик `call` ставит обёртку `_port_call("call", fn)`: зависший `fn` виден сторожу (`on_stall("call", секунды)`).
 - `apply(steps, policy) -> None` — `steps` из `params.build_plan`, `policy` — `live` или `restart`. Не блокирует, из любого потока. Правки
   сливаются по полю (последнее значение побеждает), в ящике лежит одна команда; принимается в `opening` (владелец исполнит её сразу после входа
   в `grabbing`, до первого `get_frame`) и в `grabbing`, в `stopping`/`closed`/отказе — нет (значение
@@ -148,16 +149,100 @@ class TestMyVendorContract(PortContractSuite):
 - Журнал и замеры: `apply field=<поле> policy=live|restart ms=<мс>` (логгер сеанса), `on_timing("apply", с)` на запись шага,
   `on_timing("regrab", с)` на перезахват. Фейк считает открытые дескрипторы (`open_handles`, `max_open_handles`): их >1 значит вызов порта мимо владельца.
 
+## Команды
+
+Форма ответа зависит от команды: три прежние живут на `status`, новые команды Р7 — на `success` (Р7, `decisions.md:16`; перевод
+прежних на `success` — отдельное решение). Потребителю (вкладка 4.4) нужны обе формы. Модели аргументов — `commands.py`
+(`TakeDeviceArgs`, `ReleaseDeviceArgs`, `ApplyParamsArgs`); фреймворк до Task 1.3 `data` не валидирует, обработчик разбирает его сам.
+Текст ошибки валидации модели аргументов строится из `loc` и `msg`: введённое значение в ответ и в журнал не попадает. Текст отказа
+register'а (проба и запись `apply_params`) для значения вне `min`/`max` поля может содержать это число (так печатает framework).
+
+| Команда | Аргументы | Ответ |
+|---|---|---|
+| `take_device` | `timeout_s` (0 < с <= 30, по умолчанию 5.0) -> `session.start` | `{"status": "ok"\|"error", "device_state", "error"?}` |
+| `release_device` | `timeout_s` (0 < с <= 30, по умолчанию 2.0) -> `session.stop` | `{"status": "ok"\|"error", "device_state", "error"?}` |
+| `get_status` | нет | `{"status": "ok", "state", "device_state", "device_id", "frames", "last_error"}` |
+| `reset_stats` | нет | `{"success": True}` |
+| `read_params` | нет | `{"success": True, "params": {...}, "param_errors": {...}}` |
+| `apply_params` | `{"params": {поле: значение}}` | `{"success": True, "applied": [...], "on_device": bool}` или `{"success": False, "error": ...}` |
+| `list_devices` | нет | `{"success": True, "devices": [{"kind", "value", "name"}]}` или `{"success": False, "error": ...}` |
+| `describe_params` | нет | `{"success": True, "params_meta": {поле: {"min", "max", "inc", "entries", "access"} \| None}}` или `{"success": False, "error": ...}` |
+| `trigger_software` | нет | `{"success": True}` или `{"success": False, "error": ...}` |
+
+Лишние ключи `data` у `take_device`/`release_device` игнорируются; ошибка валидации (`timeout_s=3600`) -> ответ той же формы
+(`status: error`), `start`/`stop` не вызываются. `reset_stats`, `read_params`, `apply_params` порт не зовут и ящик владельца не используют. `list_devices`, `describe_params`,
+`trigger_software` зовут порт тем потоком, который его держит (ниже); порт для них создаёт `_ensure_port()` без сеанса.
+
+- **`read_params`** — СНИМОК `params` и `param_errors` последнего цикла сеанса, не живое чтение: порт не зовётся. После
+  `release_device` вернёт прежние значения (сброс — при следующем `start()`). Сеанса нет -> оба пусты.
+- **`reset_stats`** — сбрасывает `frames` (счётчик плагина, поле register'а `frames`, метрика `frames` сразу в 0), `dropped`,
+  причину отброшенного кадра (`last_error` битого кадра) и окно `fps` (иначе следующее окно дало бы отрицательный `fps`).
+  НЕ сбрасывает: `errors` (счётчик жизни сеанса) и `seq_id` (Р10: номер кадра продолжает счёт; битый кадр тоже получает номер).
+  Замок `_stats_lock` охраняет счётчики от гонки `produce()` / сброс; метрики и журнал идут вне замка, поэтому после сброса дерево
+  может до одного кадра (порядка 20 мс) или окна `_TICK_S` показывать прежнее число `frames` (`reg.frames`, `get_status` — уже 0).
+- **`apply_params`** — единственный путь записи — `RegistersManager.set_field_value`; на прибор значение доходит колбэком
+  подписки 2.4b (Р12) в потоке вызывающего. Команда `session.apply` не зовёт (удвоение) и не ждёт владельца. Порядок проверок (всё
+  до первой записи, при отказе ничего не записано): модель -> `ctx.registers` -> поле из `bindings()` -> не `readonly` и хватает прав (`FieldMeta.access_level`: «недостаточно прав для поля: <имя>») -> пробная
+  запись ВСЕГО пакета на копии register'а (всё или ничего). Поля пишутся по одному в порядке словаря (зависимые поля работают
+  только в нём); каждое поле — отдельный `set_field_value`, отдельный `apply`.
+  - `applied` = «принято register'ом»; результат на приборе приходит позже — смотреть `param_errors` через `read_params`.
+  - `on_device` = сеанс в `opening`/`grabbing` на момент ответа И хотя бы у одного записанного поля `FieldMeta.apply` — `live` или
+    `restart`; для `config`/`None` колбэк на прибор ничего не шлёт. Без захвата значение сохранено в register'е и войдёт в план
+    следующего `take_device`. Запись на прибор асинхронна (порядка десятков мс после ответа). `on_device` не обещает записи: шаг, не
+    меняющий план (то же значение, закрытый `enabled_if`, как `trigger_mode` при `trigger_managed=False`), прибор не трогает; итог — `read_params`.
+  - Поля вне `bindings()` (`*_managed`, `timeout_ms`, `watchdog_s`, `device_serial`, `driver`, `camera_id`) отвергаются: подписки
+    на прибор у них нет. Флаги групп (`trigger_managed`, `rest_managed`) действуют только со следующего `take_device`, поэтому
+    порядок «флаг -> поле» через `register_update` работает лишь для полей, остальное — после `take_device`.
+  - Отказ на фазе записи (остаточный случай: значение между пробой и записью изменил другой писатель) -> `{"success": False,
+    "error": ..., "applied": [уже записанные]}`; ранее записанные поля остаются.
+- **`list_devices`** — перечисление исполняет тот, кто держит SDK; путь выбирается по `session.device_held`, а не по `state`: `stop()` на
+  отказном состоянии ставит `closed` сразу, пока владелец ещё закрывает порт (`state == "closed"` при `device_held == True`).
+  1. Сеанса нет или `device_held` ложно (потока-владельца нет): `acquire`, затем в `try/finally` `enum_devices` и `release` потоком команды
+     на порту из `_ensure_port()`, без handle. `release` идёт только после успешного `acquire`.
+  2. `device_held` и `grabbing`: `session.call(enum_devices)` — перечисление исполняет владелец (`acquire` не нужен, владелец держит ссылку);
+     на время перечисления он не читает кадры.
+  3. `device_held` и любое иное состояние (`opening`, `stopping`, отказ при живом владельце): `call` отвечает
+     `{"success": False, "error": "сеанс не в захвате"}`, порт не вызывается.
+  Отказ `acquire`/`enum_devices`/`release` на пути без владельца (`PortError` и любое исключение) -> `{"success": False, "error": <тип исключения>}`; отказ `call` -> его текст
+  (`"срок"`, `"сеанс остановлен"`, `"сеанс не в захвате"`). `list_devices` без `take_device` создаёт порт (`_ensure_port()`), но не сеанс,
+  не мост логов и не воркеры; последующий `take_device` строит сеанс из того же порта.
+- **`describe_params`** — один `session.call` по ВСЕМ привязкам `bindings()` (в том числе полям, пропущенным в плане run): `describe_param`
+  зовёт владелец. Это снимок текущего состояния (границы и `access` у узлов зависят от соседних: у фейка `TriggerMode` при захвате `RO`);
+  `entries` в ответе — список. Узел, давший `None` или `PortError`, -> `null`, остальные узлы отвечают. Порт без capability `node_describe` ->
+  `{"success": True, "params_meta": {}}` без вызова порта; с capability, но без захвата -> `{"success": False, "error": "сеанс не в захвате"}`. Исключение хука `bindings()` -> `{"success": False, "error": <тип исключения>}`, значения полей в ответ и журнал не попадают.
+- **`trigger_software`** — порядок: порт -> capability `software_trigger` (статична на жизнь порта, порт не вызывается) -> захват -> `session.call`
+  `port.execute(self.software_trigger_binding())`. Без capability -> `{"success": False, "error": "нет capability software_trigger"}` (команда
+  регистрируется всегда); без захвата -> `"сеанс не в захвате"`; отказ порта -> `{"success": False, "error": <текст>}`. Привязку командного узла
+  задаёт хук базы `software_trigger_binding()` (умолчание `Binding("genicam", "TriggerSoftware", "command")`), вендор переопределяет. Частота
+  — порядка 2 Гц (после 1.0).
+- **Срок и блокировка приёма команд.** Команды с `session.call` ждут не дольше `_CALL_TIMEOUT_S` = 2.0 с (больше `timeout_ms`, 0,5 с по умолчанию).
+  Если владелец уже взял `fn`, `call` ждёт ещё до `watchdog_s` (5.0 с по умолчанию): худший случай блокировки — `_CALL_TIMEOUT_S` + `watchdog_s`
+  (около 7 с). Команды плагина идут системным потоком процесса, поэтому на это время задерживаются `register_update`, `state.changed` и остальной
+  приём команд; дедлока нет (владелец системный поток не ждёт). Вывод сделан по чтению кода, в живом процессе не измерялся. Перезахват
+  у GigE-прибора (1–3 с) может не уложиться в срок — ответ `"срок"`.
+- **Открыто / не измерено.**
+  - Безопасность `MV_CC_EnumDevices` при открытом handle на MVS не измерена (0.5/6.2, ADR-CAM-002: «Шторм `EnumDevices` из трёх процессов не
+    проверен»). Теперь касается только межпроцессного случая (`hikvision_dual.yaml`: процесс B перечисляет, пока процесс A держит GigE-прибор);
+    внутри одного процесса `list_devices` при захвате перечисляет владелец.
+  - Гонка `start()` против `acquire` на пути без владельца: поток команды не конкурирует с `start()`, пока оба идут из системного потока. По чтению
+    (ревью Opus) сегодня недостижима: `session.start()` зовёт только `cmd_take_device`, её вызывают хук `start(ctx)` при `auto_start` из
+    `PluginOrchestrator.boot()` (до запуска `message_processor`, `process_module.py:291-312`) и команды в `message_processor`. Не воспроизведено,
+    замка нет; новый вызов `cmd_take_device` вне `message_processor` откроет окно. Это не гарантия.
+- **`set_config`** (generic `cmd_set_config` базы) пишет через `reg.apply_values` и подписчиков НЕ будит: на прибор не доходит.
+  На прибор — только `apply_params` или `register_update`.
+
 ## Boundaries
 
 - `interface.py` импортирует только stdlib; `cv2` и `numpy` — только `drivers/opencv_driver.py` и `testing/`.
-- Ядро импортирует только `multiprocess_framework` и stdlib.
+- Ядро импортирует только `multiprocess_framework`, `pydantic` (модели `commands.py`) и stdlib.
 - Ядро не импортирует вендоров: драйверы подключаются строками реестра `drivers/__init__.py` (ADR-CAM-001).
   Запрет держат две записи `[[boundaries]]` в `.sentrux/rules.toml`; проверка — `sentrux check .`.
 - Вендорские пакеты импортируют ядро, не наоборот. Services не импортируют `Plugins` и `multiprocess_prototype`.
 - Два экземпляра плагина камеры в одном процессе запрещены (ADR-CAM-002): путь состояния `processes.<p>.state.<плагин>` и register по имени плагина
   один; одна камера — один процесс, один сеанс. Запрет — соглашение: кодом он не проверяется.
-- Порт и `DeviceSdk` вызываются только из потока-владельца сеанса; вызывающие потоки зовут `start`/`stop` и читают свойства.
+- Порт и `DeviceSdk` вызывает тот, кто их держит: поток-владелец сеанса; вызывающие потоки зовут `start`/`stop` и читают свойства, а команды с
+  портом — `session.call`. Пока владельца нет (`device_held` ложно), `list_devices` держит порт потоком команды (`acquire`/`enum_devices`/`release`
+  без handle); порт без сеанса создаёт `_ensure_port()`.
 - Фейк не проверяет границы min/max и принадлежность enum списку entries (потолок честности: `kind="range"` не вводится).
 - Умолчания узлов фейка — гибрид: диапазон ExposureTime — запись MVS; закрытые узлы и PARENTS — запись `mvcr` и 6.2;
   значения (в т.ч. 10000.0) — решение лида, ни одной записи не соответствуют. В записи MVS `TriggerMode` при захвате

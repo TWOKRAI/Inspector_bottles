@@ -33,6 +33,14 @@ Task 2.4b: правка поля из GUI (`register_update` -> `RegistersManage
 `params.build_plan` из значений register'а, `DeviceSession.apply` ставит его в ящик владельца (неблокирующе).
 Прямая запись `self._reg.x = v` колбэки не будит: править только через `set_field_value`.
 
+Task 2.3c: команды Р7 без порта и ящика (раздел «Команды Р7» ниже): `reset_stats`, `read_params`, `apply_params`; модели
+аргументов — `commands.py`, `timeout_s` читают `take_device`/`release_device`. Счётчики охраняет `_stats_lock`.
+
+Task 2.3d: команды Р7 с портом: `list_devices`, `describe_params`, `trigger_software`. Порт создаётся отдельно от
+сеанса (`_ensure_port`, без сеанса, моста логов и воркеров); порт и SDK зовёт только тот поток, который их держит:
+владелец через `session.call` (срок `_CALL_TIMEOUT_S`), а `list_devices` без владельца — поток команды (`acquire`
+-> `enum_devices` -> `release`). Каждая команда с `call` блокирует приём команд процесса до срока.
+
 Слой: Services -> framework; плагин не импортирует `multiprocess_prototype` и вендорские драйверы.
 """
 
@@ -47,6 +55,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from pydantic import ValidationError
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -55,14 +64,15 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_plugin,
 )
 
-from .interface import Binding, DeviceIdentity, DevicePort, RawFrame
+from .commands import ApplyParamsArgs, ReleaseDeviceArgs, TakeDeviceArgs
+from .interface import Binding, DeviceIdentity, DevicePort, PortError, RawFrame
 from .params import Step, build_plan
 from .registers_base import CameraDeviceRegisters
 from .session import DeviceSession, describe_error
 
-# Срок ожидания `start`/`stop` в командах плагина, с.
-_START_TIMEOUT_S = 5.0
-_STOP_TIMEOUT_S = 2.0
+# Срок ответа владельца на команду через `session.call`, с: больше `timeout_ms/1000` и обычного перезахвата на фейке.
+# Команда блокирует системный поток процесса до срока; худший случай — срок + `watchdog_s` (владелец взял `fn` и завис).
+_CALL_TIMEOUT_S = 2.0
 # Каналов на пиксель для 8-битных форматов; `bayer_*` — один канал (дебайер — не в ядре).
 _CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3}
 # Окно публикации уровней, агрегата замеров и сверки событий, с (в тестах подменяется).
@@ -74,6 +84,8 @@ _PROFILE_OF_STATE = {"opening": "run", "grabbing": "run", "stopping": "rest", "c
 # Поля-словари события: ушедшие ключи удаляются из дерева (`merge` их не снимает).
 _DICT_EVENTS = ("params", "params_status", "param_errors")
 _MISSING = object()
+# Отказ команд с портом, когда владельца нет в `grabbing` (литерал `session.call` и Р7).
+_NOT_GRABBING = "сеанс не в захвате"
 # Группа триггера в плане rest: привязки только `trigger_*`, иначе `build_plan` потребует значения остальных полей.
 _TRIGGER_PREFIX = "trigger_"
 
@@ -111,6 +123,15 @@ def create_port(driver: str) -> DevicePort:
     raise ValueError(f"неизвестный драйвер: {driver}")
 
 
+def _validation_text(exc: ValidationError) -> str:
+    """Текст отказа модели из `loc` и `msg`; введённое значение (`input`) не берётся — ни в ответ, ни в журнал."""
+    parts = []
+    for error in exc.errors(include_url=False, include_context=False, include_input=False):
+        where = ".".join(str(part) for part in error["loc"])
+        parts.append(f"{where}: {error['msg']}" if where else error["msg"])
+    return "; ".join(parts)
+
+
 @register_plugin(
     "camera_device",
     category="source",
@@ -123,6 +144,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
         take_device    — открыть прибор и начать захват
         release_device — остановить захват и закрыть прибор
         get_status     — состояние и счётчик кадров
+        reset_stats    — обнулить счётчики кадров и окно fps
+        read_params    — снимок параметров прибора последнего цикла
+        apply_params   — записать пакет полей register'а (на прибор — колбэком подписки)
+        list_devices   — перечислить приборы (владельцем при захвате, иначе потоком команды)
+        describe_params — границы, шаг, имена enum и доступ узлов (нужен захват)
+        trigger_software — программный триггер (нужен захват и capability `software_trigger`)
     """
 
     name = "camera_device"
@@ -142,6 +169,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
         "take_device": "cmd_take_device",
         "release_device": "cmd_release_device",
         "get_status": "cmd_get_status",
+        "reset_stats": "cmd_reset_stats",
+        "read_params": "cmd_read_params",
+        "apply_params": "cmd_apply_params",
+        "list_devices": "cmd_list_devices",
+        "describe_params": "cmd_describe_params",
+        "trigger_software": "cmd_trigger_software",
     }
 
     # ------------------------------------------------------------------ #
@@ -164,6 +197,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._published: dict = {}  # что уже в дереве; `merge` — только отличия
         self._seen_state: str | None = None
         self._reported_param_errors: set[str] = set()
+        # счётчики `_frames`/`_dropped`/`_item_error`, окно fps и `reg.frames`: `produce()` (поток процесса) и
+        # `reset_stats` (системный поток). Короткий: `publish_metric` и логи — вне замка. `self._lock` слота не годится
+        self._stats_lock = threading.Lock()
         self._timing_lock = threading.Lock()  # `on_timing("get_frame")` приходит из потока-владельца на каждый кадр
         self._get_frame_n = 0
         self._get_frame_sum = 0.0
@@ -272,6 +308,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
         return FAKE_BINDINGS
 
+    def software_trigger_binding(self) -> Binding:
+        """Узел программного триггера для `trigger_software`. Вендор переопределяет, если узел называется иначе."""
+        return Binding("genicam", "TriggerSoftware", "command")
+
     def _identity(self, *, warn: bool = False) -> DeviceIdentity | None:
         """Идентичность прибора по `device_select`; пустое поле -> `ValueError` с именем поля (без значения)."""
         reg = self._reg
@@ -359,16 +399,18 @@ class CameraDevicePlugin(ProcessModulePlugin):
     def _tick(self) -> None:
         """Раз в `_TICK_S`: уровни, агрегат замера `get_frame`, сверка событий."""
         now = time.monotonic()
-        elapsed = now - self._tick_t0
-        if elapsed < _TICK_S:
-            return
-        frames = self._frames
+        with self._stats_lock:  # чтение счётчиков и сдвиг окна — одним куском: сброс между ними оставил бы старое число
+            elapsed = now - self._tick_t0
+            if elapsed < _TICK_S:
+                return
+            frames, dropped, window_frames = self._frames, self._dropped, self._tick_frames
+            self._tick_t0, self._tick_frames = now, frames
         ctx, session = self._ctx, self._session
         if elapsed > 0:
-            ctx.publish_metric("fps", (frames - self._tick_frames) / elapsed)
+            ctx.publish_metric("fps", (frames - window_frames) / elapsed)
         ctx.publish_metric("frames", frames)  # и без кадров: уровень виден с нулём, а не отсутствует
         ctx.publish_metric("errors", session.errors if session is not None else 0)
-        ctx.publish_metric("dropped", self._dropped)
+        ctx.publish_metric("dropped", dropped)
         ctx.publish_metric("pending", 0 if self._slot is None else 1)
         ctx.publish_metric("param_errors_count", len(session.param_errors) if session is not None else 0)
         with self._timing_lock:
@@ -376,7 +418,6 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._get_frame_n, self._get_frame_sum = 0, 0.0
         if count:
             ctx.record_timing("get_frame_ms", total / count)
-        self._tick_t0, self._tick_frames = now, frames
         self._sync_events()
 
     def _sync_events(self) -> None:
@@ -461,16 +502,20 @@ class CameraDevicePlugin(ProcessModulePlugin):
         except ValueError as exc:  # битый кадр отбрасывается: `produce()` не бросает, счётчик кадров не растёт
             self._drop_frame(str(exc))
             return []
-        self._frames += 1
-        self._reg.frames = self._frames
-        self._ctx.publish_metric("frames", self._frames)
+        with self._stats_lock:  # пара «инкремент + запись поля»: сброс между ними вернул бы счётчик
+            self._frames += 1
+            self._reg.frames = self._frames
+            frames = self._frames
+        self._ctx.publish_metric("frames", frames)
         return [item]
 
     def _drop_frame(self, error: str) -> None:
-        self._dropped += 1
-        if error != self._item_error:  # один журнал на причину, не на кадр (50 кадров/с)
+        with self._stats_lock:
+            self._dropped += 1
+            new_reason = error != self._item_error
+            self._item_error = error
+        if new_reason:  # один журнал на причину, не на кадр (50 кадров/с)
             self._ctx.log_error(f"CameraDevicePlugin: кадр отброшен: {error}")
-        self._item_error = error
 
     @staticmethod
     def _frame_array(raw: RawFrame) -> np.ndarray:
@@ -507,11 +552,22 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # Команды
     # ------------------------------------------------------------------ #
 
+    def _ensure_port(self) -> DevicePort:
+        """Порт плагина: создаётся один раз хуком `create_port()`; сеанс, мост логов и воркеры не создаются."""
+        with self._session_lock:
+            return self._port_locked()
+
+    def _port_locked(self) -> DevicePort:
+        """Порт при уже взятом `_session_lock` (`Lock` не реентерабелен: из-под замка зовётся только этот вариант)."""
+        if self._port is None:
+            self._port = self.create_port()  # сразу в атрибут; отказ `create_port` оставляет `None`: повтор возможен
+        return self._port
+
     def _ensure_session(self) -> DeviceSession:
         with self._session_lock:
             if self._session is not None:
                 return self._session
-            port = self.create_port()
+            port = self._port_locked()
             session = DeviceSession(
                 port,
                 port.sdk,
@@ -526,8 +582,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 on_timing=self._on_timing,
             )
             self._attach_log_bridge()
-            # атрибут не залипает на неудачной попытке (объект порта теряется без close(): SDK ещё не acquire'нут)
-            self._port, self._session = port, session
+            self._session = session  # порт уже в `self._port`; отказ `DeviceSession` сеанса не оставляет
         return session
 
     def _attach_log_bridge(self) -> None:
@@ -541,7 +596,11 @@ class CameraDevicePlugin(ProcessModulePlugin):
         session_logger.addHandler(self._log_bridge)
 
     def cmd_take_device(self, data: dict) -> dict:
-        """Открыть прибор и начать захват. Отказ — `status: error`, не исключение."""
+        """Открыть прибор и начать захват. Отказ — `status: error`, не исключение. `timeout_s` — срок `start`."""
+        try:
+            args = TakeDeviceArgs.model_validate(data or {})
+        except ValidationError as exc:
+            return {"status": "error", "device_state": self._reg.device_state, "error": _validation_text(exc)}
         workers = self._ctx.worker_manager
         if workers is None:
             return {"status": "error", "device_state": self._reg.device_state, "error": "нет менеджера воркеров"}
@@ -565,7 +624,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {text}{detail}")
             return {"status": "error", "device_state": self._reg.device_state, "error": text}
         t0 = time.monotonic()
-        ok = session.start(_START_TIMEOUT_S)
+        ok = session.start(args.timeout_s)
         ms = int((time.monotonic() - t0) * 1000)
         device = session.device
         self._ctx.log_info(
@@ -577,16 +636,225 @@ class CameraDevicePlugin(ProcessModulePlugin):
         return result
 
     def cmd_release_device(self, data: dict) -> dict:
-        """Остановить захват, закрыть прибор и отпустить SDK."""
+        """Остановить захват, закрыть прибор и отпустить SDK. `timeout_s` — срок `stop`."""
+        try:
+            args = ReleaseDeviceArgs.model_validate(data or {})
+        except ValidationError as exc:
+            return {"status": "error", "device_state": self._reg.device_state, "error": _validation_text(exc)}
         session = self._session
         if session is None:
             return {"status": "ok", "device_state": self._reg.device_state}
-        session.stop(_STOP_TIMEOUT_S)
+        session.stop(args.timeout_s)
         released = not session.device_held
         result: dict = {"status": "ok" if released else "error", "device_state": session.state}
         if not released:
             result["error"] = "поток-владелец ещё закрывает прибор"
         return result
+
+    # ------------------------------------------------------------------ #
+    # Команды Р7: 2.3c — без порта и ящика владельца, блокирующих вызовов нет; 2.3d (ниже) — через порт и ящик
+    # ------------------------------------------------------------------ #
+
+    def cmd_reset_stats(self, data: dict) -> dict:
+        """Обнулить `frames` (счётчик, поле register'а, метрика), `dropped`, причину отброса и окно `fps`.
+
+        НЕ сбрасываются: `errors` сеанса (счётчик жизни сеанса) и `seq_id` (Р10).
+        """
+        with self._stats_lock:
+            self._frames = 0
+            self._reg.frames = 0
+            self._dropped = 0
+            self._item_error = ""
+            self._tick_frames = 0  # иначе следующее окно даст отрицательный `fps`
+            self._tick_t0 = time.monotonic()
+        self._ctx.publish_metric("frames", 0)  # дерево не ждёт окна `_TICK_S`
+        self._ctx.log_info("CameraDevicePlugin: reset_stats")
+        return {"success": True}
+
+    def cmd_read_params(self, data: dict) -> dict:
+        """Снимок `params` и `param_errors` последнего цикла сеанса (не живое чтение: порт не зовётся)."""
+        session = self._session
+        if session is None:
+            return {"success": True, "params": {}, "param_errors": {}}
+        return {"success": True, "params": session.params, "param_errors": session.param_errors}
+
+    def cmd_apply_params(self, data: dict) -> dict:
+        """Записать пакет `{поле: значение}` в register; на прибор значение доходит колбэком подписки 2.4b.
+
+        Порядок проверок (всё до первой записи): модель -> `ctx.registers` -> поле из `bindings()` -> не `readonly` и
+        хватает прав (`FieldMeta.can_modify(0)`, как у `set_field_value`) -> пробная запись всего пакета на копии
+        register'а. `session.apply` отсюда не зовётся (удвоение с колбэком).
+        `applied` = «принято register'ом»; результат на приборе приходит позже (`read_params` -> `param_errors`).
+        """
+        try:
+            args = ApplyParamsArgs.model_validate(data)
+        except ValidationError as exc:
+            return self._apply_refused(_validation_text(exc))
+        registers = self._ctx.registers
+        if registers is None:
+            return self._apply_refused("нет RegistersManager")
+        params = args.params
+        bindings = self.bindings()
+        for field in params:
+            if field not in bindings:  # у `*_managed`, `timeout_ms` и т. п. нет подписки на прибор: `applied` солгал бы
+                return self._apply_refused(f"поле не параметр прибора: {field!r}")
+        fields_meta = type(self._reg).get_all_fields_meta()
+        for field in params:
+            meta = fields_meta.get(field)
+            if meta is None:
+                continue
+            # проба на копии права не проверяет, а `set_field_value` — да (`access_level=0`): пакет писался бы частично
+            if meta.readonly:  # свой текст: «Недостаточно прав доступа» register'а вводит в заблуждение
+                return self._apply_refused(f"поле только для чтения: {field}")
+            if not meta.can_modify(0):
+                return self._apply_refused(f"недостаточно прав для поля: {field}")
+        ok, error = self._reg.model_copy(deep=True).apply_values(params)  # проба всего пакета: всё или ничего
+        if not ok:
+            return self._apply_refused(error or "значение отвергнуто")
+        applied: list[str] = []
+        for field, value in params.items():  # порядок словаря: зависимые поля работают только в нём
+            ok, error = registers.set_field_value(self.name, field, value)
+            if not ok:  # остаточный случай: между пробой и записью значение register'а изменил другой писатель
+                self._log_apply(applied, False)
+                return {"success": False, "error": error or "значение отвергнуто", "applied": applied}
+            applied.append(field)
+        self._log_apply(applied, True)
+        session = self._session
+        on_device = (
+            session is not None
+            and session.state in ("opening", "grabbing")
+            and any(self._apply_policy(field) in ("live", "restart") for field in applied)
+        )
+        return {"success": True, "applied": applied, "on_device": on_device}
+
+    def _apply_refused(self, error: str) -> dict:
+        """Отказ `apply_params` до первой записи."""
+        self._log_apply([], False)
+        return {"success": False, "error": error}
+
+    def _log_apply(self, fields: list[str], ok: bool) -> None:
+        """INFO `apply_params`: имена записанных полей и итог, без значений."""
+        self._ctx.log_info(f"CameraDevicePlugin: apply_params fields={fields} ok={ok}")
+
+    # --- Команды Р7 с портом (Task 2.3d): порт зовёт тот поток, который его держит ---
+
+    def _port_or_refusal(self) -> DevicePort | dict:
+        """Порт либо ответ-отказ (`dict`): `ValueError` — свой текст, как в `take_device`, прочее — `describe_error`."""
+        try:
+            return self._ensure_port()
+        except Exception as exc:  # noqa: BLE001 — контракт 1.8: отказ команды — ответ, исключение наружу не идёт
+            text = str(exc) if isinstance(exc, ValueError) else describe_error(exc)
+            detail = "" if isinstance(exc, ValueError) else f"\n{traceback.format_exc()}"
+            self._ctx.log_error(f"CameraDevicePlugin: порт не создан: {text}{detail}")
+            return {"success": False, "error": text}
+
+    def _call_owner(self, fn: Callable[[], Any]) -> tuple[bool, Any]:
+        """`fn` в потоке-владельце: `(True, результат)` либо `(False, текст отказа)`. Блокирует до `_CALL_TIMEOUT_S`."""
+        session = self._session
+        if session is None:
+            return False, _NOT_GRABBING
+        return session.call(fn, _CALL_TIMEOUT_S)
+
+    def cmd_list_devices(self, data: dict) -> dict:
+        """Перечислить приборы: `{"success": True, "devices": [{"kind", "value", "name"}]}`.
+
+        Перечисление исполняет тот, кто держит SDK; путь — по `session.device_held`, а не по `state` (`stop()` на
+        отказном состоянии ставит `closed` СРАЗУ, пока владелец ещё закрывает порт):
+          * владельца нет -> поток команды: `acquire`, затем `enum_devices` и `release` (в `finally`, только после
+            успешного `acquire`), без handle и без сеанса;
+          * владелец есть -> `session.call(enum_devices)`; не `grabbing` (`opening`, `stopping`, отказ при живом
+            владельце) `call` отвечает `"сеанс не в захвате"`, порт не вызывается.
+        Остаточный риск: между проверкой `device_held` и `acquire` команда не конкурирует с `start()` только пока оба
+        идут из системного потока (`cmd_take_device`); `start()` из другого потока не проверялся.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        session = self._session
+        t0 = time.monotonic()
+        path = "command" if session is None or not session.device_held else "owner"
+        try:
+            if path == "command":
+                devices = self._enumerate_here(port)
+            else:
+                ok, result = self._call_owner(lambda: port.sdk.enum_devices())
+                if not ok:
+                    self._ctx.log_info(f"CameraDevicePlugin: list_devices path={path} error={result}")
+                    return {"success": False, "error": result}
+                devices = result
+        except Exception as exc:  # noqa: BLE001 — отказ `acquire`/`enum_devices`/`release` (обычно `PortError`) — ответ
+            error = describe_error(exc)
+            self._ctx.log_error(f"CameraDevicePlugin: list_devices path={path} отказ: {error}")
+            return {"success": False, "error": error}
+        ms = int((time.monotonic() - t0) * 1000)
+        self._ctx.log_info(f"CameraDevicePlugin: list_devices path={path} n={len(devices)} ms={ms}")
+        return {
+            "success": True,
+            "devices": [{"kind": d.kind, "value": d.value, "name": d.name} for d in devices],
+        }
+
+    @staticmethod
+    def _enumerate_here(port: DevicePort) -> list[DeviceIdentity]:
+        """Перечисление потоком команды, пока владельца нет; `release` стартует только после успешного `acquire`."""
+        sdk = port.sdk
+        sdk.acquire()
+        try:
+            return sdk.enum_devices()
+        finally:
+            sdk.release()
+
+    def cmd_describe_params(self, data: dict) -> dict:
+        """Описание узлов по ВСЕМ привязкам `bindings()`: `{"success": True, "params_meta": {поле: {...} | None}}`.
+
+        Снимок текущего состояния, нужен захват: границы и `access` у узлов зависят от соседних (у фейка `TriggerMode`
+        при захвате `RO`). Один `session.call`: `port.describe_param` зовёт владелец. Нет capability `node_describe` ->
+        пустая карта без вызова порта. Узел, давший `None` или `PortError`, -> `null`; остальные не падают.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        if "node_describe" not in port.capabilities:
+            return {"success": True, "params_meta": {}}
+        try:
+            bindings = self.bindings()
+        except Exception as exc:  # noqa: BLE001 — хук вендора: контракт 1.8, исключение наружу не идёт
+            error = describe_error(exc)
+            self._ctx.log_error(f"CameraDevicePlugin: describe_params: bindings() отказал: {error}")
+            return {"success": False, "error": error}
+        t0 = time.monotonic()
+        ok, result = self._call_owner(lambda: {field: self._describe_node(port, b) for field, b in bindings.items()})
+        if not ok:
+            self._ctx.log_info(f"CameraDevicePlugin: describe_params error={result}")
+            return {"success": False, "error": result}
+        ms = int((time.monotonic() - t0) * 1000)
+        self._ctx.log_info(f"CameraDevicePlugin: describe_params n={len(result)} ms={ms}")
+        return {"success": True, "params_meta": result}
+
+    @staticmethod
+    def _describe_node(port: DevicePort, binding: Binding) -> dict | None:
+        """Описание узла словарём (`entries` — список: Dict at Boundary); отказ узла -> `None`. Зовёт владелец."""
+        try:
+            info = port.describe_param(binding)
+        except PortError:
+            return None
+        if info is None:
+            return None
+        entries = None if info.entries is None else list(info.entries)
+        return {"min": info.min, "max": info.max, "inc": info.inc, "entries": entries, "access": info.access}
+
+    def cmd_trigger_software(self, data: dict) -> dict:
+        """Программный триггер: `port.execute(software_trigger_binding())` потоком-владельцем; ~2 Гц (после 1.0).
+
+        Порядок: порт -> capability `software_trigger` (статична на жизнь порта, вызова порта нет) -> захват -> `call`.
+        """
+        port = self._port_or_refusal()
+        if isinstance(port, dict):
+            return port
+        if "software_trigger" not in port.capabilities:
+            return {"success": False, "error": "нет capability software_trigger"}
+        ok, result = self._call_owner(lambda: port.execute(self.software_trigger_binding()))
+        self._ctx.log_info(f"CameraDevicePlugin: trigger_software ok={ok}")
+        return {"success": True} if ok else {"success": False, "error": result}
 
     def cmd_get_status(self, data: dict) -> dict:
         session = self._session

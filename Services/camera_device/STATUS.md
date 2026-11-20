@@ -6,7 +6,7 @@
 
 Волна W2 (ядро) собрана: порт и фейк, план записи профиля, сеанс с потоком-владельцем, профили run/rest с проверкой чтением
 и сквозной срез «фейк -> сеанс -> item -> дерево» на плагине-заготовке. Драйверов, реестра драйверов и публикации телеметрии нет.
-`Services/camera_device/tests`: 143 passed, 10 skipped (9 — `CAMERA_HARDWARE=1` не задан; 1 — фейк объявляет `software_trigger`, проверять нечего).
+`Services/camera_device/tests`: 371 passed, 10 skipped (3 прогона подряд, 2026-11-19) (9 — `CAMERA_HARDWARE=1` не задан; 1 — фейк объявляет `software_trigger`, проверять нечего).
 
 ## Что сделано
 
@@ -17,6 +17,8 @@
 | 1.8 | срез «фейк -> поток -> item -> дерево» | `plugin_base.py`, `plugin.py`, `registers_base.py` | 6 (`test_slice_plugin`) |
 | 2.1 | сеанс `DeviceSession`: поток-владелец, переходы, дедлайн `start`, сторож | `session.py` | 27 (`test_session_lifecycle*`) |
 | 2.2 | профили run/rest, проверка чтением, допуск по `vtype` | `profiles.py` | 25 (`test_session_profiles*`) |
+| 2.3c | команды Р7 без порта: `commands.py` (модели аргументов), `timeout_s` у `take_device`/`release_device`, `read_params`, `reset_stats`, `apply_params` | `commands.py`, `plugin_base.py` | 50 тестов (`test_plugin_commands*`: 33 + 17, по числу `def test_`, не прогон) |
+| 2.3d | команды Р7 с портом: `_ensure_port`, `list_devices` (путь по `device_held`), `describe_params`, `trigger_software`, сторож `call`, замок `refs` фейка | `plugin_base.py`, `session.py`, `testing/fake_port.py` | 44 теста (`test_plugin_device_commands*`: 30 слепых + 14 автора, по числу `def test_`; каталог целиком 371 passed, 10 skipped, 3 прогона; плюс тесты сторожа в `test_live_apply_hazards.py`) |
 
 Сумма 68 + 17 + 6 + 27 + 25 = 143 (каждая группа прогнана отдельно 2026-11-15). Прежние записи: ADR-CAM-001…004 (Task 0.1),
 boundary «ядро -> вендор» (`.sentrux/rules.toml`), записи узлов `testing/recordings/mvcr_ID3013.json` (Task 6.2, 2026-10-19)
@@ -24,7 +26,7 @@ boundary «ядро -> вендор» (`.sentrux/rules.toml`), записи уз
 
 ## Чего ещё нет
 
-- 2.3a: общий register (`device_select`, `timeout_ms`, `watchdog_s`, ...), команды Р7 (`list_devices`, `read_params`, `apply_params`, ...), `commands.py`;
+- 2.3a: общий register (`device_select`, `timeout_ms`, `watchdog_s`, ...);
   запись `run`/`rest` плагином (`build_plan` из register'а и `BINDINGS` -> `DeviceSession(run=, rest=)`) — пункт амендмента 4.
 - 2.3b: публикация `device_held`, `last_error`, `params`, `params_status`, `param_errors` и замеров в дерево состояния.
 - 2.4: живая правка (`subscribe` -> очередь владельца, политика `apply`) и почтовый ящик владельца в `session.py`.
@@ -44,4 +46,7 @@ boundary «ядро -> вендор» (`.sentrux/rules.toml`), записи уз
 
 - Запрет «ядро -> вендор» не ловит `from Services.hikvision_camera.sdk import structures` (один замер, Task 0.1).
 - Перезахват `stop -> план -> start_grabbing` в том же handle у `mvcr` — шлюз Task 6.4.
+- `MV_CC_EnumDevices` при открытом handle на MVS (0.5/6.2): касается межпроцессного `list_devices` (`hikvision_dual`); внутри процесса при захвате перечисляет владелец.
+- Блокировка приёма команд процесса до `_CALL_TIMEOUT_S` + `watchdog_s` (около 7 с) командами с `session.call` — вывод по чтению, в живом процессе не измерялась.
+- Гонка `start()` из другого потока против `acquire` в `list_devices` без владельца: по чтению недостижима (ревью Opus), не воспроизведена, замка нет.
 - Строки G6 R1 для потоков сеанса (`session.py`): запрос записи в `ALLOWLIST` — решение владельца ожидается; investigator проверяет `KeyedExecutor`.

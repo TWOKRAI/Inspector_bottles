@@ -197,3 +197,25 @@ Opus-ревью волны W2: код 1.6/1.8/2.1/2.2 рабочий, швы с�
 
 - Живая проверка подписки (reviewer, настоящий `RegistersManager`): `set_field_value` будит колбэк в потоке вызывающего, прямая запись поля — нет. Дефекта framework нет. Поток живого процесса (`_message_processing_loop`) не проверен — стенд в 2.4b.
 - Зависимости: 2.3c от 2.4a и 2.4b; 4.2a от 2.4a и 2.4b.
+
+## Амендмент 8 (2026-11-16, лид К): разрез 2.3c по стадии 0
+
+Стадия 0 по `tasks/2.3c.md` (reviewer sonnet, раунд 1; `docs/reviews/2026-11-16_plan-camera-device-service_task-2.3c-stage0.md`): CHANGES REQUESTED, блокеры B1–B7, замечания N1–N8; оценка размера 34–42 хода Sonnet (экспертная) при пределе ~30. Решения лида (разрез по механизму: что не требует ни порта, ни ящика — в 2.3c; что требует — в 2.3d):
+
+| Что | Правка |
+|---|---|
+| Размер | 2.3c (A, Middle, ≈ 22–26 ходов): `commands.py`, проводка `timeout_s` в `take_device`/`release_device`, `read_params`, `reset_stats`, `apply_params`. 2.3d (B, Middle+, developer ≈ 24–30): `_ensure_port`, `list_devices`, `describe_params`, `trigger_software`, сторож `call`; документы (README «Команды», ADR-CAM-002, `STATUS.md`, sync/validate) — отдельный шаг `tech-writer` после GREEN (раунд 2 стадии 0: 32–40 ходов вместе с документами). Оценки ходов экспертные |
+| B1 `list_devices` | исключения из Р1 нет: при `grabbing` перечисление исполняет владелец (`session.call`), без сеанса — поток команды через порт из `_ensure_port()`, `opening`/`stopping` — отказ. Прежнее «единственное исключение из Р1» (амендмент 6, строка «Команды, которым нужен порт») СНЯТО. Безопасность `MV_CC_EnumDevices` при открытом handle не измерена (0.5/6.2) — касается только межпроцессного случая `hikvision_dual`, открытое, не блокер |
+| B2 `trigger_software` | хук `software_trigger_binding()`, умолчание `Binding("genicam", "TriggerSoftware", "command")`; capability — у порта (`_ensure_port()`), выполнение через `call` |
+| B3 `apply_params` | единственный путь — `ctx.registers.set_field_value`; `session.apply` из команды запрещён; проверка всех полей до записи (вне `bindings()`, readonly); ответ `applied` + `on_device` |
+| B4 `reset_stats` | сбрасываются `frames` (плагин, register, метрика), `dropped`, `_item_error`, окно fps; не сбрасываются `errors` сеанса и `seq_id`; замок `_stats_lock` |
+| B5 `describe_params` | один `call` по всем `bindings()`, источник — `describe_param` владельцем, не `ProfileRunner._step_of` |
+| B6 срок и сторож | `_CALL_TIMEOUT_S = 2.0`; `call()` ставит в ящик `lambda: self._port_call("call", fn)` (правка `session.py`); команды с `call` блокируют приём команд процесса до срока |
+| B7, N1–N8 | FILES полные; ссылки поправлены (`fake_port.py:321-322`, `README.md:124`, `tasks/4.2a.md:37`); ссылка «имена фиксирует 1.3 R-a» удалена (неверна); `commands.py` — Module contract lite |
+| Зависимости | 2.3c <- 2.4a, 2.4b; 2.3d <- 2.3c, 2.4a, 2.4b; 1.3 <- только 2.3c (имена моделей); 4.2a <- 2.3c и 2.3d. `command_contracts` на класс плагина вешает 1.3, не 2.3c |
+| Порядок W3 | {2.3a, 4.1} → 2.3b → 2.4a → 2.4b → 2.3c → 2.3d (`plugin_base.py` последовательно) |
+| Стадия 0 и слепой tester | у обеих задач (11 и 10 задач в `plan.md`, `wave-protocol.md`); Opus сразу после каждой — по правилу «блокер стадии 0» |
+
+- ADDED `tasks/2.3d.md`. MODIFIED `tasks/2.3c.md` (переписана), `tasks/1.3.md` (Dependencies, R-a, OUT OF SCOPE), `tasks/4.2a.md` (Dependencies), `plan.md` (строки 2.3c, 2.3d, 1.3, 4.2a, счётчики, decisions log), `matrix.md` (строки 2.3c, 2.3d, 1.3, 4.2a), `wave-protocol.md` (список стадии 0, порядок W3, Opus сразу).
+- Δ задач +1 (2.3d). Δ бюджета: +1 запуск исполнителя, +1 стадия 0, +1 слепой tester, +1 ревью Opus сразу; токены не оценивались, порог 14M не пересматривался.
+- Раунд 2 стадии 0 (reviewer, тот же отчёт, раздел «Раунд 2»): 2.3c — CHANGES REQUESTED, 2 блокера; 2.3d — CHANGES REQUESTED, 1 блокер; правки внесены дословно (2026-11-16): пробная запись пакета `apply_params` на копии register'а (`validate_field_value` типы не проверяет); два литерала `seq_id` (6 и 7 с битым кадром); `_dropped`/`_item_error` под `_stats_lock`; детерминированный hazard `reset_stats` (прокси `_reg` с блокирующим сеттером); `applied` на отказе фазы записи; `on_device` по политике поля; выбор пути `list_devices` по `device_held`, а не по `state`; hazard «медленный `close` + `stop(0.05)`»; документы 2.3d — шаг `tech-writer`; break-injection 2.3c выборочно (удвоение `session.apply`, пакет без пробы, `_stats_lock`).
