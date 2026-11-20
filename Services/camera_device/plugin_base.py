@@ -723,7 +723,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
         if registers is None:
             return self._apply_refused("нет RegistersManager")
         params = args.params
-        bindings = self.bindings()
+        try:
+            bindings = self.bindings()
+        except Exception as exc:  # noqa: BLE001 — хук вендора: контракт 1.8, исключение наружу не идёт
+            error = describe_error(exc)
+            self._ctx.log_error(f"CameraDevicePlugin: apply_params: bindings() отказал: {error}")
+            return self._apply_refused(error)
         for field in params:
             if field not in bindings:  # у `*_managed`, `timeout_ms` и т. п. нет подписки на прибор: `applied` солгал бы
                 return self._apply_refused(f"поле не параметр прибора: {field!r}")
