@@ -2,7 +2,7 @@
 
 **Ветка:** `feat/pult-control-panel`
 **Slug:** `pult-control-panel`
-**Статус:** фазы 1–5 закрыты (5.4 `monitor` перенесена в Phase 6); **Phase 6 «Пульт оператора 1.0»** — [`pult-control-panel-phase6.md`](pult-control-panel-phase6.md), DRAFT v2, на утверждении владельца (ORDER #15–#17).
+**Статус:** фазы 1–5 закрыты (5.4 `monitor` перенесена в Phase 6); **Phase 6 «Пульт оператора 1.0»** — [`pult-control-panel-phase6.md`](pult-control-panel-phase6.md), DRAFT v2, вопросы В1–В9 закрыты (2026-11-20), ждёт слот писателя (ORDER #15–#17).
 
 > Smoke (pult_demo): Services-таб грузится, 4 контрола рендерятся, нажатие «Старт» →
 > `out_1 = True` в логе ноды. Поймал баг: секция без `action_buttons()` роняла весь
