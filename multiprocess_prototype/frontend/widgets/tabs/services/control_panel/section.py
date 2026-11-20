@@ -16,12 +16,16 @@ from typing import Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget
+from shiboken6 import isValid
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from .catalog import NodeCatalog
 from .presenter import ControlPanelPresenter
 from .widget import ControlPanelWidget
+
+_logger = get_std_logger(__name__)
 
 _PLUGIN_NAME = "control_panel"
 
@@ -40,11 +44,11 @@ def _monitor_formatter(value_key: str):
 
     def fmt(value: Any) -> str:
         try:
-            if value is None:
-                return _NO_VALUE
             if isinstance(value, dict) and value_key:
-                return str(value[value_key]) if value_key in value else _BAD_KEY
-            return str(value)
+                if value_key not in value:
+                    return _BAD_KEY
+                value = value[value_key]  # None ПОСЛЕ извлечения — тоже «значения нет»
+            return _NO_VALUE if value is None else str(value)
         except Exception:  # noqa: BLE001 — форматтер не имеет права бросать (цикл дельт)
             return _BAD_KEY
 
@@ -205,6 +209,9 @@ class _ControlPanelSection:
         if bindings is None or self._widget is None:
             return
         self._bound = True
+        # ИНВАРИАНТ порядка: handle набора привязан РАНЬШЕ handle'ов monitor-подписей
+        # (последние вешает отложенная пересвязка) — от него зависит безопасность
+        # перестройки внутри цикла дельт, см. _schedule_monitor_rebind.
         # Нода control_panel — источник в рецепте; имя процесса задаёт пользователь,
         # поэтому glob по всем процессам.
         self._handles.append(bindings.bind("processes.*.state.control_panel.controls", self._widget, "set_controls"))
@@ -215,10 +222,12 @@ class _ControlPanelSection:
     def _schedule_monitor_rebind(self) -> None:
         """Отложить пересвязку monitor-подписей (set_controls зовётся ИЗ цикла дельт).
 
-        ``unbind``/``bind`` прямо из слота внутри ``GuiStateBindings._on_state_msg``
-        меняют список подписок под итерацией и пропускают соседний handle, поэтому
-        пересвязка уходит в следующий проход цикла событий. Подряд идущие пересборки
-        схлопываются в одну.
+        ``unbind``/``bind`` из слота внутри ``GuiStateBindings._on_state_msg`` МОГУТ
+        пропустить соседний handle, если снимаемый handle окажется раньше текущего
+        в списке. Сейчас от этого защищает порядок привязки (набор раньше monitor,
+        см. ``_bind``); отложенный вызов — страховка, и нужен ещё потому, что replay
+        читает read-model до его обновления в VM (VM — второй потребитель). Подряд
+        идущие пересборки схлопываются в одну.
         """
         if self._rebind_pending:
             return
@@ -231,15 +240,25 @@ class _ControlPanelSection:
         self._unbind_handles(self._monitor_handles)
         self._monitor_handles = []
         bindings = getattr(self._runtime, "bindings", None)
-        if bindings is None or self._widget is None or not self._bound:
+        # Виджет мог быть уничтожен до срабатывания таймера (закрытие окна): обращение
+        # к нему дало бы RuntimeError и утёкший handle.
+        if bindings is None or self._widget is None or not isValid(self._widget) or not self._bound:
             return
         for spec, label in self._widget.monitor_labels():
             state_path = str(spec.get("state_path") or "").strip(".")
-            if not state_path:
-                continue  # monitor без state_path (старый формат): привязывать нечего
-            handle = bindings.bind(
-                state_path, label, "setText", formatter=_monitor_formatter(str(spec.get("value_key") or ""))
-            )
+            try:
+                if not state_path:
+                    # monitor без state_path (старый формат): привязывать нечего, но скажем почему
+                    label.setToolTip("нет state_path")
+                    continue
+                handle = bindings.bind(
+                    state_path, label, "setText", formatter=_monitor_formatter(str(spec.get("value_key") or ""))
+                )
+            except RuntimeError as exc:  # подпись уничтожена между сборкой и пересвязкой
+                _logger.debug("monitor: подпись '%s' недоступна: %s", spec.get("id"), exc)
+                # bind мог успеть добавить handle до падения на destroyed.connect — не оставляем его
+                bindings.unbind_widget(label)
+                continue
             self._monitor_handles.append(handle)
 
 

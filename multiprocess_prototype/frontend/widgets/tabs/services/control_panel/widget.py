@@ -249,7 +249,9 @@ class ControlPanelWidget(QWidget):
     @staticmethod
     def _is_operable(c: dict) -> bool:
         """Можно ли оперировать контролом: monitor — только чтение (ControlSpec.is_operable)."""
-        return ControlSpec.model_construct(id=str(c.get("id")), source=c.get("source") or "local").is_operable()
+        return ControlSpec.model_construct(
+            id=str(c.get("id")), type=c.get("type") or "button", source=c.get("source") or "local"
+        ).is_operable()
 
     def _build_monitor_value(self, c: dict) -> QLabel:
         """Подпись-значение monitor-ряда (текст ставят привязки секции; операции нет)."""

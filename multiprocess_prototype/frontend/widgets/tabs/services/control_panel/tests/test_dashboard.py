@@ -380,7 +380,7 @@ def test_picker_invalid_json_args_blocks_accept(qtbot, _discovered: None) -> Non
 _CTL_PATH = "processes.ctl.state.control_panel.controls"
 _CONN_PATH = "devices.state.robot_main.conn"
 _PARK_PATH = "devices.state.robot_main.park.state"
-_MONITOR_TYPES = ["text", "number", "slider", "toggle", "select", "button"]
+_MONITOR_TYPES = ["text", "number", "slider", "toggle", "select", "button", "monitor"]
 _REMOVE_MARK = "\u2715"  # «✕» — кнопка удаления ряда (есть у любого контрола)
 
 

@@ -42,8 +42,8 @@ class ControlPanelPresenter:
         spec — полная спецификация контрола (dict из current_controls).
         """
         source = str(spec.get("source") or "local")
-        if source == "monitor":
-            return False  # read-only — операции нет
+        if source == "monitor" or spec.get("type") == "monitor":
+            return False  # read-only — операции нет (monitor = source ИЛИ type)
         if source == "param":
             return self._write_param(spec, value)
         if source == "action":

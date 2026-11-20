@@ -123,8 +123,12 @@ class ControlSpec(BaseModel):
         return "" if raw is None else str(raw)
 
     def is_operable(self) -> bool:
-        """Можно ли оперировать контролом (monitor — только чтение, операция запрещена)."""
-        return self.source != "monitor"
+        """Можно ли оперировать контролом (monitor — только чтение, операция запрещена).
+
+        monitor-контролом считается И ``source == "monitor"``, И ``type == "monitor"``
+        (``type: monitor`` без source иначе стал бы кнопкой с эмитом в pipeline).
+        """
+        return self.source != "monitor" and self.type != "monitor"
 
     def action_args(self, value: Any) -> dict[str, Any]:
         """Аргументы команды для action-источника: фикс. command_args + значение под value_arg.

@@ -198,3 +198,15 @@ class TestMonitorStatePath:
         spec = ControlSpec(id="old", type="text", source="monitor", target_process="points", target_field="points_last")
         assert spec.state_path == ""
         assert spec.value_key == ""
+
+
+class TestTypeMonitorIsReadOnly:
+    """F1 (ревью 6.3): ``type: monitor`` — только чтение при ЛЮБОМ source."""
+
+    @pytest.mark.parametrize("source", ["local", "param", "monitor", "action"])
+    def test_type_monitor_not_operable_for_any_source(self, source: str) -> None:
+        assert ControlSpec(id="m", type="monitor", source=source).is_operable() is False
+
+    def test_source_monitor_still_not_operable_and_others_are(self) -> None:
+        assert ControlSpec(id="m", type="text", source="monitor").is_operable() is False
+        assert ControlSpec(id="b", type="button", source="local").is_operable() is True
