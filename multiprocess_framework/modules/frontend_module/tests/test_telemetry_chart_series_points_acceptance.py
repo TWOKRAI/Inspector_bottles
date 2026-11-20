@@ -68,7 +68,8 @@ class TestA1ExactPoints:
         assert chart.series_points("a") == [(1.5, 2.5)]
 
     def test_many_points_not_thinned_by_downsampling(self, qtbot) -> None:
-        # 5000 точек >> ширины виджета (800 px): peak-даунсэмплинг активен, но данные - исходные.
+        # 5000 точек: данные - исходные. Даунсэмплинг в этом сценарии без явного вьюбокса не срабатывает
+        # (зелёный и на коде до правки); свойство покрывают тесты A3 с широким диапазоном.
         chart = _make_chart(qtbot)
         pts = _points(_EPOCH, 0.5, 5000)
         chart.set_series_data("a", pts)

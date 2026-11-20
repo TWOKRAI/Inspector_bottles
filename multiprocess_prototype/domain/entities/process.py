@@ -47,7 +47,8 @@ logger = get_std_logger(__name__)
 # грузится в GUI и обязан пережить round-trip, а не свернуться в metadata.
 #
 # `stop_window_s` / `stop_wave` — typed-поля ProcessConfig (окно и волна останова,
-# framework читает их в blueprint.py как typed-поля), домен их не типизирует (C-96).
+# framework читает их в blueprint.py через `_pick`: typed-поле или `extras`), домен их
+# не типизирует, поэтому они едут через `extras` (C-96).
 _EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset(
     {"collector", "inspector", "source_target_fps", "io_peek", "stop_window_s", "stop_wave"}
 )
