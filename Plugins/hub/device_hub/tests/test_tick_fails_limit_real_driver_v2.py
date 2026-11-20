@@ -6,12 +6,14 @@
 ``make_scene`` (его фабрика берёт двойники).
 
 ЧЕСТНАЯ ГРАНИЦА. Настоящий ``RobotDriverV2.tick`` оборачивает в ``try`` пульс, чтение TLM и ``poll_errors``; строки
-``self._park.step(...)`` и ``self._dispatch(...)`` стоят вне ``try``, но реального пути исключения из них без подмены
-НЕТ: ``ParkMachine.step`` по контракту не бросает (внутри ``except Exception -> _on_error``), ``_run_next_job`` ловит
-``except Exception``. Поэтому исключение вносится подменой ``_dispatch`` / ``_park.step`` НА ЭКЗЕМПЛЯРЕ драйвера
-(для исхода «ок» обёртка делегирует исходному методу). Тест доказывает «воркер hub переживает ЛЮБОЕ исключение из
-``RobotDriverV2.tick`` и считает подряд по ``tick_fails_limit``», а не живой сценарий: реальный путь такого
-исключения не найден; сим-робот v2 не умеет ``fault.*``; стенд — отдельная задача (день №2).
+``self._park.step(...)`` и ``self._dispatch(...)`` стоят вне ``try``. ``ParkMachine.step`` по контракту не бросает
+(внутри ``except Exception -> _on_error``), ``_run_next_job`` ловит ``except Exception``, поэтому при чтении кода
+пути исключения из этих строк без подмены не найдено. Кандидат — сбой публикатора в except-ветках ``_run_next_job``
+(``_publish_error`` -> ``_pub`` вне ``try``): воспроизведён на уровне драйвера (ревью), на боевом публикаторе hub не
+проверен. Поэтому исключение вносится подменой ``_dispatch`` / ``_park.step`` НА ЭКЗЕМПЛЯРЕ драйвера (для исхода «ок»
+обёртка делегирует исходному методу). Тест доказывает «воркер hub переживает ЛЮБОЕ исключение из
+``RobotDriverV2.tick`` и считает подряд по ``tick_fails_limit``», а не живой сценарий: живой путь на боевом
+публикаторе не проверен; сим-робот v2 не умеет ``fault.*``; стенд — отдельная задача (день №2).
 
 Кто что пишет: счётчик подряд — локальная ``fails`` в ``tick_loop`` плагина (виден только через ``conn``);
 ``tick_fails_limit`` читает ПЛАГИН (``drv.entry.params``, один раз при старте воркера), драйвер ключ не использует;
@@ -251,6 +253,8 @@ def test_r4_success_resets_streak_link_error_only_on_third_after_it(make_real: C
     for n in range(1, 6):
         real.inj.step()
         assert real.sc.readiness() == [], f"после шага {n}: подряд меньше трёх"
+        if n == 3:  # шаг «ок»: last_error не очищается успехом (пока писал воркер только два броска)
+            assert real.last_errors() == ["tick boom"] * 2
     real.inj.step()
     assert real.sc.readiness() == _LINK_ERROR, "третий бросок подряд после «ок»"
     assert real.conn() == "error"
@@ -310,4 +314,5 @@ def test_r6_after_injection_removed_next_tick_restores_connected(make_real: Call
     real.remove_injection()
     until(lambda: real.conn() == "connected", 5.0, "успешный такт вернул conn == connected")
     until(lambda: real.sc.readiness() == [], 5.0, "readiness == [] после восстановления")
+    assert real.last_errors() == ["tick boom"] * 3, "last_error не очищается после восстановления"
     assert real.alive(), "поток воркера умер"
