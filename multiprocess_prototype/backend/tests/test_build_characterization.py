@@ -20,9 +20,10 @@
 Устойчивость снапшота:
   - абсолютный путь корня проекта нормализуется в ``<ROOT>`` (иначе снапшот привязан
     к машине);
-  - слово оператора (``target_word`` плагина word_layout) нормализуется в ``""``: это
-    состояние, а не свойство рецепта, и после Save из пульта оно лежит в файле рецепта
-    (В5/Task 6.1c); ключ ``target_field: "target_word"`` — другой ключ, его не трогаем;
+  - слово оператора (значение ключа ``target_word``, у плагина word_layout) нормализуется
+    в ``""``: для снапшота сборки это состояние оператора, хотя в файле рецепта оно хранится
+    после Save из пульта (В5/Task 6.1c); ключ ``target_field: "target_word"`` — другой ключ,
+    его не трогаем;
   - ``build()`` НЕ спавнит процессы — только конструирует ``SystemLauncher`` (dict-
     сборка + assembly + filesystem-discover), поэтому «железные» рецепты (phone /
     hikvision) собираются headless без камеры [[hardware-recipes-no-headless-boot]];
@@ -184,8 +185,9 @@ def test_operator_word_in_recipe_does_not_change_snapshot(monkeypatch: pytest.Mo
     """Реальная сборка β со словом «МИР» в layout/word_layout даёт тот же срез, что golden.
 
     Рецепт в репозитории не правится: загрузчик сырого рецепта подменён обёрткой, которая после
-    чтения подставляет слово в плагин word_layout. Страж «ноль наблюдений»: слово действительно
-    дошло до сборки (иначе тест прошёл бы вхолостую).
+    чтения подставляет слово в плагин word_layout. Страж «ноль наблюдений» доказывает лишь, что
+    слово подставлено в сырой рецепт; что оно доходит до сборки, показывает красный тест при
+    убранном нормализаторе (проверено ревью).
     """
     from multiprocess_prototype.backend import launch
 
@@ -211,6 +213,6 @@ def test_operator_word_in_recipe_does_not_change_snapshot(monkeypatch: pytest.Mo
     monkeypatch.setattr(launch, "_load_raw_dict", _load_with_word)
     actual = _canonical_build("hikvision_letter_robot")
 
-    assert injected, "слово не подставлено: в загруженном рецепте нет плагина word_layout"
+    assert injected, "слово не подставлено в сырой рецепт: в нём нет плагина word_layout"
     expected = json.loads(_golden_path("hikvision_letter_robot").read_text(encoding="utf-8"))
     assert actual == expected
