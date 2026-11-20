@@ -174,7 +174,7 @@ def test_build_for_the_prototype_manifest_equals_the_loaded_config() -> None:
     """
     from multiprocess_prototype.main import CONFIG_PATH
 
-    expected = False  # system.yaml: run_gate: false (коммит A)
+    expected = True  # system.yaml: run_gate: true (коммит B)
 
     launcher = _build(CONFIG_PATH)
 
@@ -192,7 +192,7 @@ def test_build_for_the_prototype_manifest_nested_sys_config() -> None:
     """
     from multiprocess_prototype.main import CONFIG_PATH
 
-    expected = False  # system.yaml: run_gate: false (коммит A); в коммите B станет True
+    expected = True  # system.yaml: run_gate: true (коммит B)
 
     launcher = _build(CONFIG_PATH)
 

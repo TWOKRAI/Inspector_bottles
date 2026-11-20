@@ -6,8 +6,8 @@
 # --- Гейт запуска линии (Task 2.1) ---
 # true — после boot система в «готов» и ждёт system.run.start; false — работа идёт сразу.
 # PM читает ключ один раз при старте: config.reload на него не действует до перезапуска.
-# Пока GUI не умеет слать START (Task 2.3), стоит false.
-run_gate: false
+# Значение true: GUI шлёт START (Task 2.3, S5), headless — через run_autostart (Task 2.7).
+run_gate: true
 
 # --- Системные параметры ---
 system:
