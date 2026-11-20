@@ -380,7 +380,7 @@ def test_red7_race_read_node_never_torn_nor_raises() -> None:
             reads += 1
             if found is not True:
                 problems.append(f"узел пропал посреди записи: {(found, value)!r}")
-            elif not isinstance(value, dict) or value.get("x") != value.get("y"):
+            elif not isinstance(value, dict) or "x" not in value or value.get("x") != value.get("y"):
                 problems.append(f"рваное чтение: {value!r}")
         if reads == 0:
             problems.append("читатель не сделал ни одного чтения")
@@ -403,7 +403,7 @@ def test_red7_race_await_condition_last_seen_never_torn() -> None:
                 problems.append(f"last_seen пуст при существующем узле: {res!r}")
                 continue
             value = seen.get("value")
-            if not isinstance(value, dict) or value.get("x") != value.get("y"):
+            if not isinstance(value, dict) or "x" not in value or value.get("x") != value.get("y"):
                 problems.append(f"рваный last_seen: {value!r}")
         if calls == 0:
             problems.append("ни одного вызова await_condition")
