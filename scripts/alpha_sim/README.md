@@ -34,7 +34,7 @@ BACKEND_CTL=1 BACKEND_CTL_PORT=8766 PYTHONUTF8=1 python apps/line_sim/run.py
 # 2. прототип, порт 8765, свежий; логи в тот же каталог, что читает скрипт
 BACKEND_CTL=1 PYTHONUTF8=1 INSPECTOR_LOG_DIR=<tree>/data/logs/prototype \
   INSPECTOR_MANIFEST=<копия multiprocess_prototype/app.yaml> \
-  python multiprocess_prototype/run.py letter_robot_sim --headless
+  python multiprocess_prototype/run.py letter_robot_sim --headless --autostart
 
 # 3. скрипт
 PYTHONUTF8=1 PYTHONPATH=<tree> python -m scripts.alpha_sim.run_alpha --tree <tree> [--dump <файл.json>]

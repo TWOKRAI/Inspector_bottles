@@ -25,8 +25,9 @@ ProcessManagerProcess — оркестратор с композицией Proce
 6. [Поток запуска системы](#поток-запуска-системы)
 7. [Обработка ошибок](#обработка-ошибок)
 8. [Graceful Shutdown](#graceful-shutdown)
-9. [CommandManager — встроенные команды](#commandmanager--встроенные-команды)
-10. [Использование](#использование)
+9. [Работа системы (run-state)](#работа-системы-run-state)
+10. [CommandManager — встроенные команды](#commandmanager--встроенные-команды)
+11. [Использование](#использование)
 
 ---
 
@@ -517,6 +518,42 @@ config = {
 каталога над пакетом `multiprocess_framework`). Два checkout одного приложения на одной машине не делят файл и не реапают
 процессы друг друга. Файл прежнего неразделённого имени `<app>_system_pids.jsonl` не реапается и не удаляется. Реап
 пишет в журнал строку на каждую жертву: `PID-реестр: убит pid=<pid> (<имя процесса>)`.
+
+## Работа системы (run-state)
+
+Машина работы PM: состояния `booting`, `not_ready`, `ready`, `running`, `stopping`, `fault`, `shutting_down`
+(`process/run_state.py`, `RunState`). Команды: `system.run.status`, `system.run.start`, `system.run.stop`,
+`system.run.ack`.
+
+### Ключи конфига (`RunConfig`, ADR-PMM-049)
+
+Модель — `process/run_config.py`: `RunConfig`, `RUN_CONFIG_KEYS`, `run_config_value(key, raw)`. Прототип наследует её
+(`SystemConfig(RunConfig)`), новый ключ — одно поле в этом файле.
+
+| Ключ | Умолчание | Когда читается |
+|---|---|---|
+| `run_gate` | `false` | один раз, в `_create_components()` (при boot PM) |
+| `run_autostart` | `false` | один раз, в `_create_components()` (ADR-PMM-050) |
+| `run_stop_timeout_s` | `10.0` | при каждом использовании: срок ожидания `paused` при STOP |
+| `run_restart_grace_s` | `30.0` | при каждом использовании: окно перезапуска процесса |
+
+`run_gate` и `run_autostart` через `config.reload` до перезапуска PM не действуют. Негодное значение (не `true`/`false`
+для флагов, не число > 0 для сроков, строка вместо числа) — умолчание и WARNING без значения входа.
+
+### Вид состояния `run_view` и листья `system.run.*`
+
+`run_view(...)` (`process/run_state.py`) — единственный построитель вида. Ключи: `state`, `since`, `run_gate`,
+`start_allowed` (`ready`), `stop_allowed` (`running`), `ack_allowed`, `reasons`, `last_fault`. Тот же вид возвращает
+`system.run.status`. В стор публикуются листья `system.run.<ключ>` для каждого из этих восьми ключей: только изменившиеся
+значения, при наличии стора. Нет стора — публикации нет.
+
+### Автостарт (`run_autostart`, ADR-PMM-050)
+
+Действует только при `run_gate: true`; при `run_autostart: true` без гейта PM пишет WARNING и ключ не действует.
+Латч `AutostartLatch` (`process/run_state.py`) решает под замком машины PM, один раз за boot: срабатывает на первый
+переход в `ready` из `booting` или `not_ready` (тактом `settled`/`tick`). Гасится без срабатывания любым принятым или
+отказанным `stop`, `apply`, `ack`, `shutdown` и принятым `start` до первого `ready`. START подаётся на исполнителе
+`pm-lifecycle`. Отказ START повторно не подаётся: `already_running` — INFO, иной код — WARNING с кодом.
 
 ## CommandManager — встроенные команды
 

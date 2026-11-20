@@ -4,6 +4,11 @@
 
     PYTHONUTF8=1 python -m scripts.alpha_sim.run_alpha --tree <корень дерева стенда>
 
+Прототип до скрипта оператор поднимает сам; ``--autostart`` переводит линию в ``running`` без START
+(Task 2.7 S3c′, ADR-PMM-050; действует при ``run_gate: true``)::
+
+    python multiprocess_prototype/run.py <рецепт> --headless --autostart
+
 Сим и прототип скрипт НЕ запускает; сим не останавливает; прототип останавливает шагом P6.
 Контракт — plans/word-layout/tasks/P4.md (Д1-Д3). Вердикта «α пройдена» скрипт не выносит (Task 1.2):
 только PASS/FAIL по литералам и код выхода 0/1/2/3.
