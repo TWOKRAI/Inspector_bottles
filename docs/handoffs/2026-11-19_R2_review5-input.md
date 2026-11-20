@@ -1,10 +1,10 @@
 # Вход для REVIEW-5 (приёмка Ф5 `robot-protocol-v2`) — подготовка, не запуск (полоса Р2, 2026-11-19)
 
-Сверено по `main` `767d61329`. REVIEW-5 не запускался; запуск `cto` — только по слову владельца (`docs/handoffs/2026-11-19_R2_owner-decisions.md`, строка 3д).
+Сверено заново по `main` `ad3dc7b72`, 2026-11-20 (номера строк и пути проверены по HEAD; первая сверка — `767d61329`, 2026-11-19). REVIEW-5 не запускался; запуск `cto` — только по слову владельца (`docs/handoffs/2026-11-19_R2_owner-decisions.md`, строка 3д).
 
 ## 1. Что ревьюируется
 
-- **Ф5** — «приложение против sim v2 без GUI: параметры, программа, калибровка ленты» (`plans/robot-protocol-v2/plan.md:58`; задачи — `plan.md:122-143`).
+- **Ф5** — «приложение против sim v2 без GUI: параметры, программа, калибровка ленты» (`plans/robot-protocol-v2/plan.md:58`; задачи — `plan.md:122-140`).
 - **REVIEW-5** → `cto`: «приёмка Ф5 = приложение против sim v2 без GUI (параметры, программа, калибровка ленты, стоп) через `backend_ctl`» (`tasks-2.md:130-131`; повтор в `tasks/T5.4.md:75`, `T5.5.md:161`).
 - Условие «после слияния T5.4» (решение В7, `T5.4.md:133`) выполнено: T5.4 влита `9afe828be` 2026-11-09. Остаётся оговорка `T5.4.md:160` и `plan.md:138`: `executors.device_io` не проверен живьём — «на REVIEW-5 (`backend_ctl capabilities`)».
 
@@ -41,13 +41,13 @@ T5.4: 344 passed, 73 с (инъекции). T5.5: 1488 passed / 8 skipped (11 м
 
 1. `pytest -q --tb=short Services/device_hub/tests Plugins/hub/device_hub/tests Services/robot_comm/tests` (heavy).
 2. Приёмка T5.5: `Plugins/hub/device_hub/tests/test_t55_plugins_v2_acceptance.py`, `Services/device_hub/tests/test_robot_v2_draw.py`, `test_spi_contract.py`, `Plugins/hub/device_hub/tests/test_robot_v2_commands_acceptance.py` (было 98 passed).
-3. Вкладка: `pytest -q robot/tests` (было 155 passed).
+3. Вкладка: `pytest -q multiprocess_prototype/frontend/widgets/tabs/services/robot/tests multiprocess_prototype/frontend/widgets/tabs/services/tests/test_staleness_indicator.py` (было 155 passed; в прежней записи «`robot/tests`» — сокращение этого пути, каталога `robot/tests` в репозитории нет).
 4. Живьём по `tasks-2.md:130`: бэкенд с `BACKEND_CTL=1`, рецепт с sim v2, `capabilities` → параметры, `robot_program_run`, калибровка ленты, `robot_stop`; `executors.device_io` (`T5.4.md:160`).
 5. `python scripts/validate.py` (на `main` был красен 2 ошибками памяти — не от Ф5).
 
 ## 6. Известные остатки (`docs/reports/2026-11-15_R2_lane.md`, `T5.5.md`, `T5.4.md`)
 
-Второй рисунок на v2 теряется; нет `robot_draw_abort` на v2; нет контракта наблюдаемости `status` в `OPEN_QUESTIONS.md`; L1b/L4 шага `pre_stop` без стенда v2; тесты сроков T5.3e.6 идут по реальным часам (запас 0,5–0,6 с); живой GUI-стенд T5.3e.6 не гонялся; утечка замыканий `owner.destroyed` (`bindings.py:320`); `P_BELT_FACTOR` до 65535 при знаковом слове (вопрос В8 GATE-0).
+Второй рисунок на v2 теряется; нет `robot_draw_abort` на v2; нет контракта наблюдаемости `status` в `OPEN_QUESTIONS.md`; L1b/L4 шага `pre_stop` без стенда v2; тесты сроков T5.3e.6 идут по реальным часам (запас 0,5–0,6 с); живой GUI-стенд T5.3e.6 не гонялся; утечка замыканий `owner.destroyed` (`multiprocess_prototype/frontend/state/bindings.py:326`; было `:320` — сдвиг после правок файла в `main`); `P_BELT_FACTOR` до 65535 при знаковом слове (вопрос В8 GATE-0).
 
 ## 7. Что НЕ входит
 
