@@ -144,6 +144,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        self._sync_progress()
         self._ctx.log_info("WordLayoutPlugin: раскладка сброшена")
         return {"status": "ok"}
 
@@ -219,6 +220,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
                 self._log_disk(pred, f"пропуск: ячейки '{self._label_of(pred)}' заняты ({', '.join(map(str, cells))})")
             else:
                 self._log_disk(pred, f"пропуск: нет в слове '{self._reg.word_norm}'")
+            self._sync_progress()
             return item
 
         # Команда роботу: ЗАБОР (pick с ленты, трекинг по энкодеру) + УКЛАДКА (place в слот
@@ -244,6 +246,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._reg.last_correction_deg = round(float(job["angle_deg"]), 2)
         self._reg.next_letter = self._assembler.next_letter
         self._reg.done = self._assembler.done
+        self._sync_progress()
         pick_txt = f"взять({_fmt1(pick[0])},{_fmt1(pick[1])}) → " if pick else ""
         self._log_disk(
             pred,
@@ -433,6 +436,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._armed = True
         self._settle = 0
         self._cur_label = ""
+        self._sync_progress()
         return {**item, self._reg.return_jobs_key: jobs}
 
     def _build_return_jobs(self) -> list[dict]:
@@ -493,6 +497,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._reg.next_letter = self._assembler.next_letter
         self._reg.done = False
         self._reg.spacing_warn = geometry.min_spacing(positions) < 2.0 * float(self._reg.disk_radius_mm)
+        self._sync_progress()
         # Новое слово — взвестись заново.
         self._armed = True
         self._settle = 0
@@ -603,6 +608,21 @@ class WordLayoutPlugin(ProcessModulePlugin):
             return True
         return False
 
+    def _mask(self) -> str:
+        """Маска собранного слова: буква заполненной ячейки, ``·`` (U+00B7) — пустая."""
+        if self._assembler is None:
+            return ""
+        return "".join(s.char if s.filled else "·" for s in self._assembler.slots)
+
+    def _sync_progress(self) -> None:
+        """Обновить маску и сразу опубликовать прогресс (на решении, а не раз в секунду).
+
+        Ставит ``_last_publish``, чтобы периодический тик ``process()`` не дублировал публикацию.
+        """
+        self._reg.assembled = self._mask()
+        self._publish_state()
+        self._last_publish = time.monotonic()
+
     def _publish_state(self) -> None:
         """Опубликовать прогресс раскладки в StateStore (для дашборда/дисплея)."""
         if self._state_proxy is None:
@@ -614,6 +634,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
                 "slots_total": self._reg.slots_total,
                 "slots_filled": self._reg.slots_filled,
                 "next_letter": self._reg.next_letter,
+                "assembled": self._reg.assembled,
                 "last_label": self._reg.last_label,
                 "last_angle_deg": self._reg.last_angle_deg,
                 "last_correction_deg": self._reg.last_correction_deg,

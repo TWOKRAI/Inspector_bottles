@@ -438,6 +438,7 @@ text_vector.text
 text_vector.tracking_px
 word_layout.angle_invert
 word_layout.angle_zero_deg
+word_layout.assembled
 word_layout.disk_radius_mm
 word_layout.done
 word_layout.encoder_source
