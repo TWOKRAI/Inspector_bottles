@@ -138,6 +138,8 @@ class ControlPanelPlugin(ProcessModulePlugin):
         spec = self._find(str(data.get("id", "")))
         if spec is None:
             return {"status": "error", "message": "контрол не найден"}
+        if not spec.is_operable():
+            return {"status": "error", "message": "контрол только для чтения (monitor)"}
         spec.value = spec.coerce(data.get("value"))
         self._queue_emit(spec.port, spec.value)
         return {"status": "ok", "id": spec.id, "value": spec.value, "port": spec.port}
@@ -147,6 +149,8 @@ class ControlPanelPlugin(ProcessModulePlugin):
         spec = self._find(str(data.get("id", "")))
         if spec is None:
             return {"status": "error", "message": "контрол не найден"}
+        if not spec.is_operable():
+            return {"status": "error", "message": "контрол только для чтения (monitor)"}
         value = spec.trigger_value if spec.type == "button" else spec.value
         self._queue_emit(spec.port, value)
         return {"status": "ok", "id": spec.id, "value": value, "port": spec.port}

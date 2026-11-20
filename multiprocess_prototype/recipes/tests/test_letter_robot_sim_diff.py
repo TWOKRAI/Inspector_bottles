@@ -50,6 +50,11 @@ _LAYOUT_BLUEPRINT_KEYS = ("metadata",)
 
 # Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
 _EXPECTED_DIFFS = [
+    # Пульт (Task 6.4): «Домой» (robot_park) и «Серво ВКЛ» (robot_servo) — только в сим-рецепте (протокол v2),
+    # в β их нет до R4 (протокол v1): длина controls 8 (β) против 10 (сим). Остальные контролы pult сравнены
+    # на равенство (путь расхождения был бы иным); состав пинит test_recipe_1_0.py. Снять запись при слиянии R4.
+    # Строковая сортировка: «[10]» идёт раньше «[5]».
+    ".blueprint.processes[10].plugins[0].config.controls[len=8 vs 10]",
     # Политика readiness боевого узла recog.ml_inference (Task 2.9b): сим осознанно без ключа — стендовые не трогаем.
     ".blueprint.processes[5].plugins[2].config.readiness",
     # Геометрия ячеек сима (word-layout P3): 9 ячеек в досягаемости сима; рецепт β — ORDER #21/#26.

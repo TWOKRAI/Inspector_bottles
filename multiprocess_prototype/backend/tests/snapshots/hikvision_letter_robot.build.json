@@ -316,6 +316,66 @@
                       "target_plugin_index": 0,
                       "target_process": "layout",
                       "type": "text"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "vfd_belt"
+                      },
+                      "id": "belt_run",
+                      "label": "Лента пуск",
+                      "source": "action",
+                      "target_command": "vfd_run",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "button"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "vfd_belt"
+                      },
+                      "id": "belt_stop",
+                      "label": "Лента стоп",
+                      "source": "action",
+                      "target_command": "vfd_stop",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "button"
+                    },
+                    {
+                      "id": "mon_conn",
+                      "label": "Связь с роботом",
+                      "source": "monitor",
+                      "state_path": "devices.state.robot_main.conn",
+                      "type": "monitor",
+                      "value_key": "conn"
+                    },
+                    {
+                      "id": "mon_park",
+                      "label": "Парковка",
+                      "source": "monitor",
+                      "state_path": "devices.state.robot_main.park.state",
+                      "type": "monitor"
+                    },
+                    {
+                      "id": "mon_last",
+                      "label": "Последняя буква",
+                      "source": "monitor",
+                      "state_path": "processes.layout.state.word_layout.last_label",
+                      "type": "monitor"
+                    },
+                    {
+                      "id": "mon_assembled",
+                      "label": "Собрано",
+                      "source": "monitor",
+                      "state_path": "processes.layout.state.word_layout.assembled",
+                      "type": "monitor"
+                    },
+                    {
+                      "id": "mon_done",
+                      "label": "Слово собрано",
+                      "source": "monitor",
+                      "state_path": "processes.layout.state.word_layout.done",
+                      "type": "monitor"
                     }
                   ],
                   "panel_id": "pult",
@@ -4074,6 +4134,66 @@
                   "target_plugin_index": 0,
                   "target_process": "layout",
                   "type": "text"
+                },
+                {
+                  "command_args": {
+                    "device_id": "vfd_belt"
+                  },
+                  "id": "belt_run",
+                  "label": "Лента пуск",
+                  "source": "action",
+                  "target_command": "vfd_run",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "button"
+                },
+                {
+                  "command_args": {
+                    "device_id": "vfd_belt"
+                  },
+                  "id": "belt_stop",
+                  "label": "Лента стоп",
+                  "source": "action",
+                  "target_command": "vfd_stop",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "button"
+                },
+                {
+                  "id": "mon_conn",
+                  "label": "Связь с роботом",
+                  "source": "monitor",
+                  "state_path": "devices.state.robot_main.conn",
+                  "type": "monitor",
+                  "value_key": "conn"
+                },
+                {
+                  "id": "mon_park",
+                  "label": "Парковка",
+                  "source": "monitor",
+                  "state_path": "devices.state.robot_main.park.state",
+                  "type": "monitor"
+                },
+                {
+                  "id": "mon_last",
+                  "label": "Последняя буква",
+                  "source": "monitor",
+                  "state_path": "processes.layout.state.word_layout.last_label",
+                  "type": "monitor"
+                },
+                {
+                  "id": "mon_assembled",
+                  "label": "Собрано",
+                  "source": "monitor",
+                  "state_path": "processes.layout.state.word_layout.assembled",
+                  "type": "monitor"
+                },
+                {
+                  "id": "mon_done",
+                  "label": "Слово собрано",
+                  "source": "monitor",
+                  "state_path": "processes.layout.state.word_layout.done",
+                  "type": "monitor"
                 }
               ],
               "panel_id": "pult",
