@@ -42,7 +42,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - Held/Suspended (В8: «нет диска» — индикатор, не состояние), режимы PackML, OPC UA (design.md §7).
 - Отдельный статус «рецепт загружен» (В1).
 - Логика «домой» робота (T5.3e) и сама точка `pre_stop` (gui-graceful-close 1.4) — только переиспользование.
-- Кнопки пульта (строки 15–17 ORDER) — пульт вызывает `system.run.*` (вкл. `system.run.ack`) в своём плане.
+- Кнопки пульта (строки 15–17 ORDER) — пульт вызывает `system.run.*` (вкл. `system.run.ack`) в своём плане. (2026-11-21: кнопки ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать — виджет `RunControlWidget` главного окна, S5 `b778b9503`; Phase 6 пульта (`plans/pult-control-panel-phase6.md`) их не дублирует; В4 для пульта — на подтверждении владельца)
 - Правка барьера `_wait_processes_ready` и его liveness-фолбэка.
 
 ## Бюджет
@@ -78,33 +78,33 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - Task 0.1: вердикт `cto` по машине состояний, сигналу готовности, механизму `run_event`, К1–К7 [DONE 2026-11-02 — вердикт cto ACCEPT WITH CONDITIONS, условия внесены; ответы владельца В1–В8 получены 2026-11-02]
 
 ### Ф1 — framework
-- Task 1.1: **[VERTICAL SLICE]** `run_event` PM → ребёнок → `SourceProducer`; `system.run.start/stop/status`; `ready ↔ running`; `run_gate` **[РЕАЛИЗОВАНА 2026-11-09; стадии 3–5 пройдены 2026-11-12 (инъекции 16/16, стенд 0/91/0/90, ревью APPROVED); слияние в main — см. отчёт docs/reports/2026-11-12_system-run-state_1.1.md]** (после 0.1, merge LSO 1.10)
+- Task 1.1: **[VERTICAL SLICE]** `run_event` PM → ребёнок → `SourceProducer`; `system.run.start/stop/status`; `ready ↔ running`; `run_gate` **[РЕАЛИЗОВАНА 2026-11-09; стадии 3–5 пройдены 2026-11-12 (инъекции 16/16, стенд 0/91/0/90, ревью APPROVED); слияние в main — см. отчёт docs/reports/2026-11-12_system-run-state_1.1.md]** **[DONE df6aa3f]** (после 0.1, merge LSO 1.10)
   - **Module contract:** public-api-change
-- Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [PENDING] (после 1.1; C-60 влита; **посылка «merge C-55b» устарела 2026-11-12** — C-55b влита версией v3 без хука `preflight`/`PreflightFinding`, `plugins/base.py` не меняла: ждать нечего, см. `amendments.md` §4)
+- Task 1.2: самоотчёт готовности — хук `readiness()`, лист `processes.<n>.readiness`, наблюдатель `run_event` → `pause/resume` [DONE 506eea2] (после 1.1; C-60 влита; **посылка «merge C-55b» устарела 2026-11-12** — C-55b влита версией v3 без хука `preflight`/`PreflightFinding`, `plugins/base.py` не меняла: ждать нечего, см. `amendments.md` §4)
   - **Module contract:** public-api-change
-- Task 1.9: `PluginRunner.call_process` в `PAUSED` — bypass; `PAUSED` перестаёт быть ярлыком (вердикт cto К6) [PENDING] (после 1.2; до 1.3)
+- Task 1.9: `PluginRunner.call_process` в `PAUSED` — bypass; `PAUSED` перестаёт быть ярлыком (вердикт cto К6) [DONE 506eea2] (после 1.2; до 1.3)
   - **Module contract:** impl-only
-- Task 1.3: агрегат PM — набор рецепта, молчание = не готов, причины, `booting/not_ready/fault`, непрерывная оценка [PENDING] (после 1.2, 1.9)
+- Task 1.3: агрегат PM — набор рецепта, молчание = не готов, причины, `booting/not_ready/fault`, непрерывная оценка [DONE 506eea2] (после 1.2, 1.9)
   - **Module contract:** impl-only
-- Task 1.3b: шкала загрузки — контракт `system.progress.<id>`, помощник `ProgressTracker`, издатель `boot` в PM (требование владельца 2026-11-12, `amendments.md` §5) [PENDING] (после 1.3; стадия 0 р.1 пройдена, v2 — срез 1.0, `amendments.md` §7)
+- Task 1.3b: шкала загрузки — контракт `system.progress.<id>`, помощник `ProgressTracker`, издатель `boot` в PM (требование владельца 2026-11-12, `amendments.md` §5) [DONE 506eea2] (после 1.3; стадия 0 р.1 пройдена, v2 — срез 1.0, `amendments.md` §7)
   - **Module contract:** public-api-change
-- Task 1.4: STOP — `pre_stop` → снять событие → ждать `paused`; авария без `pre_stop` [PENDING] (после 1.3, gui-graceful-close 1.4)
+- Task 1.4: STOP — `pre_stop` → снять событие → ждать `paused`; авария без `pre_stop` [DONE 506eea2] (после 1.3, gui-graceful-close 1.4)
   - **Module contract:** impl-only
-- Task 1.5: `topology.apply` в `running` — отказ `running`; после применения — `booting`, не `running` [PENDING] (после 1.3)
+- Task 1.5: `topology.apply` в `running` — отказ `running`; после применения — `booting`, не `running` [DONE 506eea2] (после 1.3)
   - **Module contract:** impl-only
-- Task 1.6: preflight C-55b при `run_gate` — причины `not_ready` вместо отказа boot [PENDING] (после 1.3; **источник причин устарел 2026-11-12:** хука `preflight`/`PreflightFinding` в `main` нет — C-55b v3: `error` идёт в плоскость ошибок, health `degraded`, регистр `last_error`, старт не блокируется; 1.6 переписывается на стадии 0 — причины брать из `readiness()` (1.2), health и `last_error`)
+- Task 1.6: preflight C-55b при `run_gate` — причины `not_ready` вместо отказа boot [DONE 506eea2] (после 1.3; **источник причин устарел 2026-11-12:** хука `preflight`/`PreflightFinding` в `main` нет — C-55b v3: `error` идёт в плоскость ошибок, health `degraded`, регистр `last_error`, старт не блокируется; 1.6 переписывается на стадии 0 — причины брать из `readiness()` (1.2), health и `last_error`)
   - **Module contract:** public-api-change
-- Task 1.7: квитирование — `system.run.ack`, `fault` держится до него, START в `fault` отказан (В4) [PENDING] (после 1.4)
+- Task 1.7: квитирование — `system.run.ack`, `fault` держится до него, START в `fault` отказан (В4) [DONE 506eea2] (после 1.4)
   - **Module contract:** public-api-change
-- Task 1.8: опциональный автоперезапуск — флаг процесса `run_auto_restart` в рецепте, падение с флагом не авария (В6) [PENDING] (после 1.3, 1.7; прочтение В9 = (а) — владелец 2026-11-02)
+- Task 1.8: опциональный автоперезапуск — флаг процесса `run_auto_restart` в рецепте, падение с флагом не авария (В6) [DONE 506eea2] (после 1.3, 1.7; прочтение В9 = (а) — владелец 2026-11-02)
   - **Module contract:** public-api-change
 
 ### Ф2 — прототип
-- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [PENDING] (после 1.3, 1.5)
+- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [IN PROGRESS: коммит A ecf2914 в main; коммит B (run_gate: true) не влит — ждёт стенда] (после 1.3, 1.5)
   - **Module contract:** n/a
-- Task 2.2: `readiness()`/`pause()` у устройств, камеры, модели, ленты [PENDING] (после 1.2, T5.3e)
+- Task 2.2: `readiness()`/`pause()` у устройств, камеры, модели, ленты [DONE 8ff4fd1] (после 1.2, T5.3e)
   - **Module contract:** impl-only
-- Task 2.3: GUI — ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать, состояние, причины, индикаторы [PENDING] (после 1.3, 1.7)
+- Task 2.3: GUI — ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать, состояние, причины, индикаторы [DONE 4a73cdc] (после 1.3, 1.7)
   - **Module contract:** impl-only
 - Task 2.6: окно начальной загрузки — размороженный `LoadingWindow` + тонкий подписчик `system.progress.**`; в 1.0 шкала загрузки рецепта = `boot`; `recipe_load` при смене — 2.0 (требование владельца 2026-11-12, `amendments.md` §5, §7) [PENDING] (после 1.3b, 2.3; стадия 0 р.1 пройдена, v2)
   - **Module contract:** impl-only
@@ -114,19 +114,19 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** n/a
 
 ### Ф2 — правки до железа (решение владельца 2026-11-16, срок 2026-11-22; тексты — `tasks/`)
-- Task 2.7: PM — чистый `run_state` (`check_function` не прячется), `RunConfig` + `run_view()`, автостарт один раз за boot, флаг `run.py --autostart`; файл `tasks/2.7.md` (срезы S3a, S3b1, S3b2, S3c, S3c′, S3doc) [PENDING] (после 1.11, 3.3)
+- Task 2.7: PM — чистый `run_state` (`check_function` не прячется), `RunConfig` + `run_view()`, автостарт один раз за boot, флаг `run.py --autostart`; файл `tasks/2.7.md` (срезы S3a, S3b1, S3b2, S3c, S3c′, S3doc) [DONE 85a0521; приёмка на стенде открыта] (после 1.11, 3.3)
   - **Module contract:** public-api-change
-- Task 2.7d: запрет команд плагина в `running` — второй `RunFlag` `run_active`, ключ плагина `run_locked_commands`; файл `tasks/2.7d.md` [PENDING] (после 2.7 S3b1 → S3c)
+- Task 2.7d: запрет команд плагина в `running` — второй `RunFlag` `run_active`, ключ плагина `run_locked_commands`; файл `tasks/2.7d.md` [DONE 85a0521] (после 2.7 S3b1 → S3c)
   - **Module contract:** public-api-change
-- Task 2.8a: копия клиента хранит листья (read-model, `_cache_put`, `telemetry_sink`, `backend_ctl`), проекция при привязке (П3); файл `tasks/2.8a.md` [PENDING]
+- Task 2.8a: копия клиента хранит листья (read-model, `_cache_put`, `telemetry_sink`, `backend_ctl`), проекция при привязке (П3); файл `tasks/2.8a.md` [DONE a267360]
   - **Module contract:** impl-only
 - Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [PENDING] (после 2.8a)
   - **Module contract:** public-api-change
-- Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [PENDING] (после 1.2)
+- Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
-- Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [PENDING] (после 2.9, 2.2b)
+- Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [DONE 7410b16] (после 2.9, 2.2b)
   - **Module contract:** impl-only
-- Task 2.2a2: возраст факта соединения, `pause_action` драйвера, параллельный `pause_all` (S4a «Services», S4b «plugin»); файл `tasks/2.2a2.md` в ветке `feat/run-state-2-2` [PENDING] (после 2.2a)
+- Task 2.2a2: возраст факта соединения, `pause_action` драйвера, параллельный `pause_all` (S4a «Services», S4b «plugin»); файл `tasks/2.2a2.md` в ветке `feat/run-state-2-2` [DONE 8ff4fd1] (после 2.2a)
   - **Module contract:** impl-only
 
 ### Ф3 — после 1.0 (владелец 2026-11-15)
@@ -137,16 +137,16 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Правило до старта 3.2:** новую логику PM пишут отдельным файлом рядом (как `process/run_state.py`), а не в класс `ProcessManagerProcess`; комментарии в самом PM-файле не чистят — их чистит 3.2 одним проходом.
 
 ### Ф1+ — правки свежего ревью Opus (владелец 2026-11-15: «сделай как лучше и как полагается»)
-- Task 1.10: флаг работы без межпроцессного замка вместо `mp.Event` (F3/С3 свежего ревью; текст — `tasks/1.10.md`; стадия 0 прошла, CHANGES REQUESTED применено; далее слепой tester → реализация → инъекции → стенд `kill -9` в окне машины → ревью) [PENDING] (до слияния в main)
+- Task 1.10: флаг работы без межпроцессного замка вместо `mp.Event` (F3/С3 свежего ревью; текст — `tasks/1.10.md`; стадия 0 прошла, CHANGES REQUESTED применено; далее слепой tester → реализация → инъекции → стенд `kill -9` в окне машины → ревью) [IN PROGRESS: код в main (b5cd6d8); приёмка F3 не воспроизведена] (до слияния в main)
   - **Module contract:** public API (`RunFlag`)
 - Сделано в ветке `fix/run-state-phase1-review`: F1 (С2 форма листа на входе), F2 (С1 итог `settled` гарантирован), F4 (С4 снятие пометки рестарта), N3 (С7), регресс N2 — отчёты `docs/reviews/2026-11-15_fix-{A3,B3}.md`.
 
-- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — ВЛИТ (`b74783413`); Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [PENDING] (после слияния; Q1 влит; задача — `tasks/1.11.md`)
+- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — ВЛИТ (`b74783413`); Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [IN PROGRESS: Q1 b74783413 и Q2/Q3/A6 d859338 в main; A1–A5 — в 3.7] (после слияния; Q1 влит; задача — `tasks/1.11.md`)
   - **Module contract:** impl-only
 - Советы A1–A5 итоговой проверки (мёртвый фильтр в `run_state.evaluate:94`, причина «оценка не удалась» строится в двух местах с разным `source`, докстринг `readiness_reason_is_valid`, негодный лист не пишется в журнал PM, `_eval_fail_since` не объявлен на классе) — вместе с 3.7 [PENDING]
 
 ### Ф3 — советы свежего ревью, отложенные (источник — `reports/phase1.review-opus-fresh.md` §7)
-- Task 3.3 (С5): внеочередной heartbeat при смене готовности (`push_if_paused_changed` → `push_if_changed`; подпись `(paused, ready, блокирующие причины)`, антидребезг 0,5 с). Снимает задержку доставки СМЕНЫ готовности 1,99–5,68 с (свежесть неизменного листа при заморозке — не цель, C1/3.4). Новый риск «fault на ходу» — решение владельца (`tasks/3.3.md` «Риск»). Новый механизм: слепой tester, матрица, стенд с замером. Лид 2026-11-16: делать до живой приёмки 2.4, отдельной веткой; слияние до/после тега 1.0 — владелец [PENDING] (`tasks/3.3.md`)
+- Task 3.3 (С5): внеочередной heartbeat при смене готовности (`push_if_paused_changed` → `push_if_changed`; подпись `(paused, ready, блокирующие причины)`, антидребезг 0,5 с). Снимает задержку доставки СМЕНЫ готовности 1,99–5,68 с (свежесть неизменного листа при заморозке — не цель, C1/3.4). Новый риск «fault на ходу» — решение владельца (`tasks/3.3.md` «Риск»). Новый механизм: слепой tester, матрица, стенд с замером. Лид 2026-11-16: делать до живой приёмки 2.4, отдельной веткой; слияние до/после тега 1.0 — владелец [DONE 762a112] (`tasks/3.3.md`)
 - Task 3.4 (С6): срок молчания задаёт отправитель — поле `stale_after_s` в снимке, PM берёт `min(max(value, floor), ceiling)`; нет поля — как сейчас [PENDING] (после 1.0)
 - Task 3.5 (С8): `paused` подтверждается снимком, посчитанным после снятия события (`t_clear`; `_paused_pending` принимает лист с `at >= t_clear`) [PENDING] (после 1.0)
 - Task 3.6 (С9): номер воплощения выдаёт PM (`incarnation` в kwargs, эхо в heartbeat) вместо pid ОС; не нужен опрос реестра на каждом heartbeat; Windows-повтор pid [PENDING] (после 1.0; расширение контракта heartbeat — вердикт C11 уже дан: cto не нужен)
@@ -167,7 +167,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - `plans/2026-10-20_gui-graceful-close/` Task 1.4 — точка `pre_stop`; STOP и shutdown делят её.
 - C-55b (`plans/word-layout/tasks/C-55b.md`, полоса С) — находки preflight → причины.
 - `plans/robot-protocol-v2/` T5.3e — «домой» как шаг `pre_stop`.
-- `plans/pult-control-panel.md` (строки 15–17) — кнопки пульта вызывают `system.run.*`.
+- `plans/pult-control-panel.md` (строки 15–17) — кнопки пульта вызывают `system.run.*`. (план продолжен в `plans/pult-control-panel-phase6.md`; кнопки run-state пульт не дублирует)
 
 ## Решения владельца (В1–В8, 2026-11-02; `plans/queue/decisions.md` №26)
 
@@ -179,7 +179,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   обработка, запись и робот — только в «работает» (design.md §3.4; Task 1.1 п.6, 1.2 п.4; форма — К6).
 - В3. Авария во время работы: робот стоит на месте; «домой» — только по ОСТАНОВИТЬ (design.md §3.5).
 - В4. После аварии — отдельная кнопка «Квитировать», затем ЗАПУСТИТЬ: команда `system.run.ack` (Task 1.7), кнопка
-  в GUI (Task 2.3) и в пульте (`plans/pult-control-panel.md`).
+  в GUI (Task 2.3) и в пульте (`plans/pult-control-panel.md`). [2026-11-21: «в пульте» — вопрос дублирования открыт; Phase 6 пульта кнопки не дублирует; решение за владельцем]
 - В5. Рецепт с ошибкой preflight при смене не активируется (старый остаётся); на старте — «не готов» с причиной (Task 1.6).
 - В6. Падение процесса во время работы = авария, ЗАПУСТИТЬ снова оператором; для отдельных процессов — опциональный
   автоперезапуск, флаг процесса в рецепте (Task 1.8; design.md §3.5).
@@ -231,3 +231,4 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - 2026-11-15 — **ревью Opus на объединённый diff Ф1:** CHANGES REQUESTED, 5 major + 5 minor, блокеров нет (`reports/phase1.review-opus.md`, бриф — `reports/phase1.review-brief.md`). Правки M1–M5, m1–m5 запущены тремя исполнителями (fix-A: M1, m1, m2; fix-B: M2, M3, m3; fix-C: M4, M5, m4, m5). Слепой tester заменён воспроизведениями ревьюера (решение лида). **Решение владельца:** разбиение PM-файла и чистка комментариев — после 1.0: новая Task 3.2, дизайн `reports/pm-split.design.md`, условия старта в плане. Строка очереди — `plans/queue/inbox/2026-11-15_run-state-3.2_1.md`.
 - 2026-11-15 — **свежее ревью Opus (слепая фаза, новые углы):** CHANGES REQUESTED, F1–F4 + 10 советов С1–С10 (`reports/phase1.review-opus-fresh.md`). Сделаны F1, F2, F4, N3 и регресс N2 (fix-A3, fix-B3); F3 — Task 1.10 (стадия 0 пройдена); С5–С10 отложены в Ф3 (3.3–3.7). Решения лида: M2 (негодный `restart_policy` → `not_ready`) оставлен; сбой оценки на тике не переводится в `fault` без слова владельца. Строки очереди — `plans/queue/inbox/2026-11-15_run-state-fresh_{1,2,3}.md`.
 - 2026-11-16 — **итоговая проверка teamlead:** MERGE WITH CONDITIONS (блокеров нет; условия: конфликт DECISIONS при слиянии, Q1 до слияния желательно, запись Q2/Q3/A6 в план — Task 1.11, полный прогон heavy у лида); `cto` не нужен. Слияние в main — по слову владельца («после проверки», 2026-11-16).
+- 2026-11-21 — **сверка шапок по git** (лид полосы Ф, main dc56f14df): влито 21 из 32 задач (с 0.1; 20 из 31 без неё), частично 2 (1.10, 1.11), не влито 9 (2.4, 2.5, 2.6, 2.8, 3.2, 3.4–3.7); шапки 19 задач стояли PENDING при влитом коде — приведены. Запись 2026-11-09 про «1.1 не влита» и «1.4 не начата» — устарела (1.1 влита df6aa3f, 1.4 влита 506eea2). Опора: git first-parent и `merge-base --is-ancestor`, не отчёты.
