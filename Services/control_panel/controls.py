@@ -17,7 +17,9 @@ from pydantic import BaseModel, field_validator
 # Тип контрола — ВИД виджета (как выглядит/оперируется).
 #   select — выпадающий список: options=[{label, value}], эмитит value выбранного
 #            пункта (напр. выбор режима робота: cvt|draw|manual|toolchange).
-ControlType = Literal["button", "toggle", "slider", "number", "text", "select"]
+#   monitor — только чтение: подпись-значение чужого пути StateStore (см. state_path);
+#            контрол с ``source: monitor`` рисуется подписью при ЛЮБОМ type.
+ControlType = Literal["button", "toggle", "slider", "number", "text", "select", "monitor"]
 
 # Источник/назначение контрола — КУДА идёт действие (Phase 5 дашборд):
 #   local   — эмит на свой выходной порт (pipeline-сигнал; дефолт, текущее поведение);
@@ -34,7 +36,7 @@ class ControlSpec(BaseModel):
 
     Attributes:
         id:    Уникальный идентификатор контрола (стабильный ключ).
-        type:  Тип контрола (button|toggle|slider|number|text).
+        type:  Тип контрола (button|toggle|slider|number|text|select|monitor).
         label: Человекочитаемая подпись (для GUI).
         port:  Выходной порт ноды, на который эмитится значение (out_1..out_N).
         value: Текущее значение (хранится между эмитами; для button — не используется).
@@ -60,6 +62,12 @@ class ControlSpec(BaseModel):
     target_process: str = ""  # имя процесса-ноды (для param/monitor/action)
     target_plugin_index: int = 0  # индекс плагина в процессе (мульти-плагин)
     target_field: str = ""  # имя register-поля (param/monitor)
+    # monitor (Task 6.3): полный путь StateStore, который показывает подпись
+    # (``devices.state.robot_main.conn``; у хаба корень ``devices.*``, не ``processes.*``).
+    state_path: str = ""
+    # monitor: ключ в dict-значении пути (``conn`` для ``{"conn": ..., "ts": ...}``);
+    # пусто — значение показывается как есть (скаляр или лист).
+    value_key: str = ""
     target_command: str = ""  # имя команды (action)
     # action со значением: value_arg — имя аргумента команды, куда кладётся значение
     # контрола (пусто = чистый триггер, как кнопка «Рисовать»); command_args —

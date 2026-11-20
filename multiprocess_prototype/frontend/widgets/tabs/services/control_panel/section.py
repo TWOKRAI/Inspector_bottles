@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
@@ -23,6 +24,31 @@ from .presenter import ControlPanelPresenter
 from .widget import ControlPanelWidget
 
 _PLUGIN_NAME = "control_panel"
+
+_NO_VALUE = "—"  # значения ещё нет (None)
+_BAD_KEY = "?"  # пришёл dict, но ключа value_key в нём нет (ошибка конфигурации/формы)
+
+
+def _monitor_formatter(value_key: str):
+    """Форматтер подписи monitor: любое значение пути → строка, БЕЗ исключений.
+
+    Исключение форматтера выходит из цикла дельт GuiStateBindings и ломает соседние
+    подписки, поэтому формат терпим к любой форме значения: None → «—»; dict при
+    непустом ``value_key`` → ``value[value_key]`` (нет ключа/пустой dict → «?»);
+    иначе ``str(value)``.
+    """
+
+    def fmt(value: Any) -> str:
+        try:
+            if value is None:
+                return _NO_VALUE
+            if isinstance(value, dict) and value_key:
+                return str(value[value_key]) if value_key in value else _BAD_KEY
+            return str(value)
+        except Exception:  # noqa: BLE001 — форматтер не имеет права бросать (цикл дельт)
+            return _BAD_KEY
+
+    return fmt
 
 
 class _ControlPanelSection:
@@ -35,6 +61,10 @@ class _ControlPanelSection:
         self._presenter: ControlPanelPresenter | None = None
         self._catalog: NodeCatalog | None = None
         self._handles: list[Any] = []
+        # Привязки подписей monitor-рядов; живут отдельно от набора и пересобираются с ним.
+        self._monitor_handles: list[Any] = []
+        self._bound = False  # секция активна (между on_activated и on_deactivated)
+        self._rebind_pending = False
 
     @property
     def key(self) -> str:
@@ -73,6 +103,7 @@ class _ControlPanelSection:
         self._widget.control_add_requested.connect(self._on_add)
         self._widget.control_remove_requested.connect(self._on_remove)
         self._widget.node_pick_requested.connect(self._on_node_pick)
+        self._widget.controls_rebuilt.connect(self._schedule_monitor_rebind)
         self._bind()
 
     def _on_operated(self, control_id: str, value: object) -> None:
@@ -151,14 +182,21 @@ class _ControlPanelSection:
         return None, 0
 
     def _unbind(self) -> None:
-        bindings = getattr(self._runtime, "bindings", None)
-        if bindings is not None:
-            for handle in self._handles:
-                try:
-                    bindings.unbind(handle)
-                except Exception:
-                    pass
+        self._bound = False
+        self._unbind_handles(self._handles)
         self._handles = []
+        self._unbind_handles(self._monitor_handles)
+        self._monitor_handles = []
+
+    def _unbind_handles(self, handles: list[Any]) -> None:
+        bindings = getattr(self._runtime, "bindings", None)
+        if bindings is None:
+            return
+        for handle in handles:
+            try:
+                bindings.unbind(handle)
+            except Exception:
+                pass
 
     def _bind(self) -> None:
         """Привязать набор контролов к state store (реактивный рендер)."""
@@ -166,9 +204,43 @@ class _ControlPanelSection:
         bindings = getattr(self._runtime, "bindings", None)
         if bindings is None or self._widget is None:
             return
+        self._bound = True
         # Нода control_panel — источник в рецепте; имя процесса задаёт пользователь,
         # поэтому glob по всем процессам.
         self._handles.append(bindings.bind("processes.*.state.control_panel.controls", self._widget, "set_controls"))
+        # Подписи monitor пережили деактивацию без привязок (_unbind снял их): набор мог
+        # не прийти заново, поэтому перевешиваем и без set_controls.
+        self._schedule_monitor_rebind()
+
+    def _schedule_monitor_rebind(self) -> None:
+        """Отложить пересвязку monitor-подписей (set_controls зовётся ИЗ цикла дельт).
+
+        ``unbind``/``bind`` прямо из слота внутри ``GuiStateBindings._on_state_msg``
+        меняют список подписок под итерацией и пропускают соседний handle, поэтому
+        пересвязка уходит в следующий проход цикла событий. Подряд идущие пересборки
+        схлопываются в одну.
+        """
+        if self._rebind_pending:
+            return
+        self._rebind_pending = True
+        QTimer.singleShot(0, self._rebind_monitors)
+
+    def _rebind_monitors(self) -> None:
+        """Снять старые привязки monitor-подписей и привязать подписи текущей сборки."""
+        self._rebind_pending = False
+        self._unbind_handles(self._monitor_handles)
+        self._monitor_handles = []
+        bindings = getattr(self._runtime, "bindings", None)
+        if bindings is None or self._widget is None or not self._bound:
+            return
+        for spec, label in self._widget.monitor_labels():
+            state_path = str(spec.get("state_path") or "").strip(".")
+            if not state_path:
+                continue  # monitor без state_path (старый формат): привязывать нечего
+            handle = bindings.bind(
+                state_path, label, "setText", formatter=_monitor_formatter(str(spec.get("value_key") or ""))
+            )
+            self._monitor_handles.append(handle)
 
 
 def build_control_panel_section(

@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from Services.control_panel.controls import ControlSpec
+
 # Метка типа в форме → внутренний тип контрола.
 _TYPE_LABELS: list[tuple[str, str]] = [
     ("Кнопка", "button"),
@@ -49,10 +51,14 @@ class ControlPanelWidget(QWidget):
     control_remove_requested = Signal(str)
     # Запрос открыть пикер «Добавить из ноды» (дашборд) — обрабатывает секция.
     node_pick_requested = Signal()
+    # Набор рядов перестроен (set_controls): секция перевешивает привязки monitor-подписей.
+    controls_rebuilt = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._controls: list[dict] = []
+        # monitor-ряды текущей сборки: (spec, QLabel со значением) — для привязок секции.
+        self._monitor_labels: list[tuple[dict, QLabel]] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -187,6 +193,7 @@ class ControlPanelWidget(QWidget):
     def set_controls(self, controls: Any) -> None:
         """Перестроить ряды контролов из набора (list[dict])."""
         self._controls = list(controls) if isinstance(controls, list) else []
+        self._monitor_labels = []
         # Очистить контейнер (кроме empty_label — им управляем видимостью).
         while self._rows.count():
             item = self._rows.takeAt(0)
@@ -196,11 +203,17 @@ class ControlPanelWidget(QWidget):
         if not self._controls:
             self._rows.addWidget(self._empty_label)
             self._empty_label.setVisible(True)
+            self.controls_rebuilt.emit()
             return
         self._empty_label.setVisible(False)
         for c in self._controls:
             if isinstance(c, dict) and c.get("id"):
                 self._rows.addWidget(self._build_row(c))
+        self.controls_rebuilt.emit()
+
+    def monitor_labels(self) -> list[tuple[dict, QLabel]]:
+        """Подписи-значения monitor-рядов текущей сборки: ``(spec, label)``."""
+        return list(self._monitor_labels)
 
     def _build_row(self, c: dict) -> QWidget:
         """Ряд: подпись + операбельный виджет по типу + удаление."""
@@ -212,10 +225,14 @@ class ControlPanelWidget(QWidget):
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
         # Кнопка сама несёт подпись — отдельный лейбл не нужен (иначе «Рисовать [Нажать]»).
-        if ctype != "button":
+        # monitor-ряд (любой type) кнопки не имеет — подпись нужна всегда.
+        if ctype != "button" or not self._is_operable(c):
             h.addWidget(QLabel(f"{label}"))
 
-        h.addWidget(self._build_operable(cid, ctype, c, label), 1)
+        if self._is_operable(c):
+            h.addWidget(self._build_operable(cid, ctype, c, label), 1)
+        else:
+            h.addWidget(self._build_monitor_value(c), 1)
 
         target_lbl = QLabel(self._target_hint(c))
         target_lbl.setProperty("role", "placeholder-italic")
@@ -228,6 +245,18 @@ class ControlPanelWidget(QWidget):
         rm.clicked.connect(lambda _=False, _id=cid, _lbl=label: self._confirm_remove(_id, _lbl))
         h.addWidget(rm)
         return row
+
+    @staticmethod
+    def _is_operable(c: dict) -> bool:
+        """Можно ли оперировать контролом: monitor — только чтение (ControlSpec.is_operable)."""
+        return ControlSpec.model_construct(id=str(c.get("id")), source=c.get("source") or "local").is_operable()
+
+    def _build_monitor_value(self, c: dict) -> QLabel:
+        """Подпись-значение monitor-ряда (текст ставят привязки секции; операции нет)."""
+        value = QLabel("—")
+        value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._monitor_labels.append((c, value))
+        return value
 
     @staticmethod
     def _target_hint(c: dict) -> str:
