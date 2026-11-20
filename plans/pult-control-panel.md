@@ -2,7 +2,7 @@
 
 **Ветка:** `feat/pult-control-panel`
 **Slug:** `pult-control-panel`
-**Статус:** Phase 1-3 DONE + qt-mcp smoke verified; остался Phase 4 (память).
+**Статус:** фазы 1–5 закрыты (5.4 `monitor` перенесена в Phase 6); **Phase 6 «Пульт оператора 1.0»** — [`pult-control-panel-phase6.md`](pult-control-panel-phase6.md), DRAFT v2, вопросы В1–В9 закрыты (2026-11-20), ждёт слот писателя (ORDER #15–#17).
 
 > Smoke (pult_demo): Services-таб грузится, 4 контрола рендерятся, нажатие «Старт» →
 > `out_1 = True` в логе ноды. Поймал баг: секция без `action_buttons()` роняла весь
@@ -159,6 +159,10 @@ monitor→read-only) · **5.3 DONE** (`catalog.py` NodeCatalog + `picker.py` Nod
 live точки рисуют портрет. 4 угла вынесены в pult `controls` (дашборд).
 
 **Вне scope Phase 5:** не-register config-поля (только live-tunable регистры); группировка/вкладки.
+
+## Phase 6 — Пульт оператора 1.0 (ORDER #15–#17; приёмка β8)
+
+Вынесена в [`plans/pult-control-panel-phase6.md`](pult-control-panel-phase6.md) (DRAFT v2 после стадии 0, 2026-11-20; открыты для владельца В5, В7).
 
 ## Вне scope (v1)
 - Динамические именованные порты (по label контрола) — пул `out_N` в v1.
