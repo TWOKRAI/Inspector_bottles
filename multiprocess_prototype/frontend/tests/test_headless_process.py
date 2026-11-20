@@ -99,9 +99,12 @@ class TestDrainWorkerCreation:
 
         proc._init_application_threads()
 
-        assert [w["name"] for w in wm.created] == [DRAIN_WORKER]
-        assert wm.created[0]["auto_start"] is True
-        assert wm.created[0]["fn"] == proc._drain_loop
+        # Считаем по имени: база создаёт и свои воркеры (readiness_snapshot,
+        # _init_run_state_workers) — это намеренно, инвариант только про drain.
+        drains = [w for w in wm.created if w["name"] == DRAIN_WORKER]
+        assert len(drains) == 1
+        assert drains[0]["auto_start"] is True
+        assert drains[0]["fn"] == proc._drain_loop
 
     def test_absent_worker_manager_is_loud(self) -> None:
         """Некому дренировать — обязан быть ERROR, иначе снаружи это выглядит

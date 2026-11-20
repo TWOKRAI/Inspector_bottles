@@ -301,13 +301,15 @@ class TelemetryChart(QWidget):
     def series_points(self, key: str) -> list[tuple[float, float]]:
         """Точки серии как ``[(ts, value), …]`` (для тестов/диагностики).
 
-        Возвращает исходные данные (``PlotDataItem.getData`` — не downsampled-дисплей).
+        Возвращает исходные данные (``PlotDataItem.getOriginalDataset`` — не downsampled-дисплей:
+        ``getData`` режет по авто-даунсэмплингу и ``clipToView`` и на близких по ``ts`` точках
+        или узком вьюбоксе отдаёт пусто, C-98).
         Неизвестный ключ / пустая серия → ``[]``.
         """
         curve = self._curves.get(key)
         if curve is None:
             return []
-        xs, ys = curve.getData()
+        xs, ys = curve.getOriginalDataset()
         if xs is None or ys is None:
             return []
         return [(float(t), float(v)) for t, v in zip(xs, ys)]

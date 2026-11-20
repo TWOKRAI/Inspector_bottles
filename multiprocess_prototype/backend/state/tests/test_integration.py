@@ -217,16 +217,17 @@ class TestGenericProcessApp:
         gp = _make_generic_app(router)
         gp._init_custom_managers()
 
-        # Mock плагинов для shutdown (GenericProcess.shutdown ожидает их)
-        gp._plugins = []
-        gp._plugin_contexts = []
-
         # Запоминаем proxy для проверки
         proxy = gp._state_proxy
+        assert proxy.is_initialized
 
-        # Mock super().shutdown() чтобы не лезть в ProcessModule
-        with patch.object(type(gp).__mro__[2], "shutdown", return_value=True):
-            gp.shutdown()
+        # Останов прокси живёт в записи ``state_proxy`` сегмента ``work`` корня процесса
+        # (GenericProcess._own_work, ADR-PM-054): корень открываем настоящим механизмом,
+        # базовый shutdown не подменяем — иначе корень не закроется и прокси останется живым.
+        gp._open_root()
+        gp._own_work(gp._root_segments["work"])
+
+        assert gp.shutdown() is True
 
         assert not proxy.is_initialized
 

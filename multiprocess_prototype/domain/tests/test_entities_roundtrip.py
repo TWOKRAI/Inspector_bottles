@@ -249,6 +249,16 @@ class TestExtraForbid:
         assert p.extras.get("source_target_fps") == 25
         assert "source_target_fps" not in p.metadata
 
+    def test_process_stop_shorthand_folds_into_extras(self) -> None:
+        """Окно и волна останова (stop_window_s, stop_wave) → в extras, не metadata (C-96).
+
+        Framework читает их как typed-поля ProcessConfig; свёрнутые в metadata, они для
+        бэкенда нем — волна останова процесса молча откатывается к умолчанию.
+        """
+        p = Process(process_name="gui", stop_wave="last", stop_window_s=8.0)  # type: ignore[call-arg]
+        assert p.extras == {"stop_wave": "last", "stop_window_s": 8.0}
+        assert p.metadata == {}
+
     def test_process_opaque_flat_field_folds_into_metadata(self) -> None:
         """Неизвестный НЕ-shorthand ключ (телеметрия) → по-прежнему в metadata."""
         p = Process(process_name="p", plugins=(), telemetry_tag="cam-A")  # type: ignore[call-arg]
