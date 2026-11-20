@@ -231,6 +231,56 @@ register'а (проба и запись `apply_params`) для значения 
 - **`set_config`** (generic `cmd_set_config` базы) пишет через `reg.apply_values` и подписчиков НЕ будит: на прибор не доходит.
   На прибор — только `apply_params` или `register_update`.
 
+## Готовность (readiness)
+
+Хук `CameraDevicePlugin.readiness(ctx)` (`plugin_base.py:360`, Task 2.2c, в `main`) отдаёт причину неготовности по состоянию сеанса.
+Зовёт его поток снимка готовности процесса (`PluginOrchestrator.readiness_snapshot`); хук читает один голый атрибут `session.state`,
+без замков и IO, не создаёт сеанс (`plugin_base.py:361-370`). Текст причины — литерал: без серийного номера, пути и `last_error`.
+Ответ — пустой список либо один элемент `{"severity", "reason"}`. Блокируют START `failure` и `check_function`
+(`health/schema.py:128`, `READINESS_BLOCKING_SEVERITIES`); `out_of_spec` не блокирует.
+
+| Состояние сеанса | Степень | Причина | Блокирует START | Код / тест |
+|---|---|---|---|---|
+| `grabbing` | — | `[]` | нет | `plugin_base.py:371` |
+| `opening` | `check_function` | «камера открывается» | да, и без `auto_start` | `:373`; `test_real_opening_blocks_even_without_auto_start` |
+| `stopping` | `out_of_spec` | «камера останавливается» | нет | `:375`; `test_readiness.py::_TABLE` (заглушка сеанса) |
+| `busy` | `failure` | «камера занята» | да | `:377` |
+| `not_found` | `failure` | «камера не найдена» | да | `:379` |
+| `error` | `failure` | «ошибка камеры» | да | `:381`; текст `last_error` в `reason` не входит |
+| `idle` / `closed`, `auto_start` истинен | `check_function` | «камера не запущена» | да; в том числе после `release_device` оператора | `:383-385` |
+| `idle` / `closed`, `auto_start` ложен | — | `[]` | нет | `:386` |
+| сеанса нет (`None`) | как `idle` | как `idle` | как `idle` | `:370` |
+| любое другое значение | `failure` | «состояние камеры неизвестно» | да | `:387` |
+
+`device_held` не читается: пара `closed` + `device_held=True` даёт тот же ответ, что `closed` (`plugin_base.py:366-368`).
+Таблица сверена с `Services/camera_device/tests/test_readiness.py` (`_TABLE`; настоящий сеанс — тесты `test_real_*`).
+
+**Политика (рецепт узла).** Степень причин и удержание потери задаёт не плагин, а рецепт узла: ключ `readiness: {hold_s, severity: {<из>: <в>}}`
+в `config` плагина (ADR-PM-061, применяется в `PluginOrchestrator._plugin_reasons`); без ключа причины идут как есть. Ключа `readiness`
+в `camera_device_demo.yaml` нет (на дату записи `git grep readiness -- multiprocess_prototype/recipes/camera_device_demo.yaml` пусто);
+пример ключа на другом узле — `multiprocess_prototype/recipes/hikvision_letter_robot.yaml:269` (`ml_inference`). В коде камеры
+строка `"out_of_spec"` одна (`plugin_base.py:376`), поэтому ключ `severity: {out_of_spec: ...}` затронул бы только `stopping`; это вывод из
+чтения кода, пин-теста у камеры нет (у `ml_inference` он есть — Task 2.9b).
+
+**Известное ограничение (не решено).** При `auto_start` камера в `stopping` даёт `out_of_spec`, и узел остаётся «зелёным»: START не
+блокируется, `fault` в `running` нет. Воспроизведено ревью 2.2c на фейковом порту: после зависшего `get_frame` и `release_device(timeout_s=0.5)`
+не меньше 4 с `state=stopping`, `blocking=False`. До 2.2c камера всегда отдавала `[]`, регресса нет. Варианты: (а) `stopping` ->
+`check_function` при `auto_start` в коде; (б) ключ `readiness: {severity: {out_of_spec: check_function}}` в рецепте узла. Решение ждёт
+владельца / CTO (`docs/claude/OPEN_QUESTIONS.md`, запись 2026-11-20 «камера в `stopping` при `auto_start`»). Реального теста на `stopping`
+нет (только заглушка сеанса), теста через `readiness_snapshot` нет.
+
+### Запрет команд в `running`
+
+Ключ плагина `run_locked_commands` (ADR-PM-062) отказывает перечисленным командам, пока система в `running`: ответ
+`{"status": "error", "error": "running", "message": "сначала ОСТАНОВИТЬ"}`. Ключ ставится в `config` плагина или плоско в элементе
+`plugins` узла; на уровне узла он молча игнорируется. Для камеры решением владельца (2026-11-20) список — `release_device`, `take_device`.
+Не блокируются `apply_params`, `read_params`, `get_status`, `list_devices`, `describe_params`, `reset_stats`, `trigger_software`.
+Ключ стоит в `camera_device_demo.yaml` (плоско в элементе `plugins`; Task 4c, тест `multiprocess_prototype/recipes/tests/test_camera_run_locked_recipe.py`);
+в hikvision-рецептах его нет: они ссылаются на старый плагин без `release_device`/`take_device`, ключ придёт вместе с 4.3 (W4). Код плагина охрану не знает: она в базе плагина
+(`multiprocess_framework/modules/process_module/plugins/base.py:1775,1808,1835`). Прямые вызовы `start(ctx)` (при `auto_start`,
+`plugin_base.py:349`) и `shutdown(ctx)` (`:354`) зовут `cmd_take_device` / `cmd_release_device` напрямую и охрану минуют; Пересохранение рецепта из GUI после правки узла кладёт копию ключей во вложенный `config`, и она перекрывает плоскую строку (`plugin_orchestrator.py:164-166`): ручную правку `run_locked_commands` в YAML после этого делать во вложенном `config`. Рестарт ребёнка
+супервизором в `running` не воспроизводился (`plans/2026-10-18_camera-device-service/tasks/4c.md`, Ф3).
+
 ## Boundaries
 
 - `interface.py` импортирует только stdlib; `cv2` и `numpy` — только `drivers/opencv_driver.py` и `testing/`.
@@ -255,6 +305,6 @@ Stability: contract
 
 ## Решения и план
 
-- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…004 (ADR-CAM-002 уточнён 2026-11-15).
+- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…005 (ADR-CAM-002 уточнён 2026-11-15; ADR-CAM-005 — readiness камеры).
 - [`STATUS.md`](STATUS.md) — что есть.
 - План: [`plans/2026-10-18_camera-device-service/plan.md`](../../plans/2026-10-18_camera-device-service/plan.md).

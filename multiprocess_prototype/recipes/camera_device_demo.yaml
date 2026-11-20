@@ -42,6 +42,8 @@ blueprint:
           camera_id: 0
           device_select: first
           auto_start: true
+          # В running запрещены release_device и take_device (ADR-PM-062); вне running проходят.
+          run_locked_commands: [release_device, take_device]
 
   wires: []
 
