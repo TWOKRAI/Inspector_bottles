@@ -870,8 +870,8 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "run_status",
-        "Состояние линии (system.run.status): result = {state (not_ready | ready | starting | running | "
-        "stopping | fault), since, run_gate, start_allowed, ack_allowed, reasons (узлы-причины "
+        "Состояние линии (system.run.status): result = {state (booting | not_ready | ready | running | "
+        "stopping | fault | shutting_down), since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons (узлы-причины "
         "not_ready/fault), last_fault}. Только чтение. Ответ — конверт process.command.response как есть.",
         _obj({"timeout": _TIMEOUT}, []),
         _run_status,

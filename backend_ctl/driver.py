@@ -692,7 +692,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def run_status(self, *, timeout: float | None = None) -> dict[str, Any]:
         """``system.run.status``: состояние линии. Конверт ответа — как есть.
 
-        ``result`` = ``{state, since, run_gate, start_allowed, ack_allowed, reasons, last_fault}``;
+        ``result`` = ``{state, since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons, last_fault}``;
         развернуть — на вызывающем (``backend_ctl.protocol._leaf_result``).
         """
         return self.system_command({"cmd": "system.run.status"}, timeout=timeout)
