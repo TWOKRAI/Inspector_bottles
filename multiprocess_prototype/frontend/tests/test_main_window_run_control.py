@@ -373,3 +373,26 @@ def test_set_commands_survives_failing_seed_request(qtbot) -> None:
 
     w.apply_leaf("system.run.state", "running")
     assert _lbl(w, "RunStateLabel").text() == "Работает"
+
+
+# ---------------------------------------------------------------------------
+# S5, REDS 10: подпись «гейт выключен» и ОСТАНОВИТЬ по stop_allowed — настоящие объекты
+# ---------------------------------------------------------------------------
+
+
+def test_gate_label_and_stop_follow_leaves_through_real_bindings(qtbot) -> None:
+    """run_gate=False пришёл ДО connect_bindings (replay); дальше state/stop_allowed идут дельтами."""
+    window = _window(qtbot)
+    stack = _Stack()
+    stack.leaf("run_gate", False)
+
+    window.connect_bindings(stack.bindings)
+    stack.leaf("state", "running")
+    stack.leaf("start_allowed", False)
+    stack.leaf("stop_allowed", False)
+
+    assert _lbl(window, "RunGateLabel").text() == "Гейт выключен: кадры идут без ЗАПУСТИТЬ"
+    assert not _btn(window, "RunStopButton").isEnabled()
+
+    stack.leaf("stop_allowed", True)
+    assert _btn(window, "RunStopButton").isEnabled()
