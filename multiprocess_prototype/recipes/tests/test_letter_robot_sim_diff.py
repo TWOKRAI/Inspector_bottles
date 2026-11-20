@@ -63,6 +63,12 @@ _EXPECTED_DIFFS = [
     ".name",
 ]
 
+# Слово оператора (В5/Task 6.1b): пульт пишет его в target_word word_layout, и после Save рецепта оно
+# лежит в файле. Это состояние, а не свойство рецепта: путь вне сравнения, в любом из двух рецептов.
+_OPERATOR_STATE_PATHS = [
+    ".blueprint.processes[6].plugins[0].config.target_word",
+]
+
 
 def _canonical(recipe: dict[str, Any]) -> dict[str, Any]:
     """Рецепт без раскладки редактора; блюпринт — в виде ``SystemBlueprint``.
@@ -156,7 +162,9 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # блокировку «модель не загружена» (стендовые рецепты не трогаем), её проверяет стенд 2.9b на
     # копии сима с ключом.
     all_diffs = _diff_paths(_canonical(base), _canonical(sim))
-    other_diffs = sorted(d for d in all_diffs if not d.startswith(allowed_prefix))
+    other_diffs = sorted(
+        d for d in all_diffs if not d.startswith(allowed_prefix) and d not in _OPERATOR_STATE_PATHS
+    )
     extra = [d for d in other_diffs if d not in _EXPECTED_DIFFS]
     missing = [d for d in _EXPECTED_DIFFS if d not in other_diffs]
 
