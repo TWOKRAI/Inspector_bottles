@@ -15,7 +15,7 @@
 | 5 | `Services/device_hub/drivers/base.py:107-108` | `int(entry.params.get("max_reconnect_attempts", 3))`; `:285` — `<= 0` даёт «без лимита» |
 | 6 | `robot_driver_v2/driver.py:153,538`, `vfd_driver.py:49,283` | оба вызывают `super().__init__(entry, …)` и `_note_reconnect_failed()` |
 
-**Не доказано тестом.** Сквозного теста «рецепт → `driver.max_reconnect_attempts == 0`» нет: тесты ставят атрибут руками (`test_reconnect_exhausted_notice.py:79`) или подают `params` прямо в `DeviceEntry` (`test_robot_driver.py:297`).
+**Доказано тестом на симе (обновление 2026-11-20, после слова владельца).** В репозитории сквозного теста «рецепт → `driver.max_reconnect_attempts == 0`» нет (`test_reconnect_exhausted_notice.py:79` ставит атрибут руками, `test_robot_driver.py:297` подаёт `params` в `DeviceEntry`). Одноразовый тест через `DeviceHubPlugin.start()` прошёл: ключ `0` доходит до `RobotDriverV2` и `VfdDriver`, лимит не «сдаётся» на закрытом порту, на симе драйвер вернулся в `connected` за 2,51 с после подъёма. Числа, границы и текст теста — `docs/handoffs/2026-11-20_R2-recipe-diff-reconnect.md` и `…-R2-params-path-test.py.txt`; в слот его можно взять как основу п. (1) брифа (правило: слепой tester, инъекции).
 
 **Бриф.** (1) Тест через `start()` плагина с `recipe_devices=[{…params: {max_reconnect_attempts: 0}}]` (фабрика `_make_plugin`, `Plugins/hub/device_hub/tests/test_device_hub_plugin.py:29-51`): `driver.max_reconnect_attempts == 0`. Ожидаемое — литерал 0, не из кода. (2) Потом правка `letter_robot_sim.yaml:71-95` (и других рецептов 1.0 — список даёт владелец рецептов): `max_reconnect_attempts: 0` в `params` обеих записей. (3) Стенд на симе: закрытый порт → после 4 неудач `reconnect_exhausted` остаётся False, `conn` не залипает в `failed`.
 
