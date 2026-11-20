@@ -1,0 +1,5 @@
+#!/bin/bash
+set -u
+bash /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/run.sh c36_real_child.py duty --variant idle --seconds 30 --out /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/duty.jsonl
+bash /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/run.sh c36_real_child.py duty --variant cons --seconds 30 --out /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/duty.jsonl
+C36_BURN_MS=5 bash /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/run.sh c36_real_child.py duty --variant cam --seconds 30 --out /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/duty.jsonl
