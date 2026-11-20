@@ -578,23 +578,24 @@ def _failing_belt_scene(make_scene: Callable[..., Scene], *, clock: bool = False
     return sc
 
 
-def test_r9b_failed_pause_thrice_raises_and_repeats_only_failed_device(make_scene: Callable[..., Scene]) -> None:
+def test_r9b_failed_pause_thrice_raises_and_stops_every_device_on_every_call(make_scene: Callable[..., Scene]) -> None:
+    # Решение владельца 2026-11-20 (ADR-PH-004): стоп роботам на КАЖДОМ вызове pause (прежнее окно эпизода убрано).
     sc = _failing_belt_scene(make_scene)
     errors = [sc.pause().error for _ in range(3)]
     assert all(isinstance(e, RuntimeError) for e in errors), f"исключения трёх pause: {errors}"
-    assert [(a[0], a[1]) for a in sc.drivers["r_v2"].stops()] == [("stop", {"level": "SOFT"})]
-    assert [(a[0], a[1]) for a in sc.drivers["r_v1"].stops()] == [("abort", {"mode": 3})]
+    assert [(a[0], a[1]) for a in sc.drivers["r_v2"].stops()] == [("stop", {"level": "SOFT"})] * 3
+    assert [(a[0], a[1]) for a in sc.drivers["r_v1"].stops()] == [("abort", {"mode": 3})] * 3
     assert [(a[0], a[1]) for a in sc.drivers["belt"].stops()] == [("stop", {})] * 3
 
 
-def test_r9b_resume_forgets_stops_and_robot_is_stopped_again(make_scene: Callable[..., Scene]) -> None:
+def test_r9b_resume_then_pause_stops_robot_again(make_scene: Callable[..., Scene]) -> None:
     sc = _failing_belt_scene(make_scene)
     for _ in range(3):
         assert isinstance(sc.pause().error, RuntimeError)
-    assert len(sc.drivers["r_v2"].stops()) == 1
+    assert len(sc.drivers["r_v2"].stops()) == 3
     sc.resume()
     assert isinstance(sc.pause().error, RuntimeError)
-    assert len(sc.drivers["r_v2"].stops()) == 2
+    assert len(sc.drivers["r_v2"].stops()) == 4
 
 
 def test_r9c_pause_after_clock_jump_stops_robot_again(make_scene: Callable[..., Scene]) -> None:

@@ -60,14 +60,12 @@ TEXT_STOP_UNCONFIRMED = "стоп не подтверждён роботом"
 # Постоянные тексты хуков run-state (R8: без входных значений)
 TEXT_STATE_UNAVAILABLE = "device_hub: состояние устройств недоступно"
 TEXT_PAUSE_FAILED = "pause: сбой останова устройств"
-# Часы плагина: возраст связи и окно эпизода паузы. Модульное имя — точка подмены в тестах; срок ``pause_all`` берёт
+# Часы плагина: возраст связи. Модульное имя — точка подмены в тестах; срок ``pause_all`` берёт
 # ``time.monotonic()`` (часы менеджера)
 _clock = time.monotonic
 # Срок обхода ``pause_all``, с: строго меньше замка сверки оркестратора ``_SHUTDOWN_LOCK_SEC`` = 2,0
 # (``plugin_orchestrator``): ``shutdown`` не ждёт хук дольше
 _PAUSE_BUDGET_S = 1.5
-# Окно эпизода паузы, с: повтор оркестратора идёт через 1,0 с после конца прошлого вызова; позже — новый эпизод
-_PAUSE_EPISODE_S = 3.0
 # Подряд исключений ``drv.tick`` при живой связи, после которых связь «ошибка» без порога по времени
 _TICK_FAILS_LIMIT = 3
 
@@ -224,10 +222,6 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # ``params.conn_stale_s`` устройства; пишет tick-воркер, читает ``readiness`` (``.get``, без замков)
         self._tick_ok_at: dict[str, float] = {}
         self._conn_stale_s: dict[str, float] = {}
-        # Пауза: устройства, которым стоп в этом эпизоде уже ушёл, и конец прошлого вызова ``pause`` (потоки хуков —
-        # один ``run_watch``, замка нет)
-        self._pause_stopped: set[str] = set()
-        self._pause_last_end = float("-inf")
         # Устройства рецепта в порядке рецепта; перезаписывается целым кортежем (start, cmd_device_sync_set)
         self._recipe_ids: tuple[str, ...] = ()
         self._ctx = ctx
@@ -432,9 +426,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
         Действие — данные драйвера (``pause_action``, ADR-DH-015): плагин видов и протоколов не знает. Обход —
         ``DeviceManager.pause_all`` по ВСЕМ устройствам реестра (не только рецепта) ПАРАЛЛЕЛЬНО до срока
         ``_PAUSE_BUDGET_S``: медленный робот не задерживает ленту. Неподключённое и без действия паузы — молча
-        пропущено. Устройствам, которым стоп в этом эпизоде уже ушёл (``_pause_stopped``), повтор команду не шлёт:
-        эпизод — повторы оркестратора с промежутком ≤ ``_PAUSE_EPISODE_S``; конец нормального вызова и ``resume``
-        эпизод закрывают. Сбой (``error``: ответ не ``ok``, исключение, нет ответа к сроку, предыдущий стоп ещё идёт)
+        пропущено. Стоп уходит на КАЖДОМ вызове (решение владельца 2026-11-20, ADR-PH-004): после упавшего ``pause`` и
+        ЗАПУСТИТЬ повторная остановка не теряется. Пропуск только у устройства, чей стоп прошлого вызова ещё идёт
+        (``DeviceManager.pause_all``: «предыдущий стоп ещё идёт» — ``error``, второй параллельной команды нет);
+        состояния в плагине нет, ``resume`` ничего не сбрасывает. Сбой (``error``: ответ не ``ok``, исключение, нет
+        ответа к сроку, предыдущий стоп ещё идёт)
         накапливается, логируется ПОСЛЕ обхода (сбой логгера обход не прерывает) и даёт одно ``RuntimeError`` без
         значений (оркестратор запишет ``failure`` и повторит вызов раз в секунду). Не ставит ``_shutting_down`` и не
         зовёт ``request_stop_all_begin`` (он одноразов и защёлкивает срок процесса).
@@ -444,22 +440,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
         продолжают идти. Поток, не вышедший к сроку, даёт инцидент ``device_hub.scope`` (принято, ADR-DH-015).
         """
         failures: list[str] = []  # тексты для лога; пишутся после обхода (сбой логгера не должен прервать останов)
-        if _clock() - self._pause_last_end > _PAUSE_EPISODE_S:
-            self._pause_stopped = set()  # новый эпизод
         try:
-            results = self._manager.pause_all(time.monotonic() + _PAUSE_BUDGET_S, skip=frozenset(self._pause_stopped))
+            results = self._manager.pause_all(time.monotonic() + _PAUSE_BUDGET_S)
         except Exception as exc:  # no-health: сбой обхода — в лог после и итоговое исключение
             results = {}
             failures.append(f"DeviceHubPlugin.pause: сбой обхода: {exc!r}")
         for dev_id, res in results.items():
-            status = res.get("status")
-            if status == "ok":
-                self._pause_stopped.add(dev_id)
-            elif status == "error":
+            if res.get("status") == "error":
                 failures.append(
                     f"DeviceHubPlugin.pause: {dev_id!r}: {res.get('op', '')} не принят: {res.get('message', '')}"
                 )
-        self._pause_last_end = _clock()
         if failures:
             try:
                 for text in failures:
@@ -467,12 +457,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
             except Exception:  # no-health: сбой самого лога не должен подменить контрактное исключение
                 pass
             raise RuntimeError(TEXT_PAUSE_FAILED)
-        self._pause_stopped = set()  # нормальный возврат: эпизод закрыт
 
     def resume(self, ctx: PluginContext) -> None:
         """PAUSED -> RUNNING: ничего не запускает (Task 2.2a, П.4). Движение и лента стартуют своими командами
-        (лента — кнопкой пульта); возобновление не должно само двигать оборудование. Закрывает эпизод паузы."""
-        self._pause_stopped = set()
+        (лента — кнопкой пульта); возобновление не должно само двигать оборудование. Состояния паузы в плагине нет."""
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: остановка под одним сроком (К1, О8, T5.3 круг 2), отключить всех, сохранить реестр.
