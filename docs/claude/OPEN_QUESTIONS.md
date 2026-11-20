@@ -1091,7 +1091,7 @@ use`, порт никто не слушает, прототип получает
 
 Детерминированно красные на `main` до и после merge `feat/line-sim` (проверено worktree на `0c373dc5`):
 - `multiprocess_prototype/frontend/widgets/tabs/observability/tests/test_empty_hint_and_lag.py::TestOnARealStore` — 2 теста («вкладка пуста на реальном сторе»);
-- `multiprocess_prototype/frontend/widgets/tabs/processes/tests/test_system_dashboard.py::TestRefresh::test_refresh_pulls_ring_history_into_series`;
+- `multiprocess_prototype/frontend/widgets/tabs/processes/tests/test_system_dashboard.py::TestRefresh::test_refresh_pulls_ring_history_into_series`; **причина найдена — C-98 в `defects.md` (ветка `fix/lane-D2-reds-on-main`)**;
 - `multiprocess_framework/modules/config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored` — «чужой файл разбудил watcher: 1» (macOS; на Windows не проверялось).
 Причина не искалась. gui-service 1.4 сравнивается с baseline 2470/0/3, а не с «всё зелёное».
 
@@ -2429,8 +2429,9 @@ Windows. Поймать — повторы с `--tb=long -rf` до первог�
 **Чем это грозит, если не разобраться:** документация расходится с кодом, редкие потери автостарта, тихое отключение удержания при смене периода.
 **Что нужно, чтобы закрыть:** docs-writer по (а); тесты по (б), (в), (е); замер по (г); приёмка ACCEPTANCE 2.7 и 2.7d на стенде по (ж).
 
-### 2026-11-19 · полоса Ф · красные тесты вне run-state на слитом `main` · открыты, не в `plans/queue/defects.md`
-**Что не знаю:** причину трёх красных. `frontend/tests/test_gui_process.py::TestGuiProcessInstantiation::test_bridge_created_in_init_application_threads` (`create_worker` вызван 2 раза), `frontend/tests/test_headless_process.py::TestDrainWorkerCreation::test_drain_worker_is_created_and_started` (`['readiness_snapshot', 'data_drain'] == ['data_drain']`) и `processes/tests/test_system_dashboard.py::TestRefresh::test_refresh_pulls_ring_history_into_series` (последний уже записан выше, ~строка 1094). Воркер `readiness_snapshot` (`process_module.py:1065`, `_init_run_state_workers`) есть и на `767d61329` (до слияния 2.7: 15 упоминаний в файле до и после).
+### 2026-11-19 · полоса Ф · красные тесты вне run-state на слитом `main` · причина найдена полосой Д2: C-97 и C-98 в `plans/queue/defects.md`, исправлено на ветке `fix/lane-D2-reds-on-main` (до слияния — открыто)
+**Дубль снят (полоса Д2, 2026-11-20):** причины и правки — только в `defects.md` (C-97: два теста `GuiProcess`/`HeadlessProcess`; C-98: `test_system_dashboard`, дефект `series_points` в framework); здесь не повторять.
+**Что не знаю (на момент записи):** причину трёх красных. `frontend/tests/test_gui_process.py::TestGuiProcessInstantiation::test_bridge_created_in_init_application_threads` (`create_worker` вызван 2 раза), `frontend/tests/test_headless_process.py::TestDrainWorkerCreation::test_drain_worker_is_created_and_started` (`['readiness_snapshot', 'data_drain'] == ['data_drain']`) и `processes/tests/test_system_dashboard.py::TestRefresh::test_refresh_pulls_ring_history_into_series` (последний уже записан выше, ~строка 1094). Воркер `readiness_snapshot` (`process_module.py:1065`, `_init_run_state_workers`) есть и на `767d61329` (до слияния 2.7: 15 упоминаний в файле до и после).
 **Что я проверил и чем:** `test-runner` на `main` после слияния П3 (красные те же и на `main` после 2.7), чтение кода; прогон на `767d61329` не сделан (запрос отклонён владельцем).
 **Чем это грозит, если не разобраться:** красное в suite без записи в `defects.md` теряется как «известное».
 **Что нужно, чтобы закрыть:** прогон трёх файлов на `767d61329` (или на чистой базе до run-state), затем внести в `defects.md` либо чинить: ожидание двух тестов `GuiProcess`/`HeadlessProcess` считать списком воркеров без `readiness_snapshot`.
