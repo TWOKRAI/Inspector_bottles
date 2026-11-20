@@ -138,7 +138,7 @@ proxy.gap_diverged_count      # снимок кэш изменил: потеря
 proxy.gap_unclassified_count  # применённого снимка нет (ошибка, таймаут, переполнение, shutdown)
 ```
 
-Одноимённые метрики — `state_proxy.gap_detected/clean/diverged/unclassified`. Клиент не отличает потерю пакета от дельты в полёте и от собственной записи при `exclude_self=True`, поэтому `diverged` — верхняя оценка потерь, а не число потерь. WARNING пишется только для `diverged`, не чаще раза в 30 с на экземпляр.
+Одноимённые метрики — `state_proxy.gap_detected/clean/diverged/unclassified`. Клиент не отличает потерю пакета от дельты в полёте и от собственной записи при `exclude_self=True`, поэтому `diverged` — верхняя оценка потерь, а не число потерь. Из строк про разрыв revision WARNING пишется только для `diverged`, не чаще раза в 30 с на экземпляр (остаются штатные WARNING «resync не удался» и про переполнение журнала).
 
 ---
 

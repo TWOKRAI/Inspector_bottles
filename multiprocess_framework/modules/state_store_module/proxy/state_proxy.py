@@ -1068,7 +1068,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             self._classify_gap_outcome(uncovered, "unclassified")
             self._log_error(f"StateProxy '{self._process_name}': ресинк не отправлен: {exc}")
 
-    def _resync_blocking_fallback(self, patterns: list[str], msg: dict, from_gaps: int) -> None:
+    def _resync_blocking_fallback(self, patterns: list[str], msg: dict, from_gaps: int = 0) -> None:
         """Старый синхронный ресинк — для роутеров без ``request_async``.
 
         Такие роутеры (тестовые дубли ``InMemoryRouter``/``MockRouter``/
@@ -1143,7 +1143,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 f"(всего неудач={self._resync_failed_count}); кэш оставлен как есть, "
                 "дельты продолжают применяться штатно"
             )
-            self._classify_gap_outcome(from_gaps, "unclassified")
+            # Догоняющего захода при неудаче нет (ранний return — поведение прежнее), поэтому
+            # совмещённые разрывы тоже закрываем здесь, иначе они остались бы без исхода.
+            self._classify_gap_outcome(from_gaps + again_gaps, "unclassified")
             return
 
         snapshot = response.get("value", {})
@@ -1357,6 +1359,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             equal = old == new
         except Exception:
             return False
+        if getattr(equal, "ndim", None) == 0:
+            return bool(equal)  # numpy-скаляр: ``np.float64(1.0) == np.float64(1.0)`` -> ``np.bool_``
         return equal is True or (isinstance(equal, bool) and equal)
 
     # -------------------------------------------------------------------
@@ -1381,7 +1385,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         ``count == 0`` — ресинк не от разрыва: ничего не считается. ``clean`` — снимок
         кэш не изменил, потери точно не было. ``diverged`` — снимок кэш изменил: потеря
         пакета ЛИБО штатное расхождение (дельта в полёте, собственная запись при
-        ``exclude_self``, NaN) — клиент их не различает. ``unclassified`` — применённого
+        ``exclude_self``, NaN внутри контейнера) — клиент их не различает. ``unclassified`` — применённого
         снимка нет (отказ, таймаут, переполнение, не-dict, shutdown).
 
         WARNING пишется только для ``diverged`` и не чаще ``_GAP_WARN_INTERVAL_S``.
@@ -1470,10 +1474,12 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._resync_dirty.clear()
         self._resync_dirty_deletes.clear()
         self._resync_again_pending = False
+        # R3c: ресинк в полёте оборвался — его разрывы (и совмещённые с ним: догоняющего захода
+        # не будет) считаем сразу (unclassified); поздний ответ застанет происхождение 0 и не
+        # даст ложного clean по пустым patterns.
+        uncovered = self._resync_from_gaps + self._resync_again_gaps
+        self._resync_from_gaps = 0
         self._resync_again_gaps = 0
-        # R3c: ресинк в полёте оборвался — его разрывы считаем сразу (unclassified); поздний
-        # ответ застанет происхождение 0 и не даст ложного clean по пустым patterns.
-        uncovered, self._resync_from_gaps = self._resync_from_gaps, 0
         self._classify_gap_outcome(uncovered, "unclassified")
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
