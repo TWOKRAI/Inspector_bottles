@@ -357,6 +357,35 @@ class CameraDevicePlugin(ProcessModulePlugin):
             if bridge is not None:
                 logging.getLogger("camera_device.session").removeHandler(bridge)
 
+    def readiness(self, ctx: PluginContext) -> list[dict]:
+        """Причина неготовности по состоянию сеанса камеры (Task 2.2c). Только чтение полей.
+
+        Зовётся из потока снимка готовности (~2 Гц): БЕЗ замков (`_lock`, `_session_lock`,
+        `session._lock`, `_profile.lock`), без IO, без `_ensure_session`. Читает один голый
+        атрибут сеанса — `state` (`params*` берут замок, `last_error` несёт серийные номера и
+        пути). `device_held` не читается: он не меняет ответ (пара `closed` + `device_held=True`
+        — это `closed`), а лишнее чтение — лишняя гонка. Текст причины — литерал.
+        """
+        session = getattr(self, "_session", None)
+        st = "idle" if session is None else session.state
+        if st == "grabbing":
+            return []
+        if st == "opening":
+            return [{"severity": "check_function", "reason": "камера открывается"}]
+        if st == "stopping":
+            return [{"severity": "out_of_spec", "reason": "камера останавливается"}]
+        if st == "busy":
+            return [{"severity": "failure", "reason": "камера занята"}]
+        if st == "not_found":
+            return [{"severity": "failure", "reason": "камера не найдена"}]
+        if st == "error":
+            return [{"severity": "failure", "reason": "ошибка камеры"}]
+        if st in ("idle", "closed"):
+            if self._reg.auto_start:
+                return [{"severity": "check_function", "reason": "камера не запущена"}]
+            return []
+        return [{"severity": "failure", "reason": "состояние камеры неизвестно"}]
+
     # ------------------------------------------------------------------ #
     # Поток данных
     # ------------------------------------------------------------------ #
