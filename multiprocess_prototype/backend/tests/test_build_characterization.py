@@ -20,6 +20,9 @@
 Устойчивость снапшота:
   - абсолютный путь корня проекта нормализуется в ``<ROOT>`` (иначе снапшот привязан
     к машине);
+  - слово оператора (``target_word`` плагина word_layout) нормализуется в ``""``: это
+    состояние, а не свойство рецепта, и после Save из пульта оно лежит в файле рецепта
+    (В5/Task 6.1c); ключ ``target_field: "target_word"`` — другой ключ, его не трогаем;
   - ``build()`` НЕ спавнит процессы — только конструирует ``SystemLauncher`` (dict-
     сборка + assembly + filesystem-discover), поэтому «железные» рецепты (phone /
     hikvision) собираются headless без камеры [[hardware-recipes-no-headless-boot]];
@@ -77,6 +80,23 @@ def _normalize_paths(obj: Any) -> Any:
     return obj
 
 
+def _normalize_operator_state(obj: Any) -> Any:
+    """Слово оператора → ``""`` рекурсивно (В5/Task 6.1c).
+
+    У каждого dict с ключом ``target_word`` и строковым значением значение заменяется на
+    пустую строку; не-строки (``None``, числа) и одноимённое СЛОВО в ``target_field``
+    (значение, не ключ) не трогаются. Иначе реальный Save слова из пульта в рецепт краснил
+    бы golden, а «осознанная» перегенерация замораживала бы слово оператора.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: "" if k == "target_word" and isinstance(v, str) else _normalize_operator_state(v) for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_normalize_operator_state(v) for v in obj]
+    return obj
+
+
 def _canonical_build(recipe: str) -> dict[str, Any]:
     """Собрать launcher рецепта и извлечь детерминированный канонический срез.
 
@@ -99,7 +119,7 @@ def _canonical_build(recipe: str) -> dict[str, Any]:
     }
     # default=str → стабильная сериализация Path/float; loads → снова dict для diff.
     stable = json.loads(json.dumps(payload, default=str, sort_keys=True))
-    return _normalize_paths(stable)
+    return _normalize_operator_state(_normalize_paths(stable))
 
 
 def _golden_path(recipe: str) -> Path:
@@ -135,4 +155,62 @@ def test_build_matches_snapshot(recipe: str) -> None:
     assert actual["process_count"] == expected["process_count"]
     assert actual["orchestrator_class_path"] == expected["orchestrator_class_path"]
     # Полный снапшот: ловит ЛЮБОЙ дрейф proc_dict / orchestrator_config.
+    assert actual == expected
+
+
+def test_operator_word_normalized() -> None:
+    """Нормализатор: ``target_word``-строка → ``""``, остальное (включая ``target_field``) не тронуто."""
+    src = {
+        "proc_dicts": {
+            "layout": {"config": {"target_word": "МИР", "target_field": "target_word"}},
+            "list": [{"target_word": "КОТ"}, [{"target_word": "ДОМ"}]],
+            "none": {"target_word": None},
+            "num": {"target_word": 5},
+        }
+    }
+    assert _normalize_operator_state(src) == {
+        "proc_dicts": {
+            "layout": {"config": {"target_word": "", "target_field": "target_word"}},
+            "list": [{"target_word": ""}, [{"target_word": ""}]],
+            "none": {"target_word": None},
+            "num": {"target_word": 5},
+        }
+    }
+    # исходный объект не мутирован
+    assert src["proc_dicts"]["layout"]["config"]["target_word"] == "МИР"
+
+
+def test_operator_word_in_recipe_does_not_change_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Реальная сборка β со словом «МИР» в layout/word_layout даёт тот же срез, что golden.
+
+    Рецепт в репозитории не правится: загрузчик сырого рецепта подменён обёрткой, которая после
+    чтения подставляет слово в плагин word_layout. Страж «ноль наблюдений»: слово действительно
+    дошло до сборки (иначе тест прошёл бы вхолостую).
+    """
+    from multiprocess_prototype.backend import launch
+
+    original = launch._load_raw_dict
+    injected: list[str] = []
+
+    def _find_word_layout(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("plugin_name") == "word_layout" and isinstance(node.get("config"), dict):
+                node["config"]["target_word"] = "МИР"
+                injected.append("МИР")
+            for v in node.values():
+                _find_word_layout(v)
+        elif isinstance(node, list):
+            for v in node:
+                _find_word_layout(v)
+
+    def _load_with_word(path: Path) -> Any:
+        raw = original(path)
+        _find_word_layout(raw)
+        return raw
+
+    monkeypatch.setattr(launch, "_load_raw_dict", _load_with_word)
+    actual = _canonical_build("hikvision_letter_robot")
+
+    assert injected, "слово не подставлено: в загруженном рецепте нет плагина word_layout"
+    expected = json.loads(_golden_path("hikvision_letter_robot").read_text(encoding="utf-8"))
     assert actual == expected
