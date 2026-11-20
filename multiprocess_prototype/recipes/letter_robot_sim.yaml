@@ -424,7 +424,7 @@ blueprint:
         source_target_fps: 10
       extras: {}
     # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
-    # процесса layout без перезапуска (param → SetPluginConfig). Одинаков с β.
+    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с β; «Домой»/«Серво ВКЛ» только здесь (в β — после R4).
     - process_name: pult
       plugins:
         - plugin_name: control_panel
@@ -435,6 +435,18 @@ blueprint:
             run_gated: false
             controls:
               - {id: word, type: text, label: "Слово", source: param, target_process: layout, target_plugin_index: 0, target_field: target_word}
+              # Кнопки на хаб устройств (devices/0): source action → команда DeviceHubPlugin.
+              # value_arg "on" В КАВЫЧКАХ: в YAML 1.1 голое on = True, parse_controls молча роняет контрол.
+              - {id: belt_run, type: button, label: "Лента пуск", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_run, command_args: {device_id: vfd_belt}}
+              - {id: belt_stop, type: button, label: "Лента стоп", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_stop, command_args: {device_id: vfd_belt}}
+              - {id: home, type: button, label: "Домой", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_park, command_args: {device_id: robot_main}}
+              - {id: servo_on, type: button, label: "Серво ВКЛ", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_servo, value_arg: "on", command_args: {device_id: robot_main}}
+              # Строка статуса: read-only подписи по путям StateStore (Task 6.3).
+              - {id: mon_conn, type: monitor, label: "Связь с роботом", source: monitor, state_path: devices.state.robot_main.conn, value_key: conn}
+              - {id: mon_park, type: monitor, label: "Парковка", source: monitor, state_path: devices.state.robot_main.park.state}
+              - {id: mon_last, type: monitor, label: "Последняя буква", source: monitor, state_path: processes.layout.state.word_layout.last_label}
+              - {id: mon_assembled, type: monitor, label: "Собрано", source: monitor, state_path: processes.layout.state.word_layout.assembled}
+              - {id: mon_done, type: monitor, label: "Слово собрано", source: monitor, state_path: processes.layout.state.word_layout.done}
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
