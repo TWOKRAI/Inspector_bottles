@@ -10,13 +10,15 @@
   А2. Оба рецепта проходят ``SystemBlueprint.check() == []`` тем же путём, что и загрузчик
       (``load_topology_dict`` → ``normalize_blueprint`` → ``model_validate`` →
       ``infer_missing_collectors`` → ``check``), а не облегчённым ``validate_recipe_blueprint``.
-  А3. ``parse_controls`` на конфиге плагина процесса ``pult`` даёт РОВНО ОДИН контрол:
+  А3. ``parse_controls`` на конфиге плагина процесса ``pult`` даёт среди контролов РОВНО ОДИН
+      контрол ``word`` (после Task 6.4 в ``pult`` есть и другие: лента, мониторы):
       type text, source param, id word, label «Слово», target_process layout,
       target_plugin_index 0, target_field target_word.
   А4. Контрол из рецепта → реальный ``ControlPanelPresenter.operate(spec, "МИР")`` → реальный
       ``CommandDispatcherOrchestrator`` → ровно одно ``PluginConfigChanged`` (layout, 0,
       target_word, "МИР"); ``resolve_plugin_register(topology, "layout", 0) == "word_layout"``.
-  А5. Набор контролов процесса ``pult`` в двух рецептах идентичен.
+  А5. Слово, лента и мониторы процесса ``pult`` в двух рецептах идентичны; «Домой» и
+      «Серво ВКЛ» только в sim (в β — после R4, Task 6.4).
 
 Ожидаемые значения — литералы, не вычисляются из кода под тестом. Если процесса ``pult`` в
 рецепте нет, тесты падают AssertionError с текстом «процесса pult нет», а не ошибкой теста.
