@@ -31,7 +31,7 @@
     `action` к `device_hub` — процесс `devices` в `pult_demo` ЕСТЬ (из `base.yaml`, отчёт R2), но роботов нет («не подключено»): ответ команды
     без ошибки проверять на `phone_sketch` (`robot_set_mode`, `phone_sketch.yaml:310-330`); `param` — одно поле, readback `introspect_registers`.
   - REDS: n/a — прогон без кода; красный → находка в отчёт, не правка.
-- Task 6.1: **[VERTICAL SLICE] поле «Слово» в рецептах 1.0** [PENDING] (после 6.0)
+- Task 6.1: **[VERTICAL SLICE] поле «Слово» в рецептах 1.0** [DONE 2026-11-20, ветка `feat/pult-word-field`, ревью Sonnet APPROVED; стенд «МИР» → `target_word` не гонялся — нужно окно `stand`] (6.0 GUI-путь не блокирует)
   - Level Middle+ · Assignee developer · Layer prototype · Module contract n/a · Handoff `developer`(REDS) → `reviewer`
   - FILES: `recipes/letter_robot_sim.yaml`, `recipes/hikvision_letter_robot.yaml`, новый `frontend/widgets/tabs/services/control_panel/tests/test_recipe_1_0.py`,
     `backend/tests/snapshots/hikvision_letter_robot.build.json` (перегенерация `UPDATE_BUILD_SNAPSHOTS=1`, diff просмотреть: `process_count` 10 → 11, в `process_names` добавится `pult`;
@@ -48,6 +48,15 @@
     `word_layout.target_word == "МИР"` за ≤ 2 с, на первом диске строка `смена слова '…' → 'МИР' (источник: регистр)`.
   - REDS: `test_recipe_1_0.py::test_word_control_writes_target_word` (реальные объекты), `::test_pult_node_last_in_both_recipes`, `::test_recipes_pass_blueprint_check`;
     `recipes/tests/test_letter_robot_sim_diff.py` и `backend/tests/test_build_characterization.py` — зелёные (снапшот β перегенерирован осознанно).
+- Task 6.1b: **тесты «рецепт как есть» и слово оператора (следствие В5)** [PENDING] (после слияния 6.1; решение лида, найдено ревью 6.1)
+  - Level Junior+ · Assignee developer · Layer prototype + plugins-tests · Module contract n/a · Handoff `developer`(REDS) → `reviewer`(express)
+  - Суть: после Save рецепта со словом оператора красными станут не только `recipes/tests/test_letter_robot_sim_diff.py:149`
+    (`.blueprint.processes[6].plugins[0].config.target_word`), но и (воспроизведено на копии рецепта с `target_word: МИР`)
+    `Plugins/processing/word_layout/tests/test_p3_disk_journal.py::test_recipe_default_empty_word_says_so` («рецепт как есть: target_word ''») и
+    `scripts/alpha_sim/tests/test_p4_alpha_real_plugin.py::test_real_plugin_lines_judged_b_d_c` («рецепт как есть: слово пусто»);
+    для β — golden-снапшот держит `target_word: ""`. Красного сегодня нет, он возникает только после реального Save.
+  - FILES: те три теста, `_recipe_cfg()` в двух последних — явный `target_word=''`; diff-тест — не считать `target_word` расхождением; снапшот β по решению лида. Чужие тесты — только с ведома владельцев (word_layout P3 — `plans/word-layout.md`, alpha — полоса α).
+
 - Task 6.2: **`word_layout` — прогресс в state на решении + собранная часть слова** [PENDING] (параллельно 6.1)
   - Level Middle+ · Assignee developer · Layer plugins · Module contract impl-only · Handoff `developer`(REDS) → `reviewer`
   - FILES: `Plugins/processing/word_layout/plugin.py`, `registers.py`, новый `tests/test_state_progress.py` (один файл, не `test_p3_disk_journal.py`), `README.md`
@@ -128,7 +137,7 @@ R4 — **зависимость** для «Домой»/«Серво ВКЛ» в
 - В3. **Решено:** `monitor` в 1.0 — только контролы из рецепта; пикер «Наблюдение» (в `catalog.py` билдера `monitor` нет) — после 1.0.
 - В4. **Закрыто (владелец, полоса Ф):** кнопки run-state — только главное окно, пульт не дублирует.
 - В5. **Решено владельцем 2026-11-20: принять как есть.** Слово пишется и в editor-топологию (`SetPluginConfig`, `frontend/app.py:867-912`) — рецепт станет «изменён», при Save `target_word` уйдёт в файл,
-  а `test_letter_robot_sim_diff.py:149` (точное равенство `_EXPECTED_DIFFS`) покраснеет на `.blueprint.processes[6].plugins[0].config.target_word`. Слово — часть рецепта; в 6.1 diff-тест `test_letter_robot_sim_diff.py` не должен считать `target_word` расхождением (учесть в тесте, не в рецепте).
+  а `test_letter_robot_sim_diff.py:149` (точное равенство `_EXPECTED_DIFFS`) покраснеет на `.blueprint.processes[6].plugins[0].config.target_word`; шире — см. Task 6.1b (ещё два теста и снапшот β). Слово — часть рецепта; в 6.1 diff-тест `test_letter_robot_sim_diff.py` не должен считать `target_word` расхождением (учесть в тесте, не в рецепте).
 - В6. **Решено (лид):** маска `·Е·Е····Е`; счёт `3/9` читается из `slots_filled`/`slots_total`, они уже в state.
 - В7. **Решено владельцем 2026-11-20: «режим оператора» — после 1.0.** У каждой строки пульта «✕» (`widget.py:225-240`) и форма «Добавить контрол» — оператор может удалить «Слово» (подтверждение удаления есть).
   Сейчас в «Вне scope Phase 6».

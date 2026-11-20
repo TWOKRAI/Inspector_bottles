@@ -298,6 +298,47 @@
             "status": "stopped"
           }
         },
+        "pult": {
+          "config": {
+            "chain_targets": [
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "source",
+                "config": {
+                  "controls": [
+                    {
+                      "id": "word",
+                      "label": "Слово",
+                      "source": "param",
+                      "target_field": "target_word",
+                      "target_plugin_index": 0,
+                      "target_process": "layout",
+                      "type": "text"
+                    }
+                  ],
+                  "panel_id": "pult",
+                  "run_gated": false
+                },
+                "fps": 25,
+                "plugin_class": "Services.control_panel.plugin.plugin.ControlPanelPlugin",
+                "plugin_name": "control_panel",
+                "resolution_height": 480,
+                "resolution_width": 640,
+                "ring_buffer_size": 3,
+                "source_type": "simulator"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": null,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
         "recog": {
           "config": {
             "chain_targets": [
@@ -3922,6 +3963,400 @@
       },
       "workers": {}
     },
+    "pult": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_max_lag_items": 0,
+        "chain_targets": [
+          "gui"
+        ],
+        "collector": {},
+        "copy_out_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "observability_app": {
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "name_max_len": 20,
+              "type": "file"
+            }
+          },
+          "console": true,
+          "documents": {
+            "config": {
+              "db_path": "data/documents.db",
+              "purge_interval_sec": 3600,
+              "retention_sec": {
+                "audit": 31536000,
+                "verdict": 315360000
+              }
+            },
+            "factory": "Services.documents.wiring:make_document_sink"
+          },
+          "errors": {
+            "enabled": true,
+            "include_stacktrace": true,
+            "level": "WARNING"
+          },
+          "file": true,
+          "log_level": "INFO",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
+          "loggers": {
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
+              ]
+            }
+          },
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
+          "stats": {
+            "aggregation_interval": 10.0,
+            "enabled": true,
+            "log_level": "INFO"
+          }
+        },
+        "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
+        "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
+        "plugins": [
+          {
+            "category": "source",
+            "config": {
+              "controls": [
+                {
+                  "id": "word",
+                  "label": "Слово",
+                  "source": "param",
+                  "target_field": "target_word",
+                  "target_plugin_index": 0,
+                  "target_process": "layout",
+                  "type": "text"
+                }
+              ],
+              "panel_id": "pult",
+              "run_gated": false
+            },
+            "controls": [],
+            "fps": 25,
+            "panel_id": "pult",
+            "plugin_class": "Services.control_panel.plugin.plugin.ControlPanelPlugin",
+            "plugin_name": "control_panel",
+            "port_count": 8,
+            "resolution_height": 480,
+            "resolution_width": 640,
+            "ring_buffer_size": 3,
+            "source_type": "simulator"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0,
+        "telemetry": {
+          "publish": {
+            "default_enabled": false,
+            "default_interval_sec": 1.0,
+            "metrics": {
+              "fps": {
+                "enabled": true,
+                "interval_sec": 1.0
+              },
+              "latency_ms": {
+                "enabled": true,
+                "interval_sec": 1.0
+              }
+            },
+            "tick_sec": null
+          }
+        }
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "log_success": false,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "severity_routes": {
+            "CRITICAL": [
+              "critical_file",
+              "errors_file"
+            ],
+            "ERROR": [
+              "errors_file",
+              "critical_file"
+            ],
+            "WARNING": [
+              "warnings_file",
+              "errors_file",
+              "critical_file"
+            ]
+          },
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "Inspector Bottles",
+          "channels": {
+            "busy_file": {
+              "file_path": "busy.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "console": {
+              "backup_count": 5,
+              "capacity": null,
+              "degrade_after": 3,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "name_max_len": 20,
+              "owner": null,
+              "rotate": true,
+              "slow_write_sec": 0.05,
+              "type": "console",
+              "url": null,
+              "write_deadline_sec": 0.25
+            },
+            "gui_file": {
+              "file_path": "gui.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "degrade_after": 3,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "name_max_len": 20,
+              "owner": null,
+              "rotate": true,
+              "slow_write_sec": 0.05,
+              "type": "file",
+              "url": null,
+              "write_deadline_sec": 0.25
+            },
+            "performance_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "degrade_after": 3,
+              "enabled": true,
+              "file_path": "performance.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "name_max_len": 20,
+              "owner": null,
+              "rotate": true,
+              "slow_write_sec": 0.05,
+              "type": "file",
+              "url": null,
+              "write_deadline_sec": 0.25
+            },
+            "robot_exchange_file": {
+              "file_path": "robot_exchange.log",
+              "name_max_len": 20,
+              "type": "file"
+            },
+            "system_file": {
+              "backup_count": 5,
+              "capacity": null,
+              "degrade_after": 3,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "name_max_len": 20,
+              "owner": null,
+              "rotate": true,
+              "slow_write_sec": 0.05,
+              "type": "file",
+              "url": null,
+              "write_deadline_sec": 0.25
+            },
+            "trace_file": {
+              "file_path": "trace.log",
+              "name_max_len": 20,
+              "type": "file"
+            }
+          },
+          "compress_rotated": false,
+          "default_level": "INFO",
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "logger_groups": {
+            "служебное": [
+              "multiprocess_framework.modules.command_module",
+              "multiprocess_framework.modules.dispatch_module",
+              "multiprocess_framework.modules.shared_resources_module.queues"
+            ]
+          },
+          "loggers": {
+            "": {
+              "channels": null,
+              "channels_extra": null,
+              "level": "INFO"
+            },
+            "Services.device_hub.drivers.exchange_log": {
+              "channels": [
+                "robot_exchange_file"
+              ],
+              "level": "INFO"
+            },
+            "gui": {
+              "channels_extra": [
+                "gui_file"
+              ]
+            },
+            "trace": {
+              "channels_extra": [
+                "trace_file"
+              ]
+            },
+            "служебное": {
+              "channels": [
+                "busy_file"
+              ]
+            }
+          },
+          "manager_name": "LoggerManager",
+          "retention_days": 7,
+          "retention_sweep_interval_sec": 3600.0,
+          "retention_total_mb": 200,
+          "sampling_burst_reset_sec": 5.0,
+          "sampling_every_mth": 100,
+          "sampling_first_n": 0,
+          "sampling_max_level": "DEBUG",
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "messages_file"
+              ]
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ]
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "performance_file"
+              ]
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ]
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512,
+          "use_kind_channels": false
+        },
+        "stats": {
+          "aggregation_interval": 10.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "enabled": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "log_line_max_bytes": 2048,
+          "manager_name": "StatsManager",
+          "max_series": 1000,
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "observability": {
+          "maxsize": 256
+        },
+        "state": {
+          "maxsize": 8
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
     "recog": {
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
@@ -4799,7 +5234,7 @@
       "workers": {}
     }
   },
-  "process_count": 10,
+  "process_count": 11,
   "process_names": [
     "devices",
     "gui",
@@ -4810,7 +5245,8 @@
     "layout",
     "draw",
     "maskview",
-    "phone"
+    "phone",
+    "pult"
   ],
   "stop_timeout": 5.0
 }

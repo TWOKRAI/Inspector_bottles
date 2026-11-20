@@ -423,6 +423,30 @@ blueprint:
       metadata:
         source_target_fps: 10
       extras: {}
+    # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
+    # процесса layout без перезапуска (param → SetPluginConfig). Одинаков с β.
+    - process_name: pult
+      plugins:
+        - plugin_name: control_panel
+          plugin_class: Services.control_panel.plugin.plugin.ControlPanelPlugin
+          category: source
+          config:
+            panel_id: pult
+            run_gated: false
+            controls:
+              - {id: word, type: text, label: "Слово", source: param, target_process: layout, target_plugin_index: 0, target_field: target_word}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      restart_policy: {}
+      metadata: {}
+      extras: {}
   wires:
     - source: camera_0.camera_service.frame
       target: vision.color_convert.frame
