@@ -98,7 +98,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 - **`TreeStore.merge`** при глубоких структурах работает за O(N²) (каждый лист проходит навигацию от корня). Для типичных конфигов (десятки ключей) — pernebrejmo. Кандидат на оптимизацию (Этап 2 рефакторинга).
 - **Glob-walker** для дерева повторён в трёх местах (`tree_store._collect_matching`, `selector._walk`, `subscription_manager._match_pattern`). Можно унифицировать в `core/glob_walker.py`. Кандидат на Этап 2.
 - **`StateStoreManager.shutdown` и `StateInspector.subscriptions`** обращаются к приватным атрибутам `SubscriptionManager._lock` / `_subscriptions`. Кандидат на введение публичного `SubscriptionManager.subscribers()` (Этап 2).
-- **watch-from-revision — ложные resync под конкурентными несвязанными записями** (ADR-SS-015): `revision` — счётчик всего дерева, не per-pattern; параллельные мутации вне подписок процесса тоже двигают revision и могут вызвать resync, которого не требовалось. Не влияет на корректность (кэш всё равно сходится), только на частоту resync. Точный per-subscriber gap-detection — кандидат на будущее.
+- **watch-from-revision — ложные resync под конкурентными несвязанными записями** (ADR-SS-015): `revision` — счётчик всего дерева, не per-pattern; параллельные мутации вне подписок процесса тоже двигают revision и могут вызвать resync, которого не требовалось. Не влияет на корректность (кэш всё равно сходится), только на частоту resync. С 2026-11-21 (R3c, ADR-SS-015 вариант (в)) обнаружение — DEBUG, исходы классифицируются счётчиками `gap_detected/clean/diverged/unclassified_count`, WARNING — только для `diverged`, не чаще раза в 30 с; клиент по-прежнему не отличает потерю пакета от штатного расхождения (дельта в полёте, собственная запись при `exclude_self`). Точный per-subscriber gap-detection (водяной знак на сервере, вариант (а)) — после 1.0.
 - **Задача 4.10 (driver watch-from-revision, backend_ctl e2e)** НЕ реализована — вне объёма Ф4.9 (ядро сервер+StateProxy).
 
 ---
@@ -116,6 +116,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 | **2026-05-07** | **README.md / STATUS.md приведены в соответствие с реальным API** | **✅ Готово** |
 | **2026-07-11** | **ADR-SS-014/015: revision дерева + watch-from-revision resync (Ф4.9)** | **✅ Готово** |
 | **2026-08-23** | **ADR-SS-022: ресинк снят с приёмного потока (был простой 5 с на каждый разрыв revision, 93.7% дельт вытеснялось); окно ожидания снимка защищено по revision** | **✅ Готово** |
+| **2026-11-21** | **ADR-SS-015 (пересмотр, R3c): ложные «разрыв revision» — DEBUG + счётчики исходов `gap_*_count`, WARNING только для `diverged` с троттлингом 30 с** | **✅ Готово** |
 
 ---
 
