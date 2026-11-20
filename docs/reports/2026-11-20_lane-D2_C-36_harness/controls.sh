@@ -1,0 +1,4 @@
+#!/bin/bash
+# control (a): fresh queues on every incarnation (owner rule); control (b): SIGTERM instead of SIGKILL with reuse
+bash /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/run.sh c36_real_child.py kill --variant cons --reuse 0 --sig KILL --kills 300 --budget 125 --out /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/ctl_a_fresh.jsonl
+bash /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/run.sh c36_real_child.py kill --variant cons --reuse 1 --sig TERM --kills 300 --budget 125 --out /private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/90756511-bfd5-4960-bc24-c21fb94ab13e/scratchpad/c36/ctl_b_term.jsonl
