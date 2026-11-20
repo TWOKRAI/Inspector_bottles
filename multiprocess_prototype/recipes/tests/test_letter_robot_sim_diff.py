@@ -50,6 +50,8 @@ _LAYOUT_BLUEPRINT_KEYS = ("metadata",)
 
 # Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
 _EXPECTED_DIFFS = [
+    # Политика readiness боевого узла recog.ml_inference (Task 2.9b): сим осознанно без ключа — стендовые не трогаем.
+    ".blueprint.processes[5].plugins[2].config.readiness",
     # Геометрия ячеек сима (word-layout P3): 9 ячеек в досягаемости сима; рецепт β — ORDER #21/#26.
     ".blueprint.processes[6].plugins[0].config.first_y",
     ".blueprint.wires[0].source",
@@ -150,6 +152,9 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # Протокол и параметры сим-робота — третье и четвёртое следствие «сим вместо железа» (T3.7):
     # сим линии работает по v2, боевой робот — по v1 до Ф4; кольцо забора сима шире умолчания.
     # Значения закреплены литералами в test_sim_recipe_points_robot_at_sim_not_hardware.
+    # Ключ readiness узла recog.ml_inference (Task 2.9b) есть только у боевого рецепта: сим не гоняет
+    # блокировку «модель не загружена» (стендовые рецепты не трогаем), её проверяет стенд 2.9b на
+    # копии сима с ключом.
     all_diffs = _diff_paths(_canonical(base), _canonical(sim))
     other_diffs = sorted(d for d in all_diffs if not d.startswith(allowed_prefix))
     extra = [d for d in other_diffs if d not in _EXPECTED_DIFFS]

@@ -265,6 +265,10 @@ blueprint:
             confidence_threshold: 0.5
             top_k: 3
             draw_overlay: true
+            # Task 2.9b / ADR-PM-061: «модель не загружена» (out_of_spec) блокирует START; ключ — на ВСЕ out_of_spec узла
+            readiness:
+              severity:
+                out_of_spec: check_function
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
