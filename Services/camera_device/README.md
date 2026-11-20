@@ -275,8 +275,8 @@ register'а (проба и запись `apply_params`) для значения 
 `{"status": "error", "error": "running", "message": "сначала ОСТАНОВИТЬ"}`. Ключ ставится в `config` плагина или плоско в элементе
 `plugins` узла; на уровне узла он молча игнорируется. Для камеры решением владельца (2026-11-20) список — `release_device`, `take_device`.
 Не блокируются `apply_params`, `read_params`, `get_status`, `list_devices`, `describe_params`, `reset_stats`, `trigger_software`.
-Ключ в `camera_device_demo.yaml` ставится задачей 4c (на дату записи в рецепте его нет: `git grep run_locked_commands --
-multiprocess_prototype/recipes/camera_device_demo.yaml` пусто). Код плагина охрану не знает: она в базе плагина
+Ключ стоит в `camera_device_demo.yaml` (плоско в элементе `plugins`; Task 4c, тест `multiprocess_prototype/recipes/tests/test_camera_run_locked_recipe.py`);
+в hikvision-рецептах его нет: они ссылаются на старый плагин без `release_device`/`take_device`, ключ придёт вместе с 4.3 (W4). Код плагина охрану не знает: она в базе плагина
 (`multiprocess_framework/modules/process_module/plugins/base.py:1775,1808,1835`). Прямые вызовы `start(ctx)` (при `auto_start`,
 `plugin_base.py:349`) и `shutdown(ctx)` (`:354`) зовут `cmd_take_device` / `cmd_release_device` напрямую и охрану минуют; рестарт ребёнка
 супервизором в `running` не воспроизводился (`plans/2026-10-18_camera-device-service/tasks/4c.md`, Ф3).
