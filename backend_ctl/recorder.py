@@ -34,6 +34,8 @@ import threading
 import time
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
+from ._node_read import read_node
+
 # --------------------------------------------------------------------------- #
 #  Константы формата                                                          #
 # --------------------------------------------------------------------------- #
@@ -817,10 +819,10 @@ class ReplayPlayer:
         написавший разбор по живой сессии, на записи получал другую форму и молча читал
         None. Канон — live; реплей подстраивается под него (Task 4.1).
         """
-        with self.driver._telemetry_lock:
-            snap = self.driver._telemetry_model.snapshot(path)
-        if path in snap:
-            return {"status": "ok", "path": path, "value": snap[path], "recorded": True}
+        # Read-model хранит листья (П3): узел собирается обратно в вложенный dict.
+        exists, value = read_node(self.driver, path)
+        if exists:
+            return {"status": "ok", "path": path, "value": value, "recorded": True}
         # «Пути нет» у живого бэкенда — это status:error, а не успех с found:False.
         return {
             "status": "error",
