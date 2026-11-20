@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
             "show_warning",
         )
 
-        # Пульт запуска: шесть листьев system.run.* (last_fault приходит листом целиком).
+        # Пульт запуска: восемь листьев system.run.* (вид run_view PM; last_fault приходит листом целиком).
         bindings.bind_fanout("system.run.*", self._run_control.apply_leaf, owner=self._run_control)
 
     # -- Обратная совместимость (старый API) --

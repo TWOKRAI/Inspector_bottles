@@ -9,6 +9,9 @@
 Модуль состоит из двух частей:
     ``build_view(snapshot, busy)`` — чистая модель без Qt (словарь листьев → ``RunView``);
     ``RunControlWidget``          — отрисовка ``RunView`` и обработка кликов.
+
+Правила PM пульт читает, а не повторяет: блокирующие степени — из ``health/schema.py``;
+ОСТАНОВИТЬ — по ``stop_allowed``; подпись «гейт выключен» — по ``run_gate``.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from multiprocess_framework.modules.process_module.health import schema as _readiness_schema
 from multiprocess_prototype.frontend.state.bindings import DELETED
 
 _logger = logging.getLogger(__name__)
@@ -36,7 +40,9 @@ BUSY_SAFETY_MS = 3000
 _PREFIX = "system.run."
 
 # Листья, которыми затравка из ответа ``system.run.status`` дополняет снимок.
-_SEED_KEYS = ("state", "reasons", "start_allowed", "ack_allowed", "last_fault")
+# ``stop_allowed`` не берётся: устаревшее значение из ответа смешалось бы со свежим
+# листом ``state`` (S5 Ф10). ``run_gate`` за жизнь PM не меняется, устареть не может.
+_SEED_KEYS = ("state", "reasons", "run_gate", "start_allowed", "ack_allowed", "last_fault")
 
 # state -> (имя по-русски, уровень цвета)
 _STATES: dict[str, tuple[str, str]] = {
@@ -66,6 +72,7 @@ _TEXT_NO_LINK = "нет связи"
 _TEXT_NO_ANSWER = "нет ответа от системы"
 _TEXT_REFUSED = "отказ"
 _TEXT_FAULT_STOPPING = "идёт остановка"
+_TEXT_GATE_OFF = "Гейт выключен: кадры идут без ЗАПУСТИТЬ"
 
 
 @dataclass(frozen=True)
@@ -82,6 +89,7 @@ class RunView:
     detail_text: str
     indicators_text: str
     fault_text: str
+    gate_text: str = ""  # подпись «гейт выключен»; пусто — гейт включён или лист не пришёл
 
 
 _NO_DATA_VIEW = RunView(
@@ -116,11 +124,20 @@ def _reason_text(entry: dict[str, Any]) -> str:
     return "" if reason is None else str(reason)
 
 
+def _blocking_order() -> tuple[str, ...]:
+    """Блокирующие степени фреймворка (``health/schema.py``) на момент вызова.
+
+    Сначала по тяжести ``READINESS_SEVERITIES``, затем блокирующие вне шкалы — по алфавиту
+    (причина не теряется молча). Набор не кэшируется: читается из модуля на каждом вызове.
+    """
+    blocking = _readiness_schema.READINESS_BLOCKING_SEVERITIES
+    known = _readiness_schema.READINESS_SEVERITIES
+    return tuple([s for s in known if s in blocking] + sorted(s for s in set(blocking) if s not in known))
+
+
 def _blocking_reasons(reasons: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Блокирующие причины: сначала ``failure``, затем ``check_function`` (порядок внутри сохранён)."""
-    failures = [r for r in reasons if r.get("severity") == "failure"]
-    checks = [r for r in reasons if r.get("severity") == "check_function"]
-    return failures + checks
+    """Блокирующие причины (набор фреймворка) по тяжести степени; внутри степени — порядок списка."""
+    return [r for severity in _blocking_order() for r in reasons if r.get("severity") == severity]
 
 
 def _first_reason(raw_reasons: Any) -> str:
@@ -173,8 +190,10 @@ def build_view(snapshot: dict[str, Any], busy: bool) -> RunView:
     """Собрать представление пульта из снимка листьев ``system.run.*``.
 
     Args:
-        snapshot: ``{state, reasons, start_allowed, ack_allowed, last_fault}``;
-            любой ключ может отсутствовать, ввод любой формы не бросает.
+        snapshot: ``{state, reasons, run_gate, start_allowed, stop_allowed, ack_allowed,
+            last_fault}``; любой ключ может отсутствовать, ввод любой формы не бросает.
+            Нет ``stop_allowed`` -> ОСТАНОВИТЬ по ``state`` (старый бэкенд); подпись
+            «гейт выключен» — только при ``run_gate`` ровно ``False``.
         busy: команда оператора в полёте — кнопки неактивны.
     """
     state = snapshot.get("state")
@@ -186,6 +205,9 @@ def build_view(snapshot: dict[str, Any], busy: bool) -> RunView:
     start_allowed = bool(snapshot.get("start_allowed"))
     ack_allowed = bool(snapshot.get("ack_allowed"))
     last_fault = snapshot.get("last_fault")
+    gate_text = _TEXT_GATE_OFF if snapshot.get("run_gate") is False else ""
+    # Нет ключа (старый бэкенд) -> True: ОСТАНОВИТЬ решает state, как раньше.
+    stop_allowed = bool(snapshot["stop_allowed"]) if "stop_allowed" in snapshot else True
 
     ack_visible = state == "fault"
     detail_text = ""
@@ -213,12 +235,13 @@ def build_view(snapshot: dict[str, Any], busy: bool) -> RunView:
         level=level,
         start_enabled=start_allowed and state == "ready" and not busy,
         start_tooltip=start_tooltip,
-        stop_enabled=state == "running" and not busy,
+        stop_enabled=stop_allowed and state == "running" and not busy,
         ack_visible=ack_visible,
         ack_enabled=ack_visible and ack_allowed and not busy,
         detail_text=detail_text,
         indicators_text=_indicators_text(reasons) if state == "running" else "",
         fault_text=_fault_text(last_fault),
+        gate_text=gate_text,
     )
 
 
@@ -264,6 +287,7 @@ class RunControlWidget(QWidget):
         self._level: str | None = None
 
         self._state_label = self._make_label("RunStateLabel")
+        self._gate_label = self._make_label("RunGateLabel")
         self._detail_label = self._make_label("RunDetailLabel")
         self._indicators_label = self._make_label("RunIndicatorsLabel")
         self._fault_label = self._make_label("RunFaultLabel")
@@ -275,6 +299,7 @@ class RunControlWidget(QWidget):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.addWidget(self._state_label)
+        top.addWidget(self._gate_label)
         top.addWidget(self._detail_label, stretch=1)
         top.addWidget(self._indicators_label)
         top.addWidget(self._start_btn)
@@ -428,6 +453,8 @@ class RunControlWidget(QWidget):
                 style.unpolish(self._state_label)
                 style.polish(self._state_label)
 
+        self._gate_label.setText(view.gate_text)
+        self._gate_label.setVisible(bool(view.gate_text))
         self._detail_label.setText(self._refusal or view.detail_text)
         self._indicators_label.setText(view.indicators_text)
         self._indicators_label.setVisible(bool(view.indicators_text))
