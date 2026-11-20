@@ -352,6 +352,11 @@
                   "device": "cpu",
                   "draw_overlay": true,
                   "model": "mobilenet_v3_large_20260616_050828",
+                  "readiness": {
+                    "severity": {
+                      "out_of_spec": "check_function"
+                    }
+                  },
                   "top_k": 3
                 },
                 "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
@@ -4074,6 +4079,11 @@
               "device": "cpu",
               "draw_overlay": true,
               "model": "mobilenet_v3_large_20260616_050828",
+              "readiness": {
+                "severity": {
+                  "out_of_spec": "check_function"
+                }
+              },
               "top_k": 3
             },
             "device": "cpu",
