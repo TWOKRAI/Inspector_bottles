@@ -69,11 +69,16 @@ def _find_layout(node: object) -> dict | None:
 
 
 def _recipe_cfg(**over: object) -> dict:
-    """Конфиг плагина word_layout из рецепта letter_robot_sim.yaml, как есть; поверх — over."""
+    """Конфиг плагина word_layout из рецепта letter_robot_sim.yaml без слова оператора; поверх — over.
+
+    Слово оператора — состояние, а не свойство рецепта (В5/Task 6.1b): после Save из пульта в рецепте
+    лежит ``target_word: "МИР"``. ``target_word=''`` подставляется явно, ``over`` его перекрывает.
+    """
     proc = _find_layout(yaml.safe_load(_RECIPE.read_text(encoding="utf-8")))
     assert proc is not None, "в рецепте нет процесса layout"
     plug = next(p for p in proc["plugins"] if p["plugin_name"] == "word_layout")
     conf = dict(plug["config"])
+    conf["target_word"] = ""
     conf.update(over)
     return conf
 
@@ -198,7 +203,7 @@ def test_skip_word_done_line() -> None:
 
 def test_recipe_default_empty_word_says_so() -> None:
     p, s = _make_recipe(word_source="")
-    assert p._reg.target_word == "", "рецепт как есть: target_word ''"
+    assert p._reg.target_word == "", "рецепт без слова оператора: target_word ''"
     for _ in range(3):
         assert _job(p, _disc("Р", 1, 0.0)) is None
     assert _lines(s) == ["WordLayoutPlugin: диск 'Р' 0.0° → пропуск: слово не задано"]
