@@ -35,6 +35,8 @@ BACKEND_CTL=1 BACKEND_CTL_PORT=8766 PYTHONUTF8=1 python apps/line_sim/run.py
 BACKEND_CTL=1 PYTHONUTF8=1 INSPECTOR_LOG_DIR=<tree>/data/logs/prototype \
   INSPECTOR_MANIFEST=<копия multiprocess_prototype/app.yaml> \
   python multiprocess_prototype/run.py letter_robot_sim --headless --autostart
+# `--autostart` действует только при `run_gate: true` (`system.yaml` или `user_overrides.yaml` стенда);
+# при `run_gate: false` линия и так идёт в работу с boot, а PM пишет WARNING «run_autostart без run_gate».
 
 # 3. скрипт
 PYTHONUTF8=1 PYTHONPATH=<tree> python -m scripts.alpha_sim.run_alpha --tree <tree> [--dump <файл.json>]
