@@ -278,7 +278,7 @@ register'а (проба и запись `apply_params`) для значения 
 Ключ стоит в `camera_device_demo.yaml` (плоско в элементе `plugins`; Task 4c, тест `multiprocess_prototype/recipes/tests/test_camera_run_locked_recipe.py`);
 в hikvision-рецептах его нет: они ссылаются на старый плагин без `release_device`/`take_device`, ключ придёт вместе с 4.3 (W4). Код плагина охрану не знает: она в базе плагина
 (`multiprocess_framework/modules/process_module/plugins/base.py:1775,1808,1835`). Прямые вызовы `start(ctx)` (при `auto_start`,
-`plugin_base.py:349`) и `shutdown(ctx)` (`:354`) зовут `cmd_take_device` / `cmd_release_device` напрямую и охрану минуют; рестарт ребёнка
+`plugin_base.py:349`) и `shutdown(ctx)` (`:354`) зовут `cmd_take_device` / `cmd_release_device` напрямую и охрану минуют; Пересохранение рецепта из GUI после правки узла кладёт копию ключей во вложенный `config`, и она перекрывает плоскую строку (`plugin_orchestrator.py:164-166`): ручную правку `run_locked_commands` в YAML после этого делать во вложенном `config`. Рестарт ребёнка
 супервизором в `running` не воспроизводился (`plans/2026-10-18_camera-device-service/tasks/4c.md`, Ф3).
 
 ## Boundaries
