@@ -443,7 +443,13 @@ round-trip за данными, которые уже приехали перв�
 при любом вердикте). `vacuous = ("pre" not in unreadable) and eq(pre, target)` — при ЛЮБОМ
 вердикте: отказ при равном образе до остаётся `failed`, но помечен `vacuous True` (именно B-3).
 `success = verdict in {confirmed, vacuous}` — формула живёт только в `judge`. `judge` не бросает:
-исключение из `eq` читается как «не равно».
+ни одно `Exception` из `eq` наружу не выходит, оно читается как «не равно» (`BaseException` —
+KeyboardInterrupt, SystemExit — выходит). Сбой `eq` не логируется: модуль чистый, без
+ввода-вывода; сбой неотличим от «не равно».
+
+`operator.eq` не склеивает строку с числом (`"10"` и `10` не равны), но `bool`, `int` и `float`
+равны по `==`: `judge(0, OK, True, 1)` — `confirmed`. Нужна терпимость к строке — `eq` подаёт
+вызывающий.
 
 **Отказ ack** — dict, у которого (`success is False` и `error != "timeout"`) ИЛИ
 `status == "error"`. НЕ отказ: таймаут `{"success": False, "error": "timeout"}`, `None`, не-dict,
@@ -469,8 +475,13 @@ dict без `success` и `status`. Тогда решает образ после
 (`backend_ctl/driver.py:555`) считает отказом любой `success is False`, в том числе
 `{"success": False, "error": "timeout"}`. `is_refusal` таймаут отказом не считает. Назначение
 разное: `_looks_failed` решает «регистрировать ли намерение подписки» (смещение в over-record),
-`is_refusal` — «признать ли запись проваленной». Код `driver.py` не тронут; унификация — Task 2.6
+`is_refusal` — «признать ли запись проваленной». Обратная сторона: `{"status": "error"}` —
+`is_refusal True`, а `_looks_failed` даёт False: он смотрит только `success is False`. Код `driver.py` не тронут; унификация — Task 2.6
 (перенос суда на хост).
+
+**Граница для Task 0.11.** `is_refusal` смотрит только верхний уровень ack: вложенный отказ
+`{"success": True, "result": {"success": False}}` он не видит. Поэтому 0.11 подаёт ack как есть
+или его лист (`_leaf_result`).
 
 **Отвергнуто.** Параметр `rejected`, читающий `resp.get("success")`, — зелёный по отсутствию
 ключа. Перевод `config_reload_verified` на `judge` — ломает развод BCTL-ADR-008.

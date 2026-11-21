@@ -91,7 +91,7 @@ def test_ack_string_decided_by_post():
     assert judge(5, "error", 5, 10)["verdict"] == "failed"
 
 
-def test_default_eq_is_strict():
+def test_default_eq_does_not_coerce_strings():
     res = judge(5, OK, "10", 10)
     assert res["verdict"] == "failed"
     assert res["success"] is False

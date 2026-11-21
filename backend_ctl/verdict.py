@@ -23,6 +23,9 @@
 вердикт) и ``process_restart_verified`` (``restarted``, успех обратный).
 
 Формула успеха живёт только в :func:`judge`: инструмент её не пересчитывает.
+
+Purpose: единая форма вердикта проверки записи (I3) для ``backend_ctl``.
+Stability: lite
 """
 
 from __future__ import annotations
@@ -59,13 +62,13 @@ def judge(
 ) -> dict:
     """Вердикт проверки записи по образу до, ack хоста и образу после.
 
-    Pre: ``unreadable`` — кортеж имён из {``"pre"``, ``"post"``}; ``eq(a, b)`` —
-        булево сравнение двух значений.
+    Pre: ``unreadable`` — кортеж/список/frozenset имён из {``"pre"``, ``"post"``},
+        не строка и не итератор; ``eq(a, b)`` — булево сравнение двух значений.
     Post: ответ — всегда dict с ключами ``verdict`` (``confirmed`` / ``vacuous`` /
         ``failed`` / ``unverifiable``), ``vacuous`` (bool), ``success`` (bool),
         ``pre``, ``post``, ``ack``, ``unverifiable`` (``list(unreadable)`` при
-        любом вердикте); исключение наружу не выходит (исключение из ``eq`` —
-        «не равно»).
+        любом вердикте); ни одно ``Exception`` из ``eq`` наружу не выходит (оно —
+        «не равно»); ``BaseException`` (KeyboardInterrupt, SystemExit) выходит.
 
     Правила — строго в этом порядке, первое сработавшее побеждает:
       1. :func:`is_refusal` (ack) -> ``failed``;
@@ -104,5 +107,5 @@ def _equal(eq: Callable[[Any, Any], bool], a: Any, b: Any) -> bool:
     """``eq(a, b)`` как bool; исключение из ``eq`` — «не равно» (``judge`` не бросает)."""
     try:
         return bool(eq(a, b))
-    except Exception:
+    except Exception:  # noqa: BLE001 — исключение из eq = «не равно» (DESIGN 0.3)
         return False
