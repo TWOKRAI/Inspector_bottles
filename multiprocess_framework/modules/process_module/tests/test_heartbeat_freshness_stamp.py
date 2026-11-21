@@ -277,3 +277,60 @@ def test_publish_failure_voice_is_windowed(caplog: pytest.LogCaptureFixture) -> 
     assert len(lines) == 1, lines
     assert "RuntimeError" in lines[0]
     assert "секрет-текст-исключения" not in lines[0]
+
+
+def test_note_publish_failed_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Голос не имеет права ронять такт: исключение ``log_windowed`` остаётся внутри, факт уже в счётчике.
+
+    Иначе оно ушло бы во внешний ``except`` такта и пропустило ``_send_heartbeat`` (liveness для ПМ).
+    """
+    from multiprocess_framework.modules.logger_module.core import windowed_voice
+
+    def _voice_raises(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError("голос сломан")
+
+    monkeypatch.setattr(windowed_voice, "log_windowed", _voice_raises)
+
+    services, hb = _boot_cam()
+    hb._note_publish_failed("merge", RuntimeError("исходный отказ"))  # не бросает
+    assert hb.telemetry_publish_failed == 1
+
+    # Весь путь: бросает и merge, и голос; такт возвращается нормально.
+    services._state_proxy = _MergeRaises()
+    hb._publish_telemetry_to_tree(_workers(), None)
+    assert hb.telemetry_publish_failed == 2
+
+
+def test_stamp_rides_a_closed_gate() -> None:
+    """Гейт метрик закрыт наглухо: слияние всё равно несёт метку (liveness по метке не зависит от гейта)."""
+    services, hb = _boot_cam()
+
+    hb._publish_telemetry_to_tree(_workers(), set())
+    hb._publish_telemetry_to_tree(_workers(), set())
+
+    merges = services._state_proxy.merges
+    assert len(merges) == 2
+    assert [data["_fresh"]["seq"] for _path, data in merges] == [1, 2]
+
+
+def test_publish_failure_places_do_not_mute_each_other(caplog: pytest.LogCaptureFixture) -> None:
+    """Отказы ``delete``, ``merge`` и health в ОДНОМ окне голоса: по одной WARNING на место, а не одна на процесс."""
+    services, hb = _boot_cam()
+    services._state_proxy = _DeleteRaises()
+    writer = PluginContext(services=services, config={}, plugin_name="dying")
+    writer.publish_metric("fps", 1.0)
+    _tick_levels(hb)  # уровень уехал в дерево, отказов нет
+    writer._retract_metrics()
+
+    with caplog.at_level(logging.WARNING):
+        _tick_levels(hb)  # снятие утверждается -> delete бросает
+        services._state_proxy = _MergeRaises()
+        hb._publish_telemetry_to_tree(_workers(), None)  # merge бросает
+        services._health_state = _PollRaises()
+        hb._publish_health_to_tree()  # health бросает
+
+    assert hb.telemetry_publish_failed == 3
+    lines = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(lines) == 3, lines
+    for place in ("delete", "merge", "health"):
+        assert sum(f"where={place}" in line for line in lines) == 1, (place, lines)

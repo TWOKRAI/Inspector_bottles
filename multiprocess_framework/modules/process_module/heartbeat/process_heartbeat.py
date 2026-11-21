@@ -1617,8 +1617,9 @@ class ProcessHeartbeat:
 
         Зовётся из трёх мест и только из них: ``proxy.merge`` и ``proxy.delete`` (исключение самого
         вызова) и публикация health. ``telemetry_publish_failed`` растёт первым и безусловно; затем один
-        WARNING через окно голоса (ключ на процесс, не на место: поток отказов не размножает строки;
-        место и имя класса исключения едут в контексте, текст исключения — нет). Голос в ``try`` без
+        WARNING через окно голоса (ключ на процесс И место: ``..telemetry_publish_failed.<where>``, три
+        значения ``where`` — утечки ключей нет; поток отказов ``merge`` не глушит строку про ``delete`` или
+        health). Имя класса исключения едет в контексте, текст исключения — нет. Голос в ``try`` без
         проброса, как ``batch_drain._voice``: исключение здесь ушло бы во внешний ``except`` такта и
         пропустило бы ``_send_heartbeat`` (liveness для ПМ).
 
@@ -1632,7 +1633,7 @@ class ProcessHeartbeat:
             from ...logger_module.core.windowed_voice import log_windowed
 
             log_windowed(
-                f"heartbeat.{self._services.name}.telemetry_publish_failed",
+                f"heartbeat.{self._services.name}.telemetry_publish_failed.{where}",
                 None,
                 "warning",
                 "публикация телеметрии процесса в дерево не удалась",
@@ -1693,7 +1694,8 @@ class ProcessHeartbeat:
 
         Следствие общего сборщика, принятое осознанно: округление действует и на опросе
         так же, как на push'е. С Task 0.8 до 1 знака (``round(x, 1)``) округляются
-        ``cycle_duration_ms``, ``queue_wait_ms``, ``transport_ms``; ``fps``, ``latency_ms`` и
+        ``cycle_duration_ms``, ``queue_wait_ms``, ``transport_ms`` и уровни плагинов
+        ``state.plugins.*.*`` (``build_plugin_levels``); ``fps``, ``latency_ms`` и
         ``effective_hz`` не округляются. Снимок — вид уровней для глаз, а не измерительный
         прибор; расхождение push/poll в последнем знаке было бы дороже потерянной точности.
         Метки свежести ``_fresh`` в снимке нет: она принадлежит публикации тика (писатель в дереве),
