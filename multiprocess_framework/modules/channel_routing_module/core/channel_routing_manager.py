@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin
-from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, Outcome, channel_accepted
+from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, Outcome, channel_accepted, outcome_of
 from ..levels import record_severity, threshold_severity
 from .channel_registry import ChannelRegistry
 from .config_normalizer import normalize_config
@@ -63,6 +63,10 @@ LOSS_COUNTER_KEYS = (
     # ``_on_port_record`` (``float("не-число")``), тот гасился здесь же, и ни
     # один счётчик этого не видел.
     "tap_write_errors",
+    # Task 0.5a: tap НЕ бросил, но ответил отказом (``dropped`` / ``refused``) —
+    # приёмник жив и отказывает. Ответ ``error`` без исключения — та же болезнь,
+    # что исключение, и идёт в ``tap_write_errors`` (``LOSS_KEY_BY_HOP["tap"]``).
+    "tap_refused_records",
 )
 
 #: Счётчики ДОСТАВКИ (Task 5.6). До них все счётчики считали только потери, и
@@ -1155,16 +1159,25 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         обоих случаях), то есть счётчик, заведённый ОТЛИЧАТЬ живую плоскость
         от мёртвой, отвечал на другой вопрос — «сколько раз звали».
 
-        Что именно считается принятым: ``write()`` вызван и НЕ бросил.
-        Не идут в счёт три случая — приёмников нет; порог tap'а выше уровня
-        записи; приёмник бросил (он учтён отдельно, ``tap_write_errors``).
-        **Потолок: возврат ``write()`` здесь не судится** — в отличие от
-        ``_write_record_to_channels``, где есть ``channel_accepted``, эта
-        раздача читает только факт исключения. Приёмник, вернувший
-        ``{"status": "error"}`` или ``{"status": "dropped"}`` БЕЗ исключения
-        (так делают ``RouterPushChannel.write`` и ``StoreTapChannel.write``),
-        будет засчитан как принявший. Отдельный класс потерь, эта правка его
-        не трогает.
+        Что именно считается принятым: ``write()`` вызван, НЕ бросил и его
+        ответ ``outcome_of`` толкует как ``accepted`` (``success``, ``None``,
+        словарь без ``status`` — как и раньше). **Возврат ``write()`` судится**
+        (Task 0.5a): до неё раздача читала только факт исключения, и приёмник,
+        ответивший ``{"status": "error"}`` или ``{"status": "dropped"}`` БЕЗ
+        исключения (так делают ``RecordForwardChannel`` на мёртвом роутере,
+        ``RouterPushChannel.write`` и ``StoreTapChannel.write``), засчитывался
+        принявшим. Не идут в счёт:
+          - приёмников нет; порог tap'а выше уровня записи;
+          - приёмник бросил — ``tap_write_errors``;
+          - ответ ``error`` (исход ``failed``) — тоже ``tap_write_errors``:
+            «бросил» и «ответил ошибкой» — одна болезнь приёмника;
+          - ответ ``dropped`` / ``refused`` (исход ``refused``) —
+            ``tap_refused_records``: приёмник жив, но отказывает.
+        Ключи берутся из ``LOSS_KEY_BY_HOP["tap"]`` через ``count_outcome``.
+        Суд стоит ВНЕ ``try/except`` вокруг ``write()``: ошибка самого подсчёта
+        не смешивается с ``tap_write_errors``. Лок ``_miss_lock`` берётся
+        только на отказе — здоровая доставка его не трогает (бюджет
+        ``TestTheCostOfTheHotPath``).
 
         Returns:
             Число tap'ов, реально принявших запись. Ноль = запись не легла
@@ -1189,8 +1202,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             for channel, min_severity in list(self._tap_sinks.values()):
                 if severity >= min_severity:
                     try:
-                        channel.write(record_dict)
-                        accepted += 1
+                        result = channel.write(record_dict)
                     except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое
                         # Ф5, ревью-блокер B3: контракт остаётся «не роняем
                         # эмитента», но «глушим» и «не считаем» — РАЗНЫЕ вещи.
@@ -1198,6 +1210,22 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
                         # тишина выглядели снаружи одинаково.
                         with self._miss_lock:
                             self.stats["tap_write_errors"] += 1
+                        continue
+                    # Task 0.5a: суд над ВОЗВРАТОМ write() — вне try/except выше,
+                    # чтобы ошибка самого подсчёта не легла в tap_write_errors.
+                    # Здоровый путь лок не берёт (инвариант statistics_module/STATUS.md).
+                    # Ответ None — fast path без вызова: здоровый tap, вернувший None,
+                    # не платит за суд (бюджет вызовов здорового пути закреплён
+                    # литералом в process_module/tests/test_plugin_stats_road.py::
+                    # TestTheCostOfTheHotPath::test_the_facade_call_count_pins_two_invariants).
+                    # Смысл тот же, что у outcome_of(None) == "accepted"; это равенство
+                    # закреплено тестом test_forward_outcome.py::test_none_reply_means_accepted.
+                    outcome = "accepted" if result is None else outcome_of(result)
+                    if outcome == "accepted":
+                        accepted += 1
+                    else:
+                        with self._miss_lock:
+                            count_outcome(self.stats, "tap", outcome)
         finally:
             # Снимается ВСЕГДА, в том числе если tap уронил не-Exception
             # (KeyboardInterrupt, SystemExit): иначе поток остался бы навсегда

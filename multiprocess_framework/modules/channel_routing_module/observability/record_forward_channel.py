@@ -23,6 +23,12 @@ Batch-путь ЖИВ с задачи 2.1: у stats-слота hub'а появи
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
 
+Ответ ``write()`` судится (Task 0.5a): ``ChannelRoutingManager._emit_to_taps``
+толкует его через ``outcome_of``. ``{"status": "error"}`` (исключение роутера,
+``router=None``) — tap не принял запись, счёт ``tap_write_errors`` менеджера;
+``{"status": "dropped"}`` — ``tap_refused_records``. До 0.5a любой ответ без
+исключения засчитывался доставкой.
+
 QoS live-хвоста — ДОЛГ ЗАКРЫТ (Ф7.3, 2026-08-06). Прежнее решение 5.21 (d)
 (2026-07-10) оставляло хвост на ``queue_type="system"`` при always-on подписке
 на всех процессах, и при error-storm это тесняло heartbeat: system-очередь
@@ -66,6 +72,10 @@ class RecordForwardChannel(IChannel):
             sender: имя процесса-источника (в сообщении и в ``data.process``).
             name: имя канала (хэндл tap'а для remove_tap).
             command: поле ``command`` пуша (роутинг-ключ у GUI-хендлера).
+
+        Ответ ``write()`` (tap-путь) — словарь со ``status``; его судит
+        вызывающий (``_emit_to_taps``, Task 0.5a): ``error`` — запись не
+        принята, а не «доставлена с оговоркой».
 
         Параметра ``kind`` больше нет (Ф5.2, Б-4): вид записи считает её важность.
         Прежний дефолт ``'error'`` метил ошибкой ВСЁ, что прошло порог tap'а, —
