@@ -414,3 +414,69 @@ round-trip за данными, которые уже приехали перв�
 прежние поля на месте. Изменение поведения ровно одно и намеренное: `counters_reset`
 теперь истинен там, где раньше молчал, а `silent_source` не выставляется на спорном
 окне.
+
+---
+
+## BCTL-ADR-010: форма вердикта I3 — «проверено» = образ до + подтверждение + образ после
+
+**Дата:** 2026-11-21 · **Статус:** принято · **Контекст:** план
+`observability-signal-contracts`, Task 0.3 (находка B-3 ревизии наблюдаемости; инвариант I3
+«причинность проверки»). Уточняет BCTL-ADR-008 (граница указана ниже).
+
+**Проблема.** `set_register_verified` отвечал `success True, verified True` на запись, которую
+хост отверг при УЖЕ равном значении: образ после равен цели, поэтому отказ не виден. Ответ
+«success» без образа до и без разбора ack — не доказательство.
+
+**Решение.** Один чистый модуль `backend_ctl/verdict.py` (без ввода-вывода, без импортов
+`multiprocess_*`), два символа: `is_refusal(ack)` и
+`judge(pre, ack, post, target, *, unreadable=(), eq=operator.eq) -> dict`.
+
+Правила — строго в этом порядке, первое сработавшее побеждает:
+
+1. ack — отказ -> `failed`;
+2. `unreadable` не пуст -> `unverifiable`;
+3. `not eq(post, target)` -> `failed`;
+4. `eq(pre, target)` -> `vacuous`;
+5. иначе -> `confirmed`.
+
+Ответ: `verdict`, `vacuous`, `success`, `pre`, `post`, `ack`, `unverifiable` (= `list(unreadable)`
+при любом вердикте). `vacuous = ("pre" not in unreadable) and eq(pre, target)` — при ЛЮБОМ
+вердикте: отказ при равном образе до остаётся `failed`, но помечен `vacuous True` (именно B-3).
+`success = verdict in {confirmed, vacuous}` — формула живёт только в `judge`. `judge` не бросает:
+исключение из `eq` читается как «не равно».
+
+**Отказ ack** — dict, у которого (`success is False` и `error != "timeout"`) ИЛИ
+`status == "error"`. НЕ отказ: таймаут `{"success": False, "error": "timeout"}`, `None`, не-dict,
+dict без `success` и `status`. Тогда решает образ после. Причина: `process.restart` и запись
+штатно отвечают таймаутом при доставленной команде.
+
+**Почему `eq` — параметр.** MCP-клиент превращает скаляр в строку, а
+`RegisterOps._values_match` это терпит; строгое `==` дало бы ложный `failed`.
+
+**Где применяется.** Только `set_register_verified` и поле `register_restore` (подключает Task
+0.11). Не применяется:
+
+* `config_reload_verified` — BCTL-ADR-008 развёл «применилось» и «вердикт»: `success` про
+  применение, не вердикт, `success True` при `verdict "failed"` остаётся законным; драйвер там
+  порождает только `unverifiable`, `confirmed` и `failed` приходят от хоста;
+* `process_restart_verified` — ответа `success` нет, ключ `restarted`, успех обратный
+  (`post != pre`);
+* `telemetry_set(verify=True)` — читает свой `verified_effect`.
+
+Единый `judge` на все пять инструментов не годится: форма ответа у них разная.
+
+**Известное расхождение (не чинится здесь).** `BackendDriver._looks_failed`
+(`backend_ctl/driver.py:555`) считает отказом любой `success is False`, в том числе
+`{"success": False, "error": "timeout"}`. `is_refusal` таймаут отказом не считает. Назначение
+разное: `_looks_failed` решает «регистрировать ли намерение подписки» (смещение в over-record),
+`is_refusal` — «признать ли запись проваленной». Код `driver.py` не тронут; унификация — Task 2.6
+(перенос суда на хост).
+
+**Отвергнуто.** Параметр `rejected`, читающий `resp.get("success")`, — зелёный по отсутствию
+ключа. Перевод `config_reload_verified` на `judge` — ломает развод BCTL-ADR-008.
+
+**Доказательство.** 20 unit-тестов `backend_ctl/tests/test_verdict_form.py`; контракт
+`test_contract_verified.py` (11 тестов, 5 инструментов; до Task 0.11 — `3 failed, 8 passed`,
+экземпляры чинит 0.11). Инъекции лида по плану Task 0.3.
+
+**Откат.** Аддитивно: новый модуль и ADR; инструменты `judge` до Task 0.11 не вызывают.

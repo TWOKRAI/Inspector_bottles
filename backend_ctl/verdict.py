@@ -5,7 +5,7 @@
 без образа до и после — не доказательство: запись, которую хост отверг при уже
 равном значении, выглядит как успех (B-3, ревизия наблюдаемости).
 
-Чистый модуль: без ввода-вывода, без импортов ``multiprocess_*``. Два публичных
+Чистый модуль: без ввода-вывода, без импортов пакетов фреймворка. Два публичных
 символа:
 
   * :func:`is_refusal` — «ack хоста — отказ?» (определение ниже);
@@ -22,7 +22,7 @@
 ``config_reload_verified`` (BCTL-ADR-008: ``success`` — про применение, не
 вердикт) и ``process_restart_verified`` (``restarted``, успех обратный).
 
-Тела — заглушки стадии INTERFACE; реализация — стадия GREEN Task 0.3.
+Формула успеха живёт только в :func:`judge`: инструмент её не пересчитывает.
 """
 
 from __future__ import annotations
@@ -41,7 +41,11 @@ def is_refusal(ack: Any) -> bool:
     Post: ``bool``; не бросает. ``True`` только для dict, у которого
         (``success is False`` и ``error != "timeout"``) или ``status == "error"``.
     """
-    raise NotImplementedError("Task 0.3 GREEN: is_refusal")
+    if not isinstance(ack, dict):
+        return False
+    if ack.get("status") == "error":
+        return True
+    return ack.get("success") is False and ack.get("error") != "timeout"
 
 
 def judge(
@@ -74,4 +78,31 @@ def judge(
     вердикте. ``success = verdict in {"confirmed", "vacuous"}`` — формула живёт
     только здесь.
     """
-    raise NotImplementedError("Task 0.3 GREEN: judge")
+    vacuous = "pre" not in unreadable and _equal(eq, pre, target)
+    if is_refusal(ack):
+        verdict = "failed"
+    elif unreadable:
+        verdict = "unverifiable"
+    elif not _equal(eq, post, target):
+        verdict = "failed"
+    elif vacuous:
+        verdict = "vacuous"
+    else:
+        verdict = "confirmed"
+    return {
+        "verdict": verdict,
+        "vacuous": vacuous,
+        "success": verdict in ("confirmed", "vacuous"),
+        "pre": pre,
+        "post": post,
+        "ack": ack,
+        "unverifiable": list(unreadable),
+    }
+
+
+def _equal(eq: Callable[[Any, Any], bool], a: Any, b: Any) -> bool:
+    """``eq(a, b)`` как bool; исключение из ``eq`` — «не равно» (``judge`` не бросает)."""
+    try:
+        return bool(eq(a, b))
+    except Exception:
+        return False
