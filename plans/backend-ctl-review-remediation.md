@@ -4,6 +4,7 @@
 > Основание: максимальное ревью backend_ctl 2026-07-23 (6 агентов + верификация Fable), принято владельцем.
 > Итог ревью: [`docs/audits/2026-07-23_backend-ctl-max-review.md`](../docs/audits/2026-07-23_backend-ctl-max-review.md)
 > Статус: **единственный активный план backend_ctl** (правило «один активный план на инструмент»; `backend-ctl-proof-discipline` закрыт 2026-07-22 → в архив при старте исполнения).
+> Преемник: plans/2026-11-21_observability-signal-contracts (вариант A, решение владельца 2026-11-21)
 
 ## Context
 
@@ -227,20 +228,20 @@ max-line-length в обоих `_read_loop` (drop+log вместо безгран
 
 ### Фаза 0 — baseline «до»
 
-- Task 0.1: Live-чек-лист аудита (7 пунктов) [PENDING] — нового audit-файла с исходами ПОДТВЕРЖДЁН/ОПРОВЕРГНУТ нет
+- Task 0.1: Live-чек-лист аудита (7 пунктов) [SUPERSEDED] — нового audit-файла с исходами ПОДТВЕРЖДЁН/ОПРОВЕРГНУТ нет — снята планом observability-signal-contracts, причина — design.md §5
 
 ### Фаза 1 — P0: правда агрегации
 
-- Task 1.1: `system_overview` читает счётчики потерь [IN PROGRESS] (после 0.1) — 2 из 3 видов в `main`: `queue_data_loss`, `control_plane_loss` — `54ec677a` 2026-08-24, план `observation-port`; вид для `queue_system_evict_blocked` не эмитится (поле разбирает `protocol.py:204`, `overview.py` его не читает); live-пары нет
+- Task 1.1: `system_overview` читает счётчики потерь [SUPERSEDED] (после 0.1) — 2 из 3 видов в `main`: `queue_data_loss`, `control_plane_loss` — `54ec677a` 2026-08-24, план `observation-port`; вид для `queue_system_evict_blocked` не эмитится (поле разбирает `protocol.py:204`, `overview.py` его не читает); live-пары нет — остаток (третий вид) поглощён plans/2026-11-21_observability-signal-contracts, Task 2.8
 - Task 1.2: Контракт `full=true` — подсказка не советует невозможное [DONE 2026-08-29 — `5226045a`, план `observability-closure` Ф0, задачи 0.2-0.4; `_declare_full_param` + тест `test_mcp_full_autoschema_hazards.py`] (после 0.1)
-- Task 1.3: Детекция разрывов в read-model драйвера [PENDING] (после 0.1) — `gap_count` в `backend_ctl/` нет
-- Task 1.4: Атрибуция вытеснений в `queue_senders` [PENDING] (после 0.1) — вида `evicted` в `_count_sender` нет (только `put`/`lost`)
+- Task 1.3: Детекция разрывов в read-model драйвера [SUPERSEDED] (после 0.1) — `gap_count` в `backend_ctl/` нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 0.10b, 2.8b
+- Task 1.4: Атрибуция вытеснений в `queue_senders` [SUPERSEDED] (после 0.1) — вида `evicted` в `_count_sender` нет (только `put`/`lost`) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.15
 
 ### Фаза 2 — контракт ответов
 
-- Task 2.1: Golden-фикстура форм ответов сервера [PENDING] (после 1.1–1.4) — `contract_fixtures` / golden-файла нет
-- Task 2.2: Live `missing==[]` для всех типизированных обёрток [PENDING] (после 2.1) — `TestWrappersLive` покрывает 5 тестов, `introspect_memory`/`telemetry`/`status`/`supervision_status` нет
-- Task 2.3: Конформанс схем инструментов против dispatch [PENDING] (после 2.1) — `test_schema_conformance.py` нет, схема `system_command` плоская (`command: object`)
+- Task 2.1: Golden-фикстура форм ответов сервера [SUPERSEDED] (после 1.1–1.4) — `contract_fixtures` / golden-файла нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.13
+- Task 2.2: Live `missing==[]` для всех типизированных обёрток [SUPERSEDED] (после 2.1) — `TestWrappersLive` покрывает 5 тестов, `introspect_memory`/`telemetry`/`status`/`supervision_status` нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.13
+- Task 2.3: Конформанс схем инструментов против dispatch [SUPERSEDED] (после 2.1) — `test_schema_conformance.py` нет, схема `system_command` плоская (`command: object`) — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.13
 
 ### Фаза 3 — транспорт SocketChannel (передана в `gui-service`)
 
@@ -250,16 +251,16 @@ max-line-length в обоих `_read_loop` (drop+log вместо безгран
 
 ### Фаза 4 — гигиена доверия
 
-- Task 4.1: `record_start`/`record_dump` — честная классификация [PENDING] — оба остаются `SAFETY_READ` (`mcp_tools.py:1502,1507`)
-- Task 4.2: Счётчик отказов durable-аудита [PENDING] — `file_write_failures` в `backend_ctl/` нет
-- Task 4.3: Покрытие `logger_sink_enable/disable` + стейл в тестах [PENDING] — упоминание инструмента только в `test_batch_addressing.py`; стейл `queue_type='system'`/`xfail` в `tests/test_harness.py` на месте
-- Task 4.4: Эфемерный порт live-фикстуры [PENDING] — в `harness.py`/`conftest.py` привязки к `:0` нет
-- Task 4.5: Доки и границы [PENDING] — `STATUS.md` пишет «47 инструментов», `test_backend_ctl_endpoint.py` лежит в `process_manager_module/tests/`
+- Task 4.1: `record_start`/`record_dump` — честная классификация [SUPERSEDED] — оба остаются `SAFETY_READ` (`mcp_tools.py:1502,1507`) — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.3
+- Task 4.2: Счётчик отказов durable-аудита [SUPERSEDED] — `file_write_failures` в `backend_ctl/` нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.11
+- Task 4.3: Покрытие `logger_sink_enable/disable` + стейл в тестах [SUPERSEDED] — упоминание инструмента только в `test_batch_addressing.py`; стейл `queue_type='system'`/`xfail` в `tests/test_harness.py` на месте — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.13
+- Task 4.4: Эфемерный порт live-фикстуры [SUPERSEDED] — в `harness.py`/`conftest.py` привязки к `:0` нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.1
+- Task 4.5: Доки и границы [SUPERSEDED] — `STATUS.md` пишет «47 инструментов», `test_backend_ctl_endpoint.py` лежит в `process_manager_module/tests/` — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.9, 3.12, 2.2
 
 ### Фаза 5 — один MCP на все бэкенды (пожелание владельца 2026-10-12 «один на всех»)
 
-- Task 5.1: Карточка обнаружения: бэкенд при старте пишет `{name, app, port, pid}`, при останове удаляет; инструмент `targets` [PENDING] (после 4.4) — сегодня MCP привязан к одному порту env `BACKEND_CTL_PORT` (`backend_ctl/endpoint_config.py`, `.mcp.json`), line_sim (8766) доступен только через `BackendDriver(port=8766)`; 2026-10-12
-- Task 5.2: Необязательный параметр `target` у каждого инструмента; по умолчанию — единственный живой бэкенд или прототип [PENDING] (после 5.1) — 2026-10-12
+- Task 5.1: Карточка обнаружения: бэкенд при старте пишет `{name, app, port, pid}`, при останове удаляет; инструмент `targets` [SUPERSEDED] (после 4.4) — сегодня MCP привязан к одному порту env `BACKEND_CTL_PORT` (`backend_ctl/endpoint_config.py`, `.mcp.json`), line_sim (8766) доступен только через `BackendDriver(port=8766)`; 2026-10-12 — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.10
+- Task 5.2: Необязательный параметр `target` у каждого инструмента; по умолчанию — единственный живой бэкенд или прототип [SUPERSEDED] (после 5.1) — 2026-10-12 — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.10
 
 ---
 

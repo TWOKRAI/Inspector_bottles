@@ -14,6 +14,7 @@
 > Работа идёт в worktree `.claude/worktrees/otel-f0`: общее дерево занято соседней живой сессией (closure Ф3).
 > Границы захода: **Ф0 и Ф1 — сейчас**; Ф2–Ф4 — чередуя со стендами closure; Task 2.4 — строго после closure Task 3.3.
 > **Ред. 2026-09-23 — сверка по коду:** открыты 2.4 (замер gzip), 2.5, Ф3 (3.1 наполовину: фрагмент есть, валидатор `${ENV_VAR}` и readback заголовков — нет), Ф4. Решение владельца: **closure 4.4 → closure 4.3b → хвост otel без запасных путей**; closure 4.3 для otel ничего не даёт (вердикт CTO, `plans/observability-closure/verdict-task-4-3-cto.md`).
+> **Решение 2026-11-21:** открытые хвосты closure и backend-ctl-review-remediation поглотил план `observability-signal-contracts`; этот план остаётся своим. Task 3.4 разблокирует `observability-signal-contracts` Task 0.5 (поглотила closure 4.3b). Экспорт чисел (M-9) — `observability-signal-contracts` Task 3.10; задач этого плана не заменяет.
 > Состояние closure на 2026-09-07 по коммитам: Ф3 урезана вердиктом CTO с 9 задач до **6** (3.4, 3.6, 3.7 сняты целиком), закрыто **5 из 6** (3.0, 3.1, 3.2, 3.3, 3.5; остаток 3.8), Ф4–Ф5 не начаты. Полная карта пересечений по задачам — §«Пересечения с observability-closure».
 
 ---
@@ -201,7 +202,7 @@ Baseline 2026-09-05: `grep -r opentelemetry multiprocess_framework/ --include=*.
 - Task 3.1: Включение фрагментом топологии, по умолчанию отсутствует [IN PROGRESS] (после 2.1) — в `main` фрагмент `backend/topology/otel_export.yaml` (`94998cc6`); нет закомментированной строки в `app.yaml`, не снят валидатор `${ENV_VAR}`, `readback()` отдаёт эхо конфига
 - Task 3.2: Цена названа числами [PENDING] (после 3.1)
 - Task 3.3: Фреймворк не получил зависимости, границы слоёв целы [PENDING] — контракт-теста «0 импортов opentelemetry во фреймворке» в тестах сервиса нет
-- Task 3.4: Сквозной учёт потерь сходится [BLOCKED] — ждёт closure 4.3b (секция `forwarders`), в `main` нет
+- Task 3.4: Сквозной учёт потерь сходится [BLOCKED] — ждёт observability-signal-contracts Task 0.5 (поглотила closure 4.3b), секция `forwarders`, в `main` нет
 
 ### Ф4 — приёмка и вердикт о словаре
 

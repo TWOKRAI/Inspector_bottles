@@ -91,6 +91,7 @@
 - **Acceptance criteria:** живой тест `tools/list` ≤ 20 видимых; 10 чтений с `outputSchema`, ответ проходит валидацию схемы; токены до/после на 10 пробах Ф9.13 — числами.
 - **Тестер до кода:** да; запрет — `mcp_tools.py`. **Инъекции:** И1 вернуть старый инструмент в видимые → красный `*tools_list_le_20*`; И2 ответ без ключа схемы → красный `*output_schema*`. **Ревью:** sonnet / opus ветка.
 - **Out of scope:** MCP resources/prompts/tasks; серверный токен (gui-service 2.2).
+- **Поглощение (2026-11-21):** поглощена observability-signal-contracts Task 2.12 и 2.13.
 
 ## Ось 5 — многопроцессность и IPC
 
