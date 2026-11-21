@@ -29,8 +29,9 @@ import sqlite3
 import threading
 import time
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.state_store_module.core.freshness import FRESH_KEY, read_value
 from multiprocess_framework.modules.telemetry_readmodel_module import (
@@ -540,9 +541,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # Дыры ревизий (Task 0.10b, remediation 1.3): состояние на ДРАЙВЕРЕ, под тем же локом,
         # а не в модели (реплей подменяет ``_telemetry_model`` на лету). ``None`` — базы нет:
         # первый пакет после (пере)подписки становится базой, а не дырой.
-        self._revision_last: Optional[int] = None
+        self._revision_last: int | None = None
         self._gap_count = 0
-        self._last_gap_at: Optional[float] = None
+        self._last_gap_at: float | None = None
         self.subscribe(self._ingest_state_changed)
 
         # Регистровый аппарат (live field-write / snapshot-restore / commit-confirmed)
@@ -2115,7 +2116,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # Дыры ревизий (0.10b): диапазон пакета; нет валидного — пакет пропускается (ни база, ни дыра).
         # Часы зовём ДО лока: чужой ``clock`` не должен исполняться под ``_telemetry_lock``.
         revisions = state_changed_revisions(msg)
-        gap_at = self._telemetry_clock() if revisions is not None else None
+        try:
+            gap_at = self._telemetry_clock() if revisions is not None else None
+        except Exception:  # noqa: BLE001 — сломанные часы не должны стоить дельт пакета
+            _log.warning("часы драйвера бросили исключение: last_gap_at этого пакета останется None", exc_info=True)
+            gap_at = None
         # ПОЗДНЕЕ СВЯЗЫВАНИЕ (grep-маркер): recorder.ReplayPlayer монки-патчит
         # self._telemetry_model на clock-aware инстанс ЗАДНИМ числом (offline-реплей D.4).
         # Этот колбэк ОБЯЗАН читать модель по атрибуту self._telemetry_model в момент
@@ -2133,7 +2138,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             if revisions is not None:
                 self._track_revision(revisions[0], revisions[1], gap_at)
 
-    def _track_revision(self, first_revision: int, revision: int, now: Optional[float]) -> None:
+    def _track_revision(self, first_revision: int, revision: int, now: float | None) -> None:
         """Учесть диапазон ``[first_revision, revision]`` пакета; звать ПОД ``_telemetry_lock``.
 
         Зеркало ``gui_state_proxy._advance_revision_and_maybe_resync`` (только счёт, без ресинка —
@@ -2285,12 +2290,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # Дальше лок не нужен. ``read_node`` НЕ звать: он берёт тот же (нереентрантный) лок.
         # Поддерево процесса строим из ``snap`` и ДО фильтра ``metric``: метка ``_fresh`` лежит на
         # корне записи, а фильтр оставил бы в ответе только запрошенные листья.
-        leaves_by_process: Dict[str, Dict[tuple, Any]] = {}
+        leaves_by_process: dict[str, dict[tuple, Any]] = {}
         for path, value in snap.items():
             split = self._split_process_path(path)
             if split is not None:
                 leaves_by_process.setdefault(split[0], {})[tuple(split[1].split("."))] = value
-        subtrees: Dict[str, Dict[str, Any]] = {}
+        subtrees: dict[str, dict[str, Any]] = {}
         metrics: Dict[str, Any] = {}
         for path, value in snap.items():
             split = self._split_process_path(path)
@@ -2298,7 +2303,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 continue  # листья метки — служебные: не метрики и не входят в count
             if metric is not None and not self._telemetry_matches_metric(path, metric):
                 continue
-            fresh: Dict[str, Any] = {"class": "no_data", "age_s": None}  # вне processes.<X> метки нет
+            fresh: dict[str, Any] = {"class": "no_data", "age_s": None}  # вне processes.<X> метки нет
             if split is not None:
                 name, key = split
                 if name not in subtrees:
@@ -2326,7 +2331,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         }
 
     @staticmethod
-    def _split_process_path(path: str) -> Optional[tuple]:
+    def _split_process_path(path: str) -> tuple[str, str] | None:
         """``processes.<X>.<rest>`` → ``(X, rest)``; любой другой путь → ``None`` (у него метки нет)."""
         parts = path.split(".", 2)
         if len(parts) == 3 and parts[0] == "processes" and parts[1]:

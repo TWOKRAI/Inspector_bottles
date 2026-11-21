@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
 from backend_ctl.driver import BackendDriver
-from backend_ctl.recorder import Recording, ReplayPlayer
+from backend_ctl.recorder import Recording, ReplayPlayer, collect_header
 from backend_ctl.tests.conftest import wire_line
 from multiprocess_framework.modules.state_store_module.core.freshness import stamp
 
@@ -28,7 +28,7 @@ HZ = f"{P}.workers.w.effective_hz"
 DEADLINE_SEC = 10.0  # потолок ожидания daemon-потока: зависание превращается в красный, а не в висящий прогон
 
 
-def _delta(path: str, new_value: Any) -> Dict[str, Any]:
+def _delta(path: str, new_value: Any) -> dict[str, Any]:
     return {
         "path": path,
         "old_value": None,
@@ -40,14 +40,14 @@ def _delta(path: str, new_value: Any) -> Dict[str, Any]:
     }
 
 
-def _push(*deltas: Dict[str, Any], **data_extra: Any) -> bytes:
+def _push(*deltas: dict[str, Any], **data_extra: Any) -> bytes:
     """Проводная строка ``state.changed``; ``data_extra`` — поля конверта (``first_revision``/``revision``)."""
     return wire_line({"command": "state.changed", "data": {"deltas": list(deltas), **data_extra}})
 
 
-def _root(fps: Any, *, mark: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _root(fps: Any, *, mark: dict[str, Any] | None) -> dict[str, Any]:
     """Запись процесса ``cam`` одной дельтой на корень; метка (если есть) последней, как кладёт писатель."""
-    value: Dict[str, Any] = {"state": {"fps": fps}, "workers": {"w": {"effective_hz": 5.0}}}
+    value: dict[str, Any] = {"state": {"fps": fps}, "workers": {"w": {"effective_hz": 5.0}}}
     if mark is not None:
         value["_fresh"] = mark
     return value
@@ -59,9 +59,9 @@ def _join_or_fail(thread: threading.Thread, what: str) -> None:
         pytest.fail(f"{what} завис дольше {DEADLINE_SEC} с (вероятна повторная блокировка _telemetry_lock)")
 
 
-def _snapshot(d: BackendDriver, **kwargs: Any) -> Dict[str, Any]:
+def _snapshot(d: BackendDriver, **kwargs: Any) -> dict[str, Any]:
     """``telemetry_snapshot`` в daemon-потоке с дедлайном: зависание — красный тест, а не висящий прогон."""
-    box: Dict[str, Any] = {}
+    box: dict[str, Any] = {}
 
     def run() -> None:
         try:
@@ -139,7 +139,7 @@ def test_label_update_after_first_read_is_seen() -> None:
     assert second["value"] == 25.0  # значение не переписывали
 
 
-def _rev(first: int, revision: int) -> Dict[str, Any]:
+def _rev(first: int, revision: int) -> dict[str, Any]:
     return {"first_revision": first, "revision": revision}
 
 
@@ -173,7 +173,7 @@ def _rev(first: int, revision: int) -> Dict[str, Any]:
         ),
     ],
 )
-def test_revision_gap_counted(packets: List[Dict[str, Any]], gap_count: int, last_gap_at: Optional[float]) -> None:
+def test_revision_gap_counted(packets: list[dict[str, Any]], gap_count: int, last_gap_at: float | None) -> None:
     """Дыра ревизий — ``first_revision > last + 1``; считает драйвер (зеркало ``gui_state_proxy``), часы — ``clock``."""
     d = BackendDriver(clock=lambda: 123.0)
     for i, data in enumerate(packets):
@@ -185,7 +185,7 @@ def test_revision_gap_counted(packets: List[Dict[str, Any]], gap_count: int, las
     assert snap["count"] == len(packets)  # ни один пакет не потерял свою дельту
 
 
-def _leaf_cases() -> List[Any]:
+def _leaf_cases() -> list[Any]:
     marked = _root(25.0, mark=stamp(1, 100.0, "a", 5.0))
     marked_none = {"state": {"fps": None, "lat": 25.0}, "_fresh": stamp(1, 100.0, "a", 5.0)}
     return [
@@ -214,7 +214,7 @@ def _leaf_cases() -> List[Any]:
 
 
 @pytest.mark.parametrize(("writes", "path", "expected"), _leaf_cases())
-def test_leaf_classes(writes: List[Any], path: str, expected: Dict[str, Any]) -> None:
+def test_leaf_classes(writes: list[Any], path: str, expected: dict[str, Any]) -> None:
     """Лист без метки, лист ``None`` и лист вне ``processes.<X>`` — ``no_data``; ``value`` — сырой лист."""
     d = BackendDriver(clock=lambda: 103.0)
     for write_path, value in writes:
@@ -232,9 +232,9 @@ class _FakeSend:
     """Подставной ``send_command``: записывает вызовы, отвечает успехом (как ``_recorder`` в test_telemetry_driver)."""
 
     def __init__(self) -> None:
-        self.calls: List[tuple] = []
+        self.calls: list[tuple] = []
 
-    def __call__(self, process: str, command: str, args: Any = None, **kw: Any) -> Dict[str, Any]:
+    def __call__(self, process: str, command: str, args: Any = None, **kw: Any) -> dict[str, Any]:
         self.calls.append((process, command, args))
         return {"success": True}
 
@@ -303,16 +303,16 @@ def test_replay_uses_replay_clock() -> None:
 
 
 def test_snapshot_consistent_under_concurrent_ingest() -> None:
-    """Метка и значение из одной копии: при писателе в соседнем потоке ``age_s + value == now`` на каждом чтении.
+    """Smoke: писатель в соседнем потоке, читатель в основном; ``age_s + value == now`` на каждом чтении.
 
-    Писатель кладёт значение ``i`` и ``src_ts = i`` одной дельтой на корень; часы стоят на 1000.0. Вторая копия
-    метки дала бы пару из разных записей. Проверка вероятностная (на красном не гарантированно ловит разъезд),
-    но на корректном коде детерминирована: ни зависания, ни ``RuntimeError`` итерации, ни разъезда.
+    Писатель кладёт значение ``i`` и ``src_ts = i`` одной дельтой на корень; часы стоят на 1000.0. Ловит зависание,
+    ``RuntimeError`` итерации и ложные дыры под нагрузкой. Разъезд копий (метка из второго ``snapshot``) этот тест
+    не гарантирует: его проверяет детерминированный ``test_snapshot_uses_one_copy``.
     """
     d = BackendDriver(clock=lambda: 1000.0)
     writes = 300
     writer_done = threading.Event()
-    errors: List[BaseException] = []
+    errors: list[BaseException] = []
     reads = [0]
 
     def writer() -> None:
@@ -351,3 +351,71 @@ def test_snapshot_consistent_under_concurrent_ingest() -> None:
     final = _snapshot(d)
     assert final["gap_count"] == 0  # ревизии 1..300 непрерывны: счётчик под локом не гоняет ложные дыры
     assert final["metrics"][FPS]["value"] == float(writes)
+
+
+def test_snapshot_uses_one_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Метка и значения идут из ОДНОЙ копии read-model: один вызов ``snapshot`` на ``telemetry_snapshot``.
+
+    Подставной ``snapshot`` считает вызовы и пишет новую пару «значение + метка» сразу после первого: вторая копия
+    дала бы метку новее значения, и ``age_s + value`` разошлось бы с ``now``.
+    """
+    d = BackendDriver(clock=lambda: 1000.0)
+    d.dispatch_raw(_push(_delta(P, {"state": {"fps": 1.0}, "_fresh": stamp(1, 1.0, "a", 5.0)})))
+    model = d._telemetry_model
+    original = model.snapshot
+    calls: list[str] = []
+
+    def snapshot_then_write(prefix: str) -> dict[str, Any]:
+        out = original(prefix)
+        calls.append(prefix)
+        if len(calls) == 1:  # лок драйвера уже взят, модель своего не берёт: пишем прямо в неё
+            model.ingest(P, {"state": {"fps": 2.0}, "_fresh": stamp(2, 2.0, "a", 5.0)})
+        return out
+
+    monkeypatch.setattr(model, "snapshot", snapshot_then_write)
+    entry = _snapshot(d, process="cam", metric="fps")["metrics"][FPS]
+
+    assert len(calls) == 1
+    assert entry["value"] == 1.0
+    assert entry["age_s"] + entry["value"] == 1000.0
+
+
+def test_header_marks_survive_failed_state_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Метки процесса остаются в заголовке записи, даже когда секция ``state`` не собралась: реплей судит свежесть."""
+    source = BackendDriver()
+    source.dispatch_raw(_push(_delta(P, _root(25.0, mark=stamp(1, 995.0, "a", 5.0)))))
+
+    def failing_state(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("state недоступен")
+
+    monkeypatch.setattr(source, "send_command", failing_state)
+    monkeypatch.setattr(source, "system_overview", lambda **kwargs: {"success": True})
+    header = collect_header(source, 1000.0)
+    assert header["snapshot"]["state"]["section"] == "state"  # секция state — с ошибкой
+
+    player = ReplayPlayer(Recording(header, [], None, truncated=False, path="synthetic"), position="start")
+    entry = _snapshot(player.driver, process="cam", metric="fps")["metrics"][FPS]
+    assert entry["class"] == "fresh"  # created_ts=1000.0, src_ts=995.0, tick 5.0 -> 5.0 с
+    assert entry["age_s"] == 5.0
+    assert entry["value"] == 25.0
+
+
+def test_raising_clock_keeps_deltas_and_counts_gap() -> None:
+    """Часы, бросающие исключение, не стоят дельт пакета: дыра считается, ``last_gap_at`` остаётся ``None``."""
+    broken = [True]
+
+    def clock() -> float:
+        if broken[0]:
+            raise RuntimeError("часы сломаны")
+        return 123.0
+
+    d = BackendDriver(clock=clock)
+    d.dispatch_raw(_push(_delta(f"{P}.state.a", 1.0), **_rev(1, 1)))
+    d.dispatch_raw(_push(_delta(f"{P}.state.b", 2.0), **_rev(3, 3)))  # first=3 > 1 + 1
+    broken[0] = False  # сам снимок читает те же часы
+
+    snap = _snapshot(d)
+    assert snap["ingested_total"] == 2
+    assert snap["count"] == 2
+    assert snap["gap_count"] == 1
+    assert snap["last_gap_at"] is None

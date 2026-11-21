@@ -131,7 +131,7 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def state_changed_revisions(msg: Any) -> Optional[Tuple[int, int]]:
+def state_changed_revisions(msg: Any) -> tuple[int, int] | None:
     """Диапазон ревизий пакета ``state.changed``: ``(first_revision, revision)`` или ``None``.
 
     Берёт ``data.first_revision`` и ``data.revision`` конверта. ``None``, если это не
