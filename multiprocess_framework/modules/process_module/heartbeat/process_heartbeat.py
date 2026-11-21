@@ -163,6 +163,14 @@ class ProcessHeartbeat:
         self._last_push_at: float | None = None
         self._push_error_type: str | None = None
         self._sig_error_type: str | None = None
+        # Task 0.9: метка свежести писателя. ``_tick_seq`` растёт только на тактах, где что-то публикуется;
+        # ``_incarnation`` отличает новый OS-процесс с тем же именем от старого (рестарт даёт новый
+        # ``ProcessHeartbeat``: ``seq`` с единицы, воплощение другое). Это НЕ ``routing_incarnation`` ПМ (int).
+        # Здесь, а не в ``start()``: тесты ``start()`` не зовут. Пишет один поток (``heartbeat_sender``), лок не нужен.
+        self._tick_seq: int = 0
+        self._incarnation: str = f"{os.getpid()}:{time.time_ns()}"
+        # Task 0.9, M-7: число отказов ПУБЛИКАЦИИ в дерево (merge / delete / health), см. :meth:`_note_publish_failed`.
+        self.telemetry_publish_failed: int = 0
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -1418,6 +1426,7 @@ class ProcessHeartbeat:
             except Exception as exc:  # noqa: BLE001 — запас НЕ тратится, повторим на следующем тике
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Снятие поддерева писателя {writer!r} не ушло: {exc}", module="heartbeat")
+                self._note_publish_failed("delete", exc)
                 continue
             port.note_delete_delivered(writer)
 
@@ -1437,11 +1446,15 @@ class ProcessHeartbeat:
 
         Собирается под одним путём ``processes.{name}``:
 
-        * ``workers.{w}.{status, effective_hz, cycle_duration_ms}`` — строки
+        * ``workers.{w}.{status, effective_hz, cycle_duration_ms, last_cycle_age_s}`` — строки
           таблицы воркеров;
-        * ``state.fps`` = max(``effective_hz``) по running-воркерам с hz > 0,
-          ``state.latency_ms`` = max(``cycle_duration_ms``) среди них — агрегат
-          карточки; нет ни одного hz > 0 → агрегата нет;
+        * ``_fresh`` — метка свежести писателя на КОРНЕ записи (Task 0.9), последним ключом ``data``:
+          ``{seq, src_ts, incarnation, tick_sec}``; пустой такт её не публикует;
+        * ``state.fps`` / ``state.latency_ms`` — агрегат карточки: пара ОДНОГО самого медленного
+          отработавшего воркера (``fps`` — его ``effective_hz``, ``latency_ms`` — его
+          ``cycle_duration_ms``); значения могут быть ``None`` (стадия не отработала — старое число не
+          живёт под свежей меткой). Округление до 1 знака снято только для ``fps``, ``latency_ms``,
+          ``effective_hz``; остальные листья округляются как раньше (подробно — ``build_worker_telemetry``);
         * ``state.shm.*`` — счётчики кадрового транспорта router'а (Ф7 G.3 H8 /
           G.4.a): pickle_fallbacks, torn_reads, boundary_crossings,
           queue_data_evicted и прочие сигналы потери кадра для вкладки Pipeline;
@@ -1493,6 +1506,7 @@ class ProcessHeartbeat:
         if proxy is None:
             return  # чисто системный процесс без StateProxy
 
+        from ...state_store_module.core.freshness import FRESH_KEY, stamp
         from .telemetry import build_router_shm_telemetry, build_worker_telemetry
 
         # (0) Снятие поддеревьев ушедших писателей — ДО сборки и ДО раннего
@@ -1586,11 +1600,47 @@ class ProcessHeartbeat:
             data["state"] = state
         if not data:
             return  # показаний нет вовсе — пустой merge не шлём
+        # Task 0.9: метка свежести — на КОРЕНЬ записи процесса, ПОСЛЕДНИМ ключом ``data`` и только ПОСЛЕ раннего
+        # выхода: пустой такт не публикует метку и не двигает номер (иначе процесс без показаний выглядел бы живым).
+        # ``seq`` не откатывается, если ``merge`` ниже бросит: следующий успешный такт покажет скачок.
+        self._tick_seq += 1
+        data[FRESH_KEY] = stamp(self._tick_seq, time.time(), self._incarnation, self.current_telemetry_tick())
         try:
             proxy.merge(f"processes.{self._services.name}", data)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish телеметрии процесса: {exc}", module="heartbeat")
+            self._note_publish_failed("merge", exc)
+
+    def _note_publish_failed(self, where: str, exc: BaseException) -> None:
+        """Учесть отказ ПУБЛИКАЦИИ в дерево (M-7): факт всегда, голос — окном. НЕ БРОСАЕТ.
+
+        Зовётся из трёх мест и только из них: ``proxy.merge`` и ``proxy.delete`` (исключение самого
+        вызова) и публикация health. ``telemetry_publish_failed`` растёт первым и безусловно; затем один
+        WARNING через окно голоса (ключ на процесс, не на место: поток отказов не размножает строки;
+        место и имя класса исключения едут в контексте, текст исключения — нет). Голос в ``try`` без
+        проброса, как ``batch_drain._voice``: исключение здесь ушло бы во внешний ``except`` такта и
+        пропустило бы ``_send_heartbeat`` (liveness для ПМ).
+
+        **Чего счётчик не видит.** Недоставку роутера ``StateProxy._send`` глотает сам (ERROR в его логе) —
+        ``proxy.merge`` при этом возвращается без исключения и в счёт не попадает. Место health: ``publish_health``
+        сам глотает исключения ``proxy.set`` по листьям без лога и счёта; сюда доходят только исключения
+        ``poll()`` и самой ``publish_health`` вне цикла по листьям.
+        """
+        self.telemetry_publish_failed += 1
+        try:
+            from ...logger_module.core.windowed_voice import log_windowed
+
+            log_windowed(
+                f"heartbeat.{self._services.name}.telemetry_publish_failed",
+                None,
+                "warning",
+                "публикация телеметрии процесса в дерево не удалась",
+                where=where,
+                error=type(exc).__name__,
+            )
+        except Exception:  # nosec B110 — голос не имеет права ронять такт; факт уже в счётчике
+            pass
 
     def _plugin_ms_section(self) -> dict:
         """EMA времени плагинов из PluginRunner сервисов, мс с 1 знаком; пусто — раннера/замеров нет."""
@@ -1641,10 +1691,13 @@ class ProcessHeartbeat:
         поимённый реестр немигрированных писателей с причинами живёт в ``README.md``
         модуля, а не в коде фреймворка.
 
-        Следствие общего сборщика, принятое осознанно: **округление до 1 знака**
-        (``round(x, 1)``) действует и на опросе. Снимок — вид уровней для глаз, а не
-        измерительный прибор; расхождение push/poll в последнем знаке было бы дороже
-        потерянной точности.
+        Следствие общего сборщика, принятое осознанно: округление действует и на опросе
+        так же, как на push'е. С Task 0.8 до 1 знака (``round(x, 1)``) округляются
+        ``cycle_duration_ms``, ``queue_wait_ms``, ``transport_ms``; ``fps``, ``latency_ms`` и
+        ``effective_hz`` не округляются. Снимок — вид уровней для глаз, а не измерительный
+        прибор; расхождение push/poll в последнем знаке было бы дороже потерянной точности.
+        Метки свежести ``_fresh`` в снимке нет: она принадлежит публикации тика (писатель в дереве),
+        а не ответу на опрос.
 
         **Только чтение.** ``get_all_workers_status()`` и узкий ``router.get_shm_stats()``
         ничего не мутируют, ``_next_due`` гейта НЕ продвигается (``due_metrics()``
@@ -1724,6 +1777,11 @@ class ProcessHeartbeat:
         процесса и шлёт только при изменениях — публикация вырождается в no-op,
         пока никто не звал report_error/set_status. Процессы без StateProxy или без
         HealthState (никто ещё не трогал health) тихо пропускаются.
+
+        Метку свежести ``_fresh`` этот метод НЕ кладёт: он не сливает, а пишет ``proxy.set`` по листьям
+        ``health.<поле>``. Отказ публикации идёт в ``telemetry_publish_failed`` (:meth:`_note_publish_failed`),
+        но ``publish_health`` сам глотает исключения ``proxy.set`` по листьям без лога и счёта: сюда
+        доходят только исключения ``poll()`` и самой ``publish_health`` вне цикла по листьям.
         """
         proxy = getattr(self._services, "_state_proxy", None)
         if proxy is None:
@@ -1744,3 +1802,4 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — health не критичен для работы процесса
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish health процесса: {exc}", module="heartbeat")
+            self._note_publish_failed("health", exc)
