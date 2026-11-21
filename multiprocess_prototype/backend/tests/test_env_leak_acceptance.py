@@ -1,4 +1,4 @@
-"""Приёмка C-99: env приложения не утекает между тестами (слепой tester, до реализации).
+"""Приёмка C-99: env приложения не утекает между тестами (независимые тесты слепого tester).
 
 Дефект. Тесты и код приложения (``apply_env_aliases()``, SystemLauncher, launch,
 ``frontend/run.py``) пишут в ``os.environ`` НАПРЯМУЮ, минуя ``monkeypatch``.
@@ -220,7 +220,8 @@ def _run_nested_pytest(node_ids: list[str], timeout: float = 120.0) -> tuple[int
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        tail = (exc.stdout or b"")[-2000:] if isinstance(exc.stdout, bytes) else (exc.stdout or "")[-2000:]
+        raw = exc.stdout or ""
+        tail = (raw.decode(errors="replace") if isinstance(raw, bytes) else raw)[-2000:]
         pytest.fail(f"вложенный pytest не уложился в {timeout} с (зависание): {tail}")
     out = proc.stdout + "\n" + proc.stderr
     statuses = {m.group(1): m.group(2) for m in _STATUS_LINE.finditer(out)}
@@ -236,7 +237,7 @@ def _run_nested_pytest(node_ids: list[str], timeout: float = 120.0) -> tuple[int
 def test_real_repro_pair_passes_in_one_process():
     """Критерий 4: писатель → жертва из дефекта в ОДНОМ процессе дают 2 passed.
 
-    До реализации ожидаемо: 1 passed (писатель), 1 failed (жертва, KeyError: 'system').
+    Без отката env: 1 passed (писатель), 1 failed (жертва, KeyError: 'system').
     """
     code, statuses, out = _run_nested_pytest([REAL_WRITER, REAL_VICTIM])
     assert list(statuses) == [REAL_WRITER, REAL_VICTIM], f"порядок выполнения нарушен: {list(statuses)}"
@@ -255,4 +256,6 @@ def test_victims_alone_go_red_not_trivially_green():
     ]
     code, statuses, out = _run_nested_pytest(victims)
     assert statuses == {v: "FAILED" for v in victims}, out[-2500:]
+    # красные по правильной причине (писатель не отработал), а не от опечатки или NameError
+    assert out.count("писатель не отработал в этом процессе") >= 2, out[-2500:]
     assert code != 0

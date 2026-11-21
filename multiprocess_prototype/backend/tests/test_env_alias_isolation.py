@@ -92,9 +92,10 @@ def test_02_victim_sees_no_manifest_after_real_writer() -> None:
     """Жертва C-99: ни легаси-, ни каноничного ключа манифеста — ``resolve_manifest_path`` вернёт дефолт."""
     assert "test_01_writer_is_real_apply_env_aliases" in _WRITERS_RAN, "писатель не отработал — гоняйте файл целиком"
 
-    assert "INSPECTOR_MANIFEST" not in os.environ
-    assert "MULTIPROCESS_MANIFEST" not in os.environ
-    assert "MULTIPROCESS_LOG_LEVEL" not in os.environ
+    # .get(...) is None, а не «not in os.environ»: при красном assert печатает значение ключа, а не весь env с секретами
+    assert os.environ.get("INSPECTOR_MANIFEST") is None
+    assert os.environ.get("MULTIPROCESS_MANIFEST") is None
+    assert os.environ.get("MULTIPROCESS_LOG_LEVEL") is None
     assert os.environ["INSPECTOR_LOG_LEVEL"] == "WARNING"
 
 
