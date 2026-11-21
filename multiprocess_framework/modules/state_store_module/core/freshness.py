@@ -32,6 +32,8 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
+__all__ = ["FRESH_KEY", "FreshClass", "stamp", "classify", "read_value"]
+
 FRESH_KEY = "_fresh"
 
 type FreshClass = Literal["no_data", "fresh", "stale", "writer_gone"]
@@ -42,7 +44,12 @@ _NO_DATA: dict[str, Any] = {"class": "no_data", "value": None, "age_s": None}
 
 def _is_finite_number(x: Any) -> bool:
     """int/float без bool, nan и inf."""
-    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return False
+    try:
+        return math.isfinite(x)
+    except OverflowError:  # int > 1e308 не приводится к float
+        return False
 
 
 def stamp(seq: int, src_ts: float, incarnation: str, tick_sec: float) -> dict[str, Any]:
@@ -76,7 +83,8 @@ def classify(subtree: Any, now: Any, alive_incarnation: str | None) -> FreshClas
         (2) ``subtree.get("_fresh")`` не ``dict`` -> ``no_data``;
         (3) в метке нет любого из ``seq``, ``src_ts``, ``incarnation``, ``tick_sec`` -> ``no_data``;
         (4) ``src_ts``, ``tick_sec`` или ``now`` не число (``int``/``float``), либо ``bool``,
-            ``nan``, ``inf``, либо ``tick_sec <= 0`` -> ``no_data``;
+            ``nan``, ``inf``, либо ``int`` вне диапазона ``float`` -> ``no_data``;
+        (4a) ``tick_sec <= 0`` -> ``no_data``;
         (5) ``alive_incarnation is not None`` и ``!= incarnation`` -> ``writer_gone``
             (раньше ``stale``: ответ «ушёл» полезнее «давно не писал»);
         (6) ``now - src_ts > 2 * tick_sec`` -> ``stale`` (строго ``>``: ровно два такта —

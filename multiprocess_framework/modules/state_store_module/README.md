@@ -426,7 +426,7 @@ def test_camera_config_update():
 - **Запись:** одно слияние на корень процесса, метка в `data` последней: `merge("processes.<name>", {"state": {...}, "workers": {...}, "_fresh": S})`. Метка — `processes.<name>._fresh`, значения — `processes.<name>.state.fps`.
 - **Чтение:** `read_value(subtree, "state.fps", now, alive)`, `subtree = processes.<name>`; ключ — лист или путь через точку. Ответ `{"class", "value", "age_s"}`.
 - **Классы** (`classify`, порядок правил): `no_data` (нет или негодна метка, нет ключа, значение `None`) → `writer_gone` (`alive` задан и не равен `incarnation`) → `stale` (`now - src_ts > 2 * tick_sec`) → `fresh`. Ноль — значение: `fps: 0` это `fresh`, не `no_data`.
-- Придержанный троттлом лист остаётся `fresh`, пока писатель жив. Часы писателя и читателя должны быть синхронны.
+- Придержанный троттлом лист остаётся `fresh`, пока писатель жив, если ни одно правило не покрывает `_fresh`: правила `processes.**` и `**` троттлят метку наравне с листьями (ложный `stale`), `processes.**._fresh.**` её вырезает. Часы писателя и читателя должны быть синхронны.
 
 Только stdlib, зеркал нет: `backend_ctl` импортирует `core.freshness`.
 
