@@ -76,7 +76,7 @@ def _one_worker() -> dict:
     чтобы агрегату ``state.*`` было из чего строиться. Воркер без измерений не
     отличил бы «выключено гейтом» от «публиковать было нечего» — оба дали бы
     одинаково пустой результат."""
-    return {"w0": {"status": "running", "effective_hz": 10.0, "cycle_duration_ms": 5.0}}
+    return {"w0": {"status": "running", "effective_hz": 10.0, "cycle_duration_ms": 5.0, "last_cycle_age_s": 0.1}}
 
 
 class TestBlueprintMergePreservesGlobalDefaultEnabled:
@@ -199,7 +199,8 @@ class TestNoGateIsNotTheSameAsDefaultEnabledFalse:
 
         assert result is not None
         _, silenced_payload = result
-        assert silenced_payload["workers"]["w0"] == {"status": "running"}
+        # last_cycle_age_s — диагностический ключ воркера, вне гейта метрик (0.8)
+        assert silenced_payload["workers"]["w0"] == {"status": "running", "last_cycle_age_s": 0.1}
         assert "state" not in silenced_payload
 
 

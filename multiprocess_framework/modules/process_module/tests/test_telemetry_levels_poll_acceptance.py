@@ -217,8 +217,8 @@ def _distinct_workers() -> dict:
     опроса так же.
     """
     return {
-        "w0": {"status": "running", "effective_hz": 23.7, "cycle_duration_ms": 41.3},
-        "w1": {"status": "running", "effective_hz": 31.9, "cycle_duration_ms": 17.6},
+        "w0": {"status": "running", "effective_hz": 23.7, "cycle_duration_ms": 41.3, "last_cycle_age_s": 0.1},
+        "w1": {"status": "running", "effective_hz": 31.9, "cycle_duration_ms": 17.6, "last_cycle_age_s": 0.1},
     }
 
 

@@ -435,7 +435,7 @@ class TestPushEqualsPoll:
         """
         services, hb = _boot(name="dup")
         services.worker_manager.get_all_workers_status = lambda: {  # type: ignore[attr-defined]
-            "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0}
+            "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0, "last_cycle_age_s": 0.1}
         }
         ctx = PluginContext(services=services, config={}, plugin_name="dup_plugin")
         ctx.publish_metric("fps", 21.0)  # 'fps' объявлен фреймворком — раньше «чужое имя»
@@ -786,7 +786,7 @@ class TestOneMergePerTick:
     def _services_with_worker(self, name: str) -> _Services:
         services = _Services(name=name)
         services.worker_manager.get_all_workers_status = lambda: {  # type: ignore[attr-defined]
-            "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0}
+            "w": {"status": "running", "effective_hz": 8.0, "cycle_duration_ms": 3.0, "last_cycle_age_s": 0.1}
         }
         return services
 
