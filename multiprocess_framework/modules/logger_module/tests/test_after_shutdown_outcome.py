@@ -21,8 +21,10 @@ stderr запись попадает только через ``logging.lastResor
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
+import pickle
 import subprocess
 import sys
 import threading
@@ -33,6 +35,7 @@ import pytest
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
 from multiprocess_framework.modules.base_manager.mixins import observable_mixin as _mixin
+from multiprocess_framework.modules.logger_module.core import logger_core as _logger_core_module
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
 _ROOT = Path(__file__).resolve().parents[4]
@@ -75,13 +78,22 @@ class _Collect(logging.Handler):
 
 @pytest.fixture
 def emergency():
+    """Ловец аварийных строк на корне + логгер ``logger_core`` поднят до DEBUG.
+
+    Без подъёма уровня «0 строк для INFO» вакуумно: у логгера нет своего уровня, корень стоит на
+    WARNING, и запись INFO отсекается ДО обработчика независимо от того, пишет ли код её вообще.
+    """
     handler = _Collect()
     root = logging.getLogger()
+    emitter = logging.getLogger(_logger_core_module.__name__)
+    saved_level = emitter.level
+    emitter.setLevel(logging.DEBUG)
     root.addHandler(handler)
     try:
         yield handler
     finally:
         root.removeHandler(handler)
+        emitter.setLevel(saved_level)
 
 
 @pytest.fixture
@@ -177,7 +189,7 @@ def test_error_after_shutdown_goes_to_floor(lm, emergency):
     assert floor_text.count("late error line") == 1
     # ERROR идёт тем же аварийным путём, что и WARNING: одна строка, уровень записи сохранён.
     assert [r.levelname for r in emergency.closed_records()] == ["ERROR"]
-    assert emergency.lines() == [f"{_PREFIX} late error line"]
+    assert emergency.lines() == [f"{_PREFIX} probe: late error line"]
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +225,7 @@ def test_warning_after_shutdown_on_emergency_stderr(tmp_path):
     closed = [line for line in proc.stderr.splitlines() if _PREFIX in line]
     assert len(closed) == 1, proc.stderr
     assert "late shutdown line" in closed[0]
+    assert "probe: late shutdown line" in closed[0]
 
 
 def test_closed_line_is_throttled_to_20_per_manager(tmp_path, emergency):
@@ -263,7 +276,146 @@ def test_closed_line_survives_percent_in_message(lm, emergency):
     """Текст — АРГУМЕНТОМ эмиссии: ``%`` в сообщении не должен тихо стереть строку."""
     lm.shutdown()
     lm.warning("disk 100% full, 50%d left %s", module="probe")
-    assert emergency.lines() == [f"{_PREFIX} disk 100% full, 50%d left %s"]
+    assert emergency.lines() == [f"{_PREFIX} probe: disk 100% full, 50%d left %s"]
+
+
+def test_closed_line_without_module_has_no_module_prefix(lm, emergency):
+    """Источник называется в строке; пустой ``module`` — строка без префикса источника."""
+    lm.shutdown()
+    lm.warning("bare line", module="")
+    assert emergency.lines() == [f"{_PREFIX} bare line"]
+
+
+# ---------------------------------------------------------------------------
+# Порядок внутри останова, tap'ы, лок дросселя (правки по ревью стадии 5)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingTap:
+    name = "late_tap"
+
+    def __init__(self):
+        self.records = []
+
+    def write(self, record):
+        self.records.append(record)
+        return {"status": "ok"}
+
+    def close(self):
+        return None
+
+
+class _LockSpyLogger(LoggerManager):
+    """LoggerManager, у которого счётчик строк дросселя запоминает, под ``_miss_lock`` ли его читают и пишут."""
+
+    @property
+    def _closed_lines_emitted(self):
+        self.__dict__.setdefault("_lock_spy", []).append(("read", self._miss_lock.locked()))
+        return self.__dict__.get("_spy_value", 0)
+
+    @_closed_lines_emitted.setter
+    def _closed_lines_emitted(self, value):
+        self.__dict__.setdefault("_lock_spy", []).append(("write", self._miss_lock.locked()))
+        self.__dict__["_spy_value"] = value
+
+
+def test_record_inside_shutdown_window_after_registry_clear_is_refused(lm, monkeypatch):
+    """Флаг ставится ДО ``registry.clear()``: запись в окне между очисткой и концом останова — отказ."""
+    m = _Probe(lm)
+    m.initialize()
+    original_clear = lm._channel_registry.clear
+    inside = []
+
+    def clear_then_write():
+        channels = original_clear()
+        inside.append(m._log_warning("in-window line"))
+        return channels
+
+    monkeypatch.setattr(lm._channel_registry, "clear", clear_then_write)
+    s0 = lm.get_stats()
+    lm.shutdown()
+    s1 = lm.get_stats()
+    assert inside == [False]
+    assert _delta(s0, s1, "channel_refused_records") == 1
+
+
+def test_tap_added_after_shutdown_gets_nothing(lm):
+    """Путь (а) стоит ДО блока tap'ов: отказанная запись не уходит ещё и в tap."""
+    lm.shutdown()
+    tap = _RecordingTap()
+    lm.add_tap(tap, min_level="DEBUG")
+    s0 = lm.get_stats()
+    assert lm.warning("late shutdown line", module="probe") is _mixin.REFUSED
+    s1 = lm.get_stats()
+    assert tap.records == []
+    assert _delta(s0, s1, "channel_refused_records") == 1
+
+
+def test_closed_line_counter_is_read_and_written_under_the_miss_lock(tmp_path):
+    """Решение о строке (чтение) и прибавка (запись) дросселя — под ``_miss_lock``, детерминированно."""
+    spy = _LockSpyLogger(config={"log_directory": str(tmp_path)})
+    try:
+        spy.shutdown()
+        for i in range(3):
+            assert spy.warning(f"late shutdown line {i}", module="probe") is _mixin.REFUSED
+        events = spy.__dict__["_lock_spy"]
+        kinds = [kind for kind, _locked in events]
+        # Три записи → три прибавки; чтений не меньше трёх (проверка «меньше 20» плюс чтение в ``+=``).
+        assert kinds.count("write") == 3
+        assert kinds.count("read") >= 3
+        assert all(locked for _kind, locked in events), events
+    finally:
+        spy.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Окно голоса: закрытый менеджер — состояние постоянное, слот не возвращается
+# ---------------------------------------------------------------------------
+
+
+def test_report_error_after_shutdown_is_throttled_by_the_window(lm):
+    """3000 ``report_error`` после останова: ОДИН голос (одна строка в полу, один отказ), остальные гасит окно.
+
+    До решения лида по окну голоса слот возвращался на каждом ``REFUSED``, и окно переставало
+    дросселировать: 3000 строк в полу вместо одной.
+    """
+    m = _Probe(lm)
+    m.initialize()
+    lm.shutdown()
+    s0 = lm.get_stats()
+    for _ in range(3000):
+        m.report_error(ValueError("late boom"), "ctx", throttle=3600.0)
+    s1 = lm.get_stats()
+    floor_text = Path(lm.error_floor.stats["path"]).read_text(encoding="utf-8")
+    assert floor_text.count("late boom") == 1
+    assert _delta(s0, s1, "channel_refused_records") == 1
+    assert _delta(s0, s1, "errors_to_floor") == 1
+
+
+def test_log_windowed_after_shutdown_is_throttled_by_the_window(lm):
+    m = _Probe(lm)
+    m.initialize()
+    lm.shutdown()
+    s0 = lm.get_stats()
+    for _ in range(5):
+        assert m.log_windowed("late_key", interval=3600.0, level="warning", message="late windowed") is False
+    s1 = lm.get_stats()
+    assert _delta(s0, s1, "channel_refused_records") == 1
+
+
+def test_refused_sentinel_is_falsy_and_keeps_identity(lm):
+    """Старое ``if lm.warning(...)`` после останова читает ложь; тождество (``is``) и копии целы."""
+    refused = _mixin.REFUSED
+    assert bool(refused) is False
+    assert repr(refused) == "REFUSED"
+    assert copy.copy(refused) is refused
+    assert copy.deepcopy(refused) is refused
+    assert pickle.loads(pickle.dumps(refused)) is refused
+    lm.shutdown()
+    result = lm.warning("late shutdown line", module="probe")
+    assert result is refused
+    assert not result
+    assert lm.info("late info line", module="probe") is refused
 
 
 # ---------------------------------------------------------------------------

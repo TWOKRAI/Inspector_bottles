@@ -70,6 +70,11 @@ class _Refused:
     def __repr__(self) -> str:
         return "REFUSED"
 
+    def __bool__(self) -> bool:
+        # Ложь, а не истина по умолчанию: старое ``if lm.warning(...)`` после останова
+        # не должно читать отказ как успех. ``is REFUSED`` / ``is not REFUSED`` не затронуты.
+        return False
+
     def __reduce__(self) -> str:
         # Пикл и копия обязаны вернуть ТОТ ЖЕ объект: сравнение идёт по тождеству.
         return "REFUSED"
@@ -195,6 +200,23 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         delivered, _result = self._call_manager_result("logger", level, message, **kwargs)
         return delivered
+
+    def _logger_slot_closed(self) -> bool:
+        """Менеджер в слоте ``logger`` сам говорит, что ЗАКРЫТ (Task 0.6).
+
+        Для окна голоса: закрытый менеджер — состояние ПОСТОЯННОЕ, и слот, съеденный
+        решением, возвращать незачем (повтор снова получил бы отказ). Бросивший или не
+        имеющий метода менеджер закрытым не объявляется и слот по-прежнему возвращает (Ф2.3).
+
+        Читается публичное свойство ``is_closed`` менеджера (есть у ``LoggerCore``); у
+        менеджера без него, у заглушки и при пустом слоте — ``False``. Сравнение ``is True``,
+        а не истинность: ``Mock`` отвечает на любое имя истинным объектом. Без кэша — вопрос
+        задаётся менеджеру каждый раз, как и ``ManagerRegistry.get``.
+        """
+        registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
+        if registry is None or not registry.is_enabled("logger"):
+            return False
+        return getattr(registry.get("logger"), "is_closed", False) is True
 
     def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
         """Логирование уровня DEBUG через logger manager.
@@ -382,9 +404,11 @@ class ObservableMixin(IObservableMixin):
         if suppressed:
             ctx.setdefault("suppressed_since_last", suppressed)
         delivered = self._log_checked(level, text, **ctx)
-        if not delivered:
+        if not delivered and not self._logger_slot_closed():
             # Слот съеден решением, а строки нет — вернуть, иначе первая же
-            # потеря даёт молчание на весь интервал (Task 4.13).
+            # потеря даёт молчание на весь интервал (Task 4.13). Закрытому
+            # логгеру слот НЕ возвращается (Task 0.6): отказ постоянный, и
+            # возврат отключил бы окно — каждый повтор снова шёл бы в отказ.
             self._voices().release(key, suppressed)
         return delivered
 
@@ -509,11 +533,14 @@ class ObservableMixin(IObservableMixin):
             # ``TestConcurrency::test_every_thread_leaves_a_fact_and_only_one_speaks``)
             # с подменённым ``_log_error``, возвращающим ``None``, давали голос
             # на каждом вхождении вместо одного.
-            if delivered is False:
+            if delivered is False and not self._logger_slot_closed():
                 # Task 4.13: приёмник не принял вызов — слот, съеденный
                 # решением, возвращается вместе с долгом. Без этого отказ
                 # логгера превращал бы КАЖДЫЙ следующий инцидент этого ключа в
                 # молчание, неотличимое от штатного подавления окном.
+                # Исключение — ЗАКРЫТЫЙ логгер (Task 0.6): его отказ постоянный,
+                # слот остаётся потраченным, и окно гасит повторы как до правки
+                # (иначе 3000 вхождений после останова давали бы 3000 строк в полу).
                 self._voices().release(voice_key, suppressed)
         except Exception as voice_exc:  # noqa: BLE001 — голос не стоит подмены исходной ошибки
             self._note_manager_call_failure("logger", "report_error.voice", exc=voice_exc)

@@ -1657,6 +1657,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if written == 0 and self._closed:
                 return self._refuse_closed(level, record_dict, to_floor=False)
 
+    @property
+    def is_closed(self) -> bool:
+        """Менеджер ЗАКРЫТ (``shutdown()`` дошёл до очистки реестра). Постоянное состояние.
+
+        Читает окно голоса в ``ObservableMixin``: закрытому логгеру слот окна не возвращается.
+        """
+        return self._closed
+
     def _refuse_closed(self, level: LogLevel, record_dict: Dict[str, Any], to_floor: bool) -> Any:
         """Учесть запись, отказанную ЗАКРЫТЫМ менеджером, и вернуть :data:`REFUSED`.
 
@@ -1682,12 +1690,16 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self._write_to_floor(record_dict)
         if voice:
             try:
-                emergency_log(
-                    __name__,
-                    str(getattr(level, "value", level)),
-                    "[logger closed] %s",
-                    record_dict.get("message", ""),
-                )
+                # Источник называется в строке (оператору нужно знать, кто писал в закрытый
+                # логгер); пустой ``module`` — строка без префикса источника. Текст — ВСЕГДА
+                # аргументом, не шаблоном: ``%`` в сообщении не должен стереть строку.
+                module = record_dict.get("module")
+                text = record_dict.get("message", "")
+                level_name = str(getattr(level, "value", level))
+                if module:
+                    emergency_log(__name__, level_name, "[logger closed] %s: %s", module, text)
+                else:
+                    emergency_log(__name__, level_name, "[logger closed] %s", text)
             except Exception:  # noqa: BLE001  # nosec B110 — аварийный путь не имеет права бросать
                 pass
         return REFUSED
