@@ -114,9 +114,7 @@ def channel_accepted(result: Any) -> bool:
     задним числом; но смысл общий — «отброшено» и «записано» не одно и то же,
     и различать их обязан общий толкователь, а не каждый писатель у себя.
     """
-    if isinstance(result, dict):
-        return result.get("status") not in ("error", "dropped")
-    return True
+    return outcome_of(result) == "accepted"
 
 
 # =============================================================================
