@@ -5,7 +5,7 @@
 
 ## Phase 6 — Пульт оператора 1.0 (ORDER #15–#17; приёмка β8, `plans/release-1.0/design.md` §3)
 
-**Статус:** DRAFT v2, вопросы В1–В9 закрыты — после стадии 0 (reviewer sonnet, CHANGES REQUESTED → правки внесены 2026-11-20, `docs/reports/2026-11-20_pult_phase6_stage0.md`).
+**Статус:** 6.1–6.4 влиты в main; 6.5 живая приёмка — ждёт окна stand; 6.6 — документы.
 Сверено с кодом `main` = `ad3dc7b72`. Ветка — от лида. Все вопросы закрыты (ниже); код — после их ответа и слота писателя.
 **Не путать:** «пульт» здесь — вкладка Services → «Пульт» (`control_panel`). Виджет `RunControlWidget` (ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать, S5 `b778b9503`) —
 главное окно, полоса Ф; пульт его не дублирует.
@@ -48,7 +48,7 @@
     `word_layout.target_word == "МИР"` за ≤ 2 с, на первом диске строка `смена слова '…' → 'МИР' (источник: регистр)`.
   - REDS: `test_recipe_1_0.py::test_word_control_writes_target_word` (реальные объекты), `::test_pult_node_last_in_both_recipes`, `::test_recipes_pass_blueprint_check`;
     `recipes/tests/test_letter_robot_sim_diff.py` и `backend/tests/test_build_characterization.py` — зелёные (снапшот β перегенерирован осознанно).
-- Task 6.1b: **тесты «рецепт как есть» и слово оператора (следствие В5)** [PENDING] (после слияния 6.1; решение лида, найдено ревью 6.1)
+- Task 6.1b: **тесты «рецепт как есть» и слово оператора (следствие В5)** [DONE] (после слияния 6.1; решение лида, найдено ревью 6.1)
   - Level Junior+ · Assignee developer · Layer prototype + plugins-tests · Module contract n/a · Handoff `developer`(REDS) → `reviewer`(express)
   - Суть: после Save рецепта со словом оператора красными станут не только `recipes/tests/test_letter_robot_sim_diff.py:149`
     (`.blueprint.processes[6].plugins[0].config.target_word`), но и (воспроизведено на копии рецепта с `target_word: МИР`)
@@ -57,7 +57,7 @@
     для β — golden-снапшот держит `target_word: ""`. Красного сегодня нет, он возникает только после реального Save.
   - FILES: те три теста, `_recipe_cfg()` в двух последних — явный `target_word=''`; diff-тест — не считать `target_word` расхождением; снапшот β по решению лида. Чужие тесты — только с ведома владельцев (word_layout P3 — `plans/word-layout.md`, alpha — полоса α).
 
-- Task 6.2: **`word_layout` — прогресс в state на решении + собранная часть слова** [PENDING] (параллельно 6.1)
+- Task 6.2: **`word_layout` — прогресс в state на решении + собранная часть слова** [DONE 2026-11-20, влита 69c40c3a6] (параллельно 6.1)
   - Level Middle+ · Assignee developer · Layer plugins · Module contract impl-only · Handoff `developer`(REDS) → `reviewer`
   - FILES: `Plugins/processing/word_layout/plugin.py`, `registers.py`, новый `tests/test_state_progress.py` (один файл, не `test_p3_disk_journal.py`), `README.md`
   - DESIGN: сейчас state `processes.layout.state.word_layout` пишется только в `process()` не чаще 1 с (`plugin.py:29, 159-162`) —
@@ -72,7 +72,7 @@
   - REDS: `test_state_progress.py::test_publish_on_decision_without_next_tick`, `::test_assembled_mask_case_c`, `::test_word_change_resets_assembled`, `::test_reset_publishes_state`.
 
 ### Задачи 6.3–6.4: monitor, лента, «Домой», «Серво ВКЛ»
-- Task 6.3: **`monitor` — показ состояния чужой ноды, только чтение** (бывшая 5.4) [PENDING] (после 6.0)
+- Task 6.3: **`monitor` — показ состояния чужой ноды, только чтение** (бывшая 5.4) [DONE 2026-11-21, влита e836b2db5] (после 6.0)
   - Level Middle+ · Assignee developer · Layer services + prototype · Module contract public-api-change (`ControlSpec`) ·
     Handoff `developer`(INTERFACE) → `tester`(RED) → `developer`(GREEN) → `reviewer`
   - FILES: `Services/control_panel/controls.py`, `Services/control_panel/tests/test_controls.py`, `control_panel/widget.py`,
@@ -94,10 +94,10 @@
     `::test_monitor_replay_on_lazy_bind`, `::test_monitor_rebind_drops_old_handles`, `::test_monitor_row_has_no_editable_widgets`,
     `::test_monitor_formatter_tolerates_non_dict`, `::test_monitor_never_dispatches` (через эмит виджета: `presenter.operate` для monitor уже возвращает False — `presenter.py:45`,
     поэтому тест через него красным до кода не будет).
-- Task 6.4: **кнопки ленты, «Домой», «Серво ВКЛ», строка статуса в рецептах 1.0** [PENDING] (после 6.1, 6.2, 6.3; В1, В2, В8 решены)
+- Task 6.4: **кнопки ленты, «Домой», «Серво ВКЛ», строка статуса в рецептах 1.0** [DONE 2026-11-21, влита 519db0930; ревью Sonnet APPROVED, отчёт docs/reports/2026-11-21_pult_6.4.md] (после 6.1, 6.2, 6.3; В1, В2, В8 решены)
   - Level Middle+ · Assignee developer · Layer prototype · Module contract n/a · Handoff `developer`(REDS) → `reviewer`
   - FILES: `recipes/letter_robot_sim.yaml` (все контролы), `recipes/hikvision_letter_robot.yaml` (лента и мониторы; «Домой»/«Серво ВКЛ» — после R4), `control_panel/tests/test_recipe_1_0.py`,
-    снапшот `backend/tests/snapshots/hikvision_letter_robot.build.json` — только если меняется набор процессов
+    снапшот `backend/tests/snapshots/hikvision_letter_robot.build.json` — перегенерирован (изменились `controls` блока `pult`); также тронуты в 6.4 (в плане не были): `Services/control_panel/plugin/plugin.py`, `Services/control_panel/tests/test_plugin_monitor_readonly.py`, `recipes/tests/test_letter_robot_sim_diff.py`
   - DESIGN: `action`-контролы на `devices`/0: «Лента пуск» `vfd_run {device_id: vfd_belt}`, «Лента стоп» `vfd_stop {device_id: vfd_belt}`,
     «Домой» `robot_park {device_id: robot_main}`, **«Серво ВКЛ»** `robot_servo {device_id: robot_main, on: true}` (без кода: `type: button, source: action,
     target_command: robot_servo, value_arg: on, command_args: {device_id: robot_main}`, `ControlSpec.action_args` — `controls.py:121-130`).
@@ -113,7 +113,7 @@
   - REDS: `test_recipe_1_0.py::test_belt_home_servo_commands_exist`, `::test_status_monitors_paths`, `::test_gui_validator_accepts_belt_and_home`.
 
 ### Задачи 6.5–6.6: приёмка и документы
-- Task 6.5: **живая приёмка β8 на симе** [PENDING] (после 6.4; окно `stand`)
+- Task 6.5: **живая приёмка β8 на симе** [IN PROGRESS, окно stand — ждёт Ф] (после 6.4; окно `stand`)
   - Level Senior · Assignee tester (опись — haiku) · Layer prototype · Module contract n/a · Handoff `tester` → лид
   - FILES нет (стенд §2.1 design.md + GUI с qt-mcp)
   - ACCEPTANCE: S6 через пульт вместо `set_register_verified`: «МИР» → журнал §2.5 (строка смены + 5 строк дисков, 3 `CVT_JOB`,
