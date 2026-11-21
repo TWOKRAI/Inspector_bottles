@@ -1663,9 +1663,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if isinstance(verified, dict) and verified.get("verdict"):
             verdict = str(verified.get("verdict"))
             verdict_reason: Optional[str] = None
-        elif observability is not None and reply.get("success") is False:
-            # Inline-секция передана, а хост не принял команду: суждения нет не из-за
-            # «без inline-секции» (это была бы ложная причина), а из-за ответа хоста.
+        elif observability is not None and (reply.get("success") is False or is_refusal(reply)):
+            # Inline-секция передана, а хост не принял команду. Отказ роутера приходит как
+            # `{"status": "error", "reason": ...}`, и после `_leaf_result` в листе нет ключа
+            # `success`, поэтому смотрим и на `is_refusal`. Суждения нет не из-за «без
+            # inline-секции» (это была бы ложная причина), а из-за ответа хоста.
             # `success` ниже остаётся False, вердикт — unverifiable; `judge` сюда не
             # применяется (BCTL-ADR-008: `success` — про применение, не вердикт).
             verdict = "unverifiable"

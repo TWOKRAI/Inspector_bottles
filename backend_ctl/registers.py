@@ -285,8 +285,9 @@ class RegisterOps:
         записей), ``skipped`` (поля без записи), ``failed`` (поля с вердиктом
         ``failed``: хост отверг запись либо образ после не равен снимку), ``vacuous``
         (поля с вердиктом ``vacuous``: образ уже был равен снимку, ничего не доказано),
-        ``verified`` (поля, совпавшие со снимком) и ``mismatches``. Единица счёта у всех
-        счётчиков — ПОЛЕ снимка.
+        ``verified`` (поля, совпавшие со снимком) и ``mismatches``. ``mismatches`` и ``verified``
+        считаются тем же сравнением (:meth:`_values_match`), что и ``success``: ответ не
+        противоречит себе на строковой коэрсии. Единица счёта у всех счётчиков — ПОЛЕ снимка.
 
         Restore, где образ уже равен снимку, ничего не пишет: ``written 0``,
         ``success True``, ``vacuous`` = число таких полей. Это честный пустой restore, а
@@ -341,7 +342,7 @@ class RegisterOps:
                     elif verdict["verdict"] == "vacuous":
                         vacuous += 1
                     restored = restored and verdict["success"]
-                    if got != value:
+                    if not self._values_match(value, got):  # то же сравнение, что и в judge (eq)
                         mismatches.append(
                             {"process": proc, "register": reg, "field": field, "expected": value, "actual": got}
                         )
