@@ -1110,7 +1110,7 @@
     ],
     "presentation_overlay": null,
     "replace_debounce_s": 1.0,
-    "run_gate": false,
+    "run_gate": true,
     "state_throttle_rules": {
       "processes.**.state.capture_fps": 0.05,
       "processes.**.state.drops": 0.05,
@@ -1234,7 +1234,7 @@
       "processing": {
         "worker_pool_size": 0
       },
-      "run_gate": false,
+      "run_gate": true,
       "shutdown": {
         "pre_stop": [
           {
