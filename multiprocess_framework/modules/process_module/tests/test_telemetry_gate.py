@@ -173,8 +173,8 @@ class TestBuildFilter:
     def test_only_fps(self) -> None:
         """allowed={fps} → нет hz/cycle/latency; есть status + агрегат fps."""
         _, data = build_worker_telemetry(_workers(2), "proc", {"fps"})
-        # last_cycle_age_s — диагностический ключ воркера, вне гейта метрик (0.8)
-        assert data["workers"]["w0"] == {"status": "running", "last_cycle_age_s": 0.1}
+        # ни effective_hz, ни last_cycle_age_s: возраст идёт только вместе с разрешённым effective_hz (0.8)
+        assert data["workers"]["w0"] == {"status": "running"}
         # пара — самый медленный воркер (w0, 10 Гц), а не максимум (0.8)
         assert data["state"] == {"fps": 10.0}
         assert "latency_ms" not in data["state"]
@@ -182,9 +182,8 @@ class TestBuildFilter:
     def test_empty_allowed_only_status_no_state(self) -> None:
         """allowed=set() (все метрики выключены) → только status, агрегата нет."""
         _, data = build_worker_telemetry(_workers(2), "proc", set())
-        # last_cycle_age_s — диагностический ключ воркера, вне гейта метрик (0.8)
-        assert data["workers"]["w0"] == {"status": "running", "last_cycle_age_s": 0.1}
-        assert data["workers"]["w1"] == {"status": "running", "last_cycle_age_s": 0.1}
+        assert data["workers"]["w0"] == {"status": "running"}
+        assert data["workers"]["w1"] == {"status": "running"}
         assert "state" not in data  # агрегат не считается и не публикуется
 
     def test_status_always_present(self) -> None:

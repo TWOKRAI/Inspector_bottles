@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 
 import pytest
@@ -163,10 +164,78 @@ def test_worker_payload_has_last_cycle_age(clock) -> None:
     _path, data = build_worker_telemetry(workers, "p")
     assert data["workers"]["w"]["last_cycle_age_s"] == pytest.approx(2.0)
 
-    # под гейтом, пропускающим только fps: возраст вне гейта, effective_hz — по гейту
-    _path, gated = build_worker_telemetry(workers, "p", allowed_metrics={"fps"})
+    # гейт с effective_hz: возраст едет вместе с ним (одно условие)
+    _path, gated = build_worker_telemetry(workers, "p", allowed_metrics={"effective_hz"})
     assert gated["workers"]["w"]["last_cycle_age_s"] == pytest.approx(2.0)
-    assert "effective_hz" not in gated["workers"]["w"]
+    assert gated["workers"]["w"]["effective_hz"] == pytest.approx(0.5)
+
+
+def test_last_cycle_age_follows_effective_hz_gate(clock) -> None:
+    """Ручка выключает — цена ноль: без разрешённого ``effective_hz`` возраст цикла в дерево не идёт.
+
+    У ``last_cycle_age_s`` нет собственного правила троттла, а ключ меняется на каждом тике:
+    опубликованный при пустом гейте, он давал 2 дельты на тик на воркера из ничего.
+    """
+    rec = _fifty_cycles_10ms(clock)
+    clock.now = 2.5
+    workers = {"w": _worker(**rec.get_cycle_metrics())}
+
+    for allowed in (set(), {"fps"}, {"latency_ms", "cycle_duration_ms"}):
+        _path, data = build_worker_telemetry(workers, "p", allowed_metrics=allowed)
+        assert "last_cycle_age_s" not in data["workers"]["w"], allowed
+        assert "effective_hz" not in data["workers"]["w"], allowed
+
+    # опрос уровней (include_cycles) гейт не обходит: возраст — не cycles
+    _path, data = build_worker_telemetry(workers, "p", allowed_metrics=set(), include_cycles=True)
+    assert data["workers"]["w"] == {"status": "running", "cycles": 50}
+
+
+def test_non_finite_rates_do_not_enter_pair() -> None:
+    """NaN/inf от чужого словаря в пару не входят (``hz < nan`` всегда False — NaN залипал бы первым)."""
+    workers = {
+        "nan_first": _worker(effective_hz=float("nan"), cycle_duration_ms=1.0, last_cycle_age_s=0.1),
+        "inf": _worker(effective_hz=float("inf"), cycle_duration_ms=2.0, last_cycle_age_s=0.1),
+        "finite": _worker(effective_hz=3.0, cycle_duration_ms=7.0, last_cycle_age_s=0.1),
+    }
+    _path, data = build_worker_telemetry(workers, "p")
+    assert data["state"]["fps"] == 3.0
+    assert data["state"]["latency_ms"] == 7.0
+    # сам воркер публикует явный None, а не NaN/inf
+    assert data["workers"]["nan_first"]["effective_hz"] is None
+    assert data["workers"]["inf"]["effective_hz"] is None
+
+    # одни нечисловые — пары нет
+    only_bad = {"nan": _worker(effective_hz=float("nan"), cycle_duration_ms=1.0, last_cycle_age_s=0.1)}
+    _path, data = build_worker_telemetry(only_bad, "p")
+    assert data["state"]["fps"] is None
+    assert data["state"]["latency_ms"] is None
+
+
+def test_window_is_counted_from_read_moment(clock) -> None:
+    """Окно 1 с отсчитывается ОТ момента чтения, а не от последней метки.
+
+    Метки 1.0, 1.1, 1.9; новых завершений нет, часы идут. Граница ``1/age`` это свойство маскирует
+    на простых сценариях (стоп после регулярного потока), поэтому вход подобран так, чтобы окно
+    решало: на 2.05 метка 1.0 уже вышла из окна (отсечка 1.05) — остаётся 1.1 и 1.9, темп 1/0.8;
+    окно «от последней метки» (отсечка 0.9) оставило бы все три и дало 2/0.9.
+    """
+    clock.now = 0.0
+    rec = CycleMetricsRecorder()
+    for at in (1.0, 1.1, 1.9):
+        _complete(rec, clock, at)
+
+    clock.now = 1.95  # все три метки в окне: 2 интервала на 0.9 с
+    first = rec.get_cycle_metrics()["effective_hz"]
+    assert first == pytest.approx(2 / 0.9)
+
+    clock.now = 2.05  # метка 1.0 вышла из окна без нового завершения
+    second = rec.get_cycle_metrics()["effective_hz"]
+    assert second == pytest.approx(1 / 0.8)
+
+    clock.now = 3.0  # окно пусто: обратный последний интервал 1/0.8 и граница 1/возраст (1.1 с)
+    third = rec.get_cycle_metrics()["effective_hz"]
+    assert third == pytest.approx(1 / 1.1)
+    assert first > second > third, "темп должен падать по мере чтения без новых завершений"
 
 
 def test_published_fps_after_stall(clock) -> None:
@@ -270,9 +339,11 @@ def test_microsecond_latency_not_zero(clock) -> None:
 def test_race_two_writers_one_reader_guard() -> None:
     """Гонка: 2 писателя ``record`` + читатель ``get_cycle_metrics``, по 10 000 итераций.
 
-    ЧЕСТНО: на CPython этот тест гонку без лока НЕ ловит (замер ревью: 0 из 20) — GIL
-    гасит окно. Он страж «ничего не падает, счётчик сходится, возраст не отрицателен»,
-    а не доказательство лока. Доказательство лока — детерминированный тест ниже.
+    Интервал переключения потоков сужен до 1e-6 с (с возвратом в ``finally``): при штатных 5 мс
+    CPython гонку без лока НЕ ловит (замер ревью: 0 из 10 на снятом локе), а при 1e-6 снятие лока
+    даёт ``RuntimeError: deque mutated during iteration`` (10 из 10). Тест остаётся вероятностным
+    стражем «ничего не падает, счётчик сходится, возраст не отрицателен»; ДЕТЕРМИНИРОВАННОЕ
+    доказательство лока — тест ниже (он знает только перечисленные там поля).
     """
     rec = CycleMetricsRecorder()  # реальные часы
     n_iter = 10_000
@@ -294,10 +365,17 @@ def test_race_two_writers_one_reader_guard() -> None:
             errors.append(exc)
 
     threads = [threading.Thread(target=fn, daemon=True) for fn in (writer, writer, reader)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(5)
+    # Штатные 5 мс гонку не ловят (0 из 10 на снятом локе); при 1e-6 снятие лока ловится 10 из 10
+    # (RuntimeError 'deque mutated during iteration' у читателя). Возврат — в finally.
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+    finally:
+        sys.setswitchinterval(old_interval)
 
     assert not any(t.is_alive() for t in threads), "поток завис (дедлок лока?)"
     assert errors == []

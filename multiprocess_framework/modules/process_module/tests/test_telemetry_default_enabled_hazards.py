@@ -199,8 +199,7 @@ class TestNoGateIsNotTheSameAsDefaultEnabledFalse:
 
         assert result is not None
         _, silenced_payload = result
-        # last_cycle_age_s — диагностический ключ воркера, вне гейта метрик (0.8)
-        assert silenced_payload["workers"]["w0"] == {"status": "running", "last_cycle_age_s": 0.1}
+        assert silenced_payload["workers"]["w0"] == {"status": "running"}
         assert "state" not in silenced_payload
 
 

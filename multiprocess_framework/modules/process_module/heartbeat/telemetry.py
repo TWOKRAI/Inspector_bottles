@@ -21,6 +21,7 @@ PC 1.2 (publisher-gate): ``build_worker_telemetry`` принимает ``allowed
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any, Callable, Iterable, Mapping, Optional
@@ -108,10 +109,15 @@ def build_worker_telemetry(
         ``CycleMetricsRecorder`` после первого цикла). Воркер без рекордера или без единого
         цикла ``effective_hz``/``last_cycle_age_s`` не публикует и в пару не входит;
       - per-worker: ``status`` — всегда (если не None, вне гейта); у отработавшего —
-        ``last_cycle_age_s`` (вне гейта метрик и вне ``include_cycles``: диагностический
-        ключ, как ``cycles``) и ``effective_hz`` — по гейту; число (включая 0 — ноль есть
-        показание) либо явный ``None``, если частота неизвестна: merge не трогает
-        отсутствующий ключ и оставил бы под свежей меткой старое число; ``cycle_duration_ms``
+        ``effective_hz`` — по гейту; число (включая 0 — ноль есть показание) либо явный
+        ``None``, если частота неизвестна или не конечна (NaN/inf): merge не трогает
+        отсутствующий ключ и оставил бы под свежей меткой старое число; ``last_cycle_age_s``
+        — возраст последнего цикла, с (не округляется) — ТОЛЬКО вместе с разрешённым
+        ``effective_hz`` (то же условие ``hz_ok``; вне ``include_cycles``): своего правила
+        троттла у ключа нет, а меняется он каждый тик — при выключенном гейте он стоил бы
+        дельту на воркера на тик из ничего, а ручка «выключено» обязана давать цену ноль.
+        Цена при ОТКРЫТОМ гейте — до +1 дельты на воркера на тик (измерено ревью: 2.6 → 5.0
+        дельт за тик на 2 воркерах); ``cycle_duration_ms``
         — при lat>0 И если разрешена; ``queue_wait_ms`` (EMA ожидания в chain_queue, у
         PipelineExecutor), ``transport_ms`` (EMA времени транспорта между процессами, у
         DataReceiver) и ``pacer_late`` (счётчик опоздавших тактов, у SourceProducer/IdleWorker)
@@ -208,20 +214,21 @@ def build_worker_telemetry(
         # «Отработал» = в снимке есть возраст последнего цикла (его даёт CycleMetricsRecorder
         # после первого цикла). Воркер без рекордера или без единого цикла частоты не публикует.
         worked = isinstance(age, (int, float)) and not isinstance(age, bool)
-        hz_num = isinstance(hz, (int, float)) and not isinstance(hz, bool)
+        # NaN/inf в пару и в лист не идут: ``hz < nan`` всегда False, и NaN первым залипал бы в паре.
+        hz_num = isinstance(hz, (int, float)) and not isinstance(hz, bool) and math.isfinite(hz)
 
         # Per-worker: status — всегда (вне гейта); частоту/цикл — при измерении И если разрешено.
         wp: dict = {}
         if status is not None:
             wp["status"] = status
-        if worked:
-            # Возраст последнего цикла — диагностический ключ воркера, вне гейта метрик (как cycles):
-            # по нему видно «встал», когда частота уже спала.
+        if worked and hz_ok:
+            # Возраст последнего цикла идёт ТОЛЬКО вместе с разрешённым ``effective_hz`` (одно условие):
+            # у него нет своего правила троттла, а ключ меняется на каждом тике — при выключенном гейте
+            # он стоил бы дельту на воркера на тик из ничего («ручка выключает — цена ноль»).
             wp["last_cycle_age_s"] = age
-            if hz_ok:
-                # Ноль — показание, а не отсутствие; неизвестная частота — явный None (merge не
-                # трогает отсутствующий ключ и оставил бы под свежей меткой старое число).
-                wp["effective_hz"] = hz if hz_num else None
+            # Ноль — показание, а не отсутствие; неизвестная частота — явный None (merge не
+            # трогает отсутствующий ключ и оставил бы под свежей меткой старое число).
+            wp["effective_hz"] = hz if hz_num else None
         if lat_ok and isinstance(lat, (int, float)) and lat > 0:
             wp["cycle_duration_ms"] = round(lat, 1)
         # Task 4.5a: ноль здесь — показание («не ждали» / «не опаздывали»), не отсутствие.
