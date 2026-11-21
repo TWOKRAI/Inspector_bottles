@@ -72,6 +72,8 @@ python multiprocess_prototype/run.py --headless
 ```bash
 python multiprocess_prototype/frontend/run.py
 ```
+Headless без кнопки ЗАПУСТИТЬ при `run_gate: true` — с `--autostart` (`frontend/run.py --headless --autostart`);
+`main.bootstrap()` (пробы `backend_ctl`, `tools/otel_stand`) по умолчанию держит гейт выключенным (`run_gate=False`).
 Подробности хардкод-shell механизма — [`frontend/README.md`](frontend/README.md).
 
 ## Граница фронт/бэк (Ф2 frontend-constructor)

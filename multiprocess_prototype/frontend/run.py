@@ -25,6 +25,9 @@ Headless-флаг (``INSPECTOR_HEADLESS=1`` / ``--headless``, см. ``main.py``)
 запуск ``frontend/run.py --headless`` поднимет систему БЕЗ окна: процесс ``gui``
 останется, но будет дренировать data-трафик вместо рисования.
 
+``--autostart`` (Task 2.7 S3c′) — как у ``multiprocess_prototype/run.py``: при ``run_gate: true`` без GUI-кнопки
+ЗАПУСТИТЬ (``--headless``) система стоит в ``ready`` без кадров; флаг включает автостарт.
+
 venv-guard — общий: ``multiprocess_prototype.run.venv_guard`` (одна реализация, C-55a);
 бутстрап ``sys.path`` ниже нужен, чтобы импортировать его до re-exec (см. докстринг
 ``multiprocess_prototype/run.py`` про ``sys.path[0]`` при прямом запуске скрипта).

@@ -87,7 +87,8 @@ def build_launcher(
 def bootstrap(topology_path: Path | str | None = None, *, run_gate: bool | None = False) -> "SystemLauncher":
     """LEGACY: собрать систему из явного пути топологии + ``CONFIG_PATH``.
 
-    Сохранено для тестов и README фреймворка. Новый код — ``build_launcher``.
+    Живые вызывающие: пробы ``backend_ctl/probes`` и ``tools/otel_stand``; тесты и README фреймворка.
+    Новый код — ``build_launcher``.
 
     ``run_gate`` (Task 2.1, коммит B): по умолчанию ``False`` — гейт запуска выключен независимо от
     ``system.yaml``, как у ``BackendHarness``: вызывающие (пробы, ``tools/otel_stand``) не шлют

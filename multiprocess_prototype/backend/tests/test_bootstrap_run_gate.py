@@ -29,6 +29,11 @@ def _no_log_dir_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INSPECTOR_LOG_DIR", "x")
     monkeypatch.delenv("MULTIPROCESS_LOG_DIR")
     monkeypatch.delenv("INSPECTOR_LOG_DIR")
+    # launch() пишет INSPECTOR_PRESENTATION, build() — setdefault MPF_APP_NAME на весь процесс: откат
+    # (setenv+delenv — monkeypatch запоминает «переменной не было» и удаляет при откате).
+    for name in ("INSPECTOR_PRESENTATION", "MPF_APP_NAME"):
+        monkeypatch.setenv(name, "x")
+        monkeypatch.delenv(name)
 
 
 def _system_yaml(tmp_path: Path, value: bool) -> Path:
@@ -48,10 +53,11 @@ def _system_yaml(tmp_path: Path, value: bool) -> Path:
         (["run.py", "--headless", "--autostart"], (None,), {"headless": True, "autostart": True}),
         (["run.py", "--autostart", "--headless"], (None,), {"headless": True, "autostart": True}),
         (["run.py", "letter_robot_sim", "--autostart"], ("letter_robot_sim",), {"headless": None, "autostart": True}),
+        (["run.py", "--autostart", "letter_robot_sim"], ("letter_robot_sim",), {"headless": None, "autostart": True}),
         (["run.py", "--headless"], (None,), {"headless": True, "autostart": None}),
         (["run.py", "letter_robot_sim"], ("letter_robot_sim",), {"headless": None, "autostart": None}),
     ],
-    ids=["headless-autostart", "autostart-headless", "recipe-autostart", "headless-only", "recipe-only"],
+    ids=["headless-autostart", "autostart-headless", "recipe-autostart", "autostart-recipe", "headless-only", "recipe-only"],
 )
 def test_frontend_launch_strips_autostart_from_argv(
     monkeypatch: pytest.MonkeyPatch, argv: list[str], args: tuple, kwargs: dict
@@ -68,11 +74,6 @@ def test_frontend_launch_strips_autostart_from_argv(
 
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "argv", argv)
-    # launch() ставит os.environ["INSPECTOR_PRESENTATION"] на весь процесс — без отката соседние тесты
-    # (test_build_characterization: снимок сборки с overlay презентации) краснеют. setenv+delenv: monkeypatch
-    # запоминает «переменной не было» и удаляет её при откате.
-    monkeypatch.setenv("INSPECTOR_PRESENTATION", "x")
-    monkeypatch.delenv("INSPECTOR_PRESENTATION")
     monkeypatch.setattr(frontend_run, "venv_guard", lambda *a, **k: None)
     monkeypatch.setattr(proto_main, "main", fake_main)
 
