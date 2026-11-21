@@ -13,13 +13,21 @@
 
 from __future__ import annotations
 
+import sys
 import threading
+import time
 from typing import Any, Dict, List
 
 from ..adapters import socket_bridge_adapter as bridge_module
 from ..adapters.socket_bridge_adapter import SocketBridgeAdapter
 
 _JOIN_DEADLINE_S = 5.0
+
+# Hazard счётчика: 8 потоков x 3000 вызовов при интервале переключения 1 мкс.
+_HAZARD_THREADS = 8
+_HAZARD_CALLS = 3000
+_HAZARD_SWITCH_INTERVAL_S = 1e-6
+_HAZARD_DEADLINE_S = 5.0
 
 _SESSION_GONE = {"status": "error", "reason": "session not connected"}
 
@@ -59,6 +67,34 @@ class _CapturingLogger:
 
     def warning(self, msg: str, *args: Any) -> None:  # pragma: no cover - не ожидается
         self.errors.append("WARNING " + (msg % args if args else msg))
+
+
+class _SilentLogger:
+    """Подменяет ``_logger`` в нагрузочном тесте: 24 тыс. ERROR не идут в stdlib-логгер."""
+
+    def error(self, msg: str, *args: Any) -> None:
+        pass
+
+    def warning(self, msg: str, *args: Any) -> None:
+        pass
+
+
+class _StatsReadingLogger:
+    """Подменяет ``_logger``: каждая ERROR-запись в том же потоке читает ``get_stats()``.
+
+    Так ведёт себя лог-хендлер, которому нужен счётчик моста: он входит в
+    ``_stats_lock`` из потока, где мост пишет лог.
+    """
+
+    def __init__(self, adapter: SocketBridgeAdapter, seen: list[int]) -> None:
+        self._adapter = adapter
+        self._seen = seen
+
+    def error(self, msg: str, *args: Any) -> None:
+        self._seen.append(self._adapter.get_stats()["lost_responses"])
+
+    def warning(self, msg: str, *args: Any) -> None:
+        pass
 
 
 def _msg(request_id: str = "corr-1") -> Dict[str, Any]:
@@ -166,25 +202,60 @@ def test_send_exception_log_names_class_not_text(monkeypatch) -> None:
     assert "secret-payload" not in line
 
 
-def test_bridge_lost_counter_threaded() -> None:
-    """Hazard: 4 потока x 50 ``on_inbound`` с ответом ``error`` — ровно 200 потерь."""
+def test_bridge_lost_counter_threaded(monkeypatch) -> None:
+    """Hazard: 8 потоков x 3000 ``on_inbound`` с ответом ``error`` — ровно 24000 потерь.
+
+    При обычном интервале переключения (5 мс) окно гонки на ``+= 1`` счётчика
+    почти не видно: прежний прогон 4 x 50 оставался зелёным и без ``_stats_lock``.
+    ``sys.setswitchinterval(1e-6)`` переключает потоки почти на каждой инструкции:
+    без лока на мосту прогон теряет часть инкрементов (замер ревью: 22400-22800
+    из 24000, 3 из 3), с локом счёт точен.
+    """
+    monkeypatch.setattr(bridge_module, "_logger", _SilentLogger())
     adapter = SocketBridgeAdapter(_ScriptedRouter(send_result=dict(_SESSION_GONE)), "backend_ctl")
-    start = threading.Barrier(4)
-    errors: List[BaseException] = []
+    start = threading.Barrier(_HAZARD_THREADS)
+    errors: list[BaseException] = []
 
     def worker(n: int) -> None:
         try:
             start.wait(_JOIN_DEADLINE_S)
-            for i in range(50):
+            for i in range(_HAZARD_CALLS):
                 adapter.on_inbound(_msg(f"w{n}-{i}"))
         except BaseException as exc:  # noqa: BLE001 - пробросить в поток теста
             errors.append(exc)
 
-    threads = [threading.Thread(target=worker, args=(n,), name=f"bridge-w{n}", daemon=True) for n in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(_JOIN_DEADLINE_S)
-    assert not any(thread.is_alive() for thread in threads), "потоки on_inbound не завершились за 5 с"
+    threads = [
+        threading.Thread(target=worker, args=(n,), name=f"bridge-w{n}", daemon=True) for n in range(_HAZARD_THREADS)
+    ]
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(_HAZARD_SWITCH_INTERVAL_S)
+    try:
+        for thread in threads:
+            thread.start()
+        deadline = time.monotonic() + _HAZARD_DEADLINE_S
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+    finally:
+        sys.setswitchinterval(previous_interval)
+    alive = [thread.name for thread in threads if thread.is_alive()]
+    assert alive == [], f"потоки on_inbound не завершились за {_HAZARD_DEADLINE_S} с"
     assert errors == []
-    assert adapter.get_stats()["lost_responses"] == 200
+    assert adapter.get_stats()["lost_responses"] == 24000
+
+
+def test_bridge_log_is_outside_stats_lock(monkeypatch) -> None:
+    """ERROR-лог моста пишется вне ``_stats_lock``: хендлер лога может прочесть ``get_stats()``.
+
+    ``_stats_lock`` — не реентерабельный ``Lock``. Если лог потери идёт под ним, а
+    обработчик лога (или подмена, как здесь) в том же потоке зовёт ``get_stats()``,
+    поток блокируется сам на себе. Красный = ``on_inbound`` завис (daemon-поток,
+    join с дедлайном), а не зависший прогон.
+    """
+    adapter = SocketBridgeAdapter(_ScriptedRouter(send_result=dict(_SESSION_GONE)), "backend_ctl")
+    seen: list[int] = []
+    monkeypatch.setattr(bridge_module, "_logger", _StatsReadingLogger(adapter, seen))
+
+    _run_bounded(lambda: adapter.on_inbound(_msg("corr-1")))
+
+    assert seen == [1]
+    assert adapter.get_stats()["lost_responses"] == 1
