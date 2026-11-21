@@ -82,8 +82,18 @@ def launch(
     headless_flag = "--headless" in argv
     if headless_flag:
         argv = [a for a in argv if a != "--headless"]
+    # --autostart (Task 2.7 S3c′, ADR-PMM-050) — как в multiprocess_prototype/run.py: без GUI-кнопки
+    # ЗАПУСТИТЬ (--headless) система при ``run_gate: true`` стоит в ``ready`` без кадров. Флаг не должен
+    # стать именем рецепта; без флага ``None`` — ключ ``run_autostart`` берётся из system.yaml.
+    autostart_flag = "--autostart" in argv
+    if autostart_flag:
+        argv = [a for a in argv if a != "--autostart"]
 
-    return app_main(argv[0] if argv else None, headless=True if headless_flag else None)
+    return app_main(
+        argv[0] if argv else None,
+        headless=True if headless_flag else None,
+        autostart=True if autostart_flag else None,
+    )
 
 
 if __name__ == "__main__":

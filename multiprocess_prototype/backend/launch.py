@@ -607,7 +607,9 @@ class SystemBuilder:
         )
 
     @classmethod
-    def from_topology_path(cls, system_path: Path, topology_path: Path) -> "SystemBuilder":
+    def from_topology_path(
+        cls, system_path: Path, topology_path: Path, *, run_gate: bool | None = None
+    ) -> "SystemBuilder":
         """LEGACY: из явного system.yaml + topology (без манифеста/фундамента).
 
         **Презентации эта дорога не знает никогда.** Overlay накладывает только
@@ -616,11 +618,17 @@ class SystemBuilder:
         не о чем: выбора между воплощениями тут не делается. Живых вызывающих
         нет (``main.bootstrap()`` «сохранено для тестов и README» + тесты);
         появится первый — решать, звать ли голос и отсюда.
+
+        ``run_gate`` (Task 2.1, коммит B): ``None`` — как в ``system.yaml``; ``True``/``False`` перебивает его
+        (``main.bootstrap()`` передаёт ``False``: скрипты без кнопки ЗАПУСТИТЬ не встают в ``ready`` без кадров).
         """
         from .config.schemas import load_system_config
 
+        sys_config = load_system_config(system_path)
+        if run_gate is not None:
+            sys_config.run_gate = run_gate
         return cls(
-            sys_config=load_system_config(system_path),
+            sys_config=sys_config,
             blueprint=load_topology_dict(topology_path),
             topology_path=topology_path,
             system_path=system_path,
