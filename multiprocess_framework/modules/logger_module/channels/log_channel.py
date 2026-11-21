@@ -11,6 +11,7 @@ import logging.handlers
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from collections import deque
@@ -268,7 +269,45 @@ class LogChannel(ILogChannel):
         pass
 
 
-class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+class _ErrorCapture:
+    """Миксин хэндлера: ошибка записи остаётся строкой в ``_last_error``, а не в stderr.
+
+    stdlib зовёт ``handleError`` из ``emit`` при любой ошибке записи (диск полон,
+    ошибка форматирования, сбой ``shouldRollover``) и печатает «Logging error» в
+    stderr, после чего ``emit`` возвращается штатно — канал не отличает такую
+    запись от удачной. Миксин (первым в MRO) перекрывает ``handleError``: причина
+    сохраняется СТРОКОЙ, канал читает её внутри ``_emit`` и отвечает ``error``.
+    В строку входное значение не попадает: только класс исключения и, для
+    ``OSError`` с ``errno``, номер и текст ОС. ``super().handleError`` не зовётся
+    намеренно: причина уходит в ответ канала, а не в stderr.
+
+    # до Task 3.5 (свой писатель заменит): временная конструкция, видимость ошибки.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_error: str | None = None
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        exc = sys.exc_info()[1]
+        if exc is None:
+            # вне ``except``: строка не пуста, иначе ошибка маскировалась бы под успех
+            self._last_error = "UnknownError"
+        elif isinstance(exc, OSError) and exc.errno is not None:
+            self._last_error = f"{type(exc).__name__}: errno {exc.errno} {exc.strerror}"
+        else:
+            self._last_error = type(exc).__name__
+
+
+class _ErrorCaptureFileHandler(_ErrorCapture, logging.FileHandler):
+    """``FileHandler`` с видимой ошибкой записи (ветка ``rotate: false``)."""
+
+
+class _ErrorCaptureStreamHandler(_ErrorCapture, logging.StreamHandler):
+    """``StreamHandler`` с видимой ошибкой записи (консольный канал)."""
+
+
+class _SafeRotatingFileHandler(_ErrorCapture, logging.handlers.RotatingFileHandler):
     """RotatingFileHandler, устойчивый к WinError 32 при multiprocessing.
 
     На Windows несколько процессов не могут одновременно переименовать файл.
@@ -981,7 +1020,7 @@ class FileChannel(LogChannel):
             if created:
                 self.handler.setFormatter(formatter)
         else:
-            self.handler = logging.FileHandler(self.file_path, encoding="utf-8", mode="a")
+            self.handler = _ErrorCaptureFileHandler(self.file_path, encoding="utf-8", mode="a")
             self._shared_handler = False
             self.handler.setFormatter(formatter)
         # B-1: лесенка переезжает на лок СТОКА (лежит рядом с общим ротатором,
@@ -1017,7 +1056,14 @@ class FileChannel(LogChannel):
                 # форматтер видит только stdlib-запись, наш словарь до него не доходит.
                 log_record.seq = record.get("seq") or 0
 
+                # Сброс и чтение — строго вокруг ОДНОЙ записи и под локом
+                # лесенки: хэндлер общий для каналов файла, ``_last_error`` общий.
+                # ``handler.acquire()`` запрещён (ADR-LOG-009).
+                self.handler._last_error = None
                 self.handler.emit(log_record)
+                err = getattr(self.handler, "_last_error", None)
+                if err:
+                    return {"status": "error", "channel": self.name, "error": err}
                 return {"status": "success", "channel": self.name}
             except Exception as e:
                 return {"status": "error", "error": str(e), "channel": self.name}
@@ -1056,7 +1102,7 @@ class ConsoleChannel(LogChannel):
 
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
-        self.handler = logging.StreamHandler()
+        self.handler = _ErrorCaptureStreamHandler()
         formatter = _SourceAbbreviatingFormatter(config.format, name_max_len=getattr(config, "name_max_len", 0))
         self.handler.setFormatter(formatter)
         # ``_bind_sink_lock`` НЕ зовётся (Ф7.х.2): StreamHandler у каждой консоли
@@ -1079,7 +1125,12 @@ class ConsoleChannel(LogChannel):
                 extra = record.get("extra") or {}
                 log_record.proc_name = extra.get("proc_name") or "-"
 
+                # Тот же контракт исхода, что у ``FileChannel`` (внутри лока лесенки).
+                self.handler._last_error = None
                 self.handler.emit(log_record)
+                err = getattr(self.handler, "_last_error", None)
+                if err:
+                    return {"status": "error", "channel": self.name, "error": err}
                 return {"status": "success", "channel": self.name}
             except Exception as e:
                 return {"status": "error", "error": str(e), "channel": self.name}
