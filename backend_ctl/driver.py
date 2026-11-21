@@ -88,6 +88,7 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
 from .registers import RegisterOps, _PendingCommit  # noqa: F401 — _PendingCommit re-export для back-compat
+from .verdict import is_refusal
 
 # Логгер клиента: reader-поток — daemon, его необработанное исключение уходит только
 # в stderr-трейсбек; обрыв соединения логируем явно (A.3), чтобы причина «reader молча
@@ -555,6 +556,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def _looks_failed(res: Any) -> bool:
         """Ответ явно провальный? (для решения «регистрировать ли намерение»)."""
         return isinstance(res, dict) and res.get("success") is False
+
+    @staticmethod
+    def _host_error_text(reply: Any) -> str:
+        """Текст ошибки из ответа хоста для причины отказа: ``error``, иначе ``reason`` (Task 0.11)."""
+        if isinstance(reply, dict):
+            text = reply.get("error") or reply.get("reason")
+            if text:
+                return str(text)
+        return "ответ хоста без текста ошибки"
 
     def _register_subscription(self, command: str, target: str, args: Dict[str, Any], res: Any) -> None:
         """Записать намерение подписки, если команда НЕ провалилась явно.
@@ -1653,6 +1663,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if isinstance(verified, dict) and verified.get("verdict"):
             verdict = str(verified.get("verdict"))
             verdict_reason: Optional[str] = None
+        elif observability is not None and reply.get("success") is False:
+            # Inline-секция передана, а хост не принял команду: суждения нет не из-за
+            # «без inline-секции» (это была бы ложная причина), а из-за ответа хоста.
+            # `success` ниже остаётся False, вердикт — unverifiable; `judge` сюда не
+            # применяется (BCTL-ADR-008: `success` — про применение, не вердикт).
+            verdict = "unverifiable"
+            text = self._host_error_text(reply)
+            verdict_reason = (
+                f"хост отверг config.reload: {text}"
+                if is_refusal(reply)
+                else f"config.reload без ответа хоста: {text}"  # таймаут — не отказ (0.3)
+            )
         else:
             # Файловый reload не несёт inline-секции, и сравнивать запрошенное не с
             # чем: «запрос» тут — весь файл целиком. Отсутствие суждения называется
@@ -1898,6 +1920,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``verification.reason`` — «не проверено» не выдаётся за «не применилось наоборот»,
         но и за «применилось» тоже.
 
+        **Отказ хоста (Task 0.11).** Если хост ОТВЕРГ запись (``verdict.is_refusal(res)``:
+        ``success False`` не-таймаут либо ``status == "error"``), ``verified_effect`` =
+        ``False``, ``verification.reason`` называет отказ и его ``error``, поллинг НЕ
+        запускается: правило, уже равное запрошенному, не доказывает, что запись дошла.
+        Таймаут — не отказ, решает readback. ``success`` ответа по-прежнему не трогается.
+
         **Против вакуумного True (ревью Фазы 4, находка 4).** ``resolved`` разворачивает
         ДЕФОЛТЫ: метрика без правила читается как ``(enabled=True, default_interval_sec)``.
         Поэтому одного совпадения с ``resolved`` мало — запрос ``enabled=True`` совпал бы
@@ -1916,6 +1944,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             res["verified_effect"] = bool(ok)
             res["verification"] = {"process": process, "metric": metric, "plane": plane, **extra}
             return res
+
+        if is_refusal(res):
+            # Хост ОТВЕРГ запись (Task 0.11): readback, совпавший с уже действующим
+            # правилом, был бы ложным подтверждением. Поллинг не запускаем — читать
+            # нечего. Таймаут — не отказ (is_refusal его не берёт): решает readback.
+            return _mark(False, reason=f"хост отверг запись телеметрии: {self._host_error_text(res)}")
 
         if plane == "throttle":
             # Central-троттл оркестратор-глобален: адресат readback'а всегда PM, поэтому
