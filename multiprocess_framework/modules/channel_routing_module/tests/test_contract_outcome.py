@@ -127,7 +127,7 @@ def _scenario_file_channel_enospc(tmp_path, broken):
         after = lm.get_stats()
         written = after["channel_written_records"] - before["channel_written_records"]
         loss = after["channel_refused_records"] - before["channel_refused_records"]
-        return written > 0, loss, {"channel_written_records": written}
+        return written == 4, loss, {"channel_written_records": written}
     finally:
         lm.shutdown()
 

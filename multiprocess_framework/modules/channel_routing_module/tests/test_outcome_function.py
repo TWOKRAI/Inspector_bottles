@@ -126,6 +126,9 @@ def test_count_outcome_unknown_hop_rejected():
     # hop проверяется и на здоровом пути: опечатка видна без отказа
     with pytest.raises(ValueError, match="count_outcome: unknown hop"):
         count_outcome({}, "nope", "accepted")
+    # оба неизвестны: hop проверяется раньше outcome, текст — про hop
+    with pytest.raises(ValueError, match="count_outcome: unknown hop"):
+        count_outcome({}, "nope", "weird")  # type: ignore[arg-type]
 
 
 def test_count_outcome_unknown_outcome_rejected():

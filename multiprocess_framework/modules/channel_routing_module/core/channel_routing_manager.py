@@ -86,7 +86,8 @@ LOSS_KEY_BY_HOP: dict[str, dict[str, str]] = {
 def count_outcome(counters: dict, hop: str, outcome: Outcome) -> None:
     """Прибавить 1 к счётчику потерь звена ``hop`` по исходу ``outcome``.
 
-    Pre: ``hop`` из ``LOSS_KEY_BY_HOP``; ``outcome`` — ``accepted`` / ``refused`` / ``failed``.
+    Pre: ``hop`` из ``LOSS_KEY_BY_HOP``; ``outcome`` — ``accepted`` / ``refused`` / ``failed``;
+    оба — хэшируемые литералы (нехэшируемое значение — ``TypeError``, вне контракта).
     Post: ``accepted`` ничего не меняет; иначе ``counters[key] += 1``. Возвращает ``None``.
     Неизвестный ``hop`` / ``outcome`` — ``ValueError`` с фиксированным текстом, без значения;
     ``hop`` проверяется раньше ``outcome`` и до ветки ``accepted`` (опечатка видна и на
