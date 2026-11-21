@@ -5,7 +5,7 @@
 
 ## Phase 6 — Пульт оператора 1.0 (ORDER #15–#17; приёмка β8, `plans/release-1.0/design.md` §3)
 
-**Статус:** 6.1–6.4 влиты в main; 6.5 живая приёмка — ждёт окна stand; 6.6 — документы.
+**Статус:** 6.1–6.4 влиты в main; 6.5 живая приёмка проведена на симе 2026-11-21 (GUI offscreen — через пробу qt-mcp); 6.6 документы — готовы. Открыто: β (R4), DRAW, русские подписи значений — `docs/claude/OPEN_QUESTIONS.md`.
 Сверено с кодом `main` = `ad3dc7b72`. Ветка — от лида. Все вопросы закрыты (ниже); код — после их ответа и слота писателя.
 **Не путать:** «пульт» здесь — вкладка Services → «Пульт» (`control_panel`). Виджет `RunControlWidget` (ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать, S5 `b778b9503`) —
 главное окно, полоса Ф; пульт его не дублирует.
@@ -113,13 +113,13 @@
   - REDS: `test_recipe_1_0.py::test_belt_home_servo_commands_exist`, `::test_status_monitors_paths`, `::test_gui_validator_accepts_belt_and_home`.
 
 ### Задачи 6.5–6.6: приёмка и документы
-- Task 6.5: **живая приёмка β8 на симе** [IN PROGRESS, окно stand — ждёт Ф] (после 6.4; окно `stand`)
+- Task 6.5: **живая приёмка β8 на симе** [DONE 2026-11-21, окно stand 12:30–12:53, tester sonnet; отчёты `docs/reports/2026-11-21_pult_6.5.md` и `…_pult_6.5_tester.md`; красных по механизму нет, три находки C-103…C-105 в `plans/queue/defects.md`] (после 6.4; окно `stand`)
   - Level Senior · Assignee tester (опись — haiku) · Layer prototype · Module contract n/a · Handoff `tester` → лид
   - FILES нет (стенд §2.1 design.md + GUI с qt-mcp)
   - ACCEPTANCE: S6 через пульт вместо `set_register_verified`: «МИР» → журнал §2.5 (строка смены + 5 строк дисков, 3 `CVT_JOB`,
     `jobs_emitted 12`), пульт показывает `assembled "МИР"` и последнюю букву «Р»; без перезапуска «ПЕРЕМИРИЕ» → §2.6; лента стоп/пуск и
     «Домой» по 6.4. Матрица инъекций — предсказания лида до прогона.
-- Task 6.6: **README/STATUS пульта и строка ORDER** [PENDING] (после 6.5)
+- Task 6.6: **README/STATUS пульта и строка ORDER** [DONE 2026-11-21: README/STATUS/шапки влиты `7318ca414`, итоги приёмки и строки ORDER — ветка `docs/pult-6.5-acceptance`] (после 6.5)
   - Level Junior · Assignee docs-writer · Layer docs · Handoff `docs-writer` → `reviewer`(express)
   - FILES: `Services/control_panel/README.md`, `STATUS.md` (дубль «Известные ограничения v1» — убрать), этот план.
 
