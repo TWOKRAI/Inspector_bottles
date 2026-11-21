@@ -200,3 +200,4 @@
 
 | property | predicted red | observed red |
 |---|---|---|
+| Task 0.1–0.3 (25 инъекций) | таблицы в `tasks/0.1–0.3.md`, до прогона | 20 совпали, 5 с лишними красными (недоучёт), пропусков нет — [`reports/0.1-0.3.injections.md`](reports/0.1-0.3.injections.md) |
