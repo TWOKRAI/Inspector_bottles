@@ -1,5 +1,7 @@
 # Промпты на продолжение полос (координатор inspector-bottles-2b, 2026-11-21)
 
+> **Порядок «к железу» (владелец 2026-11-21: сначала самое важное, потом остальное):** 1) К W4 → R4; 2) Р2: брифы А/Б, T0.3, T4.x; 3) Пульт: повторная проверка при `run_gate: true` (окно стенда); 4) `release-1.0`; 5) только потом observability (Н), C-93, C-36/A, RN1/PS1. Н идёт на свободном слоте и уступает К и Р2 на границе задачи.
+
 Состояние — по `git main` (`96fb1ea59`), `ORDER.md`, отчётам и заявкам 20–21.11. Других сессий на машине нет: все полосы стартуют заново, каждый блок ниже вставлять в новый чат целиком. Mac, `machine.lock` нет: тесты и прогоны — через `machine_gate.sh` по абсолютному пути (`git rev-parse --path-format=absolute --git-common-dir` + `/../scripts/machine_gate.sh`), стенд — только через `scripts/stand_gate` (сам берёт `stand.lock`: два стенда одновременно невозможны).
 
 ## Где мы (21.11, после слияний Ф 1→4 и Пульт 6.1–6.4)
@@ -69,7 +71,7 @@ REPORT: `docs/reports/<дата>_pult_6.5.md`, по-русски, непусто
 ВКЛАДКА: Полоса К · камера W4 — 4.2a раунд 2 стадии 0
 ROLE: lead of lane К, plan plans/2026-10-18_camera-device-service/. Запрет W4 снят владельцем (`docs/handoffs/2026-11-20_owner-decisions-after-cto-review.md`). Ветка `feat/camera-w4` (`6015c56c6`); дерево `Inspector_bottles--lane-K-w4`.
 READ FIRST: `docs/handoffs/2026-11-20_camera-4.2a-stage0-round1.md` (в ветке `feat/camera-w4`; B1–B5, M1–M8, REDS R1–R12); `docs/handoffs/2026-11-20_camera-w4-r4-owner-questions.md` (в `docs/camera-w4-prep`: ответы владельца по R4 — `use_linear`, `first_y`, `delta_v2`); `plans/2026-10-18_camera-device-service/tasks/4.2a.md`; ORDER строки 22–29.
-ПЕРЕД НАЧАЛОМ: координатор вливает `docs/camera-w4-prep`, `feat/camera-w4` (и `docs/r2-visit-prep-1120` для Р2) в main — документы, merge чистый; rebase своей ветки на новый main.
+ПЕРЕД НАЧАЛОМ: docs-ветки К и Р2 уже влиты в main (`bbd64697f`, `72f7b404b`, `61e8f24f0`) — читай файлы из main и сделай rebase своей ветки `feat/camera-w4` на main.
 GOAL: текст 4.2a принят стадией 0 (APPROVED), затем 4.2a → 4.2b → 4.3 → 4.4, К4' ложится ОДНИМ коммитом (старый `test_plugin.py` красный до 4.2b); после — R4 тремя коммитами (камера на ядре; `use_linear: false` + `first_y: -440`; драйвер `delta_v2` — последним, отдельно).
 ЗАДАЧИ СЕЙЧАС:
   1. Переписать текст 4.2a по блокерам B1–B5 и major M1–M8 раунда 1. Решения лида К принять как предложены, КРОМЕ M2 («всегда BGR», mono8 → GRAY2BGR — отклоняется от записи владельца 11-20 «gray для mono8»): взять BGR как рекомендацию, но вынести владельцу одной строкой в отчёт; пока ответа нет — текст пишется с BGR и пометкой «ждёт владельца», кода нет.
@@ -91,7 +93,7 @@ LESSONS: порядок записи плана = порядок объявле�
 
 ```
 ВКЛАДКА: Полоса Р2 · max_reconnect_attempts: 0 + C-101 (малые правки), потом визит
-ROLE: lead of lane Р2, plan plans/robot-protocol-v2/plan.md. T1.4 уже в main (07.11), T5.3e.1–6 влиты. T0.3 `[BLOCKED]` железом, T4.0 после него. Ветка с брифами — `docs/r2-visit-prep-1120` (2 коммита, будет влита координатором).
+ROLE: lead of lane Р2, plan plans/robot-protocol-v2/plan.md. T1.4 уже в main (07.11), T5.3e.1–6 влиты. T0.3 `[BLOCKED]` железом, T4.0 после него. Брифы уже в main (`61e8f24f0`): docs/handoffs/2026-11-20_R2-*.md.
 READ FIRST: `docs/handoffs/2026-11-20_R2-briefs-reconnect-and-C101.md`, `2026-11-20_R2-recipe-diff-reconnect.md`, `2026-11-20_R2-params-path-test.py.txt` (из той ветки); `docs/reports/2026-11-15_R2_lane.md`; plans/queue/defects.md (C-72, C-101); Plugins/hub/device_hub, ORDER строки 8, 26, 27.
 GOAL: две малые правки в main + сверка визита.
 ЗАДАЧИ:
