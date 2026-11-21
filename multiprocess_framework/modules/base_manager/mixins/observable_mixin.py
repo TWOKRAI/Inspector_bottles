@@ -62,6 +62,30 @@ from ..interfaces import IObservableMixin
 _RESERVED_FIELD_NAMES = frozenset({"message", "manager_name", "method_name"})
 
 
+class _Refused:
+    """Тип часового :data:`REFUSED`. Один экземпляр на процесс; сравнивать только по ``is``."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "REFUSED"
+
+    def __reduce__(self) -> str:
+        # Пикл и копия обязаны вернуть ТОТ ЖЕ объект: сравнение идёт по тождеству.
+        return "REFUSED"
+
+
+#: Часовой «менеджер ЗАКРЫТ и запись отказал» (Task 0.6, L-4). Возвращает его
+#: ``LoggerCore.log()`` ТОЛЬКО на пути отказа; на здоровом пути возврат остаётся
+#: ``None``. :meth:`ObservableMixin._call_manager_result` читает его как «не
+#: доставлено» и наружу не выпускает: к вызывающему ``_call_manager`` приезжает
+#: ``None``, а у ``_log_*`` — ``False``. Часовой — внутренний контракт ``log()`` и
+#: миксина; протоколы ``ILoggerManager`` / ``IErrorManager`` (``-> None``) не менялись.
+#: Определён здесь, а не в ``logger_module``: миксин не импортирует ``logger_module``
+#: ради одной константы, а ``logger_core`` уже зависит от ``base_manager``.
+REFUSED = _Refused()
+
+
 class ObservableMixin(IObservableMixin):
     """
     Mixin для подключения любого менеджера к logger, stats, error и кастомным сервисам.
@@ -156,9 +180,12 @@ class ObservableMixin(IObservableMixin):
         подавления.
 
         Returns:
-            ``False`` в тех и только тех случаях, которые
+            ``False`` в трёх и только трёх случаях. Два первых
             :meth:`_note_manager_call_failure` уже считает отказом с Ф2.3:
-            менеджер бросил, либо у него нет такого метода. Три ТИХИХ допуска
+            менеджер бросил, либо у него нет такого метода. Третий (Task 0.6):
+            менеджер ответил :data:`REFUSED` — он ЗАКРЫТ и запись не принял; этот
+            отказ учтён самим менеджером (``channel_refused_records``), и
+            ``_note_manager_call_failure`` на нём НЕ зовётся. Три ТИХИХ допуска
             (слота нет, менеджер ``None``, слот выключен) дают ``True``: это
             законное состояние, а не поломка, и считать его потерей доставки
             значило бы растить ``windowed_delivery_failed`` в каждом процессе,
@@ -797,7 +824,8 @@ class ObservableMixin(IObservableMixin):
 
         Returns:
             Результат вызова или None (если менеджер недоступен/выключен/
-            упал/не имеет метода)
+            упал/не имеет метода). Часовой :data:`REFUSED` наружу не выходит:
+            здесь он становится ``None`` (Task 0.6).
         """
         _delivered, result = self._call_manager_result(manager_name, method_name, *args, **kwargs)
         return result
@@ -813,9 +841,12 @@ class ObservableMixin(IObservableMixin):
         счётчик ``windowed_delivery_failed`` разъедутся молча.
 
         Returns:
-            ``(False, None)`` ровно там, где зовётся
-            :meth:`_note_manager_call_failure` — менеджер бросил либо метода
-            нет. Три ТИХИХ допуска дают ``(True, None)``: см. :meth:`_log_checked`.
+            ``(False, None)`` там, где зовётся :meth:`_note_manager_call_failure`
+            (менеджер бросил либо метода нет) И когда менеджер ответил
+            :data:`REFUSED` (закрыт; Task 0.6) — в последнем случае счёта здесь
+            нет: отказ уже учтён самим менеджером, а исход логгера — это его
+            ВОЗВРАТ, а не отсутствие исключения. Три ТИХИХ допуска дают
+            ``(True, None)``: см. :meth:`_log_checked`.
         """
         registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled(manager_name):
@@ -839,7 +870,10 @@ class ObservableMixin(IObservableMixin):
             # __bool__ (Mock, функтор с __len__) иначе уехал бы в ветку
             # «метода нет» и был бы посчитан отказом, которым не является.
             if method is not None and callable(method):
-                return True, method(*args, **kwargs)
+                result = method(*args, **kwargs)
+                if result is REFUSED:
+                    return False, None
+                return True, result
         except Exception as exc:
             self._note_manager_call_failure(manager_name, method_name, exc=exc)
             return False, None
