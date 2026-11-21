@@ -2563,7 +2563,7 @@
     нижнего. Счётчик потерь — одна функция, одна таблица «звено x исход -> ключ». Экземпляр: ADR-CRM-019 (Task 0.1).
   - **I2 «свежесть».** Показание несёт номер, время источника и воплощение; читатель отдаёт возраст и класс
     {`no_data`, `fresh`, `stale`, `writer_gone`}. Ноль — значение, не класс: «нет данных», «ноль», «устарело»,
-    «писатель ушёл» — разные пары (класс, значение). Экземпляр: ADR конверта свежести (Task 0.2).
+    «писатель ушёл» — разные пары (класс, значение). Экземпляр: ADR-SS-025 (Task 0.2).
   - **I3 «причинность проверки».** «Проверено» = образ до + подтверждение хоста + образ после. Равный образ до —
     `vacuous`; отказ ack — `failed` при любом образе. Экземпляр: BCTL-ADR-010 (`backend_ctl/verdict.py`, Task 0.3,
     подключение инструментов — Task 0.11).
@@ -2585,7 +2585,7 @@
     единая база заставила бы подгонять формы под неё (больше слоёв при том же эффекте, принцип 4).
 - Проверка: три контракт-теста (`channel_routing_module` — I1, Task 0.1; конверт свежести — I2, Task 0.2;
   `backend_ctl/tests/test_contract_verified.py` — I3, Task 0.3), инъекции лида на каждый, ревью Opus.
-- Связанные ADR: ADR-CRM-019 (I1, Task 0.1), ADR конверта свежести (I2, Task 0.2), BCTL-ADR-010 (I3), BCTL-ADR-008
+- Связанные ADR: ADR-CRM-019 (I1, Task 0.1), ADR-SS-025 (I2, Task 0.2), BCTL-ADR-010 (I3), BCTL-ADR-008
   (граница I3), ADR-174 (маркер `not_inspected` — тот же класс «потеря видна, а не молчит»).
 - Refs: [план observability-signal-contracts](../plans/2026-11-21_observability-signal-contracts/plan.md), [design.md](../plans/2026-11-21_observability-signal-contracts/design.md) §9, [бриф 0.3](../plans/2026-11-21_observability-signal-contracts/tasks/0.3.md)
 
@@ -2702,7 +2702,7 @@
 | `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…015 (StatsManager как прямой наследник ChannelRoutingManager (не LoggerManager), ..., Ф5-добор — исход раздачи чисел различают ПАРОЙ счётчиков, `attach_observation_port` докладывает по ФАКТУ подписки) |
 | `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…007 (Композиция RegistersContainer вместо дублирования, ..., Копия регистра из описания каталога) |
 | `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
-| `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…024 (IRouter Protocol для инкапсуляции router-зависимости, ..., копии состояния у клиента хранят листья — один `LeafCopy`, dict-дельта заменяет поддерево) |
+| `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…025 (IRouter Protocol для инкапсуляции router-зависимости, ..., свежесть значения через границу процесса — метка писателя `_fresh`, а не revision, `Delta.timestamp` и время приёма) |
 | `recipe` | [`modules/recipe/DECISIONS.md`](modules/recipe/DECISIONS.md) | Resources & Config | ADR-RCP-001…010 (Консолидация управления рецептами в один framework-модуль, ..., Каноническая форма рецепта — кто под кого подстраивается (2026-10-26)) |
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…009 (Protocol-based decoupling от доменных типов, ..., Пул параллельных бандлов на worker_module (C6e), а не свой ThreadPoolExecutor) |
 | `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |

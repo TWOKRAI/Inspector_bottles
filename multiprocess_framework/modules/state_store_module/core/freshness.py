@@ -29,11 +29,20 @@ Decisions: ADR-SS-025 (метка писателя против ``TreeStore.revi
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 FRESH_KEY = "_fresh"
 
 type FreshClass = Literal["no_data", "fresh", "stale", "writer_gone"]
+
+_MARK_KEYS = ("seq", "src_ts", "incarnation", "tick_sec")
+_NO_DATA: dict[str, Any] = {"class": "no_data", "value": None, "age_s": None}
+
+
+def _is_finite_number(x: Any) -> bool:
+    """int/float без bool, nan и inf."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
 def stamp(seq: int, src_ts: float, incarnation: str, tick_sec: float) -> dict[str, Any]:
@@ -50,7 +59,7 @@ def stamp(seq: int, src_ts: float, incarnation: str, tick_sec: float) -> dict[st
         Писатель кладёт метку в ``data`` последней (порядок ключей ``data`` — порядок
         дельт); это делает публикатор, не эта функция.
     """
-    raise NotImplementedError("INTERFACE: тело — на стадии GREEN (Task 0.2)")
+    return {"seq": seq, "src_ts": src_ts, "incarnation": incarnation, "tick_sec": tick_sec}
 
 
 def classify(subtree: Any, now: Any, alive_incarnation: str | None) -> FreshClass:
@@ -74,12 +83,26 @@ def classify(subtree: Any, now: Any, alive_incarnation: str | None) -> FreshClas
             ещё ``fresh``);
         (7) иначе ``fresh`` (отрицательный возраст — часы писателя впереди — тоже ``fresh``).
     """
-    raise NotImplementedError("INTERFACE: тело — на стадии GREEN (Task 0.2)")
+    if not isinstance(subtree, dict):
+        return "no_data"
+    mark = subtree.get(FRESH_KEY)
+    if not isinstance(mark, dict):
+        return "no_data"
+    if any(k not in mark for k in _MARK_KEYS):
+        return "no_data"
+    src_ts, tick_sec, incarnation = mark["src_ts"], mark["tick_sec"], mark["incarnation"]
+    if not (_is_finite_number(src_ts) and _is_finite_number(tick_sec) and _is_finite_number(now)):
+        return "no_data"
+    if tick_sec <= 0:
+        return "no_data"
+    if alive_incarnation is not None and alive_incarnation != incarnation:
+        return "writer_gone"
+    if now - src_ts > 2 * tick_sec:
+        return "stale"
+    return "fresh"
 
 
-def read_value(
-    subtree: Any, key: Any, now: Any, alive_incarnation: str | None
-) -> dict[str, Any]:
+def read_value(subtree: Any, key: Any, now: Any, alive_incarnation: str | None) -> dict[str, Any]:
     """Значение листа поддерева процесса вместе с классом свежести и возрастом.
 
     Pre:
@@ -100,4 +123,14 @@ def read_value(
         ноль (``fresh``, ``0``); устарело (``stale``, последнее значение); писатель
         ушёл (``writer_gone``, последнее значение).
     """
-    raise NotImplementedError("INTERFACE: тело — на стадии GREEN (Task 0.2)")
+    cls = classify(subtree, now, alive_incarnation)
+    if cls == "no_data" or not isinstance(key, str):
+        return dict(_NO_DATA)
+    value: Any = subtree
+    for segment in key.split("."):
+        if not isinstance(value, dict) or segment not in value:
+            return dict(_NO_DATA)
+        value = value[segment]
+    if value is None:
+        return dict(_NO_DATA)
+    return {"class": cls, "value": value, "age_s": now - subtree[FRESH_KEY]["src_ts"]}
