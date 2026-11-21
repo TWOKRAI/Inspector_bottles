@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -23,13 +23,13 @@ class _CapturingTap:
 
     def __init__(self, name: str = "probe_tap") -> None:
         self.name = name
-        self.records: List[Dict[str, Any]] = []
+        self.records: list[dict[str, Any]] = []
 
     @property
     def channel_type(self) -> str:
         return "probe"
 
-    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def write(self, record: dict[str, Any]) -> dict[str, Any]:
         self.records.append(dict(record))
         return {"success": True}
 
@@ -37,8 +37,7 @@ class _CapturingTap:
         return None
 
 
-@pytest.fixture
-def errors_with_tap(tmp_path):
+def _manager_with_tap(tmp_path, **config_extra: Any):
     mgr = ErrorManager(
         manager_name="TracebackProbe",
         config={
@@ -52,11 +51,29 @@ def errors_with_tap(tmp_path):
                 "BUSINESS": {"channels": ["a"]},
                 "DEBUG": {"channels": ["a"]},
             },
+            **config_extra,
         },
     )
     mgr.initialize()
     tap = _CapturingTap()
     mgr.add_tap(tap, min_level="DEBUG", name=tap.name)
+    return mgr, tap
+
+
+@pytest.fixture
+def errors_with_tap(tmp_path):
+    mgr, tap = _manager_with_tap(tmp_path)
+    try:
+        yield mgr, tap
+    finally:
+        mgr.remove_tap(tap.name)
+        mgr.shutdown()
+
+
+@pytest.fixture
+def errors_with_tap_trace_off(tmp_path):
+    """Тот же менеджер, но флаг ``include_stacktrace=False`` задан в КОНФИГЕ."""
+    mgr, tap = _manager_with_tap(tmp_path, include_stacktrace=False)
     try:
         yield mgr, tap
     finally:
@@ -123,3 +140,34 @@ def test_unraised_exception_has_no_traceback(errors_with_tap):
     message = tap.records[-1]["message"]
     assert message == "ctx: x"
     assert "Traceback" not in message
+
+
+def test_config_include_stacktrace_false_has_no_traceback(errors_with_tap_trace_off):
+    """Флаг из конфига (без аргумента вызова) тоже гейтит трассу; исключение брошенное, лог вне except."""
+    mgr, tap = errors_with_tap_trace_off
+    exc = _thrown_a()
+    assert exc.__traceback__ is not None
+
+    mgr.log_exception(exc, "ctx")
+
+    message = tap.records[-1]["message"]
+    assert "Traceback" not in message
+
+
+def test_cause_chain_is_printed(errors_with_tap):
+    """Явная причина (``raise ... from``) печатается: в записи есть и верхнее исключение, и корень."""
+    mgr, tap = errors_with_tap
+    try:
+        try:
+            raise KeyError("root")
+        except KeyError as root:
+            raise ValueError("top") from root
+    except ValueError as caught:
+        exc = caught
+
+    mgr.log_exception(exc, "ctx")
+
+    message = tap.records[-1]["message"]
+    assert "ValueError: top" in message
+    assert "KeyError: 'root'" in message
+    assert "direct cause" in message
