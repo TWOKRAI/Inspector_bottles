@@ -54,7 +54,7 @@ from __future__ import annotations
 import importlib
 import threading
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple, Union, cast
 
 from ...channel_routing_module.levels import normalize_level_name
 from ...channel_routing_module.observability import (
@@ -230,6 +230,18 @@ def drain_process_observability(
                 pass
 
 
+class ForwarderWithCounters(Protocol):
+    """``forwarder`` из :func:`wire_observability_forward` (Task 0.5c, c6).
+
+    Вызываемый для drain-петли плюс атрибут ``counters_snapshot`` — сумма
+    счётчиков созданных каналов подписчика; его читает :func:`forwarders_plane_report`.
+    """
+
+    def __call__(self, hub_records: List[dict]) -> None: ...
+
+    def counters_snapshot(self) -> dict[str, int]: ...
+
+
 def wire_observability_forward(
     router: Any,
     subscriber: str,
@@ -237,7 +249,7 @@ def wire_observability_forward(
     logger_manager: Optional[Any] = None,
     error_manager: Optional[Any] = None,
     min_level: str = "ERROR",
-) -> Tuple[Callable[[List[dict]], None], list]:
+) -> Tuple[ForwarderWithCounters, list]:
     """Собрать live-форвардер hub→подписчик и повесить error-tap'ы (Ф5.20b).
 
     Симметрично ``wire_observability_store`` (Ф5.20a), но записи не в SQLite, а
@@ -306,9 +318,10 @@ def wire_observability_forward(
         return total
 
     # Атрибут на замыкании, а не третий элемент кортежа: арность (forwarder, taps)
-    # распаковывают вызывающие и тесты. setattr — без нового `# type: ignore`.
+    # распаковывают вызывающие и тесты. setattr — без нового `# type: ignore`;
+    # тип атрибута объявляет Protocol `ForwarderWithCounters` (ревью этапа 5, замечание 5).
     setattr(forwarder, "counters_snapshot", counters_snapshot)
-    return forwarder, taps
+    return cast(ForwarderWithCounters, forwarder), taps
 
 
 def unwire_observability_forward(taps: Optional[list]) -> None:

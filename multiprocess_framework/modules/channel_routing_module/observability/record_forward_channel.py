@@ -66,15 +66,6 @@ from .record_display import log_record_to_display
 FORWARD_COMMAND = "observability.record"
 
 
-def _router_reason(result: Any, default: str) -> str:
-    """Текст причины из ответа роутера; без строки ``reason`` — ``default``."""
-    if isinstance(result, dict):
-        reason = result.get("reason")
-        if isinstance(reason, str) and reason:
-            return reason
-    return default
-
-
 class RecordForwardChannel(IChannel):
     """Форвардер display-записей наблюдаемости через router на GUI-подписчика."""
 
@@ -158,8 +149,11 @@ class RecordForwardChannel(IChannel):
         Исход ``outcome_of``: ``accepted`` -> ``success``; ``refused`` -> ``dropped``;
         ``failed``, исключение ``send`` и ``router=None`` -> ``error`` (Task 0.5c, вердикт
         CTO 4.3b Q1-B). Исключение наружу не уходит: доставка хвоста best-effort.
-        ``reason`` не несёт входного значения: имя класса исключения или текст
-        причины из ответа роутера. ``records`` — сколько записей в пуше (для счёта).
+        ``reason`` не несёт входного значения: для исключения — имя класса, для
+        ответа роутера — фиксированные ``"router refused"`` / ``"router failed"``.
+        Текст ``reason`` роутера НЕ копируется (ревью этапа 5, решение лида): он не
+        доверенный, а исход уже несут статус и счётчик. ``records`` — сколько записей
+        в пуше (для счёта).
         """
         if self._router is None:
             self._count("send_failed", records, reached_router=False)
@@ -185,9 +179,9 @@ class RecordForwardChannel(IChannel):
             return {"status": "success", "channel": self._name}
         if outcome == "refused":
             self._count("dropped", records, reached_router=True)
-            return {"status": "dropped", "channel": self._name, "reason": _router_reason(result, "router refused")}
+            return {"status": "dropped", "channel": self._name, "reason": "router refused"}
         self._count("send_failed", records, reached_router=True)
-        return {"status": "error", "channel": self._name, "reason": _router_reason(result, "router failed")}
+        return {"status": "error", "channel": self._name, "reason": "router failed"}
 
     def close(self) -> None:
         """IChannel-совместимость: канал закрывается без побочных эффектов (router общий)."""

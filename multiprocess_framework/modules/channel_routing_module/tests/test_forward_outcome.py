@@ -390,7 +390,8 @@ class _NoQueues:
         return False
 
 
-def test_dead_client_warning_does_not_self_deadlock(tmp_path) -> None:
+@pytest.mark.parametrize("mode", ["broadcast", "session"])
+def test_dead_client_warning_does_not_self_deadlock(tmp_path, mode: str) -> None:
     """Hazard c2: WARNING сокет-канала о мёртвом клиенте не замыкается на его же лок.
 
     Цепочка: ``router.send`` -> ``SocketChannel.send`` (``_write_lock``) -> сбой
@@ -398,12 +399,19 @@ def test_dead_client_warning_does_not_self_deadlock(tmp_path) -> None:
     синхронный ``router.send`` -> тот же канал -> тот же ``_write_lock``. Поток
     сценария не внутри раздачи tap'ов, поэтому ``_tap_depth`` не спасает.
     Красный только в состоянии «синхронный ``send`` без выноса лога из-под лока».
+
+    ``session`` (ревью этапа 5, замечание 1): пинг адресован сессии и идёт через
+    ``_send_to_session``; мёртвый сокет и в ``_sessions``, и в ``_clients``, как у
+    настоящего соединения, поэтому пуш форвардера (без ``session``) уходит
+    broadcast'ом в тот же ``_write_lock``.
     """
     lm = LoggerManager(config={"log_directory": str(tmp_path)})
     router = RouterManager(manager_name="deadlock_probe", logger=lm, queue_registry=_NoQueues(), relay_hub=None)
-    channel = SocketChannel(name="ctl_probe", port=0)
+    channel = SocketChannel(name="ctl_probe", port=0, session_isolation=(mode == "session"))
     dead = _DeadConnection()
     channel._clients.append(dead)
+    if mode == "session":
+        channel._sessions["sid-dead"] = dead
     assert router.register_channel(channel)
     forward = RecordForwardChannel(
         router=router,
@@ -414,6 +422,8 @@ def test_dead_client_warning_does_not_self_deadlock(tmp_path) -> None:
     witness = _ReplyTap("witness_tap", None)
     tap_names = [lm.add_tap(forward, min_level="WARNING"), lm.add_tap(witness, min_level="WARNING")]
     ping = {"type": "event", "sender": "probe", "targets": ["ctl_probe"], "command": "probe.ping", "data": {}}
+    if mode == "session":
+        ping["session"] = "sid-dead"
     box: Dict[str, Any] = {}
 
     def scenario() -> None:
@@ -435,3 +445,92 @@ def test_dead_client_warning_does_not_self_deadlock(tmp_path) -> None:
     assert box["reply"]["status"] == "error"
     assert dead.sendall_calls == 1
     assert any("[SocketChannel:ctl_probe]" in str(r.get("message", "")) for r in witness.received)
+
+
+class _SpyLock:
+    """Нереентерабельный лок с флагом ``held``: повторный вход — ``assert``, а не взаимоблокировка."""
+
+    created: List["_SpyLock"] = []
+
+    def __init__(self) -> None:
+        self.held = False
+        self.entries = 0
+        _SpyLock.created.append(self)
+
+    def __enter__(self) -> "_SpyLock":
+        assert not self.held, "повторный вход в нереентерабельный лок"
+        self.held = True
+        self.entries += 1
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.held = False
+
+
+class _HeldProbeRouter:
+    """Роутер-заглушка: в ``send`` записывает, держит ли форвардер лок счётчиков."""
+
+    def __init__(self) -> None:
+        self.held_during_send: List[bool] = []
+        self.lock: _SpyLock | None = None
+
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        assert self.lock is not None
+        self.held_during_send.append(self.lock.held)
+        return {"status": "success"}
+
+
+def test_counters_lock_is_used_and_taken_after_send(monkeypatch) -> None:
+    """Ревью этапа 5, замечание 2: счёт идёт под локом, и лок НЕ держится вокруг ``send``.
+
+    Подмена ``threading.Lock`` — только на время конструктора: подмена после
+    конструктора не увидела бы ``nullcontext`` вместо лока в ``__init__``.
+    """
+    _SpyLock.created.clear()
+    router = _HeldProbeRouter()
+    with monkeypatch.context() as ctx:
+        ctx.setattr(threading, "Lock", _SpyLock)
+        forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+    assert len(_SpyLock.created) == 1
+    lock = _SpyLock.created[0]
+    router.lock = lock
+
+    forward.push_batch([_display(0), _display(1), _display(2)])
+
+    assert router.held_during_send == [False]
+    assert lock.entries == 1
+    forward.counters_snapshot()
+    assert lock.entries == 2
+
+
+class _RaisingRouter:
+    """Роутер, чьё исключение несёт входное значение в тексте."""
+
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        raise RuntimeError("payload secret-payload")
+
+
+def test_exception_reason_is_class_name_only() -> None:
+    """Ревью этапа 5, замечание 3: ``reason`` исключения — имя класса, без текста."""
+    forward = RecordForwardChannel(router=_RaisingRouter(), subscriber="gui", sender="p")
+
+    reply = forward.write(_record())
+
+    assert reply == {"status": "error", "channel": "observability_forward", "reason": "RuntimeError"}
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("error", {"status": "error", "channel": "observability_forward", "reason": "router failed"}),
+        ("dropped", {"status": "dropped", "channel": "observability_forward", "reason": "router refused"}),
+    ],
+)
+def test_router_reason_is_not_copied(status: str, expected: Dict[str, str]) -> None:
+    """Ревью этапа 5, замечание 4 (решение лида): текст роутера не доверенный и не копируется."""
+    router = _ReplyRouter({"status": status, "reason": "bad field {'password': 'hunter2'}"})
+    forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+
+    reply = forward.write(_record())
+
+    assert reply == expected
