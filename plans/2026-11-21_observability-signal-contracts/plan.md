@@ -2,7 +2,7 @@
 
 - **Slug:** observability-signal-contracts
 - **Дата:** 2026-11-21
-- **Статус:** DRAFT
+- **Статус:** IN PROGRESS (фаза 0: 0.1–0.11 выполнены и приняты ревью, 0.11b–0.13 — после слияния среза)
 - **Plan review:** APPROVED 2026-11-21 (CHANGES 2)
 - **Ветка:** refactor/observability-signal-contracts
 
@@ -43,18 +43,18 @@
 
 **Цель фазы:** контракт-тесты и экземпляры; S2, S5, SF1 — PASS.
 
-- Task 0.1: Контракт I1 «исход» — «до 1.0» [PENDING]
-- Task 0.2: Контракт I2 «свежесть» — «до 1.0» [PENDING]
-- Task 0.3: Контракт I3 «причинность» — «до 1.0» [PENDING]
-- Task 0.4: L-1, OSError файла — «до 1.0» [PENDING] (после 0.1)
-- Task 0.5: L-3, B-6, closure 4.3b — «до 1.0» [PENDING] (после 0.1)
-- Task 0.6: L-4, после останова — «до 1.0» [PENDING] (после 0.1)
-- Task 0.7: L-2, traceback — «до 1.0» [PENDING]
-- Task 0.8: M-1, M-2, частота и пара — «до 1.0» [PENDING] (после 0.2)
-- Task 0.9: Публикатор свежести, M-7 — «до 1.0» [PENDING] (после 0.8)
-- Task 0.10: Read-model: свежесть — «до 1.0» [PENDING] (после 0.9)
-- Task 0.10b: `telemetry_snapshot`, дыры (B-4) — «до 1.0» [PENDING] (после 0.9)
-- Task 0.11: B-3, проверенная запись — «до 1.0» [PENDING] (после 0.3)
+- Task 0.1: Контракт I1 «исход» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.2: Контракт I2 «свежесть» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.3: Контракт I3 «причинность» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.4: L-1, OSError файла — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.5: L-3, B-6, closure 4.3b — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.6: L-4, после останова — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.7: L-2, traceback — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.8: M-1, M-2, частота и пара — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.2)
+- Task 0.9: Публикатор свежести, M-7 — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.8)
+- Task 0.10: Read-model: свежесть — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.9)
+- Task 0.10b: `telemetry_snapshot`, дыры (B-4) — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.9)
+- Task 0.11: B-3, проверенная запись — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.3)
 - Task 0.11b: M-4 минимум, конфликт видов — «до 1.0» [PENDING]
 - Task 0.12: Рукопожатие в общем канале — «до 1.0» [PENDING]
 - Task 0.12b: Порт закрыт без токена — «до 1.0» [PENDING] (после 0.12)
