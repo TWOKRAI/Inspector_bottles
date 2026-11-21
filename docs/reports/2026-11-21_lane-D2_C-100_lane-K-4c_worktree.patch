@@ -1,0 +1,49 @@
+diff --git a/multiprocess_framework/modules/frontend_module/tests/test_telemetry_chart.py b/multiprocess_framework/modules/frontend_module/tests/test_telemetry_chart.py
+index dd20c7cbe..ebbd2b6a6 100644
+--- a/multiprocess_framework/modules/frontend_module/tests/test_telemetry_chart.py
++++ b/multiprocess_framework/modules/frontend_module/tests/test_telemetry_chart.py
+@@ -7,6 +7,8 @@
+ 
+ from __future__ import annotations
+ 
++import pytest
++
+ from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart import (
+     SeriesSpec,
+     TelemetryChart,
+@@ -187,6 +189,22 @@ class TestCrosshair:
+         keys = {r[0] for r in chart.values_at_x(1.0)}
+         assert keys == {"a"}
+ 
++    @pytest.mark.parametrize("base", [0.0, 1_700_000_000.0], ids=["base0", "epoch"])
++    def test_values_at_x_two_points_8us_apart_wide_view(self, qtbot, base: float) -> None:
++        """C-100: две точки с зазором 8 мкс при вьюбоксе шире на порядки — кроссхейр видит обе.
++
++        ``getData()`` отдаёт даунсэмплированный набор и на таком вьюбоксе пуст (авто-peak-шаг больше
++        числа точек); исходные данные — ``getOriginalDataset()`` (как у ``series_points``, C-98).
++        """
++        chart = TelemetryChart(_specs("a"), crosshair=True)
++        qtbot.addWidget(chart)
++        chart.resize(800, 400)
++        chart.show()
++        chart.set_series_data("a", [(base, 1.0), (base + 8e-6, 2.0)])
++        chart._plot.setXRange(base, base + 1.0, padding=0)
++        assert chart.values_at_x(base) == [("a", "A", "#2563eb", base, 1.0)]
++        assert chart.values_at_x(base + 8e-6) == [("a", "A", "#2563eb", base + 8e-6, 2.0)]
++
+     def test_format_readout_has_time_and_values(self, qtbot) -> None:
+         chart = TelemetryChart(_specs("a"), crosshair=True)
+         qtbot.addWidget(chart)
+diff --git a/multiprocess_framework/modules/frontend_module/widgets/telemetry_chart.py b/multiprocess_framework/modules/frontend_module/widgets/telemetry_chart.py
+index f25a135c5..b2b74373e 100644
+--- a/multiprocess_framework/modules/frontend_module/widgets/telemetry_chart.py
++++ b/multiprocess_framework/modules/frontend_module/widgets/telemetry_chart.py
+@@ -208,7 +208,7 @@ class TelemetryChart(QWidget):
+             curve = self._curves[spec.key]
+             if not curve.isVisible():
+                 continue
+-            xs, ys = curve.getData()
++            xs, ys = curve.getOriginalDataset()  # исходные точки, не даунсэмплированный дисплей (C-100, как C-98)
+             if xs is None or len(xs) == 0:
+                 continue
+             idx = bisect.bisect_left(xs, x)
