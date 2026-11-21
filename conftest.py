@@ -145,3 +145,55 @@ def no_blocking_modals(monkeypatch):
             if hasattr(cls, attr):
                 monkeypatch.setattr(cls, attr, staticmethod(_refuse(f"{cls_name}.{attr}")), raising=False)
     yield
+
+
+#: Ключи env, в которые код приложения пишет НАПРЯМУЮ через ``os.environ`` (не через monkeypatch):
+#: 8 пар ``MULTIPROCESS_*``/``INSPECTOR_*`` (``apply_env_aliases``, ``system_launcher``, ``launch``),
+#: ``INSPECTOR_PRESENTATION`` (``frontend/run.py``) и ``MPF_APP_NAME`` (``launch.py:645``, ``setdefault``).
+#: Литералы, а не импорт ``ENV_ALIAS_PAIRS``:
+#: корневой conftest грузится до любого теста и не тянет фреймворк; сверку со списком пар
+#: держит ``multiprocess_prototype/backend/tests/test_env_alias_isolation.py`` (C-99).
+_APP_ENV_KEYS: tuple[str, ...] = (
+    "MULTIPROCESS_PID_FILE",
+    "INSPECTOR_PID_FILE",
+    "MULTIPROCESS_LOG_DIR",
+    "INSPECTOR_LOG_DIR",
+    "MULTIPROCESS_MANIFEST",
+    "INSPECTOR_MANIFEST",
+    "MULTIPROCESS_LOG_LEVEL",
+    "INSPECTOR_LOG_LEVEL",
+    "MULTIPROCESS_FRAME_TRACE",
+    "INSPECTOR_FRAME_TRACE",
+    "MULTIPROCESS_HEALTH_LOG_ONLY",
+    "INSPECTOR_HEALTH_LOG_ONLY",
+    "MULTIPROCESS_HEALTH_BREAKER_THRESHOLD",
+    "INSPECTOR_HEALTH_BREAKER_THRESHOLD",
+    "MULTIPROCESS_HEALTH_BREAKER_COOLDOWN",
+    "INSPECTOR_HEALTH_BREAKER_COOLDOWN",
+    "INSPECTOR_PRESENTATION",
+    "MPF_APP_NAME",
+)
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_env_keys():
+    """Тест не оставляет следов в env приложения (C-99).
+
+    ``monkeypatch.delenv(k, raising=False)`` на ОТСУТСТВУЮЩЕМ ключе ничего не запоминает, а
+    ``apply_env_aliases()`` / ``SystemLauncher`` / ``launch`` пишут ``os.environ`` напрямую —
+    значение переживало тест и красило соседа (``test_app_foundation_names``: ``KeyError: 'system'``).
+    Снимок берётся ДО теста, откат — после: присутствовавший ключ получает прежнее значение,
+    отсутствовавший — удаляется.
+
+    Порядок: autouse-фикстуры одного conftest идут по алфавиту имён, а teardown — в обратном порядке; сейчас
+    ``_restore…`` стоит ПЕРВОЙ по setup, поэтому откат — последнее слово после ``monkeypatch``. Новая autouse-фикстура
+    корневого conftest, берущая ``monkeypatch`` и пишущая эти ключи, должна сортироваться ПОСЛЕ ``_restore…``
+    (имя не раньше ``_restore``): иначе monkeypatch откатится позже и вернёт значение писателя (ревью C-99, nit 2).
+    """
+    saved = {key: os.environ.get(key) for key in _APP_ENV_KEYS}
+    yield
+    for key, value in saved.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value

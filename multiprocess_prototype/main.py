@@ -84,15 +84,21 @@ def build_launcher(
     ).build()
 
 
-def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
+def bootstrap(topology_path: Path | str | None = None, *, run_gate: bool | None = False) -> "SystemLauncher":
     """LEGACY: собрать систему из явного пути топологии + ``CONFIG_PATH``.
 
-    Сохранено для тестов и README фреймворка. Новый код — ``build_launcher``.
+    Живые вызывающие: пробы ``backend_ctl/probes`` и ``tools/otel_stand``; тесты и README фреймворка.
+    Новый код — ``build_launcher``.
+
+    ``run_gate`` (Task 2.1, коммит B): по умолчанию ``False`` — гейт запуска выключен независимо от
+    ``system.yaml``, как у ``BackendHarness``: вызывающие (пробы, ``tools/otel_stand``) не шлют
+    ``system.run.start`` и после ``run_gate: true`` в yaml остались бы в ``ready`` без кадров.
+    ``None`` — как в ``system.yaml``; ``True`` — включить гейт.
     """
     from multiprocess_prototype.backend.launch import SystemBuilder
 
     bp_path = Path(topology_path) if topology_path else DEFAULT_BLUEPRINT
-    return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path).build()
+    return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path, run_gate=run_gate).build()
 
 
 def _prototype_launcher_factory(

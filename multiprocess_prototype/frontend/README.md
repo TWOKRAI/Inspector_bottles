@@ -28,6 +28,9 @@ Headless-флаг перебивает presentation, даже поднятый �
 python multiprocess_prototype/frontend/run.py --headless
 ```
 
+При `run_gate: true` без GUI-кнопки ЗАПУСТИТЬ система стоит в `ready` без кадров; `--autostart`
+(как у `multiprocess_prototype/run.py`) запускает работу сразу: `frontend/run.py --headless --autostart`.
+
 ## Что такое «хардкод-shell»
 
 Это НЕ generic-конструктор фронта — фронт остаётся тонкой прошитой оболочкой

@@ -9,4 +9,4 @@
 2. Слот писателя на 0.4–0.6, затем 0.9–0.11, 0.13. Для каждой задачи та же цепочка: INTERFACE → слепой tester один раз на механизм (дерево без `plans/` через `git sparse-checkout --no-cone '/*' '!/plans/'`) → GREEN → инъекции с предсказаниями до прогона → ревью sonnet. Субагентам: не коммитить, не пушить; `uv sync` не выполнять (подменяет CUDA-torch), тесты через `.venv` главного checkout + `PYTHONPATH` на worktree.
 3. Учесть записи для следующих задач из раздела «Открыто» отчёта реализации: экспорт `count_outcome` (до 0.5), вложенный отказ в `is_refusal` и `_leaf_result` (0.11), фильтр `_fresh.*` в `read_value` (0.10b), `KeyError` в `get_subtree` (0.10); в тексте Task 0.1 таблица пробы ещё без поправки (поток `tell()`/`seek()`, `Probe(lm).initialize()` — в README уже есть).
 
-Реестр дефектов: внесены C-102 (`test_std_logger_guard`), C-103 (`sentrux`, `no_god_files`). `plans/queue/ORDER.md` не правился.
+Реестр дефектов: внесены C-106 (`test_std_logger_guard`), C-107 (`sentrux`, `no_god_files`). `plans/queue/ORDER.md` не правился.

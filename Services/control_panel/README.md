@@ -27,11 +27,41 @@ GUI-пульт: пользователь создаёт контролы (кно
 
 ## Команды плагина
 
-`get_controls`, `set_control{id,value}` (обновить+эмитнуть), `emit_control{id}`
-(кнопка-триггер), `add_control{spec}`, `remove_control{id}`, `update_control{id,patch}`.
+`get_controls`, `set_control{id,value}` (обновить+эмитнуть), `emit_control{id}` (кнопка-триггер), `add_control{spec}`, `remove_control{id}`, `update_control{id,patch}`.
+На `monitor` `set_control`/`emit_control` отвечают `{"status":"error","message":"контрол только для чтения (monitor)"}`, эмита нет.
 
 ## Поток
 
 `produce()` (source-цикл) сливает накопленные эмиты → items `{out_N: value,
 "data_type":"signal", "panel_id":...}` → chain_targets. Команды из GUI пишут в очередь
 эмитов под lock (как сигналы `phone_camera`).
+
+## Источники и типы
+
+- `source`: `local` (эмит на свой порт, дефолт); `param` (правка поля `target_field` ноды `target_process`); `action` (команда `target_command`, фикс. аргументы `command_args`, значение — в `value_arg`); `monitor` (показ `state_path`).
+- `type: monitor` — только чтение, даже без `source: monitor`. `state_path` — полный путь StateStore; `value_key` — ключ dict-значения (`conn`), пусто — значение как есть.
+
+## Пульт оператора 1.0 (рецепты)
+
+| id | Что делает | Куда идёт |
+|---|---|---|
+| `word` | новое слово (Enter) | param → процесс `layout`, `target_word` |
+| `belt_run` | пуск ленты (`vfd_run`) | action → `devices`, `vfd_belt` |
+| `belt_stop` | стоп ленты (`vfd_stop`) | action → `devices`, `vfd_belt` |
+| `home` | «Домой» (`robot_park`) | action → `devices`, `robot_main` |
+| `servo_on` | «Серво ВКЛ» (`robot_servo`, `on: true`) | action → `devices`, `robot_main` |
+| `mon_conn` | связь с роботом | monitor ← `devices.state.robot_main.conn` |
+| `mon_park` | парковка | monitor ← `devices.state.robot_main.park.state` |
+| `mon_last` | последняя буква | monitor ← `processes.layout.state.word_layout.last_label` |
+| `mon_assembled` | собрано | monitor ← `processes.layout.state.word_layout.assembled` |
+| `mon_done` | слово собрано | monitor ← `processes.layout.state.word_layout.done` |
+
+Рецепт `letter_robot_sim.yaml`, процесс `pult` (последний, `run_gated: false`). В β (`hikvision_letter_robot.yaml`) 8 контролов: «Домой» и «Серво ВКЛ» — только после R4 (перевод β на `delta_v2`).
+
+## Известные ограничения 1.0
+
+- Нет блокировок контролов по состоянию системы: «Домой» при «работает» роняет очередь заданий; блокировка по `system.run.state` — после 1.0.
+- «Слово»: только Enter, без подтверждения; пустое слово откатывает регистр; поле не читает регистр обратно (правду показывает монитор «Собрано»). Оператор может удалить его (✕) — «режим оператора» после 1.0.
+- Мониторы: значения по-английски (`done` → True/False, `conn` → connected, `park.state` → parking/done/failed); до первой публикации пути отсутствуют — подпись «—» (на стенде 2026-11-21 в GUI-прогоне так же у `last_label`/`assembled`/`done` до первого диска). Подсказка ряда «👁 .» бессмысленна — после 1.0.
+- «Домой» выключает серво (после `done` защёлка до «Серво ВКЛ»): задание роботу без серво отбрасывается, а «Слово собрано» остаётся `True` — отказ виден только в регистре `layout.robot_io` (дефект C-104). Скорость ленты по `belt_mm_s` сима доходит до 0 за 0,4–4,7 с после «Лента стоп» (C-103).
+- Ловушка YAML: `value_arg: "on"` только в кавычках. Голое `on` = True, `parse_controls` молча роняет контрол.

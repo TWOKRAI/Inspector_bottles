@@ -1,6 +1,6 @@
 # Запрос на слияние: полоса Н (observability-signal-contracts) — срез 0.1–0.3 (2026-11-21)
 
-Автор: лид полосы Н (сессия inspector-bottles-19). Отчёт: `docs/reports/2026-11-21_observability-signal-contracts_0.1-0.3-impl.md`. Ветка `refactor/observability-signal-contracts`, HEAD `99423b57a` (на момент заявки; `git rev-parse refactor/observability-signal-contracts`), worktree `../Inspector_bottles--lane-N`. В `main` я не коммитил; основное дерево лежит на `main`. Слияние делает координатор. Тема слияния — `feat(...): merge …` (хук режет `merge(...)`) + `Why:`/`Layer:`/`Refs: plans/2026-11-21_observability-signal-contracts/plan.md`; сообщение — из файла (`git merge -F -` stdin не читает). `git merge-tree` с актуальным `main` **не проверял** — прошу проверить; ожидаемое место конфликта — `plans/queue/defects.md` (дописаны строки C-102, C-103 в конце) и `multiprocess_framework/DECISIONS.md` (ADR-176).
+Автор: лид полосы Н (сессия inspector-bottles-19). Отчёт: `docs/reports/2026-11-21_observability-signal-contracts_0.1-0.3-impl.md`. Ветка `refactor/observability-signal-contracts`, HEAD `99423b57a` (на момент заявки; `git rev-parse refactor/observability-signal-contracts`), worktree `../Inspector_bottles--lane-N`. В `main` я не коммитил; основное дерево лежит на `main`. Слияние делает координатор. Тема слияния — `feat(...): merge …` (хук режет `merge(...)`) + `Why:`/`Layer:`/`Refs: plans/2026-11-21_observability-signal-contracts/plan.md`; сообщение — из файла (`git merge -F -` stdin не читает). `git merge-tree` с актуальным `main` **не проверял** — прошу проверить; ожидаемое место конфликта — `plans/queue/defects.md` (дописаны строки C-106, C-107 в конце) и `multiprocess_framework/DECISIONS.md` (ADR-176).
 
 ## БЛОКЕР: решение координатора до слияния
 
@@ -23,7 +23,7 @@
 
 ## Проверки на слитом дереве (прошу прогнать после слияния)
 - `channel_routing_module/tests` (medium; на ветке `4 failed, 403 passed`), `state_store_module/tests` (medium; `2 failed, 863 passed`), `backend_ctl/tests/test_verdict_form.py` + `test_contract_verified.py` (light; `3 failed, 28 passed`), `python scripts/validate.py` и `python -m scripts.sync --check` — на ветке exit 0.
-- Красные сверх перечисленных не ожидаются, кроме C-102 (`test_std_logger_guard`) и C-103 (`sentrux`) — они на ветке красные независимо от полосы.
+- Красные сверх перечисленных не ожидаются, кроме C-106 (`test_std_logger_guard`) и C-107 (`sentrux`) — они на ветке красные независимо от полосы.
 - Не запускались: `make gate`, `sentrux` на базе, полные `logger_module`/`router_module`/`statistics_module`/`error_module` после рефакторинга `channel_accepted` (heavy/вне радиуса).
 
 ## Что нужно от координатора

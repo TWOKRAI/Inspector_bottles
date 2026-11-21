@@ -8,7 +8,7 @@
 - **Инъекции:** 25 на три задачи, 20 совпали с предсказаниями полностью, 5 расхождений — недоучёт красных (0.3 (3); 0.2 u10 в 1, 6, 7, u9 в 10), пропущенных дефектов нет. Таблица — `plans/…/reports/0.1-0.3.injections.md`, сводка в `plan.md`.
 - **Ревью:** `plans/2026-11-21_observability-signal-contracts/reports/0.{1,2,3}.review-stage5.md`, `0.2.review-stage5-r2.md`. Реальные находки: `OverflowError` в `_is_finite_number` на int вне диапазона float; правило `no_data` в `read_value` и копия ответа не держались тестами; форма пробы 0.1 в README была неполной; в ADR устарело «замера нет».
 - **Цена:** `outcome_of` на горячем пути 66 → 105 нс на вызов (+39 нс), решение лида — принять (ADR-CRM-019 п.4).
-- **Красные вне полосы (внесены в `plans/queue/defects.md`):** C-102 — `test_std_logger_guard` (5 голых `getLogger`); C-103 — `sentrux check .` (`no_god_files`, `test_recipe_1_0.py`).
+- **Красные вне полосы (внесены в `plans/queue/defects.md`):** C-106 — `test_std_logger_guard` (5 голых `getLogger`); C-107 — `sentrux check .` (`no_god_files`, `test_recipe_1_0.py`).
 
 ## Открыто / ненадёжно
 - **Слияние среза 0.1–0.3 сделало бы `main` красным на 11 контракт-тестах** (красные по замыслу до 0.4–0.11). Решение координатора — в заявке `docs/handoffs/2026-11-21_N-merge-request.md`.
