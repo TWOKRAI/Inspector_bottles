@@ -8,7 +8,7 @@ IChannelRoutingManager  — базовый контракт менеджера �
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from ..base_manager.interfaces import IBaseManager
 
@@ -56,6 +56,35 @@ class IChannel(ABC):
     def get_info(self) -> Dict[str, Any]:
         """Информация о канале (для статистики / диагностики)."""
         return {"name": self.name, "type": self.channel_type, "active": True}
+
+
+type Outcome = Literal["accepted", "refused", "failed"]
+
+_FAILED_STATUSES = ("error",)
+_REFUSED_STATUSES = ("dropped", "refused")
+
+
+def outcome_of(result: Any) -> Outcome:
+    """Исход ответа звена: ``accepted`` / ``refused`` / ``failed``.
+
+    Единственное толкование ответа :meth:`IChannel.write` и родственных звеньев.
+    ``error`` — ``failed``; ``dropped`` и ``refused`` — ``refused``; всё прочее
+    (``success``, ``ok``, ``skipped``, ``dict`` без ``status``, ``None``, не-``dict``) —
+    ``accepted``: канал без ответа считался принявшим и раньше, ломать это нельзя.
+
+    Статус проверяется кортежем, не ``set``: ``{"status": ["error"]}`` (список)
+    даёт ``accepted``, а ``set`` бросил бы ``TypeError: unhashable``.
+
+    Pre: любой объект. Post: одно из трёх значений, не бросает.
+    """
+    if not isinstance(result, dict):
+        return "accepted"
+    status = result.get("status")
+    if status in _FAILED_STATUSES:
+        return "failed"
+    if status in _REFUSED_STATUSES:
+        return "refused"
+    return "accepted"
 
 
 def channel_accepted(result: Any) -> bool:
@@ -208,6 +237,8 @@ class IChannelRoutingManager(IBaseManager):
 __all__ = [
     "IChannel",
     "channel_accepted",
+    "Outcome",
+    "outcome_of",
     "IBufferStrategy",
     "IChannelRoutingManager",
 ]

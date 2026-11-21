@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from ..._fallback import emergency_log
 from ...base_manager import BaseManager, ObservableMixin
-from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, channel_accepted
+from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager, Outcome, channel_accepted
 from ..levels import record_severity, threshold_severity
 from .channel_registry import ChannelRegistry
 from .config_normalizer import normalize_config
@@ -69,6 +69,39 @@ LOSS_COUNTER_KEYS = (
 #: «уровень включён» было неотличимо от «записи доходят»: ноль потерь одинаково
 #: означает и здоровую систему, и систему, из которой ничего не выходит.
 DELIVERY_COUNTER_KEYS = ("channel_written_records",)
+
+#: Таблица «звено x исход -> ключ счётчика потерь» (Task 0.1, ADR-CRM-019).
+#: ``channel``: ответ ``error`` и ``refused`` — «сток жив и отказывает»
+#: (``channel_write_errors`` остаётся «звено БРОСИЛО исключение», ADR-CRM-011).
+#: ``tap``: ``refused`` — новый ключ; ``failed`` и исключение приёмника — одна болезнь.
+#: ``bridge``: адаптер моста ведёт один счётчик потерянных ответов.
+#: Имена звеньев и ключ ``lost_responses`` — только имена; импорта из router_module нет.
+LOSS_KEY_BY_HOP: dict[str, dict[str, str]] = {
+    "channel": {"refused": "channel_refused_records", "failed": "channel_refused_records"},
+    "tap": {"refused": "tap_refused_records", "failed": "tap_write_errors"},
+    "bridge": {"refused": "lost_responses", "failed": "lost_responses"},
+}
+
+
+def count_outcome(counters: dict, hop: str, outcome: Outcome) -> None:
+    """Прибавить 1 к счётчику потерь звена ``hop`` по исходу ``outcome``.
+
+    Pre: ``hop`` из ``LOSS_KEY_BY_HOP``; ``outcome`` — ``accepted`` / ``refused`` / ``failed``.
+    Post: ``accepted`` ничего не меняет; иначе ``counters[key] += 1``. Возвращает ``None``.
+    Неизвестный ``hop`` / ``outcome`` — ``ValueError`` с фиксированным текстом, без значения;
+    ``hop`` проверяется раньше ``outcome`` и до ветки ``accepted`` (опечатка видна и на
+    здоровом пути). Лок держит вызывающий; функция не лочит и не логирует.
+    """
+    keys = LOSS_KEY_BY_HOP.get(hop)
+    if keys is None:
+        raise ValueError("count_outcome: unknown hop")
+    if outcome == "accepted":
+        return
+    key = keys.get(outcome)
+    if key is None:
+        raise ValueError("count_outcome: unknown outcome")
+    counters[key] = counters.get(key, 0) + 1
+
 
 #: Ключ метки времени снимка. Темп НЕ считается здесь — наружу едут счётчик и
 #: момент его чтения, а частное берёт потребитель (Task 5.6, вторая редакция).
