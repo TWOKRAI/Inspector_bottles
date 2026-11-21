@@ -92,10 +92,14 @@ def test_02_victim_sees_no_manifest_after_real_writer() -> None:
     """Жертва C-99: ни легаси-, ни каноничного ключа манифеста — ``resolve_manifest_path`` вернёт дефолт."""
     assert "test_01_writer_is_real_apply_env_aliases" in _WRITERS_RAN, "писатель не отработал — гоняйте файл целиком"
 
-    # .get(...) is None, а не «not in os.environ»: при красном assert печатает значение ключа, а не весь env с секретами
-    assert os.environ.get("INSPECTOR_MANIFEST") is None
-    assert os.environ.get("MULTIPROCESS_MANIFEST") is None
-    assert os.environ.get("MULTIPROCESS_LOG_LEVEL") is None
+    # Значения — в локальные имена: assert по имени печатает значение ключа; ``os.environ.get(...)`` прямо в
+    # assert pytest разворачивает в ``environ({...})`` и выносит весь env (с секретами) в лог.
+    legacy, canonical, mirror = (
+        os.environ.get(key) for key in ("INSPECTOR_MANIFEST", "MULTIPROCESS_MANIFEST", "MULTIPROCESS_LOG_LEVEL")
+    )
+    assert legacy is None
+    assert canonical is None
+    assert mirror is None
     assert os.environ["INSPECTOR_LOG_LEVEL"] == "WARNING"
 
 

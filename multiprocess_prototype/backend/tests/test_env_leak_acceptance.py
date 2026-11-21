@@ -257,5 +257,6 @@ def test_victims_alone_go_red_not_trivially_green():
     code, statuses, out = _run_nested_pytest(victims)
     assert statuses == {v: "FAILED" for v in victims}, out[-2500:]
     # красные по правильной причине (писатель не отработал), а не от опечатки или NameError
-    assert out.count("писатель не отработал в этом процессе") >= 2, out[-2500:]
+    reason = re.findall(r"^E +AssertionError: писатель не отработал в этом процессе", out, re.MULTILINE)
+    assert len(reason) == len(victims), out[-2500:]
     assert code != 0
