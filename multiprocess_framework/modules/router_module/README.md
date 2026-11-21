@@ -166,6 +166,16 @@ router.shutdown()
 1. `msg["channel"]` задан → прямой O(1) lookup в `_channel_registry`
 2. `channel_dispatcher.dispatch(msg)` → exact / pattern / broadcast (из CRM)
 
+**Исход ответа `send` (Task 0.5, ADR-RTR-016).** `send(msg)` возвращает словарь со `status`; читать его обязан
+вызывающий, которому важна доставка: `SocketChannel` отвечает `{"status": "error", "reason": ...}` («session not
+connected», «session dead», «no clients connected», «all clients dead») без исключения. Исход толкует
+`channel_routing_module.interfaces.outcome_of` (`accepted` / `refused` / `failed`), счёт потерь ведёт `count_outcome`.
+Читают ответ `SocketBridgeAdapter` (ответ driver'у; счётчик `lost_responses` в `get_stats()`) и
+`RecordForwardChannel` (живой хвост; `sent` / `dropped` / `send_failed`, `reason` фиксирован и не копирует текст
+роутера). Форвардер шлёт синхронным `send` и блокирует поток эмиттера до ответа; под `_write_lock` и `_stats_lock`
+на этом пути не логируют (самоблокировка через tap). Неблокирующая отправка — очередь на выход у сессии
+`SocketChannel` (Task 2.4), не поток-писатель в форвардере.
+
 ### Маршруты (channel_dispatcher из CRM)
 
 | Метод | Описание |

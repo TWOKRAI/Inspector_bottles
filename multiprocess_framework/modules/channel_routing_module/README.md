@@ -207,8 +207,9 @@ total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_fligh
 | `tap` | `tap_refused_records` (новый) | `tap_write_errors` | tap судил только исключения (ADR-CRM-016); ответ `error` и исключение приёмника — один дефект |
 | `bridge` | `lost_responses` | `lost_responses` | адаптер моста ведёт один счётчик потерянных ответов (`get_stats()["lost_responses"]`) |
 
-Ключ `tap_refused_records` в `LOSS_COUNTER_KEYS` / `PLANE_COUNTER_KEYS` вводит Task 0.5; вызовы
-`count_outcome` подключают 0.4–0.6 (после 0.1 живых вызывающих нет).
+Ключ `tap_refused_records` введён Task 0.5 (`LOSS_COUNTER_KEYS`, `PLANE_COUNTER_KEYS`). Живые
+вызывающие `count_outcome`: `ChannelRoutingManager._emit_to_taps` (звено `tap`, 0.5a),
+`LoggerCore` (звено `channel`, закрытый логгер, 0.6) и `SocketBridgeAdapter` (звено `bridge`, 0.5b).
 
 ### Форма пробы
 
@@ -380,12 +381,15 @@ hot-reload. Порог задаётся уровнем; у плоскостей 
 **`_emit_to_taps` возвращает ЧИСЛО принявших, а не `None` (Ф5-добор, блокер
 Б1, ADR-CRM-016).** Раздача с нулём tap'ов, раздача, подавленная реентерабельностью
 (D1), и раздача, где все tap'ы бросили, — раньше выглядели снаружи одинаково:
-метод ничего не возвращал. `write()`, вызванный и НЕ бросивший, — это и есть
-«принял»; возврат `write()` на плоскости tap'ов не судится (в отличие от
-`_write_record_to_channels`, где есть `channel_accepted`) — приёмник,
-вернувший `{"status": "error"}` или `{"status": "dropped"}` БЕЗ исключения
-(так делают `RouterPushChannel.write` и `StoreTapChannel.write`), засчитан
-как принявший. Существующие вызывающие (`LoggerCore.write`,
+метод ничего не возвращал. «Принял» = `write()` вызван, НЕ бросил и его ответ
+`outcome_of` толкует как `accepted` (Task 0.5a; раздел «Исход звена» выше):
+приёмник, вернувший `{"status": "error"}` БЕЗ исключения, растит `tap_write_errors`,
+а `{"status": "dropped"}` / `{"status": "refused"}` — `tap_refused_records`, и в число
+принявших не входит (так отвечают `RecordForwardChannel` на мёртвом роутере,
+`RouterPushChannel.write` и `StoreTapChannel.write`). До 0.5a раздача читала только факт
+исключения, и такой приёмник засчитывался принявшим (README и ADR-CRM-016 той редакции
+этого не отражают). Ответ `None` — по-прежнему «принял» (быстрый путь без вызова `outcome_of`).
+Существующие вызывающие (`LoggerCore.write`,
 `StatsManager._do_flush`), которым число не нужно, звали и продолжают звать
 метод как statement — возврат отбрасывается молча, поведение не изменилось.
 `ObservationManager` — единственный потребитель числа: без него

@@ -210,6 +210,8 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         # Главный перф-сигнал воркеров (effective_hz) сводка теряла, схлопывая их до
         # статус-строк — за ним приходилось идти в introspect.status отдельно. Ведём
         # ведущий темп процесса прямо в карточке; отставание от target — подсказка.
+        # Внимание: «ведущий» здесь — МАКСИМУМ effective_hz по воркерам, а ``state.fps`` процесса
+        # с Task 0.8 — пара САМОЙ МЕДЛЕННОЙ стадии (ADR-PM-063): два числа разного смысла.
         leading_hz, hz_degraded = _process_hz(ws.workers)
         failed_handles = [
             name
