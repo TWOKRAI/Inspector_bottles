@@ -409,38 +409,61 @@ Worktree 81 (с главным деревом). Удаление — тольк�
 В блоке и на странице — только очередь: планы §4.1, §4.2 и те, которых нет в таблицах §4; закрытые §4.3 и `_archive/` скрыты и считаются в строке `в архиве`.
 
 <!-- progress:begin -->
-- 2026-10-03_lifecycle-owner-scope — 7 из 13 · 54%
-- robot-protocol-v2 — 19 из 38 · 50%
+- 2026-10-03_lifecycle-owner-scope — 8 из 8 · 100%
+- robot-protocol-v2 — 36 из 49 · 73%
 - line-sim-layer-editor — 8 из 10 · 80%
-- line-sim — 27 из 32 · 84%
+- line-sim — 28 из 32 · 88%
 - gui-constructor — 0 из 21 · 0%
 - 2026-09-22_gui-service — 10 из 21 · 48%
 - frontend-constructor — 15 из 33 · 45%
 - transport-single-policy — 19 из 24 · 79%
 - pipeline-node-timing — 1 из 4 · 25%
-- observability-closure — 33 из 48 · 69%
-- lifecycle-stop-ownership — 6 из 10 · 60% · без отметки 3
-- backend-ctl-review-remediation — 4 из 18 · 22%
+- observability-closure — 33 из 33 · 100%
+- lifecycle-stop-ownership — 4 из 6 · 67%
+- lifecycle-stop-ownership — 11 из 17 · 65% · без отметки 5
+- backend-ctl-review-remediation — 4 из 4 · 100%
 - otel-export — 13 из 21 · 62%
 - framework-architecture-rework — 1 из 35 · 3%
 - dataset-annotation — 0 из 17 · 0%
 - code-reader-sdk — 3 из 3 · 100%
-- layer-render — 13 из 22 · 59%
+- layer-render — 15 из 22 · 68%
 - letters-retrain — 2 из 3 · 67%
 - qr-code-reader — 3 из 17 · 18%
 - 2026-10-02_plans-progress-dashboard — 25 из 34 · 74%
 - 2026-10-03_commit-mechanism — 9 из 11 · 82%
 - 2026-10-04_atlas — 28 из 34 · 82%
 - 2026-10-11_memory-rules-delivery — 1 из 2 · 50%
-- robot-place-pose — 2 из 3 · 67%
+- robot-place-pose — 3 из 3 · 100%
 - robot-calibration — 4 из 6 · 67%
 - camera-robot-calibration — 6 из 7 · 86%
 - device-tree-recipe — 4 из 7 · 57%
-- word-layout — 2 из 4 · 50%
+- word-layout — 0 из 2 · 0%
+- word-layout — 4 из 4 · 100%
 - storage-stack-embedded-first — 0 из 11 · 0%
-- 2026-07-06_constructor-master — 107 из 113 · 95%
+- 2026-07-06_constructor-master — 107 из 138 · 78%
 - 2026-10-07_k0-framework-quality — 4 из 4 · 100%
 - 2026-10-07_tooling-py-modernization — 0 из 0
-- 2026-10-12_stand-recipe-switch — 0 из 7 · 0%
+- 2026-10-12_stand-recipe-switch — 1 из 19 · 5%
+- 2026-10-13_tooling-machine-gate-hook — 0 из 0
+- 2026-10-13_tooling-machine-gate-hook — 2 из 2 · 100%
+- 2026-10-18_camera-device-service — 11 из 39 · 28% · без статуса 1
+- 2026-10-20_gui-graceful-close — 9 из 9 · 100% · без статуса 6
+- 2026-10-26_recipe-save-noise — 24 из 24 · 100%
+- 2026-10-27_system-run-state — 19 из 31 · 61%
+- 2026-10-27_tooling-gate-self-service — 0 из 1 · 0% · без отметки 1
+- 2026-11-06_atlas-passport — 21 из 30 · 70%
+- 2026-11-11_dataset-sidecar-truth — 0 из 6 · 0%
+- 2026-11-11_draw-universal — 0 из 12 · 0%
+- 2026-11-21_observability-signal-contracts — 0 из 77 · 0%
+- app-active-recipe-state — 1 из 1 · 100%
+- code-reader-gui — 0 из 8 · 0%
+- code-reader-gui — 2 из 7 · 29%
+- devices-tab-recipe-errors — 0 из 1 · 0% · без отметки 1
+- framework-heartbeat-import-race — 0 из 1 · 0% · без отметки 1
+- pult-control-panel-phase6 — 0 из 0
+- r2-env-isolation-defects — 0 из 2 · 0%
+- release-1.0 — 1 из 5 · 20%
+- topology-port-join — 1 из 6 · 17%
+- worker-start-honest — 0 из 1 · 0% · без отметки 1
 в архиве: 119
 <!-- progress:end -->
