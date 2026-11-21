@@ -403,6 +403,45 @@ def test_log_windowed_after_shutdown_is_throttled_by_the_window(lm):
     assert _delta(s0, s1, "channel_refused_records") == 1
 
 
+class _BrokenIsClosedLogger:
+    """Чужой менеджер в слоте ``logger``: ``warning`` бросает, а свойство ``is_closed`` — тоже."""
+
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def is_closed(self):
+        raise RuntimeError("is_closed exploded")
+
+    def warning(self, message, module="main", **kwargs):
+        self.calls += 1
+        raise RuntimeError("sink down")
+
+
+def test_log_windowed_survives_a_throwing_is_closed_and_returns_the_slot():
+    """Вопрос окна к ``is_closed`` не роняет вызывающего; бросившее свойство = «не закрыт» → слот возвращается."""
+    logger = _BrokenIsClosedLogger()
+    m = _Probe(logger)
+    m.initialize()
+    assert m.log_windowed("broken_key", interval=3600.0, level="warning", message="x") is False
+    # Слот возвращён: второй вызов снова доходит до менеджера, а не гасится окном.
+    assert m.log_windowed("broken_key", interval=3600.0, level="warning", message="x") is False
+    assert logger.calls == 2
+
+
+def test_log_windowed_mock_logger_is_not_closed_and_returns_the_slot():
+    """``MagicMock`` отвечает на ``is_closed`` истинным объектом: слот закрытым НЕ считается (``is True``)."""
+    from unittest.mock import MagicMock
+
+    logger = MagicMock()
+    logger.warning.side_effect = RuntimeError("sink down")
+    m = _Probe(logger)
+    m.initialize()
+    assert m.log_windowed("mock_key", interval=3600.0, level="warning", message="x") is False
+    assert m.log_windowed("mock_key", interval=3600.0, level="warning", message="x") is False
+    assert logger.warning.call_count == 2
+
+
 def test_refused_sentinel_is_falsy_and_keeps_identity(lm):
     """Старое ``if lm.warning(...)`` после останова читает ложь; тождество (``is``) и копии целы."""
     refused = _mixin.REFUSED

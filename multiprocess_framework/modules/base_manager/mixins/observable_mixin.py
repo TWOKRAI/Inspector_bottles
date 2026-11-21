@@ -216,7 +216,10 @@ class ObservableMixin(IObservableMixin):
         registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled("logger"):
             return False
-        return getattr(registry.get("logger"), "is_closed", False) is True
+        try:
+            return getattr(registry.get("logger"), "is_closed", False) is True
+        except Exception:  # noqa: BLE001 — вопрос окна не должен ронять вызывающего: чужое свойство могло бросить
+            return False
 
     def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
         """Логирование уровня DEBUG через logger manager.
