@@ -187,12 +187,19 @@ def test_read_value_missing_none_or_dotted_key():  # u10
 
 
 def test_read_value_result_is_independent_and_exact():  # u11
-    # мутация ответа no_data не портит следующий ответ (константа не общая)
-    first = read_value({}, "fps", 101.0, None)
-    first["class"] = "fresh"
-    first["value"] = 1
-    first["age_s"] = 0.0
-    assert read_value({}, "fps", 101.0, None) == NO_DATA
+    # мутация ответа no_data не портит следующий ответ (константа не общая) — на всех трёх ветках
+    no_data_calls = [
+        ({}, "fps"),  # нет метки: no_data из classify
+        ({"fps": 1, "_fresh": S}, "absent"),  # нет сегмента пути
+        ({"fps": None, "_fresh": S}, "fps"),  # значение None
+    ]
+    for subtree, key in no_data_calls:
+        first = read_value(subtree, key, 101.0, None)
+        first["class"] = "fresh"
+        first["value"] = 1
+        first["age_s"] = 0.0
+        first["process"] = "cam"
+        assert read_value(subtree, key, 101.0, None) == NO_DATA
 
     # age_s — ровно now - src_ts, без округления; значение — тот же объект, без копии
     leaf = {"a": [1, 2]}
