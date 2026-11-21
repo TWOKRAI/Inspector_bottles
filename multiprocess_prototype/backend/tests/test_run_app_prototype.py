@@ -58,8 +58,11 @@ def test_main_applies_env_aliases_before_resolve(monkeypatch, tmp_path) -> None:
     custom = tmp_path / "custom_app.yaml"
     custom.write_text("name: Custom\npipeline: p.yaml\n", encoding="utf-8")
 
-    # Задан только каноничный ключ; легаси-ключ отсутствует (tracked → восстановится).
-    monkeypatch.delenv("INSPECTOR_MANIFEST", raising=False)
+    # Задан только каноничный ключ; легаси-ключ отсутствует. setenv → delenv: setenv
+    # запоминает «ключа не было», и откат УДАЛИТ то, что main() допишет в os.environ
+    # (голый delenv(raising=False) на отсутствующем ключе ничего не запоминает — C-99).
+    monkeypatch.setenv("INSPECTOR_MANIFEST", "")
+    monkeypatch.delenv("INSPECTOR_MANIFEST")
     monkeypatch.setenv("MULTIPROCESS_MANIFEST", str(custom))
 
     captured: dict = {}
