@@ -250,7 +250,7 @@ abort — здесь, в мегаплане GUI (`gui-service` + `gui-constructo
 Файл: [`phase-2-network.md`](phase-2-network.md)
 
 - Task 2.1: Кадры по сети: промоушен сервера `Plugins/sim/mjpeg_sink` (line-sim 1.2, готов) в `Services/frame_stream`; мост отдаёт дисплеи через него; Пульт выбирает SHM или поток [PENDING] (зависит от 1.3; **Ф2 целиком — после Ф3, по реальной нужде «Пульт на другой машине»**) — **Module contract:** new-lite (`Services/frame_stream` — перенос с контрактом) + impl-only
-- Task 2.2: Безопасность двери вне localhost: PSK-токен fail-closed, TLS-опция, токен в `backend_ctl` [PENDING] (зависит от 1.2) — **Module contract:** impl-only
+- Task 2.2: Безопасность двери вне localhost: PSK-токен fail-closed, TLS-опция, токен в `backend_ctl` [PENDING] (зависит от 1.2) — **Module contract:** impl-only — 2026-11-21: токен локального порта делает observability-signal-contracts Task 0.12, 0.12b (решение владельца В-1); здесь остаются TLS и правила вне localhost
 - Task 2.3: Сквозная приёмка по LAN: Пульт на машине B ↔ бэкенд на машине A, числа RTT/возраст кадра [PENDING] (зависит от 2.1, 2.2) — **Module contract:** none (приёмка)
 
 ### Phase 3 — Несколько бэкендов
