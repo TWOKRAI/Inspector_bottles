@@ -294,7 +294,10 @@ class _ErrorCapture:
             # вне ``except``: строка не пуста, иначе ошибка маскировалась бы под успех
             self._last_error = "UnknownError"
         elif isinstance(exc, OSError) and exc.errno is not None:
-            self._last_error = f"{type(exc).__name__}: errno {exc.errno} {exc.strerror}"
+            text = f"{type(exc).__name__}: errno {exc.errno}"
+            if exc.strerror is not None:
+                text += f" {exc.strerror}"
+            self._last_error = text
         else:
             self._last_error = type(exc).__name__
 

@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import io
+import logging
+import sys
 import threading
 import time
 from pathlib import Path
@@ -28,6 +30,8 @@ from multiprocess_framework.modules.logger_module.configs.logger_manager_config 
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 
 _JOIN_DEADLINE_S = 10.0
+_HAZARD_JOIN_DEADLINE_S = 60.0
+_HAZARD_WRITES = 3000
 _ENOSPC_TEXT = "OSError: errno 28 No space left on device"
 
 
@@ -45,6 +49,25 @@ class _EnospcStream:
 
     def seek(self, *args: Any) -> int:
         return 0
+
+
+class _RaisingStream(_EnospcStream):
+    """Поток, чей ``write`` бросает заданное исключение (форма ответа канала по типу ошибки)."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def write(self, data: str) -> int:
+        raise self._exc
+
+
+class _SelectiveStream(io.StringIO):
+    """Здоровый поток, который падает только на записи с маркером ``BADREC``."""
+
+    def write(self, data: str) -> int:
+        if "BADREC" in data:
+            raise OSError(28, "No space left on device")
+        return super().write(data)
 
 
 class _FlakyStream(io.StringIO):
@@ -230,3 +253,87 @@ def test_error_response_shape(tmp_path: Path) -> None:
         assert "secret-payload-xyz" not in result["error"]
     finally:
         ch.close()
+
+
+# ---------------------------------------------------------------------------
+# Правки по ревью стадии 5: входное значение не утекает в ответ; hazard общего хэндлера
+# ---------------------------------------------------------------------------
+
+
+def _write_through_failing_stream(tmp_path: Path, exc: BaseException) -> dict[str, Any]:
+    ch = FileChannel(LoggerChannelSchema(name="leak_probe", type="file", file_path=str(tmp_path / "leak.log")))
+    try:
+        _swap_stream(ch.handler, _RaisingStream(exc))
+        return _bounded(lambda: ch.write(_record("payload-text")))
+    finally:
+        ch.close()
+
+
+def test_non_oserror_gives_class_name_only(tmp_path: Path) -> None:
+    # Настоящая защита от утечки входного значения (проверка в test_error_response_shape
+    # на OSError(28) вакуумна: текст ОС там и так не секрет).
+    result = _write_through_failing_stream(tmp_path, ValueError("secret-payload-xyz"))
+    assert result == {"status": "error", "channel": "leak_probe", "error": "ValueError"}
+    assert "secret-payload-xyz" not in result["error"]
+
+
+def test_oserror_without_errno_gives_class_name_only(tmp_path: Path) -> None:
+    result = _write_through_failing_stream(tmp_path, OSError("secret-payload-xyz"))
+    assert result == {"status": "error", "channel": "leak_probe", "error": "OSError"}
+    assert "secret-payload-xyz" not in result["error"]
+
+
+def test_oserror_without_strerror_omits_none(tmp_path: Path) -> None:
+    result = _write_through_failing_stream(tmp_path, OSError(28, None))
+    assert result == {"status": "error", "channel": "leak_probe", "error": "OSError: errno 28"}
+
+
+def test_handle_error_outside_except_gives_unknown_error(tmp_path: Path) -> None:
+    ch = FileChannel(LoggerChannelSchema(name="outside", type="file", file_path=str(tmp_path / "outside.log")))
+    try:
+        record = logging.LogRecord("probe", logging.WARNING, "", 0, "m", (), None)
+        ch.handler.handleError(record)
+        assert ch.handler._last_error == "UnknownError"
+    finally:
+        ch.close()
+
+
+def test_shared_handler_two_threads_no_false_error(tmp_path: Path) -> None:
+    """Два потока на общий хэндлер: канал A всегда падает, канал B всегда здоров.
+
+    Серийность записи даёт общий ``sink_lock`` (``_bind_sink_lock``); без него
+    ``_last_error`` одного канала читает другой и B отвечает ложным ``error``.
+    """
+    path = str(tmp_path / "hazard.log")
+    # дедлайн ожидания лока с запасом: тест проверяет ложные error, а не потерю по пределу
+    cfg = {"type": "file", "file_path": path, "write_deadline_sec": 5.0}
+    ch_a = FileChannel(LoggerChannelSchema(name="chan_a", **cfg))
+    ch_b = FileChannel(LoggerChannelSchema(name="chan_b", **cfg))
+    counts = {"a_success": 0, "b_error": 0}
+    old_interval = sys.getswitchinterval()
+    try:
+        assert ch_a.handler is ch_b.handler, "каналы одного файла обязаны делить хэндлер"
+        _swap_stream(ch_a.handler, _SelectiveStream())
+
+        def _run_a() -> None:
+            for _ in range(_HAZARD_WRITES):
+                if ch_a.write(_record("BADREC"))["status"] == "success":
+                    counts["a_success"] += 1
+
+        def _run_b() -> None:
+            for _ in range(_HAZARD_WRITES):
+                if ch_b.write(_record("good"))["status"] == "error":
+                    counts["b_error"] += 1
+
+        sys.setswitchinterval(1e-6)  # частые переключения потоков: гонка проявляется чаще
+        threads = [threading.Thread(target=_run_a, daemon=True), threading.Thread(target=_run_b, daemon=True)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(_HAZARD_JOIN_DEADLINE_S)
+        assert not any(t.is_alive() for t in threads), "потоки не завершились за дедлайн"
+        assert counts == {"a_success": 0, "b_error": 0}
+    finally:
+        sys.setswitchinterval(old_interval)
+        ch_a.close()
+        ch_b.close()
