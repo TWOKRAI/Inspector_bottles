@@ -55,8 +55,22 @@ class ITelemetryReadModel(Protocol):
         """Снимок поддерева по префиксу (граница — точка-разделитель); пустой prefix → весь снимок."""
         ...
 
+    def read(self, path: str, key: str, alive_incarnation: str | None = None) -> dict[str, Any]:
+        """Значение листа процесса ``path`` (``processes.<name>``) с классом свежести и возрастом.
+
+        Возвращает ``{"class", "value", "age_s"}``: ``class`` — ``no_data`` / ``fresh`` /
+        ``stale`` / ``writer_gone`` (Task 0.2, ``freshness.read_value``), ``age_s = now - src_ts``
+        метки писателя. ``no_data`` — ``{"class": "no_data", "value": None, "age_s": None}``: пути
+        не корня процесса, метки нет, ключ не лист, лист ``None``. Ноль — значение. Всюду
+        определена; метка читается из текущего состояния на каждый вызов.
+        """
+        ...
+
     def history(self, path: str, since: float | None = None) -> list[tuple[float, Any]]:
-        """Кольцевой буфер ``(ts, value)`` метрики; since — нижняя граница ts (wall-clock)."""
+        """Кольцевой буфер ``(ts, value)`` метрики; since — нижняя граница ts (wall-clock).
+
+        ``ts`` — время источника (``src_ts`` метки писателя того же такта); метки нет — время приёма.
+        """
         ...
 
     def export_history(self) -> dict[str, list[tuple[float, float]]]:
