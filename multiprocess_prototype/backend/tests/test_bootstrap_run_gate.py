@@ -68,6 +68,11 @@ def test_frontend_launch_strips_autostart_from_argv(
 
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "argv", argv)
+    # launch() ставит os.environ["INSPECTOR_PRESENTATION"] на весь процесс — без отката соседние тесты
+    # (test_build_characterization: снимок сборки с overlay презентации) краснеют. setenv+delenv: monkeypatch
+    # запоминает «переменной не было» и удаляет её при откате.
+    monkeypatch.setenv("INSPECTOR_PRESENTATION", "x")
+    monkeypatch.delenv("INSPECTOR_PRESENTATION")
     monkeypatch.setattr(frontend_run, "venv_guard", lambda *a, **k: None)
     monkeypatch.setattr(proto_main, "main", fake_main)
 
