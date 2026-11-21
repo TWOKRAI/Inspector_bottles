@@ -1146,6 +1146,7 @@ class BuiltinCommands:
             EVENT_SELECTOR_ATTR,
             document_plane_report,
             event_plane_report,
+            forwarders_plane_report,
             observation_plane_report,
             stats_plane_report,
         )
@@ -1259,6 +1260,9 @@ class BuiltinCommands:
             # рекордер, а не конфиг: пересчёт из того же источника показывал бы
             # согласие всегда, в том числе когда правка до него не доехала.
             **flight_plane_report(svc),
+            # Task 0.5c (c6): счётчики форвардеров хвоста по подписчикам —
+            # sent/messages/dropped/send_failed; читается живой реестр процесса.
+            **forwarders_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {

@@ -264,7 +264,8 @@ def wire_observability_forward(
     (ADR-SM-010 / ADR-CRM-015). Проверено живым хвостом на стенде.
 
     Args:
-        router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.
+        router: живой RouterManager процесса (синхронный ``send``, Task 0.5c).
+            None → пуш не уходит, записи считаются в ``send_failed``.
         subscriber: адрес GUI-процесса (``targets=[subscriber]``).
         sender: имя процесса-источника.
         logger_manager/error_manager: менеджеры с ``add_tap`` (error-хвост).
@@ -273,10 +274,15 @@ def wire_observability_forward(
 
     Returns:
         (forwarder, taps) — forwarder: Callable для drain-петли; taps: список
-        (manager, tap_name) для unwire.
+        (manager, tap_name) для unwire. У ``forwarder`` есть атрибут
+        ``counters_snapshot()`` — сумма счётчиков созданных каналов подписчика
+        (Task 0.5c); его читает :func:`forwarders_plane_report`.
     """
     batch_name, error_name, logger_name = forward_tap_names(subscriber)
     batch_channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=batch_name)
+    # Task 0.5c (c6): СОБСТВЕННЫЙ список созданных каналов — в цикле ниже
+    # переменная `channel` перезаписывается, а `taps` хранит (mgr, tap_name).
+    created: list[RecordForwardChannel] = [batch_channel]
 
     def forwarder(hub_records: List[dict]) -> None:
         # process=sender (5.21 (c)): каждая live-запись несёт имя процесса-источника.
@@ -288,7 +294,20 @@ def wire_observability_forward(
             continue
         channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=tap_name)
         mgr.add_tap(channel, min_level=min_level, name=tap_name)
+        created.append(channel)
         taps.append((mgr, tap_name))
+
+    def counters_snapshot() -> dict[str, int]:
+        """Сумма ``counters_snapshot()`` созданных каналов подписчика (batch + tap'ы)."""
+        total = {"sent": 0, "messages": 0, "dropped": 0, "send_failed": 0}
+        for created_channel in created:
+            for key, value in created_channel.counters_snapshot().items():
+                total[key] = total.get(key, 0) + value
+        return total
+
+    # Атрибут на замыкании, а не третий элемент кортежа: арность (forwarder, taps)
+    # распаковывают вызывающие и тесты. setattr — без нового `# type: ignore`.
+    setattr(forwarder, "counters_snapshot", counters_snapshot)
     return forwarder, taps
 
 
@@ -416,6 +435,38 @@ def stats_plane_report(svc: Any) -> Dict[str, Any]:
         if policy_view is not None:
             section["policy"] = policy_view
     return {"stats": section}
+
+
+def forwarders_plane_report(svc: Any) -> Dict[str, Any]:
+    """Секция ``forwarders`` для ``introspect.observability`` (Task 0.5c, c6).
+
+    ``{<subscriber>: {sent, messages, dropped, send_failed}}`` — сумма счётчиков
+    каналов, созданных проводкой :func:`wire_observability_forward` для подписчика
+    (атрибут ``counters_snapshot`` на ``forwarder``). Читается живой реестр процесса
+    ``_observability_forwarders`` (``{subscriber: (forwarder, taps)}``); ссылка берётся
+    один раз — реестр меняется атомарным rebind, — и реестр не правится.
+
+    Запись без ``counters_snapshot`` — ``{"error": "AttributeError"}``; исключение при
+    вызове или вырожденная запись реестра — ``{"error": <ИмяКласса>}`` без текста
+    (текст может нести входное значение). Команда диагностики не падает от
+    диагностируемого. Реестра нет — ``{"forwarders": {}}``: ключ есть всегда.
+    ``wired_at`` вердикта CTO 4.3b здесь нет: отложен в Task 3.8.
+    """
+    registry = getattr(svc, "_observability_forwarders", None)
+    section: Dict[str, Any] = {}
+    if not isinstance(registry, dict):
+        return {"forwarders": section}
+    for subscriber, entry in list(registry.items()):
+        try:
+            forwarder, _taps = entry
+            counters = getattr(forwarder, "counters_snapshot", None)
+            if not callable(counters):
+                section[subscriber] = {"error": "AttributeError"}
+                continue
+            section[subscriber] = counters()
+        except Exception as exc:  # noqa: BLE001 — readback не смеет ронять команду диагностики
+            section[subscriber] = {"error": type(exc).__name__}
+    return {"forwarders": section}
 
 
 # ---------------------------------------------------------------------------

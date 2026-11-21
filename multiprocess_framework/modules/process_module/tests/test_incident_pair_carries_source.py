@@ -42,6 +42,10 @@ class _CapturingRouter:
     def send_async(self, message: Dict[str, Any], priority: str = "normal") -> None:
         self.pushed.append(message)
 
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        self.pushed.append(message)  # Task 0.5c: форвардер зовёт синхронный send
+        return {"status": "success"}
+
 
 def _manager_config(tmp_path, app: str) -> Dict[str, Any]:
     return {

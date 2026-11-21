@@ -51,6 +51,11 @@ class _FakeRouter:
     def send_async(self, message: dict, priority: str = "normal") -> None:
         self.sent.append((message, priority))
 
+    def send(self, message: dict) -> dict:
+        # Task 0.5c: форвардер зовёт синхронный send; приоритета у него нет.
+        self.sent.append((message, None))
+        return {"status": "success"}
+
 
 def _real_logger(name: str) -> LoggerManager:
     mgr = LoggerManager(manager_name=name)

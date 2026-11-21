@@ -202,8 +202,9 @@ class SocketChannel(MessageChannel):
 
         Медленный клиент (не читает, буфер ядра полон): ``sendall`` упирается в
         таймаут сокета 0.5 с (``settimeout`` в accept-loop — это ТОТАЛЬНЫЙ таймаут
-        sendall), ловится как OSError → один WARNING, сокет помечен мёртвым и
-        ``shutdown`` (под ``_write_lock``). Следующие отправители его пропускают,
+        sendall), ловится как OSError → сокет помечен мёртвым и ``shutdown`` (под
+        ``_write_lock``), один WARNING на сокет — уже ПОСЛЕ выхода из-под лока
+        (Task 0.5c, см. ``_write_locked``). Следующие отправители его пропускают,
         поэтому запись стоит не дольше одного таймаута сокета на медленного клиента.
         С учёта соединение снимает только выход его read-loop, после обработчиков
         сессии. На POSIX ``shutdown`` будит recv (EOF); на Windows не будит — read-loop
@@ -235,10 +236,14 @@ class SocketChannel(MessageChannel):
             return {"status": "error", "reason": "no clients connected", "channel": self._name}
 
         sent = 0
+        failures: list[str] = []
         with self._write_lock:
             for c in clients:
-                if self._write_locked(c, line, "client"):
+                if self._write_locked(c, line, "client", failures):
                     sent += 1
+        # Лог — ПОСЛЕ выхода из-под _write_lock (Task 0.5c): WARNING идёт в tap
+        # форвардера, а тот синхронным router.send может прийти в этот же канал.
+        self._log_write_failures(failures)
         if sent == 0:
             return {"status": "error", "reason": "all clients dead", "channel": self._name}
         with self._stats_lock:
@@ -268,22 +273,30 @@ class SocketChannel(MessageChannel):
             sock = self._sessions.get(sid)
         if sock is None:
             return {"status": "error", "reason": "session not connected", "channel": self._name, "session": sid}
+        failures: list[str] = []
         with self._write_lock:
-            ok = self._write_locked(sock, line, f"session {sid}")
+            ok = self._write_locked(sock, line, f"session {sid}", failures)
+        self._log_write_failures(failures)
         if not ok:
             return {"status": "error", "reason": "session dead", "channel": self._name, "session": sid}
         with self._stats_lock:
             self._tx += 1
         return {"status": "success", "channel": self._name, "clients": 1, "session": sid}
 
-    def _write_locked(self, sock: socket.socket, line: bytes, target: str) -> bool:
+    def _write_locked(self, sock: socket.socket, line: bytes, target: str, failures: list[str]) -> bool:
         """Записать строку в сокет. Только под ``_write_lock``. Returns: записано ли.
 
         Мёртвый (помечен) или уже закрытый сокет пропускается молча — ни второго
-        ожидания таймаута, ни EBADF. Сбой записи: один WARNING, пометка, ``shutdown``
-        (read-loop снимет соединение сам: на POSIX — по EOF, на Windows — по ``_dead``
-        на таймауте recv, см. ``_read_loop``). Больше
+        ожидания таймаута, ни EBADF. Сбой записи: текст отказа в ``failures``, пометка,
+        ``shutdown`` (read-loop снимет соединение сам: на POSIX — по EOF, на Windows —
+        по ``_dead`` на таймауте recv, см. ``_read_loop``). Больше
         ничего — ни снятия сессии, ни оповещения отсюда (ревью 1.3a, ADR-RTR-012).
+
+        Здесь НЕ логируем (Task 0.5c): лог под ``_write_lock`` замыкается на этот же
+        лок — WARNING идёт в tap ``RecordForwardChannel``, тот зовёт синхронный
+        ``router.send``, и пуш адресату-каналу приходит сюда же в том же потоке
+        (``threading.Lock`` не реентерабелен). Тексты пишет вызывающий через
+        :meth:`_log_write_failures` после выхода из-под лока.
         """
         if sock in self._dead or sock.fileno() == -1:
             return False
@@ -291,13 +304,18 @@ class SocketChannel(MessageChannel):
             sock.sendall(line)
             return True
         except OSError as exc:
-            self._log_warning(f"[SocketChannel:{self._name}] send to {target} failed: {exc} — сокет помечен мёртвым")
+            failures.append(f"[SocketChannel:{self._name}] send to {target} failed: {exc} — сокет помечен мёртвым")
             self._dead.add(sock)
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             return False
+
+    def _log_write_failures(self, failures: list[str]) -> None:
+        """По WARNING на каждый отказавший сокет. Зовётся только ВНЕ ``_write_lock``."""
+        for text in failures:
+            self._log_warning(text)
 
     # ---- IMessageChannel: получение ----
 

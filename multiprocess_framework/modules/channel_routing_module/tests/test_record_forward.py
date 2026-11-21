@@ -25,6 +25,11 @@ class FakeRouter:
     def send_async(self, message, priority="normal"):
         self.sent.append((message, priority))
 
+    def send(self, message):
+        # Task 0.5c: форвардер зовёт синхронный send; приоритета у него нет.
+        self.sent.append((message, None))
+        return {"status": "success"}
+
 
 # ---------------------------------------------------------------------------
 # Нормализация в display-вид

@@ -21,13 +21,25 @@ Batch-путь ЖИВ с задачи 2.1: у stats-слота hub'а появи
 вызывался ни разу. См. ADR-CRM-015.
 
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
-``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
+``send(dict) -> dict``); Dict at Boundary — наружу едет чистый pickle-safe dict.
+
+Синхронный ``router.send`` (Task 0.5c, вердикт CTO 4.3b Q1-B) вместо
+``send_async``: прежде ``_push`` отвечал ``success`` безусловно (500 ``success``
+при 500 ``delivery_failed``). Ответ роутера судит ``outcome_of`` и отображается в
+ответ форвардера: ``accepted`` -> ``success``, ``refused`` -> ``dropped``,
+``failed`` / исключение / ``router=None`` -> ``error``. Цена — поток эмиттера ждёт
+доставку; поэтому никто на пути ``send`` не должен логировать под своим локом
+(см. ``SocketChannel._write_locked``: WARNING под ``_write_lock`` замыкался на
+тот же лок через этот форвардер).
 
 Ответ ``write()`` судится (Task 0.5a): ``ChannelRoutingManager._emit_to_taps``
-толкует его через ``outcome_of``. ``{"status": "error"}`` (исключение роутера,
-``router=None``) — tap не принял запись, счёт ``tap_write_errors`` менеджера;
-``{"status": "dropped"}`` — ``tap_refused_records``. До 0.5a любой ответ без
-исключения засчитывался доставкой.
+толкует его через ``outcome_of``. ``{"status": "error"}`` — tap не принял запись,
+счёт ``tap_write_errors`` менеджера; ``{"status": "dropped"}`` —
+``tap_refused_records``. До 0.5a любой ответ без исключения засчитывался доставкой.
+
+Счётчики (Task 0.5c): :meth:`RecordForwardChannel.counters_snapshot` — ``sent`` /
+``dropped`` / ``send_failed`` в записях, ``messages`` в пушах; читает их секция
+``introspect.observability.forwarders`` через проводку ``wire_observability_forward``.
 
 QoS live-хвоста — ДОЛГ ЗАКРЫТ (Ф7.3, 2026-08-06). Прежнее решение 5.21 (d)
 (2026-07-10) оставляло хвост на ``queue_type="system"`` при always-on подписке
@@ -45,12 +57,22 @@ QoS live-хвоста — ДОЛГ ЗАКРЫТ (Ф7.3, 2026-08-06). Прежн�
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List
 
-from ..interfaces import IChannel
+from ..interfaces import IChannel, outcome_of
 from .record_display import log_record_to_display
 
 FORWARD_COMMAND = "observability.record"
+
+
+def _router_reason(result: Any, default: str) -> str:
+    """Текст причины из ответа роутера; без строки ``reason`` — ``default``."""
+    if isinstance(result, dict):
+        reason = result.get("reason")
+        if isinstance(reason, str) and reason:
+            return reason
+    return default
 
 
 class RecordForwardChannel(IChannel):
@@ -67,7 +89,7 @@ class RecordForwardChannel(IChannel):
     ) -> None:
         """
         Args:
-            router: RouterManager с ``send_async(dict, priority)`` — живой роутер процесса.
+            router: RouterManager с синхронным ``send(dict) -> dict`` — живой роутер процесса.
             subscriber: адрес получателя (GUI-процесс), ``targets=[subscriber]``.
             sender: имя процесса-источника (в сообщении и в ``data.process``).
             name: имя канала (хэндл tap'а для remove_tap).
@@ -87,6 +109,8 @@ class RecordForwardChannel(IChannel):
         self._sender = sender or subscriber
         self._name = name
         self._command = command
+        self._counters_lock = threading.Lock()
+        self._counters: Dict[str, int] = {"sent": 0, "messages": 0, "dropped": 0, "send_failed": 0}
 
     @property
     def name(self) -> str:
@@ -101,17 +125,44 @@ class RecordForwardChannel(IChannel):
         # process=sender (5.21 (c)): запись несёт процесс-источник, а не имя
         # источника внутри процесса (`module`) и не группу логирования (`scope`).
         display = log_record_to_display(record_dict, process=self._sender)
-        return self._push({"record": display})
+        return self._push({"record": display}, 1)
 
     def push_batch(self, display_records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Drain-путь: пачка уже-display записей (log/stats) → один push с ``records``."""
         if not display_records:
             return {"status": "success", "channel": self._name, "sent": 0}
-        return self._push({"records": list(display_records)})
+        records = list(display_records)
+        return self._push({"records": records}, len(records))
 
-    def _push(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Отправить адресный router-пуш подписчику (fire-and-forget, ошибки глушим)."""
+    def counters_snapshot(self) -> Dict[str, int]:
+        """Счётчики форвардера (Task 0.5c): ``sent`` / ``dropped`` / ``send_failed`` — в
+        записях, ``messages`` — в пушах, дошедших до ``router.send`` (включая бросивший).
+
+        Инвариант: ``sent + dropped + send_failed`` == предложено записей. Снимок —
+        копия под тем же локом, что и счёт.
+        """
+        with self._counters_lock:
+            return dict(self._counters)
+
+    def _count(self, key: str, records: int, *, reached_router: bool) -> None:
+        # Лок берётся ПОСЛЕ возврата send, не вокруг него: держать его на
+        # синхронной доставке значило бы сериализовать эмиттеров.
+        with self._counters_lock:
+            self._counters[key] += records
+            if reached_router:
+                self._counters["messages"] += 1
+
+    def _push(self, payload: Dict[str, Any], records: int) -> Dict[str, Any]:
+        """Отправить адресный пуш подписчику синхронным ``router.send`` и судить ответ.
+
+        Исход ``outcome_of``: ``accepted`` -> ``success``; ``refused`` -> ``dropped``;
+        ``failed``, исключение ``send`` и ``router=None`` -> ``error`` (Task 0.5c, вердикт
+        CTO 4.3b Q1-B). Исключение наружу не уходит: доставка хвоста best-effort.
+        ``reason`` не несёт входного значения: имя класса исключения или текст
+        причины из ответа роутера. ``records`` — сколько записей в пуше (для счёта).
+        """
         if self._router is None:
+            self._count("send_failed", records, reached_router=False)
             return {"status": "error", "channel": self._name, "reason": "router=None"}
         message = {
             "type": "event",
@@ -123,10 +174,20 @@ class RecordForwardChannel(IChannel):
             "data": {"process": self._sender, **payload},
         }
         try:
-            self._router.send_async(message, priority="normal")
-            return {"status": "success", "channel": self._name}
+            result = self._router.send(message)
         except Exception as exc:  # noqa: BLE001 — доставка хвоста best-effort
-            return {"status": "error", "channel": self._name, "reason": str(exc)}
+            self._count("send_failed", records, reached_router=True)
+            # Только имя класса: текст исключения может нести входное значение.
+            return {"status": "error", "channel": self._name, "reason": type(exc).__name__}
+        outcome = outcome_of(result)
+        if outcome == "accepted":
+            self._count("sent", records, reached_router=True)
+            return {"status": "success", "channel": self._name}
+        if outcome == "refused":
+            self._count("dropped", records, reached_router=True)
+            return {"status": "dropped", "channel": self._name, "reason": _router_reason(result, "router refused")}
+        self._count("send_failed", records, reached_router=True)
+        return {"status": "error", "channel": self._name, "reason": _router_reason(result, "router failed")}
 
     def close(self) -> None:
         """IChannel-совместимость: канал закрывается без побочных эффектов (router общий)."""

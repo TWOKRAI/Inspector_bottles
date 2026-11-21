@@ -99,6 +99,10 @@ class TestEmitterDoesNotStampIt:
             def send_async(self, message: Dict[str, Any], priority: str = "normal") -> None:
                 pushed.append(message)
 
+            def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+                pushed.append(message)  # Task 0.5c: форвардер зовёт синхронный send
+                return {"status": "success"}
+
         forwarder, _taps = wire_observability_forward(
             _Router(), "subscriber", "camera_0", logger_manager=None, error_manager=None
         )

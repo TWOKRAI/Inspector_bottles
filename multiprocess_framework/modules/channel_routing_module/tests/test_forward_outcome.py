@@ -16,12 +16,17 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 from typing import Any, Dict, List
+
+import pytest
 
 from multiprocess_framework.modules.channel_routing_module.interfaces import IChannel, outcome_of
 from multiprocess_framework.modules.channel_routing_module.observability import RecordForwardChannel
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+from multiprocess_framework.modules.router_module.channels.socket_channel import SocketChannel
+from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
 
 _JOIN_DEADLINE_S = 5.0
 
@@ -237,3 +242,196 @@ def test_healthy_tap_does_not_take_miss_lock(tmp_path) -> None:
     assert result["healthy_locks"] == 0
     assert result["n_refused"] == 0
     assert result["refused_locks"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 0.5c: синхронный ``router.send`` и счётчики форвардера
+# ---------------------------------------------------------------------------
+
+
+class _ReplyRouter:
+    """Роутер-заглушка: ``send`` отвечает заданным словарём.
+
+    ``send_async`` пишет в тот же журнал и ничего не отвечает: до 0.5c форвардер
+    звал его, и красный тогда — «роутерный ответ не дошёл», а не ``AttributeError``.
+    """
+
+    def __init__(self, reply: Dict[str, Any]) -> None:
+        self._reply = reply
+        self.sent: List[Dict[str, Any]] = []
+
+    def send_async(self, message: Dict[str, Any], priority: str = "normal") -> None:
+        self.sent.append(message)
+
+    def send(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        self.sent.append(message)
+        return self._reply
+
+
+def _display(i: int) -> Dict[str, Any]:
+    return {"kind": "log", "module": "probe", "ts": 1.0, "severity": "info", "message": f"m{i}"}
+
+
+def test_forwarder_counters_healthy() -> None:
+    """Живой роутер: одна запись — ``sent`` 1, один пуш."""
+    router = _ReplyRouter({"status": "success"})
+    forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+
+    forward.write(_record())
+
+    assert len(router.sent) == 1
+    assert forward.counters_snapshot() == {"sent": 1, "messages": 1, "dropped": 0, "send_failed": 0}
+
+
+def test_forwarder_counters_dropped() -> None:
+    """Роутер ответил ``dropped``: запись в ``dropped``, не в ``sent``."""
+    router = _ReplyRouter({"status": "dropped", "reason": "queue full"})
+    forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+
+    forward.write(_record())
+
+    assert forward.counters_snapshot() == {"sent": 0, "messages": 1, "dropped": 1, "send_failed": 0}
+
+
+@pytest.mark.parametrize(
+    ("make_router", "expected"),
+    [
+        (lambda: _ReplyRouter({"status": "success"}), {"sent": 3, "messages": 1, "dropped": 0, "send_failed": 0}),
+        (
+            lambda: _ReplyRouter({"status": "dropped", "reason": "queue full"}),
+            {"sent": 0, "messages": 1, "dropped": 3, "send_failed": 0},
+        ),
+        (
+            lambda: _ReplyRouter({"status": "error", "reason": "no channel resolved"}),
+            {"sent": 0, "messages": 1, "dropped": 0, "send_failed": 3},
+        ),
+        (lambda: _DeadRouter(), {"sent": 0, "messages": 1, "dropped": 0, "send_failed": 3}),
+        (lambda: None, {"sent": 0, "messages": 0, "dropped": 0, "send_failed": 3}),
+    ],
+    ids=["success", "dropped", "error", "raises", "no_router"],
+)
+def test_forwarder_counters_count_records(make_router, expected: Dict[str, int]) -> None:
+    """Единица счёта — записи: пачка из 3 даёт +3; ``messages`` — пуши, до роутера."""
+    forward = RecordForwardChannel(router=make_router(), subscriber="gui", sender="p")
+
+    forward.push_batch([_display(0), _display(1), _display(2)])
+
+    snapshot = forward.counters_snapshot()
+    assert snapshot == expected
+    assert snapshot["sent"] + snapshot["dropped"] + snapshot["send_failed"] == 3
+
+
+def test_forwarder_counters_threaded() -> None:
+    """Hazard c8: 8 потоков × 250 записей — ни одной потерянной в счёте."""
+    router = _ReplyRouter({"status": "success"})
+    forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+    start = threading.Barrier(8)
+
+    def emitter() -> None:
+        start.wait(_JOIN_DEADLINE_S)
+        for _ in range(250):
+            forward.write(_record())
+
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # чаще переключать потоки: гонка счёта видна легче
+    try:
+        threads = [threading.Thread(target=emitter, name=f"fwd-emitter-{i}", daemon=True) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(_JOIN_DEADLINE_S)
+    finally:
+        sys.setswitchinterval(old_interval)
+
+    assert not any(thread.is_alive() for thread in threads), f"эмиттеры зависли дольше {_JOIN_DEADLINE_S} с"
+    assert forward.counters_snapshot() == {"sent": 2000, "messages": 2000, "dropped": 0, "send_failed": 0}
+
+
+def test_dropped_router_reaches_tap_refused_counter(tmp_path) -> None:
+    """Сквозной: роутерный ``dropped`` -> ответ форвардера -> суд tap'а -> ``tap_refused_records``."""
+    router = _ReplyRouter({"status": "dropped", "reason": "queue full"})
+    forward = RecordForwardChannel(router=router, subscriber="gui", sender="p")
+
+    result = _run_bounded(lambda: _emit_once(tmp_path, [forward]))
+
+    assert len(router.sent) == 1
+    assert _delta(result, "tap_refused_records") == 1
+    assert result["n"] == 0
+    assert _delta(result, "tap_write_errors") == 0
+
+
+class _DeadConnection:
+    """Клиентское соединение сокет-канала: пир пропал, ``sendall`` бросает ``OSError``."""
+
+    def __init__(self) -> None:
+        self.sendall_calls = 0
+
+    def fileno(self) -> int:
+        return 7
+
+    def sendall(self, data: bytes) -> None:
+        self.sendall_calls += 1
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def shutdown(self, how: int) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+class _NoQueues:
+    """``queue_registry`` без очередей: адресат-канал едет мостом push->канал (Ф1.1b)."""
+
+    def get_queue(self, process: str, qtype: str) -> None:
+        return None
+
+    def send_to_queue(self, process: str, qtype: str, message: Dict[str, Any]) -> bool:
+        return False
+
+
+def test_dead_client_warning_does_not_self_deadlock(tmp_path) -> None:
+    """Hazard c2: WARNING сокет-канала о мёртвом клиенте не замыкается на его же лок.
+
+    Цепочка: ``router.send`` -> ``SocketChannel.send`` (``_write_lock``) -> сбой
+    ``sendall`` -> WARNING -> ``LoggerManager`` -> tap ``RecordForwardChannel`` ->
+    синхронный ``router.send`` -> тот же канал -> тот же ``_write_lock``. Поток
+    сценария не внутри раздачи tap'ов, поэтому ``_tap_depth`` не спасает.
+    Красный только в состоянии «синхронный ``send`` без выноса лога из-под лока».
+    """
+    lm = LoggerManager(config={"log_directory": str(tmp_path)})
+    router = RouterManager(manager_name="deadlock_probe", logger=lm, queue_registry=_NoQueues(), relay_hub=None)
+    channel = SocketChannel(name="ctl_probe", port=0)
+    dead = _DeadConnection()
+    channel._clients.append(dead)
+    assert router.register_channel(channel)
+    forward = RecordForwardChannel(
+        router=router,
+        subscriber="ctl_probe",
+        sender="probe",
+        name="observability_forward::ctl_probe::logger_error",
+    )
+    witness = _ReplyTap("witness_tap", None)
+    tap_names = [lm.add_tap(forward, min_level="WARNING"), lm.add_tap(witness, min_level="WARNING")]
+    ping = {"type": "event", "sender": "probe", "targets": ["ctl_probe"], "command": "probe.ping", "data": {}}
+    box: Dict[str, Any] = {}
+
+    def scenario() -> None:
+        box["reply"] = router.send(ping)
+
+    thread = threading.Thread(target=scenario, name="dead-client-probe", daemon=True)
+    thread.start()
+    thread.join(_JOIN_DEADLINE_S)
+    hung = thread.is_alive()
+    if not hung:
+        # Зависший поток держит лок канала и, возможно, локи логгера: уборка
+        # тогда сама повисла бы. Daemon-поток умрёт с процессом.
+        for tap_name in tap_names:
+            lm.remove_tap(tap_name)
+        channel.close()
+        lm.shutdown()
+
+    assert not hung, f"самоблокировка: поток висит дольше {_JOIN_DEADLINE_S} с"
+    assert box["reply"]["status"] == "error"
+    assert dead.sendall_calls == 1
+    assert any("[SocketChannel:ctl_probe]" in str(r.get("message", "")) for r in witness.received)

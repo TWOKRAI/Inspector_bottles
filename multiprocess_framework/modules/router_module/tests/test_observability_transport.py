@@ -95,7 +95,15 @@ class TestSendersUseTheirOwnQueueClass:
 
         sent: list[dict] = []
         channel = RecordForwardChannel(
-            router=type("R", (), {"send_async": lambda self, m, priority="normal": sent.append(m)})(),
+            # Task 0.5c: форвардер зовёт синхронный send; send_async оставлен как был.
+            router=type(
+                "R",
+                (),
+                {
+                    "send_async": lambda self, m, priority="normal": sent.append(m),
+                    "send": lambda self, m: sent.append(m) or {"status": "success"},
+                },
+            )(),
             subscriber="gui",
             sender="camera_0",
         )
