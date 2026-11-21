@@ -337,16 +337,21 @@ class TelemetryReadModel:
     def _restamp_tail(self, root: str, src_ts: Any) -> None:
         """Последняя точка каждого кольца хвоста ``root`` -> ``(src_ts, значение)``; хвост очищается.
 
-        ``src_ts`` — не конечное число (``None``, строка, ``nan``, ``inf``) -> ничего не меняется:
-        точки остаются на времени приёма, хвост ждёт следующую метку (он ограничен числом
-        путей колец, растёт не может). Кольцо, которого нет (путь снят) или которое пусто,
-        терпится. ``write_seq`` и ``_push_seq`` не трогаются.
+        ``src_ts`` — не конечное число (``None``, строка, ``bool``, ``nan``, ``inf``, ``int`` вне
+        диапазона ``float``) -> ничего не меняется и ничего не бросается: точки остаются на
+        времени приёма, хвост ждёт следующую метку (он ограничен числом путей колец, растёт не
+        может). Исключение здесь оборвало бы ``ingest`` после того, как дельта уже записана в
+        ``_state``, ``_push_seq`` и ``write_seq`` — частично применённая дельта. Кольцо, которого
+        нет (путь снят) или которое пусто, терпится. ``write_seq`` и ``_push_seq`` не трогаются.
         """
         paths = self._stamp_tail.get(root)
         if not paths:
             return
-        ts = self._as_number(src_ts)
-        if ts is None or not math.isfinite(ts):
+        try:
+            ts = self._as_number(src_ts)  # bool -> None; int > 1e308: float() бросает OverflowError
+            if ts is None or not math.isfinite(ts):
+                return
+        except OverflowError:
             return
         del self._stamp_tail[root]
         for p in paths:

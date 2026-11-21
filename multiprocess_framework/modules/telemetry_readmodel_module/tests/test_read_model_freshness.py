@@ -206,6 +206,23 @@ def test_mark_fields_match_the_writer_stamp() -> None:
     assert set(trm._MARK_FIELDS) == set(stamp(1, 100.0, "a", 5.0))
 
 
+def test_writer_stamp_is_read_as_fresh() -> None:
+    """Поведенческий эквивалент проверки полей: метка, собранная ``freshness.stamp``, читается как ``fresh``.
+
+    Добавят поле писателю, не тронув ``read``, — красным станет и этот тест (ответ ``no_data``),
+    а не только проверка приватной константы.
+    """
+    from multiprocess_framework.modules.state_store_module.core.freshness import stamp
+
+    m = _model([101.0])
+    m.ingest(P, {"state": {"fps": 10.0}, "_fresh": stamp(1, 100.0, "a", 5.0)})
+
+    r = m.read(P, "state.fps")
+    assert r["class"] == "fresh"
+    assert r["value"] == 10.0
+    assert r["age_s"] == pytest.approx(1.0)
+
+
 # --------------------------------------------------------------------------- #
 # M-16: время точки истории — время источника метки
 # --------------------------------------------------------------------------- #
@@ -314,9 +331,17 @@ def test_uptime_point_keeps_receipt_time_and_ring_is_chronological() -> None:
     assert [v for _, v in ring] == [1.0, 2.0, 3.0]
 
 
-@pytest.mark.parametrize("bad", [None, "x", float("nan"), float("inf")], ids=["none", "str", "nan", "inf"])
+@pytest.mark.parametrize(
+    "bad",
+    [None, "x", float("nan"), float("inf"), True, 10**400],
+    ids=["none", "str", "nan", "inf", "bool", "huge_int"],
+)
 def test_unusable_source_time_keeps_receipt_time(bad: Any) -> None:
-    """СТОРОЖ: ``src_ts`` не конечное число — довыставления нет, точка остаётся на времени приёма."""
+    """СТОРОЖ: ``src_ts`` не конечное число — довыставления нет, точка остаётся на времени приёма.
+
+    ``bool`` — не число (как у ``freshness``); ``10**400`` — ``int`` вне диапазона ``float``
+    (``float()`` бросает ``OverflowError``): исключение в потоке приёма уронило бы весь снимок.
+    """
     m = _fixed(999.0)
     m.ingest(P, {"state": {"fps": 10.0}, "_fresh": _mark(1, bad)})
 
@@ -338,6 +363,78 @@ def test_level_sources_do_not_restamp_history() -> None:
 
     m.ingest(f"{P}._fresh.src_ts", 105.0)  # поток: хвост довыставляется
     assert m.history(f"{P}.state.fps") == [(105.0, 10.0)]
+
+
+def test_tick_with_only_a_stamp_keeps_the_previous_point() -> None:
+    """Главное свойство довыставления: такт только с меткой (без значений) прежнюю точку не двигает.
+
+    Самый частый живой случай: ``TreeStore.set`` отдаёт ``None`` для неизменного значения, и
+    на такте приходят только ``_fresh.seq`` и ``_fresh.src_ts``. Точка принадлежит такту, в
+    котором значение записано (``100.0``), а не последующим тактам без значений
+    (``105.0``, ``110.0``): хвост после довыставления очищается.
+    """
+    m = _fixed(999.0)
+    m.ingest(P, {"state": {"fps": 10.0}, "_fresh": _mark(1, 100.0)})
+    m.ingest(f"{P}._fresh.seq", 2)
+    m.ingest(f"{P}._fresh.src_ts", 105.0)
+    m.ingest(f"{P}._fresh.seq", 3)
+    m.ingest(f"{P}._fresh.src_ts", 110.0)
+
+    assert m.history(f"{P}.state.fps") == [(100.0, 10.0)]
+
+
+def test_restamp_does_not_move_the_poll_guard_boundary() -> None:
+    """Довыставление не трогает ``_push_seq``: путь с номером ``== requested_at_seq`` по-прежнему вливается.
+
+    Значение (``push_seq == seq``), затем приходит метка и довыставляет точку, затем ответ опроса,
+    снятый на номере ``seq``. Если бы довыставление переписало ``push_seq`` пути текущим счётчиком,
+    ответ был бы отброшен как «push позже запроса» (инвариант 2).
+    """
+    m = _fixed(999.0)
+    m.ingest(f"{P}.state.fps", 10.0)
+    seq = m.write_seq
+    m.ingest(f"{P}._fresh.src_ts", 100.0)
+    assert m.history(f"{P}.state.fps") == [(100.0, 10.0)]  # довыставление произошло
+
+    applied = m.ingest_poll_snapshot({f"{P}.state.fps": 5.0}, requested_at_seq=seq)
+
+    assert applied == [f"{P}.state.fps"]
+    assert m.get(f"{P}.state.fps") == 5.0
+
+
+def test_stamp_before_values_stamps_the_next_tick() -> None:
+    """ПРЕДЕЛ (зафиксирован): метка РАНЬШЕ значений — точка такта N получает время такта N+1.
+
+    Порядок живого тика обратный (значения раньше метки), и механизм построен на нём. Если порядок
+    перевернётся, точка такта получит ``src_ts`` СЛЕДУЮЩЕЙ метки, а последняя точка останется на
+    времени приёма (``999.0``). Тест не одобряет такой порядок, а фиксирует последствие.
+    """
+    m = _fixed(999.0)
+    m.ingest(f"{P}._fresh.src_ts", 100.0)
+    m.ingest(f"{P}.state.fps", 11.0)
+    m.ingest(f"{P}._fresh.src_ts", 105.0)
+    m.ingest(f"{P}.state.fps", 12.0)
+    m.ingest(f"{P}._fresh.src_ts", 110.0)
+    m.ingest(f"{P}.state.fps", 13.0)
+
+    assert m.history(f"{P}.state.fps") == [(105.0, 11.0), (110.0, 12.0), (999.0, 13.0)]
+
+
+@pytest.mark.parametrize("bad", [10**400, True], ids=["huge_int", "bool"])
+def test_unusable_source_time_as_a_leaf_does_not_break_the_delta(bad: Any) -> None:
+    """``src_ts`` листом негоден — довыставление молчит, а дельта применена, как обычная запись значения.
+
+    Ни исключения (``float(10**400)`` -> ``OverflowError``), ни частично применённой дельты: лист в
+    снимке, счётчик сдвинут на 1 за каждую дельту, точка значения на времени приёма, ``read`` — ``no_data``.
+    """
+    m = _fixed(999.0)
+    m.ingest(f"{P}.state.fps", 10.0)
+    m.ingest(f"{P}._fresh.src_ts", bad)  # не должно бросить
+
+    assert m.get(f"{P}._fresh.src_ts") is bad
+    assert m.write_seq == 2
+    assert m.history(f"{P}.state.fps") == [(999.0, 10.0)]
+    assert m.read(P, "state.fps") == NO_DATA
 
 
 # --------------------------------------------------------------------------- #
@@ -373,4 +470,34 @@ def test_stamp_tail_forgets_leaves_removed_by_a_subtree_replace() -> None:
 
     assert m.history(f"{P}.state.fps") == []
     assert m.history(f"{P}.state.latency_ms") == [(999.0, 2.0), (100.0, 3.0)]
+    assert m._stamp_tail == {}
+
+
+@pytest.mark.parametrize(
+    ("deleted", "gone", "left"),
+    [
+        pytest.param("processes.p.state", "processes.p.state.fps", {"processes.p.workers.w1.effective_hz"}, id="state"),
+        pytest.param(
+            "processes.p.workers.w1", "processes.p.workers.w1.effective_hz", {"processes.p.state.fps"}, id="worker"
+        ),
+    ],
+)
+def test_stamp_tail_forgets_a_subtree_deleted_below_the_root(deleted: str, gone: str, left: set[str]) -> None:
+    """``deleted=True`` на узел НИЖЕ корня убирает из хвоста пути этого узла, соседей не трогает.
+
+    Чистка «только по ключу корня» (``processes.p``) пропустила бы оба случая: удаление корня
+    покрывает ``test_stamp_tail_is_cleared_with_the_subtree``, а живьём уходят ``state`` и воркер.
+    Приватный ``_stamp_tail`` — как ``_push_seq``: наблюдаемого следствия утечки снаружи нет.
+    """
+    m = _fixed(999.0)
+    m.ingest("processes.p.state.fps", 1.0)
+    m.ingest("processes.p.workers.w1.effective_hz", 2.0)
+    assert m._stamp_tail == {"processes.p": {"processes.p.state.fps", "processes.p.workers.w1.effective_hz"}}
+
+    m.ingest(deleted, None, deleted=True)
+
+    assert m._stamp_tail == {"processes.p": left}
+    assert m.history(gone) == []
+
+    m.ingest("processes.p._fresh.src_ts", 100.0)  # довыставление терпит удалённое поддерево
     assert m._stamp_tail == {}
