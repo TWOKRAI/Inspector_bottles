@@ -269,27 +269,82 @@ def test_process_pair_from_slowest_worker() -> None:
     assert data["state"]["latency_ms"] == 0.0
 
 
-def test_stalled_worker_drives_pair(clock) -> None:
-    """Стоящий воркер (статус ``stopped``, пауза 2 с) + здоровый (32 Гц) → пара от стоящего.
+def _stalled_and_healthy_snapshots(clock) -> tuple[dict, dict]:
+    """Снимки двух настоящих рекордеров на одних подменённых часах, чтение в 2.5 с.
 
-    Оба снимка — от настоящих рекордеров на одних подменённых часах (не рукописные).
+    Стоящий: последнее завершение в 0.5, пауза 2.0 с (~0.5 Гц, цикл 0 мс). Здоровый: 32 Гц (шаг
+    1/32 с точно представим), цикл 2 мс.
     """
     stalled = _fifty_cycles_10ms(clock)  # последнее завершение в 0.5
-    healthy = CycleMetricsRecorder()  # создан в 0.5, шаг 1/32 с (точно представим), до 2.5
+    healthy = CycleMetricsRecorder()  # создан в 0.5, до 2.5
     for k in range(1, 65):
         _complete(healthy, clock, 0.5 + k * 0.03125, duration_s=0.002)
     clock.now = 2.5
+    return stalled.get_cycle_metrics(), healthy.get_cycle_metrics()
 
-    workers = {
-        "stalled": _worker("stopped", **stalled.get_cycle_metrics()),
-        "healthy": _worker("running", **healthy.get_cycle_metrics()),
-    }
-    assert workers["healthy"]["effective_hz"] == pytest.approx(32.0)  # предпосылка: здоровый действительно быстр
+
+def test_stalled_worker_drives_pair(clock) -> None:
+    """Зависший воркер (статус ``running``, пауза 2 с) + здоровый (32 Гц) → пара от зависшего.
+
+    Оба снимка — от настоящих рекордеров (не рукописные). Намеренно остановленные
+    (``stopped``/``completed``) в пару не входят — тесты ниже; зависший по статусу неотличим от живого.
+    """
+    stalled, healthy = _stalled_and_healthy_snapshots(clock)
+    assert healthy["effective_hz"] == pytest.approx(32.0)  # предпосылка: здоровый действительно быстр
+    workers = {"stalled": _worker("running", **stalled), "healthy": _worker("running", **healthy)}
 
     _path, data = build_worker_telemetry(workers, "p")
 
-    assert data["state"]["fps"] == pytest.approx(0.5)  # стоящий тянет пару вниз, а не выпадает по статусу
+    assert data["state"]["fps"] == pytest.approx(0.5)  # зависший тянет пару вниз
     assert data["state"]["latency_ms"] == 0.0  # его цикл — 0 с (литерал сценария), напрямую, а не от здорового
+
+
+@pytest.mark.parametrize("final_status", ["stopped", "completed"])
+def test_deliberately_final_worker_does_not_drag_process_fps(clock, final_status) -> None:
+    """Намеренно остановленный (``stopped``) или завершённый (``completed``) воркер пару не прижимает."""
+    stalled, healthy = _stalled_and_healthy_snapshots(clock)
+    workers = {"final": _worker(final_status, **stalled), "healthy": _worker("running", **healthy)}
+
+    _path, data = build_worker_telemetry(workers, "p")
+
+    assert data["state"]["fps"] == pytest.approx(32.0)
+    assert data["state"]["latency_ms"] == 2.0  # цикл здорового, а не 0.0 остановленного
+    # листья самого остановленного воркера публикуются как были: меняется только агрегат процесса
+    leaf = data["workers"]["final"]
+    assert leaf["status"] == final_status
+    assert leaf["effective_hz"] == pytest.approx(0.5)
+    assert leaf["last_cycle_age_s"] == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("status", ["running", "error", "stopping"])
+def test_hung_failed_and_stopping_workers_stay_in_pair(clock, status) -> None:
+    """Зависший (``running``), упавший (``error``) и завершающийся (``stopping``) в паре ОСТАЮТСЯ.
+
+    Их ``1/возраст`` честно роняет ``fps`` процесса: не «остановлен намеренно», а «что-то не так».
+    """
+    stalled, healthy = _stalled_and_healthy_snapshots(clock)
+    workers = {"odd": _worker(status, **stalled), "healthy": _worker("running", **healthy)}
+
+    _path, data = build_worker_telemetry(workers, "p")
+
+    assert data["state"]["fps"] == pytest.approx(0.5)
+    assert data["state"]["latency_ms"] == 0.0
+
+
+def test_all_deliberately_final_workers_publish_none_leaves() -> None:
+    """Воркеры есть, но все остановлены намеренно → пары нет: ``None``-листья (как «никто не работал»)."""
+    workers = {
+        "a": _worker("stopped", effective_hz=5.0, cycle_duration_ms=3.0, last_cycle_age_s=0.1),
+        "b": _worker("completed", effective_hz=7.0, cycle_duration_ms=4.0, last_cycle_age_s=0.1),
+    }
+
+    _path, data = build_worker_telemetry(workers, "p")
+
+    assert data["state"]["fps"] is None
+    assert data["state"]["latency_ms"] is None
+    # листья самих воркеров — как были
+    assert data["workers"]["a"]["effective_hz"] == 5.0
+    assert data["workers"]["b"]["effective_hz"] == 7.0
 
 
 def test_no_cycled_workers_publishes_none() -> None:

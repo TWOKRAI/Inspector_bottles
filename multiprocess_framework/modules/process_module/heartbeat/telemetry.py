@@ -83,6 +83,13 @@ for _counter in PROCESS_COUNTER_SUMS:
     declare_metric(_counter, owner=__name__)
 del _counter
 
+#: Статусы воркера, которыми его намеренно вывели из работы: ``WorkerStatus.STOPPED`` и
+#: ``WorkerStatus.COMPLETED`` (``worker_module/types/types.py:31,35``). Снимок несёт ``.value``
+#: строкой (``worker_module/core/worker_manager.py:315``), поэтому здесь строки: process_module
+#: не импортирует enum соседнего модуля ради двух литералов. Такой воркер остаётся в реестре
+#: (``stop_worker`` его не удаляет), и его ``1/возраст`` растёт вечно — в пару процесса он не входит.
+_DELIBERATELY_FINAL_STATUSES = frozenset({"stopped", "completed"})
+
 
 def build_worker_telemetry(
     workers: dict,
@@ -124,11 +131,16 @@ def build_worker_telemetry(
         — при наличии числа, включая 0, если разрешены; воркер без единого поля не попадает
         в payload;
       - агрегат ``state`` (пара ОДНОГО воркера): воркер с наименьшей числовой ``effective_hz``
-        среди ВСЕХ отработавших, БЕЗ фильтра статуса (стоящая или упавшая стадия спадает как
-        1/возраст и тянет пару вниз, а не выпадает); ``fps`` — его ``effective_hz`` (если
-        ``fps`` разрешён), ``latency_ms`` — его ``cycle_duration_ms`` напрямую, ноль включая
-        (если ``latency_ms`` разрешён). Набор пуст (никто не отработал или у всех частота
-        ``None``) при включённом агрегате → ``fps`` и ``latency_ms`` публикуются как ``None``:
+        среди отработавших, КРОМЕ воркеров с намеренно конечным статусом ``stopped``/``completed``
+        (решение владельца: остановленный оператором воркер не прижимает ``fps`` процесса —
+        его ``1/возраст`` растёт вечно). Зависшая (``running`` с давним возрастом), упавшая
+        (``error``) и завершающаяся (``stopping``) стадии в паре ОСТАЮТСЯ и спадают как
+        1/возраст; ``status`` и листья (``effective_hz``, ``last_cycle_age_s``) самого
+        остановленного воркера публикуются как были. ``fps`` — ``effective_hz`` воркера пары
+        (если ``fps`` разрешён), ``latency_ms`` — его ``cycle_duration_ms`` напрямую, ноль
+        включая (если ``latency_ms`` разрешён). Набор пуст (никто не отработал, у всех частота
+        ``None`` или все отработавшие остановлены намеренно) при включённом агрегате →
+        ``fps`` и ``latency_ms`` публикуются как ``None``:
         старое число не живёт под свежей меткой. Так же — у процесса, чьи воркеры без
         ``CycleMetricsRecorder``: листья ``None`` уходят в merge на каждом тике. Это «ведущий
         темп процесса» = МЕДЛЕННЕЙШАЯ стадия, а не максимум по воркерам: читатели, считающие
@@ -191,9 +203,10 @@ def build_worker_telemetry(
     collect_aggregate = fps_ok or plat_ok
 
     workers_payload: dict[str, dict] = {}
-    # Пара процесса (0.8): воркер с наименьшей числовой ``effective_hz`` среди ВСЕХ отработавших
-    # (без фильтра статуса) — ``(hz, cycle_duration_ms воркера | None)``. ``fps`` и ``latency_ms``
-    # процесса — оба от ОДНОГО воркера, а не максимум по каждой метрике порознь.
+    # Пара процесса (0.8): воркер с наименьшей числовой ``effective_hz`` среди отработавших, кроме
+    # намеренно остановленных (``_DELIBERATELY_FINAL_STATUSES``) — ``(hz, cycle_duration_ms воркера |
+    # None)``. ``fps`` и ``latency_ms`` процесса — оба от ОДНОГО воркера, а не максимум по каждой
+    # метрике порознь.
     pair: tuple[float, float | None] | None = None
     # Task 5.6: суммы счётчиков тракта. Ключ появляется, только если хоть один воркер его несёт:
     # у процесса без счётчика (camera, процесс под latest для not_inspected_*) листа нет, а не ноль.
@@ -252,9 +265,12 @@ def build_worker_telemetry(
             workers_payload[wname] = wp
 
         # Агрегат процесса: пара самого медленного из отработавших с числовой частотой (только
-        # если агрегатные метрики вообще нужны — иначе не считаем). Статус не фильтруется: стоящая
-        # или упавшая стадия спадает как 1/возраст и обязана тянуть пару вниз, а не выпадать.
-        if collect_aggregate and worked and hz_num and (pair is None or hz < pair[0]):
+        # если агрегатные метрики вообще нужны — иначе не считаем). Исключены лишь воркеры с намеренно
+        # конечным статусом (``stopped``/``completed``): их 1/возраст растёт вечно и прижимал бы
+        # ``fps`` процесса к нулю. Зависшая (``running`` с давним возрастом), упавшая (``error``) и
+        # завершающаяся (``stopping``) стадии спадают как 1/возраст и обязаны тянуть пару вниз.
+        in_pair = not (isinstance(status, str) and status in _DELIBERATELY_FINAL_STATUSES)
+        if collect_aggregate and worked and hz_num and in_pair and (pair is None or hz < pair[0]):
             lat_num = isinstance(lat, (int, float)) and not isinstance(lat, bool)
             pair = (float(hz), float(lat) if lat_num else None)
 
