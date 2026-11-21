@@ -74,9 +74,10 @@ EventCallback = Callable[[Dict[str, Any]], None]
 # framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
 OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
 
-# Зеркало Delta.to_dict(): new_value == '__MISSING__' → удаление узла. Литерал,
-# а не импорт state_store_module — package __init__ тянет Qt в headless-клиент;
-# дрейф маркера ловит контракт-тест test_missing_marker_matches_state_store.
+# Зеркало Delta.to_dict(): new_value == '__MISSING__' → удаление узла. Литерал живёт
+# здесь как единственный источник для driver.py и плоскостной классификации; импорт
+# приватного маркера из state_store_module не нужен. Дрейф маркера ловит контракт-тест
+# test_missing_marker_matches_state_store.
 MISSING_MARKER: str = "__MISSING__"
 
 #: Плоскости событий (B.1). ``other`` — сверх плана: события мимо классификации
@@ -123,6 +124,31 @@ def iter_state_deltas(msg: Any) -> List[Dict[str, Any]]:
             if isinstance(path, str) and path:
                 out.append(delta)
     return out
+
+
+def _is_int(value: Any) -> bool:
+    """``int``, но не ``bool`` (``True`` — не номер ревизии)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def state_changed_revisions(msg: Any) -> Optional[Tuple[int, int]]:
+    """Диапазон ревизий пакета ``state.changed``: ``(first_revision, revision)`` или ``None``.
+
+    Берёт ``data.first_revision`` и ``data.revision`` конверта. ``None``, если это не
+    ``state.changed``, нет любого из двух полей или любое не ``int`` (``bool`` не в счёт):
+    пакет без валидного диапазона не база и не дыра, его просто пропускают. Всюду определена,
+    исключений не бросает — разбор не должен стоить потери дельт пакета.
+    ``iter_state_deltas`` не трогаем: у неё много вызовов, а дельты и ревизии — разные срезы конверта.
+    """
+    if not isinstance(msg, dict) or msg.get("command") != "state.changed":
+        return None
+    data = msg.get("data")
+    if not isinstance(data, dict):
+        return None
+    first, revision = data.get("first_revision"), data.get("revision")
+    if _is_int(first) and _is_int(revision):
+        return first, revision
+    return None
 
 
 #: supervisor-переход, отмечающий, что процесс ВЕРНУЛСЯ новой инкарнацией и снова
@@ -687,4 +713,5 @@ __all__ = [
     "EVICTION_VOICE_QUIET_SEC",
     "extract_observability_records",
     "iter_state_deltas",
+    "state_changed_revisions",
 ]

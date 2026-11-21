@@ -713,7 +713,7 @@ class ReplayPlayer:
             maxlen = max(1, int(ring_maxlen))
         else:
             maxlen = max(1, min(len(self._events) or 1, DEFAULT_RING_MAXLEN))
-        self.driver = BackendDriver(host, port, event_queue_maxlen=maxlen)
+        self.driver = BackendDriver(host, port, event_queue_maxlen=maxlen, clock=self.now)
         # Подменяем telemetry-model на clock-aware ДО прокрутки: _ingest_state_changed
         # уже подписан из __init__ и читает self._telemetry_model в момент вызова —
         # путь единый, второго ingest не появляется. Detached (нет reader-потока) →
