@@ -56,7 +56,9 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    protocol: delta_universal3
+    # R4 (владелец 2026-11-20): драйвер v2, как у сима. На роботе 192.168.1.7:502 v2 НЕ проверен — T0.3/T4.0 на визите.
+    # Откат — revert этого коммита (было `delta_universal3`).
+    protocol: delta_v2
     transport:
       type: tcp
       host: 192.168.1.7
@@ -414,7 +416,7 @@ blueprint:
       metadata:
         source_target_fps: 10
     # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
-    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с сим-рецептом; «Домой»/«Серво ВКЛ» в β — после R4 (протокол v1).
+    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с сим-рецептом; «Домой»/«Серво ВКЛ» в β пока нет: β на v2 с R4, контролы добавляет владелец Пульта.
     - process_name: pult
       plugins:
         - plugin_name: control_panel

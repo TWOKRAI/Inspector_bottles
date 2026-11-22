@@ -51,8 +51,9 @@ _LAYOUT_BLUEPRINT_KEYS = ("metadata",)
 # Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
 _EXPECTED_DIFFS = [
     # Пульт (Task 6.4): «Домой» (robot_park) и «Серво ВКЛ» (robot_servo) — только в сим-рецепте (протокол v2),
-    # в β их нет до R4 (протокол v1): длина controls 8 (β) против 10 (сим). Остальные контролы pult сравнены
-    # на равенство (путь расхождения был бы иным); состав пинит test_recipe_1_0.py. Снять запись при слиянии R4.
+    # в β их пока нет (β на v2 с R4, контролы добавляет владелец Пульта): длина controls 8 (β) против 10 (сим).
+    # Остальные контролы pult сравнены на равенство (путь расхождения был бы иным); состав пинит test_recipe_1_0.py.
+    # Снять запись, когда Пульт добавит эти два контрола в β.
     # Строковая сортировка: «[10]» идёт раньше «[5]».
     ".blueprint.processes[10].plugins[0].config.controls[len=8 vs 10]",
     # К4' (камера на ядре): β убрала `color_convert` после камеры (плагин отдаёт BGR, шаг переставлял бы R и B);
@@ -67,7 +68,6 @@ _EXPECTED_DIFFS = [
     ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",
     ".devices[0].params.robot_params",
-    ".devices[0].protocol",
     ".devices[0].transport.host",
     ".devices[0].transport.port",
     ".name",
@@ -166,7 +166,7 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # data/devices.yaml (`DeviceManager.upsert`, merge поверх), так что копия боевого
     # адреса вела прототип на сим-рецепте к настоящему роботу 192.168.1.7:502.
     # Протокол и параметры сим-робота — третье и четвёртое следствие «сим вместо железа» (T3.7):
-    # сим линии работает по v2, боевой робот — по v1 до Ф4; кольцо забора сима шире умолчания.
+    # сим линии работает по v2, боевой робот — тоже по v2 с R4 (но без robot_params); кольцо забора сима шире умолчания.
     # Значения закреплены литералами в test_sim_recipe_points_robot_at_sim_not_hardware.
     # Ключ readiness узла recog.ml_inference (Task 2.9b) есть только у боевого рецепта: сим не гоняет
     # блокировку «модель не загружена» (стендовые рецепты не трогаем), её проверяет стенд 2.9b на
@@ -217,10 +217,10 @@ def test_sim_recipe_points_robot_at_sim_not_hardware() -> None:
     robot = next(d for d in sim["devices"] if d["id"] == "robot_main")
     assert robot["transport"]["host"] == "127.0.0.1"
     assert robot["transport"]["port"] == 5021
-    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон остаётся на v1 без robot_params
+    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон (R4) — тоже v2, но без robot_params
     assert robot["protocol"] == "delta_v2"
     assert robot["params"]["robot_params"] == {"P_ZONE_MAX": 6000}
     base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
     base_robot = next(d for d in base["devices"] if d["id"] == "robot_main")
-    assert base_robot["protocol"] == "delta_universal3"
+    assert base_robot["protocol"] == "delta_v2"
     assert "robot_params" not in (base_robot.get("params") or {})

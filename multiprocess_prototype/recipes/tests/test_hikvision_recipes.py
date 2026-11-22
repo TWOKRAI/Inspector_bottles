@@ -176,7 +176,7 @@ def test_recipe_check_is_empty(name: str, plugins_discovered: None) -> None:
 
 
 def test_beta_camera_readiness_makes_stopping_block_start() -> None:
-    """R4-1 (2.2c): ключ readiness β повышает `stopping` камеры с out_of_spec (не блокирует) до check_function (блокирует)."""
+    """R4-1 (2.2c): ключ readiness β повышает `stopping` камеры с out_of_spec до check_function (блокирует START)."""
     from types import SimpleNamespace
 
     from multiprocess_framework.modules.process_module.health.readiness_policy import (
@@ -231,3 +231,11 @@ def test_beta_word_starts_at_minus_440_like_sim() -> None:
     assert cfg["first_y"] == -440.0
     assert cfg["last_y"] == 300.0
 
+
+def test_beta_robot_driver_is_v2_with_beta_address() -> None:
+    """R4-3 (владелец 2026-11-20): драйвер β — `delta_v2`; адрес реального робота прежний (не адрес сима)."""
+    raw = yaml.safe_load((_RECIPES_DIR / "hikvision_letter_robot.yaml").read_text(encoding="utf-8"))
+    robot = next(d for d in raw["devices"] if d["id"] == "robot_main")
+    assert robot["protocol"] == "delta_v2"
+    transport = robot["transport"]
+    assert (transport["host"], transport["port"], transport["unit_id"]) == ("192.168.1.7", 502, 2)
