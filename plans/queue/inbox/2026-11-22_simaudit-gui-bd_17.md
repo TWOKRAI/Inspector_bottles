@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **README/STATUS `word_layout` устарели: «робот не подключён», неполная таблица портов, старая форма `robot_job`** — `Plugins/processing/word_layout/README.md:17,26-32,118-121`, `STATUS.md:34-35` против `plugin.py:54-80,228-243` и 6 `CVT_JOB` на симе (`devices/robot_exchange.log:102…277`, `layout/messages.log:250` `forwarded=6`) | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

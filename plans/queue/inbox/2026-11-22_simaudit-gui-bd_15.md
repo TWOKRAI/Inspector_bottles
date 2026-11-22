@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Новое слово применяется только с приходом следующего диска: `word_norm`/`assembled` в state устаревают до 112 с** — запись `target_word=BDC` 21:20:39 (`layout/messages.log:150`), применено 21:22:31 (`:151`); `РЕИ` 21:30:27 (`:197`) → 21:31:04 (`:195`); регистр читается только в `_handle_item` (`word_layout/plugin.py:166-171`); применять по событию записи регистра (есть ли хук `register_update` для плагинов — не проверено) | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

@@ -50,6 +50,7 @@
 - [Новейшие модели; Haiku 5.5 на простом](feedback_always_latest_models.md) — алиасы тиров; механику — haiku-агенту
 - [Стек 2026](reference_tech_stack_2026.md) — сверять при правках стека и зависимостей
 - [Push, кредит, инструменты](project_owner_push_and_tools_decisions.md) — push/PR разрешены после договорённости с сессиями; serena/graphify — сделать полезными
+- [Аудит сима: корни, не обходы](project_sim_audit_root_causes_not_mitigations.md) — дефекты Р2 лечить причиной; wire_audit лишь показывает; cto после практики
 - [Робот как дисплей](project_robot_view_as_display_service.md) — сцена из рецепта, кроп, плавающие дисплеи; сначала бэкенд
 - [Ядро управления](project_control_core_vision.md) — одно ядро инструментов, фронты CLI/REPL/MCP, уровни доступа, ворота после фундамента
 

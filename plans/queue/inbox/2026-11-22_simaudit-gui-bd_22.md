@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Рецепты delta_v2 несут ручки драйвера v1 (`feed_poll_s`, `telemetry_interval_s`), v2 их молча не читает** — `letter_robot_sim.yaml:82-83`, `hikvision_letter_robot.yaml:69-70`; читает только `robot_driver.py:98-99` (v1); тик v2 — `poll_interval_s` (`plugin.py:679`), в рецепте его нет | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

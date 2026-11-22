@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Итог остановки процессов (`exited`/`terminated`/`killed`) не попадает в журнал PM** — `_record_stop_outcome` пишет только в реестр (`process_registry.py:138-149`), `stop summary` даёт `children=11` без итогов по именам (`logs7/ProcessManager/messages.log` #314); C-105 на пути «✕» нечем проверить по логам; предложение: одна INFO-строка `{имя: итог}` из реестра | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

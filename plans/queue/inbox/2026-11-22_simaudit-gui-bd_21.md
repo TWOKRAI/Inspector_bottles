@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Журнал обмена не показывает DONE/ERR робота** — чтение TLM = `_PERIODIC` без расшифровки (`Services/device_hub/drivers/exchange_log.py:159-179,359`): по журналу не доказать порядок DONE → `SERVO 0` у «Домой»; предложение: строка при смене `TLM_DONE_SEQ`/`TLM_ERR_SEQ` (как для RES, `:351-358`) | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **`robot_io`: вытеснение из deque и `_client is None` теряют задание без голоса и подписи; `jobs_dropped += 1` из двух потоков без замка** — `Plugins/io/robot_io/plugin.py:150-156` (pipeline), `:230-232`, `:245`, `:265` (форвардер); стресс 20000 → `jobs_dropped` 19981–19997 (`docs/claude/OPEN_QUESTIONS.md:2575`); карточки в очереди нет, только `OPEN_QUESTIONS.md:2553` | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

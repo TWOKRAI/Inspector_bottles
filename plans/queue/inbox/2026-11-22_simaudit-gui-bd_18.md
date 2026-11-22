@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **layout: интервал метрик `fps`/`latency_ms` 1,0 с при такте телеметрии 5,0 с — предупреждение на каждом старте** — `layout/system.log:1` (21:12:48), текст из `process_heartbeat.py:573`; место значения в рецепте не найдено; свести `interval_sec` и `tick_sec`, предупреждение не выключать | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Отказ «робот остановлен: включите серво» держится на защёлке `_parked`, а не на `TLM_SERVO`: серво, включённое мимо хаба, защёлку не снимает (на железе не проверено)** — на симе отказ только после «Домой» без «Серво ВКЛ» (`devices/robot_exchange.log:156-307` против `layout/system.log:2-10`); ставит `park_end` (`state.py:961-972`), снимает только `ops.py:122-134` → `state.py:1002-1005`; записать в README/DECISIONS хаба | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

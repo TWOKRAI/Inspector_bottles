@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **«Домой»: `SERVO 0` ждёт DONE хода домой и позу TLM — смысл DONE на Delta не проверен** — `SC_RUN` → `wait_done` до `TLM_DONE_SEQ` (`client_v2.py:647-678`) → исход done (`programs.py:162-180`, `state.py:871-877`) → следующий тик: `_at_home` ±0,5 мм/° (`park.py:279-290`) → `SERVO 0`; интервал 1–2 тика; ход сима не мгновенный (`sim_core_v2.py:186-192`); на железе проверить, что DONE = «в позиции», TLM — фактическая поза | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |

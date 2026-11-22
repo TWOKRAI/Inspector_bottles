@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **Выключение из `ready` может не остановить ПЧ (по коду, на стенде не проверено)** — стоп фазы 1 только для `stop_aware` (`Services/device_hub/manager.py:221-229`), у ПЧ `False` (`drivers/base.py:63`), `disconnect` ПЧ без команды (`vfd_driver.py:122-125`); сначала проверить на стенде: «Лента пуск» в `ready` → `system_shutdown` → `0x1200` и `sim.belt` (`scripts/alpha_sim/STATUS.md:56`) | полоса Н2 сим-аудит GUI (inspector-bottles-bd), 2026-11-22, отчёт docs/reports/2026-11-22_sim-audit-gui.md | открыт |
