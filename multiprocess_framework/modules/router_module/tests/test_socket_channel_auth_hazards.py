@@ -4,7 +4,9 @@
 Гонки и ресурсы, которых нет в слепой приёмке ``test_socket_channel_auth.py``:
 враждебный токен не роняет read-поток, первая строка с ``session`` не попадает в
 ``_sessions``, молчуны не держат ``close()``, отказ при непрочитанном хвосте не теряет
-ответ, дочитывание после отказа ограничено по времени и не держит рассылку.
+ответ, дочитывание после отказа ограничено по времени и не держит рассылку; ответ
+``hello`` записан раньше регистрации (под потоком рассылок); клиент зовёт провайдер
+токена на каждом ``connect``, пустой токен = нет токена; ``read_token`` на мусоре.
 Каждый тест с сокетом — в daemon-потоке с join 5 с.
 """
 
@@ -19,8 +21,9 @@ from typing import Any, Callable
 
 import pytest
 
-from ..channels.socket_auth import token_authenticator
+from ..channels.socket_auth import read_token, token_authenticator
 from ..channels.socket_channel import SocketChannel
+from ..channels.socket_client import SocketClient
 
 TOKEN = "ab" * 32
 OTHER_TOKEN = "cd" * 32
@@ -223,3 +226,132 @@ def test_drain_bounded_for_streaming_client(env) -> None:
             break
         time.sleep(0.05)
     assert failed_at is not None and failed_at <= 2.0, f"дочитывание не ограничено: {failed_at}"
+
+
+@_bounded
+def test_hello_ack_precedes_broadcast_under_load(env) -> None:
+    # Ревью стадии 5: регистрация в _clients ДО записи ответа давала рассылку первой строкой.
+    channel, connect = env
+    ch, _inbound, _errors = channel()
+    stop = threading.Event()
+    # Сток: постоянный клиент, которого рассылка видит всегда, — молотилка держит
+    # _write_lock непрерывно, а не выходит по «no clients connected».
+    sink = _authenticated(connect, ch)
+
+    def drain_sink() -> None:
+        sink.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                if not sink.recv(65536):
+                    return
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+
+    threading.Thread(target=drain_sink, daemon=True).start()
+
+    def hammer() -> None:
+        i = 0
+        while not stop.is_set():
+            ch.send({"bc": i})
+            i += 1
+            time.sleep(0)
+
+    t = threading.Thread(target=hammer, daemon=True)
+    t.start()
+    bad: list[Any] = []
+    try:
+        for _ in range(40):
+            s = connect(ch)
+            s.sendall(_line({"type": "hello", "token": TOKEN}))
+            first = _read_line(s, 1.0)
+            if first != {"type": "hello", "success": True}:
+                bad.append(first)
+            s.close()
+    finally:
+        stop.set()
+        t.join(1.0)
+    assert bad == [], f"первая строка не ответ hello в {len(bad)}/40: {bad[:3]!r}"
+
+
+class _FirstLineServer:
+    """Сырой сервер: записывает первую строку каждого соединения; на hello отвечает успехом."""
+
+    def __init__(self) -> None:
+        self.lines: list[dict] = []
+        self._lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._lsock.bind(("127.0.0.1", 0))
+        self._lsock.listen(4)
+        self._lsock.settimeout(0.1)
+        self.port = self._lsock.getsockname()[1]
+        self._conns: list[socket.socket] = []
+        self._stop = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._lsock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            self._conns.append(conn)
+            first = _read_line(conn, 2.0)
+            if first is None:
+                continue
+            self.lines.append(first)
+            if first.get("type") == "hello":
+                conn.sendall(_line({"type": "hello", "success": True}))
+
+    def close(self) -> None:
+        self._stop.set()
+        for c in [*self._conns, self._lsock]:
+            try:
+                c.close()
+            except OSError:
+                pass
+
+
+@pytest.fixture
+def first_line_server():
+    srv = _FirstLineServer()
+    yield srv
+    srv.close()
+
+
+@_bounded
+def test_token_provider_called_on_every_connect(first_line_server) -> None:
+    tokens = iter(["A", "B"])
+    client = SocketClient("127.0.0.1", first_line_server.port, sender="t", token_provider=lambda: next(tokens))
+    try:
+        client.connect(timeout=2.0)
+        client.close()
+        client.connect(timeout=2.0)
+    finally:
+        client.close()
+    deadline = time.monotonic() + 1.0
+    while len(first_line_server.lines) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [d.get("token") for d in first_line_server.lines] == ["A", "B"], first_line_server.lines
+
+
+@_bounded
+def test_empty_token_sends_no_hello(first_line_server) -> None:
+    client = SocketClient("127.0.0.1", first_line_server.port, sender="t", token_provider=lambda: "")
+    try:
+        client.connect(timeout=2.0)  # без hello connect не ждёт ответа
+        # ответа сырой сервер не шлёт: исход request не проверяется, нужна лишь первая строка
+        client.request({"cmd": "ping"}, timeout=0.5)
+    finally:
+        client.close()
+    assert len(first_line_server.lines) == 1, first_line_server.lines
+    first = first_line_server.lines[0]
+    assert first.get("type") != "hello" and "token" not in first and first.get("cmd") == "ping", first
+
+
+def test_read_token_invalid_utf8_is_none(tmp_path) -> None:
+    path = tmp_path / "garbage.token"
+    path.write_bytes(b"\xff\xfe")
+    assert read_token(path) is None

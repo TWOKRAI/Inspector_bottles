@@ -86,12 +86,13 @@ def write_token(path: Path) -> str:
 def read_token(path: Path) -> str | None:
     """Прочитать токен из ``path``.
 
-    Post: содержимое без пробельных символов по краям; пустой файл или нет
-          файла → ``None``. Прочие ``OSError`` (каталог, нет прав) пробрасываются.
+    Post: содержимое без пробельных символов по краям; пустой файл, нет файла или
+          невалидный UTF-8 (токен с мусором не валиден) → ``None``. Прочие ``OSError``
+          (каталог, нет прав) пробрасываются.
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except FileNotFoundError:
+    except (FileNotFoundError, UnicodeDecodeError):
         return None
     value = text.strip()
     return value or None

@@ -401,7 +401,7 @@ class SocketChannel(MessageChannel):
                 daemon=True,
             ).start()
 
-    def _read_loop(self, client: socket.socket, accepted_at: Optional[float] = None) -> None:
+    def _read_loop(self, client: socket.socket, accepted_at: float) -> None:
         """Читать newline-JSON из соединения, парсить и передавать в on_inbound.
 
         Битая строка → лог+skip, не падаем. Закрытие соединения → выход.
@@ -423,7 +423,7 @@ class SocketChannel(MessageChannel):
         carry = b""
         first_line = self._authenticator is None
         if not first_line:
-            rest = self._handshake(client, time.monotonic() if accepted_at is None else accepted_at)
+            rest = self._handshake(client, accepted_at)
             if rest is None:
                 self._drop_unauthenticated(client)
                 return

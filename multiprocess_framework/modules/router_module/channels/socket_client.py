@@ -296,7 +296,7 @@ class SocketClient:
         вернул строку → первой строкой уходит ``{"type": "hello", "token": ...}`` и
         ответ ``{"type": "hello", "success": true}`` читается по байту до ``\\n`` (хвоста
         не остаётся). ``timeout`` общий на TCP-connect и ``hello``. Нет провайдера или
-        он вернул ``None`` — ``hello`` не шлётся, соединение как раньше.
+        он вернул ``None`` или ``""`` — ``hello`` не шлётся, соединение как раньше.
         Raises: ``OSError`` — хост недоступен за ``timeout`` (состояние как до вызова);
               :class:`SocketAuthError` (подкласс ``OSError``) — отказ, EOF или чужой ответ
               на ``hello``; ``TimeoutError`` — нет ответа на ``hello`` за ``timeout``.
@@ -306,7 +306,7 @@ class SocketClient:
         provider = self._token_provider
         token = provider() if provider is not None else None
         sock = socket.create_connection((self._host, self._port), timeout=timeout)
-        if token is not None:
+        if token:  # None и пустая строка — токена нет, hello не шлётся
             try:
                 _hello_exchange(sock, token, deadline)
             except BaseException:
