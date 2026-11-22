@@ -254,8 +254,8 @@
 
 | Решение | Где | Задача |
 |---|---|---|
-| Три контракта сигнала (I1, I2, I3) как правило фреймворка | `multiprocess_framework/DECISIONS.md` (глобальный индекс) | 0.1 |
-| Функция исхода и ключи потерь | `channel_routing_module/DECISIONS.md` | 0.1 |
+| Три контракта сигнала (I1, I2, I3) как правило фреймворка | `multiprocess_framework/DECISIONS.md` (глобальный индекс) | 0.3 |
+| Функция исхода и ключи потерь | `channel_routing_module/DECISIONS.md` (ADR-CRM-019) | 0.1 |
 | Конверт свежести, классы, почему не `TreeStore.revision` и не `Delta.timestamp` | `state_store_module/DECISIONS.md` | 0.2 |
 | Форма вердикта `vacuous` | `backend_ctl/DECISIONS.md` (затем `process_manager_module`, 2.6) | 0.3, 2.6 |
 | Рукопожатие и токен в общем канале | `router_module/DECISIONS.md` | 0.12 |

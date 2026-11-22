@@ -295,7 +295,7 @@ def test_a5_polled_levels_cover_every_name_the_gate_can_turn_off(
     это находка, а не хрупкость теста.
     """
     workers = {
-        "cam_worker": {"status": "running", "effective_hz": 25.0, "cycle_duration_ms": 8.0},
+        "cam_worker": {"status": "running", "effective_hz": 25.0, "cycle_duration_ms": 8.0, "last_cycle_age_s": 0.1},
     }
     services = _FakeServices()
     services.worker_manager = _FakeWorkerManager(workers)
@@ -349,7 +349,7 @@ def test_a6_missing_telemetry_section_means_no_gate_and_full_publish() -> None:
     gate = hb._build_telemetry_gate()
     assert gate is None
 
-    workers = {"w1": {"status": "running", "effective_hz": 10.0, "cycle_duration_ms": 5.0}}
+    workers = {"w1": {"status": "running", "effective_hz": 10.0, "cycle_duration_ms": 5.0, "last_cycle_age_s": 0.1}}
     allowed_metrics = gate.due_metrics() if gate is not None else None
     result = build_worker_telemetry(workers, "proc", allowed_metrics)
     assert result is not None

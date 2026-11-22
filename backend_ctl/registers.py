@@ -25,7 +25,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from .protocol import _find_payload
+from .protocol import _find_payload, _leaf_result
+from .verdict import judge
 
 # Логгер того же семейства, что и driver: авто-откат бьёт в фоновом (daemon) потоке
 # таймера, его провал иначе был бы невидим (синхронного возврата агенту нет).
@@ -75,12 +76,26 @@ class RegisterOps:
 
         Общий разбор ответа ``introspect.registers`` (снимает конверт ``{success,
         result: …}`` через ``_find_payload``) для verify-probe, snapshot и restore —
-        чтобы форма ответа парсилась в одном месте.
+        чтобы форма ответа парсилась в одном месте. Ошибку чтения и «регистров нет»
+        схлопывает в ``{}``; кому нужно их различать — :meth:`_read_registers_checked`.
+        """
+        return self._read_registers_checked(process, timeout=timeout)[0]
+
+    def _read_registers_checked(self, process: str, *, timeout: float | None = None) -> tuple[dict[str, Any], bool]:
+        """Регистры процесса и признак «чтение удалось» (Task 0.11).
+
+        Чтение НЕ удалось (``readable=False``), если ответ не dict либо ``success`` ложен
+        на внешнем конверте или на листовой нагрузке (таймаут, отказ хоста). Успешное
+        чтение без регистра/поля — это ``readable=True`` и ``{}``/неполный dict: такой
+        образ честно говорит «поля нет», а не «образ не получен».
         """
         res = self._drv.introspect_registers(process, timeout=timeout)
+        readable = (
+            isinstance(res, dict) and res.get("success") is not False and _leaf_result(res).get("success") is not False
+        )
         payload = _find_payload(res, "registers")
         registers = payload.get("registers") if isinstance(payload, dict) else None
-        return registers if isinstance(registers, dict) else {}
+        return (registers if isinstance(registers, dict) else {}), readable
 
     def _topology_process_names(
         self,
@@ -145,24 +160,46 @@ class RegisterOps:
         *,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Verify-probe: write → readback → diff.
+        """Проверенная запись: образ до → запись → образ после (Task 0.11, I3).
 
-        Не доверяет ack'у записи: после :meth:`set_register` читает
-        ``introspect.registers`` того же процесса и сравнивает фактическое значение
-        поля с ожидаемым. Ловит весь класс молчаливых no-op'ов: несуществующий
-        регистр/поле, неверные ключи payload, отвал приёмника. ``verified`` может
-        отличаться от ``value`` и при легитимной коэрции значения Pydantic-схемой —
-        тогда смотреть ``actual``.
+        «Проверено» = образ ДО + подтверждение хоста + образ ПОСЛЕ. Читает
+        ``introspect.registers`` до записи, пишет через :meth:`set_register`, читает
+        после — и отдаёт вердикт :func:`backend_ctl.verdict.judge`: ``verdict``
+        (``confirmed`` / ``vacuous`` / ``failed`` / ``unverifiable``), ``vacuous``,
+        ``success``, ``pre``, ``unverifiable`` (какой образ не прочитан). Запись,
+        которую хост отверг при уже равном значении, больше не выглядит успехом
+        (readback «10 == 10» был бы ложным подтверждением).
+
+        ``verified`` — прежний алиас ``success`` (FREEZE) и включает ``vacuous``:
+        запись, не менявшая значение, но принятая хостом, остаётся ``verified``;
+        отличить её можно по ``vacuous``/``verdict``. Ловит и молчаливые no-op'ы:
+        несуществующий регистр/поле, неверные ключи payload, отвал приёмника.
+        Реальное значение может отличаться от ``value`` при легитимной коэрции
+        Pydantic-схемой — тогда смотреть ``actual``. Сравнение терпимо к строковой
+        коэрции (:meth:`_values_match`): MCP отдаёт скаляр строкой.
+
+        Образ «не прочитан» (readback вернул ``success False`` или не dict) — это
+        ``unverifiable``, а не ``failed``; регистр/поле, не найденные при УСПЕШНОМ
+        чтении, — ``failed`` (образ после = ``None``).
         """
+        pre_registers, pre_readable = self._read_registers_checked(process, timeout=timeout)
+        pre_reg = pre_registers.get(register)
+        # Копия: образ до не должен меняться вслед за живым read-model после записи.
+        pre = copy.deepcopy(pre_reg.get(field)) if isinstance(pre_reg, dict) else None
+
         ack = self.set_register(process, register, field, value, timeout=timeout)
-        registers = self._read_registers(process, timeout=timeout)
+
+        registers, post_readable = self._read_registers_checked(process, timeout=timeout)
         reg = registers.get(register)
         found = isinstance(reg, dict) and field in reg
         actual = reg.get(field) if found else None
-        verified = bool(found and self._values_match(value, actual))
+
+        unreadable = tuple(name for name, readable in (("pre", pre_readable), ("post", post_readable)) if not readable)
+        # `eq` обязателен: без него строгое == даёт ложный failed на «10» против 10.
+        verdict = judge(pre, ack, actual, value, unreadable=unreadable, eq=self._values_match)
         return {
-            "success": verified,
-            "verified": verified,
+            **verdict,
+            "verified": verdict["success"],
             "found": found,
             "process": process,
             "register": register,
@@ -170,7 +207,6 @@ class RegisterOps:
             "expected": value,
             "actual": actual,
             "known_registers": sorted(registers),
-            "ack": ack,
         }
 
     @staticmethod
@@ -243,9 +279,19 @@ class RegisterOps:
         Для каждого процесса: readback → пишет ТОЛЬКО дрейфнувшие поля (уже-верные и
         неизменившиеся read-only не трогаются — меньше лишних write и меньше шума от
         полей, которые всё равно совпадают), затем сверяет свежим readback'ом. Не
-        доверяет ack'ам записи (как verify-probe). Возвращает ``success`` (все поля
-        снимка совпали), ``written`` (реально изменённые), ``skipped`` (уже верные),
-        ``verified`` (доведённые до снимка) и ``mismatches``.
+        доверяет ack'ам записи (как verify-probe). Каждое поле судит
+        :func:`backend_ctl.verdict.judge` (образ до, ack записи, образ после, значение
+        снимка); ``success`` — все поля success. Возвращает ``written`` (отправлено
+        записей), ``skipped`` (поля без записи), ``failed`` (поля с вердиктом
+        ``failed``: хост отверг запись либо образ после не равен снимку), ``vacuous``
+        (поля с вердиктом ``vacuous``: образ уже был равен снимку, ничего не доказано),
+        ``verified`` (поля, совпавшие со снимком) и ``mismatches``. ``mismatches`` и ``verified``
+        считаются тем же сравнением (:meth:`_values_match`), что и ``success``: ответ не
+        противоречит себе на строковой коэрсии. Единица счёта у всех счётчиков — ПОЛЕ снимка.
+
+        Restore, где образ уже равен снимку, ничего не пишет: ``written 0``,
+        ``success True``, ``vacuous`` = число таких полей. Это честный пустой restore, а
+        не «подтверждённая запись»: ``vacuous`` называет его вслух.
 
         Замечание: поля с живым/вычисляемым значением (счётчики, timestamps), успевшие
         измениться после снимка, попадут в ``mismatches`` — их «восстановить» нельзя, и
@@ -257,12 +303,18 @@ class RegisterOps:
 
         written = 0
         total = 0
+        failed = 0
+        vacuous = 0
+        restored = True  # все поля success
         mismatches: List[Dict[str, Any]] = []
         for proc, registers in processes.items():
             if not isinstance(registers, dict):
                 continue
             current = self._read_registers(proc, timeout=timeout)  # readback ДО записи
-            wrote_this_proc = False
+            # Образ ДО и ack записи по полю: суд идёт во втором проходе, а `current` у
+            # живого read-model к тому времени уже мог измениться — образ фиксируем здесь.
+            pre_images: dict[tuple[str, str], Any] = {}
+            acks: dict[tuple[str, str], Any] = {}
             for reg, fields in registers.items():
                 if not isinstance(fields, dict):
                     continue
@@ -270,27 +322,36 @@ class RegisterOps:
                 for field, value in fields.items():
                     total += 1
                     cur = creg.get(field) if isinstance(creg, dict) else None
+                    pre_images[(reg, field)] = copy.deepcopy(cur)
                     if cur != value:  # пишем только то, что дрейфнуло
-                        self.set_register(proc, reg, field, value, timeout=timeout)
+                        acks[(reg, field)] = self.set_register(proc, reg, field, value, timeout=timeout)
                         written += 1
-                        wrote_this_proc = True
 
             # Verify: свежий readback только если что-то писали (иначе current актуален).
-            verify_src = self._read_registers(proc, timeout=timeout) if wrote_this_proc else current
+            verify_src = self._read_registers(proc, timeout=timeout) if acks else current
             for reg, fields in registers.items():
                 if not isinstance(fields, dict):
                     continue
                 vreg = verify_src.get(reg)
                 for field, value in fields.items():
                     got = vreg.get(field) if isinstance(vreg, dict) else None
-                    if got != value:
+                    # Поле без записи: ack None (хосту нечего подтверждать), образ после равен образу до.
+                    verdict = judge(pre_images[(reg, field)], acks.get((reg, field)), got, value, eq=self._values_match)
+                    if verdict["verdict"] == "failed":
+                        failed += 1
+                    elif verdict["verdict"] == "vacuous":
+                        vacuous += 1
+                    restored = restored and verdict["success"]
+                    if not self._values_match(value, got):  # то же сравнение, что и в judge (eq)
                         mismatches.append(
                             {"process": proc, "register": reg, "field": field, "expected": value, "actual": got}
                         )
         return {
-            "success": not mismatches,
+            "success": restored,
             "written": written,
             "skipped": total - written,
+            "failed": failed,
+            "vacuous": vacuous,
             "verified": total - len(mismatches),
             "mismatches": mismatches,
         }

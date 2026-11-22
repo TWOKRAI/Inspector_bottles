@@ -20,6 +20,9 @@ state_store_module — реактивное дерево состояния дл
         SubscriptionManager, Subscription,
         match_pattern, split_pattern  — публичные хелперы для middleware/health
 
+    Конверт свежести (core/freshness.py, ADR-SS-025):
+        FRESH_KEY, stamp, classify, read_value — метка писателя и классификатор читателя
+
     Middleware:
         StateMiddleware, MiddlewarePipeline,
         ThrottleMiddleware, ValidationMiddleware,
@@ -46,6 +49,7 @@ from .core import (
     match_pattern,
     split_pattern,
 )
+from .core.freshness import FRESH_KEY, stamp, classify, read_value
 from .manager import StateStoreManager, DeltaDispatcher
 from .proxy import StateProxy, GuiStateProxy
 from .middleware import (
@@ -72,6 +76,8 @@ __all__ = [
     "TreeStore", "Delta", "Transaction", "MISSING",
     "SubscriptionManager", "Subscription",
     "match_pattern", "split_pattern",
+    # Конверт свежести (ADR-SS-025)
+    "FRESH_KEY", "stamp", "classify", "read_value",
     # Middleware
     "StateMiddleware", "MiddlewarePipeline",
     "ThrottleMiddleware", "ValidationMiddleware",

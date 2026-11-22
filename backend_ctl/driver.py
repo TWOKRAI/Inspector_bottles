@@ -29,9 +29,11 @@ import sqlite3
 import threading
 import time
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
+from multiprocess_framework.modules.state_store_module.core.freshness import FRESH_KEY, read_value
 from multiprocess_framework.modules.telemetry_readmodel_module import (
     DEFAULT_TRACKED_SUFFIXES,
     TelemetryReadModel,
@@ -84,10 +86,13 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     extract_observability_records,
     iter_state_deltas,
     page_with_reset_retry,
+    state_changed_revisions,
 )
+from ._node_read import _assemble
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
 from .registers import RegisterOps, _PendingCommit  # noqa: F401 — _PendingCommit re-export для back-compat
+from .verdict import is_refusal
 
 # Логгер клиента: reader-поток — daemon, его необработанное исключение уходит только
 # в stderr-трейсбек; обрыв соединения логируем явно (A.3), чтобы причина «reader молча
@@ -453,7 +458,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         reply_to: str = "ProcessManager",
         default_timeout: float = 5.0,
         event_queue_maxlen: int = 1000,
+        clock: Callable[[], float] = time.time,
     ) -> None:
+        # Шов часов (Task 0.10b): возраст метрик и ``last_gap_at`` считаются по ним. Имя не ``_clock``: у
+        # тестовых наследников (test_system_shutdown_driver_*) это поле занято фейковыми часами. Тест и
+        # offline-реплей подставляют свои; по умолчанию — ``time.time`` (сравним с ``src_ts`` писателя).
+        self._telemetry_clock = clock
         self._host, self._port = resolve_endpoint(host, port)
         self._sender = sender
         self._reply_to = reply_to
@@ -528,6 +538,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # Провенанс нуля: count=0 у snapshot/history сам по себе не отличает «дельт не
         # было» от «подписки не было». Счётчик — под тем же локом, что и ingest.
         self._telemetry_ingested_total = 0
+        # Дыры ревизий (Task 0.10b, remediation 1.3): состояние на ДРАЙВЕРЕ, под тем же локом,
+        # а не в модели (реплей подменяет ``_telemetry_model`` на лету). ``None`` — базы нет:
+        # первый пакет после (пере)подписки становится базой, а не дырой.
+        self._revision_last: int | None = None
+        self._gap_count = 0
+        self._last_gap_at: float | None = None
         self.subscribe(self._ingest_state_changed)
 
         # Регистровый аппарат (live field-write / snapshot-restore / commit-confirmed)
@@ -555,6 +571,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def _looks_failed(res: Any) -> bool:
         """Ответ явно провальный? (для решения «регистрировать ли намерение»)."""
         return isinstance(res, dict) and res.get("success") is False
+
+    @staticmethod
+    def _host_error_text(reply: Any) -> str:
+        """Текст ошибки из ответа хоста для причины отказа: ``error``, иначе ``reason`` (Task 0.11)."""
+        if isinstance(reply, dict):
+            text = reply.get("error") or reply.get("reason")
+            if text:
+                return str(text)
+        return "ответ хоста без текста ошибки"
 
     def _register_subscription(self, command: str, target: str, args: Dict[str, Any], res: Any) -> None:
         """Записать намерение подписки, если команда НЕ провалилась явно.
@@ -610,6 +635,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         results: List[Dict[str, Any]] = []
         for it in self._subscriptions.export():
             res = self.send_command(it["target"], it["command"], it["args"])
+            if it["command"] == "state.subscribe":
+                self._reset_revision_base()  # идёт мимо state_subscribe: новое соединение — новая база ревизии
             results.append(
                 {
                     "command": it["command"],
@@ -1653,6 +1680,20 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if isinstance(verified, dict) and verified.get("verdict"):
             verdict = str(verified.get("verdict"))
             verdict_reason: Optional[str] = None
+        elif observability is not None and (reply.get("success") is False or is_refusal(reply)):
+            # Inline-секция передана, а хост не принял команду. Отказ роутера приходит как
+            # `{"status": "error", "reason": ...}`, и после `_leaf_result` в листе нет ключа
+            # `success`, поэтому смотрим и на `is_refusal`. Суждения нет не из-за «без
+            # inline-секции» (это была бы ложная причина), а из-за ответа хоста.
+            # `success` ниже остаётся False, вердикт — unverifiable; `judge` сюда не
+            # применяется (BCTL-ADR-008: `success` — про применение, не вердикт).
+            verdict = "unverifiable"
+            text = self._host_error_text(reply)
+            verdict_reason = (
+                f"хост отверг config.reload: {text}"
+                if is_refusal(reply)
+                else f"config.reload без ответа хоста: {text}"  # таймаут — не отказ (0.3)
+            )
         else:
             # Файловый reload не несёт inline-секции, и сравнивать запрошенное не с
             # чем: «запрос» тут — весь файл целиком. Отсутствие суждения называется
@@ -1898,6 +1939,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``verification.reason`` — «не проверено» не выдаётся за «не применилось наоборот»,
         но и за «применилось» тоже.
 
+        **Отказ хоста (Task 0.11).** Если хост ОТВЕРГ запись (``verdict.is_refusal(res)``:
+        ``success False`` не-таймаут либо ``status == "error"``), ``verified_effect`` =
+        ``False``, ``verification.reason`` называет отказ и его ``error``, поллинг НЕ
+        запускается: правило, уже равное запрошенному, не доказывает, что запись дошла.
+        Таймаут — не отказ, решает readback. ``success`` ответа по-прежнему не трогается.
+
         **Против вакуумного True (ревью Фазы 4, находка 4).** ``resolved`` разворачивает
         ДЕФОЛТЫ: метрика без правила читается как ``(enabled=True, default_interval_sec)``.
         Поэтому одного совпадения с ``resolved`` мало — запрос ``enabled=True`` совпал бы
@@ -1916,6 +1963,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             res["verified_effect"] = bool(ok)
             res["verification"] = {"process": process, "metric": metric, "plane": plane, **extra}
             return res
+
+        if is_refusal(res):
+            # Хост ОТВЕРГ запись (Task 0.11): readback, совпавший с уже действующим
+            # правилом, был бы ложным подтверждением. Поллинг не запускаем — читать
+            # нечего. Таймаут — не отказ (is_refusal его не берёт): решает readback.
+            return _mark(False, reason=f"хост отверг запись телеметрии: {self._host_error_text(res)}")
 
         if plane == "throttle":
             # Central-троттл оркестратор-глобален: адресат readback'а всегда PM, поэтому
@@ -2037,10 +2090,10 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
     # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
 
-    # Зеркало Delta.to_dict(): new_value==MISSING_MARKER → удаление узла. Литерал
-    # живёт в events.py (один источник для driver и плоскостной классификации);
-    # в state_store не ходим СОЗНАТЕЛЬНО — package __init__ затащил бы Qt в
-    # headless-драйвер. Дрейф ловит контракт-тест test_missing_marker_matches_state_store.
+    # Зеркало Delta.to_dict(): new_value==MISSING_MARKER → удаление узла. Литерал живёт
+    # в events.py как единственный источник для driver и плоскостной классификации;
+    # приватный маркер state_store отдельно не импортируем. Дрейф ловит контракт-тест
+    # test_missing_marker_matches_state_store.
     _MISSING_MARKER = MISSING_MARKER
 
     def _ingest_state_changed(self, msg: Dict[str, Any]) -> None:
@@ -2060,6 +2113,14 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         deltas = iter_state_deltas(msg)
         if not deltas:
             return
+        # Дыры ревизий (0.10b): диапазон пакета; нет валидного — пакет пропускается (ни база, ни дыра).
+        # Часы зовём ДО лока: чужой ``clock`` не должен исполняться под ``_telemetry_lock``.
+        revisions = state_changed_revisions(msg)
+        try:
+            gap_at = self._telemetry_clock() if revisions is not None else None
+        except Exception:  # noqa: BLE001 — сломанные часы не должны стоить дельт пакета
+            _log.warning("часы драйвера бросили исключение: last_gap_at этого пакета останется None", exc_info=True)
+            gap_at = None
         # ПОЗДНЕЕ СВЯЗЫВАНИЕ (grep-маркер): recorder.ReplayPlayer монки-патчит
         # self._telemetry_model на clock-aware инстанс ЗАДНИМ числом (offline-реплей D.4).
         # Этот колбэк ОБЯЗАН читать модель по атрибуту self._telemetry_model в момент
@@ -2073,6 +2134,33 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 else:
                     self._telemetry_model.ingest(delta["path"], new_value)
                 self._telemetry_ingested_total += 1
+            # Ревизии — ПОСЛЕ дельт: сбой учёта дыр не может стоить дельт пакета.
+            if revisions is not None:
+                self._track_revision(revisions[0], revisions[1], gap_at)
+
+    def _track_revision(self, first_revision: int, revision: int, now: float | None) -> None:
+        """Учесть диапазон ``[first_revision, revision]`` пакета; звать ПОД ``_telemetry_lock``.
+
+        Зеркало ``gui_state_proxy._advance_revision_and_maybe_resync`` (только счёт, без ресинка —
+        он в 2.8b): нет базы → пакет становится базой; ``first_revision > last + 1`` → дыра
+        (``gap_count`` +1, ``last_gap_at = now``); ``last = revision`` ВСЕГДА (не ``max``): скачок
+        назад (рестарт хаба) — не дыра, а новая база. Устаревший пакет (``revision <= last``)
+        не отбрасывается: драйвер только считает. ``revision`` — счётчик ВСЕГО дерева, подписка
+        узкая (ADR-SS-015), поэтому ``gap_count`` — «кандидаты в дыры», пока нет сверки с деревом.
+        """
+        last = self._revision_last
+        if last is not None and first_revision > last + 1:
+            self._gap_count += 1
+            self._last_gap_at = now
+        self._revision_last = revision
+
+    def _reset_revision_base(self) -> None:
+        """Забыть базу ревизии: первый пакет новой подписки станет базой, а не дырой.
+
+        Счётчики ``gap_count``/``last_gap_at`` не трогаем — это история драйвера, не состояние подписки.
+        """
+        with self._telemetry_lock:
+            self._revision_last = None
 
     @staticmethod
     def _telemetry_key(path: str) -> Dict[str, Optional[str]]:
@@ -2154,8 +2242,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Returns:
             ``{"success": True, "process": ..., "metric": ..., "count": N,
-            "metrics": {path: {"value": v, "process": p, "worker": w}},
-            "ingest_active": bool, "ingested_total": N, "ingest_patterns": [...]}``.
+            "metrics": {path: {"value": v, "class": c, "age_s": a, "process": p, "worker": w}},
+            "ingest_active": bool, "ingested_total": N, "ingest_patterns": [...],
+            "gap_count": N, "last_gap_at": ts | None}``.
+
+            ``value`` — сырой лист read-model. ``class`` (``fresh``/``stale``/``no_data``) и ``age_s`` —
+            свежесть по метке ``processes.<process>._fresh`` (``freshness.read_value``, часы ``clock``
+            драйвера): лист без метки, лист ``None`` и путь вне ``processes.<X>`` дают ``no_data`` /
+            ``age_s=None``; ``writer_gone`` здесь не бывает (у драйвера нет входа «воплощение живо»).
+            Листья ``_fresh.*`` служебные: в ``metrics`` и ``count`` не входят.
+            ``gap_count``/``last_gap_at`` — дыры в ревизиях ``state.changed``, увиденные драйвером
+            (``first_revision > last + 1``); ревизия — счётчик ВСЕГО дерева, подписка узкая, поэтому это
+            «кандидаты в дыры», пока нет сверки с ``state_get_subtree`` (ADR-SS-015).
             Пустой read-model (``count=0``) сам по себе не говорит, ПОЧЕМУ пусто —
             ``ingest_active`` и ``ingested_total`` разводят «нет данных» / «нет
             подписки»: без подписки ``ingest_active=False``; под активной подпиской,
@@ -2181,14 +2279,44 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             и суди сам: второй glob-матчер здесь сознательно не строится.
         """
         prefix = f"processes.{process}" if process else ""
+        # Часы — ДО лока (чужой ``clock`` не исполняется под ``_telemetry_lock``). Метку и значения
+        # берём из ОДНОЙ копии ``snap``: вторая копия дала бы пару из разных записей писателя.
+        now = self._telemetry_clock()
         with self._telemetry_lock:
             snap = self._telemetry_model.snapshot(prefix)
             ingested_total = self._telemetry_ingested_total
+            gap_count = self._gap_count
+            last_gap_at = self._last_gap_at
+        # Дальше лок не нужен. ``read_node`` НЕ звать: он берёт тот же (нереентрантный) лок.
+        # Поддерево процесса строим из ``snap`` и ДО фильтра ``metric``: метка ``_fresh`` лежит на
+        # корне записи, а фильтр оставил бы в ответе только запрошенные листья.
+        leaves_by_process: dict[str, dict[tuple, Any]] = {}
+        for path, value in snap.items():
+            split = self._split_process_path(path)
+            if split is not None:
+                leaves_by_process.setdefault(split[0], {})[tuple(split[1].split("."))] = value
+        subtrees: dict[str, dict[str, Any]] = {}
         metrics: Dict[str, Any] = {}
         for path, value in snap.items():
+            split = self._split_process_path(path)
+            if split is not None and (split[1] == FRESH_KEY or split[1].startswith(FRESH_KEY + ".")):
+                continue  # листья метки — служебные: не метрики и не входят в count
             if metric is not None and not self._telemetry_matches_metric(path, metric):
                 continue
-            metrics[path] = {"value": value, **self._telemetry_key(path)}
+            fresh: dict[str, Any] = {"class": "no_data", "age_s": None}  # вне processes.<X> метки нет
+            if split is not None:
+                name, key = split
+                if name not in subtrees:
+                    subtrees[name] = _assemble(leaves_by_process[name])
+                # ``value`` ответа — СЫРОЙ лист (``read_value`` отдаёт None на листе без метки); у него берём
+                # только класс и возраст, при ``alive_incarnation=None`` (у драйвера нет входа «воплощение живо»).
+                fresh = read_value(subtrees[name], key, now, None)
+            metrics[path] = {
+                "value": value,
+                "class": fresh["class"],
+                "age_s": fresh["age_s"],
+                **self._telemetry_key(path),
+            }
         return {
             "success": True,
             "process": process,
@@ -2198,7 +2326,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "ingest_active": self._telemetry_ingest_active(),
             "ingested_total": ingested_total,
             "ingest_patterns": self._telemetry_ingest_patterns(),
+            "gap_count": gap_count,
+            "last_gap_at": last_gap_at,
         }
+
+    @staticmethod
+    def _split_process_path(path: str) -> tuple[str, str] | None:
+        """``processes.<X>.<rest>`` → ``(X, rest)``; любой другой путь → ``None`` (у него метки нет)."""
+        parts = path.split(".", 2)
+        if len(parts) == 3 and parts[0] == "processes" and parts[1]:
+            return parts[1], parts[2]
+        return None
 
     def telemetry_history(
         self,
@@ -2730,6 +2868,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         }
         res = self.send_command("ProcessManager", "state.subscribe", args, timeout=timeout)
         self._register_subscription("state.subscribe", "ProcessManager", args, res)
+        # Новая подписка — новая последовательность ревизий: база прошлой не годится (ложная дыра).
+        # Сброс ПОСЛЕ ответа: пакеты прежнего потока, пришедшие до него, базу не успеют вернуть.
+        self._reset_revision_base()
         return res
 
     def state_unsubscribe(

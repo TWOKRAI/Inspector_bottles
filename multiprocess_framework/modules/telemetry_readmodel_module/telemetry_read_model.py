@@ -33,9 +33,11 @@ SchemaBase) — граница процессов соблюдена на сто
 from __future__ import annotations
 
 import collections
+import math
 import time
 from typing import Any, Callable
 
+from multiprocess_framework.modules.state_store_module.core.freshness import FRESH_KEY, read_value
 from multiprocess_framework.modules.state_store_module.core.leaf_copy import LeafCopy
 
 # Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны).
@@ -56,6 +58,35 @@ DEFAULT_TRACKED_SUFFIXES: tuple[str, ...] = (
     ".effective_hz",
     ".cycle_duration_ms",
 )
+
+# Поля метки писателя (``freshness.stamp``): ``read`` собирает их из текущего состояния.
+# Форма метки живёт в ``state_store_module.core.freshness``; дрейф двух списков ловит
+# ``test_read_model_freshness.py::test_mark_fields_match_the_writer_stamp``.
+_MARK_FIELDS: tuple[str, ...] = ("seq", "src_ts", "incarnation", "tick_sec")
+
+# Лист, появление которого «закрывает такт» писателя метки (M-16, довыставление хвоста).
+_SRC_TS_SUFFIX = f".{FRESH_KEY}.src_ts"
+
+# Точки этих путей ВСЕГДА держат время приёма, а не ``src_ts``: их пишет не писатель метки.
+# ``.state.uptime`` публикует ``ProcessMonitor`` (~1 Гц) своим тактом; довыставление
+# перекрасило бы последнюю точку кольца в более раннее время, и кольцо перестало бы быть
+# хронологическим. Имена Task 1.8 (``rate_hz``, ``cycle_ms``) пишет тот же такт, что и метку,
+# поэтому остаются на времени источника и сюда не входят. Константа модуля, не параметр
+# конструктора: смена набора — решение модуля, а не потребителя.
+_RECEIPT_TIME_SUFFIXES: tuple[str, ...] = (".state.uptime",)
+
+_MISSING: Any = object()
+
+
+def _process_root(path: str) -> str | None:
+    """``processes.<P>.<что-то>`` -> ``processes.<P>``; иначе ``None``.
+
+    Корень записи процесса — адрес метки ``<root>._fresh`` и ключ хвоста довыставления.
+    """
+    parts = path.split(".", 2)
+    if len(parts) < 3 or parts[0] != "processes" or not parts[1]:
+        return None
+    return f"processes.{parts[1]}"
 
 
 def _canonical_plugin_path(path: str) -> str | None:
@@ -111,7 +142,11 @@ class TelemetryReadModel:
           отбросив пути, перезаписанные push'ем уже после отправки запроса.
         * get(path) / snapshot(prefix)  — чтение текущего снимка.
         * history(path, since)          — кольцевой буфер последних ~N минут по
-          ключевым метрикам для мгновенных спарклайнов без похода в БД.
+          ключевым метрикам для мгновенных спарклайнов без похода в БД. ``ts``
+          точки — время ИСТОЧНИКА (``src_ts`` метки писателя того же такта), а
+          если метки нет — время приёма (``clock``); см. :meth:`_apply_put`.
+        * read(path, key, alive_incarnation) — значение листа вместе с классом
+          свежести (``no_data``/``fresh``/``stale``/``writer_gone``) и возрастом.
 
     **Инвариантов у read-model ДВА, и второй появился позже первого.**
 
@@ -154,7 +189,8 @@ class TelemetryReadModel:
             window_sec: длительность окна истории в секундах (~10 мин = 600).
             sample_hz: ожидаемая частота семплов метрики (троттлинг источника).
                 maxlen буфера = ceil(window_sec * sample_hz) ≈ 600 точек.
-            clock: источник wall-clock ts для точек истории. Дефолт ``time.time``
+            clock: источник wall-clock: время ПРИЁМА точки истории (если метки
+                писателя нет) и «сейчас» для :meth:`read`. Дефолт ``time.time``
                 (бит-в-бит прежнее поведение). Инъекция нужна offline-реплею
                 (backend_ctl flight recorder): точки истории при прокрутке записи
                 должны нести ЗАПИСАННЫЕ ts (playhead-часы), а не время загрузки.
@@ -186,6 +222,15 @@ class TelemetryReadModel:
         # (:meth:`_purge_subtree`): иначе словарь копил бы номера путей, которых
         # в дереве уже нет, — медленная утечка, которую никто не замечает.
         self._push_seq: dict[str, int] = {}
+
+        # Хвост довыставления (M-16): корень ``processes.<P>`` -> пути колец, в которые
+        # писали с прошлого прихода ``<root>._fresh.src_ts``. Значения идут РАНЬШЕ метки
+        # такта, поэтому точка пишется с временем приёма, а при приходе ``src_ts`` последняя
+        # точка каждого кольца хвоста получает его (:meth:`_restamp_tail`). Пополняется
+        # только внутри ``if record_history:`` в :meth:`_apply_put`; чистится там же, где
+        # уходит кольцо (``removed`` и :meth:`_purge_subtree`) — иначе писатель, никогда не
+        # шлющий метку, держал бы пути мёртвых колец (тот же класс утечки, что у ``_push_seq``).
+        self._stamp_tail: dict[str, set[str]] = {}
 
         if initial_cache:
             self.prime(initial_cache)
@@ -251,6 +296,19 @@ class TelemetryReadModel:
         Одна принятая дельта двигает ``write_seq`` на 1, все её листья получают
         этот номер. Счётчик двигается ПОСЛЕ применения записи в ``_state`` — от
         этого зависит граница ``==`` в :meth:`ingest_poll_snapshot`, см. её докстроку.
+
+        **Довыставление хвоста (M-16).** Точка истории несёт ``src_ts`` метки писателя
+        своего такта, а не время приёма. Порядок дельт живого тика — значения РАНЬШЕ
+        метки (тик 1: dict ``workers``, ``state``, затем dict ``_fresh``; тик 2+: листья
+        значений, затем ``_fresh.seq``, ``_fresh.src_ts``), поэтому метку нельзя прочесть
+        в момент записи точки: она отстала бы на такт. Точка пишется с временем приёма и
+        запоминается в хвосте корня ``processes.<P>``; когда в ``written`` появляется
+        ``<root>._fresh.src_ts`` (лист, dict ``_fresh`` или корень с меткой внутри),
+        последняя точка каждого кольца хвоста заменяется на ``(src_ts, значение)``, и хвост
+        очищается. Это идёт ПОСЛЕ цикла ``written``, меняет только ``self._history[p][-1]``,
+        не зовёт ``_apply_put`` и не двигает ``_write_seq`` и ``_push_seq`` (инвариант 2).
+        Метки нет — остаётся время приёма. Только поток: при ``record_history=False``
+        (источник уровней) хвост не пополняется и не довыставляется (инвариант 1).
         """
         if not path:
             # Пустой путь копия-листьев отвергает (``LeafCopy.put`` бросает ValueError), а
@@ -261,11 +319,55 @@ class TelemetryReadModel:
         for p in removed:
             self._history.pop(p, None)
             self._push_seq.pop(p, None)
+            self._forget_in_tail(p)
         self._write_seq += 1
+        stamped: list[str] = []  # корни, чей src_ts пришёл с этой записью
         for p in written:
             self._push_seq[p] = self._write_seq
             if record_history:
-                self._record_history(p, self._state[p])
+                if self._record_history(p, self._state[p]) and not p.endswith(_RECEIPT_TIME_SUFFIXES):
+                    root = _process_root(p)
+                    if root is not None:
+                        self._stamp_tail.setdefault(root, set()).add(p)
+                if p.endswith(_SRC_TS_SUFFIX):
+                    stamped.append(p)
+        for p in stamped:
+            self._restamp_tail(p[: -len(_SRC_TS_SUFFIX)], self._state[p])
+
+    def _restamp_tail(self, root: str, src_ts: Any) -> None:
+        """Последняя точка каждого кольца хвоста ``root`` -> ``(src_ts, значение)``; хвост очищается.
+
+        ``src_ts`` — не конечное число (``None``, строка, ``bool``, ``nan``, ``inf``, ``int`` вне
+        диапазона ``float``) -> ничего не меняется и ничего не бросается: точки остаются на
+        времени приёма, хвост ждёт следующую метку (он ограничен числом путей колец, растёт не
+        может). Исключение здесь оборвало бы ``ingest`` после того, как дельта уже записана в
+        ``_state``, ``_push_seq`` и ``write_seq`` — частично применённая дельта. Кольцо, которого
+        нет (путь снят) или которое пусто, терпится. ``write_seq`` и ``_push_seq`` не трогаются.
+        """
+        paths = self._stamp_tail.get(root)
+        if not paths:
+            return
+        try:
+            ts = self._as_number(src_ts)  # bool -> None; int > 1e308: float() бросает OverflowError
+            if ts is None or not math.isfinite(ts):
+                return
+        except OverflowError:
+            return
+        del self._stamp_tail[root]
+        for p in paths:
+            buf = self._history.get(p)
+            if buf:
+                buf[-1] = (ts, buf[-1][1])
+
+    def _forget_in_tail(self, path: str) -> None:
+        """Убрать путь из хвоста довыставления: кольцо пути ушло, ждать нечего."""
+        root = _process_root(path)
+        paths = self._stamp_tail.get(root) if root is not None else None
+        if paths is None:
+            return
+        paths.discard(path)
+        if not paths:
+            del self._stamp_tail[root]
 
     def _purge_subtree(self, path: str) -> None:
         """Убрать путь и всё поддерево под ним из снимка, истории и номеров.
@@ -290,6 +392,7 @@ class TelemetryReadModel:
         gone = self._state.drop(path)  # по индексу: цена — размер поддерева
         for p in gone:
             self._push_seq.pop(p, None)
+            self._forget_in_tail(p)
         # В кольцах истории бывают пути только от import_history (их нет в _state),
         # поэтому история чистится сканом по границе-точке; она мала (только
         # отслеживаемые суффиксы).
@@ -392,6 +495,51 @@ class TelemetryReadModel:
         dotted = prefix + "."
         return {p: v for p, v in self._state.items() if p == prefix or p.startswith(dotted)}
 
+    def read(self, path: str, key: str, alive_incarnation: str | None = None) -> dict[str, Any]:
+        """Значение листа процесса вместе с классом свежести и возрастом (M-6).
+
+        Pre:
+            ``path`` — корень записи процесса ``processes.<name>``, под которым писатель
+            держит метку ``_fresh``; ``key`` — имя листа или путь через точку от ``path``
+            (``"state.lat"``); ``alive_incarnation`` — воплощение писателя, которое
+            читатель считает живым (из супервизии), или ``None`` («не задано»).
+        Post:
+            Всюду определена, исключений не бросает. Возвращает ``{"class", "value",
+            "age_s"}``, ровно как :func:`read_value` над полным поддеревом процесса, с
+            ``now = self._clock()``:
+            ``no_data`` — ``{"class": "no_data", "value": None, "age_s": None}`` — если
+            ``path`` не корень процесса с меткой (листьев ``<path>._fresh.*`` нет),
+            метка неполна или негодна, ``key`` не строка, не указывает на лист или лист
+            равен ``None``; ``fresh`` / ``stale`` / ``writer_gone`` с последним значением и
+            ``age_s = now - src_ts`` — иначе. Ноль — значение (``fps: 0`` -> ``fresh``).
+            Снимок и ``history`` не меняются.
+
+        Метка читается ИЗ ТЕКУЩЕГО состояния на каждый вызов, не кэшируется: ``seq`` и
+        ``src_ts`` приходят отдельными листьями, и кэш с первой dict-дельты дал бы ложный
+        ``stale`` у писателя, который публикует исправно. Между дельтой значения и дельтами
+        метки читатель видит новое значение со старой меткой: возраст завышен не более чем
+        на такт — безопасное направление, и это не «чинится» кэшем. Сборка O(1): минимальное
+        поддерево из четырёх листьев метки и цепочки ``key``, а не скан снимка. Лока нет:
+        вызывающий держит тот же лок, что для ``get``/``snapshot``/``history``.
+        """
+        if not isinstance(key, str):
+            return read_value(None, key, None, None)  # тот же ответ no_data, без дублирования литерала
+        mark = {
+            field: value
+            for field in _MARK_FIELDS
+            if (value := self._state.get(f"{path}.{FRESH_KEY}.{field}", _MISSING)) is not _MISSING
+        }
+        subtree: dict[str, Any] = {FRESH_KEY: mark}
+        node = subtree
+        *parents, leaf = key.split(".")
+        for segment in parents:
+            child = node.setdefault(segment, {})
+            if not isinstance(child, dict):  # ключ идёт сквозь лист метки: «посреди пути не dict»
+                return read_value(None, key, None, None)
+            node = child
+        node[leaf] = self._state.get(f"{path}.{key}")
+        return read_value(subtree, key, self._clock(), alive_incarnation)
+
     # ------------------------------------------------------------------
     # Кольцевые буферы истории
     # ------------------------------------------------------------------
@@ -427,23 +575,27 @@ class TelemetryReadModel:
             return float(value)
         return None
 
-    def _record_history(self, path: str, value: Any) -> None:
-        """Добавить числовую точку в кольцевой буфер отслеживаемого пути (O(1))."""
+    def _record_history(self, path: str, value: Any) -> bool:
+        """Добавить числовую точку в кольцевой буфер отслеживаемого пути (O(1)); True — точка добавлена."""
         if not self._is_tracked(path):
-            return
+            return False
         num = self._as_number(value)
         if num is None:
-            return
+            return False
         buf = self._history.get(path)
         if buf is None:
             buf = collections.deque(maxlen=self._maxlen)
             self._history[path] = buf
-        # ts приёма: wall-clock (Unix-epoch) через self._clock() — единая ось
-        # времени с DB-историей и с DateAxisItem графика. Ring — только для
-        # отображения (спарклайн/дашборд), длительности/Hz по нему не считаются,
-        # поэтому monotonic здесь не нужен. Дефолт clock=time.time; инъекция —
-        # offline-реплей (записанные ts вместо времени загрузки).
+        # ts ПРИЁМА: wall-clock (Unix-epoch) через self._clock(). Это временное
+        # значение: пока метка такта не пришла, точка держит время приёма, а
+        # ``_apply_put`` довыставляет ей ``src_ts`` метки (M-16, ``_restamp_tail``);
+        # без метки (и у ``.state.uptime``) время приёма остаётся окончательным.
+        # Ring — только для отображения (спарклайн/дашборд), длительности/Hz по
+        # нему не считаются, поэтому monotonic здесь не нужен. Дефолт
+        # clock=time.time; инъекция — offline-реплей (записанные ts вместо
+        # времени загрузки).
         buf.append((self._clock(), num))
+        return True
 
     def history(self, path: str, since: float | None = None) -> list[tuple[float, Any]]:
         """Выборка (ts, value) буфера для спарклайна.
@@ -454,7 +606,11 @@ class TelemetryReadModel:
 
         Returns:
             Список ``(ts, value)`` в хронологическом порядке (O(k) по буферу). Нет
-            буфера → пустой список.
+            буфера → пустой список. ``ts`` — время ИСТОЧНИКА: ``src_ts`` метки
+            писателя того же такта; метки нет (и всегда у ``.state.uptime``) — время
+            приёма (``clock``). Принятые пределы: скачок ``src_ts`` назад (шаг часов
+            писателя) может нарушить хронологию кольца; две записи одного пути за один
+            такт довыставляются только последней (``DECISIONS.md``).
         """
         buf = self._history.get(path)
         if buf is None:

@@ -418,6 +418,20 @@ def test_camera_config_update():
 
 ---
 
+## Конверт свежести (ADR-SS-025)
+
+Значение через границу процесса несёт метку писателя: «публиковал такт N в момент T», а не «лист обновлён в T».
+
+- **Метка** `stamp(seq, src_ts, incarnation, tick_sec)` — ровно эти 4 ключа; `src_ts` — `time.time()` писателя.
+- **Запись:** одно слияние на корень процесса, метка в `data` последней: `merge("processes.<name>", {"state": {...}, "workers": {...}, "_fresh": S})`. Метка — `processes.<name>._fresh`, значения — `processes.<name>.state.fps`.
+- **Чтение:** `read_value(subtree, "state.fps", now, alive)`, `subtree = processes.<name>`; ключ — лист или путь через точку. Ответ `{"class", "value", "age_s"}`.
+- **Классы** (`classify`, порядок правил): `no_data` (нет или негодна метка, нет ключа, значение `None`) → `writer_gone` (`alive` задан и не равен `incarnation`) → `stale` (`now - src_ts > 2 * tick_sec`) → `fresh`. Ноль — значение: `fps: 0` это `fresh`, не `no_data`.
+- Придержанный троттлом лист остаётся `fresh`, пока писатель жив, если ни одно правило не покрывает `_fresh`: правила `processes.**` и `**` троттлят метку наравне с листьями (ложный `stale`), `processes.**._fresh.**` её вырезает. Часы писателя и читателя должны быть синхронны.
+
+Только stdlib, зеркал нет: `backend_ctl` импортирует `core.freshness`.
+
+---
+
 ## Содержание папок
 
 ```
@@ -431,6 +445,7 @@ state_store_module/
 │   │                              # match_pattern, split_pattern
 │   ├── tree_store.py              # TreeStore (реализует IStateStore)
 │   ├── delta.py                   # Delta + Transaction (один файл)
+│   ├── freshness.py               # Конверт свежести: stamp/classify/read_value (ADR-SS-025)
 │   ├── leaf_copy.py               # LeafCopy: копия клиента хранит только листья,
 │   │                              # dict-дельта заменяет поддерево (ADR-SS-024)
 │   └── subscription_manager.py    # SubscriptionManager + glob-матчер

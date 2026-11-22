@@ -217,8 +217,8 @@ def _distinct_workers() -> dict:
     опроса так же.
     """
     return {
-        "w0": {"status": "running", "effective_hz": 23.7, "cycle_duration_ms": 41.3},
-        "w1": {"status": "running", "effective_hz": 31.9, "cycle_duration_ms": 17.6},
+        "w0": {"status": "running", "effective_hz": 23.7, "cycle_duration_ms": 41.3, "last_cycle_age_s": 0.1},
+        "w1": {"status": "running", "effective_hz": 31.9, "cycle_duration_ms": 17.6, "last_cycle_age_s": 0.1},
     }
 
 
@@ -370,7 +370,10 @@ class TestLevelsMatchPushedNumbers:
         assert proxy.merge_calls >= 1, "форсированный тик обязан был опубликовать хотя бы раз"
         pushed_numbers: set = set()
         for _path, data in proxy.merged:
-            pushed_numbers |= _flatten_numbers(data)
+            # ``_fresh`` — метка писателя (Task 0.9: seq, src_ts, tick_sec на корне записи), а не уровень:
+            # в опрос она не входит, и ``src_ts`` каждого тика заведомо не совпадёт с числами снимка.
+            # Якорь ``_FIXTURE_NUMBERS`` ниже остаётся: без метки сравнение не стало вакуумным.
+            pushed_numbers |= _flatten_numbers({k: v for k, v in data.items() if k != "_fresh"})
         # фикстура точно ушла в push — иначе сам тест не годится для сравнения.
         assert _FIXTURE_NUMBERS.issubset(pushed_numbers), pushed_numbers
 

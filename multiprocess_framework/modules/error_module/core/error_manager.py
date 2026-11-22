@@ -475,8 +475,11 @@ class ErrorManager(LoggerCore, IErrorManager):
         full_message = f"{message}: {exc}" if message else str(exc)
         use_trace = include_stacktrace if include_stacktrace is not None else self._include_stacktrace
         if use_trace:
-            tb = traceback.format_exc()
-            if tb and tb.strip() != "NoneType: None":
+            # Трасса ПЕРЕДАННОГО исключения, а не активного: format_exc() вне except даёт
+            # "NoneType: None", внутри чужого except — чужую трассу. У создан-но-не-брошенного
+            # исключения трассы нет — вывод остаётся прежним.
+            if exc.__traceback__ is not None:
+                tb = "".join(traceback.format_exception(exc))
                 full_message += f"\n{tb}"
 
         self.error(full_message, module=module, **context)

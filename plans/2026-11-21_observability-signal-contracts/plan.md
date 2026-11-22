@@ -2,7 +2,7 @@
 
 - **Slug:** observability-signal-contracts
 - **Дата:** 2026-11-21
-- **Статус:** DRAFT
+- **Статус:** IN PROGRESS (фаза 0: 0.1–0.11 выполнены и приняты ревью, 0.11b–0.13 — после слияния среза)
 - **Plan review:** APPROVED 2026-11-21 (CHANGES 2)
 - **Ветка:** refactor/observability-signal-contracts
 
@@ -14,8 +14,8 @@
 
 ## Цели (литералы; «сейчас» — ревизия или повтор лида 2026-11-21)
 
-1. Контракт-тесты I1, I2, I3 зелёные: 12 passed (фреймворк) и 10 passed (`backend_ctl`), списки — 0.1–0.3.
-2. Полный диск: `channel_write_errors` 4, `errors_to_floor` 1, `errors_floor.jsonl` есть (сейчас 0, 0, нет).
+1. Контракт-тесты I1, I2, I3 зелёные: 12 passed (фреймворк) и 13 passed (`backend_ctl`), списки — 0.1–0.3.
+2. Полный диск: `channel_refused_records` 4, `errors_to_floor` 1, `errors_floor.jsonl` есть (сейчас 0, 0, нет).
 3. Мёртвый роутер у tap'а: принятых 0, `tap_write_errors` 1 (сейчас 1 и 0).
 4. `_log_warning` после `LoggerManager.shutdown()` — `False` (сейчас `True`).
 5. Остановленный писатель: три читателя дают один ответ из {«устарело», «писатель ушёл»}; «свежо» — FAIL.
@@ -23,7 +23,7 @@
 7. Стадия с циклом раз в 3.0 с, чтение через 1.0 с: `effective_hz` ≈ 0.3333 (сейчас 0.0).
 8. Воркеры (30 Гц, 2 мс) и (5 Гц, 180 мс): процесс 5.0 и 180.0 (сейчас 30.0 и 180.0).
 9. Конфликт видов метрики: `metric_kind_conflicts` 2, одно предупреждение (сейчас тайминги пропадают молча).
-10. Отвергнутая запись при равном значении: `success` False, `vacuous` True (сейчас `verified` True, `success` True).
+10. Отвергнутая запись при равном значении (`set_register_verified`): `success` False, `vacuous` True (сейчас `verified` True, `success` True). Равное состояние в `register_restore`: запись не уходит, `success` True, `vacuous` = число полей.
 11. Поставка `backend_ctl.enabled: false`; клиент без токена — `auth_required`; MCP с чистым env подключается.
 12. Строки S2, S5, SF1 — PASS (сейчас S2 FAIL, S5 PARTIAL из-за зонда); L6 — PASS (сейчас NOT_REACHED).
 13. `delay_ms=50` на `delay_stage`: отчёт пишет `узкое место: delay_stage — ожидание (…); запас ×<k>`.
@@ -43,18 +43,18 @@
 
 **Цель фазы:** контракт-тесты и экземпляры; S2, S5, SF1 — PASS.
 
-- Task 0.1: Контракт I1 «исход» — «до 1.0» [PENDING]
-- Task 0.2: Контракт I2 «свежесть» — «до 1.0» [PENDING]
-- Task 0.3: Контракт I3 «причинность» — «до 1.0» [PENDING]
-- Task 0.4: L-1, OSError файла — «до 1.0» [PENDING] (после 0.1)
-- Task 0.5: L-3, B-6, closure 4.3b — «до 1.0» [PENDING] (после 0.1)
-- Task 0.6: L-4, после останова — «до 1.0» [PENDING] (после 0.1)
-- Task 0.7: L-2, traceback — «до 1.0» [PENDING]
-- Task 0.8: M-1, M-2, частота и пара — «до 1.0» [PENDING] (после 0.2)
-- Task 0.9: Публикатор свежести, M-7 — «до 1.0» [PENDING] (после 0.8)
-- Task 0.10: Read-model: свежесть — «до 1.0» [PENDING] (после 0.9)
-- Task 0.10b: `telemetry_snapshot`, дыры (B-4) — «до 1.0» [PENDING] (после 0.9)
-- Task 0.11: B-3, проверенная запись — «до 1.0» [PENDING] (после 0.3)
+- Task 0.1: Контракт I1 «исход» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.2: Контракт I2 «свежесть» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.3: Контракт I3 «причинность» — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.4: L-1, OSError файла — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.5: L-3, B-6, closure 4.3b — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.6: L-4, после останова — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.1)
+- Task 0.7: L-2, traceback — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts]
+- Task 0.8: M-1, M-2, частота и пара — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.2)
+- Task 0.9: Публикатор свежести, M-7 — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.8)
+- Task 0.10: Read-model: свежесть — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.9)
+- Task 0.10b: `telemetry_snapshot`, дыры (B-4) — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.9)
+- Task 0.11: B-3, проверенная запись — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.3)
 - Task 0.11b: M-4 минимум, конфликт видов — «до 1.0» [PENDING]
 - Task 0.12: Рукопожатие в общем канале — «до 1.0» [PENDING]
 - Task 0.12b: Порт закрыт без токена — «до 1.0» [PENDING] (после 0.12)
@@ -189,6 +189,9 @@
 - **2026-11-21, лид r1–r2:** токен — `~/.multiprocess_framework/ctl_<port>.token`, не каталог журнала; ноль — значение,
   не класс свежести; оценка частоты `min(measured, 1/age)`; агрегат процесса без фильтра статуса; M-4 минимум в
   срезе 0 (0.11b); стадия-нагрузка `delay_stage` (1.9b); ресинк по дыре — 2.8b.
+- **2026-11-21, лид, стадия 0 раунд 1:** решения по вердиктам 0.1–0.3 (`reports/stage0-r1-lead-decisions.md`); поправки № 2–№ 6
+  в [`amendments.md`](amendments.md); литералы целей 1 и 2 изменены, вынесено на вето владельца/координатора.
+- **2026-11-21, лид (ревью ветки Opus):** метка свежести `_fresh` публикуется при закрытом гейте телеметрии (+2 дельты на процесс за такт) — отступление от «ручка выключена — цена ноль» принято как носитель контракта I2; запись в ADR-SS-025, условие пересмотра — цена хаба на стенде; владельцу на подтверждение.
 
 ## Итог
 
@@ -198,3 +201,4 @@
 
 | property | predicted red | observed red |
 |---|---|---|
+| Task 0.1–0.3 (25 инъекций) | таблицы в `tasks/0.1–0.3.md`, до прогона | 20 совпали, 5 с лишними красными (недоучёт), пропусков нет — [`reports/0.1-0.3.injections.md`](reports/0.1-0.3.injections.md) |

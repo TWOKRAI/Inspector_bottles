@@ -21,7 +21,8 @@ def test_counters_are_published_when_no_worker_runs_with_positive_hz():
     path, data = out
     assert path == "processes.processor"
     state = data["state"]
-    assert "fps" not in state, "агрегата частоты быть не должно: ни у кого hz>0"
+    # 0.8: воркеры есть, но ни один не отработал (нет last_cycle_age_s) — пары нет, fps явным None, а не пропуск
+    assert state["fps"] is None, "ни один воркер не отработал: fps публикуется явным None"
     assert state["lag_dropped_items"] == 11
     assert state["not_inspected_handled"] == 5
     assert state["ipc_queue_depth"] == 0

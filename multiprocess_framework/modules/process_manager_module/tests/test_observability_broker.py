@@ -664,6 +664,10 @@ class TestOrchestratorTailDeliversAtTheAskedLevel:
             def send_async(self, message: dict, priority: str = "normal") -> None:
                 self.pushed.append(message)
 
+            def send(self, message: dict) -> dict:
+                self.pushed.append(message)  # Task 0.5c: форвардер зовёт синхронный send
+                return {"status": "success"}
+
         router = _CapturingRouter()
         logger = LoggerManager(
             manager_name="PMTailProbe",

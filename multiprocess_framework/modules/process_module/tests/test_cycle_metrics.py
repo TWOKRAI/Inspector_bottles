@@ -20,7 +20,7 @@ from multiprocess_framework.modules.process_module.generic.source_producer impor
 from multiprocess_framework.modules.process_module.plugins.base import ProcessModulePlugin
 
 
-_EXPECTED_KEYS = {"cycle_duration_ms", "effective_hz", "target_interval_ms", "cycles"}
+_EXPECTED_KEYS = {"cycle_duration_ms", "effective_hz", "last_cycle_age_s", "target_interval_ms", "cycles"}
 # Task 4.5a: воркеры-обёртки добавляют к базовому снимку свои поля кадрового пути.
 _SOURCE_KEYS = _EXPECTED_KEYS | {"pacer_late"}
 _EXECUTOR_KEYS = _EXPECTED_KEYS | {"queue_wait_ms", "not_inspected_handled"}
@@ -41,8 +41,10 @@ class TestCycleMetricsRecorder:
         snap = rec.get_cycle_metrics()
         assert snap["cycle_duration_ms"] == 50.0
         assert snap["cycles"] == 1
-        # Один record() — частота ещё не определена (нет предыдущего вызова).
-        assert snap["effective_hz"] == 0.0
+        # 0.8: после первого завершения оценка грубая (от создания рекордера): не 0.0 и не отрицательна
+        # (точные значения — в test_cycle_metrics_truth.py на подменённых часах).
+        hz = snap["effective_hz"]
+        assert hz is None or hz > 0
 
     def test_effective_hz_from_call_cadence(self) -> None:
         """effective_hz = частота завершения циклов (интервал между record()).
@@ -76,7 +78,8 @@ class TestCycleMetricsRecorder:
         rec = CycleMetricsRecorder()
         rec.record(0.0)
         snap = rec.get_cycle_metrics()
-        assert snap["effective_hz"] == 0.0
+        hz = snap["effective_hz"]  # 0.8: грубая оценка от создания рекордера, а не 0.0
+        assert hz is None or hz > 0
         assert snap["cycles"] == 1
 
     def test_measure_context_manager(self) -> None:

@@ -178,6 +178,57 @@ total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_fligh
 
 ---
 
+## Исход звена
+
+Один толкователь ответа звена и один счётчик потерь (Task 0.1, ADR-CRM-019). Живут в
+`interfaces.py` (`outcome_of`, `Outcome`) и `core/channel_routing_manager.py`
+(`count_outcome`, `LOSS_KEY_BY_HOP`).
+
+**`outcome_of(result) -> "accepted" | "refused" | "failed"`**
+
+- `{"status": "error"}` — `failed`;
+- `{"status": "dropped"}` и `{"status": "refused"}` — `refused`;
+- всё прочее — `accepted`: `success`, `ok`, `skipped`, `dict` без `status`, `None`, не-`dict`
+  (канал без ответа считался принявшим и раньше; ломать это нельзя).
+
+Статус проверяется кортежем, не `set`: `{"status": ["error"]}` даёт `accepted`, а `set` бросил бы
+`TypeError: unhashable`. `channel_accepted(result)` — это `outcome_of(result) == "accepted"`.
+Расширение, не «бит в бит»: `{"status": "refused"}` раньше был принятым, теперь нет; ни один
+канал репозитория так не отвечает.
+
+**`count_outcome(counters, hop, outcome) -> None`** прибавляет 1 к ключу из таблицы; `accepted`
+ничего не делает. Неизвестный `hop` или `outcome` — `ValueError` с фиксированным текстом без
+значения; `hop` проверяется раньше `outcome` и до ветки `accepted`. Лок держит вызывающий: менеджер
+(`ChannelRoutingManager`) — `_miss_lock`, адаптер моста (`SocketBridgeAdapter`) — `_stats_lock`.
+
+| Звено (`hop`) | `refused` | `failed` | Почему |
+|---|---|---|---|
+| `channel` | `channel_refused_records` | `channel_refused_records` | `channel_write_errors` остаётся «звено БРОСИЛО исключение» (ADR-CRM-011); ответ `error` — «сток жив и отказывает» |
+| `tap` | `tap_refused_records` (новый) | `tap_write_errors` | tap судил только исключения (ADR-CRM-016); ответ `error` и исключение приёмника — один дефект |
+| `bridge` | `lost_responses` | `lost_responses` | адаптер моста ведёт один счётчик потерянных ответов (`get_stats()["lost_responses"]`) |
+
+Ключ `tap_refused_records` введён Task 0.5 (`LOSS_COUNTER_KEYS`, `PLANE_COUNTER_KEYS`). Живые
+вызывающие `count_outcome`: `ChannelRoutingManager._emit_to_taps` (звено `tap`, 0.5a),
+`LoggerCore` (звено `channel`, закрытый логгер, 0.6) и `SocketBridgeAdapter` (звено `bridge`, 0.5b).
+
+### Форма пробы
+
+У звеньев разные носители исхода (число, булево, `None`, статус), одним `outcome_of(result)` их не
+прочесть. Контракт-тест читает ИМЕНОВАННЫЙ счётчик потерь. Пара «здоров / сломан»: здоров — звено
+принято и счётчик не вырос; сломан — звено не принято и счётчик вырос на число из таблицы.
+
+| id | построение | действие | «принято» берётся из | счётчик потерь: сломан / здоров |
+|---|---|---|---|---|
+| `file_channel_enospc` | `lm = LoggerManager(config={"log_directory": str(tmp_path)})`; `for ch in lm.get_all_channels(): ch.handler.stream = <поток, бросающий OSError(28, "No space left on device")>` (у потока должны быть `write`, `flush`, `tell`, `seek`: `RotatingFileHandler.shouldRollover` спрашивает позицию, без `tell` выходит `AttributeError` вместо ENOSPC; каналов 4: `system_file`, `messages_file`, `performance_file` — `FileChannel`, `console` — `ConsoleChannel`); тест утверждает, что пропатчено 4 канала | `lm.warning("w", module="probe")`; `lm.error("e", module="probe")` | принято ⇔ вырос `lm.get_stats()["channel_written_records"]` (здоров: +4, сломан: 0) | `lm.get_stats()["channel_refused_records"]`: +4 (две записи × два канала: `console` и `system_file`) / 0 |
+| `forward_dead_router` | `R` — синхронный фейк с `send_async(message, priority="normal")` и `send(message)`; сломан: оба бросают `ConnectionError("router dead")`; здоров: `send_async` → `None`, `send` → `{"status": "success"}`; `ch = RecordForwardChannel(router=R, subscriber="gui", sender="p")`; `lm = LoggerManager(config={"log_directory": str(tmp_path)})`; `lm.add_tap(ch, min_level="DEBUG")` | `n = lm._emit_to_taps({"timestamp": 1.0, "level": "ERROR", "message": "e", "module": "probe", "extra": {}}, "ERROR")` | целое `n`: `n > 0` — принято; `n == 0` — не принято (здоров: 1, сломан: 0) | `lm.get_stats()["tap_write_errors"]`: +1 / 0 |
+| `logger_after_shutdown` | `lm` как выше; класс `Probe(BaseManager, ObservableMixin)` с `__init__(self, lm): BaseManager.__init__(self, "probe"); ObservableMixin.__init__(self, managers={"logger": lm}, config={"logger": True})`, методами `initialize` (ставит `self.is_initialized = True`, возвращает `True`) и `_on_shutdown` (возвращает `True`) | `m = Probe(lm)`; `m.initialize()` (абстрактный метод, на исход не влияет); сломан: `lm.shutdown()`, затем `ok = m._log_warning("late")`; здоров: то же без `lm.shutdown()` | булево `ok`: `True` — принято; `False` — отказ (здоров: `True`, сломан: `False`) | `lm.get_stats()["channel_refused_records"]`: +1 / 0 |
+| `bridge_session_gone` | `R` — синхронный фейк: `request(msg, timeout=None)` → `{"success": True}`; `send(msg)` → сломан: `{"status": "error", "reason": "session not connected"}`, здоров: `{"status": "success"}`; `a = SocketBridgeAdapter(R, "ctl")` | `a.on_inbound({"type": "command", "command": "introspect.handlers", "sender": "ctl", "targets": ["preprocessor"], "data": {}, "request_id": "1"})` | исход НЕ читается: `on_inbound` возвращает `None`. Судит только счётчик | `a.get_stats()["lost_responses"]`: +1 / 0 |
+
+Для `logger_after_shutdown` сегодня растёт `unresolved_channel_records`, а `channel_refused_records`
+стоит на нуле — поэтому тест читает именованный ключ.
+
+---
+
 ## Публичный API
 
 ### `ChannelRoutingManager`
@@ -330,12 +381,15 @@ hot-reload. Порог задаётся уровнем; у плоскостей 
 **`_emit_to_taps` возвращает ЧИСЛО принявших, а не `None` (Ф5-добор, блокер
 Б1, ADR-CRM-016).** Раздача с нулём tap'ов, раздача, подавленная реентерабельностью
 (D1), и раздача, где все tap'ы бросили, — раньше выглядели снаружи одинаково:
-метод ничего не возвращал. `write()`, вызванный и НЕ бросивший, — это и есть
-«принял»; возврат `write()` на плоскости tap'ов не судится (в отличие от
-`_write_record_to_channels`, где есть `channel_accepted`) — приёмник,
-вернувший `{"status": "error"}` или `{"status": "dropped"}` БЕЗ исключения
-(так делают `RouterPushChannel.write` и `StoreTapChannel.write`), засчитан
-как принявший. Существующие вызывающие (`LoggerCore.write`,
+метод ничего не возвращал. «Принял» = `write()` вызван, НЕ бросил и его ответ
+`outcome_of` толкует как `accepted` (Task 0.5a; раздел «Исход звена» выше):
+приёмник, вернувший `{"status": "error"}` БЕЗ исключения, растит `tap_write_errors`,
+а `{"status": "dropped"}` / `{"status": "refused"}` — `tap_refused_records`, и в число
+принявших не входит (так отвечают `RecordForwardChannel` на мёртвом роутере,
+`RouterPushChannel.write` и `StoreTapChannel.write`). До 0.5a раздача читала только факт
+исключения, и такой приёмник засчитывался принявшим (README и ADR-CRM-016 той редакции
+этого не отражают). Ответ `None` — по-прежнему «принял» (быстрый путь без вызова `outcome_of`).
+Существующие вызывающие (`LoggerCore.write`,
 `StatsManager._do_flush`), которым число не нужно, звали и продолжают звать
 метод как statement — возврат отбрасывается молча, поведение не изменилось.
 `ObservationManager` — единственный потребитель числа: без него
@@ -578,6 +632,9 @@ channel_routing_module
 ```
 
 **Нет циклов**: `channel_routing_module → dispatch_module → base_manager`
+
+Имена звеньев `tap`, `bridge` и ключ `lost_responses` (его владелец — `router_module`) лежат в
+этом модуле в `LOSS_KEY_BY_HOP`: импорта из `router_module` нет — только имена.
 
 ---
 

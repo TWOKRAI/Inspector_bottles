@@ -107,7 +107,8 @@ class TestLoggerManager:
         manager = LoggerManager(manager_name="TestLogger", config=cfg)
         manager.initialize()
         ch = manager._channel_registry.get("frames_file")
-        assert ch.handler.__class__ is logging.FileHandler
+        # Task 0.4: у ветки rotate:false хэндлер — тонкий подкласс FileHandler с захватом ошибки
+        assert isinstance(ch.handler, logging.FileHandler)
         assert not isinstance(ch.handler, logging.handlers.RotatingFileHandler)
         manager.shutdown()
 

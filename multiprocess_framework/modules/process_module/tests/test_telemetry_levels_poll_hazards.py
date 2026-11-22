@@ -71,8 +71,20 @@ from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat i
 WORKERS = {
     # `cycles` кладёт сюда WorkerManager.get_worker_status (подмешивает снимок
     # CycleMetricsRecorder наверх статуса) — фикстура повторяет боевую форму.
-    "w0": {"status": "running", "effective_hz": 23.7, "cycle_duration_ms": 41.3, "cycles": 1201},
-    "w1": {"status": "running", "effective_hz": 31.9, "cycle_duration_ms": 17.6, "cycles": 3407},
+    "w0": {
+        "status": "running",
+        "effective_hz": 23.7,
+        "cycle_duration_ms": 41.3,
+        "cycles": 1201,
+        "last_cycle_age_s": 0.1,
+    },
+    "w1": {
+        "status": "running",
+        "effective_hz": 31.9,
+        "cycle_duration_ms": 17.6,
+        "cycles": 3407,
+        "last_cycle_age_s": 0.1,
+    },
 }
 
 # Полный набор ключей shm-payload'а (форма пути та же, что у push: state.shm.*).
@@ -322,7 +334,7 @@ class TestPollDoesNotTouchTheGate:
         assert proxy.merge_calls == 1, proxy.merged
         _path, data = proxy.merged[0]
         assert data["workers"]["w0"]["effective_hz"] == 23.7
-        assert data["state"]["fps"] == 31.9
+        assert data["state"]["fps"] == 23.7  # 0.8: пара самого медленного воркера (w0), а не максимум
 
 
 # ============================================================================ #
@@ -391,7 +403,7 @@ class TestSnapshotIsDetached:
 
         _path, data = proxy.merged[0]
         assert data["workers"]["w0"]["effective_hz"] == 23.7
-        assert data["state"]["fps"] == 31.9
+        assert data["state"]["fps"] == 23.7  # 0.8: пара самого медленного воркера (w0), а не максимум
         assert "injected" not in data["state"]
 
     def test_poll_does_not_mutate_the_worker_source(self) -> None:
@@ -561,7 +573,7 @@ class TestCyclesIsThePollOnlyFreshnessSignal:
 
     def test_worker_without_cycle_recorder_simply_has_no_field(self) -> None:
         """Воркер без `get_cycle_metrics` (не loop-раннер) — поля нет, команда цела."""
-        svc, cm = _make(workers={"plain": {"status": "running", "effective_hz": 12.5}})
+        svc, cm = _make(workers={"plain": {"status": "running", "effective_hz": 12.5, "last_cycle_age_s": 0.1}})
 
         levels = cm.dispatch("introspect.telemetry")["levels"]
 

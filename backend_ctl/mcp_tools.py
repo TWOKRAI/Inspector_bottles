@@ -964,7 +964,9 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "set_register_verified",
         "Verify-probe записи регистра (Ф1.6): write → readback introspect.registers → diff. "
-        "Возвращает verified/expected/actual — ловит молчаливые no-op'ы (нет регистра/поля).",
+        "Возвращает verdict (confirmed/vacuous/failed/unverifiable), success, vacuous, pre, "
+        "expected/actual; verified — алиас success. Отвергнутая хостом запись при уже равном значении — "
+        "vacuous, не успех. Ловит молчаливые no-op'ы (нет регистра/поля).",
         _obj(
             {
                 "process": _PROCESS,
@@ -1388,8 +1390,11 @@ TOOLS: List[ToolSpec] = [
         "Снимок телеметрии из ЛОКАЛЬНОГО read-model — read-only, 0 IPC (не ходит на сервер). "
         "Наполняется, пока активна state-подписка на 'processes.**' (напр. после watch_like_gui). "
         "process — снимок поддерева процесса; metric — фильтр по суффиксу метрики (например 'fps', "
-        "'effective_hz'). Каждая запись несёт корреляционный ключ process/worker. Пустой read-model "
-        "(не было дельт) → count=0 (не ошибка).",
+        "'effective_hz'). Каждая запись несёт корреляционный ключ process/worker и свежесть значения: "
+        "class (fresh/stale/no_data) и age_s (None при no_data). Лист None, лист без метки свежести "
+        "и путь вне processes.<X> — no_data. В ответе также gap_count и last_gap_at: дыры в ревизиях "
+        "state.changed, увиденные драйвером (кандидаты в дыры: подписка узкая, ревизия общая). Пустой "
+        "read-model (не было дельт) → count=0 (не ошибка).",
         _obj(
             {
                 "process": {"type": "string", "description": "Фильтр по процессу (снимок поддерева). Опц."},

@@ -51,7 +51,7 @@ class _Router:
 
 def _worker(**counters) -> dict:
     """Статус работающего воркера с реальной частотой (чтобы собрался агрегат ``state``)."""
-    return {"status": "running", "effective_hz": 90.0, **counters}
+    return {"status": "running", "effective_hz": 90.0, "last_cycle_age_s": 0.1, **counters}
 
 
 _COUNTERS = (

@@ -546,6 +546,13 @@ class TestNoEmergencyLogInOperatorFacingPositions:
         # Звучит РАЗ НА КЛЮЧ, не на попытку — сторож в
         # test_f4_task413_slot_debited_on_delivery.py::test_criterion4b.
         "multiprocess_framework/modules/logger_module/core/windowed_voice.py": 1,
+        # +2 к инвентарю 2026-11-21, Task 0.6 (ADR-CRM-019). ``LoggerCore._refuse_closed``:
+        # запись в ЗАКРЫТЫЙ логгер больше не молчит — строка уходит на аварийный выход
+        # (две ветки одного вызова: с именем модуля и без). Рассказать об этом через
+        # плоскость голоса нельзя по условию: она и закрыта. Позиция законная, как у
+        # ``windowed_voice.py``; оператору строка не адресована. Дроссель 20 строк под
+        # ``_miss_lock`` — сторож в ``logger_module/tests/test_after_shutdown_outcome.py``.
+        "multiprocess_framework/modules/logger_module/core/logger_core.py": 2,
         # +2 к инвентарю 2026-09-25 (внесены L-2 Task 1.2, aebfdcb7; сторож не был
         # обновлён тогда — поймал радиус gui-service после слияния). Чем являются:
         # строка итога хука выхода ``release_queues_at_exit`` и её ошибка в

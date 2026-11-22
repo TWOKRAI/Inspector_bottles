@@ -26,7 +26,10 @@ from multiprocess_framework.modules.process_module.heartbeat.telemetry import (
 
 
 def _workers(n: int = 2) -> dict:
-    return {f"w{i}": {"status": "running", "effective_hz": 10.0 + i, "cycle_duration_ms": 5.0 + i} for i in range(n)}
+    return {
+        f"w{i}": {"status": "running", "effective_hz": 10.0 + i, "cycle_duration_ms": 5.0 + i, "last_cycle_age_s": 0.1}
+        for i in range(n)
+    }
 
 
 class TestGatedMetricsLocation:
@@ -154,8 +157,9 @@ class TestBuildFilter:
             "status": "running",
             "effective_hz": 10.0,
             "cycle_duration_ms": 5.0,
+            "last_cycle_age_s": 0.1,
         }
-        assert data["state"] == {"fps": 11.0, "latency_ms": 6.0}
+        assert data["state"] == {"fps": 10.0, "latency_ms": 5.0}  # пара самого медленного (0.8)
 
     def test_disabled_effective_hz_absent(self) -> None:
         """effective_hz не в allowed → его нет в per-worker payload (status остаётся)."""
@@ -169,8 +173,10 @@ class TestBuildFilter:
     def test_only_fps(self) -> None:
         """allowed={fps} → нет hz/cycle/latency; есть status + агрегат fps."""
         _, data = build_worker_telemetry(_workers(2), "proc", {"fps"})
+        # ни effective_hz, ни last_cycle_age_s: возраст идёт только вместе с разрешённым effective_hz (0.8)
         assert data["workers"]["w0"] == {"status": "running"}
-        assert data["state"] == {"fps": 11.0}
+        # пара — самый медленный воркер (w0, 10 Гц), а не максимум (0.8)
+        assert data["state"] == {"fps": 10.0}
         assert "latency_ms" not in data["state"]
 
     def test_empty_allowed_only_status_no_state(self) -> None:
@@ -189,7 +195,8 @@ class TestBuildFilter:
     def test_only_latency_ms_no_fps(self) -> None:
         """allowed={latency_ms} без fps → state={latency_ms}, без fps."""
         _, data = build_worker_telemetry(_workers(2), "proc", {"latency_ms"})
-        assert data["state"] == {"latency_ms": 6.0}
+        # latency_ms — cycle_duration_ms воркера пары (w0), а не максимум (0.8)
+        assert data["state"] == {"latency_ms": 5.0}
         assert "fps" not in data["state"]
 
 
@@ -374,7 +381,7 @@ class TestPublishMetricsGated:
         hb._publish_telemetry_to_tree(_workers(2))
         _, data = proxy.merged[0]
         assert "effective_hz" in data["workers"]["w0"]
-        assert data["state"] == {"fps": 11.0, "latency_ms": 6.0}
+        assert data["state"] == {"fps": 10.0, "latency_ms": 5.0}  # пара самого медленного (0.8)
 
 
 class TestShmGated:

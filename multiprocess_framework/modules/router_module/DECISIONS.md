@@ -323,6 +323,10 @@ release за lock-free refcount пула.
   строка соединения несёт session, обработчик сразу отвечает адресно — под J5 красный.
 - Счётчики `SocketBridgeAdapter` (`_lost_responses`, `_observer_errors`) теперь пишутся из
   нескольких потоков — под одним `threading.Lock` (инкремент и чтение в `get_stats`).
+  **[Дополнено 2026-11-21 (Task 0.5b, ADR-RTR-016): `lost_responses` теперь ведёт `count_outcome` по
+  звену `bridge` в словаре `_counters` под тем же `_stats_lock`, и растёт он по ИСХОДУ ответа
+  `router.send` (в том числе `{"status": "error", "reason": "session not connected"}`), а не только по
+  исключению. Лог о потере пишется уже ВНЕ `_stats_lock`.]**
 
 **Дополнение 2 (2026-09-25, ревью 1.3a, итерация 1).**
 
@@ -347,6 +351,10 @@ release за lock-free refcount пула.
   max `send()` 503.7 / 504.7 / 504.6 мс, WARNING — 1, EBADF — 0, A снят; до правки на том
   же сценарии — max 503.7 мс, но 3 WARNING, из них 2 EBADF (секундный простой ревьюера
   этим сценарием не воспроизвёлся).
+- **[Дополнено 2026-11-21 (Task 0.5c, ADR-RTR-016): WARNING об отказавшем сокете теперь пишется ПОСЛЕ
+  выхода из-под `_write_lock` (`_write_locked` собирает тексты в `failures`, `_log_write_failures` пишет их
+  вне лока). Число WARNING (один на сокет) прежнее; причина переноса — самоблокировка через tap
+  форвардера, см. ADR-RTR-016.]**
 - Тесты: `test_session_closed_after_handler_on_write_failure_path` (до правки
   `['closed:s8']` при живом обработчике), `test_second_sender_to_stuck_socket_does_not_wait_again`
   (до правки — EBADF в WARNING). Счётчики `_rx`/`_tx` — под `_stats_lock`.
@@ -450,3 +458,80 @@ success=_result_is_success(r))` (тот же конверт, что у авто-
 `key_missing` приходят инициатору одним ответом с `success=False`.
 
 **Reversible:** yes. **Refs:** `plans/lifecycle-stop-ownership/tasks/T1.9a.md` (D4), ADR-CMD-006, ADR-WRK-005.
+
+
+## ADR-RTR-016: `RecordForwardChannel` шлёт синхронным `send` в потоке эмиттера (хаб — поток хаба) до Task 2.4; лог вне локов; потока-писателя нет (Task 0.5b, 0.5c)
+
+**Статус:** принято (2026-11-21, `plans/2026-11-21_observability-signal-contracts/`, Task 0.5b/0.5c; решение
+владельца по вопросу Opus: «принять до 2.4, измерить на стенде»). Условие пересмотра — в конце.
+
+**Контекст.** Живой хвост хаб → GUI (`RecordForwardChannel`, подписан как tap) отвечал `success` на любой пуш:
+500 `success` при 500 `delivery_failed` (ревизия L-3). Отказ роутера не попадал ни в счётчик, ни в ответ
+tap'а. Чтобы судить ответ доставки, форвардер должен его иметь — то есть звать `router.send`, а не
+`send_async`. Цена: поток, эмитирующий запись, ждёт доставку, а `SocketChannel.send` на медленном клиенте стоит
+до таймаута сокета (0.5 с, ADR-RTR-012).
+
+**Альтернативы.**
+
+**A. Синхронный `router.send` в потоке эмиттера; ответ судит `outcome_of` (выбрано до Task 2.4).**
+- За: ответ роутера есть в момент `write()`, исход считается там, где он известен (`sent` / `dropped` /
+  `send_failed`, `tap_refused_records`, `tap_write_errors`); ни новых потоков, ни новой очереди.
+- Против: эмиттер блокируется на медленном клиенте; на хабе это может задеть такт heartbeat (не измерено).
+
+**B. `send_async` (прежнее поведение).**
+- Против: `AsyncSender` возвращает исход постановки в очередь, а не доставки; судить нечем — ровно L-3. Отвергнуто.
+
+**C. Поток-писатель с очередью внутри `RecordForwardChannel`.**
+- За: эмиттер не ждёт.
+- Против (совет Opus): `write()` возвращает ответ до реальной отправки, значит судимый ответ теряется (снова
+  L-3), а очередь встаёт третьей поверх очереди `observability` роутера (глубина 256, `drop_oldest`) и
+  `AsyncSender`; потеря записи в такой очереди потребует ещё одного счётчика. Отвергнуто.
+
+**D. Неблокирующая отправка в транспорте: ограниченная очередь на выход у сессии `SocketChannel` (Task 2.4, B-5).**
+- За: место, где блокировка и возникает; медленный клиент не держит общий `_write_lock`; судимый исход
+  остаётся у транспорта.
+- Против: работа среза 2, не среза 0. Это целевое место неблокирующей отправки.
+
+**Решение.** Выбрана A до Task 2.4; целевое место неблокирующей отправки — D. Не вводить поток-писатель (C).
+
+1. **Исход судит `outcome_of`.** `accepted` → `success` (`sent`); `refused` → `dropped` с `reason: "router refused"`;
+   `failed`, исключение `send` и `router=None` → `error`. Исключение наружу не уходит (хвост best-effort).
+2. **`reason` фиксирован.** `"router refused"`, `"router failed"`, `"router=None"` или имя класса исключения. Текст
+   `reason` роутера не копируется: он не доверенный и может нести значения полей, а исход уже несут статус и
+   счётчик (ревью этапа 5).
+3. **Лог вне `_write_lock` и `_stats_lock`.** WARNING об отказавшем сокете `SocketChannel` пишет уже после выхода
+   из-под `_write_lock` (`_write_locked` копит `failures`, `_log_write_failures` пишет). Причина: WARNING уходит
+   в tap форвардера, тот синхронным `send` приходит в тот же канал и берёт тот же `threading.Lock` (не
+   реентерабелен) — самоблокировка (0.5c, тест session-hazard в `test_forward_outcome.py`). Так же `SocketBridgeAdapter` пишет `error` о
+   потерянном ответе после выхода из `_stats_lock` (0.5b), а `RecordForwardChannel` берёт `_counters_lock` ПОСЛЕ
+   возврата `send`, не вокруг него: иначе эмиттеры сериализовались бы на доставке. Правило для всего пути `send`:
+   под локом не логировать.
+4. **Счётчики форвардера:** `counters_snapshot()` — `sent` / `dropped` / `send_failed` в записях, `messages` в
+   пушах; `sent + dropped + send_failed` равно числу предложенных записей. Читает секция `forwarders` ответа
+   `introspect.observability` (`process_module`, `forwarders_plane_report`).
+5. **Мост порта (0.5b).** `SocketBridgeAdapter.on_inbound` судит ВОЗВРАТ `router.send` ответа driver'у:
+   `{"status": "error", "reason": "session not connected"}` раньше проходил как доставленный, теперь растит
+   `lost_responses`; исключение `send` сводится к `error` с именем класса.
+
+**Последствия.**
+- Поток эмиттера на хабе ждёт доставку хвоста; верхняя оценка на медленного клиента — таймаут сокета 0.5 с
+  (ADR-RTR-012), после чего сокет помечается мёртвым и последующие отправители его пропускают.
+- Правило «под локом на пути `send` не логировать» — теперь ограничение для любого нового кода на этом пути.
+- Очередь `observability` роутера (глубина 256, `drop_oldest`) не менялась.
+
+**Известные риски / не проверено.**
+- Такт heartbeat хаба при синхронной отправке на стенде не мерился. Замер Opus на macOS вне стенда (скрипт
+  `slow_reader.py` в его scratchpad); повторные остановки у медленного, но живого клиента не воспроизведены; на
+  Windows буферы ядра другие.
+- Цепочка «конвоя» на чужих локах вне `router_module` не проверена.
+
+**Условие пересмотра.** Такт heartbeat хаба выходит за бюджет на стенде: p50/p99 при активном хвосте
+`backend_ctl` и не читающем клиенте (ожидание Opus: один пик ≤ 0.5 с, клиент снят). Тогда минимальная часть Task
+2.4 (очередь на выход у сессии `SocketChannel`) переносится в срез 0 — решение владельца. Число бюджета в тексте
+решения не названо: его задаёт стенд. Поток-писатель (C) не вводить и тогда.
+
+**Reversible:** да (вернуть `send_async` в `_push` вернёт L-3).
+**Refs:** ADR-RTR-012 (потолки и таймаут записи), ADR-CRM-019 (исход звена, `LOSS_KEY_BY_HOP`),
+`channel_routing_module/observability/record_forward_channel.py`, `router_module/channels/socket_channel.py`
+(`_write_locked`, `_log_write_failures`), `router_module/adapters/socket_bridge_adapter.py`,
+`plans/2026-11-21_observability-signal-contracts/reports/phase0.opus-advice.md`.

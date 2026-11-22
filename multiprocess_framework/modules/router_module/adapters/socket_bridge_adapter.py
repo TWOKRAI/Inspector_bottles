@@ -23,6 +23,8 @@ import threading
 from typing import Any, Callable, Dict, Optional
 
 from ..._fallback import FallbackLogger
+from ...channel_routing_module.core.channel_routing_manager import count_outcome
+from ...channel_routing_module.interfaces import outcome_of
 
 # A-4 (bug-hunt 2026-07-20 §5): в модуле не было ни логов, ни счётчиков — потеря
 # ответа driver'у проходила безмолвно. FallbackLogger — стандартный паттерн
@@ -64,8 +66,10 @@ class SocketBridgeAdapter:
         # применение). Публичный счётчик — get_stats().
         # Счётчики инкрементятся из нескольких потоков-обработчиков SocketChannel
         # (ADR-RTR-012) — один лок на оба счётчика, инкремент и чтение под ним.
+        # Task 0.5b: потери — словарь, его ведёт count_outcome по строке "bridge"
+        # таблицы LOSS_KEY_BY_HOP (ключ lost_responses); носитель наружу прежний.
         self._stats_lock = threading.Lock()
-        self._lost_responses = 0
+        self._counters: Dict[str, int] = {"lost_responses": 0}
         self._on_request = on_request
         self._observer_errors = 0
 
@@ -128,23 +132,33 @@ class SocketBridgeAdapter:
             # Обратный адрес доставки — SocketChannel.send резолвит его в один сокет.
             response["session"] = sid
         try:
-            self._router.send(response)
+            sent = self._router.send(response)
         except Exception as exc:  # noqa: BLE001 — не роняем read-loop, если ответ не ушёл (best-effort)
             # A-4: раньше здесь было голое `pass` — потеря ответа проходила без следа.
-            # Не re-raise (симметрично прежнему best-effort), но видимо: счётчик + лог.
+            # Не re-raise (симметрично прежнему best-effort). Task 0.5b: исключение
+            # сводится к ответу error и считается тем же кодом, что и ответ-словарь.
+            # reason — только имя класса: текст исключения может нести значения ответа.
+            sent = {"status": "error", "reason": type(exc).__name__}
+        # Task 0.5b: судим ВОЗВРАТ send. _do_send роутера почти не бросает — основной
+        # путь потери ответа это {"status": "error", "reason": "session not connected"},
+        # и до 0.5b он проходил как доставленный.
+        outcome = outcome_of(sent)
+        if outcome != "accepted":
             with self._stats_lock:
-                self._lost_responses += 1
-                lost = self._lost_responses
+                count_outcome(self._counters, "bridge", outcome)
+                lost = self._counters["lost_responses"]
+            # Только причина, request_id и канал: в sent/response — полезная нагрузка
+            # ответа driver'у, в лог она не идёт. outcome != accepted => sent — dict.
             _logger.error(
-                "SocketBridgeAdapter.on_inbound: ответ driver'у не отправлен "
+                "SocketBridgeAdapter.on_inbound: ответ driver'у не доставлен "
                 "(request_id=%s, channel=%s): %s [потеряно всего: %d]",
                 corr,
                 self._channel_name,
-                exc,
+                sent.get("reason"),
                 lost,
             )
 
     def get_stats(self) -> Dict[str, Any]:
-        """A-4: потерянные ответы (router.send упал); 4.4: упавшие наблюдатели on_request."""
+        """A-4/0.5b: ответы, не доставленные router.send (исключение или отказ); 4.4: упавшие наблюдатели on_request."""
         with self._stats_lock:
-            return {"lost_responses": self._lost_responses, "observer_errors": self._observer_errors}
+            return {"lost_responses": self._counters["lost_responses"], "observer_errors": self._observer_errors}

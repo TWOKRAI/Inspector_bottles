@@ -1146,6 +1146,7 @@ class BuiltinCommands:
             EVENT_SELECTOR_ATTR,
             document_plane_report,
             event_plane_report,
+            forwarders_plane_report,
             observation_plane_report,
             stats_plane_report,
         )
@@ -1259,6 +1260,9 @@ class BuiltinCommands:
             # рекордер, а не конфиг: пересчёт из того же источника показывал бы
             # согласие всегда, в том числе когда правка до него не доехала.
             **flight_plane_report(svc),
+            # Task 0.5c (c6): счётчики форвардеров хвоста по подписчикам —
+            # sent/messages/dropped/send_failed; читается живой реестр процесса.
+            **forwarders_plane_report(svc),
             "audit": layers.audit.view(audit_limit),
             **extra,
             "layers": {
@@ -1540,6 +1544,10 @@ class BuiltinCommands:
           ``None`` = сенсоров нет (нет ``ProcessHeartbeat`` / воркеров / показаний), а
           не «команда не сработала». Новой команды опроса не заводится — развилка РТ-3
           решена расширением этой (ADR-PM-035);
+        - ``telemetry_publish_failed`` (Task 0.9, M-7) — сколько раз публикация телеметрии процесса в
+          дерево бросила исключение (``proxy.merge`` / ``proxy.delete`` / публикация health) с старта.
+          Недоставку роутера (``StateProxy._send`` глотает её сам, ERROR в его логе) счётчик не видит.
+          ``None`` — у процесса нет ``ProcessHeartbeat``;
         - ``snapshot_ts`` — **wall-clock** (эпоха, ``time.time()``) момента сборки
           ЭТОГО ОТВЕТА. Эпоха, а не ``time.monotonic()``: monotonic одного процесса
           несравним с часами потребителя на другой стороне IPC. Тот же выбор и по той
@@ -1588,6 +1596,9 @@ class BuiltinCommands:
             # не выставленный наружу раньше. Ключ присутствует ВСЕГДА, тем же приёмом,
             # что `levels` строкой выше: у процесса без heartbeat'а спрашивать нечего.
             "tick_effective_sec": None,
+            # Task 0.9 (M-7): число отказов публикации телеметрии в дерево (merge/delete/health) с
+            # старта процесса. Ключ ВСЕГДА (у процесса без heartbeat'а — None), тем же приёмом, что `levels`.
+            "telemetry_publish_failed": None,
             # Штамп берётся ДО снятия — снимок сделан в этот момент или сразу после,
             # никогда раньше.
             "snapshot_ts": time.time(),
@@ -1608,6 +1619,7 @@ class BuiltinCommands:
                 result["tick_effective_sec"] = heartbeat.current_telemetry_tick()
             except Exception:  # noqa: BLE001 — best-effort секция, не отказ команды
                 result["tick_effective_sec"] = None
+            result["telemetry_publish_failed"] = getattr(heartbeat, "telemetry_publish_failed", None)
             try:
                 result["levels"] = heartbeat.current_levels_snapshot()
             except Exception as exc:  # noqa: BLE001 — best-effort секция, не отказ команды
