@@ -5,7 +5,7 @@
 ## Что запушено (ветки на origin)
 | Ветка | Что | Состояние |
 |---|---|---|
-| `test/sim-audit-gui` | отчёт полосы, 27 заявок в `plans/queue/inbox/` (26 находок + `_27` сводная строка очереди по корневым дефектам Р2), `wire_audit --layout-system` (код + 24 приёмочных + 35 hazard тестов), урок в память, этот handoff | ревью `wire_audit` APPROVED (раунд 2), 272 теста зелёные. Растёт от `e4443c487`; ветка `test/sim-wire-audit` (в worktree `--lane-sim-audit`) ушла на 1 доккоммит (`de0106351`, промпт полосы) — при слиянии объединить |
+| `feat/sim-audit-gui` | отчёт полосы, 27 заявок в `plans/queue/inbox/` (26 находок + `_27` сводная строка очереди по корневым дефектам Р2), `wire_audit --layout-system` (код + 24 приёмочных + 35 hazard тестов), урок в память, этот handoff | ревью `wire_audit` APPROVED (раунд 2), 272 теста зелёные. Растёт от `e4443c487`; ветка `test/sim-wire-audit` (в worktree `--lane-sim-audit`) ушла на 1 доккоммит (`de0106351`, промпт полосы) — при слиянии объединить |
 | `chore/qt-mcp-probe-hook` | проба qt-mcp в `gui`: один путь `QT_MCP_PROBE=1`/`QT_MCP_PORT`, пин сервера в `plugin.json`, тесты (25), правки README/`.rules/gui.md` | ревью APPROVED (раунд 2 из 2). НЕ сделана живая проверка окна + ping (строка `qt-mcp probe installed on localhost:` в логе `gui`) |
 | `chore/deps-py314` | Python 3.14, `pygame` снят (решение владельца), `pytest-timeout` в dev, `uv.lock` пересобран | полный прогон тестов НЕ завершён (см. ниже); слияние только после сравнения с базой и через координатора |
 | `feat/pult-belt-speed` | `VfdClient.run()` без частоты стартует на последней заданной, `belt_freq` в двух рецептах | 737 тестов зелёные; ревью стадии 5 НЕ было; на реальном ПЧ запуск — решение владельца |
@@ -35,3 +35,5 @@
 - Ветка `feat/pult-belt-speed` и `chore/deps-py314` закоммичены ради переноса, без ревью и без полного зелёного прогона.
 - В коммитах `Layer:` подобран из разрешённого списка (`services, prototype`, `infra`) — проверить хуком при слиянии.
 - Агентные отчёты (инъекции wire_audit, ревью, qt-mcp) лежат в `docs/reports/2026-11-22_sim-audit-gui_wire/` и `docs/reports/2026-11-22_qt-mcp-probe-fixes.md` (в ветках), промежуточные скрипты — только в scratchpad MacBook.
+- На origin уже есть ветка `test` (без слеша): ветки вида `test/…` не пушатся («directory file conflict»). Поэтому ветка полосы переименована `test/sim-audit-gui` → `feat/sim-audit-gui`; ветка `test/sim-wire-audit` осталась локальной (её история — предок `feat/sim-audit-gui`, на origin уехала в составе его коммитов).
+- Полный прогон 3.14 на MacBook шёл фоновым агентом в момент push: если сессия Mac жива — он допишет отчёт `docs/reports/2026-11-22_deps-py314_test-run.md` в дереве `--deps-py314` (не в git); на Windows считать прогон несделанным.
