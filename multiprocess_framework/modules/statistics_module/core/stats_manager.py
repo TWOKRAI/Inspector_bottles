@@ -244,6 +244,8 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         self._default_tags: Dict[str, str] = cfg.get("default_tags") or {}
         self._metrics: Dict[str, MetricRecord] = {}
         self._metrics_lock = threading.Lock()
+        #: Записи другого вида под занятым ключом (0.11b); меняется только под ``_metrics_lock``.
+        self._metric_kind_conflicts: int = 0
         # Ф5, задача 5.3 — порт наблюдений: пока не подключён явно
         # (:meth:`attach_observation_port`), менеджер работает СТАРОЙ прямой
         # дорогой (см. докстринг ``record_metric``). Это фолбэк для
@@ -700,8 +702,15 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         name: str,
         metric_type: MetricType,
         merged_tags: Dict[str, str],
-    ) -> Optional[MetricRecord]:
-        """Получить или создать MetricRecord (thread-safe).
+    ) -> "tuple[Optional[MetricRecord], bool]":
+        """Получить или создать MetricRecord (thread-safe) и признак конфликта вида.
+
+        Конфликт (0.11b, M-4) — под занятым ключом лежит запись ДРУГОГО вида
+        (``MetricType``): ключ серии — имя + теги, вида в нём нет (вид в ключ
+        вносит 1.2). Сравнение, счётчик ``metric_kind_conflicts`` и возврат
+        признака — под одним ``_metrics_lock``: счётчик иначе терял бы
+        инкременты, а голос по признаку звучит уже ВНЕ лока (:meth:`_apply_metric`).
+        Конфликтная запись не пишется в серию: первая серия остаётся нетронутой.
 
         ``None`` — потолок серий живого слоя (2.2). Этот слой не чистится
         вовсе: ``reset_metrics`` зовут вручную, а на живом стенде за две минуты
@@ -711,6 +720,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         случае, и это разделение названо решением Р2.2-7.
         """
         key = _metric_key(name, merged_tags)
+        conflict = False
         with self._metrics_lock:
             record = self._metrics.get(key)
             if record is None:
@@ -721,7 +731,10 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                         tags=merged_tags,
                     )
                     self._metrics[key] = record
-        return record
+            elif record.metric_type is not metric_type:
+                conflict = True
+                self._metric_kind_conflicts += 1
+        return record, conflict
 
     def _emit_record(self, data: Dict[str, Any]) -> None:
         """Единственная точка эмиссии метрики: tap'ы + буфер агрегации.
@@ -1024,7 +1037,20 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
             return
         if metric_type is MetricType.COUNTER:
             value = float(value)
-        rec = self._ensure_record(name, metric_type, merged_tags)
+        rec, conflict = self._ensure_record(name, metric_type, merged_tags)
+        if conflict:
+            # Другой вид под занятым ключом (0.11b): запись отвергнута целиком, без
+            # эмиссии, первая серия нетронута; счёт уже сделан под локом. Голос —
+            # только здесь, вне ``_metrics_lock``: логгер сам пишет метрики.
+            self.log_windowed(
+                f"metric_kind_conflict:{_metric_key(name, merged_tags)}",
+                level="warning",
+                message="запись метрики другого вида под занятым ключом отвергнута",
+                name=name,
+                kept=rec.metric_type.value,
+                rejected=metric_type.value,
+            )
+            return
         if rec is not None:
             if metric_type is MetricType.COUNTER:
                 rec.add_counter(value)
@@ -1180,6 +1206,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         with self._metrics_lock:
             stats["metrics_count"] = len(self._metrics)
             stats["metric_names"] = sorted({r.name for r in self._metrics.values()})
+            stats["metric_kind_conflicts"] = self._metric_kind_conflicts
         stats["max_series"] = self._live_guard.limit
         stats["series_dropped"] = live["series"]
         stats["observations_dropped"] = live["observations"]
