@@ -131,6 +131,10 @@ class RobotIoPlugin(ProcessModulePlugin):
             if isinstance(job, dict):
                 job_data = self._build_job_data(job)
                 if job_data is not None:
+                    # Подпись для оператора при отказе; форвардер вынимает её до запроса к хабу.
+                    char, slot = job.get("char"), job.get("slot")
+                    if char is not None and slot is not None:
+                        job_data["_label"] = f"буква '{char}', ячейка {slot}"
                     self._enqueue(job_data)
             # Возврат: список поз → команды robot_return_job (каждая отдельным заданием).
             ret_jobs = item.get(self._reg.return_jobs_source)
@@ -227,6 +231,8 @@ class RobotIoPlugin(ProcessModulePlugin):
 
             # Команда: укладка (robot_enqueue_job, дефолт) или возврат (robot_return_job).
             command = job.pop("_command", "robot_enqueue_job")
+            # Подпись задания (для голоса отказа) — до запроса: в хаб ключ не уходит.
+            label = job.pop("_label", None) or command
             try:
                 result = self._client.request(
                     command,
@@ -237,28 +243,63 @@ class RobotIoPlugin(ProcessModulePlugin):
                 self._reg.jobs_dropped += 1
                 self._reg.hub_errors += 1
                 self._reg.last_error = str(exc)
-                self._ctx.health.report_error(exc, context="robot_io.forward", throttle=30.0)
+                self._note_job_dropped(label, str(exc))
+                # Один разъём на точку (ADR-PM-030 Р-9/Р-10): голос только через health,
+                # throttle=0.0 — на каждое отброшенное задание, с подписью.
+                self._ctx.health.report_error(exc, context="robot_io.forward", throttle=0.0, job=label)
                 self._last_was_error = True
+                self._publish_state()
                 continue
 
             if result.get("status") == "ok":
                 self._reg.jobs_forwarded += 1
+                self._reg.forward_ok = True
                 # once-per-transition: при восстановлении — лог
                 if self._last_was_error:
                     self._ctx.log_info("RobotIoPlugin: hub восстановлен")
                     self._last_was_error = False
+                self._publish_state()
             else:
                 self._reg.jobs_dropped += 1
                 self._reg.hub_errors += 1
                 error_msg = result.get("message", "неизвестная ошибка hub")
                 self._reg.last_error = error_msg
+                self._note_job_dropped(label, error_msg)
                 # Отказ ВОЗВРАТОМ статуса (не исключением): hub ответил, но не "ok".
                 # Своё имя класса и свой context — не схлопнуться в один ключ окна
                 # с веткой транспортного исключения выше.
                 self._ctx.health.report_error(
-                    ResourceUnavailable(f"hub отказ: {error_msg}"),
+                    ResourceUnavailable(f"hub отказ ({label}): {error_msg}"),
                     context="robot_io.forward.refused",
+                    throttle=0.0,
                     device_id=self._reg.device_id,
                     hub_message=error_msg,
+                    job=label,
                 )
                 self._last_was_error = True
+                self._publish_state()
+
+    def _note_job_dropped(self, label: str, reason: str) -> None:
+        """Запомнить отброшенное задание в регистрах (без логирования)."""
+        self._reg.last_dropped_job = f"{label}: {reason}"
+        self._reg.forward_ok = False
+
+    def _publish_state(self) -> None:
+        """Выложить статус форвардера в state процесса; сбой state форвардер не останавливает."""
+        proxy = getattr(self._ctx, "state_proxy", None)
+        if proxy is None:
+            return
+        try:
+            proxy.merge(
+                f"processes.{self._ctx.process_name}.state.robot_io",
+                {
+                    "forward_ok": self._reg.forward_ok,
+                    "jobs_forwarded": self._reg.jobs_forwarded,
+                    "jobs_dropped": self._reg.jobs_dropped,
+                    "hub_errors": self._reg.hub_errors,
+                    "last_error": self._reg.last_error,
+                    "last_dropped_job": self._reg.last_dropped_job,
+                },
+            )
+        except Exception:  # noqa: BLE001 - state не должен ронять форвардер
+            pass
