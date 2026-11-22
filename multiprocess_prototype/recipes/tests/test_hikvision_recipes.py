@@ -52,8 +52,8 @@ def test_recipe_has_hikvision_camera(name: str) -> None:
 @pytest.mark.parametrize("name", _ALL)
 def test_camera_keys_are_register_fields(name: str) -> None:
     fields = set(HikvisionCameraRegisters.model_fields)
-    # ключи самого плагина (имя, класс, категория) и run_locked_commands читает плагин, не register
-    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands"}
+    # ключи самого плагина (имя, класс, категория), run_locked_commands и readiness читает плагин, не register
+    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands", "readiness"}
     for proc, cfg in _camera_nodes(name).values():
         unknown = set(cfg) - allowed
         assert not unknown, f"{name}: ключи вне register'а: {sorted(unknown)}"
@@ -173,3 +173,36 @@ def test_recipe_check_is_empty(name: str, plugins_discovered: None) -> None:
     topology.infer_missing_collectors()
     errors = topology.check()
     assert errors == [], f"{name}: check() вернул ошибки:\n  " + "\n  ".join(errors)
+
+
+def test_beta_camera_readiness_makes_stopping_block_start() -> None:
+    """R4-1 (2.2c): ключ readiness β повышает `stopping` камеры с out_of_spec (не блокирует) до check_function (блокирует)."""
+    from types import SimpleNamespace
+
+    from multiprocess_framework.modules.process_module.health.readiness_policy import (
+        NEVER_CLEAN,
+        apply_policy,
+        parse_policy,
+    )
+    from multiprocess_framework.modules.process_module.health.schema import READINESS_BLOCKING_SEVERITIES
+    from Services.camera_device.plugin_base import CameraDevicePlugin
+
+    cfg = _camera_nodes("hikvision_letter_robot")["camera_0"][1]
+    assert cfg["readiness"] == {"severity": {"out_of_spec": "check_function"}}
+    stub = SimpleNamespace(_session=SimpleNamespace(state="stopping"), _reg=SimpleNamespace(auto_start=True))
+    items = [(d["severity"], d["reason"]) for d in CameraDevicePlugin.readiness(stub, None)]
+    assert [sev for sev, _ in items] == ["out_of_spec"]
+
+    def blocks(policy) -> bool:
+        resolved, _ = apply_policy(items, policy, NEVER_CLEAN, 100.0)
+        return any(sev in READINESS_BLOCKING_SEVERITIES for sev, _ in resolved)
+
+    assert (blocks(parse_policy(None)), blocks(parse_policy(cfg["readiness"]))) == (False, True)
+
+
+def test_beta_devices_have_no_reconnect_limit() -> None:
+    """R4-1 (решение владельца 2026-11-20): у `robot_main` и `vfd_belt` β лимит переподключения снят (0)."""
+    raw = yaml.safe_load((_RECIPES_DIR / "hikvision_letter_robot.yaml").read_text(encoding="utf-8"))
+    params = {d["id"]: d["params"] for d in raw["devices"]}
+    assert params["robot_main"]["max_reconnect_attempts"] == 0
+    assert params["vfd_belt"]["max_reconnect_attempts"] == 0

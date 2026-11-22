@@ -29,6 +29,11 @@
                   "exposure_time": 40000.0,
                   "frame_rate": 25.0,
                   "frame_rate_enable": true,
+                  "readiness": {
+                    "severity": {
+                      "out_of_spec": "check_function"
+                    }
+                  },
                   "resolution_height": 1080,
                   "resolution_width": 1440,
                   "run_locked_commands": [
@@ -71,6 +76,7 @@
                     "name": "Робот Delta",
                     "params": {
                       "feed_poll_s": 0.05,
+                      "max_reconnect_attempts": 0,
                       "telemetry_interval_s": 0.5,
                       "word_order": "little"
                     },
@@ -89,6 +95,7 @@
                     "params": {
                       "default_freq_hz": 10.0,
                       "freq_max_hz": 50.0,
+                      "max_reconnect_attempts": 0,
                       "poll_interval_s": 0.5,
                       "stale_polls_limit": 6
                     },
@@ -998,6 +1005,11 @@
               "exposure_time": 40000.0,
               "frame_rate": 25.0,
               "frame_rate_enable": true,
+              "readiness": {
+                "severity": {
+                  "out_of_spec": "check_function"
+                }
+              },
               "resolution_height": 1080,
               "resolution_width": 1440,
               "run_locked_commands": [
@@ -1410,6 +1422,7 @@
                 "name": "Робот Delta",
                 "params": {
                   "feed_poll_s": 0.05,
+                  "max_reconnect_attempts": 0,
                   "telemetry_interval_s": 0.5,
                   "word_order": "little"
                 },
@@ -1428,6 +1441,7 @@
                 "params": {
                   "default_freq_hz": 10.0,
                   "freq_max_hz": 50.0,
+                  "max_reconnect_attempts": 0,
                   "poll_interval_s": 0.5,
                   "stale_polls_limit": 6
                 },

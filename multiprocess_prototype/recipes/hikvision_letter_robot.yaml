@@ -66,6 +66,7 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
   - id: vfd_belt
     name: ПЧ лента
     kind: vfd
@@ -78,6 +79,7 @@ devices:
       default_freq_hz: 10.0
       poll_interval_s: 0.5
       stale_polls_limit: 6
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
 blueprint:
   name: default
   description: ''
@@ -132,6 +134,12 @@ blueprint:
             trigger_managed: true
             trigger_mode: "Off"
             run_locked_commands: [release_device, take_device]
+            # 2.2c / ADR-PM-061: камера в `stopping` при `auto_start` (между остановкой и повторным захватом) даёт out_of_spec —
+            # он НЕ блокирует START; ключ повышает его до check_function (блокирует): START ждёт, пока камера не вернётся
+            # в grabbing. Остальные состояния камеры ключ не меняет. Форма ключа как у recog.ml_inference (2.9b).
+            readiness:
+              severity:
+                out_of_spec: check_function
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
