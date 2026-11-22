@@ -37,6 +37,7 @@ import glob
 import json
 import os
 import re
+import signal
 import socket
 import sqlite3
 import statistics
@@ -71,6 +72,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from backend_ctl.harness import BackendHarness  # noqa: E402
 from backend_ctl.protocol import _leaf_result  # noqa: E402
+from multiprocess_framework.modules.state_store_module.core.freshness import read_value  # noqa: E402
 
 RECIPE = PROJECT_ROOT / "multiprocess_prototype" / "backend" / "topology" / "inspection_full.yaml"
 LINE_SIM_APP = PROJECT_ROOT / "apps" / "line_sim" / "app.yaml"
@@ -449,14 +451,16 @@ def family_self_description(drv) -> Dict[str, Any]:
         cmds = getattr(card, "commands", None)
         if cmds is None and isinstance(card, dict):
             cmds = card.get("commands")
-        names: List[str] = []
+        # O-1 (Task 0.13): имена КОМАНД — `cmd_names`; `names` (процессы) раньше затиралась ими,
+        # и S2/S5 сравнивали/перебирали не то. Состав процессов дальше читается из `ctx["procs"]`.
+        cmd_names: List[str] = []
         if isinstance(cmds, dict):
-            names = [str(c) for c in cmds]
+            cmd_names = [str(c) for c in cmds]
         elif isinstance(cmds, (list, tuple, set)):
-            names = [str(c.get("name") if isinstance(c, dict) else getattr(c, "name", c)) for c in cmds]
+            cmd_names = [str(c.get("name") if isinstance(c, dict) else getattr(c, "name", c)) for c in cmds]
         obs_cmds = {
             c
-            for c in names
+            for c in cmd_names
             if c.startswith(("config.", "observability.", "introspect.", "health.", "diag.", "telemetry."))
         }
     need = {
@@ -478,7 +482,9 @@ def family_self_description(drv) -> Dict[str, Any]:
         f"drv.capabilities() → processes.{CAM}.commands",
         f"состав процессов = S1; у {CAM} есть {sorted(need)}",
         f"processes={sorted(cap_names)}; obs-команд {CAM}: {len(obs_cmds)}; отсутствуют: {missing or 'нет'}",
-        "PASS" if (cap_names == names and not missing) else ("PARTIAL" if cap_names == names else "FAIL"),
+        "PASS"
+        if (cap_names == set(ctx["procs"]) and not missing)
+        else ("PARTIAL" if cap_names == set(ctx["procs"]) else "FAIL"),
         "docs/contracts/CAPABILITIES.md",
     )
 
@@ -519,7 +525,9 @@ def family_self_description(drv) -> Dict[str, Any]:
     )
     eff = o.get("effective") or {}
     log_dir_eff = str(eff.get("log_directory") or eff.get("log_dir") or "")
-    dirs_ok = [p for p in names if (LOG_DIR / p / "system.log").exists() or (LOG_DIR / p / "messages.log").exists()]
+    dirs_ok = [
+        p for p in ctx["procs"] if (LOG_DIR / p / "system.log").exists() or (LOG_DIR / p / "messages.log").exists()
+    ]
     row(
         "S5",
         "самоописание",
@@ -527,8 +535,8 @@ def family_self_description(drv) -> Dict[str, Any]:
         "—",
         "readback effective ↔ os.listdir",
         f"каталог = {LOG_DIR}; у каждого из {len(EXPECTED_PROCS)} процессов есть system.log или messages.log",
-        f"effective.log_directory={log_dir_eff!r}; каталогов с журналами: {len(dirs_ok)}/{len(names)}: {sorted(dirs_ok)}",
-        "PASS" if (len(dirs_ok) == len(names) and len(names) > 0) else "PARTIAL",
+        f"effective.log_directory={log_dir_eff!r}; каталогов с журналами: {len(dirs_ok)}/{len(ctx['procs'])}: {sorted(dirs_ok)}",
+        "PASS" if (len(dirs_ok) == len(ctx["procs"]) and len(ctx["procs"]) > 0) else "PARTIAL",
         "SINKS_MAP.md §2",
     )
     t = _leaf_result(drv.introspect_telemetry(CAM, timeout=15.0)) or {}
@@ -1766,6 +1774,247 @@ def family_lifecycle(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Семья 5 — остановленный писатель (Task 0.13, SF1)
+# ---------------------------------------------------------------------------
+
+#: SIGSTOP на столько секунд. `stale` — возраст метки > 2 × tick_sec = 10.0 с строго (`freshness.classify` (6));
+#: рестарт монитором — не раньше стоп + 10…15 с (heartbeat_timeout 15.0 с), замер стенда фазы 0.
+SF1_STOP_S = 12.0
+#: Читатели отвечают ОДИН раз на этой отметке от SIGSTOP: уже `stale`, ещё до рестарта монитором.
+SF1_READ_AT_S = 10.75
+SF1_READERS = ("tree", "read_model", "snapshot")
+
+
+def sf1_verdict(answers: dict[str, str]) -> tuple[str, str]:
+    """(вердикт, причина). PASS — все три читателя ответили `stale`; `fresh`, `no_data`, чужой класс
+    или отсутствие ответа — FAIL. `writer_gone` на стенде недостижим (у драйвера нет входа «воплощение живо»)."""
+    seen = ", ".join(f"{k}={answers.get(k, 'нет ответа')}" for k in SF1_READERS)
+    wrong = [k for k in SF1_READERS if answers.get(k) != "stale"]
+    if not wrong:
+        return "PASS", f"{seen}: все три читателя видят остановленного писателя «устарело»"
+    return "FAIL", f"{seen}: ожидалось stale у всех трёх, иное у {wrong}"
+
+
+def sf1_precondition(labels: dict[str, dict | None]) -> tuple[bool, list[str]]:
+    """Перед стопом каждый процесс С меткой: класс `fresh` и `age_s < 2 × tick_sec` ЭТОЙ метки, иначе
+    «ложная тревога у живого писателя». `labels[proc] = {"class", "age_s", "tick_sec"}`; `None` — метки нет
+    (ожидаемо ProcessManager и gui) — строка отчёта `no_data`, не FAIL. Возврат: (ok, строки отчёта)."""
+    ok, rows = True, []
+    for proc in sorted(labels):
+        label = labels[proc]
+        if label is None:
+            rows.append(f"{proc}: no_data (нет метки)")
+            continue
+        cls, age, tick = label.get("class"), label.get("age_s"), label.get("tick_sec")
+        young = isinstance(age, (int, float)) and isinstance(tick, (int, float)) and age < 2 * tick
+        if cls != "fresh" or not young:
+            ok = False
+            rows.append(f"{proc}: ложная тревога у живого писателя (class={cls}, age_s={age}, tick_sec={tick})")
+    return ok, rows
+
+
+def sf1_target_guard(target: str | None, pm_name: str, pid: Any, own_pid: int, pm_pid: Any) -> str | None:
+    """Причина отказа от SIGSTOP (строка SF1 тогда `UNVERIFIED`) или `None`, если цель допустима."""
+    if target is None:
+        return "у приложения нет роли neighbor"
+    if target == pm_name:
+        return f"цель — {pm_name}: стоп оркестратора замораживает весь стенд"
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        return f"pid цели не число > 1: {pid!r}"
+    if pid == own_pid:
+        return f"pid цели {pid} — сам зонд"
+    if pm_pid is not None and pid == pm_pid:
+        return f"pid цели {pid} совпадает с pid {pm_name}"
+    return None
+
+
+def sf1_leaf(subtree: Any) -> str | None:
+    """Относительный ключ листа для чтения свежести: `state.fps`, иначе первый (по имени) не-`None` лист
+    `state.*` (кроме `state.uptime`: его пишет ProcessMonitor, не писатель метки); нет листов — `None`."""
+    state = subtree.get("state") if isinstance(subtree, dict) else None
+    if not isinstance(state, dict):
+        return None
+
+    def leaves(node: dict, prefix: str):
+        for key in sorted(node):
+            val, path = node[key], f"{prefix}.{key}"
+            if isinstance(val, dict):
+                yield from leaves(val, path)
+            elif val is not None:
+                yield path
+
+    if state.get("fps") is not None:
+        return "state.fps"
+    return next((p for p in leaves(state, "state") if p != "state.uptime"), None)
+
+
+def _sf1_subtree(drv, proc: str) -> dict:
+    """Читатель (1), сырой ответ: `state.get_subtree` у ProcessManager, конверт разворачивается."""
+    res = _leaf_result(drv.send_command(PM, "state.get_subtree", {"path": f"processes.{proc}"}, timeout=15.0)) or {}
+    node = res.get("subtree") or res.get("value") or {}
+    return node if isinstance(node, dict) else {}
+
+
+def _sf1_label(subtree: dict, leaf: str | None, now: float) -> dict | None:
+    """`labels[proc]` для `sf1_precondition`: класс и возраст из `read_value`, `tick_sec` — из метки поддерева."""
+    mark = subtree.get("_fresh")
+    if leaf is None or not isinstance(mark, dict):
+        return None
+    got = read_value(subtree, leaf, now, None)
+    return {"class": got["class"], "age_s": got["age_s"], "tick_sec": mark.get("tick_sec")}
+
+
+def _sf1_read_all(drv, proc: str, leaf: str, now: float) -> tuple[dict[str, str], dict[str, Any]]:
+    """Три читателя на один лист. Ключи ответов — `SF1_READERS`; второй результат — сырой ответ каждого.
+
+    (1) дерево — класс считает сам зонд (`freshness.read_value`), НЕ независимый читатель;
+    (2) read-model — приватные `drv._telemetry_model`/`_telemetry_lock` (после 2.9 заменить публичным);
+    (3) `telemetry_snapshot` — ключ метрик ПОЛНЫЙ путь `processes.<proc>.<лист>`.
+    """
+    tree = read_value(_sf1_subtree(drv, proc), leaf, now, None)
+    with drv._telemetry_lock:
+        model = drv._telemetry_model.read(f"processes.{proc}", leaf)
+    metric = (drv.telemetry_snapshot(process=proc).get("metrics") or {}).get(f"processes.{proc}.{leaf}")
+    snapshot = metric if isinstance(metric, dict) else {"class": "no_data"}
+    answers = {"tree": tree["class"], "read_model": model.get("class"), "snapshot": snapshot.get("class")}
+    return answers, {"tree": tree, "read_model": model, "snapshot": snapshot}
+
+
+def _sf1_supervision(drv) -> dict[str, dict]:
+    sup = _leaf_result(drv.supervision_status(timeout=15.0)) or {}
+    procs = sup.get("processes")
+    return procs if isinstance(procs, dict) else {}
+
+
+def _sf1_report_notes(drv, target: str, seq_before: Any, seq_after: Any) -> None:
+    """Записи отчёта (не вердикты): действующий троттл, `gap_count`, прирост `_fresh.seq` цели за ≥ 2 такта."""
+    try:
+        rules = _leaf_result(drv.introspect_telemetry(PM, timeout=15.0)).get("throttle_rules")
+        gaps = drv.telemetry_snapshot(process=target).get("gap_count")
+        NOTES.append(f"SF1 до стопа: throttle_rules(PM)={short(rules, 300)}; gap_count={gaps}")
+    except Exception as exc:  # noqa: BLE001
+        NOTES.append(f"SF1: троттл/gap_count не сняты: {type(exc).__name__}: {exc}")
+    NOTES.append(f"SF1: _fresh.seq у {target} за ≥ 2 такта: {seq_before} -> {seq_after}")
+
+
+def family_stopped_writer(drv, ctx: dict[str, Any], *, kill=os.kill, sleep=time.sleep, clock=time.time) -> None:
+    """SF1(а): SIGSTOP соседу на `SF1_STOP_S` с; на отметке `SF1_READ_AT_S` три читателя отвечают `stale`.
+
+    Зовётся в `main()` ПОСЛЕ `family_lifecycle` и ДО `family_shutdown` (стоп меняет pid и `instance_restarts`,
+    `ctx["pids"]` после неё устарел). SIGCONT — в `finally`. Рестарт супервизором во время стопа
+    (pid или `instance_restarts` до/после) — `UNVERIFIED`: читатели видят новое воплощение, не остановленное.
+    """
+    log("\n=== Семья 5: остановленный писатель (SF1) ===")
+    target = PROFILE.roles.get("neighbor")
+
+    def finish(verdict: str, observed: str) -> None:
+        row(
+            "SF1",
+            "жизненный цикл",
+            "остановленный писатель: три читателя отвечают «устарело»",
+            f"os.kill({target}, SIGSTOP) на {SF1_STOP_S:.0f} с; SIGCONT в finally",
+            "state.get_subtree + freshness.read_value (дерево — НЕ независимый читатель); "
+            "drv._telemetry_model.read; drv.telemetry_snapshot",
+            f"до стопа у процессов с меткой fresh и возраст < 2 тактов; на отметке стоп + {SF1_READ_AT_S} с "
+            f"у {target} все три читателя дают stale; pid и instance_restarts не сменились",
+            observed,
+            verdict,
+            "plans/2026-11-21_observability-signal-contracts (Task 0.13, амендмент 9)",
+        )
+
+    sigstop, sigcont = getattr(signal, "SIGSTOP", None), getattr(signal, "SIGCONT", None)
+    if sigstop is None or sigcont is None:
+        return finish("UNVERIFIED", "на этой платформе нет signal.SIGSTOP/SIGCONT")
+    reason = sf1_target_guard(target, PM, None, os.getpid(), None) if target in (None, PM) else None
+    if reason:
+        return finish("UNVERIFIED", f"отказ от SIGSTOP: {reason}")
+
+    # Предусловие. Проход A: лист и первый `seq` цели; ждём ≥ 2 такта; проход B: метки всех процессов.
+    try:
+        tree_a = _sf1_subtree(drv, target)
+        leaf = sf1_leaf(tree_a)
+        mark_a = tree_a.get("_fresh") if isinstance(tree_a.get("_fresh"), dict) else {}
+        if leaf is None:
+            return finish("UNVERIFIED", f"у {target} нет листа state.* для чтения свежести: стопать нечем проверить")
+        sleep(2 * (mark_a.get("tick_sec") or 5.0) + 0.5)
+        labels: dict[str, dict | None] = {}
+        not_fresh: list[str] = []
+        for proc in ctx["procs"]:
+            subtree = _sf1_subtree(drv, proc)
+            proc_leaf = leaf if proc == target else sf1_leaf(subtree)
+            labels[proc] = _sf1_label(subtree, proc_leaf, clock())
+            if labels[proc] is None and isinstance(subtree.get("_fresh"), dict):
+                NOTES.append(f"SF1: у {proc} метка есть, листьев state.* нет (пустой тик) — строка отчёта, не FAIL")
+            if labels[proc] is not None:  # те же листья — двумя другими читателями
+                answers, _ = _sf1_read_all(drv, proc, proc_leaf, clock())
+                not_fresh += [f"{proc}: {k}={c}" for k, c in answers.items() if k != "tree" and c != "fresh"]
+        ok, rows = sf1_precondition(labels)
+        seq_b = (_sf1_subtree(drv, target).get("_fresh") or {}).get("seq")
+        _sf1_report_notes(drv, target, mark_a.get("seq"), seq_b)
+    except Exception as exc:  # noqa: BLE001
+        return finish("UNVERIFIED", f"предусловие не снято, SIGSTOP не посылался: {type(exc).__name__}: {exc}")
+    NOTES.extend(f"SF1 предусловие: {r}" for r in rows)
+    if not ok or not_fresh:
+        bad = [r for r in rows if "ложная тревога" in r] + not_fresh
+        return finish("FAIL", f"ложная тревога у живого писателя до стопа, SIGSTOP не посылался: {bad}")
+
+    # Окно. pid и снимок супервизии берём как можно позже: рестарт между ними и SIGSTOP увёл бы сигнал не туда.
+    try:
+        before = _sf1_supervision(drv)
+        pid = cmd(drv, target, "introspect.status").get("pid")
+    except Exception as exc:  # noqa: BLE001
+        return finish("UNVERIFIED", f"pid цели не получен, SIGSTOP не посылался: {type(exc).__name__}: {exc}")
+    reason = sf1_target_guard(target, PM, pid, os.getpid(), (before.get(PM) or {}).get("pid"))
+    if reason:
+        return finish("UNVERIFIED", f"отказ от SIGSTOP: {reason}")
+    pid_before, restarts_before = (
+        (before.get(target) or {}).get("pid"),
+        (before.get(target) or {}).get("instance_restarts"),
+    )
+
+    answers, detail = {}, {}
+    error: BaseException | None = None
+    cont_note = ""
+    attempted = False
+    t0 = clock()
+    try:
+        attempted = True
+        kill(pid, sigstop)
+        sleep(max(0.0, SF1_READ_AT_S - (clock() - t0)))
+        answers, detail = _sf1_read_all(drv, target, leaf, clock())
+        sleep(max(0.0, SF1_STOP_S - (clock() - t0)))
+    except Exception as exc:  # noqa: BLE001 — исключение читателя уходит в строку SF1, не пробрасывается
+        error = exc
+    finally:
+        if attempted:
+            try:
+                kill(pid, sigcont)
+            except ProcessLookupError:
+                cont_note = "; SIGCONT: процесса уже нет (ProcessLookupError)"
+            except OSError as exc:
+                error = error or exc
+                cont_note = f"; SIGCONT НЕ доставлен ({type(exc).__name__}): писатель мог остаться остановленным"
+    # Снимок «после» — ПОСЛЕ SIGCONT.
+    try:
+        after = _sf1_supervision(drv).get(target) or {}
+    except Exception as exc:  # noqa: BLE001
+        error, after = error or exc, {}
+    pid_after, restarts_after = after.get("pid"), after.get("instance_restarts")
+
+    shown = f"ответы читателей: {short(detail, 400)}{cont_note}"
+    if error is not None:
+        return finish("FAIL", f"исключение {type(error).__name__}: {error}; {shown}")
+    if (pid_before, restarts_before) != (pid_after, restarts_after):
+        return finish(
+            "UNVERIFIED",
+            f"рестарт супервизором во время стопа, pid {pid_before}→{pid_after}, "
+            f"instance_restarts {restarts_before}→{restarts_after}; {shown}",
+        )
+    verdict, why = sf1_verdict(answers)
+    return finish(verdict, f"{why}; pid {pid_before}, instance_restarts {restarts_before}; {shown}")
+
+
 def family_shutdown(procs: List[str]) -> None:
     log("\n=== Семья 5: останов ===")
     flush = {}
@@ -1906,6 +2155,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         family_latency(drv, arr, ctx)
         family_errors(drv, arr, ctx)
         family_lifecycle(drv, arr, ctx)
+        family_stopped_writer(drv, ctx)  # ДО family_shutdown: стоп меняет pid и instance_restarts, ctx["pids"] устарел
         NOTES.append(f"стенд жил {time.time() - t_start:.0f} с до останова; пушей собрано {len(arr.items)}")
     except Exception as exc:  # noqa: BLE001
         import traceback
