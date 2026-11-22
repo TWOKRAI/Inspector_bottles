@@ -114,6 +114,10 @@ class SocketConnectionLost(RuntimeError):
     """Соединение с хостом оборвалось неожиданно (не намеренный :meth:`SocketClient.close`)."""
 
 
+class SocketAuthError(ConnectionError):
+    """Хост отказал в рукопожатии ``hello``."""
+
+
 class _Pending:
     """Слот ожидания ответа по request_id.
 
@@ -166,6 +170,7 @@ class SocketClient:
     # не зовёт ``SocketClient.__init__`` и этих полей не заводит. Добавление —
     # copy-on-write (новый кортеж на экземпляре), общий объект класса не мутируется.
     _on_push: Optional[PushHandler] = None
+    _token_provider: Callable[[], str | None] | None = None
     _push_listeners: tuple = ()
     _send_middleware: tuple = ()
     # Потолок входящей строки: классовый дефолт нужен шиму драйвера (без __init__).
@@ -182,6 +187,7 @@ class SocketClient:
         default_timeout: float = 5.0,
         on_push: PushHandler | None = None,
         max_line_bytes: int = 16_777_216,
+        token_provider: Callable[[], str | None] | None = None,
     ) -> None:
         """Сконфигурировать клиент; соединения НЕ открывает.
 
@@ -209,6 +215,7 @@ class SocketClient:
         self._default_timeout = default_timeout
         self._on_push = on_push
         self._max_line_bytes = max_line_bytes
+        self._token_provider = token_provider
         self._push_listeners = ()
         self._send_middleware = ()
         self._session: Optional[str] = None
@@ -706,4 +713,11 @@ class SocketClient:
         self._handle_push(msg)
 
 
-__all__ = ["SocketClient", "SocketConnectionLost", "PushHandler", "SendMiddleware", "ResponseCallback"]
+__all__ = [
+    "SocketClient",
+    "SocketConnectionLost",
+    "SocketAuthError",
+    "PushHandler",
+    "SendMiddleware",
+    "ResponseCallback",
+]

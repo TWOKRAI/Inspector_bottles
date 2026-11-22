@@ -73,10 +73,14 @@ class SocketChannel(MessageChannel):
         session_isolation: bool = False,
         on_session_closed: Optional[Callable[[str], None]] = None,
         max_line_bytes: int = 1_048_576,
+        authenticator: Callable[[Dict[str, Any]], bool] | None = None,
+        hello_timeout_s: float = 5.0,
     ) -> None:
         super().__init__(log_warning=log_warning, log_error=log_error)
         self._on_session_closed = on_session_closed
         self._max_line_bytes = max_line_bytes
+        self._authenticator = authenticator
+        self._hello_timeout_s = hello_timeout_s
         self._name = name
         self._host = host
         self._port = port
@@ -592,4 +596,5 @@ class SocketChannel(MessageChannel):
             "session_isolation": self._session_isolation,
             "rx": rx,
             "tx": tx,
+            "auth_rejected": 0,
         }
