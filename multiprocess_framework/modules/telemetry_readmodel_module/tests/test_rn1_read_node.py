@@ -318,9 +318,10 @@ def test_race_under_external_lock() -> None:
     """Свойство: писатель и читатель под ОДНИМ внешним ``threading.Lock`` — читатель видит только
     целые опубликованные узлы (``x == y``, узел найден) и не бросает.
 
-    Контрактный тест: красный лишь по отсутствию метода; реальную гонку несёт контроль
-    ``backend_ctl/tests/test_p3r_node_read.py::test_red7_race_read_node_never_torn_nor_raises``.
-    Убивает мутанта: ``read_node`` делает два чтения снимка (рваное значение даже под локом вызывающего).
+    Контрактный тест: красный лишь по отсутствию метода. Ловит только то, что вызов под внешним
+    локом не виснет и не бросает (например, нереентрантный лок внутри модуля). Два чтения снимка
+    он НЕ ловит (это ``test_read_node_makes_exactly_one_snapshot_call``); реальную гонку несёт
+    контроль ``backend_ctl/tests/test_p3r_node_read.py::test_red7_race_read_node_never_torn_nor_raises``.
     """
     m = TelemetryReadModel()
     lock = threading.Lock()

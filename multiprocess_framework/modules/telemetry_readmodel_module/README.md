@@ -115,7 +115,8 @@ found, value = m.read_node("processes.cam.io_peek")
 `read_node` делает РОВНО ОДИН вызов `snapshot(path)` и собирает узел из его листьев. Сборка
 вынесена в чистые функции `node_read.py` (только stdlib): `backend_ctl/_node_read.read_node`
 берёт их оттуда, поэтому алгоритм один. `snapshot(prefix)` фильтрует весь снимок по префиксу
-(индекса по поддереву нет), так что стоимость `read_node` — O(размер снимка).
+(индекса по поддереву нет), так что стоимость `read_node` — O(число листьев ВСЕЙ модели), а не
+поддерева.
 
 **Потокобезопасность.** У модуля лока НЕТ; «лок держит вызывающий» — буквально. `read_node`
 лок не берёт. Писатель без лока и читатель одновременно дают
@@ -125,7 +126,11 @@ found, value = m.read_node("processes.cam.io_peek")
 - `backend_ctl`: `read_node` берёт `drv._telemetry_lock` (обычный `threading.Lock`, НЕ `RLock`:
   вызов `read_node` под уже взятым локом вешает поток), снимок берётся под локом, сборка — вне него.
 
-Контракт гонки проверяет `test_rn1_read_node.py::test_race_under_external_lock`.
+`test_rn1_read_node.py::test_race_under_external_lock` проверяет лишь, что вызов под внешним
+локом не виснет и не бросает; два чтения снимка ловит `test_read_node_makes_exactly_one_snapshot_call`.
+Реальный сторож гонки — только у делегата `backend_ctl`
+(`test_p3r_node_read.py::test_red7_race_read_node_never_torn_nor_raises`, вероятностный); у самого
+модуля сторожа нет: лок держит вызывающий.
 
 **Известные расхождения с живым `state.get`.** Потеря лежит в read-model, а не в помощнике.
 Фиксируются тестом `test_known_divergences_from_live_state_get_literals`, не «чинятся»:
@@ -194,8 +199,9 @@ found, value = m.read_node("processes.cam.io_peek")
 - Generic: имён процессов и прикладного набора метрик не знает — параметры
   конструктора (кроме `processes.<name>` как корня записи процесса и `.state.uptime`
   как пути, который довыставления не получает, — константа модуля).
-- Лока нет: у GUI обе дороги идут потоком владельца (Qt main), у headless-драйвера
-  — своим единственным потоком приёма. Посылка проверяется тестом
+- Лока нет (про `write_seq`; чтение узла — см. «Потокобезопасность» выше): у GUI обе дороги идут
+  потоком владельца (Qt main), у headless-драйвера запись — своим единственным потоком приёма,
+  а читатели в других потоках берут `drv._telemetry_lock`. Посылка проверяется тестом
   (`test_telemetry_poll_ordering_hazards.py::test_both_sides_of_the_guard_run_in_the_owner_thread`),
   а не декларируется.
 
