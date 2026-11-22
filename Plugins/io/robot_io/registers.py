@@ -40,3 +40,5 @@ class RobotIoRegisters(SchemaBase):
     hub_errors: Annotated[int, FieldMeta("Ошибок hub", readonly=True)] = 0
     last_error: Annotated[str, FieldMeta("Последняя ошибка", readonly=True)] = ""
     queue_len: Annotated[int, FieldMeta("В очереди", readonly=True)] = 0
+    last_dropped_job: Annotated[str, FieldMeta("Последнее потерянное задание", readonly=True)] = ""
+    forward_ok: Annotated[bool, FieldMeta("Форвардинг в норме", readonly=True)] = True
