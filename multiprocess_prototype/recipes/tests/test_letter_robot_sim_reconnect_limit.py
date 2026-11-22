@@ -1,6 +1,7 @@
 """Рецепт letter_robot_sim: у робота и ПЧ снят лимит переподключения (решение владельца 2026-11-20).
 
-Путь ``params`` от рецепта до драйвера доказывает ``Plugins/hub/device_hub/tests/test_recipe_params_reach_driver_acceptance.py``.
+Путь ``params`` от рецепта до драйвера доказывает
+``Plugins/hub/device_hub/tests/test_recipe_params_reach_driver_acceptance.py``.
 Здесь — только содержимое рецепта: ключ стоит в ``params`` обеих записей и равен литералу 0.
 """
 
