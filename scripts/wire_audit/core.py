@@ -26,8 +26,11 @@ _TOL = 0.10
 _EPS = 1e-6
 _FLAGS_WORD = 3  # бит0 z != 0, бит1 есть place
 _ARGC = 10
-_ALPHA_X_WINDOW = (4549, 4615)  # окно α для ARGS[2], слова провода
-_ALPHA_Y_WINDOW = (62096, 62116)  # окно α для ARGS[3], слова провода
+# Окно α взято из сим-калибровки; на железе/β задавать флагом. Слова провода, 1 слово = 0,1 мм.
+_ALPHA_X_WINDOW = (4549, 4615)  # окно α для ARGS[2]
+_ALPHA_Y_WINDOW = (62096, 62116)  # окно α для ARGS[3]
+# Выход за окно не дальше запаса — шум центроида сети (PASS~), дальше — FAIL «окно». Флаг ``--pick-margin-mm``.
+_PICK_MARGIN_DEFAULT_MM = 5.0
 _ZONE_DEFAULT_MM = 500.0
 _P_PICK_DEFAULT_DEG = -100.0
 _RZ_TILDE_DEG = 15.0  # |e| > 15 град — «ТОЧНОСТЬ сети», не FAIL
@@ -412,6 +415,7 @@ class Row:
     disk: Disk | None = None
     job: Job | None = None
     reach_warn: bool = False
+    window_warn: bool = False
 
     def add(self, *reasons: str) -> None:
         self.reasons.extend(r for r in reasons if r not in self.reasons)
@@ -455,6 +459,7 @@ class AuditResult:
     p_pick_from_register: bool
     p_pick_source: str | None
     zone_max_mm: float
+    pick_margin_mm: float
     run_lines: list[str]  # строки между таблицей и блоком «Не покрыто»
     run_fail: bool
     notes: list[str]
@@ -481,8 +486,23 @@ class AuditResult:
         )
 
 
-def _check_words(job: Job, disk: Disk, regs: Regs, zone_max_mm: float) -> tuple[list[str], bool]:
-    """Колонка А: слова одного задания против ожиданий. Возвращает (причины FAIL, предупреждение о досягаемости)."""
+def _window_excess_mm(word: int | None, window: tuple[int, int]) -> float:
+    """На сколько мм слово провода вышло за окно α (0 — внутри или слова нет)."""
+    if word is None:
+        return 0.0
+    value = to_unsigned(word)
+    return max(window[0] - value, value - window[1], 0) / WIRE_SCALE
+
+
+def _check_words(
+    job: Job, disk: Disk, regs: Regs, zone_max_mm: float, pick_margin_mm: float = _PICK_MARGIN_DEFAULT_MM
+) -> tuple[list[str], bool, str | None]:
+    """Колонка А: слова одного задания против ожиданий.
+
+    Возвращает (причины FAIL, предупреждение о досягаемости, пометка «съём вне окна α»). Выход pick x/y за окно α
+    не дальше ``pick_margin_mm`` — не FAIL, а ``PASS~`` с пометкой (шум центроида сети); дальше — причина «окно».
+    Проверка «слово = взять(px, py) журнала диска» (``передача``) от окна не зависит и остаётся FAIL.
+    """
     reasons: list[str] = []
     args = job.args
     if job.argc != _ARGC:
@@ -506,12 +526,16 @@ def _check_words(job: Job, disk: Disk, regs: Regs, zone_max_mm: float) -> tuple[
         reasons.append("rz")
     if (disk.px is not None and bad(I_PICK_X, disk.px)) or (disk.py is not None and bad(I_PICK_Y, disk.py)):
         reasons.append("передача")
-    in_window = (
-        _ALPHA_X_WINDOW[0] <= to_unsigned(args[I_PICK_X]) <= _ALPHA_X_WINDOW[1] if I_PICK_X in args else True
-    ) and (_ALPHA_Y_WINDOW[0] <= to_unsigned(args[I_PICK_Y]) <= _ALPHA_Y_WINDOW[1] if I_PICK_Y in args else True)
-    if not in_window:
-        reasons.append("окно")
-    return reasons, math.hypot(place_x, place_y) > zone_max_mm
+    over_mm = max(
+        _window_excess_mm(args.get(I_PICK_X), _ALPHA_X_WINDOW), _window_excess_mm(args.get(I_PICK_Y), _ALPHA_Y_WINDOW)
+    )
+    window_note: str | None = None
+    if over_mm > _EPS:
+        if over_mm <= pick_margin_mm + _EPS:
+            window_note = f"съём вне окна α на {over_mm:.1f} мм (шум центроида сети)"
+        else:
+            reasons.append("окно")
+    return reasons, math.hypot(place_x, place_y) > zone_max_mm, window_note
 
 
 def _job_reasons(job: Job, seq_counts: dict[int, int]) -> list[str]:
@@ -666,6 +690,7 @@ def audit(
     *,
     words: list[str] | None = None,
     zone_max_mm: float = _ZONE_DEFAULT_MM,
+    pick_margin_mm: float = _PICK_MARGIN_DEFAULT_MM,
     sim_objects: list[dict] | None = None,
     sim_journal: list[dict] | None = None,
 ) -> AuditResult:
@@ -712,7 +737,7 @@ def audit(
         if job is None:
             row.add("потеря")
             continue
-        _judge_bound(row, job, regs, zone_max_mm, seq_counts, sim_seen)
+        _judge_bound(row, job, regs, zone_max_mm, pick_margin_mm, seq_counts, sim_seen)
 
     run_lines, run_fail, no_passport = _column_b(rows, picks, bound, regs, sim_objects)
     for job in live:
@@ -741,6 +766,7 @@ def audit(
         p_pick_from_register=regs.p_pick_from_register,
         p_pick_source=regs.p_pick_source,
         zone_max_mm=zone_max_mm,
+        pick_margin_mm=pick_margin_mm,
         run_lines=run_lines,
         run_fail=run_fail,
         notes=notes,
@@ -748,7 +774,7 @@ def audit(
         jobs=len(live),
         skips=sum(1 for r in rows if r.disk is not None and r.disk.skip_reason is not None),
         retries=len(retried),
-        warnings=sum(1 for r in rows if r.reach_warn),
+        warnings=sum(1 for r in rows if r.reach_warn or r.window_warn),
     )
 
 
@@ -777,19 +803,28 @@ def _disk_rows(events: list[WordEvent | Disk], fill_words: list[str], wrong_fill
 
 
 def _judge_bound(
-    row: Row, job: Job, regs: Regs, zone_max_mm: float, seq_counts: dict[int, int], sim_seen: set[int] | None
+    row: Row,
+    job: Job,
+    regs: Regs,
+    zone_max_mm: float,
+    pick_margin_mm: float,
+    seq_counts: dict[int, int],
+    sim_seen: set[int] | None,
 ) -> None:
     disk = row.disk
     assert disk is not None
     row.job = job
     _fill_wire_cells(row, job)
-    a_reasons, warn = _check_words(job, disk, regs, zone_max_mm)
+    a_reasons, warn, window_note = _check_words(job, disk, regs, zone_max_mm, pick_margin_mm)
     if a_reasons:
         row.col_a = "FAIL: " + "; ".join(a_reasons)
     else:
-        row.col_a = "PASS~" if warn else "PASS"
+        row.col_a = "PASS~" if warn or window_note else "PASS"
+        if window_note:
+            row.col_a += f": {window_note}"
         row.reach_warn = warn
-        row.tilde = warn
+        row.window_warn = window_note is not None
+        row.tilde = warn or window_note is not None
     row.add(*a_reasons, *_job_reasons(job, seq_counts))
     if sim_seen is not None and job.accepted and job.seq not in sim_seen:
         row.add("сим не видел")
@@ -894,6 +929,7 @@ def render(result: AuditResult) -> str:
     origin = _p_pick_origin(result)
     out.append(f"p_pick_rz_deg: {result.p_pick_rz_deg} ({origin})")
     out.append(f"--zone-max-mm: {result.zone_max_mm}")
+    out.append(f"--pick-margin-mm: {result.pick_margin_mm}")
     out.extend(result.notes)
     out += ["", _md_row(TABLE_HEADER), _md_row(["---"] * len(TABLE_HEADER))]
     out.extend(_md_row(row.cells()) for row in result.rows)

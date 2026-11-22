@@ -551,6 +551,60 @@ def test_words_count_mismatch_with_zero_journal_word_lines_says_so_explicitly():
     assert WORD not in err.value.message
 
 
+# ------------------------------------------------------------------ окно α с запасом 5 мм (раунд 3)
+
+
+def _window_run(*, x_word: int = 4602, y_word: int = 62104, layout_matches: bool = True, **kw) -> core.AuditResult:
+    """Одно взятие Е 30 град в ячейку 1 со словами съёма x_word/y_word; строка диска несёт то же взять(px, py)."""
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    ex.job(10.5, 901, 1, 30.0)
+    ex_text = (
+        ex.text()
+        .replace("CMD_ARGS[2] = 4602", f"CMD_ARGS[2] = {x_word}")
+        .replace("CMD_ARGS[3] = 62104", f"CMD_ARGS[3] = {y_word}")
+    )
+    lay_text = lay.text()
+    if layout_matches:
+        lay_text = lay_text.replace("взять(460.2,-343.2)", f"взять({x_word / 10},{(y_word - 65536) / 10})")
+    return core.audit(ex_text, lay_text, REGS, words=[WORD], zone_max_mm=600.0, **kw)
+
+
+def test_pick_x_outside_alpha_window_within_margin_is_pass_tilde_with_note():
+    """Прогон 3 серии: ARGS[2] 4617 вне окна 4549..4615 на 0,2 мм — шум центроида сети, не FAIL."""
+    res = _window_run(x_word=4617)
+    row = row_of(res, "30.0")
+    assert row.col_a == "PASS~: съём вне окна α на 0.2 мм (шум центроида сети)"
+    assert row.result == "PASS~" and res.exit_code == 0 and res.warnings == 1
+
+
+@pytest.mark.parametrize(
+    ("kw", "over"),
+    [({"x_word": 4665}, "5.0"), ({"x_word": 4499}, "5.0"), ({"y_word": 62166}, "5.0"), ({"y_word": 62046}, "5.0")],
+    ids=["x выше", "x ниже", "y выше", "y ниже"],
+)
+def test_pick_window_margin_boundary_is_five_mm_inclusive(kw, over):
+    res = _window_run(**kw)
+    assert row_of(res, "30.0").col_a == f"PASS~: съём вне окна α на {over} мм (шум центроида сети)"
+    assert res.exit_code == 0
+
+
+@pytest.mark.parametrize("kw", [{"x_word": 4666}, {"x_word": 4498}, {"y_word": 62167}, {"y_word": 62045}])
+def test_pick_beyond_five_mm_margin_is_fail_window(kw):
+    res = _window_run(**kw)
+    assert row_of(res, "30.0").reasons == ["окно"] and res.exit_code == 1
+
+
+def test_pick_margin_is_a_parameter_and_zero_margin_restores_strict_window():
+    assert _window_run(x_word=4666, pick_margin_mm=10.0).exit_code == 0
+    assert _window_run(x_word=4616, pick_margin_mm=0.0).exit_code == 1
+
+
+def test_window_margin_does_not_soften_transfer_mismatch_with_layout_line():
+    res = _window_run(x_word=4617, layout_matches=False)  # строка диска несёт 460.2, слово 461.7
+    assert "передача" in row_of(res, "30.0").reasons and res.exit_code == 1
+
+
 # ------------------------------------------------------------------ шапка: источник p_pick_rz_deg
 
 

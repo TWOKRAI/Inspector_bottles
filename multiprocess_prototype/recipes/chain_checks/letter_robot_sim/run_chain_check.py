@@ -74,15 +74,24 @@ _AUDIT_INPUT_CODE = 2  # аудит отказал по входу (число �
 _NOT_CHECKED = "НЕ ПРОВЕРЕН"
 # Узкий случай «две мягкие STOP_REQ при остановке из running» (docs/reports/2026-11-22_sim-audit-stop-req-diagnosis.md):
 # единственный красный пункт α — «СТОП stop» с «STOP_REQ строк 2 ≠ 1»; критерий α «ровно одна» устарел.
-_ALPHA_ONLY_STOP = re.compile(r"^МЕХАНИЗМ:\s*FAIL\s*\(СТОП stop\)\s*$", re.MULTILINE)
-_ALPHA_MECH_CLASS = re.compile(r"^класс .*: МЕХАНИЗМ\s*$", re.MULTILINE)
+_ALPHA_MECH_FAIL = re.compile(r"^МЕХАНИЗМ:\s*FAIL\s*\((.*)\)\s*$", re.MULTILINE)
+_ALPHA_MECH_CLASS = re.compile(r"^класс (.*): МЕХАНИЗМ\s*$", re.MULTILINE)
 _ALPHA_STOP_LINE = re.compile(r"^СТОП stop: STOP_REQ \[(\d+), (\d+)\].*→ FAIL: STOP_REQ строк 2 ≠ 1\s*$", re.MULTILINE)
+_STOP_ITEM = "СТОП stop"
+# Образец FAIL пункта окна съёма (alpha.out прогона 3 серии, B #4):
+# «pick (…) вне окна x(…) y(…); ARGS[2] 4617 ≠ 4549…4615»
+_ALPHA_WINDOW_HEAD = re.compile(r"^pick \([^)]*\) вне окна x\([^)]*\) y\([^)]*\)$")
+_ALPHA_WINDOW_ARG = re.compile(r"^ARGS\[([23])\] (\d+) ≠ (\d+)…(\d+)$")
+_WINDOW_MARGIN_MM = 5.0  # запас за окном α, мм (как --pick-margin-mm аудита); окно α зашито под сим
 _EXCHANGE_STOP = re.compile(r"\bin W\*? STOP_REQ = (\d+)")
 _EXCHANGE_LOG = ("devices", "robot_exchange.log")  # относительно каталога логов прототипа
 _SOFT_LEVEL = 1  # STOP_REQ = seq*4 + уровень; SOFT = 1 (client_v2._issue_stop_locked)
 _STOP_INFO = (
     "СТОП α: информативно (2 мягких STOP_REQ: пауза + выключение; критерий α «ровно одна» устарел, "
     "см. sim-audit-stop-req-diagnosis.md)"
+)
+_WINDOW_INFO = (
+    "ОКНО α: информативно ({n} заданий вне окна съёма ≤ 5 мм: {items}; шум центроида сети; окно зашито под сим)"
 )
 _PASS_SOFT = "PASS~"
 _REASON_LIMIT = 200
@@ -474,28 +483,77 @@ class RunOutcome:
 
 
 def _soft_stop_pair(alpha_text: str, exchange_text: str) -> bool:
-    """Узкий случай: красен ровно один пункт α — «СТОП stop: STOP_REQ строк 2 ≠ 1», обе записи мягкие.
+    """Узкий случай «СТОП»: пункт α «СТОП stop: STOP_REQ строк 2 ≠ 1», обе записи мягкие, журнал обмена подтверждает.
 
-    Условия (все): строка ``МЕХАНИЗМ: FAIL (СТОП stop)`` без других пунктов; ровно одна строка ``класс … : МЕХАНИЗМ``;
-    ровно одна строка ``СТОП stop: STOP_REQ [a, b] … → FAIL: STOP_REQ строк 2 ≠ 1``, ``a % 4 == b % 4 == 1`` (SOFT);
-    в журнале обмена последней инкарнации ровно эти две записи ``STOP_REQ`` и после них строка ``disconnect``.
-    Любое иное сочетание — ``False`` (остаётся FAIL).
+    Условия (все): ровно одна строка ``СТОП stop: STOP_REQ [a, b] … → FAIL: STOP_REQ строк 2 ≠ 1``,
+    ``a % 4 == b % 4 == 1`` (SOFT); в журнале обмена последней инкарнации ровно эти две записи ``STOP_REQ`` и после
+    них строка ``disconnect``. Красные пункты α проверяет ``_tolerated_alpha_items``.
     """
-    if len(_ALPHA_ONLY_STOP.findall(alpha_text)) != 1 or len(_ALPHA_MECH_CLASS.findall(alpha_text)) != 1:
-        return False
     lines = _ALPHA_STOP_LINE.findall(alpha_text)
     if len(lines) != 1:
         return False
     first, second = (int(n) for n in lines[0])
     if first % 4 != _SOFT_LEVEL or second % 4 != _SOFT_LEVEL:
         return False
-    incarnation = (
-        exchange_text[exchange_text.rfind("connect ok") + 1 :] if "connect ok" in exchange_text else exchange_text
-    )
+    start = exchange_text.rfind("connect ok")
+    incarnation = exchange_text[start:] if start >= 0 else exchange_text
     found = list(_EXCHANGE_STOP.finditer(incarnation))
     if [int(m.group(1)) for m in found] != [first, second]:
         return False
     return "disconnect" in incarnation[found[-1].end() :]
+
+
+def _window_deviation_mm(fail_text: str) -> float | None:
+    """Текст FAIL пункта α целиком про окно съёма: отклонение от границы, мм; иначе ``None``.
+
+    Образец: ``pick (461.7, -343.1) вне окна x(454.9, 461.5) y(-344.0, -342.0); ARGS[2] 4617 ≠ 4549…4615``.
+    Любой другой сегмент (другая причина) или отклонение больше запаса — ``None``.
+    """
+    head, *rest = fail_text.split("; ")
+    if not _ALPHA_WINDOW_HEAD.match(head) or not rest:
+        return None
+    worst = 0.0
+    for segment in rest:
+        m = _ALPHA_WINDOW_ARG.match(segment)
+        if not m:
+            return None
+        value, low, high = int(m.group(2)), int(m.group(3)), int(m.group(4))
+        worst = max(worst, max(low - value, value - high, 0) / 10.0)
+    return worst if 0 < worst <= _WINDOW_MARGIN_MM + 1e-6 else None
+
+
+def _tolerated_alpha_items(alpha_text: str, exchange_text: str) -> tuple[bool, list[str]]:
+    """Красен ли МЕХАНИЗМ α только терпимыми пунктами: ``(стоп есть, пункты окна съёма)``, иначе ``(False, [])``.
+
+    Терпимо: «СТОП stop» по ``_soft_stop_pair`` и/или пункты ``<кейс> #n``, весь текст FAIL которых — выход pick x/y
+    за окно α не дальше ``_WINDOW_MARGIN_MM``. Пункты в скобках ``МЕХАНИЗМ: FAIL (…)`` и строки ``класс … : МЕХАНИЗМ``
+    должны совпасть. Хотя бы один терпимый пункт обязателен; любое иное — ``(False, [])``.
+    """
+    heads = _ALPHA_MECH_FAIL.findall(alpha_text)
+    if len(heads) != 1:
+        return False, []
+    items = heads[0].split(", ")
+    classes = _ALPHA_MECH_CLASS.findall(alpha_text)
+    if sorted(classes) != sorted(items) or len(set(items)) != len(items):
+        return False, []
+    stop = False
+    windows: list[str] = []
+    for item in items:
+        if item == _STOP_ITEM:
+            if not _soft_stop_pair(alpha_text, exchange_text):
+                return False, []
+            stop = True
+            continue
+        rows = [
+            line
+            for line in alpha_text.splitlines()
+            if line.startswith(f"{item} ") and " → FAIL: " in line and re.fullmatch(r"\S+ #\d+", item)
+        ]
+        deviation = _window_deviation_mm(rows[0].split(" → FAIL: ", 1)[1].strip()) if len(rows) == 1 else None
+        if deviation is None:
+            return False, []
+        windows.append(f"{item} на {deviation:.1f} мм")
+    return (stop, windows) if (stop or windows) else (False, [])
 
 
 def _not_checked_reason(alpha_code: int | None, audit_code: int | None, audit_text: str) -> str | None:
@@ -516,6 +574,14 @@ def _not_checked_reason(alpha_code: int | None, audit_code: int | None, audit_te
     return None
 
 
+def _info_lines(stop_info: bool, window_items: list[str]) -> list[str]:
+    """Информативные строки терпимых пунктов α (стоп и окно съёма)."""
+    lines = [_STOP_INFO] if stop_info else []
+    if window_items:
+        lines.append(_WINDOW_INFO.format(n=len(window_items), items=", ".join(window_items)))
+    return lines
+
+
 def _verdict_text(
     cfg: Config,
     k: int,
@@ -528,16 +594,16 @@ def _verdict_text(
     itog: str | None,
     not_checked: str | None = None,
     stop_info: bool = False,
+    window_items: list[str] | None = None,
 ) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [f"# Вердикт сквозной проверки {cfg.recipe}, прогон {k}", ""]
     if not_checked:
         lines.append(f"МЕХАНИЗМ: {_NOT_CHECKED} (сценарий не дошёл: {not_checked})")
     else:
-        lines.append(f"МЕХАНИЗМ: {'FAIL' if failed else (_PASS_SOFT if stop_info else 'PASS')}")
+        lines.append(f"МЕХАНИЗМ: {'FAIL' if failed else (_PASS_SOFT if stop_info or window_items else 'PASS')}")
     lines.extend(f"причина: {key}" for key in failed)
-    if stop_info:
-        lines.append(_STOP_INFO)
+    lines.extend(_info_lines(stop_info, window_items or []))
     lines += ["", accuracy or "ТОЧНОСТЬ: строки нет в alpha.out", itog or "ИТОГ: строки нет в audit.out", ""]
     lines += [f"- метка времени: {stamp}", f"- режим: {'gui' if gui else 'headless'}", f"- каталог прогона: {run_dir}"]
     lines += [f"- файл: {run_dir / name}" for name in ("sim.out", "proto.out", "collect.out", "alpha.out", "audit.out")]
@@ -669,6 +735,7 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
     alpha_code: int | None = None
     alpha_ok = False
     stop_info = False
+    window_items: list[str] = []
     collector_ok = False
     collector: Launched | None = None
     forced: list[str] = []
@@ -708,15 +775,17 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
                 print(f"[run{k}] α сорвалась: {alpha_problem}", file=sys.stderr)
             alpha_text = _read(run_dir / "alpha.out")
             alpha_clean = bool(_MECHANISM_PASS.search(alpha_text)) and not _MECHANISM_FAIL.search(alpha_text)
-            stop_info = (
-                alpha_problem is None
-                and not alpha_clean
-                and _soft_stop_pair(alpha_text, _read(log_dir.joinpath(*_EXCHANGE_LOG)))
+            stop_info, window_items = (
+                _tolerated_alpha_items(alpha_text, _read(log_dir.joinpath(*_EXCHANGE_LOG)))
+                if alpha_problem is None and not alpha_clean
+                else (False, [])
             )
-            alpha_ok = alpha_problem is None and (alpha_clean or stop_info)
+            alpha_ok = alpha_problem is None and (alpha_clean or stop_info or bool(window_items))
             accuracy = _last_line(alpha_text, "ТОЧНОСТЬ:")
             reason = "" if alpha_ok else (alpha_problem or "МЕХАНИЗМ не PASS")
-            step.set(alpha_ok, "; ".join(part for part in (reason, _STOP_INFO if stop_info else "", accuracy) if part))
+            step.set(
+                alpha_ok, "; ".join(part for part in (reason, *_info_lines(stop_info, window_items), accuracy) if part)
+            )
         with stages.step("collector_stop") as step:
             try:
                 collector_ok = _stop_collector(collector, run_dir / "collect", cfg.stop_s)
@@ -764,13 +833,14 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
             _last_line(audit_text, "ИТОГ:"),
             not_checked,
             stop_info,
+            window_items,
         )
         (run_dir / "verdict.md").write_text(text, encoding="utf-8")
         print(text, flush=True)
         step.set(not failed and not not_checked, f"{_NOT_CHECKED}: {not_checked}" if not_checked else ", ".join(failed))
     if not_checked:
         return RunOutcome(k, run_dir, _NOT_CHECKED, accuracy)
-    return RunOutcome(k, run_dir, "FAIL" if failed else (_PASS_SOFT if stop_info else "PASS"), accuracy)
+    return RunOutcome(k, run_dir, "FAIL" if failed else (_PASS_SOFT if stop_info or window_items else "PASS"), accuracy)
 
 
 def _summary_text(cfg: Config, rows: list[RunOutcome], runs: int) -> str:

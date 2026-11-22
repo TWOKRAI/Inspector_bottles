@@ -749,3 +749,99 @@ def test_soft_stop_pair_does_not_hide_a_red_audit(rig):
     assert rig.run(rig.cfg(alpha=_stop_alpha([5, 9], [5, 9]), audit=audit)) == 1
     text = _verdict(rig)
     assert "МЕХАНИЗМ: FAIL" in text and "причина: audit" in text and "причина: alpha" not in text
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Окно съёма α: выход за окно не дальше 5 мм — информативно (PASS~); образец — B #4 прогона 3 серии
+# ---------------------------------------------------------------------------------------------------------------------
+
+_WINDOW_INFO_PREFIX = "ОКНО α: информативно ("
+
+
+def _window_alpha(items, fail_texts, *, stops=None, exchange_stops=None, disconnect=True):
+    """α с красными пунктами: items — имена в скобках МЕХАНИЗМ, fail_texts — тексты FAIL пунктов `<кейс> #n`."""
+    out = []
+    for item, text in fail_texts.items():
+        out.append(f"{item} вход И 60.0° → наблюдение: диск 'И' 63.2° → ячейка 5 | Δугла +3.2° | RES=1 → FAIL: {text}")
+    if stops:
+        out.append(
+            f"СТОП stop: STOP_REQ [{', '.join(map(str, stops))}], строк после seq 652: 13 "
+            f"→ FAIL: STOP_REQ строк {len(stops)} ≠ 1"
+        )
+    out += [f"класс {item}: МЕХАНИЗМ" for item in items]
+    out += [f"МЕХАНИЗМ: FAIL ({', '.join(items)})", "ТОЧНОСТЬ: 6 трудных (B #12)"]
+    stamp = "2026-11-22 18:11:47,296 [INFO] S.d.d.e.robot_main:"
+    log = [f"#1 {stamp} #1  connect ok"]
+    log += [f"#{i + 2} {stamp} #{i + 2} in W STOP_REQ = {n}" for i, n in enumerate(exchange_stops or [])]
+    if disconnect:
+        log.append(f"#99 {stamp} #99  disconnect")
+    code = (
+        "import sys, pathlib\n"
+        "d = pathlib.Path(sys.argv[1]) / 'devices'; d.mkdir(parents=True, exist_ok=True)\n"
+        f"(d / 'robot_exchange.log').write_text({chr(10).join(log)!r}, encoding='utf-8')\n"
+        f"print({chr(10).join(out)!r})\n"
+        "sys.exit(1)"
+    )
+    return [sys.executable, "-c", code, "{log_dir}"]
+
+
+_WIN_4617 = "pick (461.7, -343.1) вне окна x(454.9, 461.5) y(-344.0, -342.0); ARGS[2] 4617 ≠ 4549…4615"
+_WIN_4666 = "pick (466.6, -343.1) вне окна x(454.9, 461.5) y(-344.0, -342.0); ARGS[2] 4666 ≠ 4549…4615"
+_WIN_Y = "pick (460.0, -349.0) вне окна x(454.9, 461.5) y(-344.0, -342.0); ARGS[3] 62046 ≠ 62096…62116"
+
+
+def test_window_item_within_margin_is_pass_tilde_with_info_line(rig):
+    alpha = _window_alpha(["B #4"], {"B #4": _WIN_4617})
+    assert rig.run(rig.cfg(alpha=alpha)) == 0
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: PASS~" in text
+    assert "ОКНО α: информативно (1 заданий вне окна съёма ≤ 5 мм: B #4 на 0.2 мм; шум центроида сети" in text
+    assert "причина:" not in text and "СТОП α" not in text
+
+
+def test_window_item_together_with_two_soft_stops_gives_two_info_lines(rig):
+    alpha = _window_alpha(["B #4", "СТОП stop"], {"B #4": _WIN_4617}, stops=[5, 9], exchange_stops=[5, 9])
+    assert rig.run(rig.cfg(alpha=alpha)) == 0
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: PASS~" in text and _WINDOW_INFO_PREFIX in text and "СТОП α: информативно" in text
+
+
+def test_window_item_on_y_within_margin_is_pass_tilde(rig):
+    assert rig.run(rig.cfg(alpha=_window_alpha(["D #2"], {"D #2": _WIN_Y}))) == 0
+    assert "D #2 на 5.0 мм" in _verdict(rig)
+
+
+@pytest.mark.parametrize(
+    ("alpha_kwargs", "case"),
+    [
+        (dict(items=["B #4"], fail_texts={"B #4": _WIN_4666}), "дальше 5 мм"),
+        (dict(items=["B #4"], fail_texts={"B #4": _WIN_4617 + "; rz"}), "окно плюс ещё причина"),
+        (dict(items=["B #4"], fail_texts={"B #4": "слово ARGS[7] 1100 ≠ 1101"}), "не про окно"),
+        (
+            dict(items=["B #4", "B #5"], fail_texts={"B #4": _WIN_4617, "B #5": "слово ARGS[7] 1100 ≠ 1101"}),
+            "второй пункт не про окно",
+        ),
+        (
+            dict(
+                items=["B #4", "СТОП stop"],
+                fail_texts={"B #4": _WIN_4617},
+                stops=[5, 9, 13],
+                exchange_stops=[5, 9, 13],
+            ),
+            "окно плюс стоп с тремя записями",
+        ),
+        (dict(items=["B #4", "B jobs.count"], fail_texts={"B #4": _WIN_4617}), "красный пункт без текста окна"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_window_deviations_stay_fail(rig, alpha_kwargs, case):
+    assert rig.run(rig.cfg(alpha=_window_alpha(**alpha_kwargs))) == 1, case
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: FAIL" in text and "PASS~" not in text and "ОКНО α" not in text
+
+
+def test_window_item_does_not_hide_a_red_audit(rig):
+    audit = _py("import sys; print('ИТОГ: FAIL (взятий 13, заданий 13, FAIL 3, пропусков 9)'); sys.exit(1)")
+    assert rig.run(rig.cfg(alpha=_window_alpha(["B #4"], {"B #4": _WIN_4617}), audit=audit)) == 1
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: FAIL" in text and "причина: audit" in text and "причина: alpha" not in text

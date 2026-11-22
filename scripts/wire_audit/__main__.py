@@ -17,6 +17,7 @@ from pathlib import Path
 from scripts.wire_audit.core import AuditError, audit, render
 
 _ZONE_DEFAULT = "500"
+_PICK_MARGIN_DEFAULT = "5"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -34,6 +35,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--registers", required=True, help="JSON регистров укладки (word_layout)")
     p.add_argument("--words", help="слова заливок через запятую, по порядку появления в журнале диска")
     p.add_argument("--zone-max-mm", default=_ZONE_DEFAULT, help="радиус досягаемости, мм (умолчание 500)")
+    p.add_argument(
+        "--pick-margin-mm", default=_PICK_MARGIN_DEFAULT, help="запас за окном α для pick x/y, мм (умолчание 5)"
+    )
     p.add_argument("--sim-objects", help="JSONL паспортов сима (столбец Б)")
     p.add_argument("--sim-journal", help="JSONL журнала сим-робота (третий наблюдатель)")
     p.add_argument("--out", help="файл для копии отчёта")
@@ -77,25 +81,35 @@ def _load_registers(path: str) -> dict:
     return data
 
 
-def _zone(raw: str) -> float:
+def _non_negative(raw: str, flag: str) -> float:
     try:
         value = float(raw)
     except ValueError as exc:
-        raise AuditError(2, "--zone-max-mm не число") from exc
+        raise AuditError(2, f"{flag} не число") from exc
     if not math.isfinite(value) or value < 0:
-        raise AuditError(2, "--zone-max-mm вне допустимого диапазона")
+        raise AuditError(2, f"{flag} вне допустимого диапазона")
     return value
 
 
 def _run(ns: argparse.Namespace) -> tuple[int, str]:
-    zone = _zone(ns.zone_max_mm)
+    zone = _non_negative(ns.zone_max_mm, "--zone-max-mm")
+    margin = _non_negative(ns.pick_margin_mm, "--pick-margin-mm")
     words = None if ns.words is None else [w.strip() for w in ns.words.split(",")]
     exchange = _read(ns.exchange, "журнал обмена", must_have_text=True)
     layout = _read(ns.layout, "журнал диска", must_have_text=True)
     registers = _load_registers(ns.registers)
     objects = _read_jsonl(ns.sim_objects, "файл паспортов сима") if ns.sim_objects else None
     journal = _read_jsonl(ns.sim_journal, "журнал сима") if ns.sim_journal else None
-    result = audit(exchange, layout, registers, words=words, zone_max_mm=zone, sim_objects=objects, sim_journal=journal)
+    result = audit(
+        exchange,
+        layout,
+        registers,
+        words=words,
+        zone_max_mm=zone,
+        pick_margin_mm=margin,
+        sim_objects=objects,
+        sim_journal=journal,
+    )
     return result.exit_code, render(result)
 
 

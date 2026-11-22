@@ -600,18 +600,18 @@ def test_flags_word_other_than_3_fails(tmp_path):
     ("index", "word", "key", "ok"),
     [
         (2, 4549, "окно", True),
-        (2, 4548, "окно", False),
+        (2, 4498, "окно", False),
         (2, 4615, "окно", True),
-        (2, 4616, "окно", False),
+        (2, 4666, "окно", False),
         (3, 62096, "окно", True),
-        (3, 62095, "окно", False),
+        (3, 62045, "окно", False),
         (3, 62116, "окно", True),
-        (3, 62117, "окно", False),
+        (3, 62167, "окно", False),
     ],
 )
 def test_alpha_window_on_pick_words_boundaries(tmp_path, index, word, key, ok):
-    """Окно α: ARGS[2] in 4549..4615, ARGS[3] in 62096..62116 (границы с обеих сторон).
-    Строка диска несёт те же значения, поэтому `передача` не срабатывает."""
+    """Окно α: ARGS[2] in 4549..4615, ARGS[3] in 62096..62116. Вне окна дальше запаса 5 мм (50 слов) — FAIL `окно`
+    (ред. 3: ближе — PASS~, см. test_wire_audit.py). Строка диска несёт те же значения, `передача` не срабатывает."""
     px = (word if index == 2 else 4602) / 10.0
     py = ((word if index == 3 else 62104) - 65536) / 10.0
     c = fresh(tmp_path)
