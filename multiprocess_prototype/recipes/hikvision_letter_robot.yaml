@@ -259,7 +259,10 @@ blueprint:
             output_key: pick_xy
             roi_offset_x: 0
             roi_offset_y: 0
-            use_linear: true
+            # R4 (решение владельца 2026-10-25/2026-11-20): β — гомография F7, не линейный режим (линейный остаётся симу).
+            # ВНИМАНИЕ: без калибровки F7 (`config/calibration/cam0.yaml`, камера↔робот, день №2) β при `use_linear: false`
+            # даёт отказ или нулевые координаты — ожидаемо, не дефект; параметры `lin_*` ниже оставлены для отката.
+            use_linear: false
             lin_src_width: 800
             lin_src_height: 481
             lin_tl_x: 497.4
@@ -305,7 +308,8 @@ blueprint:
             word_source: signal_2
             use_pitch: true
             first_x: 320.0
-            first_y: -200.0
+            # R4 (владелец 2026-11-20): как в сим-рецепте (−440); досягаемость робота 544 мм сверить на железе в день №2.
+            first_y: -440.0
             line_angle_deg: 90.0
             pitch_mm: 0.0
             last_x: 320.0

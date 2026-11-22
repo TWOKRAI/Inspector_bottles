@@ -187,3 +187,28 @@ def test_beta_devices_have_no_reconnect_limit() -> None:
     params = {d["id"]: d["params"] for d in raw["devices"]}
     assert params["robot_main"]["max_reconnect_attempts"] == 0
     assert params["vfd_belt"]["max_reconnect_attempts"] == 0
+
+
+def _beta_plugin_config(plugin_name: str) -> dict:
+    raw = yaml.safe_load((_RECIPES_DIR / "hikvision_letter_robot.yaml").read_text(encoding="utf-8"))
+    found = [
+        p.get("config", {})
+        for proc in raw["blueprint"]["processes"]
+        for p in proc.get("plugins", [])
+        if p.get("plugin_name") == plugin_name
+    ]
+    assert len(found) == 1, f"{plugin_name}: узлов {len(found)}"
+    return found[0]
+
+
+def test_beta_uses_homography_not_linear_mode() -> None:
+    """R4-2 (владелец 2026-10-25): β без линейного режима — гомография F7; без калибровки β даёт отказ или нули."""
+    assert _beta_plugin_config("pixel_to_robot")["use_linear"] is False
+
+
+def test_beta_word_starts_at_minus_440_like_sim() -> None:
+    """R4-2 (владелец 2026-11-20): `first_y` слова β как в сим-рецепте; `last_y` не менялся."""
+    cfg = _beta_plugin_config("word_layout")
+    assert cfg["first_y"] == -440.0
+    assert cfg["last_y"] == 300.0
+
