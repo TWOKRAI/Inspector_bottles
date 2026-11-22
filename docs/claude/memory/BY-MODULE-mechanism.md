@@ -310,7 +310,7 @@
 - [project_silent_observability_plane](project_silent_observability_plane.md)
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 
-## fixtures (24)
+## fixtures (25)
 
 - [feedback_a_decision_orphans_what_encoded_the_previous_one](feedback_a_decision_orphans_what_encoded_the_previous_one.md)
 - [feedback_a_handmade_readback_leaves_its_producer_unguarded](feedback_a_handmade_readback_leaves_its_producer_unguarded.md)
@@ -332,6 +332,7 @@
 - [feedback_priority_fallback_eviction_masks_staleness_config](feedback_priority_fallback_eviction_masks_staleness_config.md)
 - [feedback_safeguard_can_be_a_noop_with_green_units](feedback_safeguard_can_be_a_noop_with_green_units.md)
 - [feedback_second_writer_shrinks_the_ring](feedback_second_writer_shrinks_the_ring.md)
+- [feedback_server_file_in_home_needs_dir_autouse_isolation](feedback_server_file_in_home_needs_dir_autouse_isolation.md)
 - [feedback_test_params_hide_defect_window](feedback_test_params_hide_defect_window.md)
 - [feedback_tests_of_process_global_state_run_in_own_process](feedback_tests_of_process_global_state_run_in_own_process.md)
 - [feedback_verify_heuristic_fix_against_golden_recipes](feedback_verify_heuristic_fix_against_golden_recipes.md)
@@ -806,7 +807,7 @@
 - [project_backend_ctl_fake_fidelity_gap](project_backend_ctl_fake_fidelity_gap.md)
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 
-## test-infra (33)
+## test-infra (34)
 
 - [feedback_a_background_chain_does_not_see_the_coordinator_pause](feedback_a_background_chain_does_not_see_the_coordinator_pause.md)
 - [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
@@ -825,6 +826,7 @@
 - [feedback_red_tests_manufacture_the_appearance_of_new_diagnostics](feedback_red_tests_manufacture_the_appearance_of_new_diagnostics.md)
 - [feedback_scripted_patch_needs_a_unique_anchor](feedback_scripted_patch_needs_a_unique_anchor.md)
 - [feedback_second_consumer_reveals_the_defect](feedback_second_consumer_reveals_the_defect.md)
+- [feedback_server_file_in_home_needs_dir_autouse_isolation](feedback_server_file_in_home_needs_dir_autouse_isolation.md)
 - [feedback_snapshot_of_a_sim_record_races_its_ticker](feedback_snapshot_of_a_sim_record_races_its_ticker.md)
 - [feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows](feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows.md)
 - [feedback_test_live_telemetry_gate_without_full_boot](feedback_test_live_telemetry_gate_without_full_boot.md)

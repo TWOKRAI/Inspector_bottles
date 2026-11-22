@@ -21,6 +21,7 @@
 - [Об ОТСУТСТВИИ](feedback_an_absence_assertion_needs_a_reachability_check.md) — с парной проверкой достижимости
 - [rg/qex слепы к docs/](feedback_root_ignore_whitelist_blinds_root_search.md) — явный путь или git grep; сгенерированное в docs/ — ссылкой
 - [Сторож «хоть раз» слеп](feedback_a_guard_that_counts_at_least_once_is_blind.md) — судить поимённо, не суммой
+- [Сервер пишет файл в HOME → autouse-изоляция на каталог](feedback_server_file_in_home_needs_dir_autouse_isolation.md) — токен порта; выкл. для живого режима
 - [Дублёр верен форме, не протоколу](feedback_a_faithful_fake_still_lacks_the_protocol.md) — одно имя, две двери
 - [Чужая сессия в том же дереве](feedback_a_peer_session_shares_the_tree.md) — один писатель, стейджить явные пути
 - [commit берёт весь индекс](feedback_commit_takes_the_whole_index.md) — `git add -A` затягивает чужое
