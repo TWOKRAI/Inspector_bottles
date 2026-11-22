@@ -199,3 +199,41 @@ def headless_backend(tmp_path_factory: pytest.TempPathFactory):
         yield drv
     finally:
         harness.stop()
+
+
+@pytest.fixture
+def tmp_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """``HOME``/``USERPROFILE`` — во временный каталог; ``BACKEND_CTL_*`` из окружения убраны (Task 0.12b).
+
+    ПМ пишет файл токена порта управления в ``~/.multiprocess_framework/ctl_<порт>.token``, клиент читает его
+    оттуда же; после SIGKILL файл залипает. ``BACKEND_CTL_TOKEN_FILE`` главнее ``HOME`` — без снятия токен ушёл бы
+    мимо временного каталога. Сама не autouse: её подключает ``_offline_home_isolation`` ниже (условия — там);
+    аргумент теста или ``usefixtures("tmp_home")`` — когда тест берёт путь или изолирован и в живом прогоне.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for key in list(os.environ):
+        if key.startswith("BACKEND_CTL_"):
+            monkeypatch.delenv(key)
+    return home
+
+
+@pytest.fixture(autouse=True)
+def _offline_home_isolation(request: pytest.FixtureRequest) -> None:
+    """Каждый тест каталога — с ``tmp_home`` (Task 0.12b, ADR-PMM-052): ни один офлайн-тест, нынешний или будущий,
+    не пишет файл токена в настоящий ``~/.multiprocess_framework``.
+
+    Отключается в трёх случаях: прогон с ``--backend-live`` (или env ``BACKEND_CTL_LIVE``); тест с маркером
+    ``harness_smoke``; тест, который берёт ``headless_backend``. Бэкенд из session/module/class-фикстуры стартует
+    раньше этой function-фикстуры, то есть с настоящим ``HOME``, и пишет токен туда; драйвер теста с подменённым
+    ``HOME`` при переподключении искал бы файл во временном каталоге. Маркер закрывает и ``-m harness_smoke`` без
+    ``--backend-live`` (``pytest_collection_modifyitems`` выше пускает живые тесты и так).
+    """
+    if request.config.getoption(LIVE_OPTION, default=False):
+        return
+    if request.node.get_closest_marker("harness_smoke") is not None:
+        return
+    if "headless_backend" in request.fixturenames:
+        return
+    request.getfixturevalue("tmp_home")

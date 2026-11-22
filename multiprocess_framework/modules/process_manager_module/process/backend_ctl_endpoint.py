@@ -6,8 +6,11 @@ backend_ctl_endpoint — поднятие SocketChannel в ProcessManager (dev-�
 регистрирует его в RouterManager хоста и подключает SocketBridgeAdapter как
 обработчик входящих сообщений driver'а. Вся доставка — через RouterManager.
 
-Гейт + localhost-bind: в проде endpoint не существует (env не выставлен). Без
-аутентификации — это dev-инструмент на localhost (см. P2 дизайн §7).
+Гейт + localhost-bind + токен (Task 0.12b, ADR-PMM-052): поставка
+выключена (`system.yaml` → `backend_ctl.enabled: false`), dev-старт — `BACKEND_CTL=1`.
+Порт без токена закрыт: первая строка соединения — `hello` с токеном из файла
+`~/.multiprocess_framework/ctl_<порт>.token` (0600, пишется ПОСЛЕ `start()` по
+фактическому порту; при остановке удаляется, только если в нём токен этого канала).
 
 Выделено из process_manager_process.py, чтобы PM оставался тонким и endpoint
 тестировался изолированно.
@@ -16,10 +19,19 @@ backend_ctl_endpoint — поднятие SocketChannel в ProcessManager (dev-�
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
+from multiprocess_framework.modules.logger_module import get_std_logger
+
 from ...router_module.adapters import SocketBridgeAdapter
-from ...router_module.channels import SocketChannel
+from ...router_module.channels import SocketChannel, socket_auth
+
+_log = get_std_logger(__name__)
+
+#: Атрибуты канала: путь файла токена и сам токен (для сверки при удалении).
+_ATTR_TOKEN_PATH = "_backend_ctl_token_path"
+_ATTR_TOKEN = "_backend_ctl_token"
 
 #: Имя канала = адрес для channel=-маршрутизации ответа driver'у.
 BACKEND_CTL_CHANNEL = "backend_ctl"
@@ -36,8 +48,8 @@ def is_enabled(env: Optional[dict] = None, config: Optional[dict] = None) -> boo
     """True, если backend-control включён.
 
     Источников два (OR): конфиг (`system.yaml` → `backend_ctl.enabled`) ИЛИ
-    env-флаг `BACKEND_CTL=1`. Конфиг — основной способ для dev-запуска прототипа;
-    env остаётся escape-hatch для тестов/smoke и CI (включить без правки yaml).
+    env-флаг `BACKEND_CTL=1`. Поставка выключена (`enabled: false`, Task 0.12b):
+    dev-старт, стенды и харнесс включают порт env-флагом без правки yaml.
     """
     source = env if env is not None else os.environ
     if source.get(ENV_ENABLE) == "1":
@@ -110,7 +122,7 @@ def setup_backend_ctl_channel(
 
     Returns:
         Запущенный SocketChannel или None (гейт закрыт / router отсутствует /
-        bind не удался).
+        bind не удался / файл токена не записан — открытого сервера не бывает).
     """
     if not is_enabled(env, config):
         return None
@@ -130,6 +142,9 @@ def setup_backend_ctl_channel(
         session_isolation=session_isolation,
         on_request=on_request,
     )
+    # Токен держит замыкание: accept-цикл работает уже между start() и записью файла;
+    # пока holder пуст, authenticator возвращает False (закрыто по умолчанию).
+    holder: dict[str, str] = {}
     channel = SocketChannel(
         BACKEND_CTL_CHANNEL,
         host=resolved_host,
@@ -137,22 +152,39 @@ def setup_backend_ctl_channel(
         on_inbound=adapter.on_inbound,
         session_isolation=session_isolation,
         on_session_closed=on_session_closed,
+        authenticator=socket_auth.token_authenticator(lambda: holder.get("token")),
     )
     router_manager.register_channel(channel)
     if not channel.start():
+        # Файл токена не тронут: при занятом порту он принадлежит другому ПМ.
         if log_error:
             log_error(f"[backend_ctl] не удалось поднять SocketChannel на {resolved_host}:{resolved_port}")
-        try:
-            router_manager.unregister_channel(BACKEND_CTL_CHANNEL)
-        except Exception:  # noqa: BLE001 — best-effort откат
-            pass
+        _unregister(router_manager)
         return None
+
+    # Имя файла — по ФАКТИЧЕСКОМУ порту (port: 0 → порт выбрала ОС). Залипший файл
+    # прошлого ПМ (SIGKILL) перезаписывается атомарно.
+    try:
+        token_path = socket_auth.resolve_token_path(channel.port, source)
+        token = socket_auth.write_token(token_path)
+    except Exception as exc:  # noqa: BLE001 — любой сбой записи: открытого сервера не оставляем
+        channel.close()
+        _unregister(router_manager)
+        if log_error:
+            log_error(
+                f"[backend_ctl] файл токена для порта {channel.port} не записан "
+                f"({type(exc).__name__}: {exc}) — endpoint не поднят"
+            )
+        return None
+    holder["token"] = token  # сразу: окно «файл есть, holder пуст» — одна инструкция
+    setattr(channel, _ATTR_TOKEN_PATH, token_path)
+    setattr(channel, _ATTR_TOKEN, token)
 
     if log_info:
         log_info(
             f"[backend_ctl] endpoint поднят на {resolved_host}:{channel.port} "
-            f"(канал '{BACKEND_CTL_CHANNEL}', session_isolation={'on' if session_isolation else 'off'}) "
-            f"— DEV-инструмент"
+            f"(канал '{BACKEND_CTL_CHANNEL}', session_isolation={'on' if session_isolation else 'off'}, "
+            f"файл токена {token_path}) — DEV-инструмент"
         )
     return channel
 
@@ -161,14 +193,39 @@ def teardown_backend_ctl_channel(
     channel: Optional[SocketChannel],
     router_manager: Any = None,
 ) -> None:
-    """Остановить канал и снять регистрацию (PID-specific, без глобального kill)."""
+    """Остановить канал и снять регистрацию (PID-specific, без глобального kill).
+
+    Файл токена удаляется ДО ``channel.close()`` и только если в нём токен этого
+    канала: файл, перезаписанный другим ПМ (общий ``BACKEND_CTL_TOKEN_FILE``), остаётся.
+    Сбой удаления не мешает закрыть порт.
+    """
     if channel is None:
         return
     try:
+        _remove_own_token(channel)
         channel.close()
     finally:
         if router_manager is not None:
-            try:
-                router_manager.unregister_channel(BACKEND_CTL_CHANNEL)
-            except Exception:  # noqa: BLE001 — best-effort
-                pass
+            _unregister(router_manager)
+
+
+def _unregister(router_manager: Any) -> None:
+    try:
+        router_manager.unregister_channel(BACKEND_CTL_CHANNEL)
+    except Exception:  # noqa: BLE001 — best-effort откат
+        pass
+
+
+def _remove_own_token(channel: SocketChannel) -> None:
+    """Удалить файл токена канала, если в нём всё ещё токен этого канала."""
+    path: Optional[Path] = getattr(channel, _ATTR_TOKEN_PATH, None)
+    token: Optional[str] = getattr(channel, _ATTR_TOKEN, None)
+    if path is None or token is None:
+        return
+    try:
+        if socket_auth.read_token(path) == token:
+            path.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 — сбой удаления не мешает close() порта
+        _log.warning("[backend_ctl] файл токена %s не удалён: %s: %s", path, type(exc).__name__, exc)

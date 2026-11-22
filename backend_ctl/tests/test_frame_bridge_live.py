@@ -64,8 +64,9 @@ def _launcher(manifest: Path):
 
 
 _READER_SCRIPT = r"""
-import json, sys, threading, time
+import json, os, sys, threading, time
 from multiprocess_framework.modules.frontend_module.bridge.remote_frame_source import RemoteFrameSource
+from multiprocess_framework.modules.router_module.channels.socket_auth import file_token_provider
 from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient
 
 port, want, window = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
@@ -76,7 +77,8 @@ def on_frame(sender, frame, bseq):
     if len(frames) >= want:
         enough.set()
 
-client = SocketClient("127.0.0.1", port, sender="pult")  # sender != имя двери хаба
+# sender != имя двери хаба; токен — из файла порта (0.12b: порт без hello закрыт), env/HOME наследованы от теста
+client = SocketClient("127.0.0.1", port, sender="pult", token_provider=file_token_provider(port, os.environ))
 client.connect(timeout=5.0)
 source = RemoteFrameSource(client, dispatch=lambda fn: fn())
 reply = source.subscribe(None, on_frame, timeout=8.0)

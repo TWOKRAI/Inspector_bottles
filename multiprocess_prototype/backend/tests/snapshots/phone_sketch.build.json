@@ -2,7 +2,7 @@
   "orchestrator_class_path": "multiprocess_prototype.orchestrator.ProcessManagerProcessApp",
   "orchestrator_config": {
     "backend_ctl": {
-      "enabled": true,
+      "enabled": false,
       "host": "127.0.0.1",
       "port": 8765
     },
@@ -1126,7 +1126,7 @@
     },
     "sys_config": {
       "backend_ctl": {
-        "enabled": true,
+        "enabled": false,
         "host": "127.0.0.1",
         "port": 8765
       },
