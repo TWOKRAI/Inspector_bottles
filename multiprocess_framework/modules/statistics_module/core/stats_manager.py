@@ -702,7 +702,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         name: str,
         metric_type: MetricType,
         merged_tags: Dict[str, str],
-    ) -> "tuple[Optional[MetricRecord], bool]":
+    ) -> tuple[MetricRecord | None, bool]:
         """Получить или создать MetricRecord (thread-safe) и признак конфликта вида.
 
         Конфликт (0.11b, M-4) — под занятым ключом лежит запись ДРУГОГО вида

@@ -17,11 +17,16 @@
 ``get_std_logger``.
 """
 
-import sys
 import threading
+import time
 from unittest.mock import MagicMock
 
+import pytest
+
+from ...logger_module.configs import LoggerChannelSchema, LoggerManagerConfig, LoggerScopeSchema
+from ...logger_module.core.logger_manager import LoggerManager
 from .. import StatsManager
+from ..observation.observation_manager import ObservationManager
 from ...channel_routing_module.interfaces import IChannel
 
 #: Дедлайн hazard-тестов: поток, не успевший за него, считается зависшим.
@@ -47,20 +52,21 @@ class _CapturingChannel(IChannel):
         pass
 
 
-def _make_manager(logger=None, name: str = "KindConflictTest", cls=StatsManager) -> "tuple[StatsManager, MagicMock]":
+def _make_manager(logger=None, name: str = "KindConflictTest", **config) -> tuple[StatsManager, MagicMock]:
     """Менеджер с mock-логгером в слоте 'logger'.
 
     ``aggregation_interval == flush_interval``, чтобы посторонний WARNING про
     «пол темпа» не засорял список вызовов логгера.
     """
     mock_logger = logger if logger is not None else MagicMock()
-    mgr = cls(
+    mgr = StatsManager(
         manager_name=name,
         config={
             "enable_logging": False,
             "channels": {},
             "aggregation_interval": 1.0,
             "flush_interval": 1.0,
+            **config,
         },
         managers={"logger": mock_logger},
     )
@@ -68,27 +74,42 @@ def _make_manager(logger=None, name: str = "KindConflictTest", cls=StatsManager)
     return mgr, mock_logger
 
 
+@pytest.fixture
+def make_manager():
+    """Фабрика менеджеров; на выходе все остановлены (иначе поток aggregation-window-timer течёт между тестами)."""
+    made = []
+
+    def make(*args, **kwargs):
+        mgr, logger = _make_manager(*args, **kwargs)
+        made.append(mgr)
+        return mgr, logger
+
+    yield make
+    for mgr in made:
+        mgr.shutdown()
+
+
 def _conflicts(mgr: StatsManager):
     return mgr.get_stats().get("metric_kind_conflicts")
 
 
-def test_timing_under_counter_counted():
-    mgr, _ = _make_manager()
+def test_timing_under_counter_counted(make_manager):
+    mgr, _ = make_manager()
     mgr.record_metric("x")
     mgr.record_timing("x", 0.5)
     mgr.record_timing("x", 0.7)
     assert _conflicts(mgr) == 2
 
 
-def test_counter_under_timing_counted():
-    mgr, _ = _make_manager()
+def test_counter_under_timing_counted(make_manager):
+    mgr, _ = make_manager()
     mgr.record_timing("y", 0.5)
     mgr.record_metric("y")
     assert _conflicts(mgr) == 1
 
 
-def test_one_warning_per_window():
-    mgr, logger = _make_manager()
+def test_one_warning_per_window(make_manager):
+    mgr, logger = make_manager()
     mgr.record_metric("x")
     mgr.record_metric("y")
     mgr.record_timing("x", 0.5)
@@ -97,8 +118,8 @@ def test_one_warning_per_window():
     assert logger.warning.call_count == 2
 
 
-def test_conflict_not_emitted_after_flush():
-    mgr, _ = _make_manager()
+def test_conflict_not_emitted_after_flush(make_manager):
+    mgr, _ = make_manager()
     # Канал-шпион стоит как tap: tap видит СЫРУЮ эмиссию. Через ``register_channel``
     # конфликтную запись не увидеть — окно агрегации держит вид первой серии и
     # в снапшоте тайминг под ``x`` не показывает (проверено на HEAD).
@@ -112,19 +133,32 @@ def test_conflict_not_emitted_after_flush():
     assert ("x", "timing") not in emitted
 
 
-def test_first_series_kept():
-    mgr, _ = _make_manager()
+def test_first_series_kept(make_manager):
+    mgr, _ = make_manager()
     mgr.record_metric("x")
     mgr.record_timing("x", 0.5)
     assert mgr.get_metric("x") == {"name": "x", "type": "counter", "tags": {}, "count": 1.0}
 
 
-def test_warning_that_records_metric_does_not_deadlock():
+def test_live_ceiling_refusal_is_not_a_conflict(make_manager):
+    """``rec is None`` (потолок живого слоя) — не конфликт: серии «b» в справочнике нет, сравнивать не с чем."""
+    mgr, _ = make_manager(max_series=1)
+    mgr.record_metric("a")
+    mgr.record_metric("b")
+    assert mgr.get_stats()["series_dropped"] == 1, "потолок не сработал — сценарий недостоверен"
+    mgr.record_timing("b", 0.5)
+    assert _conflicts(mgr) == 0
+    mgr.record_timing("a", 0.5)
+    assert _conflicts(mgr) == 1
+    assert {m["name"] for m in mgr.get_all_metrics().values()} == {"a"}
+
+
+def test_warning_that_records_metric_does_not_deadlock(make_manager):
     """Голос идёт через логгер, а логгер пишет метрику: под ``_metrics_lock`` это цикл на себя."""
     holder = {}
     logger = MagicMock()
     logger.warning.side_effect = lambda *a, **k: holder["mgr"].record_metric("other")
-    mgr, _ = _make_manager(logger=logger)
+    mgr, _ = make_manager(logger=logger)
     holder["mgr"] = mgr
     mgr.record_metric("x")
 
@@ -137,8 +171,8 @@ def test_warning_that_records_metric_does_not_deadlock():
     assert mgr.get_metric("other") is not None
 
 
-def test_concurrent_conflicts_counted():
-    mgr, _ = _make_manager()
+def test_concurrent_conflicts_counted(make_manager):
+    mgr, _ = make_manager()
     mgr.record_metric("x")
     threads_n, per_thread = 8, 50
 
@@ -147,36 +181,79 @@ def test_concurrent_conflicts_counted():
             mgr.record_timing("x", 0.1)
 
     threads = [threading.Thread(target=hammer, daemon=True) for _ in range(threads_n)]
-    old_interval = sys.getswitchinterval()
-    # Частые переключения потоков. Гонку «счётчик без лока» это на CPython 3.12 НЕ ловит
-    # (инструкции чтения-записи атрибута без вызовов между ними не прерываются) —
-    # за лок отвечает тест ниже.
-    sys.setswitchinterval(1e-6)
-    try:
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(_JOIN_DEADLINE_S)
-    finally:
-        sys.setswitchinterval(old_interval)
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(_JOIN_DEADLINE_S)
 
     assert not any(t.is_alive() for t in threads), "потоки не завершились за дедлайн"
     assert _conflicts(mgr) == 400
 
 
-class _LockWatchingManager(StatsManager):
-    """Пишет в ``unlocked_writes`` каждую запись счётчика конфликтов, сделанную БЕЗ ``_metrics_lock``."""
+class _YieldingInt(int):
+    """``int``, у которого ``+`` проходит через вызов Python: точка переключения потока между чтением и записью."""
 
-    def __setattr__(self, name, value):
-        if name == "_metric_kind_conflicts" and value and not self._metrics_lock.locked():
-            self.__dict__.setdefault("unlocked_writes", []).append(value)
-        super().__setattr__(name, value)
+    def __add__(self, other):
+        value = int(self)
+        time.sleep(0)
+        return _YieldingInt(value + int(other))
 
 
-def test_conflict_counter_written_under_metrics_lock():
-    """Потоковая гонка счётчика на CPython 3.12 не воспроизводится (см. тест выше), поэтому лок проверен прямо."""
-    mgr, _ = _make_manager(cls=_LockWatchingManager)
+def test_concurrent_conflicts_counted_with_forced_thread_switch(make_manager):
+    """``+= 1`` на голом ``int`` в CPython 3.12 не прерывается между чтением и записью, и счёт без лока
+    проходит обычный тест на 400. Здесь переключение потока между ними форсировано: потеря инкремента
+    (счётчик вне ``_metrics_lock``) даёт меньше 400.
+
+    Приватное имя ``_metric_kind_conflicts`` — только для НАЧАЛЬНОГО значения; результат читается
+    публично через ``get_stats``.
+    """
+    mgr, _ = make_manager()
+    mgr._metric_kind_conflicts = _YieldingInt(0)
     mgr.record_metric("x")
-    mgr.record_timing("x", 0.5)
-    assert _conflicts(mgr) == 1
-    assert mgr.__dict__.get("unlocked_writes", []) == []
+
+    def hammer():
+        for _ in range(50):
+            mgr.record_timing("x", 0.1)
+
+    threads = [threading.Thread(target=hammer, daemon=True) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(_JOIN_DEADLINE_S)
+
+    assert not any(t.is_alive() for t in threads), "потоки не завершились за дедлайн"
+    assert _conflicts(mgr) == 400
+
+
+def test_real_objects_port_attached_and_real_logger(tmp_path):
+    """Боевая проводка: порт наблюдений подключён (дорога через порт), логгер настоящий, строка — в файле."""
+    logger = LoggerManager(
+        config=LoggerManagerConfig(
+            app_name="kindconflict",
+            log_directory=str(tmp_path),
+            enable_batching=False,
+            modules={},
+            channels={"common": LoggerChannelSchema(type="file", enabled=True, file_path="common.log", rotate=False)},
+            default_level="DEBUG",
+            scopes={"SYSTEM": LoggerScopeSchema(channels=["common"])},
+        )
+    )
+    mgr, _ = _make_manager(logger=logger)
+    port = ObservationManager(manager_name="ObservationManager", process=None)
+    try:
+        assert port.initialize() is True
+        assert mgr.attach_observation_port(port) is True
+        mgr.record_metric("x")
+        mgr.record_timing("x", 0.5)
+        mgr.record_timing("x", 0.7)
+        logger.flush()
+    finally:
+        mgr.shutdown()
+        port.shutdown()
+        logger.shutdown()
+
+    assert _conflicts(mgr) == 2
+    assert mgr.get_metric("x") == {"name": "x", "type": "counter", "tags": {}, "count": 1.0}
+    assert mgr.observation_bypasses == {}, "числа пошли мимо порта — сценарий недостоверен"
+    lines = [ln for ln in (tmp_path / "common.log").read_text(encoding="utf-8").splitlines() if "другого вида" in ln]
+    assert len(lines) == 1, lines
