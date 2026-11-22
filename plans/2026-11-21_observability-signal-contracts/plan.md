@@ -56,7 +56,7 @@
 - Task 0.10b: `telemetry_snapshot`, дыры (B-4) — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.9)
 - Task 0.11: B-3, проверенная запись — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.3)
 - Task 0.11b: M-4 минимум, конфликт видов — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, b19437fdb + 51a2e2279]
-- Task 0.12: Рукопожатие в общем канале — «до 1.0» [PENDING]
+- Task 0.12: Рукопожатие в общем канале — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, коммиты b9962e759…0cf7da2ba; слепой tester 43 красных→зелёные, ревью стадии 5 APPROVED, раунд 2]
 - Task 0.12a: Клиенты порта читают токен — «до 1.0» [PENDING] (после 0.12)
 - Task 0.12b: Порт закрыт без токена: сервер и поставка — «до 1.0» [PENDING] (после 0.12a)
 - Task 0.13: O-1, строка SF1, стенд — «до 1.0» [PENDING] (после 0.4–0.12b)
