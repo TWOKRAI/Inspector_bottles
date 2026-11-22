@@ -426,7 +426,7 @@ blueprint:
         source_target_fps: 10
       extras: {}
     # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
-    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с β; «Домой»/«Серво ВКЛ» только здесь (в β — после R4).
+    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с β (включая «Домой»/«Серво ВКЛ», Task 6.7).
     - process_name: pult
       plugins:
         - plugin_name: control_panel

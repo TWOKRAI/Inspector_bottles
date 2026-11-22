@@ -113,16 +113,14 @@ def test_word_control_is_exactly_one(recipe: str) -> None:
 
 
 def test_pult_controls_identical_in_both_recipes() -> None:
-    """А5 (обновлено в 6.4): слово, лента и мониторы ``pult`` в двух рецептах равны (список словарей).
+    """А5 (обновлено в 6.7): все контролы ``pult`` (слово, лента, «Домой», «Серво ВКЛ», мониторы) равны в двух рецептах.
 
-    «Домой» и «Серво ВКЛ» (robot_park/robot_servo) есть только в sim — в β их нет до R4;
-    их отсутствие в β пинит ``test_beta_has_no_home_servo_before_r4``.
+    До R4 «Домой»/«Серво ВКЛ» были только в sim; с 6.7 они и в β (драйвер delta_v2) — сравнение полное.
     """
     sim, real = (_pult_controls_raw(name) for name in _RECIPE_NAMES)
     # страж против «пусто == пусто»: без контролов сравнение прошло бы вхолостую
     assert sim, "в letter_robot_sim у pult нет контролов"
     assert real, "в hikvision_letter_robot у pult нет контролов"
-    home_servo = ("robot_park", "robot_servo")
-    sim_common = [c for c in sim if c.get("target_command") not in home_servo]
-    assert len(sim_common) == len(sim) - 2, "в sim нет «Домой»/«Серво ВКЛ»: сравнение общей части вхолостую"
-    assert sim_common == real
+    # страж: «Домой»/«Серво ВКЛ» действительно есть в sim, иначе полное равенство не пинит их в β
+    assert {"robot_park", "robot_servo"} <= {c.get("target_command") for c in sim}
+    assert sim == real

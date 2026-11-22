@@ -30,8 +30,8 @@ from multiprocess_prototype.frontend.widgets.tabs.services.control_panel.tests.r
 #   Б2. 5 monitor-контролов (source monitor, type monitor) по state_path: devices.state.robot_main.conn
 #       (value_key conn), devices.state.robot_main.park.state, processes.layout.state.word_layout.{last_label,
 #       assembled, done}. Монитора system.run.state нет.
-#   Б3. hikvision_letter_robot (β, протокол v1, R4 не влит): лента и 5 мониторов есть; «Домой» и «Серво ВКЛ»
-#       ОТСУТСТВУЮТ (test_beta_has_no_home_servo_before_r4 — лид снимает при слиянии R4).
+#   Б3. hikvision_letter_robot (β, драйвер delta_v2 с R4): лента и 5 мониторов есть; «Домой» и «Серво ВКЛ» есть
+#       с теми же аргументами, что в sim (Task 6.7; тест test_pult_controls_identical_in_both_recipes).
 #   Б4. «Слово» остаётся первым контролом и не меняется.
 #   Б5. Все 4 команды есть в DeviceHubPlugin.commands; РЕАЛЬНЫЙ CommandCatalog + CommandValidator
 #       принимают validate_action_command("device_hub", <команда>).
@@ -181,18 +181,6 @@ def test_beta_has_belt_and_monitors() -> None:
     assert _pult_controls_raw(_BETA)[0].get("id") == "word"
 
 
-def test_beta_has_no_home_servo_before_r4() -> None:
-    """Б3: пока R4 не влит (протокол v1), в β НЕТ «Домой» и «Серво ВКЛ». Лид снимает тест при слиянии R4.
-
-    Страж против пустоты: лента в β уже есть (иначе «нет Домой» верно вхолостую).
-    """
-    raw = _pult_controls_raw(_BETA)
-    assert len(raw) == 8, f"β: ожидалось 8 контролов (слово + лента 2 + 5 мониторов), найдено {len(raw)}"
-    assert {c.get("label") for c in raw} >= {"Лента пуск", "Лента стоп"}, "ленты в β ещё нет: проверка пуста"
-    assert not [c for c in raw if c.get("target_command") in ("robot_park", "robot_servo")]
-    assert not [c for c in raw if c.get("label") in ("Домой", "Серво ВКЛ")]
-
-
 @pytest.mark.parametrize("recipe", _RECIPE_NAMES)
 def test_word_control_still_first(recipe: str) -> None:
     """Б4: «Слово» — первый контрол pult и совпадает с исходным дословно (регрессионный страж, не RED)."""
@@ -213,7 +201,7 @@ def test_no_system_run_state_monitor(recipe: str) -> None:
 
 @pytest.mark.parametrize(
     ("recipe", "expected"),
-    [(_SIM, _ALL_ACTIONS), (_BETA, _BELT_ACTIONS)],
+    [(_SIM, _ALL_ACTIONS), (_BETA, _ALL_ACTIONS)],
 )
 def test_gui_validator_accepts_belt_and_home(recipe: str, expected: list, _hub_registry: Any) -> None:
     """Б5: рецепт → parse_controls → РЕАЛЬНЫЙ CommandCatalog + CommandValidator принимают команды action-контролов.
