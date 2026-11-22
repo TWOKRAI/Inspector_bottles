@@ -56,7 +56,9 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    protocol: delta_universal3
+    # R4 (владелец 2026-11-20): драйвер v2, как у сима. На роботе 192.168.1.7:502 v2 НЕ проверен — T0.3/T4.0 на визите.
+    # Откат — revert этого коммита (было `delta_universal3`).
+    protocol: delta_v2
     transport:
       type: tcp
       host: 192.168.1.7
@@ -66,6 +68,7 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
   - id: vfd_belt
     name: ПЧ лента
     kind: vfd
@@ -78,6 +81,7 @@ devices:
       default_freq_hz: 10.0
       poll_interval_s: 0.5
       stale_polls_limit: 6
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
 blueprint:
   name: default
   description: ''
@@ -132,6 +136,12 @@ blueprint:
             trigger_managed: true
             trigger_mode: "Off"
             run_locked_commands: [release_device, take_device]
+            # 2.2c / ADR-PM-061: камера в `stopping` при `auto_start` (между остановкой и повторным захватом) даёт out_of_spec —
+            # он НЕ блокирует START; ключ повышает его до check_function (блокирует): START ждёт, пока камера не вернётся
+            # в grabbing. Остальные состояния камеры ключ не меняет. Форма ключа как у recog.ml_inference (2.9b).
+            readiness:
+              severity:
+                out_of_spec: check_function
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
@@ -252,7 +262,11 @@ blueprint:
             output_key: pick_xy
             roi_offset_x: 0
             roi_offset_y: 0
-            use_linear: true
+            # R4 (решение владельца 2026-10-25/2026-11-20): β — гомография F7, не линейный режим (линейный остаётся симу).
+            # ВНИМАНИЕ: без калибровки F7 (`config/calibration/cam0.yaml`, камера↔робот, день №2) β при `use_linear: false`
+            # не выдаёт `pick_xy` (плагин пропускает item дальше без координат, `last_error` «нет калибровки 'cam0'»), и
+            # `word_layout` диск не берёт — ожидаемо, не дефект; параметры `lin_*` ниже оставлены для отката.
+            use_linear: false
             lin_src_width: 800
             lin_src_height: 481
             lin_tl_x: 497.4
@@ -298,7 +312,8 @@ blueprint:
             word_source: signal_2
             use_pitch: true
             first_x: 320.0
-            first_y: -200.0
+            # R4 (владелец 2026-11-20): как в сим-рецепте (−440); досягаемость робота 544 мм сверить на железе в день №2.
+            first_y: -440.0
             line_angle_deg: 90.0
             pitch_mm: 0.0
             last_x: 320.0
@@ -401,7 +416,7 @@ blueprint:
       metadata:
         source_target_fps: 10
     # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
-    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с сим-рецептом; «Домой»/«Серво ВКЛ» в β — после R4 (протокол v1).
+    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с сим-рецептом; «Домой»/«Серво ВКЛ» в β пока нет: β на v2 с R4, контролы добавляет владелец Пульта.
     - process_name: pult
       plugins:
         - plugin_name: control_panel
