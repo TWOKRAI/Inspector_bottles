@@ -26,6 +26,7 @@ Stability: lite
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -33,6 +34,7 @@ from typing import Any
 
 from multiprocess_framework.modules.frontend_module.bridge.remote_state_proxy import RemoteStateProxy
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.router_module.channels.socket_auth import file_token_provider
 from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient, SocketConnectionLost
 from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import REG
@@ -211,7 +213,11 @@ class LineLink:
         self._retry_s = retry_ms / 1000.0
         self._connect_timeout_s = connect_timeout_s
         self._clock = clock
-        self._client = SocketClient(host, port, sender="sim_view_line")
+        # Порт управления (Task 0.12a): токен из файла порта, перечитывается на каждом
+        # connect (``_reconnect`` тоже); файла нет — ``hello`` не шлётся.
+        self._client = SocketClient(
+            host, port, sender="sim_view_line", token_provider=file_token_provider(port, os.environ)
+        )
         self._proxy: RemoteStateProxy | None = None
         self._sub_id: str | None = None
         self._in_flight = False

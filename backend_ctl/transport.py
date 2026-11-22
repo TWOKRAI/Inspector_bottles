@@ -13,7 +13,10 @@ Wire-клиент (сокет, reader-поток, request-response по ``reques
   (``_EventChannelMixin``), а не в push-слушатели клиента;
 * ``close()`` гасит watch-контур (``self._watch``) и будит ожидающих событийного
   hub'а (``self._hub``); разрыв тоже будит hub;
-* текст разрыва и guard'а дедлока — actionable для агента.
+* текст разрыва и guard'а дедлока — actionable для агента;
+* токен рукопожатия (Task 0.12a): по умолчанию читается из файла порта
+  (``socket_auth.file_token_provider``) на каждом ``connect``; нет файла — ``hello`` не
+  шлётся. Отказ хоста — :class:`BackendUnavailable` с путём файла в тексте (без токена).
 
 Поля транспорта хост (`BackendDriver`) по-прежнему заводит сам в ``__init__``:
 ``_sock``/``_reader``/``_running``/``_pending``/``_pending_lock``/``_write_lock``/
@@ -23,12 +26,19 @@ Wire-клиент (сокет, reader-поток, request-response по ``reques
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from typing import Any, Dict, Optional
 
 from backend_ctl.mcp_errors import BackendUnavailable
+from multiprocess_framework.modules.router_module.channels.socket_auth import (
+    file_token_provider,
+    resolve_token_path,
+)
 from multiprocess_framework.modules.router_module.channels.socket_client import (
     _SERVER_MARGIN_SEC,
     _TIMED_OUT_TTL_SEC,
+    SocketAuthError,
     SocketClient,
     _Pending,
 )
@@ -48,12 +58,63 @@ _READER_THREAD_GUARD_ERROR: str = (
 )
 
 
+class TokenRejected(BackendUnavailable, SocketAuthError):
+    """Хост отказал в ``hello``: токен из файла не подошёл (Task 0.12a).
+
+    Наследник обоих: для MCP — :class:`BackendUnavailable` (текст для агента), для
+    ретрая ``except OSError`` (``harness``) — :class:`SocketAuthError` (``OSError``).
+    Текст — ``token rejected: <путь файла>``; токен в текст не попадает.
+    """
+
+
 class _TransportMixin(SocketClient):
     """TCP-клиент driver'а: ``SocketClient`` + хуки событийного канала и watch."""
 
     _lost_exc = BackendUnavailable
     _reader_thread_name = "backend-ctl-reader"
     _reader_guard_error = _READER_THREAD_GUARD_ERROR
+    # Явный провайдер (параметр ``SocketClient.__init__``) — главнее файлового. Шим
+    # драйвера ``__init__`` базы не зовёт: остаётся ``None`` → файловый провайдер.
+    _explicit_token_provider: Callable[[], str | None] | None = None
+
+    @property
+    def _token_provider(self) -> Callable[[], str | None]:
+        """Провайдер токена для ``connect``: явный либо файл порта этого экземпляра.
+
+        Файловый провайдер создаётся заново при каждом обращении (``connect`` читает
+        свойство один раз на соединение) и сам файл не кэширует: реконнект после
+        рестарта сервера читает новый токен. Нет файла — провайдер вернёт ``None``,
+        ``hello`` не шлётся (открытый сервер работает как раньше).
+        """
+        explicit = self._explicit_token_provider
+        if explicit is not None:
+            return explicit
+        return file_token_provider(self._port, os.environ)
+
+    @_token_provider.setter
+    def _token_provider(self, provider: Callable[[], str | None] | None) -> None:
+        self._explicit_token_provider = provider
+
+    def _token_path_text(self) -> str:
+        return str(resolve_token_path(self._port, os.environ))
+
+    def connect(self, timeout: float = 5.0) -> None:
+        """``SocketClient.connect``; отказ в ``hello`` → :class:`TokenRejected` с путём файла."""
+        try:
+            super().connect(timeout)
+        except SocketAuthError as exc:
+            raise TokenRejected(f"token rejected: {self._token_path_text()}") from exc
+
+    def request(self, message: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
+        """``SocketClient.request``; ответ ``auth_required`` → :class:`BackendUnavailable`.
+
+        ``auth_required`` приходит только до рукопожатия: ``hello`` не слали (слали бы —
+        ``connect`` поднял бы :class:`TokenRejected`), значит файла токена нет.
+        """
+        reply = super().request(message, timeout=timeout)
+        if isinstance(reply, dict) and reply.get("success") is False and reply.get("error") == "auth_required":
+            raise BackendUnavailable(f"token file not found: {self._token_path_text()}")
+        return reply
 
     def _handle_push(self, msg: Dict[str, Any]) -> None:
         # Push (без reply / поздний ответ никто не ждёт) → событийный канал driver'а.
@@ -81,6 +142,7 @@ class _TransportMixin(SocketClient):
 
 
 __all__ = [
+    "TokenRejected",
     "_TransportMixin",
     "_Pending",
     "_READER_THREAD_GUARD_ERROR",

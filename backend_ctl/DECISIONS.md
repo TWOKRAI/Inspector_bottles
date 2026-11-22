@@ -491,3 +491,57 @@ dict без `success` и `status`. Тогда решает образ после
 экземпляры чинит 0.11). Инъекции лида по плану Task 0.3.
 
 **Откат.** Аддитивно: новый модуль и ADR; инструменты `judge` до Task 0.11 не вызывают.
+
+---
+
+## BCTL-ADR-011: транспорт драйвера читает токен из файла порта; `hello` только при файле
+
+**Дата:** 2026-11-22 · **Статус:** принято · **Контекст:** план
+`observability-signal-contracts`, Task 0.12a (клиентская половина 0.12b; механизм рукопожатия —
+Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
+
+**Проблема.** Сервер с токеном раньше клиентов ломает каждый стенд с `BACKEND_CTL=1`: драйвер,
+харнесс, `stand_gate`, `alpha_sim`, `capacity_bench`, сессии MCP и окно `sim_view --line` не
+шлют `hello`. Поэтому клиенты переходят первыми, а открытые серверы (тесты, `SocketChannel` без
+`authenticator`) должны работать как раньше.
+
+**Решение.**
+
+1. `_TransportMixin` (`backend_ctl/transport.py`) переопределяет классовый `_token_provider`
+   `SocketClient` свойством с сеттером. Сеттер (его зовёт `SocketClient.__init__`) хранит явный
+   провайдер; не-`None` главнее. Иначе свойство отдаёт
+   `file_token_provider(self._port, os.environ)`. `connect` читает свойство один раз на
+   соединение, провайдер файл не кэширует: реконнект после рестарта сервера читает новый
+   токен. Нет файла (или файл пуст) — провайдер вернул `None`, `hello` не шлётся.
+2. Тексты отказов — наблюдаемый исход вызова, без токена в тексте:
+   * хост отказал в `hello` (`SocketAuthError` из `connect`) → `TokenRejected` с текстом
+     `token rejected: <путь файла>`. `TokenRejected` наследует `BackendUnavailable` (текст для
+     MCP) и `SocketAuthError` (`OSError`): ретрай `except OSError` в `harness.py` сохраняется;
+   * `request` вернул dict `success False`, `error "auth_required"` (сервер требует токен, а
+     `hello` не слали: слали бы — отказ пришёл бы в `connect`) → `BackendUnavailable` с текстом
+     `token file not found: <путь файла>`.
+   Путь — `resolve_token_path(self._port, os.environ)`. Обёртки `driver.py` (`send_command`,
+   `system_command`) идут через `self.request`; `request_async` в backend_ctl не используется.
+3. `Services/robot_comm/gui/line_source.py` (`LineLink`, отладочная дверь линии на порту
+   управления) передаёт `token_provider=file_token_provider(port, os.environ)`; `_reconnect`
+   зовёт `connect` — провайдер перечитывает файл.
+
+**Известное (не чинится здесь).** `_await_ready` (`mcp_driver_session.py`) глотает исключение
+подключения: пользователь MCP видит `backend_warming`, а текст `token rejected` /
+`token file not found` — только на следующем вызове. Правка вне задачи (`OPEN_QUESTIONS`).
+`TokenRejected` — `OSError`: ретрай харнесса повторяет отказ по неверному токену до своего
+дедлайна, а не падает сразу.
+
+**Отвергнуто.**
+* Файловый провайдер в `__init__` драйвера — шим не зовёт `SocketClient.__init__`, а правка
+  `driver.py` шире задачи; провайдер, созданный один раз, к тому же легко закэшировать.
+* Отказ `auth_required` как error-dict без исключения — MCP не реконнектится и не называет файл.
+* `TokenRejected` только от `BackendUnavailable` — ломает ретрай `except OSError` харнесса.
+
+**Доказательство.** `backend_ctl/tests/test_token_client.py` (6 тестов: `hello` из файла, страж
+«нет файла — первая строка запрос», оба текста отказа, чистое окружение подпроцесса, реконнект
+с новым токеном) и `Services/robot_comm/tests/test_line_source_token.py` (1 тест). До правки
+`transport.py` и `line_source.py`: 6 красных, страж зелёный. Инъекции — у лида по плану Task 0.12a.
+
+**Откат.** Убрать свойство и два переопределения из `transport.py` и параметр из
+`line_source.py`: клиенты снова не шлют `hello` (открытые серверы этого не заметят).
