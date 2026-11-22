@@ -535,3 +535,54 @@ tap'а. Чтобы судить ответ доставки, форвардер 
 `channel_routing_module/observability/record_forward_channel.py`, `router_module/channels/socket_channel.py`
 (`_write_locked`, `_log_write_failures`), `router_module/adapters/socket_bridge_adapter.py`,
 `plans/2026-11-21_observability-signal-contracts/reports/phase0.opus-advice.md`.
+
+## ADR-RTR-017: рукопожатие `hello` с токеном в `SocketChannel` — первая строка соединения (Task 0.12)
+
+**Статус:** принято (2026-11-22, `plans/2026-11-21_observability-signal-contracts/`, Task 0.12). В фреймворке
+механизм есть, но ничего не включено: порт `ProcessManager` и клиенты включаются в 0.12a/0.12b.
+
+**Контекст.** Порт `backend_ctl` (`127.0.0.1`) принимал команды от любого локального процесса. `bind 127.0.0.1`
+(ADR-RTR-008) закрывает сеть, но не закрывает другого пользователя машины и межпротокольный запрос
+браузера на `127.0.0.1:порт`.
+
+**Решение.**
+1. **Граница доверия — чтение `~`.** Сервер пишет токен (`secrets.token_hex(32)`) в файл с правами 0600
+   (каталог 0700; `mkstemp` + `os.replace`). Клиент того же пользователя читает файл при каждом `connect`.
+   Процессы того же пользователя — **вне модели угроз** (явно): они читают файл. Windows: `chmod` не
+   действует, защищает ACL профиля (тест прав — skip с причиной).
+2. **Первая непустая строка — `{"type": "hello", "token": ...}`.** Проверка в read-потоке ДО `_handle_line`:
+   неаутентифицированный сокет не попадает ни в `_sessions`, ни в `_clients` (рассылка `send()` его не видит).
+   Регистрация — после записи ответа `{"type": "hello", "success": true}`, под `_clients_lock` с проверкой
+   `_running`. Accept-поток ничего не читает: молчун соседей не блокирует.
+3. **Отказ — `{"success": false, "error": "auth_required"}`** (эхо `request_id` строки, если он `str` ≤ 128),
+   затем `shutdown(SHUT_WR)`, дочитывание (≤ 0.5 с и ≤ 64 КиБ, вне локов; иначе непрочитанные байты дают RST
+   и клиент теряет ответ) и `close()`. Остаток буфера после отказа в роутер не уходит. Дедлайн `hello` —
+   абсолютный от accept (`hello_timeout_s`, точность — recv-таймаут 0.5 с), потолок первой строки 4096 байт.
+   Нового потока нет; recv-таймаут после `hello` прежний (он же тотальный таймаут `sendall`, ADR-RTR-012).
+4. **Токен не в журнал.** Отказ — счётчик `get_info()["auth_rejected"]` и DEBUG без токена и без содержимого
+   строки (не WARNING на соединение). Исключение authenticator → отказ и ERROR с именем класса. Повторный
+   `hello` после успеха идёт в `on_inbound` без поля `token`.
+5. **Сравнение за константное время** по байтам UTF-8 (на `str` с не-ASCII стандартная функция бросает
+   `TypeError`). Враждебный `token` (не `str`, пустой, суррогат) → `False` без исключения.
+6. **Клиент.** `SocketClient(token_provider=...)`: `hello` пишется в `connect()` прямо в сокет, до `session` и
+   reader-потока (исключение из I1); ответ читается по байту до `\n`. Отказ/EOF/чужой ответ →
+   `SocketAuthError(ConnectionError)` — подкласс `OSError`, контракт «Raises OSError» сохранён; нет ответа →
+   `TimeoutError`. Провайдер вернул `None` — `hello` не шлётся. Классовый `_token_provider = None` — для шима
+   `BackendDriver`, который не зовёт `__init__`.
+7. **Без authenticator — как раньше**, кроме одного: первая строка `type == "hello"` получает ответ и в
+   `on_inbound` не идёт (клиент с токеном против открытого сервера проходит).
+
+**Альтернативы.**
+- **A. Токен в каждом сообщении.** Против: токен проходит через роутер, журнал и рекордер; middleware клиента.
+  Отвергнуто.
+- **B. Unix-сокет с правами файла.** Против: нет на Windows (целевая платформа стенда). Отвергнуто.
+- **C. Проверка в accept-потоке.** Против: молчаливый клиент держит всех соседей. Отвергнуто.
+
+**Связи.** Дополняет ADR-RTR-008 (bind 127.0.0.1). Fence-токен Ф4.2 — другая сущность. Межпротокольный запрос
+браузера закрыт токеном (первая строка HTTP — не `hello`) — гипотеза, не воспроизводилась. Предел числа
+соединений до аутентификации — `max_clients`, Task 2.5. Сигнатура `authenticator: Callable[[dict], bool]`
+сменится в 2.2 (`welcome {protocol_version, session_id, role}`).
+
+**Reversible:** да (без `authenticator` / `token_provider` поведение прежнее).
+**Refs:** `router_module/channels/socket_auth.py`, `socket_channel.py` (`_handshake`, `_reject`, `_drain`),
+`socket_client.py` (`_hello_exchange`), `tests/test_socket_channel_auth.py`, `tests/test_socket_channel_auth_hazards.py`.
