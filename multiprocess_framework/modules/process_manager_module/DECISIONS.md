@@ -2926,7 +2926,7 @@ Task 0.12), клиенты читают токен из файла порта (B
 4. Не здесь: `host` вне loopback и `allow_remote` (решение владельца В-1 → `gui-service` 2.2), TLS, роли (2.3).
 5. Тесты не пишут токен в настоящий `HOME`: autouse `_offline_home_isolation` (`backend_ctl/tests/conftest.py`) и
    `_isolated_home` (`process_manager_module/tests/conftest.py`) уводят `HOME`/`USERPROFILE` во временный каталог; первая
-   выключена при `--backend-live` и у тестов с `headless_backend` (session-бэкенд пишет токен под настоящим `HOME`).
+   выключена при `--backend-live`, у тестов с `headless_backend` и у тестов с маркером `harness_smoke` (бэкенд пишет токен под настоящим `HOME`; цена маркера — в `OPEN_QUESTIONS`).
 
 ### Отвергнуто
 

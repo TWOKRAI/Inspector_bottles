@@ -36,7 +36,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 
 1. Поднять систему с открытым гейтом (порт всегда за токеном, см. ниже). **Два способа** (OR):
 
-   **(a) Через `system.yaml` (основной для dev-прототипа)** —
+   **(a) Через `system.yaml` (для постоянной настройки стенда; в репозитории не коммитить: поставка `enabled: false`, её сторожат `test_shipped_config_disabled` и golden-снимки)** —
    `multiprocess_prototype/backend/config/system.yaml`:
    ```yaml
    backend_ctl:
@@ -45,7 +45,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
      host: "127.0.0.1"
    ```
 
-   **(b) Через env (escape-hatch для тестов/CI, без правки yaml):**
+   **(b) Через env (основной dev-старт, тесты, CI; без правки yaml):**
    ```bash
    BACKEND_CTL=1 python run.py            # порт по умолчанию 8765
    BACKEND_CTL=1 BACKEND_CTL_PORT=9001 python run.py

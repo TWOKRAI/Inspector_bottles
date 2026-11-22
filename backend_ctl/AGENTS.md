@@ -87,7 +87,7 @@ worker-side обработчика регистра) — без единого �
    (ПМ не запущен или токена нет) и `token rejected: <путь>` (в файле токен другого ПМ).
 2. Запуск системы в фоне (НЕ блокировать сессию), из корня репозитория:
    ```bash
-   python multiprocess_prototype/run.py     # run_in_background: true
+   BACKEND_CTL=1 python multiprocess_prototype/run.py     # run_in_background: true
    ```
    Дать ~6-8 c на старт. Останавливать — **только** через TaskStop по task_id
    (НЕ `taskkill /IM python.exe` — это убьёт чужие процессы).
