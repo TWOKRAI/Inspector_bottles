@@ -242,6 +242,11 @@ def run_gui(process: "GuiProcess") -> None:
 
     app.installEventFilter(WheelGuard(app))
 
+    # Проба qt-mcp (разработка/сим-стенд): ВЫКЛЮЧЕНА, пока не задан INSPECTOR_QT_MCP_PROBE=1.
+    from .qt_mcp_probe import install_if_enabled as _install_qt_mcp_probe
+
+    _install_qt_mcp_probe(log=process._log_warning)
+
     # UI-tap для агентов (backend_ctl): фильтр событий кнопок/табов, ВЫКЛЮЧЕН до
     # команды ui.tap.subscribe. Живёт рядом с WheelGuard (parent=app → не уберёт GC);
     # при рестарте UI (новый app) ставится заново, команды регистрируются один раз.
