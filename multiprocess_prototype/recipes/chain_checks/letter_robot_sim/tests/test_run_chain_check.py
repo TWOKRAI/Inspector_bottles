@@ -139,7 +139,9 @@ class Rig:
         self.out_root = base / "out"
         self.sim_port, self.proto_port, self.extra_port = _free_ports(3)
 
-    def cfg(self, *, sim=None, alpha=None, collect_extra=(), timeouts=None, free_after=None, commands=()) -> dict:
+    def cfg(
+        self, *, sim=None, alpha=None, audit=None, collect_extra=(), timeouts=None, free_after=None, commands=()
+    ) -> dict:
         fake = str(self.fake)
         return {
             "recipe": "letter_robot_sim",
@@ -158,7 +160,7 @@ class Rig:
             "sim_commands": list(commands),
             "collect_cmd": ["python", fake, "collect", "{out}/collect.pid", "{out}/collect", *collect_extra],
             "alpha_cmd": alpha or ["python", fake, "alpha", "{out}/alpha.pid"],
-            "audit_cmd": ["python", fake, "audit", "{out}/audit.pid"],
+            "audit_cmd": audit or ["python", fake, "audit", "{out}/audit.pid"],
         }
 
     def run(self, cfg: dict, *extra: str, client_factory=None, deadline: float = DEADLINE_S) -> int:
@@ -596,3 +598,154 @@ def test_every_run_of_a_series_gets_its_own_stages_json(rig):
     assert (first["run"], second["run"]) == (1, 2)
     assert set(_statuses(first).values()) == set(_statuses(second).values()) == {"pass"}
     assert first["stages"][0]["started"] < second["stages"][0]["started"]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# «НЕ ПРОВЕРЕН» (сценарий не дошёл) отличается от FAIL (дошёл, проверка красная)
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _py(code: str) -> list[str]:
+    return [sys.executable, "-c", code]
+
+
+def _verdict(rig: Rig) -> str:
+    return (rig.run_dir() / "verdict.md").read_text(encoding="utf-8")
+
+
+def test_alpha_precondition_exit_3_is_not_checked_not_fail_and_exit_code_3(rig):
+    alpha = _py("import sys; print('предусловие: нет ни одной строки диска'); sys.exit(3)")
+    assert rig.run(rig.cfg(alpha=alpha)) == 3
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: НЕ ПРОВЕРЕН (сценарий не дошёл: α вышла по предусловию, код 3)" in text
+    assert "МЕХАНИЗМ: FAIL" not in text
+    summary = (rig.run_dir().parent / "summary.md").read_text(encoding="utf-8")
+    assert "НЕ ПРОВЕРЕН" in summary
+
+
+def test_audit_exit_2_is_not_checked_with_its_last_line_as_reason(rig):
+    audit = _py("import sys; print('число слов --words не равно ... в журнале диска строк слова 0'); sys.exit(2)")
+    alpha = _py("print('МЕХАНИЗМ: PASS')")
+    assert rig.run(rig.cfg(alpha=alpha, audit=audit)) == 3
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: НЕ ПРОВЕРЕН (сценарий не дошёл: аудит отказал по входу, код 2: " in text
+    assert "в журнале диска строк слова 0)" in text
+    assert "МЕХАНИЗМ: FAIL" not in text
+
+
+def test_no_disk_rows_in_the_run_is_not_checked_even_when_audit_and_alpha_pass(rig):
+    audit = _py("print('ИТОГ: PASS (взятий 0, заданий 0, FAIL 0, пропусков 0, повторов 0, предупреждений 0)')")
+    alpha = _py("print('МЕХАНИЗМ: PASS')")
+    assert rig.run(rig.cfg(alpha=alpha, audit=audit)) == 3
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: НЕ ПРОВЕРЕН (сценарий не дошёл: в прогоне нет ни одной строки диска" in text
+
+
+def test_reached_scenario_with_red_audit_is_still_fail_exit_1(rig):
+    audit = _py("import sys; print('ИТОГ: FAIL (взятий 13, заданий 13, FAIL 3, пропусков 9, повторов 0)'); sys.exit(1)")
+    alpha = _py("print('МЕХАНИЗМ: PASS')")
+    assert rig.run(rig.cfg(alpha=alpha, audit=audit)) == 1
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: FAIL" in text and "НЕ ПРОВЕРЕН" not in text
+    assert "причина: audit" in text
+
+
+def test_skips_only_run_with_disk_rows_is_not_mistaken_for_no_disk_rows(rig):
+    audit = _py("print('ИТОГ: PASS (взятий 0, заданий 0, FAIL 0, пропусков 4, повторов 0, предупреждений 0)')")
+    alpha = _py("print('МЕХАНИЗМ: PASS')")
+    assert rig.run(rig.cfg(alpha=alpha, audit=audit)) == 0
+    assert "МЕХАНИЗМ: PASS" in _verdict(rig)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Сбой уборки перекрывает «не проверен»
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def test_cleanup_failure_stays_fail_over_not_checked(rig):
+    """α вышла по предусловию (код 3), но оставила порт `free_after` занятым: FAIL, не «не проверен»."""
+    port = rig.extra_port
+    holder = "import socket, time; s = socket.socket(); s.bind(('127.0.0.1', %d)); s.listen(100); time.sleep(15)" % port
+    alpha = _py(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {holder!r}], start_new_session=True)\n"
+        "import socket\n"
+        "for _ in range(100):  # держатель порта поднялся, прежде чем α выйдет\n"
+        f"    try: socket.create_connection(('127.0.0.1', {port}), 0.2).close(); break\n"
+        "    except OSError: time.sleep(0.1)\n"
+        "sys.exit(3)"
+    )
+    cfg = rig.cfg(alpha=alpha, free_after=[rig.sim_port, rig.proto_port, port])
+    assert rig.run(cfg) == 1
+    text = _verdict(rig)
+    assert "причина: порты" in text and "МЕХАНИЗМ: FAIL" in text
+    assert "НЕ ПРОВЕРЕН" not in text
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Две мягкие STOP_REQ при остановке из running: информативно (PASS~), любое иное сочетание — FAIL
+# ---------------------------------------------------------------------------------------------------------------------
+
+_STOP_INFO_PREFIX = "СТОП α: информативно (2 мягких STOP_REQ: пауза + выключение;"
+
+
+def _stop_alpha(alpha_stops, exchange_stops, *, disconnect=True, extra_red=False):
+    """α печатает вывод в формате живого прогона; журнал обмена пишется в `{log_dir}/devices/`."""
+    shown = ", ".join(str(n) for n in alpha_stops)
+    mech = "МЕХАНИЗМ: FAIL (B jobs.count, СТОП stop)" if extra_red else "МЕХАНИЗМ: FAIL (СТОП stop)"
+    out = [
+        f"СТОП stop: STOP_REQ [{shown}], строк после seq 652: 13 | отброшено строк 513 "
+        f"→ FAIL: STOP_REQ строк {len(alpha_stops)} ≠ 1",
+        "класс СТОП stop: МЕХАНИЗМ",
+        *(["класс B jobs.count: МЕХАНИЗМ"] if extra_red else []),
+        mech,
+        "ТОЧНОСТЬ: 6 трудных (B #7)",
+    ]
+    stamp = "2026-11-22 18:11:47,296 [INFO] S.d.d.e.robot_main:"
+    log = [f"#1 {stamp} #1  connect ok"]
+    log += [f"#{i + 2} {stamp} #{i + 2} in W STOP_REQ = {n}" for i, n in enumerate(exchange_stops)]
+    if disconnect:
+        log.append(f"#99 {stamp} #99  disconnect")
+    code = (
+        "import sys, pathlib\n"
+        "d = pathlib.Path(sys.argv[1]) / 'devices'; d.mkdir(parents=True, exist_ok=True)\n"
+        f"(d / 'robot_exchange.log').write_text({chr(10).join(log)!r}, encoding='utf-8')\n"
+        f"print({chr(10).join(out)!r})\n"
+        "sys.exit(1)"
+    )
+    return [sys.executable, "-c", code, "{log_dir}"]
+
+
+def test_two_soft_stop_req_after_pause_is_pass_tilde_with_info_line(rig):
+    assert rig.run(rig.cfg(alpha=_stop_alpha([5, 9], [5, 9]))) == 0
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: PASS~" in text and _STOP_INFO_PREFIX in text
+    assert "sim-audit-stop-req-diagnosis.md" in text and "причина:" not in text
+    by_id = {item["id"]: item for item in _stages(rig)["stages"]}
+    assert by_id["alpha"]["status"] == "pass" and _STOP_INFO_PREFIX in by_id["alpha"]["note"]
+    assert "PASS~" in (rig.run_dir().parent / "summary.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "case"),
+    [
+        (dict(alpha_stops=[5, 9, 13], exchange_stops=[5, 9, 13]), "три записи"),
+        (dict(alpha_stops=[5, 10], exchange_stops=[5, 10]), "не мягкая запись n % 4 != 1"),
+        (dict(alpha_stops=[5, 9], exchange_stops=[5, 9], extra_red=True), "ещё один красный пункт"),
+        (dict(alpha_stops=[5, 9], exchange_stops=[5, 9], disconnect=False), "нет disconnect после записей"),
+        (dict(alpha_stops=[5, 9], exchange_stops=[5, 9, 13]), "журнал обмена не совпал с выводом α"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_any_other_stop_combination_stays_fail(rig, kwargs, case):
+    assert rig.run(rig.cfg(alpha=_stop_alpha(**kwargs))) == 1, case
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: FAIL" in text and "причина: alpha" in text
+    assert "PASS~" not in text and "СТОП α: информативно" not in text
+
+
+def test_soft_stop_pair_does_not_hide_a_red_audit(rig):
+    audit = _py("import sys; print('ИТОГ: FAIL (взятий 13, заданий 13, FAIL 3, пропусков 9)'); sys.exit(1)")
+    assert rig.run(rig.cfg(alpha=_stop_alpha([5, 9], [5, 9]), audit=audit)) == 1
+    text = _verdict(rig)
+    assert "МЕХАНИЗМ: FAIL" in text and "причина: audit" in text and "причина: alpha" not in text

@@ -56,6 +56,11 @@ def objects_reply(objects: dict | None) -> dict:
     return {"result": {"status": "ok", "value": objects}}
 
 
+def params_reply(raw: Any) -> dict:
+    """Ответ ``robot_param_get_all``: параметры робота, у ``P_PICK_RZ`` поле ``raw`` (десятые доли градуса)."""
+    return {"result": {"status": "ok", "params": {"P_PICK_RZ": {"raw": raw, "scale": 10}}}}
+
+
 def journal_reply(rows: list[tuple]) -> dict:
     """Строка кольца: ``(t, side, text)`` или ``(t, side, text, n)`` — склеенная строка с счётчиком ``n``."""
     wire = [
@@ -72,6 +77,7 @@ class FakeClient:
         self.objects: list[Any] = [objects_reply({})]
         self.journal: list[Any] = [journal_reply([])]
         self.layout: Any = LAYOUT_REPLY
+        self.params: Any = params_reply(-1000)  # ответ robot_param_get_all; исключение — отказ клиента
         self.connect_error: Exception | None = None
         self.closed = False
         self.on_journal: Callable[[int], None] | None = None
@@ -102,6 +108,10 @@ class FakeClient:
             if self.on_journal is not None:
                 self.on_journal(self._n_journal)
             return self._step(self.journal, self._n_journal - 1)
+        if command == "robot_param_get_all":
+            if isinstance(self.params, Exception):
+                raise self.params
+            return self.params
         raise AssertionError(f"неожиданная команда сборщика: {target}.{command}")
 
     def introspect_registers(self, process: str, **kw: Any) -> Any:
@@ -417,7 +427,7 @@ def test_unreachable_port_exit_3_without_values_in_message(rig: Rig) -> None:
     assert rig.sim.calls == [] and rig.proto.calls == []
 
 
-def test_registers_json_from_layout_register_and_default_pick_rz(rig: Rig) -> None:
+def test_registers_json_from_layout_register_and_pick_rz_from_robot_param(rig: Rig) -> None:
     rig.stop_after_journal_polls(1)
 
     assert rig.go() == 0
@@ -436,23 +446,55 @@ def test_registers_json_from_layout_register_and_default_pick_rz(rig: Rig) -> No
         "use_pitch": True,
         "word_gap_slots": 0,
         "p_pick_rz_deg": -100.0,
+        "p_pick_rz_source": "robot_param_get_all",
     }
     meta = rig.meta()
-    assert meta["p_pick_rz_deg_source"].startswith("default")
+    assert meta["p_pick_rz_deg_source"] == "robot_param_get_all"
     assert meta["registers"] == "ok"
     assert rig.proto.calls[0] == ("layout", "introspect.registers", None)
+    assert rig.proto.calls[1] == ("devices", "robot_param_get_all", {"device_id": "robot_main"})
 
 
-def test_p_pick_rz_taken_from_register_when_present(rig: Rig) -> None:
-    rig.proto.layout = {"result": {"registers": {"word_layout": {"first_x": 1.0, "p_pick_rz_deg": -1000.0}}}}
+def test_p_pick_rz_is_read_from_robot_param_raw_divided_by_ten(rig: Rig) -> None:
+    rig.proto.params = params_reply(-1050)
     rig.stop_after_journal_polls(1)
 
     assert rig.go() == 0
 
     registers = json.loads((rig.out_dir / "registers.json").read_text(encoding="utf-8"))
-    assert registers == {"first_x": 1.0, "p_pick_rz_deg": -1000.0}
-    assert rig.meta()["p_pick_rz_deg_source"] == "register"
-    assert "first_y" in rig.meta()["registers_missing"]
+    assert registers["p_pick_rz_deg"] == -105.0
+    assert rig.meta()["p_pick_rz_deg_source"] == "robot_param_get_all"
+    assert rig.meta()["errors"] == 0
+    assert [c for c in rig.proto.calls if c[1] == "robot_param_get_all"] == [
+        ("devices", "robot_param_get_all", {"device_id": "robot_main"})
+    ]  # один раз за сбор, не в цикле опроса
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        ConnectionError("devices не ответил"),
+        {"result": {"status": "error", "message": "нет такой команды"}},
+        {"result": {"status": "ok", "params": {}}},
+        {"result": {"status": "ok", "params": {"P_PICK_RZ": {"scale": 10}}}},
+        {"result": {"status": "ok", "params": {"P_PICK_RZ": {"raw": "-1000"}}}},
+    ],
+    ids=["исключение", "ошибка команды", "params пуст", "нет raw", "raw не число"],
+)
+def test_p_pick_rz_falls_back_to_default_when_param_not_read(rig: Rig, bad: Any) -> None:
+    rig.proto.params = bad
+    rig.stop_after_journal_polls(1)
+
+    assert rig.go() == 0
+
+    registers = json.loads((rig.out_dir / "registers.json").read_text(encoding="utf-8"))
+    assert registers["p_pick_rz_deg"] == -100.0
+    assert registers["p_pick_rz_source"] == "default"
+    meta = rig.meta()
+    assert meta["p_pick_rz_deg_source"].startswith("default")
+    assert meta["registers"] == "ok"
+    assert meta["errors"] == 1
+    assert "p_pick_rz" in (rig.out_dir / "collect.log").read_text(encoding="utf-8")
 
 
 def test_missing_layout_register_is_logged_and_collection_still_runs(rig: Rig) -> None:
@@ -491,7 +533,10 @@ def test_collector_only_reads(rig: Rig) -> None:
     assert rig.go() == 0
 
     assert {(t, c) for t, c, _ in rig.sim.calls} == {("ProcessManager", "state.get"), ("robot", "sim_robot.journal")}
-    assert [(t, c) for t, c, _ in rig.proto.calls] == [("layout", "introspect.registers")]
+    assert [(t, c) for t, c, _ in rig.proto.calls] == [
+        ("layout", "introspect.registers"),
+        ("devices", "robot_param_get_all"),  # чтение параметра P_PICK_RZ, один раз после регистров
+    ]
 
 
 # --- настоящее время и настоящие файлы --------------------------------------------------------------------------------

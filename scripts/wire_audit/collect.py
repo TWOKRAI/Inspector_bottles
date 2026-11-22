@@ -6,11 +6,12 @@
         --proto-port 8765 --sim-port 8766 --out-dir <каталог> [--period 0.25]
 
 Работает до Ctrl-C или файла ``<out-dir>/STOP``. Только чтение: ``state.get``, ``sim_robot.journal``,
-``introspect_registers`` — никаких записей в сим, прототип и регистры.
+``introspect_registers``, ``robot_param_get_all`` (``P_PICK_RZ``) — никаких записей в сим, прототип и регистры.
 
 Файлы каталога (каждая запись пишется строкой с ``flush``, Ctrl-C данных не теряет):
 
-* ``registers.json`` — регистр ``layout`` для столбца А (один раз в начале);
+* ``registers.json`` — регистр ``layout`` для столбца А и ``p_pick_rz_deg`` из параметра робота ``P_PICK_RZ``
+  (один раз в начале);
 * ``sim_objects.jsonl`` — по одному паспорту на ``object_id`` (при первом появлении: паспорт взятого
   объекта сим удаляет из ``sim.objects``);
 * ``sim_journal.jsonl`` — строки журнала сим-робота ``{t, side, text}`` без повторов по ``(t, side, text)``
@@ -40,6 +41,9 @@ _NAP_STEP_S = 0.05  # шаг сна: STOP-файл замечается за о�
 _POLL_TIMEOUT_S = 2.0
 _DEFAULT_PERIOD_S = 0.25
 _DEFAULT_P_PICK_RZ_DEG = -100.0
+_PARAM_ARGS = {"device_id": "robot_main"}  # robot_param_get_all процесса devices (читает и α)
+_PARAM_SCALE = 10.0  # raw параметра робота — десятые доли градуса
+_PICK_SOURCE = "robot_param_get_all"
 _ERR_MSG_LIMIT = 200
 # Окно запомненных ключей строк журнала. Кольцо ``wire`` держит 200 строк (``_JOURNAL_WIRE_MAXLEN``
 # в robot_host): строка может вернуться в ответе только пока она в кольце, значит 5000 ключей — запас
@@ -182,7 +186,7 @@ class Collector:
 
     # --- один раз в начале ----------------------------------------------------------------------------------------
     def dump_registers(self) -> None:
-        """``registers.json`` из регистра ``layout``; ``p_pick_rz_deg`` — из регистра, иначе −100,0 с пометкой."""
+        """``registers.json``: регистр ``layout`` и ``p_pick_rz_deg`` (параметр робота ``P_PICK_RZ``, иначе −100,0)."""
         try:
             regs = _layout_register(self._proto.introspect_registers("layout", timeout=_POLL_TIMEOUT_S))
         except Exception as exc:  # noqa: BLE001 — сбор живёт дальше, причина уходит в collect.log
@@ -194,18 +198,35 @@ class Collector:
             self.meta["registers"] = "missing"
             return
         out = {key: regs[key] for key in _REGISTER_FIELDS if key in regs}
-        pick = regs.get("p_pick_rz_deg")
-        if isinstance(pick, int | float) and not isinstance(pick, bool):
-            out["p_pick_rz_deg"] = float(pick)
-            self.meta["p_pick_rz_deg_source"] = "register"
-        else:
-            out["p_pick_rz_deg"] = _DEFAULT_P_PICK_RZ_DEG
-            self.meta["p_pick_rz_deg_source"] = "default -100.0 (не получен из регистра)"
+        out["p_pick_rz_deg"], source = self._read_p_pick_rz()
+        self.meta["p_pick_rz_deg_source"] = source
+        out["p_pick_rz_source"] = "robot_param_get_all" if source == _PICK_SOURCE else "default"  # шапка аудита
         self.meta["registers"] = "ok"
         self.meta["registers_missing"] = [key for key in _REGISTER_FIELDS if key not in regs]
         (self._out_dir / "registers.json").write_text(
             json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
+
+    def _read_p_pick_rz(self) -> tuple[float, str]:
+        """``P_PICK_RZ`` робота: ``robot_param_get_all`` процесса ``devices``, ``raw / 10`` (квант ``WIRE_SCALE``).
+
+        Не регистр ``layout`` (там такого поля нет): та же команда, что читает α. Любая неудача (исключение,
+        нет ``params`` или ``raw``) — умолчание −100,0 с пометкой «default» в ``meta.json``, причина в ``collect.log``.
+        Только чтение.
+        """
+        try:
+            reply = _res(
+                self._proto.send_command("devices", "robot_param_get_all", _PARAM_ARGS, timeout=_POLL_TIMEOUT_S)
+            )
+            params = reply.get("params")
+            entry = params.get("P_PICK_RZ") if isinstance(params, dict) else None
+            raw = entry.get("raw") if isinstance(entry, dict) else None
+            if isinstance(raw, int | float) and not isinstance(raw, bool):
+                return raw / _PARAM_SCALE, _PICK_SOURCE
+            self._log_error("p_pick_rz", "в ответе robot_param_get_all нет P_PICK_RZ.raw")
+        except Exception as exc:  # noqa: BLE001 — сбор живёт дальше, причина уходит в collect.log
+            self._log_exc("p_pick_rz", exc)
+        return _DEFAULT_P_PICK_RZ_DEG, f"default {_DEFAULT_P_PICK_RZ_DEG} (не получен через robot_param_get_all)"
 
     # --- опрос ----------------------------------------------------------------------------------------------------
     def _poll_objects(self) -> None:

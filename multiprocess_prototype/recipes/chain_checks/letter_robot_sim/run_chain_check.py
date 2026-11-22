@@ -7,8 +7,10 @@
 
 Один прогон — холодный старт: сим, прототип, команды сима из конфига, сборщик, α, остановка, аудит, вердикт.
 Все команды и порты — в ``chain_check.yaml``; скрипт знает только имена шагов. Коды возврата: 0 — МЕХАНИЗМ PASS
-во всех прогонах; 1 — в каком-либо прогоне FAIL; 2 — ошибка аргументов или конфига; 3 — предусловие или запуск
-сорвался (порт занят, сим или прототип не поднялся, команда сима не принята). α запускается ТОЛЬКО внешним
+во всех прогонах; 1 — в каком-либо прогоне FAIL (сценарий дошёл, проверка красная); 2 — ошибка аргументов или
+конфига; 3 — предусловие или запуск сорвался (порт занят, сим или прототип не поднялся, команда сима не принята) либо
+МЕХАНИЗМ НЕ ПРОВЕРЕН (сценарий не дошёл: α вышла по предусловию с кодом 3, аудит отказал по входу с кодом 2 или в
+прогоне нет ни одной строки диска); код 3 сильнее кода 1. α запускается ТОЛЬКО внешним
 процессом; живой прогон на общей машине берёт окно снаружи (см. README).
 
 Замков и окон машины скрипт не берёт. Процессы, которые он запустил, он же и убирает: SIGTERM всей группе
@@ -66,6 +68,24 @@ _COMMAND_KEYS = ("target", "command", "args")
 
 _MECHANISM_PASS = re.compile(r"МЕХАНИЗМ:\s*PASS\b")
 _MECHANISM_FAIL = re.compile(r"МЕХАНИЗМ:\s*FAIL\b")
+_ITOG_COUNTS = re.compile(r"взятий\s+(\d+).*?пропусков\s+(\d+)")  # строка ИТОГ аудита: взятий N, …, пропусков S
+_ALPHA_PRECONDITION_CODE = 3  # α вышла по предусловию (нет ни одной строки диска и т. п.)
+_AUDIT_INPUT_CODE = 2  # аудит отказал по входу (число слов не равно числу строк слова и т. п.)
+_NOT_CHECKED = "НЕ ПРОВЕРЕН"
+# Узкий случай «две мягкие STOP_REQ при остановке из running» (docs/reports/2026-11-22_sim-audit-stop-req-diagnosis.md):
+# единственный красный пункт α — «СТОП stop» с «STOP_REQ строк 2 ≠ 1»; критерий α «ровно одна» устарел.
+_ALPHA_ONLY_STOP = re.compile(r"^МЕХАНИЗМ:\s*FAIL\s*\(СТОП stop\)\s*$", re.MULTILINE)
+_ALPHA_MECH_CLASS = re.compile(r"^класс .*: МЕХАНИЗМ\s*$", re.MULTILINE)
+_ALPHA_STOP_LINE = re.compile(r"^СТОП stop: STOP_REQ \[(\d+), (\d+)\].*→ FAIL: STOP_REQ строк 2 ≠ 1\s*$", re.MULTILINE)
+_EXCHANGE_STOP = re.compile(r"\bin W\*? STOP_REQ = (\d+)")
+_EXCHANGE_LOG = ("devices", "robot_exchange.log")  # относительно каталога логов прототипа
+_SOFT_LEVEL = 1  # STOP_REQ = seq*4 + уровень; SOFT = 1 (client_v2._issue_stop_locked)
+_STOP_INFO = (
+    "СТОП α: информативно (2 мягких STOP_REQ: пауза + выключение; критерий α «ровно одна» устарел, "
+    "см. sim-audit-stop-req-diagnosis.md)"
+)
+_PASS_SOFT = "PASS~"
+_REASON_LIMIT = 200
 
 type ClientFactory = Callable[[int], Any]  # port -> клиент backend_ctl (BackendDriver или фейк)
 
@@ -449,8 +469,51 @@ def _last_line(text: str, prefix: str) -> str | None:
 class RunOutcome:
     k: int
     run_dir: Path
-    status: str  # PASS | FAIL | СРЫВ
+    status: str  # PASS | PASS~ | FAIL | НЕ ПРОВЕРЕН | СРЫВ
     accuracy: str | None = None
+
+
+def _soft_stop_pair(alpha_text: str, exchange_text: str) -> bool:
+    """Узкий случай: красен ровно один пункт α — «СТОП stop: STOP_REQ строк 2 ≠ 1», обе записи мягкие.
+
+    Условия (все): строка ``МЕХАНИЗМ: FAIL (СТОП stop)`` без других пунктов; ровно одна строка ``класс … : МЕХАНИЗМ``;
+    ровно одна строка ``СТОП stop: STOP_REQ [a, b] … → FAIL: STOP_REQ строк 2 ≠ 1``, ``a % 4 == b % 4 == 1`` (SOFT);
+    в журнале обмена последней инкарнации ровно эти две записи ``STOP_REQ`` и после них строка ``disconnect``.
+    Любое иное сочетание — ``False`` (остаётся FAIL).
+    """
+    if len(_ALPHA_ONLY_STOP.findall(alpha_text)) != 1 or len(_ALPHA_MECH_CLASS.findall(alpha_text)) != 1:
+        return False
+    lines = _ALPHA_STOP_LINE.findall(alpha_text)
+    if len(lines) != 1:
+        return False
+    first, second = (int(n) for n in lines[0])
+    if first % 4 != _SOFT_LEVEL or second % 4 != _SOFT_LEVEL:
+        return False
+    incarnation = (
+        exchange_text[exchange_text.rfind("connect ok") + 1 :] if "connect ok" in exchange_text else exchange_text
+    )
+    found = list(_EXCHANGE_STOP.finditer(incarnation))
+    if [int(m.group(1)) for m in found] != [first, second]:
+        return False
+    return "disconnect" in incarnation[found[-1].end() :]
+
+
+def _not_checked_reason(alpha_code: int | None, audit_code: int | None, audit_text: str) -> str | None:
+    """Почему сценарий не дошёл до проверки провода (одной строкой), иначе ``None``.
+
+    Не дошёл: α вышла по предусловию (код 3), аудит отказал по входу (код 2) или аудит прошёл, а в прогоне нет ни
+    одной строки диска (``ИТОГ: … взятий 0 … пропусков 0``). Это не FAIL провода: проверять было нечего.
+    """
+    if alpha_code == _ALPHA_PRECONDITION_CODE:
+        return f"α вышла по предусловию, код {_ALPHA_PRECONDITION_CODE}"
+    if audit_code == _AUDIT_INPUT_CODE:
+        lines = [line.strip() for line in audit_text.splitlines() if line.strip()]
+        detail = f": {lines[-1][:_REASON_LIMIT]}" if lines else ""
+        return f"аудит отказал по входу, код {_AUDIT_INPUT_CODE}{detail}"
+    counts = _ITOG_COUNTS.search(_last_line(audit_text, "ИТОГ:") or "")
+    if counts and counts.group(1) == counts.group(2) == "0":
+        return "в прогоне нет ни одной строки диска (взятий 0, пропусков 0)"
+    return None
 
 
 def _verdict_text(
@@ -463,11 +526,18 @@ def _verdict_text(
     forced: list[str],
     accuracy: str | None,
     itog: str | None,
+    not_checked: str | None = None,
+    stop_info: bool = False,
 ) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [f"# Вердикт сквозной проверки {cfg.recipe}, прогон {k}", ""]
-    lines.append(f"МЕХАНИЗМ: {'FAIL' if failed else 'PASS'}")
+    if not_checked:
+        lines.append(f"МЕХАНИЗМ: {_NOT_CHECKED} (сценарий не дошёл: {not_checked})")
+    else:
+        lines.append(f"МЕХАНИЗМ: {'FAIL' if failed else (_PASS_SOFT if stop_info else 'PASS')}")
     lines.extend(f"причина: {key}" for key in failed)
+    if stop_info:
+        lines.append(_STOP_INFO)
     lines += ["", accuracy or "ТОЧНОСТЬ: строки нет в alpha.out", itog or "ИТОГ: строки нет в audit.out", ""]
     lines += [f"- метка времени: {stamp}", f"- режим: {'gui' if gui else 'headless'}", f"- каталог прогона: {run_dir}"]
     lines += [f"- файл: {run_dir / name}" for name in ("sim.out", "proto.out", "collect.out", "alpha.out", "audit.out")]
@@ -598,6 +668,7 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
     alpha_problem: str | None = None
     alpha_code: int | None = None
     alpha_ok = False
+    stop_info = False
     collector_ok = False
     collector: Launched | None = None
     forced: list[str] = []
@@ -636,14 +707,16 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
                 alpha_problem = type(exc).__name__
                 print(f"[run{k}] α сорвалась: {alpha_problem}", file=sys.stderr)
             alpha_text = _read(run_dir / "alpha.out")
-            alpha_ok = (
+            alpha_clean = bool(_MECHANISM_PASS.search(alpha_text)) and not _MECHANISM_FAIL.search(alpha_text)
+            stop_info = (
                 alpha_problem is None
-                and bool(_MECHANISM_PASS.search(alpha_text))
-                and not _MECHANISM_FAIL.search(alpha_text)
+                and not alpha_clean
+                and _soft_stop_pair(alpha_text, _read(log_dir.joinpath(*_EXCHANGE_LOG)))
             )
+            alpha_ok = alpha_problem is None and (alpha_clean or stop_info)
             accuracy = _last_line(alpha_text, "ТОЧНОСТЬ:")
             reason = "" if alpha_ok else (alpha_problem or "МЕХАНИЗМ не PASS")
-            step.set(alpha_ok, "; ".join(part for part in (reason, accuracy) if part))
+            step.set(alpha_ok, "; ".join(part for part in (reason, _STOP_INFO if stop_info else "", accuracy) if part))
         with stages.step("collector_stop") as step:
             try:
                 collector_ok = _stop_collector(collector, run_dir / "collect", cfg.stop_s)
@@ -675,13 +748,29 @@ def run_once(cfg: Config, k: int, label_dir: Path, tree: Path, gui: bool, client
         )
         failed = [key for key, ok in checks if not ok]
         codes = {"alpha": alpha_problem or alpha_code, "audit": audit_code, "collect": collector.proc.returncode}
+        audit_text = _read(run_dir / "audit.out")
+        not_checked = _not_checked_reason(alpha_code, audit_code, audit_text)
+        if set(failed) - {"alpha", "audit"}:
+            not_checked = None  # порты, процессы, сборщик: сбой уборки — настоящий FAIL, а не «не дошёл»
         text = _verdict_text(
-            cfg, k, run_dir, gui, failed, codes, forced, accuracy, _last_line(_read(run_dir / "audit.out"), "ИТОГ:")
+            cfg,
+            k,
+            run_dir,
+            gui,
+            failed,
+            codes,
+            forced,
+            accuracy,
+            _last_line(audit_text, "ИТОГ:"),
+            not_checked,
+            stop_info,
         )
         (run_dir / "verdict.md").write_text(text, encoding="utf-8")
         print(text, flush=True)
-        step.set(not failed, ", ".join(failed))
-    return RunOutcome(k, run_dir, "FAIL" if failed else "PASS", accuracy)
+        step.set(not failed and not not_checked, f"{_NOT_CHECKED}: {not_checked}" if not_checked else ", ".join(failed))
+    if not_checked:
+        return RunOutcome(k, run_dir, _NOT_CHECKED, accuracy)
+    return RunOutcome(k, run_dir, "FAIL" if failed else (_PASS_SOFT if stop_info else "PASS"), accuracy)
 
 
 def _summary_text(cfg: Config, rows: list[RunOutcome], runs: int) -> str:
@@ -783,7 +872,9 @@ def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None 
                 code = 3
                 break
             rows.append(outcome)
-            if outcome.status != "PASS":
+            if outcome.status == _NOT_CHECKED:
+                code = 3  # сильнее FAIL: механизм не проверен, серия не прерывается
+            elif outcome.status not in ("PASS", _PASS_SOFT) and code != 3:
                 code = 1
     except KeyboardInterrupt:
         print("прервано: процессы прогона убраны", file=sys.stderr)

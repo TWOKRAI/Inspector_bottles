@@ -322,6 +322,7 @@ class Regs:
     angle_invert: bool
     p_pick_rz_deg: float
     p_pick_from_register: bool
+    p_pick_source: str | None = None  # ``p_pick_rz_source`` файла регистров (пишет сборщик), иначе None
 
 
 _REQUIRED_REGISTERS = (
@@ -354,6 +355,7 @@ def load_registers(data: dict) -> Regs:
         angle_invert=bool(data["angle_invert"]),
         p_pick_rz_deg=p_pick,
         p_pick_from_register="p_pick_rz_deg" in data,
+        p_pick_source=data["p_pick_rz_source"] if isinstance(data.get("p_pick_rz_source"), str) else None,
         **floats,
     )
 
@@ -451,6 +453,7 @@ class AuditResult:
     words_given: bool  # True — слова из --words, False — из журнала диска («слово не независимо»)
     p_pick_rz_deg: float
     p_pick_from_register: bool
+    p_pick_source: str | None
     zone_max_mm: float
     run_lines: list[str]  # строки между таблицей и блоком «Не покрыто»
     run_fail: bool
@@ -677,7 +680,11 @@ def audit(
 
     journal_words = [e.word for e in events if isinstance(e, WordEvent)]
     if words is not None and len(words) != len(journal_words):
-        raise AuditError(2, "число слов --words не равно числу строк слова и смены слова в журнале диска")
+        raise AuditError(
+            2,
+            "число слов --words не равно числу строк слова и смены слова в журнале диска "
+            f"(--words: {len(words)}, в журнале диска строк слова {len(journal_words)})",
+        )
     fill_words = list(words) if words is not None else journal_words
     if any(re.search(r"\s", w) or not w for w in fill_words):
         raise AuditError(2, "не поддержано: слово с пробелом или пустое слово")
@@ -707,7 +714,7 @@ def audit(
             continue
         _judge_bound(row, job, regs, zone_max_mm, seq_counts, sim_seen)
 
-    run_lines, run_fail, no_passport = _column_b(picks, bound, regs, sim_objects)
+    run_lines, run_fail, no_passport = _column_b(rows, picks, bound, regs, sim_objects)
     for job in live:
         if id(job) not in bound_ids:
             extra_reasons = _integrity_reasons(job) + _job_reasons(job, seq_counts)
@@ -732,6 +739,7 @@ def audit(
         words_given=words is not None,
         p_pick_rz_deg=regs.p_pick_rz_deg,
         p_pick_from_register=regs.p_pick_from_register,
+        p_pick_source=regs.p_pick_source,
         zone_max_mm=zone_max_mm,
         run_lines=run_lines,
         run_fail=run_fail,
@@ -788,32 +796,57 @@ def _judge_bound(
 
 
 def _column_b(
-    picks: list[Row], bound: dict[int, Job], regs: Regs, sim_objects: list[dict] | None
+    rows: list[Row], picks: list[Row], bound: dict[int, Job], regs: Regs, sim_objects: list[dict] | None
 ) -> tuple[list[str], bool, int]:
-    """Столбец Б по паспортам сима: колонка Б строк и медиана e. Возвращает (строки, run_fail, без паспорта)."""
+    """Столбец Б по паспортам сима: колонка Б строк и медиана e. Возвращает (строки, run_fail, без паспорта).
+
+    Привязка (ред. 3, прогон 1b): паспорт ставится в пару КО ВСЕМ строкам диска (и взятиям, и пропускам) в порядке
+    времени — диску достаётся самый поздний ещё не занятый паспорт с ``p.t <= disk.t`` (время строки диска, не
+    задания). Один паспорт — не более одного диска; нет такого паспорта — «нет паспорта». Буква НЕ критерий привязки:
+    сеть путает буквы (М→И), а пропущенный диск обязан израсходовать свой паспорт, иначе пары сбиваются. Буква диска
+    ≠ буква паспорта — «не судится: буква сети X ≠ паспорт Y» (``~``, не FAIL, в медиану e не входит). Столбец Б
+    выводится только у взятий с привязанным заданием; у пропусков пара лишь расходует паспорт.
+
+    Допущение: задержка распознавания (паспорт → строка диска) меньше шага подачи, поэтому строка диска позже
+    паспорта своего объекта, но раньше паспорта следующего. В прогоне 1b: шаг ~8,1 с, задержка ~4,3 с. На другом
+    стенде (иная скорость ленты, иная нагрузка сети) это проверять.
+    """
     if sim_objects is None:
         return [], False, 0
     passports, skipped = parse_passports(sim_objects)
     free = list(passports)
+    pick_index = {id(row): k for k, row in enumerate(picks)}
     errors: list[float] = []
     no_passport = 0
-    for k, row in enumerate(picks):
-        job = bound.get(k)
-        if job is None or row.disk is None:
+    letter_mismatch = 0
+    for row in rows:
+        disk = row.disk
+        if disk is None:
             continue
-        match = next((p for p in free if p.letter == row.disk.letter and p.t <= job.t), None)
+        match = next((p for p in reversed(free) if p.t <= disk.t), None)
+        if match is not None:
+            free.remove(match)
+        job = bound.get(pick_index[id(row)]) if id(row) in pick_index else None
+        if job is None:
+            continue  # пропуск или взятие без задания: пара только расходует паспорт
         if match is None:
             row.col_b = "нет паспорта"
             no_passport += 1
             continue
-        free.remove(match)
-        text, reasons, tilde, err = _judge_passport(job, row.disk, match, regs)
+        if match.letter.upper() != disk.letter.upper():
+            row.col_b = f"не судится: буква сети {disk.letter} ≠ паспорт {match.letter}"
+            row.tilde = True
+            letter_mismatch += 1
+            continue
+        text, reasons, tilde, err = _judge_passport(job, disk, match, regs)
         row.col_b = text
         row.add(*reasons)
         row.tilde = row.tilde or tilde
         if err is not None:
             errors.append(err)
     lines = [f"Столбец Б: паспортов {len(passports)}" + (f", отброшено записей {skipped}" if skipped else "")]
+    if letter_mismatch:
+        lines.append(f"Столбец Б: не судится из-за буквы сети ≠ паспорт: {letter_mismatch} (не FAIL, не в медиане)")
     run_fail = False
     if len(errors) >= _RUN_MIN_DISKS:
         median = statistics.median(errors)
@@ -836,6 +869,17 @@ def _md_row(cells: list[str] | tuple[str, ...]) -> str:
     return "| " + " | ".join(cells) + " |"
 
 
+def _p_pick_origin(result: AuditResult) -> str:
+    """Откуда ``p_pick_rz_deg``: по пометке сборщика (``p_pick_rz_source``), иначе по наличию ключа в файле."""
+    if result.p_pick_source == "robot_param_get_all":
+        return "с робота: robot_param_get_all"
+    if result.p_pick_source is not None and result.p_pick_source.startswith("default"):
+        return "умолчание: не получен"
+    if result.p_pick_from_register:
+        return "из файла регистров, источник не указан"
+    return "умолчание: в файле регистров нет"
+
+
 def render(result: AuditResult) -> str:
     """Отчёт: шапка, таблица Markdown, строки прогона, «Не покрыто независимо», итоговая строка (последняя)."""
     out = ["# Аудит провода CVT_JOB", ""]
@@ -847,7 +891,7 @@ def render(result: AuditResult) -> str:
         out.append("Слова заливок: нет")
     if not result.words_given:
         out.append("слово не независимо: взято из журнала диска, --words не задан")
-    origin = "регистры" if result.p_pick_from_register else "умолчание"
+    origin = _p_pick_origin(result)
     out.append(f"p_pick_rz_deg: {result.p_pick_rz_deg} ({origin})")
     out.append(f"--zone-max-mm: {result.zone_max_mm}")
     out.extend(result.notes)

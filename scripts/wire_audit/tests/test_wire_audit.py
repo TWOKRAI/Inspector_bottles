@@ -420,6 +420,164 @@ def test_pick_x_two_millimetres_off_is_yellow_zone_not_fail():
     assert res.warnings == 0
 
 
+# ------------------------------------------------------------------ столбец Б: привязка по времени (ред. 3)
+
+
+def run_b(ex: Ex, lay: Lay, objects: list[dict]) -> core.AuditResult:
+    """Прогон со столбцом Б; px взятия 458.2 (= x_ожид при lateral 0): dx равен lateral/8,163265 без смещения 2,0 мм."""
+    ex_text = ex.text().replace("CMD_ARGS[2] = 4602", "CMD_ARGS[2] = 4582")
+    lay_text = lay.text().replace("взять(460.2", "взять(458.2")
+    return core.audit(ex_text, lay_text, REGS, words=[WORD], zone_max_mm=600.0, sim_objects=objects)
+
+
+def _passport(letter: str, angle: float, t: float, lateral: float = 0.0) -> dict:
+    return {"object_id": f"o{t}", "class_name": letter, "angle_deg": angle, "lateral_px": lateral, "t": ts(t)}
+
+
+def _col_b(res: core.AuditResult, net: str) -> str:
+    return row_of(res, net).col_b
+
+
+def test_column_b_skipped_disk_between_two_picks_of_same_letter_keeps_pairs():
+    """Прогон 1b: пропущенный диск расходует свой паспорт, иначе следующее Е получает чужой (60 град вместо 90)."""
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    lay.skip(15.0, "Е", 60.0, "ячейки Е заняты (1, 3, 8)")
+    lay.pick(20.0, "Е", 90.0, 3)
+    ex.job(10.5, 801, 1, 30.0)
+    ex.job(20.5, 802, 3, 90.0)
+    objects = [
+        _passport("Е", 30.0, 8.0, 0.0),
+        _passport(
+            "Е", 60.0, 13.0, 40.0
+        ),  # паспорт пропущенного диска: lateral 40 дал бы FAIL x, если его возьмёт взятие
+        _passport("Е", 90.0, 18.0, 4.0816325),  # dx = +0.5
+    ]
+    res = run_b(ex, lay, objects)
+    assert _col_b(res, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert _col_b(res, "60.0") == "-"  # у пропуска столбец Б пуст
+    assert _col_b(res, "90.0") == "PASS (e=+0.0°, dx=+0.5)"
+    assert res.exit_code == 0
+
+
+def test_column_b_skipped_disk_consumes_its_passport_so_next_pick_without_own_gets_none():
+    """Пропуск тоже занимает паспорт: следующее Е без своего паспорта не должно взять паспорт пропущенного диска."""
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    lay.skip(15.0, "Е", 60.0, "ячейки Е заняты (1, 3, 8)")
+    lay.pick(20.0, "Е", 90.0, 3)
+    ex.job(10.5, 861, 1, 30.0)
+    ex.job(20.5, 862, 3, 90.0)
+    objects = [_passport("Е", 30.0, 8.0, 0.0), _passport("Е", 60.0, 13.0, 0.0)]  # своего паспорта у t=20 нет
+    res = run_b(ex, lay, objects)
+    assert _col_b(res, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert _col_b(res, "90.0") == "нет паспорта"
+
+
+def test_column_b_extra_warmup_passports_at_start_do_not_shift_pairs():
+    """Прогревочные паспорта до слова (без диска) не должны достаться первому диску той же буквы."""
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    ex.job(10.5, 811, 1, 30.0)
+    objects = [
+        _passport("Е", 90.0, 1.0, 40.0),  # прогревочный: старше, той же буквы, с иным углом и lateral
+        _passport("П", 262.0, 1.0, -15.0),
+        _passport("Е", 30.0, 8.0, 0.0),
+    ]
+    res = run_b(ex, lay, objects)
+    assert _col_b(res, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert res.exit_code == 0
+
+
+def test_column_b_letter_mismatch_is_not_judged_not_fail_and_not_in_median():
+    """Сеть прочла М как И: паспорт М, диск И. Ячейка «не судится», тильда, не FAIL, e в счёт не идёт."""
+    ex, lay = fresh()
+    lay.pick(10.0, "И", 30.0, 5)
+    ex.job(10.5, 821, 5, 30.0)
+    mismatch = [_passport("М", 30.0, 8.0, 80.0)]  # при суде по x: dx = +9,8 мм, FAIL
+    res = run_b(ex, lay, mismatch)
+    assert _col_b(res, "30.0") == "не судится: буква сети И ≠ паспорт М"
+    assert row_of(res, "30.0").result == "PASS~"
+    assert res.exit_code == 0
+    assert "Столбец Б: не судится из-за буквы сети ≠ паспорт: 1 (не FAIL, не в медиане)" in res.run_lines
+    assert any("судимых дисков 0" in line for line in res.run_lines)
+    same_letter = [_passport("И", 30.0, 8.0, 0.0)]
+    judged = run_b(ex, lay, same_letter)
+    assert _col_b(judged, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert any("судимых дисков 1" in line for line in judged.run_lines)
+
+
+def test_column_b_no_passport_earlier_than_disk_is_no_passport_and_later_one_goes_to_later_disk():
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    lay.pick(20.0, "Е", 60.0, 3)
+    ex.job(10.5, 831, 1, 30.0)
+    ex.job(20.5, 832, 3, 60.0)
+    res = run_b(ex, lay, [_passport("Е", 60.0, 12.0, 0.0)])  # паспорт позже первого диска
+    assert _col_b(res, "30.0") == "нет паспорта"
+    assert _col_b(res, "60.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert res.exit_code == 0  # нет паспорта — не FAIL
+    assert "дисков без паспорта сима: 1 (не FAIL)" in res.notes
+
+
+def test_column_b_passport_is_not_used_twice_and_latest_free_one_is_taken():
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    lay.pick(12.0, "Е", 60.0, 3)
+    ex.job(10.5, 841, 1, 30.0)
+    ex.job(12.5, 842, 3, 60.0)
+    # самый поздний свободный: диск t=10 берёт паспорт t=9 (30 град), диск t=12 — оставшийся t=8 (60 град)
+    two = [_passport("Е", 60.0, 8.0, 0.0), _passport("Е", 30.0, 9.0, 0.0)]
+    res = run_b(ex, lay, two)
+    assert _col_b(res, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert _col_b(res, "60.0") == "PASS (e=+0.0°, dx=+0.0)"
+    # один паспорт на два диска: второй диск без паспорта
+    one = run_b(ex, lay, [_passport("Е", 30.0, 9.0, 0.0)])
+    assert _col_b(one, "30.0") == "PASS (e=+0.0°, dx=+0.0)"
+    assert _col_b(one, "60.0") == "нет паспорта"
+
+
+def test_words_count_mismatch_with_zero_journal_word_lines_says_so_explicitly():
+    lay = Lay()
+    lay.init(0.5)
+    lay.pick(10.0, "Е", 30.0, 1)
+    ex = Ex()
+    ex.connect(0.0)
+    ex.job(10.5, 851, 1, 30.0)
+    with pytest.raises(core.AuditError) as err:
+        run(ex, lay, words=[WORD])
+    assert err.value.code == 2
+    assert "в журнале диска строк слова 0" in err.value.message
+    assert WORD not in err.value.message
+
+
+# ------------------------------------------------------------------ шапка: источник p_pick_rz_deg
+
+
+def _header_line(regs: dict) -> str:
+    ex, lay = fresh()
+    text = core.render(core.audit(ex.text(), lay.text(), regs, words=[WORD], zone_max_mm=600.0))
+    return next(line for line in text.splitlines() if line.startswith("p_pick_rz_deg:"))
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        ({"p_pick_rz_source": "robot_param_get_all"}, "p_pick_rz_deg: -100.0 (с робота: robot_param_get_all)"),
+        ({"p_pick_rz_source": "default"}, "p_pick_rz_deg: -100.0 (умолчание: не получен)"),
+        ({}, "p_pick_rz_deg: -100.0 (из файла регистров, источник не указан)"),
+    ],
+    ids=["с робота", "умолчание сборщика", "ручной файл"],
+)
+def test_header_tells_honestly_where_p_pick_rz_came_from(extra, expected):
+    assert _header_line(dict(REGS, **extra)) == expected
+
+
+def test_header_p_pick_rz_absent_in_file_is_default_not_register():
+    regs = {k: v for k, v in REGS.items() if k != "p_pick_rz_deg"}
+    assert _header_line(regs) == "p_pick_rz_deg: -100.0 (умолчание: в файле регистров нет)"
+
+
 # ------------------------------------------------------------------ реальные файлы через CLI
 
 
