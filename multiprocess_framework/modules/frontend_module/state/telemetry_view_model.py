@@ -257,6 +257,16 @@ class TelemetryViewModel(QObject):
         """Текущее значение по пути (или default, если пути нет)."""
         return self._model.get(path, default)
 
+    def get_node(self, path: str, default: Any = None) -> Any:
+        """Значение УЗЛА по пути: dict из листьев (или лист, или default, если пути нет).
+
+        ``get`` — контракт листа (для узла вернёт None, т.к. хранятся листья); виджету,
+        читающему узел целиком (например ``io_peek``), нужен ``get_node``. Найденный лист
+        со значением None — найден: вернётся None, не default.
+        """
+        found, value = self._model.read_node(path)
+        return value if found else default
+
     def snapshot(self, prefix: str) -> dict[str, Any]:
         """Снимок поддерева: все пути == prefix или начинающиеся с ``prefix.``.
 
