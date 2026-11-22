@@ -73,6 +73,18 @@ args: ["qt-mcp"]
 
 Zero-install via uvx. Requires a Python with PyQt/PySide installed in your target project's environment.
 
+**Project launcher (since 2026-11-22):** `qt-mcp` is not on the package registry, so plain `uvx qt-mcp` fails with
+"not found in the package registry". `.mcp.json` pins the git commit and forces `mcp<2` (the 0.1.0 server imports
+`mcp.server.fastmcp`, which `mcp 2.x` removed):
+
+```
+uvx --from git+https://github.com/0xCarbon/qt-mcp@24303a69d498417dfcec0223bfaa95964f788c17 --with "mcp<2" qt-mcp
+```
+
+The probe is started inside the `gui` process by `multiprocess_prototype/frontend/qt_mcp_probe.py`, only when
+`INSPECTOR_QT_MCP_PROBE=1` (port `INSPECTOR_QT_MCP_PORT`, default 9142) and the app's Python has
+`pip install "qt-mcp @ git+https://github.com/0xCarbon/qt-mcp@24303a69d498417dfcec0223bfaa95964f788c17"`. Bump the pinned commit deliberately.
+
 **Alternative** (pip-installed): see `templates/mcp-config.json.snippet`.
 
 Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).
