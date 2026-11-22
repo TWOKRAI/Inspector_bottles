@@ -1186,8 +1186,8 @@ def test_o_passport_after_job_time_is_not_used(tmp_path):
 
 def test_o_passports_of_one_letter_go_to_disks_in_time_order_not_file_order(tmp_path):
     c = fresh(tmp_path)
-    add_pick_job(c, 10.0, "Е", 30.0, 1, seq=6001)
-    add_pick_job(c, 20.0, "Е", 60.0, 3, seq=6002)
+    add_pick_job(c, 10.0, "Е", 30.0, 1, seq=6001, px=458.2, ov={2: 4582})
+    add_pick_job(c, 20.0, "Е", 60.0, 3, seq=6002, px=458.2, ov={2: 4582})
     objs = write_jsonl(
         tmp_path / "objects.jsonl",
         [_sim_obj(2, "Е", 60.0, 15.0), _sim_obj(1, "Е", 30.0, 8.0)],  # в файле порядок обратный
