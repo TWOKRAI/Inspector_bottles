@@ -8,6 +8,7 @@ Shared mock-классы и фабрики для тестов process_manager_m
     - FakePlanner: framework-level планировщик (5 фаз, без импорта prototype).
     - make_pm: фабрика PM с TopologyManager + FakePlanner wired.
     - wire_planner: подключить FakePlanner к TopologyManager PM.
+    - _isolated_home: autouse-фикстура, ``HOME``/``USERPROFILE`` во временный каталог (файл токена 0.12b).
     - _join_run_sequence_threads: autouse-фикстура, дожидающаяся одноразовых потоков последовательностей
       останова (``run-stop``, ``run-fault-stop``, ``run-shutdown``) PM без исполнителя.
 
@@ -29,6 +30,22 @@ _RUN_SEQUENCE_JOIN_DEADLINE_S = 2.0
 
 # PM, созданные ``make_pm`` в текущем тесте (список чистит фикстура ниже).
 _PMS_OF_THIS_TEST: list[ProcessManagerProcess] = []
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """``HOME``/``USERPROFILE`` — во временный каталог (Task 0.12b).
+
+    Endpoint порта управления пишет файл токена в ``~/.multiprocess_framework/ctl_<port>.token``: без
+    подмены тесты трогали бы настоящий домашний каталог, а под xdist гонялись бы на одном имени файла.
+    Каталог свой у каждого теста и лежит вне ``tmp_path`` теста (его содержимое тесты не видят);
+    тест, задающий ``HOME`` сам, делает это позже и главнее.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("BACKEND_CTL_TOKEN_FILE", raising=False)
+    return home
 
 
 @pytest.fixture(autouse=True)

@@ -2892,3 +2892,52 @@ headless (без GUI) нужен START без оператора. Цикл «ж�
 **Reversible:** yes (убрать вызовы `_run_active_sync_locked` и kwarg `run_active`; без ключа плагина поведение прежнее).
 **Refs:** `plans/2026-10-27_system-run-state/tasks/2.7d.md` (Ф3, Ф4, Ф8, DESIGN п.1, 2, 5), ADR-PM-062, ADR-PMM-047,
 `process_module/tests/test_run_locked_commands.py`, `tests/test_run_active_flag_hazards.py`.
+
+## ADR-PMM-052: Порт управления закрыт без токена; поставка выключена, dev-старт — `BACKEND_CTL=1` (Task 0.12b observability-signal-contracts, 2026-11-22)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`) + поставка прототипа (`system.yaml`).
+
+**Контекст.** Порт управления ПМ (`backend_ctl`, TCP на 127.0.0.1) принимал любую строку от любого локального процесса:
+одна строка `system.shutdown` останавливала систему. Механизм `hello` с токеном есть в `SocketChannel` (ADR-RTR-017,
+Task 0.12), клиенты читают токен из файла порта (BCTL-ADR-011, Task 0.12a). Поставка (`system.yaml`) держала порт
+включённым (`enabled: true`) с ложным комментарием «в проде ставить false».
+
+### Решение
+
+1. **Порт без токена закрыт.** `setup_backend_ctl_channel` создаёт `SocketChannel` всегда с
+   `authenticator=token_authenticator(<callable holder>)`. Пока holder пуст, authenticator возвращает `False`
+   (закрыто по умолчанию: accept-цикл работает уже между `start()` и записью файла).
+2. **Жизненный цикл файла токена** (`~/.multiprocess_framework/ctl_<порт>.token`, 0600; путь —
+   `socket_auth.resolve_token_path`, `BACKEND_CTL_TOKEN_FILE` главнее):
+   - файл пишется ПОСЛЕ успешного `start()` и по ФАКТИЧЕСКОМУ порту (`channel.port`: при `port: 0` порт выбирает ОС);
+     затем токен кладётся в holder;
+   - неудачный bind (второй ПМ на занятом порту) файл не трогает: он принадлежит первому ПМ;
+   - ошибка записи (любое исключение) → `channel.close()`, `unregister_channel`, ERROR без токена, `return None`.
+     Открытого сервера без файла не бывает;
+   - залипший файл (SIGKILL, `_force_kill_tree`) перезаписывается при следующем старте атомарно (`os.replace`);
+   - путь и токен хранятся на канале; `teardown_backend_ctl_channel` удаляет файл ДО `channel.close()` и только если
+     `read_token(path)` равен токену этого канала. Файл, перезаписанный другим ПМ, остаётся;
+   - токен в журнал не пишется (журнал называет путь файла).
+3. **Поставка выключена.** `system.yaml` → `backend_ctl.enabled: false`: простой старт порт не открывает. Dev-старт,
+   стенды и харнесс включают порт `BACKEND_CTL=1` (`is_enabled` — OR env и конфига; харнесс ставит env сам).
+   Носитель правила — этот ADR: сохранение настроек из GUI стирает комментарии yaml.
+4. Не здесь: `host` вне loopback и `allow_remote` (решение владельца В-1 → `gui-service` 2.2), TLS, роли (2.3).
+5. Тесты не пишут токен в настоящий `HOME`: autouse `_offline_home_isolation` (`backend_ctl/tests/conftest.py`) и
+   `_isolated_home` (`process_manager_module/tests/conftest.py`) уводят `HOME`/`USERPROFILE` во временный каталог; первая
+   выключена при `--backend-live` и у тестов с `headless_backend` (session-бэкенд пишет токен под настоящим `HOME`).
+
+### Отвергнуто
+
+- Записать токен до `start()`: при `port: 0` имя файла — `ctl_0.token`, клиент его не найдёт; при занятом порту
+  перезапись затёрла бы токен работающего ПМ.
+- Оставить сервер открытым при ошибке записи файла (с ERROR): одна строка снова останавливает систему.
+- Удалять файл без сверки токена: стоп одного ПМ ломал бы клиентов ПМ, уже перезаписавшего файл на том же порту.
+- Гейт `allow_remote` в этой задаче: в схеме `BackendCtlSection` нет поля (pydantic отбросил бы его молча); решение
+  В-1 относит правила вне localhost к 2.2.
+
+**Принятое ограничение.** Сверка при удалении и само удаление — два шага без замка (TOCTOU): ПМ, перезаписавший файл
+ровно между ними, теряет файл и перезапишет его только при своём рестарте. Окно — микросекунды на стопе.
+
+**Reversible:** yes (`enabled: true` в `system.yaml`; authenticator и файл — откат шага 1 в `backend_ctl_endpoint.py`).
+**Refs:** `plans/2026-11-21_observability-signal-contracts/tasks/0.12b.md`, ADR-RTR-017, BCTL-ADR-011,
+`backend_ctl/tests/test_token_handshake.py`.

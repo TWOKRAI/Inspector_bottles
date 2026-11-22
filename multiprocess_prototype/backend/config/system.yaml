@@ -37,11 +37,15 @@ storage:
   batch_size: 100
 
 # --- Backend-control сокет (dev-инструмент: BackendDriver / MCP) ---
-# enabled: true → ProcessManager поднимает TCP-endpoint на host:port (localhost).
-# Через него headless-driver шлёт те же router-команды, что GUI (отладка бэкенда
-# без GUI/qt-mcp). В проде ставить false. Env BACKEND_CTL=1 включает независимо.
+# Поставка выключена: enabled: false — простой старт порт не открывает.
+# dev-старт: BACKEND_CTL=1 (включает независимо от этого ключа; стенды и харнесс
+# ставят его сами). Включённый порт слушает host:port (localhost) и требует
+# первой строкой hello с токеном из ~/.multiprocess_framework/ctl_<port>.token
+# (файл пишет ProcessManager). Через порт headless-driver шлёт те же
+# router-команды, что GUI. Правило поставки — ADR process_manager_module
+# (комментарии этого файла стирает сохранение настроек из GUI).
 backend_ctl:
-  enabled: true
+  enabled: false
   port: 8765
   host: "127.0.0.1"
 

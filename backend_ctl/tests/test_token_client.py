@@ -31,17 +31,7 @@ TOKEN_A = "ab" * 32
 TOKEN_B = "cd" * 32
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 
-
-@pytest.fixture(autouse=True)
-def tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
-    for key in list(os.environ):
-        if key.startswith("BACKEND_CTL_"):
-            monkeypatch.delenv(key)
-    return home
+pytestmark = pytest.mark.usefixtures("tmp_home")  # общая фикстура conftest.py: HOME во временный каталог
 
 
 def _token_path(home: Path, port: int) -> Path:
