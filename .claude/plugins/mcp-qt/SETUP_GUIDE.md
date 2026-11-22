@@ -47,10 +47,12 @@ Add this line **once, early** in your app's startup (before `app.exec()`):
 
 ```python
 # main.py
-import qt_mcp.probe  # noqa: F401  — starts the JSON-RPC probe on :9142
+import qt_mcp.probe  # noqa: F401  — with QT_MCP_PROBE=1 starts the JSON-RPC probe (QT_MCP_PORT, default 9142)
 ```
 
-The probe is a no-op if `QT_MCP_DISABLE=1` is set (use this in production builds).
+The import does nothing unless `QT_MCP_PROBE=1` is set in the environment (checked verbatim: `1` on, anything else off).
+`QT_MCP_DISABLE` is **not** read by the pinned qt-mcp version (verified by grep of the package), so it is no switch.
+In this project do not write the import: `multiprocess_prototype/frontend/qt_mcp_probe.py` installs the probe.
 
 ---
 
@@ -67,8 +69,8 @@ The snippet uses **portable invocation** — no absolute paths to your machine:
       "command": "uv",
       "args": ["run", "--", "python", "-m", "qt_mcp.server"],
       "env": {
-        "QT_MCP_PROBE_HOST": "127.0.0.1",
-        "QT_MCP_PROBE_PORT": "9142"
+        "QT_MCP_HOST": "127.0.0.1",
+        "QT_MCP_PORT": "9142"
       }
     }
   }
@@ -126,13 +128,12 @@ uv run python -m your_package
 
 ### Windows: probe fails to bind to `127.0.0.1:9142`
 
-- Antivirus / firewall sometimes blocks localhost TCP for ad-hoc Python processes. Allow `python.exe` in the firewall rule, or change port via `QT_MCP_PROBE_PORT=9143`.
+- Antivirus / firewall sometimes blocks localhost TCP for ad-hoc Python processes. Allow `python.exe` in the firewall rule, or change port via `QT_MCP_PORT=9143` (set it both in the app's environment and in the server's `env` block).
 
 ### Want to disable in production builds
 
-```bash
-QT_MCP_DISABLE=1 python -m your_package
-```
+Leave `QT_MCP_PROBE` unset (or `0`): the probe is then not installed and `qt_mcp` is not even imported by this
+project's `qt_mcp_probe.py`.
 
 ---
 

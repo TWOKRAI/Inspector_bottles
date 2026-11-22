@@ -242,10 +242,11 @@ def run_gui(process: "GuiProcess") -> None:
 
     app.installEventFilter(WheelGuard(app))
 
-    # Проба qt-mcp (разработка/сим-стенд): ВЫКЛЮЧЕНА, пока не задан INSPECTOR_QT_MCP_PROBE=1.
+    # Проба qt-mcp (разработка/сим-стенд): ВЫКЛЮЧЕНА, пока не задан QT_MCP_PROBE=1 (порт — QT_MCP_PORT).
+    # Единственный путь: флаг, порт, отказы и лог — в qt_mcp_probe.py; отказ не валит окно.
     from .qt_mcp_probe import install_if_enabled as _install_qt_mcp_probe
 
-    _install_qt_mcp_probe(log=process._log_warning)
+    _install_qt_mcp_probe(warn=lambda msg: process._log_warning(msg, module="startup"))
 
     # UI-tap для агентов (backend_ctl): фильтр событий кнопок/табов, ВЫКЛЮЧЕН до
     # команды ui.tap.subscribe. Живёт рядом с WheelGuard (parent=app → не уберёт GC);
@@ -266,32 +267,6 @@ def run_gui(process: "GuiProcess") -> None:
             # command_sender создаётся ниже и вешается на process.
             lambda: getattr(process, "_ui_command_sender", None),
         )
-
-    # qt-mcp probe — активируется только при QT_MCP_PROBE=1 (значение сверяется
-    # ДОСЛОВНО, и то же самое делает хук `qt_mcp_probe.pth` в venv).
-    #
-    # Задача Т-4 (находка HR-6): жёсткое ревью 2026-08-12 выставило
-    # `QT_MCP_PROBE=1:9142` — «флаг и порт одной ручкой». Такое значение не равно
-    # `"1"`, обе проверки промолчали, порт не поднялся, и рендер GUI-вкладки
-    # наблюдаемости остался непроверенным ни одним из трёх раундов приёмки.
-    # Порт — НЕ часть этого флага: проба слушает `qt_mcp.probe.DEFAULT_PORT` (9142).
-    #
-    # `install()` возвращает None, если QApplication ещё нет или порт занят. Прежняя
-    # редакция писала «installed» безусловно — то есть отчитывалась о механизме,
-    # которого могло не быть; ровно этот класс лечит весь трек.
-    if os.environ.get("QT_MCP_PROBE") == "1":
-        try:
-            from qt_mcp.probe import DEFAULT_PORT, install
-
-            if install() is not None:
-                process._log_info(f"qt-mcp probe installed on localhost:{DEFAULT_PORT}", module="startup")
-            else:
-                process._log_warning(
-                    f"qt-mcp probe requested but not installed (нет QApplication либо порт {DEFAULT_PORT} занят)",
-                    module="startup",
-                )
-        except ImportError:
-            process._log_warning("qt-mcp probe requested but qt_mcp not installed", module="startup")
 
     # 1. Загрузить главный конфиг (манифест) и применить тему из него
     from multiprocess_prototype.backend.config.manifest import load_manifest

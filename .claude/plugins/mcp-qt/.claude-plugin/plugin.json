@@ -5,7 +5,13 @@
   "mcpServers": {
     "qt-mcp": {
       "command": "uvx",
-      "args": ["qt-mcp"]
+      "args": [
+        "--from",
+        "git+https://github.com/0xCarbon/qt-mcp@24303a69d498417dfcec0223bfaa95964f788c17",
+        "--with",
+        "mcp<2",
+        "qt-mcp"
+      ]
     }
   }
 }

@@ -49,9 +49,10 @@ paths:
 
 ### qt-mcp — для агентского smoke / baseline / диагностики
 
-- MCP-сервер ([README](../.claude/mcp/qt-mcp/README.md), [SETUP](../.claude/mcp/qt-mcp/SETUP_GUIDE.md))
-- Probe врезан в `multiprocess_prototype/frontend/app.py:run_gui()` под `QT_MCP_PROBE=1`
+- MCP-сервер ([README](../.claude/plugins/mcp-qt/README.md), [SETUP](../.claude/plugins/mcp-qt/SETUP_GUIDE.md))
+- Probe ставит один вызов в `multiprocess_prototype/frontend/app.py:run_gui()`, вся логика — `frontend/qt_mcp_probe.py`; включает `QT_MCP_PROBE=1`, порт — `QT_MCP_PORT` (умолчание 9142; те же имена читает сервер qt-mcp). Опечатка флага, битый порт, занятый порт — одно предупреждение в логе `gui`, окно не падает. Исключение: целый порт вне 1..65535 при активном `qt_mcp_probe.pth` в venv — `QApplication()` падает раньше нашего кода (OverflowError в `qt_mcp.probe._patched_init`); такой порт не задавать
 - Подключается к **живому** прототипу через `localhost:9142` — видит реальные QObject, IPC, multiprocess state
+- **Безопасность:** проба без аутентификации, читает поля паролей, слушает только 127.0.0.1; не включать при чужих пользователях ОС и открытом недоверенном браузере
 - Используется для:
   - **Baseline UI** перед рефакторингом → `qt_snapshot(max_depth=4)` → сохранить как `plans/<slug>/baseline-*.md`
   - **Diff после миграции** — `qt_snapshot` против baseline, структура должна совпасть с точностью до `[ref=wN]`
