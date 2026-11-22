@@ -482,9 +482,7 @@ def family_self_description(drv) -> Dict[str, Any]:
         f"drv.capabilities() → processes.{CAM}.commands",
         f"состав процессов = S1; у {CAM} есть {sorted(need)}",
         f"processes={sorted(cap_names)}; obs-команд {CAM}: {len(obs_cmds)}; отсутствуют: {missing or 'нет'}",
-        "PASS"
-        if (cap_names == set(ctx["procs"]) and not missing)
-        else ("PARTIAL" if cap_names == set(ctx["procs"]) else "FAIL"),
+        "PASS" if (cap_names == names and not missing) else ("PARTIAL" if cap_names == names else "FAIL"),
         "docs/contracts/CAPABILITIES.md",
     )
 
@@ -1783,6 +1781,8 @@ def family_lifecycle(drv, arr: Arrivals, ctx: Dict[str, Any]) -> None:
 SF1_STOP_S = 12.0
 #: Читатели отвечают ОДИН раз на этой отметке от SIGSTOP: уже `stale`, ещё до рестарта монитором.
 SF1_READ_AT_S = 10.75
+#: Окна выше рассчитаны на такт метки 5.0 с; иной `tick_sec` — `UNVERIFIED`, а не молча неверное окно.
+SF1_TICK_S = 5.0
 SF1_READERS = ("tree", "read_model", "snapshot")
 
 
@@ -1937,7 +1937,11 @@ def family_stopped_writer(drv, ctx: dict[str, Any], *, kill=os.kill, sleep=time.
         mark_a = tree_a.get("_fresh") if isinstance(tree_a.get("_fresh"), dict) else {}
         if leaf is None:
             return finish("UNVERIFIED", f"у {target} нет листа state.* для чтения свежести: стопать нечем проверить")
-        sleep(2 * (mark_a.get("tick_sec") or 5.0) + 0.5)
+        if mark_a.get("tick_sec") != SF1_TICK_S:
+            return finish(
+                "UNVERIFIED", f"окно рассчитано на такт {SF1_TICK_S}, у {target} tick_sec={mark_a.get('tick_sec')}"
+            )
+        sleep(2 * SF1_TICK_S + 0.5)
         labels: dict[str, dict | None] = {}
         not_fresh: list[str] = []
         for proc in ctx["procs"]:
@@ -1972,6 +1976,8 @@ def family_stopped_writer(drv, ctx: dict[str, Any], *, kill=os.kill, sleep=time.
         (before.get(target) or {}).get("pid"),
         (before.get(target) or {}).get("instance_restarts"),
     )
+    if pid != pid_before:
+        return finish("UNVERIFIED", f"pid из introspect.status {pid} не равен pid из supervision_status {pid_before}")
 
     answers, detail = {}, {}
     error: BaseException | None = None
@@ -2002,7 +2008,7 @@ def family_stopped_writer(drv, ctx: dict[str, Any], *, kill=os.kill, sleep=time.
         error, after = error or exc, {}
     pid_after, restarts_after = after.get("pid"), after.get("instance_restarts")
 
-    shown = f"ответы читателей: {short(detail, 400)}{cont_note}"
+    shown = f"ответы читателей: {short(detail, 800)}{cont_note}"
     if error is not None:
         return finish("FAIL", f"исключение {type(error).__name__}: {error}; {shown}")
     if (pid_before, restarts_before) != (pid_after, restarts_after):

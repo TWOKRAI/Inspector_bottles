@@ -42,6 +42,8 @@ NEED_CMDS = [
     "introspect.telemetry",
 ]
 DEADLINE_S = 20.0
+#: На Windows `signal.SIGSTOP` нет — тесты с настоящими номерами сигналов там не имеют смысла.
+needs_sigstop = pytest.mark.skipif(not hasattr(signal, "SIGSTOP"), reason="нет signal.SIGSTOP на этой платформе")
 
 
 @pytest.fixture(scope="module")
@@ -221,7 +223,19 @@ class FakeClockKill:
 class StopDriver:
     """Подставной драйвер для `family_stopped_writer` (цель — `processor`, метки у пяти из семи)."""
 
-    def __init__(self, *, pid_after: int = PID, raise_on_read_when_stopped: bool = False):
+    def __init__(
+        self,
+        *,
+        pid_after: int = PID,
+        raise_on_read_when_stopped: bool = False,
+        introspect_pid: int = PID,
+        tick_sec: float = 5.0,
+        pre_bad: tuple[str, str] | None = None,
+    ):
+        """`pre_bad = (читатель, класс)` — у живого `inspector` ДО стопа этот читатель отвечает не `fresh`."""
+        self.introspect_pid = introspect_pid
+        self.tick_sec = tick_sec
+        self.pre_bad = pre_bad
         self.events: list[tuple] = []
         self.frozen_ts: float | None = None
         self.pid_after = pid_after
@@ -239,23 +253,34 @@ class StopDriver:
         if proc in NO_LABEL:
             return tree
         src_ts = self.frozen_ts if (proc == "processor" and self._stopped()) else self.clock.now - 1.0
+        if proc == "inspector" and self.pre_bad is not None and self.pre_bad[0] == "tree":
+            src_ts = self.clock.now - 30.0  # метка живого процесса устарела
         tree["state"]["fps"] = 12.5
-        tree["_fresh"] = {"seq": int(self.clock.now), "src_ts": src_ts, "incarnation": "i1", "tick_sec": 5.0}
+        tree["_fresh"] = {"seq": int(self.clock.now), "src_ts": src_ts, "incarnation": "i1", "tick_sec": self.tick_sec}
         return tree
 
+    def _pre_class(self, reader: str, proc: str) -> str | None:
+        if self.pre_bad is not None and self.pre_bad[0] == reader and proc == "inspector" and not self._stopped():
+            return self.pre_bad[1]
+        return None
+
     def _model_read(self, path: str, key: str) -> dict:
-        cls = "stale" if (path == "processes.processor" and self._stopped()) else "fresh"
+        cls = self._pre_class("read_model", path.split(".", 1)[1]) or (
+            "stale" if (path == "processes.processor" and self._stopped()) else "fresh"
+        )
         return {"class": cls, "value": 12.5, "age_s": 11.75 if cls == "stale" else 1.0}
 
     def send_command(self, process, command, data=None, timeout=None):
         if command == "introspect.status":
-            return {"success": True, "result": {"success": True, "process": process, "pid": PID}}
+            return {"success": True, "result": {"success": True, "process": process, "pid": self.introspect_pid}}
         if command == "state.get_subtree":
             if self.raise_on_read and self._stopped():
                 raise RuntimeError("boom")
             self.events.append(("read", data["path"]))
             proc = data["path"].split(".", 1)[1]
-            return {"success": True, "result": {"subtree": self._subtree(proc)}}
+            # Форма настоящего обработчика (state_store_manager.py:379-385): value и revision, ключа subtree нет.
+            payload = {"status": "ok", "request_id": "r1", "value": self._subtree(proc), "revision": 7}
+            return {"success": True, "result": payload}
         return {"success": True, "result": {}}
 
     def supervision_status(self, process=None, timeout=None):
@@ -270,7 +295,9 @@ class StopDriver:
         return {"success": True, "result": {"throttle_rules": [{"pattern": "processes.**", "min_interval_s": 1.0}]}}
 
     def telemetry_snapshot(self, process=None, metric=None):
-        cls = "stale" if (process == "processor" and self._stopped()) else "fresh"
+        cls = self._pre_class("snapshot", process) or (
+            "stale" if (process == "processor" and self._stopped()) else "fresh"
+        )
         return {
             "success": True,
             "metrics": {f"processes.{process}.state.fps": {"value": 12.5, "class": cls}},
@@ -290,6 +317,7 @@ def run_sf1(probe, monkeypatch, drv: StopDriver, *, neighbor: str = "processor")
     return fake
 
 
+@needs_sigstop
 def test_sf1_pass_when_target_stops_answering(probe, monkeypatch):
     """Склейка настоящих функций зонда с подставным драйвером: PASS-путь целиком."""
     drv = StopDriver()
@@ -302,6 +330,7 @@ def test_sf1_pass_when_target_stops_answering(probe, monkeypatch):
     assert "snapshot=stale" in sf1["observed"]
 
 
+@needs_sigstop
 def test_sf1_refuses_process_manager(probe, monkeypatch):
     drv = StopDriver()
     fake = run_sf1(probe, monkeypatch, drv, neighbor="ProcessManager")
@@ -311,6 +340,7 @@ def test_sf1_refuses_process_manager(probe, monkeypatch):
     assert fake.kill_calls == []
 
 
+@needs_sigstop
 def test_sf1_sigcont_in_finally(probe, monkeypatch):
     drv = StopDriver(raise_on_read_when_stopped=True)
     fake = run_sf1(probe, monkeypatch, drv)  # исключение читателя наружу не уходит
@@ -323,6 +353,7 @@ def test_sf1_sigcont_in_finally(probe, monkeypatch):
     assert last_supervision_at > cont_at  # снимок «после» снят ПОСЛЕ SIGCONT
 
 
+@needs_sigstop
 def test_sf1_restart_is_unverified(probe, monkeypatch):
     drv = StopDriver(pid_after=200)  # pid у `processor`: 100 до окна, 200 после
     run_sf1(probe, monkeypatch, drv)
@@ -330,3 +361,111 @@ def test_sf1_restart_is_unverified(probe, monkeypatch):
     assert sf1["verdict"] == "UNVERIFIED"
     assert f"{PID}" in sf1["observed"]
     assert "200" in sf1["observed"]
+
+
+# ---------------------------------------------------------------------------
+# SF1: поздняя защита стопа, прерывание по предусловию, такт, платформа
+# ---------------------------------------------------------------------------
+
+OWN_PID, PM_PID = 77, 500
+
+
+@pytest.mark.parametrize(
+    ("target", "pid", "reason_part"),
+    [
+        pytest.param(None, 100, "нет роли neighbor", id="target_none"),
+        pytest.param("ProcessManager", 100, "ProcessManager", id="target_is_pm"),
+        pytest.param("processor", None, "pid цели", id="pid_none"),
+        pytest.param("processor", 0, "pid цели", id="pid_0"),
+        pytest.param("processor", 1, "pid цели", id="pid_1"),
+        pytest.param("processor", -1, "pid цели", id="pid_minus_1"),
+        pytest.param("processor", True, "pid цели", id="pid_bool"),
+        pytest.param("processor", "4242", "pid цели", id="pid_str"),
+        pytest.param("processor", OWN_PID, "сам зонд", id="pid_is_probe"),
+        pytest.param("processor", PM_PID, "совпадает с pid ProcessManager", id="pid_is_pm_pid"),
+        pytest.param("processor", 100, None, id="normal_pid"),
+    ],
+)
+def test_sf1_target_guard(probe, target, pid, reason_part):
+    reason = probe.sf1_target_guard(target, "ProcessManager", pid, OWN_PID, PM_PID)
+    if reason_part is None:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert reason_part in reason
+
+
+def test_sf1_target_guard_pm_pid_unknown(probe):
+    """pid ProcessManager из супервизии может отсутствовать — тогда защита по имени, а нормальный pid допустим."""
+    assert probe.sf1_target_guard("processor", "ProcessManager", 100, OWN_PID, None) is None
+
+
+@needs_sigstop
+@pytest.mark.parametrize(
+    ("introspect_pid", "reason_part"),
+    [
+        pytest.param(1, "pid цели", id="pid_1"),
+        pytest.param(500, "совпадает с pid ProcessManager", id="pid_of_pm"),  # 500 — pid PM в StopDriver
+    ],
+)
+def test_sf1_refuses_dangerous_pid_in_full_path(probe, monkeypatch, introspect_pid, reason_part):
+    drv = StopDriver(introspect_pid=introspect_pid)
+    fake = run_sf1(probe, monkeypatch, drv)
+    sf1 = rows_by_id(probe)["SF1"]
+    assert sf1["verdict"] == "UNVERIFIED"
+    assert reason_part in sf1["observed"]
+    assert fake.kill_calls == []
+
+
+@needs_sigstop
+def test_sf1_refuses_pid_mismatch(probe, monkeypatch):
+    drv = StopDriver(introspect_pid=4242)  # супервизия говорит 100
+    fake = run_sf1(probe, monkeypatch, drv)
+    sf1 = rows_by_id(probe)["SF1"]
+    assert sf1["verdict"] == "UNVERIFIED"
+    assert "4242" in sf1["observed"]
+    assert "100" in sf1["observed"]
+    assert fake.kill_calls == []
+
+
+@needs_sigstop
+@pytest.mark.parametrize(
+    ("reader", "cls"),
+    [
+        pytest.param("tree", "stale", id="tree_stale"),
+        pytest.param("read_model", "stale", id="read_model_stale"),
+        pytest.param("read_model", "no_data", id="read_model_no_data"),
+        pytest.param("snapshot", "stale", id="snapshot_stale"),
+        pytest.param("snapshot", "no_data", id="snapshot_no_data"),
+    ],
+)
+def test_sf1_precondition_failure_aborts_before_sigstop(probe, monkeypatch, reader, cls):
+    drv = StopDriver(pre_bad=(reader, cls))
+    fake = run_sf1(probe, monkeypatch, drv)
+    sf1 = rows_by_id(probe)["SF1"]
+    assert sf1["verdict"] == "FAIL"
+    assert "ложная тревога" in sf1["observed"]
+    if reader != "tree":
+        assert f"inspector: {reader}={cls}" in sf1["observed"]
+    assert fake.kill_calls == []
+
+
+@needs_sigstop
+def test_sf1_refuses_tick_other_than_five(probe, monkeypatch):
+    drv = StopDriver(tick_sec=10.0)
+    fake = run_sf1(probe, monkeypatch, drv)
+    sf1 = rows_by_id(probe)["SF1"]
+    assert sf1["verdict"] == "UNVERIFIED"
+    assert "окно рассчитано на такт 5.0" in sf1["observed"]
+    assert fake.kill_calls == []
+    assert fake.now - T0 < 30.0  # сон ограничен: не 2 × 10.0 + 0.5 и не больше окна
+
+
+def test_sf1_without_sigstop_is_unverified(probe, monkeypatch):
+    monkeypatch.delattr(probe.signal, "SIGSTOP", raising=False)
+    drv = StopDriver()
+    fake = run_sf1(probe, monkeypatch, drv)
+    sf1 = rows_by_id(probe)["SF1"]
+    assert sf1["verdict"] == "UNVERIFIED"
+    assert "SIGSTOP" in sf1["observed"]
+    assert fake.kill_calls == []
