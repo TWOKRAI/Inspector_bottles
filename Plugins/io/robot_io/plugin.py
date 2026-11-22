@@ -92,6 +92,8 @@ class RobotIoPlugin(ProcessModulePlugin):
         self._last_was_error = False
         # Отдельный once-флаг для предупреждения «job без pick» (не мешать hub-ошибкам).
         self._warned_no_pick = False
+        # Once-флаг для сбоя публикации state: строка раз на переход «публикуется -> сбой».
+        self._publish_failed = False
         ctx.log_info(f"RobotIoPlugin v2: configured (device_id={self._reg.device_id})")
 
     def start(self, ctx: PluginContext) -> None:
@@ -301,5 +303,10 @@ class RobotIoPlugin(ProcessModulePlugin):
                     "last_dropped_job": self._reg.last_dropped_job,
                 },
             )
-        except Exception:  # noqa: BLE001 - state не должен ронять форвардер
-            pass
+            self._publish_failed = False
+        except Exception as exc:  # noqa: BLE001 - state не должен ронять форвардер
+            # Один разъём (log_warning), раз на переход: повторные сбои подряд молчат,
+            # успешная публикация снимает флаг. health.report_error не зовём — кормит breaker.
+            if not self._publish_failed:
+                self._publish_failed = True
+                self._ctx.log_warning(f"RobotIoPlugin: сбой публикации state robot_io: {type(exc).__name__}: {exc}")
