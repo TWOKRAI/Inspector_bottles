@@ -1,0 +1,109 @@
+#1 2026-11-12 13:31:45,095 [INFO] [-] logger_manager: LoggerManager initialized
+#2 2026-11-12 13:31:45,097 [INFO] [-] router_layout: RouterManager 'router_layout' initialized (channels: [])
+#3 2026-11-12 13:31:45,098 [INFO] [-] stats_layout: [stats_layout] initialized
+#4 2026-11-12 13:31:45,098 [INFO] [-] observation_layout: [observation_layout] initialized
+#5 2026-11-12 13:31:45,099 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+#6 2026-11-12 13:31:45,099 [INFO] [-] StatsAdapter: StatsAdapter: commands get_metrics, get_metric, reset_metrics, stats_snapshot, flush_stats registered
+#7 2026-11-12 13:31:45,243 [INFO] [-] layout: Process starting...
+#9 2026-11-12 13:31:45,243 [INFO] [-] layout: communication: Process queues registered in queue_registry
+#10 2026-11-12 13:31:45,243 [INFO] [-] layout: Process state registered: layout
+#11 2026-11-12 13:31:45,305 [INFO] [-] layout: PluginOrchestrator[layout]: register 'word_layout' schema loaded (WordLayoutRegisters)
+#12 2026-11-12 13:31:45,306 [INFO] [-] layout: PluginOrchestrator[layout]: register 'robot_io' schema loaded (RobotIoRegisters)
+#13 2026-11-12 13:31:45,306 [INFO] [-] word_layout: WordLayoutPlugin: configured (word='')
+#14 2026-11-12 13:31:45,306 [INFO] [-] layout: PluginOrchestrator[layout]: 'word_layout' [processing] ready
+#15 2026-11-12 13:31:45,306 [INFO] [-] robot_io: RobotIoPlugin v2: configured (device_id=robot_main)
+#16 2026-11-12 13:31:45,306 [INFO] [-] layout: PluginOrchestrator[layout]: 'robot_io' [io] ready
+#17 2026-11-12 13:31:45,307 [INFO] [-] layout: PluginOrchestrator[layout]: 'word_layout' running
+#18 2026-11-12 13:31:45,307 [INFO] [-] layout: Worker 'job_forwarder' created
+#19 2026-11-12 13:31:45,307 [INFO] [-] robot_io: RobotIoPlugin v2: started (job_forwarder запущен)
+#20 2026-11-12 13:31:45,307 [INFO] [-] layout: PluginOrchestrator[layout]: 'robot_io' running
+#21 2026-11-12 13:31:45,307 [INFO] [-] layout: PluginOrchestrator[layout]: 2 плагин(ов)
+#22 2026-11-12 13:31:45,308 [INFO] [-] layout: GenericProcess[layout]: io-debug publisher активен (rate=1.0 Гц)
+#23 2026-11-12 13:31:45,308 [INFO] [-] layout: Worker 'data_receiver' created
+#24 2026-11-12 13:31:45,308 [INFO] [-] layout: Worker 'pipeline_executor' created
+#25 2026-11-12 13:31:45,308 [INFO] [-] layout: GenericProcess[layout]: data pipeline started (2 processing plugins)
+#26 2026-11-12 13:31:45,308 [INFO] [-] layout: Worker 'message_processor' created
+#27 2026-11-12 13:31:45,339 [INFO] [layout] layout: Process 'layout' initialized successfully
+#28 2026-11-12 13:31:45,339 [INFO] [layout] layout: Process initialized
+#29 2026-11-12 13:31:45,339 [INFO] [layout] layout: ready_event передан процессу — объявит готовность сам (после run())
+#30 2026-11-12 13:31:45,339 [INFO] [layout] layout: Worker 'job_forwarder' started
+#31 2026-11-12 13:31:45,339 [INFO] [layout] layout: Worker 'data_receiver' started
+#32 2026-11-12 13:31:45,340 [INFO] [layout] layout: Worker 'pipeline_executor' started
+#33 2026-11-12 13:31:45,340 [INFO] [layout] layout: Worker 'message_processor' started
+#34 2026-11-12 13:31:45,340 [INFO] [layout] layout: All workers started
+#37 2026-11-12 13:31:45,353 [INFO] [layout] heartbeat: [telemetry] publisher-gate активен: default_enabled=False, явных правил 2, интервал по умолчанию 1.0 с
+#38 2026-11-12 13:31:45,354 [INFO] [layout] layout: Worker 'heartbeat_sender' created
+#39 2026-11-12 13:31:45,354 [INFO] [layout] lifecycle: Process 'layout' started
+#40 2026-11-12 13:31:47,537 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ш' 160.5° → пропуск: слово не задано
+#41 2026-11-12 13:31:49,207 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ю' 356.6° → пропуск: слово не задано
+#42 2026-11-12 13:31:52,447 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ч' 335.7° → пропуск: слово не задано
+#43 2026-11-12 13:31:54,086 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Х' 6.4° → пропуск: слово не задано
+#45 2026-11-12 13:31:59,006 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ф' 156.6° → пропуск: слово не задано
+#46 2026-11-12 13:32:00,687 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'П' 258.5° → пропуск: слово не задано
+#47 2026-11-12 13:32:02,326 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ь' 9.0° → пропуск: слово не задано
+#48 2026-11-12 13:32:03,926 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ж' 170.3° → пропуск: слово не задано
+#49 2026-11-12 13:32:05,566 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 84.3° → пропуск: слово не задано
+#50 2026-11-12 13:32:07,206 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ы' 290.0° → пропуск: слово не задано
+#51 2026-11-12 13:32:10,527 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ж' 112.8° → пропуск: слово не задано
+#52 2026-11-12 13:32:13,806 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'В' 25.8° → пропуск: слово не задано
+#53 2026-11-12 13:32:15,406 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'У' 10.0° → пропуск: слово не задано
+#54 2026-11-12 13:32:17,087 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Н' 177.2° → пропуск: слово не задано
+#55 2026-11-12 13:32:23,647 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Я' 59.8° → пропуск: слово не задано
+#56 2026-11-12 13:32:25,246 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Х' 151.5° → пропуск: слово не задано
+#57 2026-11-12 13:32:26,889 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ш' 202.6° → пропуск: слово не задано
+#58 2026-11-12 13:32:28,596 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Н' 98.6° → пропуск: слово не задано
+#59 2026-11-12 13:32:31,757 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ь' 25.9° → пропуск: слово не задано
+#60 2026-11-12 13:32:33,438 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Х' 19.8° → пропуск: слово не задано
+#61 2026-11-12 13:32:35,037 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Я' 168.9° → пропуск: слово не задано
+#62 2026-11-12 13:32:36,717 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'И' 23.5° → пропуск: слово не задано
+#63 2026-11-12 13:32:38,317 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Я' 64.3° → пропуск: слово не задано
+#64 2026-11-12 13:32:39,997 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 175.1° → пропуск: слово не задано
+#65 2026-11-12 13:32:41,637 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'З' 293.7° → пропуск: слово не задано
+#66 2026-11-12 13:32:44,917 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Ш' 327.3° → пропуск: слово не задано
+#67 2026-11-12 13:32:48,156 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 47.9° → пропуск: слово не задано
+#68 2026-11-12 13:32:53,756 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Х' 104.5° → пропуск: слово не задано
+#70 2026-11-12 13:33:22,240 [INFO] [layout] layout: PluginOrchestrator[layout]: register_update word_layout.target_word = ПЕРЕМИРИЕ
+#72 2026-11-12 13:33:26,837 [INFO] [layout] word_layout: WordLayoutPlugin: слово 'ПЕРЕМИРИЕ' (источник: регистр)
+#73 2026-11-12 13:33:26,838 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Р' 3.3° → ячейка 2: взять(456.2,-343.2) → положить x320.0 y-220.0 z-132.0 r-3.3° [1/9]
+#74 2026-11-12 13:33:34,996 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'А' 1.3° → пропуск: нет в слове 'ПЕРЕМИРИЕ'
+#75 2026-11-12 13:33:43,117 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 32.6° → ячейка 1: взять(461.2,-343.2) → положить x320.0 y-330.0 z-132.0 r-32.6° [2/9]
+#76 2026-11-12 13:33:51,237 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'И' 62.6° → ячейка 5: взять(460.2,-343.1) → положить x320.0 y110.0 z-132.0 r-62.6° [3/9]
+#77 2026-11-12 13:33:59,397 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 94.4° → ячейка 3: взять(461.2,-342.5) → положить x320.0 y-110.0 z-132.0 r-94.4° [4/9]
+#78 2026-11-12 13:34:07,477 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Б' 357.4° → пропуск: нет в слове 'ПЕРЕМИРИЕ'
+#79 2026-11-12 13:34:15,596 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Р' 305.8° → ячейка 6: взять(455.7,-343.2) → положить x320.0 y220.0 z-132.0 r54.2° [5/9]
+#80 2026-11-12 13:34:23,716 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 338.7° → ячейка 8: взять(456.7,-343.0) → положить x320.0 y440.0 z-132.0 r21.3° [6/9]
+#81 2026-11-12 13:34:31,836 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'И' 27.4° → ячейка 7: взять(455.7,-343.0) → положить x320.0 y330.0 z-132.0 r-27.4° [7/9]
+#82 2026-11-12 13:34:39,958 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 60.5° → пропуск: ячейки 'Е' заняты (1, 3, 8)
+#83 2026-11-12 13:34:48,077 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'П' 98.6° → ячейка 0: взять(459.9,-343.2) → положить x320.0 y-440.0 z-132.0 r-98.6° [8/9]
+#84 2026-11-12 13:34:56,197 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'М' 281.5° → ячейка 4: взять(460.7,-343.2) → положить x320.0 y0.0 z-132.0 r78.5° [9/9]
+#86 2026-11-12 13:35:08,283 [INFO] [layout] layout: PluginOrchestrator[layout]: register_update word_layout.target_word = МИР
+#87 2026-11-12 13:35:12,876 [INFO] [layout] word_layout: WordLayoutPlugin: смена слова 'ПЕРЕМИРИЕ' → 'МИР' (источник: регистр) — ячейки с нуля (было заполнено 9/9)
+#88 2026-11-12 13:35:12,877 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'П' 0.8° → пропуск: нет в слове 'МИР'
+#90 2026-11-12 13:35:20,998 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'М' 39.1° → ячейка 0: взять(455.3,-343.2) → положить x320.0 y-440.0 z-132.0 r-39.1° [1/3]
+#91 2026-11-12 13:35:29,117 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 5.5° → пропуск: нет в слове 'МИР'
+#92 2026-11-12 13:35:37,237 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'И' 91.0° → ячейка 1: взять(461.5,-343.2) → положить x320.0 y-330.0 z-132.0 r-91.0° [2/3]
+#93 2026-11-12 13:35:45,357 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Р' 306.5° → ячейка 2: взять(460.1,-343.0) → положить x320.0 y-220.0 z-132.0 r53.5° [3/3]
+#95 2026-11-12 13:35:57,502 [INFO] [layout] layout: PluginOrchestrator[layout]: register_update word_layout.target_word = ПЕРЕМИРИЕ
+#96 2026-11-12 13:36:02,077 [INFO] [layout] word_layout: WordLayoutPlugin: смена слова 'МИР' → 'ПЕРЕМИРИЕ' (источник: регистр) — ячейки с нуля (было заполнено 3/3)
+#97 2026-11-12 13:36:02,077 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 3.4° → ячейка 1: взять(460.2,-343.2) → положить x320.0 y-330.0 z-132.0 r-3.4° [1/9]
+#99 2026-11-12 13:36:10,237 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 32.6° → ячейка 3: взять(454.9,-342.6) → положить x320.0 y-110.0 z-132.0 r-32.6° [2/9]
+#100 2026-11-12 13:36:18,317 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 57.6° → ячейка 8: взять(456.7,-343.2) → положить x320.0 y440.0 z-132.0 r-57.6° [3/9]
+#101 2026-11-12 13:36:26,437 [INFO] [layout] word_layout: WordLayoutPlugin: диск 'Е' 93.2° → пропуск: ячейки 'Е' заняты (1, 3, 8)
+#102 2026-11-12 13:36:28,503 [INFO] [layout] layout: Stop signal received
+#103 2026-11-12 13:36:28,504 [INFO] [layout] lifecycle: Process 'layout' stopping
+#104 2026-11-12 13:36:28,504 [INFO] [layout] layout: Process finished
+#105 2026-11-12 13:36:28,527 [INFO] [layout] layout: All workers stopped
+#106 2026-11-12 13:36:28,528 [INFO] [layout] robot_io: RobotIoPlugin v2: shutdown (forwarded=15, dropped=0, remaining_in_deque=0)
+#107 2026-11-12 13:36:28,528 [INFO] [layout] layout: PluginOrchestrator[layout]: 'robot_io' stopped
+#108 2026-11-12 13:36:28,528 [INFO] [layout] word_layout: WordLayoutPlugin: shutdown (выдано 15, заполнено 3/9)
+#109 2026-11-12 13:36:28,528 [INFO] [layout] layout: PluginOrchestrator[layout]: 'word_layout' stopped
+#111 2026-11-12 13:36:28,529 [INFO] [layout] m.m.l.c.windowed_voice: store flush: 0 записано, 0 потеряно
+#112 2026-11-12 13:36:28,530 [INFO] [layout] m.m.l.c.windowed_voice: store flush: 97 записано, 0 потеряно
+#113 2026-11-12 13:36:28,530 [INFO] [layout] layout_commands: Dispatcher 'layout_commands' shutdown completed
+#114 2026-11-12 13:36:28,530 [INFO] [layout] layout: CommandManager 'layout' shutdown completed
+#115 2026-11-12 13:36:28,531 [INFO] [layout] router_layout: RouterManager shutdown completed
+#117 2026-11-12 13:36:28,531 [INFO] [layout] observation_layout: [observation_layout] shutting down
+#118 2026-11-12 13:36:28,531 [INFO] [layout] stats_layout: [stats_layout] shutting down
+#121 2026-11-12 13:36:28,532 [INFO] [layout] layout: Process 'layout' observability planes stopped: observation, stats, error
+#122 2026-11-12 13:36:28,532 [INFO] [layout] layout: Process 'layout' shut down successfully
+#123 2026-11-12 13:36:28,532 [INFO] [-] logger_manager: logger_layout shutting down

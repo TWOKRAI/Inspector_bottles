@@ -1,0 +1,713 @@
+#47 2026-11-12 13:31:44,914 [INFO] S.d.d.e.robot_main: #1  connect ok
+#48 2026-11-12 13:31:44,915 [INFO] S.d.d.e.robot_main: #2 out R RES_SEQ..+80 RES_SEQ = 0, RES_STATUS = 0, RES_ERRNO = 0 (ОК)
+#49 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #3 in W* CMD_SEQ = 1896
+#50 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #4 in W* CMD_OPCODE = 80 (PARAM_SET)
+#51 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #5 in W* CMD_ARGC = 2
+#52 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #6 in W* CMD_ARGS[0] = 0
+#53 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #7 in W* CMD_ARGS[1] = 80
+#54 2026-11-12 13:31:44,920 [INFO] S.d.d.e.robot_main: #8 in W CMD_FLAG = 1
+#55 2026-11-12 13:31:44,946 [INFO] S.d.d.e.robot_main: #9 out R RES_SEQ..+12 RES_SEQ = 1896, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#56 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #10 in W* CMD_SEQ = 1897
+#57 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #11 in W* CMD_OPCODE = 80 (PARAM_SET)
+#58 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #12 in W* CMD_ARGC = 2
+#59 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #13 in W* CMD_ARGS[0] = 1
+#60 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #14 in W* CMD_ARGS[1] = 30
+#61 2026-11-12 13:31:44,947 [INFO] S.d.d.e.robot_main: #15 in W CMD_FLAG = 1
+#62 2026-11-12 13:31:44,972 [INFO] S.d.d.e.robot_main: #16 out R RES_SEQ..+12 RES_SEQ = 1897, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#63 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #17 in W* CMD_SEQ = 1898
+#64 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #18 in W* CMD_OPCODE = 80 (PARAM_SET)
+#65 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #19 in W* CMD_ARGC = 2
+#66 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #20 in W* CMD_ARGS[0] = 2
+#67 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #21 in W* CMD_ARGS[1] = 1500
+#68 2026-11-12 13:31:44,973 [INFO] S.d.d.e.robot_main: #22 in W CMD_FLAG = 1
+#69 2026-11-12 13:31:44,994 [INFO] S.d.d.e.robot_main: #23 out R RES_SEQ..+12 RES_SEQ = 1898, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#70 2026-11-12 13:31:45,000 [INFO] S.d.d.e.robot_main: #24 in W* CMD_SEQ = 1899
+#71 2026-11-12 13:31:45,000 [INFO] S.d.d.e.robot_main: #25 in W* CMD_OPCODE = 80 (PARAM_SET)
+#72 2026-11-12 13:31:45,000 [INFO] S.d.d.e.robot_main: #26 in W* CMD_ARGC = 2
+#73 2026-11-12 13:31:45,000 [INFO] S.d.d.e.robot_main: #27 in W* CMD_ARGS[0] = 3
+#74 2026-11-12 13:31:45,000 [INFO] S.d.d.e.robot_main: #28 in W* CMD_ARGS[1] = 25000
+#75 2026-11-12 13:31:45,001 [INFO] S.d.d.e.robot_main: #29 in W CMD_FLAG = 1
+#76 2026-11-12 13:31:45,027 [INFO] S.d.d.e.robot_main: #30 out R RES_SEQ..+12 RES_SEQ = 1899, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#77 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #31 in W* CMD_SEQ = 1900
+#78 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #32 in W* CMD_OPCODE = 80 (PARAM_SET)
+#79 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #33 in W* CMD_ARGC = 2
+#80 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #34 in W* CMD_ARGS[0] = 4
+#81 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #35 in W* CMD_ARGS[1] = 70
+#82 2026-11-12 13:31:45,028 [INFO] S.d.d.e.robot_main: #36 in W CMD_FLAG = 1
+#83 2026-11-12 13:31:45,054 [INFO] S.d.d.e.robot_main: #37 out R RES_SEQ..+12 RES_SEQ = 1900, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#84 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #38 in W* CMD_SEQ = 1901
+#85 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #39 in W* CMD_OPCODE = 80 (PARAM_SET)
+#86 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #40 in W* CMD_ARGC = 2
+#87 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #41 in W* CMD_ARGS[0] = 5
+#88 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #42 in W* CMD_ARGS[1] = 100
+#89 2026-11-12 13:31:45,055 [INFO] S.d.d.e.robot_main: #43 in W CMD_FLAG = 1
+#90 2026-11-12 13:31:45,079 [INFO] S.d.d.e.robot_main: #44 out R RES_SEQ..+12 RES_SEQ = 1901, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#91 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #45 in W* CMD_SEQ = 1902
+#92 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #46 in W* CMD_OPCODE = 80 (PARAM_SET)
+#93 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #47 in W* CMD_ARGC = 2
+#94 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #48 in W* CMD_ARGS[0] = 6
+#95 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #49 in W* CMD_ARGS[1] = 5
+#96 2026-11-12 13:31:45,080 [INFO] S.d.d.e.robot_main: #50 in W CMD_FLAG = 1
+#97 2026-11-12 13:31:45,106 [INFO] S.d.d.e.robot_main: #51 out R RES_SEQ..+12 RES_SEQ = 1902, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#98 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #52 in W* CMD_SEQ = 1903
+#99 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #53 in W* CMD_OPCODE = 80 (PARAM_SET)
+#100 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #54 in W* CMD_ARGC = 2
+#101 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #55 in W* CMD_ARGS[0] = 7
+#102 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #56 in W* CMD_ARGS[1] = 0
+#103 2026-11-12 13:31:45,107 [INFO] S.d.d.e.robot_main: #57 in W CMD_FLAG = 1
+#104 2026-11-12 13:31:45,130 [INFO] S.d.d.e.robot_main: #58 out R RES_SEQ..+12 RES_SEQ = 1903, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#105 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #59 in W* CMD_SEQ = 1904
+#106 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #60 in W* CMD_OPCODE = 80 (PARAM_SET)
+#107 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #61 in W* CMD_ARGC = 2
+#108 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #62 in W* CMD_ARGS[0] = 8
+#109 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #63 in W* CMD_ARGS[1] = 2000
+#110 2026-11-12 13:31:45,131 [INFO] S.d.d.e.robot_main: #64 in W CMD_FLAG = 1
+#111 2026-11-12 13:31:45,153 [INFO] S.d.d.e.robot_main: #65 out R RES_SEQ..+12 RES_SEQ = 1904, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#112 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #66 in W* CMD_SEQ = 1905
+#113 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #67 in W* CMD_OPCODE = 80 (PARAM_SET)
+#114 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #68 in W* CMD_ARGC = 2
+#115 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #69 in W* CMD_ARGS[0] = 9
+#116 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #70 in W* CMD_ARGS[1] = 1
+#117 2026-11-12 13:31:45,154 [INFO] S.d.d.e.robot_main: #71 in W CMD_FLAG = 1
+#118 2026-11-12 13:31:45,180 [INFO] S.d.d.e.robot_main: #72 out R RES_SEQ..+12 RES_SEQ = 1905, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#119 2026-11-12 13:31:45,180 [INFO] S.d.d.e.robot_main: #73 in W* CMD_SEQ = 1906
+#120 2026-11-12 13:31:45,180 [INFO] S.d.d.e.robot_main: #74 in W* CMD_OPCODE = 80 (PARAM_SET)
+#121 2026-11-12 13:31:45,181 [INFO] S.d.d.e.robot_main: #75 in W* CMD_ARGC = 2
+#122 2026-11-12 13:31:45,181 [INFO] S.d.d.e.robot_main: #76 in W* CMD_ARGS[0] = 10
+#123 2026-11-12 13:31:45,181 [INFO] S.d.d.e.robot_main: #77 in W* CMD_ARGS[1] = 50
+#124 2026-11-12 13:31:45,181 [INFO] S.d.d.e.robot_main: #78 in W CMD_FLAG = 1
+#125 2026-11-12 13:31:45,211 [INFO] S.d.d.e.robot_main: #79 out R RES_SEQ..+12 RES_SEQ = 1906, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#126 2026-11-12 13:31:45,212 [INFO] S.d.d.e.robot_main: #80 in W* CMD_SEQ = 1907
+#127 2026-11-12 13:31:45,212 [INFO] S.d.d.e.robot_main: #81 in W* CMD_OPCODE = 80 (PARAM_SET)
+#128 2026-11-12 13:31:45,212 [INFO] S.d.d.e.robot_main: #82 in W* CMD_ARGC = 2
+#129 2026-11-12 13:31:45,212 [INFO] S.d.d.e.robot_main: #83 in W* CMD_ARGS[0] = 11
+#130 2026-11-12 13:31:45,212 [INFO] S.d.d.e.robot_main: #84 in W* CMD_ARGS[1] = 300
+#131 2026-11-12 13:31:45,213 [INFO] S.d.d.e.robot_main: #85 in W CMD_FLAG = 1
+#132 2026-11-12 13:31:45,236 [INFO] S.d.d.e.robot_main: #86 out R RES_SEQ..+12 RES_SEQ = 1907, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#133 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #87 in W* CMD_SEQ = 1908
+#134 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #88 in W* CMD_OPCODE = 80 (PARAM_SET)
+#135 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #89 in W* CMD_ARGC = 2
+#136 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #90 in W* CMD_ARGS[0] = 12
+#137 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #91 in W* CMD_ARGS[1] = 25000
+#138 2026-11-12 13:31:45,238 [INFO] S.d.d.e.robot_main: #92 in W CMD_FLAG = 1
+#139 2026-11-12 13:31:45,260 [INFO] S.d.d.e.robot_main: #93 out R RES_SEQ..+12 RES_SEQ = 1908, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#140 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #94 in W* CMD_SEQ = 1909
+#141 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #95 in W* CMD_OPCODE = 80 (PARAM_SET)
+#142 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #96 in W* CMD_ARGC = 2
+#143 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #97 in W* CMD_ARGS[0] = 16
+#144 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #98 in W* CMD_ARGS[1] = 3000
+#145 2026-11-12 13:31:45,261 [INFO] S.d.d.e.robot_main: #99 in W CMD_FLAG = 1
+#146 2026-11-12 13:31:45,286 [INFO] S.d.d.e.robot_main: #100 out R RES_SEQ..+12 RES_SEQ = 1909, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#147 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #101 in W* CMD_SEQ = 1910
+#148 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #102 in W* CMD_OPCODE = 80 (PARAM_SET)
+#149 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #103 in W* CMD_ARGC = 2
+#150 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #104 in W* CMD_ARGS[0] = 17
+#151 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #105 in W* CMD_ARGS[1] = 63436
+#152 2026-11-12 13:31:45,287 [INFO] S.d.d.e.robot_main: #106 in W CMD_FLAG = 1
+#153 2026-11-12 13:31:45,312 [INFO] S.d.d.e.robot_main: #107 out R RES_SEQ..+12 RES_SEQ = 1910, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#154 2026-11-12 13:31:45,313 [INFO] S.d.d.e.robot_main: #108 in W* CMD_SEQ = 1911
+#155 2026-11-12 13:31:45,313 [INFO] S.d.d.e.robot_main: #109 in W* CMD_OPCODE = 80 (PARAM_SET)
+#156 2026-11-12 13:31:45,313 [INFO] S.d.d.e.robot_main: #110 in W* CMD_ARGC = 2
+#157 2026-11-12 13:31:45,314 [INFO] S.d.d.e.robot_main: #111 in W* CMD_ARGS[0] = 18
+#158 2026-11-12 13:31:45,314 [INFO] S.d.d.e.robot_main: #112 in W* CMD_ARGS[1] = 65136
+#159 2026-11-12 13:31:45,314 [INFO] S.d.d.e.robot_main: #113 in W CMD_FLAG = 1
+#160 2026-11-12 13:31:45,339 [INFO] S.d.d.e.robot_main: #114 out R RES_SEQ..+12 RES_SEQ = 1911, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#161 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #115 in W* CMD_SEQ = 1912
+#162 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #116 in W* CMD_OPCODE = 80 (PARAM_SET)
+#163 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #117 in W* CMD_ARGC = 2
+#164 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #118 in W* CMD_ARGS[0] = 19
+#165 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #119 in W* CMD_ARGS[1] = 64536
+#166 2026-11-12 13:31:45,340 [INFO] S.d.d.e.robot_main: #120 in W CMD_FLAG = 1
+#167 2026-11-12 13:31:45,363 [INFO] S.d.d.e.robot_main: #121 out R RES_SEQ..+12 RES_SEQ = 1912, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#168 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #122 in W* CMD_SEQ = 1913
+#169 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #123 in W* CMD_OPCODE = 80 (PARAM_SET)
+#170 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #124 in W* CMD_ARGC = 2
+#171 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #125 in W* CMD_ARGS[0] = 20
+#172 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #126 in W* CMD_ARGS[1] = 4500
+#173 2026-11-12 13:31:45,364 [INFO] S.d.d.e.robot_main: #127 in W CMD_FLAG = 1
+#174 2026-11-12 13:31:45,386 [INFO] S.d.d.e.robot_main: #128 out R RES_SEQ..+12 RES_SEQ = 1913, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#175 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #129 in W* CMD_SEQ = 1914
+#176 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #130 in W* CMD_OPCODE = 80 (PARAM_SET)
+#177 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #131 in W* CMD_ARGC = 2
+#178 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #132 in W* CMD_ARGS[0] = 21
+#179 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #133 in W* CMD_ARGS[1] = 62536
+#180 2026-11-12 13:31:45,387 [INFO] S.d.d.e.robot_main: #134 in W CMD_FLAG = 1
+#181 2026-11-12 13:31:45,408 [INFO] S.d.d.e.robot_main: #135 out R RES_SEQ..+12 RES_SEQ = 1914, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#182 2026-11-12 13:31:45,409 [INFO] S.d.d.e.robot_main: #136 in W* CMD_SEQ = 1915
+#183 2026-11-12 13:31:45,409 [INFO] S.d.d.e.robot_main: #137 in W* CMD_OPCODE = 80 (PARAM_SET)
+#184 2026-11-12 13:31:45,409 [INFO] S.d.d.e.robot_main: #138 in W* CMD_ARGC = 2
+#185 2026-11-12 13:31:45,409 [INFO] S.d.d.e.robot_main: #139 in W* CMD_ARGS[0] = 22
+#186 2026-11-12 13:31:45,410 [INFO] S.d.d.e.robot_main: #140 in W* CMD_ARGS[1] = 64636
+#187 2026-11-12 13:31:45,410 [INFO] S.d.d.e.robot_main: #141 in W CMD_FLAG = 1
+#188 2026-11-12 13:31:45,434 [INFO] S.d.d.e.robot_main: #142 out R RES_SEQ..+12 RES_SEQ = 1915, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#189 2026-11-12 13:31:45,434 [INFO] S.d.d.e.robot_main: #143 in W* CMD_SEQ = 1916
+#190 2026-11-12 13:31:45,435 [INFO] S.d.d.e.robot_main: #144 in W* CMD_OPCODE = 80 (PARAM_SET)
+#191 2026-11-12 13:31:45,435 [INFO] S.d.d.e.robot_main: #145 in W* CMD_ARGC = 2
+#192 2026-11-12 13:31:45,435 [INFO] S.d.d.e.robot_main: #146 in W* CMD_ARGS[0] = 23
+#193 2026-11-12 13:31:45,435 [INFO] S.d.d.e.robot_main: #147 in W* CMD_ARGS[1] = 64536
+#194 2026-11-12 13:31:45,435 [INFO] S.d.d.e.robot_main: #148 in W CMD_FLAG = 1
+#195 2026-11-12 13:31:45,460 [INFO] S.d.d.e.robot_main: #149 out R RES_SEQ..+12 RES_SEQ = 1916, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#196 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #150 in W* CMD_SEQ = 1917
+#197 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #151 in W* CMD_OPCODE = 80 (PARAM_SET)
+#198 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #152 in W* CMD_ARGC = 2
+#199 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #153 in W* CMD_ARGS[0] = 24
+#200 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #154 in W* CMD_ARGS[1] = 64536
+#201 2026-11-12 13:31:45,461 [INFO] S.d.d.e.robot_main: #155 in W CMD_FLAG = 1
+#202 2026-11-12 13:31:45,484 [INFO] S.d.d.e.robot_main: #156 out R RES_SEQ..+12 RES_SEQ = 1917, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#203 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #157 in W* CMD_SEQ = 1918
+#204 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #158 in W* CMD_OPCODE = 80 (PARAM_SET)
+#205 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #159 in W* CMD_ARGC = 2
+#206 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #160 in W* CMD_ARGS[0] = 25
+#207 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #161 in W* CMD_ARGS[1] = 64536
+#208 2026-11-12 13:31:45,485 [INFO] S.d.d.e.robot_main: #162 in W CMD_FLAG = 1
+#209 2026-11-12 13:31:45,507 [INFO] S.d.d.e.robot_main: #163 out R RES_SEQ..+12 RES_SEQ = 1918, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#210 2026-11-12 13:31:45,507 [INFO] S.d.d.e.robot_main: #164 in W* CMD_SEQ = 1919
+#211 2026-11-12 13:31:45,508 [INFO] S.d.d.e.robot_main: #165 in W* CMD_OPCODE = 80 (PARAM_SET)
+#212 2026-11-12 13:31:45,508 [INFO] S.d.d.e.robot_main: #166 in W* CMD_ARGC = 2
+#213 2026-11-12 13:31:45,508 [INFO] S.d.d.e.robot_main: #167 in W* CMD_ARGS[0] = 32
+#214 2026-11-12 13:31:45,508 [INFO] S.d.d.e.robot_main: #168 in W* CMD_ARGS[1] = 400
+#215 2026-11-12 13:31:45,508 [INFO] S.d.d.e.robot_main: #169 in W CMD_FLAG = 1
+#216 2026-11-12 13:31:45,533 [INFO] S.d.d.e.robot_main: #170 out R RES_SEQ..+12 RES_SEQ = 1919, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#217 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #171 in W* CMD_SEQ = 1920
+#218 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #172 in W* CMD_OPCODE = 80 (PARAM_SET)
+#219 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #173 in W* CMD_ARGC = 2
+#220 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #174 in W* CMD_ARGS[0] = 33
+#221 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #175 in W* CMD_ARGS[1] = 1200
+#222 2026-11-12 13:31:45,534 [INFO] S.d.d.e.robot_main: #176 in W CMD_FLAG = 1
+#223 2026-11-12 13:31:45,555 [INFO] S.d.d.e.robot_main: #177 out R RES_SEQ..+12 RES_SEQ = 1920, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#224 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #178 in W* CMD_SEQ = 1921
+#225 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #179 in W* CMD_OPCODE = 80 (PARAM_SET)
+#226 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #180 in W* CMD_ARGC = 2
+#227 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #181 in W* CMD_ARGS[0] = 34
+#228 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #182 in W* CMD_ARGS[1] = 6000
+#229 2026-11-12 13:31:45,556 [INFO] S.d.d.e.robot_main: #183 in W CMD_FLAG = 1
+#230 2026-11-12 13:31:45,578 [INFO] S.d.d.e.robot_main: #184 out R RES_SEQ..+12 RES_SEQ = 1921, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#231 2026-11-12 13:31:45,578 [INFO] S.d.d.e.robot_main: #185 in W* CMD_SEQ = 1922
+#232 2026-11-12 13:31:45,578 [INFO] S.d.d.e.robot_main: #186 in W* CMD_OPCODE = 80 (PARAM_SET)
+#233 2026-11-12 13:31:45,578 [INFO] S.d.d.e.robot_main: #187 in W* CMD_ARGC = 2
+#234 2026-11-12 13:31:45,579 [INFO] S.d.d.e.robot_main: #188 in W* CMD_ARGS[0] = 35
+#235 2026-11-12 13:31:45,579 [INFO] S.d.d.e.robot_main: #189 in W* CMD_ARGS[1] = 14447
+#236 2026-11-12 13:31:45,579 [INFO] S.d.d.e.robot_main: #190 in W CMD_FLAG = 1
+#237 2026-11-12 13:31:45,603 [INFO] S.d.d.e.robot_main: #191 out R RES_SEQ..+12 RES_SEQ = 1922, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#238 2026-11-12 13:31:45,603 [INFO] S.d.d.e.robot_main: #192 in W* CMD_SEQ = 1923
+#239 2026-11-12 13:31:45,604 [INFO] S.d.d.e.robot_main: #193 in W* CMD_OPCODE = 80 (PARAM_SET)
+#240 2026-11-12 13:31:45,604 [INFO] S.d.d.e.robot_main: #194 in W* CMD_ARGC = 2
+#241 2026-11-12 13:31:45,604 [INFO] S.d.d.e.robot_main: #195 in W* CMD_ARGS[0] = 36
+#242 2026-11-12 13:31:45,604 [INFO] S.d.d.e.robot_main: #196 in W* CMD_ARGS[1] = 1
+#243 2026-11-12 13:31:45,604 [INFO] S.d.d.e.robot_main: #197 in W CMD_FLAG = 1
+#244 2026-11-12 13:31:45,627 [INFO] S.d.d.e.robot_main: #198 out R RES_SEQ..+12 RES_SEQ = 1923, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#245 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #199 in W* CMD_SEQ = 1924
+#246 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #200 in W* CMD_OPCODE = 80 (PARAM_SET)
+#247 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #201 in W* CMD_ARGC = 2
+#248 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #202 in W* CMD_ARGS[0] = 37
+#249 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #203 in W* CMD_ARGS[1] = 3346
+#250 2026-11-12 13:31:45,628 [INFO] S.d.d.e.robot_main: #204 in W CMD_FLAG = 1
+#251 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #205 out R RES_SEQ..+12 RES_SEQ = 1924, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#252 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #206 in W* CMD_SEQ = 1925
+#253 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #207 in W* CMD_OPCODE = 80 (PARAM_SET)
+#254 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #208 in W* CMD_ARGC = 2
+#255 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #209 in W* CMD_ARGS[0] = 38
+#256 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #210 in W* CMD_ARGS[1] = 61725
+#257 2026-11-12 13:31:45,654 [INFO] S.d.d.e.robot_main: #211 in W CMD_FLAG = 1
+#258 2026-11-12 13:31:45,676 [INFO] S.d.d.e.robot_main: #212 out R RES_SEQ..+12 RES_SEQ = 1925, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#259 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #213 in W* CMD_SEQ = 1926
+#260 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #214 in W* CMD_OPCODE = 80 (PARAM_SET)
+#261 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #215 in W* CMD_ARGC = 2
+#262 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #216 in W* CMD_ARGS[0] = 39
+#263 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #217 in W* CMD_ARGS[1] = 3346
+#264 2026-11-12 13:31:45,677 [INFO] S.d.d.e.robot_main: #218 in W CMD_FLAG = 1
+#265 2026-11-12 13:31:45,699 [INFO] S.d.d.e.robot_main: #219 out R RES_SEQ..+12 RES_SEQ = 1926, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#266 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #220 in W* CMD_SEQ = 1927
+#267 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #221 in W* CMD_OPCODE = 80 (PARAM_SET)
+#268 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #222 in W* CMD_ARGC = 2
+#269 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #223 in W* CMD_ARGS[0] = 40
+#270 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #224 in W* CMD_ARGS[1] = 63536
+#271 2026-11-12 13:31:45,700 [INFO] S.d.d.e.robot_main: #225 in W CMD_FLAG = 1
+#272 2026-11-12 13:31:45,723 [INFO] S.d.d.e.robot_main: #226 out R RES_SEQ..+12 RES_SEQ = 1927, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#273 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #227 in W* CMD_SEQ = 1928
+#274 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #228 in W* CMD_OPCODE = 80 (PARAM_SET)
+#275 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #229 in W* CMD_ARGC = 2
+#276 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #230 in W* CMD_ARGS[0] = 41
+#277 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #231 in W* CMD_ARGS[1] = 200
+#278 2026-11-12 13:31:45,724 [INFO] S.d.d.e.robot_main: #232 in W CMD_FLAG = 1
+#279 2026-11-12 13:31:45,747 [INFO] S.d.d.e.robot_main: #233 out R RES_SEQ..+12 RES_SEQ = 1928, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#280 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #234 in W* CMD_SEQ = 1929
+#281 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #235 in W* CMD_OPCODE = 80 (PARAM_SET)
+#282 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #236 in W* CMD_ARGC = 2
+#283 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #237 in W* CMD_ARGS[0] = 42
+#284 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #238 in W* CMD_ARGS[1] = 1
+#285 2026-11-12 13:31:45,748 [INFO] S.d.d.e.robot_main: #239 in W CMD_FLAG = 1
+#286 2026-11-12 13:31:45,770 [INFO] S.d.d.e.robot_main: #240 out R RES_SEQ..+12 RES_SEQ = 1929, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#287 2026-11-12 13:31:45,770 [INFO] S.d.d.e.robot_main: #241 in W* CMD_SEQ = 1930
+#288 2026-11-12 13:31:45,770 [INFO] S.d.d.e.robot_main: #242 in W* CMD_OPCODE = 80 (PARAM_SET)
+#289 2026-11-12 13:31:45,770 [INFO] S.d.d.e.robot_main: #243 in W* CMD_ARGC = 2
+#290 2026-11-12 13:31:45,770 [INFO] S.d.d.e.robot_main: #244 in W* CMD_ARGS[0] = 48
+#291 2026-11-12 13:31:45,771 [INFO] S.d.d.e.robot_main: #245 in W* CMD_ARGS[1] = 1000
+#292 2026-11-12 13:31:45,771 [INFO] S.d.d.e.robot_main: #246 in W CMD_FLAG = 1
+#293 2026-11-12 13:31:45,795 [INFO] S.d.d.e.robot_main: #247 out R RES_SEQ..+12 RES_SEQ = 1930, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#294 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #248 in W* CMD_SEQ = 1931
+#295 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #249 in W* CMD_OPCODE = 80 (PARAM_SET)
+#296 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #250 in W* CMD_ARGC = 2
+#297 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #251 in W* CMD_ARGS[0] = 49
+#298 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #252 in W* CMD_ARGS[1] = 6000
+#299 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #253 in W CMD_FLAG = 1
+#300 2026-11-12 13:31:45,796 [INFO] S.d.d.e.robot_main: #254 out R RES_SEQ..+12 RES_SEQ = 1931, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#301 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #255 in W* CMD_SEQ = 1932
+#302 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #256 in W* CMD_OPCODE = 80 (PARAM_SET)
+#303 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #257 in W* CMD_ARGC = 2
+#304 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #258 in W* CMD_ARGS[0] = 50
+#305 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #259 in W* CMD_ARGS[1] = 64036
+#306 2026-11-12 13:31:45,797 [INFO] S.d.d.e.robot_main: #260 in W CMD_FLAG = 1
+#307 2026-11-12 13:31:45,822 [INFO] S.d.d.e.robot_main: #261 out R RES_SEQ..+12 RES_SEQ = 1932, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#308 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #262 in W* CMD_SEQ = 1933
+#309 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #263 in W* CMD_OPCODE = 80 (PARAM_SET)
+#310 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #264 in W* CMD_ARGC = 2
+#311 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #265 in W* CMD_ARGS[0] = 51
+#312 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #266 in W* CMD_ARGS[1] = 0
+#313 2026-11-12 13:31:45,823 [INFO] S.d.d.e.robot_main: #267 in W CMD_FLAG = 1
+#314 2026-11-12 13:31:45,846 [INFO] S.d.d.e.robot_main: #268 out R RES_SEQ..+12 RES_SEQ = 1933, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#315 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #269 in W* CMD_SEQ = 1934
+#316 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #270 in W* CMD_OPCODE = 80 (PARAM_SET)
+#317 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #271 in W* CMD_ARGC = 2
+#318 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #272 in W* CMD_ARGS[0] = 52
+#319 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #273 in W* CMD_ARGS[1] = 61936
+#320 2026-11-12 13:31:45,847 [INFO] S.d.d.e.robot_main: #274 in W CMD_FLAG = 1
+#321 2026-11-12 13:31:45,872 [INFO] S.d.d.e.robot_main: #275 out R RES_SEQ..+12 RES_SEQ = 1934, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#322 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #276 in W* CMD_SEQ = 1935
+#323 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #277 in W* CMD_OPCODE = 80 (PARAM_SET)
+#324 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #278 in W* CMD_ARGC = 2
+#325 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #279 in W* CMD_ARGS[0] = 53
+#326 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #280 in W* CMD_ARGS[1] = 3600
+#327 2026-11-12 13:31:45,873 [INFO] S.d.d.e.robot_main: #281 in W CMD_FLAG = 1
+#328 2026-11-12 13:31:45,898 [INFO] S.d.d.e.robot_main: #282 out R RES_SEQ..+12 RES_SEQ = 1935, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#329 2026-11-12 13:31:45,898 [INFO] S.d.d.e.robot_main: #283 in W* CMD_SEQ = 1936
+#330 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #284 in W* CMD_OPCODE = 80 (PARAM_SET)
+#331 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #285 in W* CMD_ARGC = 2
+#332 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #286 in W* CMD_ARGS[0] = 54
+#333 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #287 in W* CMD_ARGS[1] = 0
+#334 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #288 in W CMD_FLAG = 1
+#335 2026-11-12 13:31:45,899 [INFO] S.d.d.e.robot_main: #289 out R RES_SEQ..+12 RES_SEQ = 1936, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#336 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #290 in W* CMD_SEQ = 1937
+#337 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #291 in W* CMD_OPCODE = 80 (PARAM_SET)
+#338 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #292 in W* CMD_ARGC = 2
+#339 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #293 in W* CMD_ARGS[0] = 55
+#340 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #294 in W* CMD_ARGS[1] = 59536
+#341 2026-11-12 13:31:45,900 [INFO] S.d.d.e.robot_main: #295 in W CMD_FLAG = 1
+#342 2026-11-12 13:31:45,926 [INFO] S.d.d.e.robot_main: #296 out R RES_SEQ..+12 RES_SEQ = 1937, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#343 2026-11-12 13:31:45,926 [INFO] S.d.d.e.robot_main: #297 in W* CMD_SEQ = 1938
+#344 2026-11-12 13:31:45,926 [INFO] S.d.d.e.robot_main: #298 in W* CMD_OPCODE = 80 (PARAM_SET)
+#345 2026-11-12 13:31:45,926 [INFO] S.d.d.e.robot_main: #299 in W* CMD_ARGC = 2
+#346 2026-11-12 13:31:45,926 [INFO] S.d.d.e.robot_main: #300 in W* CMD_ARGS[0] = 56
+#347 2026-11-12 13:31:45,927 [INFO] S.d.d.e.robot_main: #301 in W* CMD_ARGS[1] = 6000
+#348 2026-11-12 13:31:45,927 [INFO] S.d.d.e.robot_main: #302 in W CMD_FLAG = 1
+#349 2026-11-12 13:31:45,952 [INFO] S.d.d.e.robot_main: #303 out R RES_SEQ..+12 RES_SEQ = 1938, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#350 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #304 in W* CMD_SEQ = 1939
+#351 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #305 in W* CMD_OPCODE = 80 (PARAM_SET)
+#352 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #306 in W* CMD_ARGC = 2
+#353 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #307 in W* CMD_ARGS[0] = 57
+#354 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #308 in W* CMD_ARGS[1] = 59536
+#355 2026-11-12 13:31:45,953 [INFO] S.d.d.e.robot_main: #309 in W CMD_FLAG = 1
+#356 2026-11-12 13:31:45,954 [INFO] S.d.d.e.robot_main: #310 out R RES_SEQ..+12 RES_SEQ = 1939, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#357 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #311 in W* CMD_SEQ = 1940
+#358 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #312 in W* CMD_OPCODE = 80 (PARAM_SET)
+#359 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #313 in W* CMD_ARGC = 2
+#360 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #314 in W* CMD_ARGS[0] = 58
+#361 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #315 in W* CMD_ARGS[1] = 6000
+#362 2026-11-12 13:31:45,955 [INFO] S.d.d.e.robot_main: #316 in W CMD_FLAG = 1
+#363 2026-11-12 13:31:45,980 [INFO] S.d.d.e.robot_main: #317 out R RES_SEQ..+12 RES_SEQ = 1940, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#364 2026-11-12 13:31:45,980 [INFO] S.d.d.e.robot_main: #318 in W* CMD_SEQ = 1941
+#365 2026-11-12 13:31:45,981 [INFO] S.d.d.e.robot_main: #319 in W* CMD_OPCODE = 80 (PARAM_SET)
+#366 2026-11-12 13:31:45,981 [INFO] S.d.d.e.robot_main: #320 in W* CMD_ARGC = 2
+#367 2026-11-12 13:31:45,981 [INFO] S.d.d.e.robot_main: #321 in W* CMD_ARGS[0] = 59
+#368 2026-11-12 13:31:45,981 [INFO] S.d.d.e.robot_main: #322 in W* CMD_ARGS[1] = 63886
+#369 2026-11-12 13:31:45,981 [INFO] S.d.d.e.robot_main: #323 in W CMD_FLAG = 1
+#370 2026-11-12 13:31:46,004 [INFO] S.d.d.e.robot_main: #324 out R RES_SEQ..+12 RES_SEQ = 1941, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#371 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #325 in W* CMD_SEQ = 1942
+#372 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #326 in W* CMD_OPCODE = 80 (PARAM_SET)
+#373 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #327 in W* CMD_ARGC = 2
+#374 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #328 in W* CMD_ARGS[0] = 60
+#375 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #329 in W* CMD_ARGS[1] = 1650
+#376 2026-11-12 13:31:46,005 [INFO] S.d.d.e.robot_main: #330 in W CMD_FLAG = 1
+#377 2026-11-12 13:31:46,027 [INFO] S.d.d.e.robot_main: #331 out R RES_SEQ..+12 RES_SEQ = 1942, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#378 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #332 in W* CMD_SEQ = 1943
+#379 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #333 in W* CMD_OPCODE = 80 (PARAM_SET)
+#380 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #334 in W* CMD_ARGC = 2
+#381 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #335 in W* CMD_ARGS[0] = 64
+#382 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #336 in W* CMD_ARGS[1] = 0
+#383 2026-11-12 13:31:46,028 [INFO] S.d.d.e.robot_main: #337 in W CMD_FLAG = 1
+#384 2026-11-12 13:31:46,049 [INFO] S.d.d.e.robot_main: #338 out R RES_SEQ..+12 RES_SEQ = 1943, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#385 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #339 in W* CMD_SEQ = 1944
+#386 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #340 in W* CMD_OPCODE = 80 (PARAM_SET)
+#387 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #341 in W* CMD_ARGC = 2
+#388 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #342 in W* CMD_ARGS[0] = 65
+#389 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #343 in W* CMD_ARGS[1] = 1
+#390 2026-11-12 13:31:46,050 [INFO] S.d.d.e.robot_main: #344 in W CMD_FLAG = 1
+#391 2026-11-12 13:31:46,073 [INFO] S.d.d.e.robot_main: #345 out R RES_SEQ..+12 RES_SEQ = 1944, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#392 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #346 in W* CMD_SEQ = 1945
+#393 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #347 in W* CMD_OPCODE = 80 (PARAM_SET)
+#394 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #348 in W* CMD_ARGC = 2
+#395 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #349 in W* CMD_ARGS[0] = 66
+#396 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #350 in W* CMD_ARGS[1] = 2
+#397 2026-11-12 13:31:46,074 [INFO] S.d.d.e.robot_main: #351 in W CMD_FLAG = 1
+#398 2026-11-12 13:31:46,099 [INFO] S.d.d.e.robot_main: #352 out R RES_SEQ..+12 RES_SEQ = 1945, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#399 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #353 in W* CMD_SEQ = 1946
+#400 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #354 in W* CMD_OPCODE = 80 (PARAM_SET)
+#401 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #355 in W* CMD_ARGC = 2
+#402 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #356 in W* CMD_ARGS[0] = 67
+#403 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #357 in W* CMD_ARGS[1] = 13
+#404 2026-11-12 13:31:46,100 [INFO] S.d.d.e.robot_main: #358 in W CMD_FLAG = 1
+#405 2026-11-12 13:31:46,125 [INFO] S.d.d.e.robot_main: #359 out R RES_SEQ..+12 RES_SEQ = 1946, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#406 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #360 in W* CMD_SEQ = 1947
+#407 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #361 in W* CMD_OPCODE = 80 (PARAM_SET)
+#408 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #362 in W* CMD_ARGC = 2
+#409 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #363 in W* CMD_ARGS[0] = 68
+#410 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #364 in W* CMD_ARGS[1] = 17
+#411 2026-11-12 13:31:46,126 [INFO] S.d.d.e.robot_main: #365 in W CMD_FLAG = 1
+#412 2026-11-12 13:31:46,150 [INFO] S.d.d.e.robot_main: #366 out R RES_SEQ..+12 RES_SEQ = 1947, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#413 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #367 in W* CMD_SEQ = 1948
+#414 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #368 in W* CMD_OPCODE = 80 (PARAM_SET)
+#415 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #369 in W* CMD_ARGC = 2
+#416 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #370 in W* CMD_ARGS[0] = 69
+#417 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #371 in W* CMD_ARGS[1] = 300
+#418 2026-11-12 13:31:46,151 [INFO] S.d.d.e.robot_main: #372 in W CMD_FLAG = 1
+#419 2026-11-12 13:31:46,176 [INFO] S.d.d.e.robot_main: #373 out R RES_SEQ..+12 RES_SEQ = 1948, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#420 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #374 in W* CMD_SEQ = 1949
+#421 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #375 in W* CMD_OPCODE = 80 (PARAM_SET)
+#422 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #376 in W* CMD_ARGC = 2
+#423 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #377 in W* CMD_ARGS[0] = 70
+#424 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #378 in W* CMD_ARGS[1] = 8
+#425 2026-11-12 13:31:46,177 [INFO] S.d.d.e.robot_main: #379 in W CMD_FLAG = 1
+#426 2026-11-12 13:31:46,203 [INFO] S.d.d.e.robot_main: #380 out R RES_SEQ..+12 RES_SEQ = 1949, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#427 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #381 in W* CMD_SEQ = 1950
+#428 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #382 in W* CMD_OPCODE = 80 (PARAM_SET)
+#429 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #383 in W* CMD_ARGC = 2
+#430 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #384 in W* CMD_ARGS[0] = 71
+#431 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #385 in W* CMD_ARGS[1] = 5
+#432 2026-11-12 13:31:46,204 [INFO] S.d.d.e.robot_main: #386 in W CMD_FLAG = 1
+#433 2026-11-12 13:31:46,230 [INFO] S.d.d.e.robot_main: #387 out R RES_SEQ..+12 RES_SEQ = 1950, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#434 2026-11-12 13:31:46,230 [INFO] S.d.d.e.robot_main: #388 in W* CMD_SEQ = 1951
+#435 2026-11-12 13:31:46,230 [INFO] S.d.d.e.robot_main: #389 in W* CMD_OPCODE = 80 (PARAM_SET)
+#436 2026-11-12 13:31:46,231 [INFO] S.d.d.e.robot_main: #390 in W* CMD_ARGC = 2
+#437 2026-11-12 13:31:46,231 [INFO] S.d.d.e.robot_main: #391 in W* CMD_ARGS[0] = 96
+#438 2026-11-12 13:31:46,231 [INFO] S.d.d.e.robot_main: #392 in W* CMD_ARGS[1] = 3000
+#439 2026-11-12 13:31:46,231 [INFO] S.d.d.e.robot_main: #393 in W CMD_FLAG = 1
+#440 2026-11-12 13:31:46,231 [INFO] S.d.d.e.robot_main: #394 out R RES_SEQ..+12 RES_SEQ = 1951, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#441 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #395 in W* CMD_SEQ = 1952
+#442 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #396 in W* CMD_OPCODE = 80 (PARAM_SET)
+#443 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #397 in W* CMD_ARGC = 2
+#444 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #398 in W* CMD_ARGS[0] = 97
+#445 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #399 in W* CMD_ARGS[1] = 5
+#446 2026-11-12 13:31:46,232 [INFO] S.d.d.e.robot_main: #400 in W CMD_FLAG = 1
+#447 2026-11-12 13:31:46,254 [INFO] S.d.d.e.robot_main: #401 out R RES_SEQ..+12 RES_SEQ = 1952, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#448 2026-11-12 13:31:46,255 [INFO] S.d.d.e.robot_main: #402 in W* CMD_SEQ = 1953
+#449 2026-11-12 13:31:46,256 [INFO] S.d.d.e.robot_main: #403 in W* CMD_OPCODE = 82 (PARAM_APPLY)
+#450 2026-11-12 13:31:46,256 [INFO] S.d.d.e.robot_main: #404 in W* CMD_ARGC = 0
+#451 2026-11-12 13:31:46,256 [INFO] S.d.d.e.robot_main: #405 in W CMD_FLAG = 1
+#452 2026-11-12 13:31:46,281 [INFO] S.d.d.e.robot_main: #406 out R RES_SEQ..+12 RES_SEQ = 1953, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#453 2026-11-12 13:31:46,282 [INFO] S.d.d.e.robot_main: #407 in W* CMD_SEQ = 1954
+#454 2026-11-12 13:31:46,282 [INFO] S.d.d.e.robot_main: #408 in W* CMD_OPCODE = 80 (PARAM_SET)
+#455 2026-11-12 13:31:46,283 [INFO] S.d.d.e.robot_main: #409 in W* CMD_ARGC = 2
+#456 2026-11-12 13:31:46,283 [INFO] S.d.d.e.robot_main: #410 in W* CMD_ARGS[0] = 98
+#457 2026-11-12 13:31:46,283 [INFO] S.d.d.e.robot_main: #411 in W* CMD_ARGS[1] = 1
+#458 2026-11-12 13:31:46,283 [INFO] S.d.d.e.robot_main: #412 in W CMD_FLAG = 1
+#459 2026-11-12 13:31:46,304 [INFO] S.d.d.e.robot_main: #413 out R RES_SEQ..+12 RES_SEQ = 1954, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#462 2026-11-12 13:31:46,313 [INFO] S.d.d.e.robot_main: #414 in W 0x1204 = 1
+#464 2026-11-12 13:32:48,468 [INFO] S.d.d.e.robot_main: #414 … ×124
+#465 2026-11-12 13:32:48,468 [INFO] S.d.d.e.robot_main: #415 in W 0x1202 = 1000
+#466 2026-11-12 13:32:48,469 [INFO] S.d.d.e.robot_main: #416 in W 0x1201 = 0
+#467 2026-11-12 13:32:48,469 [INFO] S.d.d.e.robot_main: #417 in W 0x1200 = 1
+#468 2026-11-12 13:32:48,469 [INFO] S.d.d.e.robot_main: #418 in W 0x1204 = 1
+#470 2026-11-12 13:33:22,173 [INFO] S.d.d.e.robot_main: #418 … ×68
+#471 2026-11-12 13:33:22,577 [INFO] S.d.d.e.robot_main: #419 in W 0x1204 = 1
+#473 2026-11-12 13:33:27,132 [INFO] S.d.d.e.robot_main: #419 … ×10
+#474 2026-11-12 13:33:27,132 [INFO] S.d.d.e.robot_main: #420 out R RES_SEQ..+80 RES_SEQ = 1954, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#475 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #421 in W* CMD_SEQ = 1955
+#476 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #422 in W* CMD_OPCODE = 32 (CVT_JOB)
+#477 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #423 in W* CMD_ARGC = 10
+#478 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #424 in W* CMD_ARGS[0] = 65297
+#479 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #425 in W* CMD_ARGS[1] = 0
+#480 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #426 in W* CMD_ARGS[2] = 4562
+#481 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #427 in W* CMD_ARGS[3] = 62103
+#482 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #428 in W* CMD_ARGS[4] = 64216
+#483 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #429 in W* CMD_ARGS[5] = 3
+#484 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #430 in W* CMD_ARGS[6] = 3200
+#485 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #431 in W* CMD_ARGS[7] = 63336
+#486 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #432 in W* CMD_ARGS[8] = 64216
+#487 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #433 in W* CMD_ARGS[9] = 64503
+#488 2026-11-12 13:33:27,133 [INFO] S.d.d.e.robot_main: #434 in W CMD_FLAG = 1
+#489 2026-11-12 13:33:27,159 [INFO] S.d.d.e.robot_main: #435 out R RES_SEQ..+12 RES_SEQ = 1955, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#490 2026-11-12 13:33:27,618 [INFO] S.d.d.e.robot_main: #436 in W 0x1204 = 1
+#492 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #436 … ×32
+#493 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #437 in W* CMD_SEQ = 1956
+#494 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #438 in W* CMD_OPCODE = 32 (CVT_JOB)
+#495 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #439 in W* CMD_ARGC = 10
+#496 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #440 in W* CMD_ARGS[0] = 2041
+#497 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #441 in W* CMD_ARGS[1] = 1
+#498 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #442 in W* CMD_ARGS[2] = 4612
+#499 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #443 in W* CMD_ARGS[3] = 62103
+#500 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #444 in W* CMD_ARGS[4] = 64216
+#501 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #445 in W* CMD_ARGS[5] = 3
+#502 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #446 in W* CMD_ARGS[6] = 3200
+#503 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #447 in W* CMD_ARGS[7] = 62236
+#504 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #448 in W* CMD_ARGS[8] = 64216
+#505 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #449 in W* CMD_ARGS[9] = 64210
+#506 2026-11-12 13:33:43,631 [INFO] S.d.d.e.robot_main: #450 in W CMD_FLAG = 1
+#507 2026-11-12 13:33:43,653 [INFO] S.d.d.e.robot_main: #451 out R RES_SEQ..+12 RES_SEQ = 1956, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#508 2026-11-12 13:33:43,743 [INFO] S.d.d.e.robot_main: #452 in W 0x1204 = 1
+#510 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #452 … ×16
+#511 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #453 in W* CMD_SEQ = 1957
+#512 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #454 in W* CMD_OPCODE = 32 (CVT_JOB)
+#513 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #455 in W* CMD_ARGC = 10
+#514 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #456 in W* CMD_ARGS[0] = 3179
+#515 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #457 in W* CMD_ARGS[1] = 1
+#516 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #458 in W* CMD_ARGS[2] = 4602
+#517 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #459 in W* CMD_ARGS[3] = 62105
+#518 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #460 in W* CMD_ARGS[4] = 64216
+#519 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #461 in W* CMD_ARGS[5] = 3
+#520 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #462 in W* CMD_ARGS[6] = 3200
+#521 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #463 in W* CMD_ARGS[7] = 1100
+#522 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #464 in W* CMD_ARGS[8] = 64216
+#523 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #465 in W* CMD_ARGS[9] = 63910
+#524 2026-11-12 13:33:51,489 [INFO] S.d.d.e.robot_main: #466 in W CMD_FLAG = 1
+#525 2026-11-12 13:33:51,510 [INFO] S.d.d.e.robot_main: #467 out R RES_SEQ..+12 RES_SEQ = 1957, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#526 2026-11-12 13:33:51,804 [INFO] S.d.d.e.robot_main: #468 in W 0x1204 = 1
+#528 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #468 … ×16
+#529 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #469 in W* CMD_SEQ = 1958
+#530 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #470 in W* CMD_OPCODE = 32 (CVT_JOB)
+#531 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #471 in W* CMD_ARGC = 10
+#532 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #472 in W* CMD_ARGS[0] = 4320
+#533 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #473 in W* CMD_ARGS[1] = 1
+#534 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #474 in W* CMD_ARGS[2] = 4612
+#535 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #475 in W* CMD_ARGS[3] = 62111
+#536 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #476 in W* CMD_ARGS[4] = 64216
+#537 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #477 in W* CMD_ARGS[5] = 3
+#538 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #478 in W* CMD_ARGS[6] = 3200
+#539 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #479 in W* CMD_ARGS[7] = 64436
+#540 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #480 in W* CMD_ARGS[8] = 64216
+#541 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #481 in W* CMD_ARGS[9] = 63592
+#542 2026-11-12 13:33:59,568 [INFO] S.d.d.e.robot_main: #482 in W CMD_FLAG = 1
+#543 2026-11-12 13:33:59,593 [INFO] S.d.d.e.robot_main: #483 out R RES_SEQ..+12 RES_SEQ = 1958, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#544 2026-11-12 13:33:59,868 [INFO] S.d.d.e.robot_main: #484 in W 0x1204 = 1
+#547 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #484 … ×32
+#548 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #485 in W* CMD_SEQ = 1959
+#549 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #486 in W* CMD_OPCODE = 32 (CVT_JOB)
+#550 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #487 in W* CMD_ARGC = 10
+#551 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #488 in W* CMD_ARGS[0] = 6589
+#552 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #489 in W* CMD_ARGS[1] = 1
+#553 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #490 in W* CMD_ARGS[2] = 4557
+#554 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #491 in W* CMD_ARGS[3] = 62103
+#555 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #492 in W* CMD_ARGS[4] = 64216
+#556 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #493 in W* CMD_ARGS[5] = 3
+#557 2026-11-12 13:34:15,868 [INFO] S.d.d.e.robot_main: #494 in W* CMD_ARGS[6] = 3200
+#558 2026-11-12 13:34:15,869 [INFO] S.d.d.e.robot_main: #495 in W* CMD_ARGS[7] = 2200
+#559 2026-11-12 13:34:15,869 [INFO] S.d.d.e.robot_main: #496 in W* CMD_ARGS[8] = 64216
+#560 2026-11-12 13:34:15,869 [INFO] S.d.d.e.robot_main: #497 in W* CMD_ARGS[9] = 65078
+#561 2026-11-12 13:34:15,869 [INFO] S.d.d.e.robot_main: #498 in W CMD_FLAG = 1
+#562 2026-11-12 13:34:15,892 [INFO] S.d.d.e.robot_main: #499 out R RES_SEQ..+12 RES_SEQ = 1959, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#563 2026-11-12 13:34:16,003 [INFO] S.d.d.e.robot_main: #500 in W 0x1204 = 1
+#564 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #500 … ×17
+#565 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #501 in W* CMD_SEQ = 1960
+#566 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #502 in W* CMD_OPCODE = 32 (CVT_JOB)
+#567 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #503 in W* CMD_ARGC = 10
+#568 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #504 in W* CMD_ARGS[0] = 7724
+#569 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #505 in W* CMD_ARGS[1] = 1
+#570 2026-11-12 13:34:24,112 [INFO] S.d.d.e.robot_main: #506 in W* CMD_ARGS[2] = 4567
+#571 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #507 in W* CMD_ARGS[3] = 62106
+#572 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #508 in W* CMD_ARGS[4] = 64216
+#573 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #509 in W* CMD_ARGS[5] = 3
+#574 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #510 in W* CMD_ARGS[6] = 3200
+#575 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #511 in W* CMD_ARGS[7] = 4400
+#576 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #512 in W* CMD_ARGS[8] = 64216
+#577 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #513 in W* CMD_ARGS[9] = 64749
+#578 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #514 in W CMD_FLAG = 1
+#579 2026-11-12 13:34:24,113 [INFO] S.d.d.e.robot_main: #515 out R RES_SEQ..+12 RES_SEQ = 1960, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#581 2026-11-12 13:34:24,573 [INFO] S.d.d.e.robot_main: #516 in W 0x1204 = 1
+#582 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #516 … ×15
+#583 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #517 in W* CMD_SEQ = 1961
+#584 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #518 in W* CMD_OPCODE = 32 (CVT_JOB)
+#585 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #519 in W* CMD_ARGC = 10
+#586 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #520 in W* CMD_ARGS[0] = 8861
+#587 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #521 in W* CMD_ARGS[1] = 1
+#588 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #522 in W* CMD_ARGS[2] = 4557
+#589 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #523 in W* CMD_ARGS[3] = 62106
+#590 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #524 in W* CMD_ARGS[4] = 64216
+#591 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #525 in W* CMD_ARGS[5] = 3
+#592 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #526 in W* CMD_ARGS[6] = 3200
+#593 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #527 in W* CMD_ARGS[7] = 3300
+#594 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #528 in W* CMD_ARGS[8] = 64216
+#595 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #529 in W* CMD_ARGS[9] = 64262
+#596 2026-11-12 13:34:31,861 [INFO] S.d.d.e.robot_main: #530 in W CMD_FLAG = 1
+#597 2026-11-12 13:34:31,887 [INFO] S.d.d.e.robot_main: #531 out R RES_SEQ..+12 RES_SEQ = 1961, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#598 2026-11-12 13:34:32,129 [INFO] S.d.d.e.robot_main: #532 in W 0x1204 = 1
+#601 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #532 … ×33
+#602 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #533 in W* CMD_SEQ = 1962
+#603 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #534 in W* CMD_OPCODE = 32 (CVT_JOB)
+#604 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #535 in W* CMD_ARGC = 10
+#605 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #536 in W* CMD_ARGS[0] = 11136
+#606 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #537 in W* CMD_ARGS[1] = 1
+#607 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #538 in W* CMD_ARGS[2] = 4599
+#608 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #539 in W* CMD_ARGS[3] = 62103
+#609 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #540 in W* CMD_ARGS[4] = 64216
+#610 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #541 in W* CMD_ARGS[5] = 3
+#611 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #542 in W* CMD_ARGS[6] = 3200
+#612 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #543 in W* CMD_ARGS[7] = 61136
+#613 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #544 in W* CMD_ARGS[8] = 64216
+#614 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #545 in W* CMD_ARGS[9] = 63550
+#615 2026-11-12 13:34:48,284 [INFO] S.d.d.e.robot_main: #546 in W CMD_FLAG = 1
+#616 2026-11-12 13:34:48,285 [INFO] S.d.d.e.robot_main: #547 out R RES_SEQ..+12 RES_SEQ = 1962, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#617 2026-11-12 13:34:48,783 [INFO] S.d.d.e.robot_main: #548 in W 0x1204 = 1
+#619 2026-11-12 13:34:56,611 [INFO] S.d.d.e.robot_main: #548 … ×16
+#620 2026-11-12 13:34:56,611 [INFO] S.d.d.e.robot_main: #549 in W* CMD_SEQ = 1963
+#621 2026-11-12 13:34:56,611 [INFO] S.d.d.e.robot_main: #550 in W* CMD_OPCODE = 32 (CVT_JOB)
+#622 2026-11-12 13:34:56,611 [INFO] S.d.d.e.robot_main: #551 in W* CMD_ARGC = 10
+#623 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #552 in W* CMD_ARGS[0] = 12273
+#624 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #553 in W* CMD_ARGS[1] = 1
+#625 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #554 in W* CMD_ARGS[2] = 4607
+#626 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #555 in W* CMD_ARGS[3] = 62103
+#627 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #556 in W* CMD_ARGS[4] = 64216
+#628 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #557 in W* CMD_ARGS[5] = 3
+#629 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #558 in W* CMD_ARGS[6] = 3200
+#630 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #559 in W* CMD_ARGS[7] = 0
+#631 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #560 in W* CMD_ARGS[8] = 64216
+#632 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #561 in W* CMD_ARGS[9] = 65321
+#633 2026-11-12 13:34:56,612 [INFO] S.d.d.e.robot_main: #562 in W CMD_FLAG = 1
+#634 2026-11-12 13:34:56,636 [INFO] S.d.d.e.robot_main: #563 out R RES_SEQ..+12 RES_SEQ = 1963, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#635 2026-11-12 13:34:56,856 [INFO] S.d.d.e.robot_main: #564 in W 0x1204 = 1
+#637 2026-11-12 13:35:08,211 [INFO] S.d.d.e.robot_main: #564 … ×23
+#638 2026-11-12 13:35:08,457 [INFO] S.d.d.e.robot_main: #565 in W 0x1204 = 1
+#640 2026-11-12 13:35:21,292 [INFO] S.d.d.e.robot_main: #565 … ×26
+#641 2026-11-12 13:35:21,292 [INFO] S.d.d.e.robot_main: #566 out R RES_SEQ..+80 RES_SEQ = 1963, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#642 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #567 in W* CMD_SEQ = 1964
+#643 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #568 in W* CMD_OPCODE = 32 (CVT_JOB)
+#644 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #569 in W* CMD_ARGC = 10
+#645 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #570 in W* CMD_ARGS[0] = 15746
+#646 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #571 in W* CMD_ARGS[1] = 1
+#647 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #572 in W* CMD_ARGS[2] = 4553
+#648 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #573 in W* CMD_ARGS[3] = 62103
+#649 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #574 in W* CMD_ARGS[4] = 64216
+#650 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #575 in W* CMD_ARGS[5] = 3
+#651 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #576 in W* CMD_ARGS[6] = 3200
+#652 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #577 in W* CMD_ARGS[7] = 61136
+#653 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #578 in W* CMD_ARGS[8] = 64216
+#654 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #579 in W* CMD_ARGS[9] = 64145
+#655 2026-11-12 13:35:21,293 [INFO] S.d.d.e.robot_main: #580 in W CMD_FLAG = 1
+#656 2026-11-12 13:35:21,315 [INFO] S.d.d.e.robot_main: #581 out R RES_SEQ..+12 RES_SEQ = 1964, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#657 2026-11-12 13:35:21,559 [INFO] S.d.d.e.robot_main: #582 in W 0x1204 = 1
+#660 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #582 … ×32
+#661 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #583 in W* CMD_SEQ = 1965
+#662 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #584 in W* CMD_OPCODE = 32 (CVT_JOB)
+#663 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #585 in W* CMD_ARGC = 10
+#664 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #586 in W* CMD_ARGS[0] = 18016
+#665 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #587 in W* CMD_ARGS[1] = 1
+#666 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #588 in W* CMD_ARGS[2] = 4615
+#667 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #589 in W* CMD_ARGS[3] = 62103
+#668 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #590 in W* CMD_ARGS[4] = 64216
+#669 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #591 in W* CMD_ARGS[5] = 3
+#670 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #592 in W* CMD_ARGS[6] = 3200
+#671 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #593 in W* CMD_ARGS[7] = 62236
+#672 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #594 in W* CMD_ARGS[8] = 64216
+#673 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #595 in W* CMD_ARGS[9] = 63626
+#674 2026-11-12 13:35:37,377 [INFO] S.d.d.e.robot_main: #596 in W CMD_FLAG = 1
+#675 2026-11-12 13:35:37,402 [INFO] S.d.d.e.robot_main: #597 out R RES_SEQ..+12 RES_SEQ = 1965, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#676 2026-11-12 13:35:37,684 [INFO] S.d.d.e.robot_main: #598 in W 0x1204 = 1
+#678 2026-11-12 13:35:45,731 [INFO] S.d.d.e.robot_main: #598 … ×16
+#679 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #599 in W* CMD_SEQ = 1966
+#680 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #600 in W* CMD_OPCODE = 32 (CVT_JOB)
+#681 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #601 in W* CMD_ARGC = 10
+#682 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #602 in W* CMD_ARGS[0] = 19156
+#683 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #603 in W* CMD_ARGS[1] = 1
+#684 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #604 in W* CMD_ARGS[2] = 4601
+#685 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #605 in W* CMD_ARGS[3] = 62106
+#686 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #606 in W* CMD_ARGS[4] = 64216
+#687 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #607 in W* CMD_ARGS[5] = 3
+#688 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #608 in W* CMD_ARGS[6] = 3200
+#689 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #609 in W* CMD_ARGS[7] = 63336
+#690 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #610 in W* CMD_ARGS[8] = 64216
+#691 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #611 in W* CMD_ARGS[9] = 65071
+#692 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #612 in W CMD_FLAG = 1
+#693 2026-11-12 13:35:45,732 [INFO] S.d.d.e.robot_main: #613 out R RES_SEQ..+12 RES_SEQ = 1966, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#694 2026-11-12 13:35:45,756 [INFO] S.d.d.e.robot_main: #614 in W 0x1204 = 1
+#696 2026-11-12 13:35:57,445 [INFO] S.d.d.e.robot_main: #614 … ×24
+#697 2026-11-12 13:35:57,865 [INFO] S.d.d.e.robot_main: #615 in W 0x1204 = 1
+#698 2026-11-12 13:36:02,137 [INFO] S.d.d.e.robot_main: #615 … ×9
+#699 2026-11-12 13:36:02,137 [INFO] S.d.d.e.robot_main: #616 out R RES_SEQ..+80 RES_SEQ = 1966, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#700 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #617 in W* CMD_SEQ = 1967
+#701 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #618 in W* CMD_OPCODE = 32 (CVT_JOB)
+#702 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #619 in W* CMD_ARGC = 10
+#703 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #620 in W* CMD_ARGS[0] = 21494
+#704 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #621 in W* CMD_ARGS[1] = 1
+#705 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #622 in W* CMD_ARGS[2] = 4602
+#706 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #623 in W* CMD_ARGS[3] = 62103
+#707 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #624 in W* CMD_ARGS[4] = 64216
+#708 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #625 in W* CMD_ARGS[5] = 3
+#709 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #626 in W* CMD_ARGS[6] = 3200
+#710 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #627 in W* CMD_ARGS[7] = 62236
+#711 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #628 in W* CMD_ARGS[8] = 64216
+#712 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #629 in W* CMD_ARGS[9] = 64502
+#713 2026-11-12 13:36:02,138 [INFO] S.d.d.e.robot_main: #630 in W CMD_FLAG = 1
+#714 2026-11-12 13:36:02,160 [INFO] S.d.d.e.robot_main: #631 out R RES_SEQ..+12 RES_SEQ = 1967, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#715 2026-11-12 13:36:02,413 [INFO] S.d.d.e.robot_main: #632 in W 0x1204 = 1
+#717 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #632 … ×17
+#718 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #633 in W* CMD_SEQ = 1968
+#719 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #634 in W* CMD_OPCODE = 32 (CVT_JOB)
+#720 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #635 in W* CMD_ARGC = 10
+#721 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #636 in W* CMD_ARGS[0] = 22636
+#722 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #637 in W* CMD_ARGS[1] = 1
+#723 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #638 in W* CMD_ARGS[2] = 4549
+#724 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #639 in W* CMD_ARGS[3] = 62110
+#725 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #640 in W* CMD_ARGS[4] = 64216
+#726 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #641 in W* CMD_ARGS[5] = 3
+#727 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #642 in W* CMD_ARGS[6] = 3200
+#728 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #643 in W* CMD_ARGS[7] = 64436
+#729 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #644 in W* CMD_ARGS[8] = 64216
+#730 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #645 in W* CMD_ARGS[9] = 64210
+#731 2026-11-12 13:36:10,508 [INFO] S.d.d.e.robot_main: #646 in W CMD_FLAG = 1
+#732 2026-11-12 13:36:10,530 [INFO] S.d.d.e.robot_main: #647 out R RES_SEQ..+12 RES_SEQ = 1968, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#733 2026-11-12 13:36:10,990 [INFO] S.d.d.e.robot_main: #648 in W 0x1204 = 1
+#735 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #648 … ×15
+#736 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #649 in W* CMD_SEQ = 1969
+#737 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #650 in W* CMD_OPCODE = 32 (CVT_JOB)
+#738 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #651 in W* CMD_ARGC = 10
+#739 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #652 in W* CMD_ARGS[0] = 23768
+#740 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #653 in W* CMD_ARGS[1] = 1
+#741 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #654 in W* CMD_ARGS[2] = 4567
+#742 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #655 in W* CMD_ARGS[3] = 62103
+#743 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #656 in W* CMD_ARGS[4] = 64216
+#744 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #657 in W* CMD_ARGS[5] = 3
+#745 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #658 in W* CMD_ARGS[6] = 3200
+#746 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #659 in W* CMD_ARGS[7] = 4400
+#747 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #660 in W* CMD_ARGS[8] = 64216
+#748 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #661 in W* CMD_ARGS[9] = 63960
+#749 2026-11-12 13:36:18,442 [INFO] S.d.d.e.robot_main: #662 in W CMD_FLAG = 1
+#750 2026-11-12 13:36:18,467 [INFO] S.d.d.e.robot_main: #663 out R RES_SEQ..+12 RES_SEQ = 1969, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#751 2026-11-12 13:36:18,553 [INFO] S.d.d.e.robot_main: #664 in W 0x1204 = 1
+#753 2026-11-12 13:36:26,887 [INFO] S.d.d.e.robot_main: #664 … ×17
+#754 2026-11-12 13:36:26,887 [INFO] S.d.d.e.robot_main: #665 in W* SC_BUF[0..5] (6 слов)
+#755 2026-11-12 13:36:26,888 [INFO] S.d.d.e.robot_main: #666 in W* CMD_SEQ = 1970
+#756 2026-11-12 13:36:26,888 [INFO] S.d.d.e.robot_main: #667 in W* CMD_OPCODE = 48 (SC_RUN)
+#757 2026-11-12 13:36:26,888 [INFO] S.d.d.e.robot_main: #668 in W* CMD_ARGC = 6
+#758 2026-11-12 13:36:26,888 [INFO] S.d.d.e.robot_main: #669 in W* CMD_ARGS[0] = 1
+#759 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #670 in W* CMD_ARGS[1] = 1
+#760 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #671 in W* CMD_ARGS[2] = 0
+#761 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #672 in W* CMD_ARGS[3] = 0
+#762 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #673 in W* CMD_ARGS[4] = 0
+#763 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #674 in W* CMD_ARGS[5] = 0
+#764 2026-11-12 13:36:26,889 [INFO] S.d.d.e.robot_main: #675 in W CMD_FLAG = 1
+#765 2026-11-12 13:36:26,912 [INFO] S.d.d.e.robot_main: #676 out R RES_SEQ..+12 RES_SEQ = 1970, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#766 2026-11-12 13:36:27,118 [INFO] S.d.d.e.robot_main: #677 in W 0x1204 = 1
+#767 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #677 … ×2
+#768 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #678 in W* CMD_SEQ = 1971
+#769 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #679 in W* CMD_OPCODE = 65 (SERVO)
+#770 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #680 in W* CMD_ARGC = 1
+#771 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #681 in W* CMD_ARGS[0] = 0
+#772 2026-11-12 13:36:27,895 [INFO] S.d.d.e.robot_main: #682 in W CMD_FLAG = 1
+#773 2026-11-12 13:36:27,919 [INFO] S.d.d.e.robot_main: #683 out R RES_SEQ..+12 RES_SEQ = 1971, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#775 2026-11-12 13:36:28,123 [INFO] S.d.d.e.robot_main: #684 in W 0x1204 = 1
+#776 2026-11-12 13:36:28,424 [INFO] S.d.d.e.robot_main: #685 in W* CMD_SEQ = 1972
+#777 2026-11-12 13:36:28,424 [INFO] S.d.d.e.robot_main: #686 in W* CMD_OPCODE = 65 (SERVO)
+#778 2026-11-12 13:36:28,424 [INFO] S.d.d.e.robot_main: #687 in W* CMD_ARGC = 1
+#779 2026-11-12 13:36:28,424 [INFO] S.d.d.e.robot_main: #688 in W* CMD_ARGS[0] = 0
+#780 2026-11-12 13:36:28,424 [INFO] S.d.d.e.robot_main: #689 in W CMD_FLAG = 1
+#781 2026-11-12 13:36:28,447 [INFO] S.d.d.e.robot_main: #690 out R RES_SEQ..+12 RES_SEQ = 1972, RES_STATUS = 1, RES_ERRNO = 0 (ОК)
+#787 2026-11-12 13:36:28,503 [INFO] S.d.d.e.robot_main: #691 in W STOP_REQ = 5
+#793 2026-11-12 13:36:28,684 [INFO] S.d.d.e.robot_main: #692  disconnect
