@@ -529,12 +529,12 @@ Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
    `system_command`) идут через `self.request`; `request_async` в backend_ctl не используется.
    Подмена — только для dict с `success False` и `error "auth_required"`: не-dict `result`
    и другой `error` возвращаются как есть.
-4. `driver.system_shutdown` (оба `except BackendUnavailable` — ответ на команду и опрос
-   `supervision_status`) пробрасывает `TokenFileMissing`: команда до PM не дошла, это не
-   `pm_gone` (ревью стадии 5, находка 2).
 3. `Services/robot_comm/gui/line_source.py` (`LineLink`, отладочная дверь линии на порту
    управления) передаёт `token_provider=file_token_provider(port, os.environ)`; `_reconnect`
    зовёт `connect` — провайдер перечитывает файл.
+4. `driver.system_shutdown` (оба `except BackendUnavailable` — ответ на команду и опрос
+   `supervision_status`) пробрасывает `TokenFileMissing`: команда до PM не дошла, это не
+   `pm_gone` (ревью стадии 5, находка 2).
 
 **Известное (не чинится здесь).** `token rejected` пользователь MCP видит с первого вызова:
 `connect` идёт до `_await_ready`. `token file not found` первой ловит проба `_await_ready`
@@ -542,6 +542,11 @@ Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
 метке `_token_missing` (п. 2). Сам `_await_ready` не меняется (`OPEN_QUESTIONS`).
 `TokenRejected` — `OSError`: ретрай харнесса повторяет отказ по неверному токену до своего
 дедлайна, а не падает сразу. Пустой файл токена даёт текст `token file not found`, хотя файл есть.
+П. 2 и п. 4 не безусловны: параллельные ПЕРВЫЕ запросы на одном свежем драйвере без файла
+токена. Проигравший гонку читает метку раньше, чем её ставит победитель, и получает общий текст
+«соединение оборвано». Ревьюер измерил: 12 из 450 `request`; `system_shutdown` дал ложный
+`pm_gone` 3 раза из 150. MCP, harness, `stand_gate` и `alpha_sim` в этот случай не попадают:
+пробы у них последовательные. Закрытие — ставить метку в reader-потоке (`_dispatch`); не сделано.
 
 **Отвергнуто.**
 * Файловый провайдер в `__init__` драйвера — шим не зовёт `SocketClient.__init__`, а правка
@@ -553,12 +558,15 @@ Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
 страж «нет файла — первая строка запрос»; оба текста отказа; чистое окружение подпроцесса;
 сеттер (явный провайдер главнее файла); реконнект с новым токеном; текст `token file not found`
 через `DriverSession` + `dispatch_tool`; `system_shutdown` без файла — `TokenFileMissing`, а не
-`pm_gone`; не-dict `result` и `error "boom"` возвращаются как есть.
+`pm_gone`; не-dict `result`, `error "boom"` и `success True` с `error "auth_required"`
+возвращаются как есть.
 `Services/robot_comm/tests/test_line_source_token.py` — 1 тест. До правки `transport.py` и
 `line_source.py`: 6 красных, страж зелёный. Раунд 1 ревью: до правки 2 красных (`DriverSession`,
 `system_shutdown`); тест не-dict зелёный, красный под двумя инъекциями (без `isinstance(reply, dict)`;
-без проверки `error`). Инъекции плана — у лида.
+без проверки `error`). Раунд 2: тот же тест красный под инъекцией «без проверки `success`».
+Инъекции плана — у лида.
 
-**Откат.** Убрать свойство, метку, два переопределения и `TokenFileMissing` из `transport.py`,
+**Откат.** Убрать из `transport.py` свойство, метку, три переопределения (`connect`, `request`,
+`_conn_lost_message`) и `TokenFileMissing`,
 два `except TokenFileMissing` из `driver.py` и параметр из `line_source.py`: клиенты снова не шлют
 `hello` (открытые серверы этого не заметят).

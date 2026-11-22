@@ -76,10 +76,14 @@ def _run(fn: Callable[[], Any], timeout: float = 5.0) -> Any:
 
 
 class _Server:
-    """``SocketChannel`` с токеном; отвечает успехом на каждый запрос с ``request_id``."""
+    """``SocketChannel`` с токеном; отвечает на каждый запрос с ``request_id``.
 
-    def __init__(self, token: str, port: int = 0) -> None:
+    Ответ — ``replies[command]`` (если задан), иначе ``{"success": True}``; ``request_id`` эхом.
+    """
+
+    def __init__(self, token: str, port: int = 0, replies: dict[str, dict[str, Any]] | None = None) -> None:
         self.received: list[dict[str, Any]] = []
+        self.replies = replies or {}
         self.channel = SocketChannel(
             "backend_ctl",
             port=port,
@@ -92,7 +96,8 @@ class _Server:
     def _on_inbound(self, msg: dict[str, Any]) -> None:
         self.received.append(msg)
         if "request_id" in msg:
-            self.channel.send({"success": True, "request_id": msg["request_id"]})
+            reply = self.replies.get(msg.get("command"), {"success": True})
+            self.channel.send({**reply, "request_id": msg["request_id"]})
 
     def close(self) -> None:
         self.channel.close()
@@ -272,17 +277,12 @@ def test_system_shutdown_without_token_file_is_not_pm_gone(tmp_home: Path) -> No
 
 def test_request_passes_non_dict_result_and_other_errors(tmp_home: Path) -> None:
     """Ревью стадии 5, находка 3: подмена — только для dict ``success False`` + ``auth_required``."""
-    server = _Server(TOKEN_A)
     replies = {
         "list-12a": {"success": True, "result": [1, 2]},
         "boom-12a": {"success": False, "error": "boom"},
+        "ok-auth-12a": {"success": True, "error": "auth_required"},
     }
-
-    def on_inbound(msg: dict[str, Any]) -> None:
-        server.received.append(msg)
-        server.channel.send({**replies[msg["command"]], "request_id": msg["request_id"]})
-
-    server.channel._on_inbound = on_inbound
+    server = _Server(TOKEN_A, replies=replies)
     driver = BackendDriver(port=server.port)
     try:
         _put_token(tmp_home, server.port, TOKEN_A)
@@ -291,6 +291,10 @@ def test_request_passes_non_dict_result_and_other_errors(tmp_home: Path) -> None
         boom = {"command": "boom-12a"}
         reply = _run(lambda: driver.request(boom, timeout=2.0))
         assert reply == {"success": False, "error": "boom", "request_id": boom["request_id"]}
+        # Раунд 2 (инъекция I11): ``error auth_required`` при ``success True`` — не отказ.
+        ok_auth = {"command": "ok-auth-12a"}
+        reply = _run(lambda: driver.request(ok_auth, timeout=2.0))
+        assert reply == {"success": True, "error": "auth_required", "request_id": ok_auth["request_id"]}
     finally:
         driver.close()
         server.close()
