@@ -57,9 +57,9 @@
 - Task 0.11: B-3, проверенная запись — «до 1.0» [DONE 2026-11-21 — ветка refactor/observability-signal-contracts] (после 0.3)
 - Task 0.11b: M-4 минимум, конфликт видов — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, b19437fdb + 51a2e2279]
 - Task 0.12: Рукопожатие в общем канале — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, коммиты b9962e759…0cf7da2ba; слепой tester 43 красных→зелёные, ревью стадии 5 APPROVED, раунд 2]
-- Task 0.12a: Клиенты порта читают токен — «до 1.0» [PENDING] (после 0.12)
-- Task 0.12b: Порт закрыт без токена: сервер и поставка — «до 1.0» [PENDING] (после 0.12a)
-- Task 0.13: O-1, строка SF1, стенд — «до 1.0» [PENDING] (после 0.4–0.12b)
+- Task 0.12a: Клиенты порта читают токен — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, a0aa28ae9…3815a5849; ревью стадии 5 APPROVED, раунд 2]
+- Task 0.12b: Порт закрыт без токена: сервер и поставка — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, b250ae622…bcb9a63f1; ревью стадии 5 APPROVED, раунд 2]
+- Task 0.13: O-1, строка SF1, стенд — «до 1.0» [DONE 2026-11-22 — ветка refactor/observability-signal-contracts, f16e6dff8…f822a1e7c; стенд PASS 45, ревью стадии 5 APPROVED, раунд 2]
 
 ### Phase 1: Срез 1 — отчёт о мощности
 
@@ -204,3 +204,4 @@
 | property | predicted red | observed red |
 |---|---|---|
 | Task 0.1–0.3 (25 инъекций) | таблицы в `tasks/0.1–0.3.md`, до прогона | 20 совпали, 5 с лишними красными (недоучёт), пропусков нет — [`reports/0.1-0.3.injections.md`](reports/0.1-0.3.injections.md) |
+- **2026-11-22, лид полосы Н (0.12a–0.13):** бюджет «≈250 строк src» для 0.12 не сбылся — по факту ≈450 строк src (предсказание (a) по `oversize` не сбылось); для задач механизма с IPC и безопасностью закладывать ×1.5–2 к смете, а не по числу FILES. Зонд 0.13 вырос на ≈270 строк против сметы ≈150 (сигналы, три читателя, защита цели); смету 0.13 пересмотрена тем же правилом. Остатки: изоляция HOME вне `backend_ctl/tests` и `process_manager_module/tests`, флейк `port: 0`, Windows — `docs/claude/OPEN_QUESTIONS.md`.
