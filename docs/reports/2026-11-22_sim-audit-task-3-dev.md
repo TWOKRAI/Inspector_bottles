@@ -76,3 +76,5 @@
 - `word_gap_slots` читается файлом, но не используется (слово с пробелом — код 2).
 - `core.py` вырос до ~850 строк с форматированием ruff; для sentrux `no_god_files` не проверялось (`sentrux check .` не запускал, это main-дерево лида).
 - Сообщение `DESIGN/FILES` вверх перед первой правкой не отправлял: правки не в `src/`, бриф содержит DESIGN.
+
+I2: пробел закрыт тестом `test_wire_audit.py::test_stale_reply_between_cmd_seq_and_cmd_flag_is_not_an_answer_nor_a_contradiction` (устаревший R с тем же seq между `CMD_SEQ` и `CMD_FLAG`, настоящий R после флага): на коде зелёный, на мутации `job.seq_pos < p < limit` красный; `core.py` восстановлен, `diff` пуст. Прогон после правки: `test_wire_audit.py` 30 passed; оба файла вместе 138 passed.

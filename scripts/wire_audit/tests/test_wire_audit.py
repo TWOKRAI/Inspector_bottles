@@ -74,6 +74,7 @@ class Ex:
         status: int | None = 1,
         errno: int = 0,
         rz: int | None = None,
+        stale: tuple[int, int] | None = None,
     ) -> None:
         args = [18178, 1, 4602, 62104, 64216, 3, 3200, Y_WORD[cell], 64216, RZ_WORD[net] if rz is None else rz]
         self._emit(t, f"in W* CMD_SEQ = {seq}")
@@ -81,6 +82,8 @@ class Ex:
         self._emit(t, "in W* CMD_ARGC = 10")
         for i, word in enumerate(args):
             self._emit(t, f"in W* CMD_ARGS[{i}] = {word}")
+        if stale is not None:  # устаревший ответ с тем же seq между CMD_SEQ и CMD_FLAG блока
+            self.reply(t, seq, *stale)
         self._emit(t, "in W CMD_FLAG = 1")
         if status is not None:
             self.reply(t + 0.026, seq, status, errno)
@@ -293,6 +296,19 @@ def test_reply_before_command_flag_is_not_the_answer():
     ex.job(10.5, 901, 1, 30.0, status=None)
     res = run(ex, lay)
     assert row_of(res, "30.0").reasons == ["нет ответа"]
+
+
+def test_stale_reply_between_cmd_seq_and_cmd_flag_is_not_an_answer_nor_a_contradiction():
+    """Устаревший R с тем же seq (оборот счётчика) внутри блока до CMD_FLAG: ответ — настоящий R после флага."""
+    ex, lay = fresh()
+    lay.pick(10.0, "Е", 30.0, 1)
+    ex.job(10.5, 905, 1, 30.0, status=1, errno=0, stale=(2, 7))
+    res = run(ex, lay)
+    assert res.exit_code == 0
+    row = row_of(res, "30.0")
+    assert row.answer == "1/0"
+    assert row.reasons == []
+    assert core.parse_exchange(ex.text())[0].replies == [(1, 0)]
 
 
 # ------------------------------------------------------------------ две инкарнации
