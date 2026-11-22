@@ -262,6 +262,7 @@ def test_token_not_in_logs(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> N
     finally:
         teardown_backend_ctl_channel(ch, router)
     assert infos  # журнал старта перехвачен: проверка не вакуумна по каналу журнала
+    assert file_token is not None  # токен записан: иначе цикл ниже вакуумен
     tokens = set(written) | ({file_token} if file_token else set())
     for token in tokens:
         for message in infos + errors:
@@ -290,3 +291,65 @@ def test_driver_round_trip_with_token() -> None:
     finally:
         driver.close()
         teardown_backend_ctl_channel(ch, router)
+
+
+def test_window_before_token_write_is_closed(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Окно «порт слушает, файла и токена ещё нет» закрыто: holder пуст → отказ любой первой строке."""
+    entered = threading.Event()
+    gate = threading.Event()
+    real_write = socket_auth.write_token
+
+    def held(path: Path) -> str:
+        entered.set()
+        gate.wait(5.0)
+        return real_write(path)
+
+    monkeypatch.setattr(socket_auth, "write_token", held)
+    port = _free_port()
+    router = FakeRouter()
+    box: dict[str, Any] = {}
+
+    def start() -> None:
+        box["ch"] = setup_backend_ctl_channel(router, port=port, env=ENV_ON)
+
+    thread = threading.Thread(target=start, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(5.0)
+        assert not _token_path(tmp_home, port).exists()  # окно: start() прошёл, файла нет
+        for line in ({"cmd": "system.shutdown"}, {"type": "hello"}, {"type": "hello", "token": "aa" * 32}):
+            reply, _ = _exchange(port, line)
+            assert reply == {"success": False, "error": "auth_required"}, line
+    finally:
+        gate.set()
+        thread.join(5.0)
+    assert not thread.is_alive()
+    ch = box.get("ch")
+    assert ch is not None
+    try:
+        token = socket_auth.read_token(_token_path(tmp_home, port))
+        assert token is not None
+        reply, _ = _exchange(port, {"type": "hello", "token": token})
+        assert reply == {"type": "hello", "success": True}
+    finally:
+        teardown_backend_ctl_channel(ch, router)
+
+
+def test_teardown_closes_port_even_if_token_check_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    router = FakeRouter()
+    ch = setup_backend_ctl_channel(router, port=0, env=ENV_ON)
+    assert ch is not None
+    port = ch.port
+
+    def broken(path: Path) -> str | None:
+        raise ValueError("embedded null byte")
+
+    monkeypatch.setattr(socket_auth, "read_token", broken)
+    try:
+        _run(lambda: teardown_backend_ctl_channel(ch, router))  # не бросает
+        assert router.channels == {}
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(1.0)
+            assert probe.connect_ex(("127.0.0.1", port)) != 0  # порт закрыт
+    finally:
+        ch.close()

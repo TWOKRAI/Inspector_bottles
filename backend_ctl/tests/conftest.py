@@ -224,12 +224,15 @@ def _offline_home_isolation(request: pytest.FixtureRequest) -> None:
     """Каждый тест каталога — с ``tmp_home`` (Task 0.12b, ADR-PMM-052): ни один офлайн-тест, нынешний или будущий,
     не пишет файл токена в настоящий ``~/.multiprocess_framework``.
 
-    Отключается в двух случаях: прогон с ``--backend-live`` (или env ``BACKEND_CTL_LIVE``) и тест, который берёт
-    ``headless_backend``. Session-бэкенд стартует с настоящим ``HOME`` и пишет токен туда; драйвер теста с подменённым
-    ``HOME`` при переподключении искал бы файл во временном каталоге. Второе условие закрывает и ``-m harness_smoke``
-    без ``--backend-live`` (``pytest_collection_modifyitems`` выше пускает живые тесты и так).
+    Отключается в трёх случаях: прогон с ``--backend-live`` (или env ``BACKEND_CTL_LIVE``); тест с маркером
+    ``harness_smoke``; тест, который берёт ``headless_backend``. Бэкенд из session/module/class-фикстуры стартует
+    раньше этой function-фикстуры, то есть с настоящим ``HOME``, и пишет токен туда; драйвер теста с подменённым
+    ``HOME`` при переподключении искал бы файл во временном каталоге. Маркер закрывает и ``-m harness_smoke`` без
+    ``--backend-live`` (``pytest_collection_modifyitems`` выше пускает живые тесты и так).
     """
     if request.config.getoption(LIVE_OPTION, default=False):
+        return
+    if request.node.get_closest_marker("harness_smoke") is not None:
         return
     if "headless_backend" in request.fixturenames:
         return

@@ -6,7 +6,7 @@ backend_ctl_endpoint — поднятие SocketChannel в ProcessManager (dev-�
 регистрирует его в RouterManager хоста и подключает SocketBridgeAdapter как
 обработчик входящих сообщений driver'а. Вся доставка — через RouterManager.
 
-Гейт + localhost-bind + токен (Task 0.12b, PM-ADR о токене порта управления): поставка
+Гейт + localhost-bind + токен (Task 0.12b, ADR-PMM-052): поставка
 выключена (`system.yaml` → `backend_ctl.enabled: false`), dev-старт — `BACKEND_CTL=1`.
 Порт без токена закрыт: первая строка соединения — `hello` с токеном из файла
 `~/.multiprocess_framework/ctl_<порт>.token` (0600, пишется ПОСЛЕ `start()` по
@@ -176,9 +176,9 @@ def setup_backend_ctl_channel(
                 f"({type(exc).__name__}: {exc}) — endpoint не поднят"
             )
         return None
+    holder["token"] = token  # сразу: окно «файл есть, holder пуст» — одна инструкция
     setattr(channel, _ATTR_TOKEN_PATH, token_path)
     setattr(channel, _ATTR_TOKEN, token)
-    holder["token"] = token
 
     if log_info:
         log_info(
@@ -196,7 +196,8 @@ def teardown_backend_ctl_channel(
     """Остановить канал и снять регистрацию (PID-specific, без глобального kill).
 
     Файл токена удаляется ДО ``channel.close()`` и только если в нём токен этого
-    канала: файл, перезаписанный другим ПМ на том же порту, остаётся.
+    канала: файл, перезаписанный другим ПМ (общий ``BACKEND_CTL_TOKEN_FILE``), остаётся.
+    Сбой удаления не мешает закрыть порт.
     """
     if channel is None:
         return
@@ -226,5 +227,5 @@ def _remove_own_token(channel: SocketChannel) -> None:
             path.unlink()
     except FileNotFoundError:
         pass
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 — сбой удаления не мешает close() порта
         _log.warning("[backend_ctl] файл токена %s не удалён: %s: %s", path, type(exc).__name__, exc)
