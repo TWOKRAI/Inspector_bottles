@@ -81,6 +81,7 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
       robot_params:
         P_ZONE_MAX: 6000
   - id: vfd_belt
@@ -95,6 +96,7 @@ devices:
       default_freq_hz: 10.0
       poll_interval_s: 0.5
       stale_polls_limit: 6
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
 blueprint:
   processes:
     - process_name: gui
