@@ -431,6 +431,7 @@ blueprint:
               # value_arg "on" В КАВЫЧКАХ: в YAML 1.1 голое on = True, parse_controls молча роняет контрол.
               - {id: belt_run, type: button, label: "Лента пуск", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_run, command_args: {device_id: vfd_belt}}
               - {id: belt_stop, type: button, label: "Лента стоп", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_stop, command_args: {device_id: vfd_belt}}
+              - {id: belt_freq, type: number, label: "Скорость ленты (Гц)", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_set_freq, value_arg: freq_hz, command_args: {device_id: vfd_belt}, min: 1.0, max: 50.0, value: 10.0}
               - {id: home, type: button, label: "Домой", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_park, command_args: {device_id: robot_main}}
               - {id: servo_on, type: button, label: "Серво ВКЛ", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_servo, value_arg: "on", command_args: {device_id: robot_main}}
               # Строка статуса: read-only подписи по путям StateStore (Task 6.3).

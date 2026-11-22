@@ -91,6 +91,30 @@ def test_run_default_frequency(stub: StubTransport) -> None:
     assert ("w", REG_CMD_FREQ, 1500) in stub.transactions[-1]
 
 
+def test_run_without_freq_uses_last_set_freq(vfd: VfdClient, stub: StubTransport) -> None:
+    """Пуск без частоты берёт последнюю заданную (set_freq), а не default_freq_hz."""
+    vfd.set_freq(25.5)
+    vfd.run()
+    assert ("w", REG_CMD_FREQ, 2550) in stub.transactions[-1]
+
+
+def test_run_without_freq_uses_last_run_freq(vfd: VfdClient, stub: StubTransport) -> None:
+    """После run(30) -> stop() повторный run() без частоты стартует на 30 Гц."""
+    vfd.run(30.0)
+    vfd.stop()
+    vfd.run()
+    assert ("w", REG_CMD_FREQ, 3000) in stub.transactions[-1]
+
+
+def test_rejected_freq_does_not_replace_last(vfd: VfdClient, stub: StubTransport) -> None:
+    """Частота вне диапазона бросает и не затирает последнюю заданную."""
+    vfd.set_freq(20.0)
+    with pytest.raises(VfdFrequencyError):
+        vfd.set_freq(500.0)
+    vfd.run()
+    assert ("w", REG_CMD_FREQ, 2000) in stub.transactions[-1]
+
+
 def test_set_freq_on_the_fly(vfd: VfdClient, stub: StubTransport) -> None:
     vfd.set_freq(25.5)
     assert stub.transactions[-1] == [("w", REG_CMD_FREQ, 2550), ("w", REG_VFD_FLAG, 1)]

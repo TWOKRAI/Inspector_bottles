@@ -51,6 +51,9 @@ class VfdClient:
         self._map = register_map
         self._last_heartbeat: int | None = None
         self._stale_polls = 0
+        # Последняя успешно записанная частота: пуск без частоты стартует на ней, а не на default_freq_hz
+        # (иначе «Лента пуск» затирает скорость, заданную оператором).
+        self._last_freq: float | None = None
 
     @property
     def config(self) -> VfdConfig:
@@ -67,9 +70,13 @@ class VfdClient:
     # ------------------------------------------------------------------ #
 
     def run(self, freq_hz: float | None = None, reverse: bool = False) -> bool:
-        """Запустить: частота + направление + RUN + маркер одной транзакцией."""
-        freq = self._validate_freq(freq_hz if freq_hz is not None else self._cfg.default_freq_hz)
-        return self._write(
+        """Запустить: частота + направление + RUN + маркер одной транзакцией.
+
+        Без ``freq_hz`` — последняя заданная частота (``run``/``set_freq``), при её отсутствии — ``default_freq_hz``.
+        """
+        fallback = self._last_freq if self._last_freq is not None else self._cfg.default_freq_hz
+        freq = self._validate_freq(freq_hz if freq_hz is not None else fallback)
+        ok = self._write(
             {
                 "cmd_freq": freq,
                 "cmd_dir": 1 if reverse else 0,
@@ -77,10 +84,17 @@ class VfdClient:
                 "flag": 1,  # маркер — последним
             }
         )
+        if ok:
+            self._last_freq = freq
+        return ok
 
     def set_freq(self, freq_hz: float) -> bool:
-        """Сменить частоту на ходу."""
-        return self._write({"cmd_freq": self._validate_freq(freq_hz), "flag": 1})
+        """Сменить частоту на ходу (запоминается для следующего ``run()`` без частоты)."""
+        freq = self._validate_freq(freq_hz)
+        ok = self._write({"cmd_freq": freq, "flag": 1})
+        if ok:
+            self._last_freq = freq
+        return ok
 
     def stop(self) -> bool:
         """Остановить вращение."""
