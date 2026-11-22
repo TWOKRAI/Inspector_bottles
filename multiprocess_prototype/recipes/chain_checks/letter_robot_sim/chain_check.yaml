@@ -1,0 +1,41 @@
+# Сквозная проверка цепочки рецепта letter_robot_sim (Task 4a): данные для run_chain_check.py.
+# Подстановки в элементах списков и значениях окружения:
+#   {tree} {out} {log_dir} {words} {zone_max_mm} {proto_port} {sim_port}
+# `python` первым элементом команды заменяется на sys.executable. Все ключи обязательны.
+recipe: letter_robot_sim
+words: [ПЕРЕМИРИЕ, МИР, ПЕРЕМИРИЕ]
+zone_max_mm: 600
+ports:
+  sim: 8766
+  proto: 8765
+  free_after: [5021, 8765, 8766, 8091, 8092]
+timeouts_s: {backends_up: 120, alpha: 600, stop: 30}
+sim_cmd: [python, apps/line_sim/run.py]
+sim_env: {BACKEND_CTL: "1", BACKEND_CTL_PORT: "{sim_port}", PYTHONUTF8: "1"}
+proto_cmd: [python, multiprocess_prototype/run.py, letter_robot_sim, --autostart]
+proto_env: {BACKEND_CTL: "1", PYTHONUTF8: "1", INSPECTOR_LOG_DIR: "{log_dir}"}
+# Единственная запись скрипта в сим; уходит до запуска сборщика и α.
+sim_commands:
+  - {target: camera, command: scene.defect_rate, args: {probability: 0.0}}
+collect_cmd: [python, -m, scripts.wire_audit.collect, --proto-port, "{proto_port}", --sim-port, "{sim_port}", --out-dir, "{out}/collect"]
+alpha_cmd: [python, -m, scripts.alpha_sim.run_alpha, --tree, "{tree}", --log-dir, "{log_dir}", --dump, "{out}/dump.json"]
+audit_cmd:
+  - python
+  - -m
+  - scripts.wire_audit
+  - --exchange
+  - "{log_dir}/devices/robot_exchange.log"
+  - --layout
+  - "{log_dir}/layout/messages.log"
+  - --registers
+  - "{out}/collect/registers.json"
+  - --words
+  - "{words}"
+  - --zone-max-mm
+  - "{zone_max_mm}"
+  - --sim-objects
+  - "{out}/collect/sim_objects.jsonl"
+  - --sim-journal
+  - "{out}/collect/sim_journal.jsonl"
+  - --out
+  - "{out}/audit.md"

@@ -58,7 +58,7 @@ ALL_REQUIRED_KEYS = [
 # Фейк-процесс. Роли: sim, proto, foreign (слушатели), collect, alpha, audit.
 # Параметры роли: позиционные role, events, marks, затем "ключ=значение".
 # ---------------------------------------------------------------------------
-FAKE_SRC = r'''
+FAKE_SRC = r"""
 import json, os, signal, socket, subprocess, sys, time
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -251,7 +251,7 @@ elif ROLE == "audit":
     mark("audit.md", itog + "\n")
     print(itog, flush=True)
     sys.exit(int(KV.get("code", "0")))
-'''
+"""
 
 
 def alloc_ports(n: int) -> list[int]:
@@ -349,9 +349,7 @@ class Env:
             "ports": {
                 "sim": self.sim_port,
                 "proto": self.proto_port,
-                "free_after": free_after
-                if free_after is not None
-                else [self.sim_port, self.proto_port],
+                "free_after": free_after if free_after is not None else [self.sim_port, self.proto_port],
             },
             "timeouts_s": {"backends_up": 10, "alpha": 30, "stop": 5, **(timeouts or {})},
             "sim_cmd": ["python", fake, "sim", ev, "{out}", "port={sim_port}", *sim],
@@ -405,17 +403,14 @@ class Env:
         return cfg
 
     def write(self, cfg: dict) -> Path:
-        self.config_path.write_text(
-            yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8"
-        )
+        self.config_path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
         return self.config_path
 
     # -- запуск CLI --------------------------------------------------------
-    def run(self, *extra, config: str | None = "default", tree: bool = True, out: bool = True,
-            timeout: float = 90) -> Result:
-        assert SCRIPT.is_file(), (
-            f"скрипта запуска нет: {SCRIPT} не создан (ожидаемый RED до реализации)"
-        )
+    def run(
+        self, *extra, config: str | None = "default", tree: bool = True, out: bool = True, timeout: float = 90
+    ) -> Result:
+        assert SCRIPT.is_file(), f"скрипта запуска нет: {SCRIPT} не создан (ожидаемый RED до реализации)"
         cmd = [sys.executable, str(SCRIPT)]
         if config == "default":
             cmd += ["--config", str(self.config_path)]
@@ -457,20 +452,14 @@ class Env:
             elapsed,
         )
         res.alive = [(r, p) for (r, p) in self._launched() if self._is_ours_alive(p)]
-        res.ports_open = [
-            p for p in (self.sim_port, self.proto_port, self.extra_port) if port_open(p)
-        ]
+        res.ports_open = [p for p in (self.sim_port, self.proto_port, self.extra_port) if port_open(p)]
         return res
 
     # -- журнал, уборка ----------------------------------------------------
     def events(self) -> list[dict]:
         if not self.events_path.exists():
             return []
-        return [
-            json.loads(line)
-            for line in self.events_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        return [json.loads(line) for line in self.events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def started(self, role: str) -> list[dict]:
         return [e for e in self.events() if e["role"] == role and e["event"] == "start"]
@@ -718,9 +707,7 @@ def test_e_port_busy_before_start_gives_exit_3_and_nothing_started(env):
     holder.bind(("127.0.0.1", env.extra_port))
     holder.listen(4)
     try:
-        env.write(
-            env.cfg(free_after=[env.sim_port, env.proto_port, env.extra_port])
-        )
+        env.write(env.cfg(free_after=[env.sim_port, env.proto_port, env.extra_port]))
         res = env.run()
         assert res.code == 3, res.text
         assert env.events() == [], "при занятом порте не должно стартовать ни одного фейка"
@@ -1078,14 +1065,10 @@ def test_environment_substitutions_for_sim_and_proto(env):
     assert sim_env["PYTHONUTF8"] == "1"
     proto_env = env.mark_json(1, "proto.json")["env"]
     assert proto_env["BACKEND_CTL"] == "1"
-    assert os.path.realpath(proto_env["INSPECTOR_LOG_DIR"]) == os.path.realpath(
-        env.run_dir(1) / "logs_prototype"
-    )
+    assert os.path.realpath(proto_env["INSPECTOR_LOG_DIR"]) == os.path.realpath(env.run_dir(1) / "logs_prototype")
 
 
-@pytest.mark.skipif(
-    shutil.which("git", path="/usr/bin:/bin") is None, reason="git вне /usr/bin:/bin"
-)
+@pytest.mark.skipif(shutil.which("git", path="/usr/bin:/bin") is None, reason="git вне /usr/bin:/bin")
 def test_default_tree_is_git_toplevel_of_the_script_dir_not_cwd(env):
     env.write(env.cfg(alpha=["{tree}"]))
     res = env.run(tree=False)
