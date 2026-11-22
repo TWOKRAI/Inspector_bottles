@@ -40,6 +40,7 @@ m.get("processes.cam.state.fps")                       # текущее знач
 m.snapshot("processes.cam")                            # снимок поддерева
 m.history("processes.cam.state.fps", since=ts)         # спарклайн (ts, value)
 m.read("processes.cam", "state.fps", alive_incarnation=None)  # {"class", "value", "age_s"}
+m.read_node("processes.cam.io_peek")                   # (found, узел из листьев) — см. «Чтение узла»
 
 seq = m.write_seq                                      # номер ПЕРЕД отправкой запроса опроса
 m.ingest_poll_snapshot({...}, requested_at_seq=seq)    # влив ответа со сторожем порядка
@@ -62,6 +63,12 @@ m.ingest_poll_snapshot({...}, requested_at_seq=seq)    # влив ответа �
   (путь не корень процесса, метки нет, ключ не лист, лист `None`). Метка читается из
   текущего состояния на каждый вызов и не кэшируется: `seq` и `src_ts` приходят порознь.
   `snapshot`/`get`/`history` не меняются; листья `_fresh.*` остаются в `snapshot`.
+- `read_node(path) -> (bool, value)` — узел целиком, собранный из листьев ОДНИМ
+  `snapshot(path)`: лист → `(True, значение)` (даже `None`); узел → `(True, вложенный dict)`;
+  нет пути или пустой путь → `(False, None)`. Правила — раздел «Чтение узла».
+- `assemble_leaves(leaves)` / `node_from_snapshot(snap, path)` — чистые функции сборки
+  (`node_read.py`, только stdlib), экспорт из `__init__.py`. Их берёт `read_node` ядра и
+  headless-драйвер `backend_ctl` (одна копия алгоритма).
 - `history(path, since)` — кольцевой буфер (fixed-size deque, `maxlen =
   ceil(window_sec * sample_hz)`). `ts` точки — **время источника**: `src_ts` метки
   писателя того же такта (Unix-epoch, часы писателя); метки нет — время приёма (`clock`);
@@ -82,6 +89,59 @@ m.ingest_poll_snapshot({...}, requested_at_seq=seq)    # влив ответа �
   ОПРОСА. Путь отбрасывается при `push_seq[path] > requested_at_seq`; остальные
   пути того же ответа вливаются. История не пишется. Возвращает применённые пути;
   считать отброшенные (`len(values) - len(applied)`) обязан вызывающий.
+
+## Чтение узла
+
+Ядро хранит ЛИСТЬЯ (`LeafCopy`, см. `DECISIONS.md`, «Третий инвариант»): dict-дельта по узлу
+раскладывается на листья. Поэтому `get("a.n")` для узла даёт `None`, а `snapshot("a.n")` даёт
+плоский `{"a.n.x": 3}`. Узел целиком читается через `read_node`:
+
+```python
+found, value = m.read_node("processes.cam.io_peek")
+# (True, dict из листьев) | (True, значение листа, даже None) | (False, None)
+```
+
+Правила (`node_from_snapshot`, по порядку):
+
+1. Пустой путь → `(False, None)`. Отсекается ДО `snapshot`: иначе была бы полная копия.
+2. Путь — лист → `(True, значение)`. `None` — значение, а не «нет узла»: «узел со значением
+   None» и «узла нет» — разные состояния.
+3. Есть листья с префиксом `path + "."` → `(True, вложенный dict относительно path)`.
+4. Иначе → `(False, None)`.
+5. Лист-предок побеждает потомков: если `a.n.p` — лист, а `a.n.p.q` тоже есть, в узле остаётся
+   `p: 5`. Результат не зависит от порядка записи листьев.
+6. Граница — точка-разделитель, как в `snapshot`: `read_node("a.n")` не захватывает `a.n2.*`.
+
+`read_node` делает РОВНО ОДИН вызов `snapshot(path)` и собирает узел из его листьев. Сборка
+вынесена в чистые функции `node_read.py` (только stdlib): `backend_ctl/_node_read.read_node`
+берёт их оттуда, поэтому алгоритм один. `snapshot(prefix)` фильтрует весь снимок по префиксу
+(индекса по поддереву нет), так что стоимость `read_node` — O(число листьев ВСЕЙ модели), а не
+поддерева.
+
+**Потокобезопасность.** У модуля лока НЕТ; «лок держит вызывающий» — буквально. `read_node`
+лок не берёт. Писатель без лока и читатель одновременно дают
+`RuntimeError: dictionary changed size during iteration`. Владельцы:
+
+- GUI (`TelemetryViewModel.get_node`): писатель и читатель оба в Qt main thread;
+- `backend_ctl`: `read_node` берёт `drv._telemetry_lock` (обычный `threading.Lock`, НЕ `RLock`:
+  вызов `read_node` под уже взятым локом вешает поток), снимок берётся под локом, сборка — вне него.
+
+`test_rn1_read_node.py::test_race_under_external_lock` проверяет лишь, что вызов под внешним
+локом не виснет и не бросает; два чтения снимка ловит `test_read_node_makes_exactly_one_snapshot_call`.
+Реальный сторож гонки — только у делегата `backend_ctl`
+(`test_p3r_node_read.py::test_red7_race_read_node_never_torn_nor_raises`, вероятностный); у самого
+модуля сторожа нет: лок держит вызывающий.
+
+**Известные расхождения с живым `state.get`.** Потеря лежит в read-model, а не в помощнике.
+Фиксируются тестом `test_known_divergences_from_live_state_get_literals`, не «чинятся»:
+
+- пустой dict-узел исчезает: `ingest("a.n", {})` → `(False, None)`;
+- пустой вложенный dict теряется: `ingest("a.n", {"x": 3, "e": {}})` → `(True, {"x": 3})`;
+- ключ с точкой собирается вложенным: `ingest("a.n", {"k.dot": 1})` → `(True, {"k": {"dot": 1}})`.
+
+**Потребители.** `TelemetryViewModel.get_node(path, default=None)` (`frontend_module`) — делегат
+`read_node`; найденный лист со значением `None` возвращает `None`, не `default`. `get(path, default)`
+не меняется: это контракт листа.
 
 ## Инварианты
 
@@ -139,8 +199,9 @@ m.ingest_poll_snapshot({...}, requested_at_seq=seq)    # влив ответа �
 - Generic: имён процессов и прикладного набора метрик не знает — параметры
   конструктора (кроме `processes.<name>` как корня записи процесса и `.state.uptime`
   как пути, который довыставления не получает, — константа модуля).
-- Лока нет: у GUI обе дороги идут потоком владельца (Qt main), у headless-драйвера
-  — своим единственным потоком приёма. Посылка проверяется тестом
+- Лока нет (про `write_seq`; чтение узла — см. «Потокобезопасность» выше): у GUI обе дороги идут
+  потоком владельца (Qt main), у headless-драйвера запись — своим единственным потоком приёма,
+  а читатели в других потоках берут `drv._telemetry_lock`. Посылка проверяется тестом
   (`test_telemetry_poll_ordering_hazards.py::test_both_sides_of_the_guard_run_in_the_owner_thread`),
   а не декларируется.
 
@@ -152,4 +213,4 @@ m.ingest_poll_snapshot({...}, requested_at_seq=seq)    # влив ответа �
 - Глубокая история (час/день) — вне модуля: read-сторона SQLite-стока —
   `frontend_module.state.TelemetryHistorySource`.
 
-Тесты: `tests/test_telemetry_read_model.py` (unit, без Qt).
+Тесты: `tests/test_telemetry_read_model.py` (unit, без Qt); чтение узла — `tests/test_rn1_read_node.py`.

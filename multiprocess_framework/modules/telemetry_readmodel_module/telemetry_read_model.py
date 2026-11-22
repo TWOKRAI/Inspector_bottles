@@ -40,6 +40,8 @@ from typing import Any, Callable
 from multiprocess_framework.modules.state_store_module.core.freshness import FRESH_KEY, read_value
 from multiprocess_framework.modules.state_store_module.core.leaf_copy import LeafCopy
 
+from .node_read import node_from_snapshot
+
 # Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны).
 # Это НАБОР ИСТОРИИ read-модели, а НЕ зеркало publish-gate (каталог метрик в
 # ``process_module``): пересекается с ним, но намеренно отличается — ``.state.uptime``
@@ -494,6 +496,17 @@ class TelemetryReadModel:
             return self._state.copy()  # одна C-копия: dict(LeafCopy) не атомарна
         dotted = prefix + "."
         return {p: v for p, v in self._state.items() if p == prefix or p.startswith(dotted)}
+
+    def read_node(self, path: str) -> tuple[bool, Any]:
+        """(есть ли путь, значение): узел собирается из листьев ОДНИМ ``snapshot(path)``.
+
+        ``get("a.n")`` для узла даёт None (хранятся листья); ``read_node`` собирает его
+        обратно (правила — :func:`node_from_snapshot`). Пустой путь отсекается ДО
+        ``snapshot`` (иначе полная копия). Лока у модуля нет, держит вызывающий.
+        """
+        if not path:
+            return (False, None)
+        return node_from_snapshot(self.snapshot(path), path)
 
     def read(self, path: str, key: str, alive_incarnation: str | None = None) -> dict[str, Any]:
         """Значение листа процесса вместе с классом свежести и возрастом (M-6).

@@ -6,6 +6,9 @@
 Потребитель, спросивший путь узла и проверивший ``path in snapshot(path)``, видит
 «пути нет». :func:`read_node` собирает узел обратно из листьев.
 
+Алгоритм сборки живёт в ``telemetry_readmodel_module.node_read`` (одна копия); здесь
+остаётся только взятие снимка под ``_telemetry_lock``.
+
 Модуль приватный (``_``-имя): общий нейтральный импорт для ``conditions.py`` и
 ``recorder.py`` (``recorder`` не тянет ``conditions``), не публичный контракт.
 """
@@ -13,6 +16,9 @@
 from __future__ import annotations
 
 from typing import Any
+
+from multiprocess_framework.modules.telemetry_readmodel_module import assemble_leaves as _assemble  # noqa: F401 — для driver.py:91
+from multiprocess_framework.modules.telemetry_readmodel_module import node_from_snapshot
 
 
 def read_node(drv: Any, path: str) -> tuple[bool, Any]:
@@ -40,27 +46,4 @@ def read_node(drv: Any, path: str) -> tuple[bool, Any]:
         return False, None
     with drv._telemetry_lock:
         snap = drv._telemetry_model.snapshot(path)
-    if path in snap:
-        return True, snap[path]
-    prefix = path + "."
-    leaves = {tuple(key[len(prefix) :].split(".")): value for key, value in snap.items() if key.startswith(prefix)}
-    if not leaves:
-        return False, None
-    return True, _assemble(leaves)
-
-
-def _assemble(leaves: dict[tuple[str, ...], Any]) -> dict[str, Any]:
-    """Вложенный dict из листьев ``{части_пути: значение}``; лист-предок побеждает.
-
-    Результат не зависит от порядка листьев: сначала отбрасываются листья, у которых
-    какой-либо собственный префикс сам является листом, потом строится дерево.
-    """
-    tree: dict[str, Any] = {}
-    for parts, value in leaves.items():
-        if any(parts[:i] in leaves for i in range(1, len(parts))):
-            continue
-        node = tree
-        for part in parts[:-1]:
-            node = node.setdefault(part, {})
-        node[parts[-1]] = value
-    return tree
+    return node_from_snapshot(snap, path)

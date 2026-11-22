@@ -55,6 +55,14 @@ class ITelemetryReadModel(Protocol):
         """Снимок поддерева по префиксу (граница — точка-разделитель); пустой prefix → весь снимок."""
         ...
 
+    def read_node(self, path: str) -> tuple[bool, Any]:
+        """(есть ли путь, значение): узел собирается из листьев одним ``snapshot(path)``.
+
+        Лист → ``(True, значение)`` (даже None); узел → ``(True, вложенный dict)``;
+        нет пути или пустой ``path`` → ``(False, None)``. Лока у модуля нет, держит вызывающий.
+        """
+        ...
+
     def read(self, path: str, key: str, alive_incarnation: str | None = None) -> dict[str, Any]:
         """Значение листа процесса ``path`` (``processes.<name>``) с классом свежести и возрастом.
 
