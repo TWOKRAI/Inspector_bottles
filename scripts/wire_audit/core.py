@@ -67,6 +67,14 @@ _LAY_CHANGE = re.compile(r"^смена слова '(.*?)' → '(.*?)' \(исто
 _LAY_PICK = re.compile(rf"^диск '(.+?)' {_NUM}° → ячейка (\d+): взять\({_NUM},\s*{_NUM}\)")
 _LAY_SKIP = re.compile(rf"^диск '(.+?)' {_NUM}° → пропуск: (.*)$")
 
+# строка отказа hub в system.log процесса layout (хвост после ``[WARNING] [layout] layout:``):
+# ``[health] ResourceUnavailable @ robot_io.forward.refused: hub отказ (буква 'Р', ячейка 2): причина``
+_SYS_REFUSAL = re.compile(
+    r"\[health\] ResourceUnavailable @ robot_io\.forward\.refused: hub отказ \(буква '(.+?)', ячейка (\d+)\):\s*(.*)$"
+)
+_NO_REASON = "причина не указана"
+_HUB_PREFIX = "отказ hub: "
+
 _SIM_CMD = re.compile(r"\[v2\]\s+CMD\s+seq=(\d+)\s+op=CVT_JOB")
 
 TABLE_HEADER = ("#", "заливка", "буква", "сеть°", "ячейка", "x", "y", "rz", "ecap", "seq", "ответ", "А", "Б", "итог")
@@ -274,21 +282,24 @@ class Disk:
     skip_reason: str | None = None
 
 
+def _timed_lines(text: str) -> list[tuple[datetime, str]]:
+    """Строки журнала вида ``#n <метка> [УРОВЕНЬ] сообщение`` -> (метка, сообщение); остальные пропускаются молча."""
+    parsed: list[tuple[datetime, str]] = []
+    for raw in text.splitlines():
+        m = _LAY_LINE.match(raw)
+        stamp = parse_ts(m.group(2)) if m else None
+        if m and stamp:
+            parsed.append((stamp, m.group(3)))
+    return parsed
+
+
 def parse_layout(text: str) -> list[WordEvent | Disk]:
     """События последней инкарнации журнала диска (от последней ``LoggerManager initialized``) по времени.
 
     Порядок при равных метках — порядок строк файла. Остальные строки пропускаются молча.
     """
-    parsed: list[tuple[datetime, str]] = []
-    start = 0
-    for raw in text.splitlines():
-        m = _LAY_LINE.match(raw)
-        stamp = parse_ts(m.group(2)) if m else None
-        if not (m and stamp):
-            continue
-        if _LAY_INIT in m.group(3):
-            start = len(parsed)
-        parsed.append((stamp, m.group(3)))
+    parsed = _timed_lines(text)
+    start = max((i for i, (_, message) in enumerate(parsed) if _LAY_INIT in message), default=0)
 
     events: list[WordEvent | Disk] = []
     for stamp, message in parsed[start:]:
@@ -307,6 +318,33 @@ def parse_layout(text: str) -> list[WordEvent | Disk]:
             events.append(Disk(stamp, m.group(1), float(m.group(2)), skip_reason=m.group(3)))
     events.sort(key=lambda e: e.t)  # сортировка устойчивая: равные метки остаются в порядке файла
     return events
+
+
+@dataclass
+class Refusal:
+    """Строка system.log: hub отказал заданию роботу (диск при этом ушёл с ленты без укладки)."""
+
+    t: datetime
+    letter: str
+    cell: int
+    reason: str  # текст после ``): `` строки отказа
+
+
+def parse_system(text: str) -> list[Refusal]:
+    """Все отказы hub из system.log процесса layout.
+
+    Берутся только строки ``[health] ResourceUnavailable @ robot_io.forward.refused: hub отказ (буква 'X', ячейка N):
+    причина``; остальные, обрезанные и битые строки пропускаются молча. Порядок — по времени, при равных метках по
+    строкам файла. Границы инкарнации здесь нет: system.log дописывается между запусками, начало судимого запуска
+    знает только журнал диска (``audit`` отбрасывает отказы раньше его первого события).
+    """
+    refusals = [
+        Refusal(stamp, m.group(1), int(m.group(2)), m.group(3).strip() or _NO_REASON)
+        for stamp, message in _timed_lines(text)
+        if (m := _SYS_REFUSAL.search(message))
+    ]
+    refusals.sort(key=lambda r: r.t)
+    return refusals
 
 
 # ------------------------------------------------------------------------- регистры и ожидания
@@ -417,6 +455,7 @@ class Row:
     reach_warn: bool = False
     window_warn: bool = False
     passport: Passport | None = None  # паспорт сима, поставленный в пару строке диска (столбец Б)
+    hub_reason: str | None = None  # причина отказа hub, закрывшего взятие без задания (``--layout-system``)
 
     def add(self, *reasons: str) -> None:
         self.reasons.extend(r for r in reasons if r not in self.reasons)
@@ -424,7 +463,10 @@ class Row:
     @property
     def result(self) -> str:
         if self.reasons:
-            return "FAIL: " + "; ".join(self.reasons)
+            hub = f" ({_HUB_PREFIX}{self.hub_reason})" if self.hub_reason is not None else ""
+            return "FAIL: " + "; ".join(self.reasons) + hub
+        if self.hub_reason is not None:
+            return f"PASS~: {_HUB_PREFIX}{self.hub_reason}"
         return "PASS~" if self.tilde else "PASS"
 
     @property
@@ -469,6 +511,7 @@ class AuditResult:
     skips: int
     retries: int
     warnings: int
+    hub_refusals: int | None = None  # взятий, закрытых отказом hub; None — ``--layout-system`` не задан
 
     @property
     def fails(self) -> int:
@@ -476,14 +519,15 @@ class AuditResult:
 
     @property
     def exit_code(self) -> int:
-        return 1 if self.fails or (self.picks > 0 and self.jobs == 0) else 0
+        return 1 if self.fails else 0
 
     @property
     def summary(self) -> str:
         verdict = "FAIL" if self.exit_code else "PASS"
+        hub = "" if self.hub_refusals is None else f", отказов hub {self.hub_refusals}"
         return (
             f"ИТОГ: {verdict} (взятий {self.picks}, заданий {self.jobs}, FAIL {self.fails}, "
-            f"пропусков {self.skips}, повторов {self.retries}, предупреждений {self.warnings})"
+            f"пропусков {self.skips}, повторов {self.retries}, предупреждений {self.warnings}{hub})"
         )
 
 
@@ -597,6 +641,33 @@ def _bind_jobs(picks: list[Row], jobs: list[Job], regs: Regs) -> dict[int, Job]:
     return bound
 
 
+def _bind_refusals(
+    picks: list[Row], bound: dict[int, Job], refusals: list[Refusal]
+) -> tuple[dict[int, Refusal], list[Refusal]]:
+    """Привязка «взятие без задания ↔ отказ hub»: отказ той же буквы и ячейки, не раньше времени взятия и раньше
+    следующего взятия в ту же ячейку (как у ``_bind_jobs``). Один отказ закрывает не больше одного взятия.
+
+    Возвращает (индекс взятия в ``picks`` → отказ, отказы без взятия).
+    """
+    taken = [False] * len(refusals)
+    closed: dict[int, Refusal] = {}
+    for k, row in enumerate(picks):
+        disk = row.disk
+        assert disk is not None and disk.cell is not None
+        if k in bound:
+            continue
+        upper = next((p.disk.t for p in picks[k + 1 :] if p.disk and p.disk.cell == disk.cell), None)
+        for ri, ref in enumerate(refusals):
+            if taken[ri] or ref.cell != disk.cell or ref.letter.upper() != disk.letter.upper() or ref.t < disk.t:
+                continue
+            if upper is not None and ref.t >= upper:
+                continue
+            taken[ri] = True
+            closed[k] = ref
+            break
+    return closed, [ref for ri, ref in enumerate(refusals) if not taken[ri]]
+
+
 @dataclass
 class Passport:
     """Паспорт объекта сима (``--sim-objects``)."""
@@ -703,8 +774,12 @@ def audit(
     pick_margin_mm: float = _PICK_MARGIN_DEFAULT_MM,
     sim_objects: list[dict] | None = None,
     sim_journal: list[dict] | None = None,
+    layout_system: str | None = None,
 ) -> AuditResult:
     """Судит провод: строка диска ↔ задание, колонки А и Б, третий наблюдатель, счётчики.
+
+    ``layout_system`` — текст system.log процесса layout: взятие без задания, на которое hub ответил отказом, не
+    ``потеря`` (FAIL), а предупреждение «отказ hub: причина»; None — отказы не учитываются, формат прежний.
 
     Исключения ``AuditError``: код 2 — регистры, число слов ``--words`` не равно числу строк слова журнала диска,
     слово с пробелом.
@@ -742,10 +817,20 @@ def audit(
     bound_ids = {id(j) for j in bound.values()}
     sim_seen = parse_sim_seqs(sim_journal) if sim_journal is not None else None
 
+    refusals = None
+    if layout_system is not None:
+        # system.log дописывается между запусками: отказы раньше первого события судимой инкарнации диска — чужие
+        since = events[0].t if events else None
+        refusals = [r for r in parse_system(layout_system) if since is None or r.t >= since]
+    closed, orphans = _bind_refusals(picks, bound, refusals) if refusals is not None else ({}, [])
+
     for k, row in enumerate(picks):
         job = bound.get(k)
         if job is None:
-            row.add("потеря")
+            if k in closed:
+                row.hub_reason = closed[k].reason
+            else:
+                row.add("потеря")
             continue
         _judge_bound(row, job, regs, zone_max_mm, pick_margin_mm, seq_counts, sim_seen)
 
@@ -768,6 +853,11 @@ def audit(
     notes = []
     if sim_objects is not None and no_passport:
         notes.append(f"дисков без паспорта сима: {no_passport} (не FAIL)")
+    for ref in orphans:
+        notes.append(
+            f"отказ без диска (не FAIL): буква '{ref.letter}', ячейка {ref.cell}, "
+            f"{ref.t.strftime(_TS_FORMAT)[:-3]}: {ref.reason}"
+        )
     return AuditResult(
         rows=rows,
         words=fill_words,
@@ -784,7 +874,8 @@ def audit(
         jobs=len(live),
         skips=sum(1 for r in rows if r.disk is not None and r.disk.skip_reason is not None),
         retries=len(retried),
-        warnings=sum(1 for r in rows if r.reach_warn or r.window_warn),
+        warnings=sum(1 for r in rows if r.reach_warn or r.window_warn or r.hub_reason is not None),
+        hub_refusals=None if refusals is None else len(closed),
     )
 
 

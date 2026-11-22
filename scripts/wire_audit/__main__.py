@@ -1,8 +1,9 @@
 """CLI аудита провода: ``python -m scripts.wire_audit --exchange … --layout … --registers … [--words …]``.
 
 Читает файлы журналов, печатает таблицу PASS/FAIL по каждому ``CVT_JOB`` (stdout; при ``--out`` ещё и в файл).
-Коды возврата: 0 — все PASS (допускается ``PASS~``); 1 — хотя бы один FAIL, включая ноль заданий при взятиях > 0;
-2 — ошибка аргументов или «не поддержано»; 3 — файл обмена или диска не читается или пуст.
+Коды возврата: 0 — все PASS (допускается ``PASS~``); 1 — хотя бы один FAIL, в том числе взятие без задания и без отказа hub (``потеря``);
+2 — ошибка аргументов или «не поддержано», в том числе не читается файл ``--layout-system``; 3 — файл обмена или
+диска не читается или пуст.
 Тексты отказов кодов 2 и 3 идут в stderr и не содержат значений аргументов.
 """
 
@@ -41,16 +42,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--sim-objects", help="JSONL паспортов сима (столбец Б)")
     p.add_argument("--sim-journal", help="JSONL журнала сим-робота (третий наблюдатель)")
+    p.add_argument(
+        "--layout-system",
+        help="system.log процесса layout: отказы hub (серво выключено) — предупреждение вместо «потеря»",
+    )
     p.add_argument("--out", help="файл для копии отчёта")
     return p
 
 
-def _read(path: str, what: str, *, must_have_text: bool) -> str:
-    """Текст файла; не читается или пуст — AuditError(3) без пути в тексте."""
+def _read(path: str, what: str, *, must_have_text: bool, unreadable_code: int = 3) -> str:
+    """Текст файла; не читается — AuditError(``unreadable_code``), пуст — AuditError(3); путь в тексте не печатается."""
     try:
         text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
-        raise AuditError(3, f"{what} не читается") from exc
+        raise AuditError(unreadable_code, f"{what} не читается") from exc
     if must_have_text and not text.strip():
         raise AuditError(3, f"{what} пуст")
     return text
@@ -104,6 +109,11 @@ def _run(ns: argparse.Namespace) -> tuple[int, str, str | None]:
     registers = _load_registers(ns.registers)
     objects = _read_jsonl(ns.sim_objects, "файл паспортов сима") if ns.sim_objects else None
     journal = _read_jsonl(ns.sim_journal, "журнал сима") if ns.sim_journal else None
+    system = (
+        None
+        if ns.layout_system is None
+        else _read(ns.layout_system, "--layout-system: system.log layout", must_have_text=False, unreadable_code=2)
+    )
     result = audit(
         exchange,
         layout,
@@ -113,6 +123,7 @@ def _run(ns: argparse.Namespace) -> tuple[int, str, str | None]:
         pick_margin_mm=margin,
         sim_objects=objects,
         sim_journal=journal,
+        layout_system=system,
     )
     commands = render_commands(exchange, layout, registers, result, journal) if ns.out else None
     return result.exit_code, render(result, _COMMANDS_FILE if ns.out else None), commands
