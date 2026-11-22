@@ -17,12 +17,12 @@
 - Логи полного прогона тестов на 3.14 (scratchpad Mac, не в git). Числа ниже.
 - Venv на 3.14 (scratchpad), стенд сима и прототипа: остановлены или остановить; `stand.lock` снят.
 
-## Полный прогон тестов на Python 3.14 (НЕЗАВЕРШЁН)
-Дерево `chore/deps-py314`, venv из `uv export` без `pygame` + `pytest-timeout`. Получено до остановки: фреймворк `341 failed, 14203 passed, 54 skipped, 2 xfailed, 10 errors` (23 мин); Services `238 failed, 7768 passed, 39 skipped` (14 мин); Plugins и прототип — не завершены. Базовый прогон на 3.12 тем же способом — НЕ снят, поэтому красные нельзя назвать регрессиями (на macOS часть красных ложная: POSIX-семафоры C-93, `SharedMemory`). Три теста `layer_render` красные на 3.14 и зелёные на 3.12 (подозрение на opencv 5.1, не доказано). Нужно: прогнать оба стека на Windows/Mac в окне от координатора (`machine_gate.sh heavy`), сравнить списки красных, решить по `mcp<2`/otel. Windows и Orin (torch под JetPack) проверены только метаданными.
+## Полный прогон тестов на Python 3.14 (СНЯТ, база 3.12 — НЕТ)
+Отчёт, команды и список красных — в ветке `chore/deps-py314`: `docs/reports/2026-11-22_deps-py314_test-run.md` и `..._test-run_failed.txt`. Итог на 3.14.7 (macOS): 34 790 прошло, 728 красных — framework 341 failed + 10 errors, Services 238, Plugins 6, prototype 1, misc 132; `backend_ctl` не запускался. Красные не классифицированы: база на 3.12 не снималась (владелец: сравнение на Windows). Подозрения: 232+8 красных во framework — `No space left on device` (лимит shm/семафоров macOS, C-93, гипотеза), misc — BSD `date` и коды 0/2/124; prototype — устаревший снимок `catalog_register_fields.txt` (`robot_io.forward_ok`, `last_dropped_job`). Нужно: те же команды на Windows (3.14) и на 3.12 (`.venv`), сравнить списки, решить по `mcp<2`/otel; три теста `layer_render` (opencv 5.1?) отдельно. `pytest-qt` нигде не установлен.
 
 ## Что делать дальше (по порядку)
 1. Живая проверка qt-mcp (окно + ping), если сессия получит доступ к GUI.
-2. Полный прогон 3.14 против 3.12, отчёт `docs/reports/2026-11-22_deps-py314_test-run.md` (его не успели записать), решение по слиянию `chore/deps-py314`.
+2. Прогон базы 3.12 и на Windows, сравнить с `..._test-run_failed.txt`, решение по слиянию `chore/deps-py314` (только через координатора).
 3. Передать координатору: 27 заявок `plans/queue/inbox/2026-11-22_simaudit-gui-bd_*.md` (свёртка в реестры, `C-NN` присваивает свёртка), заявки на слияние веток (`docs/handoffs/<дата>_…-merge-request.md`).
 4. Ревью стадии 5 для `feat/pult-belt-speed` (`reviewer` sonnet) и слово владельца по безопасности запуска ленты на реальном ПЧ.
 5. После всей практики — `cto` (Fable, явная модель `fable`): сброс breaker при успехе (per-context breaker или `record_success` без новых ошибок), считать ли «робот остановлен» поломкой, контракт ответа хаба (reason), общий взгляд. ADR для «ЗАПУСТИТЬ возвращает ленту» (решение 1B, opt-in `params.resume_action`, сброс при fault, не для робота) — код в `device_hub` (Р2).
@@ -36,4 +36,3 @@
 - В коммитах `Layer:` подобран из разрешённого списка (`services, prototype`, `infra`) — проверить хуком при слиянии.
 - Агентные отчёты (инъекции wire_audit, ревью, qt-mcp) лежат в `docs/reports/2026-11-22_sim-audit-gui_wire/` и `docs/reports/2026-11-22_qt-mcp-probe-fixes.md` (в ветках), промежуточные скрипты — только в scratchpad MacBook.
 - На origin уже есть ветка `test` (без слеша): ветки вида `test/…` не пушатся («directory file conflict»). Поэтому ветка полосы переименована `test/sim-audit-gui` → `feat/sim-audit-gui`; ветка `test/sim-wire-audit` осталась локальной (её история — предок `feat/sim-audit-gui`, на origin уехала в составе его коммитов).
-- Полный прогон 3.14 на MacBook шёл фоновым агентом в момент push: если сессия Mac жива — он допишет отчёт `docs/reports/2026-11-22_deps-py314_test-run.md` в дереве `--deps-py314` (не в git); на Windows считать прогон несделанным.
