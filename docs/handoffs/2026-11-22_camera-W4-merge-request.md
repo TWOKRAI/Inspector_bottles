@@ -35,11 +35,27 @@
 - `catalog_register_fields.txt`: +29 строк (`camera_device.exposure_auto`, `hikvision.*`); строки `robot_io.*` добавит владелец `robot_io` (C-108).
 - Golden β перегенерирован до rebase; после rebase `test_build_characterization` зелёный без перегенерации, дифф golden — только узел `color_convert`, его провод и `trigger_*` камеры.
 
-## Что НЕ проверено (железа и стенда нет)
+## Живой стенд на `driver: fake` (2026-11-22, `docs/reports/2026-11-22_camera-W4-stand.md`; красного по механизму нет)
 
-- Порядок каналов реального прибора (BayerRG8 по дампу 0.5; проба cv2 на синтетике), `GainAuto`, `TriggerMode` прибора, `GevSCPSPacketSize`, время перезахвата при правке `gain`/`exposure_time` — список «на железе» в `docs/claude/OPEN_QUESTIONS.md`, запись «полоса К · камера W4, К4'», и в вердикте Opus-ревью (отчёт `docs/reports/2026-11-22_camera-device-service_W4.md`).
-- **Живой стенд не гонялся** (MVS SDK на Mac нет; рецепты β без железа не поднимаются headless). Слияние без стенда — решение координатора: нужен ли стенд на `driver: fake` (`camera_device_demo.yaml`) до слияния — скажите, запущу `scripts/stand_gate` по Mac-правилу.
-- Вкладка GUI не запускалась вживую (qt-mcp не подключился), только тесты offscreen и спай моста.
+Дерево `Inspector_bottles--lane-K-w4`, HEAD `c5fa505f9`; macOS, MVS SDK нет. Рецепт `camera_device_demo` (базовый плагин ядра, `driver: fake`) — единственный, где кадры идут без железа: вендорский `hikvision` берёт порт только через `driver.make_port()` (`mvs`).
+
+| Замер | Число |
+|---|---|
+| ready после старта | 3,64 с; `run_start` ответ 7 мс, `running` |
+| fps (`get_status.frames`, 3 окна ~10 с) | 25,08 / 25,05 / 24,99; `device_state grabbing`, `dropped 0`, `errors 0` |
+| команды `cam_fake` | 9 камерных (`take_device`, `release_device`, `get_status`, `reset_stats`, `read_params`, `apply_params`, `list_devices`, `describe_params`, `trigger_software`) + общие `set_config`, `register_update`, `set_enabled` |
+| смена `exposure_time` на ходу (`policy=live`) | 10000→12000: `confirmed`, 36 мс; повтор значения: `vacuous`; 12000→8000: `confirmed`; разрыва кадров нет (шаг опроса ~49 мс, макс. интервал 54–63 мс при периоде 40 мс) |
+| `take_device`/`release_device` в `running` | отказ за 22–23 мс: `{"status":"error","error":"running","message":"сначала ОСТАНОВИТЬ"}` |
+| остановка | `system_shutdown` 0,99 с; `cam_fake`, `devices`, `gui` — `exited`; сирот 0; порт backend_ctl (8765) свободен |
+| `hikvision_inspect` headless (SDK нет) | `take_device` -> `error` («PortError kind=other: acquire: other»); `camera_0` жив, `restart_count 0` на +17 и +40 с, соседи живы, crash-loop нет; `run_status not_ready` (readiness «ошибка камеры»), `run_start` -> `error: not_ready`; остановка 0,44 с, 3 из 3 `exited`, сирот 0 |
+
+Находки стенда (не красные): (1) `frames` растёт только в `running`: после `run_stop` счётчик замёрз при `device_state=grabbing` (поведение базы ядра, К4' его не менял; решить, ожидаемо ли); (2) `release_device` в `ready` даёт `run_status not_ready`, `take_device` возвращает `ready`; (3) метрика `frames` в дереве state публикуется тиком 5 с — fps считать по `get_status.frames`; (4) текст ошибки порта без SDK не называет причину (она только в INFO-логе `S.h.sdk.bindings`).
+
+## Что НЕ проверено (железа нет)
+
+- Вендорский порт `mvs`, перезахват close/open, цвет реального прибора, `exposure_auto` `restart` (на фейке перезахват не наблюдался); рецепт β и 4 переписанных рецепта вживую не поднимались (только `SystemBlueprint.check` в тестах, `yaml.safe_load`, и `hikvision_inspect` до отказа порта).
+- Вкладка GUI вживую не запускалась (qt-mcp `CONNECTION_CLOSED`), только offscreen-тесты и спай моста; кадры в дисплей подтверждены только счётчиком `frames` источника.
+- Список «на железе» дня №1/№2 — `docs/claude/OPEN_QUESTIONS.md`, запись «полоса К · камера W4, К4'».
 
 ## Ждёт решения владельца
 
