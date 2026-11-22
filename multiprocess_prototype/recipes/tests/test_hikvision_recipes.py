@@ -52,8 +52,8 @@ def test_recipe_has_hikvision_camera(name: str) -> None:
 @pytest.mark.parametrize("name", _ALL)
 def test_camera_keys_are_register_fields(name: str) -> None:
     fields = set(HikvisionCameraRegisters.model_fields)
-    # ключи самого плагина (имя, класс, категория) и run_locked_commands читает плагин, не register
-    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands"}
+    # ключи самого плагина (имя, класс, категория), run_locked_commands и readiness читает плагин, не register
+    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands", "readiness"}
     for proc, cfg in _camera_nodes(name).values():
         unknown = set(cfg) - allowed
         assert not unknown, f"{name}: ключи вне register'а: {sorted(unknown)}"
@@ -173,3 +173,17 @@ def test_recipe_check_is_empty(name: str, plugins_discovered: None) -> None:
     topology.infer_missing_collectors()
     errors = topology.check()
     assert errors == [], f"{name}: check() вернул ошибки:\n  " + "\n  ".join(errors)
+
+
+def test_beta_camera_readiness_downgrades_stopping() -> None:
+    """R4-1 (2.2c): камера β в `stopping` при `auto_start` не блокирует START — out_of_spec снижен до check_function."""
+    cfg = _camera_nodes("hikvision_letter_robot")["camera_0"][1]
+    assert cfg["readiness"] == {"severity": {"out_of_spec": "check_function"}}
+
+
+def test_beta_devices_have_no_reconnect_limit() -> None:
+    """R4-1 (решение владельца 2026-11-20): у `robot_main` и `vfd_belt` β лимит переподключения снят (0)."""
+    raw = yaml.safe_load((_RECIPES_DIR / "hikvision_letter_robot.yaml").read_text(encoding="utf-8"))
+    params = {d["id"]: d["params"] for d in raw["devices"]}
+    assert params["robot_main"]["max_reconnect_attempts"] == 0
+    assert params["vfd_belt"]["max_reconnect_attempts"] == 0

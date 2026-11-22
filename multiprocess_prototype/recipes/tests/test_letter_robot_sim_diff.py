@@ -66,14 +66,10 @@ _EXPECTED_DIFFS = [
     ".blueprint.wires[0].source",
     ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",
-    # Лимит переподключения снят (решение владельца 2026-11-20, Р2): в сим-рецепте стоит, β (К, R4) применит то же —
-    # тогда снять обе записи. Порядок — строковая сортировка путей.
-    ".devices[0].params.max_reconnect_attempts",
     ".devices[0].params.robot_params",
     ".devices[0].protocol",
     ".devices[0].transport.host",
     ".devices[0].transport.port",
-    ".devices[1].params.max_reconnect_attempts",
     ".name",
 ]
 
