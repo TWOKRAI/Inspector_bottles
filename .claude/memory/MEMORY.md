@@ -94,3 +94,5 @@ _(empty)_
 - [Использовать Атлас активно](feedback_use_atlas_actively.md) — map/ref в брифы, atlas check после задачи, lint-result для отчётов (владелец 11-13)
 - [Без костылей, архитектура важнее скорости](feedback_no_crutches_architecture_first.md) — причина, а не симптом; список компромиссов Ф1 для ревью (владелец 11-13)
 - [Run-state: очередь после свежего ревью](project_run_state_fresh_review_advice_queue.md) — F3=Task 1.10, советы С5–С10 в плане и очереди
+- [Plan task files: task-brief.md form](feedback_plan_task_files_follow_task_brief_form.md) — H1 `—`, FILES ≤ 6; FACTS at spawn, not at plan time
+- [Глубина конвейера по риску](feedback_review_depth_by_risk.md) — стадия 5 всегда; стадия 0 по риску (владелец 11-21)
