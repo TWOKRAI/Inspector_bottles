@@ -15,15 +15,16 @@
 # === ГРУППИРОВКА ПРОЦЕССОВ (эффективность) ===
 #   Плагины внутри процесса идут ЛИНЕЙНОЙ цепочкой — кадр живёт в памяти процесса без
 #   межпроцессных SHM-перегонов. Поэтому линейные соседи слиты:
-#     vision = color_convert→roi_crop→hsv_mask→morphology→circle_detector (вся предобработка+детекция)
+#     vision = roi_crop→hsv_mask→morphology→circle_detector (вся предобработка+детекция)
 #     recog  = center_crop→pixel_to_robot→ml_inference (кроп→калибровка→нейронка)
 #     layout = word_layout→robot_io (раскладка→форвард роботу)
 #   Ветвления (vision раздаёт в 4 стороны) и источники (camera/phone) — отдельными процессами.
 #   line отдельно: line_filter заменяет item (теряет кадр) — слить в линейную цепочку нельзя.
 #
 # === ЦВЕТ ===
-#   Hikvision отдаёт RGB → color_convert свопает в физ. BGR → весь тракт + ml_inference
-#   (sidecar color:RGB, сам делает BGR→RGB) в BGR-конвенции. circle_detector по grayscale.
+#   Камера на ядре camera_device отдаёт BGR (по пробе cv2 на синтетике; на приборе — визит 6.3) →
+#   весь тракт + ml_inference (sidecar color:RGB, сам делает BGR→RGB) в BGR-конвенции без
+#   конвертации после камеры. circle_detector по grayscale.
 #
 # === КАЛИБРОВКА / КООРДИНАТЫ (важно!) ===
 #   pixel_to_robot грузит config/calibration/cam0.yaml (гомография px→мм робота, артефакт
@@ -115,11 +116,22 @@ blueprint:
           category: source
           config:
             camera_id: 0
-            camera_index: 0
+            # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+            device_select: serial
+            device_serial: DA1689923
             resolution_width: 1440
             resolution_height: 1080
-            fps: 25
+            frame_rate_enable: true
+            frame_rate: 25.0
+            # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+            exposure_time: 40000.0
+            # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
             auto_start: true
+            # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+            # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+            trigger_managed: true
+            trigger_mode: "Off"
+            run_locked_commands: [release_device, take_device]
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
@@ -137,11 +149,6 @@ blueprint:
         source_target_fps: 25
     - process_name: vision
       plugins:
-        - plugin_name: color_convert
-          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
-          category: processing
-          config:
-            mode: bgr2rgb
         - plugin_name: roi_crop
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
@@ -427,7 +434,7 @@ blueprint:
       metadata: {}
   wires:
     - source: camera_0.hikvision.frame
-      target: vision.color_convert.frame
+      target: vision.roi_crop.frame
       description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
     - source: vision.circle_detector.frame
       target: recog.center_crop.frame
@@ -473,9 +480,6 @@ blueprint:
       camera_0.hikvision:
         - 16.0
         - 40.0
-      vision.color_convert:
-        - 16.0
-        - 1120.0
       vision.roi_crop:
         - 214.4678201239235
         - 1119.9999999999998

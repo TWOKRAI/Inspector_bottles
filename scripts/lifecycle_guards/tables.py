@@ -377,7 +377,6 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
     ("R3", "multiprocess_framework/modules/statistics_module/core/aggregation_window.py"): AllowEntry(
         1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"
     ),
-    ("R4", "Services/hikvision_camera/plugin/plugin.py"): AllowEntry(2, "FROZEN Ф4 (ждёт потребителя)"),
     ("R4", "backend_ctl/harness.py"): AllowEntry(3, "дерево процессов ОС (ProcessTreeGuard, П4 stop-ownership)"),
     ("R4", "multiprocess_framework/modules/console_module/platforms/unix.py"): AllowEntry(
         1, "Ф4: join(N) и terminate вне стопа детей PM → stop_budget"

@@ -105,6 +105,11 @@ class CameraDeviceRegisters(SchemaBase):
         ),
     ] = 40
 
+    exposure_auto: Annotated[
+        Literal["Off", "Once", "Continuous"],
+        FieldMeta("Автоэкспозиция", info="Узел ExposureAuto пишется ПЕРЕД экспозицией", apply="restart"),
+    ] = "Off"
+
     exposure_time: Annotated[
         float,
         FieldMeta("Экспозиция, мкс", info="Пишется в прибор при каждом take_device", apply="live"),
