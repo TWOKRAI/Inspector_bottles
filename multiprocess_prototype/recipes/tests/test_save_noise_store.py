@@ -426,7 +426,7 @@ def test_store_conflict_on_hand_edit_between_read_and_write(tmp_path: Path) -> N
 
 
 def test_store_list_matches_sorted_glob_on_all_recipes(tmp_path: Path) -> None:
-    """list() на 23 копиях рецептов == tuple(sorted(stem каждого *.yaml)) (ревью F12)."""
+    """list() на 24 копиях рецептов == tuple(sorted(stem каждого *.yaml)) (ревью F12)."""
     for slug in _ALL_SLUGS:
         shutil.copyfile(_RECIPES_DIR / f"{slug}.yaml", tmp_path / f"{slug}.yaml")
     store = build_chain(tmp_path, _ALL_SLUGS[0])
@@ -435,7 +435,7 @@ def test_store_list_matches_sorted_glob_on_all_recipes(tmp_path: Path) -> None:
 
     assert isinstance(result, tuple)
     assert result == tuple(sorted(p.stem for p in tmp_path.glob("*.yaml")))
-    assert len(result) == 23
+    assert len(result) == 24
 
 
 # ---------------------------------------------------------------------------

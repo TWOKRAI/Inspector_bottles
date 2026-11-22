@@ -1,15 +1,15 @@
 # Рецепт camera_robot_calibration — РАЗОВАЯ калибровка камера↔робот↔энкодер.
 #
 # Топология (blob-детекция, разбитая на атомарные плагины):
-#   camera_0[hikvision] → roi[roi_crop] → detector[color_convert(bgr2rgb) → hsv_mask →
+#   camera_0[hikvision] → roi[roi_crop] → detector[hsv_mask →
 #     morphology → contour_finder] ─┬→ cal[...]                            → display "main"
 #                                   └→ maskview                            → display "mask"
 #
 # Эталон: плата с 5 КРАСНЫМИ точками (4 угла + центр) на белом фоне.
-# detector: color_convert(bgr2rgb) ПЕРВЫЙ — корректный цвет на дисплее (валидатор требует
-#   frame→frame стыковку портов, поэтому конверт на frame-пути до hsv). Следствие: hsv видит
-#   RGB, и COLOR_BGR2HSV читает физически КРАСНЫЙ как «синий» hue (~H95-135) — это норма,
-#   тюнить по дисплею "mask". morphology(open_close) «вырезает» только сплошные круги
+# Камера на ядре camera_device отдаёт BGR (по пробе cv2 на синтетике; на приборе — визит 6.3),
+#   конвертации цвета после камеры нет: hsv видит BGR, физически КРАСНЫЙ — hue ~H0-10 и ~H170-179.
+#   Порядок каналов у hsv_mask — как на main (камера BGR, color_convert убран); на приборе проверить красный предмет
+#   по дисплею "mask". morphology(open_close) «вырезает» только сплошные круги
 #   (убирает шум, заполняет дырки). contour_finder ищет контуры по чистой маске, фильтрует
 #   по площади, отдаёт center; keep_mask=true → mask идёт на дисплей "mask".
 # cal: оркестратор калибровки — кэширует detections, общается с роботом/лентой через
@@ -20,8 +20,7 @@
 #
 # === ТЮНИНГ (всё в ПИКСЕЛЯХ) ===
 #   1) roi_crop x/y/width/height (0 = до края) — обрезать фон, оставить плату.
-#   2) color_convert.mode — если точки на "mask" не красные → bgr2rgb/rgb2bgr.
-#   3) hsv_mask: красный по умолчанию h_min=170,h_max=10 (wrap); тюнить s_min/v_min по "mask".
+#   2) hsv_mask: красный по умолчанию h_min=170,h_max=10 (wrap); тюнить s_min/v_min по "mask".
 #   4) morphology.kernel_size — больше → агрессивнее чистка шума (но «съедает» мелкие круги).
 #   5) contour_finder: min_area/max_area (px²) — диапазон площади круга; режет шум — смотреть "main".
 #   6) cal.reproj_threshold_mm — порог приёмки калибровки.
@@ -102,11 +101,22 @@ blueprint:
           category: source
           config:
             camera_id: 0
-            camera_index: 0
+            # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+            device_select: serial
+            device_serial: DA1689923
             resolution_width: 1440
             resolution_height: 1080
-            fps: 25
+            frame_rate_enable: true
+            frame_rate: 25.0
+            # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+            exposure_time: 40000.0
+            # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
             auto_start: true
+            # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+            # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+            trigger_managed: true
+            trigger_mode: "Off"
+            run_locked_commands: [release_device, take_device]
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
@@ -140,11 +150,6 @@ blueprint:
       metadata: {}
     - process_name: detector
       plugins:
-        - plugin_name: color_convert
-          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
-          category: processing
-          config:
-            mode: bgr2rgb
         - plugin_name: hsv_mask
           plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
           category: processing
@@ -224,7 +229,7 @@ blueprint:
       target: roi.roi_crop.frame
       description: ''
     - source: roi.roi_crop.frame
-      target: detector.color_convert.frame
+      target: detector.hsv_mask.frame
       description: ''
     - source: detector.contour_finder.frame
       target: cal.camera_robot_calibration.frame
@@ -248,9 +253,6 @@ blueprint:
       roi.roi_crop:
         - 711.2089883319765
         - 134.29232848494945
-      detector.color_convert:
-        - 1420.0
-        - 100.0
       detector.hsv_mask:
         - 1620.0
         - 100.0
@@ -315,9 +317,6 @@ gui_positions:
     - 100.0
   roi.roi_crop:
     - 956.0
-    - 100.0
-  detector.color_convert:
-    - 1876.0
     - 100.0
   detector.hsv_mask:
     - 2076.0

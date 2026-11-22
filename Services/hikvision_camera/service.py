@@ -1,68 +1,64 @@
 """HikvisionCameraService — минимальный shell-класс для ServiceRegistry.
 
-Реализует интерфейс IService (Phase 3): start / stop / get_status.
-Детальная реализация с реальным SDK Hikvision (ISAPI/HCNetSDK) — Phase 4+.
+Реализует интерфейс IService (Phase 3): start / stop / get_status. Захват камеры — плагин `hikvision`.
 """
 
 from __future__ import annotations
 
+import logging
+
 from multiprocess_framework.modules.service_module import IService, register_service
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_service(name="hikvision_camera")
 class HikvisionCameraService:
-    """Shell-сервис камеры Hikvision.
+    """Оболочка сервиса камеры Hikvision (F22).
 
-    Хранит статус подключения; реальный бэкенд (HCNetSDK/ISAPI) — Phase 4+.
+    Захват ведёт плагин `hikvision` (`plugin/plugin.py`, ядро `camera_device`), а не этот класс:
+    сервис ничего не запускает и честно называет себя оболочкой.
 
     Атрибуты:
         name   — идентификатор сервиса для ServiceRegistry.
-        status — текущее состояние ("stopped" | "running").
+        status — состояние оболочки; всегда "shell".
     """
 
     name: str = "hikvision_camera"
+    status: str = "shell"
 
-    def __init__(self) -> None:
-        """Инициализация."""
-        self.status: str = "stopped"
+    def __repr__(self) -> str:
+        return f"HikvisionCameraService(status={self.status!r})"
 
     # ------------------------------------------------------------------
     # Публичный API (IService-совместимый)
     # ------------------------------------------------------------------
 
     def start(self, config: dict) -> bool:
-        """Запустить сервис с заданной конфигурацией.
-
-        Args:
-            config: параметры подключения (ip, port, user, password и т.п.).
+        """Не запускает ничего: оболочка, захват — плагин `hikvision`.
 
         Returns:
-            True при успехе (shell всегда возвращает True).
+            False всегда.
         """
-        # TODO Phase 4+: инициализация HCNetSDK / ISAPI-подключения
-        self.status = "running"
-        return True
+        logger.warning("HikvisionCameraService.start(): оболочка, захват — плагин `hikvision`")
+        return False
 
     def stop(self) -> bool:
-        """Остановить сервис.
+        """Остановка оболочки: освобождать нечего.
 
         Returns:
-            True при успехе (shell всегда возвращает True).
+            True (повторная остановка безвредна).
         """
-        # TODO Phase 4+: освободить ресурсы SDK
-        self.status = "stopped"
         return True
 
-    def get_status(self) -> dict:
-        """Вернуть текущее состояние сервиса.
+    def get_status(self) -> str:
+        """Состояние оболочки.
 
         Returns:
-            Словарь с ключами state и service.
+            "shell" — сервис не ведёт захват.
         """
-        return {"state": self.status, "service": self.name}
-
-    def __repr__(self) -> str:
-        return f"HikvisionCameraService(status={self.status!r})"
+        return self.status
 
 
 # Явная проверка структурной совместимости (runtime, не ABC)

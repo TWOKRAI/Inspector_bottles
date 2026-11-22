@@ -1,6 +1,6 @@
 """Тесты регистрации камеры Hikvision в реестре устройств.
 
-HikvisionRegistrationHelper: hik_enum → диалог → device_upsert.
+HikvisionRegistrationHelper: list_devices плагина hikvision → диалог → device_upsert.
 """
 
 from __future__ import annotations
@@ -16,43 +16,42 @@ from multiprocess_prototype.frontend.widgets.tabs.services.hikvision.controller 
 class TestHikvisionRegistrationHelper:
     """Тесты HikvisionRegistrationHelper — presenter-обвязка."""
 
-    def _make_helper(self) -> tuple[HikvisionRegistrationHelper, MagicMock]:
-        """Создать helper с фейковым presenter."""
+    def _make_helper(self) -> tuple[HikvisionRegistrationHelper, MagicMock, MagicMock]:
+        """Создать helper с фейковыми presenter'ами: реестра (upsert) и камеры (list_devices плагина)."""
         presenter = MagicMock()
-        runner = MagicMock()
+        hik_presenter = MagicMock()
         helper = HikvisionRegistrationHelper(
             devices_presenter=presenter,
-            request_runner=runner,
+            hikvision_presenter=hik_presenter,
         )
-        return helper, presenter
+        return helper, presenter, hik_presenter
 
-    def test_register_camera_calls_hik_enum(self) -> None:
-        """register_camera вызывает _request('hik_enum', ...)."""
-        helper, presenter = self._make_helper()
+    def test_register_camera_asks_plugin_list_devices(self) -> None:
+        """register_camera перечисляет приборы у плагина hikvision (list_devices), а не в хабе."""
+        helper, presenter, hik_presenter = self._make_helper()
         helper.register_camera()
-        presenter._request.assert_called_once()
-        call_args = presenter._request.call_args
-        assert call_args[0][0] == "hik_enum"
+        hik_presenter.list_devices.assert_called_once_with(helper._on_enum_result)
+        presenter._request.assert_not_called()
 
     def test_on_enum_result_empty_devices(self, qapp) -> None:
         """_on_enum_result с пустым списком → информационный диалог."""
-        helper, presenter = self._make_helper()
+        helper, presenter, _hik = self._make_helper()
         with patch("PySide6.QtWidgets.QMessageBox") as mock_msgbox:
-            helper._on_enum_result({"devices": []})
+            helper._on_enum_result([], "")
             mock_msgbox.information.assert_called_once()
 
     def test_on_enum_result_with_devices_upserts(self, qapp) -> None:
         """_on_enum_result с камерами + выбор в диалоге → device_upsert."""
-        helper, presenter = self._make_helper()
+        helper, presenter, _hik = self._make_helper()
         devices = [
-            {"model": "DS-2CD", "serial": "SN123", "ip": "192.168.1.10", "index": 0},
+            {"kind": "serial", "value": "SN123", "name": "DS-2CD"},
         ]
         with patch("PySide6.QtWidgets.QInputDialog") as mock_dialog:
             mock_dialog.getItem.return_value = (
-                "DS-2CD / SN123 (192.168.1.10)",
+                "DS-2CD / serial: SN123",
                 True,
             )
-            helper._on_enum_result({"devices": devices})
+            helper._on_enum_result(devices, "")
 
         presenter.device_upsert.assert_called_once()
         call_args = presenter.device_upsert.call_args[0][0]
@@ -62,13 +61,13 @@ class TestHikvisionRegistrationHelper:
 
     def test_on_enum_result_cancel_dialog(self, qapp) -> None:
         """_on_enum_result + отмена диалога → НЕ вызывает upsert."""
-        helper, presenter = self._make_helper()
+        helper, presenter, _hik = self._make_helper()
         devices = [
-            {"model": "DS-2CD", "serial": "SN123", "ip": "192.168.1.10", "index": 0},
+            {"kind": "serial", "value": "SN123", "name": "DS-2CD"},
         ]
         with patch("PySide6.QtWidgets.QInputDialog") as mock_dialog:
             mock_dialog.getItem.return_value = ("", False)
-            helper._on_enum_result({"devices": devices})
+            helper._on_enum_result(devices, "")
 
         presenter.device_upsert.assert_not_called()
 
@@ -76,7 +75,7 @@ class TestHikvisionRegistrationHelper:
         """register_camera без presenter → noop."""
         helper = HikvisionRegistrationHelper(
             devices_presenter=None,
-            request_runner=MagicMock(),
+            hikvision_presenter=MagicMock(),
         )
         # Не должно упасть
         helper.register_camera()

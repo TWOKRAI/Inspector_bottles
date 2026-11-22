@@ -3,7 +3,7 @@
 
 Переиспользуется и Services-секцией, и инспектором ноды Pipeline: связывает
 сигналы виджета с командами presenter, обновляет поля/статус по результатам
-enum/get_parameters. Вся UI-логика секции вынесена сюда, чтобы карточка ноды
+list_devices/read_params. Вся UI-логика секции вынесена сюда, чтобы карточка ноды
 в Pipeline дублировала те же поля без копипаста.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .presenter import HikvisionSettingsPresenter
+from .presenter import NO_LIVE_HINT, HikvisionSettingsPresenter
 from .widget import HikvisionSettingsWidget
 
 
@@ -29,66 +29,62 @@ class HikvisionWidgetController:
         w.enum_requested.connect(self._on_enum)
         w.open_requested.connect(self._on_open)
         w.close_requested.connect(self._on_close)
-        w.start_requested.connect(self._on_start)
-        w.stop_requested.connect(self._on_stop)
         w.get_params_requested.connect(self._on_get_params)
         w.apply_params_requested.connect(self._on_apply_params)
-        w.open_sdk_app_requested.connect(self._on_open_sdk_app)
 
     # --- обработчики сигналов виджета ---
 
     def _on_enum(self) -> None:
         self._widget.set_status("Поиск устройств…")
-        self._presenter.enum_devices(self._on_devices)
+        self._presenter.list_devices(self._on_devices)
 
-    def _on_devices(self, devices: list[dict]) -> None:
+    def _on_devices(self, devices: list[dict], error: str) -> None:
+        if error:
+            self._widget.set_devices([])
+            self._widget.set_status(error)
+            return
         self._widget.set_devices(devices)
         if devices:
             self._widget.set_status(f"Найдено устройств: {len(devices)}")
         else:
-            self._widget.set_status(
-                "Устройства не найдены. Нужен запущенный рецепт с камерой Hikvision "
-                "(процесс камеры) — либо используйте окно SDK App."
-            )
+            self._widget.set_status("Устройства не найдены.")
 
-    def _on_open(self, index: int) -> None:
-        ok = self._presenter.open(index)
-        self._widget.set_status("Камера открыта." if ok else self._no_live_hint())
+    def _on_open(self) -> None:
+        ok = self._presenter.take_device()
+        self._widget.set_status("Камера открыта, захват запущен." if ok else NO_LIVE_HINT)
 
     def _on_close(self) -> None:
-        ok = self._presenter.close()
-        self._widget.set_status("Камера закрыта." if ok else self._no_live_hint())
-
-    def _on_start(self) -> None:
-        ok = self._presenter.start()
-        self._widget.set_status("Захват запущен." if ok else self._no_live_hint())
-
-    def _on_stop(self) -> None:
-        ok = self._presenter.stop()
-        self._widget.set_status("Захват остановлен." if ok else self._no_live_hint())
+        ok = self._presenter.release_device()
+        self._widget.set_status("Камера закрыта." if ok else NO_LIVE_HINT)
 
     def _on_get_params(self) -> None:
         self._widget.set_status("Запрос параметров…")
-        self._presenter.get_parameters(self._on_params)
+        self._presenter.read_params(self._on_params)
 
-    def _on_params(self, params: dict) -> None:
-        if not params:
-            self._widget.set_status(self._no_live_hint())
+    def _on_params(self, params: dict, param_errors: dict, error: str) -> None:
+        if error:
+            self._widget.set_status(error)
             return
-        self._widget.set_params(
-            float(params.get("frame_rate", 0.0)),
-            float(params.get("exposure_time", 0.0)),
-            float(params.get("gain", 0.0)),
-        )
-        self._widget.set_status("Параметры получены.")
+        if params:
+            self._widget.set_params(
+                float(params.get("frame_rate", 0.0)),
+                float(params.get("exposure_time", 0.0)),
+                float(params.get("gain", 0.0)),
+            )
+        text = "Параметры получены." if params else "Параметров нет: прибор не взят."
+        if param_errors:
+            text += " Ошибки узлов: " + "; ".join(f"{field}: {reason}" for field, reason in param_errors.items())
+        self._widget.set_status(text)
 
     def _on_apply_params(self, fps: float, exposure: float, gain: float) -> None:
-        ok = self._presenter.set_parameters(fps, exposure, gain)
-        self._widget.set_status("Параметры применены." if ok else self._no_live_hint())
-
-    def _on_open_sdk_app(self) -> None:
-        ok = self._presenter.open_sdk_app()
-        self._widget.set_status("Окно SDK App запущено." if ok else "Не удалось запустить SDK App.")
+        ok, skipped = self._presenter.set_parameters(fps, exposure, gain)
+        if not ok:
+            self._widget.set_status(NO_LIVE_HINT)
+            return
+        text = "Параметры отправлены."
+        if "frame_rate" in skipped:
+            text += " fps пуст: не отправлен."
+        self._widget.set_status(text)
 
     # --- статус ---
 
@@ -96,22 +92,13 @@ class HikvisionWidgetController:
         if self._presenter.is_live:
             self._widget.set_status("Камера активна (live-управление доступно).")
         else:
-            self._widget.set_status(
-                "Камера не запущена. Активируйте рецепт с камерой Hikvision для "
-                "live-управления, либо откройте окно SDK App."
-            )
-
-    def _no_live_hint(self) -> str:
-        return (
-            "Команда не отправлена: нет запущенного процесса камеры Hikvision. "
-            "Активируйте рецепт hikvision_inspect или используйте окно SDK App."
-        )
+            self._widget.set_status("Камера не запущена. Активируйте рецепт с камерой Hikvision для live-управления.")
 
 
 class HikvisionRegistrationHelper:
     """Обвязка регистрации камеры Hikvision в реестре устройств.
 
-    Кнопка «Зарегистрировать» → hik_enum (device-less) → диалог выбора →
+    Кнопка «Зарегистрировать» → list_devices плагина hikvision → диалог выбора →
     device_upsert {kind: hikvision, params: {serial, index}}.
     """
 
@@ -119,43 +106,34 @@ class HikvisionRegistrationHelper:
         self,
         *,
         devices_presenter: Any,
-        request_runner: Any,
+        hikvision_presenter: Any,
         parent_widget: Any = None,
     ) -> None:
         self._devices_presenter = devices_presenter
-        self._runner = request_runner
+        self._hikvision_presenter = hikvision_presenter
         self._parent = parent_widget
 
     def register_camera(self) -> None:
-        """Запустить flow регистрации: hik_enum → выбор → upsert."""
-        if self._devices_presenter is None or self._runner is None:
+        """Запустить flow регистрации: list_devices плагина → выбор → upsert."""
+        if self._devices_presenter is None or self._hikvision_presenter is None:
             return
-        self._devices_presenter._request(
-            "hik_enum",
-            {},
-            self._on_enum_result,
-        )
+        self._hikvision_presenter.list_devices(self._on_enum_result)
 
-    def _on_enum_result(self, response: Any) -> None:
-        """Обработать ответ hik_enum: показать диалог выбора."""
+    def _on_enum_result(self, devices: list[dict], error: str) -> None:
+        """Обработать ответ list_devices (``{kind, value, name}``): показать диалог выбора."""
         from PySide6.QtWidgets import QInputDialog
 
-        if not isinstance(response, dict):
-            return
-        devices = response.get("devices") or []
-        if isinstance(response.get("result"), dict):
-            devices = response["result"].get("devices", devices)
-        if not devices:
+        if error or not devices:
             from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.information(
                 self._parent,
                 "Hikvision",
-                "Камеры не найдены. Убедитесь, что SDK установлен и камеры подключены.",
+                error or "Камеры не найдены. Убедитесь, что SDK установлен и камеры подключены.",
             )
             return
 
-        items = [f"{d.get('model', '?')} / {d.get('serial', '?')} ({d.get('ip', '?')})" for d in devices]
+        items = [f"{d.get('name') or '?'} / {d.get('kind', '?')}: {d.get('value', '?')}" for d in devices]
         item, ok = QInputDialog.getItem(
             self._parent,
             "Зарегистрировать камеру Hikvision",
@@ -167,10 +145,10 @@ class HikvisionRegistrationHelper:
             return
         idx = items.index(item)
         chosen = devices[idx]
-        serial = chosen.get("serial", "")
-        dev_index = chosen.get("index", idx)
+        serial = chosen.get("value", "") if chosen.get("kind") == "serial" else ""
+        dev_index = idx
         dev_id = f"hik_{serial}" if serial else f"hik_{dev_index}"
-        model = chosen.get("model", "Hikvision")
+        model = chosen.get("name") or "Hikvision"
 
         self._devices_presenter.device_upsert(
             {
@@ -227,7 +205,7 @@ def build_hikvision_controls(
 
     reg_helper = HikvisionRegistrationHelper(
         devices_presenter=devices_presenter,
-        request_runner=request_runner,
+        hikvision_presenter=presenter,
         parent_widget=widget,
     )
 

@@ -517,4 +517,7 @@ def test_потоки_база_не_создаёт_потоков_и_allowlist_G
     base = _git("merge-base", "HEAD", "main")
     assert base.returncode == 0, base.stderr
     diff = _git("diff", base.stdout.strip(), "--", "scripts/lifecycle_guards/tables.py")
-    assert (diff.returncode, diff.stdout) == (0, ""), diff.stdout or diff.stderr
+    assert diff.returncode == 0, diff.stderr
+    # К4' (4.2b) снимает запись R4 старого hikvision-плагина: таблица меняется, но строк `camera_device` в правке нет.
+    changed = [ln for ln in diff.stdout.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
+    assert not [ln for ln in changed if "camera_device" in ln], changed

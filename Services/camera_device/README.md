@@ -48,7 +48,8 @@
   `float` — `|read − target| ≤ max(inc or 0, 1e-3·|target|, eps_abs)`; `int` — `|read − target| < max(inc or 1, 1)` (без относительного члена);
   прочее (enum по имени элемента, `bool`, `string`) — `==`.
 - `params.build_plan(register_cls, values, bindings) -> list[Step]` — упорядоченный план из полей register'а (`FieldMeta.enabled_if`, `ui_group`) и таблицы
-  `BINDINGS`; `Step(field, binding, value, skip=None, parent=None)` — `skip` с причиной вместо исключения, `parent` — первый ключ `enabled_if`, не являющийся флагом
+  `BINDINGS`; порядок шагов = порядок объявления полей в `registers_base.CameraDeviceRegisters` (`exposure_auto` — `Off`/`Once`/`Continuous`,
+  пишется перед `exposure_time`); `Step(field, binding, value, skip=None, parent=None)` — `skip` с причиной вместо исключения, `parent` — первый ключ `enabled_if`, не являющийся флагом
   `*_managed`. Группа без флага `<группа>_managed` = `True` не пишется. Нет значения у нужного поля — `ValueError` с именем поля.
 - `params.check_bindings(register_cls, bindings, vendor_fields)` — `ValueError`, если ключи `BINDINGS` не совпадают с полями register'а (кроме флагов `*_managed` и `vendor_fields`).
 
@@ -76,6 +77,29 @@
 `frame_period_s` (период кадров; 0 — без пауз), `get_frame_hang_s` (разовое зависание `get_frame`; повторно взводит `arm_hang(seconds)`),
 `get_frame_errors` (первые N вызовов `get_frame` — `PortError`), `get_frame_script` (шаги `err` (`PortError`), `none` (тайм-аут), `frame` (кадр); допустимые — `SCRIPT_STEPS`),
 `read_offset` (`{Binding.key: смещение}` — чтение отличается от записи, узел не меняется).
+
+## Формат кадра (item)
+
+Item (`CameraDevicePlugin._build_item`): `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic), `device_id`, `ts` (wall),
+`pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. `pixel_format` — формат массива кадра, `source_format` — формат прибора.
+
+Преобразование в ядре (`_frame_array`), по `source_format` (= `RawFrame.pixel_format`):
+
+| `source_format` | Массив `frame` | `pixel_format` | Как |
+|---|---|---|---|
+| `mono8` | (H, W) | `mono8` | копия |
+| `rgb8` | (H, W, 3) BGR | `bgr8` | срез `[..., ::-1]` в непрерывную копию |
+| `bgr8` | (H, W, 3) BGR | `bgr8` | копия |
+| `bayer_rg8` | (H, W, 3) BGR | `bgr8` | `cv2.cvtColor`, `COLOR_BayerBG2BGR` |
+| `bayer_bg8` | (H, W, 3) BGR | `bgr8` | `cv2.cvtColor`, `COLOR_BayerRG2BGR` |
+| `bayer_gr8` | (H, W, 3) BGR | `bgr8` | `cv2.cvtColor`, `COLOR_BayerGB2BGR` |
+| `bayer_gb8` | (H, W, 3) BGR | `bgr8` | `cv2.cvtColor`, `COLOR_BayerGR2BGR` |
+| `bayer_*10/12`, `mono16`, прочее | — | — | кадр отброшен: `dropped` +1, `last_error`; `errors` не растёт |
+
+- Имена OpenCV для дебайера инвертированы относительно GenICam (`bayer_rg8` -> `COLOR_BayerBG2BGR`). Проверено на синтетической мозаике
+  (cv2 4.13.0); на приборе не проверено.
+- Контракт для вендорского плагина: кадр приводится к `(resolution_height, resolution_width, 3)` (цветные) и `(H, W)` (mono8).
+  Ядро проверяет только длину буфера относительно `height`, `width` и числа каналов формата; вендорский размер ядро не сверяет.
 
 ## Usage
 
@@ -283,8 +307,11 @@ register'а (проба и запись `apply_params`) для значения 
 
 ## Boundaries
 
-- `interface.py` импортирует только stdlib; `cv2` и `numpy` — только `drivers/opencv_driver.py` и `testing/`.
-- Ядро импортирует только `multiprocess_framework`, `pydantic` (модели `commands.py`) и stdlib.
+- `interface.py` импортирует только stdlib; `cv2` и `numpy` в нём запрещены.
+- `cv2` в ядре — только ленивый импорт внутри ветки дебайера `CameraDevicePlugin._frame_array` (`plugin_base.py`, сразу после
+  `if raw.pixel_format.startswith("bayer_")`): модуль ядра без дебайера `cv2` не тянет. Остальной `cv2` — `drivers/opencv_driver.py` и `testing/`.
+  `numpy` импортируется в `plugin_base.py` на верхнем уровне (кадр как массив).
+- Ядро импортирует только `multiprocess_framework`, `pydantic` (модели `commands.py`), `numpy`, ленивый `cv2` (см. выше) и stdlib.
 - Ядро не импортирует вендоров: драйверы подключаются строками реестра `drivers/__init__.py` (ADR-CAM-001).
   Запрет держат две записи `[[boundaries]]` в `.sentrux/rules.toml`; проверка — `sentrux check .`.
 - Вендорские пакеты импортируют ядро, не наоборот. Services не импортируют `Plugins` и `multiprocess_prototype`.

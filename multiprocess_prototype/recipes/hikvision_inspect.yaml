@@ -1,27 +1,27 @@
 # Рецепт hikvision_inspect — промышленная камера Hikvision → дисплей.
 #
 # Цепочка:
-#   camera_0 [HikvisionCameraPlugin] → color_convert [BGR↔RGB] → gui (display "main")
+#   camera_0 [HikvisionCameraPlugin] → gui (display "main")
 #
-# Нода color_convert переставляет каналы R/B: Bayer-демозаик камеры даёт
-# RGB-порядок, дисплей настроен на BGR — нода приводит к корректным цветам.
+# Плагин камеры отдаёт кадр в BGR (BGR по пробе cv2 на синтетике; на приборе — визит 6.3),
+# дисплей настроен на BGR — нода color_convert не нужна.
 #
-# МНОГО КАМЕР (независимы, каждая в СВОЁМ процессе):
-#   Скопируй блоки camera_0 + (опц.) свой color_convert, поменяй:
+# МНОГО КАМЕР (независимы, каждая в СВОЁМ процессе): см. hikvision_dual.yaml.
+#   Скопируй блок camera_0, поменяй:
 #     - process_name: camera_1
 #     - camera_id: 1            (уникальный SHM-слот hikvision_{id}_frame)
-#     - camera_index: 1         (индекс устройства в enum_devices)
-#   Добавь wire camera_1 → своя нода → gui и привязку display.
+#     - device_serial: <серийник второй камеры>   (device_select: serial)
+#   Добавь привязку display для camera_1.
 #
 # Предусловие: установлен MVS SDK (MvCameraControl.dll), камера(ы) подключены.
 # Запуск: python run.py → вкладка «Рецепты» → выбрать hikvision_inspect → активировать.
 name: hikvision_inspect
 version: 3
-description: "Hikvision камера → BGR↔RGB нода → дисплей (multi-camera-ready)"
+description: "Hikvision камера → дисплей (multi-camera-ready)"
 
 blueprint:
   name: hikvision_inspect
-  description: "Промышленная камера Hikvision → нода конвертации цвета → дисплей"
+  description: "Промышленная камера Hikvision → дисплей"
 
   # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без
   # «Раскладки». Авто-сохраняется при перетаскивании (PipelinePresenter).
@@ -30,11 +30,8 @@ blueprint:
       camera_0.hikvision:
         - 60.0
         - 205.54638364779876
-      color_convert.color_convert:
-        - 340.0
-        - 120.0
       main:
-        - 620.0
+        - 340.0
         - 120.0
     locked_nodes: []
 
@@ -55,41 +52,39 @@ blueprint:
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
       chain_targets:
-        - color_convert
+        - gui
       source_target_fps: 25
       plugins:
         - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
           plugin_name: hikvision
           category: source
           camera_id: 0
-          camera_index: 0
+          # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+          device_select: serial
+          device_serial: DA1689923
           # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
           # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
           # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
           resolution_width: 1440
           resolution_height: 1080
-          fps: 25
+          frame_rate_enable: true
+          frame_rate: 25.0
+          # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+          exposure_time: 40000.0
+          # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
           auto_start: true
+          # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+          # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+          trigger_managed: true
+          trigger_mode: "Off"
+          run_locked_commands: [release_device, take_device]
 
-    # --- Нода конвертации цвета BGR↔RGB ---
-    - process_name: color_convert
-      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
-      priority: normal
-      chain_targets:
-        - gui
-      plugins:
-        - plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
-          plugin_name: color_convert
-          category: processing
-          mode: bgr2rgb
-
-  wires:
-    - source: camera_0.hikvision.frame
-      target: color_convert.color_convert.frame
+  # Кадр камеры идёт прямо на дисплей (chain_targets camera_0 → gui), проводов между плагинами нет.
+  wires: []
 
   # Привязка узла к дисплею (node_id = process.plugin.port)
   displays:
-    - node_id: color_convert.color_convert.frame
+    - node_id: camera_0.hikvision.frame
       display_id: main
 
 # Определения дисплеев (top-level)
