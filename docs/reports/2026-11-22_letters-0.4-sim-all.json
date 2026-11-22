@@ -1,0 +1,368 @@
+{
+  "threshold": 0.5,
+  "total": 1056,
+  "no_disc": 0,
+  "top1_correct": 866,
+  "top1_correct_pct": 82.00757575757575,
+  "below_threshold": 170,
+  "below_threshold_pct": 16.098484848484848,
+  "answered": 886,
+  "correct_answered": 823,
+  "correct_answered_pct_of_all": 77.93560606060606,
+  "correct_among_answered_pct": 92.88939051918736,
+  "recall_by_letter": {
+    "Ё": {
+      "n": 32,
+      "top1": 0,
+      "correct_answered": 0,
+      "recall_top1_pct": 0.0,
+      "recall_answered_pct": 0.0
+    },
+    "А": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Б": {
+      "n": 32,
+      "top1": 30,
+      "correct_answered": 29,
+      "recall_top1_pct": 93.75,
+      "recall_answered_pct": 90.625
+    },
+    "В": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Г": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Д": {
+      "n": 32,
+      "top1": 4,
+      "correct_answered": 0,
+      "recall_top1_pct": 12.5,
+      "recall_answered_pct": 0.0
+    },
+    "Е": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Ж": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 28,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 87.5
+    },
+    "З": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 25,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 78.125
+    },
+    "И": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Й": {
+      "n": 32,
+      "top1": 30,
+      "correct_answered": 18,
+      "recall_top1_pct": 93.75,
+      "recall_answered_pct": 56.25
+    },
+    "К": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Л": {
+      "n": 32,
+      "top1": 0,
+      "correct_answered": 0,
+      "recall_top1_pct": 0.0,
+      "recall_answered_pct": 0.0
+    },
+    "М": {
+      "n": 32,
+      "top1": 24,
+      "correct_answered": 19,
+      "recall_top1_pct": 75.0,
+      "recall_answered_pct": 59.375
+    },
+    "Н": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "О": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "П": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Р": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "С": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Т": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "У": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Ф": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Х": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Ц": {
+      "n": 32,
+      "top1": 0,
+      "correct_answered": 0,
+      "recall_top1_pct": 0.0,
+      "recall_answered_pct": 0.0
+    },
+    "Ч": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Ш": {
+      "n": 32,
+      "top1": 16,
+      "correct_answered": 16,
+      "recall_top1_pct": 50.0,
+      "recall_answered_pct": 50.0
+    },
+    "Щ": {
+      "n": 32,
+      "top1": 19,
+      "correct_answered": 11,
+      "recall_top1_pct": 59.375,
+      "recall_answered_pct": 34.375
+    },
+    "Ъ": {
+      "n": 32,
+      "top1": 19,
+      "correct_answered": 19,
+      "recall_top1_pct": 59.375,
+      "recall_answered_pct": 59.375
+    },
+    "Ы": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 30,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 93.75
+    },
+    "Ь": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Э": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Ю": {
+      "n": 32,
+      "top1": 20,
+      "correct_answered": 20,
+      "recall_top1_pct": 62.5,
+      "recall_answered_pct": 62.5
+    },
+    "Я": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    }
+  },
+  "confusion_top5": [
+    {
+      "truth": "Ё",
+      "pred": "Е",
+      "count": 32
+    },
+    {
+      "truth": "Л",
+      "pred": "П",
+      "count": 32
+    },
+    {
+      "truth": "Ц",
+      "pred": "Т",
+      "count": 28
+    },
+    {
+      "truth": "Ш",
+      "pred": "П",
+      "count": 16
+    },
+    {
+      "truth": "Ъ",
+      "pred": "Ь",
+      "count": 13
+    }
+  ],
+  "angle": {
+    "frames_correct_letter": 866,
+    "frames_angle_undefined_full": 32,
+    "sym": {
+      "n": 834,
+      "median": 0.0731744598724191,
+      "p90_abs": 9.43582502097732,
+      "max_abs": 55.09068159833481,
+      "out_5": 0.23381294964028776,
+      "out_10": 0.09472422062350119,
+      "out_15": 0.03597122302158273
+    },
+    "sym_answered_only": {
+      "n": 791,
+      "median": -0.030439241386659432,
+      "p90_abs": 7.767259454228167,
+      "max_abs": 55.09068159833481,
+      "out_5": 0.20859671302149177,
+      "out_10": 0.07332490518331226,
+      "out_15": 0.02654867256637168
+    },
+    "no_sym": {
+      "n": 834,
+      "median": 0.08130337725212655,
+      "p90_abs": 40.38735127713496,
+      "max_abs": 179.9420987672936,
+      "out_5": 0.328537170263789,
+      "out_10": 0.19184652278177458,
+      "out_15": 0.13309352517985612
+    },
+    "inverted_sym": {
+      "n": 834,
+      "median": -0.09507975911230915,
+      "p90_abs": 176.84432537596197,
+      "max_abs": 179.96956075861334,
+      "out_5": 0.7482014388489209,
+      "out_10": 0.7146282973621103,
+      "out_15": 0.7074340527577938
+    },
+    "inverted_no_sym": {
+      "n": 834,
+      "median": -0.07290184654675613,
+      "p90_abs": 178.03882429710086,
+      "max_abs": 179.96956075861334,
+      "out_5": 0.7973621103117506,
+      "out_10": 0.7637889688249401,
+      "out_15": 0.7565947242206235
+    },
+    "median_by_grid_angle_sym": {
+      "0": {
+        "n": 106,
+        "median": 0.8803034269722545
+      },
+      "45": {
+        "n": 101,
+        "median": 1.5017285298770275
+      },
+      "90": {
+        "n": 106,
+        "median": 0.03742123603927894
+      },
+      "135": {
+        "n": 105,
+        "median": 0.6956135226924971
+      },
+      "180": {
+        "n": 103,
+        "median": -1.4957324777666656
+      },
+      "225": {
+        "n": 102,
+        "median": -0.8371439630063122
+      },
+      "270": {
+        "n": 106,
+        "median": -1.3465311907109054
+      },
+      "315": {
+        "n": 105,
+        "median": 0.07423444815805169
+      }
+    }
+  },
+  "source": {
+    "mode": "sim",
+    "model": "mobilenet_v3_large_20260616_050828",
+    "unreadable": 0,
+    "header": [
+      "модель mobilenet_v3_large_20260616_050828; порог 0.5; устройство cpu",
+      "источник: sim, букв 33, углов 8, по 4 на ячейку, seed 0",
+      "сим: дефекты 0, смещение центра ±[10, 20] px (секция train пресета), вырез radius/margin 14/128",
+      "ПРИБЛИЖЕНИЕ: вырез по радиусу объекта из альфы спрайта, не по кругу Хафа circle_detector"
+    ]
+  },
+  "thresholds_pass_fail": "не заданы (вопрос владельца β7)"
+}
