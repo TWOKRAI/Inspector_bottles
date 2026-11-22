@@ -2,35 +2,35 @@
 name = "inspector-bottles"
 version = "0.1.0"
 description = "Multiprocess framework for bottle inspection — camera-based defect detection"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     # Core framework
-    "pydantic>=2.13",
-    "pydantic-settings>=2.6",
-    "sqlalchemy[asyncio]>=2.0.49", # asyncio extras = greenlet для async-адаптера
-    "numpy>=2.4,<3",
-    "PyYAML>=6.0",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16",
+    "sqlalchemy[asyncio]>=2.1.9", # asyncio extras = greenlet для async-адаптера
+    "numpy>=2.5,<3",
+    "PyYAML>=6.0.4",
     "ruamel.yaml>=0.19.1,<0.20", # round-trip YAML с сохранением комментариев (рецепты, app.yaml)
-    "psutil>=7.0",
+    "psutil>=7.2",
     # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
-    "pyside6>=6.8,<6.11",
+    "pyside6>=6.12,<6.13", # пин minor: Qt-слой двигает API между minor (виджеты, QSS, сигналы)
     "QDarkStyle>=3.2",
     # Node graph editor (Phase 9) — fork от C3RV1 для PySide6, гибридный режим
     "NodeGraphQt",
-    "Qt.py>=1.4", # транзитивная зависимость NodeGraphQt
+    "Qt.py>=2.0", # транзитивная зависимость NodeGraphQt
     # Vision / image
-    "opencv-python>=4.13,<5",
-    "Pillow>=12.0",
+    "opencv-python>=5.1,<6", # пин major: 5.x поставился и импортируется на 3.14 (стенд 5.1.0); 6 — не проверялась
+    "Pillow>=13.0",
     # Data / plotting
-    "pandas>=2.2",
-    "matplotlib>=3.9",
-    "plotly>=5.24",
+    "pandas>=3.1",
+    "matplotlib>=3.11",
+    "plotly>=7.1",
     "seaborn>=0.13",
-    "openpyxl>=3.1",
+    "openpyxl>=3.1.5",
     # Camera (GigE Vision) — нет ARM-колёс genicam, пропускаем на macOS ARM
     "harvesters>=1.4; sys_platform != 'darwin' or platform_machine != 'arm64'",
     # Auth
-    "bcrypt>=4.1",
+    "bcrypt>=5.0",
     # Logging: своего пакета нет — записи идут через logger_module (разъём
     # `get_std_logger` + LoggerManager процесса). `loguru>=0.7` снята в задаче 4.3
     # (решение владельца 2026-08-11): после перевода двух последних точек прототипа
@@ -38,15 +38,13 @@ dependencies = [
     # без потребителя — не безобидный вес: она остаётся разрешением писать мимо
     # разъёма, а страж `test_no_loguru_outside_whitelist` держит это запретом.
     # Network / utils
-    "requests>=2.32",
-    "environs>=11.0",
+    "requests>=2.34",
+    "environs>=15.2",
     # Config hot-reload (ConfigFileWatcher → observability hot-reload)
-    "watchdog>=4.0",
-    # Simulation
-    "pygame>=2.6",
+    "watchdog>=7.1",
     # Async testing — было в стейл inner pyproject
-    "pytest-asyncio>=0.24",
-    "setuptools>=82.0.1",
+    "pytest-asyncio>=1.5",
+    "setuptools>=84.2",
     "pyqtgraph>=0.14.0",
 ]
 
@@ -56,27 +54,28 @@ inspector = "multiprocess_prototype.run:launch"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0",
-    "pytest-asyncio>=0.24",
-    "pytest-qt>=4.4", # qt_api = "pyside6", фикстура qtbot
-    "pytest-cov>=6.0", # coverage-отчёты
-    "ipykernel>=6.29",
-    "aiosqlite>=0.20", # для тестов async SQL-адаптера
-    "pyright>=1.1.408", # gradual type checking (replaces mypy)
-    "ruff>=0.15", # linter + formatter (pre-commit ставит свой, дублируем для make lint без активной venv)
+    "pytest>=9.2",
+    "pytest-asyncio>=1.5",
+    "pytest-qt>=4.5", # qt_api = "pyside6", фикстура qtbot
+    "pytest-cov>=7.1", # coverage-отчёты
+    "pytest-timeout>=2.4", # таймауты тестов (был в .venv, но не объявлен)
+    "ipykernel>=7.4",
+    "aiosqlite>=0.22", # для тестов async SQL-адаптера
+    "pyright>=1.1.414", # gradual type checking (replaces mypy)
+    "ruff>=0.17", # linter + formatter (pre-commit ставит свой, дублируем для make lint без активной venv)
     "bandit>=1.9", # security scanning (OWASP basics)
-    "pre-commit>=4.6.0",
+    "pre-commit>=4.7",
     "qt-mcp",
-    "grimp>=3.15",
-    "import-linter>=2.13",
-    "libcst>=1.8.6",
-    "pydeps>=3.0.6",
-    "griffe>=2.3",
-    "hypothesis>=6.100", # property-based тесты (robot_comm programs, T3.3)
+    "grimp>=3.20",
+    "import-linter>=2.17",
+    "libcst>=1.9",
+    "pydeps>=3.0.9",
+    "griffe>=2.4",
+    "hypothesis>=6.170", # property-based тесты (robot_comm programs, T3.3)
 ]
 diagrams = [
-    "pylint>=3.3",      # pyreverse для UML-диаграмм классов
-    "pydeps>=3.0",      # граф зависимостей модулей
+    "pylint>=4.1",      # pyreverse для UML-диаграмм классов
+    "pydeps>=3.0.9",    # граф зависимостей модулей
 ]
 
 [project.optional-dependencies]
@@ -84,30 +83,30 @@ diagrams = [
 # кросс-форматный, лёгкий, CPU/CUDA через providers. onnx нужен для валидации
 # .onnx и генерации dummy-моделей в тестах (CI/headless без реальных весов).
 ml = [
-    "onnxruntime>=1.20",
-    "onnx>=1.17",
+    "onnxruntime>=1.32",
+    "onnx>=1.23",
 ]
 # torch-backend (torchvision MobileNetV3 / .pt веса) — опциональный, тяжёлый.
 # Ставится отдельно: pip install '.[ml-torch]'
 ml-torch = [
-    "torch>=2.11",
-    "torchvision>=0.26",
+    "torch>=2.15",
+    "torchvision>=0.29",
 ]
 # Обучение моделей (Services/ml_train): torch + timm (MobileNetV4 и сотни
 # архитектур отсутствуют в torchvision) + onnx для экспорта в ml_inference.
 # GPU-сборка torch (CUDA) — по инструкции pytorch.org под драйвер стенда.
 ml-train = [
-    "torch>=2.11",
-    "torchvision>=0.26",
-    "timm>=1.0",
-    "onnx>=1.17",
+    "torch>=2.15",
+    "torchvision>=0.29",
+    "timm>=1.0.31",
+    "onnx>=1.23",
 ]
 
 # Modbus-драйвер (Services/modbus) — опциональный.
 # pymodbus тянет pyserial для RS485 (RTU). Без extra драйвер импортируется,
 # но реальное подключение требует установки: pip install '.[modbus]'
 modbus = [
-    "pymodbus>=3.7",
+    "pymodbus>=3.16",
 ]
 
 # MCP-сервер backend_ctl на официальном SDK (backend_ctl/mcp_server_sdk.py) —
@@ -115,7 +114,7 @@ modbus = [
 # даёт понятную ошибку с командой установки: pip install '.[ctl]'.
 # Пин minor-версии (ADR): SDK молодой, minor-релизы двигают API low-level Server.
 ctl = [
-    "mcp>=1.27,<1.28",
+    "mcp>=1.30,<1.31", # пин minor (ADR backend_ctl); 2.x НЕ брать: mcp 2.3.0 ломает backend_ctl (16 из 51 тестов test_mcp_server_sdk.py)
 ]
 
 # Компилируемые горячие функции (Plugins/processing/strokes_to_points: обход скелета).
@@ -124,13 +123,18 @@ ctl = [
 # aarch64 (Jetson, Pi-64); компилятор на машине не нужен. Первый вызов компилирует
 # 1–3 с, cache=True кладёт результат рядом с модулем (__pycache__).
 perf = [
-    "numba>=0.61",
+    "numba>=0.68",
 ]
 
 # OTLP-экспортёр наружу (Services/otel_export, этап 7) — опциональный.
 # Пин minor обязателен: Logs SDK живёт под opentelemetry.sdk._logs (подчёркивание
 # в имени модуля), backward-compat в minor сам проект не гарантирует. Обновление
 # extras = прогон Ф1 заново (ADR плана otel-export).
+# Python 3.14 (2026-11-22): остаёмся на 1.44 осознанно, не по инерции. Пробная установка 1.45.2
+# сломала 10 тестов (8 + 2): у OTLPLogExporter 1.45 нет `_session` (в дереве 1.45 появился
+# opentelemetry-exporter-http-transport; причину не разбирал), а Services/otel_export/exporter.py:316 зондирует
+# именно `_session` (8 тестов); ещё 2 теста читают версию «1.44» литералом. Переход на 1.45 = правка
+# exporter.py + прогон Ф1, отдельная задача.
 # Кроссплатформенность: оба пакета py3-none-any; единственная бинарная зависимость
 # по цепочке — protobuf, у него есть manylinux2014_aarch64 (Jetson, Pi-64) и
 # win_amd64, а на 32-битном armv7 подхватится py3-none-any фолбэк.
@@ -334,7 +338,7 @@ qt_api = "pyside6"
 #   - "warning"  — реальные подозрения на баги, не блокируем CI пока не разгребём
 #   - "error"    — добавлять по мере чистки долга
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 pythonPlatform = "All"
 include = ["multiprocess_framework", "multiprocess_prototype"]
 exclude = [
@@ -384,7 +388,7 @@ skip_empty = true
 # fail_under = 60  # раскомментировать когда покрытие достигнет 60%
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 120
 # .claude/ — bundled seed-канон (приходит из devseed upgrade), не наш код.
 # Без exclude ruff format расходится с upstream-форматом template'а →
