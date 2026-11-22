@@ -518,19 +518,30 @@ Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
      `token rejected: <путь файла>`. `TokenRejected` наследует `BackendUnavailable` (текст для
      MCP) и `SocketAuthError` (`OSError`): ретрай `except OSError` в `harness.py` сохраняется;
    * `request` вернул dict `success False`, `error "auth_required"` (сервер требует токен, а
-     `hello` не слали: слали бы — отказ пришёл бы в `connect`) → `BackendUnavailable` с текстом
-     `token file not found: <путь файла>`.
+     `hello` не слали: слали бы — отказ пришёл бы в `connect`) → `TokenFileMissing`
+     (подтип `BackendUnavailable`) с текстом `token file not found: <путь файла>`. После отказа
+     хост закрывает соединение (ADR-RTR-017), поэтому `request` помечает экземпляр
+     (`_token_missing`, снимается успешным `connect`): на помеченном соединении разрыв в
+     `request` — тоже `TokenFileMissing`, и `_conn_lost_message` отдаёт тот же текст. Иначе три
+     пробы `_await_ready` съедали единственный текст, а вызов пользователя видел «соединение
+     оборвано» (ревью стадии 5, находка 1).
    Путь — `resolve_token_path(self._port, os.environ)`. Обёртки `driver.py` (`send_command`,
    `system_command`) идут через `self.request`; `request_async` в backend_ctl не используется.
+   Подмена — только для dict с `success False` и `error "auth_required"`: не-dict `result`
+   и другой `error` возвращаются как есть.
+4. `driver.system_shutdown` (оба `except BackendUnavailable` — ответ на команду и опрос
+   `supervision_status`) пробрасывает `TokenFileMissing`: команда до PM не дошла, это не
+   `pm_gone` (ревью стадии 5, находка 2).
 3. `Services/robot_comm/gui/line_source.py` (`LineLink`, отладочная дверь линии на порту
    управления) передаёт `token_provider=file_token_provider(port, os.environ)`; `_reconnect`
    зовёт `connect` — провайдер перечитывает файл.
 
-**Известное (не чинится здесь).** `_await_ready` (`mcp_driver_session.py`) глотает исключение
-подключения: пользователь MCP видит `backend_warming`, а текст `token rejected` /
-`token file not found` — только на следующем вызове. Правка вне задачи (`OPEN_QUESTIONS`).
+**Известное (не чинится здесь).** `token rejected` пользователь MCP видит с первого вызова:
+`connect` идёт до `_await_ready`. `token file not found` первой ловит проба `_await_ready`
+(`mcp_driver_session.py`, глотает исключение); вызов пользователя видит тот же текст благодаря
+метке `_token_missing` (п. 2). Сам `_await_ready` не меняется (`OPEN_QUESTIONS`).
 `TokenRejected` — `OSError`: ретрай харнесса повторяет отказ по неверному токену до своего
-дедлайна, а не падает сразу.
+дедлайна, а не падает сразу. Пустой файл токена даёт текст `token file not found`, хотя файл есть.
 
 **Отвергнуто.**
 * Файловый провайдер в `__init__` драйвера — шим не зовёт `SocketClient.__init__`, а правка
@@ -538,10 +549,16 @@ Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
 * Отказ `auth_required` как error-dict без исключения — MCP не реконнектится и не называет файл.
 * `TokenRejected` только от `BackendUnavailable` — ломает ретрай `except OSError` харнесса.
 
-**Доказательство.** `backend_ctl/tests/test_token_client.py` (6 тестов: `hello` из файла, страж
-«нет файла — первая строка запрос», оба текста отказа, чистое окружение подпроцесса, реконнект
-с новым токеном) и `Services/robot_comm/tests/test_line_source_token.py` (1 тест). До правки
-`transport.py` и `line_source.py`: 6 красных, страж зелёный. Инъекции — у лида по плану Task 0.12a.
+**Доказательство.** `backend_ctl/tests/test_token_client.py` — 10 тестов: `hello` из файла;
+страж «нет файла — первая строка запрос»; оба текста отказа; чистое окружение подпроцесса;
+сеттер (явный провайдер главнее файла); реконнект с новым токеном; текст `token file not found`
+через `DriverSession` + `dispatch_tool`; `system_shutdown` без файла — `TokenFileMissing`, а не
+`pm_gone`; не-dict `result` и `error "boom"` возвращаются как есть.
+`Services/robot_comm/tests/test_line_source_token.py` — 1 тест. До правки `transport.py` и
+`line_source.py`: 6 красных, страж зелёный. Раунд 1 ревью: до правки 2 красных (`DriverSession`,
+`system_shutdown`); тест не-dict зелёный, красный под двумя инъекциями (без `isinstance(reply, dict)`;
+без проверки `error`). Инъекции плана — у лида.
 
-**Откат.** Убрать свойство и два переопределения из `transport.py` и параметр из
-`line_source.py`: клиенты снова не шлют `hello` (открытые серверы этого не заметят).
+**Откат.** Убрать свойство, метку, два переопределения и `TokenFileMissing` из `transport.py`,
+два `except TokenFileMissing` из `driver.py` и параметр из `line_source.py`: клиенты снова не шлют
+`hello` (открытые серверы этого не заметят).

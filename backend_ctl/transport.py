@@ -67,6 +67,15 @@ class TokenRejected(BackendUnavailable, SocketAuthError):
     """
 
 
+class TokenFileMissing(BackendUnavailable):
+    """Хост требует токен, а файла токена нет: команда до хоста не дошла (Task 0.12a, ревью).
+
+    Отдельный подтип: ``driver.system_shutdown`` ловит :class:`BackendUnavailable` как «PM
+    закрыл сокет» (``pm_gone``) и этот подтип пробрасывает. Текст — ``token file not found:
+    <путь файла>``.
+    """
+
+
 class _TransportMixin(SocketClient):
     """TCP-клиент driver'а: ``SocketClient`` + хуки событийного канала и watch."""
 
@@ -76,6 +85,10 @@ class _TransportMixin(SocketClient):
     # Явный провайдер (параметр ``SocketClient.__init__``) — главнее файлового. Шим
     # драйвера ``__init__`` базы не зовёт: остаётся ``None`` → файловый провайдер.
     _explicit_token_provider: Callable[[], str | None] | None = None
+    # Метка «хост ответил auth_required на этом соединении» (классовый дефолт: шим без
+    # __init__ базы). После отказа хост закрывает соединение: все следующие подъёмы разрыва
+    # называют файл токена, а не «соединение оборвано». Снимается успешным connect.
+    _token_missing: bool = False
 
     @property
     def _token_provider(self) -> Callable[[], str | None]:
@@ -104,17 +117,29 @@ class _TransportMixin(SocketClient):
             super().connect(timeout)
         except SocketAuthError as exc:
             raise TokenRejected(f"token rejected: {self._token_path_text()}") from exc
+        self._token_missing = False
 
     def request(self, message: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
-        """``SocketClient.request``; ответ ``auth_required`` → :class:`BackendUnavailable`.
+        """``SocketClient.request``; ответ ``auth_required`` → :class:`TokenFileMissing`.
 
         ``auth_required`` приходит только до рукопожатия: ``hello`` не слали (слали бы —
-        ``connect`` поднял бы :class:`TokenRejected`), значит файла токена нет.
+        ``connect`` поднял бы :class:`TokenRejected`), значит файла токена нет. После
+        отказа хост закрывает соединение: разрыв на помеченном соединении — тоже
+        :class:`TokenFileMissing` с тем же текстом (пробы ``_await_ready`` его не съедают).
         """
-        reply = super().request(message, timeout=timeout)
+        try:
+            reply = super().request(message, timeout=timeout)
+        except BackendUnavailable as exc:
+            if self._token_missing and not isinstance(exc, TokenFileMissing):
+                raise TokenFileMissing(self._token_missing_text()) from exc
+            raise
         if isinstance(reply, dict) and reply.get("success") is False and reply.get("error") == "auth_required":
-            raise BackendUnavailable(f"token file not found: {self._token_path_text()}")
+            self._token_missing = True
+            raise TokenFileMissing(self._token_missing_text())
         return reply
+
+    def _token_missing_text(self) -> str:
+        return f"token file not found: {self._token_path_text()}"
 
     def _handle_push(self, msg: Dict[str, Any]) -> None:
         # Push (без reply / поздний ответ никто не ждёт) → событийный канал driver'а.
@@ -132,6 +157,8 @@ class _TransportMixin(SocketClient):
 
     def _conn_lost_message(self, *, request_id: Optional[str] = None) -> str:
         """Actionable-текст смерти соединения (единый для всех точек подъёма)."""
+        if self._token_missing:  # хост закрыл соединение после auth_required
+            return self._token_missing_text()
         reason = getattr(self, "_conn_lost_reason", "") or "соединение оборвано"
         tail = f" (request_id={request_id})" if request_id else ""
         return (
@@ -142,6 +169,7 @@ class _TransportMixin(SocketClient):
 
 
 __all__ = [
+    "TokenFileMissing",
     "TokenRejected",
     "_TransportMixin",
     "_Pending",

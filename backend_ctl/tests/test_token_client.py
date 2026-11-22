@@ -236,6 +236,66 @@ def test_clean_env_client_finds_token(tmp_home: Path, tmp_path: Path) -> None:
         server.close()
 
 
+def test_mcp_session_shows_token_file_not_found(tmp_home: Path) -> None:
+    """Ревью стадии 5, находка 1: пробы ``_await_ready`` не съедают текст — его видит вызов MCP."""
+    from backend_ctl.dispatch import dispatch_tool
+    from backend_ctl.mcp_driver_session import DriverSession
+
+    server = _Server(TOKEN_A)
+    session = DriverSession(port=server.port, request_timeout=2.0, log=lambda _line: None)
+    try:
+        with pytest.raises(BackendUnavailable) as info:
+            _run(lambda: dispatch_tool(session, "run_status", {}), timeout=10.0)
+        assert str(info.value) == f"token file not found: {_token_path(tmp_home, server.port)}"
+        assert server.received == []
+    finally:
+        session.reset()
+        server.close()
+
+
+def test_system_shutdown_without_token_file_is_not_pm_gone(tmp_home: Path) -> None:
+    """Ревью стадии 5, находка 2: команда не дошла — это не «PM ушёл» (``pm_gone``)."""
+    from backend_ctl.transport import TokenFileMissing
+
+    server = _Server(TOKEN_A)
+    driver = BackendDriver(port=server.port)
+    try:
+        _run(lambda: driver.connect(timeout=2.0))
+        with pytest.raises(TokenFileMissing) as info:
+            _run(lambda: driver.system_shutdown(wait=False))
+        assert str(info.value) == f"token file not found: {_token_path(tmp_home, server.port)}"
+        assert server.received == []
+    finally:
+        driver.close()
+        server.close()
+
+
+def test_request_passes_non_dict_result_and_other_errors(tmp_home: Path) -> None:
+    """Ревью стадии 5, находка 3: подмена — только для dict ``success False`` + ``auth_required``."""
+    server = _Server(TOKEN_A)
+    replies = {
+        "list-12a": {"success": True, "result": [1, 2]},
+        "boom-12a": {"success": False, "error": "boom"},
+    }
+
+    def on_inbound(msg: dict[str, Any]) -> None:
+        server.received.append(msg)
+        server.channel.send({**replies[msg["command"]], "request_id": msg["request_id"]})
+
+    server.channel._on_inbound = on_inbound
+    driver = BackendDriver(port=server.port)
+    try:
+        _put_token(tmp_home, server.port, TOKEN_A)
+        _run(lambda: driver.connect(timeout=2.0))
+        assert _run(lambda: driver.request({"command": "list-12a"}, timeout=2.0)) == [1, 2]
+        boom = {"command": "boom-12a"}
+        reply = _run(lambda: driver.request(boom, timeout=2.0))
+        assert reply == {"success": False, "error": "boom", "request_id": boom["request_id"]}
+    finally:
+        driver.close()
+        server.close()
+
+
 def test_explicit_provider_beats_file_and_none_restores_file(tmp_home: Path) -> None:
     """Сеттер свойства: явный провайдер главнее файла; ``None`` возвращает файловый."""
     server = _Server(TOKEN_A)

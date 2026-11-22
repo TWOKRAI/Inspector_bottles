@@ -89,7 +89,7 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     state_changed_revisions,
 )
 from ._node_read import _assemble
-from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
+from .transport import TokenFileMissing, _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
 from .registers import RegisterOps, _PendingCommit  # noqa: F401 — _PendingCommit re-export для back-compat
 from .verdict import is_refusal
@@ -776,6 +776,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         started = time.monotonic()
         try:
             reply = self.system_command(command, timeout=6.0)
+        except TokenFileMissing:  # команда до PM не дошла — это не «PM ушёл» (0.12a)
+            raise
         except BackendUnavailable:
             # PM закрыл сокет раньше, чем ответил: команда дошла и стоп идёт — это и есть «PM ушёл».
             return {
@@ -850,6 +852,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 break
             try:
                 reply = self.supervision_status(pm_name=pm_name, timeout=min(2.0, max(0.05, wait_until - now)))
+            except TokenFileMissing:  # опрос не дошёл до PM — это не «PM ушёл» (0.12a)
+                raise
             except BackendUnavailable:
                 pm_gone = True
                 break
