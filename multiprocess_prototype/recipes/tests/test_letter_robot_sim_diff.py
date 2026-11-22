@@ -60,9 +60,9 @@ _EXPECTED_DIFFS = [
     # Снять запись, когда владелец сима решит судьбу его `color_convert` (источник сима `scene_source` отдаёт BGR).
     ".blueprint.processes[3].plugins[len=4 vs 5]",
     # Политика readiness боевого узла recog.ml_inference (Task 2.9b): сим осознанно без ключа — стендовые не трогаем.
+    # R4: β — гомография F7 (`use_linear: false`, решение владельца 2026-10-25), линейный режим остаётся симу.
+    ".blueprint.processes[5].plugins[1].config.use_linear",
     ".blueprint.processes[5].plugins[2].config.readiness",
-    # Геометрия ячеек сима (word-layout P3): 9 ячеек в досягаемости сима; рецепт β — ORDER #21/#26.
-    ".blueprint.processes[6].plugins[0].config.first_y",
     ".blueprint.wires[0].source",
     ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",

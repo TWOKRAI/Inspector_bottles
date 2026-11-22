@@ -180,7 +180,7 @@
                   "disk_radius_mm": 55.0,
                   "encoder_source": "e_capture",
                   "first_x": 320.0,
-                  "first_y": -200.0,
+                  "first_y": -440.0,
                   "last_x": 320.0,
                   "last_y": 300.0,
                   "line_angle_deg": 90.0,
@@ -456,7 +456,7 @@
                   "output_key": "pick_xy",
                   "roi_offset_x": 0,
                   "roi_offset_y": 0,
-                  "use_linear": true
+                  "use_linear": false
                 },
                 "plugin_class": "Plugins.processing.pixel_to_robot.plugin.PixelToRobotPlugin",
                 "plugin_name": "pixel_to_robot",
@@ -2587,7 +2587,7 @@
               "disk_radius_mm": 55.0,
               "encoder_source": "e_capture",
               "first_x": 320.0,
-              "first_y": -200.0,
+              "first_y": -440.0,
               "last_x": 320.0,
               "last_y": 300.0,
               "line_angle_deg": 90.0,
@@ -4643,7 +4643,7 @@
               "output_key": "pick_xy",
               "roi_offset_x": 0,
               "roi_offset_y": 0,
-              "use_linear": true
+              "use_linear": false
             },
             "plugin_class": "Plugins.processing.pixel_to_robot.plugin.PixelToRobotPlugin",
             "plugin_name": "pixel_to_robot",
