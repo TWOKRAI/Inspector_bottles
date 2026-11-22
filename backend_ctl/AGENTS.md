@@ -76,10 +76,15 @@ worker-side обработчика регистра) — без единого �
 
 ## Предусловия
 
-1. Система должна **работать** с открытым гейтом сокета. По умолчанию гейт уже открыт:
+1. Система должна **работать** с открытым гейтом сокета. Поставка гейт НЕ открывает:
    [`backend/config/system.yaml`](../multiprocess_prototype/backend/config/system.yaml) →
-   `backend_ctl.enabled: true`, `port: 8765`, `host: 127.0.0.1`.
-   Escape-hatch без правки yaml: `BACKEND_CTL=1 [BACKEND_CTL_PORT=9001] python run.py`.
+   `backend_ctl.enabled: false` (`port: 8765`, `host: 127.0.0.1`). Dev-старт включает порт env:
+   `BACKEND_CTL=1 [BACKEND_CTL_PORT=9001] python run.py` (харнесс ставит env сам).
+   Открытый порт всегда закрыт токеном: ПМ пишет его в `~/.multiprocess_framework/ctl_<порт>.token`
+   (права 0600; путь переопределяет `BACKEND_CTL_TOKEN_FILE`), клиенты backend_ctl (драйвер, MCP-сессия,
+   харнесс) читают файл сами на каждом connect — вводить токен вручную не нужно
+   ([BCTL-ADR-011](DECISIONS.md), ADR-PMM-052). Ошибки клиента: `token file not found: <путь>`
+   (ПМ не запущен или токена нет) и `token rejected: <путь>` (в файле токен другого ПМ).
 2. Запуск системы в фоне (НЕ блокировать сессию), из корня репозитория:
    ```bash
    python multiprocess_prototype/run.py     # run_in_background: true
@@ -243,7 +248,7 @@ with BackendHarness(with_base=True) as drv:      # старт → driver → г�
   «дверь» (SocketChannel в PM); без запущенной системы driver вернёт `not connected`.
 - **Таймаут = не баг по умолчанию.** `{"error": "timeout"}` часто значит «нет приёмника /
   процесс не отвечает» — это сам по себе диагностический результат.
-- **Только localhost, без аутентификации** — dev-инструмент. В проде гейт `enabled: false`.
+- **Только localhost, по токену из файла порта** — dev-инструмент. Сырой TCP без `hello` с токеном получает `auth_required` и закрывается. В поставке гейт `enabled: false`.
 - **Кадры/SHM через сокет НЕ гоняем** (Dict at Boundary) — только команды/состояние.
 - **MCP-сервер держит код на момент старта** (Ф4.5): свежую правку драйвера проверяй
   свежим процессом или рестартом сервера — иначе «доказываешь» поведение старого кода.

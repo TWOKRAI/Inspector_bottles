@@ -34,13 +34,13 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 
 ## Запуск
 
-1. Поднять систему с открытым гейтом. **Два способа** (OR):
+1. Поднять систему с открытым гейтом (порт всегда за токеном, см. ниже). **Два способа** (OR):
 
    **(a) Через `system.yaml` (основной для dev-прототипа)** —
    `multiprocess_prototype/backend/config/system.yaml`:
    ```yaml
    backend_ctl:
-     enabled: true      # сокет поднимается всегда при старте
+     enabled: true      # сокет поднимается всегда при старте (в поставке стоит false)
      port: 8765
      host: "127.0.0.1"
    ```
@@ -52,7 +52,14 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
    ```
    Приоритет: гейт открыт если `backend_ctl.enabled` **ИЛИ** `BACKEND_CTL=1`.
    Порт: `BACKEND_CTL_PORT` (env) > `backend_ctl.port` (yaml) > 8765.
-   В проде держать `enabled: false` и не выставлять env.
+   В поставке `enabled: false`, простой старт порт не открывает.
+
+   **Токен.** При открытом порте ПМ генерирует токен и пишет его в
+   `~/.multiprocess_framework/ctl_<порт>.token` (права 0600; путь переопределяет
+   `BACKEND_CTL_TOKEN_FILE`); при остановке ПМ удаляет файл, если он его. Драйвер, MCP-сессия и харнесс
+   читают файл сами на каждом connect — вручную токен не вводят. Ошибки клиента:
+   `token file not found: <путь>` и `token rejected: <путь>`. Сырой TCP без `hello` получает
+   `auth_required` и закрывается ([BCTL-ADR-011](DECISIONS.md), ADR-PMM-052).
 
 2. Подключиться драйвером:
    ```python
@@ -407,8 +414,8 @@ with BackendDriver(port=8765) as drv:
 
 ## Безопасность
 
-Dev-инструмент: bind `127.0.0.1`, гейт `BACKEND_CTL=1`, без аутентификации. В проде
-endpoint не поднимается. Остановка — PID-specific (закрытие канала при shutdown PM),
+Dev-инструмент: bind `127.0.0.1`, гейт `BACKEND_CTL=1`, доступ по токену из файла порта
+(см. «Токен» выше). В поставке endpoint не поднимается. Остановка — PID-specific (закрытие канала при shutdown PM),
 без глобального taskkill.
 
 ## Связанное
