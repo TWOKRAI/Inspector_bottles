@@ -845,3 +845,11 @@ def test_window_item_does_not_hide_a_red_audit(rig):
     assert rig.run(rig.cfg(alpha=_window_alpha(["B #4"], {"B #4": _WIN_4617}), audit=audit)) == 1
     text = _verdict(rig)
     assert "МЕХАНИЗМ: FAIL" in text and "причина: audit" in text and "причина: alpha" not in text
+
+
+def test_verdict_and_summary_link_to_wire_commands_file(rig):
+    assert rig.run(rig.cfg()) == 0
+    run_dir = rig.run_dir()
+    assert f"- журнал команд роботу: {run_dir / 'wire_commands.md'}" in _verdict(rig)
+    summary = (run_dir.parent / "summary.md").read_text(encoding="utf-8")
+    assert f"журнал команд: {run_dir / 'wire_commands.md'}" in summary

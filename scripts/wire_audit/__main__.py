@@ -14,6 +14,7 @@ import math
 import sys
 from pathlib import Path
 
+from scripts.wire_audit.commands import render_commands
 from scripts.wire_audit.core import AuditError, audit, render
 
 _ZONE_DEFAULT = "500"
@@ -91,7 +92,10 @@ def _non_negative(raw: str, flag: str) -> float:
     return value
 
 
-def _run(ns: argparse.Namespace) -> tuple[int, str]:
+_COMMANDS_FILE = "wire_commands.md"
+
+
+def _run(ns: argparse.Namespace) -> tuple[int, str, str | None]:
     zone = _non_negative(ns.zone_max_mm, "--zone-max-mm")
     margin = _non_negative(ns.pick_margin_mm, "--pick-margin-mm")
     words = None if ns.words is None else [w.strip() for w in ns.words.split(",")]
@@ -110,7 +114,8 @@ def _run(ns: argparse.Namespace) -> tuple[int, str]:
         sim_objects=objects,
         sim_journal=journal,
     )
-    return result.exit_code, render(result)
+    commands = render_commands(exchange, layout, registers, result, journal) if ns.out else None
+    return result.exit_code, render(result, _COMMANDS_FILE if ns.out else None), commands
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -119,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     ns = _build_parser().parse_args(argv)
     try:
-        code, report = _run(ns)
+        code, report, commands = _run(ns)
     except AuditError as exc:
         print(exc.message, file=sys.stderr)
         return exc.code
@@ -127,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     if ns.out:
         try:
             Path(ns.out).write_text(report, encoding="utf-8")
+            if commands is not None:
+                Path(ns.out).with_name(_COMMANDS_FILE).write_text(commands, encoding="utf-8")
         except OSError:
             print("отчёт не записан в --out", file=sys.stderr)
             return 2

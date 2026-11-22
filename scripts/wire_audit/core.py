@@ -416,6 +416,7 @@ class Row:
     job: Job | None = None
     reach_warn: bool = False
     window_warn: bool = False
+    passport: Passport | None = None  # паспорт сима, поставленный в пару строке диска (столбец Б)
 
     def add(self, *reasons: str) -> None:
         self.reasons.extend(r for r in reasons if r not in self.reasons)
@@ -604,6 +605,7 @@ class Passport:
     angle_deg: float | None
     lateral_px: float | None
     t: datetime
+    object_id: str = ""
 
 
 def parse_passports(items: list[dict]) -> tuple[list[Passport], int]:
@@ -616,7 +618,15 @@ def parse_passports(items: list[dict]) -> tuple[list[Passport], int]:
         if stamp is None or not isinstance(letter, str):
             skipped += 1
             continue
-        out.append(Passport(letter, _num(item.get("angle_deg")), _num(item.get("lateral_px")), stamp))
+        out.append(
+            Passport(
+                letter,
+                _num(item.get("angle_deg")),
+                _num(item.get("lateral_px")),
+                stamp,
+                str(item.get("object_id", "")),
+            )
+        )
     out.sort(key=lambda p: p.t)
     return out, skipped
 
@@ -869,10 +879,12 @@ def _column_b(
             no_passport += 1
             continue
         if match.letter.upper() != disk.letter.upper():
+            row.passport = match
             row.col_b = f"не судится: буква сети {disk.letter} ≠ паспорт {match.letter}"
             row.tilde = True
             letter_mismatch += 1
             continue
+        row.passport = match
         text, reasons, tilde, err = _judge_passport(job, disk, match, regs)
         row.col_b = text
         row.add(*reasons)
@@ -915,7 +927,7 @@ def _p_pick_origin(result: AuditResult) -> str:
     return "умолчание: в файле регистров нет"
 
 
-def render(result: AuditResult) -> str:
+def render(result: AuditResult, commands_link: str | None = None) -> str:
     """Отчёт: шапка, таблица Markdown, строки прогона, «Не покрыто независимо», итоговая строка (последняя)."""
     out = ["# Аудит провода CVT_JOB", ""]
     if result.words:
@@ -931,6 +943,8 @@ def render(result: AuditResult) -> str:
     out.append(f"--zone-max-mm: {result.zone_max_mm}")
     out.append(f"--pick-margin-mm: {result.pick_margin_mm}")
     out.extend(result.notes)
+    if commands_link:
+        out.append(f"Журнал команд роботу (построчно, с расшифровкой): {commands_link}")
     out += ["", _md_row(TABLE_HEADER), _md_row(["---"] * len(TABLE_HEADER))]
     out.extend(_md_row(row.cells()) for row in result.rows)
     out.append("")

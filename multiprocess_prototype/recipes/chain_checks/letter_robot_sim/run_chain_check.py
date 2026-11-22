@@ -72,6 +72,7 @@ _ITOG_COUNTS = re.compile(r"взятий\s+(\d+).*?пропусков\s+(\d+)") 
 _ALPHA_PRECONDITION_CODE = 3  # α вышла по предусловию (нет ни одной строки диска и т. п.)
 _AUDIT_INPUT_CODE = 2  # аудит отказал по входу (число слов не равно числу строк слова и т. п.)
 _NOT_CHECKED = "НЕ ПРОВЕРЕН"
+_COMMANDS_FILE = "wire_commands.md"  # пишет аудит рядом с audit.md (аргумент --out)
 # Узкий случай «две мягкие STOP_REQ при остановке из running» (docs/reports/2026-11-22_sim-audit-stop-req-diagnosis.md):
 # единственный красный пункт α — «СТОП stop» с «STOP_REQ строк 2 ≠ 1»; критерий α «ровно одна» устарел.
 _ALPHA_MECH_FAIL = re.compile(r"^МЕХАНИЗМ:\s*FAIL\s*\((.*)\)\s*$", re.MULTILINE)
@@ -607,7 +608,8 @@ def _verdict_text(
     lines += ["", accuracy or "ТОЧНОСТЬ: строки нет в alpha.out", itog or "ИТОГ: строки нет в audit.out", ""]
     lines += [f"- метка времени: {stamp}", f"- режим: {'gui' if gui else 'headless'}", f"- каталог прогона: {run_dir}"]
     lines += [f"- файл: {run_dir / name}" for name in ("sim.out", "proto.out", "collect.out", "alpha.out", "audit.out")]
-    lines += [f"- файл: {run_dir / 'audit.md'}", f"- файл: {run_dir / 'verdict.md'}"]
+    lines += [f"- файл: {run_dir / 'audit.md'}", f"- журнал команд роботу: {run_dir / _COMMANDS_FILE}"]
+    lines.append(f"- файл: {run_dir / 'verdict.md'}")
     lines += [f"- код {label}: {codes.get(key)}" for key, label in (("alpha", "α"), ("audit", "аудита"))]
     lines.append(f"- код сборщика: {codes.get('collect')}")
     if forced:
@@ -851,7 +853,8 @@ def _summary_text(cfg: Config, rows: list[RunOutcome], runs: int) -> str:
     lines += ["| прогон | МЕХАНИЗМ | ТОЧНОСТЬ (информативно) | путь |", "|---|---|---|---|"]
     for row in rows:
         lines.append(
-            f"| run{row.k} | {row.status} | {cell(row.accuracy or '—')} | {cell(str(row.run_dir / 'verdict.md'))} |"
+            f"| run{row.k} | {row.status} | {cell(row.accuracy or '—')} | "
+            f"{cell(str(row.run_dir / 'verdict.md'))}; журнал команд: {cell(str(row.run_dir / _COMMANDS_FILE))} |"
         )
     return "\n".join(lines) + "\n"
 
