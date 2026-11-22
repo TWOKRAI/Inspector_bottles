@@ -55,11 +55,16 @@ _EXPECTED_DIFFS = [
     # на равенство (путь расхождения был бы иным); состав пинит test_recipe_1_0.py. Снять запись при слиянии R4.
     # Строковая сортировка: «[10]» идёт раньше «[5]».
     ".blueprint.processes[10].plugins[0].config.controls[len=8 vs 10]",
+    # К4' (камера на ядре): β убрала `color_convert` после камеры (плагин отдаёт BGR, шаг переставлял бы R и B);
+    # сим-рецепт (чужой файл) его оставил: пара путей = плагин в `vision` (4 против 5) и цель первого провода.
+    # Снять запись, когда владелец сима решит судьбу его `color_convert` (источник сима `scene_source` отдаёт BGR).
+    ".blueprint.processes[3].plugins[len=4 vs 5]",
     # Политика readiness боевого узла recog.ml_inference (Task 2.9b): сим осознанно без ключа — стендовые не трогаем.
     ".blueprint.processes[5].plugins[2].config.readiness",
     # Геометрия ячеек сима (word-layout P3): 9 ячеек в досягаемости сима; рецепт β — ORDER #21/#26.
     ".blueprint.processes[6].plugins[0].config.first_y",
     ".blueprint.wires[0].source",
+    ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",
     # Лимит переподключения снят (решение владельца 2026-11-20, Р2): в сим-рецепте стоит, β (К, R4) применит то же —
     # тогда снять обе записи. Порядок — строковая сортировка путей.

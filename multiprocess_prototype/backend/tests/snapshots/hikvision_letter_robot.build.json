@@ -24,10 +24,19 @@
                 "config": {
                   "auto_start": true,
                   "camera_id": 0,
-                  "camera_index": 0,
-                  "fps": 25,
+                  "device_select": "serial",
+                  "device_serial": "DA1689923",
+                  "exposure_time": 40000.0,
+                  "frame_rate": 25.0,
+                  "frame_rate_enable": true,
                   "resolution_height": 1080,
-                  "resolution_width": 1440
+                  "resolution_width": 1440,
+                  "run_locked_commands": [
+                    "release_device",
+                    "take_device"
+                  ],
+                  "trigger_managed": true,
+                  "trigger_mode": "Off"
                 },
                 "fps": 25,
                 "plugin_class": "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin",
@@ -486,15 +495,6 @@
               {
                 "category": "processing",
                 "config": {
-                  "mode": "bgr2rgb"
-                },
-                "plugin_class": "Plugins.processing.color_convert.plugin.ColorConvertPlugin",
-                "plugin_name": "color_convert",
-                "worker_pool_size": 0
-              },
-              {
-                "category": "processing",
-                "config": {
                   "height": 481,
                   "width": 800,
                   "x": 246,
@@ -572,10 +572,10 @@
         "stop_timeout": 5.0
       },
       "wires": {
-        "camera_0.hikvision.frame->vision.color_convert.frame": {
+        "camera_0.hikvision.frame->vision.roi_crop.frame": {
           "source": "camera_0.hikvision.frame",
           "status": "pending",
-          "target": "vision.color_convert.frame"
+          "target": "vision.roi_crop.frame"
         },
         "line.line_filter.overlay->draw.overlay_draw.overlay": {
           "source": "line.line_filter.overlay",
@@ -993,10 +993,19 @@
             "config": {
               "auto_start": true,
               "camera_id": 0,
-              "camera_index": 0,
-              "fps": 25,
+              "device_select": "serial",
+              "device_serial": "DA1689923",
+              "exposure_time": 40000.0,
+              "frame_rate": 25.0,
+              "frame_rate_enable": true,
               "resolution_height": 1080,
-              "resolution_width": 1440
+              "resolution_width": 1440,
+              "run_locked_commands": [
+                "release_device",
+                "take_device"
+              ],
+              "trigger_managed": true,
+              "trigger_mode": "Off"
             },
             "fps": 25,
             "plugin_class": "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin",
@@ -5018,16 +5027,6 @@
         "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
         "observability_recipe_path": "<ROOT>/multiprocess_prototype/recipes/hikvision_letter_robot.yaml",
         "plugins": [
-          {
-            "category": "processing",
-            "config": {
-              "mode": "bgr2rgb"
-            },
-            "mode": "bgr2rgb",
-            "plugin_class": "Plugins.processing.color_convert.plugin.ColorConvertPlugin",
-            "plugin_name": "color_convert",
-            "worker_pool_size": 0
-          },
           {
             "category": "processing",
             "config": {

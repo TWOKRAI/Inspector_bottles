@@ -24,7 +24,8 @@ framework не попадает.
 `processes.<p>.state.plugins.camera_device.<имя>`), без прямого `merge`; прямой `state_proxy.merge` — только у
 событий (см. Task 2.3b выше), уровни им не пишутся.
 Item по Р10: `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic) + `device_id`, `ts` (wall),
-`pixel_format`, `width`, `height`, `device_frame_num`. Форма кадра — по `pixel_format` (rgb8/bgr8 — h x w x 3).
+`pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. Цветные источники (rgb8, bgr8, bayer_*8) уходят
+BGR h x w x 3 (`pixel_format="bgr8"`, `source_format` — формат прибора); mono8 — h x w; прочие форматы кадр отбрасывают.
 
 Task 2.4b: правка поля из GUI (`register_update` -> `RegistersManager.set_field_value`) доходит до прибора по Р12.
 В `configure` плагин подписывается на каждое поле из `bindings()` (`ctx.registers.subscribe`; без `ctx.registers` —
@@ -73,8 +74,16 @@ from .session import DeviceSession, describe_error
 # Срок ответа владельца на команду через `session.call`, с: больше `timeout_ms/1000` и обычного перезахвата на фейке.
 # Команда блокирует системный поток процесса до срока; худший случай — срок + `watchdog_s` (владелец взял `fn` и завис).
 _CALL_TIMEOUT_S = 2.0
-# Каналов на пиксель для 8-битных форматов; `bayer_*` — один канал (дебайер — не в ядре).
-_CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3}
+# Каналов на пиксель для принимаемых 8-битных форматов; `bayer_*8` — один канал (дебайер — в `_frame_array`).
+_CHANNELS = {"mono8": 1, "rgb8": 3, "bgr8": 3, "bayer_rg8": 1, "bayer_bg8": 1, "bayer_gr8": 1, "bayer_gb8": 1}
+# Дебайер: имя формата (GenICam) -> имя константы OpenCV. Имена OpenCV инвертированы
+# относительно GenICam (замер cv2 4.13.0, RGGB, красная сцена): bayer_rg8 -> COLOR_BayerBG2BGR и так далее.
+_DEBAYER_CODE = {
+    "bayer_rg8": "COLOR_BayerBG2BGR",
+    "bayer_bg8": "COLOR_BayerRG2BGR",
+    "bayer_gr8": "COLOR_BayerGB2BGR",
+    "bayer_gb8": "COLOR_BayerGR2BGR",
+}
 # Окно публикации уровней, агрегата замеров и сверки событий, с (в тестах подменяется).
 _TICK_S = 1.0
 # Состояния отказа сеанса: инцидент `report_error` и `health.degraded`.
@@ -548,17 +557,30 @@ class CameraDevicePlugin(ProcessModulePlugin):
 
     @staticmethod
     def _frame_array(raw: RawFrame) -> np.ndarray:
-        """Массив кадра по `pixel_format`: rgb8/bgr8 -> (h, w, 3), остальные 8-битные -> (h, w)."""
+        """Массив кадра по `pixel_format`: цветные (rgb8, bgr8, bayer_*8) -> (h, w, 3) BGR; mono8 -> (h, w).
+
+        Raises:
+            ValueError: формат не поддержан (bayer 10/12, mono16 и прочее), длина буфера не сходится с размером
+                или дебайер отказал.
+        """
         channels = _CHANNELS.get(raw.pixel_format)
-        if channels is None and raw.pixel_format.startswith("bayer_"):
-            channels = 1
         if channels is None:
             raise ValueError(f"неподдерживаемый pixel_format {raw.pixel_format}")
         expected = raw.height * raw.width * channels
         if len(raw.data) != expected:
             raise ValueError(f"длина буфера {len(raw.data)} не равна {expected} для {raw.pixel_format}")
         shape = (raw.height, raw.width, 3) if channels == 3 else (raw.height, raw.width)
-        return np.frombuffer(raw.data, dtype=np.uint8).reshape(shape).copy()
+        frame = np.frombuffer(raw.data, dtype=np.uint8).reshape(shape)
+        if raw.pixel_format == "rgb8":
+            return np.ascontiguousarray(frame[..., ::-1])  # вид с отрицательным шагом не contiguous: копия обязательна
+        if raw.pixel_format.startswith("bayer_"):
+            import cv2  # ленивый импорт: ядро без дебайера не тянет cv2
+
+            try:
+                return cv2.cvtColor(frame, getattr(cv2, _DEBAYER_CODE[raw.pixel_format]))
+            except cv2.error as exc:  # `produce()` ловит только ValueError
+                raise ValueError(f"дебайер {raw.pixel_format} не удался: {exc}") from exc
+        return frame.copy()
 
     def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame) -> dict:
         device = self._session.device if self._session is not None else None
@@ -571,7 +593,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
             "frame_id": seq,
             "timestamp": mono,
             "ts": ts,
-            "pixel_format": raw.pixel_format,
+            "pixel_format": "bgr8" if frame.ndim == 3 else raw.pixel_format,  # цветные источники уходят как BGR
+            "source_format": raw.pixel_format,
             "width": raw.width,
             "height": raw.height,
             "device_frame_num": raw.frame_num,
