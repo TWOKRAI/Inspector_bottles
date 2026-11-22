@@ -56,7 +56,7 @@ GUI-пульт: пользователь создаёт контролы (кно
 | `mon_assembled` | собрано | monitor ← `processes.layout.state.word_layout.assembled` |
 | `mon_done` | слово собрано | monitor ← `processes.layout.state.word_layout.done` |
 
-Рецепт `letter_robot_sim.yaml`, процесс `pult` (последний, `run_gated: false`). В β (`hikvision_letter_robot.yaml`) 8 контролов: «Домой» и «Серво ВКЛ» — только после R4 (перевод β на `delta_v2`).
+Рецепт `letter_robot_sim.yaml`, процесс `pult` (последний, `run_gated: false`). В β (`hikvision_letter_robot.yaml`) те же 10 контролов, что в sim (Task 6.7, после R4: β на `delta_v2`); `delta_v2` на реальном роботе не проверен.
 
 ## Известные ограничения 1.0
 

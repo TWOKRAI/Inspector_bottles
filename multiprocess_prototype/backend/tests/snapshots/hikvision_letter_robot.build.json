@@ -358,6 +358,31 @@
                       "type": "button"
                     },
                     {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "home",
+                      "label": "Домой",
+                      "source": "action",
+                      "target_command": "robot_park",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "button"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "servo_on",
+                      "label": "Серво ВКЛ",
+                      "source": "action",
+                      "target_command": "robot_servo",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "button",
+                      "value_arg": "on"
+                    },
+                    {
                       "id": "mon_conn",
                       "label": "Связь с роботом",
                       "source": "monitor",
@@ -4181,6 +4206,31 @@
                   "target_plugin_index": 0,
                   "target_process": "devices",
                   "type": "button"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "home",
+                  "label": "Домой",
+                  "source": "action",
+                  "target_command": "robot_park",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "button"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "servo_on",
+                  "label": "Серво ВКЛ",
+                  "source": "action",
+                  "target_command": "robot_servo",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "button",
+                  "value_arg": "on"
                 },
                 {
                   "id": "mon_conn",
