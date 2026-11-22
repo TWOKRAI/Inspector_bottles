@@ -212,3 +212,11 @@ def test_beta_word_starts_at_minus_440_like_sim() -> None:
     assert cfg["first_y"] == -440.0
     assert cfg["last_y"] == 300.0
 
+
+def test_beta_robot_driver_is_v2_with_beta_address() -> None:
+    """R4-3 (владелец 2026-11-20): драйвер β — `delta_v2`; адрес реального робота прежний (не адрес сима)."""
+    raw = yaml.safe_load((_RECIPES_DIR / "hikvision_letter_robot.yaml").read_text(encoding="utf-8"))
+    robot = next(d for d in raw["devices"] if d["id"] == "robot_main")
+    assert robot["protocol"] == "delta_v2"
+    assert (robot["transport"]["host"], robot["transport"]["port"], robot["transport"]["unit_id"]) == ("192.168.1.7", 502, 2)
+

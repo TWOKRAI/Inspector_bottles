@@ -67,7 +67,6 @@ _EXPECTED_DIFFS = [
     ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",
     ".devices[0].params.robot_params",
-    ".devices[0].protocol",
     ".devices[0].transport.host",
     ".devices[0].transport.port",
     ".name",
@@ -217,10 +216,10 @@ def test_sim_recipe_points_robot_at_sim_not_hardware() -> None:
     robot = next(d for d in sim["devices"] if d["id"] == "robot_main")
     assert robot["transport"]["host"] == "127.0.0.1"
     assert robot["transport"]["port"] == 5021
-    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон остаётся на v1 без robot_params
+    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон (R4) — тоже v2, но без robot_params
     assert robot["protocol"] == "delta_v2"
     assert robot["params"]["robot_params"] == {"P_ZONE_MAX": 6000}
     base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
     base_robot = next(d for d in base["devices"] if d["id"] == "robot_main")
-    assert base_robot["protocol"] == "delta_universal3"
+    assert base_robot["protocol"] == "delta_v2"
     assert "robot_params" not in (base_robot.get("params") or {})

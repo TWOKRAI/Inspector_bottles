@@ -56,7 +56,9 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    protocol: delta_universal3
+    # R4 (владелец 2026-11-20): драйвер v2, как у сима. На роботе 192.168.1.7:502 v2 НЕ проверен — T0.3/T4.0 на визите.
+    # Откат — revert этого коммита (было `delta_universal3`).
+    protocol: delta_v2
     transport:
       type: tcp
       host: 192.168.1.7

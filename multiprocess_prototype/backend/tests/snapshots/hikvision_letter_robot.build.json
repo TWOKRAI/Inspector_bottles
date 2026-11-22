@@ -80,7 +80,7 @@
                       "telemetry_interval_s": 0.5,
                       "word_order": "little"
                     },
-                    "protocol": "delta_universal3",
+                    "protocol": "delta_v2",
                     "transport": {
                       "host": "192.168.1.7",
                       "port": 502,
@@ -1426,7 +1426,7 @@
                   "telemetry_interval_s": 0.5,
                   "word_order": "little"
                 },
-                "protocol": "delta_universal3",
+                "protocol": "delta_v2",
                 "transport": {
                   "host": "192.168.1.7",
                   "port": 502,
