@@ -103,6 +103,16 @@ svg.dg{display:block;min-width:860px;width:100%;height:auto;color:var(--ink)}
 .dg text.lb{fill:var(--muted);font-size:10.5px;font-weight:400}
 .dg text.tag{fill:var(--p1);font:600 11px var(--mono)}
 figcaption{font-size:13px;color:var(--muted);max-width:80ch}
+.dg .b.ok{stroke:var(--ok);stroke-opacity:1;stroke-width:2}
+.dg .b.fix{stroke:var(--p2);stroke-opacity:1;stroke-width:2}
+.dg .b.run{stroke:var(--accent);stroke-opacity:1;stroke-width:2}
+.dg .b.wait{stroke:var(--muted);stroke-opacity:.8;stroke-dasharray:5 4}
+.dg text.t{font-size:12.5px;font-weight:600}
+.dg text.h{font-size:13.5px;font-weight:600}
+.dg text.st{font:600 10.5px var(--mono);letter-spacing:.04em}
+.dg text.st.ok{fill:var(--ok)} .dg text.st.fix{fill:var(--p2)} .dg text.st.run{fill:var(--accent)} .dg text.st.wait{fill:var(--muted)}
+.c-run{background:var(--accent)}
+.c-wait{background:transparent;border:1px dashed var(--muted)}
 
 /* находки */
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -142,7 +152,7 @@ td b{font-weight:600}
   <h1>Наблюдаемость фреймворка и backend_ctl</h1>
   <p class="lead">Логи, ошибки, метрики, телеметрия и управляющий MCP-инструмент. Оценки выставлены по коду и по живому стенду, а не по документам. Каждая находка несёт путь в коде и способ, которым она проверена.</p>
   <nav class="toc" aria-label="Разделы">
-    <a href="#verdict">Вердикт</a><a href="#scores">Оценки</a><a href="#how">Как устроено</a><a href="#live">Живой стенд</a><a href="#findings">Находки</a><a href="#crutches">Костыли</a><a href="#good">Сильные стороны</a><a href="#plans">Планы и документы</a><a href="#target">Целевая архитектура</a><a href="#roadmap">Порядок работ</a><a href="#limits">Что не проверено</a>
+    <a href="#verdict">Вердикт</a><a href="#scores">Оценки</a><a href="#how">Как устроено</a><a href="#live">Живой стенд</a><a href="#findings">Находки</a><a href="#crutches">Костыли</a><a href="#good">Сильные стороны</a><a href="#plans">Планы и документы</a><a href="#target">Целевая архитектура</a><a href="#roadmap">Порядок работ</a><a href="#phase0">Фаза 0: ход работ</a><a href="#limits">Что не проверено</a>
   </nav>
 </header>
 
@@ -892,6 +902,67 @@ td b{font-weight:600}
     </div>
   </div>
   <p class="note">Очерёдность является моим суждением. Довод: цель о планировании мощности упирается не в нехватку кода наблюдаемости, а в то, что два опубликованных числа неверны и событий стадии нет. Срез 1 использует шов, который в исполнителе уже есть, и не ждёт цепочку задач плана closure.</p>
+</section>
+
+<section id="phase0">
+  <span class="eyebrow">Фаза 0 · ход работ на 2026-11-21</span>
+  <h2>Что делает фаза 0 простыми словами</h2>
+  <p>Фаза 0 исправляет одну беду из этой ревизии: система иногда отвечает «всё хорошо», когда это не так. Для этого есть три правила. Под каждым стоят задачи, и у каждой задачи виден статус. Это срез 0 из порядка работ выше.</p>
+  <figure>
+    <div class="dgwrap">
+    <svg class="dg" viewBox="0 0 1048 760" role="img" aria-label="Схема фазы 0. Фундамент: общий словарь исходов и контракт-тесты, готово. Правило 1, ответ говорит правду: задачи 0.4, 0.6, 0.7 готовы, 0.5a и 0.5b ждут правок тестов, 0.5c в работе. Правило 2, старое число не выдаётся за живое: 0.8 в работе, 0.9 и 0.10 ждут. Правило 3, записал значит прочитал обратно: 0.11 ждёт второго раунда ревью. Дальше остальные задачи и приёмка на стенде, затем слияние в main одним срезом.">
+      <defs><marker id="ar0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect class="b ok" x="12" y="20" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="41">Фундамент · 0.1–0.3 · одно слово для исхода: «принято», «потеряно» или «отказано»</text>
+      <text class="s" x="28" y="58">Плюс 11 контракт-тестов, которые проверяют три правила ниже. </text><text class="st ok" x="360" y="58">ГОТОВО</text>
+      <line class="ln" x1="177" y1="68" x2="177" y2="82" marker-end="url(#ar0)"/>
+      <line class="ln" x1="524" y1="68" x2="524" y2="82" marker-end="url(#ar0)"/>
+      <line class="ln" x1="871" y1="68" x2="871" y2="82" marker-end="url(#ar0)"/>
+      <rect class="b goal" x="12" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="24" y="107">1 · Ответ говорит правду</text><text class="s" x="24" y="130">Было: «записано», а запись пропала.</text><text class="s" x="24" y="150">Станет: каждая потеря посчитана и названа.</text>
+      <rect class="b goal" x="359" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="371" y="107">2 · Старое число не выдаётся за живое</text><text class="s" x="371" y="130">Было: стадия встала, fps всё ещё 92.</text><text class="s" x="371" y="150">Станет: число с возрастом, ответ «устарело».</text>
+      <rect class="b goal" x="706" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="718" y="107">3 · «Записал» значит «прочитал обратно»</text><text class="s" x="718" y="130">Было: ответ «ок» принимали на веру.</text><text class="s" x="718" y="150">Станет: до, запись, после и вердикт по факту.</text>
+      <rect class="b ok" x="12" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="202">0.4 · Файловый канал: сбой записи на диск</text><text class="s" x="24" y="220">Ошибка считается и называется по классу, не текстом</text><text class="st ok" x="24" y="237">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b fix" x="12" y="254" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="276">0.5a · Копии записей (tap'ы): отказ получателя</text><text class="s" x="24" y="294">Отказ теперь считается: tap_refused_records</text><text class="st fix" x="24" y="311">КОД ЕСТЬ · ПРАВКИ ПО РЕВЬЮ</text>
+      <rect class="b fix" x="12" y="328" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="350">0.5b · Мост сокета: потерянный ответ</text><text class="s" x="24" y="368">Счётчик lost_responses и ответ «ошибка», а не тишина</text><text class="st fix" x="24" y="385">КОД ЕСТЬ · ПРАВКИ ПО РЕВЬЮ</text>
+      <rect class="b run" x="12" y="402" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="424">0.5c · Остальные пути роутера</text><text class="s" x="24" y="442">Тот же суд над возвратом отправки и доставки</text><text class="st run" x="24" y="459">В РАБОТЕ</text>
+      <rect class="b ok" x="12" y="476" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="498">0.6 · Логгер после остановки</text><text class="s" x="24" y="516">Не отвечает «записано»; ошибки идут в аварийный пол</text><text class="st ok" x="24" y="533">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b ok" x="12" y="550" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="572">0.7 · Трасса исключения</text><text class="s" x="24" y="590">log_exception сохраняет traceback целиком</text><text class="st ok" x="24" y="607">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b run" x="359" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="202">0.8 · Окно счётчиков</text><text class="s" x="371" y="220">Возраст числа считается от момента чтения</text><text class="st run" x="371" y="237">В РАБОТЕ</text>
+      <rect class="b wait" x="359" y="254" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="276">0.9 · Метка «устарело» в heartbeat</text><text class="s" x="371" y="294">Остановленная стадия не показывает старый fps</text><text class="st wait" x="371" y="311">ЖДЁТ 0.8</text>
+      <rect class="b wait" x="359" y="328" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="350">0.10 / 0.10b · Потребитель: backend_ctl</text><text class="s" x="371" y="368">Часы в драйвере: «устарело» видит и инструмент</text><text class="st wait" x="371" y="385">ЖДЁТ</text>
+      <rect class="b fix" x="706" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="718" y="202">0.11 · Проверенная запись регистров</text><text class="s" x="718" y="220">Читает до, пишет, читает после; откат и конфиг тоже</text><text class="st fix" x="718" y="237">КОД ЕСТЬ · ВТОРОЙ РАУНД РЕВЬЮ</text>
+      <line class="ln" x1="524" y1="246" x2="524" y2="252" marker-end="url(#ar0)"/>
+      <rect class="b wait" x="12" y="636" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="657">Дальше, по слову координатора · 0.11b, 0.12, 0.12b и 0.13</text>
+      <text class="s" x="28" y="674">0.13 — приёмка на живом стенде: строка «остановленная стадия отвечает „устарело“» должна пройти.</text>
+      <line class="ln" x1="524" y1="684" x2="524" y2="694" marker-end="url(#ar0)"/>
+      <rect class="b goal" x="12" y="696" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="717">Слияние в main · одним срезом</text>
+      <text class="s" x="28" y="734">Когда 0.4–0.11 прошли ревью, все 11 контракт-тестов зелёные и тяжёлые прогоны сделаны в окне координатора.</text>
+    </svg>
+    </div>
+    <figcaption>Формулировки «было / станет» я написал простыми словами по плану и отчётам ревью, это не цитаты. Какие именно ключи и файлы затронуты, видно в карточках задач плана <code>observability-signal-contracts</code>.</figcaption>
+  </figure>
+  <div class="legend" aria-label="Обозначения статусов">
+    <span><i class="c-pass"></i>готово, ревью пройдено</span>
+    <span><i class="c-part"></i>код есть, ревьюер просит правок</span>
+    <span><i class="c-run"></i>в работе</span>
+    <span><i class="c-wait"></i>ждёт своей очереди</span>
+  </div>
+  <p class="note">Итог на сегодня. Готовы фундамент и три задачи: 0.4, 0.6, 0.7. Две задачи, 0.5a и 0.5b, закоммичены и дорабатываются по ревью. Задача 0.11 реализована и ждёт второго раунда. В работе идут 0.5c и 0.8. Остальное ждёт. Приоритет владельца отдан «железу»: когда стартуют полосы К и Р2, я допишу текущую задачу и остановлюсь.</p>
 </section>
 
 <section id="limits">
