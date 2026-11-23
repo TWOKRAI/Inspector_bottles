@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Any
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 from multiprocess_framework.modules.recipe import RecipeFormatError
-from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
+from multiprocess_prototype.adapters.recipe_canonical import (
+    denormalize_recipe_dict,
+    minimize,
+    recipe_from_canonical,
+    recipe_to_canonical,
+)
 from multiprocess_prototype.domain.entities.recipe import Recipe
 
 if TYPE_CHECKING:
@@ -67,8 +72,6 @@ class RecipeStoreFromManager:
         контракт до 1.1c («None если не найден»), потребители (каталог дисплеев, ``ActivateRecipe``)
         не знают ``RecipeFormatError``.
         """
-        from multiprocess_prototype.adapters.recipe_canonical import recipe_from_canonical
-
         try:
             doc, _rev = self._rm.read_canonical(slug)
         except RecipeFormatError as exc:
@@ -85,11 +88,9 @@ class RecipeStoreFromManager:
         верхние ключи проходят ``minimize`` (как вставка в ``recipe_to_canonical``: умолчания модели не пишутся).
         Возвращает новый ``rev`` (холостая запись — прежний). Raises: ``RecipeConflict``.
         """
-        from multiprocess_prototype.adapters.recipe_canonical import minimize, recipe_to_canonical
-
         doc, rev = self._rm.read_canonical(slug)
         if doc is None:
-            after = {key: minimize((key,), value) for key, value in self._denormalize(recipe.to_dict()).items()}
+            after = {key: minimize((key,), value) for key, value in denormalize_recipe_dict(recipe.to_dict()).items()}
         else:
             after = recipe_to_canonical(recipe, doc)
         return self._rm.patch_recipe(slug, after, expected_rev=expected_rev if expected_rev is not None else rev)
@@ -193,55 +194,8 @@ class RecipeStoreFromManager:
 
     @staticmethod
     def _denormalize(data: dict[str, Any]) -> dict[str, Any]:
-        """Денормализовать meta -> top-level для backward-compat с live YAML.
-
-        Recipe.to_dict() выдаёт: {"meta": {"name": ..., "version": ..., ...}, "blueprint": ..., ...}
-        Live YAML формат (v2):   {"name": ..., "version": ..., "blueprint": ..., ...}
-
-        Решение Q2 Variant A: извлечь все поля из meta на верхний уровень,
-        удалить ключ meta. Это сохраняет совместимость с:
-        - RecipeManager.read_recipe() (raw YAML reader)
-        - Recipe.from_dict() (понимает оба формата)
-        - Legacy GUI reader'ы (ожидают top-level name/version)
-
-        Порядок ключей в результирующем YAML для читаемости (Task 1.3):
-            1. meta-поля (name, version, description, created_at)
-            2. displays — определения дисплеев (DisplayDefinition, top-level секция)
-            3. blueprint — топология рецепта
-            4. остальные поля (active_services, display_bindings, gui_positions, ...)
-
-        Поле ``displays`` (tuple[DisplayDefinition,...]) сохраняется автоматически
-        через denormalized.update(result) — оно НЕ входит в meta и не требует
-        специальной обработки. Явное позиционирование перед blueprint — только
-        для читаемости итогового YAML файла.
-        """
-        result = dict(data)
-        meta = result.pop("meta", {})
-        if isinstance(meta, dict):
-            # 1. Сначала meta-поля (верхний уровень, читаемость YAML)
-            denormalized: dict[str, Any] = {}
-            for key in ("name", "version", "description", "created_at"):
-                if key in meta:
-                    denormalized[key] = meta[key]
-            # Оставшиеся meta-поля (если появятся в будущем)
-            for key, value in meta.items():
-                if key not in denormalized:
-                    denormalized[key] = value
-
-            # 2. displays — определения дисплеев рецепта (перед blueprint для читаемости).
-            #    Сохраняется как top-level секция, НЕ внутри blueprint.
-            #    (blueprint.displays = привязки node_id→display_id — другая секция)
-            if "displays" in result:
-                denormalized["displays"] = result.pop("displays")
-
-            # 3. blueprint — топология (процессы, провода, привязки дисплеев)
-            if has_top_level_blueprint(result):
-                denormalized["blueprint"] = result.pop("blueprint")
-
-            # 4. Остальные поля Recipe (active_services, display_bindings, gui_positions, ...)
-            denormalized.update(result)
-            return denormalized
-        return result
+        """meta -> top-level (Q2 Variant A); логика — ``recipe_canonical.denormalize_recipe_dict``."""
+        return denormalize_recipe_dict(data)
 
 
 __all__ = [

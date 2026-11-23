@@ -158,3 +158,55 @@ class TestDashboardSource:
         assert out["source"] == "param"
         assert out["target_process"] == "seg"
         assert out["target_field"] == "threshold"
+
+
+class TestMonitorStatePath:
+    """Task 6.3: monitor читает ЧУЖОЙ путь StateStore — state_path + value_key в ControlSpec."""
+
+    _RAW = {
+        "id": "robot_conn",
+        "type": "text",
+        "label": "Связь",
+        "source": "monitor",
+        "target_process": "devices",
+        "target_field": "conn",
+        "state_path": "devices.state.robot_main.conn",
+        "value_key": "conn",
+    }
+
+    def test_monitor_state_path_roundtrip(self) -> None:
+        # dict -> ControlSpec -> to_dict() -> parse_controls(): оба поля переживают оба шага.
+        spec = parse_controls([dict(self._RAW)])[0]
+        assert spec.state_path == "devices.state.robot_main.conn"
+        assert spec.value_key == "conn"
+        out = spec.to_dict()
+        assert out["state_path"] == "devices.state.robot_main.conn"
+        assert out["value_key"] == "conn"
+        again = parse_controls(controls_to_dicts([spec]))[0]
+        assert again.state_path == "devices.state.robot_main.conn"
+        assert again.value_key == "conn"
+
+    def test_monitor_state_path_roundtrip_leaf_path_without_value_key(self) -> None:
+        # park — листья: value_key не нужен, остаётся пустой строкой и не теряется.
+        raw = {**self._RAW, "id": "robot_park", "state_path": "devices.state.robot_main.park.state", "value_key": ""}
+        out = parse_controls([raw])[0].to_dict()
+        assert out["state_path"] == "devices.state.robot_main.park.state"
+        assert out["value_key"] == ""
+
+    def test_state_path_and_value_key_default_empty(self) -> None:
+        # старые рецепты (без новых полей) читаются как раньше: пустые строки, не None.
+        spec = ControlSpec(id="old", type="text", source="monitor", target_process="points", target_field="points_last")
+        assert spec.state_path == ""
+        assert spec.value_key == ""
+
+
+class TestTypeMonitorIsReadOnly:
+    """F1 (ревью 6.3): ``type: monitor`` — только чтение при ЛЮБОМ source."""
+
+    @pytest.mark.parametrize("source", ["local", "param", "monitor", "action"])
+    def test_type_monitor_not_operable_for_any_source(self, source: str) -> None:
+        assert ControlSpec(id="m", type="monitor", source=source).is_operable() is False
+
+    def test_source_monitor_still_not_operable_and_others_are(self) -> None:
+        assert ControlSpec(id="m", type="text", source="monitor").is_operable() is False
+        assert ControlSpec(id="b", type="button", source="local").is_operable() is True

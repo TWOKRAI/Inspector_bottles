@@ -25,10 +25,12 @@ Stability: lite (контракт держат тесты ``test_robot_v2_comman
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from numbers import Real
 from typing import Any, Protocol
 
 from pydantic import ValidationError
 
+from Services.robot_comm.calibration import CalibrationError, check_tool_points, fit_frame
 from Services.robot_comm.core.params_v2 import to_eng
 from Services.robot_comm.errors import InvalidStoreKey, RevisionConflict, RobotDataInvalid, StoreDocumentInvalid
 from Services.robot_comm.programs.program import FrameDef, Point, Program
@@ -195,6 +197,75 @@ def _frame_teach(store: RobotDataStore, device_id: str, args: dict[str, Any]) ->
     return {"rev": save_frames(store, device_id, frames, base_rev=base_rev)}
 
 
+def _is_real(value: Any) -> bool:
+    return isinstance(value, Real) and not isinstance(value, bool)
+
+
+def _fit_points(args: dict[str, Any]) -> list[tuple[str, tuple[float, float, float]]]:
+    """``points`` подгонки СК: список из >= 3 ``{"point": str, "local": [x, y, z]}``; иначе ``BadArgs``."""
+    raw = args.get("points")
+    if not isinstance(raw, list) or len(raw) < 3:
+        raise BadArgs
+    pairs: list[tuple[str, tuple[float, float, float]]] = []
+    for item in raw:
+        if not isinstance(item, dict) or type(item.get("point")) is not str:
+            raise BadArgs
+        local = item.get("local")
+        if not isinstance(local, (list, tuple)) or len(local) != 3 or not all(_is_real(v) for v in local):
+            raise BadArgs
+        try:
+            xyz = (float(local[0]), float(local[1]), float(local[2]))
+        except OverflowError:  # int > 1.8e308 проходит isinstance(Real), во float не переводится
+            raise BadArgs from None
+        pairs.append((item["point"], xyz))
+    return pairs
+
+
+def _calib_frame(store: RobotDataStore, device_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Подгонка СК по N >= 3 сохранённым точкам и их номиналу в СК (T5.4c); результат — тот же ``FrameDef``."""
+    name = _name(args, "name")
+    pairs = _fit_points(args)
+    base_rev = _base_rev(args)
+    points, _points_rev = load_points(store, device_id)
+    picked: list[Point] = []
+    for point_name, _local in pairs:
+        if point_name not in points:
+            raise RobotOpError(TEXT_NO_POINT)
+        picked.append(points[point_name])
+    if any(p.frame is not None for p in picked):
+        raise RobotOpError(TEXT_FRAME_IN_BASE)
+    try:
+        fit = fit_frame([(p.x, p.y, p.z) for p in picked], [local for _point, local in pairs])
+    except CalibrationError as exc:
+        raise RobotOpError(str(exc)) from exc
+    try:
+        frame = FrameDef(name=name, origin=fit.origin, on_x=fit.on_x, in_plane=fit.in_plane)
+    except ValidationError as exc:
+        raise RobotOpError(TEXT_FRAME_DEGENERATE) from exc
+    frames, _rev = load_frames(store, device_id)
+    frames[frame.name] = frame  # вставка или замена по имени
+    rev = save_frames(store, device_id, frames, base_rev=base_rev)
+    return {
+        "rev": rev,
+        "frame": frame.to_dict(),
+        "yaw_deg": fit.yaw_deg,
+        "residuals_mm": list(fit.residuals_mm),
+        "max_residual_mm": fit.max_residual_mm,
+    }
+
+
+def _calib_tools(store: RobotDataStore, device_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Проверка точек инструментов (T5.4c): только чтение, ``points.yaml`` не меняется."""
+    points, rev = load_points(store, device_id)
+    checks = check_tool_points(points)
+    return {
+        "tools": [
+            {"tool": c.tool, "ok": c.ok, "missing": list(c.missing), "problems": list(c.problems)} for c in checks
+        ],
+        "rev": rev,
+    }
+
+
 # ---------------------------------------------------------------------- #
 # программы
 # ---------------------------------------------------------------------- #
@@ -232,6 +303,8 @@ OPS: dict[str, OpFn] = {
     "point_delete": _point_delete,
     "frame_list": _frame_list,
     "frame_teach": _frame_teach,
+    "calib_frame": _calib_frame,
+    "calib_tools": _calib_tools,
     "program_list": _program_list,
     "program_get": _program_get,
     "program_save": _program_save,

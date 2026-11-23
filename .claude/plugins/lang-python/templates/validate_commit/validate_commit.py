@@ -240,6 +240,7 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
     "Signed-off-by",
     "Reviewed-by",
     "Task",
+    "Decision",
 }
 
 # `Task:` value (rev. 7): `<slug>#<id>` - plan slug without the date, `#`, task id (`2.1`, `1.3a`, `K1.1`,
@@ -250,6 +251,15 @@ KNOWN_TRAILERS = REQUIRED_BASE_TRAILERS | {
 TASK_ID_PATTERN = r"[A-Z]{0,3}[0-9]{1,3}[a-z]?(?:\.[0-9]+[a-z]?)*(?:-[a-z0-9]+)*"
 TASK_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*#(?:" + TASK_ID_PATTERN + r")$", re.ASCII)
 GIT_TRAILERS_TIMEOUT = 5
+
+# `Decision:` value (Task 7.1a): exactly one ADR id per line (several decisions mean
+# several `Decision:` lines), `ADR-<MOD>-NNN`, ASCII. ADR_HEADING_RE finds the ids a
+# staged DECISIONS.md diff adds: an H2 or H3 heading (`## ADR-PM-059`,
+# `### ADR-PM-059`) on a `+`/`-` line. The numeric `## ADR-001` form is not an id here.
+DECISION_ID_PATTERN = r"ADR-[A-Z][A-Z0-9]*-[0-9]+"
+DECISION_VALUE_RE = re.compile(DECISION_ID_PATTERN, re.ASCII)
+ADR_HEADING_RE = re.compile(r"^[+-]#{2,3} (" + DECISION_ID_PATTERN + ")", re.ASCII)
+DECISIONS_GLOB = "*DECISIONS.md"
 
 # `Merge ` and `merge: ` are NOT here any more (v2): merges are validated, see MERGE_DEFAULT_RE.
 SKIP_PREFIXES = ("Revert ", "fixup!", "squash!", "amend!")
@@ -756,6 +766,83 @@ def _path_exists_in_head(repo_root: Path, rel_path: str) -> bool:
         return False
 
 
+def staged_adr_ids(repo_root: Path) -> list[str] | None:
+    """ADR ids the staged diff adds to `*DECISIONS.md`, in diff order.
+
+    An id counts when it heads a `+` line and no `-` line of the SAME diff (a header
+    edit is not a new ADR). None whenever git cannot answer (missing, not a
+    repository, failing): callers skip the rule.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--cached",
+                "-U0",
+                "--no-color",
+                "--",
+                DECISIONS_GLOB,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+        if out.returncode != 0 or out.stdout is None:
+            return None
+    except Exception:
+        return None
+    plus: list[str] = []
+    minus: set[str] = set()
+    for line in out.stdout.splitlines():
+        m = ADR_HEADING_RE.match(line)
+        if not m:
+            continue
+        if line.startswith("-"):
+            minus.add(m.group(1))
+        elif m.group(1) not in plus:
+            plus.append(m.group(1))
+    return [i for i in plus if i not in minus]
+
+
+def adr_in_index(repo_root: Path, adr_id: str) -> bool | None:
+    """True when the index holds an H2/H3 heading of *adr_id* in a `*DECISIONS.md`;
+    None when git cannot say.
+
+    `git grep --cached`: the index is the tree a commit is made from, so `--amend` is
+    covered too. The id must be well-formed (the caller checks DECISION_VALUE_RE), so
+    it goes into the pattern as is. The tail class keeps `ADR-AB-001` from matching a
+    heading of `ADR-AB-0012`.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "grep",
+                "--cached",
+                "-q",
+                "-E",
+                f"^#{{2,3}} {adr_id}([^A-Za-z0-9-]|$)",
+                "--",
+                DECISIONS_GLOB,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if out.returncode == 0:
+        return True
+    return False if out.returncode == 1 else None
+
+
 def _scan_ini_block(lines: list[str]) -> tuple[int, int, list[str]] | None:
     """First fenced ```ini block carrying a `tests_gate*` key, as
     ``(open_idx, close_idx, body)`` — 0-based indices into *lines* of the
@@ -1186,6 +1273,36 @@ def validate(
                     result.errors.append(text)
                 else:
                     _phase3(result, text)
+
+    # 6a. `Decision:` (Task 7.1a): a commit that adds an ADR heading to a DECISIONS.md
+    # carries the line `Decision: <id>`. The reminder is a plain warning in every mode
+    # (not _phase3): STRICT never refuses a commit over it. A `Decision:` id found
+    # neither in the diff nor in the index is a phase-3 rule. The whole step is skipped
+    # for a merge; the repository part also when the root or git cannot be had (as
+    # rule 7).
+    if not is_merge:
+        decision_values = [v.strip() for v in trailers.get("Decision", [])]
+        decision_ids = [v for v in decision_values if DECISION_VALUE_RE.fullmatch(v)]
+        if len(decision_ids) < len(decision_values):
+            _phase3(
+                result,
+                "Decision: malformed value (expected ADR-<MOD>-NNN, one id per line)",
+            )
+        decision_repo = find_repo_root()
+        added_adrs = staged_adr_ids(decision_repo) if decision_repo else None
+        if decision_repo and added_adrs is not None:
+            for adr_id in added_adrs:
+                if adr_id not in decision_ids:
+                    result.warnings.append(
+                        f"Decision: this commit adds {adr_id} — "
+                        f"add the line `Decision: {adr_id}`"
+                    )
+            for adr_id in dict.fromkeys(decision_ids):
+                if (
+                    adr_id not in added_adrs
+                    and adr_in_index(decision_repo, adr_id) is False
+                ):
+                    _phase3(result, f"Decision: {adr_id} not found in the index")
 
     # 7. Tests-discipline gate (Task 6.2): fires only when a staged path
     # matches tests_gate_code minus tests_gate_exclude. When it fires, the

@@ -1,0 +1,31 @@
+{
+  "name": "reference",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools": [
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "context_files": [
+    "docs/arch-map/_bench/k0_reference.json"
+  ],
+  "prompt_prefix": "Start from the reference file; open source code only to confirm a line or when the reference lacks the answer.",
+  "max_turns": 60,
+  "max_budget_usd": 1.0,
+  "expected_tokens": 60000,
+  "thresholds": {
+    "hits_min": 8,
+    "false_max": 1,
+    "calls_ratio_max": 0.5,
+    "tokens_ratio_max": 0.6
+  }
+}

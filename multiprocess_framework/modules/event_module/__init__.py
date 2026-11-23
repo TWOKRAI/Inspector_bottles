@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
+"""Типизированная шина событий-фактов внутри процесса; сюда — менять подписки и публикацию событий
+
 event_module — generic typed in-proc pub/sub (события-факты).
 
 EventBus -- pure Python synchronous typed pub/sub (диспетчеризация по type(event)).

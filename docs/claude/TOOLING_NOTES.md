@@ -64,7 +64,7 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 
 ### Правила проекта, п.10 (полный текст)
 
-10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Risk:`, `Reversible:`, `Tested:`, `Rejected:`. Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](../../.claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
+10. **Commit-сообщения:** Conventional Commits + обязательные trailers `Why:` и `Layer:`. Опциональные — `Refs:`, `Rejected:`; `Risk:`, `Reversible:`, `Tested:` валидатор распознаёт, но не рекомендует (FREEZE, см. `.claude/COMMIT_GUIDE.md`). Шаблон в `.gitmessage`, гайд в [`docs/claude/COMMIT_GUIDE.md`](../../.claude/COMMIT_GUIDE.md), валидирует hook `.git/hooks/commit-msg` (установка `bash scripts/validate_commit/install_hook.sh`). Агенты обязаны генерировать trailers — иначе commit будет отклонён.
 
 ### Формат commit-сообщений (для агентов)
 
@@ -78,9 +78,9 @@ ML (Phase 1.5): PyTorch 2.11 + Ultralytics YOLO + ONNX Runtime — extras `[ml]`
 Why: одна-две строки про мотивацию (не реализацию)
 Layer: framework | services | plugins | prototype | docs | scripts | tests | infra | mixed
 Refs: plans/<slug>.md, ADR-XXX, PR#NN  (ОБЯЗАТЕЛЬНО если задача из плана; опц. для hotfix)
-Risk: low|medium|high — короткое почему  (опц.)
-Reversible: yes | migration-needed | no  (опц.)
-Tested: scope/N passed, например auth/120  (опц., при изменении кода)
+Risk: low|medium|high — короткое почему  (распознаётся, не рекомендуется — FREEZE)
+Reversible: yes | migration-needed | no  (распознаётся, не рекомендуется — FREEZE)
+Tested: scope/N passed, например auth/120  (распознаётся, не рекомендуется — FREEZE)
 Rejected: альтернатива X — отвергнута, потому что Y  (опц., но ценно)
 
 Co-Authored-By: ...

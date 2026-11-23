@@ -1,0 +1,1000 @@
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Ревизия наблюдаемости и backend_ctl</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Раскладка: одна колонка-лист шириной до 1080px, как технический паспорт прибора:
+   сверху вердикт и шкалы, ниже схема, протокол стенда, реестр находок, план работ. */
+:root{
+  --bg:#f4f6f8; --surface:#ffffff; --ink:#17212c; --muted:#5a6878; --line:#d5dce4;
+  --accent:#0d6b80; --accent-soft:#e1f0f3;
+  --p1:#b93a12; --p2:#8a6a00; --p3:#5a6878; --ok:#1c7a4c;
+  --p1-soft:#fbe9e2; --p2-soft:#f6efd3; --ok-soft:#dff2e7;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --cond:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f141a; --surface:#172029; --ink:#e5eaf0; --muted:#93a1b2; --line:#2a3644;
+    --accent:#5bc2d6; --accent-soft:#143039;
+    --p1:#ff9a78; --p2:#e2c24a; --p3:#93a1b2; --ok:#62d29b;
+    --p1-soft:#3a2018; --p2-soft:#332c10; --ok-soft:#123324; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --surface:#172029; --ink:#e5eaf0; --muted:#93a1b2; --line:#2a3644;
+  --accent:#5bc2d6; --accent-soft:#143039;
+  --p1:#ff9a78; --p2:#e2c24a; --p3:#93a1b2; --ok:#62d29b;
+  --p1-soft:#3a2018; --p2-soft:#332c10; --ok-soft:#123324; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 15px/1.55 var(--sans);margin:0}
+.page{max-width:1080px;margin:0 auto;padding-block:28px 64px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:var(--cond);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(28px,5vw,42px);font-weight:700;letter-spacing:-.01em}
+h2{font-size:26px;font-weight:600}
+h3{font-size:18px;font-weight:600}
+p{margin:0;max-width:72ch}
+code{font:500 .88em var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.eyebrow{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lead{font-size:17px;max-width:70ch}
+.muted{color:var(--muted)}
+section{display:flex;flex-direction:column;gap:16px;min-width:0}
+.stack{display:flex;flex-direction:column;gap:10px}
+header.top{display:flex;flex-direction:column;gap:14px;border-bottom:2px solid var(--ink);padding-bottom:22px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 16px;font:500 13px var(--mono)}
+nav.toc a{text-decoration:none;border-bottom:1px solid var(--line)}
+
+/* вердикт */
+.verdict{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:24px;align-items:start}
+.total{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:18px;display:flex;flex-direction:column;gap:4px}
+.total b{font:700 64px/1 var(--cond);font-variant-numeric:tabular-nums}
+.total span{font:500 13px var(--mono);color:var(--muted)}
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.key{border-top:3px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.key.good{border-color:var(--ok)} .key.bad{border-color:var(--p1)} .key.warn{border-color:var(--p2)}
+.key b{font:600 15px var(--sans)}
+.key span{font-size:14px;color:var(--muted)}
+
+/* шкалы */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.card-h b{font:700 30px/1 var(--cond);font-variant-numeric:tabular-nums}
+.sc{display:grid;grid-template-columns:minmax(0,1fr) 84px 22px;gap:4px 10px;align-items:center;font-size:14px}
+.sc .bar{height:8px;background:var(--line);border-radius:2px;overflow:hidden;display:block}
+.sc .bar i{display:block;height:100%}
+.sc .lo{background:var(--p1)} .sc .mid{background:var(--p2)} .sc .hi{background:var(--ok)}
+.sc b{font:600 14px var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.sc small{grid-column:1/-1;color:var(--muted);font-size:12.5px;line-height:1.4;margin-bottom:6px}
+
+/* таблицы */
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font:600 11.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono);white-space:nowrap}
+td code{white-space:normal}
+
+/* стенд */
+.vbar{display:flex;height:26px;border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+.vbar span{display:block;min-width:6px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font:500 12.5px var(--mono)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.c-pass{background:var(--ok)} .c-fail{background:var(--p1)} .c-part{background:var(--p2)} .c-nr{background:var(--muted)} .c-unv{background:var(--line)}
+
+/* схемы */
+figure{margin:0;display:flex;flex-direction:column;gap:8px}
+.dgwrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+svg.dg{display:block;min-width:860px;width:100%;height:auto;color:var(--ink)}
+.dg .b{fill:var(--surface);stroke:var(--ink);stroke-opacity:.45;stroke-width:1}
+.dg .b.goal{stroke:var(--accent);stroke-opacity:1;stroke-width:2}
+.dg .rg{fill:none;stroke:var(--muted);stroke-opacity:.6;stroke-dasharray:5 4}
+.dg .ln{fill:none;stroke:var(--ink);stroke-opacity:.75;stroke-width:1.3}
+.dg text{fill:var(--ink);font:500 12px var(--sans)}
+.dg text.s{fill:var(--muted);font-size:11px;font-weight:400}
+.dg text.cap{fill:var(--muted);font:600 10.5px var(--mono);letter-spacing:.08em}
+.dg text.lb{fill:var(--muted);font-size:10.5px;font-weight:400}
+.dg text.tag{fill:var(--p1);font:600 11px var(--mono)}
+figcaption{font-size:13px;color:var(--muted);max-width:80ch}
+.dg .b.ok{stroke:var(--ok);stroke-opacity:1;stroke-width:2}
+.dg .b.fix{stroke:var(--p2);stroke-opacity:1;stroke-width:2}
+.dg .b.run{stroke:var(--accent);stroke-opacity:1;stroke-width:2}
+.dg .b.wait{stroke:var(--muted);stroke-opacity:.8;stroke-dasharray:5 4}
+.dg text.t{font-size:12.5px;font-weight:600}
+.dg text.h{font-size:13.5px;font-weight:600}
+.dg text.st{font:600 10.5px var(--mono);letter-spacing:.04em}
+.dg text.st.ok{fill:var(--ok)} .dg text.st.fix{fill:var(--p2)} .dg text.st.run{fill:var(--accent)} .dg text.st.wait{fill:var(--muted)}
+.c-run{background:var(--accent)}
+.c-wait{background:transparent;border:1px dashed var(--muted)}
+
+/* находки */
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{font:500 13px var(--mono);padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.flist{display:flex;flex-direction:column;gap:10px}
+.f{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.f-h{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font:500 12.5px var(--mono)}
+.f-h b{font-weight:600}
+.pill{font:600 11.5px var(--mono);padding:2px 7px;border-radius:3px}
+.pill.p1{background:var(--p1-soft);color:var(--p1)} .pill.p2{background:var(--p2-soft);color:var(--p2)} .pill.p3{background:var(--line);color:var(--ink)}
+.ver{color:var(--muted)} .ver.x2{color:var(--ok)}
+.known{color:var(--muted);border:1px solid var(--line);padding:1px 6px;border-radius:3px}
+.f p{font-size:14.5px;max-width:none}
+.f p.fix{color:var(--muted)}
+.f p.fix::before{content:"Исправление: ";font-weight:600;color:var(--ink)}
+
+/* списки */
+ul.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;max-width:78ch}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px 32px}
+.wave{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.wave .eyebrow{color:var(--accent)}
+.note{border-left:3px solid var(--accent);padding:2px 0 2px 14px;color:var(--muted);font-size:14px;max-width:76ch}
+footer{font:400 12.5px var(--mono);color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+td b{font-weight:600}
+#target table td{min-width:150px}
+@media (max-width:640px){
+  .verdict{grid-template-columns:1fr}
+  .total b{font-size:52px}
+}
+</style>
+
+<div class="page">
+
+<header class="top">
+  <span class="eyebrow">Inspector_bottles · ревизия от 2026-11-21 · HEAD e836b2db5</span>
+  <h1>Наблюдаемость фреймворка и backend_ctl</h1>
+  <p class="lead">Логи, ошибки, метрики, телеметрия и управляющий MCP-инструмент. Оценки выставлены по коду и по живому стенду, а не по документам. Каждая находка несёт путь в коде и способ, которым она проверена.</p>
+  <nav class="toc" aria-label="Разделы">
+    <a href="#verdict">Вердикт</a><a href="#scores">Оценки</a><a href="#how">Как устроено</a><a href="#live">Живой стенд</a><a href="#findings">Находки</a><a href="#crutches">Костыли</a><a href="#good">Сильные стороны</a><a href="#plans">Планы и документы</a><a href="#target">Целевая архитектура</a><a href="#roadmap">Порядок работ</a><a href="#phase0">Фаза 0: ход работ</a><a href="#limits">Что не проверено</a>
+  </nav>
+</header>
+
+<section id="verdict">
+  <div class="verdict">
+    <div class="total">
+      <span>Общая оценка</span>
+      <b>5.5<span style="font-size:22px"> / 10</span></b>
+      <span>51 находка: 5 P1 · 24 P2 · 22 P3</span>
+    </div>
+    <div class="stack">
+      <p class="lead">Основа инженерно крепкая: потери посчитаны, настройки меняются на ходу и проверяются обратным чтением. Слабое место одно и то же во всех трёх частях: система иногда отвечает «всё хорошо», когда это не так. Числа метрик пока не отвечают на главный вопрос владельца о том, какая стадия линии узкая.</p>
+      <div class="keys">
+        <div class="key good"><b>Управление на ходу работает</b><span>Живой стенд: 42 из 51 строки чек-листа подтверждены наблюдением, ещё две не прошли из-за ошибки самого зонда.</span></div>
+        <div class="key bad"><b>Числа могут врать</b><span>Стадия остановилась, а <code>fps</code> показывает прежние 92. При полном диске ERROR теряется, счётчик говорит «записано».</span></div>
+        <div class="key bad"><b>Сокет управления открыт</b><span>Без токена и включён в поставляемом <code>system.yaml</code>. Любой локальный процесс может остановить систему.</span></div>
+        <div class="key warn"><b>Много планов, мало доведено</b><span>27 планов за пять месяцев, 11 заменены. Наблюдаемость хопа кадра ждёт цепочку из четырёх задач.</span></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Как проверяли. Четыре независимых аудита прочитали около 34 тысяч строк кода без тестов и зондов. Отдельно я поднял headless-стенд <code>inspection_full</code> на 125 секунд и прогнал зонд приёмки. 22 находки подтверждены запуском или стендом, 7 воспроизведений аудиторов я повторил сам, 29 находок получены чтением кода. Оценки от 1 до 10 являются суждением: 5 значит «работает, но с заметными долгами», 8 значит «можно брать за образец».</p>
+</section>
+
+<section id="scores">
+  <span class="eyebrow">Оценки по частям</span>
+  <h2>Пять шкал</h2>
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-h"><h3>Управление на ходу</h3><b>8</b></div>
+      <div class="sc">
+        <span>Самоописание</span><span class="bar"><i class="hi" style="width:80%"></i></span><b>8</b>
+        <small>Сводка, реестр команд, семь секций readback отвечают на стенде.</small>
+        <span>Ручки без рестарта</span><span class="bar"><i class="hi" style="width:90%"></i></span><b>9</b>
+        <small>Уровень процессу и источнику, приёмник вкл/выкл, срок правки с авто-возвратом, отказ на опечатку.</small>
+        <span>Задержки</span><span class="bar"><i class="hi" style="width:70%"></i></span><b>7</b>
+        <small>Команда 12.5 мс, хвост 19 мс, стор 108 мс. Нижняя граница задана опросом очереди раз в 10 мс.</small>
+        <span>Жизненный цикл</span><span class="bar"><i class="hi" style="width:80%"></i></span><b>8</b>
+        <small>Рестарт процесса за 1.46 с, сессионные правки сняты, пуш вернулся.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>Логи и ошибки</h3><b>6.1</b></div>
+      <div class="sc">
+        <span>Корректность</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Четыре бага на главном пути воспроизведены.</small>
+        <span>Архитектура и слои</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Общая база для трёх плоскостей. Но к диску ведут четыре дороги, путь записи около 12 звеньев.</small>
+        <span>Гибкость</span><span class="bar"><i class="hi" style="width:70%"></i></span><b>7</b>
+        <small>Фабрики приёмников, процессоры, tap'ы. Новый приёмник без правки фреймворка.</small>
+        <span>Горячий путь</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>Выключенный DEBUG через миксин стоит 1.2–1.7 мкс, принятая запись 17–30 мкс.</small>
+        <span>Надёжность</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Пол ошибок честен. Полный диск и запись после останова считаются доставленными.</small>
+        <span>Тестируемость</span><span class="bar"><i class="hi" style="width:80%"></i></span><b>8</b>
+        <small>Тестов в 2.6 раза больше кода, часы внедряются.</small>
+        <span>Удобство и документы</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>История ревью живёт в докстрингах, карта отстала.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>Метрики и телеметрия</h3><b>4.9</b></div>
+      <div class="sc">
+        <span>Корректность</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>Учёт потерь аккуратен, но <code>fps</code> и <code>latency_ms</code> неверны в двух воспроизведённых случаях.</small>
+        <span>Архитектура и слои</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>Шесть независимых дорог числа, две плоскости не сведены.</small>
+        <span>Гибкость</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>Плагин публикует метрику сам. Тип, единицы и описание объявить нельзя.</small>
+        <span>Эффективность</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>3.3–3.8 мкс на вызов, один merge за такт.</small>
+        <span>Правдивость данных</span><span class="bar"><i class="lo" style="width:40%"></i></span><b>4</b>
+        <small>У значения нет возраста. Застывшее число выглядит живым.</small>
+        <span>Планирование мощности</span><span class="bar"><i class="lo" style="width:30%"></i></span><b>3</b>
+        <small>Нет входа и выхода стадии, занятости, распределения времени.</small>
+        <span>Тестируемость</span><span class="bar"><i class="hi" style="width:70%"></i></span><b>7</b>
+        <small>Плотные тесты на гонки, швы для подмены.</small>
+        <span>Удобство и документы</span><span class="bar"><i class="lo" style="width:40%"></i></span><b>4</b>
+        <small>Докстринги длиннее кода, карта местами неверна.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>backend_ctl</h3><b>5.0</b></div>
+      <div class="sc">
+        <span>Корректность</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Механика обкатана. Два воспроизведённых бага сигнала.</small>
+        <span>Архитектура и слои</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small><code>driver.py</code> 2783 строки, половина пакета занята зондами.</small>
+        <span>Безопасность</span><span class="bar"><i class="lo" style="width:30%"></i></span><b>3</b>
+        <small>Нет токена, нет потолка соединений, классы безопасности проверяет только клиент.</small>
+        <span>Изоляция наблюдателя</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Застрявшего клиента снимают за 0.5 с, но запись идёт в потоке отправителя ProcessManager.</small>
+        <span>Честность сигналов</span><span class="bar"><i class="mid" style="width:60%"></i></span><b>6</b>
+        <small>Усечение и потери курсора помечены. Проверка записи может пройти вхолостую.</small>
+        <span>Удобство для агента</span><span class="bar"><i class="lo" style="width:40%"></i></span><b>4</b>
+        <small>57 инструментов, из них 9 для подписок и 8 <code>introspect_*</code>.</small>
+        <span>Универсальность</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>Протокол общий. Один порт, шаблоны и запуск привязаны к прототипу.</small>
+        <span>Тестируемость</span><span class="bar"><i class="mid" style="width:50%"></i></span><b>5</b>
+        <small>111 файлов тестов, живые делят порт 8765, эталона форм ответа нет.</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>Планы и документы</h3><b>4.5</b></div>
+      <div class="sc">
+        <span>Дисциплина проверки</span><span class="bar"><i class="hi" style="width:80%"></i></span><b>8</b>
+        <small>Слепые тесты, инъекции поломок, живые стенды, приёмка по чек-листу.</small>
+        <span>Актуальность документов</span><span class="bar"><i class="lo" style="width:30%"></i></span><b>3</b>
+        <small><code>STATUS.md</code> у backend_ctl отстал на четыре месяца, числа расходятся вдвое.</small>
+        <span>Устойчивость плана</span><span class="bar"><i class="lo" style="width:40%"></i></span><b>4</b>
+        <small>Дизайн перестраивали не меньше пяти раз за три месяца.</small>
+        <span>Доведение до пользы</span><span class="bar"><i class="lo" style="width:30%"></i></span><b>3</b>
+        <small>Экспорт наружу, хоп-лаг и контекст сервисов до потребителя не дошли.</small>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="how">
+  <span class="eyebrow">Как устроено на самом деле</span>
+  <h2>Три плоскости сходятся в двух местах</h2>
+  <p>В каждом процессе живут три независимых тракта: записи (логи и ошибки), числа (<code>StatsManager</code>) и телеметрия (heartbeat). Наружу процесса выходят только tap'ы и один merge в дерево состояния за такт. Общих точек две: файл <code>observability.db</code> и дерево состояния у ProcessManager.</p>
+  <figure>
+    <div class="dgwrap">
+    <svg class="dg" viewBox="0 0 1048 424" role="img" aria-label="Схема: в каждом процессе три тракта — записи, числа и телеметрия. Записи и снапшоты чисел через tap'ы попадают в общий SQLite, телеметрия одним merge за такт уходит в дерево состояния ProcessManager, откуда её читают GUI и backend_ctl через сокет.">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect class="rg" x="12" y="24" width="584" height="388"/>
+      <text class="cap" x="24" y="44">КАЖДЫЙ ПРОЦЕСС</text>
+      <rect class="rg" x="632" y="166" width="194" height="246"/>
+      <text class="cap" x="644" y="186">PROCESSMANAGER</text>
+
+      <!-- ряд 1: записи -->
+      <rect class="b" x="24" y="56" width="170" height="56" rx="5"/>
+      <text x="109" y="80" text-anchor="middle">_log_* · ctx.log_*</text><text class="s" x="109" y="97" text-anchor="middle">get_std_logger</text>
+      <rect class="b" x="234" y="56" width="170" height="56" rx="5"/>
+      <text x="319" y="80" text-anchor="middle">LoggerCore × 2</text><text class="s" x="319" y="97" text-anchor="middle">Logger и Error</text>
+      <text class="tag" x="404" y="50" text-anchor="end">L-2</text>
+      <rect class="b" x="444" y="56" width="140" height="56" rx="5"/>
+      <text x="514" y="80" text-anchor="middle">tap'ы</text><text class="s" x="514" y="97" text-anchor="middle">store · forward</text>
+      <rect class="b" x="644" y="56" width="170" height="56" rx="5"/>
+      <text x="729" y="80" text-anchor="middle">observability.db</text><text class="s" x="729" y="97" text-anchor="middle">SQLite WAL, пишет каждый</text>
+      <rect class="b" x="854" y="56" width="170" height="56" rx="5"/>
+      <text x="939" y="80" text-anchor="middle">Журналы в GUI</text><text class="s" x="939" y="97" text-anchor="middle">history_query · otel (логи)</text>
+      <line class="ln" x1="194" y1="84" x2="232" y2="84" marker-end="url(#ar)"/>
+      <line class="ln" x1="404" y1="84" x2="442" y2="84" marker-end="url(#ar)"/>
+      <line class="ln" x1="584" y1="76" x2="642" y2="76" marker-end="url(#ar)"/>
+      <text class="lb" x="613" y="68" text-anchor="middle">~100 мс</text>
+      <line class="ln" x1="814" y1="84" x2="852" y2="84" marker-end="url(#ar)"/>
+      <line class="ln" x1="319" y1="112" x2="319" y2="128" marker-end="url(#ar)"/>
+      <rect class="b" x="234" y="130" width="170" height="32" rx="5"/>
+      <text class="s" x="319" y="150" text-anchor="middle">файлы процесса, синхронно</text>
+      <text class="tag" x="412" y="150">L-1</text>
+      <polyline class="ln" points="584,96 612,96 612,224 642,224" marker-end="url(#ar)"/>
+      <text class="lb" x="618" y="140">хвост по IPC</text>
+      <text class="tag" x="618" y="155">L-3</text>
+
+      <!-- ряд 2: числа -->
+      <rect class="b" x="24" y="196" width="170" height="56" rx="5"/>
+      <text x="109" y="220" text-anchor="middle">_record_metric</text><text class="s" x="109" y="237" text-anchor="middle">ctx.record_*</text>
+      <rect class="b" x="234" y="196" width="170" height="56" rx="5"/>
+      <text x="319" y="220" text-anchor="middle">StatsManager</text><text class="s" x="319" y="237" text-anchor="middle">окно 10 с, дельты</text>
+      <text class="tag" x="404" y="190" text-anchor="end">M-4</text>
+      <line class="ln" x1="194" y1="224" x2="232" y2="224" marker-end="url(#ar)"/>
+      <polyline class="ln" points="404,224 514,224 514,114" marker-end="url(#ar)"/>
+      <text class="lb" x="412" y="216">снапшоты stats</text>
+      <line class="ln" x1="319" y1="252" x2="319" y2="268" marker-end="url(#ar)"/>
+      <rect class="b" x="234" y="270" width="170" height="32" rx="5"/>
+      <text class="s" x="319" y="290" text-anchor="middle">performance.log · stats_*.json</text>
+      <rect class="b" x="644" y="196" width="170" height="56" rx="5"/>
+      <text x="729" y="220" text-anchor="middle">SocketChannel :8765</text><text class="s" x="729" y="237" text-anchor="middle">JSON-строки, без токена</text>
+      <text class="tag" x="814" y="160" text-anchor="end">B-1</text>
+      <rect class="b" x="854" y="196" width="170" height="56" rx="5"/>
+      <text x="939" y="220" text-anchor="middle">backend_ctl → MCP</text><text class="s" x="939" y="237" text-anchor="middle">57 инструментов</text>
+      <line class="ln" x1="816" y1="224" x2="852" y2="224" marker-end="url(#ar)" marker-start="url(#ar)"/>
+
+      <!-- ряд 3: телеметрия -->
+      <rect class="b" x="24" y="336" width="170" height="56" rx="5"/>
+      <text x="109" y="360" text-anchor="middle">CycleMetrics</text><text class="s" x="109" y="377" text-anchor="middle">ctx.publish_metric</text>
+      <rect class="b" x="234" y="336" width="170" height="56" rx="5"/>
+      <text x="319" y="360" text-anchor="middle">Heartbeat</text><text class="s" x="319" y="377" text-anchor="middle">1 merge за такт 5 с</text>
+      <text class="tag" x="404" y="330" text-anchor="end">M-1 · M-2</text>
+      <line class="ln" x1="194" y1="364" x2="232" y2="364" marker-end="url(#ar)"/>
+      <line class="ln" x1="404" y1="364" x2="642" y2="364" marker-end="url(#ar)"/>
+      <text class="lb" x="523" y="356" text-anchor="middle">processes.&lt;P&gt;.state.*</text>
+      <rect class="b" x="644" y="336" width="170" height="56" rx="5"/>
+      <text x="729" y="360" text-anchor="middle">StateStore</text><text class="s" x="729" y="377" text-anchor="middle">дерево и дельты</text>
+      <line class="ln" x1="729" y1="336" x2="729" y2="254" marker-end="url(#ar)"/>
+      <text class="lb" x="737" y="300">дельты</text>
+      <rect class="b" x="854" y="336" width="170" height="56" rx="5"/>
+      <text x="939" y="360" text-anchor="middle">GUI read-model</text><text class="s" x="939" y="377" text-anchor="middle">кольцо 600 точек</text>
+      <text class="tag" x="1024" y="330" text-anchor="end">M-6</text>
+      <line class="ln" x1="814" y1="364" x2="852" y2="364" marker-end="url(#ar)"/>
+    </svg>
+    </div>
+    <figcaption>Три тракта одного процесса и две общие точки. Красные метки показывают, где сидят главные находки из реестра ниже. Числа <code>StatsManager</code> попадают в журнал и в SQLite, но на дорогу телеметрии не выходят: графики GUI их не читают.</figcaption>
+  </figure>
+
+  <div class="scroll"><table>
+    <thead><tr><th>Часть</th><th>Ярус</th><th class="n">Код, строк</th><th class="n">Тесты, строк</th><th class="n">Тест : код</th><th class="n">ADR</th><th class="n">Импортируют</th><th>Последний коммит</th></tr></thead>
+    <tbody>
+      <tr><td><code>logger_module</code></td><td>core</td><td class="n">8 325</td><td class="n">21 905</td><td class="n">2.63</td><td class="n">12</td><td class="n">172</td><td>2026-11-12</td></tr>
+      <tr><td><code>channel_routing_module</code></td><td>core</td><td class="n">6 035</td><td class="n">8 920</td><td class="n">1.48</td><td class="n">18</td><td class="n">31</td><td>2026-11-08</td></tr>
+      <tr><td><code>statistics_module</code></td><td>core</td><td class="n">4 549</td><td class="n">10 821</td><td class="n">2.38</td><td class="n">15</td><td class="n">9</td><td>2026-11-08</td></tr>
+      <tr><td><code>error_module</code></td><td>core</td><td class="n">1 092</td><td class="n">2 110</td><td class="n">1.93</td><td class="n">8</td><td class="n">13</td><td>2026-11-08</td></tr>
+      <tr><td><code>telemetry_readmodel_module</code></td><td>optional</td><td class="n">608</td><td class="n">1 052</td><td class="n">1.73</td><td class="n">1</td><td class="n">3</td><td>2026-11-19</td></tr>
+      <tr><td><code>Services/otel_export</code></td><td>сервис</td><td class="n">1 764</td><td class="n">4 126</td><td class="n">2.34</td><td class="n">4</td><td class="n">—</td><td>2026-11-08</td></tr>
+      <tr><td><code>backend_ctl</code>, пакет</td><td>инструмент</td><td class="n">12 090</td><td class="n">23 065</td><td class="n">1.91</td><td class="n">9</td><td class="n">—</td><td>2026-11-20</td></tr>
+      <tr><td><code>backend_ctl/probes</code></td><td>зонды</td><td class="n">11 904</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td>2026-10-04</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted" style="font-size:13px">Ярус и число импортирующих файлов (вне модуля, без тестов) взяты из карточек Атласа: <code>python -m scripts.atlas card &lt;модуль&gt;</code>. Строки посчитаны по <code>.py</code>.</p>
+</section>
+
+<section id="live">
+  <span class="eyebrow">Живой стенд · headless inspection_full · 7 процессов · 125 с</span>
+  <h2>Что система показала потребителю</h2>
+  <p>Зонд <code>probe_observability_consumer_acceptance</code> проходит чек-лист как внешний потребитель: меняет настройку, затем ищет эффект в файле журнала, в SQLite или в пуше. Стенд поднялся на macOS без правок.</p>
+  <div class="vbar" role="img" aria-label="Вердикты: 42 PASS, 1 FAIL, 2 PARTIAL, 5 NOT_REACHED, 1 UNVERIFIED">
+    <span class="c-pass" style="flex:42"></span><span class="c-fail" style="flex:1"></span><span class="c-part" style="flex:2"></span><span class="c-nr" style="flex:5"></span><span class="c-unv" style="flex:1"></span>
+  </div>
+  <div class="legend">
+    <span><i class="c-pass"></i>PASS 42</span><span><i class="c-fail"></i>FAIL 1</span><span><i class="c-part"></i>PARTIAL 2</span><span><i class="c-nr"></i>NOT_REACHED 5</span><span><i class="c-unv"></i>UNVERIFIED 1</span>
+  </div>
+  <div class="cols">
+    <div class="stack">
+      <h3>Не PASS: что за этим стоит</h3>
+      <ul class="plain">
+        <li><b>S2 FAIL и S5 PARTIAL</b> вызваны ошибкой зонда, а не системы: переменная затёрта, зонд сравнивает имена процессов с именами команд (находка O-1). Система в обеих строках отвечает верно. В эталоне от 2026-09-08 строка S5 была PASS.</li>
+        <li><b>E5 PARTIAL.</b> У плоскости <code>hub</code> нет полного набора счётчиков потерь, вытеснения стора в readback не публикуются.</li>
+        <li><b>L6 NOT_REACHED.</b> Лаг кадра между стадиями потребителю недоступен. Есть только <code>latency_ms</code>: у <code>camera_0</code> 40.9, у <code>processor</code> 0.6, у <code>inspector</code> 0.3. Это время последнего цикла воркера, а не время кадра в стадии.</li>
+        <li><b>K6 NOT_REACHED.</b> Правило отбора метрики проверить не на чем: у записей <code>kind=stats</code> колонка <code>metric</code> пустая (находка O-3).</li>
+        <li><b>R8, K12, K14, K13</b> не исполнялись по правилам стенда: запись в общее дерево, разрушающая ручка, бюджет времени.</li>
+      </ul>
+    </div>
+    <div class="stack">
+      <h3>Задержки, измеренные на стенде</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Что</th><th class="n">Медиана</th><th class="n">Мин – макс</th><th class="n">n</th></tr></thead>
+        <tbody>
+          <tr><td>Команда <code>introspect</code>, туда и обратно</td><td class="n">12.5 мс</td><td class="n">7.1 – 28.1</td><td class="n">60</td></tr>
+          <tr><td>Запись → хвост подписчику</td><td class="n">18.9 мс</td><td class="n">10.4 – 30.3</td><td class="n">7</td></tr>
+          <tr><td>Запись → строка в SQLite</td><td class="n">108 мс</td><td class="n">25 – 116</td><td class="n">7</td></tr>
+          <tr><td><code>state.set</code> → пуш подписчику</td><td class="n">92 мс</td><td class="n">21 – 139</td><td class="n">7</td></tr>
+          <tr><td>Запись регистра с проверкой</td><td class="n">24.5 мс</td><td class="n">23.2 – 25.2</td><td class="n">5</td></tr>
+          <tr><td>Рестарт процесса</td><td class="n">1.46 с</td><td class="n">—</td><td class="n">1</td></tr>
+          <tr><td>Возврат правки по сроку 20 с</td><td class="n">25.1 с</td><td class="n">такт 5 с</td><td class="n">1</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted" style="font-size:13px">Одна машина, один прогон: это наблюдения, а не паспортные числа. За прогон в стор попало 561 запись журнала, 16 ошибок и 100 снапшотов чисел.</p>
+    </div>
+  </div>
+</section>
+
+<section id="findings">
+  <span class="eyebrow">Реестр находок</span>
+  <h2>Баги, костыли и долги</h2>
+  <p>Сначала P1 и P2 карточками, ниже P3 таблицей. Проверка указана у каждой находки. «Запуск ×2» значит: воспроизвёл аудитор, я повторил запуск и получил тот же вывод. «Запуск» значит: воспроизвёл аудитор. «Чтение ✓» значит: найдено чтением кода, строки я сверил. «Чтение» значит: найдено чтением кода аудитором. Находки, уже записанные в очереди проекта, помечены «известно».</p>
+  <div class="chips" role="group" aria-label="Фильтр находок">
+    <button type="button" id="flt-all" data-f="all" aria-pressed="true">Все</button>
+    <button type="button" id="flt-p1" data-f="p1" aria-pressed="false">Только P1</button>
+    <button type="button" id="flt-logs" data-f="logs" aria-pressed="false">Логи и ошибки</button>
+    <button type="button" id="flt-metrics" data-f="metrics" aria-pressed="false">Метрики</button>
+    <button type="button" id="flt-bctl" data-f="bctl" aria-pressed="false">backend_ctl</button>
+  </div>
+
+  <div class="flist" id="flist">
+
+    <article class="f" data-area="logs" data-sev="p1">
+      <div class="f-h"><span class="pill p1">P1</span><b>L-1</b><span>баг</span><span class="ver x2">запуск ×2</span><code>logger_module/channels/log_channel.py:1020</code></div>
+      <p><b>Полный диск: ERROR потерян, счётчики говорят «записано».</b> Канал зовёт <code>Handler.emit</code> из stdlib. Тот глотает <code>OSError</code> внутри <code>handleError</code>, и канал возвращает <code>success</code>. Подмена потока на ENOSPC дала: <code>channel_written_records 4</code>, <code>channel_write_errors 0</code>, <code>errors_to_floor 0</code>, файла пола ошибок нет.</p>
+      <p class="fix">писать в поток самим (<code>format</code> и <code>stream.write</code>), <code>OSError</code> превращать в <code>status: error</code>. Тогда сработает пол ошибок.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p1">
+      <div class="f-h"><span class="pill p1">P1</span><b>L-2</b><span>баг</span><span class="ver x2">запуск ×2</span><code>error_module/core/error_manager.py:478</code></div>
+      <p><b>В журнал ошибок попадает чужой traceback.</b> <code>log_exception</code> вызывает <code>traceback.format_exc()</code>. Эта функция печатает исключение, которое обрабатывается сейчас, а не переданное <code>exc</code>. Вне блока <code>except</code> traceback не пишется совсем. Внутри чужого <code>except</code> к ошибке A приклеивается traceback от ошибки B.</p>
+      <p class="fix"><code>traceback.format_exception(exc)</code>, сборку текста делать после гейта уровня.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p1">
+      <div class="f-h"><span class="pill p1">P1</span><b>M-1</b><span>баг</span><span class="ver x2">запуск ×2</span><code>process_module/generic/cycle_metrics.py:78</code></div>
+      <p><b>Стадия встала, а fps показывает прежнее число.</b> <code>effective_hz</code> пересчитывается только внутри <code>record()</code>. После 50 циклов и паузы 2 с рекордер отдаёт <code>effective_hz: 92.04</code>, в дерево уходит <code>state.fps: 92.0</code>. Для поиска узкого места это худший случай: зависшая стадия выглядит здоровой.</p>
+      <p class="fix">считать частоту при чтении по окну последней секунды. Публиковать счётчик циклов и возраст последнего цикла.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p1">
+      <div class="f-h"><span class="pill p1">P1</span><b>M-2</b><span>баг</span><span class="ver x2">запуск ×2</span><code>process_module/heartbeat/telemetry.py:218</code></div>
+      <p><b>fps и latency процесса собираются из разных воркеров.</b> Берётся максимум частоты и отдельно максимум задержки. Воркеры (30 Гц, 2 мс) и (5 Гц, 180 мс) дают <code>fps: 30.0, latency_ms: 180.0</code>. Сама задержка равна длительности одного последнего цикла, а не распределению.</p>
+      <p class="fix">агрегат процесса брать по самому медленному воркеру вместе с его задержкой. Задержку считать как p95 окна.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p1">
+      <div class="f-h"><span class="pill p1">P1</span><b>B-1</b><span>безопасность</span><span class="ver">запуск · чтение ✓</span><code>process_manager_module/process/backend_ctl_endpoint.py:9</code></div>
+      <p><b>Управляющий сокет без токена включён в поставляемом конфиге.</b> Докстринг обещает: «в проде endpoint не существует». При этом <code>multiprocess_prototype/backend/config/system.yaml:44</code> несёт <code>enabled: true</code>. Любой локальный процесс шлёт одну JSON-строку <code>system.shutdown mode=force</code> и получает <code>success: true</code>. Поле <code>host</code> принимается без проверки на loopback.</p>
+      <p class="fix">в поставке <code>enabled: false</code>. Токен-файл с правами 0600 и рукопожатие (или Unix-сокет 0600). Отказ на не-loopback без явного разрешения.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-3</b><span>баг</span><span class="ver x2">запуск ×2</span><code>channel_routing_module/observability/record_forward_channel.py:116</code></div>
+      <p><b>Мёртвый межпроцессный хвост не виден.</b> Форвардер глотает отказ роутера и возвращает <code>status: error</code>, а раздача tap'ам читает только исключения. С мёртвым роутером: <code>accepted 1</code>, <code>tap_write_errors 0</code>.</p>
+      <p class="fix">судить ответ tap'а той же функцией <code>channel_accepted</code>, что и ответ канала. Завести счётчик отказов tap'а.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-4</b><span>баг</span><span class="ver">запуск</span><code>base_manager/mixins/observable_mixin.py:842</code></div>
+      <p><b>После останова логгера запись считается доставленной.</b> После <code>LoggerManager.shutdown()</code> вызов <code>_log_warning</code> у другого менеджера возвращает <code>delivered=True</code>. В файл запись не попадает.</p>
+      <p class="fix">после останова отвечать «не доставлено» и писать в аварийный выход. Сбрасывать кэш маршрута при останове.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-5</b><span>долг</span><span class="ver x2">запуск ×2</span><code>base_manager/mixins/observable_mixin.py:185</code></div>
+      <p><b>Выключенный уровень не бесплатен.</b> Отфильтрованный <code>_log_debug</code> через миксин стоит 1.18–1.68 мкс. Прямой вызов логгера стоит 0.38–0.41 мкс, фасад <code>get_std_logger</code> 0.45–0.60 мкс. Разъём, которым пользуются сотни мест, сам нарушает правило «ноль цены, когда выключено».</p>
+      <p class="fix">связка по эпохе, как уже сделано в <code>std_facade</code>: закэшировать писателя и проверять уровень первым действием.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-7</b><span>баг</span><span class="ver">чтение</span><code>logger_module/channels/log_channel.py:1126</code></div>
+      <p><b>HTTP-приёмник блокирует поток, который пишет лог.</b> <code>HttpChannel.write</code> делает синхронный <code>requests.post(timeout=5)</code> в обход дедлайна и размыкателя. Каждая ошибка может держать рабочий поток до 5 с.</p>
+      <p class="fix">отправлять через <code>BatchDrainWorker</code>, как это уже делает запись в стор.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-9</b><span>костыль</span><span class="ver">чтение</span><code>logger_module/adapters/std_facade.py:166</code></div>
+      <p><b>Потери ранних записей никто не публикует.</b> У счётчика переполнения буфера ранних записей нет ни одного читателя в боевом коде.</p>
+      <p class="fix">включить его в <code>get_stats</code> и в общий набор счётчиков плоскости.</p>
+    </article>
+
+    <article class="f" data-area="logs" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>L-10</b><span>долг</span><span class="ver">чтение</span><code>channel_routing_module</code> · <code>log_channel.py:1034</code></div>
+      <p><b>Перенастройка каналов не атомарна.</b> <code>reconfigure</code> закрывает каналы до сборки новых. Записи в этом окне уходят в счётчик «канал не найден», INFO теряется. Гонку не воспроизводили.</p>
+      <p class="fix">собрать новый реестр, подменить одним присваиванием, старый закрыть после.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-3</b><span>баг</span><span class="ver">запуск</span><span class="known">известно: Task 4.12</span><code>process_manager_module/process/process_manager_process.py:5148</code></div>
+      <p><b>Две дороги к одной настройке отвечают по-разному.</b> <code>telemetry.broadcast</code> судит потолок троттла по заявленному интервалу, <code>config.reload</code> по реальному такту процесса. Один и тот же запрос на одной дороге называет потолок, на другой нет.</p>
+      <p class="fix">оптовая дорога спрашивает такт у адресатов или отдаёт суд самому процессу.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-4</b><span>баг</span><span class="ver">запуск · чтение ✓</span><span class="known">известно: K-4</span><code>statistics_module/core/stats_manager.py:117</code></div>
+      <p><b>Ключ серии не включает тип метрики.</b> Ключ собирается из имени и тегов. После <code>record_metric("x")</code> и двух <code>record_timing("x")</code> остаётся счётчик со значением 1, тайминги пропадают без следа.</p>
+      <p class="fix">добавить тип в ключ или отвергать конфликт с голосом и счётчиком.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-5</b><span>долг</span><span class="ver">чтение</span><code>process_manager_module/monitor/process_monitor.py:738</code></div>
+      <p><b><code>system.health.avg_fps</code> не имеет смысла.</b> Это среднее максимумов по разнородным стадиям. Когда данных нет, значение не публикуется, и в дереве остаётся старое.</p>
+      <p class="fix">заменить на пропускную способность линии: минимум выхода по стадиям с меткой времени.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-6</b><span>баг</span><span class="ver">чтение</span><code>telemetry_readmodel_module/telemetry_read_model.py:378</code></div>
+      <p><b>У значения телеметрии нет возраста.</b> Ни лист, ни поддерево не несут метку времени или номер такта. «Устарело» нельзя отличить от «живое» ни в дереве, ни в read-model, ни в ответе <code>telemetry_snapshot</code>.</p>
+      <p class="fix">метка времени и номер на каждый такт, функция возраста в read-model, отдельный вид «устарело» в GUI.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-7</b><span>костыль</span><span class="ver">чтение</span><code>process_module/heartbeat/process_heartbeat.py:334</code></div>
+      <p><b>Отказы публикации телеметрии пишутся на DEBUG.</b> Таких мест 18. В бою телеметрия может умереть молча.</p>
+      <p class="fix">счётчик отказов в <code>introspect</code> и WARNING через окно голоса.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-9</b><span>долг</span><span class="ver">чтение</span><code>Services/otel_export/mapping.py:124</code></div>
+      <p><b>Экспорт в OpenTelemetry покрывает только логи.</b> Сервис настоящий: OTLP по HTTP. Но числовые записи отбрасываются, метрик и трейсов нет.</p>
+      <p class="fix">отображать снапшот окна в OTel Metrics: счётчик в Sum, тайминг в Histogram с готовыми границами, уровень в Gauge.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>M-10</b><span>долг</span><span class="ver">чтение</span><span class="known">частично известно</span><code>process_module/heartbeat/telemetry.py:71</code></div>
+      <p><b>В ядре фреймворка лежит словарь инспекции.</b> Имена <code>fps</code>, <code>not_inspected_*</code>, <code>lag_dropped_items</code> зашиты в сборщик и в монитор. Приложение без видео наследует чужие имена.</p>
+      <p class="fix">ядро даёт нейтральные инструменты стадии, доменные имена объявляет приложение.</p>
+    </article>
+
+    <article class="f" data-area="metrics" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>O-3</b><span>наблюдение</span><span class="ver x2">живой стенд</span><code>observability.db</code></div>
+      <p><b>На основном рецепте плоскость чисел пустая по именам.</b> У всех записей <code>kind=stats</code> колонка <code>metric</code> равна NULL. Числа <code>StatsManager</code> уходят в журнал и в стор как снапшоты, числового читателя у них нет: графики и сводки их не используют.</p>
+      <p class="fix">решается единой моделью инструментов, см. целевую архитектуру.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-2</b><span>безопасность</span><span class="ver">запуск</span><code>router_module/channels/socket_channel.py:317</code></div>
+      <p><b>Нет потолка на число соединений.</b> 200 простаивающих клиентов подняли число потоков хоста с 2 до 203. Таймаут <code>1e9</code> от клиента уходит в <code>router.request</code> как есть.</p>
+      <p class="fix"><code>max_clients</code>, серверный потолок таймаута, отключение по простою.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-3</b><span>баг</span><span class="ver x2">запуск ×2</span><code>backend_ctl/registers.py:157</code></div>
+      <p><b>Проверенная запись может пройти вхолостую.</b> Запись отвергнута (<code>No handler for register_update</code>), но поле уже было равно значению. Ответ: <code>verified: True, success: True</code>. У <code>register_restore</code> то же: <code>written: 0, verified: 1, success: True</code>.</p>
+      <p class="fix">читать значение до записи. Успех считать как «совпало и подтверждение не отказ». Если значение совпадало заранее, ставить <code>vacuous: true</code>.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-4</b><span>баг</span><span class="ver">чтение</span><span class="known">известно: Task 1.3</span><code>backend_ctl/driver.py:2046</code></div>
+      <p><b>Read-model драйвера не замечает дыр.</b> Приём дельт не смотрит на номер ревизии. <code>telemetry_snapshot</code> отдаёт значение без возраста.</p>
+      <p class="fix">счётчик дыр, возраст на метрику, пересинхронизация по дыре.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-5</b><span>долг</span><span class="ver">запуск на отдельном канале</span><code>router_module/channels/socket_channel.py:238</code></div>
+      <p><b>Пуш клиенту пишется в потоке отправителя ProcessManager.</b> <code>sendall</code> идёт под одним локом на всех клиентов. Застрявший клиент стоит общему отправителю до 0.5 с, после чего его отключают. Медленный, но живой клиент теряет соединение и окно событий.</p>
+      <p class="fix">своя ограниченная очередь и поток записи на каждого клиента, вытеснение старых со счётчиком и маркером дыры.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-7</b><span>долг</span><span class="ver">чтение</span><code>backend_ctl/registers.py:360</code></div>
+      <p><b>Подтверждаемая запись откатывается не там.</b> Таймер отката живёт на клиенте. При обрыве связи таймер снимается, и запись остаётся. Это ровно тот случай, ради которого режим существует.</p>
+      <p class="fix">таймер и откат держит ProcessManager по сессии, откат срабатывает на закрытие сессии.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-8</b><span>безопасность</span><span class="ver">чтение</span><span class="known">известно: Task 4.1</span><code>backend_ctl/dispatch.py:347</code></div>
+      <p><b>Классы безопасности проверяет только клиент.</b> Хост их не знает. <code>record_start</code> и <code>record_dump</code> числятся чтением, хотя пишут файлы: они проходят в режиме <code>--read-only</code> и мимо аудита.</p>
+      <p class="fix">роль сессии проверяет хост. Запись файлов перевести в класс записи.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-9</b><span>баг сигнала</span><span class="ver">чтение</span><code>backend_ctl/overview.py:150</code></div>
+      <p><b>Сводка может не увидеть процесс и зависнуть на одном.</b> Список процессов берётся только из дерева состояния, без сверки с супервизией. Пять запросов к процессу идут подряд: один зависший процесс стоит около пяти таймаутов.</p>
+      <p class="fix">объединять с данными супервизии, опрашивать параллельно или одной командой.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-11</b><span>долг</span><span class="ver">чтение</span><span class="known">известно: Task 5.1</span><code>backend_ctl/harness.py:114</code></div>
+      <p><b>Инструмент привязан к прототипу.</b> Пакет импортирует <code>multiprocess_prototype</code>, шаблоны подписки скопированы из GUI прототипа, MCP знает один порт.</p>
+      <p class="fix">шаблоны отдаёт реестр команд приложения, запуск уходит в адаптер приложения, у инструментов появляется параметр цели.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>B-13</b><span>долг</span><span class="ver">чтение</span><code>backend_ctl/mcp_tools.py:53</code></div>
+      <p><b>Ответы без потолка в байтах.</b> <code>events</code>, <code>events_page</code> и <code>register_snapshot</code> не ограничены по размеру. Страница до 500 событий может занять мегабайты в контексте агента.</p>
+      <p class="fix">байтовый бюджет страницы и курсор по месту среза.</p>
+    </article>
+
+    <article class="f" data-area="bctl" data-sev="p2">
+      <div class="f-h"><span class="pill p2">P2</span><b>O-1</b><span>баг</span><span class="ver x2">живой стенд · чтение ✓</span><code>backend_ctl/probes/probe_observability_consumer_acceptance.py:452</code></div>
+      <p><b>Зонд приёмки сам даёт ложный FAIL.</b> Переменная <code>names</code> (имена процессов, строка 424) затёрта списком имён команд. Строка S2 сравнивает процессы с командами и ставит FAIL при «отсутствуют: нет». Строка S5 перебирает 68 команд вместо 7 процессов и ставит PARTIAL.</p>
+      <p class="fix">переименовать локальную переменную. Добавить тест зонда на подставном драйвере, чтобы вердикт проверялся без стенда.</p>
+    </article>
+
+  </div>
+
+  <h3>P3: мелкие долги и неточности</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Где</th><th>Суть</th></tr></thead>
+    <tbody>
+      <tr><td class="n">L-6</td><td><code>log_channel.py:1004</code></td><td>Принятая запись стоит 17 мкс (файл) и 30 мкс (файл и консоль). stdlib форматирует запись дважды и сбрасывает буфер на каждую.</td></tr>
+      <tr><td class="n">L-8</td><td><code>logger_manager_config.py:263</code></td><td>Схема менеджера молча игнорирует неизвестные ключи. Дорога <code>config.reload</code> опечатку отвергает: живая строка K8 прошла.</td></tr>
+      <tr><td class="n">L-11</td><td><code>logger_core.py:1506</code></td><td>Часть счётчиков растёт без лока, часть под локом.</td></tr>
+      <tr><td class="n">L-12</td><td><code>logger_core.py:1823</code></td><td>Лишний лок и две аллокации словаря на каждую запись.</td></tr>
+      <tr><td class="n">L-13</td><td><code>channel_routing_module/buffers/direct_buffer.py</code></td><td><code>DirectBuffer</code>, пустой <code>flush()</code>, параметр <code>count_each</code>: остатки снятого буфера в сигнатурах.</td></tr>
+      <tr><td class="n">L-14</td><td><code>router_push_channel.py</code>, <code>record_forward_channel.py</code></td><td>Два форвардера с одной и той же семантикой.</td></tr>
+      <tr><td class="n">L-15</td><td><code>docs/OBSERVABILITY_MAP.md</code></td><td>Карта говорит «единственный писатель», в коде четыре дороги к диску.</td></tr>
+      <tr><td class="n">M-8</td><td><code>stats_manager.py:1018</code></td><td>Выключенная плоскость чисел стоит 1.27 мкс на вызов: гейт стоит после раздачи.</td></tr>
+      <tr><td class="n">M-11</td><td><code>aggregation_window.py:246</code></td><td>В снапшоте нет начала и длины окна. Темп нельзя посчитать без внешней настройки.</td></tr>
+      <tr><td class="n">M-12</td><td><code>aggregation_window.py:342</code></td><td><code>except Exception: pass</code> в таймере сброса окна.</td></tr>
+      <tr><td class="n">M-13</td><td><code>chain_module/metrics/latency.py:40</code></td><td><code>LatencyTracker</code> в бою не создаётся. На пустом буфере отдаёт 0.0.</td></tr>
+      <tr><td class="n">M-14</td><td><code>metric_record.py:59</code></td><td>Сетка бакетов кончается на 1 с: стадия дольше секунды целиком попадает в последний бакет.</td></tr>
+      <tr><td class="n">M-15</td><td><code>OBSERVABILITY_MAP.md:28</code></td><td>Карта называет <code>ObservationManager</code> «спланирован», он работает.</td></tr>
+      <tr><td class="n">M-16</td><td><code>telemetry_read_model.py:430</code></td><td>Точки истории помечены временем приёма, а не временем источника.</td></tr>
+      <tr><td class="n">B-6</td><td><code>socket_bridge_adapter.py:130</code></td><td>Счётчик потерянных ответов ловит только исключения. Отказ <code>status: error</code> не считается.</td></tr>
+      <tr><td class="n">B-10</td><td>протокол</td><td>У протокола между хостом и драйвером нет версии и рукопожатия.</td></tr>
+      <tr><td class="n">B-12</td><td><code>backend_ctl/probes/</code></td><td>48 зондов с номерами задач лежат в импортируемом пакете: 11 904 строки.</td></tr>
+      <tr><td class="n">B-14</td><td><code>backend_ctl/driver.py</code></td><td>2783 строки: транспорт, история SQLite, телеметрия и останов в одном классе.</td></tr>
+      <tr><td class="n">B-15</td><td><code>backend_ctl/audit.py:171</code></td><td>43 широких <code>except</code> в пакете, около 14 с голым <code>pass</code>. Сбой аудит-журнала не виден.</td></tr>
+      <tr><td class="n">B-16</td><td><code>backend_ctl/STATUS.md:28</code></td><td>Написано «47 инструментов», в реестре 57.</td></tr>
+      <tr><td class="n">O-2</td><td><code>router_module/core/_receiver.py:152</code></td><td>Приём сообщений опрашивает очередь с паузой 10 мс. Время команды квантуется: медиана 12.5 мс, второй пик около 24 мс. Известно как F13.</td></tr>
+      <tr><td class="n">O-4</td><td>живой стенд</td><td>В каждом процессе весь прогон простаивают приёмники <code>warnings_file</code>, <code>critical_file</code>, <code>trace_file</code>, <code>robot_exchange_file</code>. Система сама сообщает об этом при остановке.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="crutches">
+  <span class="eyebrow">Костыли и лишние слои</span>
+  <h2>Где одна работа делается дважды</h2>
+  <div class="cols">
+    <div class="stack">
+      <h3>Логи</h3>
+      <ul class="plain">
+        <li><b>Миксин как диспетчер.</b> Между местом вызова и <code>LoggerCore.log</code> стоят три кадра ради одной проверки «слот включён». Фасад решает ту же задачу связкой по эпохе.</li>
+        <li><b>Три слоя вокруг stdlib-хэндлера.</b> Свой <code>_SafeRotatingFileHandler</code>, общий реестр и <code>sink_lock</code> обёрнуты вокруг хэндлера, который мешает честному учёту ошибок записи.</li>
+        <li><b>Два кэша решения на один ключ</b> и два форвардера записей в процесс-подписчик.</li>
+        <li><b>История ревью в докстрингах.</b> <code>logger_core.py</code> занимает 2184 строки, докстринги по 15–40 строк хроники на метод.</li>
+      </ul>
+    </div>
+    <div class="stack">
+      <h3>Метрики</h3>
+      <ul class="plain">
+        <li><b>Петля числа.</b> <code>StatsManager</code> шлёт число в порт, чтобы получить его же обратно: 8 вызовов, два лока, три копии словаря.</li>
+        <li><b>Два накопителя одной серии</b> с разными локами. Функция ключа написана дважды.</li>
+        <li><b>Шесть сглаживаний без общей модели:</b> окно 1 с, последний цикл, два EMA, p95 по бакетам, p95 по кольцу. Имена похожи, периоды разные.</li>
+        <li><b><code>round(x, 1)</code> в сборщике.</b> Микросекундная величина превращается в ноль, а ноль считается показанием.</li>
+      </ul>
+    </div>
+    <div class="stack">
+      <h3>backend_ctl</h3>
+      <ul class="plain">
+        <li><b>Тройной хоп.</b> Обработчик инструмента зовёт однострочную обёртку драйвера, та зовёт <code>send_command</code>.</li>
+        <li><b>Пары инструментов «с проверкой и без».</b> <code>set_register</code> и <code>set_register_verified</code>, <code>config_reload</code> и <code>config_reload_verified</code>: вариант без проверки не нужен агенту.</li>
+        <li><b>Зонды задач в пакете.</b> Половина строк инструмента живёт как одноразовые сценарии с номерами задач.</li>
+        <li><b>Политика на клиенте.</b> Режим только-чтения и подтверждаемая запись сделаны на стороне, которой хост не доверяет.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="good">
+  <span class="eyebrow">Сильные стороны</span>
+  <h2>Что стоит сохранить как образец</h2>
+  <div class="cols">
+    <ul class="plain">
+      <li><b>Потери названы и выходят одним снимком.</b> Классы потерь перечислены, снимок берётся под одним локом с монотонной меткой. Темп считает читатель, поэтому два потребителя не мешают друг другу.</li>
+      <li><b><code>BatchDrainWorker</code> учитывает записи без зазоров.</b> Решение «принимаю» и постановка в очередь стоят под одним локом, потеря после закрытия идёт в свою корзину.</li>
+      <li><b>Лесенка перегрузки защищает пишущий поток</b> от залипшего приёмника: дедлайн, размыкание, отдельный лок на путь файла.</li>
+      <li><b>Пол ошибок честен.</b> Счётчик растёт после реальной записи, отказ самого пола считается отдельно.</li>
+    </ul>
+    <ul class="plain">
+      <li><b>Гистограммы на бакетах с семантикой <code>le</code>.</b> Память постоянная, слияние ассоциативное. Эту основу можно отдавать в OpenTelemetry и Prometheus как есть.</li>
+      <li><b>Владение метрикой плагина задано путём в дереве.</b> Ушедший писатель снимается удалением поддерева, а не надгробиями.</li>
+      <li><b>Слои настроек со сроком.</b> Сессионная правка живёт срок и возвращается сама с записью в журнал. Опечатка в ключе даёт отказ с подсказкой. Оба свойства подтверждены на стенде.</li>
+      <li><b>Курсор событий с поколением.</b> При смене поколения драйвер требует сброса, а не читает молча не с того места. Усечение ответа помечено.</li>
+      <li><b>Система говорит о себе.</b> При остановке каждый менеджер перечисляет приёмники, которые за прогон не приняли ни одной записи.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="plans">
+  <span class="eyebrow">Планы и документы</span>
+  <h2>Бумажный след против кода</h2>
+  <div class="cols">
+    <div class="stack">
+      <h3>Состояние планов</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>План</th><th class="n">Сделано</th><th>Состояние</th></tr></thead>
+        <tbody>
+          <tr><td><code>observability-closure</code></td><td class="n">33 из 70</td><td>29 ждут, 5 отложены. Без движения с 2026-10-01.</td></tr>
+          <tr><td><code>otel-export</code></td><td class="n">13 из 21</td><td>Живого прогона на коллекторе нет. Релиз не назначен.</td></tr>
+          <tr><td><code>backend-ctl-review-remediation</code></td><td class="n">4 из 18</td><td>Все четыре закрыты чужими планами. Базовый живой прогон 0.1 ждёт с 2026-07-23.</td></tr>
+          <tr><td>Инструменты по намерению</td><td class="n">0</td><td>Желание владельца от 2026-10-26, своего плана нет.</td></tr>
+        </tbody>
+      </table></div>
+      <ul class="plain">
+        <li>Всего по теме 27 планов за пять месяцев. 11 из них заменены или поглощены.</li>
+        <li>Класс дефектов «сигнал врёт» закрывали три раза: 2026-07-21, 2026-07-26 и после приёмки 2026-09-08. Сегодняшние B-3, L-1 и M-1 относятся к нему же.</li>
+        <li>Наблюдаемость хопа кадра стоит в конце цепочки 4.3b → 4.6 → 4.5 → 4.15. Ни одна из четырёх задач не начата.</li>
+      </ul>
+    </div>
+    <div class="stack">
+      <h3>Дрейф документов, измерено</h3>
+      <div class="scroll"><table>
+        <thead><tr><th>Утверждение</th><th class="n">В документе</th><th class="n">В коде</th></tr></thead>
+        <tbody>
+          <tr><td>Инструментов MCP, <code>backend_ctl/STATUS.md</code></td><td class="n">47</td><td class="n">57</td></tr>
+          <tr><td>Инструментов MCP, очередь владельца</td><td class="n">53</td><td class="n">57</td></tr>
+          <tr><td>Строк в <code>driver.py</code></td><td class="n">1 270</td><td class="n">2 783</td></tr>
+          <tr><td>Дата <code>backend_ctl/STATUS.md</code></td><td class="n">07-20</td><td class="n">код: 11-20</td></tr>
+          <tr><td>Строк кода <code>channel_routing_module</code></td><td class="n">3 782</td><td class="n">6 035</td></tr>
+          <tr><td>ADR в <code>channel_routing_module</code></td><td class="n">14</td><td class="n">18</td></tr>
+          <tr><td>Тестов в <code>error_module</code></td><td class="n">~25</td><td class="n">92</td></tr>
+          <tr><td>Вызовов <code>get_std_logger</code>, карта</td><td class="n">116</td><td class="n">144</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted" style="font-size:13px">Числа в <code>STATUS.md</code> пишутся руками и стареют за недели. Индекс Атласа собирается командой и не стареет: тот же приём годится для счётчиков в статусах.</p>
+    </div>
+  </div>
+</section>
+
+<section id="target">
+  <span class="eyebrow">Целевая архитектура</span>
+  <h2>От механизмов к контрактам сигнала</h2>
+
+  <div class="stack">
+    <h3>Корневая причина</h3>
+    <p>Почти все находки P1 и P2 принадлежат одному классу: ответ выглядит здоровым, когда это не так. Так ведут себя запись в файл (L-1), tap (L-3), логгер после останова (L-4), частота стадии (M-1), значение без возраста (M-6, B-4), проверенная запись (B-3) и даже зонд приёмки (O-1). Этот класс уже закрывали три раза, каждый раз по экземплярам. Он возвращается, потому что система собрана вокруг механизмов: у логгера, у менеджера чисел, у heartbeat и у драйвера своё понятие «доставлено», «свежо» и «проверено». Общего контракта нет, поэтому каждое новое звено приносит новый экземпляр.</p>
+    <p class="note">Вывод: чинить надо не экземпляры, а класс. Три правила ниже задаются один раз и проверяются одним параметризованным тестом по всем реализациям. Проект уже так поступал: спор писателей за имя метрики был не починен, а удалён, когда владение стало путём в дереве.</p>
+  </div>
+
+  <div class="stack">
+    <h3>Три инварианта вместо россыпи проверок</h3>
+    <div class="scroll"><table>
+      <thead><tr><th>Инвариант</th><th>Что требует</th><th>Какие находки закрывает</th><th>Как проверяет контракт-тест</th></tr></thead>
+      <tbody>
+        <tr><td><b>Исход</b></td><td>Каждое звено, принявшее запись или команду, отвечает одним из трёх: принял, отказал с причиной, сбой с ошибкой. Звено не вправе улучшить исход нижнего звена. Счётчики потерь считает одна функция по исходу.</td><td>L-1, L-3, L-4, B-6</td><td>Для каждого зарегистрированного типа приёмника и tap'а: подставить сломанный поток, мёртвый роутер, закрытый менеджер. Исход не «принял», счётчик потерь вырос на 1.</td></tr>
+        <tr><td><b>Свежесть</b></td><td>Каждое значение, которое пересекает границу процесса, несёт номер по порядку, время источника и номер воплощения процесса. Читатель отдаёт возраст. «Нет данных», «ноль», «устарело» и «писатель ушёл» являются четырьмя разными ответами.</td><td>M-1, M-5, M-6, B-4, M-16</td><td>Остановить писателя. Через два такта каждый читатель (дерево, read-model, <code>telemetry_snapshot</code>) обязан ответить «устарело».</td></tr>
+        <tr><td><b>Причинность проверки</b></td><td>«Проверено» означает три наблюдения: значение до, подтверждение записи, значение после. Если значение до уже равно целевому, ответ помечается <code>vacuous</code>.</td><td>B-3, O-1</td><td>Для каждого инструмента с проверкой: отвергнуть запись на хосте при совпадающем значении. Ответ не <code>success</code>.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Образец третьего правила в проекте уже есть: <code>config_reload_verified</code> отвечает <code>verdict</code> и списком <code>unverifiable</code>. Его форму стоит сделать общей для всех проверяемых действий.</p>
+  </div>
+
+  <div class="stack">
+    <h3>Четыре роли в процессе вместо пяти менеджеров</h3>
+    <p>Сейчас в процессе живут два экземпляра писателя записей, менеджер чисел с собственной петлёй, heartbeat со своим сборщиком и миксин-диспетчер перед ними. Цель: четыре роли, у каждой один владелец.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Роль</th><th>Сейчас</th><th>Цель</th><th>Что уходит</th></tr></thead>
+      <tbody>
+        <tr><td><b>Разъём эмиссии</b></td><td><code>ObservableMixin</code> проходит три кадра и поиск менеджера на каждый вызов; число идёт через порт и возвращается обратно в <code>StatsManager</code></td><td>Тонкая связка по эпохе: проверка уровня первым действием, затем прямой вызов писателя или инструмента. Имена <code>_log_*</code> и <code>_record_*</code> не меняются</td><td>1.3 мкс на выключенный вызов, петля из 8 вызовов</td></tr>
+        <tr><td><b>Писатель записей</b></td><td>Два <code>LoggerCore</code> (Logger и Error) со своими файлами и кэшами решений; четыре дороги к диску</td><td>Один писатель на процесс. <code>ErrorManager</code> становится обогатителем: снимает исключение, считает, отдаёт запись <code>kind=error</code> в тот же писатель. Файлы выбирают правила маршрута. Это задача 4.17 плана closure</td><td>Второй экземпляр, второй кэш, второй форвардер</td></tr>
+        <tr><td><b>Реестр инструментов</b></td><td>Живой словарь и окно с разными локами, шесть сглаживаний, уровни плагина отдельной дорогой</td><td>Один реестр: счётчик, уровень, гистограмма. Значения накопительные. Объявление через существующий <code>declare_metric</code>, к имени добавляются вид, единица и описание. Такт heartbeat остаётся единственным сборщиком</td><td>EMA и «последний цикл» как опубликованные числа, дубль функции ключа</td></tr>
+        <tr><td><b>Приёмники</b></td><td>stdlib-хэндлер в трёх обёртках; HTTP пишет в потоке эмитента; tap отвечает иначе, чем канал</td><td>Один контракт исхода. Файл пишется синхронно своим кодом (ADR-LOG-008 остаётся). Всё медленное идёт через <code>BatchDrainWorker</code></td><td>Двойное форматирование записи, невидимая ошибка диска</td></tr>
+      </tbody>
+    </table></div>
+    <p>Между процессами остаются три дороги с разным назначением. Дерево состояния несёт только уровни: последнее значение с номером и временем, то, что GUI показывает сейчас. Стор несёт историю: записи и периодические снимки реестра. Порт управления является единственной внешней границей для клиентов без GUI.</p>
+  </div>
+
+  <div class="stack">
+    <h3>Метрики проектируются от отчёта о мощности</h3>
+    <p>Главная цель владельца: когда линия не успевает, система называет узкую стадию и то, во что она упёрлась. Значит, начинать надо с отчёта, а набор метрик выводить из него. Отчёту нужны семь величин на каждую стадию. Шов для них в коде уже есть: <code>PipelineExecutor.run_loop</code> (<code>process_module/generic/pipeline_executor.py:205</code>) уже читает метку постановки в очередь <code>enq_ts</code>, уже берёт <code>t_start</code> и уже знает размер входа <code>n_in</code>. Сейчас эти значения сворачиваются в EMA и в «последний цикл». Достаточно складывать их в накопительные инструменты.</p>
+
+  <figure>
+    <div class="dgwrap">
+    <svg class="dg" viewBox="0 0 1048 262" role="img" aria-label="Сравнение: сейчас три несвязанных тракта чисел с разными читателями; цель — инструменты стадии пишут в один реестр процесса, из которого читают дерево для GUI, стор и экспорт.">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <text class="cap" x="20" y="26">СЕЙЧАС: ШЕСТЬ ДОРОГ ЧИСЛА</text>
+      <rect class="b" x="20" y="44" width="210" height="48" rx="5"/><text x="125" y="64" text-anchor="middle">StatsManager</text><text class="s" x="125" y="80" text-anchor="middle">дельта за окно 10 с</text>
+      <rect class="b" x="280" y="44" width="210" height="48" rx="5"/><text x="385" y="64" text-anchor="middle">журнал и SQLite</text><text class="s" x="385" y="80" text-anchor="middle">числового читателя нет</text>
+      <line class="ln" x1="230" y1="68" x2="278" y2="68" marker-end="url(#ar2)"/>
+      <rect class="b" x="20" y="114" width="210" height="48" rx="5"/><text x="125" y="134" text-anchor="middle">Heartbeat</text><text class="s" x="125" y="150" text-anchor="middle">максимум по воркерам</text>
+      <rect class="b" x="280" y="114" width="210" height="48" rx="5"/><text x="385" y="134" text-anchor="middle">дерево состояния</text><text class="s" x="385" y="150" text-anchor="middle">GUI, без возраста значения</text>
+      <line class="ln" x1="230" y1="138" x2="278" y2="138" marker-end="url(#ar2)"/>
+      <rect class="b" x="20" y="184" width="210" height="48" rx="5"/><text x="125" y="204" text-anchor="middle">EMA · avg_fps · LatencyTracker</text><text class="s" x="125" y="220" text-anchor="middle">четыре своих сглаживания</text>
+      <rect class="b" x="280" y="184" width="210" height="48" rx="5"/><text x="385" y="204" text-anchor="middle">частные поля</text><text class="s" x="385" y="220" text-anchor="middle">общей модели нет</text>
+      <line class="ln" x1="230" y1="208" x2="278" y2="208" marker-end="url(#ar2)"/>
+      <line class="rg" x1="524" y1="16" x2="524" y2="246"/>
+      <text class="cap" x="556" y="26">ЦЕЛЬ: ОДИН РЕЕСТР ИНСТРУМЕНТОВ</text>
+      <rect class="b" x="556" y="114" width="170" height="48" rx="5"/><text x="641" y="134" text-anchor="middle">Инструменты стадии</text><text class="s" x="641" y="150" text-anchor="middle">вход · выход · занято · очередь</text>
+      <rect class="b goal" x="766" y="114" width="130" height="48" rx="5"/><text x="831" y="134" text-anchor="middle">Реестр процесса</text><text class="s" x="831" y="150" text-anchor="middle">накопительно, ts и seq</text>
+      <line class="ln" x1="726" y1="138" x2="764" y2="138" marker-end="url(#ar2)"/>
+      <rect class="b" x="926" y="44" width="110" height="48" rx="5"/><text x="981" y="64" text-anchor="middle">дерево</text><text class="s" x="981" y="80" text-anchor="middle">уровни для GUI</text>
+      <rect class="b" x="926" y="114" width="110" height="48" rx="5"/><text x="981" y="134" text-anchor="middle">стор</text><text class="s" x="981" y="150" text-anchor="middle">история</text>
+      <rect class="b" x="926" y="184" width="110" height="48" rx="5"/><text x="981" y="204" text-anchor="middle">экспорт</text><text class="s" x="981" y="220" text-anchor="middle">OTel, Prometheus</text>
+      <polyline class="ln" points="896,128 910,128 910,68 924,68" marker-end="url(#ar2)"/>
+      <line class="ln" x1="896" y1="138" x2="924" y2="138" marker-end="url(#ar2)"/>
+      <polyline class="ln" points="896,148 910,148 910,208 924,208" marker-end="url(#ar2)"/>
+    </svg>
+    </div>
+    <figcaption>Разница в одном звене: числа сначала попадают в один реестр с накопительными значениями и меткой такта, и только потом расходятся читателям. Сейчас у каждого писателя свой получатель и своё сглаживание.</figcaption>
+  </figure>
+
+    <div class="scroll"><table>
+      <thead><tr><th>Инструмент стадии</th><th>Вид</th><th>Откуда берётся</th></tr></thead>
+      <tbody>
+        <tr><td><code>stage_items_in</code></td><td>счётчик</td><td>размер входного батча <code>n_in</code></td></tr>
+        <tr><td><code>stage_items_out</code></td><td>счётчик</td><td>число отправленных результатов</td></tr>
+        <tr><td><code>stage_dropped{reason}</code></td><td>счётчик</td><td>уже существующие маркеры <code>stale_exec</code>, <code>not_inspected</code></td></tr>
+        <tr><td><code>stage_busy_seconds</code></td><td>счётчик</td><td>сумма <code>t_end − t_start</code> полезной итерации</td></tr>
+        <tr><td><code>stage_queue_wait_seconds</code></td><td>гистограмма</td><td><code>now − enq_ts</code>, сейчас это EMA с весом 0.1</td></tr>
+        <tr><td><code>stage_service_seconds</code></td><td>гистограмма</td><td><code>t_end − t_start</code>, сейчас это «последний цикл»</td></tr>
+        <tr><td><code>process_cpu_seconds</code></td><td>счётчик</td><td>дельта времени процессора, уже считается в heartbeat</td></tr>
+      </tbody>
+    </table></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Вопрос</th><th>Как считается из двух снимков</th><th>Вывод</th></tr></thead>
+      <tbody>
+        <tr><td>Сколько стадия пропускает</td><td>Δ<code>items_out</code> / Δt</td><td>пропускная способность линии равна минимуму по стадиям</td></tr>
+        <tr><td>Насколько стадия занята</td><td>Δ<code>busy_seconds</code> / Δt на воркер</td><td>около 1: стадия на пределе</td></tr>
+        <tr><td>Где копится работа</td><td>p95 <code>queue_wait_seconds</code> по стадиям</td><td>узкая та стадия, перед которой ожидание растёт</td></tr>
+        <tr><td>Упор в код или язык</td><td>занятость около 1 и процессор около одного ядра на воркер</td><td>оптимизировать код; дальше вынос из-под GIL</td></tr>
+        <tr><td>Упор в ожидание</td><td>занятость около 1, процессор заметно меньше ядра</td><td>ввод-вывод, блокировка или GIL соседнего потока</td></tr>
+        <tr><td>Упор в железо</td><td>сумма процессора по процессам близка к числу ядер</td><td>больше ядер или несколько ПК</td></tr>
+        <tr><td>Запас</td><td>1 / занятость узкой стадии</td><td>во сколько раз можно поднять темп линии</td></tr>
+      </tbody>
+    </table></div>
+    <p>Лаг между процессами требует одного числа в конверте кадра: времени выхода из предыдущей стадии. Тогда каждая стадия пишет гистограмму ожидания транспорта на своём входе. Часы должны быть сравнимы между процессами одной машины; выбор часов делается в одном месте фреймворка с самопроверкой на старте. Подробный след отдельного кадра не требует новой системы: выборка <code>first_n</code> и <code>every_mth</code> для широких записей уже работает, к ней добавляются отметки по хопам. Этот путь не зависит от <code>ServiceContext</code> и нейтрального словаря, поэтому задача 4.15 выходит из цепочки 4.3b → 4.6 → 4.5.</p>
+    <p>Имена <code>fps</code> и <code>latency_ms</code> остаются как отображаемые уровни приложения. В ядре их заменяют темп и время обслуживания стадии. Приложение без видео получает те же семь инструментов без единой правки фреймворка.</p>
+  </div>
+
+  <div class="stack">
+    <h3>Порт управления как граница продукта</h3>
+    <p>GUI и backend_ctl являются двумя клиентами одного контракта: GUI формирует намерение, бэкенд исполняет без окна. Значит, сокет ProcessManager является не отладочной дверью, а границей продукта, и Пульт с телефонным шлюзом унаследуют её свойства. Сейчас правда собирается на клиенте: проверку записи, откат по таймеру, режим только-чтения и сводку состояния делает драйвер. Каждый новый клиент вынужден повторять это сам.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Слой</th><th>Где живёт</th><th>Что содержит</th></tr></thead>
+      <tbody>
+        <tr><td><b>Порт управления</b></td><td>фреймворк, ProcessManager</td><td>Рукопожатие с токеном и версией протокола. Роль сессии: чтение, запись, опасное. Очередь на выход у каждого клиента со счётчиком вытеснений. Проверенная запись, подтверждаемая запись с откатом и сводка состояния считаются на хосте</td></tr>
+        <tr><td><b>Клиент</b></td><td>пакет backend_ctl</td><td>Транспорт, курсоры событий, общий read-model. Зависит только от контракта порта и реестра команд, прототип не импортирует</td></tr>
+        <tr><td><b>Адаптеры</b></td><td>рядом с приложением</td><td>MCP-сервер с инструментами по намерению. Профиль приложения: порты, роли процессов, шаблоны подписки. Зонды приёмки</td></tr>
+      </tbody>
+    </table></div>
+    <p>Поверхность MCP сжимается с 57 инструментов до 19 по намерению: <code>discover</code>, <code>status</code>, <code>inspect</code>, <code>state_read</code>, <code>telemetry</code>, <code>history</code>, <code>stream</code>, <code>events</code>, <code>await</code>, <code>command</code>, <code>run</code>, <code>register_set</code>, <code>registers</code>, <code>config_reload</code>, <code>observability_config</code>, <code>restart</code>, <code>shutdown</code>, <code>recording</code>, <code>audit</code>. Запись всегда идёт с проверкой. Старые имена остаются скрытыми алиасами по правилу «заморозить, не удалять».</p>
+  </div>
+
+  <div class="stack">
+    <h3>Хранилище: сначала измерить</h3>
+    <p>Каждый процесс сам пишет в общий файл SQLite в режиме WAL. На семи процессах это работает: за прогон 677 строк, медиана от записи до строки 108 мс. SQLite допускает одного писателя в момент времени, поэтому на 20 процессах под штормом записей возможны отказы по блокировке. Менять топологию заранее не нужно. Нужен замер задачи 4.8 со счётчиком отказов по блокировке. Если отказы появятся, правильный ход: свой файл-сегмент на процесс и объединение при чтении. Центральный писатель хуже: он ставит историю в зависимость от ProcessManager и нарушает правило «сбой одного не валит соседей».</p>
+  </div>
+
+  <div class="stack">
+    <h3>Чего не строить</h3>
+    <ul class="plain">
+      <li>Отдельный менеджер ручек. Слои настроек со сроком и обратным чтением уже работают: на стенде прошли все исполненные строки семейства «ручки».</li>
+      <li>SDK OpenTelemetry внутри фреймворка. Экспорт остаётся сервисом. Накопительные счётчики и гистограммы с границами <code>le</code> отображаются в Prometheus и OTel без преобразований, первый внешний читатель может быть сервисом в сотню строк.</li>
+      <li>Собственную систему трассировки. Хватает широких записей с выборкой и отметками по хопам.</li>
+      <li>Базу временных рядов. Снимков реестра в сторе достаточно для отчёта о мощности.</li>
+      <li>Новое поколение планов. Нужен один план со срезами, каждый срез заканчивается строкой в чек-листе приёмки.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="roadmap">
+  <span class="eyebrow">Порядок работ</span>
+  <h2>Четыре среза, каждый заканчивается строкой приёмки</h2>
+  <div class="cols">
+    <div class="wave">
+      <span class="eyebrow">Срез 0 · дни · правда ответов</span>
+      <ul class="plain">
+        <li>Три контракт-теста по инвариантам: исход, свежесть, причинность проверки.</li>
+        <li>Экземпляры: L-1, L-2, L-3, L-4, M-1, M-2, B-3.</li>
+        <li>B-1: <code>enabled: false</code> в поставке и токен-файл.</li>
+        <li>O-1: починить зонд и дать ему тест без стенда.</li>
+        <li><b>Приёмка:</b> S2 и S5 зелёные, новая строка «остановленная стадия отвечает „устарело“».</li>
+      </ul>
+    </div>
+    <div class="wave">
+      <span class="eyebrow">Срез 1 · недели · отчёт о мощности</span>
+      <ul class="plain">
+        <li>Семь инструментов стадии в <code>PipelineExecutor</code>, <code>DataReceiver</code>, <code>SourceProducer</code>.</li>
+        <li>Реестр инструментов с накопительными значениями, вид и единица в <code>declare_metric</code>.</li>
+        <li>Время выхода предыдущей стадии в конверте кадра.</li>
+        <li>Команда отчёта: два снимка, таблица по стадиям, строка вывода об узком месте.</li>
+        <li><b>Приёмка:</b> строка L6 (хоп-лаг) переходит из NOT_REACHED в PASS.</li>
+      </ul>
+    </div>
+    <div class="wave">
+      <span class="eyebrow">Срез 2 · недели · порт управления</span>
+      <ul class="plain">
+        <li>Токен, версия протокола, роль сессии на хосте.</li>
+        <li>Очередь на выход у каждого клиента.</li>
+        <li>Проверенная и подтверждаемая запись на хосте.</li>
+        <li>Инструменты MCP по намерению, старые имена алиасами.</li>
+        <li><b>Приёмка:</b> клиент без токена получает отказ; застрявший клиент не задерживает соседа.</li>
+      </ul>
+    </div>
+    <div class="wave">
+      <span class="eyebrow">Срез 3 · по мере нужды · меньше слоёв</span>
+      <ul class="plain">
+        <li>Один писатель записей на процесс (4.17), тонкий разъём эмиссии, своя запись в файл.</li>
+        <li>Экспорт метрик наружу сервисом.</li>
+        <li>Распил <code>driver.py</code>, зонды вынести из пакета.</li>
+        <li>История из докстрингов переезжает в <code>DECISIONS.md</code>, счётчики в <code>STATUS.md</code> собирает команда.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="note">Очерёдность является моим суждением. Довод: цель о планировании мощности упирается не в нехватку кода наблюдаемости, а в то, что два опубликованных числа неверны и событий стадии нет. Срез 1 использует шов, который в исполнителе уже есть, и не ждёт цепочку задач плана closure.</p>
+</section>
+
+<section id="phase0">
+  <span class="eyebrow">Фаза 0 · ход работ на 2026-11-21</span>
+  <h2>Что делает фаза 0 простыми словами</h2>
+  <p>Фаза 0 исправляет одну беду из этой ревизии: система иногда отвечает «всё хорошо», когда это не так. Для этого есть три правила. Под каждым стоят задачи, и у каждой задачи виден статус. Это срез 0 из порядка работ выше.</p>
+  <figure>
+    <div class="dgwrap">
+    <svg class="dg" viewBox="0 0 1048 760" role="img" aria-label="Схема фазы 0. Фундамент: общий словарь исходов и контракт-тесты, готово. Правило 1, ответ говорит правду: задачи 0.4, 0.6, 0.7 готовы, 0.5a и 0.5b ждут правок тестов, 0.5c в работе. Правило 2, старое число не выдаётся за живое: 0.8 в работе, 0.9 и 0.10 ждут. Правило 3, записал значит прочитал обратно: 0.11 ждёт второго раунда ревью. Дальше остальные задачи и приёмка на стенде, затем слияние в main одним срезом.">
+      <defs><marker id="ar0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect class="b ok" x="12" y="20" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="41">Фундамент · 0.1–0.3 · одно слово для исхода: «принято», «потеряно» или «отказано»</text>
+      <text class="s" x="28" y="58">Плюс 11 контракт-тестов, которые проверяют три правила ниже. </text><text class="st ok" x="360" y="58">ГОТОВО</text>
+      <line class="ln" x1="177" y1="68" x2="177" y2="82" marker-end="url(#ar0)"/>
+      <line class="ln" x1="524" y1="68" x2="524" y2="82" marker-end="url(#ar0)"/>
+      <line class="ln" x1="871" y1="68" x2="871" y2="82" marker-end="url(#ar0)"/>
+      <rect class="b goal" x="12" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="24" y="107">1 · Ответ говорит правду</text><text class="s" x="24" y="130">Было: «записано», а запись пропала.</text><text class="s" x="24" y="150">Станет: каждая потеря посчитана и названа.</text>
+      <rect class="b goal" x="359" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="371" y="107">2 · Старое число не выдаётся за живое</text><text class="s" x="371" y="130">Было: стадия встала, fps всё ещё 92.</text><text class="s" x="371" y="150">Станет: число с возрастом, ответ «устарело».</text>
+      <rect class="b goal" x="706" y="84" width="330" height="84" rx="5"/>
+      <text class="h" x="718" y="107">3 · «Записал» значит «прочитал обратно»</text><text class="s" x="718" y="130">Было: ответ «ок» принимали на веру.</text><text class="s" x="718" y="150">Станет: до, запись, после и вердикт по факту.</text>
+      <rect class="b ok" x="12" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="202">0.4 · Файловый канал: сбой записи на диск</text><text class="s" x="24" y="220">Ошибка считается и называется по классу, не текстом</text><text class="st ok" x="24" y="237">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b fix" x="12" y="254" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="276">0.5a · Копии записей (tap'ы): отказ получателя</text><text class="s" x="24" y="294">Отказ теперь считается: tap_refused_records</text><text class="st fix" x="24" y="311">КОД ЕСТЬ · ПРАВКИ ПО РЕВЬЮ</text>
+      <rect class="b fix" x="12" y="328" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="350">0.5b · Мост сокета: потерянный ответ</text><text class="s" x="24" y="368">Счётчик lost_responses и ответ «ошибка», а не тишина</text><text class="st fix" x="24" y="385">КОД ЕСТЬ · ПРАВКИ ПО РЕВЬЮ</text>
+      <rect class="b run" x="12" y="402" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="424">0.5c · Остальные пути роутера</text><text class="s" x="24" y="442">Тот же суд над возвратом отправки и доставки</text><text class="st run" x="24" y="459">В РАБОТЕ</text>
+      <rect class="b ok" x="12" y="476" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="498">0.6 · Логгер после остановки</text><text class="s" x="24" y="516">Не отвечает «записано»; ошибки идут в аварийный пол</text><text class="st ok" x="24" y="533">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b ok" x="12" y="550" width="330" height="66" rx="5"/>
+      <text class="t" x="24" y="572">0.7 · Трасса исключения</text><text class="s" x="24" y="590">log_exception сохраняет traceback целиком</text><text class="st ok" x="24" y="607">ГОТОВО · РЕВЬЮ ПРОЙДЕНО</text>
+      <rect class="b run" x="359" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="202">0.8 · Окно счётчиков</text><text class="s" x="371" y="220">Возраст числа считается от момента чтения</text><text class="st run" x="371" y="237">В РАБОТЕ</text>
+      <rect class="b wait" x="359" y="254" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="276">0.9 · Метка «устарело» в heartbeat</text><text class="s" x="371" y="294">Остановленная стадия не показывает старый fps</text><text class="st wait" x="371" y="311">ЖДЁТ 0.8</text>
+      <rect class="b wait" x="359" y="328" width="330" height="66" rx="5"/>
+      <text class="t" x="371" y="350">0.10 / 0.10b · Потребитель: backend_ctl</text><text class="s" x="371" y="368">Часы в драйвере: «устарело» видит и инструмент</text><text class="st wait" x="371" y="385">ЖДЁТ</text>
+      <rect class="b fix" x="706" y="180" width="330" height="66" rx="5"/>
+      <text class="t" x="718" y="202">0.11 · Проверенная запись регистров</text><text class="s" x="718" y="220">Читает до, пишет, читает после; откат и конфиг тоже</text><text class="st fix" x="718" y="237">КОД ЕСТЬ · ВТОРОЙ РАУНД РЕВЬЮ</text>
+      <line class="ln" x1="524" y1="246" x2="524" y2="252" marker-end="url(#ar0)"/>
+      <rect class="b wait" x="12" y="636" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="657">Дальше, по слову координатора · 0.11b, 0.12, 0.12b и 0.13</text>
+      <text class="s" x="28" y="674">0.13 — приёмка на живом стенде: строка «остановленная стадия отвечает „устарело“» должна пройти.</text>
+      <line class="ln" x1="524" y1="684" x2="524" y2="694" marker-end="url(#ar0)"/>
+      <rect class="b goal" x="12" y="696" width="1024" height="48" rx="5"/>
+      <text class="t" x="28" y="717">Слияние в main · одним срезом</text>
+      <text class="s" x="28" y="734">Когда 0.4–0.11 прошли ревью, все 11 контракт-тестов зелёные и тяжёлые прогоны сделаны в окне координатора.</text>
+    </svg>
+    </div>
+    <figcaption>Формулировки «было / станет» я написал простыми словами по плану и отчётам ревью, это не цитаты. Какие именно ключи и файлы затронуты, видно в карточках задач плана <code>observability-signal-contracts</code>.</figcaption>
+  </figure>
+  <div class="legend" aria-label="Обозначения статусов">
+    <span><i class="c-pass"></i>готово, ревью пройдено</span>
+    <span><i class="c-part"></i>код есть, ревьюер просит правок</span>
+    <span><i class="c-run"></i>в работе</span>
+    <span><i class="c-wait"></i>ждёт своей очереди</span>
+  </div>
+  <p class="note">Итог на сегодня. Готовы фундамент и три задачи: 0.4, 0.6, 0.7. Две задачи, 0.5a и 0.5b, закоммичены и дорабатываются по ревью. Задача 0.11 реализована и ждёт второго раунда. В работе идут 0.5c и 0.8. Остальное ждёт. Приоритет владельца отдан «железу»: когда стартуют полосы К и Р2, я допишу текущую задачу и остановлюсь.</p>
+</section>
+
+<section id="limits">
+  <span class="eyebrow">Что не проверено</span>
+  <h2>Границы этой ревизии</h2>
+  <ul class="plain">
+    <li>Тестовые наборы не запускались. Состояние «зелёное» ни у одного модуля не подтверждено.</li>
+    <li>Стенд поднят один раз, на macOS и без камеры. Задержки не паспортные. На Windows гранулярность часов другая.</li>
+    <li>Аудиторы не читали целиком: <code>observability_store.py</code>, <code>windowed_voice.py</code>, <code>sampling.py</code>, <code>recorder.py</code>, <code>conditions.py</code>, <code>numbers_gate.py</code>, <code>cardinality_guard.py</code>.</li>
+    <li>B-5 измерена на отдельном канале, не внутри ProcessManager. Связь с общим отправителем установлена чтением кода.</li>
+    <li>L-7, L-10, L-11, B-4, B-7 и M-5 – M-7 найдены чтением и не воспроизведены.</li>
+    <li>Не проверено, переносится ли <code>trace_id</code> через <code>Message</code> между процессами и что происходит с писателями SQLite при блокировке файла.</li>
+    <li>Сверка с очередью дефектов сделана поиском по ключевым словам. Часть находок без пометки «известно» может быть записана в очереди под другими словами.</li>
+    <li>Оценки по шкалам являются суждением четырёх аудиторов и моим. Числа рядом с ними измерены.</li>
+  </ul>
+</section>
+
+<footer>Протокол стенда и скрипты воспроизведений лежат во временном каталоге сессии. Источник оценок: код на HEAD 69c40c3a6 – e836b2db5, ветка main.</footer>
+
+</div>
+
+<script>
+(function(){
+  var chips=document.querySelectorAll('.chips button');
+  var items=document.querySelectorAll('#flist .f');
+  function apply(f){
+    items.forEach(function(el){
+      var show = f==='all' || (f==='p1' ? el.dataset.sev==='p1' : el.dataset.area===f);
+      el.hidden=!show;
+    });
+    chips.forEach(function(b){b.setAttribute('aria-pressed', String(b.dataset.f===f));});
+  }
+  chips.forEach(function(b){b.addEventListener('click',function(){apply(b.dataset.f);});});
+})();
+</script>

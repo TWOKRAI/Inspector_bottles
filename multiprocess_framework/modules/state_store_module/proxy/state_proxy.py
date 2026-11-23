@@ -14,6 +14,7 @@ ADR-SS-002: server_target — конфигурируемое имя процес
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any, Callable
 
@@ -28,6 +29,7 @@ from ...base_manager import BaseManager, ObservableMixin
 from ...router_module.core.router_manager import RouterReentrantRequestError
 from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
+from ..core.leaf_copy import LeafCopy, flatten_leaves
 from ..interfaces import IRouter, IStateProxy
 
 # Sentinel для отличия "default не передан" от None
@@ -85,7 +87,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._router = router
         self._server_target = server_target
         # Кэш подписанных данных: path → значение
-        self._cache: dict[str, Any] = {}
+        self._cache = LeafCopy()
         # Реестр callbacks: sub_id → список Callable[[list[Delta]], None]
         self._callbacks: dict[str, list[Callable]] = {}
         # sub_id → pattern (нужен для фильтрации входящих дельт по подписке)
@@ -153,6 +155,20 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # Разрыв, обнаруженный ПОКА снимок в полёте: после его применения делаем
         # ровно один догоняющий заход (не N по числу разрывов).
         self._resync_again_pending: bool = False
+        # R3c: сколько ОБНАРУЖЕННЫХ РАЗРЫВАМИ revision разрывов покрывает ресинк в полёте
+        # (0 — ресинк не от разрыва, исход не классифицируется) и сколько разрывов
+        # совместилось с ним (их классифицирует догоняющий заход). Числом, не флагом:
+        # два совмещённых разрыва за окно — это два события, а не одно.
+        self._resync_from_gaps: int = 0
+        self._resync_again_gaps: int = 0
+        # Классификация разрывов revision (R3c, ADR-SS-015 «пересмотрено 2026-11-21»).
+        self._gap_detected_count: int = 0
+        self._gap_diverged_count: int = 0
+        self._gap_clean_count: int = 0
+        self._gap_unclassified_count: int = 0
+        # Троттлинг WARNING «diverged»: время последней строки и накопленное с неё.
+        self._gap_warn_last: float | None = None
+        self._gap_warn_pending: int = 0
         # Наблюдаемость ресинхронизации (сверяется с логом и метриками).
         self._resync_started_count: int = 0
         self._resync_coalesced_count: int = 0
@@ -177,7 +193,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     @property
     def cache(self) -> dict[str, Any]:
         """Копия текущего кэша (только для чтения/тестов)."""
-        return dict(self._cache)
+        return self._cache.copy()
 
     @property
     def confirmed_pattern_count(self) -> int:
@@ -203,6 +219,30 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         текущих активных подписок).
         """
         return self._async_subscribe_count
+
+    @property
+    def gap_detected_count(self) -> int:
+        """Сколько раз обнаружен «разрыв revision» (R3c): каждое обнаружение, даже если ресинк не стартовал."""
+        return self._gap_detected_count
+
+    @property
+    def gap_clean_count(self) -> int:
+        """Разрывы, чей ресинк завершился снимком, НЕ изменившим кэш: точно ничего не потеряно (R3c)."""
+        return self._gap_clean_count
+
+    @property
+    def gap_diverged_count(self) -> int:
+        """Разрывы, чей ресинк изменил кэш (R3c).
+
+        Потеря пакета ЛИБО штатное расхождение (дельта в полёте, собственная запись
+        при ``exclude_self``) — клиент их не различает (ADR-SS-015).
+        """
+        return self._gap_diverged_count
+
+    @property
+    def gap_unclassified_count(self) -> int:
+        """Разрывы, чей ресинк не дал применённого снимка: ошибка, таймаут, переполнение и т.п. (R3c)."""
+        return self._gap_unclassified_count
 
     # -------------------------------------------------------------------
     # Запись
@@ -885,13 +925,20 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._last_revision = envelope_revision
 
         if gap:
-            self._log_warning(
-                f"StateProxy '{self._process_name}': разрыв revision "
-                f"(ожидалось {expected}, пакет начинается с {first_revision}) — "
-                "запускаю resync (подстраховка; текущий пакет уже применён)"
+            # R3c: обнаружение — DEBUG (путь ~4 раза/с на узкой подписке при чужих записях,
+            # потери данных обычно нет); WARNING остаётся за исходом «снимок изменил кэш»
+            # (см. _classify_gap_outcome).
+            self._gap_detected_count += 1
+            self._record_metric("state_proxy.gap_detected")
+            self._log_debug(
+                lambda: (
+                    f"StateProxy '{self._process_name}': разрыв revision "
+                    f"(ожидалось {expected}, пакет начинается с {first_revision}) — "
+                    "запускаю resync (подстраховка; текущий пакет уже применён)"
+                )
             )
             patterns = list(dict.fromkeys(self._sub_patterns.values()))
-            self._resync(patterns)
+            self._resync(patterns, from_gaps=1)
 
     #: Потолок журнала защищённых путей на одно окно ресинхронизации.
     #: Журнал — это РАЗНЫЕ пути (не дельты), поэтому потолок бьётся только при
@@ -901,7 +948,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     #: наполовину.
     _RESYNC_DIRTY_MAX = 10_000
 
-    def _resync(self, patterns: list[str]) -> None:
+    def _resync(self, patterns: list[str], *, from_gaps: int = 0) -> None:
         """Ресинк кэша: запросить свежий снапшот поддеревьев по patterns.
 
         Переиспользует существующий канал state.get_subtree (не заводит
@@ -949,6 +996,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         No-op при router=None или пустом patterns (нечего ресинкать). Второй
         вызов, пока ответ первого не пришёл, НЕ шлёт второго запроса: он только
         помечает ``_resync_again_pending`` — догоняющий заход будет ровно один.
+
+        ``from_gaps`` (R3c) — сколько обнаруженных разрывов revision покрывает этот
+        ресинк; по исходу они классифицируются (:meth:`_classify_gap_outcome`).
+        0 (умолчание) — ресинк не от разрыва (например ``RemoteStateProxy.on_reconnected``),
+        счётчики классификации он не трогает.
         """
         if self._router is None or not patterns:
             return
@@ -959,6 +1011,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             # трафик и дал бы два снимка, применяемых в неизвестном порядке.
             self._resync_coalesced_count += 1
             self._resync_again_pending = True
+            self._resync_again_gaps += from_gaps
             self._record_metric("state_proxy.resync_coalesced")
             self._log_debug(
                 f"StateProxy '{self._process_name}': ресинк уже идёт "
@@ -981,18 +1034,22 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             # Роутер без неблокирующего запроса (тестовые дубли IRouter, у
             # которых send() сам по себе request-reply) — прежний синхронный
             # путь. Приёмного потока у таких роутеров нет, блокировать нечего.
-            self._resync_blocking_fallback(patterns, msg)
+            self._resync_blocking_fallback(patterns, msg, from_gaps)
             return
 
         # Порядок важен: помечаем «идёт» ДО отправки. Отправка может провалиться
         # и позвать колбэк синхронно, ещё изнутри request_async — колбэк обязан
         # застать флаг взведённым, иначе снимет чужой (следующий) ресинк.
         self._resync_inflight_id = request_id
+        # R3c: происхождение пишется РЯДОМ с флагом «идёт» и по той же причине — синхронный
+        # колбэк (провал отправки) обязан застать его уже записанным.
+        self._resync_from_gaps = from_gaps
         self._resync_patterns = list(patterns)
         self._resync_dirty.clear()
         self._resync_dirty_deletes.clear()
         self._resync_dirty_overflow = False
         self._resync_again_pending = False
+        self._resync_again_gaps = 0
         self._resync_started_count += 1
         self._record_metric("state_proxy.resync_started")
         try:
@@ -1005,9 +1062,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         except Exception as exc:
             self._resync_inflight_id = None
             self._resync_patterns = []
+            # Колбэка не будет вообще: исход известен сейчас. Значение берём из поля, а не из
+            # аргумента: если колбэк успел отработать синхронно, он уже обнулил его.
+            uncovered, self._resync_from_gaps = self._resync_from_gaps, 0
+            self._classify_gap_outcome(uncovered, "unclassified")
             self._log_error(f"StateProxy '{self._process_name}': ресинк не отправлен: {exc}")
 
-    def _resync_blocking_fallback(self, patterns: list[str], msg: dict) -> None:
+    def _resync_blocking_fallback(self, patterns: list[str], msg: dict, from_gaps: int = 0) -> None:
         """Старый синхронный ресинк — для роутеров без ``request_async``.
 
         Такие роутеры (тестовые дубли ``InMemoryRouter``/``MockRouter``/
@@ -1015,16 +1076,21 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         прямо в вызове send()/request(), приёмного потока у них нет вовсе — и
         блокировать здесь нечего. Держится ради обратной совместимости
         контракта ``IRouter``: он не обязывает никого иметь ``request_async``.
+
+        ``from_gaps`` — как у :meth:`_resync`: сколько разрывов покрывает этот ресинк
+        (здесь окна и совмещения нет по построению, поэтому классификация одна).
         """
         response = self._send_sync(msg)
         if response is None or response.get("status") != "ok":
             self._resync_failed_count += 1
             self._log_warning(f"StateProxy '{self._process_name}': resync не удался: {response}")
+            self._classify_gap_outcome(from_gaps, "unclassified")
             return
 
         snapshot = response.get("value", {})
         revision = response.get("revision")
-        self._apply_resync_snapshot(patterns, snapshot if isinstance(snapshot, dict) else {})
+        changed = self._apply_resync_snapshot(patterns, snapshot if isinstance(snapshot, dict) else {})
+        self._classify_snapshot_outcome(from_gaps, isinstance(snapshot, dict), changed)
         self._advance_revision_after_resync(revision)
         self._resync_completed_count += 1
         self._log_debug(f"StateProxy '{self._process_name}': resync выполнен, revision={revision}")
@@ -1051,6 +1117,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         dirty_deletes = dict(self._resync_dirty_deletes)
         overflow = self._resync_dirty_overflow
         again = self._resync_again_pending
+        from_gaps = self._resync_from_gaps
+        again_gaps = self._resync_again_gaps
 
         # Снимаем «идёт» ДО применения: следующий разрыв должен иметь право
         # запустить новый ресинк, а не совместиться с уже завершённым.
@@ -1060,6 +1128,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._resync_dirty_deletes = {}
         self._resync_dirty_overflow = False
         self._resync_again_pending = False
+        self._resync_from_gaps = 0
+        self._resync_again_gaps = 0
 
         response = self._unwrap_envelope(envelope)
         if response is None or response.get("status") != "ok":
@@ -1073,6 +1143,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 f"(всего неудач={self._resync_failed_count}); кэш оставлен как есть, "
                 "дельты продолжают применяться штатно"
             )
+            # Догоняющего захода при неудаче нет (ранний return — поведение прежнее), поэтому
+            # совмещённые разрывы тоже закрываем здесь, иначе они остались бы без исхода.
+            self._classify_gap_outcome(from_gaps + again_gaps, "unclassified")
             return
 
         snapshot = response.get("value", {})
@@ -1087,13 +1160,16 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 f"откатилась бы к устаревшим значениям); восстановление отложено до "
                 f"следующего разрыва (всего переполнений={self._resync_overflow_count})"
             )
+            self._classify_gap_outcome(from_gaps, "unclassified")
         else:
-            self._apply_resync_snapshot(
+            changed = self._apply_resync_snapshot(
                 patterns,
                 snapshot if isinstance(snapshot, dict) else {},
                 protected=self._make_resync_protector(dirty, dirty_deletes, revision),
             )
             self._resync_completed_count += 1
+            # Классификация первого ответа — ДО догоняющего захода: тот перезапишет происхождение.
+            self._classify_snapshot_outcome(from_gaps, isinstance(snapshot, dict), changed)
 
         self._advance_revision_after_resync(revision)
         self._log_debug(
@@ -1104,7 +1180,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if again:
             # Разрыв, случившийся пока снимок был в полёте: один догоняющий заход.
             self._log_debug(f"StateProxy '{self._process_name}': догоняющий ресинк после совмещённого разрыва")
-            self._resync(patterns)
+            self._resync(patterns, from_gaps=again_gaps)
 
     def _advance_revision_after_resync(self, revision: object) -> None:
         """Продвинуть _last_revision по серверной revision снимка, НИКОГДА не назад.
@@ -1144,11 +1220,19 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             rev = dirty.get(path)
             if rev is not None and (snapshot_revision is None or rev >= snapshot_revision):
                 return True
-            for root, del_rev in dirty_deletes.items():
+            if not dirty_deletes:
+                return False
+            # Корень удаления/замены — любой префикс пути по границе-точке (и сам путь):
+            # O(глубина), а не O(число корней окна).
+            prefix = ""
+            for seg in path.split("."):
+                prefix = f"{prefix}.{seg}" if prefix else seg
+                del_rev = dirty_deletes.get(prefix)
+                if del_rev is None:
+                    continue
                 if snapshot_revision is not None and del_rev < snapshot_revision:
                     continue
-                if path == root or path.startswith(root + "."):
-                    return True
+                return True
             return False
 
         return _protected
@@ -1167,6 +1251,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 # протектор удалений сравнивает по префиксу (см. _make_resync_protector).
                 self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)
                 continue
+            # Запись заменяет поддерево пути (LeafCopy.put снимает старые листья): корень
+            # защищается, как удаление. Скаляру корень нужен только если у пути в кэше есть
+            # дети (иначе защищать нечего, а журнал растёт вдвое); тогда корень защищает и сам
+            # путь, и в ``_resync_dirty`` он не дублируется.
+            if isinstance(delta.new_value, dict) or self._cache.has_children(delta.path):
+                self._mark_resync_dirty(self._resync_dirty_deletes, delta.path, delta.revision)  # корень записи
+                if not isinstance(delta.new_value, dict):
+                    continue
             # ЗАПИСЬ помечается ТЕМИ ЖЕ путями, какие реально легли в кэш.
             # Дельта создания поддерева приходит СЛОВАРЁМ, а `_cache_put`
             # раскладывает её в листья: пометить корень значило бы защитить путь,
@@ -1183,18 +1275,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
     def _expand_leaf_paths(path: str, value: Any) -> list[str]:
         """Пути, которые ``_cache_put`` реально запишет для этого значения.
 
-        Один обход на двоих с :meth:`_cache_put` по смыслу: разъедься они — журнал
-        защиты снова начнёт охранять не то, что лежит в кэше.
+        Раскладка одна на двоих с :meth:`_cache_put` (``flatten_leaves``): разъедься они —
+        журнал защиты начнёт охранять не то, что лежит в кэше. Пустой словарь листьев
+        не даёт — защищать нечего.
         """
-        if not isinstance(value, dict):
-            return [path]
-        if not value:
-            # Пустой словарь листьев не даёт и в кэш не попадает — защищать нечего.
-            return []
-        leaves: list[str] = []
-        for key, nested in value.items():
-            leaves.extend(StateProxy._expand_leaf_paths(f"{path}.{key}", nested))
-        return leaves
+        return [leaf for leaf, _ in flatten_leaves(path, value)]
 
     def _mark_resync_dirty(self, target: dict, path: str, revision: int) -> None:
         """Отметить один путь в журнале защиты, соблюдая потолок ``_RESYNC_DIRTY_MAX``."""
@@ -1212,13 +1297,18 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         patterns: list[str],
         snapshot: dict,
         protected: Callable[[str], bool] | None = None,
-    ) -> None:
+    ) -> list[str]:
         """Сойти кэш с серверным снимком для путей, попадающих под patterns.
 
         1. Удаляет из кэша все закэшированные пути, матчащие любой из patterns
            (устаревшие значения — в т.ч. пути, удалённые на сервере и потому
            отсутствующие в свежем снапшоте, должны исчезнуть из кэша).
         2. Заполняет кэш листовыми значениями снапшота по каждому pattern.
+
+        Returns:
+            Пути, значение которых снимок ИЗМЕНИЛ (R3c): добавленные, стёртые как
+            устаревшие, отличающиеся по значению. Защищённые пути применением не
+            затрагиваются и в список не попадают. Сравнение — :meth:`_same_value`.
 
         Args:
             patterns: glob-паттерны (те же, что переданы в _resync()).
@@ -1235,13 +1325,118 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             for path in self._cache
             if any(match_pattern(segs, tuple(path.split("."))) for segs in pattern_segs_list) and not is_protected(path)
         ]
+        before = {key: self._cache[key] for key in stale_keys}
         for key in stale_keys:
             del self._cache[key]
 
+        written: dict[str, Any] = {}
         for pattern in patterns:
             for path, value in iter_matches(snapshot, pattern):
                 if not isinstance(value, dict) and not is_protected(path):
                     self._cache[path] = value
+                    written[path] = value
+
+        changed = [path for path in before if path not in written]  # стёрты как устаревшие
+        for path, value in written.items():
+            if path not in before or not self._same_value(before[path], value):
+                changed.append(path)  # добавлен либо значение отличается
+        return changed
+
+    @staticmethod
+    def _same_value(old: Any, new: Any) -> bool:
+        """Равенство значения кэша и снимка для классификации (R3c).
+
+        NaN равен NaN (``nan != nan`` дал бы ложное «изменено» на каждом ресинке).
+        ``__eq__``, вернувший не-bool (массивы) или бросивший исключение, — «отличается»:
+        расхождение лучше показать, чем потерять. NaN ВНУТРИ контейнера тоже «отличается»
+        (``[nan] != [nan]``) — рекурсивное сравнение не делается (открытый вопрос задачи).
+        """
+        if old is new:
+            return True
+        if isinstance(old, float) and isinstance(new, float) and old != old and new != new:
+            return True
+        try:
+            equal = old == new
+        except Exception:
+            return False
+        if getattr(equal, "ndim", None) == 0:
+            return bool(equal)  # numpy-скаляр: ``np.float64(1.0) == np.float64(1.0)`` -> ``np.bool_``
+        return equal is True or (isinstance(equal, bool) and equal)
+
+    # -------------------------------------------------------------------
+    # Классификация разрывов revision (R3c, ADR-SS-015 «пересмотрено 2026-11-21»)
+    # -------------------------------------------------------------------
+
+    #: Не чаще одной строки WARNING «diverged» на экземпляр за этот интервал, секунд.
+    _GAP_WARN_INTERVAL_S = 30.0
+
+    def _classify_snapshot_outcome(self, count: int, is_dict: bool, changed: list[str]) -> None:
+        """Исход применённого снимка: не dict — unclassified, иначе clean/diverged по ``changed``."""
+        if not is_dict:
+            self._classify_gap_outcome(count, "unclassified")
+        elif changed:
+            self._classify_gap_outcome(count, "diverged", changed)
+        else:
+            self._classify_gap_outcome(count, "clean")
+
+    def _classify_gap_outcome(self, count: int, outcome: str, changed: list[str] | None = None) -> None:
+        """Засчитать исход ресинка, начатого ``count`` разрывами revision.
+
+        ``count == 0`` — ресинк не от разрыва: ничего не считается. ``clean`` — снимок
+        кэш не изменил, потери точно не было. ``diverged`` — снимок кэш изменил: потеря
+        пакета ЛИБО штатное расхождение (дельта в полёте, собственная запись при
+        ``exclude_self``, NaN внутри контейнера) — клиент их не различает. ``unclassified`` — применённого
+        снимка нет (отказ, таймаут, переполнение, не-dict, shutdown).
+
+        WARNING пишется только для ``diverged`` и не чаще ``_GAP_WARN_INTERVAL_S``.
+        Значения путей не печатаются: кэш может держать чувствительное.
+        """
+        if count <= 0:
+            return
+        if outcome == "clean":
+            self._gap_clean_count += count
+            self._record_metric("state_proxy.gap_clean", count)
+            self._log_debug(
+                lambda: (
+                    f"StateProxy '{self._process_name}': после разрыва revision снимок кэш не изменил "
+                    f"(разрывов={count}) — потери не было"
+                )
+            )
+        elif outcome == "unclassified":
+            self._gap_unclassified_count += count
+            self._record_metric("state_proxy.gap_unclassified", count)
+            self._log_debug(
+                lambda: (
+                    f"StateProxy '{self._process_name}': разрыв revision без применённого снимка "
+                    f"(разрывов={count}) — исход не классифицирован"
+                )
+            )
+        else:
+            self._record_diverged(count, changed or [])
+
+    def _record_diverged(self, count: int, changed: list[str]) -> None:
+        """Засчитать ``diverged`` и, если интервал троттлинга прошёл, написать WARNING."""
+        self._gap_diverged_count += count
+        self._gap_warn_pending += count
+        self._record_metric("state_proxy.gap_diverged", count)
+        now = time.monotonic()  # в момент вызова, через модуль: тест подменяет часы
+        if self._gap_warn_last is not None and now - self._gap_warn_last < self._GAP_WARN_INTERVAL_S:
+            self._log_debug(
+                lambda: (
+                    f"StateProxy '{self._process_name}': после разрыва revision снимок изменил "
+                    f"{len(changed)} путей — WARNING подавлен (накоплено {self._gap_warn_pending})"
+                )
+            )
+            return
+        accumulated = self._gap_warn_pending
+        self._gap_warn_pending = 0
+        self._gap_warn_last = now
+        names = ", ".join(sorted(changed)[:5])
+        self._log_warning(
+            f"StateProxy '{self._process_name}': снимок после разрыва revision изменил {len(changed)} путей "
+            f"(потеря пакета, дельты в полёте или собственные записи — не различаются); "
+            f"пути: {names}; разрывов с прошлой строки: {accumulated}"
+        )
 
     # -------------------------------------------------------------------
     # Lifecycle
@@ -1279,6 +1474,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._resync_dirty.clear()
         self._resync_dirty_deletes.clear()
         self._resync_again_pending = False
+        # R3c: ресинк в полёте оборвался — его разрывы (и совмещённые с ним: догоняющего захода
+        # не будет) считаем сразу (unclassified); поздний ответ застанет происхождение 0 и не
+        # даст ложного clean по пустым patterns.
+        uncovered = self._resync_from_gaps + self._resync_again_gaps
+        self._resync_from_gaps = 0
+        self._resync_again_gaps = 0
+        self._classify_gap_outcome(uncovered, "unclassified")
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
         return True
@@ -1305,36 +1507,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             return []
 
     def _cache_put(self, path: str, value: Any) -> None:
-        """Положить значение в кэш, РАЗВЕРНУВ словарь в листья.
+        """Положить значение в кэш по правилу копии: только листья, dict-дельта заменяет поддерево.
 
-        Инвариант «в кэше только листья» в этом классе уже существовал, но
-        соблюдался лишь половиной кода: :meth:`_apply_resync_snapshot` словари
-        пропускает явно (``not isinstance(value, dict)``), а приёмная сторона
-        дельт клала ``delta.new_value`` сырым. Дельта СОЗДАНИЯ поддерева
-        приходит со словарём целиком, поэтому нелистовая запись в кэше
-        появлялась и жила там вечно.
-
-        Чем это плохо (воспроизведено на живом стенде 2026-08-23, дефект
-        наблюдался у DB-стока, разделяющего ту же модель кэша):
-
-        * запись протухает — дальнейшие обновления идут полистовыми дельтами
-          и словаря не касаются (в строках БД жили ``14.5`` в словаре и
-          ``14.3`` в листе одновременно);
-        * префикс-чистка по MISSING-дельте её не видит: удаление
-          ``…plugins.capture`` снимает лист ``…plugins.capture.capture_fps``,
-          но ПРЕДКА ``…plugins`` не трогает — числа ушедшего писателя
-          переживают собственное снятие.
-
-        Пустой словарь листьев не даёт вовсе и в кэш не кладётся: узел есть,
-        значений нет.
+        Инвариант и причины — в :mod:`..core.leaf_copy` (ADR-SS-024 A3); сама
+        запись — :meth:`LeafCopy.put`. Пустой словарь листьев не даёт: узел есть,
+        значений нет, и старое поддерево он снимает.
         """
-        if isinstance(value, dict):
-            if not value:
-                return
-            for key, nested in value.items():
-                self._cache_put(f"{path}.{key}", nested)
-            return
-        self._cache[path] = value
+        self._cache.put(path, value)
 
     def _update_cache(self, deltas: list[Delta]) -> None:
         """Обновить кэш на основе списка дельт.
@@ -1368,11 +1547,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         for delta in deltas:
             if delta.new_value is MISSING:
                 # Удаление узла — вместе с поддеревом (см. докстринг).
-                self._cache.pop(delta.path, None)
-                dotted = delta.path + "."
-                stale = [key for key in self._cache if key.startswith(dotted)]
-                for key in stale:
-                    del self._cache[key]
+                self._cache.drop(delta.path)
             else:
                 self._cache_put(delta.path, delta.new_value)
 

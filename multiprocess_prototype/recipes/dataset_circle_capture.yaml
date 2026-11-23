@@ -1,8 +1,8 @@
-# Рецепт dataset_circle_capture — сбор датасета: камера → ROI → конверт цвета →
+# Рецепт dataset_circle_capture — сбор датасета: камера → ROI →
 # маска белого → круги → линия (триггер) → квадратный crop вокруг центра → сохранение.
 #
 # Топология (DAG — ветки от circle_detector ОБЯЗАНЫ быть отдельными процессами):
-#   camera_0[hikvision] → roi[roi_crop → color_convert] → detector[hsv_mask → circle_detector]
+#   camera_0[hikvision] → roi[roi_crop] → detector[hsv_mask → circle_detector]
 #     detector ──┬→ line[line_filter] ──┬→ crop[center_crop] → saver[frame_saver]   (ЧИСТЫЙ кадр + .json)
 #                │                       └→ draw                                      (дисплей main)
 #                ├→ draw[circle_draw → overlay_draw]  (Join: круги + линия)  → display "main"
@@ -15,15 +15,16 @@
 #   * Узел-ВЕТВЛЕНИЕ (fan-out) или узел, чей выход нужно отвести отдельно
 #     (в join/дисплей/другую ветку) — ОБЯЗАН быть отдельным процессом.
 #     Здесь circle_detector ветвится на line/crop/draw/maskview → их не слить в линию.
-#   * Валидные слияния: roi_crop→color_convert (roi), hsv_mask→circle_detector (detector).
+#   * Валидные слияния: hsv_mask→circle_detector (detector); roi — один плагин roi_crop.
 #   * join (draw, crop) выводится из портов плагина (Port.join, ADR-PMM-017 п.7): рецепт не
 #     задаёт mode/inputs. collector: {timeout_sec} — ПРЯМОЙ ключ процесса, только тонкая
 #     настройка; metadata.inspector/collector — deprecated (предупреждение в лог).
 #
 # detector: hsv_mask изолирует белый объект → item["mask"]; circle_detector(input_key=mask,
 #   keep_mask=true) ищет круги по ЧИСТОЙ маске (мало ложных) и НЕ рисует на кадре — кадр идёт
-#   в center_crop чистым (важно для датасета). color_convert(bgr2rgb) в roi → весь downstream
-#   (детект/дисплеи/датасет) в RGB-порядке; на белый детект перестановка R↔B не влияет.
+#   в center_crop чистым (важно для датасета). камера на ядре camera_device
+#   отдаёт BGR (по пробе cv2 на синтетике; на приборе — визит 6.3), конвертации нет → весь downstream
+#   (детект/дисплеи/датасет) в BGR; на белый детект порядок каналов не влияет.
 # Два дисплея для тюнинга: "main" (кадр + круги + линия), "mask" (что видит hsv_mask).
 #
 # === ТЮНИНГ (всё в ПИКСЕЛЯХ — калибровки мм↔px пока нет) ===
@@ -77,11 +78,22 @@ blueprint:
           category: source
           config:
             camera_id: 0
-            camera_index: 0
+            # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+            device_select: serial
+            device_serial: DA1689923
             resolution_width: 1440
             resolution_height: 1080
-            fps: 25
+            frame_rate_enable: true
+            frame_rate: 25.0
+            # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+            exposure_time: 40000.0
+            # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
             auto_start: true
+            # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+            # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+            trigger_managed: true
+            trigger_mode: "Off"
+            run_locked_commands: [release_device, take_device]
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
@@ -103,11 +115,6 @@ blueprint:
             y: 240
             width: 800
             height: 600
-        - plugin_name: color_convert
-          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
-          category: processing
-          config:
-            mode: bgr2rgb
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
@@ -283,7 +290,7 @@ blueprint:
     - source: camera_0.hikvision.frame
       target: roi.roi_crop.frame
       description: ''
-    - source: roi.color_convert.frame
+    - source: roi.roi_crop.frame
       target: detector.hsv_mask.frame
       description: ''
     - source: detector.circle_detector.frame
@@ -323,9 +330,6 @@ blueprint:
       roi.roi_crop:
         - 756.0000000000001
         - 201.4448318293683
-      roi.color_convert:
-        - 956.0
-        - 160.0
       detector.hsv_mask:
         - 1476.0
         - 160.0

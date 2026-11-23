@@ -29,9 +29,11 @@ import sqlite3
 import threading
 import time
 from collections import deque  # noqa: F401 — используется в аннотации back-compat property _rollback_journal
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
+from multiprocess_framework.modules.state_store_module.core.freshness import FRESH_KEY, read_value
 from multiprocess_framework.modules.telemetry_readmodel_module import (
     DEFAULT_TRACKED_SUFFIXES,
     TelemetryReadModel,
@@ -84,10 +86,13 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     extract_observability_records,
     iter_state_deltas,
     page_with_reset_retry,
+    state_changed_revisions,
 )
-from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
+from ._node_read import _assemble
+from .transport import TokenFileMissing, _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
 from .registers import RegisterOps, _PendingCommit  # noqa: F401 — _PendingCommit re-export для back-compat
+from .verdict import is_refusal
 
 # Логгер клиента: reader-поток — daemon, его необработанное исключение уходит только
 # в stderr-трейсбек; обрыв соединения логируем явно (A.3), чтобы причина «reader молча
@@ -453,7 +458,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         reply_to: str = "ProcessManager",
         default_timeout: float = 5.0,
         event_queue_maxlen: int = 1000,
+        clock: Callable[[], float] = time.time,
     ) -> None:
+        # Шов часов (Task 0.10b): возраст метрик и ``last_gap_at`` считаются по ним. Имя не ``_clock``: у
+        # тестовых наследников (test_system_shutdown_driver_*) это поле занято фейковыми часами. Тест и
+        # offline-реплей подставляют свои; по умолчанию — ``time.time`` (сравним с ``src_ts`` писателя).
+        self._telemetry_clock = clock
         self._host, self._port = resolve_endpoint(host, port)
         self._sender = sender
         self._reply_to = reply_to
@@ -528,6 +538,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # Провенанс нуля: count=0 у snapshot/history сам по себе не отличает «дельт не
         # было» от «подписки не было». Счётчик — под тем же локом, что и ingest.
         self._telemetry_ingested_total = 0
+        # Дыры ревизий (Task 0.10b, remediation 1.3): состояние на ДРАЙВЕРЕ, под тем же локом,
+        # а не в модели (реплей подменяет ``_telemetry_model`` на лету). ``None`` — базы нет:
+        # первый пакет после (пере)подписки становится базой, а не дырой.
+        self._revision_last: int | None = None
+        self._gap_count = 0
+        self._last_gap_at: float | None = None
         self.subscribe(self._ingest_state_changed)
 
         # Регистровый аппарат (live field-write / snapshot-restore / commit-confirmed)
@@ -555,6 +571,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     def _looks_failed(res: Any) -> bool:
         """Ответ явно провальный? (для решения «регистрировать ли намерение»)."""
         return isinstance(res, dict) and res.get("success") is False
+
+    @staticmethod
+    def _host_error_text(reply: Any) -> str:
+        """Текст ошибки из ответа хоста для причины отказа: ``error``, иначе ``reason`` (Task 0.11)."""
+        if isinstance(reply, dict):
+            text = reply.get("error") or reply.get("reason")
+            if text:
+                return str(text)
+        return "ответ хоста без текста ошибки"
 
     def _register_subscription(self, command: str, target: str, args: Dict[str, Any], res: Any) -> None:
         """Записать намерение подписки, если команда НЕ провалилась явно.
@@ -610,6 +635,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         results: List[Dict[str, Any]] = []
         for it in self._subscriptions.export():
             res = self.send_command(it["target"], it["command"], it["args"])
+            if it["command"] == "state.subscribe":
+                self._reset_revision_base()  # идёт мимо state_subscribe: новое соединение — новая база ревизии
             results.append(
                 {
                     "command": it["command"],
@@ -677,32 +704,71 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         msg = build_system_command_message(command, sender=self._sender, reply_to=self._reply_to)
         return self.request(msg, timeout=timeout)
 
+    def run_start(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """``system.run.start``: запустить линию (из ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.start"}, timeout=timeout)
+
+    def run_stop(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """``system.run.stop``: остановить линию (возврат в ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.stop"}, timeout=timeout)
+
+    def run_ack(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """``system.run.ack``: квитировать аварию (``fault`` -> ``ready``). Конверт ответа — как есть."""
+        return self.system_command({"cmd": "system.run.ack"}, timeout=timeout)
+
+    def run_status(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """``system.run.status``: состояние линии. Конверт ответа — как есть.
+
+        ``result`` = ``{state, since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons, last_fault}``;
+        развернуть — на вызывающем (``backend_ctl.protocol._leaf_result``).
+        """
+        return self.system_command({"cmd": "system.run.status"}, timeout=timeout)
+
     def system_shutdown(
         self,
         mode: str = "graceful",
         deadline_s: float = 1.0,
         wait: bool = True,
-        wait_timeout: float = 20.0,
+        wait_timeout: float | None = None,
+        pm_name: str = "ProcessManager",
     ) -> dict[str, Any]:
-        """Остановить систему командой ``system.shutdown`` (ADR-PMM-038, Task 0.2 gui-graceful-close).
+        """Остановить систему командой ``system.shutdown`` и вернуть честные итоги по процессам.
 
-        ``mode="force"`` — PM обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с),
-        не уложившихся добивает фаза 3 области стопа; ``graceful`` — обычный стоп, ``deadline_s``
-        не передаётся. Срок запроса 6.0 с: команда может ждать в очереди PM до 5 с (предел (а)).
+        ADR-PMM-038 (Task 0.2) и ADR-PMM-042/044 (Task 1.4 gui-graceful-close). ``mode="force"`` — PM
+        обрезает срок стопа детей до ``deadline_s`` от команды (0.1..5.0 с), не уложившихся добивает
+        фаза 3 области стопа; ``graceful`` — обычный стоп, ``deadline_s`` не передаётся. Срок запроса
+        6.0 с: команда может ждать в очереди PM до 5 с (предел (а)).
 
-        При ``wait`` — опрос ``connection_lost`` каждые 100 мс до ``True`` или ``wait_timeout``.
-        ``accepted is False`` (PM ответил ошибкой — стоп не начат) — возврат сразу, без ожидания:
-        ``pm_gone=False``, ``elapsed_s`` — время до ответа. Сокет закрылся раньше ответа
-        (``BackendUnavailable`` из запроса) — PM ушёл: ``accepted=None``, ``pm_gone=True``, без ожидания.
+        При ``wait`` после принятой команды драйвер опрашивает ``supervision.status`` каждые 50 мс.
+        Опрос кончается первым из: у каждого ребёнка (строки ``pm_name`` в счёт нет) есть
+        ``stop_outcome`` из ``exited`` / ``terminated`` / ``killed``; ``system_stop.phase == "done"``;
+        разрыв соединения; ``wait_timeout``. После конца по итогам или по ``done`` драйвер ждёт закрытия
+        сокета ещё не дольше ``min(остаток, 3.0 с)``.
 
-        Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes"}``:
-          * ``accepted`` — ``True``/``False`` по ``success`` ответа; ``None``, если ответ — timeout
-            (команда могла дойти; закрытия сокета ждём всё равно) или ответа нет, потому что сокет
-            закрылся раньше;
+        ``accepted is False`` с ``reason == "already_stopping"`` — стоп идёт, опрашиваем. Прочий
+        ``accepted is False`` (ошибка аргументов) — возврат сразу: без опроса, ``outcomes=None``.
+        Сокет закрылся раньше ответа (``BackendUnavailable`` из запроса) — PM ушёл: ``accepted=None``,
+        ``pm_gone=True``, без опроса.
+
+        ``wait_timeout=None`` — срок по умолчанию: 20.0 с до первого снимка с ``system_stop``, затем
+        ``max(20.0, deadline_at - сейчас + 12.0)`` от момента этого снимка (12.0 = ``pm_total_s`` с
+        волной ``last`` + запас).
+
+        Возврат ``{"accepted", "mode", "elapsed_s", "pm_gone", "outcomes", "unconfirmed", "timed_out"}``:
+          * ``accepted`` — ``accepted`` ответа (иначе ``success``); ``None``, если ответ — timeout
+            (команда могла дойти) или ответа нет, потому что сокет закрылся раньше;
           * ``pm_gone`` — PM закрыл сокет backend_ctl. Сам процесс PM в этот момент может быть ещё
             жив: транспорт закрывается раньше остальных частей PM;
           * ``elapsed_s`` — от отправки команды до конца ожидания;
-          * ``outcomes`` — пока ``None`` (исходы по процессам — Task 1.4).
+          * ``outcomes`` — ``{имя: итог}`` по детям: последнее не-``null`` ``stop_outcome`` за все
+            снимки; без итога — ``None``. ``None`` целиком, если опроса не было;
+          * ``unconfirmed`` — имена без итога, по алфавиту (``None``, если опроса не было);
+          * ``timed_out`` — опрос кончился по ``wait_timeout``.
+
+        Предел: PM после ``done`` ещё до 0.5 с отвечает на статус, если его опрашивают прямо
+        сейчас (C-88, ADR-PMM-045), и последний итог обычно доезжает. Но опрос реже 0.25 с или
+        ответ, не успевший уйти через транспорт, оставляют имя без итога: оно попадает в
+        ``unconfirmed`` — «PM не подтвердил», а не «ребёнок жив».
         """
         command: dict[str, Any] = {"cmd": "system.shutdown", "mode": mode}
         if mode == "force":
@@ -710,6 +776,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         started = time.monotonic()
         try:
             reply = self.system_command(command, timeout=6.0)
+        except TokenFileMissing:  # команда до PM не дошла — это не «PM ушёл» (0.12a)
+            raise
         except BackendUnavailable:
             # PM закрыл сокет раньше, чем ответил: команда дошла и стоп идёт — это и есть «PM ушёл».
             return {
@@ -718,26 +786,114 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 "elapsed_s": round(time.monotonic() - started, 3),
                 "pm_gone": True,
                 "outcomes": None,
+                "unconfirmed": None,
+                "timed_out": False,
             }
-        if isinstance(reply, dict) and reply.get("error") == "timeout":
-            accepted: bool | None = None
+        reply_dict = reply if isinstance(reply, dict) else {}
+        # Живой ответ — конверт process.command.response: ответ ``system.shutdown`` лежит в ``result``,
+        # а ``success`` конверта True и на отказе already_stopping. Читаем лист; timeout — по плоскому ответу.
+        payload = _leaf_result(reply_dict)
+        accepted: bool | None
+        if reply_dict.get("error") == "timeout":
+            accepted = None
         else:
-            accepted = isinstance(reply, dict) and bool(reply.get("success"))
-        # PM отверг команду (ошибка аргументов) — стоп не начат, сокет не закроется: не ждём.
-        pm_gone = False if accepted is False else bool(self.connection_lost)
-        if wait and not pm_gone and accepted is not False:
-            wait_until = time.monotonic() + float(wait_timeout)
-            while not pm_gone and time.monotonic() < wait_until:
-                time.sleep(min(0.1, max(0.0, wait_until - time.monotonic())))
-                pm_gone = bool(self.connection_lost)
-        reply_mode = reply.get("mode", mode) if isinstance(reply, dict) else mode
+            raw_accepted = payload.get("accepted", payload.get("success"))
+            accepted = bool(raw_accepted)
+        reply_mode = payload.get("mode", mode)
+        # accepted False при already_stopping — стоп идёт, итоги честные; прочий отказ — стоп не начат.
+        stop_running = accepted is not False or payload.get("reason") == "already_stopping"
+        if not wait or not stop_running:
+            # PM отверг команду (ошибка аргументов) — сокет не закроется: не ждём.
+            pm_gone = False if accepted is False else bool(self.connection_lost)
+            return {
+                "accepted": accepted,
+                "mode": reply_mode,
+                "elapsed_s": round(time.monotonic() - started, 3),
+                "pm_gone": pm_gone,
+                "outcomes": None,
+                "unconfirmed": None,
+                "timed_out": False,
+            }
+        outcomes, pm_gone, timed_out = self._poll_shutdown_outcomes(started, wait_timeout, pm_name)
         return {
             "accepted": accepted,
             "mode": reply_mode,
             "elapsed_s": round(time.monotonic() - started, 3),
             "pm_gone": pm_gone,
-            "outcomes": None,
+            "outcomes": outcomes,
+            "unconfirmed": sorted(name for name, outcome in outcomes.items() if outcome is None),
+            "timed_out": timed_out,
         }
+
+    def _poll_shutdown_outcomes(
+        self, started: float, wait_timeout: float | None, pm_name: str
+    ) -> tuple[dict[str, str | None], bool, bool]:
+        """Опрос ``supervision.status`` после ``system.shutdown``: ``(outcomes, pm_gone, timed_out)``.
+
+        Порядок такта: снимок -> конец «у всех итог» / ``done`` -> только потом ``connection_lost``.
+        Часы — только через модуль ``time`` (тесты подменяют ``backend_ctl.driver.time``).
+        """
+        poll_interval_s = 0.05
+        socket_wait_s = 3.0
+        default_wait_s = 20.0
+        done_outcomes = ("exited", "terminated", "killed")
+        outcomes: dict[str, str | None] = {}
+        budget_s = default_wait_s if wait_timeout is None else float(wait_timeout)
+        wait_until = started + budget_s
+        budget_fixed = wait_timeout is not None
+        pm_gone = False
+        timed_out = False
+        finished_by_outcomes = False
+
+        while True:
+            now = time.monotonic()
+            if now >= wait_until:
+                timed_out = True
+                break
+            try:
+                reply = self.supervision_status(pm_name=pm_name, timeout=min(2.0, max(0.05, wait_until - now)))
+            except TokenFileMissing:  # опрос не дошёл до PM — это не «PM ушёл» (0.12a)
+                raise
+            except BackendUnavailable:
+                pm_gone = True
+                break
+            snapshot = _leaf_result(reply)
+            processes = snapshot.get("processes") if isinstance(snapshot, dict) else None
+            if isinstance(processes, dict) and snapshot.get("success") is not False:
+                system_stop = snapshot.get("system_stop")
+                if not budget_fixed and isinstance(system_stop, dict):
+                    deadline_at = system_stop.get("deadline_at")
+                    if isinstance(deadline_at, (int, float)):
+                        budget_fixed = True
+                        extended_s = max(default_wait_s, float(deadline_at) - time.time() + 12.0)
+                        wait_until = time.monotonic() + extended_s
+                names = [name for name, entry in processes.items() if name != pm_name and isinstance(entry, dict)]
+                for name in names:
+                    outcome = processes[name].get("stop_outcome")
+                    outcomes.setdefault(name, None)
+                    if outcome is not None:
+                        outcomes[name] = outcome
+                # ``outcomes`` — все дети, виденные в любом снимке; пустой набор не есть «все подтверждены».
+                all_done = bool(outcomes) and all(outcome in done_outcomes for outcome in outcomes.values())
+                phase_done = isinstance(system_stop, dict) and system_stop.get("phase") == "done"
+                if all_done or phase_done:
+                    finished_by_outcomes = True
+                    break
+            if self.connection_lost:
+                pm_gone = True
+                break
+            time.sleep(min(poll_interval_s, max(0.0, wait_until - time.monotonic())))
+
+        if finished_by_outcomes:
+            socket_until = min(wait_until, time.monotonic() + socket_wait_s)
+            while not pm_gone and time.monotonic() < socket_until:
+                if self.connection_lost:
+                    pm_gone = True
+                    break
+                time.sleep(min(0.1, max(0.0, socket_until - time.monotonic())))
+            if not pm_gone:
+                pm_gone = bool(self.connection_lost)
+        return outcomes, pm_gone, timed_out
 
     # ---- Интроспекция (P1 команды) ----
 
@@ -1528,6 +1684,20 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if isinstance(verified, dict) and verified.get("verdict"):
             verdict = str(verified.get("verdict"))
             verdict_reason: Optional[str] = None
+        elif observability is not None and (reply.get("success") is False or is_refusal(reply)):
+            # Inline-секция передана, а хост не принял команду. Отказ роутера приходит как
+            # `{"status": "error", "reason": ...}`, и после `_leaf_result` в листе нет ключа
+            # `success`, поэтому смотрим и на `is_refusal`. Суждения нет не из-за «без
+            # inline-секции» (это была бы ложная причина), а из-за ответа хоста.
+            # `success` ниже остаётся False, вердикт — unverifiable; `judge` сюда не
+            # применяется (BCTL-ADR-008: `success` — про применение, не вердикт).
+            verdict = "unverifiable"
+            text = self._host_error_text(reply)
+            verdict_reason = (
+                f"хост отверг config.reload: {text}"
+                if is_refusal(reply)
+                else f"config.reload без ответа хоста: {text}"  # таймаут — не отказ (0.3)
+            )
         else:
             # Файловый reload не несёт inline-секции, и сравнивать запрошенное не с
             # чем: «запрос» тут — весь файл целиком. Отсутствие суждения называется
@@ -1773,6 +1943,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``verification.reason`` — «не проверено» не выдаётся за «не применилось наоборот»,
         но и за «применилось» тоже.
 
+        **Отказ хоста (Task 0.11).** Если хост ОТВЕРГ запись (``verdict.is_refusal(res)``:
+        ``success False`` не-таймаут либо ``status == "error"``), ``verified_effect`` =
+        ``False``, ``verification.reason`` называет отказ и его ``error``, поллинг НЕ
+        запускается: правило, уже равное запрошенному, не доказывает, что запись дошла.
+        Таймаут — не отказ, решает readback. ``success`` ответа по-прежнему не трогается.
+
         **Против вакуумного True (ревью Фазы 4, находка 4).** ``resolved`` разворачивает
         ДЕФОЛТЫ: метрика без правила читается как ``(enabled=True, default_interval_sec)``.
         Поэтому одного совпадения с ``resolved`` мало — запрос ``enabled=True`` совпал бы
@@ -1791,6 +1967,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             res["verified_effect"] = bool(ok)
             res["verification"] = {"process": process, "metric": metric, "plane": plane, **extra}
             return res
+
+        if is_refusal(res):
+            # Хост ОТВЕРГ запись (Task 0.11): readback, совпавший с уже действующим
+            # правилом, был бы ложным подтверждением. Поллинг не запускаем — читать
+            # нечего. Таймаут — не отказ (is_refusal его не берёт): решает readback.
+            return _mark(False, reason=f"хост отверг запись телеметрии: {self._host_error_text(res)}")
 
         if plane == "throttle":
             # Central-троттл оркестратор-глобален: адресат readback'а всегда PM, поэтому
@@ -1912,10 +2094,10 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
     # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
 
-    # Зеркало Delta.to_dict(): new_value==MISSING_MARKER → удаление узла. Литерал
-    # живёт в events.py (один источник для driver и плоскостной классификации);
-    # в state_store не ходим СОЗНАТЕЛЬНО — package __init__ затащил бы Qt в
-    # headless-драйвер. Дрейф ловит контракт-тест test_missing_marker_matches_state_store.
+    # Зеркало Delta.to_dict(): new_value==MISSING_MARKER → удаление узла. Литерал живёт
+    # в events.py как единственный источник для driver и плоскостной классификации;
+    # приватный маркер state_store отдельно не импортируем. Дрейф ловит контракт-тест
+    # test_missing_marker_matches_state_store.
     _MISSING_MARKER = MISSING_MARKER
 
     def _ingest_state_changed(self, msg: Dict[str, Any]) -> None:
@@ -1935,6 +2117,14 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         deltas = iter_state_deltas(msg)
         if not deltas:
             return
+        # Дыры ревизий (0.10b): диапазон пакета; нет валидного — пакет пропускается (ни база, ни дыра).
+        # Часы зовём ДО лока: чужой ``clock`` не должен исполняться под ``_telemetry_lock``.
+        revisions = state_changed_revisions(msg)
+        try:
+            gap_at = self._telemetry_clock() if revisions is not None else None
+        except Exception:  # noqa: BLE001 — сломанные часы не должны стоить дельт пакета
+            _log.warning("часы драйвера бросили исключение: last_gap_at этого пакета останется None", exc_info=True)
+            gap_at = None
         # ПОЗДНЕЕ СВЯЗЫВАНИЕ (grep-маркер): recorder.ReplayPlayer монки-патчит
         # self._telemetry_model на clock-aware инстанс ЗАДНИМ числом (offline-реплей D.4).
         # Этот колбэк ОБЯЗАН читать модель по атрибуту self._telemetry_model в момент
@@ -1948,6 +2138,33 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 else:
                     self._telemetry_model.ingest(delta["path"], new_value)
                 self._telemetry_ingested_total += 1
+            # Ревизии — ПОСЛЕ дельт: сбой учёта дыр не может стоить дельт пакета.
+            if revisions is not None:
+                self._track_revision(revisions[0], revisions[1], gap_at)
+
+    def _track_revision(self, first_revision: int, revision: int, now: float | None) -> None:
+        """Учесть диапазон ``[first_revision, revision]`` пакета; звать ПОД ``_telemetry_lock``.
+
+        Зеркало ``gui_state_proxy._advance_revision_and_maybe_resync`` (только счёт, без ресинка —
+        он в 2.8b): нет базы → пакет становится базой; ``first_revision > last + 1`` → дыра
+        (``gap_count`` +1, ``last_gap_at = now``); ``last = revision`` ВСЕГДА (не ``max``): скачок
+        назад (рестарт хаба) — не дыра, а новая база. Устаревший пакет (``revision <= last``)
+        не отбрасывается: драйвер только считает. ``revision`` — счётчик ВСЕГО дерева, подписка
+        узкая (ADR-SS-015), поэтому ``gap_count`` — «кандидаты в дыры», пока нет сверки с деревом.
+        """
+        last = self._revision_last
+        if last is not None and first_revision > last + 1:
+            self._gap_count += 1
+            self._last_gap_at = now
+        self._revision_last = revision
+
+    def _reset_revision_base(self) -> None:
+        """Забыть базу ревизии: первый пакет новой подписки станет базой, а не дырой.
+
+        Счётчики ``gap_count``/``last_gap_at`` не трогаем — это история драйвера, не состояние подписки.
+        """
+        with self._telemetry_lock:
+            self._revision_last = None
 
     @staticmethod
     def _telemetry_key(path: str) -> Dict[str, Optional[str]]:
@@ -2029,8 +2246,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Returns:
             ``{"success": True, "process": ..., "metric": ..., "count": N,
-            "metrics": {path: {"value": v, "process": p, "worker": w}},
-            "ingest_active": bool, "ingested_total": N, "ingest_patterns": [...]}``.
+            "metrics": {path: {"value": v, "class": c, "age_s": a, "process": p, "worker": w}},
+            "ingest_active": bool, "ingested_total": N, "ingest_patterns": [...],
+            "gap_count": N, "last_gap_at": ts | None}``.
+
+            ``value`` — сырой лист read-model. ``class`` (``fresh``/``stale``/``no_data``) и ``age_s`` —
+            свежесть по метке ``processes.<process>._fresh`` (``freshness.read_value``, часы ``clock``
+            драйвера): лист без метки, лист ``None`` и путь вне ``processes.<X>`` дают ``no_data`` /
+            ``age_s=None``; ``writer_gone`` здесь не бывает (у драйвера нет входа «воплощение живо»).
+            Листья ``_fresh.*`` служебные: в ``metrics`` и ``count`` не входят.
+            ``gap_count``/``last_gap_at`` — дыры в ревизиях ``state.changed``, увиденные драйвером
+            (``first_revision > last + 1``); ревизия — счётчик ВСЕГО дерева, подписка узкая, поэтому это
+            «кандидаты в дыры», пока нет сверки с ``state_get_subtree`` (ADR-SS-015).
             Пустой read-model (``count=0``) сам по себе не говорит, ПОЧЕМУ пусто —
             ``ingest_active`` и ``ingested_total`` разводят «нет данных» / «нет
             подписки»: без подписки ``ingest_active=False``; под активной подпиской,
@@ -2056,14 +2283,44 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             и суди сам: второй glob-матчер здесь сознательно не строится.
         """
         prefix = f"processes.{process}" if process else ""
+        # Часы — ДО лока (чужой ``clock`` не исполняется под ``_telemetry_lock``). Метку и значения
+        # берём из ОДНОЙ копии ``snap``: вторая копия дала бы пару из разных записей писателя.
+        now = self._telemetry_clock()
         with self._telemetry_lock:
             snap = self._telemetry_model.snapshot(prefix)
             ingested_total = self._telemetry_ingested_total
+            gap_count = self._gap_count
+            last_gap_at = self._last_gap_at
+        # Дальше лок не нужен. ``read_node`` НЕ звать: он берёт тот же (нереентрантный) лок.
+        # Поддерево процесса строим из ``snap`` и ДО фильтра ``metric``: метка ``_fresh`` лежит на
+        # корне записи, а фильтр оставил бы в ответе только запрошенные листья.
+        leaves_by_process: dict[str, dict[tuple, Any]] = {}
+        for path, value in snap.items():
+            split = self._split_process_path(path)
+            if split is not None:
+                leaves_by_process.setdefault(split[0], {})[tuple(split[1].split("."))] = value
+        subtrees: dict[str, dict[str, Any]] = {}
         metrics: Dict[str, Any] = {}
         for path, value in snap.items():
+            split = self._split_process_path(path)
+            if split is not None and (split[1] == FRESH_KEY or split[1].startswith(FRESH_KEY + ".")):
+                continue  # листья метки — служебные: не метрики и не входят в count
             if metric is not None and not self._telemetry_matches_metric(path, metric):
                 continue
-            metrics[path] = {"value": value, **self._telemetry_key(path)}
+            fresh: dict[str, Any] = {"class": "no_data", "age_s": None}  # вне processes.<X> метки нет
+            if split is not None:
+                name, key = split
+                if name not in subtrees:
+                    subtrees[name] = _assemble(leaves_by_process[name])
+                # ``value`` ответа — СЫРОЙ лист (``read_value`` отдаёт None на листе без метки); у него берём
+                # только класс и возраст, при ``alive_incarnation=None`` (у драйвера нет входа «воплощение живо»).
+                fresh = read_value(subtrees[name], key, now, None)
+            metrics[path] = {
+                "value": value,
+                "class": fresh["class"],
+                "age_s": fresh["age_s"],
+                **self._telemetry_key(path),
+            }
         return {
             "success": True,
             "process": process,
@@ -2073,7 +2330,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "ingest_active": self._telemetry_ingest_active(),
             "ingested_total": ingested_total,
             "ingest_patterns": self._telemetry_ingest_patterns(),
+            "gap_count": gap_count,
+            "last_gap_at": last_gap_at,
         }
+
+    @staticmethod
+    def _split_process_path(path: str) -> tuple[str, str] | None:
+        """``processes.<X>.<rest>`` → ``(X, rest)``; любой другой путь → ``None`` (у него метки нет)."""
+        parts = path.split(".", 2)
+        if len(parts) == 3 and parts[0] == "processes" and parts[1]:
+            return parts[1], parts[2]
+        return None
 
     def telemetry_history(
         self,
@@ -2605,6 +2872,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         }
         res = self.send_command("ProcessManager", "state.subscribe", args, timeout=timeout)
         self._register_subscription("state.subscribe", "ProcessManager", args, res)
+        # Новая подписка — новая последовательность ревизий: база прошлой не годится (ложная дыра).
+        # Сброс ПОСЛЕ ответа: пакеты прежнего потока, пришедшие до него, базу не успеют вернуть.
+        self._reset_revision_base()
         return res
 
     def state_unsubscribe(

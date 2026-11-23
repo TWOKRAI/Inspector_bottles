@@ -28,7 +28,10 @@ from contextvars import ContextVar
 if TYPE_CHECKING:
     from multiprocessing import Process
 
+from ..._fallback import emergency_log
+from ...base_manager.mixins.observable_mixin import REFUSED
 from ...channel_routing_module import ChannelRoutingManager, resolve_build_result
+from ...channel_routing_module.core.channel_routing_manager import count_outcome
 from ...channel_routing_module.interfaces import channel_accepted
 from ..interfaces import ILoggerManager
 from ..configs.logger_manager_config import (
@@ -284,6 +287,22 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # join свипера 5.0 с + один tap ≤ 2.0 с (batch_drain.DEFAULT_CLOSE_TIMEOUT_SEC).
     _ON_SHUTDOWN_WAIT_S: float = 7.0
 
+    # Task 0.6 (L-4): менеджер ЗАКРЫТ. Значение по умолчанию — атрибут КЛАССА, а не
+    # присваивание в ``__init__``: ``_setup_channels`` зовёт ``self.debug()`` → ``log()``
+    # раньше конца тела конструктора, и флаг обязан читаться уже тогда (ErrorManager по
+    # тому же поводу выставляет ``_level_to_channel`` ДО ``super().__init__``). Ставится
+    # в ``_on_shutdown`` ПРЯМО перед очисткой реестра и не сбрасывается: повторная
+    # ``initialize()`` после ``shutdown()`` вне контракта (ADR-BM-009).
+    _closed: bool = False
+
+    #: Сколько аварийных строк ``[logger closed]`` менеджер вправе выпустить за жизнь:
+    #: цикл логирования после останова не должен залить stderr. Дальше — только счётчик.
+    _CLOSED_LINES_LIMIT: int = 20
+    # Сколько уже выпущено. Читается и растёт ТОЛЬКО под ``_miss_lock`` (тем же, под
+    # которым растёт ``channel_refused_records``): без него в нескольких потоках
+    # проверка «меньше 20» и прибавка разъезжались бы, и строк было бы больше.
+    _closed_lines_emitted: int = 0
+
     def __init__(
         self,
         manager_name: str = "LoggerManager",
@@ -512,6 +531,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # `store flush: N записано, M потеряно` ещё должна найти приёмник.
             self.close_all_taps()
 
+            # Task 0.6: флаг СТОИТ ЗДЕСЬ — после прощальной записи и строки tap'а
+            # «store flush» (обе идут через ``log()`` и обязаны дойти) и прямо перед
+            # очисткой реестра. Раньше он отказал бы собственным прощальным записям.
+            self._closed = True
             for channel in self._channel_registry.clear():
                 try:
                     channel.close()
@@ -1486,6 +1509,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     ):
         """Записать. Сообщение может быть отложенным (Ф1.4).
 
+        Returns:
+            ``None`` на здоровом пути (запись принята, отклонена гейтом или
+            поглощена процессором — как и до Task 0.6) и :data:`REFUSED`, когда
+            менеджер ЗАКРЫТ и запись не принята: либо он закрыт к моменту, когда
+            запись собрана и прошла гейт и процессоры (путь «а»), либо гонка с
+            ``shutdown()`` — каналов приняло 0 и менеджер уже закрыт (путь «б»).
+            Миксин читает часового как «не доставлено» (``_log_*`` → ``False``).
+
         Args:
             message: строка, ``%``-шаблон или ``Callable[[], str]``. Callable
                 вызывается ТОЛЬКО после гейта и ровно один раз.
@@ -1577,6 +1608,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             return
         record_dict = processed
 
+        # Task 0.6, путь (а): менеджер закрыт. Проверка СТОИТ ЗДЕСЬ, а не раньше:
+        # запись уже собрана и отредактирована (пол и аварийная строка берут готовый
+        # ``record_dict``, второй сборки нет), а то, что гейт отклонил или процессор
+        # поглотил, выше ушло своим путём и отказом НЕ числится. И ДО tap'ов: запись,
+        # ушедшая в tap, не должна ещё и числиться отказанной (``close_all_taps()`` к
+        # этому моменту уже опустошил ``_tap_sinks``, так что tap'у она и не достаётся).
+        if self._closed:
+            return self._refuse_closed(level, record_dict, to_floor=is_error_level(level))
+
         # Гейт по наличию tap'ов сохранён, хотя словарь уже собран: сам обход
         # tap'ов и вычисление severity — тоже цена на каждой записи.
         #
@@ -1591,7 +1631,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # каналов сбрасываем первой — иначе запись легла бы на диск раньше
             # предшествовавших ей INFO, и контекст перед падением потерял бы порядок.
             # Пустой список приёмников сюда тоже приходит — и floor его ловит.
-            self._write_error_record(record_dict, channels)
+            written = self._write_error_record(record_dict, channels)
+            # Путь (б): пол при нуле принявших уже сработал внутри — второй раз не пишем.
+            if written == 0 and self._closed:
+                return self._refuse_closed(level, record_dict, to_floor=False)
         elif not channels:
             # Ни одного приёмника: запись потеряна, но НЕ молча. Раньше этот
             # случай проваливался в ветку буфера, ничего не клал и всё равно
@@ -1607,7 +1650,59 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # display-вида (``stamp_observed``) происходит уже на приёмной
             # стороне, за IPC, на своей копии. Разделяемая мутация здесь была бы
             # дефектом канала, и стережёт её отдельный тест.
-            self._write_record_to_channels(record_dict, channels)
+            written = self._write_record_to_channels(record_dict, channels)
+            # Путь (б), гонка: запись прошла проверку (а), ``shutdown()`` очистил реестр,
+            # принявших 0 и менеджер закрыт — ответ «доставлено» после возврата
+            # ``shutdown()`` был бы ложным.
+            if written == 0 and self._closed:
+                return self._refuse_closed(level, record_dict, to_floor=False)
+
+    @property
+    def is_closed(self) -> bool:
+        """Менеджер ЗАКРЫТ (``shutdown()`` дошёл до очистки реестра). Постоянное состояние.
+
+        Читает окно голоса в ``ObservableMixin``: закрытому логгеру слот окна не возвращается.
+        """
+        return self._closed
+
+    def _refuse_closed(self, level: LogLevel, record_dict: Dict[str, Any], to_floor: bool) -> Any:
+        """Учесть запись, отказанную ЗАКРЫТЫМ менеджером, и вернуть :data:`REFUSED`.
+
+        Ровно один ``channel_refused_records`` +1 за запись (ключ именованный:
+        таблица ``LOSS_KEY_BY_HOP``, Task 0.1). Затем:
+
+        * ``to_floor`` (путь «а», ERROR/CRITICAL): запись ВСЁ РАВНО идёт в пол —
+          закрытый менеджер сегодня спасает их именно им (инвариант ``ErrorFloor``).
+          На пути «б» пол уже отработал в ``_write_error_record`` — не дублируем;
+        * уровень ≥ WARNING: аварийная строка ``[logger closed] <текст>`` — тем же
+          ``emergency_log``, что и весь «аварийный выход один». Текст берётся из
+          ``record_dict`` ПОСЛЕ процессоров: редактор секретов уже отработал (текст
+          пользовательский, и без редакции аварийная строка стала бы обходом).
+          Не больше :attr:`_CLOSED_LINES_LIMIT` строк на менеджер, дальше — только счёт.
+        """
+        loud = severity_of(level) >= severity_of(LogLevel.WARNING)
+        with self._miss_lock:
+            count_outcome(self.stats, "channel", "refused")
+            voice = loud and self._closed_lines_emitted < self._CLOSED_LINES_LIMIT
+            if voice:
+                self._closed_lines_emitted += 1
+        if to_floor:
+            self._write_to_floor(record_dict)
+        if voice:
+            try:
+                # Источник называется в строке (оператору нужно знать, кто писал в закрытый
+                # логгер); пустой ``module`` — строка без префикса источника. Текст — ВСЕГДА
+                # аргументом, не шаблоном: ``%`` в сообщении не должен стереть строку.
+                module = record_dict.get("module")
+                text = record_dict.get("message", "")
+                level_name = str(getattr(level, "value", level))
+                if module:
+                    emergency_log(__name__, level_name, "[logger closed] %s: %s", module, text)
+                else:
+                    emergency_log(__name__, level_name, "[logger closed] %s", text)
+            except Exception:  # noqa: BLE001  # nosec B110 — аварийный путь не имеет права бросать
+                pass
+        return REFUSED
 
     # =========================================================================
     # FLOOR ОШИБОК (Ф0.9, вариант B — инвариант 1 плана observability-unified-routing)
@@ -1764,18 +1859,23 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             record_dict = result
         return record_dict
 
-    def _write_error_record(self, record_dict: Dict[str, Any], channel_names: List[str]) -> None:
+    def _write_error_record(self, record_dict: Dict[str, Any], channel_names: List[str]) -> int:
         """Синхронно записать error/critical; при нуле приёмников — в floor.
 
         Инвариант «одно место, без дублей»: floor пишет ТОЛЬКО когда обычный
         маршрут не записал НИ ОДНОГО канала. Пока хоть один канал жив, второй
         копии записи не появляется (это и отличает вариант B от отклонённого A).
+
+        Returns:
+            Число каналов, принявших запись (Task 0.6): по нулю ``log()`` на
+            закрытом менеджере выбирает путь отказа «б». Раньше — ``None``.
         """
         written = self._write_record_to_channels(record_dict, channel_names)
         if written == 0:
             # Ни одного живого приёмника: каналы выключены конфигом, сняты
             # logger.sink.disable или все write упали. Запись обязана уцелеть.
             self._write_to_floor(record_dict)
+        return written
 
     def _write_to_floor(self, record_dict: Dict[str, Any]) -> None:
         """Последняя попытка сохранить запись + ЧЕСТНЫЙ учёт её исхода.
@@ -1915,20 +2015,23 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # иначе is_enabled_for отвечает про другой маршрут. Сверяет тест-сетка
     # test_gate_predicate.py, а не глаз.
 
+    # Task 0.6: методы ПРОБРАСЫВАЮТ возврат ``log()`` (``None`` либо :data:`REFUSED`).
+    # Прежде они его отбрасывали, и часовой до миксина не дошёл бы.
+
     def debug(self, message: LogMessage, module: str = "main", *args: Any, **extra):
-        self.log(LogScope.DEBUG, LogLevel.DEBUG, message, module, *args, **extra)
+        return self.log(LogScope.DEBUG, LogLevel.DEBUG, message, module, *args, **extra)
 
     def info(self, message: LogMessage, module: str = "main", *args: Any, **extra):
-        self.log(LogScope.BUSINESS, LogLevel.INFO, message, module, *args, **extra)
+        return self.log(LogScope.BUSINESS, LogLevel.INFO, message, module, *args, **extra)
 
     def warning(self, message: LogMessage, module: str = "main", *args: Any, **extra):
-        self.log(LogScope.SYSTEM, LogLevel.WARNING, message, module, *args, **extra)
+        return self.log(LogScope.SYSTEM, LogLevel.WARNING, message, module, *args, **extra)
 
     def error(self, message: LogMessage, module: str = "main", *args: Any, **extra):
-        self.log(LogScope.SYSTEM, LogLevel.ERROR, message, module, *args, **extra)
+        return self.log(LogScope.SYSTEM, LogLevel.ERROR, message, module, *args, **extra)
 
     def critical(self, message: LogMessage, module: str = "main", *args: Any, **extra):
-        self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, *args, **extra)
+        return self.log(LogScope.SYSTEM, LogLevel.CRITICAL, message, module, *args, **extra)
 
     # =========================================================================
     # SINK CONTROL PLANE — хук базы (Ф0.6)

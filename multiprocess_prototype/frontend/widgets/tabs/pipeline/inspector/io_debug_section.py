@@ -246,8 +246,11 @@ class IoDebugSection(QWidget):
         read_model = getattr(self._bindings, "read_model", None)
         if read_model is None:
             return
+        # io_peek — узел: в read-model он хранится листьями, ``get(path)`` дал бы None.
+        # Модель без ``get_node`` (фейк, голая read-model) — прежний ``get``.
+        getter = getattr(read_model, "get_node", None)
         try:
-            value = read_model.get(self._active_path)
+            value = getter(self._active_path) if getter is not None else read_model.get(self._active_path)
         except Exception:
             return
         if value is not None:

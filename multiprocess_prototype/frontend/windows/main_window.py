@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..widgets.chrome.app_header import AppHeaderWidget
 from ..widgets.chrome.error_banner import ErrorBannerWidget
+from ..widgets.chrome.run_control import RunControlWidget
 from .config import MainWindowConfig
 
 if TYPE_CHECKING:
@@ -123,6 +124,9 @@ class MainWindow(QMainWindow):
     StatusBar: fps + latency.
     """
 
+    # Task 1.1: CloseCoordinator (set_close_coordinator); None — прежнее закрытие (тесты, teardown).
+    _close_coordinator = None
+
     def __init__(self, config: dict | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -148,6 +152,10 @@ class MainWindow(QMainWindow):
         # 1.5. Баннер ошибок/предупреждений (скрыт по умолчанию)
         self._error_banner = ErrorBannerWidget()
         self._layout.addWidget(self._error_banner)
+
+        # 1.6. Пульт запуска (Task 2.3): состояние системы + ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать
+        self._run_control = RunControlWidget()
+        self._layout.addWidget(self._run_control)
 
         # 2. Image panel placeholder — будет заменён реальным ImagePanel
         self._image_panel_placeholder = QWidget()
@@ -284,13 +292,44 @@ class MainWindow(QMainWindow):
         """Сохранить позицию и размер в QSettings."""
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
-    def closeEvent(self, event) -> None:
-        """Подтвердить несохранённые правки графа (RS-4) и сохранить геометрию.
+    def set_close_coordinator(self, coordinator) -> None:
+        """Подключить координатор закрытия (Task 1.1): крестик ждёт остановки системы."""
+        self._close_coordinator = coordinator
 
-        C-2/C-5: закрытие приложения при dirty-редакторе МОЛЧА теряло применённые-но-
-        несохранённые правки топологии. Теперь при dirty спрашиваем: Сохранить /
-        Не сохранять / Отмена. «Отмена» → окно не закрывается.
+    def set_run_commands(self, commands) -> None:
+        """Подключить команды запуска (ProcessManagerProxy) к пульту ЗАПУСТИТЬ/ОСТАНОВИТЬ."""
+        self._run_control.set_commands(commands)
+
+    def closeEvent(self, event) -> None:
+        """Закрытие окна.
+
+        С координатором (Task 1.1): в ``CLOSING`` — сохранить геометрию и закрыться БЕЗ вопроса
+        (вопрос уже задан координатором: «Не сохранять» не снимает dirty, второй вопрос был бы
+        лишним); иначе событие игнорируется, а координатор начинает закрытие (вопрос →
+        ``system.shutdown`` → ожидание детей).
+
+        Без координатора — прежний путь RS-4: C-2/C-5: закрытие приложения при dirty-редакторе
+        МОЛЧА теряло применённые-но-несохранённые правки топологии. Теперь при dirty спрашиваем:
+        Сохранить / Не сохранять / Отмена. «Отмена» → окно не закрывается.
         """
+        coordinator = self._close_coordinator
+        if coordinator is not None:
+            from multiprocess_prototype.frontend.shutdown import CloseState
+
+            if coordinator.state is CloseState.CLOSING:
+                self._save_geometry()
+                super().closeEvent(event)
+                return
+            coordinator.request_close()
+            # Крестик мог сразу привести в CLOSING (сбой send_shutdown, бэкенд ушёл во время
+            # вопроса): quit_app зовёт window.close() ВНУТРИ этого closeEvent, а Qt вложенный
+            # close() молча отбрасывает — окно осталось бы видимым. Закрываемся этим событием.
+            if coordinator.state is CloseState.CLOSING:
+                self._save_geometry()
+                event.accept()
+            else:
+                event.ignore()
+            return
         if not self.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"):
             event.ignore()
             return
@@ -597,7 +636,7 @@ class MainWindow(QMainWindow):
         Args:
             bindings: GuiStateBindings (принимает object для обратной совместимости).
         """
-        if bindings is None or not hasattr(bindings, "bind"):
+        if bindings is None or not hasattr(bindings, "bind") or not hasattr(bindings, "bind_fanout"):
             return
 
         bindings.bind(
@@ -632,6 +671,9 @@ class MainWindow(QMainWindow):
             self._error_banner,
             "show_warning",
         )
+
+        # Пульт запуска: восемь листьев system.run.* (вид run_view PM; last_fault приходит листом целиком).
+        bindings.bind_fanout("system.run.*", self._run_control.apply_leaf, owner=self._run_control)
 
     # -- Обратная совместимость (старый API) --
 

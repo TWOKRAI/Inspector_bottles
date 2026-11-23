@@ -14,6 +14,10 @@
   push'а и пришедший после него, больше не воскрешает снятое значение; судится
   каждый путь отдельно, номер, а не время (Windows-сетка `monotonic` 15.6 мс).
 - `ITelemetryReadModel` (Protocol) — контракт (включая `write_seq` и влив опроса).
+- RN1 (2026-11-22): чтение узла из листьев — `read_node(path) -> (bool, value)` и чистые
+  `assemble_leaves` / `node_from_snapshot` (`node_read.py`, только stdlib). `backend_ctl` и
+  `TelemetryViewModel.get_node` делегируют сюда. Расхождения с живым `state.get` (пустые
+  dict-узлы, ключ с точкой) названы в README; лока у модуля нет, держит вызывающий.
 - Поддержка ВТОРОЙ формы адреса `…state.plugins.<писатель>.<метрика>` (Ф1 «порта
   наблюдений», Task 1.4): один и тот же `tracked_suffixes` покрывает и плоский
   агрегат, и лист в поддереве писателя; ключ кольца остаётся полным путём, так
@@ -28,6 +32,11 @@
 
 - `frontend_module.state.TelemetryViewModel` (Qt) — композирует ядро.
 - `backend_ctl` driver (headless) — композирует ядро, наполняет `state.changed`.
+
+## Копия хранит листья (Task 2.8a)
+
+`_state` — `LeafCopy`: dict-дельта заменяет поддерево, push-запись идёт через
+`_apply_put` (один `write_seq` на дельту). Раздел «Третий инвариант» в DECISIONS.md.
 
 ## Границы / вне охвата
 

@@ -8,7 +8,7 @@ IChannelRoutingManager  — базовый контракт менеджера �
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from ..base_manager.interfaces import IBaseManager
 
@@ -58,6 +58,35 @@ class IChannel(ABC):
         return {"name": self.name, "type": self.channel_type, "active": True}
 
 
+type Outcome = Literal["accepted", "refused", "failed"]
+
+_FAILED_STATUSES = ("error",)
+_REFUSED_STATUSES = ("dropped", "refused")
+
+
+def outcome_of(result: Any) -> Outcome:
+    """Исход ответа звена: ``accepted`` / ``refused`` / ``failed``.
+
+    Единственное толкование ответа :meth:`IChannel.write` и родственных звеньев.
+    ``error`` — ``failed``; ``dropped`` и ``refused`` — ``refused``; всё прочее
+    (``success``, ``ok``, ``skipped``, ``dict`` без ``status``, ``None``, не-``dict``) —
+    ``accepted``: канал без ответа считался принявшим и раньше, ломать это нельзя.
+
+    Статус проверяется кортежем, не ``set``: ``{"status": ["error"]}`` (список)
+    даёт ``accepted``, а ``set`` бросил бы ``TypeError: unhashable``.
+
+    Pre: любой объект. Post: одно из трёх значений, не бросает.
+    """
+    if not isinstance(result, dict):
+        return "accepted"
+    status = result.get("status")
+    if status in _FAILED_STATUSES:
+        return "failed"
+    if status in _REFUSED_STATUSES:
+        return "refused"
+    return "accepted"
+
+
 def channel_accepted(result: Any) -> bool:
     """Принял ли канал запись — единственное толкование ответа :meth:`IChannel.write`.
 
@@ -76,6 +105,9 @@ def channel_accepted(result: Any) -> bool:
     Каналы, не возвращающие статус (``None`` / не-``dict``), считаются
     принявшими — прежний контракт, ломать его на ровном месте нельзя.
 
+    **``"refused"`` — тоже НЕ принял** (Task 0.1, ADR-CRM-019): тот же отказ, что
+    ``"dropped"``; ``channel_accepted({"status": "refused"})`` даёт ``False``.
+
     **``"dropped"`` — тоже НЕ принял** (задача 2.1). Прежде здесь стоял только
     отказ по ``"error"``, и вытеснение в bounded-приёмнике считалось записью:
     канал `hub_stats` при заторе дренажа выбрасывал снапшот и рапортовал успех,
@@ -85,9 +117,7 @@ def channel_accepted(result: Any) -> bool:
     задним числом; но смысл общий — «отброшено» и «записано» не одно и то же,
     и различать их обязан общий толкователь, а не каждый писатель у себя.
     """
-    if isinstance(result, dict):
-        return result.get("status") not in ("error", "dropped")
-    return True
+    return outcome_of(result) == "accepted"
 
 
 # =============================================================================
@@ -208,6 +238,8 @@ class IChannelRoutingManager(IBaseManager):
 __all__ = [
     "IChannel",
     "channel_accepted",
+    "Outcome",
+    "outcome_of",
     "IBufferStrategy",
     "IChannelRoutingManager",
 ]

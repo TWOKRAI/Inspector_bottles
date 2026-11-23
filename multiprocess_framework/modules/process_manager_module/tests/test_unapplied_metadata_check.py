@@ -40,7 +40,7 @@ RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
 APP_YAML = PROJECT_ROOT / "multiprocess_prototype" / "app.yaml"
 
 # Литерал плана (M10): число рецептов репозитория.
-_RECIPE_COUNT = 22
+_RECIPE_COUNT = 23  # 23-й — camera_device_demo (Task 1.8, 2026-11-15)
 ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 
 
@@ -360,8 +360,8 @@ def _offenders(recipe: str) -> list[str]:
     return result
 
 
-def test_m10_recipe_set_is_the_known_22() -> None:
-    """Страж «ноль наблюдений»: рецептов ровно 22 и в них есть процессы."""
+def test_m10_recipe_set_is_the_known_23() -> None:
+    """Страж «ноль наблюдений»: рецептов ровно 23 и в них есть процессы."""
     assert len(ALL_RECIPES) == _RECIPE_COUNT, ALL_RECIPES
     assert "robot_demo" in ALL_RECIPES
     assert sum(len(_recipe_processes(r)) for r in ALL_RECIPES) > 0

@@ -157,24 +157,21 @@ processes:
 
 ### Команды плагина
 
+Плагин `hikvision` работает на ядре `camera_device`; команды -- общий набор Р7 (ADR-CAM-001, ADR-HIK-001). Старые команды
+(`open`, `close`, `start_capture`, `stop_capture`, `enum_devices`, `get_parameters`, `set_parameters`, `set_*`, `open_sdk_app`,
+`close_sdk_app`) удалены без алиасов (ADR-CAM-004).
+
 ```python
-# Эти команды отправляются через GUI или API:
-
-# Управление подключением
-- open(camera_index=0)
-- close()
-
-# Управление захватом
-- start_capture()
-- stop_capture()
-
-# Параметры
-- get_parameters()
-- set_parameters(exposure_time_us=..., gain_db=..., frame_rate=...)
-
-# Информация
-- enum_devices()
-- get_status()
+# Команды IPC плагина (отправляются через GUI, хаб или API):
+- take_device       # открыть камеру и начать захват (бывшие open + start_capture)
+- release_device    # остановить захват и закрыть камеру (бывшие stop_capture + close)
+- get_status
+- reset_stats
+- read_params       # бывший get_parameters
+- apply_params      # бывшие set_parameters / set_exposure / set_gain / set_frame_rate / set_resolution
+- list_devices      # бывший enum_devices
+- describe_params
+- trigger_software
 ```
 
 ---
@@ -182,8 +179,9 @@ processes:
 ## SDK App — GUI для отладки
 
 ```bash
-# Запустить GUI (PySide6)
-python -m hikvision_camera_module_2
+# Запустить GUI (PySide6) -- только вручную и при остановленном стенде:
+# SDK App открывает камеру сам, второй открыватель MVS с приложением конфликтует (ADR-HIK-001)
+python -m Services.hikvision_camera
 ```
 
 Окно `CameraTestWindow` показывает:
@@ -404,7 +402,7 @@ pytest hikvision_camera_module_2/tests/test_converter.py -v
 ## Интеграция с multiprocess_prototype
 
 1. **Blueprint (YAML):** добавить процесс с `HikvisionCameraPlugin` в `topology.yaml`
-2. **Команды:** отправлять через bridge (open, close, set_parameters и т.д.)
+2. **Команды:** отправлять через bridge (`take_device`, `release_device`, `apply_params` и т.д. -- набор Р7)
 3. **Кадры:** захватываются плагином → SHM ring-buffer → другие процессы (processor и т.д.)
 4. **Параметры:** регистры (`HikvisionCameraRegisters`) синхронизируются с GUI в реальном времени
 

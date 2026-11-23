@@ -1,4 +1,4 @@
-# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (d3c801e4)
+# СГЕНЕРИРОВАНО из Services/robot_comm/protocols/delta_v2.yaml (e9e06893)
 # не править руками; python -m Services.robot_comm.codegen
 
 REG = {
@@ -431,6 +431,33 @@ ACT = {
     "SPEED_PCT": 4,
     "ACCEL": 5,
     "ACCUR": 6,
+}
+
+ACT_RANGE = {
+    "DO_ON": (
+        1,
+        16,
+    ),
+    "DO_OFF": (
+        1,
+        16,
+    ),
+    "DELAY_MS": (
+        0,
+        65535,
+    ),
+    "SPEED_PCT": (
+        1,
+        100,
+    ),
+    "ACCEL": (
+        100,
+        50000,
+    ),
+    "ACCUR": (
+        0,
+        1,
+    ),
 }
 
 STOP_LEVEL = {

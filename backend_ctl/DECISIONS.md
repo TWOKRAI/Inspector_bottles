@@ -414,3 +414,159 @@ round-trip за данными, которые уже приехали перв�
 прежние поля на месте. Изменение поведения ровно одно и намеренное: `counters_reset`
 теперь истинен там, где раньше молчал, а `silent_source` не выставляется на спорном
 окне.
+
+---
+
+## BCTL-ADR-010: форма вердикта I3 — «проверено» = образ до + подтверждение + образ после
+
+**Дата:** 2026-11-21 · **Статус:** принято · **Контекст:** план
+`observability-signal-contracts`, Task 0.3 (находка B-3 ревизии наблюдаемости; инвариант I3
+«причинность проверки»). Уточняет BCTL-ADR-008 (граница указана ниже).
+
+**Проблема.** `set_register_verified` отвечал `success True, verified True` на запись, которую
+хост отверг при УЖЕ равном значении: образ после равен цели, поэтому отказ не виден. Ответ
+«success» без образа до и без разбора ack — не доказательство.
+
+**Решение.** Один чистый модуль `backend_ctl/verdict.py` (без ввода-вывода, без импортов
+`multiprocess_*`), два символа: `is_refusal(ack)` и
+`judge(pre, ack, post, target, *, unreadable=(), eq=operator.eq) -> dict`.
+
+Правила — строго в этом порядке, первое сработавшее побеждает:
+
+1. ack — отказ -> `failed`;
+2. `unreadable` не пуст -> `unverifiable`;
+3. `not eq(post, target)` -> `failed`;
+4. `eq(pre, target)` -> `vacuous`;
+5. иначе -> `confirmed`.
+
+Ответ: `verdict`, `vacuous`, `success`, `pre`, `post`, `ack`, `unverifiable` (= `list(unreadable)`
+при любом вердикте). `vacuous = ("pre" not in unreadable) and eq(pre, target)` — при ЛЮБОМ
+вердикте: отказ при равном образе до остаётся `failed`, но помечен `vacuous True` (именно B-3).
+`success = verdict in {confirmed, vacuous}` — формула живёт только в `judge`. `judge` не бросает:
+ни одно `Exception` из `eq` наружу не выходит, оно читается как «не равно» (`BaseException` —
+KeyboardInterrupt, SystemExit — выходит). Сбой `eq` не логируется: модуль чистый, без
+ввода-вывода; сбой неотличим от «не равно».
+
+`operator.eq` не склеивает строку с числом (`"10"` и `10` не равны), но `bool`, `int` и `float`
+равны по `==`: `judge(0, OK, True, 1)` — `confirmed`. Нужна терпимость к строке — `eq` подаёт
+вызывающий.
+
+**Отказ ack** — dict, у которого (`success is False` и `error != "timeout"`) ИЛИ
+`status == "error"`. НЕ отказ: таймаут `{"success": False, "error": "timeout"}`, `None`, не-dict,
+dict без `success` и `status`. Тогда решает образ после. Причина: `process.restart` и запись
+штатно отвечают таймаутом при доставленной команде.
+
+**Почему `eq` — параметр.** MCP-клиент превращает скаляр в строку, а
+`RegisterOps._values_match` это терпит; строгое `==` дало бы ложный `failed`.
+
+**Где применяется.** Только `set_register_verified` и поле `register_restore` (подключает Task
+0.11). Не применяется:
+
+* `config_reload_verified` — BCTL-ADR-008 развёл «применилось» и «вердикт»: `success` про
+  применение, не вердикт, `success True` при `verdict "failed"` остаётся законным; драйвер там
+  порождает только `unverifiable`, `confirmed` и `failed` приходят от хоста;
+* `process_restart_verified` — ответа `success` нет, ключ `restarted`, успех обратный
+  (`post != pre`);
+* `telemetry_set(verify=True)` — читает свой `verified_effect`.
+
+Единый `judge` на все пять инструментов не годится: форма ответа у них разная.
+
+**Известное расхождение (не чинится здесь).** `BackendDriver._looks_failed`
+(`backend_ctl/driver.py:555`) считает отказом любой `success is False`, в том числе
+`{"success": False, "error": "timeout"}`. `is_refusal` таймаут отказом не считает. Назначение
+разное: `_looks_failed` решает «регистрировать ли намерение подписки» (смещение в over-record),
+`is_refusal` — «признать ли запись проваленной». Обратная сторона: `{"status": "error"}` —
+`is_refusal True`, а `_looks_failed` даёт False: он смотрит только `success is False`. Код `driver.py` не тронут; унификация — Task 2.6
+(перенос суда на хост).
+
+**Граница для Task 0.11.** `is_refusal` смотрит только верхний уровень ack: вложенный отказ
+`{"success": True, "result": {"success": False}}` он не видит. Поэтому 0.11 подаёт ack как есть
+или его лист (`_leaf_result`).
+
+**Отвергнуто.** Параметр `rejected`, читающий `resp.get("success")`, — зелёный по отсутствию
+ключа. Перевод `config_reload_verified` на `judge` — ломает развод BCTL-ADR-008.
+
+**Доказательство.** 20 unit-тестов `backend_ctl/tests/test_verdict_form.py`; контракт
+`test_contract_verified.py` (11 тестов, 5 инструментов; до Task 0.11 — `3 failed, 8 passed`,
+экземпляры чинит 0.11). Инъекции лида по плану Task 0.3.
+
+**Откат.** Аддитивно: новый модуль и ADR; инструменты `judge` до Task 0.11 не вызывают.
+
+---
+
+## BCTL-ADR-011: транспорт драйвера читает токен из файла порта; `hello` только при файле
+
+**Дата:** 2026-11-22 · **Статус:** принято · **Контекст:** план
+`observability-signal-contracts`, Task 0.12a (клиентская половина 0.12b; механизм рукопожатия —
+Task 0.12, ADR-RTR-017). Сервер здесь не меняется.
+
+**Проблема.** Сервер с токеном раньше клиентов ломает каждый стенд с `BACKEND_CTL=1`: драйвер,
+харнесс, `stand_gate`, `alpha_sim`, `capacity_bench`, сессии MCP и окно `sim_view --line` не
+шлют `hello`. Поэтому клиенты переходят первыми, а открытые серверы (тесты, `SocketChannel` без
+`authenticator`) должны работать как раньше.
+
+**Решение.**
+
+1. `_TransportMixin` (`backend_ctl/transport.py`) переопределяет классовый `_token_provider`
+   `SocketClient` свойством с сеттером. Сеттер (его зовёт `SocketClient.__init__`) хранит явный
+   провайдер; не-`None` главнее. Иначе свойство отдаёт
+   `file_token_provider(self._port, os.environ)`. `connect` читает свойство один раз на
+   соединение, провайдер файл не кэширует: реконнект после рестарта сервера читает новый
+   токен. Нет файла (или файл пуст) — провайдер вернул `None`, `hello` не шлётся.
+2. Тексты отказов — наблюдаемый исход вызова, без токена в тексте:
+   * хост отказал в `hello` (`SocketAuthError` из `connect`) → `TokenRejected` с текстом
+     `token rejected: <путь файла>`. `TokenRejected` наследует `BackendUnavailable` (текст для
+     MCP) и `SocketAuthError` (`OSError`): ретрай `except OSError` в `harness.py` сохраняется;
+   * `request` вернул dict `success False`, `error "auth_required"` (сервер требует токен, а
+     `hello` не слали: слали бы — отказ пришёл бы в `connect`) → `TokenFileMissing`
+     (подтип `BackendUnavailable`) с текстом `token file not found: <путь файла>`. После отказа
+     хост закрывает соединение (ADR-RTR-017), поэтому `request` помечает экземпляр
+     (`_token_missing`, снимается успешным `connect`): на помеченном соединении разрыв в
+     `request` — тоже `TokenFileMissing`, и `_conn_lost_message` отдаёт тот же текст. Иначе три
+     пробы `_await_ready` съедали единственный текст, а вызов пользователя видел «соединение
+     оборвано» (ревью стадии 5, находка 1).
+   Путь — `resolve_token_path(self._port, os.environ)`. Обёртки `driver.py` (`send_command`,
+   `system_command`) идут через `self.request`; `request_async` в backend_ctl не используется.
+   Подмена — только для dict с `success False` и `error "auth_required"`: не-dict `result`
+   и другой `error` возвращаются как есть.
+3. `Services/robot_comm/gui/line_source.py` (`LineLink`, отладочная дверь линии на порту
+   управления) передаёт `token_provider=file_token_provider(port, os.environ)`; `_reconnect`
+   зовёт `connect` — провайдер перечитывает файл.
+4. `driver.system_shutdown` (оба `except BackendUnavailable` — ответ на команду и опрос
+   `supervision_status`) пробрасывает `TokenFileMissing`: команда до PM не дошла, это не
+   `pm_gone` (ревью стадии 5, находка 2).
+
+**Известное (не чинится здесь).** `token rejected` пользователь MCP видит с первого вызова:
+`connect` идёт до `_await_ready`. `token file not found` первой ловит проба `_await_ready`
+(`mcp_driver_session.py`, глотает исключение); вызов пользователя видит тот же текст благодаря
+метке `_token_missing` (п. 2). Сам `_await_ready` не меняется (`OPEN_QUESTIONS`).
+`TokenRejected` — `OSError`: ретрай харнесса повторяет отказ по неверному токену до своего
+дедлайна, а не падает сразу. Пустой файл токена даёт текст `token file not found`, хотя файл есть.
+П. 2 и п. 4 не безусловны: параллельные ПЕРВЫЕ запросы на одном свежем драйвере без файла
+токена. Проигравший гонку читает метку раньше, чем её ставит победитель, и получает общий текст
+«соединение оборвано». Ревьюер измерил: 12 из 450 `request`; `system_shutdown` дал ложный
+`pm_gone` 3 раза из 150. MCP, harness, `stand_gate` и `alpha_sim` в этот случай не попадают:
+пробы у них последовательные. Закрытие — ставить метку в reader-потоке (`_dispatch`); не сделано.
+
+**Отвергнуто.**
+* Файловый провайдер в `__init__` драйвера — шим не зовёт `SocketClient.__init__`, а правка
+  `driver.py` шире задачи; провайдер, созданный один раз, к тому же легко закэшировать.
+* Отказ `auth_required` как error-dict без исключения — MCP не реконнектится и не называет файл.
+* `TokenRejected` только от `BackendUnavailable` — ломает ретрай `except OSError` харнесса.
+
+**Доказательство.** `backend_ctl/tests/test_token_client.py` — 10 тестов: `hello` из файла;
+страж «нет файла — первая строка запрос»; оба текста отказа; чистое окружение подпроцесса;
+сеттер (явный провайдер главнее файла); реконнект с новым токеном; текст `token file not found`
+через `DriverSession` + `dispatch_tool`; `system_shutdown` без файла — `TokenFileMissing`, а не
+`pm_gone`; не-dict `result`, `error "boom"` и `success True` с `error "auth_required"`
+возвращаются как есть.
+`Services/robot_comm/tests/test_line_source_token.py` — 1 тест. До правки `transport.py` и
+`line_source.py`: 6 красных, страж зелёный. Раунд 1 ревью: до правки 2 красных (`DriverSession`,
+`system_shutdown`); тест не-dict зелёный, красный под двумя инъекциями (без `isinstance(reply, dict)`;
+без проверки `error`). Раунд 2: тот же тест красный под инъекцией «без проверки `success`».
+Инъекции плана — у лида.
+
+**Откат.** Убрать из `transport.py` свойство, метку, три переопределения (`connect`, `request`,
+`_conn_lost_message`) и `TokenFileMissing`,
+два `except TokenFileMissing` из `driver.py` и параметр из `line_source.py`: клиенты снова не шлют
+`hello` (открытые серверы этого не заметят).

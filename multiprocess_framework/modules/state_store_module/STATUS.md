@@ -21,6 +21,7 @@
 | StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers; **не-IPC вход `forget_session(session_id)`** — снятие подписок мёртвого соединения по сигналу `on_session_closed` (Т-2, ADR-PMM-027) |
 | DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber; **доставка коалесцированная** — буфер per-subscriber + daemon-flusher (~120 мс, cap ~200), очередь класса `state`, переключателей нет (ADR-SS-020) |
 | **proxy/** | | | |
+| LeafCopy | core/leaf_copy.py | Готов | Копия состояния у клиента: только листья, dict-дельта заменяет поддерево, индекс детей (цена `put` — размер поддерева); кэш `StateProxy` и накопитель стока; `project_leaves` / `paths_with_matched_descendants` — проекция копии на шаблон при привязке (ADR-SS-024 A3, Task 2.8a/2.8a2) |
 | StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015); **ресинк неблокирующий** — уходит через `router.request_async`, снимок применяет приёмный поток, пути, изменённые за окно ожидания, защищены по revision (ADR-SS-022); **публичные счётчики `confirmed_pattern_count`/`async_subscribe_count`** — честная витрина coverage-проверки снаружи, подтверждение async-паттерна для coverage строго server-ack-only, evidence-based (по дельте) запрещено (ADR-SS-023, Task Т.3) |
 | GuiStateProxy | proxy/gui_state_proxy.py | Готов | Qt-safe: callbacks через `QMetaObject.invokeMethod(QueuedConnection)`, ленивый PySide6; наследует watch-from-revision из StateProxy |
 | **middleware/** | | | |
@@ -97,7 +98,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 - **`TreeStore.merge`** при глубоких структурах работает за O(N²) (каждый лист проходит навигацию от корня). Для типичных конфигов (десятки ключей) — pernebrejmo. Кандидат на оптимизацию (Этап 2 рефакторинга).
 - **Glob-walker** для дерева повторён в трёх местах (`tree_store._collect_matching`, `selector._walk`, `subscription_manager._match_pattern`). Можно унифицировать в `core/glob_walker.py`. Кандидат на Этап 2.
 - **`StateStoreManager.shutdown` и `StateInspector.subscriptions`** обращаются к приватным атрибутам `SubscriptionManager._lock` / `_subscriptions`. Кандидат на введение публичного `SubscriptionManager.subscribers()` (Этап 2).
-- **watch-from-revision — ложные resync под конкурентными несвязанными записями** (ADR-SS-015): `revision` — счётчик всего дерева, не per-pattern; параллельные мутации вне подписок процесса тоже двигают revision и могут вызвать resync, которого не требовалось. Не влияет на корректность (кэш всё равно сходится), только на частоту resync. Точный per-subscriber gap-detection — кандидат на будущее.
+- **watch-from-revision — ложные resync под конкурентными несвязанными записями** (ADR-SS-015): `revision` — счётчик всего дерева, не per-pattern; параллельные мутации вне подписок процесса тоже двигают revision и могут вызвать resync, которого не требовалось. Не влияет на корректность (кэш всё равно сходится), только на частоту resync. С 2026-11-21 (R3c, ADR-SS-015 вариант (в)) обнаружение — DEBUG, исходы классифицируются счётчиками `gap_detected/clean/diverged/unclassified_count`, из строк про разрыв revision WARNING — только для `diverged`, не чаще раза в 30 с (остаются WARNING «resync не удался» и про переполнение); клиент по-прежнему не отличает потерю пакета от штатного расхождения (дельта в полёте, собственная запись при `exclude_self`). Точный per-subscriber gap-detection (водяной знак на сервере, вариант (а)) — после 1.0.
 - **Задача 4.10 (driver watch-from-revision, backend_ctl e2e)** НЕ реализована — вне объёма Ф4.9 (ядро сервер+StateProxy).
 
 ---
@@ -115,6 +116,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 | **2026-05-07** | **README.md / STATUS.md приведены в соответствие с реальным API** | **✅ Готово** |
 | **2026-07-11** | **ADR-SS-014/015: revision дерева + watch-from-revision resync (Ф4.9)** | **✅ Готово** |
 | **2026-08-23** | **ADR-SS-022: ресинк снят с приёмного потока (был простой 5 с на каждый разрыв revision, 93.7% дельт вытеснялось); окно ожидания снимка защищено по revision** | **✅ Готово** |
+| **2026-11-21** | **ADR-SS-015 (пересмотр, R3c): ложные «разрыв revision» — DEBUG + счётчики исходов `gap_*_count`, из строк про разрыв revision WARNING только для `diverged` с троттлингом 30 с** | **✅ Готово** |
 
 ---
 

@@ -19,6 +19,11 @@ import os
 
 import pytest
 
+from multiprocess_framework.modules.observability_declarations import restore, snapshot
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    ensure_framework_producers,
+)
+
 HARDWARE_ENV = "CAMERA_HARDWARE"
 HARDWARE_SKIP_REASON = "CAMERA_HARDWARE=1 not set"
 
@@ -35,3 +40,21 @@ def skip_without_hardware(items) -> None:
 
 def pytest_collection_modifyitems(config, items):
     skip_without_hardware(items)
+
+
+@pytest.fixture(autouse=True)
+def declarations_snapshot():
+    """Снимок реестра объявлений до теста, возврат к нему после.
+
+    Реестр объявлений наблюдаемости процессный: плагин камеры зовёт `ctx.declare_metric` для `fps`, `frames`,
+    `errors`, `dropped`, `pending`, `param_errors_count` (`test_plugin_observability.py`), и без возврата эти
+    имена доставались сторожу каталога метрик фреймворка (`modules/tests/conftest.py::framework_metric_catalogue_guard`)
+    в том же прогоне: `pytest Services/camera_device/tests/test_plugin_observability.py
+    multiprocess_framework/modules/tests/test_one_connector_per_point.py` на чистом `main` давал 1 error на teardown
+    (замер 2026-11-19); `Services` входит в `testpaths`, так что падал и общий `make test`.
+    Близнец `Plugins/sim/robot_host/tests/conftest.py::declarations_snapshot`.
+    """
+    ensure_framework_producers()
+    state = snapshot()
+    yield
+    restore(state)

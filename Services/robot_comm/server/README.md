@@ -39,7 +39,7 @@ v1 и v2 не связаны и не импортируют друг друга.
 состояние применяется до первой записи. 0 — «не задано»: `spd_pct` -> `P_SPD_DEFAULT`, `accel` -> `P_ACC_L`, `accur` ->
 `P_ACCUR_DEFAULT` (текущие значения параметров). `accur` на проводе сдвинут: 1 -> ROUGH (0), 2 -> HIGH (1). Вне
 диапазона (`spd_pct > 100`, `accel` вне `P_ACC_L`, `accur > 2`) — NAK `E_RANGE`, rval0 = `R_APARAM`, без следов;
-проверка идёт после `E_SC_COUNT`, до `E_NO_SERVO`. Состояние живёт в сценарии и умирает вместе с ним (§7.2 п.5).
+проверка идёт после `E_SC_COUNT`, до `E_NO_SERVO`. Состояние живёт в сценарии и умирает вместе с ним (§7.2 п.5). Диапазоны — `ACT_RANGE` (T1.4): SC_RUN spd_pct/accel/accur и DO_SET берут границы из `ACT_RANGE`; spd_pct у PTP_MOVE/HOME/JOG_STEP остаётся литералом 100 (аргумент опкода, не APARAM) — проза `info` у SC_RUN в `delta_v2.yaml` («1..100») диапазоном не порождается.
 
 **Модель робота (T2.K).** Проверка зоны в `RobotSimCoreV2` идёт через
 `self.model` (`../kinematics.py`, `RobotModel`) — по умолчанию `ScaraModel()`,

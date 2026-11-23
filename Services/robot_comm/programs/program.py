@@ -28,8 +28,7 @@ from pydantic import (
     model_validator,
 )
 
-from Services.robot_comm.core.params_v2 import PARAM_ID, PARAMS
-from Services.robot_comm.core.protocol_v2 import ACT, KIND, REASON, REASON_TEXT
+from Services.robot_comm.core.protocol_v2 import ACT, ACT_RANGE, KIND, REASON, REASON_TEXT
 from Services.robot_comm.programs import geometry
 
 __all__ = [
@@ -62,28 +61,15 @@ def _strict_coord(v: Any) -> float:
 type Coord = Annotated[float, BeforeValidator(_strict_coord)]
 type Triple = tuple[Coord, Coord, Coord]
 
-_ACC_META = PARAMS[PARAM_ID["P_ACC_L"]]
-
-# Диапазон APARAM по действию (включительно). Литералы DO/SPEED/ACCUR повторяют проверку прошивки и sim
-# (`server/sim_core_v2.py`, `_sc_validate`), ACCEL — метаданные `P_ACC_L`; перенос в `delta_v2.yaml` —
-# отдельной задачей (О3 брифа T3.3). Имя из `ACT` без строки здесь — ошибка «нет диапазона».
-_ACT_RANGE: dict[str, tuple[int, int]] = {
-    "DO_ON": (1, 16),  # канал
-    "DO_OFF": (1, 16),  # канал
-    "DELAY_MS": (0, 65535),  # мс, весь u16
-    "SPEED_PCT": (1, 100),  # %
-    "ACCEL": (int(_ACC_META["min"]), int(_ACC_META["max"])),  # мм/с²
-    "ACCUR": (0, 1),
-}
-
 
 def _check_aparam(act: str, value: int) -> None:
-    """Параметр действия по таблице `_ACT_RANGE`; `NONE` — только 0. Общая проверка `Action` и `Record`."""
+    """Параметр действия по таблице `ACT_RANGE`; `NONE` — только 0. Общая проверка `Action` и `Record`."""
     if act == "NONE":
         if value != 0:
             raise ValueError("у записи без действия параметр должен быть 0")
         return
-    bounds = _ACT_RANGE.get(act)
+    # диапазоны — `delta_v2.yaml` → `scenario.aparam` (T1.4); таблица читается при вызове, копии нет
+    bounds = ACT_RANGE.get(act)
     if bounds is None:
         raise ValueError("нет диапазона параметра для этого действия (новый код ACT без строки таблицы)")
     lo, hi = bounds

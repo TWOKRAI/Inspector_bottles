@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import copy
+import os
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...observability_declarations import declare_metric
+from ..health.schema import READINESS_BLOCKING_SEVERITIES
 from .cpu_clock import CpuClock
+
+#: Task 1.2c: не чаще одного внеочередного heartbeat за это время, сек (антидребезг ~2 в секунду).
+_PUSH_MIN_INTERVAL_SEC = 0.5
+#: Ключ серии лога недоставки внеочередного heartbeat (``send_message`` вернул ``False``): не имя исключения.
+_UNDELIVERED = "undelivered"
 
 if TYPE_CHECKING:
     pass
@@ -65,6 +74,29 @@ def _observation_port_of(services: Any) -> Any:
     return observation_port(services)
 
 
+def _readiness_signature(readiness: Any) -> tuple[Any, Any, frozenset] | None:
+    """Подпись снимка готовности для решения «слать ли внеочередной heartbeat» (Task 3.3, ADR-PMM-048).
+
+    ``(paused, ready, {(node, severity) блокирующих причин})``. ``at``, ``stale_after_s``, тексты причин,
+    ``out_of_spec`` и ``maintenance`` в подпись не входят: ``at`` растёт на каждом пересчёте (поток ~2 сообщения/с),
+    а остальное в листе PM отстаёт до регулярного heartbeat по решению ADR. ``ready`` отдельно от причин: защёлка
+    boot даёт ``False -> True`` без единой причины. Доступ только ``.get``; ``reasons`` не список и элементы не
+    dict пропускаются, а не бросают. Не dict -> ``None``. Неhashable ``node`` бросит ``TypeError``: зовущий
+    обязан держать вызов в ``try``.
+    """
+    if not isinstance(readiness, dict):
+        return None
+    reasons = readiness.get("reasons")
+    blocking: frozenset = frozenset()
+    if isinstance(reasons, list):
+        blocking = frozenset(
+            (r.get("node"), r.get("severity"))
+            for r in reasons
+            if isinstance(r, dict) and r.get("severity") in READINESS_BLOCKING_SEVERITIES
+        )
+    return (readiness.get("paused"), readiness.get("ready"), blocking)
+
+
 class ProcessHeartbeat:
     """Heartbeat sender через IProcessServices.
 
@@ -121,6 +153,24 @@ class ProcessHeartbeat:
         # process_clock() переносил бы окно между экземплярами и делал «первый тик без cpu»
         # зависимым от порядка тестов. Синглтон остаётся для introspect.status (seconds_total).
         self._cpu_clock = CpuClock()
+        # Task 1.2c / 3.3 (system-run-state): внеочередной heartbeat при смене готовности. ОДИН замок отправки на
+        # регулярный и внеочередной heartbeat: сообщения не перемежаются, а ``_last_sent_sig`` (подпись снимка,
+        # УШЕДШЕГО в PM любым путём, :func:`_readiness_signature`; None — готовность в PM ещё не уходила) не гонится.
+        # ``_last_push_at`` — антидребезг; ``_push_error_type`` — ключ серии лога сбоя отправки, ``_sig_error_type`` —
+        # то же для сбоя расчёта подписи.
+        self._send_lock = threading.Lock()
+        self._last_sent_sig: tuple[Any, Any, frozenset] | None = None
+        self._last_push_at: float | None = None
+        self._push_error_type: str | None = None
+        self._sig_error_type: str | None = None
+        # Task 0.9: метка свежести писателя. ``_tick_seq`` растёт только на тактах, где что-то публикуется;
+        # ``_incarnation`` отличает новый OS-процесс с тем же именем от старого (рестарт даёт новый
+        # ``ProcessHeartbeat``: ``seq`` с единицы, воплощение другое). Это НЕ ``routing_incarnation`` ПМ (int).
+        # Здесь, а не в ``start()``: тесты ``start()`` не зовут. Пишет один поток (``heartbeat_sender``), лок не нужен.
+        self._tick_seq: int = 0
+        self._incarnation: str = f"{os.getpid()}:{time.time_ns()}"
+        # Task 0.9, M-7: число отказов ПУБЛИКАЦИИ в дерево (merge / delete / health), см. :meth:`_note_publish_failed`.
+        self.telemetry_publish_failed: int = 0
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -352,13 +402,78 @@ class ProcessHeartbeat:
         except Exception:  # noqa: BLE001 — сбой снятия статуса не должен ронять такт HB
             return {}
 
+    def push_if_changed(self) -> bool:
+        """Внеочередной heartbeat, если подпись снимка готовности отличается от ушедшей в PM (Task 1.2c, 3.3).
+
+        Зовёт воркер снимка ``ProcessModule`` после каждого пересчёта. ``True`` — сообщение отправлено.
+        Смена — это любое отличие подписи :func:`_readiness_signature`: ``paused``, ``ready`` или набор пар
+        ``(node, severity)`` блокирующих причин. Без смены, без снимка, пока в PM не уходила готовность (первый
+        снимок сменой не считается), при выключенном heartbeat (``heartbeat_interval <= 0``) и внутри окна
+        антидребезга (``_PUSH_MIN_INTERVAL_SEC``) — ``False``; подавленная смена не теряется: сравнение с УШЕДШЕЙ
+        подписью повторится на следующем пересчёте, и итог уйдёт после затишья. Сообщение — тот же формат, что у
+        регулярного (:meth:`_send_heartbeat_locked`); побочные хозяйственные дела такта (телеметрия, health,
+        GC-накачка) остаются на регулярном такте. Недоставка (``send_message`` -> ``False``) подпись не записывает:
+        смена повторится после антидребезга. Сбой отправки или расчёта подписи не бросает: лог ERROR один раз
+        на серию (ключ — тип исключения; сбой расчёта — только тип, без значений причин), повтор — следующим
+        пересчётом.
+        """
+        if not self._started:
+            return False
+        snapshot = getattr(self._services, "_readiness_snapshot", None)
+        try:
+            current = _readiness_signature(snapshot)
+        except Exception as exc:  # noqa: BLE001 — сбой расчёта подписи не роняет воркер снимка
+            if self._sig_error_type != type(exc).__name__:
+                self._sig_error_type = type(exc).__name__
+                self._services.log_error(f"heartbeat: подпись снимка готовности не посчитана: {type(exc).__name__}")
+            return False
+        self._sig_error_type = None
+        if current is None:
+            return False
+        with self._send_lock:
+            last = self._last_sent_sig
+            if last is None or current == last:
+                return False
+            now = time.monotonic()
+            if self._last_push_at is not None and now - self._last_push_at < _PUSH_MIN_INTERVAL_SEC:
+                return False
+            self._last_push_at = now
+            try:
+                delivered = self._send_heartbeat_locked(self._collect_workers())
+            except Exception as exc:  # noqa: BLE001 — сбой внеочередной отправки не роняет воркер снимка
+                if self._push_error_type != type(exc).__name__:
+                    self._push_error_type = type(exc).__name__
+                    self._services.log_error(
+                        f"heartbeat: внеочередная отправка при смене готовности не удалась: {type(exc).__name__}: {exc}"
+                    )
+                return False
+            if not delivered:
+                if self._push_error_type != _UNDELIVERED:
+                    self._push_error_type = _UNDELIVERED
+                    self._services.log_error("heartbeat: внеочередное сообщение при смене готовности не доставлено")
+                return False
+            self._push_error_type = None
+            return True
+
     def _send_heartbeat(self, workers: dict) -> None:
-        """Собрать и отправить heartbeat-сообщение к ``ProcessManager`` (liveness).
+        """Собрать и отправить heartbeat-сообщение к ``ProcessManager`` (liveness) под замком отправки."""
+        with self._send_lock:
+            self._send_heartbeat_locked(workers)
+
+    def _send_heartbeat_locked(self, workers: dict) -> bool:
+        """Тело отправки; зовущий держит ``_send_lock`` (регулярный путь и внеочередной — один замок).
+
+        ``False`` — ``send_message`` сообщил о недоставке (реальный ``send_to_process`` глотает исключения и
+        возвращает ``False``): подпись в этом случае НЕ записывается, смена не считается ушедшей. Любой другой
+        результат (``True``, ``None``) — доставлено. Регулярный путь результат не использует.
 
         Тайминг цикла (``effective_hz`` / ``cycle_duration_ms``) подмешан на ВЕРХНИЙ
         уровень статуса воркера (не внутри ``metrics``) и сохраняется; вложенный
-        ``metrics`` вырезается для экономии трафика IPC.
+        ``metrics`` вырезается для экономии трафика IPC. ``readiness`` — копия снимка;
+        подпись УШЕДШЕЙ копии запоминается для сравнения внеочередным путём (не подпись снимка, сравнённого до замка:
+        между сравнением и отправкой снимок мог смениться).
         """
+        sent_sig: tuple[Any, Any, frozenset] | None = None
         heartbeat_msg = {
             "type": "system",
             "command": "heartbeat",
@@ -369,13 +484,32 @@ class ProcessHeartbeat:
             # ``introspect.status`` в тех же условиях отвечает ``"unknown"``;
             # два разных ответа на один вопрос — хуже, чем один незнающий.
             "status": getattr(self._services, "_current_process_status", "unknown"),
+            # Task 1.7c: идентичность воплощения. Супервизор по ``pid`` отличает ребёнка, которого убьёт рестарт,
+            # от нового (после рестарта pid другой). Поле аддитивное: без него heartbeat принимается как раньше.
+            "pid": os.getpid(),
         }
         if getattr(self._services, "worker_manager", None):
             for w in workers.values():
                 if isinstance(w, dict):
                     w.pop("metrics", None)
             heartbeat_msg["workers_status"] = workers
-        self._services.send_message("ProcessManager", heartbeat_msg)
+        # Task 1.2 (system-run-state): готовность процесса — последний снимок потока
+        # ``readiness_snapshot`` (ProcessModule). Здесь только чтение готового dict и
+        # его копия: ``readiness()`` плагинов на потоке heartbeat не зовётся никогда.
+        # Свой try: битый снимок не должен съесть liveness-сообщение. Нет снимка —
+        # поля нет (PM по молчанию считает процесс не готовым, Task 1.3).
+        try:
+            snapshot = getattr(self._services, "_readiness_snapshot", None)
+            if isinstance(snapshot, dict):
+                heartbeat_msg["readiness"] = copy.deepcopy(snapshot)
+                sent_sig = _readiness_signature(heartbeat_msg["readiness"])
+        except Exception as exc:  # noqa: BLE001 — сбой копии снимка не роняет heartbeat
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"heartbeat: снимок готовности не прочитан: {type(exc).__name__}", module="heartbeat")
+        delivered = self._services.send_message("ProcessManager", heartbeat_msg) is not False
+        if delivered and sent_sig is not None:
+            self._last_sent_sig = sent_sig
+        return delivered
 
     def _warn_capped_metrics(self, config: Any) -> None:
         """Залогировать WARNING по метрикам, чья частота ограничена телеметрийным тиком.
@@ -1292,6 +1426,7 @@ class ProcessHeartbeat:
             except Exception as exc:  # noqa: BLE001 — запас НЕ тратится, повторим на следующем тике
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Снятие поддерева писателя {writer!r} не ушло: {exc}", module="heartbeat")
+                self._note_publish_failed("delete", exc)
                 continue
             port.note_delete_delivered(writer)
 
@@ -1311,11 +1446,15 @@ class ProcessHeartbeat:
 
         Собирается под одним путём ``processes.{name}``:
 
-        * ``workers.{w}.{status, effective_hz, cycle_duration_ms}`` — строки
+        * ``workers.{w}.{status, effective_hz, cycle_duration_ms, last_cycle_age_s}`` — строки
           таблицы воркеров;
-        * ``state.fps`` = max(``effective_hz``) по running-воркерам с hz > 0,
-          ``state.latency_ms`` = max(``cycle_duration_ms``) среди них — агрегат
-          карточки; нет ни одного hz > 0 → агрегата нет;
+        * ``_fresh`` — метка свежести писателя на КОРНЕ записи (Task 0.9), последним ключом ``data``:
+          ``{seq, src_ts, incarnation, tick_sec}``; пустой такт её не публикует;
+        * ``state.fps`` / ``state.latency_ms`` — агрегат карточки: пара ОДНОГО самого медленного
+          отработавшего воркера (``fps`` — его ``effective_hz``, ``latency_ms`` — его
+          ``cycle_duration_ms``); значения могут быть ``None`` (стадия не отработала — старое число не
+          живёт под свежей меткой). Округление до 1 знака снято только для ``fps``, ``latency_ms``,
+          ``effective_hz``; остальные листья округляются как раньше (подробно — ``build_worker_telemetry``);
         * ``state.shm.*`` — счётчики кадрового транспорта router'а (Ф7 G.3 H8 /
           G.4.a): pickle_fallbacks, torn_reads, boundary_crossings,
           queue_data_evicted и прочие сигналы потери кадра для вкладки Pipeline;
@@ -1367,6 +1506,7 @@ class ProcessHeartbeat:
         if proxy is None:
             return  # чисто системный процесс без StateProxy
 
+        from ...state_store_module.core.freshness import FRESH_KEY, stamp
         from .telemetry import build_router_shm_telemetry, build_worker_telemetry
 
         # (0) Снятие поддеревьев ушедших писателей — ДО сборки и ДО раннего
@@ -1460,11 +1600,48 @@ class ProcessHeartbeat:
             data["state"] = state
         if not data:
             return  # показаний нет вовсе — пустой merge не шлём
+        # Task 0.9: метка свежести — на КОРЕНЬ записи процесса, ПОСЛЕДНИМ ключом ``data`` и только ПОСЛЕ раннего
+        # выхода: пустой такт не публикует метку и не двигает номер (иначе процесс без показаний выглядел бы живым).
+        # ``seq`` не откатывается, если ``merge`` ниже бросит: следующий успешный такт покажет скачок.
+        self._tick_seq += 1
+        data[FRESH_KEY] = stamp(self._tick_seq, time.time(), self._incarnation, self.current_telemetry_tick())
         try:
             proxy.merge(f"processes.{self._services.name}", data)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish телеметрии процесса: {exc}", module="heartbeat")
+            self._note_publish_failed("merge", exc)
+
+    def _note_publish_failed(self, where: str, exc: BaseException) -> None:
+        """Учесть отказ ПУБЛИКАЦИИ в дерево (M-7): факт всегда, голос — окном. НЕ БРОСАЕТ.
+
+        Зовётся из трёх мест и только из них: ``proxy.merge`` и ``proxy.delete`` (исключение самого
+        вызова) и публикация health. ``telemetry_publish_failed`` растёт первым и безусловно; затем один
+        WARNING через окно голоса (ключ на процесс И место: ``..telemetry_publish_failed.<where>``, три
+        значения ``where`` — утечки ключей нет; поток отказов ``merge`` не глушит строку про ``delete`` или
+        health). Имя класса исключения едет в контексте, текст исключения — нет. Голос в ``try`` без
+        проброса, как ``batch_drain._voice``: исключение здесь ушло бы во внешний ``except`` такта и
+        пропустило бы ``_send_heartbeat`` (liveness для ПМ).
+
+        **Чего счётчик не видит.** Недоставку роутера ``StateProxy._send`` глотает сам (ERROR в его логе) —
+        ``proxy.merge`` при этом возвращается без исключения и в счёт не попадает. Место health: ``publish_health``
+        сам глотает исключения ``proxy.set`` по листьям без лога и счёта; сюда доходят только исключения
+        ``poll()`` и самой ``publish_health`` вне цикла по листьям.
+        """
+        self.telemetry_publish_failed += 1
+        try:
+            from ...logger_module.core.windowed_voice import log_windowed
+
+            log_windowed(
+                f"heartbeat.{self._services.name}.telemetry_publish_failed.{where}",
+                None,
+                "warning",
+                "публикация телеметрии процесса в дерево не удалась",
+                where=where,
+                error=type(exc).__name__,
+            )
+        except Exception:  # nosec B110 — голос не имеет права ронять такт; факт уже в счётчике
+            pass
 
     def _plugin_ms_section(self) -> dict:
         """EMA времени плагинов из PluginRunner сервисов, мс с 1 знаком; пусто — раннера/замеров нет."""
@@ -1515,10 +1692,14 @@ class ProcessHeartbeat:
         поимённый реестр немигрированных писателей с причинами живёт в ``README.md``
         модуля, а не в коде фреймворка.
 
-        Следствие общего сборщика, принятое осознанно: **округление до 1 знака**
-        (``round(x, 1)``) действует и на опросе. Снимок — вид уровней для глаз, а не
-        измерительный прибор; расхождение push/poll в последнем знаке было бы дороже
-        потерянной точности.
+        Следствие общего сборщика, принятое осознанно: округление действует и на опросе
+        так же, как на push'е. С Task 0.8 до 1 знака (``round(x, 1)``) округляются
+        ``cycle_duration_ms``, ``queue_wait_ms``, ``transport_ms`` и уровни плагинов
+        ``state.plugins.*.*`` (``build_plugin_levels``); ``fps``, ``latency_ms`` и
+        ``effective_hz`` не округляются. Снимок — вид уровней для глаз, а не измерительный
+        прибор; расхождение push/poll в последнем знаке было бы дороже потерянной точности.
+        Метки свежести ``_fresh`` в снимке нет: она принадлежит публикации тика (писатель в дереве),
+        а не ответу на опрос.
 
         **Только чтение.** ``get_all_workers_status()`` и узкий ``router.get_shm_stats()``
         ничего не мутируют, ``_next_due`` гейта НЕ продвигается (``due_metrics()``
@@ -1598,6 +1779,11 @@ class ProcessHeartbeat:
         процесса и шлёт только при изменениях — публикация вырождается в no-op,
         пока никто не звал report_error/set_status. Процессы без StateProxy или без
         HealthState (никто ещё не трогал health) тихо пропускаются.
+
+        Метку свежести ``_fresh`` этот метод НЕ кладёт: он не сливает, а пишет ``proxy.set`` по листьям
+        ``health.<поле>``. Отказ публикации идёт в ``telemetry_publish_failed`` (:meth:`_note_publish_failed`),
+        но ``publish_health`` сам глотает исключения ``proxy.set`` по листьям без лога и счёта: сюда
+        доходят только исключения ``poll()`` и самой ``publish_health`` вне цикла по листьям.
         """
         proxy = getattr(self._services, "_state_proxy", None)
         if proxy is None:
@@ -1618,3 +1804,4 @@ class ProcessHeartbeat:
         except Exception as exc:  # noqa: BLE001 — health не критичен для работы процесса
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish health процесса: {exc}", module="heartbeat")
+            self._note_publish_failed("health", exc)

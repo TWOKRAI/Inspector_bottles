@@ -1,0 +1,12 @@
+open(with_links) 1.23
+open(no links) 0.76
+read_many 0.3 3518
+pure ast.parse of blobs (no per-file git) + module bindings 4.12 3518
+--- difflib pool
+<class 'dict'> ['sha', 'files_total', 'files_err']
+['sha', 'files_total', 'files_err', 'rows']
+difflib pool: def-only leaf names 33092
+is_valid_window 0.057 s ['valid_window_s', 'build_window', '_main_window', 'is_windows', 'stale_windows']
+RecipeBlueprint 0.052 s ['recipe_blueprint', 'blueprint', 'SystemBlueprint', 'validate_recipe_blueprint', 'TestNormalizeBlueprint']
+Backenddriver 0.045 s ['BackendDriver', 'FakeDriver', 'IBackendClient', 'BackendHarness', 'driver']
+Drivr 0.014 s ['Drv', 'driver', 'VfdDriver', '_driver', 'StopDriver']

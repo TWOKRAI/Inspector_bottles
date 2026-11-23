@@ -1,0 +1,17 @@
+{
+ "G1": {"T1": ["ref ProcessConfig stop_window_s stop_window valid_window SystemBlueprint OrchestratorConfig ProcessLaunchConfig"],
+        "T2": ["ref multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig --full", "ref SystemBlueprint --full", "map multiprocess_framework/modules/process_manager_module/topology/blueprint.py --all members"],
+        "T3": ["map multiprocess_framework/modules/process_manager_module/core/stop_budget.py", "ref multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig.stop_window_s", "ref multiprocess_framework/modules/process_module/configs/process_launch_config.py::ProcessLaunchConfig.stop_window_s"]},
+ "G3": {"T1": ["ref park ParkMachine RobotDriverV2 program_loop"],
+        "T3": ["map Services/device_hub/drivers/robot_driver_v2/park.py --all members", "map Services/device_hub/drivers/robot_driver_v2/programs.py --all members", "ref ParkMachine ProgramMixin --full"]},
+ "G5": {"T1": ["ref SystemConfig SystemBuilder SystemBuilder.build pre_stop"],
+        "T2": ["ref SystemConfig --full", "map multiprocess_prototype/backend/config/schemas.py --all members"],
+        "T3": ["map multiprocess_prototype/backend/launch.py --all members"]},
+ "G7": {"T1": ["ref BackendDriver.system_shutdown system_shutdown TOOLS supervision_status wait_timeout"],
+        "T2": ["ref _system_shutdown", "map backend_ctl/mcp_tools.py --all members", "map backend_ctl/driver.py --all members", "ref BackendDriver --full"],
+        "T3": ["ref backend_ctl/mcp_tools.py::TOOLS"]},
+ "G9": {"T1": ["ref ProcessConfig.as_generic_config as_generic_config"],
+        "T2": ["map multiprocess_framework/modules/process_manager_module/topology/blueprint.py", "ref _same_config_value"]},
+ "G11": {"T1": ["ref TopologySession LayoutController RecipesPresenter"],
+        "T2": ["ref TopologySession LayoutController RecipesPresenter --full", "map multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py --all members", "map multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py --all members"]}
+}

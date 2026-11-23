@@ -306,12 +306,30 @@ def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _system_shutdown(drv: BackendDriver, args: dict[str, Any]) -> Any:
-    # Только mode/deadline_s: wait/wait_timeout — дефолты драйвера (ждать закрытия сокета до 20 с).
+    # mode/deadline_s/wait_timeout: wait — дефолт драйвера (ждать итоги и закрытие сокета PM).
     # deadline_s — как есть, без float(): диапазон и тип проверяет PM и отвечает названной ошибкой.
     kw: dict[str, Any] = {"mode": str(args.get("mode", "graceful"))}
     if args.get("deadline_s") is not None:
         kw["deadline_s"] = args["deadline_s"]
+    if args.get("wait_timeout") is not None:
+        kw["wait_timeout"] = float(args["wait_timeout"])
     return _jsonable(drv.system_shutdown(**kw))
+
+
+def _run_start(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_start(**_kw_timeout(args))
+
+
+def _run_stop(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_stop(**_kw_timeout(args))
+
+
+def _run_ack(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_ack(**_kw_timeout(args))
+
+
+def _run_status(drv: BackendDriver, args: dict[str, Any]) -> Any:
+    return drv.run_status(**_kw_timeout(args))
 
 
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -851,13 +869,48 @@ TOOLS: List[ToolSpec] = [
         _process_restart_verified,
     ),
     ToolSpec(
+        "run_status",
+        "Состояние линии (system.run.status): result = {state (booting | not_ready | ready | running | "
+        "stopping | fault | shutting_down), since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons (узлы-причины "
+        "not_ready/fault), last_fault}. Только чтение. Ответ — конверт process.command.response как есть.",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_status,
+    ),
+    ToolSpec(
+        "run_start",
+        "Запустить линию (system.run.start) из ready. Ранний START в окне not_ready (~4 с после boot) "
+        "отказан: внешний success=false, result.error='not_ready' + reasons — повторить после "
+        "run_status.start_allowed. Меняет поведение бэкенда (источники начинают производить).",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_start,
+    ),
+    ToolSpec(
+        "run_stop",
+        "Остановить линию (system.run.stop): running -> stopping -> ready (~3 с). "
+        "Процессы не гасятся — система остаётся в ready и ждёт нового run_start.",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_stop,
+    ),
+    ToolSpec(
+        "run_ack",
+        "Квитировать аварию линии (system.run.ack): fault -> ready, если ack_allowed (см. run_status).",
+        _obj({"timeout": _TIMEOUT}, []),
+        _run_ack,
+    ),
+    ToolSpec(
         "system_shutdown",
-        "Остановить ВСЮ систему (system.shutdown) и дождаться, пока PM закроет сокет backend_ctl. "
-        "mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s (0.1..5.0 с, "
-        "дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
-        "{accepted (None — ответ timeout, команда могла дойти), mode, elapsed_s, pm_gone, outcomes=null}. "
+        "Остановить ВСЮ систему (system.shutdown), дождаться итогов по процессам и закрытия сокета "
+        "backend_ctl. mode='graceful' — обычный стоп; mode='force' — срок стопа детей deadline_s "
+        "(0.1..5.0 с, дефолт 1.0) от команды, не уложившихся PM добивает terminate/kill. Ответ: "
+        "{accepted (None — ответ timeout, команда могла дойти; False + already_stopping — стоп уже идёт, "
+        "итоги всё равно собираются), mode, elapsed_s, pm_gone, "
+        "outcomes ({имя ребёнка: exited | terminated | killed | null}), "
+        "unconfirmed (имена без подтверждённого итога, по алфавиту), timed_out}. "
         "pm_gone=true — сокет закрыт (в том числе раньше ответа: тогда accepted=None); "
-        "процесс PM в этот момент может быть ещё жив. "
+        "процесс PM в этот момент может быть ещё жив. outcomes/unconfirmed=null и timed_out=false, "
+        "если опроса не было (ошибка аргументов, сокет закрыт раньше ответа). "
+        "Итог последнего медленного ребёнка опросом может быть не виден: имя в unconfirmed — "
+        "это «не подтверждено», а не «не остановлен». "
         "Разрушающий: после вызова бэкенда нет.",
         _obj(
             {
@@ -869,6 +922,13 @@ TOOLS: List[ToolSpec] = [
                 "deadline_s": {
                     "type": "number",
                     "description": "Только для force: срок стопа детей, сек (0.1..5.0, дефолт 1.0).",
+                },
+                "wait_timeout": {
+                    "type": "number",
+                    "description": (
+                        "Предел ожидания итогов, сек. По умолчанию 20 с, а после первого снимка "
+                        "с system_stop — max(20, deadline_at - сейчас + 12) с."
+                    ),
                 },
             },
             [],
@@ -904,7 +964,9 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "set_register_verified",
         "Verify-probe записи регистра (Ф1.6): write → readback introspect.registers → diff. "
-        "Возвращает verified/expected/actual — ловит молчаливые no-op'ы (нет регистра/поля).",
+        "Возвращает verdict (confirmed/vacuous/failed/unverifiable), success, vacuous, pre, "
+        "expected/actual; verified — алиас success. Отвергнутая хостом запись при уже равном значении — "
+        "vacuous, не успех. Ловит молчаливые no-op'ы (нет регистра/поля).",
         _obj(
             {
                 "process": _PROCESS,
@@ -1328,8 +1390,11 @@ TOOLS: List[ToolSpec] = [
         "Снимок телеметрии из ЛОКАЛЬНОГО read-model — read-only, 0 IPC (не ходит на сервер). "
         "Наполняется, пока активна state-подписка на 'processes.**' (напр. после watch_like_gui). "
         "process — снимок поддерева процесса; metric — фильтр по суффиксу метрики (например 'fps', "
-        "'effective_hz'). Каждая запись несёт корреляционный ключ process/worker. Пустой read-model "
-        "(не было дельт) → count=0 (не ошибка).",
+        "'effective_hz'). Каждая запись несёт корреляционный ключ process/worker и свежесть значения: "
+        "class (fresh/stale/no_data) и age_s (None при no_data). Лист None, лист без метки свежести "
+        "и путь вне processes.<X> — no_data. В ответе также gap_count и last_gap_at: дыры в ревизиях "
+        "state.changed, увиденные драйвером (кандидаты в дыры: подписка узкая, ревизия общая). Пустой "
+        "read-model (не было дельт) → count=0 (не ошибка).",
         _obj(
             {
                 "process": {"type": "string", "description": "Фильтр по процессу (снимок поддерева). Опц."},
@@ -1521,6 +1586,8 @@ TOOL_SAFETY: Dict[str, str] = {
     # Task 3.5: чтение sqlite-стора истории read-only соединением — бэкенд не мутируется.
     "history_query": SAFETY_READ,
     "supervision_status": SAFETY_READ,
+    # Task 2.1: system.run.status — только чтение состояния линии
+    "run_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,
     "state_get": SAFETY_READ,
@@ -1564,6 +1631,10 @@ TOOL_SAFETY: Dict[str, str] = {
     "logger_sink_disable": SAFETY_WRITE,
     "telemetry_reconfigure": SAFETY_WRITE,
     "telemetry_set": SAFETY_WRITE,
+    # Task 2.1: управление run-состоянием линии (system.run.*) — меняет поведение бэкенда
+    "run_start": SAFETY_WRITE,
+    "run_stop": SAFETY_WRITE,
+    "run_ack": SAFETY_WRITE,
     # escalated
     "send_command": SAFETY_ESCALATED,
     "system_command": SAFETY_ESCALATED,

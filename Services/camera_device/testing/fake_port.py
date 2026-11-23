@@ -4,9 +4,14 @@
 `make_port(**opts)` строит порт с узлами по умолчанию, `from_recording(path, **opts)` — с узлами из записи
 (формат — `plans/2026-10-18_camera-device-service/recording-schema.md`, `schema_version: 1`).
 
-Опции: `neter_after_stop`, `applied_but_error` (`bool | frozenset[str]`), `busy_for_s`, `capabilities`.
+Опции: `neter_after_stop`, `applied_but_error` (`bool | frozenset[str]`), `busy_for_s`, `capabilities`;
+для сеанса (Task 2.1): `open_delay_s`, `frame_period_s`, `get_frame_hang_s` (+ `arm_hang`), `get_frame_errors`,
+`get_frame_script`, `read_offset` (умолчания сохраняют поведение 1.5).
 Журнал вызовов `FakePort.calls` — список `(имя, args, threading.get_ident())`; пишется ДО проверок
 состояния, поэтому отказ тоже виден. Фейковый `DeviceSdk` пишет в тот же журнал.
+Счётчики открытых дескрипторов (Task 2.4a): `open_handles` (+1 после успешного `open`, -1 в `close`, если порт
+был открыт) и `max_open_handles` (максимум за жизнь фейка); ловят вызов порта мимо потока-владельца. Поведение
+`open`/`close` счётчики не меняют.
 """
 
 from __future__ import annotations
@@ -28,6 +33,10 @@ from Services.camera_device.interface import (
 
 SCHEMA_VERSION = 1
 
+# Шаги `get_frame_script`: `err` — `PortError("other","get_frame")`, `none` — `None` без ожидания,
+# `frame` — кадр без ожидания.
+SCRIPT_STEPS = frozenset({"err", "none", "frame"})
+
 ALL_CAPABILITIES = frozenset({"read_back", "live_write", "node_describe", "software_trigger", "restart_regrab"})
 
 # MV_CODEREADER_E_NETER — не опечатка: код сетевой ошибки записи после stop_grabbing.
@@ -48,6 +57,14 @@ FRAME_WIDTH = 4
 FRAME_HEIGHT = 2
 FRAME_PIXEL_FORMAT = "mono8"
 FAKE_SERIAL = "FAKE-0001"
+
+# Таблица привязки полей register'а базового плагина к узлам фейка (`driver: fake`); вендор держит свою (`BINDINGS`).
+FAKE_BINDINGS = {
+    "trigger_mode": Binding("genicam", "TriggerMode", "enum"),
+    "trigger_source": Binding("genicam", "TriggerSource", "enum"),
+    "trigger_period_ms": Binding("genicam", "TriggerSelfTriggerPeriod", "int"),
+    "exposure_time": Binding("genicam", "ExposureTime", "float"),
+}
 
 
 @dataclass
@@ -141,16 +158,20 @@ class _FakeSdk:
     def __init__(self, journal) -> None:
         self._journal = journal
         self.refs = 0
+        # `acquire`/`release` приходят из потока команды плагина и из потока-владельца: `+= 1` без замка теряет счёт
+        self._refs_lock = threading.Lock()
 
     def acquire(self) -> None:
         self._journal("acquire", ())
-        self.refs += 1
+        with self._refs_lock:
+            self.refs += 1
 
     def release(self) -> None:
         self._journal("release", ())
-        if self.refs <= 0:
-            raise RuntimeError("release without acquire")
-        self.refs -= 1
+        with self._refs_lock:
+            if self.refs <= 0:
+                raise RuntimeError("release without acquire")
+            self.refs -= 1
 
     def enum_devices(self) -> list[DeviceIdentity]:
         self._journal("enum_devices", ())
@@ -168,7 +189,17 @@ class FakePort:
         applied_but_error: bool | frozenset[str] = False,
         busy_for_s: float = 0.0,
         capabilities: frozenset[str] = ALL_CAPABILITIES,
+        open_delay_s: float = 0.0,
+        frame_period_s: float = 0.0,
+        get_frame_hang_s: float = 0.0,
+        get_frame_errors: int = 0,
+        get_frame_script: tuple[str, ...] = (),
+        read_offset: dict[str, float] | None = None,
     ) -> None:
+        script = ("err",) * get_frame_errors + tuple(get_frame_script)
+        unknown = sorted(set(script) - SCRIPT_STEPS)
+        if unknown:
+            raise ValueError(f"неизвестные шаги get_frame_script: {unknown}; допустимы {sorted(SCRIPT_STEPS)}")
         self.capabilities: frozenset[str] = frozenset(capabilities)
         self.calls: list[tuple[str, tuple, int]] = []
         self.sdk = _FakeSdk(self._record)
@@ -180,6 +211,20 @@ class FakePort:
         self._state = "closed"
         self._neter_active = False
         self._frame_num = 0
+        self._open_delay_s = open_delay_s
+        self._frame_period_s = frame_period_s
+        self._hang_s = get_frame_hang_s  # разовое: `arm_hang` взводит повторно
+        self._script = script
+        self._read_offset = dict(read_offset or {})  # ключ — Binding.key; только чтение, узел не меняется
+        self._get_frame_calls = 0  # вызовы `get_frame` с последнего `start_grabbing`
+        self._next_frame_at = 0.0
+        self._handles_lock = threading.Lock()
+        self.open_handles = 0
+        self.max_open_handles = 0
+
+    def arm_hang(self, seconds: float) -> None:
+        """Взвести разовое зависание: следующий `get_frame` спит `seconds`, игнорируя `timeout_ms`."""
+        self._hang_s = seconds
 
     # -- служебное -----------------------------------------------------------------------------
 
@@ -233,11 +278,16 @@ class FakePort:
 
     def open(self, ident: DeviceIdentity) -> None:
         self._record("open", (ident.kind, ident.value))
+        if self._open_delay_s > 0:
+            time.sleep(self._open_delay_s)
         if time.monotonic() - self._created < self._busy_for_s:
             raise PortError("busy", "open")
         if self._state != "closed":
             raise PortError("other", "open")
         self._state = "opened"
+        with self._handles_lock:
+            self.open_handles += 1
+            self.max_open_handles = max(self.max_open_handles, self.open_handles)
 
     def get_param(self, b: Binding) -> object:
         self._record("get_param", (b.key,))
@@ -247,6 +297,10 @@ class FakePort:
             raise PortError("access", "get_param", node.closed_code)
         if node.value is None:
             raise PortError("other", "get_param", node.read_rc or None)
+        offset = self._read_offset.get(b.key)
+        if offset is not None and node.type in ("int", "float"):
+            shifted = node.value + offset
+            return int(shifted) if node.type == "int" else shifted
         return node.value
 
     def set_param(self, b: Binding, value: object) -> None:
@@ -289,11 +343,25 @@ class FakePort:
             return
         self._state = "grabbing"
         self._frame_num = 0
+        self._get_frame_calls = 0
+        self._next_frame_at = time.monotonic() + self._frame_period_s
 
     def get_frame(self, timeout_ms: int) -> RawFrame | None:
         self._record("get_frame", (timeout_ms,))
         if self._state != "grabbing":
             raise PortError("closed", "get_frame")
+        hung = self._hang_s > 0
+        if hung:
+            seconds, self._hang_s = self._hang_s, 0.0
+            time.sleep(seconds)  # зависание игнорирует timeout_ms; кадр отдаётся после него
+        step = self._script[self._get_frame_calls] if self._get_frame_calls < len(self._script) else None
+        self._get_frame_calls += 1
+        if step == "err":
+            raise PortError("other", "get_frame")
+        if step == "none":
+            return None
+        if self._frame_period_s > 0 and step is None and not hung and not self._wait_next_frame(timeout_ms):
+            return None
         self._frame_num += 1
         return RawFrame(
             data=bytearray(range(8)),
@@ -303,6 +371,20 @@ class FakePort:
             frame_num=self._frame_num,
             extras={},
         )
+
+    def _wait_next_frame(self, timeout_ms: int) -> bool:
+        """Ждать срока следующего кадра, не дольше `timeout_ms`; `False` — срок не наступил (таймаут).
+
+        Сон не прерывается `close`/`stop_grabbing`: так ведёт себя `get_frame` в SDK.
+        """
+        wait = min(timeout_ms / 1000.0, max(0.0, self._next_frame_at - time.monotonic()))
+        if wait > 0:
+            time.sleep(wait)
+        now = time.monotonic()
+        if now < self._next_frame_at:
+            return False
+        self._next_frame_at = now + self._frame_period_s
+        return True
 
     def stop_grabbing(self) -> None:
         self._record("stop_grabbing", ())
@@ -314,8 +396,12 @@ class FakePort:
 
     def close(self) -> None:
         self._record("close", ())
+        was_open = self._state != "closed"
         self._state = "closed"
         self._neter_active = False
+        if was_open:
+            with self._handles_lock:
+                self.open_handles -= 1
 
 
 def make_port(
@@ -324,6 +410,12 @@ def make_port(
     applied_but_error: bool | frozenset[str] = False,
     busy_for_s: float = 0.0,
     capabilities: frozenset[str] = ALL_CAPABILITIES,
+    open_delay_s: float = 0.0,
+    frame_period_s: float = 0.0,
+    get_frame_hang_s: float = 0.0,
+    get_frame_errors: int = 0,
+    get_frame_script: tuple[str, ...] = (),
+    read_offset: dict[str, float] | None = None,
 ) -> FakePort:
     """Фейк с узлами по умолчанию."""
     return FakePort(
@@ -332,6 +424,12 @@ def make_port(
         applied_but_error=applied_but_error,
         busy_for_s=busy_for_s,
         capabilities=capabilities,
+        open_delay_s=open_delay_s,
+        frame_period_s=frame_period_s,
+        get_frame_hang_s=get_frame_hang_s,
+        get_frame_errors=get_frame_errors,
+        get_frame_script=get_frame_script,
+        read_offset=read_offset,
     )
 
 
@@ -342,6 +440,12 @@ def from_recording(
     applied_but_error: bool | frozenset[str] = False,
     busy_for_s: float = 0.0,
     capabilities: frozenset[str] = ALL_CAPABILITIES,
+    open_delay_s: float = 0.0,
+    frame_period_s: float = 0.0,
+    get_frame_hang_s: float = 0.0,
+    get_frame_errors: int = 0,
+    get_frame_script: tuple[str, ...] = (),
+    read_offset: dict[str, float] | None = None,
 ) -> FakePort:
     """Фейк с узлами из записи (относительный путь читается от cwd; тесты идут из корня репозитория)."""
     return FakePort(
@@ -350,4 +454,10 @@ def from_recording(
         applied_but_error=applied_but_error,
         busy_for_s=busy_for_s,
         capabilities=capabilities,
+        open_delay_s=open_delay_s,
+        frame_period_s=frame_period_s,
+        get_frame_hang_s=get_frame_hang_s,
+        get_frame_errors=get_frame_errors,
+        get_frame_script=get_frame_script,
+        read_offset=read_offset,
     )

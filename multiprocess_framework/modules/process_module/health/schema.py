@@ -82,6 +82,83 @@ LAST_ERROR_KEYS: tuple[str, ...] = (
 )
 
 
+#: Под-сегмент готовности под корнем процесса (Task 1.2 плана system-run-state):
+#: ``processes.<name>.readiness`` — лист, который опубликует PM (Task 1.3) из
+#: поля ``readiness`` heartbeat-сообщения. Здесь только контракт путей.
+READINESS_SEGMENT = "readiness"
+
+
+class ReadinessField:
+    """Ключи снимка готовности (поле ``readiness`` heartbeat-сообщения и лист дерева)."""
+
+    READY = "ready"  # bool — нет failure/check_function и процесс объявил готовность
+    REASONS = "reasons"  # list[dict] — причины неготовности (см. ReadinessReasonKey)
+    PAUSED = "paused"  # bool — цель «пауза» применена ко всем плагинам, к которым она применима
+    AT = "at"  # float — epoch расчёта снимка (по нему PM судит «молчание»)
+
+
+class ReadinessReasonKey:
+    """Ключи одного элемента ``reasons`` (контракт значения)."""
+
+    NODE = "node"  # "<процесс>.<плагин>"
+    SEVERITY = "severity"  # failure | check_function | out_of_spec | maintenance
+    REASON = "reason"  # короткий текст без значений входа
+    SOURCE = "source"  # "readiness"
+
+
+#: Полный УПОРЯДОЧЕННЫЙ список ключей снимка (порядок — часть контракта, как у HEALTH_FIELDS).
+READINESS_FIELDS: tuple[str, ...] = (
+    ReadinessField.READY,
+    ReadinessField.REASONS,
+    ReadinessField.PAUSED,
+    ReadinessField.AT,
+)
+
+#: Ключи элемента причины — тоже часть контракта (лишних нет).
+READINESS_REASON_KEYS: tuple[str, ...] = (
+    ReadinessReasonKey.NODE,
+    ReadinessReasonKey.SEVERITY,
+    ReadinessReasonKey.REASON,
+    ReadinessReasonKey.SOURCE,
+)
+
+#: Шкала ``severity`` причины готовности (NE 107; порядок — по убыванию тяжести).
+READINESS_SEVERITIES: tuple[str, ...] = ("failure", "check_function", "out_of_spec", "maintenance")
+#: Уровни ``severity``, блокирующие готовность (``out_of_spec`` / ``maintenance`` — нет).
+READINESS_BLOCKING_SEVERITIES: tuple[str, ...] = ("failure", "check_function")
+#: Потолок текста причины, символов (отправитель обрезает, получатель длиннее не принимает).
+READINESS_REASON_MAX_LEN = 200
+#: Потолок числа причин одного листа, включая маркер «причин больше N».
+READINESS_REASONS_MAX = 32
+
+
+def readiness_reason_is_valid(reason: object) -> bool:
+    """Форма одной причины ``reasons``: единый источник правды для отправителя (ребёнок) и получателя (монитор PM).
+
+    Годна: dict, где ``node`` / ``severity`` / ``reason`` / ``source`` — ровно ``str`` (подклассы и контейнеры не
+    проходят: поля хешируются и пиклятся дальше), ``severity`` из ``READINESS_SEVERITIES``, текст не длиннее
+    ``READINESS_REASON_MAX_LEN``. Лишние ключи не запрещены (контракт — не меньше четырёх).
+    """
+    if not isinstance(reason, dict):
+        return False
+    for key in READINESS_REASON_KEYS:
+        if type(reason.get(key)) is not str:
+            return False
+    return (
+        reason[ReadinessReasonKey.SEVERITY] in READINESS_SEVERITIES
+        and len(reason[ReadinessReasonKey.REASON]) <= READINESS_REASON_MAX_LEN
+    )
+
+
+def readiness_reasons_are_valid(reasons: object) -> bool:
+    """Список причин годен: ``list`` не длиннее ``READINESS_REASONS_MAX``, каждая причина годна."""
+    return (
+        isinstance(reasons, list)
+        and len(reasons) <= READINESS_REASONS_MAX
+        and all(readiness_reason_is_valid(r) for r in reasons)
+    )
+
+
 def health_root(process: str) -> str:
     """Корень поддерева здоровья процесса: ``processes.<process>.health``."""
     return f"{PROCESSES_ROOT}.{process}.{HEALTH_SEGMENT}"
@@ -90,3 +167,13 @@ def health_root(process: str) -> str:
 def health_path(process: str, field: str) -> str:
     """Полный путь листа здоровья: ``processes.<process>.health.<field>``."""
     return f"{health_root(process)}.{field}"
+
+
+def readiness_root(process: str) -> str:
+    """Корень листа готовности процесса: ``processes.<process>.readiness``."""
+    return f"{PROCESSES_ROOT}.{process}.{READINESS_SEGMENT}"
+
+
+def readiness_path(process: str, field: str) -> str:
+    """Полный путь поля готовности: ``processes.<process>.readiness.<field>``."""
+    return f"{readiness_root(process)}.{field}"

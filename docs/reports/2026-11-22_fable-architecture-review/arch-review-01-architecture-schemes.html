@@ -1,0 +1,905 @@
+<title>Архитектура Inspector_bottles</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: одна колонка. Вердикт, схема как есть и общая схема «с нуля» плюс 2.0 на карточках Атласа, разбор ошибок, стратегии по слоям, планы до 1.0 и на 2.0, библиотеки.
+   Цвет несёт смысл: бирюзовый = своё, индиго = готовое или добавка по триггеру, янтарный = люди и железо, пунктир = заморожено или шов. */
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --fg: #12161c; --muted: #566070; --line: #c3c9d4; --arrow: #5d6675;
+  --own: #0b6e63; --own-bg: #d9f0ec;
+  --lib: #3f4fc4; --lib-bg: #e4e7fb;
+  --ext: #8f5300; --ext-bg: #fbecd2;
+  --warn: #9a3412; --warn-bg: #fde8dc;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1318; --panel: #171c23; --fg: #e6e9ee; --muted: #98a2b3; --line: #343c49; --arrow: #8791a3;
+    --own: #4fd1c0; --own-bg: #11302d;
+    --lib: #9aa6ff; --lib-bg: #1c2150;
+    --ext: #f0b35a; --ext-bg: #3a2a0e;
+    --warn: #ffab84; --warn-bg: #3b1f12;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1318; --panel: #171c23; --fg: #e6e9ee; --muted: #98a2b3; --line: #343c49; --arrow: #8791a3;
+  --own: #4fd1c0; --own-bg: #11302d;
+  --lib: #9aa6ff; --lib-bg: #1c2150;
+  --ext: #f0b35a; --ext-bg: #3a2a0e;
+  --warn: #ffab84; --warn-bg: #3b1f12;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--sans); font-size: 15px; line-height: 1.55;
+  padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 42px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; font-weight: 600; }
+h1 { font-size: 30px; letter-spacing: -0.01em; }
+h2 { font-size: 21px; }
+p { margin: 0; max-width: 70ch; }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+.lead { font-size: 17px; max-width: 66ch; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+figcaption { color: var(--muted); font-size: 13.5px; max-width: 82ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 18px; height: 12px; border-radius: 3px; border: 1.5px solid; flex: none; }
+.sw.own { background: var(--own-bg); border-color: var(--own); }
+.sw.swap { background: var(--lib-bg); border-color: var(--lib); border-style: dashed; }
+.sw.lib { background: var(--lib-bg); border-color: var(--lib); }
+.sw.ext { background: var(--ext-bg); border-color: var(--ext); }
+.sw.seam { background: var(--panel); border-color: var(--fg); border-style: dotted; }
+
+/* SVG */
+svg.diagram { display: block; width: 100%; min-width: 860px; height: auto; font-family: var(--sans); }
+svg .own { fill: var(--own-bg); stroke: var(--own); stroke-width: 1.5; }
+svg .inner { fill: var(--panel); stroke: var(--own); stroke-width: 1.2; }
+svg .swap { fill: var(--lib-bg); stroke: var(--lib); stroke-width: 1.5; stroke-dasharray: 5 3; }
+svg .lib { fill: var(--lib-bg); stroke: var(--lib); stroke-width: 1.5; }
+svg .ext { fill: var(--ext-bg); stroke: var(--ext); stroke-width: 1.5; }
+svg .seam { fill: var(--panel); stroke: var(--fg); stroke-width: 1.3; stroke-dasharray: 2 3; }
+svg .ln { stroke: var(--arrow); stroke-width: 1.5; fill: none; }
+svg .ln-lib { stroke: var(--lib); stroke-width: 1.8; fill: none; }
+svg .ln-swap { stroke: var(--lib); stroke-width: 1.8; fill: none; stroke-dasharray: 6 4; }
+svg .div { stroke: var(--line); stroke-width: 1; }
+svg .mk { fill: var(--arrow); }
+svg .mkl { fill: var(--lib); }
+svg text { fill: var(--fg); font-size: 12px; }
+svg .t { font-weight: 600; font-size: 13.5px; }
+svg .t2 { font-weight: 600; font-size: 12.5px; }
+svg .s { fill: var(--muted); font-size: 11.5px; }
+svg .sm { font-weight: 600; font-size: 12px; }
+svg .pl { font-family: var(--mono); font-size: 10.5px; }
+svg .lab { fill: var(--muted); font-family: var(--mono); font-size: 11px; }
+svg .lab-lib { fill: var(--lib); font-family: var(--mono); font-size: 11px; font-weight: 500; }
+svg .band { font-size: 13.5px; font-weight: 600; fill: var(--lib); }
+
+/* Tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+td .now { color: var(--muted); }
+.tag { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--lib-bg); color: var(--lib); white-space: nowrap; }
+.tag.keep { background: var(--own-bg); color: var(--own); }
+.tag.warn { background: var(--warn-bg); color: var(--warn); }
+.tag.ext { background: var(--ext-bg); color: var(--ext); }
+
+/* Cards */
+.cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+.cards > div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cards h3 { font-size: 16px; }
+.cards .yes { color: var(--own); }
+.cards .half { color: var(--lib); }
+.cards .risk { color: var(--warn); }
+.cards p, .cards li { font-size: 14.5px; }
+.banner { background: var(--own-bg); border: 1px solid var(--own); border-radius: 8px; padding: 14px 18px; max-width: none; }
+.banner strong { color: var(--own); }
+ul.plain { margin: 0; padding-left: 20px; max-width: 76ch; display: flex; flex-direction: column; gap: 6px; }
+.cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.cols > div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cols h3 { font-size: 16px; }
+.cols ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 14.5px; }
+.note { color: var(--muted); font-size: 14px; }
+@media (max-width: 520px) { h1 { font-size: 25px; } }
+
+/* ---- Полная схема (раздел 2): карточки Атласа, линзы, потоки ---- */
+.wide { position: relative; left: 50%; transform: translateX(-50%); width: min(1340px, calc(100vw - 32px)); }
+.fsbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; background: var(--bg); padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bg .bl { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.bg button { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+.bg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.bg button:focus-visible, .card:focus-visible { outline: 2.5px solid var(--lib); outline-offset: 2px; }
+.fslayout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
+#fs { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.layer { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.layer.core { border-color: var(--own); border-width: 1.5px; }
+.lt { font-weight: 600; font-size: 13.5px; }
+.lt .sub, .gt .sub { font-weight: 400; color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+.row { display: grid; gap: 6px; }
+.row.xs { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.row.impl { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+.row.protos { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.row.chipsrow { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.svcgroups { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.sg { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.gt { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.groups { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grp { border: 1px dashed var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gcards { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.seamrow { display: grid; gap: 8px; }
+.seamrow.two { grid-template-columns: 3fr 2fr; }
+.card { font: inherit; text-align: left; color: var(--fg); cursor: pointer; display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: 6px; border: 1.5px solid var(--bd, var(--line)); background: var(--bg, var(--panel)); position: relative; min-width: 0; --bg: var(--panel); --bd: var(--line); }
+.card:hover { filter: brightness(0.97); }
+.card[aria-pressed="true"] { outline: 2.5px solid var(--fg); outline-offset: 1px; }
+.card .nm { font-family: var(--mono); font-size: 12px; font-weight: 600; overflow-wrap: break-word; padding-right: 22px; }
+.legend .lg[hidden] { display: none !important; }
+.card .ds { font-size: 11.5px; line-height: 1.35; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.card .ft { display: flex; gap: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: auto; flex-wrap: wrap; }
+.card.compact { padding: 5px 8px; gap: 2px; }
+.card.compact .nm { font-size: 11.5px; }
+.card.xcard .nm { font-family: var(--sans); font-size: 12.5px; }
+.card.seamc { align-items: center; text-align: center; border-style: dotted; border-color: var(--fg); background: var(--panel); }
+.card.seamc .nm { font-family: var(--sans); font-size: 13px; padding-right: 0; }
+.card.seamc .ds { -webkit-line-clamp: 2; color: var(--fg); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.chip { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 4px; line-height: 1.4; }
+.chip.sc { background: var(--lib-bg); color: var(--lib); }
+.chip.ad { background: var(--own-bg); color: var(--own); border: 1px solid var(--own); }
+.chip.pre { background: var(--ext-bg); color: var(--ext); }
+.heatn { display: none; position: absolute; top: 5px; right: 7px; font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.stepn { position: absolute; top: -9px; left: -9px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 999px; background: var(--fg); color: var(--bg); font-family: var(--mono); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; z-index: 2; }
+
+/* цвета по линзам */
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="own"] { --bg: var(--own-bg); --bd: var(--own); }
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="frozen"] { --bg: color-mix(in srgb, var(--own-bg) 45%, var(--panel)); --bd: var(--own); border-style: dashed; }
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="edge"] { --bg: var(--own-bg); --bd: var(--own); box-shadow: inset 5px 0 0 var(--lib); }
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="seam"] { --bg: var(--own-bg); --bd: var(--fg); border-style: dotted; }
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="lib"] { --bg: var(--lib-bg); --bd: var(--lib); }
+#fullscheme:is([data-lens="both"], [data-lens="v20"]) .card[data-st="none"] { --bg: var(--panel); --bd: var(--muted); border-style: dashed; color: var(--muted); }
+#fullscheme .card[data-st="ext"] { --bg: var(--ext-bg); --bd: var(--ext); }
+#fullscheme .card.seamc { --bg: var(--panel); --bd: var(--fg); }
+
+#fullscheme[data-lens="scratch"] .card[data-sc="own"] { --bg: var(--own-bg); --bd: var(--own); }
+#fullscheme[data-lens="scratch"] .card[data-sc="lib"] { --bg: var(--lib-bg); --bd: var(--lib); }
+#fullscheme[data-lens="scratch"] .card[data-sc="gone"] { --bg: var(--warn-bg); --bd: var(--warn); border-style: dashed; }
+#fullscheme[data-lens="scratch"] .card[data-sc="off"] { opacity: .38; }
+#fullscheme[data-lens="scratch"] .card[data-st="ext"] { opacity: 1; }
+
+#fullscheme[data-lens="heat"] .card[data-h="1"] { --bg: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
+#fullscheme[data-lens="heat"] .card[data-h="2"] { --bg: color-mix(in srgb, var(--warn) 20%, var(--panel)); }
+#fullscheme[data-lens="heat"] .card[data-h="3"] { --bg: color-mix(in srgb, var(--warn) 34%, var(--panel)); }
+#fullscheme[data-lens="heat"] .card[data-h="4"] { --bg: color-mix(in srgb, var(--warn) 50%, var(--panel)); }
+#fullscheme[data-lens="heat"] .card[data-h="5"] { --bg: color-mix(in srgb, var(--warn) 68%, var(--panel)); --bd: var(--warn); }
+#fullscheme[data-lens="heat"] .card[data-h="0"] { opacity: .5; }
+#fullscheme[data-lens="heat"] .card[data-st="ext"] { --bg: var(--panel); --bd: var(--line); }
+#fullscheme[data-lens="heat"] .heatn { display: block; }
+#fullscheme[data-lens="heat"] .card[data-h="0"] .heatn { display: none; }
+
+#fullscheme[data-lens="tier"] .card[data-tier="core"] { --bg: var(--own-bg); --bd: var(--own); }
+#fullscheme[data-lens="tier"] .card[data-tier="optional"] { --bg: var(--lib-bg); --bd: var(--lib); border-style: dashed; }
+#fullscheme[data-lens="tier"] .card[data-st="ext"] { --bg: var(--panel); --bd: var(--line); opacity: .5; }
+
+#fullscheme[data-lens="v20"] .chip.sc { display: none; }
+#fullscheme[data-lens="scratch"] :is(.chip.ad, .chip.pre) { display: none; }
+#fullscheme:is([data-lens="heat"], [data-lens="tier"]) .chip { display: none; }
+
+#fullscheme.flowing .card { opacity: .22; }
+#fullscheme.flowing .card.on { opacity: 1; outline: 2px solid var(--fg); outline-offset: 1px; }
+
+/* панель */
+#fspanel { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+#fspanel h3 { font-size: 16px; font-family: var(--mono); overflow-wrap: anywhere; }
+#fspanel .meta { display: flex; flex-wrap: wrap; gap: 6px; }
+#fspanel .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+#fspanel .pill.st { color: var(--fg); border-color: var(--fg); }
+#fspanel .k { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+#fspanel p { max-width: none; font-size: 13.5px; }
+#fspanel .nums { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#fspanel .nums div { background: var(--bg); border-radius: 6px; padding: 6px 8px; }
+#fspanel .nums b { display: block; font-family: var(--mono); font-size: 15px; }
+#fspanel .nums span { font-size: 11.5px; color: var(--muted); }
+#fspanel pre { margin: 0; font-family: var(--mono); font-size: 12px; background: var(--bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+#fspanel .hint { color: var(--muted); }
+.flowtxt { font-size: 13.5px; color: var(--muted); min-height: 1.5em; max-width: none; }
+.mini { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+@media (max-width: 1000px) {
+  .fslayout { grid-template-columns: minmax(0, 1fr); }
+  #fspanel { position: sticky; top: auto; bottom: 8px; max-height: 46vh; z-index: 4; box-shadow: 0 4px 24px rgba(0,0,0,.25); }
+  .seamrow.two { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) { .card { transition: opacity .15s, background-color .15s; } }
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:14px">
+  <div class="eyebrow">Inspector_bottles · схемы и вердикт Fable 5.2 · 2026-11-22</div>
+  <h1>Своё или готовое: схемы и вердикт</h1>
+  <p class="lead">Fable 5.2 принял курс с условиями. Вложения не зря: ядро верное, а главная ценность в проверенном поведении, а не в строках кода. Слабые места другие: нет версий на швах и нет второго продукта. Заменять транспорт сейчас не нужно, обе готовые замены в Beta.</p>
+</header>
+
+<section>
+  <h2>Вердикт</h2>
+  <div class="banner"><p><strong>Принять с условиями.</strong> Тезис «ядро своё, обвязку заменить на готовое» верен частично: обвязку не заменять, а заморозить и дополнять на краях.</p></div>
+  <div class="cards">
+    <div>
+      <h3 class="yes">Не зря</h3>
+      <p>Рецепт → топология, супервизия и честный стоп под Windows, контракт плагина, StateStore, <code>backend_ctl</code>. Готового целого на Python под Windows без Docker нет.</p>
+      <p>Главное вложение это матрицы инъекций, владение стопом, контракты исхода. Они переживут смену любой библиотеки.</p>
+    </div>
+    <div>
+      <h3 class="risk">Где риск</h3>
+      <p>Фреймворк вырос до 159 тыс. строк раньше, чем появился второй потребитель. В конверте IPC нет поля версии (проверено: 0 совпадений), а продуктов будет несколько.</p>
+      <p>Первое же ломающее изменение ударит по всем продуктам сразу.</p>
+    </div>
+    <div>
+      <h3 class="half">Как остаться актуальным</h3>
+      <p>Не гнаться за библиотеками. Сделать пять-шесть швов с версией и набором соответствия, и подключать готовое за шов, когда оно созреет.</p>
+      <p>Zenoh 1.10.2 и iceoryx2 0.10.1 сегодня обе Beta (проверено по PyPI).</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>1. Как сейчас</h2>
+  <figure>
+    <div class="scroll">
+    <svg class="diagram" viewBox="0 0 1080 545" role="img" aria-label="Текущая архитектура: SystemLauncher запускает ProcessManager, рецепт YAML задаёт топологию, ProcessManager создаёт три процесса: источники кадров, обработка, devices. Кадры идут между ними по собственным очередям и SHM-кольцу, команды GUI идут через собственный Router. Router и транспорт между процессами помечены как своё, заморожено.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0L10 5L0 10z"/></marker>
+        <marker id="a1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mkl" d="M0 0L10 5L0 10z"/></marker>
+      </defs>
+
+      <rect class="ext" x="40" y="20" width="180" height="46" rx="6"/>
+      <text class="t" x="130" y="40" text-anchor="middle">Оператор</text>
+      <text class="s" x="130" y="57" text-anchor="middle">работает в GUI</text>
+
+      <rect class="own" x="260" y="20" width="160" height="46" rx="6"/>
+      <text class="t" x="340" y="40" text-anchor="middle">SystemLauncher</text>
+      <text class="s" x="340" y="57" text-anchor="middle">главный процесс</text>
+
+      <rect class="own" x="440" y="20" width="240" height="46" rx="6"/>
+      <text class="t" x="560" y="40" text-anchor="middle">Рецепт YAML</text>
+      <text class="s" x="560" y="57" text-anchor="middle">топология · плагины · пульт</text>
+
+      <rect class="ext" x="860" y="20" width="200" height="46" rx="6"/>
+      <text class="t" x="960" y="40" text-anchor="middle">Агент / инженер</text>
+      <text class="s" x="960" y="57" text-anchor="middle">backend_ctl (MCP)</text>
+
+      <rect class="own" x="40" y="110" width="180" height="70" rx="6"/>
+      <text class="t" x="130" y="136" text-anchor="middle">GUI · PySide6</text>
+      <text class="s" x="130" y="155" text-anchor="middle">frontend_module</text>
+      <text class="s" x="130" y="170" text-anchor="middle">редактор нод свой</text>
+
+      <rect class="own" x="440" y="110" width="240" height="70" rx="6"/>
+      <text class="t" x="560" y="134" text-anchor="middle">ProcessManager</text>
+      <text class="s" x="560" y="152" text-anchor="middle">реестр · супервизия · монитор</text>
+      <text class="s" x="560" y="168" text-anchor="middle">RecipeService · сокет backend_ctl</text>
+
+      <line class="ln" x1="130" y1="66" x2="130" y2="110" marker-end="url(#a1)"/>
+      <polyline class="ln" points="340,66 340,125 440,125" marker-end="url(#a1)"/>
+      <text class="lab" x="348" y="100">spawn</text>
+      <line class="ln" x1="560" y1="66" x2="560" y2="110" marker-end="url(#a1)"/>
+      <text class="lab" x="568" y="92">recipe.activate</text>
+      <polyline class="ln" points="960,66 960,145 680,145" marker-end="url(#a1)"/>
+      <text class="lab" x="820" y="137" text-anchor="middle">backend_ctl · TCP, JSON</text>
+      <line class="ln" x1="220" y1="160" x2="440" y2="160" marker-start="url(#a1)" marker-end="url(#a1)"/>
+      <text class="lab" x="330" y="153" text-anchor="middle">команды, подписки</text>
+
+      <line class="ln" x1="560" y1="180" x2="560" y2="215"/>
+      <line class="ln" x1="345" y1="215" x2="915" y2="215"/>
+      <line class="ln" x1="345" y1="215" x2="345" y2="250" marker-end="url(#a1)"/>
+      <line class="ln" x1="630" y1="215" x2="630" y2="250" marker-end="url(#a1)"/>
+      <line class="ln" x1="915" y1="215" x2="915" y2="250" marker-end="url(#a1)"/>
+      <text class="lab" x="772" y="208" text-anchor="middle">create_and_register</text>
+
+      <g>
+        <rect class="own" x="235" y="250" width="220" height="110" rx="6"/>
+        <text class="t" x="345" y="272" text-anchor="middle">Источники кадров</text>
+        <text class="s" x="345" y="291" text-anchor="middle">camera_service · hikvision</text>
+        <text class="s" x="345" y="307" text-anchor="middle">code_reader · phone_gateway</text>
+        <line class="div" x1="245" y1="318" x2="445" y2="318"/>
+        <rect class="swap" x="243" y="328" width="64" height="22" rx="4"/><text class="pl" x="275" y="343" text-anchor="middle">Router</text>
+        <rect class="own" x="311" y="328" width="64" height="22" rx="4"/><text class="pl" x="343" y="343" text-anchor="middle">State</text>
+        <rect class="own" x="379" y="328" width="68" height="22" rx="4"/><text class="pl" x="413" y="343" text-anchor="middle">Log/Stat</text>
+      </g>
+      <g>
+        <rect class="own" x="520" y="250" width="220" height="110" rx="6"/>
+        <text class="t" x="630" y="272" text-anchor="middle">Обработка</text>
+        <text class="s" x="630" y="291" text-anchor="middle">chain · ml_inference</text>
+        <text class="s" x="630" y="307" text-anchor="middle">word_layout · line_filter</text>
+        <line class="div" x1="530" y1="318" x2="730" y2="318"/>
+        <rect class="swap" x="528" y="328" width="64" height="22" rx="4"/><text class="pl" x="560" y="343" text-anchor="middle">Router</text>
+        <rect class="own" x="596" y="328" width="64" height="22" rx="4"/><text class="pl" x="628" y="343" text-anchor="middle">State</text>
+        <rect class="own" x="664" y="328" width="68" height="22" rx="4"/><text class="pl" x="698" y="343" text-anchor="middle">Log/Stat</text>
+      </g>
+      <g>
+        <rect class="own" x="805" y="250" width="220" height="110" rx="6"/>
+        <text class="t" x="915" y="272" text-anchor="middle">devices</text>
+        <text class="s" x="915" y="291" text-anchor="middle">DeviceHubPlugin · supervisor</text>
+        <text class="s" x="915" y="307" text-anchor="middle">драйверы: робот, ПЧ, Modbus</text>
+        <line class="div" x1="815" y1="318" x2="1015" y2="318"/>
+        <rect class="swap" x="813" y="328" width="64" height="22" rx="4"/><text class="pl" x="845" y="343" text-anchor="middle">Router</text>
+        <rect class="own" x="881" y="328" width="64" height="22" rx="4"/><text class="pl" x="913" y="343" text-anchor="middle">State</text>
+        <rect class="own" x="949" y="328" width="68" height="22" rx="4"/><text class="pl" x="983" y="343" text-anchor="middle">Log/Stat</text>
+      </g>
+
+      <path class="ln-swap" d="M410 360 V402 H570 V360" marker-end="url(#a1s)"/>
+      <text class="lab-lib" x="490" y="421" text-anchor="middle">кадры: очередь + SHM-кольцо</text>
+      <path class="ln-swap" d="M695 360 V402 H855 V360" marker-end="url(#a1s)"/>
+      <text class="lab-lib" x="775" y="421" text-anchor="middle">события и задания</text>
+
+      <line class="ln" x1="270" y1="360" x2="270" y2="470" marker-end="url(#a1)"/>
+      <rect class="ext" x="235" y="470" width="160" height="50" rx="6"/>
+      <text class="t" x="315" y="491" text-anchor="middle">Камеры</text>
+      <text class="s" x="315" y="508" text-anchor="middle">GigE, телефон (HTTP)</text>
+
+      <line class="ln" x1="985" y1="360" x2="985" y2="470" marker-end="url(#a1)"/>
+      <text class="lab" x="977" y="425" text-anchor="end">Modbus TCP</text>
+      <rect class="ext" x="835" y="470" width="190" height="50" rx="6"/>
+      <text class="t" x="930" y="491" text-anchor="middle">Робот Delta, ПЧ</text>
+      <text class="s" x="930" y="508" text-anchor="middle">через pymodbus</text>
+    </svg>
+    </div>
+    <div class="legend">
+      <span><i class="sw own"></i>своё, развиваю</span>
+      <span><i class="sw swap"></i>своё, заморожено: не растить, менять только по триггеру</span>
+      <span><i class="sw ext"></i>люди, агенты, железо</span>
+    </div>
+    <figcaption>Каждый процесс несёт свои Router, State и Log/Stat. Между процессами кадры идут по очередям и SHM-кольцу с seqlock, остальное по сообщениям Router. Замер: около 0,3 мс p50 на хоп при 640×480, меньше 5% кадра (по записи, один хоп, синтетика). Схема упрощена из <code>docs/diagrams/foundation-audit/system-containers.mmd</code>: без ml_train, Hikvision SDK-app и части Services.</figcaption>
+  </figure>
+</section>
+
+<section class="wide" id="fullscheme" data-lens="both">
+  <h2>2. Полная схема: «с нуля» и цель 2.0 на одной карте</h2>
+  <p>Две прежние схемы (мысленный опыт «с нуля» и цель 2.0) сведены в одну. Скелет один, слои и модули те же, что в Атласе: 27 модулей фреймворка, 12 групп плагинов, 18 сервисов и 6 пакетов прототипа. Каждая карточка это запись Атласа (<code>python -m scripts.atlas card &lt;id&gt;</code>) с наложенным решением. Переключатель линз показывает ту же схему с разных сторон, а потоки показывают, как через карточки идёт кадр, команда, рецепт и журнал.</p>
+
+  <div class="fsbar" role="toolbar" aria-label="Линзы и потоки схемы">
+    <div class="bg" role="group" aria-label="Линза">
+      <span class="bl">Линза</span>
+      <button type="button" data-lens-btn="both" aria-pressed="true">«С нуля» и 2.0 вместе</button>
+      <button type="button" data-lens-btn="v20" aria-pressed="false">Цель 2.0</button>
+      <button type="button" data-lens-btn="scratch" aria-pressed="false">Опыт «с нуля»</button>
+      <button type="button" data-lens-btn="heat" aria-pressed="false">Радиус правки</button>
+      <button type="button" data-lens-btn="tier" aria-pressed="false">Ярус</button>
+    </div>
+    <div class="bg" role="group" aria-label="Поток">
+      <span class="bl">Поток</span>
+      <button type="button" data-flow-btn="frame" aria-pressed="false">Кадр</button>
+      <button type="button" data-flow-btn="cmd" aria-pressed="false">Команда и стоп</button>
+      <button type="button" data-flow-btn="recipe" aria-pressed="false">Рецепт → топология</button>
+      <button type="button" data-flow-btn="obs" aria-pressed="false">Журнал наружу</button>
+      <button type="button" data-flow-btn="" aria-pressed="false">Сбросить</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="lg" data-for="both v20"><i class="sw own"></i>своё, развиваем</span>
+    <span class="lg" data-for="both v20"><i class="sw" style="background:color-mix(in srgb,var(--own-bg) 45%,var(--panel));border-color:var(--own);border-style:dashed"></i>своё, заморожено</span>
+    <span class="lg" data-for="both v20"><i class="sw" style="background:var(--own-bg);border-color:var(--own);box-shadow:inset 4px 0 0 var(--lib)"></i>своё + добавка на краю</span>
+    <span class="lg" data-for="both v20"><i class="sw" style="background:var(--own-bg);border-color:var(--fg);border-style:dotted"></i>нужен шов с версией</span>
+    <span class="lg" data-for="both v20"><i class="sw lib"></i>готовое, по триггеру</span>
+    <span class="lg" data-for="both scratch heat tier"><i class="sw ext"></i>люди, железо, внешнее</span>
+    <span class="lg" data-for="both"><i class="chip sc" style="padding:0 5px">с нуля: X</i>что заменил бы опыт «с нуля»</span>
+    <span class="lg" data-for="scratch"><i class="sw own"></i>остался бы своим</span>
+    <span class="lg" data-for="scratch"><i class="sw lib"></i>заменён готовым</span>
+    <span class="lg" data-for="scratch"><i class="sw" style="background:var(--warn-bg);border-color:var(--warn);border-style:dashed"></i>исчез бы</span>
+    <span class="lg" data-for="scratch">бледное: в опыте не участвовало</span>
+    <span class="lg" data-for="heat">чем краснее, тем больше файлов импортируют модуль; число в углу карточки</span>
+    <span class="lg" data-for="tier"><i class="sw own"></i>core: без него не бутится ни одно приложение</span>
+    <span class="lg" data-for="tier"><i class="sw lib" style="border-style:dashed"></i>optional: по потребности</span>
+    <span class="lg" data-for="both v20"><i class="chip pre" style="padding:0 5px">до 1.0</i>шов, который стоит сделать до 1.0</span>
+  </div>
+
+  <div class="fslayout">
+    <div id="fs">
+<div class="layer"><div class="lt">Люди и клиенты</div><div class="row xs"><button type="button" class="card xcard" data-id="x_operator" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Оператор</span><span class="ds">работает в GUI</span></button><button type="button" class="card xcard" data-id="x_engineer" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Инженер / агент</span><span class="ds">backend_ctl · MCP</span></button><button type="button" class="card xcard" data-id="x_tablet" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">Планшет</span><span class="ds">веб-пульт, по триггеру</span></button><button type="button" class="card xcard" data-id="x_cpp" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">Коллеги C++</span><span class="ds">нативные узлы</span></button></div></div><div class="layer"><div class="lt">Продукты <span class="sub">прототип = продукт 1, по Атласу</span></div><div class="row protos"><button type="button" class="card" data-id="prototype/backend" data-st="own" data-sc="own" data-h="3" data-tier="—"><span class="nm">backend</span><span class="ds">Backend прототипа: конфигурация системы и топология процессов и плагинов</span><span class="ft"><span class="m">4,7 тыс. стр.</span><span class="m">исп. 49</span></span><span class="heatn">49</span></button><button type="button" class="card" data-id="prototype/frontend" data-st="own" data-sc="own" data-h="3" data-tier="—"><span class="nm">frontend</span><span class="ds">GUI-пакет прототипа: Qt-презентация PySide6 поверх бэкенда</span><span class="ft"><span class="m">48,6 тыс. стр.</span><span class="m">исп. 67</span></span><span class="heatn">67</span></button><button type="button" class="card" data-id="prototype/domain" data-st="own" data-sc="own" data-h="4" data-tier="—"><span class="nm">domain</span><span class="ds">Изолированный типизированный domain-слой: frozen-сущности и исключения</span><span class="ft"><span class="m">4,3 тыс. стр.</span><span class="m">исп. 135</span></span><span class="heatn">135</span></button><button type="button" class="card" data-id="prototype/adapters" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">adapters</span><span class="ds">Adapter-слой между domain Protocols и реестрами фреймворка</span><span class="ft"><span class="m">2,8 тыс. стр.</span><span class="m">исп. 25</span></span><span class="heatn">25</span></button><button type="button" class="card" data-id="prototype/recipes" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">recipes</span><span class="ds">Управление рецептами прототипа: RecipeManager и миграции форматов</span><span class="ft"><span class="m">1,5 тыс. стр.</span><span class="m">исп. 19</span></span><span class="heatn">19</span></button><button type="button" class="card" data-id="prototype/registers" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">registers</span><span class="ds">Общие регистры прототипа между плагинами и RegistersManager</span><span class="ft"><span class="m">1,0 тыс. стр.</span><span class="m">исп. 13</span></span><span class="heatn">13</span></button><button type="button" class="card xcard" data-id="x_prod2" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Продукт 2</span><span class="ds">домен не выбран</span></button><button type="button" class="card xcard" data-id="x_prodN" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Продукт N</span><span class="ds">по шаблону app_module</span></button></div></div><div class="seamrow"><button type="button" class="card seamc" data-id="seam1" data-st="seam" data-sc="off" data-h="0" data-tier="none"><span class="nm">ШОВ 1 · продукты ↔ фреймворк</span><span class="ds">версия рецепта · api_version плагина · semver</span></button></div><div class="layer"><div class="lt">Плагины <span class="sub">Plugins/, словарь для всех продуктов</span></div><div class="row chipsrow"><button type="button" class="card compact" data-id="plugins/sources" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">sources</span><span class="ft"><span class="m">2,6 тыс. стр.</span><span class="m">исп. 7</span></span><span class="heatn">7</span></button><button type="button" class="card compact" data-id="plugins/processing" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">processing</span><span class="ft"><span class="m">8,0 тыс. стр.</span><span class="m">исп. 8</span></span><span class="heatn">8</span></button><button type="button" class="card compact" data-id="plugins/render" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">render</span><span class="ft"><span class="m">1,1 тыс. стр.</span><span class="m">исп. 1</span></span><span class="heatn">1</span></button><button type="button" class="card compact" data-id="plugins/filter" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">filter</span><span class="ft"><span class="m">655 стр.</span><span class="m">исп. 4</span></span><span class="heatn">4</span></button><button type="button" class="card compact" data-id="plugins/calibration" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">calibration</span><span class="ft"><span class="m">1,0 тыс. стр.</span><span class="m">исп. 1</span></span><span class="heatn">1</span></button><button type="button" class="card compact" data-id="plugins/control" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">control</span><span class="ft"><span class="m">703 стр.</span><span class="m">исп. 1</span></span><span class="heatn">1</span></button><button type="button" class="card compact" data-id="plugins/io" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">io</span><span class="ft"><span class="m">4,0 тыс. стр.</span><span class="m">исп. 6</span></span><span class="heatn">6</span></button><button type="button" class="card compact" data-id="plugins/sinks" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">sinks</span><span class="ft"><span class="m">331 стр.</span><span class="m">исп. 0</span></span><span class="heatn">0</span></button><button type="button" class="card compact" data-id="plugins/runtime" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">runtime</span><span class="ft"><span class="m">702 стр.</span><span class="m">исп. 0</span></span><span class="heatn">0</span></button><button type="button" class="card compact" data-id="plugins/hub" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">hub</span><span class="ft"><span class="m">1,7 тыс. стр.</span><span class="m">исп. 18</span></span><span class="heatn">18</span></button><button type="button" class="card compact" data-id="plugins/sim" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">sim</span><span class="ft"><span class="m">5,5 тыс. стр.</span><span class="m">исп. 5</span></span><span class="heatn">5</span></button><button type="button" class="card compact" data-id="plugins/utility" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">utility</span><span class="ft"><span class="m">349 стр.</span><span class="m">исп. 0</span></span><span class="heatn">0</span></button></div></div><div class="layer"><div class="lt">Сервисы <span class="sub">Services/, прикладные</span></div><div class="svcgroups"><div class="sg"><div class="gt">Камеры и ввод</div><div class="row chipsrow"><button type="button" class="card compact" data-id="services/camera_device" data-st="edge" data-sc="own" data-h="1" data-tier="—"><span class="nm">camera_<wbr>device</span><span class="ft"><span class="m">3,0 тыс. стр.</span><span class="m">исп. 6</span></span><span class="chips"><span class="chip ad">драйвер на марку</span></span><span class="heatn">6</span></button><button type="button" class="card compact" data-id="services/hikvision_camera" data-st="edge" data-sc="own" data-h="1" data-tier="—"><span class="nm">hikvision_<wbr>camera</span><span class="ft"><span class="m">4,5 тыс. стр.</span><span class="m">исп. 7</span></span><span class="chips"><span class="chip ad">драйвер на марку</span></span><span class="heatn">7</span></button><button type="button" class="card compact" data-id="services/phone_gateway" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">phone_<wbr>gateway</span><span class="ft"><span class="m">1,2 тыс. стр.</span><span class="m">исп. 2</span></span><span class="heatn">2</span></button><button type="button" class="card compact" data-id="services/code_reader" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">code_<wbr>reader</span><span class="ft"><span class="m">5,1 тыс. стр.</span><span class="m">исп. 3</span></span><span class="heatn">3</span></button></div></div><div class="sg"><div class="gt">Устройства</div><div class="row chipsrow"><button type="button" class="card compact" data-id="services/device_hub" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">device_<wbr>hub</span><span class="ft"><span class="m">9,2 тыс. стр.</span><span class="m">исп. 21</span></span><span class="heatn">21</span></button><button type="button" class="card compact" data-id="services/modbus" data-st="edge" data-sc="own" data-h="3" data-tier="—"><span class="nm">modbus</span><span class="ft"><span class="m">2,9 тыс. стр.</span><span class="m">исп. 33</span></span><span class="chips"><span class="chip ad">+ asyncua (OPC UA)</span></span><span class="heatn">33</span></button><button type="button" class="card compact" data-id="services/robot_comm" data-st="own" data-sc="own" data-h="4" data-tier="—"><span class="nm">robot_<wbr>comm</span><span class="ft"><span class="m">13,7 тыс. стр.</span><span class="m">исп. 95</span></span><span class="heatn">95</span></button><button type="button" class="card compact" data-id="services/vfd_comm" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">vfd_<wbr>comm</span><span class="ft"><span class="m">494 стр.</span><span class="m">исп. 6</span></span><span class="heatn">6</span></button></div></div><div class="sg"><div class="gt">ML и данные</div><div class="row chipsrow"><button type="button" class="card compact" data-id="services/ml_inference" data-st="edge" data-sc="own" data-h="1" data-tier="—"><span class="nm">ml_<wbr>inference</span><span class="ft"><span class="m">1,9 тыс. стр.</span><span class="m">исп. 6</span></span><span class="chips"><span class="chip ad">провайдеры ONNX Runtime</span></span><span class="heatn">6</span></button><button type="button" class="card compact" data-id="services/ml_train" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">ml_<wbr>train</span><span class="ft"><span class="m">2,2 тыс. стр.</span><span class="m">исп. 2</span></span><span class="heatn">2</span></button><button type="button" class="card compact" data-id="services/dataset_gen" data-st="own" data-sc="own" data-h="3" data-tier="—"><span class="nm">dataset_<wbr>gen</span><span class="ft"><span class="m">2,5 тыс. стр.</span><span class="m">исп. 72</span></span><span class="heatn">72</span></button><button type="button" class="card compact" data-id="services/layer_render" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">layer_<wbr>render</span><span class="ft"><span class="m">2,7 тыс. стр.</span><span class="m">исп. 28</span></span><span class="heatn">28</span></button><button type="button" class="card compact" data-id="services/line_sim" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">line_<wbr>sim</span><span class="ft"><span class="m">3,0 тыс. стр.</span><span class="m">исп. 25</span></span><span class="heatn">25</span></button></div></div><div class="sg"><div class="gt">Платформа</div><div class="row chipsrow"><button type="button" class="card compact" data-id="services/auth" data-st="own" data-sc="own" data-h="2" data-tier="—"><span class="nm">auth</span><span class="ft"><span class="m">3,5 тыс. стр.</span><span class="m">исп. 21</span></span><span class="heatn">21</span></button><button type="button" class="card compact" data-id="services/sql" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">sql</span><span class="ft"><span class="m">3,4 тыс. стр.</span><span class="m">исп. 10</span></span><span class="heatn">10</span></button><button type="button" class="card compact" data-id="services/documents" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">documents</span><span class="ft"><span class="m">659 стр.</span><span class="m">исп. 3</span></span><span class="heatn">3</span></button><button type="button" class="card compact" data-id="services/otel_export" data-st="edge" data-sc="own" data-h="1" data-tier="—"><span class="nm">otel_<wbr>export</span><span class="ft"><span class="m">1,8 тыс. стр.</span><span class="m">исп. 8</span></span><span class="chips"><span class="chip ad">сток для OTel</span></span><span class="heatn">8</span></button><button type="button" class="card compact" data-id="services/control_panel" data-st="own" data-sc="own" data-h="1" data-tier="—"><span class="nm">control_<wbr>panel</span><span class="ft"><span class="m">473 стр.</span><span class="m">исп. 3</span></span><span class="heatn">3</span></button></div></div></div></div><div class="layer core"><div class="lt">Фреймворк <span class="sub">multiprocess_framework/modules: 27 карточек Атласа</span></div><div class="groups"><div class="grp g-orch"><div class="gt">Оркестрация и рецепты <span class="sub">кто поднимает систему и что в ней живёт</span></div><div class="gcards"><button type="button" class="card" data-id="process_manager_module" data-st="own" data-sc="own" data-h="3" data-tier="core"><span class="nm">process_<wbr>manager_<wbr>module</span><span class="ds">Оркестратор процессов: запуск системы, реестр, приоритеты, мониторинг</span><span class="ft"><span class="m">17,3 тыс. стр.</span><span class="m">исп. 65</span></span><span class="heatn">65</span></button><button type="button" class="card" data-id="recipe" data-st="seam" data-sc="own" data-h="3" data-tier="optional"><span class="nm">recipe</span><span class="ds">Управление рецептами: снимки конфигурации, определение формата, миграции, CRUD</span><span class="ft"><span class="m">3,5 тыс. стр.</span><span class="m">исп. 44</span></span><span class="chips"><span class="chip pre">до 1.0: версия рецепта</span></span><span class="heatn">44</span></button><button type="button" class="card" data-id="app_module" data-st="own" data-sc="own" data-h="3" data-tier="optional"><span class="nm">app_<wbr>module</span><span class="ds">Шаблон приложения (composition root): общая сборка многопроцессного приложения</span><span class="ft"><span class="m">2,1 тыс. стр.</span><span class="m">исп. 41</span></span><span class="heatn">41</span></button><button type="button" class="card" data-id="service_module" data-st="own" data-sc="own" data-h="2" data-tier="optional"><span class="nm">service_<wbr>module</span><span class="ds">Реестр и жизненный цикл долгоживущих сервисов (камеры, БД, auth)</span><span class="ft"><span class="m">790 стр.</span><span class="m">исп. 29</span></span><span class="heatn">29</span></button></div></div><div class="grp g-proc"><div class="gt">Процесс и исполнение <span class="sub">что внутри одного процесса</span></div><div class="gcards"><button type="button" class="card" data-id="process_module" data-st="seam" data-sc="own" data-h="5" data-tier="core"><span class="nm">process_<wbr>module</span><span class="ds">Базовый класс процесса: создание, инициализация, управление, мониторинг</span><span class="ft"><span class="m">35,2 тыс. стр.</span><span class="m">исп. 463</span></span><span class="chips"><span class="chip pre">до 1.0: api_version плагина</span></span><span class="heatn">463</span></button><button type="button" class="card" data-id="worker_module" data-st="own" data-sc="own" data-h="3" data-tier="core"><span class="nm">worker_<wbr>module</span><span class="ds">Менеджер потоков-воркеров внутри процесса: старт, стоп, пауза, перезапуск</span><span class="ft"><span class="m">3,0 тыс. стр.</span><span class="m">исп. 58</span></span><span class="heatn">58</span></button><button type="button" class="card" data-id="chain_module" data-st="own" data-sc="own" data-h="1" data-tier="core"><span class="nm">chain_<wbr>module</span><span class="ds">Движок исполнения цепочек и DAG-pipeline, в т.ч. между процессами</span><span class="ft"><span class="m">2,0 тыс. стр.</span><span class="m">исп. 5</span></span><span class="heatn">5</span></button><button type="button" class="card" data-id="command_module" data-st="frozen" data-sc="own" data-h="2" data-tier="core"><span class="nm">command_<wbr>module</span><span class="ds">Менеджер команд над dispatch_module: регистрация обработчиков по имени</span><span class="ft"><span class="m">1,1 тыс. стр.</span><span class="m">исп. 22</span></span><span class="heatn">22</span></button><button type="button" class="card" data-id="dispatch_module" data-st="own" data-sc="own" data-h="1" data-tier="core"><span class="nm">dispatch_<wbr>module</span><span class="ds">Диспетчеризация входящих сообщений к обработчикам внутри процесса</span><span class="ft"><span class="m">2,2 тыс. стр.</span><span class="m">исп. 8</span></span><span class="heatn">8</span></button><button type="button" class="card" data-id="console_module" data-st="own" data-sc="own" data-h="1" data-tier="core"><span class="nm">console_<wbr>module</span><span class="ds">Менеджер терминальных окон процесса: показ, перехват вывода, ввод</span><span class="ft"><span class="m">1,7 тыс. стр.</span><span class="m">исп. 6</span></span><span class="heatn">6</span></button></div></div><div class="grp g-ipc"><div class="gt">Связь между процессами <span class="sub">конверт, роутер, очереди и SHM</span></div><div class="gcards"><button type="button" class="card" data-id="message_module" data-st="seam" data-sc="lib" data-h="2" data-tier="core"><span class="nm">message_<wbr>module</span><span class="ds">Транспортный протокол сообщений между менеджерами и процессами</span><span class="ft"><span class="m">2,2 тыс. стр.</span><span class="m">исп. 24</span></span><span class="chips"><span class="chip pre">до 1.0: версия конверта</span><span class="chip sc">с нуля: msgspec</span><span class="chip ad">+ msgspec на границе</span></span><span class="heatn">24</span></button><button type="button" class="card" data-id="router_module" data-st="edge" data-sc="lib" data-h="3" data-tier="core"><span class="nm">router_<wbr>module</span><span class="ds">Маршрутизация сообщений между процессами через RouterManager</span><span class="ft"><span class="m">6,9 тыс. стр.</span><span class="m">исп. 75</span></span><span class="chips"><span class="chip pre">до 1.0: набор соответствия канала</span><span class="chip sc">с нуля: Zenoh</span><span class="chip ad">+ канал Zenoh</span></span><span class="heatn">75</span></button><button type="button" class="card" data-id="channel_routing_module" data-st="frozen" data-sc="lib" data-h="4" data-tier="core"><span class="nm">channel_<wbr>routing_<wbr>module</span><span class="ds">Базовая маршрутизация по каналам для роутера, логгера и ошибок</span><span class="ft"><span class="m">6,2 тыс. стр.</span><span class="m">исп. 83</span></span><span class="chips"><span class="chip sc">с нуля: ключи Zenoh</span></span><span class="heatn">83</span></button><button type="button" class="card" data-id="shared_resources_module" data-st="seam" data-sc="lib" data-h="3" data-tier="core"><span class="nm">shared_<wbr>resources_<wbr>module</span><span class="ds">Pickle-safe реестр общих ресурсов для межпроцессного обмена</span><span class="ft"><span class="m">6,5 тыс. стр.</span><span class="m">исп. 62</span></span><span class="chips"><span class="chip pre">до 1.0: формат SHM документом</span><span class="chip sc">с нуля: Zenoh SHM / iceoryx2</span><span class="chip ad">iceoryx2 — только пилот</span></span><span class="heatn">62</span></button></div></div><div class="grp g-obs"><div class="gt">Наблюдаемость <span class="sub">журнал, ошибки, метрики</span></div><div class="gcards"><button type="button" class="card" data-id="logger_module" data-st="edge" data-sc="lib" data-h="5" data-tier="core"><span class="nm">logger_<wbr>module</span><span class="ds">Менеджер логирования: каналы записи, сбор логов процессов</span><span class="ft"><span class="m">8,5 тыс. стр.</span><span class="m">исп. 282</span></span><span class="chips"><span class="chip sc">с нуля: OpenTelemetry</span><span class="chip ad">+ сток OTel</span></span><span class="heatn">282</span></button><button type="button" class="card" data-id="error_module" data-st="edge" data-sc="lib" data-h="3" data-tier="core"><span class="nm">error_<wbr>module</span><span class="ds">Менеджер ошибок на базе логгера: каналы по уровням, traceback</span><span class="ft"><span class="m">1,1 тыс. стр.</span><span class="m">исп. 50</span></span><span class="chips"><span class="chip sc">с нуля: OpenTelemetry</span><span class="chip ad">+ сток OTel</span></span><span class="heatn">50</span></button><button type="button" class="card" data-id="statistics_module" data-st="edge" data-sc="lib" data-h="3" data-tier="core"><span class="nm">statistics_<wbr>module</span><span class="ds">Менеджер статистики и метрик, третья плоскость наблюдаемости</span><span class="ft"><span class="m">4,5 тыс. стр.</span><span class="m">исп. 36</span></span><span class="chips"><span class="chip sc">с нуля: OpenTelemetry</span><span class="chip ad">+ сток OTel</span></span><span class="heatn">36</span></button></div></div><div class="grp g-data"><div class="gt">Данные и конфиг <span class="sub">схемы, конфиги, регистры</span></div><div class="gcards"><button type="button" class="card" data-id="data_schema_module" data-st="own" data-sc="own" data-h="4" data-tier="core"><span class="nm">data_<wbr>schema_<wbr>module</span><span class="ds">Ядро описания структур данных на Pydantic: схемы, поля, маршрутизация</span><span class="ft"><span class="m">10,8 тыс. стр.</span><span class="m">исп. 134</span></span><span class="heatn">134</span></button><button type="button" class="card" data-id="config_module" data-st="own" data-sc="own" data-h="3" data-tier="core"><span class="nm">config_<wbr>module</span><span class="ds">Управление конфигурациями в рантайме: схемы, контейнер, менеджер</span><span class="ft"><span class="m">2,0 тыс. стр.</span><span class="m">исп. 31</span></span><span class="heatn">31</span></button><button type="button" class="card" data-id="registers_module" data-st="own" data-sc="own" data-h="3" data-tier="optional"><span class="nm">registers_<wbr>module</span><span class="ds">Рантайм именованных регистров: подписки на поля, карта маршрутов, отправка</span><span class="ft"><span class="m">1,1 тыс. стр.</span><span class="m">исп. 57</span></span><span class="heatn">57</span></button></div></div><div class="grp g-state"><div class="gt">Состояние и события <span class="sub">общее дерево, шина событий, откат</span></div><div class="gcards"><button type="button" class="card" data-id="state_store_module" data-st="edge" data-sc="own" data-h="4" data-tier="optional"><span class="nm">state_<wbr>store_<wbr>module</span><span class="ds">Реактивное иерархическое дерево состояния: сервер и клиентский кэш с подписками</span><span class="ft"><span class="m">8,2 тыс. стр.</span><span class="m">исп. 121</span></span><span class="chips"><span class="chip ad">+ мост удалённых подписчиков</span></span><span class="heatn">121</span></button><button type="button" class="card" data-id="event_module" data-st="own" data-sc="own" data-h="1" data-tier="optional"><span class="nm">event_<wbr>module</span><span class="ds">Типизированная шина событий-фактов внутри процесса</span><span class="ft"><span class="m">459 стр.</span><span class="m">исп. 4</span></span><span class="heatn">4</span></button><button type="button" class="card" data-id="actions_module" data-st="own" data-sc="own" data-h="3" data-tier="optional"><span class="nm">actions_<wbr>module</span><span class="ds">Action-шина с undo/redo и объединением правок для GUI</span><span class="ft"><span class="m">1,1 тыс. стр.</span><span class="m">исп. 35</span></span><span class="heatn">35</span></button></div></div><div class="grp g-gui"><div class="gt">GUI-каркас <span class="sub">конструктор окон и показ кадров</span></div><div class="gcards"><button type="button" class="card" data-id="frontend_module" data-st="edge" data-sc="own" data-h="4" data-tier="optional"><span class="nm">frontend_<wbr>module</span><span class="ds">UI-фреймворк: конструктор PySide6-приложений из виджетов и регистров</span><span class="ft"><span class="m">25,6 тыс. стр.</span><span class="m">исп. 97</span></span><span class="chips"><span class="chip ad">+ веб-клиент по backend_ctl</span></span><span class="heatn">97</span></button><button type="button" class="card" data-id="display_module" data-st="edge" data-sc="own" data-h="2" data-tier="optional"><span class="nm">display_<wbr>module</span><span class="ds">Реестр именованных SHM-каналов для вывода кадров</span><span class="ft"><span class="m">670 стр.</span><span class="m">исп. 15</span></span><span class="chips"><span class="chip ad">+ Rerun (dev)</span></span><span class="heatn">15</span></button><button type="button" class="card" data-id="telemetry_readmodel_module" data-st="own" data-sc="own" data-h="2" data-tier="optional"><span class="nm">telemetry_<wbr>readmodel_<wbr>module</span><span class="ds">Qt-free ядро read-model телеметрии: проекция значений и кольцевая история</span><span class="ft"><span class="m">865 стр.</span><span class="m">исп. 11</span></span><span class="heatn">11</span></button></div></div><div class="grp g-base"><div class="gt">Основа <span class="sub">база всех менеджеров</span></div><div class="gcards"><button type="button" class="card" data-id="base_manager" data-st="own" data-sc="own" data-h="4" data-tier="core"><span class="nm">base_<wbr>manager</span><span class="ds">Базовый менеджер: жизненный цикл, адаптеры, наблюдаемость</span><span class="ft"><span class="m">4,0 тыс. стр.</span><span class="m">исп. 117</span></span><span class="heatn">117</span></button></div></div></div></div><div class="seamrow two"><button type="button" class="card seamc" data-id="seam2" data-st="seam" data-sc="off" data-h="0" data-tier="none"><span class="nm">ШОВ 2 · ядро ↔ транспорт</span><span class="ds">версия конверта · набор соответствия · формат SHM</span></button><button type="button" class="card seamc" data-id="seam3" data-st="seam" data-sc="off" data-h="0" data-tier="none"><span class="nm">ШОВ 3 · ядро ↔ клиенты UI</span><span class="ds">спека UI v1 · протокол backend_ctl</span></button></div><div class="layer"><div class="lt">Реализации и края <span class="sub">за швами; в 2.0 подключаются по триггеру</span></div><div class="row xs impl"><button type="button" class="card xcard" data-id="x_queues" data-st="frozen" data-sc="gone" data-h="0" data-tier="none"><span class="nm">Очереди + SHM</span><span class="ds">основной путь, заморожен</span></button><button type="button" class="card xcard" data-id="x_zenoh" data-st="lib" data-sc="lib" data-h="0" data-tier="none"><span class="nm">Zenoh</span><span class="ds">канал между машинами</span></button><button type="button" class="card xcard" data-id="x_native" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">Нативный узел</span><span class="ds">C++ или Rust, форма 2</span></button><button type="button" class="card xcard" data-id="x_iox" data-st="lib" data-sc="lib" data-h="0" data-tier="none"><span class="nm">iceoryx2</span><span class="ds">только пилот со сроком</span></button><button type="button" class="card xcard" data-id="x_msgspec" data-st="lib" data-sc="lib" data-h="0" data-tier="none"><span class="nm">msgspec / JSON</span><span class="ds">граница для чужих языков</span></button><button type="button" class="card xcard" data-id="x_rerun" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">Rerun</span><span class="ds">отладка кадров, dev-extra</span></button><button type="button" class="card xcard" data-id="x_web" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">Веб-пульт (TypeScript)</span><span class="ds">через шлюз по backend_ctl</span></button><button type="button" class="card xcard" data-id="x_wasm" data-st="lib" data-sc="off" data-h="0" data-tier="none"><span class="nm">WASM-песочница</span><span class="ds">чужие плагины чистой логики</span></button><button type="button" class="card xcard" data-id="x_redis" data-st="none" data-sc="off" data-h="0" data-tier="none"><span class="nm">Redis</span><span class="ds">только край, не планируется</span></button><button type="button" class="card xcard" data-id="x_ft" data-st="none" data-sc="off" data-h="0" data-tier="none"><span class="nm">Free-threading 3.15</span><span class="ds">ждём колёса</span></button></div></div><div class="layer"><div class="lt">Внешний мир</div><div class="row xs"><button type="button" class="card xcard" data-id="x_cams" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Камеры</span><span class="ds">GigE, телефон (HTTP)</span></button><button type="button" class="card xcard" data-id="x_plc" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">Робот, ПЧ, ПЛК</span><span class="ds">Modbus; OPC UA по триггеру</span></button><button type="button" class="card xcard" data-id="x_db" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">БД</span><span class="ds">PostgreSQL, MySQL, SQLite</span></button><button type="button" class="card xcard" data-id="x_coll" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">OTel-коллектор</span><span class="ds">приёмник стока</span></button><button type="button" class="card xcard" data-id="x_os" data-st="ext" data-sc="own" data-h="0" data-tier="none"><span class="nm">ОС и процессы</span><span class="ds">Windows, spawn, SHM</span></button></div></div>
+    </div>
+    <aside id="fspanel" aria-live="polite" aria-label="Карточка выбранного элемента"></aside>
+  </div>
+  <p class="flowtxt" id="flowtxt"></p>
+
+  <p class="note">Снимок Атласа: HEAD 6cb212213, 2026-11-22. Строки считаны по .py без каталогов tests. Группы модулей и потоки составил лид, Атлас их не даёт. Метка «решение: Fable» на карточке значит, что решение взято из вердикта; «лид» значит, что Fable модуль отдельно не разбирал.</p>
+
+  <h3>Что показывает слияние, в числах Атласа</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Вопрос</th><th>Опыт «с нуля»</th><th>Цель 2.0</th></tr></thead>
+      <tbody>
+        <tr><td>Что заменяется готовым</td><td>7 модулей из 27: <code>message_module</code>, <code>router_module</code>, <code>channel_routing_module</code>, <code>shared_resources_module</code>, <code>logger_module</code>, <code>error_module</code>, <code>statistics_module</code>. Это <b>35 845 из 159 488 строк</b> фреймворка (22,5%).</td><td>Ни один модуль. Готовое подключается рядом, за швом, и только по триггеру.</td></tr>
+        <tr><td>Что берётся готовым</td><td>Zenoh как общая шина, msgspec в каждом процессе, OpenTelemetry в каждом процессе.</td><td>Добавки на краях по триггеру: Zenoh (2-я машина), нативный узел, msgspec на границе, веб-пульт, Rerun, asyncua, сток OTel; iceoryx2 только пилотом. Три шва с версиями.</td></tr>
+        <tr><td>Семантика супервизии</td><td>Теряется: <code>ReaderGoneQueue</code>, инкарнации, возврат loan-слотов после <code>kill -9</code> общая шина не даёт.</td><td>Сохраняется: очереди и SHM остаются основным путём.</td></tr>
+        <tr><td>Экономия</td><td>Потолок по Атласу 22,5% строк; Fable считал 24,2% по другому набору слоёв и оценил реальную экономию в 10–15% после адаптеров.</td><td>Не гонимся за экономией. Цель: чтобы продукты не ломались от общих изменений.</td></tr>
+        <tr><td>Версии на швах</td><td>В схеме «с нуля» не рисовались.</td><td>Три шва: версия рецепта и плагина, версия конверта и набор соответствия, спека UI и протокол backend_ctl.</td></tr>
+        <tr><td>Состав разметки в 2.0 (27 модулей)</td><td colspan="2">своё, развиваем: 14 · своё с добавкой на краю: 7 · с швом: 4 · заморожено: 2. Ярусы по Атласу: core 17, optional 10.</td></tr>
+        <tr><td>Где ломающее изменение ударит сильнее всего</td><td colspan="2">По числу файлов-потребителей (линза «Радиус правки»): <code>process_module</code> 463, <code>logger_module</code> 282, <code>data_schema_module</code> 134, <code>state_store_module</code> 121, <code>base_manager</code> 117. Именно там версий на швах не хватает больше всего: ломающая правка заденет столько файлов сразу.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Почему Fable не принял «с нуля»</h3>
+  <ul class="plain">
+    <li>Заменяемые слои это около четверти кода. С адаптерами экономия 10–15%, а не 30–40%, как я писал.</li>
+    <li>В очередях живёт семантика супервизии. Общая шина её не даёт, и её пришлось бы писать заново поверх.</li>
+    <li>OpenTelemetry для логов в Python пока в статусе Development. Годится как сток, как основной путь нет.</li>
+  </ul>
+
+  <details>
+    <summary><b>Девять правил для любой добавки на краю</b> (Fable, §5.9.3)</summary>
+    <ol class="plain" style="margin-top:8px">
+      <li>Один основной путь на работу, а не на слой.</li>
+      <li>Критерий повышения измерим; рядом критерий отказа и срок, оба записаны до пилота.</li>
+      <li>Старый путь замораживают, неудавшийся новый удаляют (уточнение принципа 3, решает владелец).</li>
+      <li>Один набор соответствия, параметризованный по всем реализациям шва; отдельная задача CI на каждый extra.</li>
+      <li>Выбор пути это данные в рецепте или конфиге, не <code>if</code> в коде.</li>
+      <li>Добавка заявляет, чего она не гарантирует; проверка рецепта не пускает на неё провода, которым это нужно.</li>
+      <li>Сбой добавки не тормозит основной путь: ограниченный буфер, сброс со счётчиком.</li>
+      <li>Добавка строится по триггеру от продукта, не впрок; не больше одного пилота «второй дороги» одновременно.</li>
+      <li>У Beta-библиотек есть верхняя граница версии.</li>
+    </ol>
+  </details>
+  <script id="fs-data" type="application/json">{"cards": {"x_operator": {"layer": "Люди", "title": "Оператор", "sub": "работает в GUI", "st": "ext", "sc": "own", "v20": "Работает в Qt-станции. Планшет и удалённый пульт — через веб-клиент по триггеру.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_engineer": {"layer": "Люди", "title": "Инженер / агент", "sub": "backend_ctl · MCP", "st": "ext", "sc": "own", "v20": "Управляет живым бэкендом по TCP (JSON по строкам) через backend_ctl. Это же шов 3 для любого нового клиента.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_tablet": {"layer": "Люди", "title": "Планшет", "sub": "веб-пульт, по триггеру", "st": "lib", "sc": "off", "v20": "Появляется только когда продукту нужен планшет или удалённый пульт.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_cpp": {"layer": "Люди", "title": "Коллеги C++", "sub": "нативные узлы", "st": "lib", "sc": "off", "v20": "Могут писать целые узлы на C++ при условии, что узел говорит с системой по документам швов 1–3. Критерии приёмки результата у них ещё не спрошены (решение владельца №6).", "scratch": "", "trig": "", "src": "лид", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "prototype/backend": {"layer": "prototype", "tier": "—", "purpose": "Backend прототипа: конфигурация системы и топология процессов и плагинов; сюда — менять wiring системы", "api": "—", "plans": 10, "tasks": 97, "commits": 147, "users": 49, "users_tests": 39, "findings": 0, "loc": 4715, "files": 31, "title": "prototype/backend", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/backend"}, "prototype/frontend": {"layer": "prototype", "tier": "—", "purpose": "GUI-пакет прототипа: Qt-презентация PySide6 поверх бэкенда; сюда — менять экраны и GUI прототипа", "api": "—", "plans": 15, "tasks": 134, "commits": 229, "users": 67, "users_tests": 37, "findings": 0, "loc": 48621, "files": 283, "title": "prototype/frontend", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/frontend"}, "prototype/domain": {"layer": "prototype", "tier": "—", "purpose": "Изолированный типизированный domain-слой: frozen-сущности и исключения; сюда — менять доменные сущности", "api": "—", "plans": 3, "tasks": 45, "commits": 60, "users": 135, "users_tests": 83, "findings": 0, "loc": 4286, "files": 27, "title": "prototype/domain", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/domain"}, "prototype/adapters": {"layer": "prototype", "tier": "—", "purpose": "Adapter-слой между domain Protocols и реестрами фреймворка; сюда — менять привязку domain к реестрам", "api": "—", "plans": 4, "tasks": 48, "commits": 53, "users": 25, "users_tests": 20, "findings": 0, "loc": 2762, "files": 20, "title": "prototype/adapters", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/adapters"}, "prototype/recipes": {"layer": "prototype", "tier": "—", "purpose": "Управление рецептами прототипа: RecipeManager и миграции форматов; сюда — менять рецепты прототипа", "api": "—", "plans": 7, "tasks": 71, "commits": 109, "users": 19, "users_tests": 10, "findings": 0, "loc": 1516, "files": 11, "title": "prototype/recipes", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/recipes"}, "prototype/registers": {"layer": "prototype", "tier": "—", "purpose": "Общие регистры прототипа между плагинами и RegistersManager; сюда — менять shared-регистры", "api": "—", "plans": 0, "tasks": 0, "commits": 14, "users": 13, "users_tests": 7, "findings": 0, "loc": 1037, "files": 5, "title": "prototype/registers", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Расходный слой продукта 1: композиция из рецепта, плагинов и сервисов. Принцип владельца: framework универсален, прототип расходный.", "scratch": "Тот же слой.", "trig": "—", "src": "лид", "cmd": "prototype/registers"}, "x_prod2": {"layer": "Продукты", "title": "Продукт 2", "sub": "домен не выбран", "st": "ext", "sc": "own", "v20": "Пока пусто. Именно появление второго продукта проверит швы и шаблон приложения. Какой домен — решение владельца №3.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_prodN": {"layer": "Продукты", "title": "Продукт N", "sub": "по шаблону app_module", "st": "ext", "sc": "own", "v20": "Собирается по шаблону приложения из рецепта и плагинов своего домена.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "seam1": {"layer": "Шов", "title": "ШОВ 1 · продукты ↔ фреймворк", "sub": "версия рецепта · api_version плагина · semver", "st": "seam", "sc": "off", "v20": "Несколько продуктов на одном ядре: первое ломающее изменение иначе бьёт по всем сразу. Нужны версия рецепта, api_version в манифесте плагина и semver фреймворка с таблицей совместимости.", "scratch": "В опыте «с нуля» швов не было: в схеме с общей шиной их нет.", "trig": "Минимум швов: 1,5–3 недели по оценке Fable (умножать на 2–3).", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "plugins/sources": {"layer": "plugins", "tier": "—", "purpose": "Плагины источников данных: камеры, файлы, генераторы; сюда — менять источники", "api": "—", "plans": 3, "tasks": 17, "commits": 25, "users": 7, "users_tests": 5, "findings": 0, "loc": 2602, "files": 24, "title": "plugins/sources", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/sources"}, "plugins/processing": {"layer": "plugins", "tier": "—", "purpose": "Плагины обработки кадров: фильтры, детекторы, преобразования; сюда — менять обработку кадров", "api": "—", "plans": 4, "tasks": 9, "commits": 51, "users": 8, "users_tests": 8, "findings": 0, "loc": 7962, "files": 125, "title": "plugins/processing", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/processing"}, "plugins/render": {"layer": "plugins", "tier": "—", "purpose": "Плагины отрисовки overlay и композитинга кадров для GUI; сюда — менять отрисовку", "api": "—", "plans": 1, "tasks": 8, "commits": 9, "users": 1, "users_tests": 1, "findings": 0, "loc": 1112, "files": 18, "title": "plugins/render", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/render"}, "plugins/filter": {"layer": "plugins", "tier": "—", "purpose": "Плагины фильтрации и анализа координат (виртуальная линия и др.); сюда — менять фильтры координат", "api": "—", "plans": 1, "tasks": 11, "commits": 5, "users": 4, "users_tests": 4, "findings": 0, "loc": 655, "files": 7, "title": "plugins/filter", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/filter"}, "plugins/calibration": {"layer": "plugins", "tier": "—", "purpose": "Плагины калибровки (камера и робот и др.); сюда — менять калибровочные плагины", "api": "—", "plans": 1, "tasks": 1, "commits": 7, "users": 1, "users_tests": 0, "findings": 0, "loc": 1000, "files": 7, "title": "plugins/calibration", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/calibration"}, "plugins/control": {"layer": "plugins", "tier": "—", "purpose": "Плагины управления внешними устройствами: роботы, IO, реле; сюда — менять управляющие плагины", "api": "—", "plans": 1, "tasks": 2, "commits": 14, "users": 1, "users_tests": 1, "findings": 0, "loc": 703, "files": 5, "title": "plugins/control", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/control"}, "plugins/io": {"layer": "plugins", "tier": "—", "purpose": "Плагины ввода-вывода: запись в БД, выгрузка кадров, экспорт; сюда — менять ввод-вывод", "api": "—", "plans": 3, "tasks": 21, "commits": 49, "users": 6, "users_tests": 6, "findings": 0, "loc": 3983, "files": 32, "title": "plugins/io", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/io"}, "plugins/sinks": {"layer": "plugins", "tier": "—", "purpose": "Плагины-приёмники: вывод и экспорт данных из конца цепочки; сюда — менять приёмники данных", "api": "—", "plans": 0, "tasks": 0, "commits": 6, "users": 0, "users_tests": 0, "findings": 0, "loc": 331, "files": 5, "title": "plugins/sinks", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/sinks"}, "plugins/runtime": {"layer": "plugins", "tier": "—", "purpose": "Плагины-исполнители pipeline: chain executor, пулы воркеров; сюда — менять исполнение pipeline", "api": "—", "plans": 0, "tasks": 0, "commits": 9, "users": 0, "users_tests": 0, "findings": 0, "loc": 702, "files": 9, "title": "plugins/runtime", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/runtime"}, "plugins/hub": {"layer": "plugins", "tier": "—", "purpose": "Плагины-хабы (always-on сервисы устройств, device_hub); сюда — менять хаб устройств и его IPC-клиент", "api": "—", "plans": 1, "tasks": 3, "commits": 42, "users": 18, "users_tests": 12, "findings": 0, "loc": 1651, "files": 6, "title": "plugins/hub", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/hub"}, "plugins/sim": {"layer": "plugins", "tier": "—", "purpose": "Плагины-хосты симулятора линии; сервис держит логику, плагин жизненный цикл; сюда — менять хост симуляции", "api": "—", "plans": 2, "tasks": 11, "commits": 69, "users": 5, "users_tests": 5, "findings": 0, "loc": 5513, "files": 12, "title": "plugins/sim", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/sim"}, "plugins/utility": {"layer": "plugins", "tier": "—", "purpose": "Служебные и тестовые плагины (heartbeat, pilot_widgets и др.); сюда — менять служебные плагины", "api": "—", "plans": 0, "tasks": 0, "commits": 6, "users": 0, "users_tests": 0, "findings": 0, "loc": 349, "files": 4, "title": "plugins/utility", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Словарь плагинов, общий для продуктов. Плагин знает только PluginContext и не импортирует прототип (ADR-120).", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "plugins/utility"}, "services/camera_device": {"layer": "services", "tier": "—", "purpose": "Общее ядро камер: контракт порта прибора и его фейк; сюда — менять порт, границу SDK и эмуляцию", "api": "—", "plans": 1, "tasks": 29, "commits": 22, "users": 6, "users_tests": 3, "findings": 0, "loc": 2962, "files": 11, "title": "services/camera_device", "st": "edge", "sc": "own", "sct": "", "add": "драйвер на марку", "pre": "", "v20": "Общее ядро камер: порт прибора и фейк. Новая марка — новый драйвер, не новая дорога.", "scratch": "Остаётся своим.", "trig": "—", "src": "Fable", "cmd": "services/camera_device"}, "services/hikvision_camera": {"layer": "services", "tier": "—", "purpose": "Сервис промышленной камеры Hikvision: SDK, логика, плагин; сюда — менять работу с камерой", "api": "HikvisionCameraProtocol", "plans": 1, "tasks": 31, "commits": 21, "users": 7, "users_tests": 3, "findings": 1, "loc": 4515, "files": 23, "title": "services/hikvision_camera", "st": "edge", "sc": "own", "sct": "", "add": "драйвер на марку", "pre": "", "v20": "Образец правильного дополнения: драйвер на марку через camera_device. Старый путь Hikvision убирает задача 4.2b (по хэндофу лида, задачу не читал).", "scratch": "Остаётся своим.", "trig": "—", "src": "Fable", "cmd": "services/hikvision_camera"}, "services/phone_gateway": {"layer": "services", "tier": "—", "purpose": "Приём фото и слов с телефона по WiFi через браузер; сюда — менять приём данных с телефона", "api": "FrameSource", "plans": 0, "tasks": 0, "commits": 3, "users": 2, "users_tests": 1, "findings": 1, "loc": 1240, "files": 11, "title": "services/phone_gateway", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/phone_gateway"}, "services/code_reader": {"layer": "services", "tier": "—", "purpose": "Сервис считывателя кодов Hikrobot ID3000: приём результатов по TCP, разбор; сюда — менять чтение кодов", "api": "CodeQuality, CodeRead, CodeReaderSinkProtocol, ReadResult, ReadStatus, ResultHandler, SdkCodeReader, SdkFrame, decode_image, frame_from_raw", "plans": 2, "tasks": 22, "commits": 12, "users": 3, "users_tests": 3, "findings": 3, "loc": 5125, "files": 27, "title": "services/code_reader", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/code_reader"}, "services/device_hub": {"layer": "services", "tier": "—", "purpose": "Центральный реестр устройств и менеджер соединений; сюда — менять учёт и подключение устройств", "api": "—", "plans": 2, "tasks": 16, "commits": 44, "users": 21, "users_tests": 20, "findings": 0, "loc": 9188, "files": 30, "title": "services/device_hub", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/device_hub"}, "services/modbus": {"layer": "services", "tier": "—", "purpose": "Драйвер Modbus-TCP и RS485 для связи с PLC; сюда — менять обмен по Modbus", "api": "ModbusClientProtocol, RegisterTransport", "plans": 2, "tasks": 16, "commits": 13, "users": 33, "users_tests": 18, "findings": 1, "loc": 2866, "files": 24, "title": "services/modbus", "st": "edge", "sc": "own", "sct": "", "add": "+ asyncua (OPC UA)", "pre": "", "v20": "Modbus остаётся. OPC UA добавляется сервисом asyncua над State, протокол выбирается на устройство в рецепте. Триггер: в продукте появился ПЛК с OPC UA, 1–2 недели.", "scratch": "Остаётся своим.", "trig": "—", "src": "Fable", "cmd": "services/modbus"}, "services/robot_comm": {"layer": "services", "tier": "—", "purpose": "Сервис робота Delta поверх Modbus: карта регистров, доменные методы; сюда — менять управление роботом", "api": "DeviceTransport, RobotClientProtocol", "plans": 3, "tasks": 20, "commits": 54, "users": 95, "users_tests": 74, "findings": 0, "loc": 13725, "files": 45, "title": "services/robot_comm", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/robot_comm"}, "services/vfd_comm": {"layer": "services", "tier": "—", "purpose": "Сервис частотного преобразователя INVT GD20, не зависит от транспорта; сюда — менять управление ПЧ", "api": "VfdClientProtocol", "plans": 0, "tasks": 0, "commits": 4, "users": 6, "users_tests": 4, "findings": 1, "loc": 494, "files": 9, "title": "services/vfd_comm", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/vfd_comm"}, "services/ml_inference": {"layer": "services", "tier": "—", "purpose": "Инференс нейросетей для pipeline: кадр на входе, классы и confidence на выходе; сюда — менять инференс", "api": "InferenceBackend, ModelCatalog", "plans": 1, "tasks": 1, "commits": 17, "users": 6, "users_tests": 3, "findings": 2, "loc": 1858, "files": 17, "title": "services/ml_inference", "st": "edge", "sc": "own", "sct": "", "add": "провайдеры ONNX Runtime", "pre": "", "v20": "ONNX Runtime как основа, провайдеры по железу. Образец правильного дополнения.", "scratch": "Остаётся своим.", "trig": "—", "src": "Fable", "cmd": "services/ml_inference"}, "services/ml_train": {"layer": "services", "tier": "—", "purpose": "Обучение классификаторов и выбор лучшей модели по метрикам; сюда — менять обучение и сравнение прогонов", "api": "ModelExporter, RunSource, TrainSample", "plans": 0, "tasks": 0, "commits": 12, "users": 2, "users_tests": 1, "findings": 3, "loc": 2206, "files": 12, "title": "services/ml_train", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/ml_train"}, "services/dataset_gen": {"layer": "services", "tier": "—", "purpose": "Генератор синтетического датасета методом cut-and-paste; сюда — менять создание обучающих данных", "api": "SampleGenerator", "plans": 1, "tasks": 7, "commits": 19, "users": 72, "users_tests": 62, "findings": 0, "loc": 2494, "files": 23, "title": "services/dataset_gen", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/dataset_gen"}, "services/layer_render": {"layer": "services", "tier": "—", "purpose": "Слои сцены: фон, объект, пресет, каталог классов; сюда — менять сборку кадра из слоёв", "api": "ScrollingTile, SolidFill", "plans": 2, "tasks": 11, "commits": 19, "users": 28, "users_tests": 10, "findings": 0, "loc": 2716, "files": 15, "title": "services/layer_render", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/layer_render"}, "services/line_sim": {"layer": "services", "tier": "—", "purpose": "Объект-агностичный движок сцены лента с объектами; сюда — менять симуляцию ленты", "api": "AUGMENT_FIELDS, LayerAugment, LayerMode, LayerSpec, ObjectPassport, RangeF, SceneCompositorProtocol, SpriteSource", "plans": 3, "tasks": 12, "commits": 61, "users": 25, "users_tests": 23, "findings": 0, "loc": 3038, "files": 19, "title": "services/line_sim", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/line_sim"}, "services/auth": {"layer": "services", "tier": "—", "purpose": "Аутентификация и RBAC: хеши паролей, пользователи, роли; сюда — менять вход и права доступа", "api": "IAuditWriter, IAuthManager, IPasswordHasher, ISessionTracker, IUserStorage", "plans": 0, "tasks": 0, "commits": 17, "users": 21, "users_tests": 7, "findings": 4, "loc": 3450, "files": 19, "title": "services/auth", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/auth"}, "services/sql": {"layer": "services", "tier": "—", "purpose": "Универсальный SQL-менеджер на SQLAlchemy: PostgreSQL, MySQL, SQLite; сюда — менять доступ к БД", "api": "IAsyncEngineAdapter, IAsyncUnitOfWork, IEngineAdapter, IRepository, ISQLManager, ISchemaMapper, ISyncEngineAdapter, IUnitOfWork", "plans": 1, "tasks": 31, "commits": 20, "users": 10, "users_tests": 5, "findings": 8, "loc": 3392, "files": 31, "title": "services/sql", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/sql"}, "services/documents": {"layer": "services", "tier": "—", "purpose": "Хранилище документов: аудит смен наблюдаемости и вердикты по детали; сюда — менять аудит и вердикты", "api": "IDocumentSink, IDocumentStore, KIND_AUDIT, KIND_VERDICT", "plans": 0, "tasks": 0, "commits": 5, "users": 3, "users_tests": 1, "findings": 0, "loc": 659, "files": 5, "title": "services/documents", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/documents"}, "services/otel_export": {"layer": "services", "tier": "—", "purpose": "Экспорт записей наблюдаемости наружу по OTLP; сюда — менять маппинг и отправку данных наблюдаемости", "api": "ExportOutcome, FlushOutcome, LogExporter, MappedRecord, ObservabilityPort, RecordMapper, Resource, ResourceResolver", "plans": 2, "tasks": 19, "commits": 13, "users": 8, "users_tests": 6, "findings": 0, "loc": 1764, "files": 6, "title": "services/otel_export", "st": "edge", "sc": "own", "sct": "", "add": "сток для OTel", "pre": "", "v20": "Единственное место, где OpenTelemetry входит в систему. Только сток, основным не становится никогда. Отправка по расписанию ещё не сделана.", "scratch": "Остаётся своим.", "trig": "—", "src": "Fable", "cmd": "services/otel_export"}, "services/control_panel": {"layer": "services", "tier": "—", "purpose": "Сервис Пульт: GUI-контролы выдают значения на порты pipeline; сюда — менять контролы и их сигналы", "api": "ControlSpec, ControlType", "plans": 0, "tasks": 0, "commits": 10, "users": 3, "users_tests": 1, "findings": 0, "loc": 473, "files": 7, "title": "services/control_panel", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Прикладной сервис. Без изменений в 2.0.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "services/control_panel"}, "process_manager_module": {"layer": "framework", "tier": "core", "purpose": "Оркестратор процессов: запуск системы, реестр, приоритеты, мониторинг; сюда — менять управление процессами", "api": "IProcessManagerProcess, IProcessRegistry, ISystemLauncher", "plans": 10, "tasks": 70, "commits": 186, "users": 65, "users_tests": 49, "findings": 17, "loc": 17323, "files": 41, "title": "process_manager_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Супервизия, рецепт → топология, честный стоп, инкарнации процессов и каркас backend_ctl — то, чем продукт отличается. Идеи берём, модуль не заменяем.", "scratch": "Остаётся своим: в опыте «с нуля» ProcessManager просто становится ещё одним пиром шины.", "trig": "—", "src": "Fable", "cmd": "process_manager_module"}, "recipe": {"layer": "framework", "tier": "optional", "purpose": "Управление рецептами: снимки конфигурации, определение формата, миграции, CRUD; сюда — менять рецепты", "api": "RecipeEngineProtocol, RecipeManagerProtocol, StoreProtocol", "plans": 2, "tasks": 33, "commits": 28, "users": 44, "users_tests": 21, "findings": 4, "loc": 3483, "files": 12, "title": "recipe", "st": "seam", "sc": "own", "sct": "", "add": "", "pre": "версия рецепта", "v20": "Рецепт — источник топологии (recipe.activate → apply_topology). Шов 1: у рецепта должно быть поле version, чтобы продукты не ломались от общих изменений.", "scratch": "Остаётся своим.", "trig": "Версия рецепта — до 1.0 (в минимуме швов, 1,5–3 недели на все швы по оценке Fable).", "src": "Fable", "cmd": "recipe"}, "app_module": {"layer": "framework", "tier": "optional", "purpose": "Шаблон приложения (composition root): общая сборка многопроцессного приложения; сюда — менять каркас запуска", "api": "BlueprintLoader, LauncherFactory, ManifestStoreProtocol, ProcDictsBuilder, StateBootstrap, ThrottleRules", "plans": 5, "tasks": 52, "commits": 28, "users": 41, "users_tests": 32, "findings": 7, "loc": 2085, "files": 9, "title": "app_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Шаблон приложения: по нему собираются продукты 2…N. Его первым проверит второй продукт, поэтому менять API до продукта №2 не стоит.", "scratch": "Остаётся своим.", "trig": "Продукт №2.", "src": "лид", "cmd": "app_module"}, "service_module": {"layer": "framework", "tier": "optional", "purpose": "Реестр и жизненный цикл долгоживущих сервисов (камеры, БД, auth); сюда — менять учёт сервисов", "api": "IService, ServiceLifecycle", "plans": 1, "tasks": 31, "commits": 4, "users": 29, "users_tests": 11, "findings": 0, "loc": 790, "files": 5, "title": "service_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Учёт долгоживущих сервисов (камеры, БД, auth). Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "service_module"}, "process_module": {"layer": "framework", "tier": "core", "purpose": "Базовый класс процесса: создание, инициализация, управление, мониторинг; сюда — менять жизнь процесса", "api": "IProcessCommunication, IProcessModule, ISharedResources, ProcessStatsDict", "plans": 15, "tasks": 119, "commits": 337, "users": 463, "users_tests": 249, "findings": 16, "loc": 35219, "files": 83, "title": "process_module", "st": "seam", "sc": "own", "sct": "", "add": "", "pre": "api_version плагина", "v20": "База дочернего процесса и контракт плагина (PluginContext, манифест). Шов 1: api_version в манифесте. Free-threading Python не раньше, чем OpenCV и PySide6 выпустят free-threaded колёса (сейчас только abi3).", "scratch": "Остаётся своим.", "trig": "api_version — до 1.0. Free-threading ждёт колёса библиотек.", "src": "Fable", "cmd": "process_module"}, "worker_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер потоков-воркеров внутри процесса: старт, стоп, пауза, перезапуск; сюда — менять управление потоками", "api": "IExecutorManager, IExecutorRegistry, IWorkerLifecycle, IWorkerManager, IWorkerRegistry, OrderedExecutor, WorkerStatus, WorkerType", "plans": 2, "tasks": 36, "commits": 20, "users": 58, "users_tests": 44, "findings": 35, "loc": 2972, "files": 19, "title": "worker_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Потоки внутри процесса (LOOP/TASK, KeyedExecutor). Свободные потоки Python появятся здесь первыми, но только после колёс OpenCV и PySide6.", "scratch": "Остаётся своим.", "trig": "Колёса OpenCV и PySide6 без abi3.", "src": "лид", "cmd": "worker_module"}, "chain_module": {"layer": "framework", "tier": "core", "purpose": "Движок исполнения цепочек и DAG-pipeline, в т.ч. между процессами; сюда — менять порядок и шаги исполнения", "api": "IChainLogger, IChainRunnable, IExecutionStep, INodeConnection, IRemoteExecutable, IStepNode, IStepNodeWithWorker", "plans": 2, "tasks": 33, "commits": 18, "users": 5, "users_tests": 3, "findings": 21, "loc": 2004, "files": 20, "title": "chain_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Движок цепочек и DAG. В опыте «с нуля» тоже оставался своим (chain + OpenCV + ONNX Runtime + Polars).", "scratch": "Остаётся своим, под ним готовые OpenCV, ONNX Runtime, Polars.", "trig": "—", "src": "лид", "cmd": "chain_module"}, "command_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер команд над dispatch_module: регистрация обработчиков по имени; сюда — менять приём команд", "api": "ICommandManager", "plans": 3, "tasks": 41, "commits": 17, "users": 22, "users_tests": 17, "findings": 5, "loc": 1086, "files": 9, "title": "command_module", "st": "frozen", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Команды и стоп на одной машине идут по mp.Queue. Вторая дорога к той же работе запрещена. Модуль не растим.", "scratch": "Команды пошли бы запросами по шине. Fable отклонил: в очередях живёт семантика супервизии, общая шина её не даёт.", "trig": "—", "src": "Fable", "cmd": "command_module"}, "dispatch_module": {"layer": "framework", "tier": "core", "purpose": "Диспетчеризация входящих сообщений к обработчикам внутри процесса; сюда — менять стратегии обработки", "api": "DispatchStrategy, IDispatcher", "plans": 2, "tasks": 33, "commits": 19, "users": 8, "users_tests": 5, "findings": 13, "loc": 2196, "files": 17, "title": "dispatch_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Диспетчеризация сообщений внутри процесса. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "dispatch_module"}, "console_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер терминальных окон процесса: показ, перехват вывода, ввод; сюда — менять консоль процесса", "api": "IConsoleManager, IPlatformConsole", "plans": 1, "tasks": 31, "commits": 10, "users": 6, "users_tests": 1, "findings": 22, "loc": 1659, "files": 19, "title": "console_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Консоль процесса. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "console_module"}, "message_module": {"layer": "framework", "tier": "core", "purpose": "Транспортный протокол сообщений между менеджерами и процессами; сюда — менять формат сообщений", "api": "IMessage", "plans": 2, "tasks": 40, "commits": 17, "users": 24, "users_tests": 7, "findings": 3, "loc": 2151, "files": 25, "title": "message_module", "st": "seam", "sc": "lib", "sct": "msgspec", "add": "+ msgspec на границе", "pre": "версия конверта", "v20": "Свой Message остаётся. Fable отверг замену на msgspec: «решает не ту задачу», скорость не болит (receive p50 ≈ 0,001 мс), болит отсутствие версии. Добавить поле version в конверт (по умолчанию 1) и проверить контракт-тестом. msgspec (JSON/MessagePack) — только на внешней границе (сокет, чужой язык, веб).", "scratch": "msgspec в каждом процессе вместо Message. Fable не принял.", "trig": "Версия конверта — до 1.0 (в конверте IPC поля версии нет: проверено, 0 совпадений). msgspec — в день первого нативного узла или веб-клиента. Вывод про языконезависимый формат — рассуждение лида, в коде не проверено.", "src": "Fable", "cmd": "message_module"}, "router_module": {"layer": "framework", "tier": "core", "purpose": "Маршрутизация сообщений между процессами через RouterManager; сюда — менять каналы и правила доставки", "api": "IMessageChannel, IRouterManager", "plans": 7, "tasks": 64, "commits": 90, "users": 75, "users_tests": 49, "findings": 16, "loc": 6856, "files": 24, "title": "router_module", "st": "edge", "sc": "lib", "sct": "Zenoh", "add": "+ канал Zenoh", "pre": "набор соответствия канала", "v20": "Основной путь не меняется: очереди и SHM. Zenoh — третий тип канала рядом с queue_channel и socket_channel. Один набор соответствия для всех реализаций IMessageChannel. Zenoh не даёт сигнала «читатель умер» и возврата loan-слотов, поэтому системные провода на него ставить нельзя.", "scratch": "Единая шина Zenoh вместо очередей и Router. Fable не принял: заменяемые слои это 24% кода, реальная экономия 10–15%, а не 30–40%.", "trig": "Триггер: вторая машина в продукте. 2–3 недели со стендом (оценка Fable). Параметризованы ли контракт-тесты Router по реализациям канала — не проверено.", "src": "Fable", "cmd": "router_module"}, "channel_routing_module": {"layer": "framework", "tier": "core", "purpose": "Базовая маршрутизация по каналам для роутера, логгера и ошибок; сюда — менять общую логику каналов", "api": "IBufferStrategy, IChannel, IChannelRoutingManager, Outcome, channel_accepted, outcome_of", "plans": 4, "tasks": 48, "commits": 54, "users": 83, "users_tests": 51, "findings": 34, "loc": 6195, "files": 24, "title": "channel_routing_module", "st": "frozen", "sc": "lib", "sct": "ключи Zenoh", "add": "", "pre": "", "v20": "База каналов для Router, логгера, ошибок и статистики. Заморожена, не растим.", "scratch": "Исчезла бы вместе с Router: ключи и подписки даёт Zenoh. Это моё чтение схемы, Fable модуль отдельно не разбирал.", "trig": "—", "src": "лид", "cmd": "channel_routing_module"}, "shared_resources_module": {"layer": "framework", "tier": "core", "purpose": "Pickle-safe реестр общих ресурсов для межпроцессного обмена; сюда — менять передачу ресурсов процессам", "api": "IConfigStore, IEventManager, IMemoryManager, IProcessStateRegistry, IQueueRegistry, ISharedResourcesManager", "plans": 4, "tasks": 46, "commits": 52, "users": 62, "users_tests": 48, "findings": 70, "loc": 6516, "files": 56, "title": "shared_resources_module", "st": "seam", "sc": "lib", "sct": "Zenoh SHM / iceoryx2", "add": "iceoryx2 — только пилот", "pre": "формат SHM документом", "v20": "SHM-кольцо (seqlock, loan, ReaderGoneQueue, инкарнации) — основной путь кадров на одной машине. Заморожено. Формат кольца и заголовка кадра записать документом, к нему автономный читатель (B-5): это шов для нативных узлов. iceoryx2 — только пилотом со сроком.", "scratch": "Zenoh SHM или iceoryx2 вместо своего кольца. Fable: выигрыш у iceoryx2 — чужая поддержка, а не скорость, схема у вас та же.", "trig": "Триггер iceoryx2: упор в потолок собственного кольца. Измерено 640×480, один хоп ≈ 0,3 мс p50; 1080p и несколько хопов не измерены (B-2).", "src": "Fable", "cmd": "shared_resources_module"}, "logger_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер логирования: каналы записи, сбор логов процессов; сюда — менять вывод и хранение логов", "api": "ILogChannel, ILoggerManager, LogLevel, LogScope, ScopeName", "plans": 7, "tasks": 68, "commits": 63, "users": 282, "users_tests": 109, "findings": 24, "loc": 8483, "files": 24, "title": "logger_module", "st": "edge", "sc": "lib", "sct": "OpenTelemetry", "add": "+ сток OTel", "pre": "", "v20": "Свой журнал — основной путь навсегда. OTel только сток: Services/otel_export. Сбой стока не должен тормозить журнал (ограниченный буфер, сброс со счётчиком).", "scratch": "OpenTelemetry в каждом процессе. Fable: для логов в Python OTel пока в статусе Development.", "trig": "Сток готов частично: otel_export шлёт пачку по команде otel_export.flush, отправки по расписанию ещё нет.", "src": "Fable", "cmd": "logger_module"}, "error_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер ошибок на базе логгера: каналы по уровням, traceback; сюда — менять обработку и запись ошибок", "api": "DeviceOpenFailed, FrameworkFailure, IErrorManager, ObservabilityMisuse, ResourceUnavailable, SubsystemStartFailed", "plans": 3, "tasks": 45, "commits": 21, "users": 50, "users_tests": 37, "findings": 1, "loc": 1095, "files": 8, "title": "error_module", "st": "edge", "sc": "lib", "sct": "OpenTelemetry", "add": "+ сток OTel", "pre": "", "v20": "Как у журнала: свой основной путь, OTel только сток.", "scratch": "OpenTelemetry. Не принято.", "trig": "См. журнал.", "src": "Fable", "cmd": "error_module"}, "statistics_module": {"layer": "framework", "tier": "core", "purpose": "Менеджер статистики и метрик, третья плоскость наблюдаемости; сюда — менять сбор и вывод метрик", "api": "IStatsManager", "plans": 4, "tasks": 48, "commits": 48, "users": 36, "users_tests": 27, "findings": 7, "loc": 4549, "files": 18, "title": "statistics_module", "st": "edge", "sc": "lib", "sct": "OpenTelemetry", "add": "+ сток OTel", "pre": "", "v20": "Как у журнала: свой основной путь, OTel только сток.", "scratch": "OpenTelemetry. Не принято.", "trig": "См. журнал.", "src": "Fable", "cmd": "statistics_module"}, "data_schema_module": {"layer": "framework", "tier": "core", "purpose": "Ядро описания структур данных на Pydantic: схемы, поля, маршрутизация; сюда — менять схемы и валидацию", "api": "HasBuild, IAsyncRegisterStorage, IAsyncSchemaStorage, IDataConverter, IDataValidator, IDocumentationFormatter, IRegisterStorage, ISchema, ISchemaAdapter, ISchemaDocumentationGenerator, ISchemaManager, ISchemaRegistry, ISchemaStorage, ISchemaVisualizer, IStorageManager, IVersionManager, IVisualizationFormatter", "plans": 5, "tasks": 64, "commits": 36, "users": 134, "users_tests": 42, "findings": 44, "loc": 10765, "files": 66, "title": "data_schema_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "SchemaBase остаётся внутри системы. Fable: Pydantic внутри, dict на границе; msgspec только на внешней границе, не раньше 1.0.", "scratch": "msgspec в схемах. Не принято.", "trig": "—", "src": "Fable", "cmd": "data_schema_module"}, "config_module": {"layer": "framework", "tier": "core", "purpose": "Управление конфигурациями в рантайме: схемы, контейнер, менеджер; сюда — менять загрузку и хранение конфигов", "api": "IConfig, IConfigManager, IConfigObserver", "plans": 2, "tasks": 32, "commits": 28, "users": 31, "users_tests": 12, "findings": 2, "loc": 2005, "files": 17, "title": "config_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Единственный конфиг-слой. Два конфига — дефект.", "scratch": "В опыте не менялся.", "trig": "—", "src": "Fable", "cmd": "config_module"}, "registers_module": {"layer": "framework", "tier": "optional", "purpose": "Рантайм именованных регистров: подписки на поля, карта маршрутов, отправка; сюда — менять регистры", "api": "IRegistersManager", "plans": 2, "tasks": 42, "commits": 20, "users": 57, "users_tests": 31, "findings": 3, "loc": 1137, "files": 7, "title": "registers_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Рантайм регистров (GUI-ориентирован). Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "registers_module"}, "state_store_module": {"layer": "framework", "tier": "optional", "purpose": "Реактивное иерархическое дерево состояния: сервер и клиентский кэш с подписками; сюда — менять общее состояние", "api": "IRouter, IStateProxy, IStateStore, IStateStoreManager", "plans": 5, "tasks": 42, "commits": 63, "users": 121, "users_tests": 99, "findings": 11, "loc": 8200, "files": 37, "title": "state_store_module", "st": "edge", "sc": "own", "sct": "", "add": "+ мост удалённых подписчиков", "pre": "", "v20": "StateStore остаётся единственным хранилищем состояния. Для второй машины — мост для удалённых подписчиков, не второе хранилище.", "scratch": "Оставался своим (в схеме «с нуля» State тоже свой).", "trig": "Вторая машина.", "src": "Fable", "cmd": "state_store_module"}, "event_module": {"layer": "framework", "tier": "optional", "purpose": "Типизированная шина событий-фактов внутри процесса; сюда — менять подписки и публикацию событий", "api": "EventBusProtocol, Subscription", "plans": 0, "tasks": 0, "commits": 11, "users": 4, "users_tests": 1, "findings": 5, "loc": 459, "files": 4, "title": "event_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Типизированная шина событий внутри процесса. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "event_module"}, "actions_module": {"layer": "framework", "tier": "optional", "purpose": "Action-шина с undo/redo и объединением правок для GUI; сюда — менять откат и повтор действий", "api": "IActionLogRepository, IActionLogWriter, IRegistersManagerGui", "plans": 0, "tasks": 0, "commits": 12, "users": 35, "users_tests": 18, "findings": 6, "loc": 1147, "files": 11, "title": "actions_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Undo/redo для GUI. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "actions_module"}, "frontend_module": {"layer": "framework", "tier": "optional", "purpose": "UI-фреймворк: конструктор PySide6-приложений из виджетов и регистров; сюда — менять GUI-каркас", "api": "AccessContextSource, AppIdentity, DEFAULT_TRACKED_SUFFIXES, IConfigurableWidget, IFrontendManager, IRegistersManager, IRegistersManagerGui, IRouterLike, ISignalProvider, IWidgetFactory, IWidgetRegistry, IWindowRegistry, LazyTab, PlaceholderFactory, QThreadHandle, QtTreeMismatch, SupportsCommandMessage, TabRegistry, TabSpec, TelemetryHistorySource, … ещё 5", "plans": 9, "tasks": 94, "commits": 88, "users": 97, "users_tests": 26, "findings": 18, "loc": 25598, "files": 254, "title": "frontend_module", "st": "edge", "sc": "own", "sct": "", "add": "+ веб-клиент по backend_ctl", "pre": "", "v20": "Конструктор PySide6-приложений. Редактор графа свой, второй редактор — дефект. Веб (TypeScript) — только второй клиент по протоколу backend_ctl. Одна спека UI. Конструктор GUI выносится из прототипа в 2.0.", "scratch": "GUI становится пиром шины Zenoh. Не принято.", "trig": "Веб — когда продукту нужен планшет или удалённый пульт. Атлас: фронтенд прототипа 48,6 тыс. строк против 25,6 тыс. в этом модуле (без tests) — вынос конструктора ещё впереди.", "src": "Fable", "cmd": "frontend_module"}, "display_module": {"layer": "framework", "tier": "optional", "purpose": "Реестр именованных SHM-каналов для вывода кадров; сюда — менять каналы отображения кадров", "api": "DisplayEntry, IDisplayChannel, IDisplayRegistry", "plans": 1, "tasks": 31, "commits": 5, "users": 15, "users_tests": 6, "findings": 4, "loc": 670, "files": 3, "title": "display_module", "st": "edge", "sc": "own", "sct": "", "add": "+ Rerun (dev)", "pre": "", "v20": "Реестр каналов вывода кадров. Rerun — только инструмент разработчика (dev-extra), кадр берётся из уже собранного изображения; второй путь сборки картинки — дефект.", "scratch": "Остаётся своим.", "trig": "Сразу после β, 1–2 дня (оценка Fable).", "src": "Fable", "cmd": "display_module"}, "telemetry_readmodel_module": {"layer": "framework", "tier": "optional", "purpose": "Qt-free ядро read-model телеметрии: проекция значений и кольцевая история; сюда — менять чтение телеметрии", "api": "ITelemetryReadModel", "plans": 3, "tasks": 14, "commits": 16, "users": 11, "users_tests": 7, "findings": 1, "loc": 865, "files": 4, "title": "telemetry_readmodel_module", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "Read-model телеметрии для GUI. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "telemetry_readmodel_module"}, "base_manager": {"layer": "framework", "tier": "core", "purpose": "Базовый менеджер: жизненный цикл, адаптеры, наблюдаемость; сюда — менять фундамент всех менеджеров", "api": "CloseReport, IBaseAdapter, IBaseManager, IHandle, IObservableMixin, IScope, Reporter, Resource, ScopeClosedError, Stoppable", "plans": 3, "tasks": 46, "commits": 54, "users": 117, "users_tests": 63, "findings": 8, "loc": 3980, "files": 21, "title": "base_manager", "st": "own", "sc": "own", "sct": "", "add": "", "pre": "", "v20": "База всех менеджеров. Без изменений.", "scratch": "Остаётся своим.", "trig": "—", "src": "лид", "cmd": "base_manager"}, "seam2": {"layer": "Шов", "title": "ШОВ 2 · ядро ↔ транспорт", "sub": "версия конверта · набор соответствия · формат SHM", "st": "seam", "sc": "off", "v20": "Версия конверта IPC (сегодня поля нет: проверено, 0 совпадений). Один набор соответствия IMessageChannel для всех реализаций канала. Формат SHM-кольца и заголовка кадра документом + автономный читатель (B-5). Без этого шва любое дополнение небезопасно.", "scratch": "В опыте «с нуля» швов не было: в схеме с общей шиной их нет.", "trig": "Минимум швов: 1,5–3 недели по оценке Fable (умножать на 2–3).", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "seam3": {"layer": "Шов", "title": "ШОВ 3 · ядро ↔ клиенты UI", "sub": "спека UI v1 · протокол backend_ctl", "st": "seam", "sc": "off", "v20": "Одна спека UI и протокол backend_ctl (TCP, JSON по строкам). Любой клиент (Qt, веб, Rerun) показывает те же пиксели: изображение с оверлеями собирает бэкенд один раз.", "scratch": "В опыте «с нуля» швов не было: в схеме с общей шиной их нет.", "trig": "Минимум швов: 1,5–3 недели по оценке Fable (умножать на 2–3).", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_queues": {"layer": "Реализации", "title": "Очереди + SHM", "sub": "основной путь, заморожен", "st": "frozen", "sc": "gone", "v20": "Основной путь для команд, стопа и кадров на одной машине. Заморожен, не растим. Замер: ≈0,3 мс p50 на хоп при 640×480 (send 0,23, restore 0,05, receive 0,001 мс), менее 5% кадра 33 мс. 1080p и несколько хопов не измерены (B-2, B-3).", "scratch": "В опыте «с нуля» заменён шиной Zenoh.", "trig": "—", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_zenoh": {"layer": "Реализации", "title": "Zenoh", "sub": "канал между машинами", "st": "lib", "sc": "lib", "v20": "Версия 1.10.2 — Beta (проверено по PyPI); SHM помечен как unstable API. Третий тип канала Router. Заявляет, чего не даёт: сигнал «читатель умер», возврат loan-слотов. Верхняя граница версии обязательна.", "scratch": "Основа опыта «с нуля»: единая шина под всеми процессами.", "trig": "Вторая машина. 2–3 недели со стендом (оценка Fable).", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_native": {"layer": "Реализации", "title": "Нативный узел", "sub": "C++ или Rust, форма 2", "st": "lib", "sc": "off", "v20": "Отдельный процесс-узел в рецепте читает SHM по документу. Нужно письменно: формат кольца и заголовка кадра с автономным читателем (B-5), версия конверта, протокол управления (команды, стоп, «жив», инкарнация, возврат loan-слотов после kill -9), api_version плагина, один набор соответствия для Python- и C++-узлов. Начинать с формы 1 (расширение внутри процесса: PyO3, pybind11, nanobind), она новых контрактов не требует.", "scratch": "В опыте «с нуля» не рассматривался.", "trig": "Замер B-3 показал долю Python в цикле плагина выше 20–30%, либо SDK и код коллег. C++ там, где SDK камер, OpenCV, CUDA; Rust для новых небольших горячих библиотек (мнение лида). Как сегодня устроены протокол управления и возврат слотов на нативной стороне, в коде не читал.", "src": "Fable+лид", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_iox": {"layer": "Реализации", "title": "iceoryx2", "sub": "только пилот со сроком", "st": "lib", "sc": "lib", "v20": "Версия 0.10.1 — Beta, Windows tier 2, версии 1.0 нет. Только пилот под флагом и в отдельном extra, критерии повышения и отказа записаны заранее; неудавшийся пилот удаляется (уточнение принципа 3, решает владелец).", "scratch": "Вариант замены своего SHM-кольца.", "trig": "Потолок собственного кольца.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_msgspec": {"layer": "Реализации", "title": "msgspec / JSON", "sub": "граница для чужих языков", "st": "lib", "sc": "lib", "v20": "Версия 0.22.0 (по отчёту исследователя). Внутри очередей остаются dict и pickle. Нейтральный формат нужен там, где конверт читает не Python: нативный узел, веб. Выбор между msgspec, Protobuf, FlatBuffers, Cap'n Proto принимать вместе со спекой конверта.", "scratch": "msgspec внутри каждого процесса. Не принято.", "trig": "Первый нативный узел или веб-клиент.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_rerun": {"layer": "Реализации", "title": "Rerun", "sub": "отладка кадров, dev-extra", "st": "lib", "sc": "off", "v20": "Только для разработчика. Берёт уже собранное изображение, свою картинку не строит.", "scratch": "В опыте не рассматривался.", "trig": "Сразу после β, 1–2 дня.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_web": {"layer": "Реализации", "title": "Веб-пульт (TypeScript)", "sub": "через шлюз по backend_ctl", "st": "lib", "sc": "off", "v20": "Второй клиент для пульта оператора, не замена Qt-станции и не редактор графа. Прецедент: PultWebPlugin в plugins/sim. Затраты на веб-просмотр кадров (1080p, JPEG или сырые байты по WebSocket) не проверены, нужен замер за день.", "scratch": "В опыте не рассматривался.", "trig": "Планшет или удалённый пульт. 2–4 недели до первой пользы.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_wasm": {"layer": "Реализации", "title": "WASM-песочница", "sub": "чужие плагины чистой логики", "st": "lib", "sc": "off", "v20": "Только для сторонних плагинов чистой логики. WASI 0.3.0 ратифицирован 2026-06-11 (по отчёту исследователя). Не замена фреймворку: нет ни кадров, ни SHM, ни процессов.", "scratch": "Это было поводом для исходного вопроса; в схеме «с нуля» не участвует.", "trig": "Появятся сторонние плагины.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_redis": {"layer": "Реализации", "title": "Redis", "sub": "только край, не планируется", "st": "none", "sc": "off", "v20": "Только как внешний IMessageChannel (docs/COMMUNICATION_ARCHITECTURE.md это уже допускает), не внутренняя шина: нет zero-copy и семантики супервизии. Под Windows нужен WSL или Memurai, есть вопросы лицензии (Valkey, Redict). Эти факты из знаний лида, не проверены.", "scratch": "В опыте не рассматривался.", "trig": "Нет триггера.", "src": "лид", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_ft": {"layer": "Реализации", "title": "Free-threading 3.15", "sub": "ждём колёса", "st": "none", "sc": "off", "v20": "Python 3.15 вышел 2026-10-09. opencv-python 5.1.0.95 и PySide6 6.12.0 дают только abi3-колёса, free-threaded нет (проверил Fable). numpy 2.5.5 готов. Пока не блокирует: узкое место не GIL.", "scratch": "—", "trig": "Колёса OpenCV и PySide6.", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_cams": {"layer": "Внешнее", "title": "Камеры", "sub": "GigE, телефон (HTTP)", "st": "ext", "sc": "own", "v20": "SDK вендора через camera_device; телефон через phone_gateway.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_plc": {"layer": "Внешнее", "title": "Робот, ПЧ, ПЛК", "sub": "Modbus; OPC UA по триггеру", "st": "ext", "sc": "own", "v20": "Сегодня Modbus. OPC UA — только когда придёт ПЛК, который его требует.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_db": {"layer": "Внешнее", "title": "БД", "sub": "PostgreSQL, MySQL, SQLite", "st": "ext", "sc": "own", "v20": "Через Services/sql.", "scratch": "", "trig": "", "src": "лид", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_coll": {"layer": "Внешнее", "title": "OTel-коллектор", "sub": "приёмник стока", "st": "ext", "sc": "own", "v20": "Принимает записи по OTLP из Services/otel_export. Мёртвый коллектор не должен останавливать журнал.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}, "x_os": {"layer": "Внешнее", "title": "ОС и процессы", "sub": "Windows, spawn, SHM", "st": "ext", "sc": "own", "v20": "Готового целого на Python под Windows без Docker нет: честный стоп и spawn здесь — одна из причин своего ядра.", "scratch": "", "trig": "", "src": "Fable", "x": 1, "users": 0, "loc": 0, "files": 0, "tier": null, "add": "", "pre": "", "sct": ""}}, "flows": [{"id": "frame", "title": "Путь кадра", "text": "Камера → источник → SHM-кольцо → Router (FrameShmMiddleware) → обработка → отрисовка → показ → GUI.", "ids": ["x_cams", "services/hikvision_camera", "plugins/sources", "shared_resources_module", "router_module", "plugins/processing", "plugins/render", "display_module", "frontend_module"]}, {"id": "cmd", "title": "Команда и стоп", "text": "GUI или агент → Router → очередь процесса (ReaderGoneQueue) → процесс → команды → диспетчер → воркер.", "ids": ["frontend_module", "router_module", "shared_resources_module", "process_module", "command_module", "dispatch_module", "worker_module"]}, {"id": "recipe", "title": "Рецепт → топология", "text": "Рецепт продукта → RecipeEngine → TopologyManager → запуск дочерних процессов → плагины → состояние.", "ids": ["prototype/recipes", "recipe", "process_manager_module", "process_module", "plugins/runtime", "state_store_module"]}, {"id": "obs", "title": "Журнал → наружу", "text": "Процесс → логгер → хаб наблюдаемости → Router → ProcessManager → otel_export → коллектор.", "ids": ["process_module", "logger_module", "channel_routing_module", "router_module", "process_manager_module", "services/otel_export", "x_coll"]}], "stLabel": {"own": "своё, развиваем", "frozen": "своё, заморожено (не растим)", "edge": "своё + добавка на краю по триггеру", "seam": "своё + шов с версией и набором соответствия", "lib": "готовое, по триггеру", "none": "не планируется", "ext": "люди, железо, внешнее"}}</script>
+</section>
+
+<section>
+  <h2>Где разбор лида ошибался</h2>
+  <p>Эти поправки от Fable проверены по коду и записям. Они меняют схему «с нуля» (раздел 2) и таблицу замен, которые стояли на странице раньше.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Что я утверждал</th><th>Что оказалось</th></tr></thead>
+      <tbody>
+        <tr><td>С нуля вышло бы короче на 30–40%</td><td>Заменяемые слои это 24% кода (38,6 из 159,3 тыс. строк, проверено). Реально 10–15% с адаптерами. Основная масса (49%) лежит в «своём»: <code>process_module</code>, <code>frontend_module</code>, <code>process_manager_module</code>.</td></tr>
+        <tr><td>Транспорт можно заменить на Zenoh</td><td>В очередях живёт семантика супервизии: <code>ReaderGoneQueue</code>, запрет переиспользовать очередь убитого ребёнка, инкарнации, возврат слотов после <code>kill -9</code>. Общая шина pub/sub этого не даёт.</td></tr>
+        <tr><td>Логи на stdlib + OpenTelemetry</td><td>Логи в Python-версии OTel пока в статусе Development. В проекте уже есть <code>Services/otel_export</code>: экспорт, а не замена. Свой журнал несёт контракты исхода и свежести для агента.</td></tr>
+        <tr><td>Message заменить на msgspec</td><td>Скорость не болит (receive p50 0,001 мс). Болит отсутствие версии контракта. msgspec нужен на внешней границе, не внутри.</td></tr>
+        <tr><td>Готового аналога на Python нет</td><td>dora-rs дошёл до 1.x и закрывает нижнюю и среднюю треть (по отчёту, не проверено). Но у него нет GUI, рецептов с пультом, device hub и <code>backend_ctl</code>.</td></tr>
+        <tr><td>Free-threading блокирует Qt</td><td>Qt нужен только процессу GUI. Headless-процессам мешает другое: у <code>opencv-python</code> нет free-threaded колёс (проверено), у PySide6 6.12 все колёса abi3.</td></tr>
+        <tr><td>Триггер пилота: iceoryx2 v1.0</td><td>v1.0 нет (есть 0.10.1, Beta, проверено). И выигрыш у iceoryx2 это чужая поддержка, а не скорость: схема у вас уже та же (loan, seqlock, чтение без копии).</td></tr>
+        <tr><td>QImage из SHM без копии как решающий довод</td><td>В текущем коде копия есть (<code>image_panel.py:40</code> делает <code>.copy()</code>). Довод за нативный просмотр верен, но решает отсутствие кодирования и потерь, а не «ноль копий».</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Три стратегии и что выбрать по слою</h2>
+  <p>Вы предложили три пути: заменить, взять лучшее и сделать лучше, дополнять. Fable разбирает их так: <strong>дополнять на краях, своё в ядре, заменять только дубль той же работы, двух основных путей для одной работы не держать.</strong></p>
+  <div class="cols">
+    <div>
+      <h3>Дополнение возможностью — безопасно</h3>
+      <ul><li>Раньше пути не было, теперь есть: Zenoh для второй машины, OPC UA для ПЛК, веб-клиент по существующему протоколу, сток OTel, Rerun для разработчика.</li></ul>
+    </div>
+    <div>
+      <h3>Вторая дорога к той же работе — дефект</h3>
+      <ul><li>Два транспорта для одного провода, два сериализатора, два редактора графа, два пути сборки изображения. Это замена в два шага, она удваивает проверки. Допустима только как пилот со сроком.</li></ul>
+    </div>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Работа</th><th>Стратегия</th><th>Основной путь</th><th>Дополнение и условие</th></tr></thead>
+      <tbody>
+        <tr><td>Команды и стоп на одной машине</td><td><span class="tag keep">своё</span></td><td><code>mp.Queue</code></td><td>вторая дорога запрещена</td></tr>
+        <tr><td>Кадры на одной машине</td><td><span class="tag keep">своё</span></td><td>SHM-кольцо</td><td>iceoryx2 только пилотом со сроком при упоре в потолок своего кольца</td></tr>
+        <tr><td>Связь между машинами</td><td><span class="tag">дополнять</span></td><td>пути нет → Zenoh третьим типом канала Router</td><td>триггер: вторая машина. Не даёт сигнала «читатель умер», системные провода на него ставить нельзя</td></tr>
+        <tr><td>Формат сообщений</td><td><span class="tag">идея + край</span></td><td>dict и pickle внутри</td><td>версия в конверте; msgspec или JSON только на внешней границе</td></tr>
+        <tr><td>Логи, ошибки, статистика</td><td><span class="tag">дополнять</span></td><td>свой logger</td><td>сток OTel; основным не становится. Сбой коллектора не должен тормозить журнал</td></tr>
+        <tr><td>Состояние, конфиг</td><td><span class="tag keep">своё</span></td><td>StateStore, <code>config_module</code></td><td>без второго хранилища и второго конфига</td></tr>
+        <tr><td>Отладка кадров</td><td><span class="tag">дополнять</span></td><td>Qt-дисплей</td><td>Rerun как dev-extra; кадр берётся из уже собранного изображения</td></tr>
+        <tr><td>ПЛК</td><td><span class="tag">дополнять</span></td><td>Modbus</td><td>asyncua сервисом над State, протокол выбирается на устройство в рецепте</td></tr>
+        <tr><td>Клиенты GUI</td><td><span class="tag">дополнять</span></td><td>Qt-станция</td><td>веб-клиент по протоколу <code>backend_ctl</code>. Изображение с оверлеями собирает бэкенд один раз</td></tr>
+        <tr><td>Редактор графа</td><td><span class="tag keep">своё</span></td><td>свой на <code>QGraphicsScene</code></td><td>два редактора дефект; замена только по измеренной боли</td></tr>
+        <tr><td>Инференс, драйверы камер</td><td><span class="tag">дополнять</span></td><td>ONNX Runtime; <code>camera_device</code></td><td>образец правильного дополнения (провайдеры, драйвер на марку)</td></tr>
+        <tr><td>Супервизия, рецепт, контракт плагина, <code>backend_ctl</code></td><td><span class="tag keep">своё, идеи</span></td><td>—</td><td>это отличие продукта</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div>
+      <h3>Где «лучше» реально</h3>
+      <ul>
+        <li>время от чистой машины до работающего стенда на Windows без Docker, для инженера с агентом;</li>
+        <li>управляемость агентом: живую систему можно осмотреть, изменить и проверить исход;</li>
+        <li>связка «камера, сеть, робот, ПЛК, пульт» в одном рецепте;</li>
+        <li>изоляция сбоя устройства;</li>
+        <li>открытый контракт плагина и цена.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Где «лучше» нереально</h3>
+      <ul>
+        <li>задержка транспорта против iceoryx2;</li>
+        <li>межмашинная маршрутизация против Zenoh и DDS;</li>
+        <li>GPU-тракт против DeepStream;</li>
+        <li>библиотека алгоритмов против Halcon и Cognex;</li>
+        <li>жёсткое реальное время против TwinCAT;</li>
+        <li>число готовых узлов против Node-RED и драйверов против ROS 2.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>До 1.0</h2>
+  <p>1.0 в планах это «прототип 1.0»: слово на пульте, диски с буквами, камера читает букву и угол, робот берёт и кладёт. Веха α (симулятор) закрыта по механизму, веха β (камера и робот на железе) ждёт железа. «1.0 фреймворка» не определён: Fable предлагает считать его тегом заморозки контрактов после β. Это допущение, решает владелец.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>#</th><th>Что</th><th>Готово, когда</th><th>Цена</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>β на железе и лист из пяти чисел с видео 2 минуты</td><td>секунд на диск, доля верных букв, «взял и положил» из N, часы без сбоя, время «Стоп → всё погашено»</td><td>дни с железом</td></tr>
+        <tr><td>2</td><td>Рамки до β: в ядро только блокеры сценария</td><td>вердикт β</td><td>0</td></tr>
+        <tr><td>3</td><td>Бинарный гейт на Windows: унаследованные красные в карантин</td><td><code>make gate</code> exit 0 три прогона подряд</td><td>2–4 дня, после β</td></tr>
+        <tr><td>4</td><td><strong>Заморозка контрактов:</strong> поле версии в конверте IPC, проверка <code>api_version</code> плагина, версия рецепта с цепочкой миграций, снимок CAPABILITIES, <code>access</code> у команд</td><td>тег и контракт-тест на каждый пункт</td><td>1–1,5 недели</td></tr>
+        <tr><td>5</td><td>Формат SHM-кольца документом (B-5)</td><td>автономный читатель на 50 строк читает живой стенд</td><td>2–3 дня</td></tr>
+        <tr><td>6</td><td>Набор соответствия для <code>IMessageChannel</code></td><td><code>QueueChannel</code> и <code>SocketChannel</code> проходят один набор</td><td>2–3 дня</td></tr>
+        <tr><td>7</td><td>P-2 замером: чистая сессия агента собирает другой малый продукт только по документам</td><td>число часов и список мест, где пришлось читать исходник</td><td>2–4 дня</td></tr>
+        <tr><td>8</td><td>Зависимости: pandas и подобное из core, убрать форк NodeGraphQt</td><td><code>uv sync</code> без них, смоук импорта</td><td>0,5–1 день, после β</td></tr>
+        <tr><td>9</td><td>Python 3.14 вместо 3.13, пилот на ветке вместе со снятием <code>pyside6&lt;6.11</code></td><td>гейт и GUI-смоук на ветке</td><td>2–4 дня</td></tr>
+        <tr><td>10</td><td>Решение о продукте №2 и метка области у плагинов (<code>core</code> или <code>domain:продукт</code>)</td><td>запись в <code>decisions.md</code></td><td>1 день</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Цены в днях это оценки Fable, менеджер их не подтверждал. После возражений Fable признал их оптимистичными: заморозка контрактов целиком 3–5 недель, минимальное ядро 1–1,5 недели, бинарный гейт 1–2 недели, P-2 1–2 недели, Python 3.14 с PySide6 6.12 1–2 недели. В список также добавлены замеры B-2 (цена хопа на 720p и 1080p) и B-3 (профиль цикла плагина), подробности в разделе про спор с C++ ниже.</p>
+  <p><strong>Не делать до 1.0:</strong> пилоты Zenoh и iceoryx2, перевод сообщений на msgspec, OpenTelemetry в ядро, free-threading, смену стека GUI и вынос GUI-конструктора, новые инструменты MCP и срезы наблюдаемости сверх запланированных.</p>
+</section>
+
+<section>
+  <h2>На 2.0</h2>
+  <div class="cols">
+    <div>
+      <h3>Состав</h3>
+      <ul>
+        <li>второй продукт в <code>apps/</code> по шаблону, он задаёт требования;</li>
+        <li>GUI-конструктор во фреймворке: спека UI v1 как данные, эталонный Qt-отрисовщик, <code>examples/minimal_gui</code>;</li>
+        <li>фреймворк как версионируемый пакет, продукты закрепляют диапазон версий;</li>
+        <li>ядро управления: каталог команд с <code>access</code>;</li>
+        <li>второй фронт по тому же протоколу: веб-пульт для планшета;</li>
+        <li>по триггеру: нативный узел через документированный SHM, Zenoh между машинами, OPC UA.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Продукты и плагины</h3>
+      <ul>
+        <li>Механизм входит во фреймворк при втором потребителе, обобщается при третьем. Сегодня их три (прототип, <code>apps/line_sim</code>, <code>examples/minimal_app</code>), все от одного автора.</li>
+        <li>Плагин живёт в продукте, в общий словарь переходит при втором использовании. Сегодня в <code>Plugins/</code> 58 плагинов, часть продуктовых.</li>
+        <li>Нужны semver фреймворка, версия конверта, диапазон <code>api_version</code>, миграции рецепта и метка «ломающее» при диффе CAPABILITIES.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Стек GUI-конструктора</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Часть</th><th>Отрисовщик</th><th>Причина</th></tr></thead>
+      <tbody>
+        <tr><td>Просмотр кадров, ROI, пиксельная отладка</td><td>нативный Qt</td><td>нет кодирования, точные пиксели, нет лишнего процесса</td></tr>
+        <tr><td>Редактор графа</td><td>свой на <code>QGraphicsScene</code> до конца 2.0</td><td>работает и небольшой (457 строк в <code>graph_scene.py</code>)</td></tr>
+        <tr><td>Формы, настройки</td><td>из спеки UI, пока Qt</td><td>данные, а не код виджетов</td></tr>
+        <tr><td>Пульт оператора, планшет, удалённый доступ</td><td>веб (TypeScript) через шлюз по протоколу <code>backend_ctl</code></td><td>здесь веб сильнее; кадры только уменьшенное превью</td></tr>
+        <tr><td>Отладка многокамерного тракта</td><td>Rerun</td><td>готовое, своё не писать</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Ответ на ваш вопрос о TypeScript: станция инженера остаётся на PySide6, а TypeScript идёт вторым фронтом для оператора, а не заменой. Всё на Electron или Tauri не подходит: браузер не видит SHM, кадр пришлось бы кодировать и копировать. Встраивать веб в Qt (<code>QWebEngineView</code>) хуже, чем отдельным клиентом через шлюз.</p>
+  <p><strong>UI данными</strong> Fable называет самым сильным решением. Спека должна быть чистыми данными (JSON, версия, без типов Qt), контекст виджета протоколом, канал кадров абстрактным (ссылка на кадр), и один и тот же тест должен проходить спеку без Qt. Сначала <code>examples/minimal_gui</code> как второй потребитель, потом вынос.</p>
+
+  <h3>Технологии: роль и триггер</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Технология</th><th>Роль в 2.0</th><th>Триггер или условие</th></tr></thead>
+      <tbody>
+        <tr><td>Zenoh</td><td>третий тип канала Router, только между машинами</td><td>вторая машина в продукте; Beta, нужна верхняя граница версии</td></tr>
+        <tr><td>iceoryx2</td><td>только пилот со сроком для кадров</td><td>своё кольцо упёрлось и вышел 1.0 с Windows первого класса</td></tr>
+        <tr><td>Free-threading</td><td>параллельность лёгких плагинов внутри процесса, не замена процессов</td><td>free-threaded колёса <code>opencv-python</code> и <code>onnxruntime</code> под Windows</td></tr>
+        <tr><td>Субинтерпретаторы</td><td>роли нет</td><td>падение нативного SDK убивает все интерпретаторы процесса</td></tr>
+        <tr><td>WASM</td><td>только песочница чужих плагинов чистой логики</td><td>первый сторонний автор плагинов; до этого наблюдать</td></tr>
+        <tr><td>Rust</td><td>сначала функция через PyO3 внутри процесса, потом нативный узел</td><td>профиль цикла плагина покажет Python узким местом или потребуется &gt;200 fps</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Порядок дополнений</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>#</th><th>Дополнение</th><th>Состояние</th><th>Триггер</th><th>Цена</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Сток OTel</td><td>частично есть: <code>Services/otel_export</code> по команде, без расписания</td><td>довести по своему плану</td><td>по плану</td></tr>
+        <tr><td>2</td><td>Rerun</td><td>нет</td><td>сразу после β, как инструмент разработчика</td><td>1–2 дня</td></tr>
+        <tr><td>3</td><td>Веб-клиент</td><td>прецедент <code>Plugins/sim/pult_web</code></td><td>продукту нужен планшет</td><td>2–4 недели</td></tr>
+        <tr><td>4</td><td>asyncua (OPC UA)</td><td>нет</td><td>появился ПЛК с OPC UA</td><td>1–2 недели</td></tr>
+        <tr><td>5</td><td>Канал Zenoh</td><td>нет</td><td>вторая машина</td><td>2–3 недели</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Библиотеки на конец 2026</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Библиотека</th><th>Состояние</th><th>Метка</th></tr></thead>
+      <tbody>
+        <tr><td>iceoryx2</td><td>0.10.1 (2026-11-20), Beta, 1.0 нет; Windows tier 2</td><td><span class="tag keep">проверено</span> версия; <span class="tag warn">не проверено</span> tier</td></tr>
+        <tr><td>Zenoh</td><td>1.10.2 (2026-10-28), Beta; SHM называется нестабильным API</td><td><span class="tag keep">проверено</span> версия; <span class="tag warn">не проверено</span> SHM</td></tr>
+        <tr><td>PySide6</td><td>6.12.0, все 5 колёс abi3, free-threaded колёс нет</td><td><span class="tag keep">проверено</span></td></tr>
+        <tr><td>opencv-python</td><td>5.1.0.95, abi3, free-threaded колёс нет</td><td><span class="tag keep">проверено</span></td></tr>
+        <tr><td>msgspec</td><td>0.22.0 (2026-09-29), активен</td><td><span class="tag keep">проверено</span></td></tr>
+        <tr><td>Python 3.15</td><td>вышел 2026-10-09; JIT около +7–8% на Linux</td><td><span class="tag warn">не проверено</span></td></tr>
+        <tr><td>WASI 0.3</td><td>утверждён 2026-06-11; numpy, OpenCV и камеры в компонентах не нашли</td><td><span class="tag warn">не проверено</span></td></tr>
+        <tr><td>dora-rs 1.1.0, Rerun 0.43.2, asyncua 2.1.0, OpenTelemetry (логи в Development), viva-genicam 0.12</td><td>по отчётам Haiku</td><td><span class="tag warn">не проверено</span></td></tr>
+        <tr><td>Редактор нод для PySide6</td><td>NodeGraphQt обновляется медленно (0.6.44, 2026-02), остальные форки не обновлялись с 2024</td><td><span class="tag ext">по отчёту</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>Расхождения с вашими документами:</strong> в TECH_STACK написано «iceoryx2 v1.0 до конца 2026», он не вышел. Волна 1 из TECH_STACK (чистка зависимостей, Python 3.13) не исполнена за четыре месяца: pandas в core, пин 3.12. В отчёте ещё упомянут <code>mvkit</code>, возможный конкурент: страница не открылась, стоит проверить.</p>
+</section>
+
+<section>
+  <h2>Спор с C++: что защитимо и как доказывать</h2>
+  <p>Вы довозите 1.0 как есть, затем строите несколько приложений и параллельно делаете 2.0, чтобы показать, что подход лучше, чем писать всё на C++. Я оспорил вердикт Fable по семи пунктам, он ответил, и вот что осталось.</p>
+  <div class="banner"><p><strong>Тезис «Python не медленнее C++» защитить нельзя. Защитим другой:</strong> система выполняет требования ячейки при меньшей цене разработки, а любой узел уходит в нативный код по замеру. Спор «лучше C++ во всём» проигрывается, спор по требованиям выигрывается.</p></div>
+
+  <h3>Что Fable уступил мне</h3>
+  <ul class="plain">
+    <li><strong>B-2 (цена хопа на 720p и 1080p, 1/3/5 хопов) идёт в список до 1.0.</strong> Решение «транспорт не менять» стояло на замере 640×480 в один хоп. Сначала нужно починить дефект M-1 (сводка пробника пуста), тогда 2–4 дня.</li>
+    <li><strong>Цены были оптимистичны.</strong> Заморозка контрактов целиком 3–5 недель, минимальное ядро (версия конверта, <code>api_version</code>, <code>version</code> рецепта) 1–1,5 недели, бинарный гейт 1–2 недели, P-2 1–2 недели, переход на PySide6 6.12 1–2 недели. Правило: его оценки умножать на 2–3.</li>
+    <li><strong>«Дисциплина выше большинства команд» снято.</strong> Честнее: проверочных механизмов больше обычного, а бинарный зелёный гейт ещё не достигнут (<code>main</code> по умолчанию красный, <code>time.sleep</code> в 168 из 911 файлов тестов).</li>
+    <li>Общий слепой пункт двух моделей Claude: мы ценим проверочные механизмы, а коллега с C++ считает часы без сбоя. Довод самих коллег никто не слышал: он может быть о развёртывании, защите кода или найме, а не об fps.</li>
+  </ul>
+
+  <h3>Три факта, которые Fable проверил сегодня</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Факт</th><th>Результат</th></tr></thead>
+      <tbody>
+        <tr><td>Поле версии в конверте IPC</td><td>нет (0 совпадений, проверено повторно)</td></tr>
+        <tr><td>Доли кода с исключением всех тестов</td><td>заменяемые слои 24,2%, три модуля ядра 48,9% от 160 680 строк (проверено)</td></tr>
+        <tr><td>Путь кадра от SHM до виджета GUI</td><td>3–4 копии полного кадра и 1–2 в размере виджета; на 1080p 19–25 МБ на показанный кадр (по коду, не по трассировке). Это свойство <code>QLabel</code> + <code>QPixmap</code>, а не Python: C++ на Qt сделал бы часть копий так же. Преобразование numpy → <code>QImage</code> написано в пяти местах.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cols">
+    <div>
+      <h3>Где C++ выигрывает на самом деле</h3>
+      <ul>
+        <li>хвосты задержки и детерминизм: нет GC и GIL (у вас до <code>gc.freeze</code> был выброс p99 33,7 мс);</li>
+        <li>цена на элемент: десятки микросекунд на сообщение, при 10 тыс. сообщений в секунду это проблема;</li>
+        <li>один процесс и указатели вместо хопов, меньше копий и памяти;</li>
+        <li>развёртывание одним бинарником и защита кода;</li>
+        <li>проверка типов при компиляции, SDK камер и GPU-тракт в первую очередь на C/C++.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Где выигрывает подход Python</h3>
+      <ul>
+        <li>время до первого работающего стенда и скорость правки, с агентами разрыв больше;</li>
+        <li>обучение и инференс в одной экосистеме;</li>
+        <li>тяжёлая работа уже нативная (OpenCV, ONNX Runtime), Python это клей. Его доля не измерена (B-3);</li>
+        <li>изоляция сбоев: надёжный C++ с чужими SDK тоже станет многопроцессным;</li>
+        <li>оба жёстких краха проекта пришли из нативного кода (numba без проверки границ, серый кадр в Qt);</li>
+        <li>плагин на Python может править технолог или ML-инженер.</li>
+      </ul>
+    </div>
+  </div>
+  <p><strong>Гибрид, который убедит коллег:</strong> формат SHM и протокол управления документом (B-5), коллега пишет узел на C++ и включает его в тот же рецепт, спор превращается в «по узлу, по замеру». Жёсткое реальное время остаётся вне ПК (аппаратный триггер камеры, слежение за лентой в контроллере робота): Python задаёт уставки, а не крутит сервоконтур. Предупреждение от Fable: цель «самая универсальная и самая быстрая» содержит конфликт, универсальность и предельная скорость тянут в разные стороны.</p>
+
+  <h3>План доказательств</h3>
+  <p>Правила: вопросы, нагрузки, метрики и пороги записать и согласовать с коллегами до замеров. Одно железо, одна ОС, один источник кадров, одна модель, одна сборка OpenCV. Базовый вариант на C++ пишет сторонник C++, его часы записываются. Не меньше пяти повторов, p50, p99, максимум, сырые данные открыты. В таблице должны быть строки, где Python заведомо проигрывает.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>#</th><th>Нагрузка</th><th>Метрики</th><th>Уступаете, если</th></tr></thead>
+      <tbody>
+        <tr><td>W1</td><td>Транспорт: 480p…5 Мп × 1/3/5 хопов × 30/60/100 fps</td><td>p50, p99 на хоп, CPU, копии</td><td>на 1080p × 3 хопа транспорт больше 10% бюджета кадра: меньше хопов, ссылки, пилот iceoryx2</td></tr>
+        <tr><td>W2</td><td>Цикл плагина пустой и типовой (B-3)</td><td>мс каркаса против мс тела</td><td>клей Python больше 20–30% цикла: горячий путь в нативный код</td></tr>
+        <tr><td>W3</td><td>Ячейка: 1, 2, 4 камеры 1080p → ONNX → решение → робот, 1 час</td><td>потолок fps, «триггер → результат» p50/p99/макс, CPU на камеру</td><td>p99 выше требования и причина в Python или IPC: ядро тракта одним нативным процессом</td></tr>
+        <tr><td>W4</td><td>Сбой: <code>kill -9</code> узла камеры, прогон 24–72 ч</td><td>время восстановления, живы ли соседи, утечки</td><td>сбоев нет ни у кого за 72 ч: вес довода об изоляции падает</td></tr>
+        <tr><td>W5</td><td>Чистая машина → стенд; добавить шаг инспекции</td><td>часы, строки, дефекты за неделю</td><td>сторонник C++ делает не дольше чем в 1,5 раза: довод о скорости разработки снимается</td></tr>
+        <tr><td>W6</td><td>Холодный старт и смена рецепта</td><td>секунды</td><td>дольше требования: постоянные процессы, ленивый импорт</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Пороги это предложения Fable, а не данные. Их задаёт требование ячейки: при ленте 200 мм/с джиттер 10 мс равен 2 мм. Коллеги уступают, если клей меньше 10%, p99 укладывается в требование и W5 в два раза быстрее. Это стоит записать заранее.</p>
+
+  <h3>Порядок: 1.0 → приложения → 2.0</h3>
+  <div class="cols">
+    <div>
+      <h3>Фаза 1. 1.0 как есть</h3>
+      <ul>
+        <li>β на железе и лист из пяти чисел; в те же дни собрать «бесплатные» числа (кадр → задание роботу, fps, CPU по процессам, старт и стоп);</li>
+        <li>B-2 расширенный (2–4 дня) и B-3 профиль цикла плагина (1–2 дня): самое важное недостающее число;</li>
+        <li>минимум швов: версия конверта, формат SHM документом с читателем, <code>api_version</code>, <code>version</code> рецепта (1,5–3 недели);</li>
+        <li>тег 1.0.0, вместо полного карантина красных список известных красных с ID.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Фаза 2. Несколько приложений</h3>
+      <ul>
+        <li>P-2 замером, из него список трений;</li>
+        <li>приложения №2 и №3, одно с настоящим pass/fail, каждое ведёт тот же лист чисел;</li>
+        <li>механизм входит во фреймворк при втором потребителе;</li>
+        <li>план замеров согласовать с коллегами, прогнать W1, W2, W4, W6, пригласить коллегу написать один узел на C++ через SHM.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Фаза 3. 2.0 параллельно</h3>
+      <ul>
+        <li>после двух приложений в работе и данных замеров;</li>
+        <li>каждая часть 2.0 ссылается на число: трение из приложений или проигранная строка сравнения;</li>
+        <li>у каждой части критерий отказа, 1.x закрывается только когда все приложения на 2.0.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Форма 2.0: части за швами, а не второе дерево</h3>
+  <p>Fable возражает против параллельного дерева для одного инженера: две кодовые базы, починки расходятся, 2.0 не достигает паритета и остаётся хобби. Проект уже отклонил <code>multiprocess_prototype_2</code> по этим причинам. Рекомендация: 2.0 как набор заменяемых частей за швами 1.x в том же репозитории. <code>main</code> это 1.x, долгая ветка <code>next</code> только для правок, ломающих контракт, с еженедельным rebase, починки сначала в 1.x. 2.0 читает рецепты 1.x через миграции и плагины 1.x через диапазон <code>api_version</code>. Бюджет 20–30% недели и только после двух приложений в работе.</p>
+
+  <h3>Обвязка процесса съела много времени</h3>
+  <p>За 30 дней 1 557 коммитов без слияний: документация 58%, новые функции 10%, по слоям продуктовые (прототип, сервисы, плагины) 14%. Worktree 264, записей в <code>plans/</code> 93 (проверено). Коммит не равен усилию, но пропорция говорит сама. Советы: считать долю раз в неделю и поставить цель ≥ 30% продуктовых коммитов до второго продукта; заморозить полосу механизмов (атлас, доставка памяти, панель планов) до продукта №2, только починки; чистить worktree; планы без движения 60 дней в «отложено»; глубину конвейера задавать по риску.</p>
+  <p><strong>Рынок и спрос:</strong> проверки спроса у проекта нет. <code>mvkit</code> существует (0.4.3, проприетарный, 34 выпуска за две недели в августе, затем тишина), по зависимостям это веб-сервис, а не многопроцессный каркас. Первый «рынок» это ваши коллеги: их критерии приёмки и есть спецификация спроса. До рамок 2.0 нужны пять разговоров с теми, кто будет ставить это на линию.</p>
+</section>
+
+<section>
+  <h2>Итог</h2>
+  <p>Вы шли правильно в главном: сделали то, чего нет готовым, и довели проверку до уровня выше большинства команд. Ошибка масштаба одна: фреймворк, наблюдаемость и обвязка процесса росли быстрее, чем появлялись потребители. Лечится она не сменой библиотек, а вторым продуктом и версиями на швах.</p>
+  <p>На вашем месте: закрыть β, поставить тег заморозки контрактов, замерить P-2, выбрать продукт №2 из другого домена и только из его трений вынимать GUI-конструктор. Транспорт, журнал и сообщения заморозить и не трогать до первого реального триггера.</p>
+</section>
+
+<section>
+  <h2>Что не проверено</h2>
+  <ul class="plain">
+    <li>Fable стенд и тесты не запускал: выводы о поведении опираются на чтение кода, grep и записанные замеры. Доли кода и отсутствие поля версии он перепроверил сам. Цена хопа 0,3 мс снята на 640×480 в один хоп, для 1080p замеров по хопам нет, пока не сделан B-2. Доля Python в цикле плагина (B-3) не измерена никем, а это главная переменная в споре с C++.</li>
+    <li>Сам довод ваших коллег неизвестен ни мне, ни Fable. План доказательств может отвечать не на тот вопрос, поэтому его нужно согласовать с ними до замеров.</li>
+    <li>Доли 24% и 49% кода верны с точностью до нескольких пунктов (фильтр по именам тестов).</li>
+    <li>Путь кадра в GUI Fable прочитал не целиком: читает ли GUI SHM напрямую, не установлено.</li>
+    <li>Статусы dora-rs, OpenTelemetry logs, Zenoh SHM, iceoryx2 под Windows, Python 3.15 и free-threaded колёса onnxruntime взяты из отчётов Haiku, большая часть не перепроверена.</li>
+    <li>Цены в днях и «лучше реально или нет» это суждения Fable.</li>
+    <li>Не проверялось: затраты на веб-просмотр кадров (1080p, JPEG и сырые байты по WebSocket). Перед решением нужен замер за день.</li>
+  </ul>
+  <p class="note">Материалы лежат в <code>docs/reports/2026-11-22_fable-architecture-review/</code>: бриф, пять отчётов исследователей (02–06), мнение лида о стеке GUI (01b), вердикт Fable (07a–07c, индекс 07) и дополнение о стратегии «дополнять» (08). Решения владельца и вопросы для OPEN_QUESTIONS собраны в конце вердикта (часть 07c и файл 08).</p>
+</section>
+
+</div>
+<script>
+(function () {
+  var rawEl = document.getElementById('fs-data');
+  var root = document.getElementById('fullscheme');
+  var panel = document.getElementById('fspanel');
+  if (!rawEl || !root || !panel) { return; }
+  var RAW = JSON.parse(rawEl.textContent);
+  var DATA = RAW.cards, FLOWS = RAW.flows, ST = RAW.stLabel;
+  var SNAP = 'снимок Атласа: HEAD 6cb212213, 2026-11-22';
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text !== undefined && text !== null) { e.textContent = text; }
+    return e;
+  }
+  function fmt(n) { return Number(n).toLocaleString('ru-RU'); }
+  function block(key, text) {
+    var b = el('div');
+    b.appendChild(el('div', 'k', key));
+    b.appendChild(el('p', '', text));
+    return b;
+  }
+
+  /* линзы */
+  function setLens(l) {
+    root.setAttribute('data-lens', l);
+    Array.prototype.forEach.call(root.querySelectorAll('[data-lens-btn]'), function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-lens-btn') === l));
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('.lg'), function (g) {
+      g.hidden = g.getAttribute('data-for').split(' ').indexOf(l) < 0;
+    });
+  }
+
+  /* потоки */
+  var flowText = document.getElementById('flowtxt');
+  function clearFlow() {
+    root.classList.remove('flowing');
+    Array.prototype.forEach.call(root.querySelectorAll('.card.on'), function (c) { c.classList.remove('on'); });
+    Array.prototype.forEach.call(root.querySelectorAll('.stepn'), function (s) { s.parentNode.removeChild(s); });
+  }
+  function setFlow(id) {
+    clearFlow();
+    Array.prototype.forEach.call(root.querySelectorAll('[data-flow-btn]'), function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-flow-btn') === id && id !== ''));
+    });
+    if (!id) { flowText.textContent = 'Выберите путь: карточки на пути подсветятся и получат номера шагов.'; return; }
+    var f = FLOWS.filter(function (x) { return x.id === id; })[0];
+    if (!f) { return; }
+    root.classList.add('flowing');
+    f.ids.forEach(function (cid, idx) {
+      var c = root.querySelector('.card[data-id="' + cid + '"]');
+      if (!c) { return; }
+      c.classList.add('on');
+      c.appendChild(el('span', 'stepn', String(idx + 1)));
+    });
+    flowText.textContent = f.text + ' Порядок собран по именам классов в Атласе, это не трассировка кода.';
+  }
+
+  /* панель */
+  var selected = null;
+  function showHelp() {
+    panel.textContent = '';
+    panel.appendChild(el('h3', '', 'Карточка'));
+    panel.appendChild(el('p', 'hint', 'Нажмите на любую карточку на схеме. Здесь появятся данные Атласа (назначение, интерфейсы, строки, потребители, открытые задачи) и решение: что в 2.0, что взяла бы схема «с нуля», какой триггер.'));
+    panel.appendChild(el('p', 'hint', 'Цвет карточки зависит от выбранной линзы. Рамка слева у карточки значит «своё, но с добавкой на краю», пунктир значит «заморожено», точки значит «нужен шов с версией».'));
+    panel.appendChild(el('p', 'hint', 'Метка «Fable» у решения значит, что оно взято из его вердикта, «лид» значит, что Fable модуль отдельно не разбирал и метка поставлена мной.'));
+  }
+  function render(id) {
+    var d = DATA[id];
+    if (!d) { return; }
+    panel.textContent = '';
+    panel.appendChild(el('h3', '', d.x ? d.title : id));
+    var meta = el('div', 'meta');
+    if (d.layer) { meta.appendChild(el('span', 'pill', d.layer)); }
+    meta.appendChild(el('span', 'pill st', ST[d.st] || d.st));
+    if (d.tier) { meta.appendChild(el('span', 'pill', 'ярус ' + d.tier)); }
+    if (d.src) { meta.appendChild(el('span', 'pill', 'решение: ' + d.src)); }
+    panel.appendChild(meta);
+    if (d.sub) { panel.appendChild(el('p', 'hint', d.sub)); }
+    if (!d.x) {
+      panel.appendChild(block('Назначение (Атлас)', d.purpose));
+      if (d.api) { panel.appendChild(block('Публичный API', d.api)); }
+      var nums = el('div', 'nums');
+      [['строк кода без tests', fmt(d.loc)], ['файлов кода', fmt(d.files)],
+       ['файлов используют', fmt(d.users) + ' (тестов ' + fmt(d.users_tests) + ')'],
+       ['открытых задач', fmt(d.tasks) + ' в ' + fmt(d.plans) + ' планах'],
+       ['коммитов в main', fmt(d.commits)], ['находок линтера Атласа', fmt(d.findings)]].forEach(function (p) {
+        var c = el('div'); c.appendChild(el('b', '', p[1])); c.appendChild(el('span', '', p[0])); nums.appendChild(c);
+      });
+      panel.appendChild(nums);
+    }
+    if (d.pre) { panel.appendChild(block('До 1.0', d.pre)); }
+    if (d.v20) { panel.appendChild(block('Цель 2.0', d.v20)); }
+    if (d.scratch) { panel.appendChild(block('Опыт «с нуля»', d.scratch)); }
+    if (d.trig && d.trig !== '—') { panel.appendChild(block('Триггер и оговорки', d.trig)); }
+    if (!d.x) {
+      var k = el('div'); k.appendChild(el('div', 'k', 'Те же данные из Атласа'));
+      k.appendChild(el('pre', '', 'python -m scripts.atlas card ' + id + '\npython -m scripts.atlas ref ' + id));
+      panel.appendChild(k);
+      panel.appendChild(el('p', 'hint', SNAP + '. «Используют» это статика: импорты модуля целиком вне него; getattr, реестры и каналы роутера не видны.'));
+    }
+  }
+  function select(id) {
+    if (selected) { selected.setAttribute('aria-pressed', 'false'); }
+    selected = root.querySelector('.card[data-id="' + id + '"]');
+    if (selected) { selected.setAttribute('aria-pressed', 'true'); }
+    render(id);
+  }
+
+  root.addEventListener('click', function (e) {
+    var t = e.target;
+    while (t && t !== root) {
+      if (t.getAttribute) {
+        if (t.hasAttribute('data-lens-btn')) { setLens(t.getAttribute('data-lens-btn')); return; }
+        if (t.hasAttribute('data-flow-btn')) { setFlow(t.getAttribute('data-flow-btn')); return; }
+        if (t.classList && t.classList.contains('card')) { select(t.getAttribute('data-id')); return; }
+      }
+      t = t.parentNode;
+    }
+  });
+  setLens('both');
+  setFlow('');
+  showHelp();
+})();
+</script>
+

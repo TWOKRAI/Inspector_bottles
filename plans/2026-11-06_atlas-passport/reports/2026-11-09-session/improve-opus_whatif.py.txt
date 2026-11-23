@@ -1,0 +1,28 @@
+"""What-if: patch copies of the reference / question set in scratch and recompute the ceiling. Read-only to repo."""
+import json, subprocess, sys, ast
+D, repo = sys.argv[1], sys.argv[2]
+ref = json.load(open(f"{repo}/.claude/worktrees/atlas-3-1/docs/arch-map/_bench/k0_reference.json"))
+src = subprocess.run(["git", "-C", repo, "show", "1dc6c71b7:multiprocess_framework/modules/config_module/interfaces.py"], capture_output=True, text=True).stdout
+lines = {}
+for n in ast.walk(ast.parse(src)):
+    if isinstance(n, ast.ClassDef):
+        for m in n.body:
+            if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                lines[(n.name, m.name)] = m.lineno
+bm = subprocess.run(["git", "-C", repo, "show", "1dc6c71b7:multiprocess_framework/modules/base_manager/interfaces.py"], capture_output=True, text=True).stdout
+ibm = next(n.lineno for n in ast.walk(ast.parse(bm)) if isinstance(n, ast.ClassDef) and n.name == "IBaseManager")
+print("IConfigObserver.__call__ line:", lines.get(("IConfigObserver", "__call__")), "| IBaseManager line:", ibm)
+for t in ref["targets"]:
+    s = t["spec"]
+    if s.get("path", "").endswith("config_module/interfaces.py") and s.get("level") == "house":
+        for m in s.get("members", []):
+            if (s["name"], m["name"]) in lines:
+                m["line"] = lines[(s["name"], m["name"])]; m["path"] = s["path"]
+        if "IBaseManager" in s.get("bases", []):
+            s["bases_where"] = [{"name": "IBaseManager", "where": f"multiprocess_framework/modules/base_manager/interfaces.py:{ibm}", "how": "import"}]
+json.dump(ref, open(f"{D}/k0_reference.whatif.json", "w"), ensure_ascii=False, indent=1)
+q = json.load(open(f"{repo}/scripts/nav_bench/questions/k0.json"))
+for x in q["questions"]:
+    if x["id"] == "Q3":
+        x["expected"][0]["tolerance"] = 3
+json.dump(q, open(f"{D}/k0.q3tol3.json", "w"), ensure_ascii=False, indent=1)

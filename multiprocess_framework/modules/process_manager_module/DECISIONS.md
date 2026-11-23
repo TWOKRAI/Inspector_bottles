@@ -1329,6 +1329,8 @@ Switch и rollback этого класса НЕ имеют: планировщи
 **Дата:** 2026-09-24
 **Refs:** [plans/lifecycle-stop-ownership.md](../../../plans/lifecycle-stop-ownership.md) (Task 1.4), закрывает
 «класс сирот» из «Принятого риска» ADR-PMM-030
+**Дополнение Task 1.3 (ADR-PMM-043):** бюджет волн: `pm_total_s`/`outer_s` + `last_wave_s` только при `has_last`
+(в топологии есть процесс `stop_wave: last`); вложенность «спавнер > PM > ребёнок» сохраняется.
 
 ### Контекст
 
@@ -1799,7 +1801,8 @@ False`, `stop_all calls total = 2`. Исправлено двумя изолир
   `warning`, `_try_auto_restart` не зовётся.
 - `GenericProcessManagerApp._own_work`: СНАЧАЛА `super()._own_work(work)` (дети PM), ЗАТЕМ `state_store`,
   `recipe_watcher`, `observability_watcher` — LIFO закрывает watcher'ы и SSM раньше конца детей и сводки,
-  как прежний `shutdown()`. Сигнал детям уходит раньше SSM: фаза 1 `work` взводит `request_stop` всех
+  как прежний `shutdown()`. **Порядок watcher'ов/SSM и детей заменён ADR-PMM-040** (дети — в `_own_work_late`,
+  закрываются раньше воркеров, watcher'ов и SSM). Сигнал детям уходит раньше SSM: фаза 1 `work` взводит `request_stop` всех
   записей сегмента до LIFO-фазы 2.
 - Известный предел: на пути `shutdown()` без `stop()` ошибка фазы 1 детей пишется в `errors` корня дважды (фаза 1 и повтор из `join_until`); на пути раннера (`stop()` + `close_root()`) — один раз. Снять дубль можно только правкой `base_manager` (`cancel()` зовёт фазу 1 без аккумулятора).
 
@@ -1935,6 +1938,10 @@ K=120 без вычерпывания — жив через 3 с (ожидани
   порядок регистрации в `work`). Цену мерит L6 (`backend_ctl/tests/test_system_shutdown_force_live.py`).
 - (д) `force` с `deadline_s` меньше обычного стопа (0,7–1,8 с) обрывает и здоровых детей посреди их стопа. Срок самих
   детей (`work_s` от 5,0 с, `stop_budget.py`) `force` не меняет.
+- (е) Task 1.4 (ADR-PMM-044): ответ дополнен полями `accepted`/`phase`. Первый `graceful` и свежий `force` —
+  `accepted: True`; `force` поверх идущего graceful — `escalated: True`; повтор `graceful` — `accepted: False,
+  reason: "already_stopping", phase` (без новых событий в фазе `pre_stop`); повтор `force` — `already_set` +
+  `accepted: False, reason` (без `phase`). Прежние поля и литералы не менялись.
 
 **Reversible:** yes (без `mode` команда идёт прежним путём; снять `set_force_deadline` — `force` станет graceful).
 **Refs:** `plans/2026-10-20_gui-graceful-close/tasks/0.2.md`, `tests/test_system_shutdown_force.py`,
@@ -2052,7 +2059,7 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
 | стоп прерван системным стопом | `False` | `handed_over`, ключа `error` нет |
 | отказ исполнителя | как раньше | ключа нет |
 
-Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня (`_ChildrenGroupStop` `stop_outcome` не пишет);
+Не входит: сводка стопа ADR-PMM-033 и запись стора; стоп корня — см. ADR-PMM-042;
 код 76; GUI; парсеры `backend_ctl`.
 
 ### Альтернативы
@@ -2098,3 +2105,843 @@ ADR-PMM-037 лечил L-9 вычерпыванием: одиночный `proce
 `docs/maps/pm-lifecycle-commands.md`, ADR-PMM-037, ADR-PMM-038, ADR-WRK-005, ADR-WRK-006, ADR-CMD-006, ADR-RTR-014,
 ADR-RTR-015, `tests/test_child_stop_idle_acceptance.py`, `tests/test_stop_wait_idle_hazards.py`,
 `tests/test_pm_stop_drains_own_queue_acceptance.py`.
+
+## ADR-PMM-040: Дети PM закрываются раньше `message_processor` — крюк корня `_own_work_late` (Task 1.1a gui-graceful-close, 2026-11-06)
+
+**Статус:** accepted (2026-11-06; стадия 0 — `docs/reports/2026-11-06_gui-graceful-close_1.1_stage0-review.md`;
+реализация — Task 1.1a плана `plans/2026-10-20_gui-graceful-close/plan.md`). **Заменяет пункт ADR-PMM-036 о порядке
+SSM/watcher'ов и детей.**
+
+### Контекст
+
+По ADR-PMM-036 область `children` регистрировалась в `_own_work` PM, то есть РАНЬШЕ `workers` (`_WorkersStop`,
+шаг 6a `ProcessModule.initialize`). LIFO фазы 2 закрывал воркеры — и с ними `message_processor` — ДО ожидания детей.
+Всё окно стопа детей PM был глух: `supervision.status`, второй `system.shutdown`, отказ `process.restart` не получали
+ответа (слепой набор `tests/test_pm_responsive_during_children_stop.py`, 5 красных до правки). Решение CTO D4: PM
+отвечает всё окно стопа детей.
+
+### Решение
+
+- **Крюк корня `ProcessModule._own_work_late(work)`** (база пустая). Вызов — в шаге 6a ПОСЛЕ
+  `work.own(_WorkersStop(self), …)` и ДО `work.own(…, name="plugins-stop")`. Записи крюка закрываются раньше воркеров
+  (LIFO); `plugins-stop` (C-60) остаётся последним в регистрации — первым в закрытии. У процесса без переопределения
+  порядок прежний (страж `process_module/tests/test_process_root_acceptance.py::test_root_close_order_golden`).
+- **PM: в `_own_work_late` переезжает только область `children`** (`work.child("children", budget_s=pm_graceful_s,
+  kill_reserve_s=KILL_RESERVE_S)` + `_ChildrenStop`). `summary` остаётся в `_own_work`: сводка публикуется после закрытия
+  SSM, как раньше.
+- **Порядок закрытия `work` PM:** `plugins-stop → children → workers (message_processor) → observability_watcher →
+  recipe_watcher → state_store → summary → plugins → hooks`. Фаза 1 корня не менялась: сигнал детям уходит до фазы 2.
+- **Команды в фазе детей** исполняет живой `message_processor`. Класс L отвергается: `KeyedExecutor` `pm-lifecycle`
+  закрыт уже фазой 1 (`request_stop` ставит `_closed`, ответ `system_stopping`, `worker_module/keyed_executor.py`
+  `request_stop`), `should_reject=_pm_stopping` дублирует отказ. Прямой `restart_process` отказывает слоем спавна
+  (`_spawn_refused_after_system_stop`). Повторный `system.shutdown` отвечает и не запрашивает стоп группы второй раз.
+- **Бюджет не менялся** (`_root_budget` = `pm_total_s + infra_s`, ADR-PMM-036 О6). Ребёнок, которому нужен
+  `terminate`, хвосту время оставляет (G = 1,0: корень закрыт за 1,14 с, выживших нет).
+
+### Известное ограничение
+
+После переноса `children` у хвоста `work` (`workers`, watcher'ы, SSM) нет своей доли бюджета: область `children` вправе
+занять весь `pm_total_s = G + TERMINATE_GRACE_S + KILL_CONFIRM_S` сегмента `work`. Проба (G = 1,0; ребёнок игнорирует
+сигнал и `terminate`, `kill()` в ≈ 2,02 с, ребёнок умирает через N с после `kill()`):
+
+| N | `survivors` корня |
+|---|---|
+| 0,5 | `()` |
+| 0,9 | `()` |
+| 0,98 | `('proc/ProcessManager/work/workers',)` |
+| 1,5 (не умер за окно) | `('…/work/children/processes', 'proc/ProcessManager/work/workers')` |
+
+Последствие: в этом окне отчёт корня PM не `ok` — `message_processor` в выживших (до правки воркеры закрывались первыми
+и выжившими не бывали). Случай N ≥ 1,5 — уже сбой ребёнка и до правки; новое — только `workers` в списке. Страж:
+`tests/test_process_root_pm_hazards.py::test_workers_not_survivor_when_child_outlives_kill_window`
+(`xfail(strict=True)`: станет красным, когда хвосту дадут долю). Решение — перераспределение долей бюджета `work`
+(контракт ADR-PMM-031/036 О6, литералы `modules/tests/test_manager_shutdown_1_2b_2_acceptance.py`, `PM_TEARDOWN_MARGIN_S`) —
+отдельная задача полосы Ф; см. `docs/claude/OPEN_QUESTIONS.md` 2026-11-06.
+
+### Отвергнуто
+
+- **Перенести `summary` вместе с `children`.** Сводка ушла бы раньше `workers` и SSM — момент публикации и её полнота
+  меняются (ревью стадии 0, п. 9).
+- **Вызов крюка после `plugins-stop`.** Плагины узнали бы о стопе позже начала ожидания детей (C-60).
+- **Доля хвоста в `_root_budget` в этой задаче.** Меняет контракт бюджета корня и числа спавнера (запас
+  `PM_TEARDOWN_MARGIN_S` при G ≥ 5 уже занят на 1,0 из 1,5) — не вертикальный срез; см. «Известное ограничение».
+- **Укоротить срок или резерв области `children`.** Меняет окна graceful/terminate/kill ADR-PMM-031.
+
+**Reversible:** yes (вернуть две строки `children` в `_own_work` PM; пустой крюк базы безвреден).
+**Refs:** `plans/2026-10-20_gui-graceful-close/plan.md`, `plans/2026-10-20_gui-graceful-close/tasks/1.1a.md`,
+ADR-PMM-036, ADR-PMM-038, ADR-PMM-039, `tests/test_pm_responsive_during_children_stop.py`,
+`tests/test_process_root_pm_hazards.py`.
+
+## ADR-PMM-041: Ход системного стопа — поле `system_stop` в `supervision.status` и ключи `system.stop.*` в сторе (Task 1.2a gui-graceful-close, 2026-11-07)
+
+**Статус:** accepted (2026-11-07; стадия 0 — ревью 2026-11-07, пп. 2–6, 10, 12; реализация — Task 1.2a плана
+`plans/2026-10-20_gui-graceful-close/plan.md`, бриф `tasks/1.2a.md`).
+
+### Контекст
+
+После ADR-PMM-040 PM отвечает всё окно стопа детей, но потребитель (встроенный GUI, Пульт, `backend_ctl`) не видит,
+ЧТО идёт: фаза, режим, кто начал и до какого момента. `status` процессов на стопе устаревший — монитор на паузе
+(ADR-PMM-036), выводить фазу из него нельзя.
+
+### Решение
+
+- **Форма.** Верхнее поле ответа `supervision.status` — `system_stop`: `None`, пока стоп не начат; иначе словарь
+  `phase` (`pre_stop | children | last_wave | done`), `mode` (`graceful | force`), `initiator`, `started_at`
+  (`time.time()`), `deadline_at` (`time.time()`), `pre_stop_step` (в 1.2a всегда `None`). Отдаётся КОПИЯ под листовым
+  локом `_system_stop_lock`. `pre_stop` ставит Task 1.4, `last_wave` — Task 1.3. Поля на процесс не менялись.
+- **Один набор помощников.** `_begin_system_stop` (первый выигрывает: одна проверка-и-установка под локом),
+  `_escalate_system_stop` (`force` поверх graceful: новые `mode`/`deadline_at`, `started_at`/`initiator` прежние;
+  повторный graceful и `phase == "done"` — без изменений), `_set_system_stop_phase` (стоп не начат — WARNING без
+  создания словаря; `done` — конечная), `_set_pre_stop_step`, `_publish_system_stop`. Остальной код словарь не трогает.
+- **Инициатор** — `sender` конверта `process.command`: `_handle_process_command` кладёт его в `data` служебным
+  ключом `_sender` только для `system.shutdown` (другим командам `data` не меняется). Значение — `_EnvelopeSender`
+  (подкласс `str`, метка происхождения); `_cmd_system_shutdown` принимает `_sender` только этого типа, строку из
+  `data` клиента — нет (через IPC приходит только `dict`/`str`, подделать тип нельзя). Длина `initiator` — не
+  более 64 символов. Нет отправителя или прямой `send_command` мимо конверта (в том числе с `_sender` в `data`) —
+  `"unknown"`. Стоп без команды (внешнее `system_stop_event`) — `"event"`.
+- **Начало.** `system.shutdown`: ход стопа начинается ДО взвода событий (иначе опрос успел бы начать его как `event`),
+  после проверки аргументов (ошибка аргументов стоп не начинает). `deadline_at`: graceful — `started_at + pm_graceful_s`
+  бюджета PM, force — `started_at + deadline_s`. `_ChildrenStop.request_stop` первым действием (до
+  `_children_stopping`, исполнителя и паузы монитора) начинает стоп как `event`, если он не начат, и объявляет
+  `children`. `_cmd_supervision_status`, видя `system_stop is None` при `_pm_stopping()`, сам начинает стоп как
+  `event` — окна «стоп идёт, а поле пусто» нет.
+- **`done`** ставит `_ChildrenStop.join_until`, если он вернул `True` (момент факта) или если `kill()` уже звали
+  (выжившие; потребитель судит по `alive`). Вызов после `kill()` — последний ход области до закрытия
+  `message_processor`: `_finish_stoppable` (`base_manager/core/lifetime.py`) зовёт `close()` только при `True`,
+  поэтому `close()` с выжившими не вызывается и остаётся лишь запасным путём. Не на любом возврате `join_until`:
+  область зовёт его и до `kill()`. Не в
+  `_stop_summary`: к нему `message_processor` и SSM уже закрыты (порядок ADR-PMM-040), `done` никто бы не увидел.
+- **Стор.** `system.stop.{phase,mode,initiator,started_at}` через `handle_state_set` (source `ProcessManager`),
+  после взвода событий и вне лока словаря. `_publish_system_stop` под отдельным `_system_stop_publish_lock` берёт
+  ТЕКУЩИЙ снимок и пишет только ключи, изменившиеся с прошлой публикации: фаза в сторе не откатывается, число
+  вызовов равно числу дельт. Командный graceful-стоп — 5 дельт (4 при начале, `done`); эскалация — ещё `mode`.
+  Сбой стора — исключение или ответ со `status` `rejected`/`error` (middleware, валидация) — WARNING, ключ не
+  помечается записанным (следующая публикация повторит его), `system.shutdown` не ломается. Флашер SSM может слить соседние дельты: каждую фазу пушем
+  потребитель не увидит.
+
+### Отвергнуто
+
+- **`done` в `_stop_summary`.** Публикация после закрытия `message_processor` и SSM — никому не видна.
+- **`done` на любом возврате `join_until`.** До `kill()` дети ещё живы.
+- **`done` только в `close()` для выживших** (итерация 0). Область не зовёт `close()` при `False`: стоп с выжившим
+  навсегда оставался `children` (ревью 1.2a, `survivor_rig.py`).
+- **Доверие строке `_sender` в `data`.** Прямая команда мимо конверта подделывала `initiator`.
+- **Отправитель всем командам в `data`.** Ломает обработчики, которые пересылают `data` целиком (`process.relay`)
+  или проверяют состав аргументов.
+- **Значение фазы из аргумента издателя.** Поздний издатель `children` откатил бы `done` в сторе (H10).
+
+**Дополнение Task 1.4 (ADR-PMM-044):** `pre_stop_step` ставит поток шагов `pm-pre-stop` (`"<process>.<command>"`
+текущего шага, `None` после списка и при выходе из фазы). `deadline_at` фазы `pre_stop` — `started_at + Σ timeout_s`
+принятых шагов (`_begin_system_stop(..., window_s=Σ)`); при выходе в `children` graceful перебазируется на
+`time.time() + pm_graceful_s`, `force` не сдвигается. Значения `initiator`: имя отправителя | `event` | `unknown`;
+литерала `parent_death` нет.
+
+**Reversible:** yes (поле и ключи новые; удаление помощников возвращает прежнее поведение).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2a.md`, `plans/2026-10-20_gui-graceful-close/design.md`
+(«Контракт хода»), ADR-PMM-036, ADR-PMM-038, ADR-PMM-040, `tests/test_supervision_status_system_stop.py`,
+`tests/test_supervision_status_system_stop_hazards.py`.
+
+## ADR-PMM-042: Итог стопа ребёнка на пути корня — реестр единственный источник `stop_outcome`; `stop_deadline_at` и `stop_wave` в `supervision.status` (Task 1.2 gui-graceful-close, 2026-11-08)
+
+**Статус:** accepted (2026-11-08; стадия 0 — `plans/2026-10-20_gui-graceful-close/reviews/task-1.2-stage0.md`,
+решение CTO 2026-11-07 вариант A; реализация — Task 1.2, бриф `plans/2026-10-20_gui-graceful-close/tasks/1.2.md`).
+
+### Контекст
+
+ADR-PMM-039 (Task 1.10) ввёл итог стопа воплощения (`exited | terminated | killed | handed_over | survived`), но писал
+его только `_stop_many`. Стоп корня (`_ChildrenGroupStop`, область `children`) итог считал и в реестр не писал: после
+закрытия корня `registry.stop_outcome` = `None`, а `ChildProcessStop.outcomes()` знал ответ. Звать `outcomes()` с потока
+`message_processor` нельзя: посреди стопа он лжёт `survived` у живых и сам подтверждает смерть (`_observe()` → `_confirm`)
+не на потоке-владельце группы. GUI (решение владельца 7) судит о зависании по сроку — его в ответе не было.
+
+### Решение
+
+- **Источник.** Реестр — единственный источник `stop_outcome` на обоих путях (`_stop_many` и корень). Единственный
+  писатель словаря — `ProcessRegistry._record_stop_outcome(name, outcome)` под листовым `_stop_outcome_lock` (только
+  проверка ранга и запись). Читатель `stop_outcome()` — без лока (D3 1.10). `add_process` сбрасывает итог (тот же лок).
+- **Момент записи — `_confirm`.** `ChildProcessStop` получил колбэк `on_outcome(name, outcome)`; итог (`killed` /
+  `terminated` / `exited` — по сигналу, доставленному ИМЕНИ) считается под существующим локом сразу после `_dead.add`,
+  колбэки — после выхода из лока, без раннего `return`: сначала `on_confirmed_dead` (метка читателя), потом
+  `on_outcome`; каждый в своём try/except с WARNING. Поэтому `stop_outcome != null` ⇒ метка читателя стоит.
+  `_build_child_stop` передаёт `on_outcome=self._record_stop_outcome` для обоих путей и при любом `mark_reader_gone`.
+  Цикл итога `_stop_many` пишет через `_record_stop_outcome`; канал ответа вызова (`call_stop_outcome`) — напрямую, без
+  правила. `outcomes()` и `_observe()` не меняются (заморозка).
+- **Правило перезаписи — ранг.** `handed_over` 1 < `survived` 2 < `exited` 3 < `terminated` 4 < `killed` 5; пишется,
+  если ранг нового >= сохранённого. Писателей два, порядок не гарантирован (при `False` от `executor.join_until`
+  стоп по одному идёт параллельно с корнем, ADR-PMM-039 I1): группа `_stop_many` видит смерть от `terminate` корня и
+  считает `exited`, её снимок `outcomes()` бывает снят до этой смерти (`handed_over`). Ранг сохраняет самый сильный
+  доставленный сигнал.
+- **Умерший до стопа** в группу корня не попадает: `_ChildrenGroupStop.request_stop` пишет ему `exited` (имя без
+  объекта в реестре не пишется). Так у каждого ребёнка, остановленного до или во время стопа, итог не `null`.
+- **`survived`** — только после `kill()` и срока: `False` от `join_until` фазы 3 → одним снимком `survivors()` на
+  потоке-владельце. До этого `None`. Умерший позже получает подтверждённый итог поверх (ранг выше).
+- **`stop_deadline_at`** (`time.time()`) = момент сигнала стопа детям + окно имени
+  (`ProcessRegistry.stop_window_s(name)`: `stop_window_s` воплощения, иначе `g`). Сигнал — геттер группы, не PM-часы:
+  `ChildProcessStop.stop_requested_wall` (ставится один раз в `request_stop`) → `_ChildrenGroupStop.signalled_at()` →
+  `_ChildrenStop.signalled_at()` → PM. PM-часы в `_ChildrenStop.request_stop` ошиблись бы на ожидание исполнителя и
+  паузу монитора. PM проверяет число (`isinstance`), иначе `None` (двойники). При `mode == "force"` —
+  `min(…, system_stop.deadline_at)`; для graceful `system_stop.deadline_at` не используется (он раньше реального срока —
+  ложное «завис»). Снимок `system_stop` берётся выше цикла по процессам. `null` до сигнала, вне стопа, у PM и у имени
+  без объекта в реестре; после смерти не пересчитывается. У умершего до стопа значение = сигнал + окно, потребитель им
+  не пользуется (`stop_outcome` уже `exited`).
+- **Предел срока.** Настоящий `terminate` по имени идёт в `min(_stop_requested_at + окно, срок области)`
+  (`child_process_stop.py`, `_name_escalate`), срок области фиксируется до фазы 1 (`base_manager/core/lifetime.py`):
+  `сигнал + окно` — верхняя оценка, перекос <= `infra_s`; для GUI безопасная сторона.
+- **`stop_wave`** — геттер `_stop_wave(name)`, сегодня `"main"` у всех; Task 1.3 заменит его (волна `last`).
+- **F1.** `_ChildrenStop.join_until` при `_group is None` (реестр не собрал группу) после `kill()` объявляет `done` —
+  иначе фаза навсегда `children`, а контракт «после `done` `null` = PM не подтвердил» на этом пути не исполняется.
+
+### Инварианты
+
+- `_confirm` зовёт только поток-владелец группы (тот, что ведёт `join_until`/`kill`/`close`): `_terminated.add` и
+  `_killed.add` стоят ПОСЛЕ `proc.terminate()`/`proc.kill()`, и итог верен, пока смерть наблюдает тот же поток.
+  `result()`, `survivors()`, `outcomes()` с потока `message_processor` не зовутся; статус читает только
+  `registry.stop_outcome(name)`.
+- На системном стопе спавн отвергает `create_and_register` (ADR-PMM-030): он проверяет только `system_stop_event`, не
+  `_children_stopping`. Отказанный рестарт и `remove_process` итог не сбрасывают; сбрасывает только `add_process`.
+- Метка читателя — ровно одна на имя (D2 1.10 без изменений).
+
+### Предел контракта
+
+Между реальной смертью и её наблюдением группой (<= `STOP_POLL_S`) бывает `alive=false, stop_outcome=null`.
+«Остановлен» = `stop_outcome` ∈ {`exited`, `terminated`, `killed`}; `survived` и `handed_over` = НЕ остановлен
+(ребёнок жив). «Все остановлены» = итог из этого набора у каждого ребёнка; после `system_stop.phase == "done"` `null` =
+«PM не подтвердил». `survived` опросом почти не виден (окно между концом детей и остановкой `message_processor` короче
+шага опроса) — доезжает логом. Долг документации: `README.md` модуля и `backend_ctl/AGENTS.md` — Task 1.4. README модуля закрыт в Task 1.4 (абзац «Итог стопа ребёнка»); `backend_ctl/AGENTS.md` — часть драйвера Task 1.4.
+
+C-88 (ADR-PMM-045): окно «последний итог не доехал» закрыто ожиданием наблюдателя после `done`; остаток предела — в ADR-PMM-045.
+
+Ключ итога — имя, а не воплощение: `ChildProcessStop` старого воплощения X, подтвердивший смерть после
+`remove_process` + `add_process` нового X, пишет `exited` под именем нового. На `main` до Task 1.2 так же через цикл
+`_stop_many` — не регрессия. Экспозиция низкая: нужны две одновременные операции на одно имя (исполнитель жизненного
+цикла их сериализует, спавн на системном стопе отвергнут). Проверка идентичности воплощения в записи итога не делается
+(решение лида 2026-11-08).
+
+### Отвергнуто
+
+- **Запись в конце (`result()`/`outcomes()` после закрытия области).** Посреди стопа соседи без итога; GUI не видит
+  умерших, пока жив медленный.
+- **Геттер итога через `outcomes()` из `supervision.status`.** Чужой поток подтверждает смерть и лжёт `survived` у живых.
+- **«Подтверждённый не затирается» вместо ранга.** `exited` группы `_stop_many` (смерть от `terminate` корня) —
+  тоже подтверждённый и затёр бы `terminated`.
+- **Срок от PM-часов или `system_stop.started_at + pm_graceful_s`.** Ошибка на ожидание исполнителя и паузу
+  монитора; без окна имени.
+
+**Последствия:** `stop_wave` — константа `main` до Task 1.3; с Task 1.3 — волна имени из реестра (ADR-PMM-043).
+
+**Reversible:** yes (поля ответа новые; колбэк необязательный — без него прежнее поведение).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.2.md`, ADR-PMM-035, ADR-PMM-039 (дополнение Task 1.10),
+ADR-PMM-041, `tests/test_root_stop_outcome_acceptance.py`, `tests/test_root_stop_outcome_hazards.py`.
+
+
+## ADR-PMM-043: Волны системного стопа — `stop_wave: last` гаснет после основной волны (Task 1.3 gui-graceful-close, 2026-11-08)
+
+**Статус:** accepted (2026-11-08; стадия 0 — три раунда, `plans/2026-10-20_gui-graceful-close/reviews/task-1.3-stage0.md`)
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.3.md`, ADR-PMM-031, ADR-PMM-035, ADR-PMM-042, LSO Task 1.11
+
+### Контекст
+
+GUI получал `terminate` в окне PM, пока PM ждал зависшего соседа: все дети корня гасились одной волной, окно
+`gui` кончалось вместе с окнами остальных. GUI должен гаснуть последним — после основной волны.
+
+### Решение
+
+- **Поле.** `stop_wave: Any = None` у `ProcessConfig` (чертёж) → `as_generic_config` → `GenericProcessConfig` →
+  верхний уровень `proc_dict`; `None` и `"main"` в `proc_dict` не кладутся. `Any`, не `Literal`: опечатка не роняет
+  blueprint (принцип 5) и не несёт значение в текст ошибки. Проверка — в реестре: годно ровно `"main"` или `"last"`;
+  иное — WARNING без значения, процесс в `main`. Прототип: `presentation.yaml` ставит `stop_wave: last` у `gui`.
+- **Реестр.** `_stop_waves` пишется в `_create_process` (рестарт и `topology.apply` идут тем же путём и обновляют
+  запись), снимается в `remove_process`; публичный `stop_wave(name)`. Группа корня (`_ChildrenGroupStop`) делит
+  имена на две сборки `ChildProcessStop`; имён `last` нет — вторая сборка не строится, путь прежний.
+- **Карта окон по всем именам** при волне `last` (`_build_child_stop(..., all_windows=True)`): область `children`
+  длиннее `g`, имя без ключа обязано получить `terminate` на `сигнал + g`, а не дожить до срока области.
+- **`poll` вместо коротких сроков.** `ChildProcessStop.poll(deadline)` — один проход `join_until` без ожидания,
+  `wait(pause)` — пауза; `join_until` = цикл `poll` + `wait`. Один поток группы крутит обе сборки с настоящим сроком
+  `D`: короткий `join_until(now + STOP_POLL_S)` зажал бы `term_at`/`kill_at` и `terminate` ушёл бы через ~50 мс.
+- **Сигнал `last` по времени (вариант А).** Фаза 1 сигналит только `main`. `last.request_stop()` — один раз, когда
+  `main` пуст или в `D − LAST_WAVE_S`. Следствие: у зависшего ребёнка `main` со стандартным окном `g` его
+  `terminate` (5,0 с) и сигнал `gui` (5,0 с) совпадают — вопрос «процесс завис» (design.md, C) для него не успевает
+  появиться; «подождать ещё» на стороне PM ничего не меняет, PM эскалирует по своему сроку. При `main`, который
+  игнорирует и `terminate`, `last` сигналят до его `kill` (6,0 с).
+- **Пороговое правило `force`.** Отдельной ветки нет: при `D − now ≤ LAST_WAVE_S` (в т.ч. `force` с
+  `deadline_s ≤ 2,0`) обе волны сигналят на первом проходе. При `force` с `deadline_s` в (2,0; 5,0] `last` сигналят в
+  `D − 2,0`, пока `main` ещё в окне; срок `terminate` `main` не сокращается (= `D`).
+- **Бюджет.** `stop_budget(g, *, has_last=False)`: `LAST_WAVE_S = 2.0`; только при `has_last` шестой ключ
+  `last_wave_s` и `pm_total_s`/`outer_s` + 2,0 (g = 5,0: 9,0 / 10,5 против 7,0 / 8,5). Без `has_last` — ровно пять
+  прежних ключей. Область `children` при `has_last`: `budget_s = pm_graceful_s + last_wave_s` (`D` = старт + 7,0,
+  `D − last_wave_s` = прежнее окно `main`, предел фазы 3 = `pm_total_s`). Ребёнку `last_wave_s` не уходит.
+- **`has_last` — только при старте.** PM считает его в `__init__` из `processes_config` (к `initialize`
+  `_process_configs` пуст), спавнер — в `stop()` из своего `processes_config`. `_ceiled_budget` при `has_last`
+  пересчитывает всегда (словарь раннера `last_wave_s` не несёт).
+- **Слушатель волны и сдвиг `deadline_at`.** Группа зовёт `callback("last", D)` сразу после сигнала `last`, вне лока;
+  PM (`_ChildrenStop._on_last_wave`) сдвигает `system_stop.deadline_at` на остаток срока области (под
+  `_system_stop_lock`; не при `force` и не после `done`) и объявляет фазу `last_wave`. Переход ловится внутри
+  `join_until`, не чтением `wave` после возврата. Сигнатура `children_stop` прежняя (слушатель — через `getattr`).
+- **`signalled_at` по волне.** `stop_deadline_at` имени `last` — от сигнала `last` (до него `null`, контракт 042);
+  у прочих — от сигнала `main`. Для `last` это верхняя оценка: настоящий `terminate` — в `min(сигнал + окно, D)`.
+
+### Известные ограничения
+
+- `has_last` не пересчитывается на `topology.apply`: рецепт с `gui: last`, применённый после старта топологии без
+  `last`, области корня не удлиняет (они открыты один раз).
+- `has_last` истинен (снят при старте), а имени `last` в реестре к стопу нет: группа идёт прежним путём без карты
+  окон, область `children` = 7,0 с — зависший `main` без своего ключа получает `terminate` на 7,0, а не на 5,0;
+  `deadline_at` и `stop_deadline_at` его имени остаются на 5,0 (занижены на 2,0). Если имя `last` в реестре, но мёртво,
+  сборки строятся с `all_windows=True` и `terminate` идёт на 5,0. Следствие решения «`has_last` только при старте».
+- `LAST_WAVE_S = 2.0` не замерено против штатного выхода `gui`; если замер > ~1,5 с — поднять до 3,0 (число в одном
+  месте, `stop_budget.LAST_WAVE_S`).
+
+### Отвергнуто
+
+- **Вариант (Б): `last` после конца эскалации `main`.** Нужен свой резерв эскалации у `last`: `pm_total_s` 11,0
+  вместо 9,0; иначе зависший `gui` остаётся без `terminate`/`kill`.
+- **Резерв 2,0 с «всегда».** Ломает «числа прежние» у топологий без `last`.
+- **`Literal["main", "last"]`.** Опечатка роняла бы весь blueprint и несла значение в текст ошибки.
+
+**Reversible:** yes (без `stop_wave: last` в топологии — путь и числа прежние).
+**Risk:** medium — стоп корня крутит две сборки одним потоком; держится слепыми REDS 1–10 и стражами
+`test_stop_wave_last_guards.py`.
+
+## ADR-PMM-044: `pre_stop` — шаги-запросы до событий стопа, отдельный исполнитель, отказ L/T в фазе `pre_stop` (Task 1.4 gui-graceful-close, 2026-11-09)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** «Домой» перед стопом (робот паркуется) нужно исполнить ДО взвода `_system_stop_event`: после него
+дети гаснут. Нужен запрос с ожиданием ответа, срок на шаг, отмена `force` и внешним событием, честный ход стопа.
+
+### Решение
+
+1. **Схема** (`process/pre_stop.py`, lite-контракт): ключ `pre_stop` конфига PM (из `orchestrator_config`) — список
+   `{process, command, args, timeout_s}`; `timeout_s` — конечное число `0 < t <= 60` (`bool`/строки нет, `int` — да).
+   Негодная запись — одна ERROR `pre_stop[<i>]: <поле> — <причина>` без входных значений и пропуск; потолок
+   `Σ timeout_s <= 120` по принятым записям (граница включительно). PM стартует всегда (принцип 5).
+2. **Шаг — запрос** `router_manager.request_async` (`build_command_message`, `sender` = имя PM) с потока
+   `pm-pre-stop`. Порядок: реестр (`процесс не найден`) → событие готовности (`ребёнок не готов`) → запрос → ожидание.
+   Все ожидания — срезами 50 мс по событию с проверкой отмены. Колбэк (поток приёма) только кладёт ответ и взводит
+   `Event` шага. Сбой — одна WARNING `pre_stop: шаг '<p>.<c>' — <причина>` (`timeout` | `ошибка ответа` |
+   `ошибка отправки` | `процесс не найден` | `ребёнок не готов` | `исключение <Класс>`), следующий шаг. Синхронный
+   отказ `request_async` (колбэк на потоке шага) — `ошибка отправки`; исключение `send` — `исключение <Класс>`.
+   Отмена — INFO `... прерван (force|event)`, остальные шаги не идут.
+3. **Запоздавший ответ.** Приходит в system-очередь PM. Колбэк закрытого шага — no-op; слот подметается таймаутом
+   `request_async` на такте `receive()`; ответ после подметания `_resolve_pending` не находит — обычный разбор
+   `command.response` (обработчика нет). Повторного шага нет.
+4. **Исполнитель** `pm-pre-stop` (`KeyedExecutor`, `serial`, `max_pending: 1`) создаётся в `initialize` только при
+   шагах (иначе ноль потоков); весь список — одна операция `submit`. Нет `executor_manager` — ERROR
+   `pre_stop: исполнитель недоступен — шаги отключены`. События стопа и публикацию взводит поток шагов в `finally`
+   (`_finish_pre_stop`, идемпотентна); отказ `submit` (`reply`) зовёт её же.
+   Два пути оставлены намеренно (ревью r1, m1): `finally` потока шагов и `reply` операции `submit` (он же идёт и на
+   нормальном выходе). SM 2 проверяет «хотя бы один путь»; каждый путь по отдельности охраняют hazard h7 (`finally`,
+   инъекция 14) и h8 (`reply` отказа, инъекция R); инъекция 14б убирает оба — SM 2 красная.
+5. **Отмена** — флаг `force` (ленивое свойство `_pre_stop_cancel_flag`) ИЛИ `_system_stop_event`, взведённый не
+   потоком шагов (`harness.stop()`, запасной путь GUI, спавнер). В фазе `pre_stop` событие НЕ взведено. Ревью r1:
+   ещё свой `stop_event` PM и начатый стоп детей (`_children_stopping`) — источник `event`; в фазе `pre_stop` их внутри
+   PM взводит только путь `force` после флага, снаружи — раннер/спавнер (h6, инъекция S).
+6. **Отказ L/T.** `pm-lifecycle` получает предикат `_lifecycle_rejected() = _pm_stopping() or phase == "pre_stop"`:
+   L и T-для-цели-в-переходе отвечают `system_stopping`. `_pm_stopping()` и его потребители (`stop_abort`, отказ
+   спавна, ожидания, ленивый begin) не меняются. Известное ограничение: монитор может перезапустить упавшего
+   ребёнка во время `pre_stop`.
+7. **Ход стопа.** Фаза `pre_stop`: `deadline_at = started_at + Σ timeout_s`. Переход `pre_stop → children` —
+   `_leave_pre_stop` (под `_system_stop_lock`, только из `pre_stop`; повтор — no-op): `pre_stop_step = None`,
+   graceful — `deadline_at = time.time() + pm_graceful_s`, `force` — без сдвига. То же делает `_set_system_stop_phase`
+   при выходе из `pre_stop` любым путём (`_ChildrenStop.request_stop` при внешнем событии).
+8. **Ответ `system.shutdown`.** Первый `graceful` — `accepted: True, mode: "graceful", phase` (`pre_stop` при шагах и
+   `_pm_stopping()` ложном, иначе `children` и события сразу). Повтор `graceful` — `accepted: False,
+   reason: "already_stopping", phase` (+ прежний `message`); в фазе `pre_stop` без событий и без публикации, вне
+   `pre_stop` события взводятся, как до 1.4 (идемпотентно, страж Task 0.2). `force` свежий — `accepted: True,
+   phase: "children"`, шаги не исполняются. `force` поверх graceful — `_escalate_system_stop`, отмена, переход и
+   события на потоке приёма; `accepted: True, escalated: True` (ключ `escalated` — только здесь). Повтор `force` —
+   `already_set` + `accepted: False, reason` (без `phase`). Запасной путь без `_children_stop` (двойники): шаги
+   отменяются, события всегда, `accepted` — итог `_begin_system_stop`, при `False` — `reason`.
+   Аргумент `initiator` не вводится (`_EnvelopeSender`, ADR-PMM-041).
+
+### Отвергнуто
+
+- **`_send_child_command`** — не ждёт ответа и таймаута не знает.
+- **Шаги в `pm-lifecycle`** — шаг до 60 с занял бы единственного рабочего; собственный предикат отказа фазы
+  `pre_stop` отклонил бы сам шаг.
+- **Расширить `_pm_stopping()`** — поменяло бы `stop_abort`, отказ спавна и ожидания в фазе `pre_stop`.
+- **Явный аргумент `initiator`** — открыл бы подделку инициатора; потребителя нет.
+- **Отказ старта PM за негодный шаг** — один негодный ключ ронял бы бэкенд (принцип 5).
+- **Блокирующий `request(timeout)`** — ждёт слепо, отмену не видит.
+- **Конец опроса драйвера по `alive`** — ADR-PMM-042 «Предел контракта» (`alive=false, stop_outcome=null`).
+
+**Последствия:** итог последнего медленного ребёнка опросом может быть не виден (`message_processor` PM закрывается
+вскоре после `done`) — вариант «итоги в стор при `done`» в `docs/claude/OPEN_QUESTIONS.md` (2026-11-08). Манифест
+`pre_stop` и шаг `robot_park_all` — Task 1.4m.
+
+**Reversible:** yes (без ключа `pre_stop` путь прежний; новые поля ответа — добавочные).
+**Risk:** medium — второй поток в стопе PM; держится SM REDS 1–7 и hazard h1–h4 (`tests/test_pre_stop_author.py`).
+**Refs:** `plans/2026-10-20_gui-graceful-close/tasks/1.4.md`, ADR-PMM-038, ADR-PMM-039, ADR-PMM-041, ADR-PMM-042,
+`tests/test_system_shutdown_pre_stop.py`, `tests/test_pre_stop_contract.py`, `tests/test_pre_stop_author.py`.
+
+## ADR-PMM-045: Ожидание наблюдателя `supervision.status` после `done` — последний итог стопа доезжает (C-88, 2026-11-11)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст (диагноз C-88).** `BackendDriver.system_shutdown(wait=True)` на стенде `letter_robot_sim` отдавал девять
+`exited` и `recog: None` (`unconfirmed=['recog']`, `pm_gone=True`, `timed_out=False`) — 2 из 2 прогонов. Причина:
+`_ChildrenStop.join_until` объявляет фазу `done` сразу после записи итога последнего ребёнка (ADR-PMM-041), область
+закрывает `message_processor` через ~1 мс, а драйвер опрашивает `supervision.status` раз в ~60 мс — снимок с
+последним итогом не отдаётся ни разу. Последним уходит `recog` (хвост выхода процесса после atexit 0.29-0.39 с против
+<= 0.17 с у остальных). Реестр, `ChildProcessStop` и драйвер верны: запись `recog=exited` есть, PM её не отдаёт. Это
+щель, названная в ADR-PMM-042 «Предел контракта».
+
+### Решение
+
+1. `_cmd_supervision_status` перед возвратом, по локальному `system_stop` (после ленивого начала стопа): стоп идёт —
+   метка `_status_served_during_stop_at = time.monotonic()`; `phase == "done"` — взводится `threading.Event`
+   «снимок с `done` отдан». Событие берёт ОДИН accessor PM `_status_done_served_event` (создание при чтении, образец
+   `_system_stop_lock`): обработчик и ожидание получают одно событие. `getattr` с умолчанием допустим только для
+   метки (`None` = не свеж): PM из `__new__` в тестах обработчик не роняет.
+2. `_ChildrenStop._linger_for_status_observer(deadline)` зовётся сразу после `_announce_phase("done")` в трёх местах
+   (`join_until`: ветка «группы нет, `kill()` был» и ветка «дети ушли»; `close` — `deadline=None`, только потолок).
+   Один раз на экземпляр (флаг класса `_linger_done`; берётся при любом результате). Метка нет или старше
+   `_STATUS_OBSERVER_FRESH_S = 0.25` — выход сразу (нулевая цена без наблюдателя). Иначе ждёт событие не дольше
+   `min(_STATUS_LINGER_S = 0.5, max(0, deadline - monotonic()))`; событие взведено — пауза `_STATUS_FLUSH_S = 0.05`
+   (тоже в пределах остатка): ответ уходит потоком адаптера моста уже после возврата обработчика, а
+   `_close_backend_ctl` не ждёт отправок в полёте — пауза это время, не гарантия доставки. Константы — глобалы модуля,
+   читаются в момент вызова. Лок PM не держится. Сбой — ERROR в лог, стоп идёт (принцип 5). Охраны потока нет:
+   `join_until`/`close` обычно идут на основном потоке раннера, но `_handle_critical_error`
+   (`process_manager_process.py`, ~:4128) может позвать `shutdown()` с любого потока, в том числе с
+   `message_processor`; тогда самоожидание ограничено потолком и не виснет.
+3. Не меняются: `outcomes()`, `_observe()`, `_confirm`, `_record_stop_outcome`, правило ранга, порядок фаз и момент
+   `done` (ADR-PMM-041), логика драйвера, `interfaces.py`, публичный API.
+
+### Известная цена
+
+- **N2.** Наблюдатель, перестав опрашивать прямо перед `done` (закрытие GUI останавливается по «нет живых»,
+  `close_coordinator.py`), ещё выглядит свежим: PM выходит позже на срок до `_STATUS_LINGER_S + _STATUS_FLUSH_S` (0,55 с). Запас спавнера
+  `PM_TEARDOWN_MARGIN_S` = 1.5 с (`stop_budget.py`) его покрывает; потолок держит H4.
+
+### Остаточное
+
+- `force` с малым остатком срока получает мало ожидания или никакого: ожидание не выходит за срок.
+- После исчерпания ожидания `null` у необслуженного последнего итога по-прежнему значит «PM не подтвердил»
+  (ADR-PMM-042) — не заявлено закрытым.
+- Наблюдатель, опрашивающий статус реже чем раз в 0,25 с, ожидания не получает.
+- Если драйвер кончает опрос по `all_done`, пока фаза ещё `children`, PM ждёт потолок зря (окно короче
+  миллисекунды, но возможно).
+- Метку ставит ЛЮБОЙ `supervision.status` во время стопа, в том числе с фильтром `process=` и разовый запрос
+  GUI: один запрос за 0,25 с до `done` продлевает выход PM.
+
+### Отвергнуто
+
+- **B: PM шлёт итоги до закрытия транспорта** — новое сообщение, правка драйвера и эндпоинта.
+- **C: обслуживать `supervision.status` вне `message_processor`** — смена маршрутизации, риск выше.
+- **Правка только драйвера** — невозможна: PM снимок не отдаёт.
+
+**Reversible:** yes (удалить метку, событие и вызов ожидания).
+**Risk:** low — бездействует без свежего наблюдателя; ограничено потолком и остатком срока.
+**Refs:** `plans/release-1.0/lane-tasks/C-88_recog-outcome.md` (бриф живёт в ветке `docs/release-1.0-alpha-1.1`), ADR-PMM-041, ADR-PMM-042,
+`tests/test_c88_status_linger_hazards.py`, `backend_ctl/tests/test_c88_shutdown_outcomes_acceptance.py`.
+
+
+## ADR-PMM-046: PID-реестр — область «приложение И checkout», прежний неразделённый файл не реапается, лог реапа называет pid и имя (D2 r2-env-isolation-defects, 2026-11-15)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`, `launcher/pid_registry.py`).
+
+**Контекст.** После D4 имя дефолтного реестра — `<app>_system_pids.jsonl` в `tempfile.gettempdir()`. Два checkout
+(клон, worktree) ОДНОГО приложения на одной машине получали один файл, и `reap_and_reset` на каждом старте убивал живые
+процессы соседа: сверка `create_time` защищает только от переиспользования PID, не от «чужого, но живого» процесса.
+Лог реапа давал только счётчик, кого убили — не видно.
+
+### Решение
+
+1. Имя — `<app>_<tag>_system_pids.jsonl`, `tag` = первые 8 hex `sha1` от корня checkout. Корень — шов `_checkout_root()`:
+   каталог, содержащий пакет `multiprocess_framework` (`Path(list(pkg.__path__)[0]).resolve().parent`; `__path__` есть
+   и у namespace-пакета, `__file__` может быть `None`). Любая ошибка -> запасной корень `unknown-checkout` (общее имя,
+   не исключение: `clear()` считает путь вне `try`). Env-ручки (`MULTIPROCESS_PID_FILE` сильнее `INSPECTOR_PID_FILE`) не меняются.
+2. Прежнее неразделённое имя `<app>_system_pids.jsonl` НЕ реапается и НЕ удаляется: записи нельзя отнести к checkout,
+   а убить чужой живой процесс хуже, чем оставить хвост.
+3. `legacy_pid_file_path` (реестр `inspector_system_pids.jsonl` до D4) возвращает `None`, если он — тот же файл, что
+   неразделённый дефолт D4: `os.path.samefile`, при отсутствии файла — сравнение `os.path.normcase` имён (на
+   регистронезависимой ФС `MPF_APP_NAME=Inspector` даёт одну сущность при разных строках).
+4. `_reap_file`: на жертву имя `p.name()` (сбой -> `?`), один `kill()` (охрана R4 держит ровно один), затем строка
+   `PID-реестр: убит pid=<p.pid> (<имя>)`. Берётся `p.pid`, не переменная цикла (она держит последнюю запись реестра,
+   не жертву). Итоговая строка со счётчиком и возвращаемое число не изменены.
+
+### Границы (названы явно)
+
+- **(а) Цена п.2.** Хвосты аварийного запуска СТАРОЙ версии (реестр прежнего неразделённого имени) один раз остаются
+  до ручной чистки.
+- **(б) Остаточный путь убийства.** Реестр `inspector_system_pids.jsonl` для приложений, кроме `inspector`, по-прежнему
+  реапается и удаляется (его писал код до D4, а также код D4 при `MPF_APP_NAME=inspector`; старых worktree много). Отпечаток считается от каталога пакета фреймворка, не приложения: два приложения на одном установленном пакете получат один отпечаток (различает их slug). Реестр не отличает хвост от живого параллельного
+  запуска ТОГО ЖЕ checkout. `register_self` между чтением и усечением файла (`reap_and_reset` / `_reset_file`) стирается.
+- **(в)** Общее состояние вне реестра (SHM, порт backend_ctl, каталог логов) D2 не покрывает.
+- **(г)** macOS: `resolve()` не нормализует регистр пути — два написания одного каталога дадут два отпечатка.
+- **(д)** PyInstaller onefile даёт новый `_MEIPASS` на каждый запуск -> корень другой, хвосты не реапаются.
+
+### Отвергнуто
+
+- `parents[N]` от `__file__` и `os.getcwd()` — первое ломается на namespace-пакете, второе меняется от запуска к запуску.
+- Реап прежнего неразделённого файла «на всякий случай» — путь межчекаутного убийства, ради которого сделан D2.
+
+**Reversible:** yes (вернуть имя без `tag`).
+**Risk:** low — реестр не критичен, ошибки определения корня деградируют до прежнего общего имени.
+**Refs:** `plans/r2-env-isolation-defects/plan.md`, `plans/r2-env-isolation-defects/tasks/D2.md`, ADR-137 (D4),
+`tests/test_pid_registry_app_scoped.py`, `tests/test_pid_registry_checkout_acceptance.py`, `tests/test_pid_registry.py`.
+
+## ADR-PMM-047: `run_event` — `RunFlag` (байт в разделяемой памяти без межпроцессного замка) вместо `multiprocessing.Event` (Task 1.10 system-run-state, F3, 2026-11-15)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст (F3 свежего ревью Ф1).** `run_event` был `multiprocessing.Event`: каждый `is_set/set/clear` берёт
+межпроцессный замок. Дети читают флаг с частотой ~90 обращений/с на ребёнка (`reconcile_run_event`, `SourceProducer`,
+`process_module`). Ребёнок, убитый (SIGKILL/OOM/segfault) внутри `is_set()`, оставляет замок занятым навсегда;
+`_run_apply` трогает флаг под `_run_lock` PM — PM встаёт, а с ним `system.run.*`, публикация состояния и такт монитора
+(воспроизведение: ребёнок держит внутренний замок, SIGKILL — три вызова висят дольше 3 с). Это нарушает принцип
+владельца 5 (сбой одного процесса не валит соседей).
+
+### Решение
+
+1. `core/run_flag.py`: `RunFlag(initial: bool = False)` на `multiprocessing.RawValue(ctypes.c_bool, initial)`;
+   `is_set() -> bool`, `set() -> None`, `clear() -> None`. Имена и смысл как у `Event` — подмена одной строкой:
+   `ProcessManagerProcess._create_components`: `self._run_event = RunFlag()` (имя атрибута сохранено, потребители и
+   раннер не меняются). `wait()` НЕ реализован: блокирующих потребителей в репозитории нет (проверено `git grep`),
+   контракт «только опрос» закреплён в docstring и тесте.
+2. Контекст `RawValue` — умолчательный (`multiprocessing.RawValue`), как у `RawArray("q", 3)` слота отчёта выхода и
+   `Event` в `process_registry.py` (`from multiprocessing import Event, Process, RawArray`): `Process` реестра тоже
+   умолчательный, объект согласован с ним при spawn (macOS, Windows).
+3. **Инвариант ADR-PMM-034 сохранён.** Флаг уходит ребёнку ТОЛЬКО наследованием при spawn — kwargs `Process(...)`
+   (`ProcessRegistry(run_event=...)` -> `run_process_function(..., run_event=...)`), не через bundle `custom`, очередь
+   или Manager. Вне spawn `pickle` падает громко (`TypeError: cannot pickle 'mmap.mmap'`, проверено стадией 0), тихой
+   порчи нет.
+4. **Атомарность без замка и барьера.** Единственный писатель — PM (под своим `_run_lock`); читатели — дети, только
+   `is_set()`. Читатель видит старое или новое значение — оба допустимы (фронт виден за доли секунды, как и раньше).
+   Формально Python барьера памяти не даёт; безопасно по двум причинам: запись/чтение одиночного байта атомарны на
+   x86-64 и arm64, а флаг не публикует зависимых данных (читатель по значению ничего больше не читает из памяти
+   писателя, порядок видимости относительно других записей не нужен). Добавить зависимые данные или второго писателя —
+   пересмотр решения.
+5. Не меняются: `stop_event` (per-process, `process_registry.py`: `Event()` из `multiprocessing`) и
+   `system_ready_event` (остаются `mp.Event`); `pause_event` в ADR не участвует: это `threading.Event` воркера внутри
+   процесса (`worker_module/lifecycle/worker_lifecycle.py:72`), межпроцессного замка у него нет. Аннотации `Optional[Event]` в
+   `process_registry.py` и `process_runner.py` (аннотация, не фабрика; `RunFlag` совместим по утиной форме `is_set`).
+   Обращения PM к флагу под `_run_lock` остаются, но замка ОС больше не берут.
+
+### Отвергнуто
+
+- **Байт в `shared_resources_module`** (реестр, имя, жизненный цикл ради одного флага): лишний слой без выигрыша;
+  рядом уже живёт `RawArray` слота отчёта выхода тем же путём (принцип 4: меньше слоёв при равной функции).
+- **`RawValue` с замком по умолчанию / `mp.Value`:** вернул бы тот же межпроцессный замок.
+- **Оставить `Event` и ловить зависание таймаутом:** замок не отпустить снаружи, `_run_lock` держится — PM всё равно
+  встаёт.
+
+### Известная цена и остаточное
+
+- Читатель может увидеть старое значение дольше одного опроса: гарантии «сразу» нет и не было (темп опроса детей — порядка 90 обращений/с).
+- Windows не проверялся: наследование `RawValue` аргументом `Process` при spawn Windows предполагается по образцу
+  `RawArray` слота, не проверено; стенд с `kill -9` на Windows — отдельная проверка стадии 4.
+- Остальные `mp.Event` в PM/детях (`stop_event`, `system_ready_event`) тот же класс отказа не лечатся
+  этим ADR; решение по ним и по `run_watch` (M1, OPEN_QUESTIONS 2026-11-12/-13) — Task 2.5. (`pause_event` воркера —
+  `threading.Event`, класс отказа к нему не относится.)
+- **Цепочка через `stop_event` (найдена свежим ревью, итерация 2).** Ребёнок, умерший внутри своего
+  `stop_event.is_set()`, оставляет замок этого `mp.Event` занятым; PM затем зовёт `stop_event.set()`
+  (`core/child_process_stop.py`, `request_stop`) — вызов виснет на потоке L-исполнителя, очередь последовательностей
+  стоит, и STOP не выполняется. Флаг `run_event` эту цепочку не закрывает (замок другого события). Лечится в Task 2.5
+  (замена `stop_event` на безблокировочный флаг или ограничение ожидания `set()`); до него остаётся риском.
+
+**Reversible:** yes (одна строка в PM + удалить модуль).
+**Risk:** low — API совпадает с `Event` по используемому подмножеству; покрыт тестами и break-injection.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/1.10.md`, `plans/2026-10-27_system-run-state/reports/phase1.review-opus-fresh.md`
+(F3/С3), ADR-PMM-034, ADR-PMM-033 (`RawArray` слота), OPEN_QUESTIONS 2026-11-12 (M1) / Task 2.5,
+`tests/test_run_flag.py`, `tests/test_run_flag_contract.py`, `tests/test_run_flag_pm_wiring.py`.
+
+## ADR-PMM-048: Внеочередной heartbeat при смене готовности — подпись `(paused, ready, блокирующие причины)` вместо одного `paused` (Task 3.3 system-run-state, С5, 2026-11-16)
+
+**Статус:** принято; риск «fault на ходу» — открытый вопрос владельца (ниже). **Слой:** framework (`process_module`,
+сторона ребёнка; PM-сторона не меняется).
+
+**Контекст (С5 свежего ревью Ф1).** Лист `processes.<n>.readiness` в сторе PM обновлялся только регулярным heartbeat
+(~5,03 с) плюс внеочередным при смене `paused` (Task 1.2c). Смена `ready` или блокирующих причин ждала регулярного
+такта: стенд 1.6 дал возраст листа от 1,99 до 5,68 с, приёмка «≤ 1 с» провалена 0 из 7. Следствия: устаревшие «готов» /
+«не готов» на кнопке ЗАПУСТИТЬ и запаздывание `fault` при аварии на ходу.
+
+### Решение
+
+1. Метод внеочередной отправки `ProcessHeartbeat` (прежде «push при смене `paused`») переименован в `push_if_changed`. Единственный вызывающий — воркер `readiness_snapshot`
+   (период 0,5 с, `process_module.py`, `_push_readiness_change`); сообщение строит тот же `_send_heartbeat_locked`, что
+   у регулярного (`pid`, `status`, `workers_status` без `metrics`, `readiness` — копия снимка): форка формата нет, иначе
+   `pid` не доедет и `_admit_heartbeat` отбросит сообщение.
+2. **Подпись снимка:** `(paused, ready, frozenset((node, severity) блокирующих причин))`. Блокирующие — `failure` и
+   `check_function` (`READINESS_BLOCKING_SEVERITIES` из `process_module/health/schema.py`, импорт на уровне модуля;
+   копия в `process_manager_module/process/run_state.py` — это слой PM, импорт оттуда обратная зависимость). Push шлётся,
+   когда подпись текущего снимка ≠ подпись реально ушедшего.
+3. **Подпись «ушедшего» берётся из копии, реально ушедшей, внутри `_send_heartbeat_locked`** (в существующем `try`
+   чтения снимка), и пишется ТОЛЬКО после успешного `send_message`. Её обновляют и регулярный, и внеочередной heartbeat
+   (поле `_last_sent_sig`). Причины: (а) снимок, сравнённый до замка, к моменту отправки мог смениться — подпись «из
+   сравнённого» помечала бы ушедшей копию, которой не было (гонка; следом уходит дубль); (б) запись до отправки пометила
+   бы неудавшийся heartbeat «ушедшим» — смена потерялась бы; по той же причине подпись не пишется и при недоставке:
+   `send_message` реального процесса не бросает, а возвращает `False` (`send_to_process` глотает исключения), и результат
+   `False` не считается ушедшим сообщением. Push при недоставке возвращает `False` и логирует ERROR один раз на серию (только
+   факт, без значений); повтор — следующий пересчёт снимка после антидребезга 0,5 с; (в) без записи регулярным после него уходил бы дубль того же
+   снимка.
+4. **Расчёт подписи внутри `try`** (`.get("node")` / `.get("severity")`; `reasons` не список и элемент не dict
+   пропускаются). Битая причина не должна съесть регулярный liveness-heartbeat: иначе PM объявит процесс `unresponsive`.
+   Сбой расчёта в push-пути (например, неhashable `node`) не бросает: ERROR один раз на тип исключения, в логе только
+   тип, без текста плагина и значений причин.
+5. **Что в подпись НЕ входит, и почему.**
+   - `at` и `stale_after_s`: `at` растёт на каждом пересчёте, иначе поток ~2 сообщения/с на процесс, антидребезг его не
+     гасит. Свежесть неизменного листа — отдельная задача (3.4 / `readiness.refresh` по запросу PM).
+   - Тексты причин и `out_of_spec` / `maintenance`: не блокируют запуск, смена их текста не повод для сообщения. В листе PM
+     они отстают до регулярного heartbeat (до ~5,5 с). Это решение, а не недосмотр.
+6. **`ready` отдельно от причин.** Защёлка boot (`process_module._refresh_readiness_snapshot`) даёт `False -> True` без
+   единой причины; подпись из одних причин эту смену не видела бы. Уменьшение набора блокирующих причин при том же
+   `ready` — тоже смена (подпись другая).
+7. **Первый снимок сменой не считается** (`_last_sent_sig is None`: готовность в PM ещё не уходила). Причина: не плодить
+   push на старте. Следствие: boot-смена `ready False -> True` доезжает best-effort — если первый регулярный heartbeat ушёл
+   без `readiness` (порядок не гарантирован, `reports/1.2.developer.md:200`), push по `None` не шлёт, смену донесёт
+   следующий регулярный (≤ ~5 с).
+8. **Антидребезг прежний:** `_PUSH_MIN_INTERVAL_SEC = 0.5` под `_send_lock` (один замок на регулярный и внеочередной
+   путь); подавленная смена не теряется: сравнение с ушедшим повторяется на следующем пересчёте. Push НЕ двигает
+   `_last_heartbeat_sent`: расписание регулярного heartbeat прежнее. Шторм ограничен дважды — воркером снимка (~2 Гц) и
+   антидребезгом; при `at` вне подписи это ≈ 2 сообщения/с на процесс в худшем случае.
+9. Ожидаемый эффект по коду: и лист, и `system.run.status` ≤ ~1,2 с от смены (статус не позже листа). Подтверждение — стенд
+   стадии 4 (метод стенда 1.6, не менее 10 циклов в каждую сторону).
+
+### Отвергнуто
+
+- **Подпись с `at`:** поток push на каждый пересчёт, антидребезг лишь режет его до 2/с — трафик без новой информации.
+- **Подпись из сравнённого снимка** (проще, без чтения из ушедшей копии): гонка между сравнением и отправкой, дубль после
+  смены снимка в окне (см. п. 3).
+- **Общий push с ТЕКСТАМИ причин:** тексты меняются плагинами произвольно, поток сообщений без значения для решения PM.
+- **Лёгкое сообщение формата, отличного от heartbeat** (только `readiness`): форк формата; `pid` / `incarnation` не
+  доедут, и `_admit_heartbeat` его отбросит.
+
+### Открытый вопрос владельца: «fault на ходу»
+
+`transition(running, tick, ready=False)` в PM даёт `fault` без гистерезиса, `fault` липкий, выход только `ack`. Раньше PM
+видел срез готовности раз в ~5 с, и короткие провалы плагина часто не доходили до монитора. После 3.3 любой провал
+длиннее ~0,5 с дойдёт и положит `running` в `fault`. Какие реальные плагины мигают `not_ready` на ходу — не проверено.
+Варианты: принять (честная авария) либо гистерезис на стороне PM (отдельная задача). Решение владельца не принято; на
+стенде обязателен soak `running` 10 мин: число переходов `running -> fault` до и после (ожидание 0 и 0).
+
+### Известная цена и отложенное
+
+- Свежесть НЕИЗМЕННОГО листа не меняется: заморозка процесса по-прежнему видна по `at` с регулярным heartbeat (срок
+  молчания 15,0 с, допуск 10,0 с, окно `fault` 15,27 с). Лечится запросом PM `readiness.refresh` (C1) или Task 3.4.
+- `stale_after_s` (3.4) и `incarnation` (3.6) в подпись не входят; push строится тем же построителем сообщения — оба
+  доедут без правки push.
+- Тексты неблокирующих причин и `out_of_spec` / `maintenance` в листе отстают до ~5,5 с (п. 5).
+- Windows: возврат `Event.wait(0,5)` чуть раньше срока подавит push, задержка станет ~1,0 с — не проверялось.
+- Boot-смена доезжает best-effort (п. 7).
+- **Boot-push — лишний heartbeat на каждом старте процесса.** Через ~0,5 с после первого регулярного heartbeat (подпись
+  `(False, False, ∅)`) уходит внеочередной с защёлкой boot (`(False, True, ∅)`): две подписи `ready` в первые секунды
+  вместо одной. Стенд проверяет частоту контролем «тишина 60 с -> различных `at` 12 ± 1».
+- **`send_message` выполняется под `_send_lock`.** Зависшая отправка внеочередного heartbeat держит замок и блокирует
+  регулярный heartbeat (liveness) на то же время. Не проверялось; известная цена общего замка (п. 8).
+
+**Reversible:** yes (вернуть сравнение по одному `paused`; поле `_last_sent_sig` и подпись — внутри `ProcessHeartbeat`).
+**Risk:** medium — рост трафика heartbeat до ~2 сообщений/с на процесс при дребезге и раннее попадание в `fault` на
+ходу (открытый вопрос выше); покрыто слепым набором и hazard-тестами автора, break-injection.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/3.3.md`, `plans/2026-10-27_system-run-state/reports/3.3.stage0-review.md`,
+`plans/2026-10-27_system-run-state/reports/phase1.review-opus-fresh.md` (С5), `reports/1.6-1.8-1.7c.stand.md`,
+ADR-PMM-047, `process_module/tests/test_heartbeat_readiness_push.py`,
+`process_module/tests/test_heartbeat_readiness_push_hazards.py`.
+
+## ADR-PMM-049: `RunConfig` — ключи работы PM одной моделью, `run_view` — один построитель вида (Task 2.7 S3b1 system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Ключи работы PM лежали врассыпную: `run_gate` проверялся в `_create_components()`, `run_stop_timeout_s` и
+`run_restart_grace_s` — каждый своей копией проверки «число > 0» в геттере, прототип знал из них только `run_gate`
+(`SystemConfig` остальные ключи молча отбрасывал). Вид состояния строили два места: `_publish_run_state` (листья) и
+`_cmd_system_run_status` (ответ команды) — разный набор ключей, `stop_allowed` не было нигде.
+
+### Решение
+
+1. `process/run_config.py`: `RunConfig(SchemaBase)` — плоские поля `run_gate: StrictBool = False`,
+   `run_autostart: StrictBool = False`, `run_stop_timeout_s` и `run_restart_grace_s` типа
+   `Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)]` (умолчания 10.0 и 30.0). `RUN_CONFIG_KEYS` —
+   имена полей по порядку. Новый ключ PM — одно поле в одном файле. `StrictBool` и `strict=True` отвергают `1`,
+   `"true"`, `True` для числа, `"2"`: `PositiveFloat` пропускал `True -> 1.0` и `"2" -> 2.0`.
+2. `run_config_value(key, raw) -> (значение, годно)`: `None` (ключа нет) -> `(умолчание, True)`; годное -> `(значение,
+   True)`; негодное -> `(умолчание, False)`; на негодном значении не бросает. Значение входа в результат и в тексты
+   WARNING не попадает (ADR-PMM-044 п.1); тексты WARNING PM прежние, дословно.
+3. PM: `_create_components()` читает `run_gate` через `run_config_value`; геттеры `_run_restart_grace` и
+   `_run_stop_timeout` остаются точками вызова и читают ключ при каждом использовании (как раньше), проверка — вызов
+   `run_config_value`; `_DEFAULT_RUN_*` — псевдонимы умолчаний полей `RunConfig`.
+4. `process/run_state.py`: чистая `run_view(state, since, *, run_gate, ack_allowed, reasons, last_fault) -> dict` с
+   ключами `state, since, run_gate, start_allowed (state is ready), stop_allowed (state is running), ack_allowed,
+   reasons, last_fault`. `_publish_run_state` обходит `run_view(...).items()` (дедупликация по `published` прежняя),
+   `_cmd_system_run_status` возвращает `run_view(...)`. Новые листья `system.run.run_gate` и `system.run.stop_allowed`.
+5. **`run_gate` и `run_autostart` читаются один раз** (в `_create_components()`): `config.reload` на них не действует до
+   перезапуска PM. Числовые ключи читаются при каждом использовании и подхватывают изменение конфига.
+
+### Известная цена
+
+- Импорт `run_config` из прототипа грузит пакет PM (`import ...process.run_state` -> +1053 модуля, ~0,39 с,
+  загружен `process_manager_process`). Принято. Вариант на будущее — вынести `RunConfig` в место, импорт которого не тянет
+  `__init__` пакета PM; не исследован.
+- `run_autostart` в схеме есть, PM его пока не читает (читает срез S3c, ADR-PMM-050).
+- Блокирующий набор степеней причин (`health/schema.py`, `READINESS_BLOCKING_SEVERITIES`) по-прежнему имеет копию в GUI
+  (`run_control.py`); `run_view` её не касается (S5).
+
+**Reversible:** yes (вернуть проверки в геттеры и два построителя вида; удалить `run_config.py`).
+**Risk:** low — поведение при умолчаниях не меняется, добавлены ключ `stop_allowed` в ответе и два листа; покрыто
+слепым набором и hazard-тестами автора.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф4–Ф6, Ф13, DESIGN п.5–8а), `tests/test_run_config_and_view.py`,
+`tests/test_run_config_and_view_hazards.py`, ADR-PMM-044.
+
+## ADR-PMM-050: Автостарт работы — один раз за boot, латч под замком машины PM (Task 2.7 S3c system-run-state, 2026-11-16)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** С `run_gate: true` линия после boot стоит в `ready`, пока оператор не подаст `system.run.start`. Боевому
+headless (без GUI) нужен START без оператора. Цикл «ждать `ready` -> START» снаружи PM (в `run.py`, стендах) пришлось бы
+повторять в каждом пути запуска, а готовность и переходы машины известны только PM под `_run_lock`. Первый `ready`
+приходит не только тактом `settled` из `booting`: окно `not_ready` после подъёма детей ~4 с, вход в `ready` — тактом
+`tick` из `not_ready`.
+
+### Решение
+
+1. Ключ конфига PM `run_autostart` (поле `RunConfig`, ADR-PMM-049) читается один раз в `_create_components()` через
+   `run_config_value`, сразу после `run_gate`. Негодное значение -> одна WARNING «run_autostart негоден (нужно true или
+   false) — автостарт выключен»; `true` без `run_gate` -> одна WARNING «run_autostart без run_gate — автостарт не
+   действует» (без гейта событие работы взведено с boot, START ничего не меняет источникам). Значение входа в текст не
+   попадает (ADR-PMM-044 п.1). `config.reload` на ключ не действует (ADR-PMM-049 п.5).
+2. **Латч** `AutostartLatch(enabled)` в `process/run_state.py` — чистый класс без IO, часов и своего замка.
+   `observe(event, prev, new, code) -> bool`: выключенный — `False`; `stop`, `apply`, `ack`, `shutdown` (принятые и
+   отказанные) и принятый `start` — гасят, `False`; `settled`/`tick` без отказа, `new` = `ready`, `prev` в
+   {`booting`, `not_ready`} — гасит и даёт `True`; иначе `False`. Отказанный `start` (`not_ready`) латч не гасит:
+   намерение оператора то же. Погасший латч не взводится — **один раз за жизнь PM**: перезапуск процесса набора
+   (`ready` -> `not_ready` -> `ready`) автостарт не повторяет.
+3. **Контракт замка:** `observe` зовётся только в `_run_apply` под `_run_lock`, сразу после `transition` — латч и
+   машина решают одним шагом, параллельные такты дают ровно одно срабатывание. START подаётся ПОСЛЕ замка и после
+   `_publish_run_state()`: `_run_lock` не реентерабелен, а START сам идёт через `_run_apply`.
+4. START подаёт `_submit_run_sequence(self._run_autostart_start, "run-autostart")` — исполнитель `pm-lifecycle`; не
+   взял (отказ `executor_busy`/`system_stopping`, `False` без ответа, исключение) — одноразовый daemon-поток, как у
+   STOP. `_run_autostart_start()`: WARNING «автостарт: system.run.start (run_autostart)», затем
+   `_cmd_system_run_start({})` (готовность оценивается заново). Успех — всё; `already_running` (оператор успел) —
+   INFO «автостарт не нужен: линия уже в работе (already_running)»; иной отказ — WARNING «автостарт отказан: <код>»
+   (только код, без причин). **Повтора нет.**
+
+### Достижимость (почему таблица шире PM)
+
+В PM взведённый латч бывает только в `booting`/`not_ready`: первые входы в `ready` его гасят, в `stopping`/`fault`
+он уже погашен. Проверка `prev` и гашение принятыми `start`/`ack` в PM недостижимы — их держит только таблица
+`test_run_autostart_hazards.py` (защита от будущей правки `transition`).
+
+### Отвергнуто
+
+- Цикл «ждать `ready` -> START» в `run.py` и стендах: размножается по путям запуска, гонка с машиной PM снаружи замка.
+- Синхронный START внутри `with self._run_lock`: самоблокировка (замок не реентерабелен).
+- `_submit_run_sequence` под замком: эквивалент по исходу, но добавляет порядок `_run_lock -> _routing_lock`
+  (`_LifecycleSubmit._shift`) — риск взаимоблокировки, тестами не ловится.
+- Повтор автостарта после отказа или после перезапуска процесса: решение владельца — один раз за boot; повтор — вне
+  объёма (отдельный текст).
+
+### Известная цена
+
+- Отказанный автостарт (готовность ушла между тактом и START) оставляет линию в `ready`/`not_ready` до START оператора;
+  в журнале — WARNING с кодом.
+- Латч не отличает «первый boot» от `topology.apply`: `apply` гасит латч, после применения топологии автостарта нет.
+
+**Reversible:** yes (убрать вызов `observe` и подачу в `_run_apply`, чтение ключа; без ключа поведение прежнее).
+**Risk:** low — при умолчании (`run_autostart` нет или `false`) латч выключен, `observe` возвращает `False`.
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7.md` (Ф7, Ф8, Ф12, Ф14, DESIGN п.10–12а), `tests/test_run_autostart.py`,
+`tests/test_run_autostart_hazards.py`, ADR-PMM-049, ADR-PMM-044.
+
+## ADR-PMM-051: Флаг `run_active` — второй `RunFlag` PM «`running` и нет хода системного стопа» (Task 2.7d system-run-state, 2026-11-17)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`).
+
+**Контекст.** Команду плагина, опасную на ходу линии (`release_device` камеры и т.п.), ребёнок должен отказать в
+`running`. `run_event` для этого не годится: при `run_gate` не true он взведён всегда, ребёнок не отличает `running` от
+`ready`. Все пути команды (GUI relay, `request_command`, `backend_ctl`) сходятся в `CommandManager` ребёнка — признак
+нужен там, а состояние знает только PM под `_run_lock`.
+
+### Решение
+
+1. `self._run_active = RunFlag()` в `_create_components()` рядом с `_run_event`, при любом `run_gate`; классовое
+   умолчание `None` (PM из `__new__` — писать некуда). Флаг — производная, своего хранилища нет:
+   `want = state is RunState.running and not stop_begun` (признак — `_system_stop_snapshot() is not None`).
+2. Пишет флаг **одна функция** `_run_active_sync_locked(state, *, stop_begun=None)`, только под `_run_lock`, из
+   **двух точек записи источников** (у каждого источника точка записи единственная):
+   - `_run_apply` (состояние) — после переключения `run_event`, до записи `_run_state` (состояние не опережает флаг),
+     без условия `run_gate`. В `stopping`, `fault`, `shutting_down` флаг снят: шаги `pre_stop` STOP оператора проходят.
+   - `_begin_system_stop` (ход стопа; признак `_system_stop_info` пишет только он, сброса нет) — под
+     `with self._run_lock, self._system_stop_lock:` флаг снимается ДО записи признака (`stop_begun=True`: второй раз
+     `_system_stop_lock` не берётся, замок не реентерабелен). Так флаг верен при любом пути начала стопа:
+     `system.shutdown` (graceful из `running` — флаг снят до постановки прохода, шаги идут в `running` при снятом флаге и
+     взведённом `run_event`, Task 1.4), `supervision.status` при событии стопа, взведённом снаружи (инициатор `event`),
+     стоп детей корня `_ChildrenStop.request_stop` (инициатор `event`). Перечислять пути не нужно.
+   Поздний такт или START, прошедшие проверку стопа вне замка до `_begin_system_stop`, идут через `_run_apply` и читают
+   признак уже под `_run_lock` — флаг обратно не взведут.
+3. **Порядок замков** `_run_lock` -> `_system_stop_lock`. `_system_stop_lock` листовой: в блоках
+   `with self._system_stop_lock:` других замков нет — обратного порядка нет. `_begin_system_stop` берёт оба в этом
+   порядке; под `_run_lock` его не зовут (в блоках `with self._run_lock:` — только переходы, флаги и `_system_stop_lock`).
+4. **Доставка** — путём `run_event`: `ProcessRegistry(..., run_active=)` -> kwargs `Process` ребёнка (каждое воплощение,
+   рестарт тоже) -> `run_process_function(..., run_active=)` -> атрибут `_run_active` экземпляра до `initialize()`.
+   `"run_active"` — в pop-фильтре bundle `custom` (ключ из рецепта не уедет в bundle). `None` (корневой PM от
+   spawner'а, реестр без флага) — атрибут не ставится. Читатель — обёртка ключа плагина `run_locked_commands`
+   (ADR-PM-062). Негодный ключ плагина закрывает: причина `failure` `source: "config"`, узел не готов (ключ
+   безопасности; ключи подстройки `run_*` — WARNING и умолчание).
+5. **Принятое ограничение (TOCTOU у START).** Команда, начавшая исполнение до `set()` флага, исполняется во время
+   `running` — окно = время исполнения одной команды (флаг читается на исполнении, ожидание в очереди не в счёт). Исход
+   в окне — как до защиты: охраняемая команда исполнилась в `running`. `fault` после неё — только у узлов, чья
+   `readiness()` даёт причину (камера — после 2.2c). Закрытие требует замка, общего для PM и ребёнка, — новый
+   межпроцессный слой; на этапе 1 не закрываем.
+
+### Отвергнуто
+
+- Отличать `running` по `run_event`: при `run_gate` false он взведён с boot.
+- Список запрещённых команд в PM (`process.relay`): пути `request_command` и `backend_ctl` идут мимо `CommandManager` PM.
+- Гашение кнопок в GUI: только UX, `backend_ctl` и `request_command` не закрывает.
+- Свой атрибут «стоп начат» у флага: второе хранилище; признак хода стопа уже есть (`_system_stop_info`).
+
+**Reversible:** yes (убрать вызовы `_run_active_sync_locked` и kwarg `run_active`; без ключа плагина поведение прежнее).
+**Refs:** `plans/2026-10-27_system-run-state/tasks/2.7d.md` (Ф3, Ф4, Ф8, DESIGN п.1, 2, 5), ADR-PM-062, ADR-PMM-047,
+`process_module/tests/test_run_locked_commands.py`, `tests/test_run_active_flag_hazards.py`.
+
+## ADR-PMM-052: Порт управления закрыт без токена; поставка выключена, dev-старт — `BACKEND_CTL=1` (Task 0.12b observability-signal-contracts, 2026-11-22)
+
+**Статус:** принято. **Слой:** framework (`process_manager_module`) + поставка прототипа (`system.yaml`).
+
+**Контекст.** Порт управления ПМ (`backend_ctl`, TCP на 127.0.0.1) принимал любую строку от любого локального процесса:
+одна строка `system.shutdown` останавливала систему. Механизм `hello` с токеном есть в `SocketChannel` (ADR-RTR-017,
+Task 0.12), клиенты читают токен из файла порта (BCTL-ADR-011, Task 0.12a). Поставка (`system.yaml`) держала порт
+включённым (`enabled: true`) с ложным комментарием «в проде ставить false».
+
+### Решение
+
+1. **Порт без токена закрыт.** `setup_backend_ctl_channel` создаёт `SocketChannel` всегда с
+   `authenticator=token_authenticator(<callable holder>)`. Пока holder пуст, authenticator возвращает `False`
+   (закрыто по умолчанию: accept-цикл работает уже между `start()` и записью файла).
+2. **Жизненный цикл файла токена** (`~/.multiprocess_framework/ctl_<порт>.token`, 0600; путь —
+   `socket_auth.resolve_token_path`, `BACKEND_CTL_TOKEN_FILE` главнее):
+   - файл пишется ПОСЛЕ успешного `start()` и по ФАКТИЧЕСКОМУ порту (`channel.port`: при `port: 0` порт выбирает ОС);
+     затем токен кладётся в holder;
+   - неудачный bind (второй ПМ на занятом порту) файл не трогает: он принадлежит первому ПМ;
+   - ошибка записи (любое исключение) → `channel.close()`, `unregister_channel`, ERROR без токена, `return None`.
+     Открытого сервера без файла не бывает;
+   - залипший файл (SIGKILL, `_force_kill_tree`) перезаписывается при следующем старте атомарно (`os.replace`);
+   - путь и токен хранятся на канале; `teardown_backend_ctl_channel` удаляет файл ДО `channel.close()` и только если
+     `read_token(path)` равен токену этого канала. Файл, перезаписанный другим ПМ, остаётся. На пути по умолчанию
+     это недостижимо на POSIX (файл удаляется до `close()`, второй ПМ не займёт порт, пока первый слушает; на Windows при безусловном `SO_REUSEADDR` не проверено, `OPEN_QUESTIONS`); путь один —
+     общий `BACKEND_CTL_TOKEN_FILE` у двух ПМ на разных портах;
+   - токен в журнал не пишется (журнал называет путь файла).
+3. **Поставка выключена.** `system.yaml` → `backend_ctl.enabled: false`: простой старт порт не открывает. Dev-старт,
+   стенды и харнесс включают порт `BACKEND_CTL=1` (`is_enabled` — OR env и конфига; харнесс ставит env сам).
+   Носитель правила — этот ADR: сохранение настроек из GUI стирает комментарии yaml.
+4. Не здесь: `host` вне loopback и `allow_remote` (решение владельца В-1 → `gui-service` 2.2), TLS, роли (2.3).
+5. Тесты не пишут токен в настоящий `HOME`: autouse `_offline_home_isolation` (`backend_ctl/tests/conftest.py`) и
+   `_isolated_home` (`process_manager_module/tests/conftest.py`) уводят `HOME`/`USERPROFILE` во временный каталог; первая
+   выключена при `--backend-live`, у тестов с `headless_backend` и у тестов с маркером `harness_smoke` (бэкенд пишет токен под настоящим `HOME`; цена маркера — в `OPEN_QUESTIONS`).
+
+### Отвергнуто
+
+- Записать токен до `start()`: при `port: 0` имя файла — `ctl_0.token`, клиент его не найдёт; при занятом порту
+  перезапись затёрла бы токен работающего ПМ.
+- Оставить сервер открытым при ошибке записи файла (с ERROR): одна строка снова останавливает систему.
+- Удалять файл без сверки токена: при общем `BACKEND_CTL_TOKEN_FILE` стоп одного ПМ удалял бы файл другого.
+- Гейт `allow_remote` в этой задаче: в схеме `BackendCtlSection` нет поля (pydantic отбросил бы его молча); решение
+  В-1 относит правила вне localhost к 2.2.
+
+**Принятые ограничения.** (1) Общий `BACKEND_CTL_TOKEN_FILE` у двух ПМ — последний писатель выигрывает: после старта
+B клиенты A получают отказ (в файле токен B), стоп A файл B оставляет, стоп B удаляет. (2) Сверка при удалении и само
+удаление — два шага без замка (TOCTOU): ПМ, перезаписавший общий файл ровно между ними, теряет файл до своего
+рестарта. Окно — микросекунды на стопе.
+
+**Reversible:** yes (`enabled: true` в `system.yaml`; authenticator и файл — откат шага 1 в `backend_ctl_endpoint.py`).
+**Refs:** `plans/2026-11-21_observability-signal-contracts/tasks/0.12b.md`, ADR-RTR-017, BCTL-ADR-011,
+`backend_ctl/tests/test_token_handshake.py`.

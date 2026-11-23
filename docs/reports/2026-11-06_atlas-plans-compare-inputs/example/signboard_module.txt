@@ -1,0 +1,27 @@
+[unit] config_module
+Config Module — управление конфигурациями в рантайме.
+использует меня 7 / использую 3 (юнитов, hard+lazy)
+нарушений направления: 0
+
+Правило направления импортов:
+  можно → никого; нельзя ← Services, Plugins, multiprocess_prototype, backend_ctl; в чужой юнит — через его витрину (__init__, interfaces)
+
+Счётчики:
+  packages 5, files 17, loc 1638, classes 14, functions 9, loc_unit 1638, tests 12
+
+Находки по серьёзности:
+  error 0, warn 4, info 1
+
+Ярус:
+  core
+
+Интерфейсы:
+  IConfigObserver (Protocol)
+  IConfig (ABC)
+  IConfigManager (ABC)
+
+Витрина __all__:
+  Config, ConfigManager, ConfigManagerConfig, ConfigSection, IConfigManager, IConfig
+
+Рецепты, где назван:
+  0

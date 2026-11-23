@@ -1,0 +1,40 @@
+{
+  "name": "graphify",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "mcp__graphify__query_graph",
+    "mcp__graphify__get_node",
+    "mcp__graphify__get_neighbors",
+    "mcp__graphify__shortest_path",
+    "mcp__graphify__god_nodes",
+    "mcp__graphify__get_community",
+    "mcp__graphify__graph_stats"
+  ],
+  "disallowed_tools": [
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "context_files": [],
+  "max_turns": 60,
+  "max_budget_usd": 1.0,
+  "thresholds": {
+    "hits_min": 8,
+    "false_max": 1,
+    "calls_ratio_max": 0.5,
+    "tokens_ratio_max": 0.6
+  },
+  "mcp_config": "conditions/mcp/graphify.json",
+  "requires": [
+    "graphify-graph"
+  ],
+  "prompt_prefix": "Besides Read/Grep/Glob you have the mcp__graphify__ graph tools (code graph of this repository). Confirm a place by reading it.",
+  "expected_tokens": 70000
+}

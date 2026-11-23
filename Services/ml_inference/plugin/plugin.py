@@ -93,7 +93,10 @@ class MLInferencePlugin(ProcessModulePlugin):
             name="predictions",
             dtype="list[dict]",
             shape="N",
-            description="Топ-K: class_id, label, confidence, below_threshold",
+            description=(
+                "Топ-K: class_id, label, confidence, below_threshold; "
+                "у топ-1 (если есть голова угла): angle_deg, angle_valid, angle_symmetry"
+            ),
         ),
     ]
 
@@ -180,6 +183,9 @@ class MLInferencePlugin(ProcessModulePlugin):
                 # threshold=0.0: движок отдаёт топ-K ВСЕГДА, порог применяем сами —
                 # не отсекаем, а помечаем below_threshold (подпись всегда, решение — потребителю).
                 preds = self._mark_below_threshold(self._engine.predict(frame, top_k=self._reg.top_k, threshold=0.0))
+                # id читаем под тем же локом, что и predict: именно эта модель дала preds,
+                # а не та, что сейчас в регистре (set_model на другом потоке)
+                model_id = self._engine.current_model_id
         except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
             self._reg.last_error = str(exc)
             self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
@@ -206,7 +212,12 @@ class MLInferencePlugin(ProcessModulePlugin):
         # overlay пишем в 'frame' (его читает дисплей; SHM-middleware стрипует
         # именно 'frame'). Отдельный 'rendered_frame' НЕ заводим — он поехал бы
         # полным кадром через pickle на каждом кадре (грабли line_filter).
-        return {**item, "frame": result_frame, "predictions": preds}
+        # model_id — id модели, которая реально отработала (ключ каталога, не путь и не
+        # display-name sidecar); только у успешного инференса и только если модель ещё загружена
+        result = {**item, "frame": result_frame, "predictions": preds}
+        if model_id:
+            result["model_id"] = model_id
+        return result
 
     def _mark_below_threshold(self, preds: list[dict]) -> list[dict]:
         """Копии предсказаний с `below_threshold = not (confidence >= confidence_threshold)`.
@@ -291,7 +302,7 @@ class MLInferencePlugin(ProcessModulePlugin):
             if diagnosis.severity == "error":
                 self._engine.unload()
                 self._reg.loaded_model = ""
-                self._fail_assets(diagnosis.message, last_error=diagnosis.message)
+                self._fail_assets(diagnosis.message, last_error=diagnosis.message, reason=diagnosis.reason)
                 return
             try:
                 self._engine.load_model(self._reg.model, device=self._reg.device)
@@ -305,21 +316,49 @@ class MLInferencePlugin(ProcessModulePlugin):
                 self._fail_assets(
                     f"не удалось загрузить '{self._reg.model}': {type(exc).__name__}",
                     last_error=str(exc),
+                    reason="не удалось загрузить модель",
                 )
                 return
             self._ctx.log_info(diagnosis.message)
             self._clear_asset_degraded()
 
-    def _fail_assets(self, message: str, last_error: str) -> None:
+    def readiness(self, ctx: PluginContext) -> list[dict]:
+        """Причины неготовности (только чтение полей): непригодные ассеты модели -> ``failure`` (Task 1.6, ветвь
+        первая и возвращает результат); модель не загружена -> ``out_of_spec`` (Task 2.2b; степень узла может
+        переназначить рецепт — ADR-PM-061, боевой рецепт блокирует START).
+
+        Зовётся из потока снимка готовности (~2 Гц): БЕЗ ``_engine_lock`` (под ним идёт долгая
+        загрузка модели — снимок замёрз бы вместе с ней) и без IO. Порядок чтения — сначала
+        текст, потом флаг: ``_fail_assets`` пишет текст до флага, ``_clear_asset_degraded``
+        снимает флаг до текста, так что полупрочитанная пара даёт ``[]``, а не пустую причину.
+        """
+        reason = getattr(self, "_asset_reason", "")
+        if getattr(self, "_asset_degraded", False) and reason:
+            return [{"severity": "failure", "reason": reason}]
+        # Task 2.2b: ассеты исправны, но модели в работе нет — кадры идут без распознавания. ``out_of_spec`` не
+        # блокирует готовность (виден в индикаторе). Только голые поля; исключение чтения (гонка с ``unload()``:
+        # ``_backend`` обнулён между проверкой и чтением, engine.py) — тот же ``out_of_spec``, не ``failure``
+        try:
+            not_loaded = not self._reg.model or not self._engine.is_ready
+        except Exception:  # no-health: хук не бросает; сбой чтения = «модель не загружена» (гонка с unload)
+            not_loaded = True
+        if not_loaded:
+            return [{"severity": "out_of_spec", "reason": "модель не загружена: кадры идут без распознавания"}]
+        return []
+
+    def _fail_assets(self, message: str, last_error: str, reason: str) -> None:
         """Ассеты модели непригодны: регистр, инцидент, health degraded. Зовётся под _engine_lock.
 
         Одна дверь для инцидента — `report_error` (правило одного коннектора), `log_error` рядом
         не ставим. Исключение не пробрасываем: старт системы не блокируется.
+
+        ``message`` (со значениями: путь, id модели) идёт в health и журнал; ``reason`` — короткий
+        текст без значений для ``readiness()`` (контракт хука: путь и id в причину не кладём).
         """
         self._reg.last_error = last_error
-        self._asset_reason = f"ml_inference: {message}"
+        self._asset_reason = f"ml_inference: {reason}"
         self._ctx.health.report_error(ModelAssetError(message), context="ml_inference.model")
-        self._ctx.health.degraded(self._asset_reason)
+        self._ctx.health.degraded(f"ml_inference: {message}")
         self._asset_degraded = True
 
     def _clear_asset_degraded(self) -> None:

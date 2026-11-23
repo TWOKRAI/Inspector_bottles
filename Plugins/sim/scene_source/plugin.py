@@ -29,13 +29,18 @@ Task 3.4 меняет только то, ЧТО рисуется в кадре �
 ``src="__replay__"``. :meth:`_on_deltas` обрабатывает обе формы одним и тем же
 кодом независимо от их происхождения.
 
-**Протухшее значение — предупреждение, не экстраполяция.** Позиция объектов
-всегда считается из ПОСЛЕДНЕЙ ДОСТАВЛЕННОЙ дельты (нет отдельного пути
-«время идёт — двигай сцену по времени»), поэтому «заморозка» между двумя
-кадрами на неизменном мире — не отдельный код, а прямое следствие того, что
-между ними не пришло новой дельты. Единственный НАБЛЮДАЕМЫЙ эффект протухания
-в этой версии — предупреждение через ``ctx.log_warning`` (де-дублировано по
-``t``, чтобы не заспамить лог на неизменном протухшем значении).
+**Досчёт энкодера между батчами (C-87).** Мир приходит батчами раз в
+~170 мс (publish 50 мс + dispatch 120 мс), а кадр рисуется каждые ~33 мс:
+без досчёта диск стоит ~3 кадра и прыгает на 16.5-24.7 px. Поэтому
+:meth:`_read_world_encoder` отдаёт ``value + mm_s * clamp(age_s, 0, stale_ms/1000)
+/ FACTOR_MM``, ``age_s = self._clock() - t`` — позиция продолжает движение по
+скорости последней дельты. Досчёт всегда идёт от ПОСЛЕДНЕЙ дельты (нет
+max/монотонного зажима между дельтами), потолок — ``stale_ms``. Нет ``t``/``mm_s``
+или они не конечные числа -> ``value`` как раньше. Протухание (``age > stale_ms``)
+по-прежнему даёт предупреждение ``ctx.log_warning``, де-дублированное по ``t``.
+Это ОТМЕНА прежнего решения «протухшее значение — предупреждение, не
+экстраполяция»; причины, формула, часы и последствия — в
+``DECISIONS.md`` (ADR-SCN-001).
 
 **Task 3.4 — реальный движок вместо заглушки-спрайта.** ``configure()`` строит
 ``ScenePreset``/``ObjectFactory``/``ObjectSpawner``/``SceneCompositor`` из
@@ -53,11 +58,13 @@ np.random.default_rng(seed)`` живёт здесь (единственный pr
 from __future__ import annotations
 
 import collections
+import json
+import math
 import os
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO, TypeGuard
 
 import cv2
 import numpy as np
@@ -76,6 +83,7 @@ from Services.dataset_gen.core.catalog import imread_unicode
 from Services.layer_render import ScrollingTile, SolidFill, background_layers_from_config
 from Services.line_sim import ObjectFactory, ObjectSpawner, SceneCompositor, ScenePreset, confine_preset_paths
 from Services.line_sim.core import (
+    FACTOR_MM,
     REPO_ROOT,
     BeltGeometry,
     JobDone,
@@ -86,7 +94,13 @@ from Services.line_sim.core import (
     match_job,
     resolve_repo_path,
 )
-from Services.line_sim.core.spawner import validate_flow, validate_lateral_offset_px
+from Services.line_sim.core.spawner import (
+    SEQUENCE_MAX_LEN,
+    DiscSequence,
+    SequenceBusy,
+    validate_flow,
+    validate_lateral_offset_px,
+)
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.state_store_module.core.delta import Delta
@@ -112,6 +126,12 @@ _RECENT_MAXLEN = 32
 #: накопленное без применения). Тот же порядок величины, что _RECENT_MAXLEN — четырёх
 #: ручек стенда оператор физически не нажмёт быстрее этого числа раз между кадрами.
 _CONTROL_MAXLEN = 64
+
+#: DS-1 Task 1.1b: журнал истины (JSONL на диске, design.md §3). Каталог ``""`` — выключено.
+_DEFAULT_TRUTH_JOURNAL_ENC_HZ = 10.0
+_JOURNAL_SCHEMA = 1
+_JOURNAL_ERROR_CONTEXT = "scene_source.truth_journal"
+_JOURNAL_ERROR_THROTTLE_S = 30.0
 
 #: Task 5.2 (контракт лида §2) + 5.1b (§3): правда на проводе — TruthLedger + шесть
 #: уровней (пятый исходный + ``truth_false_alarm_frozen_xy`` — причина «те же X/Y с
@@ -139,6 +159,18 @@ _BACKGROUND_BGR = (60, 60, 60)
 
 #: Не чаще раза в секунду — иначе падающая фабрика заливает лог на каждый кадр.
 _FACTORY_ERROR_LOG_INTERVAL_S = 1.0
+
+
+def _is_finite_number(x: object) -> TypeGuard[float]:
+    """C-87: конечное число (int/float, не bool) — иначе досчёт энкодера не применяется."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+#: Служебные ключи транспорта в `data` команды: роутер добавляет `correlation_id` в `data` любого
+#: request-response вызова (`RouterManager.request`; список фреймворка — приватный
+#: `message_module.contracts.registry._TRANSPORT_KEYS`, не импортируется). Строгая проверка набора ключей
+#: `scene.sequence` их отбрасывает (только эти): иначе отвергался бы любой реальный запрос.
+_TRANSPORT_KEYS = frozenset({"correlation_id"})
 
 _ENGINE_DOWN_MESSAGE = "движок не запущен — применится после перезапуска"
 _MISSING_KEY = object()
@@ -183,6 +215,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
         "scene.flow": "cmd_flow",
         "scene.defect_rate": "cmd_defect_rate",
         "scene.defect_now": "cmd_defect_now",
+        "scene.sequence": "cmd_sequence",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -193,7 +226,25 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._height: int = cfg.get("resolution_height", _DEFAULT_HEIGHT)
         self._spawn_encoder: int = cfg.get("spawn_encoder", _DEFAULT_SPAWN_ENCODER)
         self._stale_ms: float = cfg.get("stale_ms", _DEFAULT_STALE_MS)
+        # C-87: шов часов для досчёта энкодера; тесты подменяют ПОСЛЕ configure()
+        self._clock = time.monotonic
+        # DS-1 1.1b: шов настенных часов журнала истины; тесты подменяют ПОСЛЕ configure()
+        self._wall = time.time
         self._camera_id = cfg.get("camera_id", _DEFAULT_CAMERA_ID)
+        # DS-1 1.1b: частота enc проверяется и при выключенном журнале — кривой ключ стенда виден сразу.
+        # Ошибка конфигурации, как оба spawn_*: ValueError выходит из configure().
+        journal_enc_hz_cfg = cfg.get("truth_journal_enc_hz", _DEFAULT_TRUTH_JOURNAL_ENC_HZ)
+        # Только int/float: bool (`true`) и строка («5») — ошибка конфигурации, а не молчаливое 1.0/5.0 Гц.
+        if (
+            isinstance(journal_enc_hz_cfg, bool)
+            or not isinstance(journal_enc_hz_cfg, (int, float))
+            or not math.isfinite(journal_enc_hz_cfg)
+            or journal_enc_hz_cfg <= 0
+        ):
+            raise ValueError(
+                f"scene_source: truth_journal_enc_hz должен быть числом > 0, получено {journal_enc_hz_cfg!r}"
+            )
+        self._journal_enc_period_s = 1.0 / float(journal_enc_hz_cfg)
 
         px_per_mm = float(cfg.get("px_per_mm", _DEFAULT_PX_PER_MM))
         belt_y_px = float(cfg.get("belt_y_px", self._height / 2.0))
@@ -319,15 +370,24 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._preset: ScenePreset | None = None
         self._live_factory: ObjectFactory | None = None
 
+        # Task R1: список дисков `{буква, угол}` — единственное состояние спавнера, общее с потоком команд
+        # (свой лок внутри `DiscSequence`). Движок не собран -> `None`, `scene.sequence` отвечает `applied: false`.
+        self._sequence: DiscSequence | None = None
         self._spawner: ObjectSpawner | None = None
         self._compositor: SceneCompositor | None = None
         try:
             preset = load_scene_preset(preset_path, self._defect_override)
             self._preset = preset
             factory = ObjectFactory(preset)
+            sequence = DiscSequence()
             self._spawner = ObjectSpawner(
-                factory, scene_length_mm=scene_length_mm, lateral_offset_px=lateral_offset_px, **spawner_kwargs
+                factory,
+                scene_length_mm=scene_length_mm,
+                lateral_offset_px=lateral_offset_px,
+                sequence=sequence,
+                **spawner_kwargs,
             )
+            self._sequence = sequence
             self._compositor = SceneCompositor(
                 self._spawner,
                 px_per_mm=px_per_mm,
@@ -355,6 +415,10 @@ class SceneSourcePlugin(ProcessModulePlugin):
             background_desc = f"слои[{', '.join(parts)}]"
         else:
             background_desc = f"цвет {_BACKGROUND_BGR}"
+
+        # DS-1 1.1b: файл журнала — последним, после всех ValueError конфигурации (иначе кривой конфиг
+        # оставлял бы за собой созданный файл).
+        self._open_truth_journal(ctx, str(cfg.get("truth_journal_dir") or ""), geometry_cfg)
 
         ctx.log_info(
             f"scene_source: {self._width}x{self._height}, px_per_mm={px_per_mm}, belt_y_px={belt_y_px}, "
@@ -435,6 +499,12 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._drain_control()
         self._apply_pending_factory()
         now_encoder = self._read_world_encoder()
+        # DS-1 1.1b: ровно одно чтение настенных часов на produce() и только при включённом журнале;
+        # то же `now` решает об enc и уходит в строки spawn этого кадра.
+        journal_now: float | None = None
+        if self._journal is not None:
+            journal_now = self._wall()
+            self._journal_write_enc(journal_now, now_encoder)
 
         if self._spawner is not None and self._compositor is not None:
             if self._world_ready:
@@ -449,7 +519,7 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 except Exception as exc:  # noqa: BLE001 — сбой фабрики не должен ронять кадровый цикл  # no-health: ДОЛГ — вечный отказ фабрики виден только в log_error, health не видит (OPEN_QUESTIONS, Task 5.5c)
                     self._warn_factory_error(exc)
                 after_passports = {obj.passport.object_id: obj.passport for obj in self._spawner.active_objects()}
-                self._update_truth_belt(before_ids, after_passports)
+                self._update_truth_belt(before_ids, after_passports, journal_now=journal_now, encoder=now_encoder)
             frame_rgb, _passports_in_view = self._compositor.render(
                 now_encoder, camera_rect=(0.0, 0.0, float(self._width), float(self._height))
             )
@@ -529,6 +599,11 @@ class SceneSourcePlugin(ProcessModulePlugin):
             "flow": flow,
             "defect_probability": defect_probability,
             "force_defect_pending": force_defect_pending,
+            "sequence": (
+                self._sequence.snapshot()
+                if self._sequence is not None
+                else {"mode": "random", "total": 0, "fed": 0, "skipped": 0, "remaining": 0}
+            ),
         }
 
     def cmd_truth_status(self, data: dict | None = None) -> dict:
@@ -646,6 +721,106 @@ class SceneSourcePlugin(ProcessModulePlugin):
             return {"status": "ok", "applied": False}
         overload = self._push_control({"op": "defect_now"})
         return overload if overload is not None else {"status": "ok"}
+
+    # ------------------------------------------------------------------ #
+    # Подача дисков по списку (Task R1)
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _disc_defect(item: object) -> float | None:
+        """Форма одного элемента `discs`: `[буква, угол]` (list/tuple длины 2), буква — `str`, угол —
+        `int | float` (не `bool`), конечный, `0 <= угол < 360`. Хорош — вернуть угол как `float` (`-0.0` ->
+        `+0.0`: `угол + 0.0`, как у `lateral_px`), плох — `None`. Исключений не бросает."""
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return None
+        letter, angle = item
+        if not isinstance(letter, str):  # нехешируемая «буква» — дефект формы, до дедупликации не доходим
+            return None
+        if isinstance(angle, bool) or not isinstance(angle, (int, float)):
+            return None
+        try:
+            value = float(angle)
+        except OverflowError:  # no-health: int вне диапазона float (10**400) — дефект значения, ответ вызывающему
+            return None
+        if not math.isfinite(value) or not 0.0 <= value < 360.0:
+            return None
+        return value + 0.0
+
+    def cmd_sequence(self, data: dict | None = None) -> dict:
+        """`scene.sequence` — подать диски по списку (Task R1). Ровно одна из форм `data`:
+        `{"discs": [[буква, угол], ...]}` (загрузить, если текущий исчерпан), `{"discs": ..., "replace":
+        bool}` (`true` заменяет текущий, остаток выброшен), `{"random": true}` (вернуться к случайным).
+
+        Порядок проверок (первая сработавшая отвечает, до шага 6 ничего не меняется): 1 структура
+        запроса; 2 `discs` — непустой `list` не длиннее `SEQUENCE_MAX_LEN`; 3 форма КАЖДОГО элемента
+        (раньше букв; плохой -> `invalid` + `index`); 4 движок не собран -> `ok, applied: false`;
+        5 буквы против каталога ТЕКУЩЕЙ живой фабрики (`invalid` + `unknown`); 6 `DiscSequence.load()` /
+        `set_random()` (`busy` + `remaining`). `message` не повторяет входные значения. Спавнер отсюда не
+        трогается — только `DiscSequence` под своим локом."""
+        if not isinstance(data, dict):
+            return self._invalid("scene.sequence: ожидается dict")
+        data = {key: value for key, value in data.items() if key not in _TRANSPORT_KEYS}  # копия, вход не мутируется
+        keys = set(data)
+        if keys == {"random"}:
+            if data["random"] is not True:
+                return self._invalid("scene.sequence: random должен быть true")
+            is_random = True
+            discs = None
+            replace = False
+        elif keys == {"discs"} or keys == {"discs", "replace"}:
+            replace = data.get("replace", False)
+            if not isinstance(replace, bool):
+                return self._invalid("scene.sequence: replace должен быть bool")
+            is_random = False
+            discs = data["discs"]
+        else:
+            return self._invalid("scene.sequence: ожидается ровно один из наборов discs | discs+replace | random")
+
+        if not is_random:
+            if not isinstance(discs, list):
+                return self._invalid("scene.sequence: discs должен быть списком")
+            if not discs:
+                return self._invalid("scene.sequence: пустой список дисков")
+            if len(discs) > SEQUENCE_MAX_LEN:
+                return self._invalid(f"scene.sequence: список длиннее {SEQUENCE_MAX_LEN} дисков")
+            checked: list[tuple[str, float]] = []
+            for index, item in enumerate(discs):
+                angle = self._disc_defect(item)
+                if angle is None:
+                    return {
+                        "status": "error",
+                        "code": "invalid",
+                        "index": index,
+                        "message": f"scene.sequence: диск {index} — ожидалась пара [буква, угол], 0 <= угол < 360",
+                    }
+                checked.append((item[0], angle))
+
+        if self._spawner is None or self._sequence is None:
+            return {"status": "ok", "applied": False}
+
+        if is_random:
+            return {"status": "ok", "mode": "random", "dropped": self._sequence.set_random()}
+
+        live_factory = self._live_factory
+        known = set(live_factory.class_names) if live_factory is not None else set()
+        unknown = list(dict.fromkeys(letter for letter, _angle in checked if letter not in known))
+        if unknown:
+            return {
+                "status": "error",
+                "code": "invalid",
+                "unknown": unknown,
+                "message": f"scene.sequence: букв нет в каталоге: {len(unknown)}",
+            }
+        try:
+            dropped = self._sequence.load(checked, replace=replace)
+        except SequenceBusy as busy:  # no-health: список ещё подаётся — отказ уходит вызывающему в ответе команды
+            return {
+                "status": "error",
+                "code": "busy",
+                "remaining": busy.remaining,
+                "message": f"scene.sequence: подаётся список, осталось {busy.remaining}",
+            }
+        return {"status": "ok", "queued": len(checked), "dropped": dropped}
 
     # ------------------------------------------------------------------ #
     # Команды пресета (Task 1.2a — план line-sim-layer-editor, «Устройство»)
@@ -930,17 +1105,26 @@ class SceneSourcePlugin(ProcessModulePlugin):
             )
 
     def _read_world_encoder(self) -> float:
-        """Снимок текущего значения энкодера из мира + предупреждение о протухании."""
+        """Снимок энкодера из мира, досчитанный до «сейчас» (C-87), + предупреждение о протухании.
+
+        ``value + mm_s * clamp(age_s, 0, stale_ms/1000) / FACTOR_MM``, ``age_s = _clock() - t``.
+        Снимок берётся один раз под локом (value/mm_s/t из одного состояния). Нет ``t``/``mm_s``
+        или они не конечные числа -> ``value`` без исключения; ``now < t`` -> возраст 0."""
         with self._lock:
             snapshot = dict(self._world)
 
-        value = snapshot.get("value", self._spawn_encoder)
+        value = float(snapshot.get("value", self._spawn_encoder))
         t = snapshot.get("t")
-        if t is not None:
-            age_ms = (time.monotonic() - t) * 1000.0
-            if age_ms > self._stale_ms:
-                self._warn_stale(t, age_ms)
-        return float(value)
+        if not _is_finite_number(t):
+            return value
+        age_s = self._clock() - t
+        if age_s * 1000.0 > self._stale_ms:
+            self._warn_stale(t, age_s * 1000.0)
+        mm_s = snapshot.get("mm_s")
+        if not _is_finite_number(mm_s):
+            return value
+        capped_age_s = min(max(age_s, 0.0), self._stale_ms / 1000.0)
+        return value + mm_s * capped_age_s / FACTOR_MM
 
     def _background_only_frame(self) -> np.ndarray:
         """Кадр одного фона В RGB (не BGR!) — движок недоступен, см. `configure()`.
@@ -971,12 +1155,107 @@ class SceneSourcePlugin(ProcessModulePlugin):
         if self._ctx.state_proxy is not None:
             self._ctx.state_proxy.set(_OBJECTS_PATH, {oid: passport.to_dict() for oid, passport in current.items()})
 
-    def _update_truth_belt(self, before_ids: set[str], after: dict[str, Any]) -> None:
+    # ------------------------------------------------------------------ #
+    # Журнал истины (DS-1 Task 1.1b, design.md §3)
+    # ------------------------------------------------------------------ #
+
+    def _open_truth_journal(self, ctx: PluginContext, journal_dir: str, geometry_cfg: dict[str, Any]) -> None:
+        """Создать файл журнала и записать `header`. Пустой `journal_dir` — выключено: ни каталога, ни файла.
+
+        Повторный `configure()` закрывает прежний файл. Любой `OSError` (каталог, файл, заголовок) — одна
+        ошибка в health и журнал выключен до конца жизни узла: кадры идут дальше."""
+        previous = getattr(self, "_journal", None)
+        if previous is not None:
+            try:
+                previous.close()
+            except OSError as exc:
+                ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+        self._journal: TextIO | None = None
+        self._journal_last_enc_t: float | None = None
+        if not journal_dir:
+            return
+        t_wall = self._wall()
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(t_wall))
+        path = Path(journal_dir) / f"truth_{stamp}_{os.getpid()}.jsonl"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # "a": повторный configure() в ту же секунду не затирает уже записанное
+            self._journal = path.open("a", encoding="utf-8", newline="\n")
+        except OSError as exc:
+            ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+            return
+        self._journal_write(
+            {
+                "kind": "header",
+                "schema": _JOURNAL_SCHEMA,
+                "t_wall": t_wall,
+                "px_per_mm": self._px_per_mm,
+                "geometry": geometry_cfg,
+                "camera_id": self._camera_id,
+            }
+        )
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        """STOPPED: закрыть журнал истины. Зовётся и после упавшего `configure()` — атрибута может не быть.
+
+        `_journal` обнуляется ДО закрытия: `produce()`, не успевший остановиться, больше не пишет в файл."""
+        journal = getattr(self, "_journal", None)
+        self._journal = None
+        if journal is not None:
+            try:
+                journal.close()
+            except OSError as exc:
+                ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+
+    def _journal_write(self, record: dict[str, Any]) -> None:
+        """Единственная точка записи журнала: строка JSON + `flush()`. Выключен — ничего не делает.
+
+        `OSError` (и `ValueError` — запись в закрытый файл) -> одна ошибка в health, файл закрыт, журнал
+        выключен до конца жизни узла (без повторов: иначе при полном диске каждый кадр платил бы за отказ)."""
+        journal = self._journal
+        if journal is None:
+            return
+        try:
+            journal.write(json.dumps(record, ensure_ascii=False) + "\n")
+            journal.flush()
+        except (OSError, ValueError) as exc:
+            self._journal = None
+            self._ctx.health.report_error(exc, context=_JOURNAL_ERROR_CONTEXT, throttle=_JOURNAL_ERROR_THROTTLE_S)
+            try:
+                journal.close()
+            except OSError:  # no-health: отказ записи уже заявлен выше; закрытие мёртвого файла — тот же инцидент
+                pass
+
+    def _journal_write_enc(self, now: float, encoder: float) -> None:
+        """Строка `enc`: только когда мир готов; первая — сразу, дальше — не раньше чем через период от
+        ПРЕДЫДУЩЕЙ записанной строки (не сетка: `last = now`, а не `last += period`)."""
+        if not self._world_ready:
+            return
+        last = self._journal_last_enc_t
+        if not math.isfinite(encoder):
+            return  # NaN/inf в строке дал бы невалидный строгий JSON; следующий конечный кадр запишет enc
+        # `now < last`: настенные часы прыгнули назад -> пересинхронизация, иначе enc молчит до прежней отметки
+        if last is not None and 0 <= now - last < self._journal_enc_period_s:
+            return
+        self._journal_last_enc_t = now
+        self._journal_write({"kind": "enc", "t_wall": now, "encoder": encoder})
+
+    def _update_truth_belt(
+        self,
+        before_ids: set[str],
+        after: dict[str, Any],
+        *,
+        journal_now: float | None = None,
+        encoder: float = 0.0,
+    ) -> None:
         """Task 5.2 (контракт лида §2): id, появившиеся между снимком до и после
         `spawner.tick()`, -> `ledger.on_spawn(passport)`; id, исчезнувшие -> `ledger.
         on_despawn(id)`. Объект, снятый заданием в ЭТОМ ЖЕ кадре (`_drain_jobs` идёт до
         `tick()`), уже отсутствует и в `before_ids` — diff его не видит, поэтому такой
-        объект не попадает в `on_despawn` дважды (он уже решён через `on_match`)."""
+        объект не попадает в `on_despawn` дважды (он уже решён через `on_match`).
+
+        DS-1 1.1b: на каждый реально новый id — строка `spawn` в журнал истины (если он включён и
+        `produce()` передал `journal_now`); своего чтения часов у спавна нет."""
         after_ids = set(after)
         new_ids = after_ids - before_ids
         gone_ids = before_ids - after_ids
@@ -987,6 +1266,21 @@ class SceneSourcePlugin(ProcessModulePlugin):
                 self._truth.on_spawn(after[object_id])
             for object_id in gone_ids:
                 self._truth.on_despawn(object_id)
+        if journal_now is not None:
+            # запись на диск — вне `_truth_lock`: медленный диск не должен держать `truth.status` потока команд
+            finite = math.isfinite(encoder)
+            for object_id in sorted(new_ids):
+                passport = after[object_id].to_dict()
+                if not finite:
+                    passport["spawn_encoder"] = None  # паспорт несёт тот же NaN, что и энкодер кадра
+                self._journal_write(
+                    {
+                        "kind": "spawn",
+                        "t_wall": journal_now,
+                        "encoder": encoder if finite else None,
+                        "passport": passport,
+                    }
+                )
 
     def _publish_truth_metrics(self) -> None:
         """Task 5.2 (контракт лида §2) + 5.1b (§3): шесть уровней `truth_*` на своём
@@ -1026,5 +1320,5 @@ class SceneSourcePlugin(ProcessModulePlugin):
         self._last_warned_t = t
         self._ctx.log_warning(
             f"scene_source: значение мира устарело на {age_ms:.0f} мс (> stale_ms={self._stale_ms}) — "
-            f"позиция объектов не экстраполируется"
+            f"досчёт позиции по скорости ограничен stale_ms"
         )

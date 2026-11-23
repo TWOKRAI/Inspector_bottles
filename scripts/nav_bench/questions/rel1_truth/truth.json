@@ -1,0 +1,625 @@
+{
+ "repo_sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+ "files_parsed": 4254,
+ "questions": {
+  "A1": {
+   "relation": "callers",
+   "entries": [
+    {
+     "path": "Plugins/sim/layer_preview/plugin.py",
+     "line": 292,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "Plugins/sim/scene_source/plugin.py",
+     "line": 863,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "Plugins/sim/scene_source/plugin.py",
+     "line": 941,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/manager.py",
+     "line": 419,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/manager.py",
+     "line": 441,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/manager.py",
+     "line": 543,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/manager.py",
+     "line": 578,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/service.py",
+     "line": 345,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/service.py",
+     "line": 364,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/service.py",
+     "line": 373,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/service.py",
+     "line": 417,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/recipe/service.py",
+     "line": 418,
+     "symbol": "compute_rev",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_prototype/frontend/app.py",
+     "line": 51,
+     "symbol": "compute_rev",
+     "how": "call"
+    }
+   ],
+   "flagged": []
+  },
+  "A2": {
+   "relation": "callers",
+   "entries": [
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/levels.py",
+     "line": 158,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/levels.py",
+     "line": 174,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/observability/record_display.py",
+     "line": 109,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+     "line": 45,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+     "line": 416,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/error_module/core/error_manager.py",
+     "line": 440,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/logger_core.py",
+     "line": 246,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/logger_core.py",
+     "line": 247,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/sampling.py",
+     "line": 198,
+     "symbol": "severity_of",
+     "how": "call"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/sampling.py",
+     "line": 203,
+     "symbol": "severity_of",
+     "how": "call"
+    }
+   ],
+   "flagged": []
+  },
+  "B1": {
+   "relation": "subclasses",
+   "entries": [
+    {
+     "path": "Services/modbus/channels/modbus_channel.py",
+     "line": 35,
+     "symbol": "ModbusChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/observability/bounded_channel.py",
+     "line": 31,
+     "symbol": "BoundedChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/observability/record_forward_channel.py",
+     "line": 50,
+     "symbol": "RecordForwardChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/observability/store_tap.py",
+     "line": 109,
+     "symbol": "StoreTapChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/console_module/channels/console_log_channel.py",
+     "line": 16,
+     "symbol": "ConsoleLogChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 43,
+     "symbol": "LogChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 962,
+     "symbol": "FileChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 1043,
+     "symbol": "ConsoleChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 1116,
+     "symbol": "HttpChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 1135,
+     "symbol": "FrameTraceChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 1315,
+     "symbol": "MemoryChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/log_channel.py",
+     "line": 1415,
+     "symbol": "NullChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/channels/router_push_channel.py",
+     "line": 30,
+     "symbol": "RouterPushChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/interfaces.py",
+     "line": 28,
+     "symbol": "ILogChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/base_channel.py",
+     "line": 26,
+     "symbol": "MessageChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/queue_channel.py",
+     "line": 24,
+     "symbol": "QueueChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+     "line": 43,
+     "symbol": "SocketChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/interfaces.py",
+     "line": 173,
+     "symbol": "IMessageChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/statistics_module/channels/file_stats_channel.py",
+     "line": 13,
+     "symbol": "FileStatsChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/statistics_module/channels/hub_stats_channel.py",
+     "line": 45,
+     "symbol": "HubStatsChannel",
+     "how": "subclass"
+    },
+    {
+     "path": "multiprocess_framework/modules/statistics_module/channels/log_stats_channel.py",
+     "line": 25,
+     "symbol": "LogStatsChannel",
+     "how": "subclass"
+    }
+   ],
+   "flagged": []
+  },
+  "B2": {
+   "relation": "structural",
+   "entries": [
+    {
+     "path": "multiprocess_prototype/adapters/stores/config_store.py",
+     "line": 65,
+     "symbol": "ConfigStoreFromManager",
+     "how": "structural"
+    }
+   ],
+   "flagged": []
+  },
+  "C1": {
+   "relation": "importers",
+   "entries": [
+    {
+     "path": "Plugins/control/robot_control/plugin.py",
+     "line": 53,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/generic/data_receiver.py",
+     "line": 21,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/generic/pipeline_executor.py",
+     "line": 24,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/generic/plugin_operation_step.py",
+     "line": 30,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/generic/plugin_runner.py",
+     "line": 44,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/middleware/frame_shm_middleware.py",
+     "line": 45,
+     "symbol": "not_inspected_marker",
+     "how": "import"
+    }
+   ],
+   "flagged": []
+  },
+  "C2": {
+   "relation": "importers",
+   "entries": [
+    {
+     "path": "backend_ctl/driver.py",
+     "line": null,
+     "symbol": "telemetry_readmodel_module",
+     "how": "import"
+    },
+    {
+     "path": "backend_ctl/recorder.py",
+     "line": null,
+     "symbol": "telemetry_readmodel_module",
+     "how": "import"
+    },
+    {
+     "path": "multiprocess_framework/modules/frontend_module/state/telemetry_view_model.py",
+     "line": null,
+     "symbol": "telemetry_readmodel_module",
+     "how": "import"
+    }
+   ],
+   "flagged": []
+  },
+  "D1": {
+   "relation": "threads",
+   "entries": [
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/queue_channel.py",
+     "line": 153,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+     "line": 162,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+     "line": 329,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/socket_channel.py",
+     "line": 474,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/channels/socket_client.py",
+     "line": 250,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/core/_receiver.py",
+     "line": 76,
+     "symbol": "Thread",
+     "how": "thread"
+    },
+    {
+     "path": "multiprocess_framework/modules/router_module/core/_sender.py",
+     "line": 86,
+     "symbol": "Thread",
+     "how": "thread"
+    }
+   ],
+   "flagged": []
+  },
+  "D2": {
+   "relation": "env_reads",
+   "entries": [
+    {
+     "path": "multiprocess_framework/modules/channel_routing_module/observability/observability_store.py",
+     "line": 136,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-read"
+    },
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/log_paths.py",
+     "line": 21,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "manual: loop over a literal tuple, os.environ.get(key) in the same function (default_log_base_directory)"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/configs/process_launch_config.py",
+     "line": 157,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-read"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_module/managers/observability_reload.py",
+     "line": 119,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-read"
+    },
+    {
+     "path": "multiprocess_prototype/backend/launch.py",
+     "line": 54,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "manual: env.get(...) on the environment mapping passed in (_env_log_dir_override)"
+    },
+    {
+     "path": "multiprocess_prototype/frontend/app.py",
+     "line": 224,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-read"
+    }
+   ],
+   "flagged": [
+    {
+     "path": "backend_ctl/probes/probe_16_tab_search_live.py",
+     "line": 60,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_4_4_sampler_live.py",
+     "line": 221,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_d5_retention_live.py",
+     "line": 83,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_observability_consumer_acceptance.py",
+     "line": 64,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_observability_consumer_acceptance.py",
+     "line": 65,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_observability_consumer_acceptance.py",
+     "line": 1885,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_observability_consumer_acceptance.py",
+     "line": 1886,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "backend_ctl/probes/probe_stage2_observability_gate.py",
+     "line": 62,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "multiprocess_prototype/backend/launch.py",
+     "line": 682,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    },
+    {
+     "path": "multiprocess_prototype/backend/launch.py",
+     "line": 684,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-setdefault"
+    },
+    {
+     "path": "tools/otel_stand/plane_probe.py",
+     "line": 91,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-setdefault"
+    },
+    {
+     "path": "tools/otel_stand/task24_proof.py",
+     "line": 218,
+     "symbol": "INSPECTOR_LOG_DIR",
+     "how": "env-write"
+    }
+   ]
+  },
+  "E1": {
+   "relation": "self_callers",
+   "entries": [
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 765,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 1215,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 1313,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 2577,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 4422,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 4918,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 4939,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+     "line": 5074,
+     "symbol": "_pm_stopping",
+     "how": "self-call"
+    }
+   ],
+   "flagged": []
+  },
+  "E2": {
+   "relation": "uses",
+   "entries": [
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 48,
+     "symbol": "TERMINATE_GRACE_S",
+     "how": "module-binding"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 49,
+     "symbol": "KILL_CONFIRM_S",
+     "how": "module-binding"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 51,
+     "symbol": "PM_TEARDOWN_MARGIN_S",
+     "how": "module-binding"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 55,
+     "symbol": "INFRA_STOP_S",
+     "how": "module-binding"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 57,
+     "symbol": "CHILD_STOP_FRACTION",
+     "how": "module-binding"
+    },
+    {
+     "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+     "line": 70,
+     "symbol": "LAST_WAVE_S",
+     "how": "module-binding"
+    }
+   ],
+   "flagged": []
+  }
+ }
+}

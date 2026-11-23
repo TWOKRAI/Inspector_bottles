@@ -1,0 +1,77 @@
+# Рецепт camera_device_demo — сквозной срез ядра камеры (Task 1.8): фейк порта -> поток -> item -> дисплей.
+#
+# Нода cam_fake (CameraDevicePlugin, driver: fake) берёт фейковый прибор FAKE-0001 и отдаёт серый
+# кадр 4x2 (mono8) с растущими seq_id. Метрика frames публикуется через publish_metric:
+# processes.cam_fake.state.plugins.camera_device.frames (точный путь подтверждает стенд).
+#
+# Запуск: python multiprocess_prototype/run.py camera_device_demo
+# Команды cam_fake: take_device / release_device / get_status.
+
+name: camera_device_demo
+version: 1
+description: "Ядро камеры: фейковый прибор -> кадры на дисплей (стенд без камер)"
+
+blueprint:
+  name: camera_device_demo
+  description: "cam_fake (camera_device, driver fake) -> display main"
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+
+    - process_name: cam_fake
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      source_target_fps: 25
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.camera_device.plugin_base.CameraDevicePlugin
+          plugin_name: camera_device
+          category: source
+          driver: fake
+          camera_id: 0
+          device_select: first
+          auto_start: true
+          # В running запрещены release_device и take_device (ADR-PM-062); вне running проходят.
+          run_locked_commands: [release_device, take_device]
+
+  wires: []
+
+  # Кадр фейка (gray) прямо на дисплей main.
+  displays:
+    - node_id: cam_fake.camera_device.frame
+      display_id: main
+
+  metadata:
+    gui_positions:
+      cam_fake.camera_device:
+        - 40.0
+        - 40.0
+    locked_nodes: []
+
+# Определение дисплея; кадр источника серый (1 канал), поэтому format: GRAY.
+displays:
+  - id: main
+    name: Фейковая камера
+    width: 4
+    height: 2
+    format: GRAY
+    fps_limit: 25.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

@@ -32,6 +32,7 @@ class RobotDriverV2(StopMixin, JogMixin, ProgramMixin, JobMixin, ParamMixin, Ops
 
     OP_SPECS = ROBOT_V2_OPS  # описания операций _OPS (SPI хаба)
     stop_aware = True  # получает стоп фазы 1 остановки: request_stop (StopMixin)
+    pause_action = ("stop", {"level": "SOFT"})  # ОСТАНОВИТЬ: стоп SOFT (решение владельца 2026-11-16, ADR-DH-015)
 
 
 RobotDriverV2._OPS = OPS

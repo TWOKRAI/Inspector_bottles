@@ -62,6 +62,35 @@ from ..interfaces import IObservableMixin
 _RESERVED_FIELD_NAMES = frozenset({"message", "manager_name", "method_name"})
 
 
+class _Refused:
+    """Тип часового :data:`REFUSED`. Один экземпляр на процесс; сравнивать только по ``is``."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "REFUSED"
+
+    def __bool__(self) -> bool:
+        # Ложь, а не истина по умолчанию: старое ``if lm.warning(...)`` после останова
+        # не должно читать отказ как успех. ``is REFUSED`` / ``is not REFUSED`` не затронуты.
+        return False
+
+    def __reduce__(self) -> str:
+        # Пикл и копия обязаны вернуть ТОТ ЖЕ объект: сравнение идёт по тождеству.
+        return "REFUSED"
+
+
+#: Часовой «менеджер ЗАКРЫТ и запись отказал» (Task 0.6, L-4). Возвращает его
+#: ``LoggerCore.log()`` ТОЛЬКО на пути отказа; на здоровом пути возврат остаётся
+#: ``None``. :meth:`ObservableMixin._call_manager_result` читает его как «не
+#: доставлено» и наружу не выпускает: к вызывающему ``_call_manager`` приезжает
+#: ``None``, а у ``_log_*`` — ``False``. Часовой — внутренний контракт ``log()`` и
+#: миксина; протоколы ``ILoggerManager`` / ``IErrorManager`` (``-> None``) не менялись.
+#: Определён здесь, а не в ``logger_module``: миксин не импортирует ``logger_module``
+#: ради одной константы, а ``logger_core`` уже зависит от ``base_manager``.
+REFUSED = _Refused()
+
+
 class ObservableMixin(IObservableMixin):
     """
     Mixin для подключения любого менеджера к logger, stats, error и кастомным сервисам.
@@ -156,9 +185,12 @@ class ObservableMixin(IObservableMixin):
         подавления.
 
         Returns:
-            ``False`` в тех и только тех случаях, которые
+            ``False`` в трёх и только трёх случаях. Два первых
             :meth:`_note_manager_call_failure` уже считает отказом с Ф2.3:
-            менеджер бросил, либо у него нет такого метода. Три ТИХИХ допуска
+            менеджер бросил, либо у него нет такого метода. Третий (Task 0.6):
+            менеджер ответил :data:`REFUSED` — он ЗАКРЫТ и запись не принял; этот
+            отказ учтён самим менеджером (``channel_refused_records``), и
+            ``_note_manager_call_failure`` на нём НЕ зовётся. Три ТИХИХ допуска
             (слота нет, менеджер ``None``, слот выключен) дают ``True``: это
             законное состояние, а не поломка, и считать его потерей доставки
             значило бы растить ``windowed_delivery_failed`` в каждом процессе,
@@ -168,6 +200,26 @@ class ObservableMixin(IObservableMixin):
         kwargs.setdefault("module", self._observability_source())
         delivered, _result = self._call_manager_result("logger", level, message, **kwargs)
         return delivered
+
+    def _logger_slot_closed(self) -> bool:
+        """Менеджер в слоте ``logger`` сам говорит, что ЗАКРЫТ (Task 0.6).
+
+        Для окна голоса: закрытый менеджер — состояние ПОСТОЯННОЕ, и слот, съеденный
+        решением, возвращать незачем (повтор снова получил бы отказ). Бросивший или не
+        имеющий метода менеджер закрытым не объявляется и слот по-прежнему возвращает (Ф2.3).
+
+        Читается публичное свойство ``is_closed`` менеджера (есть у ``LoggerCore``); у
+        менеджера без него, у заглушки и при пустом слоте — ``False``. Сравнение ``is True``,
+        а не истинность: ``Mock`` отвечает на любое имя истинным объектом. Без кэша — вопрос
+        задаётся менеджеру каждый раз, как и ``ManagerRegistry.get``.
+        """
+        registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
+        if registry is None or not registry.is_enabled("logger"):
+            return False
+        try:
+            return getattr(registry.get("logger"), "is_closed", False) is True
+        except Exception:  # noqa: BLE001 — вопрос окна не должен ронять вызывающего: чужое свойство могло бросить
+            return False
 
     def _log_debug(self, message: "str | Callable[[], str]", **kwargs) -> None:
         """Логирование уровня DEBUG через logger manager.
@@ -355,9 +407,11 @@ class ObservableMixin(IObservableMixin):
         if suppressed:
             ctx.setdefault("suppressed_since_last", suppressed)
         delivered = self._log_checked(level, text, **ctx)
-        if not delivered:
+        if not delivered and not self._logger_slot_closed():
             # Слот съеден решением, а строки нет — вернуть, иначе первая же
-            # потеря даёт молчание на весь интервал (Task 4.13).
+            # потеря даёт молчание на весь интервал (Task 4.13). Закрытому
+            # логгеру слот НЕ возвращается (Task 0.6): отказ постоянный, и
+            # возврат отключил бы окно — каждый повтор снова шёл бы в отказ.
             self._voices().release(key, suppressed)
         return delivered
 
@@ -482,11 +536,14 @@ class ObservableMixin(IObservableMixin):
             # ``TestConcurrency::test_every_thread_leaves_a_fact_and_only_one_speaks``)
             # с подменённым ``_log_error``, возвращающим ``None``, давали голос
             # на каждом вхождении вместо одного.
-            if delivered is False:
+            if delivered is False and not self._logger_slot_closed():
                 # Task 4.13: приёмник не принял вызов — слот, съеденный
                 # решением, возвращается вместе с долгом. Без этого отказ
                 # логгера превращал бы КАЖДЫЙ следующий инцидент этого ключа в
                 # молчание, неотличимое от штатного подавления окном.
+                # Исключение — ЗАКРЫТЫЙ логгер (Task 0.6): его отказ постоянный,
+                # слот остаётся потраченным, и окно гасит повторы как до правки
+                # (иначе 3000 вхождений после останова давали бы 3000 строк в полу).
                 self._voices().release(voice_key, suppressed)
         except Exception as voice_exc:  # noqa: BLE001 — голос не стоит подмены исходной ошибки
             self._note_manager_call_failure("logger", "report_error.voice", exc=voice_exc)
@@ -797,7 +854,8 @@ class ObservableMixin(IObservableMixin):
 
         Returns:
             Результат вызова или None (если менеджер недоступен/выключен/
-            упал/не имеет метода)
+            упал/не имеет метода). Часовой :data:`REFUSED` наружу не выходит:
+            здесь он становится ``None`` (Task 0.6).
         """
         _delivered, result = self._call_manager_result(manager_name, method_name, *args, **kwargs)
         return result
@@ -813,9 +871,12 @@ class ObservableMixin(IObservableMixin):
         счётчик ``windowed_delivery_failed`` разъедутся молча.
 
         Returns:
-            ``(False, None)`` ровно там, где зовётся
-            :meth:`_note_manager_call_failure` — менеджер бросил либо метода
-            нет. Три ТИХИХ допуска дают ``(True, None)``: см. :meth:`_log_checked`.
+            ``(False, None)`` там, где зовётся :meth:`_note_manager_call_failure`
+            (менеджер бросил либо метода нет) И когда менеджер ответил
+            :data:`REFUSED` (закрыт; Task 0.6) — в последнем случае счёта здесь
+            нет: отказ уже учтён самим менеджером, а исход логгера — это его
+            ВОЗВРАТ, а не отсутствие исключения. Три ТИХИХ допуска дают
+            ``(True, None)``: см. :meth:`_log_checked`.
         """
         registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled(manager_name):
@@ -839,7 +900,10 @@ class ObservableMixin(IObservableMixin):
             # __bool__ (Mock, функтор с __len__) иначе уехал бы в ветку
             # «метода нет» и был бы посчитан отказом, которым не является.
             if method is not None and callable(method):
-                return True, method(*args, **kwargs)
+                result = method(*args, **kwargs)
+                if result is REFUSED:
+                    return False, None
+                return True, result
         except Exception as exc:
             self._note_manager_call_failure(manager_name, method_name, exc=exc)
             return False, None

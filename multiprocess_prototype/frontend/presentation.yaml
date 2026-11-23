@@ -29,5 +29,7 @@ description: "Презентационный overlay: gui получает Qt-к
 processes:
   - process_name: gui
     process_class: multiprocess_prototype.frontend.process.GuiProcess
+    # Task 1.3 (ADR-PMM-043): окно гаснет последним — PM сигналит ему после основной волны.
+    stop_wave: last
 
 wires: []

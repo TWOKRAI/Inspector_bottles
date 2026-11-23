@@ -196,6 +196,36 @@ def check_no_s16_admits_minus_32768(doc: dict) -> list[str]:
     return bad
 
 
+_U16_MAX = 65535
+
+
+def check_aparam_covers_actions_and_fits_u16(doc: dict) -> list[str]:
+    """`scenario.aparam` (T1.4): ключи == `actions` без NONE; ровно одна форма; границы в u16."""
+    scenario = doc["scenario"]
+    aparam = scenario.get("aparam", {})
+    expected = [name for name in scenario["actions"] if name != "NONE"]
+    bad: list[str] = []
+    if sorted(aparam) != sorted(expected):
+        bad.append(f"ключи aparam {sorted(aparam)} != действия без NONE {sorted(expected)}")
+    for name, row in aparam.items():
+        if set(row) == {"min", "max"}:
+            lo, hi = row["min"], row["max"]
+        elif set(row) == {"param"}:
+            meta = doc["params"].get(row["param"])
+            if meta is None:
+                bad.append(f"{name}: param {row['param']!r} нет в params")
+                continue
+            if meta["scale"] != 1 or meta["signed"]:
+                bad.append(f"{name}: param {row['param']} должен быть scale 1 и без знака")
+            lo, hi = meta["min"], meta["max"]
+        else:
+            bad.append(f"{name}: нужна ровно одна форма {{min, max}} или {{param}}, есть {sorted(row)}")
+            continue
+        if not 0 <= lo <= hi <= _U16_MAX:
+            bad.append(f"{name}: диапазон {lo}..{hi} вне 0 <= min <= max <= {_U16_MAX}")
+    return bad
+
+
 # ─────────────────────────── фикстуры ────────────────────────────────────────── #
 
 
@@ -225,11 +255,18 @@ def snapshot() -> dict[int, str]:
         check_reason_codes_unique,
         check_param_default_in_range,
         check_no_s16_admits_minus_32768,
+        check_aparam_covers_actions_and_fits_u16,
     ],
     ids=lambda f: f.__name__,
 )
 def test_invariant_holds_on_real_yaml(doc: dict, check: Callable[[dict], list[str]]) -> None:
     assert check(doc) == []
+
+
+def test_aparam_covers_actions_and_fits_u16(doc: dict) -> None:
+    """T1.4: `scenario.aparam` — по строке на действие (без NONE), границы в u16; значения — литералы."""
+    assert list(doc["scenario"]["aparam"]) == ["DO_ON", "DO_OFF", "DELAY_MS", "SPEED_PCT", "ACCEL", "ACCUR"]
+    assert check_aparam_covers_actions_and_fits_u16(doc) == []
 
 
 def test_param_ids_stable_against_snapshot(doc: dict, snapshot: dict[int, str]) -> None:
@@ -378,6 +415,34 @@ def _m_signed_reg_with_range(d: dict) -> None:
     d["registers"]["tlm_x"]["min"] = -32768
 
 
+def _m_aparam_drop_do_on(d: dict) -> None:
+    del d["scenario"]["aparam"]["DO_ON"]
+
+
+def _m_aparam_extra_none(d: dict) -> None:
+    d["scenario"]["aparam"]["NONE"] = {"min": 0, "max": 0}
+
+
+def _m_aparam_min_above_max(d: dict) -> None:
+    d["scenario"]["aparam"]["SPEED_PCT"] = {"min": 100, "max": 1}
+
+
+def _m_aparam_max_65536(d: dict) -> None:
+    d["scenario"]["aparam"]["DELAY_MS"]["max"] = 65536
+
+
+def _m_aparam_unknown_param(d: dict) -> None:
+    d["scenario"]["aparam"]["ACCEL"] = {"param": "P_NOPE"}
+
+
+def _m_aparam_scaled_param(d: dict) -> None:
+    d["scenario"]["aparam"]["ACCEL"] = {"param": "P_HOME_X"}  # scale 10
+
+
+def _m_aparam_both_forms(d: dict) -> None:
+    d["scenario"]["aparam"]["ACCEL"] = {"param": "P_ACC_L", "min": 1, "max": 2}
+
+
 # (id кейса, инвариант, порча)
 _CORRUPTIONS: list[tuple[str, Callable[[dict], list[str]], Callable[[dict], None]]] = [
     ("reg_into_vfd_block", _overlap_via_existing_test, _m_shift_into_vfd),
@@ -399,6 +464,13 @@ _CORRUPTIONS: list[tuple[str, Callable[[dict], list[str]], Callable[[dict], None
     ("default_below_min", check_param_default_in_range, _m_default_below),
     ("s16_param_min_minus_32768", check_no_s16_admits_minus_32768, _m_s16_min),
     ("s16_register_range_minus_32768", check_no_s16_admits_minus_32768, _m_signed_reg_with_range),
+    ("aparam_row_missing", check_aparam_covers_actions_and_fits_u16, _m_aparam_drop_do_on),
+    ("aparam_extra_none_row", check_aparam_covers_actions_and_fits_u16, _m_aparam_extra_none),
+    ("aparam_min_above_max", check_aparam_covers_actions_and_fits_u16, _m_aparam_min_above_max),
+    ("aparam_max_65536", check_aparam_covers_actions_and_fits_u16, _m_aparam_max_65536),
+    ("aparam_unknown_param", check_aparam_covers_actions_and_fits_u16, _m_aparam_unknown_param),
+    ("aparam_scaled_param", check_aparam_covers_actions_and_fits_u16, _m_aparam_scaled_param),
+    ("aparam_both_forms", check_aparam_covers_actions_and_fits_u16, _m_aparam_both_forms),
 ]
 
 

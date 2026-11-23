@@ -1,0 +1,267 @@
+{
+  "name": "fw1",
+  "repo_sha": "4164beb74ed76a1d1beacb85e99f37cc3ab002ef",
+  "exclude": [
+    "scripts/nav_bench",
+    "scripts/atlas/tests",
+    "docs/handoffs",
+    "docs/reports",
+    "docs/reviews",
+    "plans",
+    "docs/claude/memory",
+    ".claude/plugins/core/scripts/plans_ledger.py",
+    ".claude/plugins/lang-python/templates/validate_commit",
+    ".claude/commands/dev/adr.md",
+    "multiprocess_framework/DECISIONS.md",
+    "multiprocess_framework/modules/process_manager_module/DECISIONS.md",
+    "multiprocess_framework/modules/process_manager_module/tests",
+    "multiprocess_framework/modules/process_module/DECISIONS.md",
+    "multiprocess_framework/modules/process_module/tests",
+    "multiprocess_framework/modules/data_schema_module/DECISIONS.md",
+    "multiprocess_framework/modules/data_schema_module/tests",
+    "multiprocess_framework/modules/console_module/STATUS.md",
+    "multiprocess_framework/modules/console_module/tests",
+    "Services/device_hub/DECISIONS.md",
+    "Services/device_hub/tests",
+    "Services/robot_comm/tests",
+    "Services/robot_comm/STATUS.md",
+    "Plugins/sources/camera_service/tests",
+    "Plugins/filter/line_filter/tests",
+    "Plugins/filter/line_filter/STATUS.md",
+    "Plugins/processing/word_layout/tests",
+    "Plugins/processing/word_layout/STATUS.md"
+  ],
+  "questions": [
+    {
+      "id": "F1",
+      "question": "A process whose name contains a dot is silently mixed up with a shorter-named process, because the message router reads the first dot-separated segment of an address as the process. Such a name must instead be reported as a validation error, both by the whole-topology validation that runs when the system boots or hot-switches a recipe, and by the cheaper structure-only gate that runs when a recipe is saved or loaded. In which two methods of the topology blueprint class must the new check be wired in?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 825,
+          "symbol": "SystemBlueprint.check_structure"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 878,
+          "symbol": "SystemBlueprint.check"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from 44bb41f94 (C25.1). git show 44bb41f94: the existing check_structure and check changed (a call to the new helper _dotted_process_names added to both; the helper itself is new so it is not in the reference). Both needed.",
+      "require": "all"
+    },
+    {
+      "id": "F2",
+      "question": "The frame-source plugin for cameras must learn one more kind of source: a network video stream given by a URL. Four existing places must be extended for a new kind: the module-level tuple that lists the allowed kinds, the factory function that builds a backend object for a kind, the typing alias (Literal) used by the plugin config to restrict the kind, and the plugin method that assembles the keyword arguments passed to the factory. Where are they?",
+      "expected": [
+        {
+          "path": "Plugins/sources/camera_service/backends/__init__.py",
+          "line": 17,
+          "symbol": "CAMERA_TYPES"
+        },
+        {
+          "path": "Plugins/sources/camera_service/backends/__init__.py",
+          "line": 28,
+          "symbol": "create_backend"
+        },
+        {
+          "path": "Plugins/sources/camera_service/config.py",
+          "line": 14,
+          "symbol": "CameraTypeStr"
+        },
+        {
+          "path": "Plugins/sources/camera_service/plugin.py",
+          "line": 204,
+          "symbol": "CameraServicePlugin._backend_kwargs"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from 8f18a71df (Task 1.2a, stream camera type). git show 8f18a71df: CAMERA_TYPES (constant), create_backend (function), CameraTypeStr (Literal alias) and the kwargs dict in the plugin (_backend_kwargs) changed. Constants/registry answer. The commit message itself says 'declared in three places'; the fourth is the kwargs method.",
+      "require": "all"
+    },
+    {
+      "id": "F3",
+      "question": "A plugin input slot currently carries one boolean that means both 'may be left unconnected' and, implicitly, 'does not take part in correlating inputs by sequence id into one joined item'. The owner wants a separate, independent declaration of participation in the join (default: same as before). Which class defines the slot contract, which blueprint method counts which wires count as join sources, and which built-in command handler that serves the plugin catalog to a remote GUI must additionally expose the new flag?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/port.py",
+          "line": 41,
+          "symbol": "Port"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/topology/blueprint.py",
+          "line": 482,
+          "symbol": "SystemBlueprint._joining_sources"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/commands/builtin_commands.py",
+          "line": 972,
+          "symbol": "BuiltinCommands._cmd_catalog_plugins"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from c13439ee0 (C-16/C-17, Port.join). git show c13439ee0: existing class Port (field join + effective_join added), the source counting inside SystemBlueprint.infer_missing_collectors (moved by that commit into the new helper _joining_sources, which is the HEAD site), and _cmd_catalog_plugins (join added to port dicts) changed. Answer includes a class. Caveat: the catalog lines edited are 1020 and 1024, the reference points at the def line.",
+      "require": "all"
+    },
+    {
+      "id": "F4",
+      "question": "In the filter plugin that emits an event when a detected disc passes a zone on the conveyor, a detection that vanishes inside the zone for a few frames and then reappears next to the same spot produces a second event for the same physical disc. The fix must (a) change the function that makes the 'zone empty -> occupied' trigger decision, and (b) reuse an existing registers field that holds the pixel radius within which a reappearing point counts as the same object. Which function and which registers field?",
+      "expected": [
+        {
+          "path": "Plugins/filter/line_filter/plugin.py",
+          "line": 141,
+          "symbol": "LineFilterPlugin._apply_zone_edge"
+        },
+        {
+          "path": "Plugins/filter/line_filter/registers.py",
+          "line": 119,
+          "symbol": "LineFilterRegisters.max_match_distance"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from 723e17420 (C-42). git show 723e17420: existing _apply_zone_edge rewritten (plus new helper _is_same_object), the registers field max_match_distance gets a new meaning in zone mode. Field in a SchemaBase registers class.",
+      "require": "all"
+    },
+    {
+      "id": "F5",
+      "question": "The letter-placement plugin can receive its target word from two sources: an operator-writable register and a field of the item arriving on an input port. Today the word coming from the port is latched and shadows later register writes forever. Required: the register becomes the single storage, whichever source wrote last wins, and a change of word is logged with its source. Which method decides the effective word, and which method rebuilds the matcher on word change and writes the log line?",
+      "expected": [
+        {
+          "path": "Plugins/processing/word_layout/plugin.py",
+          "line": 312,
+          "symbol": "WordLayoutPlugin._resolve_word"
+        },
+        {
+          "path": "Plugins/processing/word_layout/plugin.py",
+          "line": 430,
+          "symbol": "WordLayoutPlugin._ensure_assembler"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from caf90b220 (C-37). git show caf90b220: existing _resolve_word (latch removed) and _ensure_assembler (source in the log) changed, __init__ too (not scored).",
+      "require": "all"
+    },
+    {
+      "id": "F6",
+      "question": "The process manager's system-shutdown command must accept a 'forced' variant with a caller-given deadline of 0.1 to 5 seconds, after which the children that have not stopped are escalated by the existing last phase. Which handler method parses and validates these arguments, and which method of the helper object that tracks the stopping of child processes must clip the join deadline it passes to the child group?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 1120,
+          "symbol": "ProcessManagerProcess._cmd_system_shutdown"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+          "line": 5289,
+          "symbol": "_ChildrenStop.join_until"
+        }
+      ],
+      "scored": true,
+      "note": "class=described. Derived from b8197afd1 (system.shutdown mode=force, ADR-PMM-038). git show b8197afd1: existing _cmd_system_shutdown (mode/deadline_s args) and _ChildrenStop.join_until (min with force deadline) changed. The process manager file has >5000 lines.",
+      "require": "all"
+    },
+    {
+      "id": "F7",
+      "question": "In the robot v2 driver, `RobotState` decides whether a manual connect attempt may start (it returns 'shutdown', 'busy' or 'go'). When the operator presses Disconnect in the middle of a connect, the connect must be refused with a new outcome, checked before the 'busy' case, and the device manager that publishes the connection state after the connect must report 'disconnecting' instead of 'error' for an aborted connect. Which two methods change?",
+      "expected": [
+        {
+          "path": "Services/device_hub/drivers/robot_driver_v2/state.py",
+          "line": 323,
+          "symbol": "RobotState.connect_begin"
+        },
+        {
+          "path": "Services/device_hub/manager.py",
+          "line": 504,
+          "symbol": "DeviceManager.connect"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 4fcf8c9a6 (C-29). git show 4fcf8c9a6: existing RobotState.connect_begin ('cancelled' outcome) and DeviceManager.connect (conn state 'disconnecting') changed.",
+      "require": "all"
+    },
+    {
+      "id": "F8",
+      "question": "`ProcessManagers` registers a set of managers from a bundle onto a process. A manually built bundle (a test double without the `executors` attribute) must not crash it with AttributeError: the optional executors manager has to be read tolerantly. Which method of `ProcessManagers` reads it?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_module/managers/process_managers.py",
+          "line": 165,
+          "symbol": "ProcessManagers.register_all"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 128af06e5 (Task 1.9m). git show 128af06e5: one-line change in register_all (bundle.executors -> getattr). Single address, easy."
+    },
+    {
+      "id": "F9",
+      "question": "`PluginTestBench` (the harness for testing a plugin without a process) cannot be constructed because it builds the plugin context with arguments that the context no longer accepts (it must pass services, config and io), and an author who wants to simulate the stop notice has to call a private lifecycle hook directly. Which method builds the context, and which public method should forward the stop notice to the plugin hook?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/plugin_test_bench.py",
+          "line": 41,
+          "symbol": "PluginTestBench.__init__"
+        },
+        {
+          "path": "multiprocess_framework/modules/process_module/plugins/plugin_test_bench.py",
+          "line": 106,
+          "symbol": "PluginTestBench.request_stop"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from d86e5ae23 (T5.3e.5f). git show d86e5ae23: existing __init__ (PluginContext call) changed and request_stop added (it exists at HEAD, so it is a valid answer site). The PluginContext call itself is ~25 lines below the def, the reference points at def __init__.",
+      "require": "all"
+    },
+    {
+      "id": "F10",
+      "question": "`WindowsConsole` must not detach the process from a console it did not create: when the Windows call that allocates a console fails because the process is already attached to a windowless console (for example under ConPTY), the 'we allocated it' flag must stay false so that closing does not call FreeConsole. Which method sets that flag?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/console_module/platforms/windows.py",
+          "line": 31,
+          "symbol": "WindowsConsole.create"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from 494e5f446 (fix console detach). git show 494e5f446: existing WindowsConsole.create changed (_allocated_console = bool(AllocConsole())). Single address; close() unchanged. Windows-only code, nothing to run on macOS."
+    },
+    {
+      "id": "F11",
+      "question": "`FieldMeta` accepts an `enabled_if` mapping of field name to a list of allowed values. A nested list or an Enum member inside such a list makes `to_dict` return references into class-level metadata, so the constructor must reject any element whose exact type is not bool, int, float, str or None. Which module-level function validates the mapping, and which module-level constant should list the permitted element types?",
+      "expected": [
+        {
+          "path": "multiprocess_framework/modules/data_schema_module/core/field_meta.py",
+          "line": 105,
+          "symbol": "_normalize_enabled_if"
+        },
+        {
+          "path": "multiprocess_framework/modules/data_schema_module/core/field_meta.py",
+          "line": 102,
+          "symbol": "_ENABLED_IF_ITEM_TYPES"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from ba5fe9ff3 (Task 1.1 review W1). git show ba5fe9ff3: _normalize_enabled_if changed, constant _ENABLED_IF_ITEM_TYPES added (exists at HEAD). Constant answer.",
+      "require": "all"
+    },
+    {
+      "id": "F12",
+      "question": "`fit_frame` fits a coordinate frame to base and local point sets by singular value decomposition. Coordinates around 1e155 overflow the matrices and make the SVD hang an executor thread, so input points whose absolute coordinate exceeds a fixed limit in millimetres must be rejected before the SVD with the 'bad points' error. Which function applies the check and which constant holds the limit?",
+      "expected": [
+        {
+          "path": "Services/robot_comm/calibration/frame_fit.py",
+          "line": 70,
+          "symbol": "fit_frame"
+        },
+        {
+          "path": "Services/robot_comm/calibration/frame_fit.py",
+          "line": 47,
+          "symbol": "MAX_COORD_MM"
+        }
+      ],
+      "scored": true,
+      "note": "class=named. Derived from c3807f295 (T5.4). git show c3807f295: existing fit_frame changed (two new conditions before the SVD), constant MAX_COORD_MM added (exists at HEAD). Constant answer.",
+      "require": "all"
+    }
+  ]
+}

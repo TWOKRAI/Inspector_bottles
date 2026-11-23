@@ -47,6 +47,8 @@ class InferenceEngine:
         self._backend: BaseInferenceBackend | None = None
         self._spec: ModelSpec | None = None
         self._labels: list[str] | None = None
+        #: id загруженной модели — ключ каталога (stem файла); ставится в load_model, чистится в unload
+        self._model_id: str | None = None
         self._device: str = "cpu"
         #: метки, для которых уже залогирован fallback симметрии (анти-спам в predict)
         self._warned_symmetry: set[str] = set()
@@ -60,6 +62,14 @@ class InferenceEngine:
     def current_model(self) -> str | None:
         """Имя текущей загруженной модели или None."""
         return self._spec.name if self._spec else None
+
+    @property
+    def current_model_id(self) -> str | None:
+        """Id (ключ каталога) модели, которая реально загружена сейчас, или None.
+
+        В отличие от `current_model` (sidecar-имя) это то, что хранит регистр `model`.
+        """
+        return self._model_id
 
     @property
     def is_ready(self) -> bool:
@@ -93,6 +103,7 @@ class InferenceEngine:
         self._backend = backend
         self._spec = spec
         self._labels = spec.load_labels()
+        self._model_id = model_id
         self._device = device
         self._warned_symmetry = set()
         self._check_symmetry_coverage(spec)
@@ -165,6 +176,9 @@ class InferenceEngine:
             if angle_raw is not None:
                 sym = self._symmetry_for(preds[0]["label"])
                 preds[0].update(angle_postprocess(angle_raw, sym))
+                # режим, которым декодирован угол: потребителю (датасет-sidecar) нужен
+                # он, а не карта симметрий модели
+                preds[0]["angle_symmetry"] = sym
         return preds
 
     def unload(self) -> None:
@@ -174,3 +188,4 @@ class InferenceEngine:
         self._backend = None
         self._spec = None
         self._labels = None
+        self._model_id = None

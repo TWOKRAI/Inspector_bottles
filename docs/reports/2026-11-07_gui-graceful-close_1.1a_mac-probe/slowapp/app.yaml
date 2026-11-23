@@ -1,0 +1,8 @@
+name: Slow Probe App
+version: 1
+extras: {}
+pipeline: pipeline.yaml
+discovery:
+  plugin_paths: []
+  service_paths: []
+  auto_discover: false

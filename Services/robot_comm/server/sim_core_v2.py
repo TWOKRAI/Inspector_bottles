@@ -231,6 +231,7 @@ from Services.robot_comm.codegen import crc16_modbus
 from Services.robot_comm.core.params_v2 import DICT_FINGERPRINT, PARAM_ID, PARAMS, to_eng
 from Services.robot_comm.core.protocol_v2 import (
     ACT,
+    ACT_RANGE,
     CONSTANTS,
     ERR,
     KIND,
@@ -1296,7 +1297,6 @@ class RobotSimCoreV2:
         start = self._read_pose_eng()
         hand = self.regs[REG["TLM_HAND"]]
         p_hand = self._values[PARAM_ID["P_HAND"]]
-        acc_meta = PARAMS[PARAM_ID["P_ACC_L"]]
         records: list[dict] = []
         for i in range(count):
             base = REG["SC_BUF"] + (offset + i) * CONSTANTS["SC_STRIDE"]
@@ -1312,18 +1312,10 @@ class RobotSimCoreV2:
                 return nak(REASON["R_LAST_PASS"])
             if action not in _SC_ACTIONS:
                 return nak(REASON["R_ACTION"])
-            if action in (ACT["DO_ON"], ACT["DO_OFF"]):
-                aparam_ok = 1 <= aparam <= 16
-            elif action == ACT["SPEED_PCT"]:
-                aparam_ok = 1 <= aparam <= 100
-            elif action == ACT["ACCEL"]:
-                aparam_ok = acc_meta["min"] <= aparam <= acc_meta["max"]
-            elif action == ACT["ACCUR"]:
-                aparam_ok = aparam in (0, 1)
-            else:
-                aparam_ok = True  # NONE — APARAM игнорируется; DELAY_MS — весь u16, мс
-            if not aparam_ok:
-                return nak(REASON["R_APARAM"])
+            if action != ACT["NONE"]:  # у NONE APARAM игнорируется; диапазоны — `scenario.aparam` (T1.4)
+                rng = ACT_RANGE.get(_ACT_NAME[action])
+                if rng is None or not rng[0] <= aparam <= rng[1]:
+                    return nak(REASON["R_APARAM"])
             target = tuple(self._decode(v, True) / 10.0 for v in (x, y, z, rz))
             line = kind != KIND["JOINT"]
             reason, j_end = self._check_target(ws, target, line, start, hand)
@@ -1499,13 +1491,14 @@ class RobotSimCoreV2:
 
     def _op_do_set(self, args: list[int], busy: bool, seq: int) -> tuple[int, int, int, list[int]]:
         channel, value = args
-        if not (1 <= channel <= 16) or value not in (0, 1):
+        lo, hi = ACT_RANGE["DO_ON"]
+        if not (lo <= channel <= hi) or value not in (0, 1):
             return NAK, ERR["E_RANGE"], 0, []
         self._set_do(channel, value)
         return ACK, 0, 0, []
 
     def _set_do(self, channel: int, value: int) -> None:
-        """DO-канал 1..16 -> бит маски (общий для DO_SET и действий сценария)."""
+        """DO-канал из `ACT_RANGE["DO_ON"]` -> бит маски (общий для DO_SET и действий сценария)."""
         bit = 1 << (channel - 1)
         mask = self.regs[REG["TLM_DO_MASK"]]
         mask = (mask | bit) if value else (mask & ~bit)
@@ -1658,8 +1651,15 @@ class RobotSimCoreV2:
         cap = CONSTANTS["SC_CAP"]
         if not (1 <= count <= cap) or offset + count > cap:
             return NAK, ERR["E_SC_COUNT"], 0, []
-        acc_meta = PARAMS[PARAM_ID["P_ACC_L"]]
-        if spd_pct > 100 or (accel != 0 and not acc_meta["min"] <= accel <= acc_meta["max"]) or accur > 2:
+        # 0 — «не задано» у всех трёх; accur на проводе сдвинут на 1 относительно ACCUR (§7.2 п.8)
+        spd_lo, spd_hi = ACT_RANGE["SPEED_PCT"]
+        acc_lo, acc_hi = ACT_RANGE["ACCEL"]
+        accur_lo, accur_hi = ACT_RANGE["ACCUR"]
+        if (
+            (spd_pct != 0 and not spd_lo <= spd_pct <= spd_hi)
+            or (accel != 0 and not acc_lo <= accel <= acc_hi)
+            or (accur != 0 and not accur_lo + 1 <= accur <= accur_hi + 1)
+        ):
             return NAK, ERR["E_RANGE"], 1, [REASON["R_APARAM"]]
         if self.regs[REG["TLM_SERVO"]] == 0:
             return NAK, ERR["E_NO_SERVO"], 0, []

@@ -2,6 +2,7 @@
 name: manager
 description: Planning manager. Receives a phase from Director, decomposes it into subtasks with complexity levels, and writes a detailed spec. Does NOT write code.
 model: opus
+effort: xhigh
 omitClaudeMd: true
 skills: project-rules, team-protocol
 disallowedTools: mcp__backend-ctl, mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__graphify, mcp__qt-mcp, mcp__serena

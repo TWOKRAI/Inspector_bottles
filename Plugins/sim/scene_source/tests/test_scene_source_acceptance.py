@@ -241,11 +241,12 @@ def test_sprite_moves_with_encoder(tmp_path: Path) -> None:
     t0 = time.monotonic()
     _spawn_one_object_at_encoder_zero(plugin, sp, t0)
 
-    _push_leaf_update(sp, value=1000, mm_s=50.0, t=time.monotonic())
+    # C-87: mm_s=0.0 — досчёт энкодера по скорости выключен, формула позиции остаётся буквальной
+    _push_leaf_update(sp, value=1000, mm_s=0.0, t=time.monotonic())
     frame_1000 = _frame_of(plugin)
     x_1000 = _object_centroid_x(frame_1000, color_bgr)
 
-    _push_leaf_update(sp, value=2000, mm_s=50.0, t=time.monotonic())
+    _push_leaf_update(sp, value=2000, mm_s=0.0, t=time.monotonic())
     frame_2000 = _frame_of(plugin)
     x_2000 = _object_centroid_x(frame_2000, color_bgr)
 
@@ -267,10 +268,11 @@ def test_sprite_moves_with_encoder(tmp_path: Path) -> None:
 
 
 def test_stale_world_freezes_and_warns(tmp_path: Path) -> None:
-    """Пин (обновлён Task 3.4 — см. блок правки выше файла): значение мира старше
-    ``stale_ms`` -> позиция объекта НЕ экстраполируется между двумя последовательными
-    кадрами (центр масс не двигается), и ``ctx.log_warning`` вызван хотя бы раз (якорь
-    существования — не привязываюсь к тексту сообщения, см. память тестера)."""
+    """Пин (обновлён Task 3.4 — см. блок правки выше файла; C-87 — досчёт): значение мира
+    старше ``stale_ms`` -> досчёт ограничен ``stale_ms``, поэтому между двумя последовательными
+    кадрами центр масс не двигается (замирает на value + mm_s*stale_ms/1000/FACTOR_MM), и
+    ``ctx.log_warning`` вызван хотя бы раз (якорь существования — не привязываюсь к тексту
+    сообщения, см. память тестера)."""
     color_bgr = (0, 0, 255)
     plugin, ctx, sp = _make_plugin_with_engine(tmp_path, color_bgr)
 
@@ -293,6 +295,9 @@ def test_stale_world_freezes_and_warns(tmp_path: Path) -> None:
     assert x_a == pytest.approx(x_b, abs=0.01), (
         f"позиция объекта сместилась между двумя кадрами на устаревшем значении: {x_a} -> {x_b}"
     )
+    # C-87: литерал позиции: (200 + 50*0.2/0.144473) отсчётов * 0.144473 мм/отсчёт * 1.0 px/мм
+    # = 28.89 + 10.0 = 38.89 px (досчёт обрезан stale_ms=200 мс, а не 10 с возраста)
+    assert x_a == pytest.approx(38.89, abs=2.0), f"позиция на протухшем значении {x_a} != 38.89 px (value 200 + cap)"
     assert ctx.log_warning.called, "ctx.log_warning не был вызван на устаревшем значении мира"
 
 

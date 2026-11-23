@@ -113,6 +113,22 @@ class FrameSaverRegisters(SchemaBase):
         ),
     ] = "sidecar"
 
+    sidecar_keys: Annotated[
+        str,
+        FieldMeta(
+            "Sidecar Keys",
+            info="Ключи верхнего уровня item через запятую: копируются в sidecar JSON под своим именем",
+        ),
+    ] = ""
+
+    sidecar_source: Annotated[
+        Literal["", "synthetic", "real"],
+        FieldMeta(
+            "Sidecar Source",
+            info="Пишется в sidecar JSON как source (происхождение кадра); пусто - ключа source нет",
+        ),
+    ] = ""
+
     # --- Режим сохранения ---
     save_mode: Annotated[
         Literal["stream", "trigger"],

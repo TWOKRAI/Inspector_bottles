@@ -20,6 +20,7 @@
 | GenericModbusDriver | done | test_generic_modbus.py |
 | RobotDriverV2 (пакет `drivers/robot_driver_v2/`) | done (T5.3f; стенд `harness_smoke` 3 passed ×3, 2026-10-20) | test_robot_driver_v2.py, test_robot_v2_state_acceptance.py, test_no_private_driver_state.py |
 | SPI драйвера (`spi.py`, `OpSpec`, команды из описаний) | done (SPI a–g, 2026-10-26; стенд не гонялся) | test_spi_contract.py, test_spi_acceptance.py, test_op_commands.py, test_spi_commands_acceptance.py |
+| Пауза драйверов (`pause_action`, `PAUSE_OPS`, `DeviceManager.pause_all`, `conn_cb`) | done (2.2a2 S4a, ADR-DH-015; на железе время ответа stop v2/v1/ПЧ не измерено) | test_pause_all.py, test_pause_all_acceptance.py |
 | DeviceHubPlugin | done | test_device_hub_plugin.py |
 | DeviceHubClient | done | test_client.py |
 
@@ -47,7 +48,7 @@
 
 ## SPI хаба — итог (ADR-DH-012)
 
-Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 56 операций в каталогах `OpSpec`, из них
+Контракт драйвера — `Protocol` и умолчания базы вместо `getattr` / `hasattr`; 59 операций в каталогах `OpSpec`, из них
 генерируются команды `robot_*` / `vfd_*` (72 имени не менялись); исполнитель `device_io` (4/64) объявлен в топологии
 (`base.yaml`, C-47 исправлен в framework); `drv._client` в тестах хаба вне v1/ПЧ/сторожа 43 -> 0; затвор переподключения
 в базе. Команды и фабрики — из таблицы видов `kinds.py` по `OP_SPECS` драйверов (SPI.h); подкласс плагина со своим
@@ -58,3 +59,23 @@
   (`python -m backend_ctl.dump_capabilities`, headless-бэкенд, окно `heavy`): до неё `backend_ctl/tests/test_capabilities.py::test_dump_matches_committed` красный.
 - Значения `device_io` 4/64 — умолчания `ExecutorSpec`, не замер; стенд для SPI не гонялся.
 - Длинные синхронные операции (`toolchange` v1, `stop` v2 до 0,8 с) задерживают поток роутера (вне SPI).
+
+## T5.4 — калибровка робота v2
+
+Команды `robot_calib_belt` / `robot_calib_frame` / `robot_calib_tools` (77 команд хаба, в каталогах 59); расчёт в пакете
+`Services/robot_comm/calibration` (`belt_from_marks`, `fit_frame`, `check_tool_points`). Приёмка: A1–A9
+(`Services/robot_comm/tests/test_t54_calibration_acceptance.py`), B1–B9
+(`Plugins/hub/device_hub/tests/test_t54_calib_commands_acceptance.py`), C1–C3
+(`Plugins/calibration/camera_robot/tests/test_v2_driver_contract.py`).
+
+**Открыто:**
+- `P_BELT_FACTOR` допускает до 65535 (`delta_v2.yaml:636`), а слово протокола знаковое (±32767): sim принимает 40000
+  без отказа (читано по `sim_core_v2.py:1523`, не запускалось); поведение на железе не проверено до GATE-0.
+  `param_bounds` оставлены по умолчанию (вопрос В8).
+
+## T5.5 — рисунок на v2
+
+- `draw_polyline` на v2 — программой (генератор `draw`, путь `program_run`); робот v2 принимает подачу CVT и рисунок.
+  Влито слиянием ветки `feat/robot-v2-t55` (T5.5a).
+- Открыто: `robot_draw_abort` на v2 — «неизвестная операция» (О2; остановка — `robot_program_abort` / `robot_abort`);
+  очередь рисунков на v2 нет (второй рисунок во время первого теряется, `jobs_dropped`); REVIEW-5 после T5.4 (стенд).

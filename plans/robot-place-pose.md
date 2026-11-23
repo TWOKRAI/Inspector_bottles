@@ -110,7 +110,7 @@ MovP("GL_HOME")
 
 - Task P1: Python-протокол — регистры `0x1140+`, yaml, client/driver/robot_io, тесты [DONE 2026-06-16 — `81664569`; `REG_PLACE_X` в `Services/robot_comm/core/registers.py`]
 - Task P2: Lua `run_job` — укладка с `place_flag` [DONE 2026-06-16 — `81664569`; `place_flag` в `robot/universal3/cvt_universal_full.lua`; прошивка на роботе и имя 4-й оси `WritePoint` не проверены, ось `"R"` против `"RZ"` — см. примечание плана v2] (после P1)
-- Task P3: Связка съём↔укладка (узел калибровки pick + объединение в задание) [PENDING] (после P2) — по примечанию плана делается на `robot-protocol-v2` (`CVT_JOB`); в `robot-protocol-v2` задача T2.3 стоит BLOCKED
+- Task P3: Связка съём↔укладка (узел калибровки pick + объединение в задание) [DONE 2026-11-09 — вместе с word-layout P3, `plans/word-layout/tasks/P3.md`: связка есть в коде (`pixel_to_robot` → `word_layout` → `robot_io` → `CVT_JOB`), P3 закрепил её тестами и журналом; имя 4-й оси `R`/`RZ` и возврат RZ после укладки — полоса Р2, T4.1]
 
 ## Открытые вопросы
 - `R_BASE` и имя 4-й оси в `WritePoint` — уточнить на роботе.

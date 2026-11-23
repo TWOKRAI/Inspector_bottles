@@ -42,6 +42,10 @@ class _SpyRouter:
     def send_async(self, message, priority="normal") -> None:
         self.sent.append(message)
 
+    def send(self, message) -> dict:
+        self.sent.append(message)  # Task 0.5c: форвардер зовёт синхронный send
+        return {"status": "success"}
+
 
 class TestKindIsDerivedFromSeverity:
     @pytest.mark.parametrize(

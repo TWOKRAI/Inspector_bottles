@@ -76,13 +76,18 @@ worker-side обработчика регистра) — без единого �
 
 ## Предусловия
 
-1. Система должна **работать** с открытым гейтом сокета. По умолчанию гейт уже открыт:
+1. Система должна **работать** с открытым гейтом сокета. Поставка гейт НЕ открывает:
    [`backend/config/system.yaml`](../multiprocess_prototype/backend/config/system.yaml) →
-   `backend_ctl.enabled: true`, `port: 8765`, `host: 127.0.0.1`.
-   Escape-hatch без правки yaml: `BACKEND_CTL=1 [BACKEND_CTL_PORT=9001] python run.py`.
+   `backend_ctl.enabled: false` (`port: 8765`, `host: 127.0.0.1`). Dev-старт включает порт env:
+   `BACKEND_CTL=1 [BACKEND_CTL_PORT=9001] python run.py` (харнесс ставит env сам).
+   Открытый порт всегда закрыт токеном: ПМ пишет его в `~/.multiprocess_framework/ctl_<порт>.token`
+   (права 0600; путь переопределяет `BACKEND_CTL_TOKEN_FILE`), клиенты backend_ctl (драйвер, MCP-сессия,
+   харнесс) читают файл сами на каждом connect — вводить токен вручную не нужно
+   ([BCTL-ADR-011](DECISIONS.md), ADR-PMM-052). Ошибки клиента: `token file not found: <путь>`
+   (ПМ не запущен или токена нет) и `token rejected: <путь>` (в файле токен другого ПМ).
 2. Запуск системы в фоне (НЕ блокировать сессию), из корня репозитория:
    ```bash
-   python multiprocess_prototype/run.py     # run_in_background: true
+   BACKEND_CTL=1 python multiprocess_prototype/run.py     # run_in_background: true
    ```
    Дать ~6-8 c на старт. Останавливать — **только** через TaskStop по task_id
    (НЕ `taskkill /IM python.exe` — это убьёт чужие процессы).
@@ -113,7 +118,7 @@ PY
 | `router_stats(p)` / `queues(p)` / `worker_status(p)` | типизированно (dataclass + `.raw`): счётчики router'а / глубины очередей / статус воркеров |
 | `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного). MCP-инструмент принимает `format="concise"` (только имена, кратно дешевле) / `"help"` (пример вызова + какое push-событие в какую плоскость + корреляционные ключи) / `"detailed"` (дефолт) и `process`-фильтр (B.4) |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
-| `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
+| `set_register_verified(process, register, field, value)` | проверенная запись (Ф1.6, Task 0.11): образ ДО → запись → образ ПОСЛЕ → вердикт `verdict` (`confirmed`/`vacuous`/`failed`/`unverifiable`) + `success`, `vacuous`, `pre`, `expected`/`actual`; `verified` — алиас `success` (FREEZE). Запись, отвергнутая хостом при уже равном значении, — `vacuous`, не успех |
 | `set_register(..., confirm_within=N)` | **commit-confirmed** (D.5): запись авто-откатится через `N` сек, если не вызвать `register_confirm(commit_id)`. Аналог Juniper `commit confirmed` |
 | `register_snapshot(process=None)` / `register_restore(snapshot)` | снимок регистров (один процесс или все — топология одним запросом PM) → откат: `{processes: {proc: {register: {field: value}}}}`; restore пишет ТОЛЬКО дрейфнувшие поля + сверяет readback'ом (`success`/`written`/`skipped`/`mismatches`) |
 | `register_confirm(commit_id)` | подтвердить commit-confirmed запись — снять таймер авто-отката; для уже откатившегося отдаёт `rolled_back` (исход) (D.5) |
@@ -130,7 +135,7 @@ PY
 | `events_stats()` | счётчики hub'а: per-plane seq/размер/вытеснено |
 | `telemetry_set(process, metric, enabled=, interval_sec=, plane=)` | **точечно** поменять ОДНУ метрику/правило телеметрии (merge — соседей не сносит); `plane="publisher"` (частота публикации) или `"throttle"` (central rate-limit) |
 | `telemetry_reconfigure(process="all", publish=, throttle=, mode=)` | секцией: publisher-gate и/или central-троттл; `mode="replace"` (дефолт) применяет ЦЕЛИКОМ (**wipe** неуказанных) — для одной метрики предпочитай `telemetry_set` |
-| `telemetry_snapshot(process=None, metric=None)` | **локальный** снимок телеметрии (0 IPC): read-model поверх `state.changed`; наполняется после `watch_like_gui`; фильтр по процессу/суффиксу метрики + ключ process/worker |
+| `telemetry_snapshot(process=None, metric=None)` | **локальный** снимок телеметрии (0 IPC): read-model поверх `state.changed`; наполняется после `watch_like_gui`; фильтр по процессу/суффиксу метрики; запись `{value, class, age_s, process, worker}`: `class` — `fresh`/`stale`/`no_data` (лист `None`, лист без метки и путь вне `processes.<X>` — `no_data`, `age_s` None; `writer_gone` здесь не бывает); в ответе `gap_count`, `last_gap_at` — дыры в ревизиях `state.changed` (кандидаты: подписка узкая, ревизия общая) |
 | `telemetry_history(path, limit=None)` | **локальная** история метрики (спарклайн без БД): кольцевой буфер (fps/latency_ms/uptime/effective_hz/cycle_duration_ms) |
 | `record_start(name, max_events=)` / `record_stop()` | **D.4 flight recorder**: ЗАПИСЬ потока событий в файл (`BACKEND_CTL_RECORD_DIR`, имя без разделителей). Пиши то, на что подписан (без подписок — hint про пустую ленту); лимит → авто-стоп |
 | `record_load(name, position="end"\|"start", ring_maxlen=)` / `record_unload()` | загрузить запись в OFFLINE-реплей (сессия → replay-режим) / вернуть live. `end` — финал сразу; `start` — тайм-трэвел (playhead двигают `await_condition`'ы) |
@@ -142,9 +147,13 @@ PY
 | `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) + **`os` RSS/VMS процесса ОС** (Task 3.1) — только статистика; секции best-effort (`null`, не ошибка) |
 | `introspect_telemetry(process)` | **Ф4.1**: readback телеметрийного gate (read-only) — `gate_active`, эффективная `publish`-секция, `resolved` (per-метрика `enabled`+`interval_sec` с уже применённым наследованием), `unknown_metrics` (опечатки в именах), `throttle_rules` центральной плоскости. Отвечает «публикуется ли `fps` СЕЙЧАС» без гадания по эффекту в дереве |
 | `introspect_router_stats(p)` / `introspect_queues(p)` / `introspect_plugins(p)` | MCP-имена сырых ручек: счётчики router'а / глубины очередей / каталог плагинов + `failed_imports` (типизированные обёртки — `router_stats`/`queues` выше) |
-| `supervision_status(process=None)` | **D.1b**: epoch топологии + per-process incarnation / restart_count / last_exit / status / **pid / started_at / instance_restarts** (Ф2). Маркер «до/после рестарта» = **pid + instance_restarts** (считает и ручные, и авто-рестарты supervision — обе идут командой `process.restart`); `incarnation` — только для no-reuse полосы (fencing-token), `restart_count` — краш-рестарты в окне истории монитора |
+| `supervision_status(process=None)` | **D.1b**: epoch топологии + per-process incarnation / restart_count / last_exit / status / **pid / started_at / instance_restarts** (Ф2). Маркер «до/после рестарта» = **pid + instance_restarts** (считает и ручные, и авто-рестарты supervision — обе идут командой `process.restart`); `incarnation` — только для no-reuse полосы (fencing-token), `restart_count` — краш-рестарты в окне истории монитора. **gui-graceful-close 1.2a:** верхнее поле `system_stop` (ADR-PMM-041) — `null` без стопа, иначе `{phase: pre_stop\|children\|last_wave\|done, mode, initiator, started_at, deadline_at, pre_stop_step}` (время `time.time()`; `initiator` — отправитель команды, `event` — стоп без команды, `unknown` — без отправителя). Читать из `r["result"]["system_stop"]`. На стопе верить `alive`, не `status` (монитор на паузе); `done` может не застать опрос — он приходит дельтой стора `system.stop.phase` |
 | `process_restart_verified(process, wait=)` | **Ф4.4**: рестарт с PID-доказательством одним вызовом — pid до → `process.restart` → поллинг supervision до живого процесса с ДРУГИМ pid. Ответ команды не судится (медленный рестарт штатно отвечает timeout'ом при доставленной команде), вердикт — факт: `{restarted, pid_before, pid_after, instance_restarts_*, elapsed}`; несуществующий процесс → `restarted=false`+`reason` и НИ ОДНОЙ разрушающей команды |
-| `system_shutdown(mode=, deadline_s=)` | **gui-graceful-close Task 0.2** (escalated): стоп ВСЕЙ системы и ожидание закрытия сокета PM (до 20 с). `force` — срок стопа детей `deadline_s` 0.1..5.0 с (дефолт 1.0), не уложившихся PM добивает terminate/kill (ADR-PMM-038). Ответ `{accepted, mode, elapsed_s, pm_gone, outcomes=null}`: `accepted=null` — ответ timeout (команда могла дойти); `pm_gone=true` — сокет закрыт, процесс PM может быть ещё жив |
+| `system_shutdown(mode=, deadline_s=, wait_timeout=)` | **gui-graceful-close Task 0.2/1.4** (escalated): стоп ВСЕЙ системы, итоги по процессам и ожидание закрытия сокета PM. `force` — срок стопа детей `deadline_s` 0.1..5.0 с (дефолт 1.0), не уложившихся PM добивает terminate/kill (ADR-PMM-038). После принятой команды драйвер опрашивает `supervision.status` (каждые 50 мс) до: у каждого ребёнка есть `stop_outcome` (`exited`/`terminated`/`killed`), `system_stop.phase=done`, разрыва или `wait_timeout`; затем ждёт закрытия сокета ещё ≤ 3,0 с. `wait_timeout` по умолчанию 20 с, после первого снимка с `system_stop` — `max(20, deadline_at − сейчас + 12)`. Ответ `{accepted, mode, elapsed_s, pm_gone, outcomes, unconfirmed, timed_out}`: `accepted=null` — ответ timeout (команда могла дойти, опрос идёт); `accepted=false` + `already_stopping` — стоп уже идёт, опрос идёт; `outcomes` — `{имя: итог}` по детям, последнее не-null за все снимки (имя без итога — `null`); `unconfirmed` — такие имена по алфавиту (C-88, ADR-PMM-045: PM после `done` ещё до 0,55 с отвечает на статус, если его опрашивают чаще раза в 0,25 с, поэтому итог последнего ребёнка обычно доезжает; `null` после этого ожидания = «PM не подтвердил», а не «ребёнок жив»); `timed_out=true` — опрос кончился по `wait_timeout`; `outcomes`/`unconfirmed` = `null`, `timed_out=false`, если опроса не было (`wait=False`, ошибка аргументов, сокет закрыт раньше ответа); `pm_gone=true` — сокет закрыт, процесс PM может быть ещё жив |
+| `run_status()` | **Task 2.1** (read): `system.run.status` — `result = {state (booting/not_ready/ready/running/stopping/fault/shutting_down), since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons, last_fault}`. Ответ — конверт `process.command.response` как есть, `result` разворачивать через `_leaf_result` |
+| `run_start()` | **Task 2.1** (write): `system.run.start` из `ready`. Ранний START в окне `not_ready` (~4 с после boot) отказан: внешний `success=false`, `result.error="not_ready"` + `reasons` — повторить после `run_status().start_allowed`. У harness готовый вариант — `BackendHarness.start_run()` |
+| `run_stop()` | **Task 2.1** (write): `system.run.stop`, `running -> stopping -> ready` (~3 с); процессы не гасятся |
+| `run_ack()` | **Task 2.1** (write): `system.run.ack`, `fault -> ready` при `ack_allowed` |
 | `state_get(path)` / `state_get_subtree(path, full=)` | чтение узла/поддерева state-дерева (крупный ответ усекается по `RESPONSE_BYTE_CAP` с hint; `full=true` — целиком) |
 | `log_tail(process, level=)` / `log_untail(process)` | подписка на ЛОГИ процесса по уровню → плоскость `logs` (композитная часть `watch_like_gui`) |
 | `config_reload(process, observability=, path=)` | перечитать/применить observability-секцию на лету (`{log_level: DEBUG}` — сменить уровень логгера без рестарта, ADR-CRM-006) |
@@ -239,7 +248,7 @@ with BackendHarness(with_base=True) as drv:      # старт → driver → г�
   «дверь» (SocketChannel в PM); без запущенной системы driver вернёт `not connected`.
 - **Таймаут = не баг по умолчанию.** `{"error": "timeout"}` часто значит «нет приёмника /
   процесс не отвечает» — это сам по себе диагностический результат.
-- **Только localhost, без аутентификации** — dev-инструмент. В проде гейт `enabled: false`.
+- **Только localhost, по токену из файла порта** — dev-инструмент. Сырой TCP без `hello` с токеном получает `auth_required` и закрывается. В поставке гейт `enabled: false`.
 - **Кадры/SHM через сокет НЕ гоняем** (Dict at Boundary) — только команды/состояние.
 - **MCP-сервер держит код на момент старта** (Ф4.5): свежую правку драйвера проверяй
   свежим процессом или рестартом сервера — иначе «доказываешь» поведение старого кода.

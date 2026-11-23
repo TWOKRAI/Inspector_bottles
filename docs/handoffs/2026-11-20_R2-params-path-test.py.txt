@@ -1,0 +1,181 @@
+"""Черновик теста для слота (не коллектится: расширение .txt). Положить как
+Plugins/hub/device_hub/tests/test_recipe_params_reach_driver.py и пройти стадии 1/3/5 правил проекта.
+
+Доказательство пути params рецепта -> драйвер через настоящий DeviceHubPlugin.start() (Р2, 2026-11-20).
+Прогон на main a53d5a61b: 5 passed за 10.41 с; break-injection (base.py:108 читает "max_reconnect_attempt")
+краснит ровно три теста (T1 с ключом, T2 с лимитом 0, T3).
+
+Т1: recipe_devices (зеркало letter_robot_sim.yaml:71-95) -> plugin.start -> manager.upsert -> max_reconnect_attempts.
+Т2: поведение лимита на закрытом порту робота (RECONNECT_THROTTLE_S=0 через monkeypatch).
+Т3: e2e на симе: закрытый порт -> sim поднят -> драйвер сам переподключается.
+
+Границы: записи подаются в конфиг хаба вручную (devices_sync не прогонялся); тики зовутся руками, не воркером плагина;
+ПЧ проверен только на значение лимита.
+"""
+
+from __future__ import annotations
+
+import copy
+import time
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from Plugins.hub.device_hub import plugin as plugin_mod
+from Plugins.hub.device_hub.plugin import DeviceHubPlugin
+from Plugins.hub.device_hub.tests.test_device_hub_plugin import _make_plugin
+from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
+from Services.robot_comm.core.registers import ROBOT_UNIT_ID
+from Services.robot_comm.server.sim_core_v2 import RobotSimCoreV2
+from Services.robot_comm.server.sim_robot import SimRobotServer
+from Services.robot_comm.tests.e2e_rig_v2 import bounded, free_port
+
+_CONNECT_DEADLINE_S = 60.0  # connect включает sync_params (58 записей PARAM_SET)
+
+
+def _recipe(port: int, with_limit: bool) -> list[dict]:
+    """Две записи, зеркальные letter_robot_sim.yaml:71-95; порт — свободный, лимит — по флагу."""
+    robot_params: dict[str, Any] = {
+        "word_order": "little",
+        "feed_poll_s": 0.05,
+        "telemetry_interval_s": 0.5,
+        "robot_params": {"P_ZONE_MAX": 6000},
+    }
+    vfd_params: dict[str, Any] = {
+        "freq_max_hz": 50.0,
+        "default_freq_hz": 10.0,
+        "poll_interval_s": 0.5,
+        "stale_polls_limit": 6,
+    }
+    if with_limit:
+        robot_params["max_reconnect_attempts"] = 0
+        vfd_params["max_reconnect_attempts"] = 0
+    return [
+        {
+            "id": "robot_main",
+            "name": "Робот Delta",
+            "kind": "robot",
+            "protocol": "delta_v2",
+            "transport": {"type": "tcp", "host": "127.0.0.1", "port": port, "unit_id": 2},
+            "params": robot_params,
+        },
+        {
+            "id": "vfd_belt",
+            "name": "ПЧ лента",
+            "kind": "vfd",
+            "protocol": "gd20_bridge",
+            "transport": {"type": "bridge", "bridge": "robot_main"},
+            "params": vfd_params,
+        },
+    ]
+
+
+def _plugin_after_failed_connect(tmp_path: Path, port: int, with_limit: bool) -> DeviceHubPlugin:
+    """Настоящий start() с recipe_devices; затем connect обоих через очередь плагина (порт робота закрыт)."""
+    plugin, _ctx = _make_plugin(tmp_path, recipe_devices=copy.deepcopy(_recipe(port, with_limit)))
+    for dev_id in ("robot_main", "vfd_belt"):
+        assert plugin.cmd_device_connect({"device_id": dev_id})["status"] == "ok"
+    bounded(plugin._process_conn_queue, _CONNECT_DEADLINE_S)
+    return plugin
+
+
+# ------------------------------------------------------------------ T1
+
+
+def test_t1_params_reach_drivers_with_limit(tmp_path: Path) -> None:
+    plugin = _plugin_after_failed_connect(tmp_path, free_port(), with_limit=True)
+    mgr = plugin._manager
+    assert mgr.get("robot_main").params["max_reconnect_attempts"] == 0  # запись реестра после upsert
+    assert mgr.get("vfd_belt").params["max_reconnect_attempts"] == 0
+    robot = mgr.get_driver("robot_main")
+    vfd = mgr.get_driver("vfd_belt")
+    assert type(robot).__name__ == "RobotDriverV2"
+    assert type(vfd).__name__ == "VfdDriver"
+    assert robot.max_reconnect_attempts == 0
+    assert vfd.max_reconnect_attempts == 0
+
+
+def test_t1_control_without_key_gives_default_3(tmp_path: Path) -> None:
+    plugin = _plugin_after_failed_connect(tmp_path, free_port(), with_limit=False)
+    mgr = plugin._manager
+    assert "max_reconnect_attempts" not in mgr.get("robot_main").params
+    assert mgr.get_driver("robot_main").max_reconnect_attempts == 3
+    assert mgr.get_driver("vfd_belt").max_reconnect_attempts == 3
+
+
+# ------------------------------------------------------------------ T2
+
+
+def _tick(drv: Any, times: int) -> None:
+    for _ in range(times):
+        bounded(lambda: drv.tick(None), 30.0)
+
+
+def test_t2_limit_zero_never_exhausts_on_closed_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(RobotDriverV2, "RECONNECT_THROTTLE_S", 0.0)
+    plugin = _plugin_after_failed_connect(tmp_path, free_port(), with_limit=True)
+    drv = plugin._manager.get_driver("robot_main")
+    assert drv.desired_connected is True  # выставлено очередью плагина после неудачного connect
+    assert drv.is_connected is False
+    reconnects_before = drv._stats["reconnects"]  # приватный счётчик: публичного нет
+    _tick(drv, 5)
+    assert drv._stats["reconnects"] - reconnects_before == 5  # 5 тиков = 5 реальных попыток
+    assert drv.reconnect_exhausted is False
+    assert drv.desired_connected is True
+    assert drv.is_connected is False
+
+
+def test_t2_control_default_3_exhausts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(RobotDriverV2, "RECONNECT_THROTTLE_S", 0.0)
+    plugin = _plugin_after_failed_connect(tmp_path, free_port(), with_limit=False)
+    drv = plugin._manager.get_driver("robot_main")
+    assert drv.desired_connected is True
+    reconnects_before = drv._stats["reconnects"]
+    _tick(drv, 5)
+    assert drv.reconnect_exhausted is True
+    assert drv.desired_connected is False
+    assert drv._stats["reconnects"] - reconnects_before == 3  # ровно 3 попытки, остальные тики молчат
+
+
+# ------------------------------------------------------------------ T3
+
+
+def test_t3_e2e_reconnects_by_itself_after_sim_up(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    port = free_port()
+    plugin = _plugin_after_failed_connect(tmp_path, port, with_limit=True)
+    drv = plugin._manager.get_driver("robot_main")
+    assert drv.is_connected is False
+    # «ждёт»: пока порт закрыт, 3+ реальных такта с интервалом подряд — не сдался (реальный throttle 2.0 с, ~7 с)
+    t_end = time.monotonic() + 7.0
+    while time.monotonic() < t_end:
+        bounded(lambda: drv.tick(None), 30.0)
+        time.sleep(0.2)
+    assert drv._stats["reconnects"] >= 3
+    assert drv.reconnect_exhausted is False
+    assert drv.desired_connected is True
+    assert drv.is_connected is False
+    # sim поднимается на том же порту
+    server = SimRobotServer("127.0.0.1", port, ROBOT_UNIT_ID, core=RobotSimCoreV2())
+    bounded(server.start, 10.0)
+    try:
+        t_up = time.monotonic()
+        conn = "?"
+        deadline = t_up + _CONNECT_DEADLINE_S + 10.0
+        while time.monotonic() < deadline:
+            snapshot = bounded(lambda: drv.tick(None), _CONNECT_DEADLINE_S)
+            conn = plugin_mod._conn_of(drv, snapshot)  # то же вычисление conn, что в tick_loop плагина
+            if conn == "connected":
+                break
+            time.sleep(0.2)
+        elapsed = time.monotonic() - t_up
+        with capsys.disabled():
+            print(f"\nT3_ELAPSED_S sim_up->connected = {elapsed:.2f}")
+        assert conn == "connected"
+        assert drv.is_connected is True
+        assert drv.reconnect_exhausted is False
+    finally:
+        try:
+            bounded(drv.disconnect, 15.0)
+        finally:
+            bounded(server.stop, 5.0)

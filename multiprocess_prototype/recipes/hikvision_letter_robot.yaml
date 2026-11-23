@@ -15,15 +15,16 @@
 # === ГРУППИРОВКА ПРОЦЕССОВ (эффективность) ===
 #   Плагины внутри процесса идут ЛИНЕЙНОЙ цепочкой — кадр живёт в памяти процесса без
 #   межпроцессных SHM-перегонов. Поэтому линейные соседи слиты:
-#     vision = color_convert→roi_crop→hsv_mask→morphology→circle_detector (вся предобработка+детекция)
+#     vision = roi_crop→hsv_mask→morphology→circle_detector (вся предобработка+детекция)
 #     recog  = center_crop→pixel_to_robot→ml_inference (кроп→калибровка→нейронка)
 #     layout = word_layout→robot_io (раскладка→форвард роботу)
 #   Ветвления (vision раздаёт в 4 стороны) и источники (camera/phone) — отдельными процессами.
 #   line отдельно: line_filter заменяет item (теряет кадр) — слить в линейную цепочку нельзя.
 #
 # === ЦВЕТ ===
-#   Hikvision отдаёт RGB → color_convert свопает в физ. BGR → весь тракт + ml_inference
-#   (sidecar color:RGB, сам делает BGR→RGB) в BGR-конвенции. circle_detector по grayscale.
+#   Камера на ядре camera_device отдаёт BGR (по пробе cv2 на синтетике; на приборе — визит 6.3) →
+#   весь тракт + ml_inference (sidecar color:RGB, сам делает BGR→RGB) в BGR-конвенции без
+#   конвертации после камеры. circle_detector по grayscale.
 #
 # === КАЛИБРОВКА / КООРДИНАТЫ (важно!) ===
 #   pixel_to_robot грузит config/calibration/cam0.yaml (гомография px→мм робота, артефакт
@@ -55,7 +56,9 @@ devices:
   - id: robot_main
     name: Робот Delta
     kind: robot
-    protocol: delta_universal3
+    # R4 (владелец 2026-11-20): драйвер v2, как у сима. На роботе 192.168.1.7:502 v2 НЕ проверен — T0.3/T4.0 на визите.
+    # Откат — revert этого коммита (было `delta_universal3`).
+    protocol: delta_v2
     transport:
       type: tcp
       host: 192.168.1.7
@@ -65,6 +68,7 @@ devices:
       word_order: little
       feed_poll_s: 0.05
       telemetry_interval_s: 0.5
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
   - id: vfd_belt
     name: ПЧ лента
     kind: vfd
@@ -77,6 +81,7 @@ devices:
       default_freq_hz: 10.0
       poll_interval_s: 0.5
       stale_polls_limit: 6
+      max_reconnect_attempts: 0  # без лимита: хаб сам переподключается (решение владельца 2026-11-20)
 blueprint:
   name: default
   description: ''
@@ -115,11 +120,28 @@ blueprint:
           category: source
           config:
             camera_id: 0
-            camera_index: 0
+            # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+            device_select: serial
+            device_serial: DA1689923
             resolution_width: 1440
             resolution_height: 1080
-            fps: 25
+            frame_rate_enable: true
+            frame_rate: 25.0
+            # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+            exposure_time: 40000.0
+            # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
             auto_start: true
+            # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+            # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+            trigger_managed: true
+            trigger_mode: "Off"
+            run_locked_commands: [release_device, take_device]
+            # 2.2c / ADR-PM-061: камера в `stopping` при `auto_start` (между остановкой и повторным захватом) даёт out_of_spec —
+            # он НЕ блокирует START; ключ повышает его до check_function (блокирует): START ждёт, пока камера не вернётся
+            # в grabbing. Остальные состояния камеры ключ не меняет. Форма ключа как у recog.ml_inference (2.9b).
+            readiness:
+              severity:
+                out_of_spec: check_function
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
@@ -137,11 +159,6 @@ blueprint:
         source_target_fps: 25
     - process_name: vision
       plugins:
-        - plugin_name: color_convert
-          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
-          category: processing
-          config:
-            mode: bgr2rgb
         - plugin_name: roi_crop
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
@@ -245,7 +262,11 @@ blueprint:
             output_key: pick_xy
             roi_offset_x: 0
             roi_offset_y: 0
-            use_linear: true
+            # R4 (решение владельца 2026-10-25/2026-11-20): β — гомография F7, не линейный режим (линейный остаётся симу).
+            # ВНИМАНИЕ: без калибровки F7 (`config/calibration/cam0.yaml`, камера↔робот, день №2) β при `use_linear: false`
+            # не выдаёт `pick_xy` (плагин пропускает item дальше без координат, `last_error` «нет калибровки 'cam0'»), и
+            # `word_layout` диск не берёт — ожидаемо, не дефект; параметры `lin_*` ниже оставлены для отката.
+            use_linear: false
             lin_src_width: 800
             lin_src_height: 481
             lin_tl_x: 497.4
@@ -265,6 +286,10 @@ blueprint:
             confidence_threshold: 0.5
             top_k: 3
             draw_overlay: true
+            # Task 2.9b / ADR-PM-061: «модель не загружена» (out_of_spec) блокирует START; ключ — на ВСЕ out_of_spec узла
+            readiness:
+              severity:
+                out_of_spec: check_function
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
@@ -287,7 +312,8 @@ blueprint:
             word_source: signal_2
             use_pitch: true
             first_x: 320.0
-            first_y: -200.0
+            # R4 (владелец 2026-11-20): как в сим-рецепте (−440); досягаемость робота 544 мм сверить на железе в день №2.
+            first_y: -440.0
             line_angle_deg: 90.0
             pitch_mm: 0.0
             last_x: 320.0
@@ -389,9 +415,43 @@ blueprint:
       category:
       metadata:
         source_target_fps: 10
+    # Пульт оператора (Services → «Пульт»): поле «Слово» пишет target_word в word_layout
+    # процесса layout без перезапуска (param → SetPluginConfig). Слово, лента и мониторы одинаковы с сим-рецептом (β на v2 с R4: «Домой»/«Серво ВКЛ» — Task 6.7).
+    - process_name: pult
+      plugins:
+        - plugin_name: control_panel
+          plugin_class: Services.control_panel.plugin.plugin.ControlPanelPlugin
+          category: source
+          config:
+            panel_id: pult
+            run_gated: false
+            controls:
+              - {id: word, type: text, label: "Слово", source: param, target_process: layout, target_plugin_index: 0, target_field: target_word}
+              # Кнопки на хаб устройств (devices/0): source action → команда DeviceHubPlugin.
+              # value_arg "on" В КАВЫЧКАХ: в YAML 1.1 голое on = True, parse_controls молча роняет контрол.
+              - {id: belt_run, type: button, label: "Лента пуск", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_run, command_args: {device_id: vfd_belt}}
+              - {id: belt_stop, type: button, label: "Лента стоп", source: action, target_process: devices, target_plugin_index: 0, target_command: vfd_stop, command_args: {device_id: vfd_belt}}
+              - {id: home, type: button, label: "Домой", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_park, command_args: {device_id: robot_main}}
+              - {id: servo_on, type: button, label: "Серво ВКЛ", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_servo, value_arg: "on", command_args: {device_id: robot_main}}
+              # Строка статуса: read-only подписи по путям StateStore (Task 6.3).
+              - {id: mon_conn, type: monitor, label: "Связь с роботом", source: monitor, state_path: devices.state.robot_main.conn, value_key: conn}
+              - {id: mon_park, type: monitor, label: "Парковка", source: monitor, state_path: devices.state.robot_main.park.state}
+              - {id: mon_last, type: monitor, label: "Последняя буква", source: monitor, state_path: processes.layout.state.word_layout.last_label}
+              - {id: mon_assembled, type: monitor, label: "Собрано", source: monitor, state_path: processes.layout.state.word_layout.assembled}
+              - {id: mon_done, type: monitor, label: "Слово собрано", source: monitor, state_path: processes.layout.state.word_layout.done}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata: {}
   wires:
     - source: camera_0.hikvision.frame
-      target: vision.color_convert.frame
+      target: vision.roi_crop.frame
       description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
     - source: vision.circle_detector.frame
       target: recog.center_crop.frame
@@ -437,9 +497,6 @@ blueprint:
       camera_0.hikvision:
         - 16.0
         - 40.0
-      vision.color_convert:
-        - 16.0
-        - 1120.0
       vision.roi_crop:
         - 214.4678201239235
         - 1119.9999999999998

@@ -47,11 +47,13 @@
     не смена версии рецепта.
 
 Шаг — pure dict→dict (``canonicalize_gui_positions``), не читает и не пишет
-файлы. Отдельно — ``run_migration()`` (file-writer, ruamel round-trip, тот же
-паттерн что ``drop_display_name.py``/``displays_to_recipe.py`` в этом пакете)
-для будущего одобренного применения к реальным файлам: Ф4.8 — это mini-GATE
-владельца, применение к ``multiprocess_prototype/recipes/*.yaml`` НЕ входит в
-эту задачу и НЕ вызывается отсюда.
+файлы. Отдельно — ``run_migration()`` (file-writer) для будущего одобренного
+применения к реальным файлам: Ф4.8 — это mini-GATE владельца, применение к
+``multiprocess_prototype/recipes/*.yaml`` НЕ входит в эту задачу и НЕ вызывается
+отсюда. Запись — дельта ``before -> after`` через ``patch_yaml_preserving``
+движка рецептов (Task 1.5): удаляется только дубль, остальной файл не
+переписывается, комментарии и EOL файла (LF/CRLF) сохраняются. Собственного
+ruamel-дампа в модуле нет — единственный писатель рецепта это движок.
 
 Использование (после одобрения владельцем):
     python -m multiprocess_prototype.recipes.migrations.canonicalize_gui_positions
@@ -71,12 +73,14 @@ from __future__ import annotations
 import copy
 import logging
 
+import yaml
+
 from multiprocess_framework.modules.logger_module import get_std_logger
 from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any
 
 from multiprocess_framework.modules.recipe.migrations import migration
+from multiprocess_framework.modules.recipe.yaml_io import patch_yaml_preserving
 
 logger = get_std_logger(__name__)
 
@@ -92,10 +96,9 @@ _DEFAULT_RECIPES_DIR = Path(__file__).resolve().parent.parent
 def _canonicalize_gui_positions_inplace(data: MutableMapping) -> bool:
     """Свернуть дубль gui_positions на месте (мутирует ``data``).
 
-    Работает как с plain dict (in-memory pure-путь), так и с ruamel
-    ``CommentedMap`` (file writer — сохраняет комментарии): обе поддерживают
-    протокол ``MutableMapping`` (get/[]=/del/in), поэтому одна и та же логика
-    обслуживает оба сценария без дублирования.
+    Работает с любым ``MutableMapping`` (get/[]=/del/in): pure-путь и file
+    writer зовут одну и ту же логику на plain dict (запись файла — дельтой
+    через движок, см. ``_migrate_recipe_file``).
 
     Правила:
       - нет вложенного ``blueprint`` (не v3-рецепт) — канонизировать нечего,
@@ -168,50 +171,32 @@ def canonicalize_gui_positions(data: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _make_yaml() -> Any:
-    """Сконфигурированный ruamel YAML (round-trip) — та же настройка, что
-    ``drop_display_name.py``/``displays_to_recipe.py``/``yaml_io._make_yaml``.
-    """
-    try:
-        from ruamel.yaml import YAML
-    except ModuleNotFoundError as exc:  # pragma: no cover - зависит от окружения
-        raise RuntimeError("ruamel.yaml не установлен. Установи зависимости: `uv sync`") from exc
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    yaml.width = 4096
-    yaml.indent(mapping=2, sequence=4, offset=2)
-    return yaml
-
-
 def _migrate_recipe_file(path: Path) -> bool:
-    """Канонизировать один YAML-рецепт на диске (ruamel round-trip, комментарии целы).
+    """Канонизировать один YAML-рецепт на диске дельтой через движок.
 
-    В отличие от ``update_yaml_preserving`` (merge-семантика, только SET ключей),
-    здесь нужно УДАЛИТЬ top-level ``gui_positions`` — поэтому документ читается,
-    мутируется на месте (``_canonicalize_gui_positions_inplace`` — тот же helper,
-    что и pure-путь) и пишется обратно целиком, как в ``drop_display_name.py``.
+    Файл читается plain (``yaml.safe_load``), копия канонизируется тем же
+    ``_canonicalize_gui_positions_inplace``, что и pure-путь, а запись —
+    ``patch_yaml_preserving(path, before, after)``: в файле меняется только
+    удалённый дубль, комментарии и EOL (LF/CRLF) остаются как были. Если менять
+    нечего, файл не открывается на запись.
 
     Returns:
         True если файл был изменён.
     """
-    from ruamel.yaml.comments import CommentedMap
-
-    yaml = _make_yaml()
     with path.open("r", encoding="utf-8") as f:
-        data = yaml.load(f)
+        before = yaml.safe_load(f)
 
-    if not isinstance(data, (dict, CommentedMap)):
+    if not isinstance(before, dict):
         logger.warning("Пропуск %s — не является словарём", path.name)
         return False
 
-    changed = _canonicalize_gui_positions_inplace(data)
-    if not changed:
+    after = copy.deepcopy(before)
+    if not _canonicalize_gui_positions_inplace(after):
         logger.debug("Пропуск %s — gui_positions уже канонизирован", path.name)
         return False
 
-    with path.open("w", encoding="utf-8") as f:
-        yaml.dump(data, f)
+    if not patch_yaml_preserving(path, before, after):
+        return False
 
     logger.info("Рецепт %s канонизирован (gui_positions → одна секция)", path.name)
     return True

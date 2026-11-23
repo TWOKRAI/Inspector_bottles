@@ -1,0 +1,123 @@
+sha 1e085652f6a7a5b3825f87157769be6de47ad928 files 3518 rows 61294
+
+== п.1 виды ==
+function          17575 (prod 4310, test 13265)
+nested_function    1770 (prod 315, test 1455)
+class              5695 (prod 2164, test 3531)
+method            22099 (prod 10896, test 11203)
+module_binding     7595 (prod 4668, test 2927)
+class_binding      6560 (prod 5723, test 837)
+total 61294 prod 28076
+class с точкой в qualname: 411
+top-level function: 17575
+
+уникальных голых имён (последний сегмент): 40441
+имён с хотя бы одним определением def/class/method: 33092
+
+== п.2 распределение числа кандидатов на имя (правило «хвост = имя», плоское) ==
+A: все (def+binding), все файлы                              1:35392 2:2820 3-5:1383 6-10:500 11-30:265 >30:81  всего имён 40441
+B: только def/class/method (без привязок)                    1:29687 2:1885 3-5:944 6-10:342 11-30:184 >30:50  всего имён 33092
+повторных строк с тем же path::qualname (условные redefs, property setter): 9
+
+топ-25 имён по числу кандидатов (id) — плоское, все:
+  __init__                      1607  prod=809 test=798  pools={'def_tail': 1607}
+  __all__                        704  prod=681 test=23  pools={'bind_exact': 704}
+  name                           309  prod=190 test=119  pools={'bind_tail': 249, 'def_tail': 60}
+  main                           185  prod=181 test=4  pools={'def_exact': 183, 'def_tail': 2}
+  close                          164  prod=69 test=95  pools={'def_tail': 164}
+  start                          127  prod=79 test=48  pools={'def_tail': 127}
+  stop                           122  prod=70 test=52  pools={'def_tail': 117, 'bind_tail': 1, 'bind_exact': 4}
+  logger                         115  prod=104 test=11  pools={'bind_exact': 101, 'bind_tail': 3, 'def_exact': 10, 'def_tail': 1}
+  configure                      109  prod=77 test=32  pools={'def_tail': 109}
+  write                          108  prod=42 test=66  pools={'def_tail': 105, 'def_exact': 3}
+  run                            107  prod=34 test=73  pools={'def_exact': 19, 'def_tail': 86, 'bind_tail': 2}
+  category                        97  prod=84 test=13  pools={'bind_tail': 96, 'def_tail': 1}
+  initialize                      91  prod=43 test=48  pools={'def_tail': 91}
+  inputs                          79  prod=72 test=7  pools={'bind_tail': 78, 'def_tail': 1}
+  outputs                         79  prod=70 test=9  pools={'bind_tail': 78, 'def_tail': 1}
+  shutdown                        78  prod=52 test=26  pools={'def_tail': 74, 'bind_tail': 4}
+  commands                        77  prod=68 test=9  pools={'bind_tail': 73, 'def_tail': 4}
+  to_dict                         71  prod=68 test=3  pools={'def_tail': 71}
+  get                             70  prod=46 test=24  pools={'def_tail': 70}
+  process                         70  prod=61 test=9  pools={'def_exact': 4, 'def_tail': 58, 'bind_tail': 8}
+  _run                            69  prod=8 test=61  pools={'def_exact': 44, 'def_tail': 25}
+  setUp                           69  prod=0 test=69  pools={'def_tail': 69}
+  REPO_ROOT                       66  prod=11 test=55  pools={'bind_exact': 66}
+  _on_shutdown                    64  prod=31 test=33  pools={'def_tail': 64}
+  plugin_class                    63  prod=61 test=2  pools={'bind_tail': 63}
+  >> __init__ 1607
+  >> run 107
+  >> build 31
+  >> get 70
+  >> name 309
+  >> main 185
+  >> setUp 69
+  >> start 127
+  >> stop 122
+  >> close 164
+
+== п.3 тировое правило: exact def -> (exact binding) -> tail ==
+R0 prod_rule=False: однозначных  18094 (44.7%) неоднозначных   1392 (3.4%) not found 20955
+R0 prod_rule=True : однозначных  18216 (45.0%) неоднозначных   1270 (3.1%) not found 20955
+R1 prod_rule=False: однозначных  35701 (88.3%) неоднозначных   4740 (11.7%) not found 0
+R1 prod_rule=True : однозначных  36067 (89.2%) неоднозначных   4374 (10.8%) not found 0
+R2 prod_rule=False: однозначных  35683 (88.2%) неоднозначных   4758 (11.8%) not found 0
+R2 prod_rule=True : однозначных  36053 (89.1%) неоднозначных   4388 (10.9%) not found 0
+R3 prod_rule=False: однозначных  35392 (87.5%) неоднозначных   5049 (12.5%) not found 0
+R3 prod_rule=True : однозначных  35816 (88.6%) неоднозначных   4625 (11.4%) not found 0
+
+если ВООБЩЕ игнорировать тестовых кандидатов (плоско): flat prod only                                               1:13304 2:1803 3-5:802 6-10:294 11-30:130 >30:46  всего имён 16379
+имён, у которых нет ни одного прод-кандидата (только тесты): 24062
+
+доля имён, разрешённых до 1 кандидата, из имён с >=1 кандидатом (R1+prod):
+  36067/40441 = 89.2%
+
+== п.4 регрессии относительно сегодняшнего ==
+имён, однозначных сегодня (ровно 1 точное совпадение def): 18094
+имён, неоднозначных сегодня (>=2): 1392
+имён not found сегодня (0 точных def): 20955
+R1 prod_rule=False: изменился результат у 0 из 18094 сегодня-однозначных
+R1 prod_rule=True : изменился результат у 0 из 18094 сегодня-однозначных
+R2 prod_rule=False: изменился результат у 18 из 18094 сегодня-однозначных
+R2 prod_rule=True : изменился результат у 17 из 18094 сегодня-однозначных
+R3 prod_rule=False: изменился результат у 282 из 18094 сегодня-однозначных
+R3 prod_rule=True : изменился результат у 267 из 18094 сегодня-однозначных
+  примеры R2:
+    pp: было 1 (scripts/plans_progress/tests/test_task_id_grammar_plans_acceptance.py::pp); стало 13; пулы {'bind_exact': 12, 'def_exact': 1}
+    Point: было 1 (Services/robot_comm/programs/program.py::Point); стало 6; пулы {'bind_exact': 5, 'def_exact': 1}
+    queue: было 1 (scripts/plans_progress/tests/test_acceptance_owner_queue.py::queue); стало 5; пулы {'def_tail': 1, 'bind_exact': 4, 'def_exact': 1}
+    _policy: было 1 (multiprocess_framework/modules/statistics_module/tests/test_f2_gate_precedes_assembly.py::_policy); стало 3; пулы {'bind_exact': 2, 'def_exact': 1}
+    DisplayEntry: было 1 (multiprocess_framework/modules/display_module/interfaces.py::DisplayEntry); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+    FieldMeta: было 1 (multiprocess_framework/modules/data_schema_module/core/field_meta.py::FieldMeta); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+    FieldRouting: было 1 (multiprocess_framework/modules/data_schema_module/core/field_routing.py::FieldRouting); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+    Handler: было 1 (Services/code_reader/tools/id3000_tcp_sink.py::Handler); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+    RegisterDispatchMeta: было 1 (multiprocess_framework/modules/data_schema_module/core/register_dispatch.py::RegisterDispatchMeta); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+    Resource: было 1 (Services/otel_export/interfaces.py::Resource); стало 2; пулы {'def_exact': 1, 'bind_exact': 1}
+  примеры R3:
+    clear: было 1 (multiprocess_framework/modules/process_manager_module/launcher/pid_registry.py::clear); стало 43; пулы {'def_tail': 42, 'def_exact': 1}
+    connect: было 1 (scripts/atlas/store.py::connect); стало 39; пулы {'def_tail': 38, 'def_exact': 1}
+    port: было 1 (Plugins/sim/pult_web/tests/test_early_reject_close.py::port); стало 37; пулы {'bind_tail': 23, 'def_exact': 1, 'def_tail': 13}
+    handler: было 1 (multiprocess_prototype/frontend/actions/tests/test_topology_mutation_handler.py::handler); стало 31; пулы {'def_tail': 28, 'bind_tail': 2, 'def_exact': 1}
+    code: было 1 (Services/code_reader/tests/test_sdk_reader.py::code); стало 29; пулы {'bind_tail': 28, 'def_exact': 1}
+    scenario: было 1 (Plugins/hub/device_hub/tests/test_t53r2_stop_acceptance.py::scenario); стало 27; пулы {'def_exact': 1, 'def_tail': 26}
+    tick: было 1 (scripts/lifecycle_guards/probe/axis_chain.py::tick); стало 27; пулы {'def_tail': 26, 'def_exact': 1}
+    get_config: было 1 (multiprocess_framework/modules/data_schema_module/api/simple_api.py::get_config); стало 23; пулы {'def_tail': 22, 'def_exact': 1}
+    record_metric: было 1 (multiprocess_framework/modules/data_schema_module/core/metrics.py::record_metric); стало 23; пулы {'def_tail': 21, 'def_exact': 1, 'bind_tail': 1}
+    release: было 1 (multiprocess_framework/modules/base_manager/tests/test_lifetime_scope_acceptance.py::release); стало 23; пулы {'bind_tail': 2, 'def_tail': 20, 'def_exact': 1}
+
+сегодня неоднозначные и ставшие однозначными только за счёт прод-правила (R0+prod):
+   122 из 1392
+  примеры: ['Violation', 'section', 'scan_module', '_state', '_join', '_telemetry', '_is_number', '_dumps', '_Ctx', '_bounded']
+сегодня-однозначных, где единственный кандидат — тест: 13361
+def_exact==1 и есть module_binding того же имени: 18 ['FieldMeta', 'register_schema', '_lock', 'queue', 'RegisterDispatchMeta', 'app', 'FieldRouting', 'DisplayEntry', 'make_document_sink', 'Point']
+def_exact==1 и есть хвостовые кандидаты (методы/вложенные/class-привязки) — именно они ломаются при плоском R3: 268
+
+== п.5 N: какой N покрывает целиком p% неоднозначных имён ==
+R1+prod (рекомендуемое): неоднозначных 4374; 90%->N=7, 95%->N=12, 99%->N=40; max=1607
+    покрытие при N: 3:72.6%, 5:84.5%, 8:91.8%, 10:93.8%, 15:96.5%, 20:97.4%, 30:98.5%
+R1 без прод-правила: неоднозначных 4740; 90%->N=7, 95%->N=12, 99%->N=37; max=1607
+    покрытие при N: 3:73.5%, 5:85.2%, 8:92.2%, 10:94.1%, 15:96.6%, 20:97.5%, 30:98.6%
+плоский хвост, всё: неоднозначных 5049; 90%->N=8, 95%->N=14, 99%->N=41; max=1607
+    покрытие при N: 3:71.2%, 5:83.2%, 8:90.9%, 10:93.1%, 15:95.9%, 20:96.9%, 30:98.4%
+сегодняшнее (точный def): неоднозначных 1392; 90%->N=5, 95%->N=9, 99%->N=21; max=183
+    покрытие при N: 3:79.7%, 5:90.0%, 8:94.8%, 10:96.4%, 15:98.3%, 20:99.0%, 30:99.6%

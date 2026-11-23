@@ -8,7 +8,7 @@
 
 | файл | что |
 |---|---|
-| `run_stand.py` | оркестратор: `--scenario P1\|P2\|P3`, `--regress`, `--repeats`, `--dry-run`, `--prepare-only`, `--race-only` |
+| `run_stand.py` | оркестратор: `--scenario P1\|P2\|P3\|P4\|P5`, `--regress`, `--repeats`, `--dry-run`, `--prepare-only`, `--race-only` |
 | `count.py` | таблица критериев park по каталогам прогона (`PASS`/`FAIL` на критерий); для `--regress` — прежняя таблица S0/S1 + G |
 | `sim_v2.py` | сим v2, **копия `SPI.stand/sim_v2.py` без правок** (`cmp` — совпадает) |
 
@@ -31,7 +31,7 @@ S=plans/robot-protocol-v2/tasks/T5.3e.stand
 G="$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh"
 
 # вне окна
-$PY $S/run_stand.py --dry-run --scenario P1        # план; также --scenario P2 / P3, --regress
+$PY $S/run_stand.py --dry-run --scenario P1        # план; также --scenario P2 / P3 / P4 / P5, --regress
 $PY -m py_compile $S/run_stand.py $S/count.py $S/sim_v2.py
 $PY $S/run_stand.py --prepare-only                 # копии манифеста и рецепта в stand-root
 
@@ -39,6 +39,8 @@ $PY $S/run_stand.py --prepare-only                 # копии манифест
 bash "$G" heavy <сессия> $PY $S/run_stand.py --scenario P1 --repeats 3
 bash "$G" heavy <сессия> $PY $S/run_stand.py --scenario P2 --repeats 3
 bash "$G" heavy <сессия> $PY $S/run_stand.py --scenario P3 --repeats 3
+bash "$G" heavy <сессия> $PY $S/run_stand.py --scenario P4 --repeats 3   # T5.3e.5a: robot_park_all
+bash "$G" heavy <сессия> $PY $S/run_stand.py --scenario P5 --repeats 3   # T5.3e.5a: robot_park_all + system_shutdown
 bash "$G" heavy <сессия> $PY $S/run_stand.py --regress            # один прогон: D, S0, S1, G
 # S2/S3 нужны отдельно (S3 до ~2,5 мин): $PY $S/run_stand.py --only S2,S3
 
@@ -59,6 +61,8 @@ $PY $S/count.py <stand-root>/run-<время>-P1 [<другой каталог> 
 | P1 = L1 | поток-держатель `robot_jog_hold` каждые 0,05 с (≤ 0,1 с) до возврата `system_shutdown`; `moving` из `.status.telemetry`; +0,3 с → `robot_park` | `done`, `home == moved` |
 | P2 = L2 | `robot_jog_step dx=80` (вне дома, без jog-удержания); `robot_park` → `done`; `robot_servo on`; второй `robot_park` | второй: `home == already` |
 | P3 = L3 | `robot_point_save` a, b; `robot_program_save` `p3` (20 ходов JOINT a/b); `robot_program_run`; `done ≥ 3` → `robot_park`; опрос `.program` каждые 25 мс | `done`, `moved`; `aborted` пользователя раньше `park_home` |
+| P4 | `robot_jog_step dx=80` (вне дома); `robot_park_all {}` (исполнитель `device_io`, без `device_id`); второй `robot_park_all {}` | ответ `robots.robot_main`: `done`/`moved`, затем `done`/`already`; `.park` `seq == seq` ответа |
+| P5 | `robot_jog_step dx=80`; `robot_park_all {}` в потоке (свой драйвер, потолок ответа 8 с); через 0,2 с `system_shutdown` (его шлёт сам сценарий, `finish()` второй раз не шлёт); опрос `.park` каждые 25 мс (`park_poll.jsonl`) | `.park` `failed`, `reason «драйвер робота останавливается»` |
 
 ## Пороги (литералы в `count.py`)
 
@@ -66,6 +70,12 @@ $PY $S/count.py <stand-root>/run-<время>-P1 [<другой каталог> 
   `L1 == 0`, `A1 == 0`, `E1 == 0`; `d1 == 2`; последняя запись `STOP_REQ & 3 == 1`.
 - **P2:** второй итог `home == "already"` за ≤ `1.5` с от ответа; `d1 == 1`; `L1 == 0`.
 - **P3:** `p3`/`aborted` раньше `park_home` в `program.jsonl`; итог `done`/`moved`; `L1 == 0`, `A1 == 0`.
+- **P4 (T5.3e.5a):** на каждый `robot_park_all`: `status "ok"`, `timeout_s == 30.0`, `robots.robot_main.result == "done"`, `seq` — число, `.park` `done` с тем же `seq`;
+  первый — `home == "moved"`, ответ ≤ `3.0` с от отправки (опора P1 0,687–0,714 с); второй — `home == "already"`, другой `seq`, ответ ≤ `2.0` с (опора P2 0,446–0,498 с);
+  `d1 == 1` (только SOFT выключения, как P2); `L1 == 0`.
+- **P5 (T5.3e.5a):** первый терминал `.park` (по `park_poll.jsonl`) — `failed`, `reason == "драйвер робота останавливается"`, за ≤ `1.5` с от `shutdown_send`;
+  в `logs/**` нет строки с «не остановлен к сроку» и `device_io` (всего строк с фразой — в факте); `L1 == 0`, `A1 == 0`, `E1 == 0`. Ответ `robot_park_all` печатается, если пришёл (не критерий).
+  Итог `.park` раньше `shutdown_send` — событие `precondition_failed`, прогон не в счёт (строка «предусловия» красная).
 - `d1` — все записи `W STOP_REQ` в `sim.log` от `MARK P<n>` до конца прогона (все уровни); `L1` / `A1` / `E1` — строки «робот 'robot_main': jog остановлен поводком: окно удержания истекло» / «… после начала остановки» / «… область закрывается» в `logs/**`.
 - Итог `STAND: PASS` и код 0 — только если все строки PASS (и группа D, уборка). По каталогам из `--repeats`: `P1: k/N`.
 - `count.py` печатает «В отчёт»: время ответа, `elapsed_s`, тиков до итога (`elapsed_s / 0,5`), `d1`/`L1`/`A1`/`E1`, итог → `process.stop`, длительность `system_shutdown`, строки `stop_echo` в логах, «поводок jog прерван», попытки готовности.
@@ -90,4 +100,7 @@ $PY $S/count.py <stand-root>/run-<время>-P1 [<другой каталог> 
 - «Здоровье» `device_hub.stop_echo` после выключения не опрашивается (бэкенда уже нет): в отчёт идёт число строк `stop_echo` в логах, это не health.
 - Времена «итог за …» и «≤ 1,5 с от ответа» меряются опросом `state.get` (шаг 0,05 с): ошибка до +0,05 с и задержка IPC. Порядок `aborted` → `park_home` — опросом 25 мс; пропуск тика исключён только тем, что `aborted` держится ≥ 0,5 с (по брифу).
 - `d1` считает строки `W STOP_REQ` в `sim.log` без разбора автора записи; если сим не склеивает повторы (журнал строка на запись) — верно, иначе заниженный счёт.
+- P4/P5 не прогнаны. Второй `robot_park_all` в P4 идёт без `robot_servo on` (P2 включал серво перед вторым park; в приёмке 5a этого нет); если park при выключенном серво откажет — красным будет P4.2.
+- P5: `.park` наблюдает отдельный опрос (25 мс, свой драйвер); во время `process.stop` бэкенд может перестать отвечать — тогда итог не будет увиден и строки итога красные (как «не успели увидеть»).
+  Точный текст строки исполнителя «не остановлен к сроку» не сверен с кодом: критерий ищет подстроку «не остановлен к сроку» и `device_io` в одной строке.
 - Рецепт по-прежнему называется `spi_stand_delta_v2` (копия `prepare_copies` без правок имени); `device_io`-проверки группы D те же, что в SPI.stand.

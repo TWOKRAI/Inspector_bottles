@@ -35,6 +35,7 @@ def _workers(n: int = 3) -> dict:
             "status": "running",
             "effective_hz": 10.0 + i,
             "cycle_duration_ms": 5.0 + i,
+            "last_cycle_age_s": 0.1,
         }
         for i in range(n)
     }
@@ -51,22 +52,23 @@ class TestBuildWorkerTelemetry:
             "status": "running",
             "effective_hz": 10.0,
             "cycle_duration_ms": 5.0,
+            "last_cycle_age_s": 0.1,
         }
         assert data["workers"]["w1"]["effective_hz"] == 11.0
 
     def test_aggregate_state(self) -> None:
         _, data = build_worker_telemetry(_workers(3), "proc")
-        # fps = max(hz) = 12.0; latency_ms = max(cycle) = 7.0
-        assert data["state"]["fps"] == 12.0
-        assert data["state"]["latency_ms"] == 7.0
+        # 0.8: пара ОДНОГО воркера — самого медленного (w0, 10 Гц): fps = 10.0, latency_ms = его cycle = 5.0
+        assert data["state"]["fps"] == 10.0
+        assert data["state"]["latency_ms"] == 5.0
 
     def test_status_only_worker_no_hz(self) -> None:
-        """Воркер со status без hz/lat → только status; агрегата нет → без state."""
+        """Воркер со status без hz/lat → только status; пары нет → fps/latency_ms явным None (0.8)."""
         result = build_worker_telemetry({"w0": {"status": "idle"}}, "proc")
         assert result is not None
         _, data = result
         assert data["workers"]["w0"] == {"status": "idle"}
-        assert "state" not in data
+        assert data["state"] == {"fps": None, "latency_ms": None}
 
     def test_empty_returns_none(self) -> None:
         assert build_worker_telemetry({}, "proc") is None

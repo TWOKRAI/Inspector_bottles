@@ -11,12 +11,12 @@ I/O изолирован в собственном процессе (`GenericPro
 
 ```
 StateStoreManager --state.changed--> ctx.state_proxy.subscribe callback
-    --> self._cache[path] = value          (только запись в кэш, без I/O)
+    --> self._cache.put(path, value)       (LeafCopy, только запись в кэш, без I/O)
 loop-worker (sample_interval_sec)
     --> снимок _cache --> TelemetrySnapshot[] --> repo.insert_many (sync)
 ```
 
-- Callback подписки **только** кладёт листья в `self._cache: dict[path, value]`.
+- Callback подписки **только** кладёт листья в `self._cache` (`LeafCopy`, через `LeafCopy.put`: dict-дельта заменяет поддерево).
 - Запись в БД — на таймере (loop-worker), а не на каждую дельту.
 
 ## Параметры (registers.py)

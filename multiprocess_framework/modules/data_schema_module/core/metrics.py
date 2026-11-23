@@ -17,7 +17,9 @@ from functools import wraps
 from threading import RLock
 import time
 
-# ЛЕНИВЫЙ импорт get_std_logger (S-27, Task 5.4): этот файл грузится как ЧАСТЬ
+from ..._fallback import FallbackLogger
+
+# ЛЕНИВЫЙ логгер (S-27, Task 5.4): этот файл грузится как ЧАСТЬ
 # core/__init__.py — то есть на LAYER 0 инициализации data_schema_module, до
 # того, как пакет отдаёт SchemaBase наружу. logger_module (через
 # configs/logger_manager_config.py → channel_routing_module → data_schema_module)
@@ -28,11 +30,20 @@ import time
 # воспроизведением: fresh `import data_schema_module` падает
 # ImportError'ом на этой строке, если импорт не отложен). Резолвится
 # лениво — при первом фактическом вызове, когда граф модулей уже собран.
+# С 2026-11-12 прямого импорта logger_module здесь нет вовсе (даже ленивого):
+# логгер — «цикло-безопасная дверь» ``_fallback.FallbackLogger``, её
+# единственное ленивое ребро в logger_module и есть точка резолва.
 _logger = None
 
 
 def _std_logger():
-    """Вернуть (и закэшировать) ``get_std_logger(__name__)`` — импорт ЛЕНИВЫЙ.
+    """Вернуть (и закэшировать) ``FallbackLogger(__name__)`` с подтянутым видом.
+
+    Дверь ``FallbackLogger`` конструируется без импортов и подтягивает вид
+    ``logger_module`` при ПЕРВОЙ записи; там же при кольце она бросила бы
+    ``ImportError``. Чтобы контракт ниже («вернуть ``None``, а не бросить»)
+    остался в силе, первый резолв вида выполняется здесь, под ``try``, — до
+    того, как сборщик выставит флаг голоса.
 
     **Ленивость обязательна, а не стилистична: модульный импорт роняет пакет.**
     Воспроизведено 2026-08-26 — строка ``from ...logger_module import
@@ -59,8 +70,10 @@ def _std_logger():
     """
     global _logger
     if _logger is None:
+        log = FallbackLogger(__name__)
         try:
-            from ...logger_module import get_std_logger
+            # Первый резолв вида = то, что дверь сделала бы на первой записи.
+            log.resolve()
         except ImportError:
             # Частично инициализированный logger_module — голос ОТКЛАДЫВАЕТСЯ,
             # а не роняет пакет. Воспроизведено 2026-08-26 инъекцией J3: со
@@ -72,7 +85,7 @@ def _std_logger():
             # по счастливому порядку импорта; вернуть ``None`` дешевле, чем
             # зависеть от удачи.
             return None
-        _logger = get_std_logger(__name__)
+        _logger = log
     return _logger
 
 
@@ -93,8 +106,8 @@ class MetricsCollector:
     S-27 (Task 5.4): ``_timings`` растёт до :data:`TIMINGS_CEILING` записей на
     ключ, дальше новые записи ОТБРАСЫВАЮТСЯ (не старые — см. ``record_timing``),
     а потеря считается явно и видна в ``get_metrics()["timings"][key]["dropped"]``.
-    Сверх того — сборщик ОДИН РАЗ за жизнь экземпляра говорит через
-    ``get_std_logger``, что накопленное никто не читает (боевых читателей
+    Сверх того — сборщик ОДИН РАЗ за жизнь экземпляра говорит через дверь
+    ``_fallback.FallbackLogger`` (см. ``_std_logger``), что накопленное никто не читает (боевых читателей
     ``get_metrics()``/``reset()`` — ноль, см. докстринг модуля).
 
     **Уровень голоса — DEBUG, а не WARNING (правка по ревью Ф5, S7).** Первая

@@ -84,3 +84,13 @@ bash scripts/install_pre_push_hook.sh
 5. **Stdlib first.** Внешние зависимости — только если без них нельзя. Указать в README раздел «Требования».
 6. **Slash-команда для частого.** Если скрипт планируется к регулярному вызову — завести `.claude/commands/<ns>/<name>.md` с однострочным описанием.
 7. **Учёт здесь.** После создания добавить строку в подходящий раздел этого README.
+
+---
+
+## 6. Замер сети букв — `letters_baseline.py` (letters-retrain 0.4, β7)
+
+Измерение, не гейт (код выхода 0; 2 — ошибка вызова; порогов PASS/FAIL нет). Не путать с `capture_baseline.py` (покрытие S7) и `day1_capture_check.py` (качество кадров). Данные и модель вне git — пути к главному дереву, `PYTHONPATH` = корень дерева с кодом. Все команды — через `machine_gate.sh light <сессия>`.
+
+- **Сим** (диски кодом сима, истина = буква и угол рендера, дефекты 0, смещение 10–20 px): `python scripts/letters_baseline.py sim --models-dir /abs/Inspector_bottles/data/models --data-root /abs/Inspector_bottles/data [--letters ПЕРМИ | --all] [--angles 0,45,...,315] [--per-cell 4] [--seed 0] [--json-out out.json]`
+- **Кадры дня №1** (`<корень>/<БУКВА>/a<УГОЛ:03d>_<индекс>.png`): `python scripts/letters_baseline.py dir <корень> --crop none --models-dir /abs/Inspector_bottles/data/models` (`--crop pipeline` — полный кадр камеры через плагины рецепта `letter_robot_sim`).
+- Печатает top-1, долю ниже порога 0.5, полноту по буквам, топ-5 путаниц, ошибку угла (по модулю симметрии, без неё, с инвертированной истиной, медиана по углам сетки). `--help` показывает оба режима и все флаги. Тесты: `scripts/tests/test_letters_baseline.py` (реальный движок — при `LETTERS_BASELINE_DATA_ROOT=<дерево>/data`, иначе skip).

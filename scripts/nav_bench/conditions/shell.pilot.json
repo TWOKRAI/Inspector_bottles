@@ -1,0 +1,29 @@
+{
+  "name": "shell-pilot",
+  "model": "haiku",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Agent",
+    "WebFetch",
+    "WebSearch"
+  ],
+  "context_files": [],
+  "max_turns": 60,
+  "max_budget_usd": 1.0,
+  "thresholds": {
+    "hits_min": 0,
+    "false_max": 99
+  },
+  "prompt_prefix": "Navigate the code with Read, Grep and Glob and with read-only shell commands (ls, find, grep, cat) run through Bash.",
+  "expected_tokens": 85000,
+  "bash_allow": [
+    "ls *"
+  ]
+}

@@ -1,4 +1,6 @@
-"""line_sim — объект-агностичный движок сцены «лента с объектами».
+"""Объект-агностичный движок сцены лента с объектами; сюда — менять симуляцию ленты
+
+line_sim — объект-агностичный движок сцены «лента с объектами».
 
 Публичный API (numpy/opencv/pydantic/yaml, без torch и PySide6):
     ObjectPassport, LayerSpec, LayerAugment, LayeredObject, ObjectFactory, ObjectSpawner,

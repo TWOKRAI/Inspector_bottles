@@ -502,10 +502,11 @@ processes:
       tags:
       - diagnostics
       - stats
-    - description: 'Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts.
+    - description: 'Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts/stop_outcome.
         Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision
         — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count
-        — краш-рестарты монитора'
+        — краш-рестарты монитора; stop_outcome — как умер ребёнок при последнем стопе текущего воплощения
+        (exited|terminated|killed|handed_over|survived), None — не стопался'
       name: supervision.status
       tags:
       - system
@@ -1638,6 +1639,17 @@ processes:
     - description: 'Стоп робота: {device_id, mode: 1|2|3}.'
       name: robot_abort
       tags: []
+    - description: 'Робот v2: калибровка ленты по двум отметкам {device_id, marks[{x_mm, y_mm, encoder}]
+        x2, base_rev, dry_run?} -> P_BELT_FACTOR, P_BELT_DIR, PARAM_APPLY'
+      name: robot_calib_belt
+      tags: []
+    - description: 'Робот v2: подогнать СК по сохранённым точкам и их номиналу в СК {device_id, name,
+        points[{point, local[x, y, z]}] >= 3, base_rev} -> frame, yaw_deg, residuals_mm'
+      name: robot_calib_frame
+      tags: []
+    - description: 'Робот v2: проверить точки инструментов (только чтение) {device_id} -> tools'
+      name: robot_calib_tools
+      tags: []
     - description: Очистить очередь заданий.
       name: robot_clear_queue
       tags: []
@@ -1726,6 +1738,9 @@ processes:
     - description: 'Робот v2: основная остановка — конец текущей команды или цикла, домой, серво OFF {device_id,
         timeout_s?}; ответ сразу, итог — devices.state.<id>.park'
       name: robot_park
+      tags: []
+    - description: 'Роботы v2: основная остановка всех (домой, серво OFF) {timeout_s?}; ответ — итог каждого'
+      name: robot_park_all
       tags: []
     - description: 'Робот v2: запомнить текущую позу как точку {device_id, name, base_rev}'
       name: robot_point_capture

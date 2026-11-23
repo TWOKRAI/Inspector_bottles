@@ -50,13 +50,27 @@ _LAYOUT_BLUEPRINT_KEYS = ("metadata",)
 
 # Все намеренные расхождения вне блока camera_0.plugins[0], литералом. Причины — в тесте.
 _EXPECTED_DIFFS = [
+    # К4' (камера на ядре): β убрала `color_convert` после камеры (плагин отдаёт BGR, шаг переставлял бы R и B);
+    # сим-рецепт (чужой файл) его оставил: пара путей = плагин в `vision` (4 против 5) и цель первого провода.
+    # Снять запись, когда владелец сима решит судьбу его `color_convert` (источник сима `scene_source` отдаёт BGR).
+    ".blueprint.processes[3].plugins[len=4 vs 5]",
+    # Политика readiness боевого узла recog.ml_inference (Task 2.9b): сим осознанно без ключа — стендовые не трогаем.
+    # R4: β — гомография F7 (`use_linear: false`, решение владельца 2026-10-25), линейный режим остаётся симу.
+    ".blueprint.processes[5].plugins[1].config.use_linear",
+    ".blueprint.processes[5].plugins[2].config.readiness",
     ".blueprint.wires[0].source",
+    ".blueprint.wires[0].target",  # К4': вторая половина записи про `color_convert` выше
     ".description",
     ".devices[0].params.robot_params",
-    ".devices[0].protocol",
     ".devices[0].transport.host",
     ".devices[0].transport.port",
     ".name",
+]
+
+# Слово оператора (В5/Task 6.1b): пульт пишет его в target_word word_layout, и после Save рецепта оно
+# лежит в файле. Это состояние, а не свойство рецепта: путь вне сравнения, в любом из двух рецептов.
+_OPERATOR_STATE_PATHS = [
+    ".blueprint.processes[6].plugins[0].config.target_word",
 ]
 
 
@@ -146,10 +160,15 @@ def test_sim_recipe_differs_only_in_camera_block() -> None:
     # data/devices.yaml (`DeviceManager.upsert`, merge поверх), так что копия боевого
     # адреса вела прототип на сим-рецепте к настоящему роботу 192.168.1.7:502.
     # Протокол и параметры сим-робота — третье и четвёртое следствие «сим вместо железа» (T3.7):
-    # сим линии работает по v2, боевой робот — по v1 до Ф4; кольцо забора сима шире умолчания.
+    # сим линии работает по v2, боевой робот — тоже по v2 с R4 (но без robot_params); кольцо забора сима шире умолчания.
     # Значения закреплены литералами в test_sim_recipe_points_robot_at_sim_not_hardware.
+    # Ключ readiness узла recog.ml_inference (Task 2.9b) есть только у боевого рецепта: сим не гоняет
+    # блокировку «модель не загружена» (стендовые рецепты не трогаем), её проверяет стенд 2.9b на
+    # копии сима с ключом.
     all_diffs = _diff_paths(_canonical(base), _canonical(sim))
-    other_diffs = sorted(d for d in all_diffs if not d.startswith(allowed_prefix))
+    other_diffs = sorted(
+        d for d in all_diffs if not d.startswith(allowed_prefix) and d not in _OPERATOR_STATE_PATHS
+    )
     extra = [d for d in other_diffs if d not in _EXPECTED_DIFFS]
     missing = [d for d in _EXPECTED_DIFFS if d not in other_diffs]
 
@@ -192,10 +211,10 @@ def test_sim_recipe_points_robot_at_sim_not_hardware() -> None:
     robot = next(d for d in sim["devices"] if d["id"] == "robot_main")
     assert robot["transport"]["host"] == "127.0.0.1"
     assert robot["transport"]["port"] == 5021
-    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон остаётся на v1 без robot_params
+    # T3.7: сим-робот линии — протокол v2 и кольцо забора 600 мм; боевой эталон (R4) — тоже v2, но без robot_params
     assert robot["protocol"] == "delta_v2"
     assert robot["params"]["robot_params"] == {"P_ZONE_MAX": 6000}
     base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
     base_robot = next(d for d in base["devices"] if d["id"] == "robot_main")
-    assert base_robot["protocol"] == "delta_universal3"
+    assert base_robot["protocol"] == "delta_v2"
     assert "robot_params" not in (base_robot.get("params") or {})

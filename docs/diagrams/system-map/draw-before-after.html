@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Рисовальщик «как сейчас / как будет». Снимок 2026-11-11 (main 3ce3fbf1e); план по отчёту CTO docs/reports/2026-11-11_draw-architecture-cto.md.
+     «Сейчас» собрано по коду: Plugins/render/{overlay_draw,render_overlay,circle_draw}/plugin.py,
+     Plugins/processing/contour_draw/plugin.py, Services/ml_inference/plugin/plugin.py, рецепт letter_robot_sim.
+     «Будет» — направление владельца, в код не заложено, везде помечено «план».
+     Снимок, не генерируется: при сомнении сверять с кодом. Mermaid грузится с CDN — нужен интернет. -->
+<title>Рисовальщик до и после</title>
+<style>
+:root { --bg:#ffffff; --fg:#1b1f24; --muted:#5b6470; --line:#d8dde3; --surface:#f6f8fa; --ok:#2e7d32; --part:#b07d00; --no:#888; --task:#b3261e; --new:#2f5fa7; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; --ok:#66bb6a; --part:#e0a526; --no:#9aa4b2; --task:#ef6b61; --new:#6ea8ff; } }
+:root[data-theme="dark"] { --bg:#13161b; --fg:#e4e8ee; --muted:#9aa4b2; --line:#2c333d; --surface:#1b2027; --ok:#66bb6a; --part:#e0a526; --no:#9aa4b2; --task:#ef6b61; --new:#6ea8ff; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:1200px; margin:0 auto; padding:24px 16px 64px; }
+h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 6px; } h3 { font-size:16px; margin:20px 0 4px; }
+p, li { color:var(--muted); } p { margin:4px 0 12px; } strong { color:var(--fg); }
+code { font-size:13px; background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+nav { display:flex; flex-wrap:wrap; gap:6px 14px; margin:12px 0 4px; font-size:14px; }
+nav a { color:inherit; }
+a { color:#1f6feb; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) a { color:#6ea8ff; } }
+:root[data-theme="dark"] a { color:#6ea8ff; }
+.frame { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; }
+pre.mermaid { margin:0; background:#fff; border-radius:6px; }
+pre.mermaid p, pre.mermaid span { color:#111 !important; margin:0; }
+.layers { display:flex; flex-direction:column; gap:0; }
+.band { border:1px solid var(--line); border-left:6px solid var(--c); border-radius:8px; padding:10px 12px; background:var(--surface); }
+.band h3 { margin:0 0 2px; font-size:15px; color:var(--fg); }
+.band > p { margin:0 0 8px; font-size:13px; }
+.b-chg { --c:var(--part); } .b-new { --c:var(--new); } .b-ok { --c:var(--ok); }
+.chips { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; }
+.chip { border:1px solid var(--line); border-radius:6px; padding:6px 9px; background:var(--bg); font-size:13px; color:var(--muted); }
+.chip b { display:block; color:var(--fg); font-size:13px; margin-bottom:2px; }
+.chip.frz { border-style:dashed; border-color:var(--no); }
+.arrow { text-align:center; color:var(--muted); font-size:13px; padding:3px 0; }
+.cap { font-size:13px; font-weight:600; color:var(--fg); margin:0 0 6px; }
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media (max-width:820px) { .pair { grid-template-columns:1fr; } }
+.idea { border-left:4px solid var(--ok); background:var(--surface); padding:10px 14px; border-radius:0 8px 8px 0; margin:12px 0; }
+.idea p { margin:4px 0; }
+.legend { display:flex; flex-wrap:wrap; gap:8px 18px; font-size:13px; color:var(--muted); margin:8px 0; }
+.legend span::before { content:""; display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; border:2px solid; }
+.l-ok::before { border-color:var(--ok) !important; background:#e6f4ea; }
+.l-part::before { border-color:var(--part) !important; background:#fff3d6; }
+.l-no::before { border-color:var(--no) !important; border-style:dashed !important; background:#f1f1f1; }
+.l-new::before { border-color:var(--new) !important; background:#e3efff; }
+.l-bad::before { border-color:var(--task) !important; border-width:3px !important; }
+.tbl { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+table { border-collapse:collapse; width:100%; font-size:14px; min-width:860px; }
+th, td { text-align:left; vertical-align:top; padding:7px 10px; border-bottom:1px solid var(--line); }
+th { background:var(--surface); color:var(--fg); font-weight:600; }
+td { color:var(--fg); } tr:last-child td { border-bottom:none; }
+td.grp { background:var(--surface); font-weight:600; }
+.s { white-space:nowrap; font-weight:600; }
+.s-ok { color:var(--ok); } .s-part { color:var(--part); } .s-no { color:var(--no); } .s-new { color:var(--new); }
+ol li, ul li { margin:4px 0; }
+footer { margin-top:40px; font-size:13px; color:var(--muted); border-top:1px solid var(--line); padding-top:12px; }
+</style>
+</head>
+<body><main>
+<h1>Рисовальщик: как сейчас и как будет</h1>
+<p>Код «сейчас» снят на <code>main</code> 3ce3fbf1e (2026-11-11). Часть «как будет» — предложение CTO из <code>docs/reports/2026-11-11_draw-architecture-cto.md</code> (база 358faaeda) плюс решения владельца того же дня. В коде этого ещё нет, везде помечено «план». Если страница и отчёт расходятся, прав отчёт. Соседняя страница: <a href="index.html">карта системы</a>.</p>
+<nav>
+  <a href="#idea">Главное</a><a href="#now">1. Сейчас</a><a href="#will">2. Как будет (план)</a><a href="#move">3. Что куда переходит</a><a href="#where">4. Где жечь пиксели</a><a href="#topo">5. Топология letter_robot_sim</a><a href="#phases">6. Фазы миграции</a><a href="#lr">7. layer_render</a><a href="#owner">8. Решения владельца</a><a href="#open">9. Что не решено</a>
+</nav>
+
+<section id="idea">
+<h2>Главное</h2>
+<div class="idea">
+<p><strong><code>overlay_draw</code> остаётся по имени</strong> — 8 рецептов не переписываем. Внутри он тонкий: собирает из полей item список фигур (сцену) и одним вызовом на кадр отдаёт её ядру <code>Services/draw</code>.</p>
+<p><strong>Ядро сводит сцену к пяти примитивам, бэкенд умеет только их.</strong> Текст рисует не бэкенд: PIL растеризует его в маленький патч, а бэкенд лишь смешивает патч. Поэтому новый бэкенд — пять функций, без шрифтов.</p>
+<p><strong>Рисовать или нет — настройка.</strong> Регистр <code>burn: false</code> оставляет кадр нетронутым и выдаёт только сцену: она уходит в <code>.json</code> как разметка для обучения.</p>
+<p><strong><code>render_overlay</code>, <code>circle_draw</code>, <code>contour_draw</code> замораживаются</strong> (не удаляются): их работа становится правилами <code>mapping</code>.</p>
+</div>
+<div class="legend">
+  <span class="l-ok">остаётся как есть</span>
+  <span class="l-part">меняется</span>
+  <span class="l-no">заморожено: остаётся как контракт, не удаляется</span>
+  <span class="l-new">новое (план)</span>
+  <span class="l-bad">проблема</span>
+</div>
+</section>
+
+<section id="now">
+<h2>1. Сейчас: пять основных мест рисования и ещё шесть мелких</h2>
+<p>Слева — откуда приходят данные, в середине — кто рисует, справа — куда уходит кадр. Красная рамка — проблема. Серый пунктир с красной рамкой — узел заморозят, и у него есть проблема.</p>
+<div class="frame"><pre class="mermaid">
+flowchart LR
+  S1["line_filter, code_reader&lt;br/&gt;overlay: dict с линиями и точками"]
+  S2["circle_detector&lt;br/&gt;detections: center, radius"]
+  S3["contour_finder&lt;br/&gt;contours"]
+  S4["маска и detections с bbox"]
+  S5["center_crop, pixel_to_robot&lt;br/&gt;кадр-вырез"]
+  D1["overlay_draw, 8 рецептов&lt;br/&gt;линии, полосы, точки, подписи&lt;br/&gt;cv2.putText: кириллица даёт ???"]
+  D2["circle_draw, 4 рецепта&lt;br/&gt;окружности"]
+  D3["contour_draw, 1 рецепт&lt;br/&gt;контуры, color_inspect"]
+  D4["render_overlay, 0 рецептов&lt;br/&gt;маска alpha, рамки, area=&lt;br/&gt;39 мс на кадр, 1080p, 100 кадр/с"]
+  D5["подпись внутри ml_inference&lt;br/&gt;draw_overlay: true, 3 рецепта&lt;br/&gt;весь кадр BGR в RGB и обратно"]
+  O1["frame&lt;br/&gt;дисплей"]
+  O2["rendered_frame&lt;br/&gt;дисплей рецептов его не читает"]
+  O3["грязный frame&lt;br/&gt;уходит в layout и в будущий frame_saver"]
+  S1 -->|"frame + overlay"| D1
+  S2 -->|"frame + detections"| D2
+  S3 -->|"frame + contours"| D3
+  S4 -->|"frame + mask + detections"| D4
+  S5 -->|"frame + predictions"| D5
+  D1 --> O1
+  D2 --> O1
+  D3 --> O1
+  D4 --> O2
+  D5 --> O3
+  classDef ok fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px,color:#111
+  classDef chgp fill:#fff3d6,stroke:#b3261e,stroke-width:3px,color:#111
+  classDef frz fill:#f1f1f1,stroke:#888,stroke-width:2px,stroke-dasharray:5 4,color:#111
+  classDef frzp fill:#f1f1f1,stroke:#b3261e,stroke-width:3px,stroke-dasharray:5 4,color:#111
+  classDef prob fill:#fdeceb,stroke:#b3261e,stroke-width:3px,color:#111
+  class S1,S2,S3,S4,S5,O1 ok
+  class D1 chgp
+  class D2,D3 frz
+  class D4,D5 frzp
+  class O2,O3 prob
+</pre></div>
+<p>Пять мест рисуют одно и то же разными способами, у каждого свои цвета и регистры. Кириллицу умеет только <code>ml_inference</code>, и то ценой перекраски всего кадра. <code>render_overlay</code> пишет в <code>rendered_frame</code>, а дисплей читает <code>frame</code> (поэтому в июне 2026 <code>overlay_draw</code> переключили на <code>frame</code>); в рецептах этого узла нет.</p>
+<h3>Что уточнил замер CTO (macOS arm64, не стенд и не Orin)</h3>
+<ul>
+<li><strong>39 мс у <code>render_overlay</code> — не «полнокадровая заливка».</strong> Основная цена — булев индекс numpy: 35 мс при маске 5 % кадра и 98 мс при 44 %. Само смешивание стоит 0,08 мс, а полнокадровое смешивание через cv2 — 1,78 мс (по рамкам фигур — 0,28 мс).</li>
+<li><strong><code>fps_limit</code> дисплея никто не исполняет.</strong> Он есть в конфиге, схемах и вкладке GUI, но ветка показа рисует с частотой камеры. Проверено поиском по коду, на живом стенде нет.</li>
+<li><strong>SHM возит не только <code>frame</code>.</strong> С Task 4.1 любой ndarray верхнего уровня от 8192 байт едет ссылкой на SHM. Вложенные массивы (список контуров) идут внутри сообщения.</li>
+<li><strong>Мест рисования больше пяти.</strong> Вызовы cv2-рисования есть ещё в <code>points_render</code>, <code>camera_robot</code> (калибровка), <code>blob_detector</code>, <code>circle_detector</code>, <code>segmentation</code>, <code>phone_gateway</code>. Что из них идёт на дисплей, будет выяснено в фазе 2 (опись). <code>points_render</code> и <code>renderer_compositor</code> не переносятся: первый строит график из миллиметров, второй собирает сетку кадров.</li>
+<li><strong>Регистры-списки GUI правит.</strong> У <code>overlay_draw</code> уже есть <code>color_table: list[dict]</code>, GUI отдаёт его в общий JSON-редактор. Табличный редактор не нужен.</li>
+</ul>
+</section>
+
+<section id="will">
+<h2>2. Как будет (план): плагин, ядро и один бэкенд сейчас</h2>
+<p>«Что рисовать» (фигуры, стили, сопоставление полей) отделено от «чем рисовать» (бэкенд). Граница между ними — <strong>сцена</strong>, а точнее её сводка в пять примитивов: всё передаётся одним вызовом на кадр, поэтому нативному бэкенду нужен один переход границы, а не по вызову на фигуру.</p>
+<h3>Слои сверху вниз</h3>
+<div class="layers">
+  <div class="band b-chg"><h3>Плагин <code>overlay_draw</code>: имя остаётся, начинка тонкая</h3>
+    <p>Один плагин на всё рисование. Лежит на ветке показа, данные берёт из полей item.</p>
+    <div class="chips">
+      <div class="chip"><b>backend</b>имя бэкенда или <code>auto</code></div>
+      <div class="chip"><b>burn</b><code>false</code>: кадр не трогается, выдаётся только <code>scene</code></div>
+      <div class="chip"><b>max_fps</b>частота рисования этой ветки; 0 — без ограничения</div>
+      <div class="chip"><b>mapping</b>регистр <code>list[dict]</code>: какое поле во что превратить</div>
+      <div class="chip"><b>styles</b>регистр <code>list[dict]</code>: группа, тип, по умолчанию</div>
+      <div class="chip"><b>выходы</b><code>frame</code> (с рисунком) и <code>scene</code> (данными)</div>
+    </div></div>
+  <div class="arrow">↓ вся сцена одним вызовом</div>
+  <div class="band b-new"><h3><code>Services/draw</code>: «что рисовать»</h3>
+    <p>Логика без конвейера: её можно вызвать из плагина, из CLI или из GUI. В ядре нет записи на диск и решений «брак».</p>
+    <div class="chips">
+      <div class="chip"><b>mapping</b>поля item в фигуры по правилам; адаптер <code>scene_from_overlay</code> для старого <code>overlay</code>; <code>vline</code> разворачивается здесь, <code>geometry.py</code> переезжает сюда</div>
+      <div class="chip"><b>scene</b>список фигур-dict: point, line, polyline, circle, rect, mask, text. Порядок списка = порядок слоёв. Есть поле <code>label</code> — фигура идёт в разметку</div>
+      <div class="chip"><b>lower</b>стили, vline, пунктир, текст сводятся к 5 примитивам: line, polyline, circle, rect, patch</div>
+      <div class="chip"><b>text</b>PIL FreeType растеризует строку в альфа-патч; кэш строк; шрифты подключаемые</div>
+      <div class="chip"><b>registry</b>выбор бэкенда по имени</div>
+      <div class="chip"><b>export</b>сцена в <code>.json</code>, затем YOLO и COCO</div>
+    </div></div>
+  <div class="arrow">↓ <code>backend.render(canvas, ops)</code>: рисует на месте, без копии кадра</div>
+  <div class="band b-new"><h3><code>backends/</code>: «чем рисовать»</h3>
+    <p>Бэкенд умеет пять примитивов и смешивание патча. Шрифтов ему не нужно.</p>
+    <div class="chips">
+      <div class="chip"><b>cv2</b>единственный, который строится сейчас</div>
+      <div class="chip frz"><b>Qt QPainter</b>второй кандидат, только по замеру</div>
+      <div class="chip frz"><b>Rust, C++, GPU</b>только если на Orin p95 выше 5 мс на кадр после фазы 4</div>
+    </div></div>
+  <div class="band b-new" style="margin-top:8px"><h3><code>conformance/</code>: один набор сцен</h3>
+    <p style="margin:0">Его проходит каждый бэкенд: вне рамок фигур пиксели побайтно равны входу, внутри — совпадение покрытия и цвета с допуском. В набор входят пересекающиеся полупрозрачные фигуры.</p></div>
+</div>
+<h3>Путь одного кадра</h3>
+<div class="frame"><pre class="mermaid">
+flowchart LR
+  I["поля item&lt;br/&gt;overlay, detections,&lt;br/&gt;contours, mask,&lt;br/&gt;predictions"]
+  M["mapping&lt;br/&gt;поля в фигуры&lt;br/&gt;и адаптер старого&lt;br/&gt;overlay"]
+  S["scene&lt;br/&gt;список фигур-dict&lt;br/&gt;порядок = слои"]
+  L["lower&lt;br/&gt;стили, vline, пунктир&lt;br/&gt;сводит к 5 примитивам"]
+  B["backend.render&lt;br/&gt;canvas и ops&lt;br/&gt;рисует на месте"]
+  F["frame&lt;br/&gt;с рисунком"]
+  T["text&lt;br/&gt;PIL в альфа-патч&lt;br/&gt;кэш строк"]
+  J["scene в .json&lt;br/&gt;через frame_saver&lt;br/&gt;при burn: false"]
+  I --> M --> S --> L --> B --> F
+  T --> L
+  S -->|"фигуры с label"| J
+  classDef ok fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px,color:#111
+  classDef new fill:#e3efff,stroke:#2f5fa7,stroke-width:2px,color:#111
+  class I,F ok
+  class M,S,L,B,T,J new
+</pre></div>
+<p>Узлы данных не рисуют: они отдают <code>detections</code>, <code>overlay</code>, <code>predictions</code>, <code>mask</code>. Плагин собирает сцену и, если включён <code>burn</code>, рисует её на копии кадра: одна копия на ветку (сегодня в процессе <code>draw</code> их две). Та же сцена без рисования уходит в <code>.json</code> рядом с чистым кадром.</p>
+<h3>Правила реестра бэкендов</h3>
+<ul>
+<li>Неизвестное имя даёт <code>ValueError</code> со списком доступных имён.</li>
+<li>Бэкенд без своей библиотеки даёт <code>RuntimeError</code> при <code>configure</code>.</li>
+<li>Молчаливой замены нет: ошибка громкая, а не тихий откат на другой бэкенд.</li>
+<li><code>auto</code> разрешается один раз при <code>configure</code>; выбранное имя пишется в лог и в регистр <code>active_backend</code> (только для чтения).</li>
+</ul>
+<h3>Что известно про скорость (замер CTO, macOS arm64)</h3>
+<ul>
+<li>125 фигур через сцену — 0,51 мс против 0,50 мс прямых вызовов cv2: слой сцены почти ничего не стоит.</li>
+<li>Маска через <code>cv2.addWeighted</code> и <code>cv2.copyTo</code>: 35 мс → 1,78 мс на весь кадр, 0,28 мс по рамкам фигур.</li>
+<li>Текст патчем: 3,36 мс (весь кадр, как сейчас в <code>ml_inference</code>) → 0,63 мс без кэша → 0,08 мс из кэша строк.</li>
+<li>Не рисовать чаще показа: 100 → 30 кадр/с даёт 3,3× меньше работы. Для этого и нужен <code>max_fps</code>.</li>
+<li>После замены булева индекса весь рисунок на 1080p стоит 2,4–3,9 мс на кадр, поэтому бэкенд на Rust или GPU сейчас не строят.</li>
+</ul>
+</section>
+
+<section id="move">
+<h2>3. Что куда переходит: <code>overlay_draw</code> и <code>render_overlay</code></h2>
+<p>Верхний блок (<code>overlay_draw</code>) меняется: оранжевое. Нижний (<code>render_overlay</code>) замораживается: серый пунктир. Новые места — синие.</p>
+<div class="frame"><pre class="mermaid">
+flowchart LR
+  subgraph OD["overlay_draw"]
+    a1["vlines, lines, dashed_lines, points&lt;br/&gt;из dict overlay"]
+    a2["таблица цветов color_table&lt;br/&gt;shape, group, type, по умолчанию"]
+    a3["подписи точек&lt;br/&gt;cv2.putText, кириллица даёт ???"]
+    a4["результат пишет в frame"]
+  end
+  subgraph RO["render_overlay"]
+    b1["заливка маски с alpha&lt;br/&gt;булев индекс numpy"]
+    b2["рамки bbox"]
+    b3["подпись area=..."]
+    b4["результат пишет в rendered_frame,&lt;br/&gt;дисплей его не читает"]
+  end
+  n1["scene_from_overlay&lt;br/&gt;dict overlay в фигуры,&lt;br/&gt;vline разворачивается в ядре"]
+  n2["styles: регистр list[dict]&lt;br/&gt;color_table остаётся входом"]
+  n3["фигура text&lt;br/&gt;PIL в альфа-патч,&lt;br/&gt;бэкенд смешивает патч"]
+  n4["тонкий overlay_draw&lt;br/&gt;выходы frame и scene"]
+  n5["фигура mask&lt;br/&gt;addWeighted и copyTo"]
+  n6["фигура rect&lt;br/&gt;mapping: bbox в xyxy"]
+  n7["фигура text по шаблону&lt;br/&gt;area={area}"]
+  n8["не переносится&lt;br/&gt;общий узел пишет в frame"]
+  a1 --> n1
+  a2 --> n2
+  a3 --> n3
+  a4 --> n4
+  b1 --> n5
+  b2 --> n6
+  b3 --> n7
+  b4 -.-> n8
+  classDef chg fill:#fff3d6,stroke:#b07d00,stroke-width:2px,color:#111
+  classDef chgp fill:#fff3d6,stroke:#b3261e,stroke-width:3px,color:#111
+  classDef frz fill:#f1f1f1,stroke:#888,stroke-width:2px,stroke-dasharray:5 4,color:#111
+  classDef frzp fill:#f1f1f1,stroke:#b3261e,stroke-width:3px,stroke-dasharray:5 4,color:#111
+  classDef new fill:#e3efff,stroke:#2f5fa7,stroke-width:2px,color:#111
+  class a1,a2,a4 chg
+  class a3 chgp
+  class b1,b2,b3 frz
+  class b4 frzp
+  class n1,n2,n3,n4,n5,n6,n7 new
+  class n8 frz
+  style OD fill:#fafafa,stroke:#bbb
+  style RO fill:#fafafa,stroke:#bbb
+</pre></div>
+<p>Все умения <code>overlay_draw</code> переезжают без потерь, а подписи заодно получают кириллицу. Три дела <code>render_overlay</code> становятся фигурами сцены (маска, рамка, текст), а «пишет не туда» исчезает: общий узел пишет в <code>frame</code>. Заморозка значит: плагин остаётся в реестре как контракт, не удаляется.</p>
+
+<h3>Полная таблица переходов</h3>
+<div class="tbl"><table>
+<thead><tr><th>Что умеет сейчас</th><th>Где живёт сейчас</th><th>Куда переходит (план)</th><th>Что со старым</th></tr></thead>
+<tbody>
+<tr><td colspan="4" class="grp"><code>overlay_draw</code> — 8 рецептов</td></tr>
+<tr><td>Линии, пунктирные линии, точки из словаря <code>overlay</code></td><td><code>Plugins/render/overlay_draw/plugin.py</code></td><td>Адаптер <code>scene_from_overlay</code> раскладывает <code>overlay</code> в фигуры <code>line</code> и <code>point</code>. Формат <code>overlay</code> у <code>line_filter</code> и <code>code_reader</code> не меняется</td><td class="s s-part">имя остаётся, начинка меняется</td></tr>
+<tr><td>Полоса от края до края и два пунктирных края (<code>vlines</code>)</td><td><code>overlay_draw/geometry.py</code>, <code>vline_segments</code></td><td>Разворачивается в ядре <code>Services/draw</code> в линию и два пунктира; <code>geometry.py</code> переезжает туда</td><td class="s s-part">переезжает</td></tr>
+<tr><td>Цвета: у фигуры свой, затем группа, затем тип, затем по умолчанию</td><td>регистр <code>color_table</code>, <code>default_*</code></td><td>Регистр <code>styles</code> (<code>list[dict]</code>); <code>color_table</code> и <code>default_*</code> остаются живыми как вход в таблицу стилей</td><td class="s s-ok">остаётся</td></tr>
+<tr><td>Подписи точек (<code>cv2.putText</code>, без кириллицы)</td><td><code>overlay_draw/plugin.py</code></td><td>Фигура <code>text</code>; PIL растеризует её в альфа-патч, бэкенд смешивает патч. Составного бэкенда нет</td><td class="s s-ok">кириллица появляется</td></tr>
+<tr><td>Результат пишется в <code>frame</code></td><td>выход <code>frame</code></td><td>Выходы <code>frame</code> и <code>scene</code>; при <code>burn: false</code> кадр не трогается</td><td class="s s-ok">расширяется</td></tr>
+<tr><td colspan="4" class="grp"><code>render_overlay</code> — 0 рецептов (стоит в топологиях <code>inspection_basic</code> и <code>inspection_full</code>)</td></tr>
+<tr><td>Заливка маски с прозрачностью</td><td><code>Plugins/render/render_overlay/plugin.py</code>, регистры цвета и alpha</td><td>Правило <code>mapping</code>: <code>mask</code> в фигуру <code>mask</code>; рисует <code>cv2.addWeighted</code> и <code>cv2.copyTo</code> вместо булева индекса (35 → 1,78 мс на весь кадр)</td><td class="s s-no">заморожен</td></tr>
+<tr><td>Рамки из <code>detections[].bbox</code></td><td>там же, <code>draw_detections</code></td><td>Правило: <code>bbox</code> в фигуру <code>rect</code> (xyxy)</td><td class="s s-no">заморожен</td></tr>
+<tr><td>Подпись <code>area=…</code></td><td>там же</td><td>Фигура <code>text</code> по шаблону в <code>mapping</code></td><td class="s s-no">заморожен</td></tr>
+<tr><td>Выход <code>rendered_frame</code>, который дисплей рецептов не читает</td><td>выход <code>rendered_frame</code></td><td>Не переносится: общий узел пишет в <code>frame</code>; дисплей в двух топологиях переводится на <code>overlay_draw.frame</code> (фаза 4)</td><td class="s s-no">заморожен, контракт</td></tr>
+<tr><td>Команды <code>set_alpha</code>, <code>set_color</code>, <code>toggle_detections</code></td><td>там же</td><td>Остаются у замороженного плагина; в общем узле их заменяют регистры <code>mapping</code> и <code>styles</code></td><td class="s s-no">заморожены вместе с плагином</td></tr>
+<tr><td colspan="4" class="grp">Остальные места рисования</td></tr>
+<tr><td><code>circle_draw</code>: окружности, центр, радиус <code>r=…</code> (4 рецепта)</td><td><code>Plugins/render/circle_draw/plugin.py</code></td><td>Правило: <code>detections</code> в фигуру <code>circle</code> (+ <code>text</code> для радиуса)</td><td class="s s-no">заморожен</td></tr>
+<tr><td><code>contour_draw</code>: контуры (рецепт <code>color_inspect</code>)</td><td><code>Plugins/processing/contour_draw/plugin.py</code></td><td>Правило: <code>contours</code> в фигуру <code>polyline</code> (closed)</td><td class="s s-no">заморожен</td></tr>
+<tr><td>Подпись «буква уверенность угол» внутри <code>ml_inference</code> (3 рецепта)</td><td><code>Services/ml_inference/plugin/plugin.py</code>, регистр <code>draw_overlay</code></td><td>Правило с <code>parts</code> и <code>when</code>: <code>predictions.0</code> в фигуру <code>text</code> (угол и «порог» добавляются по условию; цвет ниже порога — <code>group_when</code>). <code>ml_inference</code> выдаёт только данные; подпись рисует ветка <code>recog_draw</code></td><td class="s s-no">регистр <code>draw_overlay</code> и <code>_put_text_unicode</code> заморожены</td></tr>
+<tr><td><code>points_render</code>, <code>renderer_compositor</code></td><td><code>Plugins/processing/points_render</code>, <code>Plugins/render/renderer_compositor</code></td><td>Не переносятся: график из миллиметров и сетка кадров</td><td class="s s-ok">без изменений</td></tr>
+<tr><td><code>camera_robot</code>, <code>blob_detector</code>, <code>circle_detector</code>, <code>segmentation</code>, <code>phone_gateway</code></td><td>свои <code>plugin.py</code></td><td>Опись в фазе 2: что из этого идёт на дисплей и что переводить на правила</td><td class="s s-part">разбор впереди</td></tr>
+<tr><td colspan="4" class="grp">Чего сейчас нет вообще</td></tr>
+<tr><td>Разметка для обучения из тех же фигур</td><td>—</td><td>Фигуры с полем <code>label</code> пишутся как <code>scene</code> в <code>.json</code> рядом с чистым кадром через <code>frame_saver</code>; экспортёры в <code>Services/draw/export.py</code></td><td class="s s-new">новое</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="where">
+<h2>4. Где жечь пиксели: кто что получает</h2>
+<p>Сейчас строится вариант «рисует узел на ветке показа». Сцена всегда едет данными, поэтому позже можно рисовать и в другом месте без смены контракта.</p>
+<div class="tbl"><table style="min-width:720px">
+<thead><tr><th>Потребитель</th><th>Что нужно</th><th>Как</th></tr></thead>
+<tbody>
+<tr><td>Локальный GUI, <code>mjpeg_sink</code>, удалённый Пульт</td><td>кадр с рисунком</td><td>ветка с <code>overlay_draw</code>, <code>max_fps</code> равен частоте показа</td></tr>
+<tr><td>Запись видео с рисунком</td><td>кадр с рисунком</td><td>своя ветка со своим <code>max_fps</code></td></tr>
+<tr><td>Датасет</td><td>чистый кадр и разметка</td><td>ветка <code>overlay_draw(burn: false)</code> и дальше <code>frame_saver</code></td></tr>
+<tr><td>Orin без экрана</td><td>только данные</td><td><code>burn: false</code>, цена пикселей ноль</td></tr>
+</tbody></table></div>
+<p>Рисовать внутри GUI пока отклонено: мост кадров для Пульта несёт пять ключей и не больше 300 байт (сцена не помещается), окно показа делает crop, scale, rotate, flip (координаты пришлось бы вести тем же путём), а выигрыш мал: рисунок стоит 2,4–3,9 мс на кадр.</p>
+</section>
+
+<section id="topo">
+<h2>5. Топология <code>letter_robot_sim</code>: что меняется на схеме процессов</h2>
+<p>Слева — как рецепт устроен сегодня, справа — план. Толстая стрелка — кадр, идущий в <code>layout</code>: красная — грязный, зелёная — чистый. Процессы <code>maskview</code> (маска) и <code>phone</code> (телефон) не показаны: рисования они не касаются.</p>
+<div class="pair">
+<div class="frame"><p class="cap">Сейчас</p><pre class="mermaid">
+flowchart TB
+  cam["camera_0&lt;br/&gt;camera_service"]
+  vis["vision&lt;br/&gt;color_convert, roi_crop, hsv_mask,&lt;br/&gt;morphology, circle_detector"]
+  line["line&lt;br/&gt;line_filter"]
+  draw["draw&lt;br/&gt;circle_draw, потом overlay_draw&lt;br/&gt;рисует с частотой камеры"]
+  recog["recog&lt;br/&gt;center_crop, pixel_to_robot, ml_inference&lt;br/&gt;ml_inference РИСУЕТ подпись в кадр"]
+  lay["layout&lt;br/&gt;word_layout, robot_io"]
+  gui["gui&lt;br/&gt;дисплеи main и recog"]
+  cam --> vis
+  vis -->|"detections"| line
+  vis -->|"frame + detections"| draw
+  vis -->|"frame"| recog
+  line -->|"overlay"| draw
+  line -.->|"overlay как триггер"| recog
+  recog ==>|"ГРЯЗНЫЙ frame + predictions"| lay
+  recog -->|"frame с подписью"| gui
+  draw --> gui
+  linkStyle 6 stroke:#b3261e,stroke-width:4px
+  classDef ok fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px,color:#111
+  classDef chg fill:#fff3d6,stroke:#b07d00,stroke-width:2px,color:#111
+  classDef chgp fill:#fff3d6,stroke:#b3261e,stroke-width:3px,color:#111
+  class cam,vis,line,lay,gui ok
+  class draw chg
+  class recog chgp
+</pre></div>
+<div class="frame"><p class="cap">План</p><pre class="mermaid">
+flowchart TB
+  cam["camera_0&lt;br/&gt;camera_service"]
+  vis["vision&lt;br/&gt;color_convert, roi_crop, hsv_mask,&lt;br/&gt;morphology, circle_detector"]
+  line["line&lt;br/&gt;line_filter"]
+  draw["draw&lt;br/&gt;только overlay_draw, max_fps:&lt;br/&gt;круги из detections и линия"]
+  recog["recog&lt;br/&gt;center_crop, pixel_to_robot, ml_inference&lt;br/&gt;только данные, кадр чистый"]
+  rdraw["recog_draw, новый&lt;br/&gt;overlay_draw, max_fps:&lt;br/&gt;подпись из predictions"]
+  lay["layout&lt;br/&gt;word_layout, robot_io"]
+  gui["gui&lt;br/&gt;дисплеи main и recog"]
+  cam --> vis
+  vis -->|"detections"| line
+  vis -->|"frame + detections"| draw
+  vis -->|"frame"| recog
+  line -->|"overlay"| draw
+  line -.->|"overlay как триггер"| recog
+  recog ==>|"ЧИСТЫЙ frame + predictions"| lay
+  recog -->|"frame + predictions"| rdraw
+  rdraw --> gui
+  draw --> gui
+  linkStyle 6 stroke:#2e7d32,stroke-width:4px
+  classDef ok fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px,color:#111
+  classDef chg fill:#fff3d6,stroke:#b07d00,stroke-width:2px,color:#111
+  classDef new fill:#e3efff,stroke:#2f5fa7,stroke-width:2px,color:#111
+  class cam,vis,line,lay,gui ok
+  class draw,recog chg
+  class rdraw new
+</pre></div>
+</div>
+<p>Сегодня <code>ml_inference</code> перекрашивает кадр прямо в цепочке <code>recog</code>, и этот же кадр идёт в <code>layout</code> (а завтра пошёл бы в <code>frame_saver</code> и попал бы в датасет с надписью). В плане <code>recog</code> выдаёт только данные, подпись рисует ветка <code>recog_draw</code> и отдаёт её только в <code>gui</code>. Процесс <code>draw</code> остаётся с одним <code>overlay_draw</code>. Каждая ветка рисования ограничена своим <code>max_fps</code>. Имя <code>recog_draw</code> условное.</p>
+</section>
+
+<section id="phases">
+<h2>6. Фазы миграции (план)</h2>
+<p>Каждая фаза даёт рабочий результат и имеет замер до и после. Все числа в отчёте сняты на macOS arm64, стенд не запускали.</p>
+<div class="tbl"><table>
+<thead><tr><th>Фаза</th><th>Что даёт</th><th>Рецепты и топологии</th><th>Замер до и после</th></tr></thead>
+<tbody>
+<tr><td class="s">0. База</td><td>числа стенда, кода нет</td><td><code>letter_robot_sim</code>, <code>inspection_full</code></td><td>мс на кадр у <code>overlay_draw</code>, <code>circle_draw</code>, <code>render_overlay</code>, рисующей части <code>ml_inference</code>; загрузка процесса <code>draw</code>; частота показа; дропы</td></tr>
+<tr><td class="s">1. Ядро</td><td><code>Services/draw</code>: сцена, lower, cv2, текст-патч, conformance, адаптер overlay. <code>overlay_draw</code> внутри зовёт ядро. Подписи с кириллицей</td><td>8 рецептов с <code>overlay_draw</code> не меняются</td><td>золотые сцены: фигуры без текста побайтно равны старому плагину; мс на кадр не выше базы</td></tr>
+<tr><td class="s">2. Mapping</td><td>регистры <code>mapping</code>, <code>styles</code>, <code>burn</code>, <code>max_fps</code>, выход <code>scene</code>. Опись остальных мест рисования</td><td><code>circle_draw</code> в правило: <code>letter_robot_sim</code>, <code>hikvision_letter_robot</code>, <code>letter_angle_inspect</code>, <code>dataset_circle_capture</code>. <code>contour_draw</code> в правило: <code>color_inspect</code></td><td>копий кадра в <code>draw</code>: 2 → 1; мс на кадр процесса <code>draw</code>; кадров в секунду на входе плагина: частота камеры → <code>max_fps</code></td></tr>
+<tr><td class="s">3. Чистый кадр</td><td>подпись <code>ml_inference</code> в ветку <code>recog_draw</code></td><td><code>letter_robot_sim</code>, <code>hikvision_letter_robot</code>, <code>letter_angle_inspect</code>: <code>draw_overlay: false</code></td><td>кадр на входе <code>layout</code> побайтно равен выходу <code>center_crop</code>; время <code>ml_inference.process</code> до и после</td></tr>
+<tr><td class="s">4. Маска и рамки</td><td><code>render_overlay</code> в правила mask, rect, text</td><td><code>inspection_basic</code>, <code>inspection_full</code>: дисплей на <code>overlay_draw.frame</code></td><td>стенд 1080p при 100 кадр/с: 39 мс → цель не выше 3 мс; renderer 21 Гц → частота показа; дропы около 1800 за 30 с → около нуля</td></tr>
+<tr><td class="s">5. Разметка</td><td><code>scene</code> в <code>.json</code>, экспортёры. Вместе с DS-1</td><td><code>dataset_circle_capture</code></td><td>синтетика сима: рамки из экспорта против известных позиций, IoU не ниже 0,95</td></tr>
+<tr><td class="s">6. По замеру</td><td>второй бэкенд, рисунок на уменьшенном кадре или отрисовка в GUI</td><td>—</td><td>открывается, только если ветка показа после фазы 4 дороже 5 мс на кадр p95 на Orin</td></tr>
+</tbody></table></div>
+<div class="idea" style="border-left-color:var(--no)">
+<p><strong>Заморозка, без удаления:</strong> <code>circle_draw</code>, <code>contour_draw</code>, <code>render_overlay</code> (с тремя командами и выходом <code>rendered_frame</code>), регистр <code>draw_overlay</code> и <code>_put_text_unicode</code> в <code>ml_inference</code>. Регистры <code>color_table</code> и <code>default_*</code> у <code>overlay_draw</code> остаются живыми.</p>
+<p><strong>Не переносятся:</strong> <code>points_render</code> и <code>renderer_compositor</code>. <code>qr_reader_*</code> и <code>line_filter_inspect</code> работают без правок с фазы 1.</p>
+</div>
+</section>
+
+<section id="lr">
+<h2>7. <code>layer_render</code>: остаётся отдельным модулем <span class="s s-part">(на пересмотре у CTO)</span></h2>
+<p>У <code>Services/layer_render</code> побайтно воспроизводимые кадры (пины в тестах, свой поток случайных чисел) и RGB. Сменный бэкенд под такими пинами их ломает, поэтому сейчас модуль не трогаем. Общими становятся словарь фигур и экспорт разметки, а не растеризатор. Владелец попросил пересмотреть, не строить ли <code>layer_render</code> поверх <code>draw</code>: вопрос у CTO.</p>
+<div class="frame"><pre class="mermaid">
+flowchart LR
+  LR["layer_render&lt;br/&gt;спрайты, фон, эффекты, пресет&lt;br/&gt;свой растеризатор, RGB"]
+  EXP["Services/draw&lt;br/&gt;словарь фигур&lt;br/&gt;и экспорт разметки"]
+  TR["ml_train, dataset_gen"]
+  LR -.->|"Ф9: регионы = те же фигуры и тот же экспорт"| EXP
+  EXP --> TR
+  classDef part fill:#fff3d6,stroke:#b07d00,stroke-width:2px,color:#111
+  classDef new fill:#e3efff,stroke:#2f5fa7,stroke-width:2px,color:#111
+  classDef ok fill:#e6f4ea,stroke:#2e7d32,stroke-width:2px,color:#111
+  class LR ok
+  class EXP new
+  class TR ok
+</pre></div>
+<p>Импортировать <code>Services/draw</code> из <code>layer_render</code> можно, наоборот нельзя; это правка правила LR-001, и решает её владелец при старте Ф9.</p>
+</section>
+
+<section id="owner">
+<h2>8. Решения владельца 2026-11-11</h2>
+<div class="idea">
+<ul>
+<li><strong>Шрифты подключаемые.</strong> Нужен реестр шрифтов (в том числе пользовательские), а не один зашитый шрифт. Это отличается от предложения CTO положить один DejaVu в репозиторий; как сравнивать ширину текста между системами, предстоит решить.</li>
+<li><strong>Общий помощник шаблонов полей — да.</strong> Один механизм «поле item по шаблону», общий с раскладкой папок DS-1.</li>
+<li><strong>Ограничение частоты — на ветку или плагин</strong> (регистр <code>max_fps</code>), а не глобальное.</li>
+<li><strong>Нужен сервис или инструмент разметки:</strong> выделять объекты и обводить контуры для обучения. Куда его поместить, решает CTO.</li>
+</ul>
+</div>
+</section>
+
+<section id="open">
+<h2>9. Что в плане пока не решено</h2>
+<ul>
+<li><strong>Где живёт помощник шаблонов полей:</strong> в SDK плагинов framework (рекомендация CTO, он не знает о зрении) или в <code>Services</code>. Грамматика шаблона (<code>{путь:формат}</code>, <code>when</code>) не согласована с DS-1, где <code>|</code> значит диапазон.</li>
+<li><strong>Шрифты.</strong> Решение владельца (реестр шрифтов) и риск из отчёта (разная ширина текста на Windows и Linux) пока не сведены: нужен допуск в conformance или заданный набор шрифтов по умолчанию.</li>
+<li><strong>Сервис разметки</strong> (выделение объектов, контуры): место под ревью CTO; пока есть только экспорт сцены в <code>.json</code>, YOLO, COCO.</li>
+<li><strong><code>layer_render</code> поверх <code>draw</code>:</strong> на пересмотре, плюс правка LR-001 о направлении импорта.</li>
+<li><strong>Кто исполняет <code>fps_limit</code>.</strong> Для рисования решено: регистр <code>max_fps</code> у плагина. Исправление в framework (ограничение на входе ветки показа) — отдельная задача, не решена.</li>
+<li><strong>Допуски conformance</strong> (покрытие, цвет, IoU 0,95) — предложение, не откалиброваны. Все числа с macOS arm64: на стенде и на Orin они будут другими.</li>
+<li><strong>Старые топологии.</strong> <code>render_overlay</code> стоит в <code>inspection_basic.yaml</code> и <code>inspection_full.yaml</code> (в <code>inspection_full</code> дисплей привязан к <code>rendered_frame</code>); запускаются ли они ещё — не проверено. Заморозка их не ломает.</li>
+<li><strong>Шесть мелких мест рисования:</strong> что из них идёт на дисплей, не разбирали (фаза 2).</li>
+</ul>
+</section>
+
+<footer>
+Код «сейчас» снят на <code>main</code> 3ce3fbf1e, 2026-11-11. «План» — по отчёту <code>docs/reports/2026-11-11_draw-architecture-cto.md</code> (CTO, база 358faaeda) и решениям владельца того же дня. Страница не генерируется: при расхождении правду говорит код.<br>
+Источники «сейчас»: <code>Plugins/render/overlay_draw/plugin.py</code>, <code>Plugins/render/render_overlay/plugin.py</code>, <code>Plugins/render/circle_draw/plugin.py</code>, <code>Plugins/processing/contour_draw/plugin.py</code>, <code>Services/ml_inference/plugin/plugin.py</code> (строки 39–67 и 203–237), <code>Services/code_reader/plugin/sdk_plugin.py</code>, <code>Plugins/filter/line_filter/plugin.py</code>, <code>multiprocess_prototype/recipes/letter_robot_sim.yaml</code> и другие рецепты (счётчики: <code>git grep -l</code>).
+Коммиты: <code>7e1640c97</code> (2026-10-15, общий <code>overlay_draw</code> для <code>code_reader</code>; отдельный <code>code_view</code> отвергнут), <code>454c4ffb1</code> (2026-06-08, <code>overlay_draw</code> пишет в <code>frame</code>), <code>261b90f13</code> (2026-05-10, удалён старый <code>RendererService</code>, который ещё и сохранял кадры и решал «брак»), <code>ee22e6206</code> (2026-09-30, замер 11,6 → 39 мс).
+</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", flowchart: { htmlLabels: true }, maxTextSize: 200000 });</script>
+</body>
+</html>

@@ -17,6 +17,8 @@ Purpose: проверить `Services.line_sim.tools.build_stand_assets.main(arg
 from __future__ import annotations
 
 import importlib
+import shutil
+import unicodedata
 from pathlib import Path
 from types import ModuleType
 
@@ -33,12 +35,12 @@ _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _PHOTO = "belt_photo_full.png"
 _TILE = "belt_tile.png"
 _DISK = "letters_ink_disk.png"
-_LETTER_DIRS = ["А", "К", "Р", "Х"]  # А К Р Х (кириллица)
+_LETTER_DIRS = list("ЁАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")  # 33 буквы (кириллица, sorted)
 _LETTER_FILES = ["DejaVuSans_s3.png", "DejaVuSansMono_s3.png"]
 
 _LINE_PHOTO = "belt_photo_full.png 598x484x3"
 _LINE_TILE = "belt_tile.png 410x484x4"
-_LINE_LETTERS = "letters_ink 8 files, disk 300x300x4"
+_LINE_LETTERS = "letters_ink 66 files, disk 300x300x4"
 
 _RAIL_ROWS = np.array(list(range(0, 22)) + list(range(463, 484)))
 
@@ -106,7 +108,7 @@ def test_letters_8_files_and_disk_300(built: dict[str, object]) -> None:
     assert sorted(p.name for p in (data / "letters_ink").iterdir()) == sorted(_LETTER_DIRS)
     for letter in _LETTER_DIRS:
         assert sorted(p.name for p in (data / "letters_ink" / letter).iterdir()) == sorted(_LETTER_FILES)
-    assert len(_letter_files(data)) == 8
+    assert len(_letter_files(data)) == 66
     assert imread_unicode(data / _DISK, cv2.IMREAD_UNCHANGED).shape == (300, 300, 4)
     assert _status(built["out"])[2] == f"built {_LINE_LETTERS}"  # type: ignore[arg-type]
     assert "ошибка шага" not in built["err"]  # type: ignore[operator]  # stderr дочернего tile несёт заметку про масштаб
@@ -167,7 +169,7 @@ def test_partial_letters_group_rebuilt_and_junk_removed(
         f"built {_LINE_LETTERS}",
     ]
     assert not junk.exists()
-    assert len(_letter_files(data)) == 8
+    assert len(_letter_files(data)) == 66
     for rel, (data_bytes, mtime) in base.items():
         assert (data / rel).read_bytes() == data_bytes
         assert (data / rel).stat().st_mtime_ns == mtime
@@ -326,7 +328,7 @@ def test_children_called_with_spec_arguments(bsa: ModuleType, monkeypatch: pytes
     fonts = Path(importlib.import_module("matplotlib").get_data_path()) / "fonts" / "ttf"
     expected = [
         [
-            "--letters", "АКРХ", "--font", str(fonts / f"{name}.ttf"),
+            "--letters", "ЁАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ", "--font", str(fonts / f"{name}.ttf"),
             "--stroke-px", "3", "--size-px", "300", "--letter-frac", "0.4763",
             "--ink-rgb", "65,70,82", "--grain-sigma", "9", "--edge-blur-px", "1", "--seed", "1",
             "--disk-from-photo", str(_FIXTURES / "real_disk_snapshot.png"),
@@ -416,7 +418,7 @@ def test_extra_png_in_letters_dir_rebuilds_group(
         f"built {_LINE_LETTERS}",
     ]
     assert not extra.exists()
-    assert len(_letter_files(data)) == 8
+    assert len(_letter_files(data)) == 66
 
 
 def test_extra_webp_in_letters_dir_rebuilds_group(
@@ -436,4 +438,59 @@ def test_extra_webp_in_letters_dir_rebuilds_group(
         f"built {_LINE_LETTERS}",
     ]
     assert not junk.exists()
+    assert len(_letter_files(data)) == 66
+
+
+def test_letters_full_alphabet(built: dict[str, object]) -> None:
+    data: Path = built["data"]  # type: ignore[assignment]
+    root = data / "letters_ink"
+    names = sorted(p.name for p in root.iterdir())
+    assert names == list("ЁАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
+    assert len(names) == 33
+    assert all(unicodedata.is_normalized("NFC", name) for name in names)
+    for letter in names:
+        assert sorted(p.name for p in (root / letter).iterdir()) == sorted(_LETTER_FILES), letter
+    assert len(_letter_files(data)) == 66
+
+
+def test_old_8_sprite_catalog_rebuilt(
+    bsa: ModuleType, built: dict[str, object], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    shutil.copytree(built["data"], data)  # type: ignore[arg-type]
+    for letter_dir in (data / "letters_ink").iterdir():
+        if letter_dir.name not in "АКРХ":
+            shutil.rmtree(letter_dir)  # остаётся старый каталог из 8 спрайтов
     assert len(_letter_files(data)) == 8
+    capsys.readouterr()
+
+    assert bsa.main(["--data-dir", str(data)]) == 0
+
+    assert _status(capsys.readouterr().out) == [
+        f"skipped {_LINE_PHOTO}",
+        f"skipped {_LINE_TILE}",
+        f"built {_LINE_LETTERS}",
+    ]
+    assert len(_letter_files(data)) == 66
+    assert sorted(p.name for p in (data / "letters_ink").iterdir()) == sorted(_LETTER_DIRS)
+
+
+def test_other_letters_ink_layout_rebuilt(
+    bsa: ModuleType, built: dict[str, object], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    shutil.copytree(built["data"], data)  # type: ignore[arg-type]
+    extra = data / "letters_ink" / "А" / "extra.png"  # лишний файл рядом с 66 ожидаемыми: образец класса (LS-014)
+    extra.write_bytes((data / "letters_ink" / "А" / "DejaVuSans_s3.png").read_bytes())
+    assert len(_letter_files(data)) == 67
+    capsys.readouterr()
+
+    assert bsa.main(["--data-dir", str(data)]) == 0
+
+    assert _status(capsys.readouterr().out) == [
+        f"skipped {_LINE_PHOTO}",
+        f"skipped {_LINE_TILE}",
+        f"built {_LINE_LETTERS}",
+    ]
+    assert not extra.exists()
+    assert len(_letter_files(data)) == 66

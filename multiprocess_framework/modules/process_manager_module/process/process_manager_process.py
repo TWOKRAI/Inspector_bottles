@@ -9,13 +9,15 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+from dataclasses import replace
+import inspect
 import math
 import os
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ...command_module import DEFERRED
 from ...config_module.feature_flags import is_enabled
@@ -27,6 +29,8 @@ from ...logger_module.channels.log_channel import (
 )
 from ...process_module import ProcessModule
 from ...process_module.configs.observability_layers import ORCHESTRATOR_PROCESS_NAME
+from ...process_module.health.schema import READINESS_FIELDS, readiness_path
+from ...process_module.progress import ProgressTracker, progress_path
 from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
 from ..core.process_priority import ProcessPriority
@@ -35,11 +39,14 @@ from ..core.stop_budget import (
     KILL_RESERVE_S,
     MAX_STOP_WINDOW_KEY,
     SHUTDOWN_TIMEOUT_KEY,
+    STOP_WAVE_MAIN,
+    has_last_wave,
     outer_graceful_s,
     stop_budget,
     valid_window_s,
 )
 from ..core.process_status import ProcessStatusMonitor
+from ..core.run_flag import RunFlag
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
 from .backend_ctl_endpoint import (
@@ -47,6 +54,21 @@ from .backend_ctl_endpoint import (
     teardown_backend_ctl_channel,
 )
 from .observability_broker import POINT_COMMANDS
+from .pre_stop import PreStopStep, parse_pre_stop, run_pre_stop_step
+from .run_config import RunConfig, run_config_value
+from .run_state import (
+    AutostartLatch,
+    EvalInput,
+    RunState,
+    auto_restart_config_reason,
+    evaluate,
+    has_blocking,
+    restart_window,
+    run_view,
+    stop_unconfirmed_reason,
+    transition,
+    unconfirmed_stop,
+)
 from .topology_manager import TopologyManager
 
 #: 4.4 (ревью, R4): ленивое создание брокера зовут два read-потока канала
@@ -54,6 +76,34 @@ from .topology_manager import TopologyManager
 #: два брокера (показано тестом только с замедленным на 50 мс ``__init__``), и память
 #: закрытых сессий одного не видна другому.
 _BROKER_INIT_LOCK = threading.Lock()
+
+
+#: Task 1.2a gui-graceful-close (ADR-PMM-041): фазы хода системного стопа (``pre_stop`` ставит 1.4,
+#: ``last_wave`` — 1.3) и ключи ``system.stop.*``, которые идут в стор.
+_SYSTEM_STOP_PHASES = ("pre_stop", "children", "last_wave", "done")
+_SYSTEM_STOP_STORE_KEYS = ("phase", "mode", "initiator", "started_at")
+#: Служебный ключ ``data`` команды ``system.shutdown``: отправитель внешнего ``process.command``
+#: (ставит только ``_handle_process_command``; другим командам не подмешивается).
+_SHUTDOWN_SENDER_KEY = "_sender"
+#: Предел длины ``initiator`` в ``system.stop`` (символов): отправитель конверта — чужая строка.
+_SHUTDOWN_INITIATOR_MAX = 64
+#: C-88 (ADR-PMM-045): после ``done`` PM ещё недолго отвечает на ``supervision.status``, если снимок
+#: опрашивают прямо сейчас. Читаются в момент вызова (не параметры по умолчанию): тесты подменяют.
+#: Свежесть: последний ответ ``supervision.status`` во время стопа моложе этого срока (с).
+_STATUS_OBSERVER_FRESH_S = 0.25
+#: Потолок ожидания снимка с ``done`` (с).
+_STATUS_LINGER_S = 0.5
+#: Пауза после снимка с ``done``: ответ уходит потоком адаптера моста уже после возврата обработчика (с).
+_STATUS_FLUSH_S = 0.05
+
+
+class _EnvelopeSender(str):
+    """Отправитель конверта ``process.command``, вложенный самим PM (Task 1.2a, ADR-PMM-041).
+
+    Тип — метка происхождения: строку ``_sender`` из ``data`` клиента (через IPC приходит только
+    ``dict``/``str``) ``_cmd_system_shutdown`` не примет, принимает только этот тип."""
+
+    __slots__ = ()
 
 
 def _merge_cmd_args(data: dict | None, kwargs: dict) -> dict:
@@ -76,6 +126,11 @@ HUB_QUEUES: dict[str, Any] = {
     "state": {"maxsize": 8},
     "observability": {"maxsize": 256},
 }
+
+
+def _restart_policy_invalid_reason(name: str) -> dict:
+    """Причина «per-process ``restart_policy`` негоден»: ``failure`` / ``config``, значения входа не называет."""
+    return {"node": name, "severity": "failure", "reason": f"restart_policy негоден: {name}", "source": "config"}
 
 
 class ProcessManagerProcess(ProcessModule):
@@ -101,10 +156,86 @@ class ProcessManagerProcess(ProcessModule):
     #: Task 1.9b (D1/D4): стоп детей PM начат (``_ChildrenStop.request_stop``). Уровень класса — чтобы
     #: атрибут был у любого экземпляра, в том числе собранного в тестах через ``__new__`` (``make_pm``).
     _children_stopping: bool = False
+    #: Task 1.2a gui-graceful-close (ADR-PMM-041): ход системного стопа для ``supervision.status`` —
+    #: ``phase / mode / initiator / started_at / deadline_at / pre_stop_step``; ``None`` — стоп не начат.
+    #: Уровень класса — как ``_children_stopping``: PM из тестов (``__new__``) отвечает ``system_stop: None``.
+    #: Читается и пишется только под ``_system_stop_lock`` и только помощниками ``*_system_stop*``.
+    _system_stop_info: dict | None = None
+    #: Значения ``system.stop.*``, уже записанные в стор (под ``_system_stop_publish_lock``); ``None`` — ни одной.
+    _system_stop_published: dict | None = None
     #: Task 1.9b (D1): исполнитель операций жизненного цикла и два адаптера над ним; ``None`` до ``initialize()``.
     _lifecycle_executor: Any = None
     _lifecycle_submit: Any = None
     _transition_gate: Any = None
+    #: Task 1.4 (ADR-PMM-044): принятые шаги ``pre_stop`` и их исполнитель ``pm-pre-stop``; без шагов —
+    #: пусто и ``None`` (ноль потоков). Уровень класса — PM из ``__new__`` отвечает как граф без шагов.
+    _pre_stop_steps: tuple = ()
+    _pre_stop_executor: Any = None
+    #: Источник отмены шагов, поставленный путём ``force`` (``"force"``); ``None`` — не ставился.
+    _pre_stop_cancel_reason: str | None = None
+    #: Task 1.1 system-run-state: состояние работы системы и событие ``run_event``. Уровень класса — PM из
+    #: ``__new__`` (``make_pm``) отвечает и пишет машину без ``_create_components()``. Пишет только
+    #: ``_run_apply`` под ``_run_lock``; ``_run_event`` — ``RunFlag`` (байт без межпроцессного замка,
+    #: ADR-PMM-047), детям уходит через ``ProcessRegistry``.
+    _run_event: Any = None
+    #: Task 2.7d (ADR-PMM-051): второй ``RunFlag`` — «``running`` и нет хода системного стопа», при любом
+    #: ``run_gate``; детям уходит путём ``run_event``. Пишет только ``_run_active_sync_locked`` под ``_run_lock``.
+    #: ``None`` — PM из ``__new__`` без ``_create_components()``: писать некуда.
+    _run_active: RunFlag | None = None
+    _run_state: RunState = RunState.booting
+    _run_gate: bool = False
+    #: S3c (ADR-PMM-050): латч автостарта «взведён до первого ready»; решает только под ``_run_lock`` в
+    #: ``_run_apply``. Уровень класса — выключенный (PM из ``__new__`` без ``_create_components()`` не стартует сам).
+    _run_autostart: AutostartLatch = AutostartLatch(False)
+    _run_since: float = 0.0
+    #: ``time.monotonic()`` последнего входа в ``running`` (ревью Ф1, m2): такт, чья оценка начата раньше, устарел.
+    #: Наружу не публикуется — ``since`` остаётся ``time.time()``.
+    _run_running_mono: float = 0.0
+    _run_ready: bool = True
+    #: Значения ``system.run.*``, уже записанные в стор (под ``_run_publish_lock``); ``None`` — ни одной.
+    _run_published: dict | None = None
+    #: Task 1.3: текущие причины готовности (``evaluate``) и последняя авария ``{at, reasons, acknowledged_at}``.
+    #: Пишет только ``_run_apply`` под ``_run_lock`` и ЗАМЕНЯЕТ значение целиком (никогда не мутирует на месте:
+    #: значение уровня класса общее для всех PM). ``tuple`` — неизменяемое пустое умолчание.
+    _run_reasons: tuple | list = ()
+    _run_last_fault: dict | None = None
+    #: Task 1.4: срок ожидания ``paused`` по умолчанию (конфиг PM ``run_stop_timeout_s``), срез опроса листьев, с.
+    _DEFAULT_RUN_STOP_TIMEOUT_S: float = RunConfig.model_fields["run_stop_timeout_s"].default
+    _STOP_POLL_S = 0.05
+    #: Task 1.4: «не подтвердили остановку» ``{процесс: N}`` (N — срок ожидания ``paused``); пишет только код под
+    #: ``_unconfirmed_lock`` и ЗАМЕНЯЕТ значение целиком (как ``_run_reasons``: уровень класса общий для всех PM).
+    _run_unconfirmed: dict = {}
+    #: Task 1.8: окно перезапуска процессов с флагом ``run_auto_restart`` — ``{процесс: когда у него появился failure}``
+    #: (``time.time()``, часы листов готовности) и срок окна по умолчанию (конфиг PM ``run_restart_grace_s``), с.
+    #: Ведёт только тик под ``_run_restart_lock`` (``restart_window``) и ЗАМЕНЯЕТ значение целиком (как
+    #: ``_run_unconfirmed``: уровень класса общий для всех PM); остальные оценки только читают ссылку.
+    _DEFAULT_RUN_RESTART_GRACE_S: float = RunConfig.model_fields["run_restart_grace_s"].default
+    _run_down_since: dict = {}
+    #: Task 1.4: остановка в аварии завершена (все ``paused``/не живы или срок истёк); ``ack`` (Task 1.7) читает
+    #: признак. Сбрасывается при входе в ``fault`` и выходе из него (под ``_run_lock``); ``_fault_seq`` — номер аварии:
+    #: поздняя последовательность старой аварии признак новой не ставит.
+    _fault_stop_done: bool = False
+    _fault_seq: int = 0
+    #: Task 1.4: STOP с шагами ``pre_stop`` держит ``run_event`` взведённым в ``stopping`` до конца шагов.
+    _run_stop_hold: bool = False
+    #: Task 1.3: листья ``processes.<n>.readiness``, уже записанные в стор (``{имя: {поле: значение}}``);
+    #: пишет только ``_publish_readiness_leaves`` под ``_readiness_publish_lock``.
+    _readiness_published: dict | None = None
+    #: Task 1.3b: шкала загрузки ``system.progress.boot``. Ведёт ТОЛЬКО ``initialize()`` (initialize-поток, один
+    #: писатель: ``ProgressTracker`` не потокобезопасен). ``None`` — шкалы нет (нет стора) или она закрыта
+    #: ``finish``; тогда все хуки шкалы ничего не делают (рестарт, apply, итог STOP лист ``boot`` не трогают).
+    _boot_progress: ProgressTracker | None = None
+    #: Число процессов, прошедших валидацию (N), и число стартованных (k) — для долей и метки «запущено k из N».
+    _boot_total: int = 0
+    _boot_started: int = 0
+    #: Объединение готовых по ВСЕМ вызовам барьера (гейты волн возвращают подмножества); ``None`` — шкалы нет.
+    _boot_ready: set | None = None
+    #: Веса шкалы по фазам, не по времени: стор поднят 5, «запущен» 45 (k из N), «готов» 50 (результат барьера).
+    _BOOT_PROGRESS_STEPS = [("store", 5), ("started", 45), ("ready", 50)]
+    #: Task 1.3: интервал heartbeat по умолчанию, сек — как ``ProcessHeartbeat.start()`` (``heartbeat_interval``, 5.0).
+    _DEFAULT_HEARTBEAT_INTERVAL_S = 5.0
+    #: Task 1.3: молчание = ``3 x`` интервал heartbeat (design.md §3.3).
+    _READINESS_STALE_FACTOR = 3.0
 
     def __init__(
         self,
@@ -129,6 +260,13 @@ class ProcessManagerProcess(ProcessModule):
         # а не только лениво, чтобы первое касание было заведомо однопоточным.
         self.__dict__["_broadcast_generations_map"] = {}
         self.__dict__["_broadcast_generations_lock_obj"] = threading.Lock()
+        # Task 1.2a gui-graceful-close: листовые локи хода стопа — здесь, чтобы первое касание было
+        # однопоточным; запасной путь в свойствах — для PM из тестов (``__new__``).
+        self.__dict__["_system_stop_lock_obj"] = threading.Lock()
+        self.__dict__["_system_stop_publish_lock_obj"] = threading.Lock()
+        # Task 1.1 system-run-state: листовой замок машины работы и замок её публикации — тем же образцом.
+        self.__dict__["_run_lock_obj"] = threading.Lock()
+        self.__dict__["_run_publish_lock_obj"] = threading.Lock()
         # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
         # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
         # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
@@ -166,6 +304,36 @@ class ProcessManagerProcess(ProcessModule):
 
         # Task 1.11 (DESIGN 2, 7): потолок окон стопа детей ``C`` — один раз, до реестра и ``_budget()``.
         self._stop_window_ceiling_s = self._read_stop_window_ceiling()
+        # Task 1.3 (ADR-PMM-043): есть ли волна ``last`` — ОДИН раз при старте, из ``processes_config`` (к
+        # ``initialize`` ``_process_configs`` ещё пуст). ``topology.apply`` его не пересчитывает (ограничение ADR-043).
+        self._has_last = has_last_wave(self.get_config("processes_config"))
+
+        # Task 1.1 system-run-state: событие работы — ДО реестра (реестр строится из ``__init__``, позже
+        # ``initialize()`` отдал бы ему ``None``). ``run_gate: true`` — снято до ``system.run.start``;
+        # иначе взведено сразу и PM его больше не трогает (машина наблюдаемая, не гейтящая).
+        run_gate, gate_ok = run_config_value("run_gate", self.get_config("run_gate"))
+        if not gate_ok:
+            self._log_warning("run_gate негоден (нужно true или false) — гейт работы выключен")
+        self._run_gate = run_gate is True
+        # S3c (ADR-PMM-050): автостарт один раз за boot — читается один раз, как ``run_gate`` (ADR-PMM-049).
+        # Без гейта событие работы взведено с boot, START источникам ничего не меняет: ключ не действует.
+        autostart, autostart_ok = run_config_value("run_autostart", self.get_config("run_autostart"))
+        if not autostart_ok:
+            self._log_warning("run_autostart негоден (нужно true или false) — автостарт выключен")
+        elif autostart is True and not self._run_gate:
+            self._log_warning("run_autostart без run_gate — автостарт не действует")
+        self._run_autostart = AutostartLatch(autostart is True and self._run_gate)
+        self._run_state = RunState.booting
+        self._run_since = time.time()
+        self._run_ready = True
+        self._run_stale_warned: set[str] = set()  # типы исключений чтения срока молчания, о которых уже был WARNING
+        # Task 1.10 (ADR-PMM-047): ``RunFlag``, не ``mp.Event`` — у того каждое обращение берёт межпроцессный замок,
+        # а ребёнок, убитый внутри ``is_set()``, держит его вечно и вешает PM под ``_run_lock`` (F3 ревью Ф1).
+        self._run_event = RunFlag()
+        if not self._run_gate:
+            self._run_event.set()
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — снят до первого ``running``, при любом ``run_gate``.
+        self._run_active = RunFlag()
 
         self._process_registry = ProcessRegistry(
             logger=self,
@@ -182,6 +350,10 @@ class ProcessManagerProcess(ProcessModule):
             child_stop_budget=stop_budget(self.get_config(SHUTDOWN_TIMEOUT_KEY)),
             # Task 1.11: потолок окон stop_window_s; None — потолок = g (числа те же, что без ключей).
             max_stop_window_s=self._stop_window_ceiling_s,
+            # Task 1.1 system-run-state: событие работы детям на чтение (путь ADR-PMM-034).
+            run_event=self._run_event,
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём.
+            run_active=self._run_active,
         )
         # Task 1.8 (L-9, ADR-PMM-037): ожидание стопа ребёнка вычерпывает каналы PM в буфер роутера.
         self._process_registry.stop_wait_idle = self._stop_wait_idle
@@ -293,10 +465,15 @@ class ProcessManagerProcess(ProcessModule):
             # строковое имя исполнителя в register_command разрешается при регистрации.
             if not self._setup_lifecycle_executor():
                 return False
+            self._setup_pre_stop()
 
             self._setup_console_manager()
             self._setup_topology_manager()
             self._setup_state_store()
+            # Task 1.1 system-run-state: первая публикация состояния работы (booting) — как только есть стор.
+            self._publish_run_state()
+            # Task 1.3b: шкала загрузки — «стор поднят» (5 %); дальше хуки в старте процессов и барьерах.
+            self._boot_progress_begin()
             self._register_builtin_commands()
             self._log_active_feature_flags()
 
@@ -349,6 +526,13 @@ class ProcessManagerProcess(ProcessModule):
             # По таймауту всё равно сигналим готовность (boot не блокировать
             # навсегда) + WARNING со списком не-ready.
             self._wait_boot_ready()
+            # Task 1.3 system-run-state: подъём закончен — booting -> ready/not_ready по оценке агрегата
+            # (молчание = не готов), а не по барьеру. Первый heartbeat с ``readiness`` приходит позже —
+            # до тех пор ``not_ready`` с причинами ``liveness``; дальше состояние ведёт такт монитора.
+            self._settle_run_state()
+            # Task 1.3b: шкала закрывается ОДИН раз и при ready, и при not_ready (окно закрывается по выходу
+            # из booting; причины «не готов» видны в system.run.*). Провал выше оставляет boot с done: false.
+            self._boot_progress_finish()
 
             # Готовность оркестратора для SystemLauncher (ADR-116) объявляется ТЕМ ЖЕ
             # примитивом, что и у детей: _announce_ready() ПОСЛЕДНЕЙ строкой run() —
@@ -520,7 +704,7 @@ class ProcessManagerProcess(ProcessModule):
         self._lifecycle_executor = manager.create(
             "pm-lifecycle",
             {"kind": "keyed", "serial": True, "max_pending": _L_CAP + _T_CAP},
-            should_reject=self._pm_stopping,
+            should_reject=self._lifecycle_rejected,
         )
         self._lifecycle_submit = _LifecycleSubmit(self, self._lifecycle_executor)
         self._transition_gate = _TransitionGate(self, self._lifecycle_submit, t_cap=_T_CAP)
@@ -536,6 +720,956 @@ class ProcessManagerProcess(ProcessModule):
         """
         ev = getattr(self, "_system_stop_event", None)
         return bool(ev is not None and ev.is_set()) or self._children_stopping
+
+    # -------------------------------------------------------------------------
+    # Ход системного стопа (Task 1.2a gui-graceful-close, ADR-PMM-041)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _system_stop_lock(self) -> threading.Lock:
+        """Листовой лок словаря хода стопа: под ним только чтение, запись и проверка-и-установка."""
+        return self.__dict__.setdefault("_system_stop_lock_obj", threading.Lock())
+
+    @property
+    def _status_done_served_event(self) -> threading.Event:
+        """Событие «снимок ``supervision.status`` с фазой ``done`` отдан» (C-88, ADR-PMM-045).
+
+        Создаётся при первом чтении (``__dict__.get`` → ``setdefault`` только если нет): обработчик
+        и ожидание в ``_ChildrenStop`` берут ОДНО и то же событие; чтение через ``getattr`` с
+        умолчанием дало бы ожидающему ``None`` и мгновенный выход."""
+        ev = self.__dict__.get("_status_done_served_ev")
+        if ev is None:
+            ev = self.__dict__.setdefault("_status_done_served_ev", threading.Event())
+        return ev
+
+    @property
+    def _system_stop_publish_lock(self) -> threading.Lock:
+        """Сериализует публикации ``system.stop.*`` в стор (не словарь): фаза в сторе не откатывается."""
+        return self.__dict__.setdefault("_system_stop_publish_lock_obj", threading.Lock())
+
+    def _system_stop_snapshot(self) -> dict | None:
+        """Копия словаря хода стопа под локом или ``None``."""
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            return dict(info) if info is not None else None
+
+    def _begin_system_stop(
+        self,
+        mode: str,
+        initiator: str,
+        deadline_s: float | None,
+        phase: str = "children",
+        *,
+        window_s: float | None = None,
+    ) -> bool:
+        """Начать ход стопа. Первый выигрывает: ``True`` — стоп начат этим вызовом, ``False`` — уже шёл.
+
+        ``deadline_at`` (``time.time()``): ``window_s`` задан (фаза ``pre_stop``, Task 1.4 — сумма
+        ``timeout_s`` шагов) — ``started_at + window_s``; ``force`` — ``started_at + deadline_s``; иначе
+        ``started_at + pm_graceful_s`` бюджета PM. Бюджет читается до лока (лок листовой).
+        """
+        if phase not in _SYSTEM_STOP_PHASES:
+            raise ValueError(f"system_stop: недопустимая фаза {phase!r}")
+        if window_s is not None:
+            window_s = float(window_s)
+        elif mode == "force" and deadline_s is not None:
+            window_s = float(deadline_s)
+        else:
+            window_s = float(self._budget()["pm_graceful_s"])
+        started_at = time.time()
+        info = {
+            "phase": phase,
+            "mode": mode,
+            "initiator": initiator,
+            "started_at": started_at,
+            "deadline_at": started_at + window_s,
+            "pre_stop_step": None,
+        }
+        # Task 2.7d (ADR-PMM-051): единственная точка начала хода стопа — и единственное место, где признак стопа
+        # снимает флаг ``run_active``, каким бы путём стоп ни начинался (команда, ``supervision.status``, стоп детей
+        # корня). Порядок замков ``_run_lock`` -> ``_system_stop_lock``; флаг снимается ДО записи признака — ход
+        # стопа не опережает флаг (как состояние в ``_run_apply``). Вызывающий ``_run_lock`` не держит.
+        with self._run_lock, self._system_stop_lock:
+            if self._system_stop_info is not None:
+                return False
+            self._run_active_sync_locked(self._run_state, stop_begun=True)
+            self._system_stop_info = info
+            return True
+
+    def _escalate_system_stop(self, mode: str, deadline_s: float) -> bool:
+        """``force`` поверх идущего graceful: новые ``mode`` и ``deadline_at``; ``started_at`` и ``initiator``
+        прежние. Повторный graceful, стоп не начат или ``phase == "done"`` — без изменений. ``True`` — изменено."""
+        if mode != "force":
+            return False
+        deadline_at = time.time() + float(deadline_s)
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is None or info["phase"] == "done" or info["mode"] == "force":
+                return False
+            info["mode"] = "force"
+            info["deadline_at"] = deadline_at
+            return True
+
+    def _shift_system_stop_deadline(self, deadline: float) -> bool:
+        """Сдвиг ``deadline_at`` хода стопа на срок области (Task 1.3, ADR-PMM-043); ``deadline`` — ``monotonic``.
+
+        Зовёт слушатель волны ``last`` в момент её сигнала: ``deadline_at = time.time() + остаток срока``.
+        Сдвига нет при ``mode == "force"``, ``phase == "done"`` и без начатого стопа. ``True`` — сдвинут.
+        """
+        deadline_at = time.time() + max(0.0, float(deadline) - time.monotonic())
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is None or info["phase"] == "done" or info["mode"] == "force":
+                return False
+            info["deadline_at"] = deadline_at
+            return True
+
+    def _set_system_stop_phase(self, phase: str) -> None:
+        """Сменить фазу хода стопа. Стоп не начат — no-op с WARNING (словарь не создаётся); ``done`` — конечная."""
+        if phase not in _SYSTEM_STOP_PHASES:
+            raise ValueError(f"system_stop: недопустимая фаза {phase!r}")
+        graceful_s = self._pre_stop_graceful_s()
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is not None and info["phase"] != "done":
+                # Task 1.4 (ADR-PMM-044): выход из ``pre_stop`` любым путём (``_ChildrenStop.request_stop`` при
+                # внешнем событии) — то же, что ``_leave_pre_stop``: шаг снят, срок graceful перебазирован.
+                if info["phase"] == "pre_stop" and phase != "pre_stop":
+                    self._exit_pre_stop_locked(info, graceful_s)
+                info["phase"] = phase
+        if info is None:
+            self._log_warning(f"system_stop: фаза {phase!r} без начатого стопа — пропущено")
+
+    def _set_pre_stop_step(self, step: str | None) -> None:
+        """Шаг фазы ``pre_stop`` (ставит Task 1.4). Стоп не начат — no-op с WARNING."""
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is not None:
+                info["pre_stop_step"] = step
+        if info is None:
+            self._log_warning("system_stop: шаг pre_stop без начатого стопа — пропущено")
+
+    # -------------------------------------------------------------------------
+    # Шаги pre_stop (Task 1.4 gui-graceful-close, ADR-PMM-044)
+    # -------------------------------------------------------------------------
+
+    def _setup_pre_stop(self) -> None:
+        """Разобрать ``pre_stop`` конфига PM и создать исполнитель ``pm-pre-stop`` (только при шагах).
+
+        Негодная запись — ERROR и пропуск; PM стартует всегда (принцип 5 владельца). Без менеджера
+        исполнителей или при его отказе — ERROR, граф без шагов.
+        """
+        steps, errors = parse_pre_stop(self.get_config("pre_stop"))
+        for text in errors:
+            self._log_error(text)
+        if not steps:
+            return
+        manager = getattr(self, "executor_manager", None)
+        if manager is None:
+            self._log_error("pre_stop: исполнитель недоступен — шаги отключены")
+            return
+        try:
+            executor = manager.create(
+                "pm-pre-stop",
+                {"kind": "keyed", "serial": True, "max_pending": 1},
+                should_reject=self._pre_stop_rejected,
+            )
+        except (ValueError, TypeError) as exc:
+            self._log_error(f"pre_stop: исполнитель не создан ({type(exc).__name__}) — шаги отключены")
+            return
+        self._pre_stop_executor = executor
+        self._pre_stop_steps = tuple(steps)
+
+    @property
+    def _pre_stop_cancel_flag(self) -> threading.Event:
+        """Флаг отмены шагов путём ``force``; ленивый — как ``_system_stop_lock`` (PM из ``__new__``)."""
+        return self.__dict__.setdefault("_pre_stop_cancel_obj", threading.Event())
+
+    def _pre_stop_cancel_source(self) -> str | None:
+        """Почему шаги отменены: ``"force"`` | ``"event"`` | ``None``.
+
+        ``"event"`` — корень PM гасится не потоком шагов: внешний ``_system_stop_event``, свой ``stop_event``
+        (раннер/спавнер) или начатый стоп детей. До ``_finish_pre_stop`` эти события в фазе ``pre_stop`` внутри
+        PM взводит только путь ``force`` — и он ставит флаг отмены раньше; значит, любой их взвод — отмена.
+        """
+        if self._pre_stop_cancel_flag.is_set():
+            return self._pre_stop_cancel_reason or "force"
+        ev = getattr(self, "_system_stop_event", None)
+        if ev is not None and ev.is_set():
+            return "event"
+        own = getattr(self, "stop_event", None)
+        if (own is not None and own.is_set()) or self._children_stopping:
+            return "event"
+        return None
+
+    def _pre_stop_rejected(self) -> bool:
+        """``should_reject`` исполнителя ``pm-pre-stop``: шаги отменены до старта."""
+        return self._pre_stop_cancel_source() is not None
+
+    def _cancel_pre_stop(self, reason: str) -> None:
+        """Отменить шаги (путь ``force``): причина ДО флага — поток шагов читает её после флага."""
+        if self._pre_stop_cancel_reason is None:
+            self._pre_stop_cancel_reason = reason
+        self._pre_stop_cancel_flag.set()
+
+    def _lifecycle_rejected(self) -> bool:
+        """``should_reject`` ``pm-lifecycle`` (Task 1.4): PM гасится ИЛИ ход стопа в фазе ``pre_stop``.
+
+        ``_pm_stopping()`` не расширяется: его потребители (``stop_abort``, отказ спавна, ожидания) в фазе
+        ``pre_stop`` работают как раньше (ADR-PMM-044).
+        """
+        if self._pm_stopping():
+            return True
+        info = self._system_stop_snapshot()
+        return info is not None and info.get("phase") == "pre_stop"
+
+    def _pre_stop_graceful_s(self) -> float | None:
+        """``pm_graceful_s`` бюджета, если ход стопа в фазе ``pre_stop``; иначе ``None`` (бюджет не читается).
+
+        Чтение фазы — подсказка без лока (лок листовой, бюджет под ним не читают): фазу ``pre_stop`` ставит
+        только ``_begin_system_stop``, а выход из неё перепроверяется под локом.
+        """
+        info = self._system_stop_info
+        if info is None or info.get("phase") != "pre_stop":
+            return None
+        return float(self._budget()["pm_graceful_s"])
+
+    @staticmethod
+    def _exit_pre_stop_locked(info: dict, graceful_s: float | None) -> None:
+        """Под ``_system_stop_lock``: шаг снят; graceful — срок фазы детей от момента перехода."""
+        info["pre_stop_step"] = None
+        if info["mode"] == "graceful" and graceful_s is not None:
+            info["deadline_at"] = time.time() + graceful_s
+
+    def _leave_pre_stop(self) -> bool:
+        """Переход ``pre_stop → children``. ``True`` — переход сделан этим вызовом; иначе no-op.
+
+        Зовут поток шагов (``finally``) и путь ``force``-эскалации; ``force`` срок не сдвигает.
+        """
+        graceful_s = self._pre_stop_graceful_s()
+        with self._system_stop_lock:
+            info = self._system_stop_info
+            if info is None or info["phase"] != "pre_stop":
+                return False
+            self._exit_pre_stop_locked(info, graceful_s)
+            info["phase"] = "children"
+            return True
+
+    def _finish_pre_stop(self) -> None:
+        """Конец шагов: переход в ``children``, события стопа, публикация. Идемпотентна."""
+        self._leave_pre_stop()
+        self._set_stop_events()
+        self._publish_system_stop()
+
+    def _run_pre_stop(self) -> None:
+        """Операция ``pm-pre-stop``: шаги по порядку; события стопа — в ``finally`` всегда.
+
+        ``_set_pre_stop_step`` — вне обработки шага: его исключение — исключение потока шагов.
+        """
+        try:
+            self._run_pre_stop_loop()
+        except Exception as exc:  # noqa: BLE001 — граница потока шагов: события взводит finally
+            self._log_error(f"pre_stop: поток шагов — исключение {type(exc).__name__}")
+        finally:
+            self._finish_pre_stop()
+
+    def _run_pre_stop_loop(self) -> None:
+        """Шаги по порядку до отмены (общий цикл ``_run_pre_stop`` и прохода graceful-shutdown из ``running``)."""
+        for step in self._pre_stop_steps:
+            source = self._pre_stop_cancel_source()
+            if source is not None:
+                self._log_info(f"pre_stop: шаг '{step.label}' прерван ({source})")
+                break
+            self._set_pre_stop_step(step.label)
+            if not self._run_pre_stop_step(step):
+                break
+
+    def _run_pre_stop_step(self, step: PreStopStep, cancel_source: Callable[[], str | None] | None = None) -> bool:
+        """Один шаг; ``False`` — шаги отменены (дальше не идём). Сбой шага — одна WARNING без значений.
+
+        ``cancel_source`` (Task 1.4 system-run-state) — свой источник отмены (STOP оператора добавляет ``shutdown``).
+        """
+        try:
+            cancelled, reason = self._pre_stop_step_outcome(step, cancel_source)
+        except Exception as exc:  # noqa: BLE001 — граница шага: сбой одного шага не роняет список
+            cancelled, reason = None, f"исключение {type(exc).__name__}"
+        if cancelled is not None:
+            self._log_info(f"pre_stop: шаг '{step.label}' прерван ({cancelled})")
+            return False
+        if reason is not None:
+            self._log_warning(f"pre_stop: шаг '{step.label}' — {reason}")
+        return True
+
+    def _pre_stop_step_outcome(
+        self, step: PreStopStep, cancel_source: Callable[[], str | None] | None = None
+    ) -> tuple[str | None, str | None]:
+        """Исполнить шаг (``pre_stop.run_pre_stop_step``) поверх реестра, гейта готовности и роутера PM."""
+        registry = self._process_registry
+        return run_pre_stop_step(
+            step,
+            process_exists=lambda name: registry.get_process_by_name(name) is not None,
+            ready_event=self._child_ready_event,
+            request_async=self.router_manager.request_async,
+            cancel_source=cancel_source or self._pre_stop_cancel_source,
+            sender=self.name,
+        )
+
+    def _publish_system_stop(self) -> None:
+        """Записать в стор изменившиеся ключи ``system.stop.*`` из ТЕКУЩЕГО снимка.
+
+        Зовёт вызывающий после взвода событий стопа, вне лока словаря. Публикации сериализованы
+        ``_system_stop_publish_lock``: снимок берётся под ним, поэтому поздний издатель не перезапишет
+        ``done`` старой фазой. Один вызов ``handle_state_set`` на изменившийся ключ. Сбой стора —
+        WARNING, ключ не помечается записанным; ``system.shutdown`` он не ломает.
+        """
+        ssm = getattr(self, "_state_store_manager", None)
+        if ssm is None:
+            return
+        with self._system_stop_publish_lock:
+            info = self._system_stop_snapshot()
+            if info is None:
+                return
+            published = self._system_stop_published
+            if published is None:
+                published = self._system_stop_published = {}
+            for key in _SYSTEM_STOP_STORE_KEYS:
+                value = info[key]
+                if key in published and published[key] == value:
+                    continue
+                path = f"system.stop.{key}"
+                try:
+                    reply = ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessManager"}})
+                except Exception as exc:  # noqa: BLE001 — handle_state_set ловит только ValueError/TypeError
+                    self._log_warning(f"system_stop: запись {path} в стор не удалась: {exc}")
+                    continue
+                # Отказ стора приходит ответом, не исключением (middleware → ``rejected``, сбой → ``error``).
+                status = reply.get("status") if isinstance(reply, dict) else None
+                if status in ("rejected", "error"):
+                    self._log_warning(f"system_stop: стор отклонил {path} ({status}): {reply}")
+                    continue
+                published[key] = value
+
+    # -------------------------------------------------------------------------
+    # Состояние работы системы (Task 1.1 system-run-state, design.md §3.2)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _run_lock(self) -> threading.Lock:
+        """Замок машины работы: под ним только ``transition()``, ``set()/clear()`` события и флага ``run_active``.
+
+        Единственный вложенный — листовой ``_system_stop_lock`` (признак хода стопа для ``run_active``, ADR-PMM-051):
+        порядок ``_run_lock`` -> ``_system_stop_lock``, обратного нет. ``_begin_system_stop`` берёт оба в этом порядке —
+        под ``_run_lock`` его не зовут."""
+        return self.__dict__.setdefault("_run_lock_obj", threading.Lock())
+
+    @property
+    def _run_publish_lock(self) -> threading.Lock:
+        """Сериализует публикации ``system.run.*`` в стор: поздний издатель не откатывает состояние."""
+        return self.__dict__.setdefault("_run_publish_lock_obj", threading.Lock())
+
+    def _run_apply(
+        self,
+        event: str,
+        *,
+        ready: bool | None = None,
+        stop_done: bool | None = None,
+        reasons: list[dict] | None = None,
+        hold_event: bool = False,
+        eval_started: float | None = None,
+    ) -> tuple[RunState, str | None, RunState]:
+        """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
+
+        ``ready=None`` — последняя принятая оценка (``_run_ready``); ``tick`` обновляет ``_run_ready``
+        независимо от смены состояния, ``settled``/``ack``/``start`` — только когда событие сменило состояние
+        (no-op ``settled`` и отказанные команды ``_run_ready`` не трогают). При ``run_gate`` true в том же замке событие
+        доводится до ``is_set() == (state == running)``; при false событие не трогается никогда. После замка —
+        ``_publish_run_state()``.
+
+        ``reasons`` (Task 1.3) — результат ``evaluate``, считанный ВНЕ замка: ``None`` — причины не
+        меняются; список заменяет текущие причины, кроме отказа, не сменившего состояние (C10: причины допуска
+        отказанного START/ack в статус не попадают). Переход в ``fault`` по ``tick`` записывает
+        ``last_fault`` = причины этого такта.
+
+        ``stop_done`` (Task 1.7) — для ``ack``: ``None`` — признак ``_fault_stop_done`` читается ТУТ, под
+        ``_run_lock``, вместе с записью состояния (гонка ``ack`` и завершения остановки в аварии — один исход);
+        явное значение передаёт тест. Успешный ``ack`` пишет ``last_fault.acknowledged_at``; успешный ``start``
+        обнуляет ``last_fault`` (до него авария остаётся видимой).
+
+        ``hold_event`` (Task 1.4) — только для ``stop`` из ``running``: событие остаётся взведённым в ``stopping``
+        (идут шаги ``pre_stop``); снимает его последовательность STOP (``_run_stop_clear_event``). Остальные
+        вызовы в ``stopping`` событие не трогают; при выходе из ``stopping`` оно доводится по таблице как всегда.
+
+        ``eval_started`` (ревью Ф1, m2) — только для ``tick``: ``time.monotonic()`` начала оценки такта (оценка идёт
+        вне замка). Начата раньше последнего входа в ``running`` — такт устарел: не применяется совсем (ни состояние,
+        ни ``_run_ready``, ни причины, ни публикация), возврат ``(текущее, None, текущее)``.
+        """
+        with self._run_lock:
+            if event == "tick" and eval_started is not None and eval_started < self._run_running_mono:
+                current = self._run_state
+                return current, None, current
+            if ready is None:
+                ready = self._run_ready
+            prev = self._run_state
+            if stop_done is None:
+                stop_done = self._fault_stop_done
+            new, code = transition(prev, event, ready=ready, stop_done=stop_done)
+            # S3c (ADR-PMM-050): латч решает только тут, под ``_run_lock`` (своего замка у него нет); START подаётся
+            # после замка — ``_run_lock`` не реентерабелен, а START сам идёт через ``_run_apply``.
+            autostart = self._run_autostart.observe(event, prev, new, code)
+            # ``_run_ready`` — последняя принятая оценка: пишут ``tick`` и ``settled``/``ack``/``start``, РЕАЛЬНО
+            # сменившие состояние (no-op ``settled`` и отказ без смены состояния его не трогают); иначе одиночный
+            # сбойный такт после них брал бы устаревшее значение: ``False`` после ``settled``/``ack`` переводил бы
+            # ``running`` в ``fault``, ``True`` после START, отказанного ``not_ready``, возвращал бы ``ready``.
+            if event == "tick" or (event in ("settled", "ack", "start") and new is not prev):
+                self._run_ready = ready
+            # Отказ команды, не сменивший состояние (``already_running``, ``fault_unacknowledged``...), причины своей
+            # оценки в статус не пишет: статус отражает последний такт, а не оценку по порогу допуска (C10).
+            if reasons is not None and (code is None or new is not prev):
+                self._run_reasons = [dict(r) for r in reasons]
+            if prev is RunState.fault and new is not RunState.fault:
+                self._fault_stop_done = False
+                if event == "ack" and code is None and self._run_last_fault is not None:
+                    self._run_last_fault = {**self._run_last_fault, "acknowledged_at": time.time()}
+            if event == "start" and code is None and new is RunState.running:
+                self._run_last_fault = None
+            if new is RunState.stopping and prev is not RunState.stopping:
+                self._run_stop_hold = hold_event
+            elif new is not RunState.stopping:
+                self._run_stop_hold = False
+            if new is RunState.fault and prev is not RunState.fault:
+                self._fault_seq += 1
+                self._fault_stop_done = False
+                # ``fault`` липкий: последняя авария не перезаписывается, пока машина в ``fault``.
+                self._run_last_fault = {
+                    "at": time.time(),
+                    "reasons": [dict(r) for r in self._run_reasons],
+                    "acknowledged_at": None,
+                }
+            # Событие переключаем ДО записи состояния: состояние не опережает событие (ревью стадии 5, N1).
+            # ``RunFlag`` (ADR-PMM-047) не блокируется и не бросает.
+            run_event = self._run_event
+            holding = new is RunState.stopping and self._run_stop_hold
+            if self._run_gate and run_event is not None and not holding:
+                want_set = new is RunState.running
+                if run_event.is_set() != want_set:
+                    if want_set:
+                        run_event.set()
+                    else:
+                        run_event.clear()
+            # Task 2.7d (ADR-PMM-051): флаг запрета команд — при любом ``run_gate``, тоже ДО записи состояния.
+            self._run_active_sync_locked(new)
+            if new is not prev:
+                self._run_state = new
+                self._run_since = time.time()
+                if new is RunState.running:
+                    self._run_running_mono = time.monotonic()
+        self._publish_run_state()
+        if autostart:
+            self._submit_run_sequence(self._run_autostart_start, "run-autostart")
+        return new, code, prev
+
+    def _run_autostart_start(self) -> None:
+        """S3c (ADR-PMM-050): START автостарта на исполнителе жизненного цикла — ровно один раз, без повтора.
+
+        Готовность START оценивает сам (``_cmd_system_run_start``): между тактом и START она могла уйти — тогда отказ.
+        ``already_running`` — оператор успел нажать START: INFO, не WARNING. Иной отказ — WARNING только с кодом.
+        """
+        self._log_warning("автостарт: system.run.start (run_autostart)")
+        reply = self._cmd_system_run_start({})
+        if reply.get("success") is True:
+            return
+        error = reply.get("error")
+        if error == "already_running":
+            self._log_info("автостарт не нужен: линия уже в работе (already_running)")
+            return
+        self._log_warning(f"автостарт отказан: {error}")
+
+    def _run_active_sync_locked(self, state: RunState, *, stop_begun: bool | None = None) -> None:
+        """Task 2.7d (ADR-PMM-051): довести ``_run_active`` до «``state`` — ``running`` и нет хода системного стопа».
+
+        Единственная функция записи флага; зовётся ТОЛЬКО под ``_run_lock`` из двух точек записи источников:
+        ``_run_apply`` (состояние) и ``_begin_system_stop`` (ход стопа; признак не сбрасывается). ``stop_begun=None`` —
+        признак читается под листовым ``_system_stop_lock`` (порядок ``_run_lock`` -> ``_system_stop_lock``); явное
+        значение передаёт ``_begin_system_stop``, уже держащий ``_system_stop_lock`` (замок не реентерабелен). Своего
+        хранилища у флага нет: поздний такт или START после начала стопа его не взведут.
+        """
+        active = self._run_active
+        if active is None:
+            return
+        if stop_begun is None:
+            stop_begun = self._system_stop_snapshot() is not None
+        want = state is RunState.running and not stop_begun
+        if active.is_set() != want:
+            if want:
+                active.set()
+            else:
+                active.clear()
+
+    def _run_snapshot(self) -> tuple[RunState, float]:
+        """Пара ``(состояние, since)`` под ``_run_lock``."""
+        with self._run_lock:
+            return self._run_state, self._run_since
+
+    def _run_ack_allowed(self) -> bool:
+        """``ack`` разрешён: ``fault`` и остановка в аварии завершена (под ``_run_lock``, как решает ``_run_apply``)."""
+        with self._run_lock:
+            return self._run_state is RunState.fault and self._fault_stop_done
+
+    def _run_detail_snapshot(self) -> tuple[list[dict], dict | None]:
+        """Копии ``(причины, last_fault)`` под ``_run_lock`` (Task 1.3): значения наружу уходят без общих ссылок."""
+        with self._run_lock:
+            reasons = [dict(r) for r in self._run_reasons]
+            fault = self._run_last_fault
+            last_fault = None if fault is None else {**fault, "reasons": [dict(r) for r in fault["reasons"]]}
+            return reasons, last_fault
+
+    def _publish_run_state(self) -> None:
+        """Записать в стор изменившиеся листья ``system.run.*`` (вид ``run_view``) из СНИМКА.
+
+        Порядок — как ``_publish_system_stop``: снимок берётся под ``_run_publish_lock``, поэтому поздний
+        издатель не перезапишет новое состояние старым. Неизменённые значения пропускаются. Стора нет —
+        no-op, ключи не помечаются записанными.
+        """
+        if getattr(self, "_state_store_manager", None) is None:
+            return
+        with self._run_publish_lock:
+            state, since = self._run_snapshot()
+            reasons, last_fault = self._run_detail_snapshot()
+            published = self._run_published
+            if published is None:
+                published = self._run_published = {}
+            view = run_view(
+                state,
+                since,
+                run_gate=self._run_gate,
+                ack_allowed=self._run_ack_allowed(),
+                reasons=reasons,
+                last_fault=last_fault,
+            )
+            for key, value in view.items():
+                if key in published and published[key] == value:
+                    continue
+                self._state_op(
+                    "handle_state_set",
+                    {"path": f"system.run.{key}", "value": value, "source": "ProcessManager"},
+                    "run_state",
+                )
+                published[key] = value
+
+    # -------------------------------------------------------------------------
+    # Агрегат готовности (Task 1.3 system-run-state, design.md §3.3)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _readiness_publish_lock(self) -> threading.Lock:
+        """Сериализует публикацию листьев ``processes.<n>.readiness`` (зовут разные потоки)."""
+        return self.__dict__.setdefault("_readiness_publish_lock_obj", threading.Lock())
+
+    def _run_expected_names(self) -> list[str]:
+        """Требуемый набор: процессы применённой топологии (ключи ``_process_configs``).
+
+        Ключ ``run_required: false`` на верхнем уровне конфига процесса исключает его (умолчание true);
+        сам PM в набор не входит. ``list(dict.items())`` — атомарная копия под GIL: топологию мутируют
+        потоки жизненного цикла.
+        """
+        configs = list((getattr(self, "_process_configs", None) or {}).items())
+        return [
+            name
+            for name, cfg in configs
+            if name != self.name and not (isinstance(cfg, dict) and cfg.get("run_required") is False)
+        ]
+
+    def _run_stale_s(self) -> float:
+        """Срок молчания снимка готовности: ``3 x`` интервал heartbeat.
+
+        Интервал — наибольший из положительных ключей конфига PM ``heartbeat_interval`` (загрузочный,
+        его читает ``ProcessHeartbeat.start``) и ``heartbeat_interval_sec`` (рантайм-правка): большее
+        значение даёт меньше ложных ``fault``. Негодные/нулевые значения и сбой чтения конфига не
+        учитываются (не бросает); ни одного — умолчание 5.0 с. Сбой чтения, не ``TypeError``/``ValueError``, —
+        один WARNING на тип исключения за жизнь PM (тип и имя ключа, без текста исключения).
+        """
+        candidates: list[float] = []
+        for key in ("heartbeat_interval", "heartbeat_interval_sec"):
+            try:
+                value = float(self.get_config(key) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            except Exception as exc:  # noqa: BLE001 — сбой чтения конфига не роняет оценку: ключ не учитывается
+                warned = self.__dict__.setdefault(
+                    "_run_stale_warned", set()
+                )  # фейки без ``__init__`` — как ``_run_lock``
+                if type(exc).__name__ not in warned:
+                    warned.add(type(exc).__name__)
+                    self._log_warning(f"срок молчания: ключ '{key}' не прочитан ({type(exc).__name__}) — ключ не учтён")
+                continue
+            if math.isfinite(value) and value > 0.0:
+                candidates.append(value)
+        interval = max(candidates) if candidates else self._DEFAULT_HEARTBEAT_INTERVAL_S
+        return self._READINESS_STALE_FACTOR * interval
+
+    def _process_alive(self, name: str) -> bool:
+        """Процесс ``name`` жив по реестру ОС-процессов; нет записи или сбой опроса — не жив."""
+        registry = getattr(self, "_process_registry", None)
+        if registry is None:
+            return False
+        try:
+            proc = registry.get_process_by_name(name)
+            return bool(proc is not None and proc.is_alive())
+        except Exception as exc:  # noqa: BLE001 — опрос живости не роняет оценку: молчание = не готов
+            self._log_error(f"readiness: опрос живости '{name}' не удался: {exc}")
+            return False
+
+    def _readiness_leaves(self) -> dict[str, dict]:
+        """Копия карты листов ``readiness`` монитора (под его листовым замком); нет монитора — пусто."""
+        monitor = getattr(self, "_process_monitor", None)
+        snapshot = getattr(monitor, "readiness_snapshot", None)
+        leaves = snapshot() if callable(snapshot) else None
+        return leaves if isinstance(leaves, dict) else {}
+
+    def _readiness_view(self) -> tuple[dict[str, dict], frozenset[str]]:
+        """Листы готовности и имена «перезапускается» одним снимком монитора (Task 1.7c): ``(листы, перезапускаемые)``.
+
+        Воплощение процесса знает только супервизор (``ProcessMonitor``) — PM его не копит. Монитора нет — листы из
+        ``_readiness_leaves``, перезапускаемых нет. Форма ответа монитора не проверяется (r2 N3): двойник в тестах —
+        ``MagicMock(spec=ProcessMonitor)`` с ответом настоящей формы.
+        """
+        monitor = getattr(self, "_process_monitor", None)
+        view = getattr(monitor, "readiness_view", None)
+        if not callable(view):
+            return self._readiness_leaves(), frozenset()
+        leaves, restarting = view()
+        return leaves, frozenset(restarting)
+
+    def _admission_stale_s(self) -> float:
+        """Порог свежести листа для ДОПУСКА (``ack``/START): ``stale_s`` минус интервал heartbeat (2/3 ``stale_s``).
+
+        Гистерезис (Task 1.7b): допуск строже удержания. Лист возрастом 10-15 с ещё держит ``running`` (удержание — на
+        полном ``stale_s``), но допустить по нему нельзя: до пересечения 15 с новый снимок может не успеть и работа
+        упала бы в ``fault`` сразу после допуска.
+        """
+        stale = self._run_stale_s()
+        interval = stale / self._READINESS_STALE_FACTOR
+        return stale - interval
+
+    def _evaluate_run_readiness(
+        self, *, admission: bool = False, track_restart: bool = False
+    ) -> tuple[bool, list[dict]]:
+        """Готовность системы сейчас: ``(ready, reasons)`` по ``run_state.evaluate``.
+
+        Не берёт ``_run_lock`` и не ждёт ничего: безопасна на ``message_processor`` (``system.run.start``,
+        DECISIONS.md:125) и на потоке монитора. Копия листов берётся под замком монитора, ``evaluate`` —
+        уже без замков.
+
+        Task 1.8: в ``running`` процесс с флагом ``run_auto_restart`` (и ``enabled: true``) в перезапуске даёт
+        ``out_of_spec`` вместо ``failure`` (``evaluate``). ``track_restart`` — оценка тика монитора: только она
+        ведёт окно перезапуска (``down_since``); остальные оценки (START, ``ack``, итог подъёма/STOP) его читают.
+        Флаг без ``enabled: true`` — ``failure`` / ``config`` на каждой оценке, в любом состоянии.
+        """
+        expected = self._run_expected_names()
+        leaves, restarting = self._readiness_view()
+        alive = {name: self._process_alive(name) for name in expected}
+        stale_s = self._admission_stale_s() if admission else self._run_stale_s()
+        now = time.time()
+        auto_restart, config_reasons = self._run_auto_restart_flags(expected)
+        running = self._run_state is RunState.running  # одно чтение атрибута: ``_run_lock`` оценка не берёт
+        inp = EvalInput(
+            expected,
+            leaves,
+            alive,
+            now,
+            stale_s,
+            running=running,
+            auto_restart=auto_restart,
+            down_since=self._run_down_since,
+            grace_s=self._run_restart_grace(),
+            given_up=self._supervisor_gave_up(auto_restart) if running and auto_restart else frozenset(),
+            restarting=restarting,
+        )
+        if track_restart:
+            inp = replace(inp, down_since=self._advance_restart_window(inp))
+        ready, reasons = evaluate(inp)
+        # Task 1.4: процессы, не подтвердившие остановку, — отдельные причины на КАЖДОЙ оценке (tick их не стирает).
+        extra = config_reasons + self._unconfirmed_stop_reasons(expected, leaves, alive)
+        if extra:
+            reasons = reasons + extra
+            ready = not has_blocking(reasons)
+        return ready, reasons
+
+    @property
+    def _run_restart_lock(self) -> threading.Lock:
+        """Листовой замок окна перезапуска ``_run_down_since`` (Task 1.8; не ``_run_lock``: оценка его не берёт)."""
+        return self.__dict__.setdefault("_run_restart_lock_obj", threading.Lock())
+
+    def _run_auto_restart_flags(self, expected: list[str]) -> tuple[frozenset[str], list[dict]]:
+        """Процессы набора с флагом ``run_auto_restart`` и причины конфига: ``(флаг действует, ошибки конфига)``.
+
+        Политику решает ОДИН разборщик — ``ProcessMonitor.resolve_policy`` (fix-B, M2); здесь сырой dict не читается.
+        Флаг действует, если ``policy.enabled and policy.run_auto_restart`` и процесс не ``protected`` (супервизор
+        protected не поднимает: падение такого в ``running`` — сразу ``fault``, не окно перезапуска). Ошибки
+        конфига — ``failure`` / ``config`` (``not_ready``), без значений входа:
+          * per-process ``restart_policy`` негоден (схема его отвергла) -> «restart_policy негоден: <процесс>»;
+          * схема годна, флаг включён, ``enabled`` выключен -> ``auto_restart_config_reason``.
+        Нет монитора (нет и супервизора) — флагов нет.
+        """
+        monitor = getattr(self, "_process_monitor", None)
+        resolve = getattr(monitor, "resolve_policy", None)
+        if not callable(resolve) or not expected:
+            # Пустой набор — флагов и ошибок конфига нет. Проверка ДО ``_get_protected_names``: тот читает
+            # ``_process_configs`` строго, а набор (``_run_expected_names``) — терпимо к его отсутствию (PM до загрузки
+            # конфигов); непустой набор взят из ``_process_configs``, значит он есть (fix-A3).
+            return frozenset(), []
+        protected = self._get_protected_names()
+        active: set[str] = set()
+        reasons: list[dict] = []
+        for name in expected:
+            policy, valid = resolve(name)
+            if not valid:
+                reasons.append(_restart_policy_invalid_reason(name))
+            elif policy.run_auto_restart and policy.enabled:
+                if name not in protected:  # protected супервизор не поднимает (``_try_auto_restart`` выходит сразу)
+                    active.add(name)
+            elif policy.run_auto_restart:
+                reasons.append(auto_restart_config_reason(name))
+        return frozenset(active), reasons
+
+    def _advance_restart_window(self, inp: EvalInput) -> dict[str, float]:
+        """Новая запись окна перезапуска по тику (``run_state.restart_window``): читается и заменяется под замком."""
+        with self._run_restart_lock:
+            window = restart_window(replace(inp, down_since=self._run_down_since))
+            self._run_down_since = window
+            return window
+
+    def _run_restart_grace(self) -> float:
+        """Окно перезапуска: конфиг PM ``run_restart_grace_s`` (умолчание 30.0 с); негодное — умолчание."""
+        value, ok = run_config_value("run_restart_grace_s", self.get_config("run_restart_grace_s"))
+        if not ok:
+            self._log_warning("run_restart_grace_s негоден (нужно число > 0) — взято 30.0 с")
+        return float(value)  # type: ignore[arg-type]
+
+    def _supervisor_gave_up(self, names: frozenset[str]) -> frozenset[str]:
+        """Процессы ``names``, от перезапуска которых супервизор отказался (``status == "failed"`` в его снимке).
+
+        Только чтение публичного ``get_supervision_snapshot()``. Нет монитора или сбой снимка — пусто: окно
+        перезапуска остаётся предохранителем (без него «сдался» не виден, но ``fault`` по сроку наступит).
+        """
+        monitor = getattr(self, "_process_monitor", None)
+        snapshot = getattr(monitor, "get_supervision_snapshot", None)
+        if not callable(snapshot):
+            return frozenset()
+        try:
+            statuses = snapshot()
+            return frozenset(n for n in names if (statuses.get(n) or {}).get("status") == "failed")
+        except Exception as exc:  # noqa: BLE001 — сбой снимка не роняет тик: остаётся окно перезапуска
+            self._log_error(f"readiness: снимок супервизора не получен: {exc}")
+            return frozenset()
+
+    @property
+    def _unconfirmed_lock(self) -> threading.Lock:
+        """Листовой замок множества ``unconfirmed_stop`` (не ``_run_lock``: оценка готовности его не берёт)."""
+        return self.__dict__.setdefault("_unconfirmed_lock_obj", threading.Lock())
+
+    def _mark_unconfirmed(self, added: dict[str, float]) -> None:
+        """Процессы вошли в множество «не подтвердили остановку» (по истечении срока ожидания ``paused``)."""
+        if added:
+            with self._unconfirmed_lock:
+                self._run_unconfirmed = {**self._run_unconfirmed, **added}
+
+    def _unconfirmed_stop_reasons(self, expected: list[str], leaves: dict, alive: dict) -> list[dict]:
+        """Причины множества ``unconfirmed_stop`` и выход из него (лист ``paused`` / не жив / нет в наборе).
+
+        Под ``_unconfirmed_lock`` — только копия и замена словаря (без ожиданий). Выбывшего удаляет, только если
+        запись не успели заменить новой (новый STOP по сроку).
+        """
+        current = self._run_unconfirmed  # значение заменяется целиком — чтение ссылки без замка безопасно
+        if not current:
+            return []
+        remaining, reasons = unconfirmed_stop(expected, current, leaves, alive)
+        gone = [name for name in current if name not in remaining]
+        if gone:
+            with self._unconfirmed_lock:
+                fresh = dict(self._run_unconfirmed)
+                for name in gone:
+                    if fresh.get(name) == current[name]:
+                        del fresh[name]
+                self._run_unconfirmed = fresh
+        return reasons
+
+    def _run_stop_timeout(self) -> float:
+        """Срок ожидания ``paused``: конфиг PM ``run_stop_timeout_s`` (умолчание 10.0 с); негодное — умолчание.
+
+        Не бросает: сбой чтения конфига — WARNING с типом исключения и то же умолчание (поток остановки в аварии,
+        умерший здесь, оставил бы ``ack`` в ``fault_stopping`` навсегда).
+        """
+        try:
+            raw = self.get_config("run_stop_timeout_s")
+        except Exception as exc:  # noqa: BLE001 — итог остановки не имеет права не случиться
+            self._log_warning(f"run_stop_timeout_s не прочитан ({type(exc).__name__}) — взято 10.0 с")
+            return self._DEFAULT_RUN_STOP_TIMEOUT_S
+        value, ok = run_config_value("run_stop_timeout_s", raw)
+        if not ok:
+            self._log_warning("run_stop_timeout_s негоден (нужно число > 0) — взято 10.0 с")
+        return float(value)  # type: ignore[arg-type]
+
+    def _settle_run_state(self) -> None:
+        """Итог подъёма/применения топологии: ``booting`` -> ``ready``/``not_ready`` по оценке агрегата."""
+        ready, reasons = self._evaluate_or_fail()
+        self._run_apply("settled", ready=ready, reasons=reasons)
+
+    def _evaluate_or_fail(self, *, admission: bool = False) -> tuple[bool, list[dict]]:
+        """Оценка готовности для ``settled``, START и ``ack``, которая не бросает.
+
+        У ``booting`` и ``stopping`` выход — только ``settled``: исключение оценки оставило бы машину там навсегда
+        (START -> ``not_ready`` без причин). START и ``ack`` не бросают тоже: исключение ушло бы в диспетчер
+        командой-ошибкой с текстом исключения. Сбой — ERROR с типом исключения (текста исключения нет ни в логе,
+        ни в ответе) и итог «не готов» с причиной ``failure`` / ``report`` «оценка готовности не удалась» (узел —
+        PM); следующий такт оценивает заново. ``admission`` уходит в оценку только ключом (порог допуска команды).
+        """
+        try:
+            return self._evaluate_run_readiness(admission=admission)
+        except Exception as exc:  # noqa: BLE001 — итог машины не имеет права не случиться
+            self._log_error(f"readiness: оценка готовности не удалась ({type(exc).__name__})")
+            reason = {
+                "node": getattr(self, "name", "ProcessManager"),
+                "severity": "failure",
+                "source": "report",
+                "reason": "оценка готовности не удалась",
+            }
+            return False, [reason]
+
+    def _boot_progress_begin(self) -> None:
+        """Завести шкалу загрузки и записать «стор поднят» (5 %). Стора нет — шкалы нет, boot прежний."""
+        if getattr(self, "_state_store_manager", None) is None:
+            return
+        self._boot_progress = ProgressTracker(list(self._BOOT_PROGRESS_STEPS))
+        self._boot_total = 0
+        self._boot_started = 0
+        self._boot_ready = set()
+        self._boot_progress_advance("store")
+
+    def _boot_progress_advance(self, step: str, fraction: float = 1.0) -> None:
+        """Продвинуть шаг шкалы и записать лист ``system.progress.boot``.
+
+        Сначала трекер (процент монотонный и держится в нём), затем запись: сбой записи лист теряет, но процент
+        не откатывает и boot не валит. Шкалы нет (``None``) — ничего не делает.
+        """
+        tracker = self._boot_progress
+        if tracker is None:
+            return
+        try:
+            self._boot_progress_write(tracker.advance(step, fraction))
+        except Exception as exc:  # noqa: BLE001 — шкала не имеет права уронить boot
+            self._log_warning(f"шкала загрузки: шаг '{step}' не записан: {exc}")
+
+    def _boot_progress_started(self, started: int) -> None:
+        """Стартовало ``started`` из N процессов -> шаг «запущен» растёт на k/N."""
+        self._boot_started = started
+        if self._boot_total > 0:
+            self._boot_progress_advance("started", started / self._boot_total)
+
+    def _boot_progress_ready(self, ready: dict[str, bool]) -> None:
+        """Результат барьера: готовые добавляются в объединение по всем вызовам (процент не берёт «последний гейт»)."""
+        if self._boot_ready is None or self._boot_total <= 0:
+            return
+        self._boot_ready.update(name for name, ok in ready.items() if ok)
+        self._boot_progress_advance("ready", len(self._boot_ready) / self._boot_total)
+
+    def _boot_progress_finish(self) -> None:
+        """Закрыть шкалу: 100 % и ``done``; при k < N метка «запущено k из N» (иначе 100 % скроет неподнятый процесс).
+
+        Шкалу снимает ДО записи: повторный вызов и поздние хуки (рестарт, apply) становятся пустыми.
+        """
+        tracker = self._boot_progress
+        if tracker is None:
+            return
+        self._boot_progress = None
+        label = f"запущено {self._boot_started} из {self._boot_total}" if self._boot_started < self._boot_total else ""
+        try:
+            self._boot_progress_write(tracker.finish(label))
+        except Exception as exc:  # noqa: BLE001 — шкала не имеет права уронить boot
+            self._log_warning(f"шкала загрузки: итог не записан: {exc}")
+
+    def _boot_progress_write(self, leaf: dict) -> None:
+        """Записать лист шкалы как ``_publish_run_state``: через ``_state_op`` (стора нет — no-op)."""
+        self._state_op(
+            "handle_state_set",
+            {"path": progress_path("boot"), "value": leaf, "source": "ProcessManager"},
+            "boot_progress",
+        )
+
+    def _run_readiness_tick(self) -> None:
+        """Один такт готовности (зовёт монитор из ``_run_iteration``): оценка -> ``tick`` -> листы в стор.
+
+        Пока PM гасится или идёт системный стоп — такт пропускается: останавливаемые дети молчат, и
+        это не авария работы (подачу ``shutdown`` в машину добавляет Task 1.4).
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            return
+        # Ревью Ф1, m2: оценка идёт вне ``_run_lock``; START между оценкой и применением делает такт устаревшим —
+        # ``_run_apply`` отбросит его по метке начала оценки.
+        eval_started = time.monotonic()
+        try:
+            ready, reasons = self._evaluate_run_readiness(track_restart=True)
+        except Exception as exc:  # noqa: BLE001 — сбой оценки: серия, а не потерянный такт (ниже)
+            ready, reasons = self._evaluation_failed(exc)
+        else:
+            self._eval_fail_since = None  # первый успешный такт сбрасывает серию
+        new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons, eval_started=eval_started)
+        if new is RunState.fault and prev is not RunState.fault:
+            self._start_fault_stop()  # Task 1.4: остановка в аварии идёт не на потоке монитора
+        self._publish_readiness_leaves()
+
+    def _evaluation_failed(self, exc: Exception) -> tuple[bool | None, list[dict]]:
+        """Сбой оценки готовности на такте: ``(ready, reasons)`` для ``tick`` (fix-B4, совет ревью Ф1).
+
+        Подряд идущие сбои — серия (``_eval_fail_since`` — ``time.monotonic()`` первого). ERROR — один раз на серию, не
+        на каждом такте (монитор крутит такт ~2 Гц). В статус кладётся причина ``failure`` «оценка готовности не
+        удалась» (без текста исключения). Пока серия короче срока молчания (``_run_stale_s``), ``ready`` остаётся
+        прежним (``None`` — последний результат ``tick``): состояние не дребезжит от одиночного сбоя. Серия дольше
+        срока — то же молчание, что «нет отчёта о готовности» (R2/R3): ``ready=False``, в ``running`` это ``fault``.
+        Выполняется только на потоке монитора (такт), замок не нужен.
+        """
+        now = time.monotonic()
+        since = getattr(self, "_eval_fail_since", None)
+        if since is None:
+            since = self._eval_fail_since = now
+            self._log_error(f"оценка готовности не удалась: {type(exc).__name__}: {exc}")
+        reason = {
+            "node": self.name,
+            "severity": "failure",
+            "reason": "оценка готовности не удалась",
+            "source": "liveness",
+        }
+        return (False if now - since >= self._run_stale_s() else None), [reason]
+
+    def _publish_readiness_leaves(self) -> None:
+        """Записать листья ``processes.<n>.readiness.<поле>`` в стор (для GUI); неизменённые значения пропускаются.
+
+        Гейт от стора не зависит — сюда доходят и без него (нет стора: no-op, кэш не пополняется).
+        Процесс, пропавший из карты монитора, забывается и в кэше записанного.
+        """
+        if getattr(self, "_state_store_manager", None) is None:
+            return
+        leaves = self._readiness_leaves()
+        with self._readiness_publish_lock:
+            published = self._readiness_published
+            if published is None:
+                published = self._readiness_published = {}
+            for gone in set(published) - set(leaves):
+                del published[gone]
+            for name, leaf in leaves.items():
+                written = published.setdefault(name, {})
+                for field in READINESS_FIELDS:
+                    if field not in leaf:
+                        continue
+                    value = leaf[field]
+                    if field in written and written[field] == value:
+                        continue
+                    self._state_op(
+                        "handle_state_set",
+                        {"path": readiness_path(name, field), "value": value, "source": "ProcessManager"},
+                        "readiness",
+                    )
+                    written[field] = value
 
     def _in_transition(self, name: str) -> bool:
         """Процесс ``name`` в операции жизненного цикла (идёт или стоит в очереди исполнителя)."""
@@ -583,6 +1717,17 @@ class ProcessManagerProcess(ProcessModule):
             "process.restart": (self._cmd_process_restart, "Перезапустить именованный процесс"),
             "process.status": (self._cmd_process_status, "Статус именованного процесса"),
             "system.shutdown": (self._cmd_system_shutdown, "Завершить систему"),
+            # Task 1.1 system-run-state: класс R, быстрые, без ожиданий.
+            "system.run.status": (
+                self._cmd_system_run_status,
+                "Состояние работы системы: state/since/run_gate/start_allowed/reasons/last_fault",
+            ),
+            "system.run.start": (self._cmd_system_run_start, "Начать работу: ready -> running (кадры идут)"),
+            "system.run.ack": (
+                self._cmd_system_run_ack,
+                "Квитировать аварию: fault -> ready/not_ready (после завершённой остановки в аварии)",
+            ),
+            "system.run.stop": (self._cmd_system_run_stop, "Остановить работу: running -> stopping -> ready"),
             "system.stats": (self._cmd_system_stats, "Статистика системы"),
             "supervision.status": (
                 self._cmd_supervision_status,
@@ -770,6 +1915,286 @@ class ProcessManagerProcess(ProcessModule):
             return {"error": "process_name required"}
         return self.get_process_status(pn)
 
+    def _cmd_system_run_status(self, data=None, **kwargs) -> dict:
+        """``system.run.status`` (Task 1.1 system-run-state): снимок машины работы.
+
+        Вид строит ``run_view`` (тот же, что листья ``system.run.*``; ``stop_allowed`` — ``state`` = ``running``).
+        ``reasons`` — причины последней оценки готовности (Task 1.3), ``last_fault`` — последняя авария
+        ``{at, reasons, acknowledged_at}`` или ``None`` (квитирование — Task 1.7).
+        """
+        state, since = self._run_snapshot()
+        reasons, last_fault = self._run_detail_snapshot()
+        return run_view(
+            state,
+            since,
+            run_gate=self._run_gate,
+            ack_allowed=self._run_ack_allowed(),
+            reasons=reasons,
+            last_fault=last_fault,
+        )
+
+    def _cmd_system_run_start(self, data=None, **kwargs) -> dict:
+        """``system.run.start``: ``ready`` -> ``running``; иначе отказ с кодом, ТЕКУЩИМ состоянием и причинами.
+
+        Пока PM гасится (``_pm_stopping()``) или начат ход системного стопа — отказ ``shutting_down``,
+        событие не взводится (подачу ``shutdown`` в машину добавляет Task 1.4). Иначе готовность
+        оценивается заново (Task 1.3, вне замка машины): из ``ready`` при потере готовности START даёт
+        отказ ``not_ready`` с причинами; в ``fault`` — ``fault_unacknowledged`` с причинами ``last_fault``.
+        Не бросает и при сбое оценки: сбой даёт ``ready=False`` с причиной ``failure`` (``_evaluate_or_fail``),
+        из ``ready`` это отказ ``not_ready``, из прочих состояний — обычный отказ машины.
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            state, _since = self._run_snapshot()
+            return {"success": False, "state": state.value, "error": "shutting_down", "reasons": []}
+        ready, reasons = self._evaluate_or_fail(admission=True)
+        new, code, _prev = self._run_apply("start", ready=ready, reasons=reasons)
+        if code is None:
+            return {"success": True, "state": new.value}
+        current, last_fault = self._run_detail_snapshot()
+        refusal_reasons = last_fault["reasons"] if new is RunState.fault and last_fault is not None else current
+        return {"success": False, "state": new.value, "error": code, "reasons": refusal_reasons}
+
+    def _cmd_system_run_ack(self, data=None, **kwargs) -> dict:
+        """``system.run.ack`` (Task 1.7): квитирование аварии, класс R — быстрая, без ожиданий.
+
+        ``fault`` с завершённой остановкой -> ``ready``/``not_ready`` по СВЕЖЕЙ оценке готовности (вне замка
+        машины); остановка не завершена — отказ ``fault_stopping``; вне ``fault`` — ``no_fault``; пока PM гасится
+        или идёт системный стоп — ``shutting_down``. ``last_fault`` остаётся (с ``acknowledged_at``) до
+        успешного START. Признак остановки читает ``_run_apply`` под ``_run_lock`` — не отдельно от записи.
+        Не бросает и при сбое оценки: сбой даёт ``ready=False`` с причиной ``failure`` (``_evaluate_or_fail``),
+        ``ack`` из ``fault`` с завершённой остановкой принимается и ведёт в ``not_ready``; следующий такт оценит заново.
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            state, _since = self._run_snapshot()
+            return {"success": False, "state": state.value, "error": "shutting_down"}
+        ready, reasons = self._evaluate_or_fail(admission=True)
+        new, code, _prev = self._run_apply("ack", ready=ready, reasons=reasons)
+        return {"success": code is None, "state": new.value, "error": code}
+
+    def _cmd_system_run_stop(self, data=None, **kwargs) -> dict:
+        """``system.run.stop``: принимается мгновенно; из ``running`` — ``stopping`` и последовательность (Task 1.4).
+
+        Последовательность (шаги ``pre_stop`` -> ``run_event.clear()`` -> ждать ``paused`` у всех -> итог) идёт на
+        исполнителе жизненного цикла, не на этом потоке; итог — ``ready``/``not_ready`` по оценке готовности. Без
+        работы (``run_gate`` false или нет ни шагов, ни процессов в наборе) итог ставится тут же. Из прочих
+        состояний — no-op ``accepted: False``; пока идёт системный стоп — отказ ``shutting_down`` (как у START:
+        второй проход ``pre_stop`` рядом с ``system.shutdown`` не запускается).
+        """
+        if self._pm_stopping() or self._system_stop_snapshot() is not None:
+            state, _since = self._run_snapshot()
+            return {"success": False, "state": state.value, "error": "shutting_down"}
+        gated = self._run_gate and self._run_event is not None
+        has_steps = gated and bool(self._pre_stop_steps)
+        new, code, prev = self._run_apply("stop", hold_event=has_steps)
+        if code is not None:
+            return {"success": False, "state": new.value, "error": code}
+        accepted = prev is RunState.running
+        if accepted:
+            self._start_stop_sequence(gated, has_steps)
+        return {"success": True, "accepted": accepted, "state": new.value}
+
+    # -------------------------------------------------------------------------
+    # Последовательность STOP и аварии (Task 1.4 system-run-state, design.md §3.5)
+    # -------------------------------------------------------------------------
+
+    def _start_stop_sequence(self, gated: bool, has_steps: bool) -> None:
+        """STOP оператора принят: последовательность на исполнитель; без работы — итог сразу (без потока)."""
+        if not gated or (not has_steps and not self._run_expected_names()):
+            self._run_stop_finish(fault=False, seq=0, names=[], timeout_s=0.0)
+            return
+        self._submit_run_sequence(lambda: self._run_stop_sequence(fault=False, seq=0), "run-stop")
+
+    def _start_fault_stop(self) -> None:
+        """Авария (зовёт такт монитора при переходе в ``fault``): шаги пропущены, остальное — как STOP.
+
+        ``run_gate`` false: событие не снимается, ждать нечего — остановка «завершена» сразу (``ack`` разрешён).
+        """
+        with self._run_lock:
+            seq = self._fault_seq
+            if not (self._run_gate and self._run_event is not None):
+                if self._run_state is RunState.fault:
+                    self._fault_stop_done = True
+                    publish = True
+                else:
+                    publish = False
+        if not (self._run_gate and self._run_event is not None):
+            if publish:
+                self._publish_run_state()  # ack_allowed
+            return
+        self._submit_run_sequence(lambda: self._run_stop_sequence(fault=True, seq=seq), "run-fault-stop", seq=seq)
+
+    def _submit_run_sequence(
+        self, action: Callable[[], Any], name: str, reply: Callable[[Any], None] | None = None, *, seq: int = 0
+    ) -> None:
+        """Отдать ``action`` исполнителю жизненного цикла (``pm-lifecycle``); он последовательный, ожидание ``paused``
+        не держит ни ``_run_lock``, ни замок монитора. PM без исполнителя (двойник из ``__new__``) — одноразовый
+        daemon-поток.
+
+        Ревью Ф1, M1: исполнитель не взял последовательность — один путь для всех видов (STOP, авария, проход
+        shutdown): та же ``action`` на одноразовом daemon-потоке, ``reply`` — после неё. «Не взял» — это отказ по
+        контракту ``OrderedExecutor.submit`` (``reply`` с ``executor_busy`` / ``system_stopping``: сразу или позже,
+        когда закрытие снимает очередь), возврат ``False`` без ``reply`` и исключение подачи. Ожиданию ``paused``
+        сериализация с очередью L не нужна; прерывание системным стопом последовательность видит сама и итог не ставит
+        (машину ведёт ``shutdown``). Так ``stopping`` и ``fault`` не остаются без итога. Обход — не больше одного на
+        подачу. Отказ — WARNING, исключение — ERROR. Поток не стартовал — ERROR; STOP и авария (``seq`` — номер аварии
+        подачи) получают итог сразу.
+        """
+        done = reply or (lambda _result: None)
+        submit = self._lifecycle_submit
+        refusals = ("executor_busy", "system_stopping")
+        once = threading.Lock()
+        taken: list[bool] = []
+        replied: list[bool] = []
+
+        def detached() -> None:
+            with once:
+                if taken:
+                    return
+                taken.append(True)
+            try:
+                threading.Thread(target=lambda: done(action()), daemon=True, name=name).start()
+            except Exception as exc:  # noqa: BLE001 — поток не стартовал: машина не должна застрять в stopping
+                self._log_error(f"{name}: поток последовательности не стартовал ({type(exc).__name__})")
+                if name == "run-stop":
+                    self._run_stop_finish(fault=False, seq=0, names=[], timeout_s=0.0)
+                elif name == "run-fault-stop":
+                    self._run_stop_finish(fault=True, seq=seq, names=[], timeout_s=0.0)  # ``ack`` не застрянет
+
+        def on_reply(result: Any) -> None:
+            replied.append(True)
+            if isinstance(result, dict) and result.get("success") is False and result.get("error") in refusals:
+                self._log_warning(
+                    f"{name}: исполнитель отказал ({result['error']}) — последовательность на своём потоке"
+                )
+                detached()
+                return
+            done(result)
+
+        if submit is None:
+            detached()
+            return
+        try:
+            queued = submit.submit(action, None, on_reply)
+        except Exception as exc:  # noqa: BLE001 — граница подачи: тот же путь, что у отказа
+            self._log_error(f"{name}: исполнитель не принял последовательность ({type(exc).__name__})")
+            detached()
+            return
+        if queued is False and not replied:
+            self._log_warning(f"{name}: исполнитель вернул False без ответа — последовательность на своём потоке")
+            detached()
+
+    def _run_stop_cancel_source(self) -> str | None:
+        """Почему STOP/авария прерваны: общие причины шагов (``force``, события стопа) или ``shutdown`` в машине."""
+        source = self._pre_stop_cancel_source()
+        if source is None and self._run_snapshot()[0] is RunState.shutting_down:
+            return "shutdown"
+        return source
+
+    def _run_stop_sequence(self, *, fault: bool, seq: int) -> None:
+        """Тело последовательности (поток исполнителя): [шаги ``pre_stop`` -> ``clear``] -> ждать ``paused`` -> итог.
+
+        Прервана системным стопом — без итога (машину ведёт ``shutdown``). Исключение — ERROR и итог без ожидания:
+        из ``stopping`` выходим всегда.
+        """
+        timeout_s = self._run_stop_timeout()
+        names: list[str] = []
+        try:
+            if not fault:
+                if not self._run_stop_steps() or not self._run_stop_clear_event():
+                    return
+            waited = self._wait_all_paused(timeout_s, lambda: self._run_stop_cancel_source() is not None)
+            if waited is None:
+                return
+            names = waited
+        except Exception as exc:  # noqa: BLE001 — граница потока исполнителя
+            self._log_error(f"run-stop: последовательность — исключение {type(exc).__name__}")
+        self._run_stop_finish(fault=fault, seq=seq, names=names, timeout_s=timeout_s)
+
+    def _run_stop_steps(self) -> bool:
+        """Шаги ``pre_stop`` при ВЗВЕДЁННОМ ``run_event`` (сбой шага — WARNING, дальше идём). ``False`` — отменены."""
+        for step in self._pre_stop_steps:
+            if self._run_stop_cancel_source() is not None:
+                return False
+            if not self._run_pre_stop_step(step, self._run_stop_cancel_source):
+                return False
+        return self._run_stop_cancel_source() is None
+
+    def _run_stop_clear_event(self) -> bool:
+        """Снять ``run_event`` после шагов (под ``_run_lock``). ``False`` — состояние уже не ``stopping``."""
+        with self._run_lock:
+            if self._run_state is not RunState.stopping:
+                return False
+            self._run_stop_hold = False
+            event = self._run_event
+            if self._run_gate and event is not None and event.is_set():
+                event.clear()
+        return True
+
+    def _paused_pending(self) -> list[str]:
+        """Процессы набора, от которых ждём ``paused``: лист не ``paused: true``, процесс жив (мёртвый = остановлен).
+
+        Процесс из «перезапускается» (Task 1.7c) тоже считается остановленным: его воплощение приговорено и будет
+        остановлено исполнением рестарта, лист его не принимается (``paused`` от него не придёт), а новое воплощение
+        поднимается при снятом ``run_event``. Без этого ``ack`` из ``fault`` ждал бы ``run_stop_timeout_s`` (10 с).
+        """
+        leaves, restarting = self._readiness_view()
+        pending: list[str] = []
+        for name in self._run_expected_names():
+            leaf = leaves.get(name)
+            if name in restarting or (isinstance(leaf, dict) and leaf.get("paused") is True):
+                continue
+            if self._process_alive(name):
+                pending.append(name)
+        return pending
+
+    def _wait_all_paused(self, timeout_s: float, aborted: Callable[[], bool]) -> list[str] | None:
+        """Ждать ``paused: true`` у всех процессов набора не дольше ``timeout_s``, вне любых замков (heartbeat идут
+        через ``message_processor``). Итог: ``[]`` — все остановлены; список — не подтвердившие к сроку;
+        ``None`` — прервано."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if aborted():
+                return None
+            pending = self._paused_pending()
+            if not pending:
+                return []
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return pending
+            time.sleep(min(self._STOP_POLL_S, remaining))
+
+    def _run_stop_finish(self, *, fault: bool, seq: int, names: list[str], timeout_s: float) -> None:
+        """Итог: не подтвердившие входят в ``unconfirmed_stop``. STOP — ``settled`` по оценке (``ready``/``not_ready``);
+        авария — состояние остаётся ``fault``, ``fault_stop_done``, причины срока — в ``last_fault.reasons``."""
+        added = {name: timeout_s for name in names}
+        if fault:
+            append_failed: Exception | None = None
+            with self._run_lock:
+                last = self._run_last_fault
+                if self._fault_seq != seq or self._run_state is not RunState.fault or last is None:
+                    return
+                try:
+                    if added:
+                        have = {(r.get("node"), r.get("reason")) for r in last["reasons"]}
+                        fresh = [stop_unconfirmed_reason(n, timeout_s) for n in names]
+                        fresh = [r for r in fresh if (r["node"], r["reason"]) not in have]
+                        self._run_last_fault = {**last, "reasons": [dict(r) for r in last["reasons"]] + fresh}
+                except Exception as exc:  # noqa: BLE001 — дописывание причин срока не должно оставить ``ack`` без выхода
+                    append_failed = exc
+                finally:
+                    self._fault_stop_done = True  # выход из ``fault`` (``ack``) гарантирован при любом сбое выше
+            if append_failed is not None:
+                self._log_error(f"остановка в аварии: причины срока не дописаны ({type(append_failed).__name__})")
+            self._mark_unconfirmed(added)
+            self._publish_run_state()
+            return
+        with self._run_lock:
+            if self._run_state is not RunState.stopping:
+                return  # system.shutdown обогнал: машину ведёт он
+        self._mark_unconfirmed(added)
+        ready, reasons = self._evaluate_or_fail()  # F2: итог STOP случается и при сбое оценки
+        self._run_apply("settled", ready=ready, reasons=reasons)
+
     def _cmd_system_shutdown(self, data=None, **kwargs) -> dict:
         """Запустить завершение системы.
 
@@ -778,6 +2203,11 @@ class ProcessManagerProcess(ProcessModule):
           * ``deadline_s`` — только для ``force``: срок стопа детей от момента команды,
             0.1..5.0 с включительно, по умолчанию 1.0. Для ``graceful`` не читается.
         Ошибка аргументов → ``{"error": ...}``, ни одно событие не взводится.
+
+        Ответ (Task 1.4, ADR-PMM-044): ``accepted`` — стоп начат или эскалирован этой командой;
+        ``phase`` — фаза хода стопа после команды (``pre_stop`` при шагах ``pre_stop``); повтор
+        ``graceful`` — ``accepted: False, reason: "already_stopping", phase``; повтор ``force`` —
+        ``already_set`` + ``accepted: False, reason``; ``force`` поверх graceful — ``escalated``.
 
         Команда == системный стоп (Task 1.1 lifecycle-stop-ownership): взводит ОБЩИЙ
         ``system_stop_event`` — тот же путь, что закрытие окна GUI и ``harness.stop()``.
@@ -792,38 +2222,165 @@ class ProcessManagerProcess(ProcessModule):
         mode = args.get("mode", "graceful")
         if mode not in ("graceful", "force"):
             return {"error": "mode: graceful|force"}
+        # Task 1.2a: отправитель внешнего ``process.command`` — только ``_EnvelopeSender`` от
+        # ``_handle_process_command``; ``_sender`` из ``data`` клиента (прямая команда) — ``unknown``.
+        sender = args.get(_SHUTDOWN_SENDER_KEY)
+        initiator = (
+            str(sender)[:_SHUTDOWN_INITIATOR_MAX] if isinstance(sender, _EnvelopeSender) and sender else "unknown"
+        )
+        if mode == "graceful":
+            return self._shutdown_graceful(initiator)
+        deadline_s = args.get("deadline_s", 1.0)
+        # Диапазон ДО isfinite: сравнение int с float точное, а math.isfinite(10**400)
+        # бросил бы OverflowError. NaN и inf диапазон не проходят и так.
+        if (
+            isinstance(deadline_s, bool)
+            or not isinstance(deadline_s, (int, float))
+            or not 0.1 <= deadline_s <= 5.0
+            or not math.isfinite(deadline_s)
+        ):
+            return {"error": "deadline_s: 0.1..5.0"}
+        deadline_s = float(deadline_s)
+        self._run_apply("shutdown")  # Task 1.4: событие работы снято и состояние shutting_down — ДО событий стопа
         reply: dict = {"success": True, "message": "Shutdown initiated"}
-        if mode == "force":
-            deadline_s = args.get("deadline_s", 1.0)
-            # Диапазон ДО isfinite: сравнение int с float точное, а math.isfinite(10**400)
-            # бросил бы OverflowError. NaN и inf диапазон не проходят и так.
-            if (
-                isinstance(deadline_s, bool)
-                or not isinstance(deadline_s, (int, float))
-                or not 0.1 <= deadline_s <= 5.0
-                or not math.isfinite(deadline_s)
-            ):
-                return {"error": "deadline_s: 0.1..5.0"}
-            deadline_s = float(deadline_s)
-            children_stop = getattr(self, "_children_stop", None)
-            if children_stop is None:
-                self._log_warning("force: стоп детей не зарегистрирован — выполняю graceful")
-                reply["mode"] = "graceful"
-            # СНАЧАЛА срок, потом события: иначе область успеет начать стоп без срока.
-            elif children_stop.set_force_deadline(time.monotonic() + deadline_s):
-                self._force_deadline_s = deadline_s
-                self._log_info(f"force: срок стопа детей {deadline_s} с")
-                reply.update(mode="force", deadline_s=deadline_s)
+        children_stop = getattr(self, "_children_stop", None)
+        if children_stop is None:
+            # Запасной путь (двойники из ``__new__``): шаги не исполняются; идущие — отменяются (ADR-PMM-044).
+            self._log_warning("force: стоп детей не зарегистрирован — выполняю graceful")
+            begun = self._begin_system_stop("graceful", initiator, None)
+            self._cancel_pre_stop("force")
+            self._leave_pre_stop()
+            reply.update(mode="graceful", accepted=begun, phase=self._system_stop_phase())
+            if not begun:
+                reply["reason"] = "already_stopping"
+        # СНАЧАЛА срок, потом события: иначе область успеет начать стоп без срока.
+        elif children_stop.set_force_deadline(time.monotonic() + deadline_s):
+            self._force_deadline_s = deadline_s
+            self._log_info(f"force: срок стопа детей {deadline_s} с")
+            reply.update(mode="force", deadline_s=deadline_s)
+            # Ход стопа — ДО событий: иначе опрос status успел бы начать его как ``event`` (ленивый begin).
+            if self._begin_system_stop("force", initiator, deadline_s):
+                reply.update(accepted=True, phase=self._system_stop_phase())
             else:
-                # Первый force выигрывает: ответ несёт ДЕЙСТВУЮЩИЙ срок, а не запрошенный.
-                effective = self._force_deadline_s if self._force_deadline_s is not None else deadline_s
-                self._log_info(f"force: срок уже стоит ({effective} с), повтор не меняет")
-                reply.update(mode="force", deadline_s=effective, already_set=True)
+                # Поверх идущего graceful — эскалация (Task 1.4): срок от команды, шаг отменён, переход в
+                # ``children`` и события — здесь, на потоке приёма, не дожидаясь потока шагов.
+                escalated = self._escalate_system_stop("force", deadline_s)
+                self._cancel_pre_stop("force")
+                self._leave_pre_stop()
+                reply.update(accepted=True, escalated=escalated, phase=self._system_stop_phase())
+        else:
+            # Первый force выигрывает: ответ несёт ДЕЙСТВУЮЩИЙ срок, а не запрошенный.
+            effective = self._force_deadline_s if self._force_deadline_s is not None else deadline_s
+            self._log_info(f"force: срок уже стоит ({effective} с), повтор не меняет")
+            reply.update(
+                mode="force", deadline_s=effective, already_set=True, accepted=False, reason="already_stopping"
+            )
         self._log_info("System shutdown requested via command")
-        if self._system_stop_event is not None:
-            self._system_stop_event.set()
-        self.stop_event.set()
+        self._set_stop_events()
+        # Публикация — после взвода событий и вне лока словаря.
+        self._publish_system_stop()
         return reply
+
+    def _shutdown_graceful(self, initiator: str) -> dict:
+        """``system.shutdown mode=graceful`` (Task 1.4, ADR-PMM-044).
+
+        Есть принятые шаги ``pre_stop`` и PM ещё не гасится — фаза ``pre_stop``: шаги одной операцией
+        ``pm-pre-stop``, события взводит поток шагов. Иначе — фаза ``children`` и события сразу.
+        Повтор во время стопа — ранний ответ ``already_stopping`` без событий и без публикации.
+        Ни одного блокирующего вызова: ответ уходит до закрытия сокета (класс S, поток приёма).
+        """
+        steps = self._pre_stop_steps
+        executor = self._pre_stop_executor
+        with_steps = bool(steps) and executor is not None and not self._pm_stopping()
+        # Task 1.4 system-run-state (amendments §9): из ``running`` с гейтом — шаги при ВЗВЕДЁННОМ событии, затем
+        # shutdown в машину (снимает событие), ожидание ``paused``, затем события стопа; один проход ``pre_stop``.
+        # Иначе shutdown в машину — первым шагом, остальное как в gui-graceful-close 1.4.
+        from_running = self._run_snapshot()[0] is RunState.running and self._run_gate and self._run_event is not None
+        if not from_running:
+            self._run_apply("shutdown")
+        if with_steps:
+            window_s = sum(step.timeout_s for step in steps) + (self._run_stop_timeout() if from_running else 0.0)
+            begun = self._begin_system_stop("graceful", initiator, None, phase="pre_stop", window_s=window_s)
+        else:
+            begun = self._begin_system_stop("graceful", initiator, None)
+        if not begun:
+            phase = self._system_stop_phase()
+            if phase != "pre_stop":
+                # Вне ``pre_stop`` повтор взводит события, как до 1.4 (идемпотентно; страж Task 0.2): стоп,
+                # начатый ``_ChildrenStop.request_stop`` без событий, всё равно гасит корень. Шаги не режутся.
+                self._set_stop_events()
+            return {
+                "success": True,
+                "message": "Shutdown initiated",
+                "accepted": False,
+                "reason": "already_stopping",
+                "phase": phase,
+            }
+        reply = {
+            "success": True,
+            "message": "Shutdown initiated",
+            "accepted": True,
+            "mode": "graceful",
+            "phase": self._system_stop_phase(),
+        }
+        self._log_info("System shutdown requested via command")
+        if from_running:
+            self._log_info(
+                f"shutdown из running: шагов pre_stop {len(steps) if with_steps else 0}, затем ожидание paused"
+            )
+            action = lambda: self._run_shutdown_pass(with_steps)  # noqa: E731
+
+            def finish(_result: Any) -> None:
+                # Ревью Ф1, m1: отказ исполнителя шагов зовёт ``finish`` без прохода — ``shutdown`` в машину подаётся и
+                # тут, до событий стопа. После прохода повтор — no-op (``shutdown`` из ``shutting_down`` не меняет
+                # ни состояние, ни ``since``; публикация пропускает неизменённые значения).
+                self._run_apply("shutdown")
+                self._finish_pre_stop()
+
+            if with_steps:
+                executor.submit(action, frozenset({"system"}), finish)
+            else:
+                self._submit_run_sequence(action, "run-shutdown", finish)
+            self._publish_system_stop()
+            return reply
+        if with_steps:
+            self._log_info(f"pre_stop: шагов {len(steps)} — события стопа после них")
+            # Отказ submit (шаги отменены до старта) зовёт reply сразу — тогда события взводит он.
+            executor.submit(self._run_pre_stop, frozenset({"system"}), lambda _result: self._finish_pre_stop())
+            self._publish_system_stop()
+            return reply
+        self._set_stop_events()
+        self._publish_system_stop()
+        return reply
+
+    def _run_shutdown_pass(self, with_steps: bool) -> None:
+        """Проход graceful-shutdown из ``running``: шаги -> ``shutdown`` в машину (снимает событие) -> ждать
+        ``paused`` -> события стопа (``finally``, как ``_run_pre_stop``). Не подтвердившие — WARNING: машина уходит."""
+        try:
+            # Task 2.7d (ADR-PMM-051): флаг ``run_active`` снят уже в ``_begin_system_stop`` (до постановки прохода);
+            # шаги идут в ``running`` при снятом флаге и взведённом ``run_event`` (Task 1.4).
+            if with_steps:
+                self._run_pre_stop_loop()
+            self._run_apply("shutdown")
+            names = self._wait_all_paused(self._run_stop_timeout(), lambda: self._pre_stop_cancel_source() is not None)
+            if names:
+                self._log_warning(f"shutdown: не подтвердили остановку ({len(names)}): {', '.join(names)}")
+        except Exception as exc:  # noqa: BLE001 — граница потока: события взводит finally
+            self._log_error(f"shutdown: проход из running — исключение {type(exc).__name__}")
+        finally:
+            self._finish_pre_stop()
+
+    def _system_stop_phase(self) -> str | None:
+        """Текущая фаза хода стопа или ``None``."""
+        info = self._system_stop_snapshot()
+        return info.get("phase") if info is not None else None
+
+    def _set_stop_events(self) -> None:
+        """Взвести ``_system_stop_event`` (если есть) и ``stop_event``. Идемпотентно."""
+        ev = getattr(self, "_system_stop_event", None)
+        if ev is not None:
+            ev.set()
+        self.stop_event.set()
 
     def _cmd_system_stats(self, data=None, **kwargs) -> dict:
         """Статистика системы.
@@ -866,10 +2423,29 @@ class ProcessManagerProcess(ProcessModule):
         started_at = dict(getattr(self, "_instance_started_at", None) or {})
         registry = getattr(self, "_process_registry", None)
         target = data.get("process") if isinstance(data, dict) else None
+        # Task 1.2a (ADR-PMM-041): ход системного стопа — копия под локом или None. Фазу из ``status``
+        # процессов не выводить: монитор на стопе на паузе (ADR-PMM-036), снимок устаревший.
+        # Task 1.2: снимок — ВЫШЕ цикла, срок ``force`` режет ``stop_deadline_at`` записей. Сигнал читается ДО
+        # снимка: сигнал детям идёт после начала хода стопа, значит снимок после него уже видит стоп (и ``force``).
+        # Task 1.3 (ADR-PMM-043): сигнал — по волне имени (у ``last`` свой момент), тот же набор имён, что цикл ниже.
+        names = sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at))
+        signalled = {name: self._children_signalled_at(name) for name in names if not target or name == target}
+        system_stop = self._system_stop_snapshot()
+        if system_stop is None and self._pm_stopping():
+            # Событие взведено снаружи (fallback GUI, harness), ``request_stop`` ещё не звали: окна
+            # «стоп идёт, а system_stop пуст» нет. Идемпотентно — первый выигрывает.
+            self._begin_system_stop("graceful", "event", None)
+            system_stop = self._system_stop_snapshot()
+        force_deadline = None
+        if system_stop is not None and system_stop.get("mode") == "force":
+            value = system_stop.get("deadline_at")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                force_deadline = float(value)
         processes: dict = {}
-        for name in sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at)):
+        for name in names:
             if target and name != target:
                 continue
+            signalled_at = signalled.get(name)
             s = snap.get(name, {})
             proc = registry.get_process_by_name(name) if registry is not None else None
             if proc is None and name == getattr(self, "name", None):
@@ -892,8 +2468,73 @@ class ProcessManagerProcess(ProcessModule):
                 "instance_restarts": instance_restarts.get(name, 0),
                 # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
                 "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
+                # Task 1.2 (ADR-PMM-042): волна стопа имени и срок, после которого ребёнок «завис».
+                "stop_wave": self._stop_wave(name),
+                "stop_deadline_at": (
+                    self._stop_deadline_at(registry, name, signalled_at, force_deadline) if proc is not None else None
+                ),
             }
-        return {"success": True, "epoch": epoch, "processes": processes}
+        if system_stop is not None:
+            # C-88 (ADR-PMM-045): наблюдатель опрашивает статус во время стопа; снимок с ``done`` отдан —
+            # ожидание в ``_ChildrenStop`` отпускает. Значение ``system_stop`` — копия из ``_system_stop_snapshot``.
+            self._status_served_during_stop_at = time.monotonic()
+            if system_stop.get("phase") == "done":
+                self._status_done_served_event.set()
+        return {"success": True, "epoch": epoch, "processes": processes, "system_stop": system_stop}
+
+    def _stop_wave(self, name: str) -> str:
+        """Волна системного стопа имени (Task 1.3, ADR-PMM-043): из реестра; двойник без строки — ``"main"``."""
+        getter = getattr(getattr(self, "_process_registry", None), "stop_wave", None)
+        if not callable(getter):
+            return STOP_WAVE_MAIN
+        try:
+            wave = getter(name)
+        except Exception:  # noqa: BLE001 — статус не падает от волны одного имени
+            return STOP_WAVE_MAIN
+        return wave if isinstance(wave, str) else STOP_WAVE_MAIN
+
+    def _children_signalled_at(self, name: str | None = None) -> float | None:
+        """Момент сигнала стопа детям корня (``time.time()``) от группы, не PM-часы; нет — ``None``.
+
+        Task 1.3: ``name`` — момент сигнала волны этого имени. Двойники ``_children_stop`` в тестах геттера
+        не имеют или отдают не число — ``None``; геттер без параметров (сигнатура) — зовётся без имени.
+        """
+        getter = getattr(getattr(self, "_children_stop", None), "signalled_at", None)
+        if not callable(getter):
+            return None
+        try:
+            value = getter(name) if _takes_argument(getter) else getter()
+        except Exception as exc:  # noqa: BLE001 — статус не падает от геттера срока
+            self._log_warning(f"supervision.status: signalled_at() упал: {exc}")
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    @staticmethod
+    def _stop_deadline_at(
+        registry: Any, name: str, signalled_at: float | None, force_deadline: float | None
+    ) -> float | None:
+        """Срок стопа ребёнка (Task 1.2, ADR-PMM-042): сигнал + окно имени; при ``force`` — не позже его срока.
+
+        Верхняя оценка: настоящий ``terminate`` идёт в ``min(сигнал + окно, срок области)``. До сигнала,
+        вне стопа и у реестра без числового окна (двойник) — ``None``.
+        """
+        if signalled_at is None or registry is None:
+            return None
+        getter = getattr(registry, "stop_window_s", None)
+        if not callable(getter):
+            return None
+        try:
+            window = getter(name)
+        except Exception:  # noqa: BLE001 — статус не падает от окна одного имени
+            return None
+        if isinstance(window, bool) or not isinstance(window, (int, float)):
+            return None
+        deadline = signalled_at + float(window)
+        if force_deadline is not None:
+            deadline = min(deadline, force_deadline)
+        return deadline
 
     # -------------------------------------------------------------------------
     # Topology commands
@@ -905,6 +2546,12 @@ class ProcessManagerProcess(ProcessModule):
         Маршрутизирует в ``apply_topology`` (не напрямую в менеджер) —
         чтобы транзакция, snapshot, rollback и debounce не обходились.
         """
+        # Task 1.5 system-run-state: гейт по состоянию машины — ПЕРВЫМ, до разбора аргументов, debounce, ретаргета
+        # адреса рецепта и любых записей (работает и при ``run_gate: false``: машина ведётся всегда). Применение
+        # допустимо только из ``booting``/``not_ready``/``ready``; одна точка — покрывает и ``recipe.activate``.
+        refusal = self._topology_apply_gate(self._run_snapshot()[0])
+        if refusal is not None:
+            return refusal
         args = _merge_cmd_args(data, kwargs)
         td = args.get("topology_dict")
         if td is None:
@@ -918,6 +2565,35 @@ class ProcessManagerProcess(ProcessModule):
         debounced = self._topology_debounce_reject()
         if debounced is not None:
             return debounced
+        # Task 1.3 system-run-state: применение топологии — снова ``booting``; итог (успех, откат или
+        # исключение) закрывает ``settled`` по оценке агрегата. Состояние могло уйти в ``running`` и т.п. между
+        # гейтом выше и этим переходом (START/STOP параллельно): отказ машины — тот же ответ, без побочных эффектов.
+        new, code, _prev = self._run_apply("apply")
+        if code is not None:
+            return self._topology_apply_refusal(code)
+        try:
+            return self._topology_apply_retargeted(args, td)
+        finally:
+            self._settle_run_state()
+
+    def _topology_apply_gate(self, state: RunState) -> dict | None:
+        """Отказ ``topology.apply`` по состоянию машины (чистая проверка таблицей, без записи) или ``None``."""
+        new, code = transition(state, "apply", ready=True)
+        return None if code is None else self._topology_apply_refusal(code)
+
+    @staticmethod
+    def _topology_apply_refusal(code: str) -> dict:
+        """Ответ-отказ: ``error`` — код машины (``fault_unacknowledged`` для аварии), ``message`` — что сделать."""
+        if code == "fault_unacknowledged":
+            message = "сначала Квитировать"
+        elif code == "shutting_down":
+            message = "система завершает работу"
+        else:
+            message = "сначала ОСТАНОВИТЬ"
+        return {"success": False, "error": code, "message": message}
+
+    def _topology_apply_retargeted(self, args: dict, td: Any) -> dict:
+        """Тело ``topology.apply`` после debounce: ретаргет адреса рецепта, ``apply_topology``, откат адреса."""
         # Task 5.12: L2-watcher обязан переехать на спутник НОВОГО рецепта. Иначе
         # правка нового файла молча не применяется, а правка старого — применяется,
         # и оба симптома читаются как «hot-reload сломался».
@@ -3538,6 +5214,13 @@ class ProcessManagerProcess(ProcessModule):
                 for key, value in data.items():
                     if key not in ("cmd", "correlation_id"):
                         inner_msg["data"][key] = value
+                if cmd == "system.shutdown":
+                    # Task 1.2a (ADR-PMM-041): инициатор стопа — отправитель конверта. Только этой команде:
+                    # другие обработчики получают ``data`` как раньше. Ключ из ``data`` снаружи перекрыт.
+                    sender = msg.get("sender")
+                    inner_msg["data"][_SHUTDOWN_SENDER_KEY] = (
+                        _EnvelopeSender(sender) if isinstance(sender, str) else None
+                    )
 
                 # Task 1.9b (D2): команда с исполнителем (L/T) отвечает через ``reply`` сама, позже,
                 # с потока исполнителя; обёртка тогда не отвечает (``DEFERRED``).
@@ -3614,6 +5297,7 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources:
                 self.shared_resources.register_process(name, proc_config)
 
+        self._boot_total = len(valid)  # N шкалы загрузки: процессы, прошедшие валидацию
         ordered_names = [n for n, _ in valid]
         config_by_name = {n: c for n, c in valid}
         waves = self._plan_boot_waves(ordered_names, config_by_name)
@@ -3628,6 +5312,7 @@ class ProcessManagerProcess(ProcessModule):
                 )
                 if upstreams:
                     ready = self._wait_processes_ready(upstreams, timeout_s, "boot-deps")
+                    self._boot_progress_ready(ready)
                     # Не глотать сигнал: подтверждённо не-ready апстрим → зависимые
                     # волны стартуют ВСЁ РАВНО (boot не блокируем), но это должно быть
                     # видно на уровне гейта, а не тонуть в generic-warning примитива.
@@ -3640,6 +5325,7 @@ class ProcessManagerProcess(ProcessModule):
             for name in wave:
                 if self._boot_create_and_start(config_by_name[name], name):
                     started.add(name)
+                    self._boot_progress_started(len(started))
 
     def _boot_create_and_start(self, proc_config: dict[str, Any], name: str) -> bool:
         """Создать+стартовать один процесс на boot. ``True`` если реально стартован.
@@ -3771,11 +5457,19 @@ class ProcessManagerProcess(ProcessModule):
         return float(budget["pm_total_s"]), float(budget["infra_s"])
 
     def _ceiled_budget(self, base: dict) -> dict:
-        """``stop_budget(G(g_att, C))`` из словаря ``base``; без потолка — ``base`` как есть (Task 1.11)."""
+        """``stop_budget(G(g_att, C))`` из словаря ``base``; без потолка — ``base`` как есть (Task 1.11).
+
+        Task 1.3 (ADR-PMM-043): при волне ``last`` пересчёт ВСЕГДА — ``stop_budget(G, has_last=True)``: словарь
+        раннера ``last_wave_s`` не несёт.
+        """
         ceiling = getattr(self, "_stop_window_ceiling_s", None)
+        has_last = bool(getattr(self, "_has_last", False))
+        graceful = float(base["pm_graceful_s"])
+        if has_last:
+            outer = graceful if ceiling is None else outer_graceful_s(graceful, ceiling)
+            return stop_budget(outer, has_last=True)
         if ceiling is None:
             return base
-        graceful = float(base["pm_graceful_s"])
         outer = outer_graceful_s(graceful, ceiling)
         return base if outer == graceful else stop_budget(outer)
 
@@ -3801,11 +5495,23 @@ class ProcessManagerProcess(ProcessModule):
         return ceiling
 
     def _own_work(self, work) -> None:
-        """``work`` PM: ``summary``, затем область ``children`` (LIFO: дети → сводка)."""
+        """``work`` PM: ``summary`` (закрывается после детей, воркеров, watcher'ов и SSM — LIFO)."""
         super()._own_work(work)
         work.own(self._self_call("_stop_summary"), name="summary", kind="callable")
+
+    def _own_work_late(self, work) -> None:
+        """``work`` PM, поздние записи: область ``children`` (Task 1.1a, ADR-PMM-040).
+
+        Регистрация после ``workers`` — закрытие раньше них (LIFO): ``message_processor``
+        PM отвечает на команды всё окно остановки детей.
+        """
+        super()._own_work_late(work)
         self._children_stop = _ChildrenStop(self)
-        children = work.child("children", budget_s=self._budget()["pm_graceful_s"], kill_reserve_s=KILL_RESERVE_S)
+        # Task 1.3 (ADR-PMM-043): при волне ``last`` область длиннее на ``last_wave_s``: ``D − last_wave_s`` — прежнее
+        # окно ``main``, предел фазы 3 = ``pm_total_s``. Без ``last`` ключа нет — срок прежний.
+        budget = self._budget()
+        budget_s = float(budget["pm_graceful_s"]) + float(budget.get("last_wave_s", 0.0))
+        children = work.child("children", budget_s=budget_s, kill_reserve_s=KILL_RESERVE_S)
         children.own(self._children_stop, name="processes", kind="process")
 
     def _own_transport(self, transport) -> None:
@@ -3979,6 +5685,26 @@ class ProcessManagerProcess(ProcessModule):
         if not config:
             self._log_error(f"No saved config for '{process_name}'")
             return False
+        # Task 1.7c: с этого момента процесс «перезапускается» (pid прежнего воплощения запоминается до замены) —
+        # лист и поздний heartbeat прежнего воплощения не допускают ``ack`` / START. Авто-рестарт монитора уже
+        # поставил пометку при решении; повтор здесь идемпотентен (реестр ещё держит то же воплощение).
+        mark = getattr(getattr(self, "_process_monitor", None), "mark_restarting", None)
+        if callable(mark):
+            mark(process_name)
+        # fix-B3 (F4): у пометки два владельца исхода — успех (heartbeat нового pid) и провал (здесь): любой выход без
+        # ``True`` (``stop_process`` ложь, воплощение не создано, исключение) снимает пометку, иначе живой процесс
+        # остаётся «перезапускающимся» навсегда, а его heartbeat отбрасывается как чужой.
+        replaced = False
+        try:
+            replaced = self._restart_process_replace(process_name, config)
+            return replaced
+        finally:
+            unmark = getattr(getattr(self, "_process_monitor", None), "unmark_restarting", None)
+            if not replaced and callable(unmark):
+                unmark(process_name)
+
+    def _restart_process_replace(self, process_name: str, config: dict[str, Any]) -> bool:
+        """Замена воплощения после пометки ``mark_restarting``: stop -> снять с реестра -> create -> start -> ready."""
         # ADR-PMM-030: метку НЕ ставить — очереди переиспользуются новым воплощением.
         if not self.stop_process(process_name, mark_reader_gone=False):
             return False
@@ -3995,6 +5721,11 @@ class ProcessManagerProcess(ProcessModule):
         ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
+            # Task 1.8b: новое воплощение рождается со статусом нового воплощения (как boot и switch: запись PSR
+            # создаётся с ``initializing``). Здесь запись переживает замену (очереди/metadata/custom), а
+            # ``register_process`` существующей записи статус не трогает — без сброса воплощение наследует
+            # ``crashed`` / ``unresponsive`` / ``stopped`` прежнего и супервизор пропускает его следующий сбой.
+            self.shared_resources.process_state_registry.update_state(process_name, status="initializing")
             # Дренаж переиспользованных очередей: новый инстанс стартует чистым.
             self._drain_process_queues(process_name)
         ids_after = self._process_queue_ids(process_name)
@@ -4457,6 +6188,7 @@ class ProcessManagerProcess(ProcessModule):
         if not names:
             return
         ready = self._wait_processes_ready(names, timeout_s, "boot")
+        self._boot_progress_ready(ready)
         not_ready = sorted(n for n, ok in ready.items() if not ok)
         if not_ready:
             self._log_warning(
@@ -4620,6 +6352,19 @@ class ProcessManagerProcess(ProcessModule):
         return started
 
 
+def _takes_argument(fn: Any) -> bool:
+    """Принимает ли ``fn`` позиционный аргумент (Task 1.3): двойники ``signalled_at()`` в тестах — без параметров.
+
+    Проверка сигнатуры до вызова, а не ``except TypeError``: настоящий ``TypeError`` внутри геттера не скрывается.
+    Сигнатуру не прочесть — ``True`` (вызов с аргументом, как у настоящей группы).
+    """
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+
+
 class _ChildrenStop:
     """Единственный Stoppable детей PM в области ``work/children`` (Task 1.2a, ADR-PMM-036).
 
@@ -4639,6 +6384,8 @@ class _ChildrenStop:
     _force_at: float | None = None
     #: ``kill()`` уже звали — срок ``force`` больше не применяется.
     _killed: bool = False
+    #: Ожидание наблюдателя статуса (C-88) уже было — один раз на экземпляр, в том числе у ``__new__``-двойников.
+    _linger_done: bool = False
 
     def __init__(self, pm: ProcessManagerProcess) -> None:
         self._pm = pm
@@ -4661,6 +6408,10 @@ class _ChildrenStop:
                     budget = infra_s if deadline is None else max(0.0, deadline - time.monotonic())
                     monitor.stop(wait=True, timeout=budget)
                 self._group = pm._process_registry.children_stop(mark_reader_gone=True)
+                # Task 1.3 (ADR-PMM-043): слушатель волны last; двойник группы без метода — пропуск.
+                setter = getattr(self._group, "set_wave_listener", None)
+                if callable(setter):
+                    setter(self._on_last_wave)
             except Exception as exc:
                 # Одна попытка: повтор в join_until/фазе 3 не лечит и множит ошибки.
                 self._start_failed = True
@@ -4678,6 +6429,9 @@ class _ChildrenStop:
         ``join_until`` у ребёнка, которого ещё держит операция, было бы два владельца стопа.
         """
         pm = self._pm
+        # Task 1.2a (ADR-PMM-041): фаза ``children`` объявлена ПЕРВОЙ — до флага «PM гасится», исполнителя
+        # и паузы монитора (каждое до ``infra_s``). Стоп без команды (внешнее событие) — инициатор ``event``.
+        self._announce_phase("children", begin=True)
         pm._children_stopping = True
         # Один срок на исполнитель и паузу монитора (монитору — остаток).
         deadline = time.monotonic() + float(pm._budget()["infra_s"])
@@ -4728,18 +6482,59 @@ class _ChildrenStop:
     def join_until(self, deadline: float) -> bool:
         """Дети остановлены к сроку? Ошибка фазы 1 — один раз повторяется здесь (попадёт в ``errors`` корня);
         реестр упал (группы нет) — ``False`` без исключения. Срок ``force`` (если стоит и ``kill()``
-        ещё не звали) обрезает ``deadline`` — в том числе для группы, созданной здесь же."""
+        ещё не звали) обрезает ``deadline`` — в том числе для группы, созданной здесь же.
+
+        ``done`` ставится при ``True`` или после ``kill()`` (вызов фазы 3 — последний до закрытия
+        message_processor; ``close()`` область зовёт только при ``True``)."""
         error, self._phase1_error = self._phase1_error, None
         if error is not None:
             raise error
         if self._group is None and not self._start_failed:
             self.request_stop()
         if self._group is None:
+            # F1 (Task 1.2, ADR-PMM-042): группа не собралась, ``kill()`` уже звали — вызов фазы 3 последний,
+            # ``done`` ставится здесь, иначе «после ``done`` ``null`` = PM не подтвердил» не исполнится.
+            if self._killed:
+                self._announce_phase("done")
+                self._linger_for_status_observer(deadline)
             return False
         force_at = self._force_at
         if force_at is not None and not self._killed:
             deadline = min(deadline, force_at)
-        return self._group.join_until(deadline)
+        stopped = self._group.join_until(deadline)
+        if stopped or self._killed:
+            # Task 1.2a: дети ушли — ``done`` в момент факта (до закрытия message_processor и стора).
+            # После ``kill()`` этот вызов — последний ход области до закрытия message_processor
+            # (``_finish_stoppable`` зовёт ``close()`` только при ``True``): выжившие получают ``done``
+            # здесь, потребитель судит по ``alive``.
+            self._announce_phase("done")
+            self._linger_for_status_observer(deadline)
+        return stopped
+
+    def _on_last_wave(self, wave: str, deadline: float) -> None:
+        """Слушатель волны (Task 1.3, ADR-PMM-043): сдвиг ``deadline_at`` на срок области, затем фаза ``last_wave``.
+
+        Зовётся потоком группы сразу после сигнала ``last``, вне её лока. Сбой — ERROR, стоп идёт.
+        """
+        pm = self._pm
+        try:
+            pm._shift_system_stop_deadline(deadline)
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: срок волны {wave!r} не сдвинут: {exc}")
+        self._announce_phase("last_wave")
+
+    def signalled_at(self, name: str | None = None) -> float | None:
+        """Момент сигнала стопа детям (``time.time()``) от группы реестра (Task 1.2); нет — ``None``.
+
+        Task 1.3: ``name`` — момент сигнала волны имени; геттер двойника без параметров (сигнатура) — без имени.
+        """
+        getter = getattr(self._group, "signalled_at", None)
+        if not callable(getter):
+            return None
+        value = getter(name) if _takes_argument(getter) else getter()
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
 
     def kill(self) -> None:
         # Флаг ДО делегирования: join_until фазы 3 после kill() получает срок как есть.
@@ -4748,8 +6543,58 @@ class _ChildrenStop:
             self._group.kill()
 
     def close(self) -> None:
-        if self._group is not None:
-            self._group.close()
+        try:
+            if self._group is not None:
+                self._group.close()
+        finally:
+            # Task 1.2a: запасной путь ``done`` (основной — ``join_until`` после ``kill()``). Уже ``done`` —
+            # ни изменения, ни записи в стор.
+            self._announce_phase("done")
+            self._linger_for_status_observer(None)
+
+    def _linger_for_status_observer(self, deadline: float | None) -> None:
+        """Дать наблюдателю забрать снимок ``supervision.status`` с фазой ``done`` (C-88, ADR-PMM-045).
+
+        Без неё последний итог ребёнка не доходит: ``done`` объявлен сразу после записи итога, область
+        закрывает message_processor через ~1 мс, и ответ со снимком уже не отдаётся. Ждём, только если
+        статус опрашивают прямо сейчас (последний ответ во время стопа моложе ``_STATUS_OBSERVER_FRESH_S``);
+        иначе выход сразу — цена нулевая. Ждём событие «снимок с ``done`` отдан» не дольше
+        ``min(_STATUS_LINGER_S, остаток срока)``; после него пауза ``_STATUS_FLUSH_S`` (ответ уходит
+        потоком адаптера моста уже после возврата обработчика: это время, не гарантия доставки).
+        ``deadline=None`` (путь ``close``) — только потолок. Один раз на экземпляр: флаг берётся
+        независимо от результата. Лок PM не держим. Сбой — ERROR в лог, стоп идёт (принцип 5).
+        """
+        if self._linger_done:
+            return
+        self._linger_done = True
+        pm = self._pm
+        try:
+            stamp = getattr(pm, "_status_served_during_stop_at", None)
+            if stamp is None or time.monotonic() - stamp > _STATUS_OBSERVER_FRESH_S:
+                return
+            wait_s = _STATUS_LINGER_S
+            if deadline is not None:
+                wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
+            if wait_s <= 0.0 or not pm._status_done_served_event.wait(wait_s):
+                return
+            flush_s = _STATUS_FLUSH_S
+            if deadline is not None:
+                flush_s = min(flush_s, max(0.0, deadline - time.monotonic()))
+            if flush_s > 0.0:
+                time.sleep(flush_s)
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: ожидание наблюдателя supervision.status: {exc}")
+
+    def _announce_phase(self, phase: str, *, begin: bool = False) -> None:
+        """Фаза хода стопа PM + публикация в стор. Сбой не ломает стоп детей (ERROR в лог)."""
+        pm = self._pm
+        try:
+            if begin:
+                pm._begin_system_stop("graceful", "event", None)
+            pm._set_system_stop_phase(phase)
+            pm._publish_system_stop()
+        except Exception as exc:  # noqa: BLE001 — стоп детей идёт всегда
+            pm._log_error(f"shutdown: фаза стопа {phase!r} не объявлена: {exc}")
 
     def result(self) -> dict[str, bool]:
         return self._group.result() if self._group is not None else {}

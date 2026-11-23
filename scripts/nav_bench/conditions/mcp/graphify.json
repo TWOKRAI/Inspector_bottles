@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": [
+        "{run_root}/graphify-out/graph.json"
+      ]
+    }
+  }
+}

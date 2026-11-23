@@ -1,7 +1,7 @@
 """CLI стенд-гейта фазы 5 (Task 5.6).
 
-``python -m scripts.stand_gate [--profile quick] [--runs N] [--from-json PATH ...] [--no-throughput-gate]
-[--out-dir reports/stand]``
+``python -m scripts.stand_gate [--profile quick] [--runs N] [--run-gate | --no-run-gate]
+[--from-json PATH ...] [--no-throughput-gate] [--out-dir reports/stand]``
 
 Коды выхода: 0 — все пороги зелёные; 1 — нарушен хотя бы один порог (строка ``FAIL <имя>: <факт> vs <порог>``);
 2 — сбой прогона (стенд не поднялся, нет обязательного ключа JSON, замок занят).
@@ -25,6 +25,13 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--profile", choices=("quick",), default="quick")
     ap.add_argument("--runs", type=int, default=1, help="прогонов каждого кейса (живой режим)")
     ap.add_argument("--from-json", nargs="+", metavar="PATH", help="проверить готовые JSON, стенд не поднимать")
+    ap.add_argument(
+        "--run-gate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="стенд «как в бою»: гейт запуска включён, стенд сам шлёт system.run.start (умолчание вкл). "
+        "Метрика first_frame_after_ready_s с гейтом отсчитывается от start_run, без — от boot: числа несравнимы",
+    )
     ap.add_argument("--no-throughput-gate", action="store_true", help="выключить ТОЛЬКО порог lag processor")
     ap.add_argument("--out-dir", default="reports/stand")
     ap.add_argument("--port", type=int, default=8775, help="порт драйвера живого стенда")
@@ -58,7 +65,7 @@ def _live(args: argparse.Namespace) -> list[tuple[str, dict]]:
     cases = []
     for i in range(1, args.runs + 1):
         for tag, transit, pause in run.QUICK_CASES:
-            data = run.run_case(tree, tag, transit, pause, args.port)
+            data = run.run_case(tree, tag, transit, pause, args.port, run_gate=args.run_gate)
             out = json_dir / f"{tag}_{i}.json"
             out.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
             print(f"stand_gate: {tag} run {i} -> {out}", flush=True)

@@ -85,12 +85,16 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         """
 
     def _own_work(self, work) -> None:
-        """``work``: СНАЧАЛА дети PM (``super()``), ЗАТЕМ ``state_store``, ``recipe_watcher``,
+        """``work``: СНАЧАЛА сводка PM (``super()``), ЗАТЕМ ``state_store``, ``recipe_watcher``,
         ``observability_watcher``.
 
-        LIFO закрывает watcher'ы и SSM РАНЬШЕ детей и сводки — порядок прежнего
-        ``shutdown()`` (Task 1.2a, ADR-PMM-036). Сигнал детям уходит ещё раньше — в фазе 1
-        ``work`` (``request_stop`` всех записей сегмента до LIFO-фазы 2).
+        Дети PM здесь не регистрируются: область ``children`` лежит в ``_own_work_late`` и в
+        LIFO-фазе 2 закрывается РАНЬШЕ ``workers`` (ADR-PMM-040, заменяет порядок ADR-PMM-036).
+        Порядок закрытия ``work``: ``plugins-stop`` → ``children`` → ``workers`` (``message_processor``)
+        → ``observability_watcher`` → ``recipe_watcher`` → ``state_store`` → ``summary`` → ``plugins``
+        → ``hooks``: watcher'ы и SSM закрываются ПОСЛЕ детей и воркеров, сводка — после SSM.
+        Сигнал детям уходит ещё раньше — в фазе 1 ``work`` (``request_stop`` всех записей
+        сегмента до LIFO-фазы 2).
 
         ``StateStoreManager.shutdown()`` обещает финальный дренаж буфера коалесцирования
         и остановку daemon-flusher'а — но на прод-пути его никто не звал: оркестратор

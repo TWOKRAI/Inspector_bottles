@@ -1,0 +1,152 @@
+{
+  "threshold": 0.5,
+  "total": 160,
+  "no_disc": 0,
+  "top1_correct": 148,
+  "top1_correct_pct": 92.5,
+  "below_threshold": 10,
+  "below_threshold_pct": 6.25,
+  "answered": 150,
+  "correct_answered": 142,
+  "correct_answered_pct_of_all": 88.75,
+  "correct_among_answered_pct": 94.66666666666667,
+  "recall_by_letter": {
+    "Е": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "И": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "М": {
+      "n": 32,
+      "top1": 20,
+      "correct_answered": 14,
+      "recall_top1_pct": 62.5,
+      "recall_answered_pct": 43.75
+    },
+    "П": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    },
+    "Р": {
+      "n": 32,
+      "top1": 32,
+      "correct_answered": 32,
+      "recall_top1_pct": 100.0,
+      "recall_answered_pct": 100.0
+    }
+  },
+  "confusion_top5": [
+    {
+      "truth": "М",
+      "pred": "И",
+      "count": 12
+    }
+  ],
+  "angle": {
+    "frames_correct_letter": 148,
+    "frames_angle_undefined_full": 0,
+    "sym": {
+      "n": 148,
+      "median": 1.8668215376467572,
+      "p90_abs": 10.52542711820664,
+      "max_abs": 90.24048945901956,
+      "out_5": 0.24324324324324326,
+      "out_10": 0.10810810810810811,
+      "out_15": 0.05405405405405406
+    },
+    "sym_answered_only": {
+      "n": 142,
+      "median": 1.8668215376467572,
+      "p90_abs": 6.4614756132429765,
+      "max_abs": 28.30728085011384,
+      "out_5": 0.2112676056338028,
+      "out_10": 0.07746478873239436,
+      "out_15": 0.035211267605633804
+    },
+    "no_sym": {
+      "n": 148,
+      "median": 1.3991196678345972,
+      "p90_abs": 173.98596782238178,
+      "max_abs": 179.93490525411192,
+      "out_5": 0.33783783783783783,
+      "out_10": 0.21621621621621623,
+      "out_15": 0.16216216216216217
+    },
+    "inverted_sym": {
+      "n": 148,
+      "median": -0.6844180350178135,
+      "p90_abs": 177.07060887383622,
+      "max_abs": 179.67510335780207,
+      "out_5": 0.7567567567567568,
+      "out_10": 0.7162162162162162,
+      "out_15": 0.7027027027027027
+    },
+    "inverted_no_sym": {
+      "n": 148,
+      "median": 1.090578818322797,
+      "p90_abs": 178.33412538759904,
+      "max_abs": 179.67510335780207,
+      "out_5": 0.8108108108108109,
+      "out_10": 0.7702702702702703,
+      "out_15": 0.7567567567567568
+    },
+    "median_by_grid_angle_sym": {
+      "0": {
+        "n": 20,
+        "median": 3.905343502437674
+      },
+      "45": {
+        "n": 18,
+        "median": 3.6470760567821685
+      },
+      "90": {
+        "n": 18,
+        "median": 1.2385300548980638
+      },
+      "135": {
+        "n": 20,
+        "median": 1.7485722208105443
+      },
+      "180": {
+        "n": 19,
+        "median": 0.7382670174985151
+      },
+      "225": {
+        "n": 16,
+        "median": -0.5082413357019249
+      },
+      "270": {
+        "n": 17,
+        "median": -0.32489664219787073
+      },
+      "315": {
+        "n": 20,
+        "median": 2.357381615887448
+      }
+    }
+  },
+  "source": {
+    "mode": "sim",
+    "model": "mobilenet_v3_large_20260616_050828",
+    "unreadable": 0,
+    "header": [
+      "модель mobilenet_v3_large_20260616_050828; порог 0.5; устройство cpu",
+      "источник: sim, букв 5, углов 8, по 4 на ячейку, seed 0",
+      "сим: дефекты 0, смещение центра ±[10, 20] px (секция train пресета), вырез radius/margin 14/128",
+      "ПРИБЛИЖЕНИЕ: вырез по радиусу объекта из альфы спрайта, не по кругу Хафа circle_detector"
+    ]
+  },
+  "thresholds_pass_fail": "не заданы (вопрос владельца β7)"
+}

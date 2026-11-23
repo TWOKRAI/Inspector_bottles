@@ -95,6 +95,14 @@ class FallbackLogger:
             view = self._view = get_std_logger(self._name, fallback_name=self._name)
         return view
 
+    def resolve(self) -> Any:
+        """Подтянуть вид сейчас, не дожидаясь записи; вернуть его.
+
+        ``ImportError`` при частичной инициализации ``logger_module`` летит
+        наружу — решать, откладывать ли голос, должен вызывающий.
+        """
+        return self._resolve()
+
     def debug(self, msg: str, *args: Any) -> None:
         self._resolve().debug(msg, *args)
 

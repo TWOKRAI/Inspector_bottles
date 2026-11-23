@@ -37,18 +37,19 @@ def test_custom_config(qtbot):
 
 
 def test_layout_has_three_zones(qtbot):
-    """Central layout содержит 4 виджета: header, error_banner, placeholder, tab_widget."""
+    """Central layout содержит 5 виджетов: header, error_banner, run_control, placeholder, tab_widget."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     layout = window._layout
-    assert layout.count() == 4
+    assert layout.count() == 5
 
-    # Порядок: header (0), error_banner (1), placeholder (2), tab_widget (3)
+    # Порядок: header (0), error_banner (1), run_control (2), placeholder (3), tab_widget (4)
     assert layout.itemAt(0).widget() is window._header
     assert layout.itemAt(1).widget() is window._error_banner
-    assert layout.itemAt(2).widget() is window._image_panel_placeholder
-    assert layout.itemAt(3).widget() is window._tab_widget
+    assert layout.itemAt(2).widget() is window._run_control
+    assert layout.itemAt(3).widget() is window._image_panel_placeholder
+    assert layout.itemAt(4).widget() is window._tab_widget
 
 
 # -- Header property --
@@ -161,13 +162,13 @@ def test_set_image_panel(qtbot):
 
     window.set_image_panel(real_panel)
 
-    # Виджет на позиции 2 теперь — real_panel (header=0, error_banner=1, image=2, tabs=3)
+    # Виджет на позиции 3 теперь — real_panel (header=0, error_banner=1, run_control=2, image=3, tabs=4)
     layout = window._layout
-    assert layout.itemAt(2).widget() is real_panel
+    assert layout.itemAt(3).widget() is real_panel
     assert window._image_panel is real_panel
 
-    # Общее количество виджетов в layout осталось 4
-    assert layout.count() == 4
+    # Общее количество виджетов в layout осталось 5
+    assert layout.count() == 5
 
 
 # -- Undo/Redo controller (G.4.4: единая шина undo) --

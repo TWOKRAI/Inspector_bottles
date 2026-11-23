@@ -66,9 +66,8 @@ class PluginTestBench:
 
         # Контекст
         self.ctx = PluginContext(
-            process_name=process_name,
+            services=self._mock_process,
             config=self.config,
-            process=self._mock_process,
             io=self._mock_io,
         )
 
@@ -102,6 +101,11 @@ class PluginTestBench:
     def resume(self) -> PluginTestBench:
         """PAUSED → RUNNING."""
         self.plugin._do_resume(self.ctx)
+        return self
+
+    def request_stop(self) -> PluginTestBench:
+        """Весть о стопе (C-60): хук ``request_stop`` в READY/RUNNING/PAUSED; состояние не меняет."""
+        self.plugin._do_request_stop(self.ctx)
         return self
 
     def shutdown(self) -> PluginTestBench:

@@ -2,6 +2,7 @@
 name: developer
 description: Implementation engineer. Executes a task per spec from Manager/Director. Writes code, runs smoke-tests, commits. Strictly within scope.
 model: sonnet
+effort: high
 omitClaudeMd: true
 skills: project-rules, verify-done
 disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__sentrux, mcp__serena

@@ -8,14 +8,71 @@ Shared mock-классы и фабрики для тестов process_manager_m
     - FakePlanner: framework-level планировщик (5 фаз, без импорта prototype).
     - make_pm: фабрика PM с TopologyManager + FakePlanner wired.
     - wire_planner: подключить FakePlanner к TopologyManager PM.
+    - _isolated_home: autouse-фикстура, ``HOME``/``USERPROFILE`` во временный каталог (файл токена 0.12b).
+    - _join_run_sequence_threads: autouse-фикстура, дожидающаяся одноразовых потоков последовательностей
+      останова (``run-stop``, ``run-fault-stop``, ``run-shutdown``) PM без исполнителя.
 
 Phase 2.3: общий код вынесен из test_apply_topology / test_replace_blueprint.
 """
 
 import copy
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ..process.process_manager_process import ProcessManagerProcess
+
+# Имена одноразовых потоков, которые ``_submit_run_sequence`` заводит у PM без исполнителя ``pm-lifecycle``.
+_RUN_SEQUENCE_THREAD_NAMES = frozenset({"run-stop", "run-fault-stop", "run-shutdown"})
+_RUN_SEQUENCE_JOIN_DEADLINE_S = 2.0
+
+# PM, созданные ``make_pm`` в текущем тесте (список чистит фикстура ниже).
+_PMS_OF_THIS_TEST: list[ProcessManagerProcess] = []
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """``HOME``/``USERPROFILE`` — во временный каталог (Task 0.12b).
+
+    Endpoint порта управления пишет файл токена в ``~/.multiprocess_framework/ctl_<port>.token``: без
+    подмены тесты трогали бы настоящий домашний каталог, а под xdist гонялись бы на одном имени файла.
+    Каталог свой у каждого теста и лежит вне ``tmp_path`` теста (его содержимое тесты не видят);
+    тест, задающий ``HOME`` сам, делает это позже и главнее.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("BACKEND_CTL_TOKEN_FILE", raising=False)
+    return home
+
+
+@pytest.fixture(autouse=True)
+def _join_run_sequence_threads():
+    """После теста дождаться (не дольше 2 с суммарно) потоков ``run-stop``/``run-fault-stop``/``run-shutdown``
+    этого теста.
+
+    Источник потоков — ветка одноразовых потоков в ``_submit_run_sequence``; без ожидания они переживают тест
+    (стражи жизненного цикла G4 и предупреждения pytest). Такой поток ждёт ``paused`` у живых процессов набора до
+    ``run_stop_timeout_s`` (до 10 с), а в тесте дети молчат; поэтому перед ожиданием процессы-двойники PM этого теста
+    помечаются остановленными: «мёртвый процесс считается остановленным» (``_paused_pending``), поток завершается на
+    ближайшем шаге опроса. Это делается ПОСЛЕ проверок теста (teardown); src PM не меняется. Поток, начатый до теста,
+    не трогаем.
+    """
+    _PMS_OF_THIS_TEST.clear()
+    before = {t.ident for t in threading.enumerate() if t.name in _RUN_SEQUENCE_THREAD_NAMES}
+    yield
+    for pm in _PMS_OF_THIS_TEST:
+        processes = getattr(getattr(pm, "_process_registry", None), "_processes", None)
+        if isinstance(processes, dict):
+            for proc in processes.values():
+                proc._alive = False
+    _PMS_OF_THIS_TEST.clear()
+    deadline = time.monotonic() + _RUN_SEQUENCE_JOIN_DEADLINE_S
+    for thread in threading.enumerate():
+        if thread.name in _RUN_SEQUENCE_THREAD_NAMES and thread.ident not in before:
+            thread.join(max(0.0, deadline - time.monotonic()))
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +148,10 @@ class MockProcessRegistry:
 
     def stop_outcome(self, name: str) -> str | None:
         """Task 1.10: итог последнего стопа воплощения (двойник стопов не ведёт — None)."""
+        return None
+
+    def stop_window_s(self, name: str) -> float | None:
+        """Task 1.2: окно стопа имени (двойник окон не ведёт — None; PM отдаёт ``stop_deadline_at`` None)."""
         return None
 
     def reset_call_stop_outcomes(self) -> None:
@@ -243,6 +304,17 @@ class FakePlanner:
 # ---------------------------------------------------------------------------
 
 
+def make_monitor_double() -> MagicMock:
+    """Двойник ``ProcessMonitor`` с ответами настоящей формы: политика по умолчанию годна, листов и рестартов нет."""
+    from ..core.restart_policy import RestartPolicy
+    from ..monitor.process_monitor import ProcessMonitor
+
+    monitor = MagicMock(spec=ProcessMonitor)
+    monitor.resolve_policy.return_value = (RestartPolicy(), True)
+    monitor.readiness_view.return_value = ({}, frozenset())
+    return monitor
+
+
 def make_pm(
     process_configs: dict[str, dict] | None = None,
     *,
@@ -276,8 +348,8 @@ def make_pm(
         registry._next_process_factory = next_process_factory
     pm._process_registry = registry
 
-    # ProcessMonitor
-    pm._process_monitor = MagicMock()
+    # ProcessMonitor: двойник с формой настоящего (r2 N3) — PM зовёт resolve_policy / readiness_view без проверки формы.
+    pm._process_monitor = make_monitor_double()
     pm._process_monitor._monitoring = True
 
     # Priority
@@ -332,6 +404,8 @@ def make_pm(
 
     pm.get_config = _get_config
     pm.update_config = _update_config
+
+    _PMS_OF_THIS_TEST.append(pm)
 
     # TopologyManager с реальными сидами PM (как _setup_topology_manager)
     from ..process.topology_manager import TopologyManager

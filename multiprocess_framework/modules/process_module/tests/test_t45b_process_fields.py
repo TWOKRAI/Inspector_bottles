@@ -156,20 +156,39 @@ class TestPluginRunnerMs:
             runner.call_process(plugin, [{"i": 1}])
         assert 9.0 <= runner.plugin_ms()["det"] <= 13.0
 
-    def test_t45b_plugin_ms_alpha_is_a_tenth_first_sample_seeds(self) -> None:
-        """Первый вызов 30 мс, ещё 19 по 10 мс.
+    def test_t45b_plugin_ms_alpha_is_a_tenth_first_sample_seeds(self, monkeypatch) -> None:
+        """Первый вызов 30 мс, ещё 19 по 10 мс — на ПОДМЕНЁННЫХ часах, без реального sleep.
 
-        EMA alpha=0.1, первый сэмпл = начальное значение: 10 + 20 * 0.9**19 ≈ 12.7..13.5.
-        Среднее арифметическое дало бы ~11, «последний сэмпл» ~10, alpha=0.2 ~10.8,
-        alpha=0.05 ~17.7 — окно 12.3..14.3 отличает alpha=0.1 от них всех.
+        EMA alpha=0.1, первый сэмпл = начальное значение: 10 + 20 * 0.9**19 = 12.70.
+        Среднее арифметическое дало бы ~11, «последний сэмпл» 10, alpha=0.2 ~10.8,
+        alpha=0.05 ~17.7. Реальный ``sleep`` на macOS перелетает на 1-3 мс и выталкивал
+        значение за окно (14.7 / 15.7), поэтому время задаёт фальшивый ``perf_counter``,
+        а окно 12.6..12.8 отличает alpha=0.1 от всех вариантов.
         """
+        import types
+
+        from multiprocess_framework.modules.process_module.generic import plugin_runner as plugin_runner_module
+
+        now = [0.0]
+        monkeypatch.setattr(plugin_runner_module, "time", types.SimpleNamespace(perf_counter=lambda: now[0]))
+
+        class _ClockPlugin:
+            enabled = True
+
+            def __init__(self, delay: float) -> None:
+                self.name = "det"
+                self._delay = delay
+
+            def process(self, items: list[dict]) -> list[dict]:
+                now[0] += self._delay  # «работа» плагина занимает delay секунд
+                return items
+
         runner = _runner()
-        slow_first = _FakePlugin("det", 0.03)
-        runner.call_process(slow_first, [{"i": 1}])
-        fast = _FakePlugin("det", 0.01)
+        runner.call_process(_ClockPlugin(0.03), [{"i": 1}])
+        fast = _ClockPlugin(0.01)
         for _ in range(19):
             runner.call_process(fast, [{"i": 1}])
-        assert 12.3 <= runner.plugin_ms()["det"] <= 14.3
+        assert 12.6 <= runner.plugin_ms()["det"] <= 12.8
 
     def test_t45b_plugin_ms_excludes_pre_hook_time(self) -> None:
         """pre-хук спит 20 мс, process() 10 мс -> EMA не выше 13 (хук не считается)."""
@@ -381,6 +400,10 @@ class TestIntrospectQueuesCapacity:
         assert result["chain_queue"]["maxsize"] == 6
 
     def test_t45b_introspect_queues_reports_size_and_keeps_queue_sizes(self, data_queue) -> None:
+        try:
+            data_queue.qsize()
+        except NotImplementedError:
+            pytest.skip("multiprocessing.Queue.qsize() не реализован на macOS — глубину очереди там узнать нельзя")
         chain = queue.Queue(maxsize=6)
         for i in range(3):
             chain.put(i)

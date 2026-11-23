@@ -42,6 +42,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from ._node_read import read_node
 from .events import (
     ALL_PLANE,
     MISSING_MARKER,
@@ -479,10 +480,10 @@ def _read_model_entry(drv: Any, path: str) -> tuple[bool, Any]:
 
     Существование отдельно от значения: узел со значением ``None`` и отсутствие
     узла — разные состояния, «ждать value=None» не должно срабатывать на пустоте.
+    Read-model хранит листья (П3): узел собирается обратно в вложенный dict
+    (:func:`~backend_ctl._node_read.read_node`, лок берётся внутри него).
     """
-    with drv._telemetry_lock:
-        snap = drv._telemetry_model.snapshot(path)
-    return (True, snap[path]) if path in snap else (False, None)
+    return read_node(drv, path)
 
 
 def _unknown_metric_diagnosis(drv: Any, path: str) -> Dict[str, Any]:
@@ -504,7 +505,11 @@ def _unknown_metric_diagnosis(drv: Any, path: str) -> Dict[str, Any]:
             observed = list(drv._telemetry_model.snapshot(""))
     except Exception:  # noqa: BLE001 — деградация read-model не должна ронять await
         return {}
-    if not observed or drv._telemetry_is_tracked(path) or path in observed:
+    # Read-model хранит листья (П3): путь узла опознан, если он лист или префикс листа.
+    # read_node здесь НЕ зовём: свой лок выше — обычный Lock, повторный захват вешает.
+    prefix = path + "."
+    is_known = path in observed or any(key.startswith(prefix) for key in observed)
+    if not observed or drv._telemetry_is_tracked(path) or is_known:
         return {}
     # Стиль подсказки — зеркало BCTL-ADR-003 (mcp_errors.suggest_tools): тот же
     # difflib с n=3/cutoff=0.5, тот же принцип «назвать ближайшие валидные имена».

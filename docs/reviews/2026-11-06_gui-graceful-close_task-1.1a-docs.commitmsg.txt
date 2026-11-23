@@ -1,0 +1,6 @@
+docs(process): 1.1a — документация приведена к порядку закрытия корня PM (_own_work_late)
+
+Why: после переноса children в крюк _own_work_late докстринг оркестратора, ADR-PM-055/057 и README process_module описывали прежний порядок закрытия work; добавлен ADR-PM-059 о контракте крюка для наследников
+Layer: docs
+Refs: plans/2026-10-20_gui-graceful-close/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

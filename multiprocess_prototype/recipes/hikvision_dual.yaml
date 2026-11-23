@@ -1,0 +1,156 @@
+# Рецепт hikvision_dual — две промышленные камеры Hikvision → два дисплея (R-g).
+#
+# Цепочка (каждая камера в СВОЁМ процессе, независимы):
+#   camera_0 [HikvisionCameraPlugin] → gui (display "main")
+#   camera_1 [HikvisionCameraPlugin] → gui (display "main2")
+#
+# Камеры выбираются по серийнику (device_select: serial). Серийник camera_1 — ПЛЕЙСХОЛДЕР:
+# в фактах стенда 0.5 есть только DA1689923. Перед запуском подставить серийник второй камеры.
+# Пауза автоперезапуска процесса камеры — 10 с (restart_policy.backoff_sec), чтобы обе камеры
+# не дёргали сеть GigE одновременно при сбое.
+#
+# Предусловие: установлен MVS SDK (MvCameraControl.dll), обе камеры подключены.
+name: hikvision_dual
+version: 1
+description: "Две Hikvision камеры → два дисплея"
+
+blueprint:
+  name: hikvision_dual
+  description: "Две промышленные камеры Hikvision → два дисплея"
+
+  # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без
+  # «Раскладки». Авто-сохраняется при перетаскивании (PipelinePresenter).
+  metadata:
+    gui_positions:
+      camera_0.hikvision:
+        - 60.0
+        - 205.54638364779876
+      camera_1.hikvision:
+        - 60.0
+        - 405.0
+      main:
+        - 340.0
+        - 120.0
+      main2:
+        - 340.0
+        - 405.0
+    locked_nodes: []
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    # --- Камера 0 (один процесс на одну камеру) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 25
+      restart_policy: {enabled: true, max_retries: 3, window_sec: 60, backoff_sec: 10.0}
+      plugins:
+        - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          plugin_name: hikvision
+          category: source
+          camera_id: 0
+          # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+          device_select: serial
+          device_serial: DA1689923
+          # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
+          # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
+          # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
+          resolution_width: 1440
+          resolution_height: 1080
+          frame_rate_enable: true
+          frame_rate: 25.0
+          # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+          exposure_time: 40000.0
+          # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
+          auto_start: true
+          # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+          # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+          trigger_managed: true
+          trigger_mode: "Off"
+          run_locked_commands: [release_device, take_device]
+
+    # --- Камера 1 (один процесс на одну камеру) ---
+    - process_name: camera_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 25
+      restart_policy: {enabled: true, max_retries: 3, window_sec: 60, backoff_sec: 10.0}
+      plugins:
+        - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          plugin_name: hikvision
+          category: source
+          camera_id: 1
+          # ПЛЕЙСХОЛДЕР: серийника второй камеры в фактах 0.5 нет — подставить перед запуском.
+          device_select: serial
+          device_serial: REPLACE_WITH_SECOND_CAMERA_SERIAL
+          # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
+          # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
+          # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
+          resolution_width: 1440
+          resolution_height: 1080
+          frame_rate_enable: true
+          frame_rate: 25.0
+          # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+          exposure_time: 40000.0
+          # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
+          auto_start: true
+          # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+          # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+          trigger_managed: true
+          trigger_mode: "Off"
+          run_locked_commands: [release_device, take_device]
+
+  # Кадр каждой камеры идёт прямо на свой дисплей (chain_targets → gui), проводов между плагинами нет.
+  wires: []
+
+  # Привязка узла к дисплею (node_id = process.plugin.port)
+  displays:
+    - node_id: camera_0.hikvision.frame
+      display_id: main
+    - node_id: camera_1.hikvision.frame
+      display_id: main2
+
+# Определения дисплеев (top-level)
+displays:
+  - id: main
+    name: Камера 0
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: main2
+    name: Камера 1
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1280
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

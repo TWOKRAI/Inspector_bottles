@@ -42,8 +42,20 @@ class ObjectFactory(_RenderFactory):
         независимо от `defect_probability`. Флаг одноразовый (см. `make()`)."""
         self._force_defect_pending = True
 
-    def make(self, object_id: str, spawn_encoder: float, rng: np.random.Generator) -> LayeredObject:
+    def make(
+        self,
+        object_id: str,
+        spawn_encoder: float,
+        rng: np.random.Generator,
+        *,
+        class_index: int | None = None,
+        angle_deg: float | None = None,
+    ) -> LayeredObject:
         """Собрать объект ленты: `render` базы + паспорт.
+
+        `class_index` / `angle_deg` (Task R1, подача дисков по списку) — пробрасываются в `render`:
+        `None` — класс/угол разыгрываются как раньше, заданные — берутся как есть. Форс брака работает
+        так же и для диска списка.
 
         `force_defect_next()` ТОЛЬКО читается здесь (`forced`), а гасится лишь ПОСЛЕ того,
         как объект успешно построен — транзитная ошибка (например каталог на сетевом
@@ -52,7 +64,7 @@ class ObjectFactory(_RenderFactory):
         см. test_hazards_3_2.py — репродукция флаки-каталога).
         """
         forced = self._force_defect_pending
-        rendered = self.render(rng, force_defect=forced, label=object_id)
+        rendered = self.render(rng, force_defect=forced, label=object_id, class_index=class_index, angle_deg=angle_deg)
         obj = LayeredObject.from_rendered(rendered, object_id=object_id, spawn_encoder=spawn_encoder)
         self._force_defect_pending = False  # гасим ТОЛЬКО после успеха — см. докстринг выше
         return obj

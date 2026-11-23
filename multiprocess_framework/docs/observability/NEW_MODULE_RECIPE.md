@@ -262,7 +262,7 @@ config_reload_verified(process="<твой процесс>",
 контракта, а не «ещё не заполнили»: прикладные правила живут в конфиге приложения, фреймворк несёт
 только механизм. Доменное имя приложения ушло из универсального слоя целиком (ADR-137, задача D4):
 имя берётся из composition root (`MPF_APP_NAME`), нейтраль — `MultiprocessApp`, pid-файл называется
-`<app>_system_pids.jsonl`.
+`<app>_<tag>_system_pids.jsonl` (`<tag>` — отпечаток корня checkout, D2).
 
 **Где реестр объявлений физически лежит и почему.** [`modules/observability_declarations.py`](../../modules/observability_declarations.py)
 — лист без зависимостей, рядом с `_fallback.py`, а НЕ внутри `logger_module`. Объявление зовут из

@@ -292,4 +292,6 @@ OPS.update(
         "program_abort": ProgramMixin._op_program_abort,
     }
 )
-OPS["park"] = OpsMixin._op_park  # T5.3e: основная остановка (В2), последней — порядок ROBOT_V2_OPS
+OPS["park"] = OpsMixin._op_park  # T5.3e: основная остановка (В2); порядок ключей OPS — порядок ROBOT_V2_OPS
+OPS["draw_polyline"] = ProgramMixin._op_draw_polyline  # T5.5: рисунок программой; после park, как в ROBOT_V2_OPS
+OPS["calib_belt"] = ParamMixin._op_calib_belt  # T5.4c: калибровка ленты; после draw_polyline, как в ROBOT_V2_OPS

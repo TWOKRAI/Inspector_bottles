@@ -7,6 +7,7 @@ Per-process stop_event: остановка одного процесса не т
 import math
 import os
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from multiprocessing import Event, Process, RawArray
@@ -16,7 +17,11 @@ from .child_process_stop import ChildProcessStop
 from .stop_budget import (
     DEFAULT_SHUTDOWN_TIMEOUT_S,
     KILL_RESERVE_S,
+    LAST_WAVE_S,
     MAX_STOP_WINDOW_KEY,
+    STOP_WAVE_KEY,
+    STOP_WAVE_LAST,
+    STOP_WAVE_MAIN,
     STOP_WINDOW_KEY,
     stop_budget,
     valid_window_s,
@@ -27,6 +32,9 @@ from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
 
 # Task 1.10 (D1/D3): итоги стопа, при которых смерть ребёнка подтверждена.
 _CONFIRMED_OUTCOMES = frozenset({"exited", "terminated", "killed"})
+# Task 1.2 (ADR-PMM-042): ранг итога стопа. Писателей два (``_stop_many`` и группа корня), порядок их записей
+# не гарантирован: новый итог пишется, только если его ранг >= сохранённого.
+_OUTCOME_RANK = {"handed_over": 1, "survived": 2, "exited": 3, "terminated": 4, "killed": 5}
 
 # Окна эскалации стопа детей (STOP_POLL_S, TERMINATE_GRACE_S, KILL_CONFIRM_S) и формула
 # бюджета живут в ``core/stop_budget.py`` (Task 1.1, ADR-PMM-035): реестр, спавнер и
@@ -47,6 +55,10 @@ class ProcessRegistry:
         system_ready_event: Optional[Event] = None,
         child_stop_budget: Optional[Dict[str, float]] = None,
         max_stop_window_s: float | None = None,
+        run_event: Optional[Event] = None,
+        run_active: Optional[
+            Event
+        ] = None,  # ``Event`` тут — функция multiprocessing: ``Event | None`` падает при импорте
     ) -> None:
         self.logger = logger
         # Task 1.1 (ADR-PMM-035): словарь ``stop_budget(shutdown_timeout PM)`` — каждый ребёнок
@@ -60,6 +72,8 @@ class ProcessRegistry:
         self._stop_window_ceiling_s: float = ceiling if ceiling is not None else self._system_window_s()
         # Task 1.11: карта ``{имя: w_i}`` — окно воплощения после проверки и потолка; только имена с ключом.
         self._stop_windows: Dict[str, float] = {}
+        # Task 1.3 (ADR-PMM-043): волна системного стопа воплощения ``{имя: "main" | "last"}``.
+        self._stop_waves: dict[str, str] = {}
         # Task 1.8 (L-9, ADR-PMM-037): чем ждать между проходами опроса остановки детей.
         # None — ``time.sleep``; PM ставит сюда «вычерпать свои каналы и доспать остаток», чтобы
         # выходящий ребёнок не ждал без срока, пока PM прочитает хвост его очереди.
@@ -84,8 +98,11 @@ class ProcessRegistry:
         # как и ready_event: старый инстанс не может подложить отчёт новому.
         self._exit_reports: Dict[str, Any] = {}
         # Task 1.10 (D3): итог последнего стопа ТЕКУЩЕГО воплощения по имени (D1: exited | terminated |
-        # killed | handed_over | survived). Пишет ``_stop_many``; ``add_process`` того же имени сбрасывает.
+        # killed | handed_over | survived). Пишет только ``_record_stop_outcome`` (Task 1.2: ``_stop_many`` и группа
+        # корня, правило ранга); ``add_process`` того же имени сбрасывает. Читатель ``stop_outcome()`` — без лока.
         self._stop_outcomes: Dict[str, str] = {}
+        # Листовой лок записи итога (Task 1.2, ADR-PMM-042): под ним только проверка ранга и запись.
+        self._stop_outcome_lock = threading.Lock()
         # Единственный канал итога стопа ДЛЯ ОТВЕТА PM (Task 1.10, D4): итоги ТЕКУЩЕГО вызова ``_stop_many``
         # на этом потоке. Отличает «стоп прошёл и записал итог» от «имя не дошло до ChildProcessStop» (запись
         # ``_stop_outcomes`` тогда от прошлого стопа). Поток исполнителя переиспользуется, поэтому читатель
@@ -99,6 +116,13 @@ class ProcessRegistry:
         # (SourceProducer) ждут его перед первым produce(). Едет Process-kwargs
         # (inheritance при spawn), не в bundle custom и не позиционно.
         self._system_ready_event: Optional[Event] = system_ready_event
+        # Task 1.1 (system-run-state): событие работы системы — взводит и снимает ТОЛЬКО PM
+        # (``_run_apply``). Ребёнок его только читает (``SourceProducer``). Тот же путь, что
+        # у ``system_ready_event``: Process-kwargs (inheritance при spawn), не bundle custom.
+        self._run_event: Optional[Event] = run_event
+        # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина «``running`` и нет хода стопа» — пишет ТОЛЬКО PM
+        # (``_run_active_sync_locked``), ребёнок читает (обёртка ``run_locked_commands``). Путь ``run_event``.
+        self._run_active: Optional[Event] = run_active
         # Ф3.1 (routing-epoch): поставщик routing_meta для bundle нового ребёнка
         # ({"epoch": N, "incarnations": {...}}). None → пустой meta (совместимость).
         self._routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = routing_meta_fn
@@ -108,7 +132,29 @@ class ProcessRegistry:
         # Новое воплощение — итога стопа у него ещё нет (двойники без ``name`` терпим).
         name = getattr(process, "name", None)
         if name is not None:
-            self._stop_outcomes.pop(name, None)
+            with self._stop_outcome_lock:
+                self._stop_outcomes.pop(name, None)
+
+    def _record_stop_outcome(self, name: str, outcome: str) -> None:
+        """Единственный писатель итога стопа (Task 1.2, ADR-PMM-042): пишет, если ранг нового >= сохранённого.
+
+        Зовётся из ``ChildProcessStop._confirm`` (колбэк ``on_outcome``) обоих путей, из цикла ``_stop_many``
+        и из группы корня (``exited`` умершему до стопа, ``survived`` после ``kill()`` и срока). Не ждёт.
+        """
+        rank = _OUTCOME_RANK.get(outcome, 0)
+        with self._stop_outcome_lock:
+            current = self._stop_outcomes.get(name)
+            if current is not None and _OUTCOME_RANK.get(current, 0) > rank:
+                return
+            self._stop_outcomes[name] = outcome
+
+    def stop_window_s(self, name: str) -> float:
+        """Окно стопа имени (Task 1.11): ``stop_window_s`` воплощения, иначе ``g`` системного стопа (Task 1.2)."""
+        return self._stop_windows.get(name, self._system_window_s())
+
+    def stop_wave(self, name: str) -> str:
+        """Волна системного стопа имени (Task 1.3, ADR-PMM-043): ``"main"`` (по умолчанию) или ``"last"``."""
+        return self._stop_waves.get(name, STOP_WAVE_MAIN)
 
     def stop_outcome(self, name: str) -> str | None:
         """Итог последнего стопа текущего воплощения ``name`` (D1) или ``None`` — не стопался."""
@@ -165,6 +211,25 @@ class ProcessRegistry:
         self._stop_windows[name] = window
         return window
 
+    def _register_stop_wave(self, name: str, process_config: dict[str, Any]) -> str:
+        """Волна воплощения из ``stop_wave`` (Task 1.3, ADR-PMM-043): годно ровно ``"main"`` или ``"last"``.
+
+        Нет ключа или ``None`` — ``main``. Негодное значение — WARNING без значения, процесс в ``main``.
+        Не бросает: ошибка конфига не роняет создание процесса (принцип 5). Запись одна, без ``pop``: читатель
+        ``stop_wave(name)`` (группа корня) не видит окна «ключа нет» при пересоздании воплощения.
+        """
+        raw = process_config.get(STOP_WAVE_KEY)
+        if raw is None:
+            wave = STOP_WAVE_MAIN
+        elif isinstance(raw, str) and raw in (STOP_WAVE_MAIN, STOP_WAVE_LAST):
+            wave = raw
+        else:
+            wave = STOP_WAVE_MAIN
+            if self.logger:
+                self.logger._log_warning(f"{STOP_WAVE_KEY} процесса '{name}' негоден — волна {STOP_WAVE_MAIN}")
+        self._stop_waves[name] = wave
+        return wave
+
     def _group_windows(
         self, names: List[str], default_window_s: float, *, force: bool = False
     ) -> Dict[str, float] | None:
@@ -180,6 +245,7 @@ class ProcessRegistry:
 
     def remove_process(self, name: str) -> None:
         self._stop_windows.pop(name, None)  # Task 1.11: окно живёт с воплощением
+        self._stop_waves.pop(name, None)  # Task 1.3: волна живёт с воплощением
         # B-5 (RS-2): мутация СПИСКА НА МЕСТЕ (slice-assign), а НЕ ребиндинг
         # `self.os_processes = [...]`. ProcessStatusMonitor захватывает ссылку на
         # ЭТОТ list-объект в конструкторе (PM: ProcessStatusMonitor(registry.os_processes));
@@ -266,6 +332,8 @@ class ProcessRegistry:
             process_config["class"] = class_path
             # Task 1.11 (DESIGN 6): ребёнок с окном — бюджет от своего окна; явный stop_budget сильнее.
             window = self._register_stop_window(name, process_config)
+            # Task 1.3 (ADR-PMM-043): волна стопа; пересоздание (рестарт, ``topology.apply``) обновляет запись.
+            self._register_stop_wave(name, process_config)
             if window is not None:
                 process_config.setdefault("stop_budget", stop_budget(window))
             if self._child_stop_budget is not None:
@@ -302,7 +370,15 @@ class ProcessRegistry:
             # mp.Event/Condition на Windows-spawn пиклится только через inheritance →
             # иначе RuntimeError "should only be shared ... through inheritance".
             # system_stop_event передаётся отдельным Process-аргументом (см. ниже).
-            for key in ("stop_event", "error_manager", "pause_event", "system_ready_event", "system_stop_event"):
+            for key in (
+                "stop_event",
+                "error_manager",
+                "pause_event",
+                "system_ready_event",
+                "system_stop_event",
+                "run_event",
+                "run_active",
+            ):
                 custom.pop(key, None)
 
             all_process_memory: Dict[str, Dict[str, Any]] = {}
@@ -370,6 +446,10 @@ class ProcessRegistry:
                     "parent_pid": os.getpid(),
                     "exit_report": exit_report_slot,
                     "system_ready_event": self._system_ready_event,
+                    # Task 1.1 (system-run-state): событие работы — тем же путём.
+                    "run_event": self._run_event,
+                    # Task 2.7d (ADR-PMM-051): флаг запрета команд плагина — тем же путём.
+                    "run_active": self._run_active,
                 },
                 name=name,
             )
@@ -503,6 +583,7 @@ class ProcessRegistry:
         *,
         should_abort: Callable[[], bool] | None = None,
         default_window_s: float | None = None,
+        all_windows: bool = False,
     ) -> tuple[Dict[str, bool], ChildProcessStop | None]:
         """Шаг (а) стопа и сборка группы живых (шов для Task 1.2: область ``children``).
 
@@ -513,6 +594,10 @@ class ProcessRegistry:
         Task 1.11: есть ``stop_window_s`` хоть у одного живого — группа получает ``windows_s`` по
         всем именам; имя без ключа — ``default_window_s`` (скаляр вызова), ``None`` — ``g``
         системного стопа (область ``children``).
+
+        Task 1.3 (ADR-PMM-043): ``all_windows=True`` — карта окон по всем именам (как ``children_from_g``):
+        при волне ``last`` область ``children`` длиннее ``g``, и имя без ключа обязано получить ``terminate``
+        на ``сигнал + g``, а не дожить до срока области.
         """
         result: Dict[str, bool] = {}
         procs: Dict[str, Process] = {}
@@ -536,11 +621,12 @@ class ProcessRegistry:
         keyless_s = default_window_s if default_window_s is not None else self._system_window_s()
         # Task 1.11 (DESIGN 4, исключение): путь children (скаляра вызова нет) при потолке C > g — область от G,
         # поэтому windows_s строится по всем именам, даже если ключей нет ни у кого.
-        children_from_g = default_window_s is None and self._stop_window_ceiling_s > keyless_s
+        children_from_g = all_windows or (default_window_s is None and self._stop_window_ceiling_s > keyless_s)
         stop = ChildProcessStop(
             procs,
             self._stop_events,
             on_confirmed_dead=self._mark_confirmed_dead if mark_reader_gone else None,
+            on_outcome=self._record_stop_outcome,
             logger=self.logger,
             idle=self.stop_wait_idle,
             should_abort=should_abort,
@@ -590,7 +676,8 @@ class ProcessRegistry:
         outcomes = stop.outcomes()
         for name in group:
             outcome = outcomes[name]
-            self._stop_outcomes[name] = outcome
+            self._record_stop_outcome(name, outcome)
+            # Канал ответа вызова — итог ЭТОГО вызова как есть, без правила ранга (Task 1.10, D4).
             self._stop_call.outcomes[name] = outcome
             result[name] = outcome in _CONFIRMED_OUTCOMES
         survivors = [name for name in group if not result[name]]
@@ -644,6 +731,15 @@ class _ChildrenGroupStop:
     из другого потока ждёт этот лок. Пустая группа — ``join_until`` ``True``,
     ``kill``/``close`` ничего не делают. Сбой сборки — fail-closed: ``join_until`` ``False``,
     ``result()`` ``False`` по всем именам ``os_processes`` (смерть не подтверждена).
+
+    Итог стопа (Task 1.2, ADR-PMM-042) пишется в реестр: подтверждённым — в момент ``_confirm``
+    (колбэк группы), умершим до стопа — ``exited`` в ``request_stop``, выжившим после ``kill()`` и
+    срока — ``survived`` одним снимком в конце ``join_until``.
+
+    Волны (Task 1.3, ADR-PMM-043): имена с ``stop_wave(name) == "last"`` — вторая сборка ``_last``
+    (обе с картой окон по всем именам). Фаза 1 сигналит только ``main`` (``_group``); ``join_until(D)``
+    одним потоком крутит ``poll`` обеих и сигналит ``last`` один раз — когда ``main`` пуст или в
+    ``D − LAST_WAVE_S``. Имён ``last`` нет — вторая сборка не строится, путь прежний.
     """
 
     def __init__(self, registry: "ProcessRegistry", mark_reader_gone: bool) -> None:
@@ -654,8 +750,23 @@ class _ChildrenGroupStop:
         self._build_failed = False
         self._failed_names: List[str] = []
         self._done: Dict[str, bool] = {}
-        self._group: ChildProcessStop | None = None
+        self._group: ChildProcessStop | None = None  # волна main
+        self._last: ChildProcessStop | None = None  # волна last (Task 1.3); None — имён last нет
+        self._last_names: list[str] = []
+        self._last_signalled = False
+        self._wave_listener: Callable[[str, float], None] | None = None
         self._names: List[str] = []
+        # ``kill()`` уже звали: ``False`` следующего ``join_until`` — срок фазы 3, выжившим пишется ``survived``.
+        self._kill_requested = False
+
+    @property
+    def wave(self) -> str:
+        """Текущая волна (Task 1.3): ``"main"``, после сигнала ``last`` — ``"last"``. Только для чтения."""
+        return STOP_WAVE_LAST if self._last_signalled else STOP_WAVE_MAIN
+
+    def set_wave_listener(self, callback: Callable[[str, float], None] | None) -> None:
+        """Слушатель перехода волны (Task 1.3): ``callback("last", D)`` сразу после сигнала ``last``, вне лока."""
+        self._wave_listener = callback
 
     def request_stop(self) -> None:
         with self._lock:
@@ -664,46 +775,146 @@ class _ChildrenGroupStop:
             names: List[str] = []
             try:
                 names = [p.name for p in self._registry.os_processes]
-                done, group = self._registry._build_child_stop(list(names), self._mark_reader_gone)
+                unique = list(dict.fromkeys(names))
+                # Двойники реестра в тестах ``stop_wave`` не имеют — getattr, иначе все имена в main.
+                wave_of = getattr(self._registry, "stop_wave", None)
+                last_names = [name for name in unique if wave_of(name) == STOP_WAVE_LAST] if callable(wave_of) else []
+                last: ChildProcessStop | None = None
+                if last_names:
+                    main_names = [name for name in unique if name not in set(last_names)]
+                    done, group = self._registry._build_child_stop(main_names, self._mark_reader_gone, all_windows=True)
+                    done_last, last = self._registry._build_child_stop(
+                        last_names, self._mark_reader_gone, all_windows=True
+                    )
+                    done = {**done, **done_last}
+                else:
+                    done, group = self._registry._build_child_stop(list(names), self._mark_reader_gone)
             except Exception:
                 self._build_failed = True
                 self._failed_names = list(dict.fromkeys(names))
                 raise
-            self._done, self._group = done, group
+            self._done, self._group, self._last = done, group, last
             self._names = [name for name in dict.fromkeys(names) if name not in done]
+            self._last_names = [name for name in last_names if name not in done] if last is not None else []
             self._requested = True
+            # Task 1.2 (решение лида 2026-11-07): умерший ДО стопа в группу не попал — его итог ``exited``.
+            # Имя без объекта в реестре («нет в реестре») не пишется.
+            for name in done:
+                if self._registry.get_process_by_name(name) is not None:
+                    self._registry._record_stop_outcome(name, "exited")
+            # Фаза 1 — только волна main (Task 1.3): last сигналит ``join_until``.
             if group is not None:
                 group.request_stop()
 
     def join_until(self, deadline: float) -> bool:
         self.request_stop()  # ждёт лок чужой сборки; после сбоя сборки — тихий возврат
         with self._lock:
-            group, failed = self._group, self._build_failed
+            group, last, failed = self._group, self._last, self._build_failed
         if failed:
             return False
-        if group is None:
-            return True
-        return group.join_until(deadline)
+        if last is None:
+            if group is None:
+                return True
+            stopped = group.join_until(deadline)
+        else:
+            stopped = self._join_waves(group, last, deadline)
+        if not stopped and self._kill_requested:
+            # Task 1.2: срок фазы 3 вышел — выжившим ``survived`` одним снимком (поток-владелец группы).
+            for build in (group, last):
+                if build is None:
+                    continue
+                for name in build.survivors():
+                    self._registry._record_stop_outcome(name, "survived")
+        return stopped
+
+    def _join_waves(self, main: ChildProcessStop | None, last: ChildProcessStop, deadline: float) -> bool:
+        """Цикл двух волн (Task 1.3, ADR-PMM-043): ``poll(D)`` обеих одним потоком, сигнал ``last`` один раз.
+
+        Сборка, вернувшая ``True``/``False``, в этом вызове больше не опрашивается. Итог ``True`` — обе ``True``.
+        """
+        signal_at = deadline - LAST_WAVE_S
+        main_done: bool | None = True if main is None else None
+        last_done: bool | None = None
+        while True:
+            pauses: list[float] = []
+            if main is not None and main_done is None:
+                main_done, pause = main.poll(deadline)
+                if main_done is None:
+                    pauses.append(pause)
+            if not self._last_signalled:
+                # До сигнала last — только наблюдение (без сигналов и эскалации): смерть ребёнка last в основной
+                # волне метится (ReaderGone, итог) в момент факта, а не в момент сигнала last (О2, Task 1.1).
+                last.survivors()
+            if not self._last_signalled and (main_done is True or time.monotonic() >= signal_at):
+                self._signal_last(last, deadline)
+            if self._last_signalled and last_done is None:
+                last_done, pause = last.poll(deadline)
+                if last_done is None:
+                    pauses.append(pause)
+            if main_done is not None and last_done is not None:
+                return main_done is True and last_done is True
+            if not self._last_signalled:
+                pauses.append(signal_at - time.monotonic())
+            waiter = main if main is not None and main_done is None else last
+            waiter.wait(max(0.0, min(pauses)))
+
+    def _signal_last(self, last: ChildProcessStop, deadline: float) -> None:
+        """Сигнал волне ``last`` — один раз, вне лока группы; затем строка INFO и слушатель волны."""
+        with self._lock:
+            if self._last_signalled:
+                return
+            self._last_signalled = True
+            names = list(self._last_names)
+            listener = self._wave_listener
+        last.request_stop()
+        logger = self._registry.logger
+        if logger:
+            logger._log_info(f"stop: волна last — сигнал: {names}")
+        if listener is None:
+            return
+        try:
+            listener(STOP_WAVE_LAST, deadline)
+        except Exception as exc:  # noqa: BLE001 — слушатель вторичен к стопу
+            if logger:
+                logger._log_error(f"stop: слушатель волны last упал: {exc} — стоп продолжается")
 
     def kill(self) -> None:
-        if self._group is not None:
-            self._group.kill()
+        self._kill_requested = True
+        # Task 1.3: last — только если уже сигналили, иначе terminate пришёл бы раньше stop_event.
+        # Один вызов на обе сборки: храповик G6 R4 держит число ``.kill()`` вне child_process_stop.py.
+        last = self._last if self._last_signalled else None
+        for build in (self._group, last):
+            if build is not None:
+                build.kill()
+
+    def signalled_at(self, name: str | None = None) -> float | None:
+        """Момент сигнала стопа в ``time.time()`` (Task 1.2); группы нет или сигнала не было — ``None``.
+
+        Task 1.3: имя из волны ``last`` — момент сигнала ``last`` (до него ``None``); иначе — волны ``main``.
+        """
+        if name is not None and self._last is not None and name in self._last_names:
+            return self._last.stop_requested_wall
+        return getattr(self._group, "stop_requested_wall", None)
 
     def close(self) -> None:
-        if self._group is not None:
-            self._group.close()
+        for build in (self._group, self._last):
+            if build is not None:
+                build.close()
 
     def result(self) -> Dict[str, bool]:
-        """Карта шага (а) + для имён группы ``False``, если имя среди выживших.
+        """Карта шага (а) + для имён групп ``False``, если имя среди выживших.
 
         Не опирается на ``close()``: область выжившему ``close()`` не зовёт.
         """
         if self._build_failed:
             return {name: False for name in self._failed_names}
         result = dict(self._done)
-        if self._group is None:
+        builds = [build for build in (self._group, self._last) if build is not None]
+        if not builds:
             return result
-        survivors = set(self._group.survivors())
+        survivors: set[str] = set()
+        for build in builds:
+            survivors.update(build.survivors())
         for name in self._names:
             result[name] = name not in survivors
         return result

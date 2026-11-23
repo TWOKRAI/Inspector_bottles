@@ -1,0 +1,8 @@
+test(framework): run-state fix-B2b — тест на сброс времени heartbeat в mark_restarting (обратное чередование)
+
+Heartbeat текущего pid между сбросом базы в _try_auto_restart и постановкой пометки проходит допуск и пишет время; mark_restarting обязан его стереть. Тест оборачивает mark_restarting настоящим heartbeat перед вызовом: без pop внутри mark_restarting он красный (ложное recovered), первый тест N1 при этом зелёный.
+
+Why: ревью fix-B2: строка pop в mark_restarting не была защищена тестом, её прикрывал pop в _try_auto_restart при порядке допуск -> решение
+Layer: framework
+Refs: plans/2026-10-27_system-run-state/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

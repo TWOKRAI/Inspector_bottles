@@ -1,0 +1,372 @@
+# -*- coding: utf-8 -*-
+"""Машина состояний работы системы (Task 1.1 плана system-run-state, design.md §3.2).
+
+Чистая функция без IO: ``transition(state, event, *, ready, stop_done)`` возвращает новое
+состояние и код отказа (``None`` — переход принят или событие — no-op). Держатель состояния,
+замок и событие ``run_event`` живут в ``ProcessManagerProcess`` (``_run_apply``); здесь только
+таблица, чистые оценки и латч автостарта ``AutostartLatch`` (S3c, ADR-PMM-050; решает под замком владельца).
+
+События:
+  * ``start`` / ``stop`` — команды ``system.run.start`` / ``system.run.stop``;
+  * ``ack`` — квитирование аварии (Task 1.7), ``stop_done`` читает только ``ack`` в ``fault``;
+  * ``apply`` — начало применения топологии (Task 1.5);
+  * ``shutdown`` — начало остановки системы (Task 1.4);
+  * ``settled`` — подъём/применение топологии закончен (``booting``) или итог STOP (``stopping``);
+  * ``tick`` — очередная оценка готовности; потеря готовности в ``running`` — это ``tick`` с
+    ``ready=False`` (отдельного события ``fault`` нет).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from enum import Enum
+
+from multiprocess_framework.modules.process_module.health.schema import READINESS_BLOCKING_SEVERITIES
+
+
+class RunState(str, Enum):
+    """Состояние работы системы (значения — design.md §3.2)."""
+
+    booting = "booting"
+    not_ready = "not_ready"
+    ready = "ready"
+    running = "running"
+    stopping = "stopping"
+    fault = "fault"
+    shutting_down = "shutting_down"
+
+
+#: Допустимые события машины.
+EVENTS: frozenset[str] = frozenset({"start", "stop", "ack", "apply", "shutdown", "settled", "tick"})
+
+
+#: Степени причины, блокирующие START (К3 CTO: ``check_function`` блокирует START и в ``running`` равен
+#: потере готовности); ``out_of_spec`` / ``maintenance`` не блокируют. Единственное определение набора —
+#: ``health/schema.py`` (``READINESS_BLOCKING_SEVERITIES``).
+BLOCKING_SEVERITIES: frozenset[str] = frozenset(READINESS_BLOCKING_SEVERITIES)
+
+
+def _reason(node: str, reason: str, source: str, severity: str = "failure") -> dict:
+    """Причина от самого агрегата (форма — design.md §3.3, как у причин листа); умолчание — ``failure``."""
+    return {"node": node, "severity": severity, "reason": reason, "source": source}
+
+
+@dataclass(frozen=True, slots=True)
+class EvalInput:
+    """Вход ``evaluate`` / ``restart_window``: наблюдение за системой и контекст автоперезапуска (C6, Task 1.8/1.7c).
+
+    Наблюдение (обязательно): ``expected`` — имена процессов применённой топологии; ``leaves[name]`` — dict
+    ``readiness`` процесса (``{"ready", "reasons", "paused", "at"}``), нет ключа = нет листа; ``alive[name]`` —
+    процесс жив (нет ключа = не жив); ``now`` и ``stale_s`` — время и срок молчания листа (часов функция не читает).
+
+    Контекст (умолчания = прежнее поведение без автоперезапуска): ``running`` — система в работе (флаг действует только
+    тогда); ``auto_restart`` — процессы с флагом ``run_auto_restart``; ``down_since`` — когда у процесса открылось окно
+    перезапуска; ``grace_s`` — срок окна; ``given_up`` — процессы, от перезапуска которых супервизор отказался;
+    ``restarting`` — процессы, чьё воплощение супервизор решил перезапустить (Task 1.7c).
+    """
+
+    expected: Sequence[str]
+    leaves: Mapping[str, dict]
+    alive: Mapping[str, bool]
+    now: float
+    stale_s: float
+    running: bool = False
+    auto_restart: frozenset[str] = frozenset()
+    down_since: Mapping[str, float] = field(default_factory=dict)
+    grace_s: float = 30.0
+    given_up: frozenset[str] = frozenset()
+    restarting: frozenset[str] = frozenset()
+
+
+def _process_reasons(name: str, inp: EvalInput) -> tuple[list[dict], bool]:
+    """Причины одного процесса и признак «молчит»: ``(причины, перезапускается / не жив / нет свежего листа)``.
+
+    Процесс из ``restarting`` (супервизор решил его перезапустить или перезапускает; Task 1.7c) — одна ``failure``
+    «<процесс>: перезапускается супервизором» независимо от листа и живости: лист воплощения, которое убьёт рестарт,
+    готовности не доказывает.
+    """
+    if name in inp.restarting:
+        return [_reason(name, f"{name}: перезапускается супервизором", "liveness")], True
+    if not inp.alive.get(name, False):
+        return [_reason(name, "процесс не жив", "liveness")], True
+    leaf = inp.leaves.get(name)
+    at = leaf.get("at") if isinstance(leaf, dict) else None
+    if not isinstance(at, (int, float)) or inp.now - at > inp.stale_s:
+        return [_reason(name, "нет отчёта о готовности", "liveness")], True
+    reasons = [dict(r) for r in (leaf.get("reasons") or []) if isinstance(r, dict)]
+    if not leaf.get("ready", False) and not has_blocking(reasons):
+        reasons.append(_reason(name, f"{name} не готов", "report"))
+    return reasons, False
+
+
+def _restarting(name: str, silent: bool, reasons: list[dict], inp: EvalInput) -> bool:
+    """Процесс из ``auto_restart`` в перезапуске: молчит либо поднялся, но блокирующие причины не ушли (запись есть)."""
+    return name in inp.auto_restart and (silent or (name in inp.down_since and has_blocking(reasons)))
+
+
+def evaluate(inp: EvalInput) -> tuple[bool, list[dict]]:
+    """Готовность системы по процессам набора: ``(ready, reasons)`` (Task 1.3, design.md §3.3).
+
+    Чистая функция без IO и без чтения часов: все входы — поля ``EvalInput`` (``now`` и ``stale_s`` приходят
+    снаружи). Молчание = не готов. Процессы вне ``inp.expected`` не читаются.
+
+    Для каждого процесса набора, по порядку ``expected``:
+      * не жив -> ``failure`` / ``liveness`` «процесс не жив»;
+      * нет листа или ``at`` старше ``stale_s`` (судим по ``at`` — времени расчёта снимка, а не по
+        heartbeat: мёртвый поток-наблюдатель при живом heartbeat иначе выглядел бы готовым) ->
+        ``failure`` / ``liveness`` «нет отчёта о готовности»;
+      * иначе причины листа как есть; лист ``ready: false`` без блокирующей причины среди его причин ->
+        добавлена ``failure`` / ``report`` «<процесс> не готов».
+
+    Автоперезапуск в работе (Task 1.8) — только при ``running=True``; иначе флаг не действует и мёртвый
+    процесс остаётся ``failure``. Процесс из ``auto_restart``, который молчит (не жив / нет свежего листа)
+    или поднялся, но блокирующие причины ещё не ушли и запись в ``down_since`` есть, даёт итоговую причину
+    (``node`` = процесс, ``source`` = ``liveness``):
+      * процесс в ``given_up`` (супервизор отказался) -> ``failure`` «<процесс>: супервизор отказался от
+        перезапуска» — выигрывает у окна и действует сразу;
+      * ``now - down_since[процесс] >= grace_s`` -> ``failure`` «<процесс>: перезапуск не завершён за
+        <grace_s> с» (записи нет — окно началось сейчас, ``0``);
+      * иначе ``out_of_spec`` «перезапуск <процесс>»: на ``ready`` не влияет.
+    В окне итоговая причина ЗАМЕНЯЕТ все причины процесса (одна ``out_of_spec``). При истёкшем окне и при ``given_up``
+    за итоговой ``failure`` идут прежние причины процесса как есть («процесс не жив», «модель не загружена»...):
+    оператору видно, почему процесс не поднялся.
+    Ведёт ``down_since`` не эта функция, а ``restart_window``.
+
+    Воплощение процесса (Task 1.7c): процесс из ``restarting`` (решение супервизора о рестарте или ручной
+    ``process.restart``, новое воплощение ещё не отчиталось) даёт одну ``failure`` / ``liveness`` «<процесс>:
+    перезапускается супервизором» независимо от листа и живости — она блокирует ``ready`` (``ack`` / START). В
+    ``running`` без флага это ``fault``; с флагом процесс «молчит» (окно 1.8 от первого такта с решением):
+    ``out_of_spec`` «перезапуск <процесс>», а после окна — итоговая ``failure`` и эта причина как деталь.
+
+    ``ready`` = среди итоговых причин нет ``failure`` и ``check_function``.
+    """
+    reasons: list[dict] = []
+    for name in inp.expected:
+        process_reasons, silent = _process_reasons(name, inp)
+        if inp.running and _restarting(name, silent, process_reasons, inp):
+            elapsed_s = inp.now - inp.down_since.get(name, inp.now)
+            summary = restart_reason(name, elapsed_s, inp.grace_s, name in inp.given_up)
+            reasons.append(summary)
+            if summary["severity"] == "failure":  # окно закрыто: за итогом идут детали, почему процесс не поднялся
+                reasons.extend(process_reasons)
+        else:
+            reasons.extend(process_reasons)
+    ready = not has_blocking(reasons)
+    return ready, reasons
+
+
+def restart_reason(name: str, elapsed_s: float, grace_s: float, given_up: bool) -> dict:
+    """Итоговая причина процесса в перезапуске (см. ``evaluate``); ``elapsed_s`` — сколько идёт окно."""
+    if given_up:
+        return _reason(name, f"{name}: супервизор отказался от перезапуска", "liveness")
+    if elapsed_s >= grace_s:
+        return _reason(name, f"{name}: перезапуск не завершён за {grace_s:g} с", "liveness")
+    return _reason(name, f"перезапуск {name}", "liveness", severity="out_of_spec")
+
+
+def auto_restart_config_reason(name: str) -> dict:
+    """Причина «флаг ``run_auto_restart`` без ``enabled: true``»: супервизор такой процесс не поднимет (Task 1.8)."""
+    return _reason(name, f"{name}: `run_auto_restart` требует `enabled: true`", "config")
+
+
+def restart_window(inp: EvalInput) -> dict[str, float]:
+    """Новый ``down_since`` после очередного тика: ``{процесс: когда началось окно перезапуска}`` (Task 1.8).
+
+    Чистая функция без IO: возвращает новый словарь, ``inp.down_since`` не меняет. Вне ``running`` окон нет (``{}``):
+    запись не переживает ``running -> stopping -> ready``. В ``running`` запись есть только у процесса в перезапуске
+    (``_restarting``: он из ``auto_restart`` и молчит, либо поднялся, но ``failure`` ещё не ушли и запись была): она
+    сохраняется, а у нового — ``now``. Сбой живого процесса со свежим листом без записи — не перезапуск; жив, лист
+    свежий, ``failure`` нет — записи нет (окно закрыто, следующее падение откроет новое). Процесс, вышедший из
+    ``expected`` / ``auto_restart``, из записи уходит (она не растёт).
+    """
+    if not inp.running:
+        return {}
+    window: dict[str, float] = {}
+    for name in inp.expected:
+        process_reasons, silent = _process_reasons(name, inp)
+        if _restarting(name, silent, process_reasons, inp):
+            window[name] = inp.down_since.get(name, inp.now)
+    return window
+
+
+def unconfirmed_stop(
+    expected: list[str], unconfirmed: dict[str, float], leaves: dict, alive: dict
+) -> tuple[dict[str, float], list[dict]]:
+    """Множество «не подтвердили остановку» после оценки: ``(оставшиеся, причины)`` (Task 1.4, design.md §3.2 п.3).
+
+    Чистая функция без IO. ``unconfirmed`` — ``{процесс: N}``, где ``N`` — срок ожидания ``paused``, за который
+    процесс не ответил. Процесс выходит из множества, когда его лист показывает ``paused: true``, или он не жив
+    (``alive == False``: остановленным считается мёртвый), или его нет в ``expected`` (топология сменилась).
+    Для каждого оставшегося, по порядку ``expected``, — ``failure`` / ``report`` «<процесс> не подтвердил остановку
+    за <N> с» (``node`` = процесс; тот же текст на каждой оценке, не накапливается).
+    """
+    remaining: dict[str, float] = {}
+    reasons: list[dict] = []
+    for name in expected:
+        n = unconfirmed.get(name)
+        if n is None:
+            continue
+        leaf = leaves.get(name)
+        if not alive.get(name, False) or (isinstance(leaf, dict) and leaf.get("paused") is True):
+            continue
+        remaining[name] = n
+        reasons.append(stop_unconfirmed_reason(name, n))
+    return remaining, reasons
+
+
+def stop_unconfirmed_reason(name: str, timeout_s: float) -> dict:
+    """Причина «<процесс> не подтвердил остановку за <N> с» (``{:g}``: 0.5 -> «0.5», 10.0 -> «10»)."""
+    return _reason(name, f"{name} не подтвердил остановку за {timeout_s:g} с", "report")
+
+
+def has_blocking(reasons: list[dict]) -> bool:
+    """Среди причин есть блокирующая START (``failure`` / ``check_function``)."""
+    return any(r.get("severity") in BLOCKING_SEVERITIES for r in reasons)
+
+
+def run_view(
+    state: RunState,
+    since: float,
+    *,
+    run_gate: bool,
+    ack_allowed: bool,
+    reasons: list[dict],
+    last_fault: dict | None,
+) -> dict:
+    """Вид состояния работы для ``system.run.status`` и листьев ``system.run.*`` (один построитель, ADR-PMM-049).
+
+    Чистая функция без IO. Ключи — в порядке публикации: ``state``, ``since``, ``run_gate``, ``start_allowed``
+    (``state`` = ``ready``), ``stop_allowed`` (``state`` = ``running``), ``ack_allowed``, ``reasons``, ``last_fault``.
+    """
+    return {
+        "state": state.value,
+        "since": since,
+        "run_gate": run_gate,
+        "start_allowed": state is RunState.ready,
+        "stop_allowed": state is RunState.running,
+        "ack_allowed": ack_allowed,
+        "reasons": reasons,
+        "last_fault": last_fault,
+    }
+
+
+def _r(ready: bool) -> RunState:
+    """Ячейка ``R`` таблицы: ``ready`` при ``ready=True``, иначе ``not_ready``."""
+    return RunState.ready if ready else RunState.not_ready
+
+
+def transition(state: RunState, event: str, *, ready: bool, stop_done: bool = False) -> tuple[RunState, str | None]:
+    """Один шаг машины: ``(новое состояние, код отказа | None)``.
+
+    Таблица — design.md §3.2 (литералом в Task 1.1, DESIGN п.1). Неизвестное событие —
+    ``ValueError("unknown event")``; входные значения в текст не попадают (ADR-PMM-044 п.1).
+    """
+    if event not in EVENTS:
+        raise ValueError("unknown event")
+    state = RunState(state)
+    S = RunState
+
+    # Общая строка: shutdown из любого состояния ведёт в shutting_down без отказа.
+    if event == "shutdown":
+        return S.shutting_down, None
+
+    if state is S.shutting_down:
+        # Команды отказывают кодом shutting_down; внутренние события — no-op.
+        if event in ("start", "stop", "ack", "apply"):
+            return state, "shutting_down"
+        return state, None
+
+    if event == "ack":
+        if state is S.fault:
+            if stop_done:
+                return _r(ready), None
+            return state, "fault_stopping"
+        return state, "no_fault"
+
+    if state is S.booting:
+        if event == "start":
+            return state, "not_ready"
+        if event == "settled":
+            return _r(ready), None
+        return state, None  # stop, apply, tick
+
+    if state is S.not_ready:
+        if event == "start":
+            return state, "not_ready"
+        if event == "apply":
+            return S.booting, None
+        if event == "tick":
+            return _r(ready), None
+        return state, None  # stop, settled
+
+    if state is S.ready:
+        if event == "start":
+            # Готовность пропала между тиком и командой: в ready вернёт только tick.
+            if ready:
+                return S.running, None
+            return S.not_ready, "not_ready"
+        if event == "apply":
+            return S.booting, None
+        if event == "tick":
+            return _r(ready), None
+        return state, None  # stop, settled
+
+    if state is S.running:
+        if event == "start":
+            return state, "already_running"
+        if event == "stop":
+            return S.stopping, None
+        if event == "apply":
+            return state, "running"
+        if event == "tick":
+            return (state, None) if ready else (S.fault, None)
+        return state, None  # settled
+
+    if state is S.stopping:
+        if event in ("start", "apply"):
+            return state, "stopping"
+        if event == "settled":
+            return _r(ready), None
+        return state, None  # stop, tick
+
+    # state is S.fault
+    if event in ("start", "apply"):
+        return state, "fault_unacknowledged"
+    return state, None  # stop, settled, tick
+
+
+#: S3c (ADR-PMM-050): события, которые гасят взведённый латч автостарта при любом исходе (принято или отказано).
+_AUTOSTART_CANCEL_EVENTS: frozenset[str] = frozenset({"stop", "apply", "ack", "shutdown"})
+#: Состояния, из которых вход в ``ready`` — «первый ready за boot» (Ф12: взведённый латч бывает только в них).
+_AUTOSTART_FROM: frozenset[RunState] = frozenset({RunState.booting, RunState.not_ready})
+
+
+class AutostartLatch:
+    """Латч автостарта «взведён до первого ``ready``» (S3c, ADR-PMM-050). Чистый: без IO и часов.
+
+    Вызывать только под замком машины владельца (``_run_lock`` PM, вместе с ``transition``); своего замка нет.
+
+    ``observe(event, prev, new, code)`` — шаг машины, уже вычисленный владельцем. Итог ``True`` — ровно один раз:
+    взведённый латч видит вход в ``ready`` из ``booting``/``not_ready`` по ``settled``/``tick`` без отказа и
+    гаснет. Гасят без срабатывания: ``stop``, ``apply``, ``ack``, ``shutdown`` (принятые и отказанные) и принятый
+    ``start``. Отказанный ``start`` (``not_ready``) латч не гасит: намерение оператора то же. Погасший латч
+    больше не взводится — повтора автостарта за жизнь владельца нет.
+    """
+
+    __slots__ = ("_armed",)
+
+    def __init__(self, enabled: bool) -> None:
+        self._armed = enabled is True
+
+    def observe(self, event: str, prev: RunState, new: RunState, code: str | None) -> bool:
+        """Учесть шаг машины; ``True`` — пора подать START автостарта (латч уже погашен)."""
+        if not self._armed:
+            return False
+        if event in _AUTOSTART_CANCEL_EVENTS or (event == "start" and code is None):
+            self._armed = False
+            return False
+        if event in ("settled", "tick") and code is None and new is RunState.ready and prev in _AUTOSTART_FROM:
+            self._armed = False
+            return True
+        return False

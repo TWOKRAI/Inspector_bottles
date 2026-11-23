@@ -15,11 +15,15 @@ from Services.robot_comm.core.protocol_v2 import CONSTANTS, REG, STOP_LEVEL
 
 __all__ = [
     "TEXT_BAD_DO",
+    "TEXT_BAD_DRAW_ARGS",
     "TEXT_BAD_JOB_ARGS",
     "TEXT_BAD_RANGE",
     "TEXT_BAD_RETURN_ARGS",
     "TEXT_BAD_STOP_LEVEL",
+    "TEXT_BELT_HALF",
+    "TEXT_BELT_NOT_APPLIED",
     "TEXT_DISCONNECTING",
+    "TEXT_DRAW_TOO_MANY",
     "TEXT_EPOCH_NOT_WRITTEN",
     "TEXT_LEASE_LOST",
     "TEXT_NO_ECHO_WINDOW",
@@ -142,6 +146,9 @@ TEXT_EPOCH_NOT_WRITTEN = "параметр не применён: метка н�
 TEXT_PARAM_DIVERGED = "параметр робота расходится с файлом"
 # Запись значения параметра не получила ответа (не NAK): исход у робота неизвестен, значение возвращается из файла
 TEXT_PARAM_NO_REPLY = "параметр не применён: робот не ответил"
+# T5.4c: калибровка ленты (два параметра + PARAM_APPLY): записана частично / записана, применение не прошло
+TEXT_BELT_HALF = "калибровка ленты записана не полностью"
+TEXT_BELT_NOT_APPLIED = "параметры ленты записаны, применение не прошло — повторите применение"
 # Ожидание эха стопа оператора: от входа в обработчик до t0 + 0,8 с (0,2 с запаса из бюджета О9 в 1,0 с)
 _OPERATOR_ECHO_BUDGET_S = 0.8
 _STOP_NAMES = {level: name for name, level in STOP_LEVEL.items()}
@@ -181,6 +188,9 @@ _HOME_TOL_DEG = 0.5
 # Тексты отказа постановки — постоянные, без входного значения (R8)
 TEXT_BAD_JOB_ARGS = "неверные аргументы задания"
 TEXT_BAD_RETURN_ARGS = "неверные аргументы возврата"
+# T5.5: рисунок (draw_polyline) — тоже постоянные тексты, без входных значений
+TEXT_BAD_DRAW_ARGS = "неверные точки рисунка"
+TEXT_DRAW_TOO_MANY = "слишком много точек в рисунке"
 # Глубина очередей заданий и возвратов по умолчанию (паритет v1)
 _JOB_QUEUE_MAXLEN = 256
 # Предел координаты на проводе: |v| * WIRE_SCALE <= W_MAX (R8)

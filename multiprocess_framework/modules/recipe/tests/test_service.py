@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from multiprocess_framework.modules.recipe.service import RecipeService
 
@@ -151,6 +152,30 @@ def test_manual_disk_edit_makes_editor_save_conflict(tmp_path: Path) -> None:
     assert res["error"] == "conflict"
     assert res["current_rev"] == _sha(new_bytes)
     assert recipe_path.read_bytes() == new_bytes  # отказ не тронул чужую правку
+
+
+class _MovingHook(FakeHook):
+    """Нормализатор переносит top-level ``gui_positions`` в ``blueprint.metadata`` (как хук прототипа)."""
+
+    def normalize(self, body: dict) -> dict:
+        out = dict(body)
+        if "gui_positions" in out:
+            moved = out.pop("gui_positions")
+            out["blueprint"] = {"metadata": {"gui_positions": moved}}
+        return out
+
+
+def test_save_keeps_key_moved_by_normalize(tmp_path: Path) -> None:
+    path = tmp_path / "r.yaml"
+    raw = b"gui_positions: {n1: [1, 2]}\na: 1\n"
+    path.write_bytes(raw)
+    body = {"a": 2, "blueprint": {"metadata": {"gui_positions": {"n1": [1, 2]}}}}
+
+    res = make_service(tmp_path, hook=_MovingHook()).save({"name": "r", "base_rev": _sha(raw), "body": body})
+
+    assert res["success"] is True
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert loaded == {"gui_positions": {"n1": [1, 2]}, "a": 2}
 
 
 def test_invalid_body_returns_path_message_errors_file_unchanged(tmp_path: Path) -> None:

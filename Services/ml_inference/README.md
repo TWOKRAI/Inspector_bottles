@@ -38,7 +38,10 @@ Graceful degradation: сервис импортируется без ML-библ
 - **Порог уверенности**, **Top-K**, **Рисовать результат**.
 
 Выходные порты: `frame` (кадр, опц. overlay) + `predictions` (`list[dict]`:
-`class_id`, `label`, `confidence`, `below_threshold`).
+`class_id`, `label`, `confidence`, `below_threshold`; у топ-1, если у модели есть голова угла, ещё
+`angle_deg`, `angle_valid`, `angle_symmetry` — `none` | `180` | `full`, режим симметрии класса,
+которым декодирован угол). Ключ item `model_id` — id модели (ключ каталога), которая реально дала
+`predictions`; есть только у успешного инференса (pass-through и ошибка инференса его не ставят).
 
 ### «Подпись всегда» и `below_threshold` (Task 0.3, letters-retrain)
 

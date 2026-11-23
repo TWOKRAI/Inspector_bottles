@@ -1,0 +1,173 @@
+{
+  "set": "floor-r1",
+  "repo_sha": "35e68f3d57282e52bab4921b4efecaa2319c7e8d",
+  "source_root": "/Users/twokrai/Project_code/Inspector_bottles",
+  "root": "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83",
+  "prefixes": [
+    "/private/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83",
+    "/var/folders/qr/q5h4tcf14556l_ry9kbf0yx80000gn/T/nav_bench/35e68f3d57282e52bab4921b4efecaa2319c7e8d-e02dffac83"
+  ],
+  "date": "2026-11-09",
+  "condition": "grep-read",
+  "model": "haiku",
+  "condition_def": {
+    "allowed_tools": [
+      "Read",
+      "Grep",
+      "Glob"
+    ],
+    "disallowed_tools": [
+      "Bash",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "Agent",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "context_files": [],
+    "prompt_prefix": "Navigate by reading the source code only (Read, Grep, Glob).",
+    "max_turns": 60,
+    "max_budget_usd": 0.8,
+    "expected_tokens": 68000,
+    "thresholds": {
+      "hits_min": 7,
+      "false_max": 1
+    },
+    "output_format": "stream-json",
+    "audit_reads": false,
+    "bash_allow": [],
+    "mcp_config": null,
+    "requires": [],
+    "name": "grep-read",
+    "model": "haiku"
+  },
+  "thresholds": {
+    "hits_min": 0,
+    "false_max": 99
+  },
+  "baseline": null,
+  "command": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "haiku",
+    "--no-session-persistence",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--disallowedTools",
+    "Bash,Edit,Write,NotebookEdit,Agent,WebFetch,WebSearch",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.8",
+    "--append-system-prompt",
+    "Navigate by reading the source code only (Read, Grep, Glob)."
+  ],
+  "questions": [
+    {
+      "id": "F0",
+      "question": "(floor: no question)",
+      "expected": [],
+      "scored": false
+    }
+  ],
+  "repeats": [
+    {
+      "index": 1,
+      "returncode": 0,
+      "subtype": "success",
+      "error": "",
+      "turns": 1,
+      "tool_calls": 0,
+      "final_context_tokens": 21299,
+      "cumulative_tokens": 21469,
+      "cache_read_tokens": 0,
+      "wall_s": 2.67,
+      "cost_usd": 0.0274715,
+      "over_max_turns": false,
+      "violations": [],
+      "tool_uses": [],
+      "final_text": "```json\n{\"id\": \"F0\", \"answer\": \"ready\", \"locations\": [], \"confidence\": \"unknown\"}\n```",
+      "score": {
+        "per_question": [
+          {
+            "id": "F0",
+            "scored": false,
+            "verdict": "n/a",
+            "facts": null,
+            "confidence": "unknown",
+            "locations": []
+          }
+        ],
+        "hits": 0,
+        "false": 0,
+        "scored": 0,
+        "facts_hit": 0,
+        "facts_scored": 0,
+        "total_hits": 0,
+        "total_false": 0,
+        "total": 1
+      }
+    }
+  ],
+  "aggregate": {
+    "repeats": 1,
+    "hits": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "false": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "facts_hit": {
+      "min": null,
+      "median": null,
+      "max": null
+    },
+    "tool_calls": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "final_context_tokens": {
+      "min": 21299,
+      "median": 21299,
+      "max": 21299
+    },
+    "cumulative_tokens": {
+      "min": 21469,
+      "median": 21469,
+      "max": 21469
+    },
+    "cache_read_tokens": {
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "wall_s": {
+      "min": 2.67,
+      "median": 2.67,
+      "max": 2.67
+    }
+  },
+  "verdict": {
+    "pass": true,
+    "band": "PASS",
+    "checks": {
+      "false": {
+        "value": 0,
+        "limit": 99,
+        "ok": true
+      }
+    },
+    "unmeasured": []
+  }
+}

@@ -1,0 +1,1674 @@
+[
+  {
+    "passport": 1,
+    "kind": "class",
+    "id": "multiprocess_framework/modules/process_module/core/process_module.py::ProcessModule",
+    "path": "multiprocess_framework/modules/process_module/core/process_module.py",
+    "line": 33,
+    "sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+    "scanner": "1-d8b9d44d5b0d",
+    "purpose": {
+      "text": "Базовый класс для всех процессов системы (Refactored).",
+      "called_from": [],
+      "called_from_more": 0,
+      "declared_at": null
+    },
+    "interface": {
+      "layer": "process_module",
+      "all": [
+        "multiprocess_framework/modules/process_module/core/__init__.py",
+        "multiprocess_framework/modules/process_module/__init__.py"
+      ],
+      "signature": "",
+      "members": [
+        {
+          "name": "__init__",
+          "signature": "(name: str, shared_resources: ISharedResources | None = None, config: dict | None = None, state_proxy: IStateProxy | None = None)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:118"
+        },
+        {
+          "name": "initialize",
+          "signature": "() -> bool",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:226"
+        },
+        {
+          "name": "attach_stop_budget",
+          "signature": "(budget: dict) -> None",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:371"
+        },
+        {
+          "name": "lifetime_segments",
+          "signature": "-> dict",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:402"
+        },
+        {
+          "name": "close_root",
+          "signature": "()",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:406"
+        },
+        {
+          "name": "report_error",
+          "signature": "(exc: BaseException, context: str | None = None, **fields: Any) -> None",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:614"
+        },
+        {
+          "name": "update_process_state",
+          "signature": "(status: str | None = None, events: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None, custom: dict[str, Any] | None = None)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:981"
+        },
+        {
+          "name": "should_stop",
+          "signature": "() -> bool",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1069"
+        },
+        {
+          "name": "managers",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1078"
+        },
+        {
+          "name": "adapters",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1089"
+        },
+        {
+          "name": "router",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1105"
+        },
+        {
+          "name": "command_adapter",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1110"
+        },
+        {
+          "name": "router_adapter",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1115"
+        },
+        {
+          "name": "worker_adapter",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1120"
+        },
+        {
+          "name": "console_adapter",
+          "signature": "",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1125"
+        },
+        {
+          "name": "get_config",
+          "signature": "(key: str, default: Any = None) -> Any",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1179"
+        },
+        {
+          "name": "update_config",
+          "signature": "(key: str, value: Any)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1183"
+        },
+        {
+          "name": "send_message",
+          "signature": "(target: str, message)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1202"
+        },
+        {
+          "name": "broadcast_message",
+          "signature": "(message, exclude_self: bool = True)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1208"
+        },
+        {
+          "name": "receive_message",
+          "signature": "(timeout: float = None, channel_types=None, return_messages: bool = True)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1214"
+        },
+        {
+          "name": "register_manager",
+          "signature": "(name: str, manager, enabled: bool = True)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1229"
+        },
+        {
+          "name": "get_manager",
+          "signature": "(name: str)",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1234"
+        },
+        {
+          "name": "send",
+          "signature": "(message) -> dict",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1243"
+        },
+        {
+          "name": "receive",
+          "signature": "(timeout: float = 0.01, channel_types=None, return_messages: bool = True) -> list",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1257"
+        },
+        {
+          "name": "send_to_process",
+          "signature": "(target: str, message: dict) -> bool",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1273"
+        },
+        {
+          "name": "execute_command",
+          "signature": "(command: str, data: dict = None) -> Any",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1283"
+        },
+        {
+          "name": "attach_ready_event",
+          "signature": "(event) -> None",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1303"
+        },
+        {
+          "name": "run",
+          "signature": "()",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1335"
+        },
+        {
+          "name": "stop",
+          "signature": "()",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1409"
+        },
+        {
+          "name": "subscribe_observability_tail",
+          "signature": "(subscriber: str, level: str | None = None, *, wholesale: bool = False) -> dict",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1466"
+        },
+        {
+          "name": "unsubscribe_observability_tail",
+          "signature": "(subscriber: str | None = None, *, wholesale: bool = False) -> dict",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1593"
+        },
+        {
+          "name": "get_stats",
+          "signature": "() -> dict[str, Any]",
+          "where": "multiprocess_framework/modules/process_module/core/process_module.py:1653"
+        }
+      ]
+    },
+    "links": {
+      "used_by": [
+        {
+          "where": "Plugins/control/robot_control/tests/test_flight_dump_emitter.py:31",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "Plugins/control/robot_control/tests/test_verdict_real_wiring.py:33",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/base_manager/tests/test_report_error_mechanism_hazards.py:293",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_manager_module/tests/test_observability_broker.py:1121",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_manager_module/tests/test_process_root_pm_hazards.py:18",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/__init__.py:42",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/core/__init__.py:5",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/generic/generic_process.py:16",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_diag_commands_hazards.py:272",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_error_plane_one_connector_capture_acceptance.py:47",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_error_plane_one_connector_health_report_acceptance.py:30",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_f2_task22_schema_wiring.py:76",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py:52",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_fact_always_voice_windowed_acceptance.py:356",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_manifest_redaction_hazards.py:45",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_default_and_revoice_hazards.py:41",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_default_disabled_acceptance.py:38",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_hazards.py:26",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_no_ring_revoice_acceptance.py:21",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_real_wiring.py:33",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_generic_process_state_proxy.py:29",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_health_incident_reaches_the_store.py:32",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_incident_pair_carries_source.py:35",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_logger_slot_wiring_order.py:27",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_boot_layers.py:35",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_documents_real_wiring.py:33",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_forward_wiring.py:229",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_refs.py:574",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_tail_delivery.py:24",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_tail_delivery.py:284",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_context_contract.py:184",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py:250",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py:299",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_acceptance.py:58",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:31",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:6",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_resource.py:27",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:25",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_repurposed_voice_window_hazards.py:443",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_shutdown_order.py:36",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_sink_command_real_wiring.py:39",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_state_proxy_autoregister.py:9",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:40",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_voices_policy_road_guards.py:46",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:33",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_prototype/frontend/headless_process.py:42",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_prototype/frontend/process.py:18",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "<module>"
+        },
+        {
+          "where": "multiprocess_prototype/frontend/widgets/tabs/observability/tests/test_tail_activator.py:261",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "<module>"
+        }
+      ],
+      "uses": null,
+      "subclasses": [
+        {
+          "where": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py:105",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "ProcessManagerProcess",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/generic/generic_process.py:53",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "GenericProcess",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_executors_acceptance.py:88",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "ProcessWithSlowEntry",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_executors_acceptance.py:413",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "ProcessRegisteringByName",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_resource.py:298",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "TestCollectionNeverBreaksTheProcess.test_exploding_config_does_not_raise._BoomConfig",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:371",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "_StuckRunnerProc",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:386",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "_CleanRunnerProc",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:398",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "_SelfRunnerProc",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:432",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "test_g24_measured_second_call_wait_follows_budget.HeldProcess",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:525",
+          "how": "import",
+          "scope": "test",
+          "enclosing": "CountingProc",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_prototype/frontend/headless_process.py:53",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "HeadlessGuiProcess",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_prototype/frontend/process.py:27",
+          "how": "import",
+          "scope": "prod",
+          "enclosing": "GuiProcess",
+          "rank": 0
+        }
+      ],
+      "call_sites": [
+        {
+          "where": "Plugins/control/robot_control/tests/test_flight_dump_emitter.py:64",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "stand",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "Plugins/control/robot_control/tests/test_flight_dump_emitter.py:181",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheLineSurvivesTheRefusal.test_a_disabled_recorder_costs_the_dump_not_the_verdict",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "Plugins/control/robot_control/tests/test_verdict_real_wiring.py:58",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "Plugins/control/robot_control/tests/test_verdict_real_wiring.py:118",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestVerdictOnRealWiring.test_process_without_the_plane_keeps_deciding",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/base_manager/tests/test_base_manager_template_acceptance.py:125",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "make_process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/base_manager/tests/test_base_manager_template_hazards.py:611",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_process_logger_counts_failure_line_once",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/base_manager/tests/test_report_error_mechanism_hazards.py:302",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleKeepsItsRicherRoad.test_process_module_road_wins_over_the_mixin_and_still_counts_health",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_manager_module/tests/test_process_manager_process.py:561",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestOrchestratorReadySignalIsHonest.test_the_event_is_announced_when_capabilities_already_answer",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_diag_commands_hazards.py:274",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestDiagCommandsRealWiring.test_diag_commands_answer_through_the_real_command_manager",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_error_plane_one_connector_capture_acceptance.py:93",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "capture_scene",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_error_plane_one_connector_health_report_acceptance.py:76",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestHealthReportIsOneIncidentOneRow.test_health_report_with_level_error_produces_exactly_one_store_row",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_f2_task22_schema_wiring.py:101",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_real_wired",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_f4_task411_voice_at_apply_stage.py:89",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_fact_always_voice_windowed_acceptance.py:364",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "real_process_with_store",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_manifest_redaction_hazards.py:287",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_real_process_and_logger",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_default_and_revoice_hazards.py:82",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_default_disabled_acceptance.py:78",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot_without_any_flight_section",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_hazards.py:65",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_make",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_hazards.py:242",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheTwoNamedRefusals.test_a_missing_recorder_answers_the_same_refusal",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_no_ring_revoice_acceptance.py:53",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_real_wiring.py:87",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_real_wiring.py:312",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheProtocolAndTheAttributeAgree.test_a_process_without_wiring_still_satisfies_the_protocol",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_health_incident_reaches_the_store.py:77",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_Stand.__init__",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_incident_pair_carries_source.py:68",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "process_with_both_planes",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_logger_slot_wiring_order.py:111",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestLoggerManagerIsADeclaredPort.test_a_bare_process_always_has_the_attribute",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_documents_real_wiring.py:55",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_documents_real_wiring.py:91",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestRealWiring.test_no_key_keeps_the_previous_behaviour",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_tail_delivery.py:58",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "process_with_tail",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_context_contract.py:186",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheDocumentRoadIsJudged.test_a_real_process_satisfies_the_protocol_too",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py:252",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheRealWiring.process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py:301",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheRealWiring.test_a_process_without_managers_still_satisfies_the_protocol",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stop_request_acceptance.py:185",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_make_process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stop_request_hazards.py:224",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_make_process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_acceptance.py:597",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestA7ProcessModuleWiresHooks.test_initialize_installs_hooks_and_shutdown_restores_them",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:86",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestFailedInitializeDoesNotLeakHooks.test_hooks_are_removed_when_initialize_fails_after_managers",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:106",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestDoubleShutdown.test_second_shutdown_is_a_no_op_for_hooks",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:148",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessReportErrorCarriesFields.test_fields_reach_the_store_record_through_real_managers",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:200",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestHooksInstallAfterErrorManagerBundle.test_hooks_use_the_error_manager_created_in_the_same_bundle",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:27",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_minimal",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:35",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_with_config",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:40",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_with_shared_resources",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:48",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleLifecycle._make_process_with_mocked_init",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:134",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleRunStop._make_process_no_log",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:160",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleRunStop.test_should_stop_false_initially",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:164",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModuleRunStop.test_should_stop_true_after_stop",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:187",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestBuiltinCommandsReachableViaCommandManager.test_builtin_commands_in_command_manager_after_run",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:15",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_create_process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:28",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_initialize",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:50",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_shutdown",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:77",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_run_stop",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:109",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_ready_announced_only_after_commands_registered",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:147",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_running_status_is_not_announced_before_commands_are_registered",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:183",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_initialize_moves_both_status_planes_to_ready",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:204",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_status_before_run_is_not_running",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:213",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_ready_event_absent_is_not_an_error",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:226",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_should_stop",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:236",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_get_config",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:251",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_update_config",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:273",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_update_config_reaches_a_live_handler",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:283",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_managers_property",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:298",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_register_manager",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:309",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_get_manager",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:320",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_log",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:343",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_get_stats",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_module.py:359",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestProcessModule.test_send_receive_message",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_resource.py:326",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestResourceIsCollectedOnceAndReachesRecords.test_real_initialize_puts_the_whole_set_into_the_base",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:188",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "make_process",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:256",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_lifetime_segments_empty_before_initialize",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_acceptance.py:261",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_shutdown_without_initialize_returns_true_and_closes_nothing",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:64",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_process_with_root",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:172",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_failed_initialize_closes_root_and_planes",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:215",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_stuck_worker_is_named_in_survivors",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:241",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_second_initialize_on_live_process_rebuilds_nothing",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:264",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_initialize_after_shutdown_is_refused_without_new_root",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_repurposed_voice_window_hazards.py:447",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestTheVoiceReachesTheLogFileNotOnlyCaplog.test_the_voice_lands_in_the_log_file_of_a_real_logger_manager",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_shutdown_order.py:104",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_process_ready_to_stop",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_shutdown_order.py:290",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_all_four_planes_of_a_real_process_are_stopped",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_sink_command_real_wiring.py:57",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "wired",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_sink_command_real_wiring.py:129",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestAttributeContract.test_process_module_exposes_every_addressable_attribute",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:312",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_metric_reaches_the_real_stats_manager",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:330",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_record_timing_unit_is_seconds_not_milliseconds",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:349",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_gauge_overwrites_not_accumulates",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_task_3_2_summary_call_site.py:76",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestK2SummaryCallSiteInRun.test_summary_count_matches_independently_counted_debug_lines",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_task_3_2_summary_call_site.py:153",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestK2MissingSummaryMethodWarnsInsteadOfCrashing.test_missing_method_logs_a_warning_and_run_completes",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_voices_policy_road_guards.py:99",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "_boot",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:66",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "wired",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:191",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestBootWiring.test_boot_wiring_reads_events_from_the_config",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:207",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestBootWiring.test_a_process_without_the_key_is_wired_all_the_same",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:391",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g24_process_module_wait_follows_stop_budget",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:411",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g24_attach_stop_budget_alone_leaves_default",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:420",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g24_class_attribute_stays_default_after_instance_budget",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:463",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g25_before_root_opens_class_default",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:470",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g25_process_module_default_member_of_root",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:501",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g18_process_module_is_iprocess_module",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_acceptance.py:800",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_g23_process_module_closes_root_once_on_two_shutdowns",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_hazards.py:171",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_process_module_instance_wait_is_per_instance",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/tests/test_manager_shutdown_1_2b_2_hazards.py:172",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "test_process_module_instance_wait_is_per_instance",
+          "same_file": false,
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_prototype/frontend/widgets/tabs/observability/tests/test_tail_activator.py:286",
+          "how": "name-call",
+          "scope": "test",
+          "enclosing": "TestPanelStopsBeingErrorOnly._process",
+          "same_file": false,
+          "rank": 0
+        }
+      ],
+      "call_sites_unresolved": 0,
+      "bases": [
+        {
+          "name": "BaseManager",
+          "where": "multiprocess_framework/modules/base_manager/core/base_manager.py:53",
+          "how": "import",
+          "scope": "prod"
+        },
+        {
+          "name": "ObservableMixin",
+          "where": "multiprocess_framework/modules/base_manager/mixins/observable_mixin.py:65",
+          "how": "import",
+          "scope": "prod"
+        },
+        {
+          "name": "IProcessModule",
+          "where": "multiprocess_framework/modules/process_module/interfaces.py:18",
+          "how": "import",
+          "scope": "prod"
+        }
+      ],
+      "structural": {
+        "required": [
+          "initialize",
+          "attach_stop_budget",
+          "lifetime_segments",
+          "close_root",
+          "report_error",
+          "update_process_state",
+          "should_stop",
+          "managers",
+          "adapters",
+          "router",
+          "command_adapter",
+          "router_adapter",
+          "worker_adapter",
+          "console_adapter",
+          "get_config",
+          "update_config",
+          "send_message",
+          "broadcast_message",
+          "receive_message",
+          "register_manager",
+          "get_manager",
+          "send",
+          "receive",
+          "send_to_process",
+          "execute_command",
+          "attach_ready_event",
+          "run",
+          "stop",
+          "subscribe_observability_tail",
+          "unsubscribe_observability_tail",
+          "get_stats"
+        ],
+        "twins": [],
+        "note": null
+      },
+      "call_sites_by_name": null
+    },
+    "runtime": {
+      "processes": null,
+      "threads": [],
+      "commands": null,
+      "io": []
+    },
+    "checks": {
+      "findings": null,
+      "tests": [
+        {
+          "where": "Plugins/control/robot_control/tests/test_flight_dump_emitter.py:179",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheLineSurvivesTheRefusal.test_a_disabled_recorder_costs_the_dump_not_the_verdict",
+          "rank": 0
+        },
+        {
+          "where": "Plugins/control/robot_control/tests/test_verdict_real_wiring.py:116",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestVerdictOnRealWiring.test_process_without_the_plane_keeps_deciding",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/base_manager/tests/test_report_error_mechanism_hazards.py:292",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleKeepsItsRicherRoad.test_process_module_road_wins_over_the_mixin_and_still_counts_health",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_diag_commands_hazards.py:265",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestDiagCommandsRealWiring.test_diag_commands_answer_through_the_real_command_manager",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_error_plane_one_connector_health_report_acceptance.py:70",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestHealthReportIsOneIncidentOneRow.test_health_report_with_level_error_produces_exactly_one_store_row",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_hazards.py:235",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheTwoNamedRefusals.test_a_missing_recorder_answers_the_same_refusal",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_flight_recorder_real_wiring.py:309",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheProtocolAndTheAttributeAgree.test_a_process_without_wiring_still_satisfies_the_protocol",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_logger_slot_wiring_order.py:108",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestLoggerManagerIsADeclaredPort.test_a_bare_process_always_has_the_attribute",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_observability_documents_real_wiring.py:89",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestRealWiring.test_no_key_keeps_the_previous_behaviour",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_context_contract.py:175",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheDocumentRoadIsJudged.test_a_real_process_satisfies_the_protocol_too",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_plugin_stats_road.py:292",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheRealWiring.test_a_process_without_managers_still_satisfies_the_protocol",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_acceptance.py:592",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestA7ProcessModuleWiresHooks.test_initialize_installs_hooks_and_shutdown_restores_them",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:68",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestFailedInitializeDoesNotLeakHooks.test_hooks_are_removed_when_initialize_fails_after_managers",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:96",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestDoubleShutdown.test_second_shutdown_is_a_no_op_for_hooks",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:120",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessReportErrorCarriesFields.test_fields_reach_the_store_record_through_real_managers",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_hooks_wiring.py:193",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestHooksInstallAfterErrorManagerBundle.test_hooks_use_the_error_manager_created_in_the_same_bundle",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:26",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_minimal",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:33",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_with_config",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:38",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleCreation.test_create_with_shared_resources",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:159",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleRunStop.test_should_stop_false_initially",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:163",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestProcessModuleRunStop.test_should_stop_true_after_stop",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_lifecycle.py:185",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestBuiltinCommandsReachableViaCommandManager.test_builtin_commands_in_command_manager_after_run",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_resource.py:313",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestResourceIsCollectedOnceAndReachesRecords.test_real_initialize_puts_the_whole_set_into_the_base",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:171",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "test_failed_initialize_closes_root_and_planes",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:214",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "test_stuck_worker_is_named_in_survivors",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:238",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "test_second_initialize_on_live_process_rebuilds_nothing",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_process_root_hazards.py:261",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "test_initialize_after_shutdown_is_refused_without_new_root",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_repurposed_voice_window_hazards.py:438",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestTheVoiceReachesTheLogFileNotOnlyCaplog.test_the_voice_lands_in_the_log_file_of_a_real_logger_manager",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_shutdown_order.py:268",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "test_all_four_planes_of_a_real_process_are_stopped",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_sink_command_real_wiring.py:119",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestAttributeContract.test_process_module_exposes_every_addressable_attribute",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:311",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_metric_reaches_the_real_stats_manager",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:326",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_record_timing_unit_is_seconds_not_milliseconds",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_stats_connector_acceptance.py:348",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestRealProcessIntegration.test_gauge_overwrites_not_accumulates",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:183",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestBootWiring.test_boot_wiring_reads_events_from_the_config",
+          "rank": 0
+        },
+        {
+          "where": "multiprocess_framework/modules/process_module/tests/test_wide_event_real_wiring.py:205",
+          "how": "test-body",
+          "scope": "test",
+          "enclosing": "TestBootWiring.test_a_process_without_the_key_is_wired_all_the_same",
+          "rank": 0
+        }
+      ]
+    },
+    "status": {
+      "tier": null,
+      "doc_missing": false,
+      "dynamic": 0,
+      "stale": [],
+      "frozen": []
+    }
+  }
+]

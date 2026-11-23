@@ -164,7 +164,7 @@ pytest scripts/aggregate_context/tests/ -v
 ## Связь с другими частями seed
 
 - `commands/dev/adr.md` — slash-команда для создания **глобальных** ADR
-  (`docs/claude/DECISIONS/NNNN-*.md`). Per-module ADR создаются через
+  (`docs/decisions/NNNN-*.md`). Per-module ADR создаются через
   `templates/DECISIONS.template.md` руками или агентом.
 - `skills/module-contract` — при создании нового публичного модуля
   рекомендует создать CONTEXT.md если есть Gotchas или Key decisions.

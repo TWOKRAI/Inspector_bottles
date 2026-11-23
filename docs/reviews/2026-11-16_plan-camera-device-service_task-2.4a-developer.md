@@ -1,0 +1,226 @@
+# Task 2.4a — отчёт разработчика (2026-11-16)
+
+**Ветка:** `feat/camera-2-4a`, HEAD `6d511ca57` (красные тесты тестера). Не закоммичено, не запушено: коммитит лид.
+**Роль:** developer. **Итераций:** 1 из 2.
+**memory hits:** `search.py camera session owner mailbox` -> ничего по теме (шесть чужих уроков про push, модели, диалоги).
+
+## Что сделано
+
+1. `Services/camera_device/session.py`
+   - Ящик владельца: `_Box` (очередь + `closed`), `_Cmd(fn)` с `done/result/error/cancelled/committed`; создаётся в `start()` под `self._lock`
+     вместе с `_stop_evt`. Там же `start()` сбрасывает `_pending`, `_drain_queued` и `_last_error`.
+   - Публичные методы `submit(fn) -> bool`, `call(fn, timeout) -> (ok, результат)`, `apply(steps, policy)`. Новых публичных полей нет.
+   - Владелец опрашивает ящик в `_grab_loop` после каждого возврата `get_frame` (кадр, `None`, `PortError`): `_poll_box`. Решение «исполнить/пропустить
+     отменённую» принимается под замком, `fn` исполняется вне замка (`_execute`), исключение `fn` -> `error` команды, цикл идёт дальше.
+   - Выход владельца: `_close_box(box)` в `finally` ДО `_cleanup`: ящик закрыт, `_pending` и `_drain_queued` сброшены, остаток команд -> `(False, "сеанс остановлен")`.
+   - `apply`: под замком сливает шаги в `_pending[поле] = (Step, policy)` и ставит ОДНУ `_drain`. `_drain`: `live` при `live_write` пишется без
+     остановки; остальное — один перезахват на пакет (`_regrab`): `stop_grabbing`, при `restart_regrab` — запись шагов пакета, иначе `close`, `open`, весь `_run`
+     с заменёнными шагами; `start_grabbing`, если стоп не запрошен. Шаги пакета заменяют шаги тех же полей в `_run` цикла.
+   - Перезахват идёт внутри `grabbing`: `state` и `on_state` не затронуты. Отказ любого шага перезахвата -> `_fail("error", exc)`, цикл выходит.
+   - `_Hold` (`acquired/opened/grabbing`) — что владелец держит у порта; `_cleanup` решает по нему, поэтому уже закрытый/остановленный порт повторно не трогается.
+   - Наблюдаемость: лог `apply field=<поле> policy=live|restart ms=<мс>` через логгер сеанса; `on_timing("regrab", с)`; `on_timing("apply", с)` уже шлёт
+     `ProfileRunner.apply_step` на каждую записанную правку (я не дублировал).
+2. `Services/camera_device/testing/fake_port.py`: `open_handles`, `max_open_handles` под замком фейка; поведение `open`/`close` не изменено.
+3. `Services/camera_device/tests/test_live_apply_hazards.py` (новый, 16 тестов, мои).
+4. `Services/camera_device/README.md`: раздел «Живая правка и ящик владельца» (задержка не больше `timeout_ms`; `trigger_software` ~2 Гц, после 1.0; `restart` в Р12 = перезахват
+   порта, `FieldMeta.apply == "restart"` = перезапуск процесса-владельца, `field_meta.py:106-108`); строки Public API про `submit/call/apply` и `on_timing("regrab")`.
+
+`threading.Thread|KeyedExecutor|ThreadPoolExecutor` в `session.py` — четыре строки, все аннотации типов, те же, что в HEAD (`git grep -nE ... -- session.py`). ALLOWLIST G6 не тронут.
+
+## Числа
+
+Окружение: Mac, `.venv/bin/python`, через gate (`light` / `medium`, сессия `inspector-bottles-20`). Импорт из дерева (из того же cwd, что pytest):
+```
+multiprocess_framework/__init__.py -> .../.claude/worktrees/cam-2-4a-dev/multiprocess_framework/__init__.py
+Services/camera_device/session.py   -> .../.claude/worktrees/cam-2-4a-dev/Services/camera_device/session.py
+```
+| Что | Результат |
+|---|---|
+| `tests/test_live_apply_session.py` (тестер) | **8 passed**, 0 failed (до кода 8 failed — по брифу, сам красное не запускал) |
+| `tests/test_live_apply_hazards.py` (мои) | **16 passed**, 0 failed |
+| оба файла подряд 6 раз (поиск флейков) | 23 passed ×6 (до добавления 16-го теста), 6,05-6,11 с на прогон |
+| весь `Services/camera_device/tests` | **216 passed, 10 skipped**, 0 failed (было 192 passed, 10 skipped; +8 +16 = 216) |
+| `ruff check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed |
+| `ruff format --check` на тех же файлах | 3 files already formatted |
+
+## Что трактовал сам (решения вне DESIGN)
+
+1. `call` из потока владельца (например, из `on_frame`) возвращает `(False, "вызов из потока владельца")` сразу: владелец сам себя не дождётся. По аналогии с `start()`/`stop()`.
+2. Исключение `fn` в `call` -> `(False, <describe_error>)`, то есть имя типа исключения строкой (без значений); `submit` ответа не возвращает.
+3. Живую группу пишу через `ProfileRunner.apply_plan`, а не голым `apply_step`: так сохраняется пропуск шага (`Step.skip`) и пропуск потомка отказавшего родителя; каждая запись всё равно идёт через `apply_step`.
+4. Порядок шагов внутри группы — по позиции поля в `_run` (родитель раньше потомка): правки приходят из разных `apply`, а dict хранит порядок первой вставки. Поле, которого нет в `_run`, добавляется в конец `_run`.
+5. Порядок групп в пакете: сначала `live` (при захвате), потом перезахват остальных. `live` шаги при перезахвате без `restart_regrab` пишутся ещё раз (в составе `_run`).
+6. Стоп запрошен -> команды ящика не исполняются (получают «сеанс остановлен»). Проверки стопа в `_regrab`: до `stop_grabbing`, до `open`, после `open` до записи `_run`, до `start_grabbing`.
+7. `apply` не в `grabbing` (в т.ч. в `opening`) — правка не принимается, в `_pending` не копится, INFO в лог. Неизвестная `policy` (не `live`/`restart`) — `ValueError` в потоке вызывающего; пустой пакет — no-op.
+8. `rest` в `_cleanup` пишется только если порт открыт (`... and hold.opened`): стоп в окне перезахвата оставляет порт закрытым, запись `rest` в закрытый порт дала бы ложные отказы узлов.
+9. `on_timing("regrab")` шлётся в `finally`: и при успехе, и при отказе или раннем выходе по стопу (длительность попытки).
+10. `_run` внутри `_drain` заменяется без замка: пишет только владелец, пока `_held`; `set_cycle` пока `_held` не пишет (`False`).
+
+## Мутации на моём коде (по одной; откат `cp` из резервной копии; `diff -q` пуст после каждой)
+
+Прогон: оба файла (24 теста после добавления 16-го), `session.py` мутируется скриптом, откат `cp`, `diff -q` вывод пустой, код возврата 0 во всех случаях.
+
+| Мутация | Результат | Какие красные и на чём |
+|---|---|---|
+| (а) `restart` пишется как `live` (всё в живую группу, перезахвата нет) | **9 failed** | оба теста строки 1 (`test_restart_с_restart_regrab…`, `test_restart_без_restart_regrab…`), `два_потока`, `слияние`, мои `stop_в_окне`, `отказ_open`, `отказ_start_grabbing`, `правка_заменяет_шаг_в_run`, `on_timing_regrab` |
+| (б) `apply` исполняется в потоке вызывающего (`self._drain()` без ящика) | **8 failed** (до добавления моего live-теста — 7) | `два_потока` (красный на `_wait_regrab_done`, не на «id потока»: порт, вызванный из двух потоков, ломает фейк раньше), `слияние` (`2 == 1`), `restart_без_restart_regrab`, мои `stop_в_окне`, `стоп_до_перезахвата`, `повторные_apply`, `очередь_не_переходит`, и новый `live_запись_идёт_из_потока_владельца` (`{6158774272} == {6125121536}` — именно id потока) |
+| (в) убрано слияние (каждая `apply` — своя команда, `_drain` берёт один пакет) | **2 failed** | `слияние_двух_правок…` (`assert 2 == 1` — «ровно один `stop_grabbing`»), мой `повторные_apply_одного_поля…` |
+| (г) ящик не закрывается при выходе владельца (`_close_box` убран) | **1 failed** | `call_перед_stop_получает_ответ…` (`call перед stop() остался без ответа`) |
+
+Дополнительно (сверх списка лида; нужны, чтобы hazard-тесты не были зелёными «просто так»):
+
+| Мутация | Результат | Красные |
+|---|---|---|
+| (д) `call` по сроку не смотрит `committed` (всегда отменяет) | 1 failed | мой `call_по_сроку_при_уже_исполняющейся_команде…` (`(False, 'срок') == (True, 'готово')`); тест тестера эту мутацию НЕ ловит |
+| (е) владелец не смотрит `cancelled` | 1 failed | `call_результат_в_потоке_владельца_срок_и_closed` (`['fn'] == []`) — это и есть «`fn` исполнена позже срока» |
+| (ж) убраны проверки стопа в `_regrab` | 1 failed | мой `stop_в_окне_перезахвата…` (`start_grabbing` после стопа: `2 == 1`) |
+| (з) `hold.grabbing` не сбрасывается после `stop_grabbing` перезахвата | 3 failed | мои `stop_в_окне`, `отказ_open`, `отказ_start_grabbing` (лишний `stop_grabbing` в `_cleanup`) |
+| (и) `_pending`/`_drain_queued` не сбрасываются в `start()` и `_close_box` | 1 failed | мой `очередь_не_переходит_в_следующий_цикл` (`apply` второго цикла не дошёл) |
+
+## Что осталось открытым / ненадёжно
+
+1. ~~Дыра: `apply` во время `opening` теряется~~ — закрыто по решению лида, см. «Дополнение» ниже.
+2. **Тест тестера для мутации (б) красный не на «id потока»** (см. таблицу), а на раннем ожидании; живая запись (`live`) мутацией (б) тестом тестера не ловится вообще (`test_live_при_live_write` зелёный). Закрыто моим `test_live_запись_идёт_из_потока_владельца_а_не_вызывающего`, но это тест автора кода, не слепой.
+3. **Мутацию «`committed` не проверяется под замком» как гонку не прогонял**: детерминированно её не воспроизвести. Прогнаны две её стороны (д) и (е); `committed` выставляется под замком в `_poll_box`, но гонку «cancelled выставлен между `popleft` и `committed`» тестом не поймать — она закрыта только замком в коде и рассуждением.
+4. **Остаточное окно стопа:** `stop()`, пришедший между проверкой `stop()` и вызовом `start_grabbing` в `_regrab`, всё же даёт один `start_grabbing`; затем цикл сразу выходит и `_cleanup` зовёт `stop_grabbing`. Гарантия «после стопа `start_grabbing` не зовётся» — для стопа, запрошенного до проверки.
+5. **`fn` из `call` не обёрнута `_port_call`:** зависшая команда не видна сторожу (`on_stall` не придёт), `on_timing` не пишется. Для 2.3c решение: оборачивать `fn` самой или расширить `_execute`.
+6. **Порядок групп:** если `live`-шаг зависит от родителя из группы перезахвата, `live` пишется раньше родителя (родитель в том же пакете, но в другой группе). В 2.4b это ограничение `FieldMeta.apply` у пары родитель/потомок.
+7. **Только фейк.** Реальный GigE `open` 1-3 с в перезахвате: кадры не идут, команды из ящика ждут; `release_device` ждёт `_STOP_TIMEOUT_S=2.0` и может ответить «поток-владелец ещё закрывает прибор». Не проверено на приборе.
+8. **Тайминги в тестах:** `call` по сроку (`elapsed >= 0.25`), `call` из `on_frame` (`< 0.5`), окна по `open_delay_s=0.3`. Шесть серий по 23 теста зелёные на свободной машине; под нагрузкой пороги возможны флейки.
+9. `ValueError` на неизвестную `policy` летит в поток вызывающего: колбэк подписки (2.4b) обязан ловить или заранее фильтровать `config`.
+10. Не запускал `sentrux check .` (не просили; изменений между слоями нет: только `collections.deque` из stdlib).
+11. Красное состояние до кода сам не прогонял (8 failed взято из брифа); зелёное и мутации прогнаны.
+
+ESCALATION: не требуется (1 итерация, блокеров нет); п.1 — вопрос лиду по 2.4b, не блокер 2.4a.
+
+---
+
+# Дополнение (запрос лида К, 2026-11-16): `apply` в `opening` и флейк `test_старт_прерван_стопом`
+
+## П.1. `apply` принимается в `opening`
+
+Что изменено (`session.py`, `README.md`, `tests/test_live_apply_hazards.py`; `fake_port.py` не менялся):
+- `apply` принимается в `opening` и `grabbing` (цикл жив, ящик создан и не закрыт); в `stopping`/`closed`/`idle`/отказе или при закрытом ящике — не принимается, в лог INFO.
+- Владелец опрашивает ящик ОДИН раз перед циклом `get_frame` (начало `_grab_loop`, сразу после входа в `grabbing`): накопленный в `opening` `_drain` исполняется до первого `get_frame`, живая или перезахват по политике, состояние не меняется.
+- Если воркер владельца не запустился (`_launch_owner` отказал), ящик закрывается, `_pending` сбрасывается: правка из `opening` не повисает.
+- README: в описании `apply` добавлено «принимается в `opening` ... и в `grabbing`, в `stopping`/`closed`/отказе — нет».
+
+Тесты автора (все четыре зелёные):
+- `test_apply_live_в_opening_исполняется_один_раз_до_первого_get_frame` — `open_delay_s=0.3`, `apply(exposure_time=1200.0, live)` во время `open`: в журнале `set_param(ExposureTime,1200.0)` ровно один, после `start_grabbing` и до первого `get_frame`, `stop_grabbing` нет, события `[idle->opening, opening->grabbing]`.
+- `test_apply_restart_в_opening_один_перезахват_после_входа_в_grabbing` — после первого `start_grabbing` журнал ровно `stop_grabbing, set_param(TriggerSelfTriggerPeriod,60), get_param, start_grabbing`, запись `60` одна, состояние не менялось.
+- `test_apply_в_opening_и_сразу_stop_закрывает_без_start_grabbing` — `closed`, `held False`, нет `start_grabbing`/`stop_grabbing`/записи 61, `open_handles == 0`, события `[idle->opening, opening->stopping, stopping->closed]`.
+- `test_apply_в_closed_не_принимается_порт_не_зовётся_и_правка_не_копится` — после `stop` порт не зовётся, следующий `start` строит план `run` (period 40), единственный `stop_grabbing` — из `_cleanup` первого цикла.
+
+Мутации на новом коде (откат `cp`, `diff -q` пуст):
+- (к) «в `opening` не принимается» (`state == "grabbing"` вместо `in ("opening","grabbing")`): **2 failed** — `apply_live_в_opening…`, `apply_restart_в_opening…` (`не дождались за 3.0 с`).
+- (л) нет опроса ящика до первого `get_frame` (начальный `_poll_box` убран): **1 failed** — `apply_live_в_opening…` (`assert 17 < 16`: запись шла только после первого `get_frame`).
+
+## П.2. Флейк `test_session_lifecycle_hazards.py::test_старт_прерван_стопом`: старый тест, НЕ регрессия
+
+**Падающий assert** (строка 122 старого теста, текст из прогонов):
+```
+assert rig.states == [("idle", "opening"), ("opening", "stopping"), ("stopping", "closed")]
+AssertionError: assert [('idle', 'op..., 'stopping')] == [('idle', 'op...g', 'closed')]
+```
+В «Captured log» того же прогона строка `session state=stopping->closed device_id=FAKE-0001 ms=505` уже есть: переход случился и залогирован, а колбэк `on_state` в `rig.states` ещё не записан.
+
+**Причина (гонка в тесте, а не в коде):** в `_owner_main` финальный `closed` ставится под замком (`state`, `device_held=False`, `exited.set()`), а `on_state` зовётся ПОСЛЕ замка в `_fire_states` (строка лога, затем колбэк). Тест после `join` потоков ждёт `session.state == "closed"` и сразу читает `rig.states`: между видимым `closed` и колбэком у владельца остаётся окно. Это задокументировано в шапке `session.py` («`on_state` приходит из потока, сменившего состояние ... истина — свойство `state`»), код `start()`/`stop()`/`_owner_main` в этом месте я не менял.
+
+**Доказательство, что это не моя регрессия:**
+1. Полный каталог `Services/camera_device/tests`, 8 прогонов подряд через gate (`medium`), одинаково для двух деревьев:
+   - моё дерево (`feat/camera-2-4a`): 7 зелёных (220 passed, 10 skipped), 1 красный — этот же тест, тот же assert (прогон 6);
+   - база `cam-w3` (HEAD `ae89c89bf`, `feat/camera-device-w3`): 3 зелёных (204 passed, 10 skipped), **5 красных**: 4 раза этот же тест с тем же assert (прогоны 3, 5, 6, 7) и 1 раз другой старый тест (см. ниже).
+2. Детерминированное воспроизведение на НЕизменённой базе `cam-w3`: тот же тест в процессе, где обработчик лога `camera_device.session` спит 50 мс на строке `stopping->closed` (она пишется до колбэка): `1 failed`, `E AssertionError ... Right contains one more item: ('stopping', 'closed')`. На моём дереве то же самое (скрипт — в scratchpad, в дерево не кладу).
+3. Один этот тест 60 раз подряд в одном процессе: 0 красных и на базе, и на моём дереве (отдельно зелёный — как вы видели); флейк проявляется только в полном каталоге (чем именно полный прогон расширяет окно — не установлено).
+
+**Второй старый флейк, только на базе (прогон 4):** `test_plugin_observability.py::test_профиль_при_отказе_открытия_не_rest_а_при_штатном_закрытии_rest`, строка 356, `AssertionError: assert None == 'run'`. На моём дереве за 8 прогонов не наблюдался; причину не разбирал. Тесты W2 чужие, не правил.
+
+Вывод: тесты W2 не правил; красный `test_старт_прерван_стопом` — флейк старого теста (читает `rig.states` до доставки `on_state`). Предложение: старый тест должен ждать `rig.states == [...]` через `_await`, а не читать список сразу (решает владелец теста/лид).
+
+## Числа (после п.1, дерево `cam-2-4a-dev`, код не менялся с момента серии)
+
+| Что | Результат |
+|---|---|
+| `test_live_apply_session.py` + `test_live_apply_hazards.py` | 28 passed (8 + 20) |
+| весь `Services/camera_device/tests`, 8 прогонов подряд | 7 × (220 passed, 10 skipped) + 1 × (1 failed, 219 passed) — красный только старый `test_старт_прерван_стопом` |
+| база `cam-w3`, те же 8 прогонов | 3 × (204 passed, 10 skipped), 5 красных (4 × тот же тест, 1 × `test_plugin_observability`) |
+| `ruff check` / `ruff format --check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed / 3 files already formatted |
+
+## Что осталось открытым / ненадёжно (дополнение)
+
+1. Причину, по которой флейк виден только в полном каталоге (не в одиночном/60-кратном прогоне), не установил. Различие частоты (мои 1/8, база 5/8) считаю шумом нагрузки машины: серии шли подряд, не одновременно, но машина общая; сравнивать частоты как «у меня лучше» нельзя.
+2. `apply` в `opening` исполняется после входа в `grabbing`: для `restart` это перезахват сразу после старта (лишний `stop_grabbing`/запись при уже применённом `run`). Слияние правки в `run` до `start_grabbing` не делал (лид просил «как обычно»).
+3. `apply` в `opening` читает `_run` старого цикла: если `set_cycle` меняет цикл между `start()` и `grabbing`, `set_cycle` отказывает (`device_held`), поэтому план `run` и правка согласованы.
+4. Остальные пункты «осталось открытым» основного отчёта (2-10) в силе, п.1 снят.
+5. Второй старый флейк (`test_plugin_observability`, `assert None == 'run'`) не исследован.
+
+---
+
+# Дополнение 2: выжившие мутации break-injection (K6, K8, K9, K11, K12)
+
+Прогон Haiku на `c4af315e2`: 12 мутаций, пять выжили (28/0). Правки только в `tests/test_live_apply_hazards.py`; `session.py` не менялся (`git diff HEAD -- Services/camera_device/session.py` пуст). Мутации прогнаны скриптом `inj_24a.py` на моём дереве с откатом `cp` и `diff -q` (пуст после каждой): красный с новым тестом, затем зелёный на восстановленном коде.
+
+| Мутация | Тест, который её убивает | Результат на мутанте | Что красное (assert) |
+|---|---|---|---|
+| K6: убран опрос ящика до первого `get_frame` | усилен `test_apply_restart_в_opening_один_перезахват_после_входа_в_grabbing`: между первым `start_grabbing` и `stop_grabbing` в журнале нет `get_frame` | 2 failed, 31 passed | `assert 'get_frame' not in ['start_grabbing', 'get_frame']` (+ уже ловивший тест (а): `assert 17 < 16`) |
+| K8: убрана проверка стопа перед `start_grabbing` в `_regrab` | новый `test_стоп_после_записи_до_start_grabbing_перезахват_не_зовёт_start_grabbing`: хук на `port.get_param` узла периода зовёт `session.stop(0.1)` из потока владельца сразу после записи шага пакета | 1 failed, 32 passed | журнал после первого `start_grabbing` не равен `[stop_grabbing, set_param(...,60), get_param, close]` (появляется второй `start_grabbing`) |
+| K9: `rest` в `_cleanup` пишется и на закрытом порту | новый `test_стоп_между_close_и_open_перезахвата_rest_не_пишется_в_закрытый_порт`: сеанс с `rest`, фейк без `restart_regrab`, хук на `port.close` зовёт `stop(0.1)` сразу после `close` | 1 failed, 32 passed | журнал `[stop_grabbing, ..., get_param]` вместо `[stop_grabbing, close]`: `rest` писался в закрытый порт |
+| K12: исключение `fn` ловится не как `Exception` | `test_исключение_fn_не_валит_цикл_и_отвечает_отказом` параметризован: `RuntimeError`, `ZeroDivisionError`, `KeyError` (раньше был только `ZeroDivisionError`, мутант ловил именно его) | 2 failed, 31 passed (`RuntimeError`, `KeyError`) | `assert (False, 'команда прервана') == (False, 'RuntimeError')` |
+| K11: `_pending` не сбрасывается в `start()` | новый `test_правка_из_opening_цикла_1_не_попадает_в_прибор_цикла_2` | **выжил: 33 passed** — мутант эквивалентен, доказательство ниже | — |
+
+**K11 — эквивалентная мутация (доказано запуском):** `_pending` не бывает непустым к моменту нового `start()`: `apply` принимает правку только при незакрытом ящике (под тем же замком), а ящик закрывается и `_pending` очищается в `_close_box` при выходе владельца и в `_launch_owner` при отказе запуска; новый `start()` возможен только после `_held = False`, то есть после этих мест. Сброс в `start()` — дублирующая защита (оставил в коде).
+- K11b (K11 + убран сброс в `_close_box`): 2 failed, 31 passed — `test_очередь_не_переходит_в_следующий_цикл` (`assert 2 == 1`) и новый `test_правка_из_opening_цикла_1…` (`'set_param(TriggerSelfTriggerPeriod,61)' not in [...]` не выполнено): тесты чувствительны к утечке, если ни одна из двух защит не работает.
+- K11c (в `start()` вместо сброса стоит `assert not self._pending`): весь `Services/camera_device/tests` — 225 passed, 10 skipped: ассерт ни разу не сработал, то есть место недостижимо в этих тестах.
+
+## Числа (дерево `cam-2-4a-dev`, код `session.py` как в `c4af315e2`)
+
+| Что | Результат |
+|---|---|
+| `test_live_apply_hazards.py` | **25 passed** (было 20; параметризация исключений +2, новых тестов +3) |
+| `test_live_apply_session.py` + `test_live_apply_hazards.py`, 6 прогонов подряд | 33 passed ×6, 8,0 с на прогон |
+| весь `Services/camera_device/tests` | **225 passed, 10 skipped** (было 220 passed, 10 skipped), 0 failed в этом прогоне |
+| `ruff check` / `ruff format --check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed / 3 files already formatted |
+
+## Что осталось открытым / ненадёжно (дополнение 2)
+
+1. K11 остаётся «выжившим» по построению: убить его тестом нельзя, пока в коде две другие защиты (`_close_box`, `_launch_owner`). Доказательство эквивалентности (K11b, K11c) — запуск на этом наборе тестов, а не формальное; рассуждение о замке выше.
+2. Тесты K8/K9 подменяют методы порта (`get_param`, `close`) в экземпляре фейка и зовут `session.stop` из потока владельца: это моделирует «стоп пришёл в нужный момент», но не настоящую гонку двух потоков. Остаточное окно между проверкой стопа и вызовом `start_grabbing` (п.4 основного отчёта) тестом не закрыто и закрыто быть не может.
+3. K12 в мутанте превращает любое исключение, кроме `ZeroDivisionError`, в гибель владельца с ответом «команда прервана»; тест проверяет ответ и живой цикл на `RuntimeError`/`KeyError`/`ZeroDivisionError`, но не `BaseException`-ветку (`KeyboardInterrupt`/`SystemExit`): её отдельно не прогонял.
+4. Флейки старых тестов W2 из «Дополнения» (`test_старт_прерван_стопом`, `test_plugin_observability`) в этом прогоне не проявились; прогнано по одному полному каталогу и 6 повторам двух файлов, 8-кратной серии не повторял.
+5. Остальные пункты основного отчёта и «Дополнения» остаются в силе.
+
+---
+
+# Дополнение 3: порядок «родитель раньше потомка» в слитом пакете (находка 2 ревью Opus)
+
+Правки только в `tests/test_live_apply_hazards.py`; `session.py` не менялся (`git diff HEAD -- Services/camera_device/session.py` пуст, мутация откатана `cp`, `diff -q` пуст).
+
+Новые тесты (пакет = две правки, слитые за зависшим `get_frame`, потомок приходит первым; ожидаемое — литералами):
+- `test_пакет_потомок_и_родитель_с_restart_regrab_пишется_родитель_раньше_потомка`: `run` с `trigger_mode=On, trigger_source=Line0` (период закрыт), `apply([trigger_period_ms=60])`, затем `apply([trigger_source=SelfTrigger])`, обе `restart`. Журнал после первого `start_grabbing` ровно `stop_grabbing, set_param(TriggerSource,SelfTrigger), get_param, set_param(TriggerSelfTriggerPeriod,60), get_param, start_grabbing`; `param_errors == {}`; `params` = `SelfTrigger` и `60`.
+- `test_пакет_потомок_и_родитель_без_restart_regrab_run_цикла_в_порядке_родитель_потомок`: тот же сценарий на фейке без `restart_regrab`; журнал `stop_grabbing, close, open, set_param(TriggerMode,On), get_param, set_param(TriggerSource,SelfTrigger), get_param, set_param(TriggerSelfTriggerPeriod,60), get_param, set_param(ExposureTime,10000.0), get_param, start_grabbing`, `param_errors == {}`.
+- `test_пакет_источник_и_режим_триггера_режим_пишется_раньше_источника` (образец ревьюера: `run` с `Off`, источник пришёл раньше режима): журнал `stop_grabbing, set_param(TriggerMode,On), get_param, set_param(TriggerSource,SelfTrigger), get_param, start_grabbing`, `param_errors == {}`.
+
+Мутация «сортировка убрана» (удалены две строки `live.sort(...)`/`regrab.sort(...)` в `_drain`), на моём дереве с откатом:
+
+| Состояние кода | `test_live_apply_hazards.py` | Что красное |
+|---|---|---|
+| сортировка убрана | **2 failed, 26 passed** | `restart_regrab`: `At index 1 diff: 'set_param(TriggerSelfTriggerPeriod,60)' != 'set_param(TriggerSource,SelfTrigger)'`; режим/источник: `At index 1 diff: 'set_param(TriggerSource,SelfTrigger)' != 'set_param(TriggerMode,On)'` |
+| после отката | 28 passed | — |
+
+Вариант без `restart_regrab` на мутанте остаётся ЗЕЛЁНЫМ (он в числе 26 passed): там весь `run` переигрывается по позиции в `_run` (`_replace_in_run` заменяет шаги на месте), сортировка пакета на него не влияет. Тест нужен как защита этой второй опоры порядка, но «убрать сортировку» он не ловит; ловят первый и третий.
+
+## Числа
+
+| Что | Результат |
+|---|---|
+| `test_live_apply_hazards.py` | **28 passed** (было 25; +3) |
+| оба файла 2.4a (`test_live_apply_session.py` + hazards), 5 прогонов подряд | 36 passed ×5, около 9,0 с |
+| весь `Services/camera_device/tests` | **228 passed, 10 skipped** (было 225 passed, 10 skipped), 0 failed |
+| `ruff check` / `ruff format --check` (session.py, fake_port.py, test_live_apply_hazards.py) | All checks passed / 3 files already formatted |
+
+## Что осталось открытым / ненадёжно (дополнение 3)
+
+1. **НАХОДКА для лида (дефект порядка вне сортировки), не исправлялась (`session.py` вне FILES):** поля пакета, которых нет в `_run` цикла (например, группа trigger не управлялась: `trigger_managed=False` в `run`), дописываются в конец `_run` в порядке прихода `apply`, а сортировка по `_run` их не переупорядочивает. Проба на текущем коде (скрипт `absent_from_run.py` в scratchpad, не в дереве): `run` с `['exposure_time']`; `apply` в порядке потомок, источник, режим (`period=60`, `source=SelfTrigger`, `mode=On`, все `restart`) даёт записи `TriggerSelfTriggerPeriod, TriggerSource, TriggerMode` и `param_errors = {'trigger_period_ms': 'чтение не удалось: access', 'trigger_source': 'чтение не удалось: access'}`. Лечится топологической сортировкой пакета по `Step.parent` (или хотя бы порядком `register_cls.get_all_fields_meta()` в 2.4b). Тестом не закрыт: красный тест в наборе нельзя оставить, решение по `session.py` за лидом.
+2. Пара родитель/потомок в РАЗНЫХ группах (`live` при `live_write` и перезахват): `live` пишется раньше родителя из группы перезахвата (п.6 основного отчёта) — тестом не закрыто.
+3. Порядок цепочки из трёх звеньев (режим, источник, период) в одном пакете проверен только по парам (источник/период и режим/источник), тремя полями за раз не прогонял.
+4. Остальные пункты основного отчёта и дополнений 1-2 остаются в силе.

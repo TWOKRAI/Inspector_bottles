@@ -1,0 +1,139 @@
+Таблица 8x3: адреса агента | статусы записей эталона | вердикт score.py (V0)
+
+## R1  require=all  expected=scripts/plans_ledger.py:2044±3; scripts/plans_ledger.py:2947±3; .claude/plugins/core/templates/PLAN.template.md:21±3
+  r1: miss  conf=unsure locs=['scripts/plans_progress/plans_progress.py:1427', '.claude/plugins/core/templates/PLAN.template.md']
+        plans_ledger.py:2044 -> файл не назван
+        plans_ledger.py:2947 -> файл не назван
+        PLAN.template.md:21 -> файл без строки
+  r2: miss  conf=unsure locs=['.claude/plugins/core/templates/PLAN.template.md']
+        plans_ledger.py:2044 -> файл не назван
+        plans_ledger.py:2947 -> файл не назван
+        PLAN.template.md:21 -> файл без строки
+  r3: miss  conf=sure locs=['scripts/plans_ledger.py:2044', 'scripts/plans_ledger.py:2947']
+        plans_ledger.py:2044 -> ok
+        plans_ledger.py:2947 -> ok
+        PLAN.template.md:21 -> файл не назван
+
+## R2  require=all  expected=scripts/plans_ledger.py:258±3; scripts/plans_ledger.py:302±3; scripts/plans_ledger.py:1585±3
+  r1: false conf=sure locs=['scripts/plans_progress/plans_progress.py:66-76', 'scripts/plans_progress/plans_progress.py:1427']
+        plans_ledger.py:258 -> файл не назван
+        plans_ledger.py:302 -> файл не назван
+        plans_ledger.py:1585 -> файл не назван
+  r2: false conf=sure locs=['scripts/plans_progress/plans_progress.py:66', 'scripts/plans_progress/plans_progress.py:1427']
+        plans_ledger.py:258 -> файл не назван
+        plans_ledger.py:302 -> файл не назван
+        plans_ledger.py:1585 -> файл не назван
+  r3: false conf=sure locs=['scripts/plans_ledger.py:258', 'scripts/plans_progress/plans_progress.py:192']
+        plans_ledger.py:258 -> ok
+        plans_ledger.py:302 -> строка 258 вне [299,305]
+        plans_ledger.py:1585 -> строка 258 вне [1582,1588]
+
+## R3  require=all  expected=scripts/validate_commit/validate_commit.py:228±3; scripts/validate_commit/validate_commit.py:979±3
+  r1: hit   conf=sure locs=['scripts/validate_commit/validate_commit.py:228', 'scripts/validate_commit/validate_commit.py:979']
+        validate_commit.py:228 -> ok
+        validate_commit.py:979 -> ok
+  r2: miss  conf=unsure locs=['scripts/validate_commit/validate_commit.py:228', 'scripts/validate_commit/validate_commit.py:500']
+        validate_commit.py:228 -> ok
+        validate_commit.py:979 -> строка 228,500 вне [976,982]
+  r3: false conf=sure locs=['scripts/validate_commit/validate_commit.py:228', 'scripts/validate_commit/validate_commit.py:1001']
+        validate_commit.py:228 -> ok
+        validate_commit.py:979 -> строка 228,1001 вне [976,982]
+
+## R4  require=all  expected=scripts/validate.py:396±10; pyproject.toml:150±3
+  r1: false conf=sure locs=['scripts/validate.py:396', 'scripts/validate.py:198', 'multiprocess_framework/modules/pytest.ini']
+        validate.py:396 -> ok
+        pyproject.toml:150 -> файл не назван
+  r2: miss  conf=unsure locs=['scripts/validate.py:380', 'scripts/validate.py:198']
+        validate.py:396 -> строка 380,198 вне [386,406]
+        pyproject.toml:150 -> файл не назван
+  r3: hit   conf=sure locs=['scripts/validate.py:396', 'scripts/validate.py:198', 'pyproject.toml:150']
+        validate.py:396 -> ok
+        pyproject.toml:150 -> ok
+
+## R5  require=all  expected=scripts/atlas/brief.py:8±5; scripts/atlas/metrics.py:8±5; scripts/atlas/views.py:8±5
+  r1: false conf=sure locs=['scripts/atlas/brief.py:1', 'scripts/atlas/metrics.py:1', 'scripts/atlas/views.py:1']
+        brief.py:8 -> строка 1 вне [3,13]
+        metrics.py:8 -> строка 1 вне [3,13]
+        views.py:8 -> строка 1 вне [3,13]
+  r2: false conf=sure locs=['scripts/atlas/brief.py:1', 'scripts/atlas/metrics.py:1', 'scripts/atlas/views.py:1']
+        brief.py:8 -> строка 1 вне [3,13]
+        metrics.py:8 -> строка 1 вне [3,13]
+        views.py:8 -> строка 1 вне [3,13]
+  r3: false conf=sure locs=['scripts/atlas/brief.py:1', 'scripts/atlas/metrics.py:1', 'scripts/atlas/views.py:1']
+        brief.py:8 -> строка 1 вне [3,13]
+        metrics.py:8 -> строка 1 вне [3,13]
+        views.py:8 -> строка 1 вне [3,13]
+
+## R6  require=all  expected=.gitmessage:15±3; .claude/COMMIT_GUIDE.md:21±3; .claude/COMMIT_GUIDE.md:128±3
+  r1: miss  conf=sure locs=['.gitmessage:14-15', '.claude/COMMIT_GUIDE.md:17-24']
+        .gitmessage:15 -> ok
+        COMMIT_GUIDE.md:21 -> ok
+        COMMIT_GUIDE.md:128 -> строка 17-24 вне [125,131]
+  r2: miss  conf=unsure locs=['.gitmessage:14', '.claude/COMMIT_GUIDE.md:17']
+        .gitmessage:15 -> ok
+        COMMIT_GUIDE.md:21 -> строка 17 вне [18,24]
+        COMMIT_GUIDE.md:128 -> строка 17 вне [125,131]
+  r3: miss  conf=sure locs=['.gitmessage:15', '.claude/COMMIT_GUIDE.md:128']
+        .gitmessage:15 -> ok
+        COMMIT_GUIDE.md:21 -> строка 128 вне [18,24]
+        COMMIT_GUIDE.md:128 -> ok
+
+## R7  require=all  expected=.claude/plugins/dev/commands/adr.md:2±10; .claude/plugins/core/templates/DECISIONS.template.md:31±3
+  r1: miss  conf=unsure locs=['.claude/plugins/dev/commands/adr.md:38-42', '.claude/plugins/core/templates/DECISIONS.template.md']
+        adr.md:2 -> строка 38-42 вне [-8,12]
+        DECISIONS.template.md:31 -> файл без строки
+  r2: miss  conf=unsure locs=['.claude/plugins/core/templates/ADR.template.md:51', '.claude/plugins/core/templates/DECISIONS.template.md:1']
+        adr.md:2 -> файл не назван
+        DECISIONS.template.md:31 -> строка 1 вне [28,34]
+  r3: false conf=sure locs=['.claude/plugins/dev/commands/adr.md:27', '.claude/plugins/core/templates/DECISIONS.template.md:30']
+        adr.md:2 -> строка 27 вне [-8,12]
+        DECISIONS.template.md:31 -> ok
+
+## R8  require=all  expected=.claude/plugins/dev/templates/task-brief.md:9±3; .claude/plugins/dev/templates/task-result.md:7±3; .claude/plugins/dev/templates/injections.md:8±3
+  r1: miss  conf=unsure locs=['.claude/plugins/dev/templates/task-brief.md:9', '.claude/plugins/dev/templates/executor-brief.md:73', '.claude/plugins/dev/templates/task-result.md:7']
+        task-brief.md:9 -> ok
+        task-result.md:7 -> ok
+        injections.md:8 -> файл не назван
+  r2: miss  conf=unsure locs=['.claude/plugins/dev/templates/task-brief.md:9', '.claude/plugins/dev/templates/task-result.md:8']
+        task-brief.md:9 -> ok
+        task-result.md:7 -> ok
+        injections.md:8 -> файл не назван
+  r3: false conf=sure locs=['.claude/plugins/dev/templates/task-brief.md:9', '.claude/plugins/dev/templates/task-result.md:7', '.claude/plugins/dev/templates/task-result.md:58']
+        task-brief.md:9 -> ok
+        task-result.md:7 -> ok
+        injections.md:8 -> файл не назван
+
+V0 воспроизводит verdict'ы записи: OK
+
+V0 нынешнее                        hits=[1, 0, 1] hits.min=0 | Kill-1 по hits: <7 (hits.min 0) | Kill-2: СТОП  false=[3, 2, 5] max=5
+V1 файл-уровень                    hits=[4, 3, 6] hits.min=3 | Kill-1 по hits: <7 (hits.min 3) | Kill-2: СТОП
+    r1 файл-уровень: R1- R2- R3+ R4- R5+ R6+ R7+ R8-
+    r2 файл-уровень: R1- R2- R3+ R4- R5+ R6+ R7- R8-
+    r3 файл-уровень: R1- R2+ R3+ R4+ R5+ R6+ R7+ R8-
+V2a ±10 (ячейки 0/1)               сумма=[3.83, 2.83, 5.33] min=2.83 | вопросов с долей 1.0=[2, 1, 2] min=1 | с долей>=0.67=[4, 3, 5] min=3
+    r1: R1=0.00 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.67 R7=0.00 R8=0.67
+    r2: R1=0.00 R2=0.00 R3=0.50 R4=0.00 R5=1.00 R6=0.67 R7=0.00 R8=0.67
+    r3: R1=0.67 R2=0.33 R3=0.50 R4=1.00 R5=1.00 R6=0.67 R7=0.50 R8=0.67
+V2b ±10 или символ в тексте        сумма=[3.83, 3.83, 6.17] min=3.83 | вопросов с долей 1.0=[2, 2, 4] min=2 | с долей>=0.67=[4, 4, 6] min=4
+    r1: R1=0.00 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.67 R7=0.00 R8=0.67
+    r2: R1=0.00 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.67 R7=0.00 R8=0.67
+    r3: R1=0.67 R2=0.33 R3=1.00 R4=1.00 R5=1.00 R6=1.00 R7=0.50 R8=0.67
+V2c ±10, путь без строки=0.5       сумма=[4.67, 3.92, 6.33] min=3.92 | вопросов с долей 1.0=[2, 1, 2] min=1 | с долей>=0.67=[4, 4, 8] min=4
+    r1: R1=0.17 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.83 R7=0.50 R8=0.67
+    r2: R1=0.17 R2=0.00 R3=0.75 R4=0.25 R5=1.00 R6=0.83 R7=0.25 R8=0.67
+    r3: R1=0.67 R2=0.67 R3=0.75 R4=1.00 R5=1.00 R6=0.83 R7=0.75 R8=0.67
+V2d ±10 или символ, путь=0.5       сумма=[4.67, 4.42, 6.75] min=4.42 | вопросов с долей 1.0=[2, 2, 4] min=2 | с долей>=0.67=[4, 4, 8] min=4
+    r1: R1=0.17 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.83 R7=0.50 R8=0.67
+    r2: R1=0.17 R2=0.00 R3=1.00 R4=0.50 R5=1.00 R6=0.83 R7=0.25 R8=0.67
+    r3: R1=0.67 R2=0.67 R3=1.00 R4=1.00 R5=1.00 R6=1.00 R7=0.75 R8=0.67
+V3 правила V0, эталон исправлен    hits=[2, 1, 4] hits.min=1 | Kill-1 по hits: <7 (hits.min 1) | Kill-2: СТОП  false=[2, 1, 1] max=2
+    r1 V3: R1=miss R2=false R3=hit R4=false R5=hit R6=miss R7=miss R8=miss
+    r2 V3: R1=miss R2=false R3=miss R4=miss R5=hit R6=miss R7=miss R8=miss
+    r3 V3: R1=miss R2=false R3=hit R4=hit R5=hit R6=miss R7=hit R8=miss
+
+V3 по одной правке (hits по повторам / false):
+  ('R3', 'validate')       hits=[1, 0, 2] false=[3, 2, 4]
+  ('R5', 'Stability')      hits=[1, 0, 1] false=[3, 2, 5]
+  ('R5', 'Public API')     hits=[1, 0, 1] false=[3, 2, 5]
+  ('R7', 'description')    hits=[1, 0, 2] false=[3, 2, 4]
+  R8+58                    hits=[1, 0, 1] false=[3, 2, 4]

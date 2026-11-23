@@ -1,0 +1,52 @@
+# Старый атлас (scripts.atlas) на main c07fb7cb7: код scripts/ из git archive c07fb7cb7, --ref c07fb7cb7.
+# PYTHONSAFEPATH=1 PYTHONUTF8=1 PYTHONPATH=<scratch>/main_scripts; venv без grimp/griffe.
+
+################ python -m scripts.atlas ref ConfigFileWatcher --ref c07fb7cb7   (как в задаче: ref принимает ИМЯ МОДУЛЯ, не класс)
+--- stdout (       0 строк):
+--- stderr (строки 1-15):
+atlas: module not found
+real 0.20
+user 0.15
+sys 0.04
+exit=2
+--- time:
+
+################ python -m scripts.atlas ref config_module --symbol ConfigFileWatcher --ref c07fb7cb7
+--- stdout (       0 строк):
+--- stderr (строки 1-15):
+atlas: internal error: ModuleNotFoundError: No module named 'grimp'
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/__main__.py", line 158, in main
+    print("\n".join(reference.ref(con, root, ref, main_ref, args.module, args.symbol)))
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/reference.py", line 325, in ref
+    use = cm.usage(module, {n: where[n] for n in shown})
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/codemap.py", line 436, in usage
+    self.graph()
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/codemap.py", line 335, in graph
+    import grimp  # noqa: PLC0415 - тяжёлый импорт нужен только видам с графом
+    ^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'grimp'
+real 4.62
+--- time:
+
+################ python -m scripts.atlas card config_module --ref c07fb7cb7
+--- stdout (       0 строк):
+--- stderr (строки 1-15):
+atlas: internal error: ModuleNotFoundError: No module named 'grimp'
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/__main__.py", line 151, in main
+    views.card(con, root, ref, main_ref, args.module)
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/views.py", line 202, in card
+    lines += ([f"  … ещё {len(found) - 10}"] if len(found) > 10 else []) + _module_blocks(tree, rows, row)
+                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/views.py", line 138, in _module_blocks
+    users = code.module_users(module)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/codemap.py", line 466, in module_users
+    self.graph()
+  File "/private/tmp/claude-501/-Users-twokrai-Project-code-Inspector-bottles/c65ef458-4c88-4da0-b0a4-836981f97334/scratchpad/main_scripts/scripts/atlas/codemap.py", line 335, in graph
+    import grimp  # noqa: PLC0415 - тяжёлый импорт нужен только видам с графом
+    ^^^^^^^^^^^^
+--- time:

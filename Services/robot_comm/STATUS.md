@@ -1,6 +1,6 @@
 # robot_comm — статус
 
-**Дата:** 2026-06-11 · **Статус:** ✅ Фаза 1 готова (клиент + sim + CLI)
+**Дата:** 2026-11-07 · **Статус:** ✅ Фаза 1 готова (клиент + sim + CLI)
 
 ## Сделано
 
@@ -43,6 +43,10 @@
   EXACT), `upload` блоками FC16, `run_chunks` с меткой стопа -> `RunReport`; тесты автора `test_client_v2_chunks.py` +
   слепая приёмка `test_client_v2_chunks_acceptance.py` (golden `tests/golden/t32_run_chunks.log`).
   Не сделано: пульс в `run_chunks` (поток вызывающего, T5.1), путь GUI -> `round_step` (T5.1/T6.1)
+- [x] Калибровка робота v2 (T5.4, robot-protocol-v2): пакет `calibration/` — `belt_from_marks` (коэффициент и направление
+  ленты), `fit_frame` (подгонка СК, отказ при невязке > 0,5 мм), `check_tool_points` (точки инструментов); чистые функции,
+  без робота. Приёмка: A1–A9 (`test_t54_calibration_acceptance.py`); B1–B9 и C1–C3 — в тестах хаба и камеры (см. STATUS хаба).
+  Не сделано: замер на железе (GATE-0)
 - [x] Ленивые `__init__` корня и `core/` (T3.6, PEP 562): `import Services.robot_comm.programs` не грузит pymodbus,
   `Services.modbus`, `core.client`; имена `__all__` прежние (приёмка `test_lazy_init_acceptance.py`). Остаётся
   `multiprocess_framework` через `params_v2` (≈ 0,7 с) — вне объёма по слову владельца
@@ -58,6 +62,14 @@
   sim применяет стартовое состояние до первого движения (NAK `E_RANGE [R_APARAM]` вне диапазона), `run_chunks`
   передаёт в кусок k+1 состояние конца куска k, след `SC rec` несёт `acc=`/`accur=`. Не сделано: обработчик `SC_RUN` в
   прошивке (Ф4); `PROTO_VER` не поднят (`changes-rev2.md`)
+
+- [x] Диапазоны APARAM в `delta_v2.yaml` (T1.4, robot-protocol-v2, ветка `feat/robot-v2-t14`): `scenario.aparam` →
+  codegen даёт `ACT_RANGE` (`core/protocol_v2.py`) и Lua-таблицу `ARNG`; `programs/program.py` и
+  `server/sim_core_v2.py` читают `ACT_RANGE`, своих литералов диапазонов нет.
+  Долги: прошивка читает `ARNG` и применяет сдвиг ACCUR на 1 — Ф4/T4.1; 3 файла с `hypothesis`
+  (`test_client_v2_chunks_acceptance.py`, `test_generators_acceptance.py`, `test_programs_acceptance.py`)
+  не запускались на Mac; `lupa` нет — `ARNG` проверен текстом, не исполнением в Lua; DO-каналы 1..16 ещё в
+  `Services/device_hub/drivers/robot_driver_v2/texts.py:113` (`_DO_CHANNELS`).
 
 ## Не сделано / дальше
 

@@ -1,0 +1,62 @@
+# дерево: /Users/twokrai/Project_code/Inspector_bottles/.claude/worktrees/agent-a73c58c6dbb1c16a8 @ 75f818845 (feat/atlas-lookup-map)
+## git grep -n 'ConfigFileWatcher' -- '*.py' | wc -l   (число мест)
+      39
+## git grep -l 'ConfigFileWatcher' -- '*.py'   (файлы)
+multiprocess_framework/modules/config_module/tests/test_watcher.py
+multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py
+multiprocess_framework/modules/config_module/tools/__init__.py
+multiprocess_framework/modules/config_module/tools/watcher.py
+multiprocess_framework/modules/process_module/managers/observability_reload.py
+multiprocess_framework/modules/process_module/tests/test_observability_hot_reload.py
+scripts/atlas/tests/test_brief_1_9b.py
+scripts/atlas/tests/test_exam_k0.py
+## число файлов:        8
+## wc -l watcher.py (файл класса: multiprocess_framework/modules/config_module/tools/watcher.py; путь из задачи multiprocess_framework/modules/config_module/watcher.py не существует)
+     254 multiprocess_framework/modules/config_module/tools/watcher.py
+## все .py в multiprocess_framework/modules/config_module/ (git ls-files), включая tests/
+    3788
+## из них без tests/
+    2004
+## число .py: все / без tests
+32
+17
+## git grep -n по строкам: сколько строк приходится на строку-определение/импорт/использование (первые 40 мест)
+multiprocess_framework/modules/config_module/tests/test_watcher.py:2:Unit-тесты для config_module.tools.watcher — ConfigFileWatcher.
+multiprocess_framework/modules/config_module/tests/test_watcher.py:12:    from multiprocess_framework.modules.config_module.tools.watcher import ConfigFileWatcher
+multiprocess_framework/modules/config_module/tests/test_watcher.py:33:    watcher = ConfigFileWatcher(path=config_file, config=cfg)
+multiprocess_framework/modules/config_module/tests/test_watcher.py:47:    watcher = ConfigFileWatcher(path=config_file, config=cfg)
+multiprocess_framework/modules/config_module/tests/test_watcher.py:57:    watcher = ConfigFileWatcher(path="nonexistent.json", config=cfg)
+multiprocess_framework/modules/config_module/tests/test_watcher.py:73:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:135:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:174:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:213:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:242:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:271:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher.py:302:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py:2:Воспроизведение: доходит ли ConfigFileWatcher до ПОСЛЕДНЕГО содержимого файла.
+multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py:9:    Проверяется ConfigFileWatcher(path, config, on_reload=None,
+multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py:27:    from multiprocess_framework.modules.config_module.tools.watcher import ConfigFileWatcher
+multiprocess_framework/modules/config_module/tests/test_watcher_final_write.py:62:        watcher = ConfigFileWatcher(path, cfg, debounce_seconds=1.0)
+multiprocess_framework/modules/config_module/tools/__init__.py:8:    from multiprocess_framework.modules.config_module.tools import ConfigFileWatcher  # требует watchdog
+multiprocess_framework/modules/config_module/tools/__init__.py:17:    from .watcher import ConfigFileWatcher
+multiprocess_framework/modules/config_module/tools/__init__.py:21:__all__ = ["deep_merge", "multi_merge", "ConfigLoader", "ConfigFileWatcher", "env_flag", "env_truthy"]
+multiprocess_framework/modules/config_module/tools/watcher.py:2:ConfigFileWatcher — hot-reload конфигов при изменении файла.
+multiprocess_framework/modules/config_module/tools/watcher.py:10:    from multiprocess_framework.modules.config_module.tools import ConfigFileWatcher
+multiprocess_framework/modules/config_module/tools/watcher.py:13:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/config_module/tools/watcher.py:193:        print(f"[ConfigFileWatcher] {message}", file=sys.stderr, flush=True)
+multiprocess_framework/modules/config_module/tools/watcher.py:196:class ConfigFileWatcher:
+multiprocess_framework/modules/process_module/managers/observability_reload.py:3:Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).
+multiprocess_framework/modules/process_module/managers/observability_reload.py:6:  ConfigFileWatcher (config_module) следит за файлом конфига → при изменении читает
+multiprocess_framework/modules/process_module/managers/observability_reload.py:92:    from ...config_module.tools.watcher import ConfigFileWatcher
+multiprocess_framework/modules/process_module/managers/observability_reload.py:2207:    Использует ``on_reload`` ConfigFileWatcher'а напрямую (callback вызывается ПОСЛЕ
+multiprocess_framework/modules/process_module/managers/observability_reload.py:2275:) -> Optional["ConfigFileWatcher"]:
+multiprocess_framework/modules/process_module/managers/observability_reload.py:2292:        Запущенный ``ConfigFileWatcher`` или None, если файл не найден.
+multiprocess_framework/modules/process_module/managers/observability_reload.py:2305:        from ...config_module.tools.watcher import ConfigFileWatcher
+multiprocess_framework/modules/process_module/managers/observability_reload.py:2341:    watcher = ConfigFileWatcher(
+multiprocess_framework/modules/process_module/tests/test_observability_hot_reload.py:4:Контракт: правка файла с секцией observability → ConfigFileWatcher → reconfigure
+scripts/atlas/tests/test_brief_1_9b.py:175:    assert any(what == "объект задачи ConfigFileWatcher" for what, _ in pairs)
+scripts/atlas/tests/test_exam_k0.py:127:        and "  ConfigFileWatcher — Hot-reload: следит за файлом, обновляет Config при изменении — :141" in lines
+scripts/atlas/tests/test_exam_k0.py:139:        "ConfigFileWatcher — вне модуля 3, тестов 8, файлов 1" in lines
+scripts/atlas/tests/test_exam_k0.py:162:    5: (row5, ("config_module", "--symbol", "ConfigFileWatcher")),
+scripts/atlas/tests/test_exam_k0.py:163:    6: (row6, ("config_module", "--symbol", "ConfigFileWatcher")),
+scripts/atlas/tests/test_exam_k0.py:164:    7: (row7, ("config_module", "--symbol", "ConfigFileWatcher")),

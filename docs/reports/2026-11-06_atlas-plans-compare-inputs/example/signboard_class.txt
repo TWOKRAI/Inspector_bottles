@@ -1,0 +1,31 @@
+[house] ConfigFileWatcher
+class — Hot-reload: следит за файлом, обновляет Config при изменении
+использует меня 1 (вызовы по имени) / использую 0
+
+Сигнатура:
+  ConfigFileWatcher(path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None)   (__init__: own)
+
+Докстринг:
+  Hot-reload: следит за файлом, обновляет Config при изменении.
+
+Члены (4):
+  __init__(self, path: str | Path, config: 'Config', on_reload: Optional[Callable[['Config'], None]]=None, debounce_seconds: float=1.0, log_error: Optional[Callable[[str], None]]=None) -> None
+  start(self) -> None
+  stop(self) -> None
+  is_running(self) -> bool
+
+Наследники по имени базы (0):
+  нет
+
+Вызовы по имени: 1 (+0 в файле); 0 — не «не используется»:
+  multiprocess_framework/modules/process_module/managers/observability_reload.py:2341
+
+Тесты (11):
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_double_start_is_safe
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_dropped_event_gets_one_delayed_reload_with_last_content
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_foreign_file_in_the_same_directory_is_ignored
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_rapid_edits_collapse_into_first_and_one_delayed_reload
+  multiprocess_framework/modules/config_module/tests/test_watcher.py::test_recreate_without_rename_also_reloads
+
+Ввод-вывод:
+  watches  self._handler  :238

@@ -42,7 +42,7 @@ _TCP = {"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 1}
 # Литерал исключений сторожа полноты «OP_SPECS == таблица операций»: пуст (на базе 27/27, 17/17, 5/5)
 _OPS_EXCEPTIONS: dict[str, set[str]] = {"RobotDriver": set(), "RobotDriverV2": set(), "VfdDriver": set()}
 
-# 56 команд с описанием каталога (T5.3c + SPI.c2): 10 данных + 18 v2 + 27 v1 - 4 общих + 5 vfd
+# 59 команд с описанием каталога (T5.3c + SPI.c2 + T5.4c): 12 данных + 20 v2 + 27 v1 - 5 общих + 5 vfd
 _DESCRIBED = {
     "robot_jog_hold",
     "robot_jog_release",
@@ -85,12 +85,15 @@ _DESCRIBED = {
     "robot_draw_set_overlap",
     "robot_draw_abort",
     "robot_draw_progress",
+    "robot_calib_belt",
     "robot_param_get_all",
     "robot_point_list",
     "robot_point_save",
     "robot_point_delete",
     "robot_frame_list",
     "robot_frame_teach",
+    "robot_calib_frame",
+    "robot_calib_tools",
     "robot_program_list",
     "robot_program_get",
     "robot_program_save",
@@ -174,10 +177,10 @@ def test_opsource_key_from_default() -> None:
 # --- command_table ---
 
 
-def test_command_table_default_sources_has_56_commands() -> None:
+def test_command_table_default_sources_has_59_commands() -> None:
     table = spi.command_table(kinds.DEFAULT_SOURCES)
-    assert len(table) == 56
-    assert sum(1 for name in table if name.startswith("robot_")) == 51
+    assert len(table) == 59
+    assert sum(1 for name in table if name.startswith("robot_")) == 54
     assert {name for name in table if name.startswith("vfd_")} == {
         "vfd_run",
         "vfd_set_freq",
@@ -190,17 +193,18 @@ def test_command_table_default_sources_has_56_commands() -> None:
 def test_command_table_routes_and_links() -> None:
     table = spi.command_table(kinds.DEFAULT_SOURCES)
     data = {name for name, (source, _spec) in table.items() if source.route == "data"}
-    assert len(data) == 10
+    assert len(data) == 12
     no_link = {name for name, (_source, spec) in table.items() if spec.needs_link is False}
     assert no_link == data | {"robot_exchange_log_get", "robot_exchange_log_set"}
 
 
 def test_command_table_shared_robot_ops_one_row_one_object() -> None:
-    """``abort``, ``enqueue_job``, ``get_telemetry``, ``return_job`` — один объект в v1 и v2, одна строка таблицы."""
+    """``abort``, ``draw_polyline``, ``enqueue_job``, ``get_telemetry``, ``return_job`` — один объект в v1 и v2, одна
+    строка таблицы."""
     v1 = {s.name: s for s in spi.ROBOT_V1_OPS}
     v2 = {s.name: s for s in spi.ROBOT_V2_OPS}
     shared = set(v1) & set(v2)
-    assert shared == {"abort", "enqueue_job", "get_telemetry", "return_job"}
+    assert shared == {"abort", "draw_polyline", "enqueue_job", "get_telemetry", "return_job"}
     assert all(v1[name] is v2[name] for name in shared)
     table = spi.command_table(kinds.DEFAULT_SOURCES)
     assert table["robot_abort"][1] is v2["abort"]
@@ -241,9 +245,14 @@ def test_op_specs_match_driver_ops_table(cls: type, keys: Any) -> None:
     assert set(names) ^ keys() == _OPS_EXCEPTIONS[cls.__name__]
 
 
+def test_robot_v2_ops_order_matches_ops_table() -> None:
+    """Порядок ``ROBOT_V2_OPS`` — порядок ключей ``OPS`` драйвера v2 (комментарий каталога «в том же порядке»)."""
+    assert [s.name for s in spi.ROBOT_V2_OPS] == list(V2_OPS_TABLE)
+
+
 def test_op_specs_sizes() -> None:
-    assert (len(RobotDriver.OP_SPECS), len(RobotDriverV2.OP_SPECS), len(VfdDriver.OP_SPECS)) == (27, 18, 5)
-    assert len(spi.ROBOT_DATA_OPS) == 10
+    assert (len(RobotDriver.OP_SPECS), len(RobotDriverV2.OP_SPECS), len(VfdDriver.OP_SPECS)) == (27, 20, 5)
+    assert len(spi.ROBOT_DATA_OPS) == 12
     assert HikvisionDriver.OP_SPECS == () and GenericModbusDriver.OP_SPECS == ()
 
 
@@ -308,7 +317,7 @@ def test_plugin_commands_are_op_specs_of_kind_table() -> None:
     }
     expected |= {f"robot_{spec.name}" for spec in spi.ROBOT_DATA_OPS}
     assert set(DeviceHubPlugin._op_commands) == expected
-    assert len(expected) == 56 and len(DeviceHubPlugin.commands) == 73
+    assert len(expected) == 59 and len(DeviceHubPlugin.commands) == 77
 
 
 def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
@@ -324,8 +333,8 @@ def test_new_kind_row_gives_commands_and_factory(tmp_path: Path) -> None:
         device_kinds = table
 
     assert LampHub.commands["lamp_on"] == "cmd_lamp_on"
-    assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 73
-    assert len(LampHub.commands) == 74
+    assert "lamp_on" not in DeviceHubPlugin.commands and len(DeviceHubPlugin.commands) == 77
+    assert len(LampHub.commands) == 78
 
     manager = DeviceManager(store=None, kinds=table)
     manager.upsert({"id": "lamp_1", "name": "Лампа", "kind": "lamp"})
@@ -350,7 +359,7 @@ def test_op_added_to_driver_op_specs_becomes_command(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(RobotDriverV2, "OP_SPECS", (*RobotDriverV2.OP_SPECS, extra))
     table = spi.command_table(kinds.command_sources(kinds.DEFAULT_KINDS))
     assert table["robot_new_op"][1] is extra
-    assert len(table) == 57
+    assert len(table) == 60
 
 
 def test_subclass_in_table_row_is_created_and_non_driver_row_refused() -> None:
@@ -408,7 +417,7 @@ def test_subclass_kinds_cannot_drop_or_change_parent_command() -> None:
         class ChangedVfd(DeviceHubPlugin):
             device_kinds = changed
 
-    assert len(DeviceHubPlugin.commands) == 73
+    assert len(DeviceHubPlugin.commands) == 77
 
 
 def test_command_sources_refuses_ops_without_prefix_and_repeated_kind() -> None:

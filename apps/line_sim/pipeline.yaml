@@ -86,9 +86,9 @@ processes:
         # hikvision_letter_robot.yaml — калибровка pixel_to_robot (use_linear,
         # 800 px ROI = 98 мм) это ИСТИНА, а не disk_radius_mm word_layout (тот
         # задаёт шаг слотов укладки, к кадру отношения не имеет). Каталог букв —
-        # кириллические эталоны, инструмент:
-        #   python -m Services.line_sim.tools.make_letter_catalog --src manual_sprites \
-        #       --letters АКРХ --diameter-px 300 --out data/line_sim/letter_catalog
+        # кириллические эталоны; каталог шрифтовых букв всего алфавита (33 буквы,
+        # data/line_sim/letters_ink) собирает инструмент:
+        #   python -m Services.line_sim.tools.build_stand_assets
         # Стенд редактора слоёв (1.2h/1.3h): слоёный пресет — диск и буква отдельными слоями.
         # Каталог-спрайты (правка владельца 8441b531) — data/line_sim/letter_catalog_rep:
         # у них нет слоёв, редактор показывает «рев.: нет» и не сохраняет.

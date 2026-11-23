@@ -219,7 +219,7 @@ class RegistersManager(BaseManager, ObservableMixin):
         # Подписчикам и send_callback — СОХРАНЁННОЕ (нормализованное) значение: копия
         # хранит "WARNING", виджет должен получить "WARNING", а не введённое "warn".
         value = getattr(reg, field_name)
-        self._log_debug(f"set_field_value: {register_name}.{field_name} = {value!r}")
+        self._log_debug(f"set_field_value: {register_name}.{field_name} set")
         self._notify_observers(register_name, field_name, value)
         if self._send_callback:
             targets = resolve_dispatch_targets(

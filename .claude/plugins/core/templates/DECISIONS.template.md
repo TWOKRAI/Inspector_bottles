@@ -29,6 +29,7 @@ folder name if omitted (uppercase initials), but setting it explicitly is better
 **Date:** YYYY-MM-DD
 **Status:** Accepted | Proposed | Deprecated | Superseded-by-ADR-{{CODE}}-NNN
 **PR:** PR-XX (opt., link to the pull request)
+**Refs:** plans/<slug>/plan.md  (opt., the plan this decision came from)
 
 ### Context
 

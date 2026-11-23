@@ -45,7 +45,13 @@ logger = get_std_logger(__name__)
 #
 # `inspector` — легаси-имя `collector` (D4): рецепт, написанный до переименования,
 # грузится в GUI и обязан пережить round-trip, а не свернуться в metadata.
-_EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset({"collector", "inspector", "source_target_fps", "io_peek"})
+#
+# `stop_window_s` / `stop_wave` — typed-поля ProcessConfig (окно и волна останова,
+# framework читает их в blueprint.py через `_pick`: typed-поле или `extras`), домен их
+# не типизирует, поэтому они едут через `extras` (C-96).
+_EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset(
+    {"collector", "inspector", "source_target_fps", "io_peek", "stop_window_s", "stop_wave"}
+)
 
 
 class Process(SchemaBase):
@@ -114,7 +120,7 @@ class Process(SchemaBase):
         description=(
             "Passthrough-bag для runtime-телеметрии и прочих opaque-полей. "
             "Не интерпретируется domain-слоем — прозрачно передаётся adapter'ами. "
-            "Pipeline-routing shorthand-ключи (inspector/source_target_fps/io_peek) сюда "
+            "Pipeline-routing shorthand-ключи (inspector/source_target_fps/io_peek/stop_wave/stop_window_s) сюда "
             "НЕ сворачиваются — они едут в extras (framework их из metadata не читает, AU-2)."
         ),
     )
@@ -122,7 +128,7 @@ class Process(SchemaBase):
         default_factory=dict,
         description=(
             "Domain-opaque мешок pipeline-routing ключей (inspector/source_target_fps/"
-            "io_peek), которые framework-blueprint читает как typed-shorthand/extras "
+            "io_peek/stop_wave/stop_window_s), которые framework-blueprint читает как typed-shorthand/extras "
             "(симметрия ProcessConfig.extras, ADR-PM-014). Escape-hatch inspector едет "
             "здесь и переживает GUI round-trip авторитетно; в metadata его "
             "infer_missing_collectors игнорирует (ADR-PMM-017 п.5)."
@@ -142,7 +148,7 @@ class Process(SchemaBase):
         их не типизирует, но обязана сохранить БЕЗ ПОТЕРИ ДАННЫХ, чтобы редактор
         открывал любой pipeline, а сериализация переживала round-trip:
           - pipeline-routing shorthand-ключи (``_EXTRAS_SHORTHAND_KEYS``:
-            inspector/source_target_fps/io_peek) → в ``extras`` (framework читает их
+            inspector/source_target_fps/io_peek/stop_wave/stop_window_s) → в ``extras`` (framework читает их
             только из typed-поля/extras, НЕ из metadata — AU-2, ADR-PMM-017 п.5);
           - прочие неизвестные ключи (телеметрия и пр.) → в ``metadata`` (passthrough).
         Явные ``extras``/``metadata`` во входе имеют приоритет над свёрнутыми

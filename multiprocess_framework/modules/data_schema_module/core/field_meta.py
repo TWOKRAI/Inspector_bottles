@@ -33,10 +33,19 @@ import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Union
 
+from ..._fallback import FallbackLogger
+
 if TYPE_CHECKING:
     from pydantic import GetCoreSchemaHandler
     from pydantic_core import CoreSchema
     from .field_routing import FieldRouting
+
+# Журнал через «цикло-безопасную дверь»: файл грузится из core/__init__.py на
+# LAYER 0, прямой импорт logger_module (даже ленивый) замыкал кольцо
+# logger_module -> channel_routing_module -> data_schema_module -> logger_module
+# (см. core/metrics.py::_std_logger). FallbackLogger конструируется без импортов,
+# вид подтягивает при первой записи; имя stdlib-логгера = __name__ точно.
+_log = FallbackLogger(__name__)
 
 # Тип для параметра routing: принимаем FieldRouting, dict или None
 _RoutingType = Union["FieldRouting", dict, None]
@@ -475,26 +484,18 @@ class FieldMeta:
             # незнакомого правила: оно отбрасывается со строкой в журнал.
             unknown = sorted(set(rules) - RULE_KEYS)
             if unknown:
-                # ЛЕНИВЫЙ импорт: файл грузится из core/__init__.py на LAYER 0, модульный
-                # импорт logger_module замыкает кольцо (см. core/metrics.py::_std_logger).
-                from ...logger_module import get_std_logger
-
-                get_std_logger(__name__).warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
+                _log.warning("FieldMeta.from_dict: отброшены неизвестные правила %s", unknown)
                 kwargs["rules"] = {k: v for k, v in rules.items() if k in RULE_KEYS}
         # Тот же приём для apply/enabled_if: хаб новее GUI не должен ронять копию регистра
         # целиком из-за незнакомого режима. Конструктор остаётся строгим.
         apply = kwargs.get("apply")
         if apply is not None and (not isinstance(apply, str) or apply not in APPLY_MODES):
-            from ...logger_module import get_std_logger
-
-            get_std_logger(__name__).warning("FieldMeta.from_dict: отброшен недопустимый apply %r", apply)
+            _log.warning("FieldMeta.from_dict: отброшен недопустимый apply %r", apply)
             kwargs["apply"] = None
         try:
             _normalize_enabled_if(kwargs.get("enabled_if"))
         except ValueError as exc:
-            from ...logger_module import get_std_logger
-
             # Текст исключения называет ключ, значения не печатает.
-            get_std_logger(__name__).warning("FieldMeta.from_dict: отброшен enabled_if: %s", exc)
+            _log.warning("FieldMeta.from_dict: отброшен enabled_if: %s", exc)
             kwargs["enabled_if"] = None
         return cls(**kwargs)

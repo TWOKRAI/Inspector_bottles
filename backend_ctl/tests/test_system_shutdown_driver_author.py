@@ -51,6 +51,7 @@ def test_rejected_command_returns_without_wait(monkeypatch: pytest.MonkeyPatch) 
     assert res["accepted"] is False, res
     assert res["pm_gone"] is False, res
     assert res["outcomes"] is None, res
+    assert res["unconfirmed"] is None and res["timed_out"] is False, res
     assert res["elapsed_s"] < 0.5, f"отвергнутая команда, а драйвер ждал {res['elapsed_s']} с"
 
 
@@ -85,4 +86,5 @@ def test_socket_lost_before_reply_means_pm_gone(monkeypatch: pytest.MonkeyPatch)
     assert res["pm_gone"] is True, res
     assert res["mode"] == "force", res
     assert res["outcomes"] is None, res
+    assert res["unconfirmed"] is None and res["timed_out"] is False, res
     assert res["elapsed_s"] < 0.5, res

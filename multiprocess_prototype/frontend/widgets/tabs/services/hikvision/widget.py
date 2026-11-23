@@ -24,17 +24,14 @@ from PySide6.QtCore import Signal
 
 
 class HikvisionSettingsWidget(QWidget):
-    """Поля настроек камеры Hikvision (поиск/открытие/захват/параметры)."""
+    """Поля настроек камеры Hikvision (поиск/открытие/параметры)."""
 
     # Сигналы наружу — presenter подключается к ним.
     enum_requested = Signal()
-    open_requested = Signal(int)  # camera_index
+    open_requested = Signal()
     close_requested = Signal()
-    start_requested = Signal()
-    stop_requested = Signal()
     get_params_requested = Signal()
     apply_params_requested = Signal(float, float, float)  # fps, exposure, gain
-    open_sdk_app_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -55,24 +52,13 @@ class HikvisionSettingsWidget(QWidget):
 
         open_close = QHBoxLayout()
         self._btn_open = QPushButton("Открыть")
-        self._btn_open.clicked.connect(self._emit_open)
+        self._btn_open.clicked.connect(self.open_requested.emit)
         self._btn_close = QPushButton("Закрыть")
         self._btn_close.clicked.connect(self.close_requested.emit)
         open_close.addWidget(self._btn_open)
         open_close.addWidget(self._btn_close)
         dev_layout.addLayout(open_close)
         root.addWidget(dev_group)
-
-        # --- Захват ---
-        grab_group = QGroupBox("Захват изображения")
-        grab_layout = QHBoxLayout(grab_group)
-        self._btn_start = QPushButton("Начать захват")
-        self._btn_start.clicked.connect(self.start_requested.emit)
-        self._btn_stop = QPushButton("Остановить")
-        self._btn_stop.clicked.connect(self.stop_requested.emit)
-        grab_layout.addWidget(self._btn_start)
-        grab_layout.addWidget(self._btn_stop)
-        root.addWidget(grab_group)
 
         # --- Параметры камеры ---
         params_group = QGroupBox("Параметры камеры")
@@ -103,15 +89,6 @@ class HikvisionSettingsWidget(QWidget):
         params_layout.addLayout(params_btns, 3, 0, 1, 2)
         root.addWidget(params_group)
 
-        # --- Оригинальное окно SDK App ---
-        self._btn_sdk_app = QPushButton("Открыть окно SDK App")
-        self._btn_sdk_app.setToolTip(
-            "Запустить автономное отладочное окно Hikvision (main_window.py). "
-            "Внимание: камера может быть занята запущенным рецептом."
-        )
-        self._btn_sdk_app.clicked.connect(self.open_sdk_app_requested.emit)
-        root.addWidget(self._btn_sdk_app)
-
         # --- Статус ---
         self._status = QLabel("")
         self._status.setWordWrap(True)
@@ -122,9 +99,6 @@ class HikvisionSettingsWidget(QWidget):
     # ------------------------------------------------------------------ #
     # Сигналы-хелперы
     # ------------------------------------------------------------------ #
-
-    def _emit_open(self) -> None:
-        self.open_requested.emit(self.selected_index())
 
     def _emit_apply(self) -> None:
         self.apply_params_requested.emit(
@@ -148,11 +122,11 @@ class HikvisionSettingsWidget(QWidget):
             return 0
 
     def set_devices(self, devices: list[dict]) -> None:
-        """Заполнить комбобокс устройствами (dict с index/display_name/...)."""
+        """Заполнить комбобокс приборами ``list_devices`` (dict ``{kind, value, name}``)."""
         self._combo_devices.clear()
-        for dev in devices:
-            label = dev.get("display_name") or dev.get("model_name") or f"[{dev.get('index', 0)}]"
-            self._combo_devices.addItem(str(label), dev.get("index", 0))
+        for index, dev in enumerate(devices):
+            label = dev.get("name") or dev.get("value") or f"[{index}]"
+            self._combo_devices.addItem(str(label), index)
 
     def set_params(self, fps: float, exposure: float, gain: float) -> None:
         """Записать параметры в поля ввода."""

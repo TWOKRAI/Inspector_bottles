@@ -29,7 +29,7 @@
 | Здоровье процесса | `process_module/health/state.py` (`ctx.health`), схема `health/schema.py:37-53` (`ok/degraded/failed`), публикация `publish_health` `state.py:677` через heartbeat-прокси в `processes.<n>.health.*` | непрерывный самоотчёт ребёнка в state-дерево PM без нового канала | **образец канала.** Готовность — другая ось (камера ещё не открыта ≠ деградация), отдельные листья тем же путём |
 | StateStore | в процессе PM: `app_module/orchestrator.py:377-420`; публикация PM — `_state_op("handle_state_set", {"path": ...})` (`process_manager_process.py:1876-1880`, `system.switch.unstoppable`) | GUI получает дельты | **да.** Но state-plane опционален (minimal_app без него, `orchestrator.py:388-392`) → нужна ещё команда-снимок |
 | Активация рецепта | `multiprocess_framework/modules/recipe/service.py:122-129` (`recipe.activate`); проводка `multiprocess_prototype/orchestrator.py:78-90` (исполнитель `pm-lifecycle-submit`), `build_recipe_service` `:146-187` → `pm._cmd_topology_apply` | смена топологии | рецепт = топология; boot поднимает активный рецепт (`ManifestStore.pipeline`) и плагины сразу `READY → RUNNING` (`plugin_orchestrator.py:197`) — это и есть «сразу активен» |
-| Preflight C-55b (полоса С, не в main) | бриф `plans/word-layout/tasks/C-55b.md` (коммит `101d49607`) | классовый хук `preflight(config) -> list[PreflightFinding]` (`error/warning/info`), сборщик в `plugins/manifest.py`, вызов в `SystemLauncher.run()/start()` до спавна; `error` → `PreflightFailed`, спавна нет | **источник причин R4** после слияния; сегодня boot с `error` не стартует вовсе |
+| Preflight C-55b (**устарело 2026-11-12:** влито версией v3 без `preflight`/`PreflightFinding`, см. `amendments.md` §4; строка ниже — версия v1/v2) | бриф `plans/word-layout/tasks/C-55b.md` (коммит `101d49607`) | классовый хук `preflight(config) -> list[PreflightFinding]` (`error/warning/info`), сборщик в `plugins/manifest.py`, вызов в `SystemLauncher.run()/start()` до спавна; `error` → `PreflightFailed`, спавна нет | **источник причин R4** после слияния; сегодня boot с `error` не стартует вовсе |
 | Состояния/команды работы системы | `git grep -n -i "run_state\|system_state\|start_work\|stop_work\|system\.start\|system\.run"` по `*.py` — 0 совпадений в framework/prototype | — | нет; подтверждено |
 
 Тесты, которые держат liveness-фолбэк (R2 не должен их сломать):
@@ -64,6 +64,9 @@
 | `stopping` | останавливается | Stopping | только STOP оператора | отказ `stopping` | no-op | `no_fault` | отказ `stopping` |
 | `fault` | авария | Aborted | потеря готовности в `running` (R3) | отказ `fault_unacknowledged` | no-op | ok при `fault_stop_done`, иначе `fault_stopping` | отказ `fault_unacknowledged` |
 | `shutting_down` | завершение | — | `system.shutdown` | отказ `shutting_down` | отказ `shutting_down` | отказ `shutting_down` | отказ `shutting_down` |
+
+
+Строка `ready` + START при `ready=False` (готовность пропала между тиком и командой): `not_ready`, отказ `not_ready`; в `ready` переводит только `tick` (Task 1.1, стадия 0 2026-11-09).
 
 Правила таблицы. (1) Авария **не** проходит через `stopping`: `fault` сразу снимает `run_event`, ждёт `paused` и ставит
 внутренний признак `fault_stop_done`; состояние остаётся `fault` до `ack`; готовность вернулась — всё равно `fault`.

@@ -25,7 +25,9 @@ Wire-клиент сокетного канала хоста: одно TCP-со�
 -----------------
 I1. Каждое исходящее сообщение проходит ОДНУ точку записи (``_send_raw``): там
     проставляется ``session`` (``setdefault``) и применяются send-middleware в порядке
-    регистрации. Обходного пути записи нет.
+    регистрации. Обходного пути записи нет. Исключение — строка ``hello`` рукопожатия
+    (Task 0.12): её пишет :meth:`connect` прямо в сокет до старта reader-потока, без
+    ``session`` и без middleware.
 I2. Сообщение с ``request_id``, который ждёт pending-слот, — ответ, и только ответ:
     в push оно не попадает. Сообщение без ``request_id`` либо с ``request_id``, который
     никто не ждёт и которого нет в карантине, — push.
@@ -114,6 +116,59 @@ class SocketConnectionLost(RuntimeError):
     """Соединение с хостом оборвалось неожиданно (не намеренный :meth:`SocketClient.close`)."""
 
 
+class SocketAuthError(ConnectionError):
+    """Хост отказал в рукопожатии ``hello`` (отказ, EOF до ответа или чужой ответ).
+
+    Подкласс ``OSError``: контракт «Raises OSError» у :meth:`SocketClient.connect` и
+    ретраи ``except OSError`` у потребителей сохраняются. Текст — без токена.
+    """
+
+
+# Потолок ответа на hello: длиннее — не ответ хоста.
+_HELLO_REPLY_MAX_BYTES = 4096
+
+
+def _hello_exchange(sock: socket.socket, token: str, deadline: float) -> None:
+    """Послать ``hello`` и дождаться ответа до ``deadline`` (monotonic).
+
+    Ответ читается по одному байту до ``\\n``: строки после ответа остаются в сокете
+    для reader-потока. Raises: ``SocketAuthError``, ``TimeoutError``.
+    """
+    line = (json.dumps({"type": "hello", "token": token}, ensure_ascii=False) + "\n").encode("utf-8")
+    reply = bytearray()
+    try:
+        sock.settimeout(max(deadline - time.monotonic(), 0.001))
+        sock.sendall(line)
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("socket_client: нет ответа на hello за timeout")
+            sock.settimeout(left)
+            byte = sock.recv(1)
+            if not byte:
+                raise SocketAuthError("socket_client: хост закрыл соединение до ответа на hello")
+            if byte == b"\n":
+                break
+            reply += byte
+            if len(reply) > _HELLO_REPLY_MAX_BYTES:
+                raise SocketAuthError("socket_client: ответ на hello длиннее 4096 байт")
+    except socket.timeout:
+        raise TimeoutError("socket_client: нет ответа на hello за timeout") from None
+    except SocketAuthError:
+        raise
+    except ConnectionError as exc:  # reset / broken pipe до ответа — как EOF
+        raise SocketAuthError(f"socket_client: соединение оборвано до ответа на hello ({type(exc).__name__})") from None
+    try:
+        msg = json.loads(reply.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        msg = None
+    if isinstance(msg, dict) and msg.get("type") == "hello" and msg.get("success") is True:
+        return
+    error = msg.get("error") if isinstance(msg, dict) else None
+    shown = error if isinstance(error, str) and len(error) <= 64 else "нет"
+    raise SocketAuthError(f"socket_client: хост отказал в hello (error: {shown})")
+
+
 class _Pending:
     """Слот ожидания ответа по request_id.
 
@@ -166,6 +221,7 @@ class SocketClient:
     # не зовёт ``SocketClient.__init__`` и этих полей не заводит. Добавление —
     # copy-on-write (новый кортеж на экземпляре), общий объект класса не мутируется.
     _on_push: Optional[PushHandler] = None
+    _token_provider: Callable[[], str | None] | None = None
     _push_listeners: tuple = ()
     _send_middleware: tuple = ()
     # Потолок входящей строки: классовый дефолт нужен шиму драйвера (без __init__).
@@ -182,6 +238,7 @@ class SocketClient:
         default_timeout: float = 5.0,
         on_push: PushHandler | None = None,
         max_line_bytes: int = 16_777_216,
+        token_provider: Callable[[], str | None] | None = None,
     ) -> None:
         """Сконфигурировать клиент; соединения НЕ открывает.
 
@@ -209,6 +266,7 @@ class SocketClient:
         self._default_timeout = default_timeout
         self._on_push = on_push
         self._max_line_bytes = max_line_bytes
+        self._token_provider = token_provider
         self._push_listeners = ()
         self._send_middleware = ()
         self._session: Optional[str] = None
@@ -234,9 +292,26 @@ class SocketClient:
               повторный ``connect`` на живом соединении не проверяется (паритет с шимом).
         Post: новый ``session`` (12 hex), отличный от предыдущего; ``subscriber_address``
               обновлён; ``connection_lost is False``; reader-поток жив.
-        Raises: ``OSError`` — хост недоступен за ``timeout`` (состояние как до вызова).
+        Рукопожатие (Task 0.12): ``token_provider`` читается на каждом ``connect``. Он
+        вернул строку → первой строкой уходит ``{"type": "hello", "token": ...}`` и
+        ответ ``{"type": "hello", "success": true}`` читается по байту до ``\\n`` (хвоста
+        не остаётся). ``timeout`` общий на TCP-connect и ``hello``. Нет провайдера или
+        он вернул ``None`` или ``""`` — ``hello`` не шлётся, соединение как раньше.
+        Raises: ``OSError`` — хост недоступен за ``timeout`` (состояние как до вызова);
+              :class:`SocketAuthError` (подкласс ``OSError``) — отказ, EOF или чужой ответ
+              на ``hello``; ``TimeoutError`` — нет ответа на ``hello`` за ``timeout``.
+              Во всех случаях сокет закрыт, состояние как до вызова.
         """
+        deadline = time.monotonic() + timeout
+        provider = self._token_provider
+        token = provider() if provider is not None else None
         sock = socket.create_connection((self._host, self._port), timeout=timeout)
+        if token:  # None и пустая строка — токена нет, hello не шлётся
+            try:
+                _hello_exchange(sock, token, deadline)
+            except BaseException:
+                sock.close()
+                raise
         sock.settimeout(_READ_POLL_SEC)
         self._session = uuid.uuid4().hex[:12]
         # Наследник-шим (``backend_ctl.BackendDriver``) заводит поля сам, без __init__ базы:
@@ -706,4 +781,11 @@ class SocketClient:
         self._handle_push(msg)
 
 
-__all__ = ["SocketClient", "SocketConnectionLost", "PushHandler", "SendMiddleware", "ResponseCallback"]
+__all__ = [
+    "SocketClient",
+    "SocketConnectionLost",
+    "SocketAuthError",
+    "PushHandler",
+    "SendMiddleware",
+    "ResponseCallback",
+]

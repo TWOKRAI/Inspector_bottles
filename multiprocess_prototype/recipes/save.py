@@ -230,6 +230,26 @@ def _name(process: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+_EMPTY_GRAPH_WITHOUT_BASE = (
+    "граф редактора пуст, а ревизия файла, с которой он строился, неизвестна: Save отменён, файл не тронут"
+)
+
+
+def _is_empty_graph_over_file_processes(
+    topology: dict[str, Any], doc: dict[str, Any], foundation: frozenset[str]
+) -> bool:
+    """Граф редактора без процессов вне ``foundation`` при непустых процессах файла (Task 1.16, D2).
+
+    ``processes`` не список или ключа нет — не «пусто» (диагностику даёт ``Topology``). Процесс без строкового
+    имени — процесс редактора, а не фундамент (как в :func:`_editor_owned_topology`).
+    """
+    processes = topology.get("processes")
+    if not isinstance(processes, list) or any(_name(p) not in foundation for p in processes):
+        return False
+    file_procs = (doc.get("blueprint") or {}).get("processes")
+    return isinstance(file_procs, list) and bool(file_procs)
+
+
 def _editor_owned_topology(topology: dict[str, Any], doc: dict[str, Any], foundation: frozenset[str]) -> dict[str, Any]:
     """Топология на запись: Save не пишет фундамент (процессы ``manifest.base``), он остаётся как в файле.
 
@@ -303,7 +323,10 @@ def save_editor_topology_to_recipe(
 
     Порядок проверок: рецепт читается -> ``RecipeNotFoundError``; ``expected_rev`` не равен ``rev`` чтения ->
     ``RecipeConflict`` (раньше любой проверки содержимого; при ``expected_rev=None`` не срабатывает); не-mapping
-    ``blueprint`` -> ``RecipeValidationError``; правило владения; адаптер и структурная валидация; проверка ссылок
+    ``blueprint`` -> ``RecipeValidationError``; ``expected_rev=None`` (база редактора неизвестна), граф без процессов
+    вне ``foundation`` и непустые процессы файла -> ``RecipeValidationError``, файл не тронут (Task 1.16, D2: сбой
+    захвата базы при старте не должен стирать процессы рецепта; проверка стоит ДО правила владения — фундамент не
+    «наполняет» пустой граф); правило владения; адаптер и структурная валидация; проверка ссылок
     на дисплеи; запись (авторитетная сверка ``expected_rev`` под локом — в ``save_raw``).
 
     Исключения (RecipeNotFoundError/RecipeValidationError/RecipeConflict) НЕ глотает — вызывающий сам
@@ -328,14 +351,18 @@ def save_editor_topology_to_recipe(
       - ``topology`` — dict, который разбирает ``Topology`` (``extra="forbid"``).
     Post:
       - записан ровно один раз (одна ``save_raw``), возвращён ``rev`` этой записи; при любом
-        исключении запись не выполнена.
+        исключении запись не выполнена;
+      - ``expected_rev=None`` + граф редактора без процессов вне ``foundation`` + непустые процессы файла ->
+        ``RecipeValidationError``, ``save_raw`` не вызван. Пустой граф при ``expected_rev`` не None (осознанная
+        очистка), непустой граф и пустой граф над файлом без процессов пишутся как раньше.
 
     Raises:
         RecipeNotFoundError: рецепт ``slug`` не читается.
         RecipeFormatError: файл рецепта не разбирается (битый YAML / корень не mapping).
         RecipeValidationError: топология или blueprint (в т.ч. не-mapping ``blueprint`` в файле) не
             разбираются / не прошли структурную валидацию; привязка ``blueprint.displays`` ссылается
-            на ``display_id`` без определения в ``displays``.
+            на ``display_id`` без определения в ``displays``; граф редактора пуст при неизвестной ревизии
+            файла (``expected_rev=None``), а в файле есть процессы.
         RecipeConflict: ``expected_rev`` устарел (файл изменён после чтения): при чтении — сразу после поиска
             рецепта, и ещё раз под локом в ``save_raw``.
     """
@@ -351,6 +378,8 @@ def save_editor_topology_to_recipe(
         raise RecipeConflict(slug, expected_rev, rev)
     if "blueprint" in doc and not isinstance(doc["blueprint"], dict):
         raise RecipeValidationError(["blueprint: ожидался mapping"])
+    if expected_rev is None and _is_empty_graph_over_file_processes(topology, doc, foundation):
+        raise RecipeValidationError([_EMPTY_GRAPH_WITHOUT_BASE])
     topology = _editor_owned_topology(topology, doc, foundation)
     try:
         after = topology_to_canonical(topology, doc)

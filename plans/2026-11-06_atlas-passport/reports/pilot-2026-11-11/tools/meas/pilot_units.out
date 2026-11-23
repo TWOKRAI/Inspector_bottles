@@ -1,0 +1,70 @@
+кросс-проверка R0: выборка 408 расхождений 0
+
+== п.8 цели 12 вызовов ==
+C3 map multiprocess_framework: сегодня not found
+D1.1 ref ProcessConfig: сегодня ambiguous(2); R1+prod [exact-def+prod-rule] -> ok; плоско 2; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig
+D1.1 ref TopologySession: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_prototype/domain/topology_session.py::TopologySession
+D1.1 ref LayoutController: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py::LayoutController
+D1.1 ref RecipesPresenter: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py::RecipesPresenter
+D1.1 ref BackendDriver: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; backend_ctl/driver.py::BackendDriver
+D1.2 ref as_generic_config: сегодня not found; R1+prod [tail] -> ok; плоско 1; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig.as_generic_config
+D1.2 ref system_shutdown: сегодня not found; R1+prod [tail+prod-rule] -> ok; плоско 2; backend_ctl/driver.py::BackendDriver.system_shutdown
+D1.3 map multiprocess_framework/modules/process_manager_module/topology/blueprint.py: сегодня ok kind=file
+D1.4 map multiprocess_framework/modules/app_module: сегодня not found
+D1.5 ref SystemBlueprint: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::SystemBlueprint
+D2.1 map .: сегодня not found
+D2.2 ref BackendDriver: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; backend_ctl/driver.py::BackendDriver
+D2.2 ref ProcessConfig: сегодня ambiguous(2); R1+prod [exact-def+prod-rule] -> ok; плоско 2; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig
+D2.2 ref TopologySession: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_prototype/domain/topology_session.py::TopologySession
+D2.2 ref LayoutController: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py::LayoutController
+D2.3 ref is_valid_window: сегодня not found; R1+prod [none] -> not found; плоско 0; 
+D2.3 ref ProcessConfig: сегодня ambiguous(2); R1+prod [exact-def+prod-rule] -> ok; плоско 2; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig
+D2.3 ref RecipeBlueprint: сегодня not found; R1+prod [none] -> not found; плоско 0; 
+D2.4 ref _same_config_value: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; multiprocess_framework/modules/process_manager_module/topology/blueprint.py::_same_config_value
+D2.5 ref BackendDriver: сегодня ok; R1+prod [exact-def] -> ok; плоско 1; backend_ctl/driver.py::BackendDriver
+D2.5 ref system_shutdown: сегодня not found; R1+prod [tail+prod-rule] -> ok; плоско 2; backend_ctl/driver.py::BackendDriver.system_shutdown
+D2.5 ref park: сегодня not found; R1+prod [tail] -> ok; плоско 1; multiprocess_prototype/frontend/widgets/tabs/services/robot/presenter.py::RobotPresenter.park
+D3.1 map .: сегодня not found
+целей 24 ошибочных сегодня 13
+order sig d1d4b67fa0b5142f4d063d0ed39fea9d28e39762
+
+== п.7 строки реестра ==
+всего строк: 89 юнитов(roots): 89
+ключи строки: ['docs', 'id', 'layer', 'parent', 'paths', 'purpose', 'tier']
+Counter({'dir': 85, 'file': 4})
+p0 {'not found': 86, 'ok:file': 3}
+p0_no_slash {'not found': 84, 'ok:file': 3, 'ok:unit': 2}
+p0_backslash {'not found': 86, 'ok:file': 3}
+p0_slash_end {'not found': 89}
+id {'ok:unit': 89}
+примеры: [{'uid': 'actions_module', 'p0': 'not found', 'p0_no_slash': 'not found', 'p0_backslash': 'not found', 'p0_slash_end': 'not found', 'id': 'ok:unit'}, {'uid': 'app_module', 'p0': 'not found', 'p0_no_slash': 'not found', 'p0_backslash': 'not found', 'p0_slash_end': 'not found', 'id': 'ok:unit'}, {'uid': 'base_manager', 'p0': 'not found', 'p0_no_slash': 'not found', 'p0_backslash': 'not found', 'p0_slash_end': 'not found', 'id': 'ok:unit'}]
+юниты, чей paths[0] — файл: [('framework_meta', ['multiprocess_framework/__init__.py', 'multiprocess_framework/version.py', 'multiprocess_framework/modules/__init__.py', 'multiprocess_framework/modules/_fallback.py', 'multiprocess_framework/modules/conftest.py', 'multiprocess_framework/modules/observability_declarations.py', 'multiprocess_framework/docs/']), ('services_shared', ['Services/__init__.py']), ('plugins_shared', ['Plugins/__init__.py', 'Plugins/_shared/']), ('prototype_root', ['multiprocess_prototype/ARCHITECTURE.md', 'multiprocess_prototype/README.md', 'multiprocess_prototype/STATUS.md', 'multiprocess_prototype/__init__.py', 'multiprocess_prototype/app.yaml', 'multiprocess_prototype/generic_process_app.py', 'multiprocess_prototype/main.py', 'multiprocess_prototype/orchestrator.py', 'multiprocess_prototype/run.py'])]
+вложенных юнитов (paths[0] внутри paths[0] другого): 26
+   ('scripts/atlas', 'scripts/atlas/', 'scripts', 'scripts/')
+   ('tools/backend_ctl/probes', 'backend_ctl/probes/', 'tools/backend_ctl', 'backend_ctl/')
+   ('frontend_module/components', 'multiprocess_framework/modules/frontend_module/components/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+   ('frontend_module/components/_examples', 'multiprocess_framework/modules/frontend_module/components/_examples/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+   ('frontend_module/components/_examples', 'multiprocess_framework/modules/frontend_module/components/_examples/', 'frontend_module/components', 'multiprocess_framework/modules/frontend_module/components/')
+   ('frontend_module/components/base', 'multiprocess_framework/modules/frontend_module/components/base/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+   ('frontend_module/components/base', 'multiprocess_framework/modules/frontend_module/components/base/', 'frontend_module/components', 'multiprocess_framework/modules/frontend_module/components/')
+   ('frontend_module/core', 'multiprocess_framework/modules/frontend_module/core/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+   ('frontend_module/widgets', 'multiprocess_framework/modules/frontend_module/widgets/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+   ('frontend_module/widgets/chrome', 'multiprocess_framework/modules/frontend_module/widgets/chrome/', 'frontend_module', 'multiprocess_framework/modules/frontend_module/')
+paths у нескольких юнитов: []
+разные layer у юнитов: Counter({'framework': 36, 'services': 19, 'prototype': 14, 'plugins': 13, 'tools': 4, 'scripts': 2, 'docs': 1})
+каталогов (любой глубины) с .py внутри, не покрытых ни одним юнитом: 50
+из них с .py НЕПОСРЕДСТВЕННО: 36
+верхнеуровневые каталоги без юнита: ['.claude/', 'Plugins/', 'Services/', 'docs/', 'multiprocess_framework/', 'multiprocess_prototype/', 'workspace/']
+10 примеров (непосредственные, по убыванию числа .py):
+   multiprocess_framework/modules/tests/ 19
+   .claude/plugins/core/scripts/ 12
+   .claude/plugins/core/scripts/aggregate_context/ 6
+   .claude/plugins/lang-python/templates/scripts/ 5
+   Plugins/_shared/fanin/tests/ 5
+   multiprocess_prototype/ 5
+   workspace/dev/style-bench/ 5
+   .claude/plugins/mcp-qex/ 4
+   Plugins/_shared/fanin/ 4
+   multiprocess_framework/modules/ 4
+пример: корневые .py файлы не в каталоге: ['conftest.py', 'run.py']
+кол-во .py вне юнитов всего: 108 из 3518

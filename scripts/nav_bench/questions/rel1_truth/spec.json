@@ -1,0 +1,133 @@
+{
+ "repo_sha": "1e085652f6a7a5b3825f87157769be6de47ad928",
+ "exclude": [
+  "scripts/nav_bench",
+  "scripts/atlas/tests",
+  "docs/handoffs",
+  "docs/reports",
+  "docs/reviews",
+  "plans",
+  "docs/claude/memory",
+  "docs/claude/OPEN_QUESTIONS.md"
+ ],
+ "questions": {
+  "A1": {
+   "relation": "callers",
+   "path": "multiprocess_framework/modules/recipe/format.py",
+   "name": "compute_rev",
+   "grep": [
+    "(^|[^A-Za-z0-9_])compute_rev([^A-Za-z0-9_]|$)"
+   ],
+   "manual_notes": "namesake Services/robot_comm/store.py::compute_rev (different function) excluded; calls through the recipe.service re-export (Plugins) included: same function object"
+  },
+  "A2": {
+   "relation": "callers",
+   "path": "multiprocess_framework/modules/channel_routing_module/levels.py",
+   "name": "severity_of",
+   "grep": [
+    "(^|[^A-Za-z0-9_])severity_of([^A-Za-z0-9_]|$)"
+   ]
+  },
+  "B1": {
+   "relation": "subclasses",
+   "path": "multiprocess_framework/modules/channel_routing_module/interfaces.py",
+   "name": "IChannel",
+   "grep": [
+    "class [A-Za-z0-9_]+\\((.*[^A-Za-z0-9_])?(IChannel|LogChannel|ILogChannel|MessageChannel|IMessageChannel)([^A-Za-z0-9_]|$)"
+   ],
+   "manual_notes": "transitive; abstract intermediates (ILogChannel, IMessageChannel, MessageChannel, LogChannel) included; 32 test subclasses excluded"
+  },
+  "B2": {
+   "relation": "structural",
+   "path": "multiprocess_prototype/domain/protocols/config_store.py",
+   "name": "ConfigStore",
+   "members": [
+    "get",
+    "set",
+    "get_section",
+    "list_keys",
+    "subscribe",
+    "save"
+   ],
+   "grep": [
+    "def (get_section|list_keys)\\(",
+    "class [A-Za-z0-9_]*ConfigStore"
+   ],
+   "manual_notes": "namesake shared_resources_module/config_store/config_store.py::ConfigStore is a different class (no get_section/list_keys/subscribe); no near-miss classes (flagged empty)"
+  },
+  "C1": {
+   "relation": "importers",
+   "path": "multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py",
+   "grep": [
+    "not_inspected_marker"
+   ]
+  },
+  "C2": {
+   "relation": "importers",
+   "package": "multiprocess_framework/modules/telemetry_readmodel_module",
+   "files": true,
+   "grep": [
+    "telemetry_readmodel_module"
+   ],
+   "manual_notes": "frontend_module/__init__.py, interfaces.py, state/__init__.py import DEFAULT_TRACKED_SUFFIXES through telemetry_view_model (third module): excluded by rule"
+  },
+  "D1": {
+   "relation": "threads",
+   "dir": "multiprocess_framework/modules/router_module",
+   "grep": [
+    "(Thread|Timer)\\("
+   ],
+   "grep_path": "multiprocess_framework/modules/router_module"
+  },
+  "D2": {
+   "relation": "env_reads",
+   "names": [
+    "MULTIPROCESS_LOG_DIR",
+    "INSPECTOR_LOG_DIR"
+   ],
+   "scope": [
+    "multiprocess_framework/",
+    "multiprocess_prototype/",
+    "Services/",
+    "Plugins/"
+   ],
+   "grep": [
+    "MULTIPROCESS_LOG_DIR|INSPECTOR_LOG_DIR"
+   ],
+   "manual_include": [
+    {
+     "path": "multiprocess_framework/modules/logger_module/core/log_paths.py",
+     "line": 21,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "manual: loop over a literal tuple, os.environ.get(key) in the same function (default_log_base_directory)"
+    },
+    {
+     "path": "multiprocess_prototype/backend/launch.py",
+     "line": 54,
+     "symbol": "MULTIPROCESS_LOG_DIR",
+     "how": "manual: env.get(...) on the environment mapping passed in (_env_log_dir_override)"
+    }
+   ],
+   "manual_notes": "excluded by rule: app_module/env.py:37 (alias table; the generic copier apply_env_aliases does not decide the log dir); launch.py:682 and :684 (writes); docstrings and comments; backend_ctl/probes and tools/ are outside the question scope"
+  },
+  "E1": {
+   "relation": "self_callers",
+   "path": "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py",
+   "class": "ProcessManagerProcess",
+   "method": "_pm_stopping",
+   "grep": [
+    "(^|[^A-Za-z0-9_])_pm_stopping([^A-Za-z0-9_]|$)"
+   ],
+   "manual_notes": "excluded by rule: process_manager_process.py:233 stop_abort = self._pm_stopping (reference stored for later invocation, not a call); :576 definition"
+  },
+  "E2": {
+   "relation": "uses",
+   "path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py",
+   "name": "stop_budget",
+   "grep": [
+    "^[A-Z_][A-Z0-9_]* *(:[^=]*)?="
+   ],
+   "grep_path": "multiprocess_framework/modules/process_manager_module/core/stop_budget.py"
+  }
+ }
+}

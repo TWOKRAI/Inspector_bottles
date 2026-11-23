@@ -716,3 +716,7 @@ observability-watcher — в `multiprocess_prototype/orchestrator.py`; дела�
   инструмент полосы `observability-closure`; Task 1.4 его параметризует. Поведение без
   аргументов обязано остаться прежним (первый критерий задачи), правка согласуется с
   владельцем той полосы.
+
+## Связь с DS-1 (2026-11-11)
+
+[`dataset-sidecar-truth`](../2026-11-11_dataset-sidecar-truth/plan.md) Task 1.1b добавляет в `Plugins/sim/scene_source` журнал истины JSONL (`truth_journal_dir`, пусто — выключен), Task 1.1c — офлайн-сведение `match_job` (`Services/line_sim/tools/join_frame_truth.py`). Решение 2026-09-21 п.4 сохраняется: в item ничего не добавляется, тест `test_item_has_no_sim_truth_and_all_required_keys` остаётся зелёным без правки. Пересечение O12 — [`queue/group-draw-dataset.md`](../queue/group-draw-dataset.md).

@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -90,3 +92,40 @@ def test_reap_skips_self(reg_path):
 
 def test_reap_empty_file_noop(reg_path):
     assert pid_registry.reap_and_reset(reg_path) == 0
+
+
+def test_reap_logs_pid_and_name_per_victim(reg_path, tmp_path, monkeypatch):
+    """Журнал реапа: одна строка на жертву с её pid и именем процесса + итоговая строка.
+
+    Последняя запись реестра — мёртвый pid: pid в журнале обязан быть pid жертвы, а не
+    значение, оставшееся в переменной цикла после последней записи.
+    """
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "isolated_tmp"))
+    victims = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]) for _ in range(2)]
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait(timeout=10)
+    try:
+        names = {v.pid: psutil.Process(v.pid).name() for v in victims}  # ДО реапа
+        with open(reg_path, "w", encoding="utf-8") as f:
+            for v in victims:
+                f.write(json.dumps({"pid": v.pid, "ct": psutil.Process(v.pid).create_time()}) + "\n")
+            f.write(json.dumps({"pid": dead.pid, "ct": None}) + "\n")  # ПОСЛЕДНЯЯ — мёртвый
+
+        lines: list[str] = []
+        killed = pid_registry.reap_and_reset(reg_path, log=lines.append)
+
+        assert killed == 2
+        for v in victims:
+            mine = [ln for ln in lines if re.search(rf"(?<!\d){v.pid}(?!\d)", ln)]
+            assert len(mine) == 1, f"pid {v.pid}: ожидалась одна строка, получено {lines!r}"
+            assert names[v.pid] in mine[0], f"нет имени {names[v.pid]!r}: {mine[0]!r}"
+            v.wait(timeout=10)
+        assert not any(re.search(rf"(?<!\d){dead.pid}(?!\d)", ln) for ln in lines), lines
+        assert any(re.search(r"убито\s+2(?!\d)", ln) for ln in lines), lines
+    finally:
+        for v in victims:
+            if v.poll() is None:
+                v.kill()
+                v.wait(timeout=5)

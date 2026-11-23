@@ -1,0 +1,52 @@
+"""Offline ceiling: which expected addresses of a question set are reachable from a reference JSON.
+
+Collects every (path, line) the reference states (spec path+line, io lines, "path:line" strings),
+then, per question, checks each expected item with score.location_matches. Read-only.
+"""
+import json, re, sys
+sys.path.insert(0, sys.argv[3])
+from scripts.nav_bench import score
+
+ref = json.load(open(sys.argv[1]))
+qset = json.load(open(sys.argv[2]))
+addrs = set()
+LOC = re.compile(r"^([\w./-]+\.(?:py|md|toml|json|yaml|ini)):(\d+)$")
+
+def walk(o, cur_path=None):
+    if isinstance(o, dict):
+        p = o.get("path") if isinstance(o.get("path"), str) else cur_path
+        if p and isinstance(o.get("line"), int):
+            addrs.add((p, o["line"]))
+        if p and "line" not in o and "path_expr" not in o:
+            addrs.add((p, None))
+        for k, v in o.items():
+            walk(v, p)
+    elif isinstance(o, list):
+        for v in o:
+            walk(v, cur_path)
+    elif isinstance(o, str):
+        m = LOC.match(o)
+        if m:
+            addrs.add((m.group(1), int(m.group(2))))
+        elif re.match(r"^[\w./-]+\.py(::.*)?$", o):
+            addrs.add((o.split("::")[0], None))
+walk(ref)
+print(f"addresses stated by the reference: {len(addrs)}")
+total = reach = 0
+for q in qset["questions"]:
+    exp = q.get("expected") or []
+    cov = []
+    for e in exp:
+        cands = [f"{p}:{l}" if l is not None else p for p, l in addrs if p == e["path"]]
+        ok = any(score.location_matches(c, e) for c in cands)
+        cov.append((e["path"].split("/")[-1], e.get("line"), e.get("tolerance", 3), ok,
+                    sorted({c.split(':')[-1] for c in cands if ':' in c})[:8]))
+    need_all = q.get("require", "any") == "all"
+    r = all(c[3] for c in cov) if need_all else any(c[3] for c in cov)
+    if q.get("scored"):
+        total += 1
+        reach += r
+    print(f"{q['id']:4s} scored={q.get('scored')} require={q.get('require','any'):3s} reachable={r}")
+    for c in cov:
+        print(f"      {c[0]}:{c[1]} ±{c[2]} -> {'ok' if c[3] else 'NOT IN REFERENCE'}  (lines stated for this file: {c[4]})")
+print(f"ceiling (scored): {reach}/{total}")

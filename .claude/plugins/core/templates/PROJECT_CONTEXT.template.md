@@ -11,7 +11,7 @@ Text outside the markers is hand-written and preserved on rebuild.
 **Conventions:**
 - `<module>/CONTEXT.md` — lightweight per-module document (Purpose / Gotchas / …)
 - `<module>/DECISIONS.md` — formal ADRs (numbered `ADR-{CODE}-NNN`)
-- Global cross-module ADRs — in `docs/claude/DECISIONS/NNNN-*.md`
+- Global cross-module ADRs — in `docs/decisions/NNNN-*.md`
   (created via `/dev:adr`)
 
 ---
@@ -56,6 +56,6 @@ _(пусто — запусти `uv run --no-project python -m scripts.aggregate
 
 ## How to add a cross-module (global) ADR
 
-Use `/dev:adr <title>` — creates `docs/claude/DECISIONS/NNNN-<slug>.md`.
+Use `/dev:adr <title>` — creates `docs/decisions/NNNN-<slug>.md`.
 These ADRs use the `ADR-NNN` format (no module code) and are not indexed
 by the `aggregate_context` script — they have their own numbering and storage location.

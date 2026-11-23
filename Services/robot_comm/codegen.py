@@ -3,9 +3,9 @@
 `Services/robot_comm/protocols/delta_v2.yaml` — единственный источник контракта
 (plans/robot-protocol-v2/tasks.md, T1.1). Из него порождаются:
 
-    core/protocol_v2.py — REG/OP/ERR/REASON/CONSTANTS и т.п. (без импортов)
+    core/protocol_v2.py — REG/OP/ERR/REASON/CONSTANTS/ACT_RANGE и т.п. (без импортов)
     core/params_v2.py   — PARAMS, PARAM_ID, DICT_FINGERPRINT, to_eng/to_raw, RobotParamsV2
-    lua_block(root)     — таблицы REG/OP/ERR/PDEF/KIND/ACT/C/RSN/STOP между маркерами
+    lua_block(root)     — таблицы REG/OP/ERR/PDEF/KIND/ACT/ARNG/C/RSN/STOP между маркерами
 
 Регенерация детерминирована: тот же YAML -> байт-в-байт тот же текст (без временных
 меток, без порядка set/словарей рантайма — только literal-рендер, без `repr()`/`pprint`
@@ -304,6 +304,16 @@ def _extract(doc: dict) -> dict:
 
     kind = dict(doc["scenario"]["kinds"])
     act = dict(doc["scenario"]["actions"])
+    act_range: dict[str, tuple[int, int]] = {}
+    for name in act:
+        if name == "NONE":
+            continue
+        row = doc["scenario"]["aparam"][name]
+        if "param" in row:
+            meta = doc["params"][row["param"]]
+            act_range[name] = (meta["min"], meta["max"])
+        else:
+            act_range[name] = (row["min"], row["max"])
     sc_record = tuple(doc["scenario"]["record"])
     stop_level = dict(doc["stop_levels"])
 
@@ -342,6 +352,7 @@ def _extract(doc: dict) -> dict:
         "gate1_constants": gate1_constants,
         "kind": kind,
         "act": act,
+        "act_range": act_range,
         "stop_level": stop_level,
         "sc_record": sc_record,
         "params": params,
@@ -377,6 +388,7 @@ def _render_protocol_module(doc: dict, sha8: str) -> str:
         _assign("GATE1_CONSTANTS", ex["gate1_constants"]),
         _assign("KIND", ex["kind"]),
         _assign("ACT", ex["act"]),
+        _assign("ACT_RANGE", ex["act_range"]),
         _assign("STOP_LEVEL", ex["stop_level"]),
         _assign("SC_RECORD", ex["sc_record"]),
     ]
@@ -498,7 +510,7 @@ def check(root: Path) -> list[Path]:
 
 
 def lua_block(root: Path) -> str:
-    """Таблицы REG/OP/ERR/PDEF/KIND/ACT/C/RSN/STOP между маркерами BEGIN/END GENERATED."""
+    """Таблицы REG/OP/ERR/PDEF/KIND/ACT/ARNG/C/RSN/STOP между маркерами BEGIN/END GENERATED."""
     doc = _load_yaml(root)
     sha8 = yaml_sha8(root)
     ex = _extract(doc)
@@ -527,6 +539,9 @@ def lua_block(root: Path) -> str:
     }
     constants["PMIR_DICT"] = ex["dict_fingerprint"]
 
+    # ключ — код действия: прошивка берёт код из `OP >> 8` записи и ищет `ARNG[act]` без обратной таблицы
+    arng = {ex["act"][name]: {"lo": lo, "hi": hi} for name, (lo, hi) in ex["act_range"].items()}
+
     lines = [f"-- ===== BEGIN GENERATED (delta_v2.yaml {sha8}) ====="]
     for name, value in (
         ("REG", reg),
@@ -535,6 +550,7 @@ def lua_block(root: Path) -> str:
         ("PDEF", pdef),
         ("KIND", ex["kind"]),
         ("ACT", ex["act"]),
+        ("ARNG", arng),
         ("C", constants),
         ("RSN", ex["reason"]),
         ("STOP", ex["stop_level"]),

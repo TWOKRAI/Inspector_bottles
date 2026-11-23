@@ -16,12 +16,14 @@ import itertools
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from multiprocess_framework.modules.base_manager import BaseManager, ObservableMixin
-from multiprocess_framework.modules.base_manager.interfaces import ScopeClosedError
+from multiprocess_framework.modules.base_manager.interfaces import IHandle, ScopeClosedError
 from multiprocess_framework.modules.logger_module import get_std_logger
 
+from Services.device_hub.drivers.base import PAUSE_OPS
+from Services.device_hub.drivers.robot_driver_v2.texts import TEXT_PARKING
 from Services.device_hub.errors import (
     DeviceHubError,
     DeviceNotFoundError,
@@ -35,6 +37,7 @@ from Services.device_hub.robot_data_ops import STORE_ERRORS, run_op, store_error
 from Services.device_hub.spi import DeviceDriver
 
 if TYPE_CHECKING:
+    from Services.device_hub.drivers.robot_driver_v2 import RobotDriverV2
     from Services.device_hub.robot_data_ops import RobotDataStore
 
 logger = get_std_logger(__name__)
@@ -44,6 +47,22 @@ _STOP_ALL_DEFAULT_S = 2.5
 # Номер потока рассылки стопа: имя ``stop-<id>-<k>`` уникально в области
 _STOP_SEQ = itertools.count(1)
 _STOP_SEQ_LOCK = threading.Lock()
+
+# robot_park_all (T5.3e.5a): срок park по умолчанию и его диапазон, с
+_PARK_ALL_DEFAULT_S = 30.0
+_PARK_ALL_MIN_S = 1.0
+_PARK_ALL_MAX_S = 32.0
+# Запас срока ожидания: тик 0,5 с + длительность — срок park замечает первый тик после него
+_PARK_ALL_GRACE_S = 1.5
+# После should_stop: ответ ≤ 1,0 с от хука (окно join исполнителя ≈ 3 с не съедается)
+_PARK_ALL_STOP_GRACE_S = 0.5
+# Срез ожидания одного робота: задержка реакции на should_stop (0,2 + 0,5 < 1,0)
+_PARK_ALL_SLICE_S = 0.2
+_TEXT_PARK_ALL_HUB_STOPPING = "идёт остановка хаба"
+_TEXT_PARK_ALL_BAD_TIMEOUT = "timeout_s: число от 1 до 32"
+_TEXT_PARK_ALL_NOT_DONE = "основная остановка не выполнена: "
+# skipped с этими причинами — не провал команды (робот не v2 или без связи — park ему не нужен)
+_PARK_ALL_OK_SKIPS = frozenset({"not_connected", "not_v2"})
 
 
 def _next_stop_k() -> int:
@@ -71,6 +90,9 @@ class DeviceManager(BaseManager, ObservableMixin):
                     драйверу опция — ``TypeError`` его конструктора при создании.
         kinds:      Таблица видов (``Services/device_hub/kinds.py``): фабрики драйверов по умолчанию; допустимый вид
                     записи — вид с фабрикой. По умолчанию ``DEFAULT_KINDS``; повтор вида — ``ValueError``.
+        conn_cb:    ``(dev_id, conn) -> None`` — единственный писатель факта соединения менеджера (``connect`` /
+                    ``disconnect`` / каскад носителя). ``None`` — прежняя публикация ``publish_cb`` по пути
+                    ``devices.state.<id>.conn`` со словарём ``{"conn": conn}`` (ADR-DH-015).
     """
 
     def __init__(
@@ -82,11 +104,14 @@ class DeviceManager(BaseManager, ObservableMixin):
         robot_store: RobotDataStore | None = None,
         driver_options: Mapping[str | tuple[str, str], Mapping[str, Any]] | None = None,
         kinds: Sequence[DeviceKind] = DEFAULT_KINDS,
+        conn_cb: Callable[[str, str], None] | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
         ObservableMixin.__init__(self)
         self._store = store
         self._publish = publish_cb or (lambda _p, _d: None)
+        # Умолчание остаётся на self._publish: подмена его тела на self._conn дала бы бесконечную рекурсию
+        self._conn = conn_cb or (lambda dev_id, conn: self._publish(f"devices.state.{dev_id}.conn", {"conn": conn}))
         self._spawn = spawn
         self._robot_store = robot_store
         # Ключ — вид (все протоколы) или (вид, протокол)
@@ -94,6 +119,18 @@ class DeviceManager(BaseManager, ObservableMixin):
             key: dict(opts) for key, opts in (driver_options or {}).items()
         }
         self._stop_deadline: float | None = None  # срок первого request_stop_all (фаза 1 остановки)
+        # Стоп из хука процесса (C-60.b): потоки, запущенные request_stop_all_begin и ещё не дождавшиеся (None — begin
+        # не было); сами объекты драйверов, которым стоп уже ушёл (членство по ``is``: remove + upsert того же id в окне
+        # создают новый объект); замок begin — повтор хука с разных потоков (всё тело begin под ним)
+        self._stop_handles: list[IHandle] | None = None
+        self._stop_served: list[DeviceDriver] = []
+        self._stop_begin_lock = threading.Lock()
+
+        # pause_all: устройства с ещё идущим стопом, уже отмеченные в лог негодные params.pause_action; замок —
+        # только на эти поля и на результаты вызова, без IO
+        self._pause_lock = threading.Lock()
+        self._pause_inflight: set[str] = set()
+        self._pause_warned: set[tuple[str, str]] = set()
 
         # Реестр: id -> DeviceEntry
         self._entries: dict[str, DeviceEntry] = {}
@@ -138,6 +175,10 @@ class DeviceManager(BaseManager, ObservableMixin):
         вызывающем потоке (fail-closed), следующие роботы не пропускаются; лишней записи нет — её отсекает защёлка
         драйвера. Исключение одного драйвера логируется.
         Без ``spawn`` (менеджер без области: роботов ``delta_v2`` нет) — вызовы по очереди в этом потоке.
+
+        После ``request_stop_all_begin`` (стоп из хука процесса): потоки хука только дожидаются, повторного стопа нет;
+        драйверам, появившимся после ``begin``, стоп запускается СНАЧАЛА (зависший сосед не задерживает запись
+        позднему роботу), затем ждутся все потоки; поздним уходит срок этого вызова.
         """
         with self._registry_lock:
             if deadline is None:  # повторный вызов без срока (фаза 4 через _on_shutdown) — срок первого вызова
@@ -146,7 +187,43 @@ class DeviceManager(BaseManager, ObservableMixin):
                 )
             if self._stop_deadline is None:
                 self._stop_deadline = deadline
+            handles = self._stop_handles
+            self._stop_handles = [] if handles is not None else None  # забраны: повторный вызов их не ждёт
             drivers = list(self._drivers.items())
+        if handles is None:  # begin не было: прежний путь
+            self._stop_wait(self._stop_start(drivers, deadline), deadline)
+            return
+        with self._registry_lock:
+            late = [(dev_id, drv) for dev_id, drv in drivers if not any(drv is served for served in self._stop_served)]
+            self._stop_served.extend(drv for _dev_id, drv in late)
+        late_handles = self._stop_start(late, deadline)  # сначала запустить поздним, потом ждать всех
+        self._stop_wait([*handles, *late_handles], deadline)
+
+    def request_stop_all_begin(self, deadline: float) -> None:
+        """Фаза 1 остановки из хука процесса (C-60.b): запустить стоп-запрос всем драйверам, НЕ дожидаясь потоков.
+
+        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; он же уходит каждому драйверу и защёлкивается как
+        срок остановки (``request_stop_all`` после ``begin`` берёт его же).
+        Post: возврат без ожидания потоков стопа; не бросает (исключение драйвера — в лог); повторный вызов, в том
+        числе с другого потока, — без действия (тело под замком, стоп каждому роботу уходит один раз); потоки
+        дожидается ``request_stop_all``. При отказе ``spawn`` стоп этому роботу идёт в вызывающем потоке
+        (fail-closed) — тогда возврат не раньше конца этого вызова драйвера (до срока).
+        """
+        with self._stop_begin_lock:
+            if self._stop_handles is not None:
+                return
+            with self._registry_lock:
+                if self._stop_deadline is None:
+                    self._stop_deadline = deadline
+                drivers = list(self._drivers.items())
+            handles = self._stop_start(drivers, deadline)
+            # В конце: упавший begin оставляет поле None — request_stop_all идёт прежним путём
+            with self._registry_lock:
+                self._stop_served = [drv for _dev_id, drv in drivers]
+                self._stop_handles = handles
+
+    def _stop_start(self, drivers: list[tuple[str, DeviceDriver]], deadline: float) -> list[IHandle]:
+        """Запустить стоп-запрос драйверам ``drivers`` с ``stop_aware``; вернуть потоки (без ``spawn`` — ``[]``)."""
         targets: list[tuple[str, Callable[..., object]]] = []
         for dev_id, drv in drivers:
             # Отбор — внутри try на драйвер: флаг stop_aware без метода request_stop (AttributeError) или сбойное
@@ -159,8 +236,8 @@ class DeviceManager(BaseManager, ObservableMixin):
         if self._spawn is None:
             for dev_id, request in targets:
                 self._stop_one(dev_id, request, deadline)
-            return
-        handles = []
+            return []
+        handles: list[IHandle] = []
         inline: list[tuple[str, Callable[..., object]]] = []  # spawn отказал: стоп этим роботам — в этом потоке
         for dev_id, request in targets:
             name = f"stop-{dev_id}-{_next_stop_k()}"
@@ -173,6 +250,11 @@ class DeviceManager(BaseManager, ObservableMixin):
                     (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
         for dev_id, request in inline:  # fail-closed: отказ spawn не лишает робота стопа (защёлка — в драйвере)
             self._stop_one(dev_id, request, deadline)
+        return handles
+
+    @staticmethod
+    def _stop_wait(handles: list[IHandle], deadline: float) -> None:
+        """Дождаться потоков стопа до общего срока ``deadline``; не вышедший поток — в лог."""
         for handle in handles:
             try:
                 report = handle.close(max(0.0, deadline - time.monotonic()))
@@ -188,6 +270,143 @@ class DeviceManager(BaseManager, ObservableMixin):
             request(deadline)
         except Exception:
             logger.exception(f"device_hub: стоп-запрос {dev_id!r} не прошёл")
+
+    # ------------------------------------------------------------------ #
+    # Пауза: действие паузы каждому устройству параллельно (ADR-DH-015)
+    # ------------------------------------------------------------------ #
+
+    def pause_all(self, deadline: float, skip: frozenset[str] = frozenset()) -> dict[str, dict]:
+        """Действие паузы (``pause_action``) всем устройствам реестра ПАРАЛЛЕЛЬНО до общего срока ``deadline``.
+
+        Pre: ``deadline`` — абсолютный срок по ``time.monotonic()``; ``skip`` — id, которым стоп уже ушёл
+        (плагин device_hub не передаёт с 2026-11-20, ADR-PH-004 п.4; контракт заморожен).
+        Post: по одному результату на запись реестра (ключ — id), копия под замком:
+        ``{"status": "ok", "op": op}``; ``{"status": "skipped", "reason": "not_connected" | "already_stopped" |
+        "no_pause_action"}``; ``{"status": "error", "op": op, "message": ...}`` (ответ не ``ok``, исключение, срок
+        — ``"нет ответа к сроку"``, предыдущий стоп того же устройства ещё идёт — ``"предыдущий стоп ещё идёт"``;
+        сбой отбора устройства — ``op == ""``, соседи идут дальше). Не бросает.
+        Действие — ``pause_action`` класса драйвера (читается ``getattr``: способность не входит в Protocol), либо
+        годное ``params.pause_action`` записи: ``{"op": <из PAUSE_OPS, с immediate=True в OP_SPECS>, "args": dict}``;
+        негодное — действие драйвера и одна WARNING на значение. Каждому — свой поток из ``spawn``
+        (``pause-<id>-<k>``): медленный робот не задерживает ленту. Без ``spawn`` и при его отказе вызовы идут в
+        этом потоке после запуска остальных — срок на этом пути не соблюдается (как у ``request_stop_all``).
+        Поток, не вышедший к сроку, остаётся в ``_pause_inflight`` до своего выхода; его поздний итог возвращённый
+        словарь не меняет. Не трогает ``request_stop_all``, ``_shutdown`` и очереди драйверов.
+        """
+        results: dict[str, dict] = {}
+        targets: list[tuple[str, str, dict]] = []
+        for entry in self.snapshot_registry():
+            dev_id = entry.id
+            try:
+                picked = self._pause_pick(entry, skip)
+                if isinstance(picked, dict):
+                    results[dev_id] = picked
+                    continue
+                op, args = picked
+                with self._pause_lock:
+                    busy = dev_id in self._pause_inflight
+                    if not busy:
+                        self._pause_inflight.add(dev_id)
+                if busy:
+                    results[dev_id] = {"status": "error", "op": op, "message": "предыдущий стоп ещё идёт"}
+                else:
+                    targets.append((dev_id, op, args))
+            except Exception as exc:
+                logger.exception(f"device_hub: отбор паузы {dev_id!r} не прошёл")
+                results[dev_id] = {"status": "error", "op": "", "message": f"{type(exc).__name__}: {exc}"}
+
+        handles: list[IHandle] = []
+        inline: list[tuple[str, str, dict]] = []  # без spawn или отказ spawn: вызовы в этом потоке
+        for dev_id, op, args in targets:
+            if self._spawn is None:
+                inline.append((dev_id, op, args))
+                continue
+            try:
+                handles.append(
+                    self._spawn(
+                        lambda _ev, d=dev_id, o=op, a=args: self._pause_one(d, o, a, results),
+                        name=f"pause-{dev_id}-{_next_stop_k()}",
+                    )
+                )
+            except Exception as exc:  # ScopeClosedError и любой отказ spawn: fail-closed, остановка не пропускается
+                inline.append((dev_id, op, args))
+                if len(inline) == 1:
+                    text = f"device_hub: поток паузы не запущен ({type(exc).__name__}) — пауза идёт в этом потоке"
+                    (logger.debug if isinstance(exc, ScopeClosedError) else logger.warning)(text)
+        for dev_id, op, args in inline:
+            self._pause_one(dev_id, op, args, results)
+        for handle in handles:
+            try:
+                report = handle.close(max(0.0, deadline - time.monotonic()))
+            except Exception:
+                logger.exception("device_hub: запись потока паузы не закрыта")
+                continue
+            if report.survivors:
+                logger.warning(f"device_hub: поток паузы не вышел к сроку: {list(report.survivors)}")
+        with self._pause_lock:
+            # Поздний поток пишет в ``results`` и после возврата, но вернулась копия: защита — копия под замком
+            for dev_id, op, _args in targets:
+                results.setdefault(dev_id, {"status": "error", "op": op, "message": "нет ответа к сроку"})
+            return dict(results)
+
+    def _pause_pick(self, entry: DeviceEntry, skip: frozenset[str]) -> tuple[str, dict] | dict:
+        """Отбор устройства для паузы: ``(op, args)`` — слать; ``dict`` — готовый результат ``skipped``."""
+        dev_id = entry.id
+        driver = self.get_driver(dev_id)
+        if driver is None or not driver.is_connected:
+            return {"status": "skipped", "reason": "not_connected"}
+        if dev_id in skip:
+            return {"status": "skipped", "reason": "already_stopped"}
+        cls = type(driver)
+        action = getattr(cls, "pause_action", None)
+        override = (getattr(entry, "params", None) or {}).get("pause_action")
+        if override is not None:
+            valid = self._pause_override(override, cls)
+            if valid is not None:
+                action = valid
+            else:
+                with self._pause_lock:
+                    first = (dev_id, repr(override)) not in self._pause_warned
+                    self._pause_warned.add((dev_id, repr(override)))
+                if first:
+                    logger.warning(f"device_hub: {dev_id}: params.pause_action негоден — взято действие драйвера")
+        if action is None:
+            return {"status": "skipped", "reason": "no_pause_action"}
+        return action
+
+    @staticmethod
+    def _pause_override(override: Any, driver_cls: type) -> tuple[str, dict] | None:
+        """Годное ``params.pause_action`` -> ``(op, args)``; негодное -> ``None``.
+
+        Годно: ``dict``; ``op`` — ``str`` из ``PAUSE_OPS``; в ``OP_SPECS`` драйвера есть операция с этим именем и
+        ``immediate is True``; ``args`` — ``None`` или ``dict``. Аргументы по существу проверяет драйвер.
+        """
+        if not isinstance(override, dict):
+            return None
+        op = override.get("op")
+        args = override.get("args")
+        if not isinstance(op, str) or op not in PAUSE_OPS or not (args is None or isinstance(args, dict)):
+            return None
+        specs = getattr(driver_cls, "OP_SPECS", ())
+        if not any(spec.name == op and spec.immediate is True for spec in specs):
+            return None
+        return op, args or {}
+
+    def _pause_one(self, dev_id: str, op: str, args: dict, results: dict[str, dict]) -> None:
+        """Одна команда паузы устройству (поток ``pause-<id>-<k>`` или вызывающий поток); итог — в ``results``."""
+        try:
+            reply = self.call(dev_id, op, dict(args))  # копия: dict внутри ClassVar общий, драйвер вправе его менять
+            if isinstance(reply, dict) and reply.get("status") == "ok":
+                outcome = {"status": "ok", "op": op}
+            else:
+                outcome = {"status": "error", "op": op, "message": repr(reply)}
+        except Exception as exc:
+            outcome = {"status": "error", "op": op, "message": f"{type(exc).__name__}: {exc}"}
+        finally:
+            with self._pause_lock:
+                self._pause_inflight.discard(dev_id)
+        with self._pause_lock:
+            results[dev_id] = outcome
 
     def _on_shutdown(self) -> bool:
         """Стоп-запрос всем, затем отключить все устройства и сохранить реестр."""
@@ -454,7 +673,7 @@ class DeviceManager(BaseManager, ObservableMixin):
             # Ошибка данных или конфига оператора (битый params.yaml, плохой robot_params, недопустимый id) с постоянным
             # текстом: оператор видит причину в last_error; health не трогаем, исключение из менеджера не выходит
             self._publish(f"devices.state.{dev_id}.last_error", str(exc))
-            self._publish(f"devices.state.{dev_id}.conn", {"conn": "error"})
+            self._conn(dev_id, "error")
             return False
 
         # Bridge: проверить connected-носителя
@@ -470,7 +689,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         # C-29 (В3): connect, прерванный «Отключить», — не ошибка (`is True`: подмены MagicMock дают истинный объект)
         aborted = not ok and driver.disconnect_pending is True
         conn = "connected" if ok else ("disconnecting" if aborted else "error")
-        self._publish(f"devices.state.{dev_id}.conn", {"conn": conn})
+        self._conn(dev_id, conn)
         return ok
 
     def disconnect(self, dev_id: str) -> None:
@@ -489,7 +708,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         driver = self.get_driver(dev_id)
         if driver is not None:
             driver.disconnect()
-            self._publish(f"devices.state.{dev_id}.conn", {"conn": "disconnected"})
+            self._conn(dev_id, "disconnected")
 
         # Cascade degraded для зависимых bridge-устройств (итерация по снапшоту —
         # реестр может мутироваться параллельно; сам disconnect-IO вне лока).
@@ -499,7 +718,7 @@ class DeviceManager(BaseManager, ObservableMixin):
                 try:
                     dep_driver = self.get_driver(e.id)
                     if dep_driver is not None and dep_driver.set_degraded():
-                        self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
+                        self._conn(e.id, "disconnected")
                 except Exception:
                     logger.exception(f"device_hub: деградация зависимого {e.id!r} при отключении носителя не прошла")
 
@@ -545,6 +764,165 @@ class DeviceManager(BaseManager, ObservableMixin):
         if self._robot_store is None:
             return {"status": "error", "message": "хранилище данных робота не задано"}
         return run_op(self._robot_store, dev_id, op, args, entry.params, log=logger)
+
+    def robot_park_all(self, args: dict, *, should_stop: Callable[[], bool] = lambda: False) -> dict:
+        """Основная остановка всех роботов v2 реестра с итогом каждого в ответе (команда ``robot_park_all``, T5.3e.5a).
+
+        Вызов: ``mgr.robot_park_all({})`` или ``mgr.robot_park_all({"timeout_s": 5.0}, should_stop=fn)``.
+        ``args["timeout_s"]`` — срок park каждого робота и основа срока ожидания, по умолчанию ``30.0``; прочие
+        ключи игнорируются. ``should_stop`` — без аргументов, ``True`` = процесс останавливается (хук
+        ``request_stop`` плагина); опрашивается перед каждой отправкой и в ожидании (не реже раза в 0,2 с).
+
+        Pre: нет; связь с роботами не нужна. Зовут из потока исполнителя команды (вызов блокирующий).
+        Post: не бросает. Срок ожидания ``deadline = t0 + timeout_s + 1.5`` (``t0`` — вход в метод, реальное
+        время); ответ не позже него плюс остаток одной идущей отправки ``park``. ``should_stop()`` стал истинным
+        во время ожидания → ``deadline = min(deadline, now + 0.5)``.
+
+        Отказы всей команды (роботы не тронуты, нового ``seq`` park нет), проверка в этом порядке:
+            ``should_stop()`` истинен на входе → ``{"status": "error", "message": "идёт остановка хаба"}``;
+            ``timeout_s`` — ``bool``, не ``int``/``float`` или вне ``[1.0, 32.0]`` →
+            ``{"status": "error", "message": "timeout_s: число от 1 до 32"}``.
+
+        Обход: записи реестра с ``kind == "robot"`` по возрастанию ``id`` (порядок отправки и ``message``).
+        Признак v2 — ``entry.protocol == "delta_v2"`` из записи реестра (не из драйвера). Сначала park всем: каждому
+        v2 со связью по очереди ``drv.call("park", {"timeout_s": float(timeout_s)})`` на драйвере из
+        ``get_driver(id)``; затем одно общее ожидание итогов всех принятых через ``drv.park_wait(seq, ...)`` срезами
+        до ``deadline`` и завершающий проход без ожидания. Отправка последовательная: роботы паркуются параллельно,
+        ждут одного срока. Робот для метода — запись реестра (``upsert``) плюс драйвер,
+        который отдаёт ``get_driver(id)``; в тестах драйвер подставляется ``register_driver_factory("robot",
+        factory)`` до ``initialize()``, связь — ``connect(id)`` / ``drv.is_connected``.
+
+        Ответ::
+
+            {"status": "ok" | "error", "timeout_s": float(t), "elapsed_s": float,   # 30.0 без ключа
+             "robots": {<id>: R, ...}}            # при "error" ещё:
+            "message": "основная остановка не выполнена: <id>, <id>"   # id по возрастанию, через ", "
+
+        ``"ok"`` ⇔ у каждого ``R`` ``result == "done"`` либо ``result == "skipped"`` с ``reason`` из
+        ``{"not_connected", "not_v2"}``; роботов нет → ``"ok"``, ``robots: {}``. В ``message`` — id всех прочих.
+        ``R`` (по одному на каждого робота реестра):
+            ``{"result": "done", "seq": k, "home": "moved" | "already", "elapsed_s": e}``;
+            ``{"result": "failed", "seq": k, "step": s, "reason": r}`` — ``step``/``reason`` из терминала park;
+            ``{"result": "timeout", "seq": k}`` — терминала нет к сроку ожидания (park робота идёт дальше);
+            ``{"result": "skipped", "reason": "not_v2" | "not_connected" | "stopping" | "no_time"}`` — робот не
+            тронут: ``not_v2`` — протокол не ``delta_v2`` (проверка до связи); ``not_connected`` — драйвера нет
+            или ``is_connected`` ложен; ``stopping`` — ``should_stop()`` истинен перед его отправкой (ему и
+            следующим, в фазе отправки); ``no_time`` — срок ожидания вышел до его отправки (отправки прежним
+            роботам съели срок; ему и следующим);
+            ``{"result": "refused", "message": m}`` — ``park`` отказал (кроме «park уже идёт»);
+            ``{"result": "error", "message": f"{type(exc).__name__}: {exc}"}`` — исключение вызова.
+        Присоединение: ``park`` отказал текстом «идёт основная остановка робота» (park оператора уже идёт) → хаб
+        ждёт его ``seq`` (``drv.park_current_seq()``), в ``R`` ещё ``"joined": True``; присоединённый park живёт
+        по своему сроку, хаб ждёт только свой (итог может быть ``timeout``).
+        """
+        t0 = time.monotonic()
+        try:
+            return self._park_all(args, should_stop, t0)
+        except Exception as exc:  # no-health: страховка «не бросает» — ошибка уходит в ответ команды и в лог
+            logger.exception("device_hub: robot_park_all прерван")
+            return {"status": "error", "message": f"robot_park_all: {type(exc).__name__}: {exc}"}
+
+    def _park_all(self, args: dict, should_stop: Callable[[], bool], t0: float) -> dict:
+        """Тело ``robot_park_all``: отказы -> park всем по ``id`` -> общее ожидание -> завершающий проход."""
+        if should_stop():
+            return {"status": "error", "message": _TEXT_PARK_ALL_HUB_STOPPING}
+        t = args.get("timeout_s", _PARK_ALL_DEFAULT_S)
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not (_PARK_ALL_MIN_S <= t <= _PARK_ALL_MAX_S):
+            return {"status": "error", "message": _TEXT_PARK_ALL_BAD_TIMEOUT}
+        timeout_s = float(t)
+        deadline = t0 + timeout_s + _PARK_ALL_GRACE_S
+        robots: dict[str, dict] = {}
+        # Ждущие: (id, драйвер, seq, присоединён) — драйвер тот же, что получил park (device_upsert между ними
+        # увёл бы seq к другому автомату)
+        pending: list[tuple[str, RobotDriverV2, int, bool]] = []
+        stopped = False
+        cut: str | None = None
+        entries = sorted((e for e in self.snapshot_registry() if e.kind == "robot"), key=lambda e: e.id)
+        for entry in entries:
+            if entry.protocol != "delta_v2":
+                robots[entry.id] = {"result": "skipped", "reason": "not_v2"}
+                continue
+            drv = self.get_driver(entry.id)
+            if drv is None or not drv.is_connected:
+                robots[entry.id] = {"result": "skipped", "reason": "not_connected"}
+                continue
+            if cut is None:
+                now = time.monotonic()
+                if should_stop():
+                    cut, stopped = "stopping", True
+                    deadline = min(deadline, now + _PARK_ALL_STOP_GRACE_S)
+                elif now >= deadline:
+                    cut = "no_time"
+            if cut is not None:
+                robots[entry.id] = {"result": "skipped", "reason": cut}
+                continue
+            robot = cast("RobotDriverV2", drv)
+            try:
+                reply = robot.call("park", {"timeout_s": timeout_s})
+                if reply.get("accepted") is True:
+                    pending.append((entry.id, robot, int(reply["seq"]), False))
+                elif reply.get("message") == TEXT_PARKING:
+                    pending.append((entry.id, robot, robot.park_current_seq(), True))
+                else:
+                    robots[entry.id] = {"result": "refused", "message": reply.get("message")}
+            except Exception as exc:  # no-health: исключение одного робота — его исход в ответе, соседи идут дальше
+                robots[entry.id] = {"result": "error", "message": f"{type(exc).__name__}: {exc}"}
+
+        while pending and time.monotonic() < deadline:
+            for item in list(pending):
+                now = time.monotonic()
+                if not stopped and should_stop():
+                    stopped = True
+                    deadline = min(deadline, now + _PARK_ALL_STOP_GRACE_S)
+                left = deadline - now
+                if left <= 0:
+                    break
+                if self._park_all_poll(item, min(_PARK_ALL_SLICE_S, left), robots):
+                    pending.remove(item)
+        for item in pending:  # завершающий проход: итог, поставленный в чужом срезе после опроса робота
+            if not self._park_all_poll(item, 0.0, robots):
+                robots[item[0]] = {"result": "timeout", "seq": item[2]}
+
+        robots = {dev_id: robots[dev_id] for dev_id in sorted(robots)}
+        failed = [
+            dev_id
+            for dev_id, r in robots.items()
+            if not (r["result"] == "done" or (r["result"] == "skipped" and r["reason"] in _PARK_ALL_OK_SKIPS))
+        ]
+        answer: dict[str, Any] = {
+            "status": "error" if failed else "ok",
+            "timeout_s": timeout_s,
+            "elapsed_s": time.monotonic() - t0,
+            "robots": robots,
+        }
+        if failed:
+            answer["message"] = _TEXT_PARK_ALL_NOT_DONE + ", ".join(failed)
+        return answer
+
+    @staticmethod
+    def _park_all_poll(item: tuple[str, RobotDriverV2, int, bool], timeout_s: float, robots: dict[str, dict]) -> bool:
+        """Один срез ожидания робота: итог (или исключение) записан в ``robots`` -> True; итога нет -> False."""
+        dev_id, robot, seq, joined = item
+        try:
+            value = robot.park_wait(seq, timeout_s)
+        except Exception as exc:  # no-health: исход робота в ответе, ожидание соседей идёт дальше
+            robots[dev_id] = {"result": "error", "message": f"{type(exc).__name__}: {exc}"}
+            return True
+        if value is None:
+            return False
+        if value.get("state") == "done":
+            r: dict[str, Any] = {
+                "result": "done",
+                "seq": seq,
+                "home": value.get("home"),
+                "elapsed_s": value.get("elapsed_s"),
+            }
+        else:
+            r = {"result": "failed", "seq": seq, "step": value.get("step"), "reason": value.get("reason")}
+        if joined:
+            r["joined"] = True
+        robots[dev_id] = r
+        return True
 
     # ------------------------------------------------------------------ #
     # Describe / protocols / read/write registers

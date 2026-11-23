@@ -160,6 +160,23 @@ class TestPersist:
         assert p.save() is True
         assert p._pending == {}
 
+    def test_save_validation_error_sets_last_error(self):
+        """Отказ валидации Save (RecipeValidationError) -> False, причина в last_error, pending цел (Task 1.16 m1)."""
+        from multiprocess_prototype.recipes.save import RecipeValidationError
+
+        class _Refusing:
+            def __call__(self) -> bool:
+                raise RecipeValidationError(["a", "b"])
+
+        commands = _FakeCommands()
+        p = CameraSettingsPresenter(
+            topology=_FakeTopology(_TOPO), recipes=_FakeRecipes("r"), commands=commands, save_active=_Refusing()
+        )
+        p._pending = {"fps": 30}
+        assert p.save() is False
+        assert p.last_error == "a; b"
+        assert p._pending == {"fps": 30}
+
 
 class TestMergeHelper:
     def test_merge_recursive_finds_block(self):

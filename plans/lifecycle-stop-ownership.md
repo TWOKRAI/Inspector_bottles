@@ -552,6 +552,8 @@ process/process_manager_process.py, DECISIONS.md, tests/}`. Не трогать:
 **Goal:** ответ `process.stop`/`process.restart` и `supervision.status` несут `outcome` = exited | terminated | killed | survived | handed_over; `success` по-прежнему «смерть подтверждена».
 **Зависит от:** Task 1.9b; О1
 **Полный текст:** [`lifecycle-stop-ownership/tasks/T1.10.md`](lifecycle-stop-ownership/tasks/T1.10.md)
+
+**Путь корня (системный стоп)** — вне этой задачи; решение CTO 2026-11-07: итог пишется в реестр в момент подтверждения смерти, поле `stop_outcome` — `gui-graceful-close` Task 1.2, `ADR-PMM-042`.
 **Handoff:** `reviewer`(стадия 0) → `tester`(RED) → `developer`(GREEN) → лид (инъекции, стенд) → `reviewer`
 **Files:** — раздел «Files» файла задачи
 **Acceptance:** — раздел «Acceptance» файла задачи

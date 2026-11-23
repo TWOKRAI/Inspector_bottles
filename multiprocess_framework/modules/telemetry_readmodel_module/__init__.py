@@ -1,4 +1,6 @@
-"""telemetry_readmodel_module — generic Qt-free ядро read-model телеметрии.
+"""Qt-free ядро read-model телеметрии: проекция значений и кольцевая история; сюда — менять чтение телеметрии
+
+telemetry_readmodel_module — generic Qt-free ядро read-model телеметрии.
 
 Одна проекция состояния (снимок ``path → value``) + кольцевые буферы истории,
 наполняемые ОДНИМ потоком уже разобранных дельт. Ядро транспорт-агностично и не
@@ -13,16 +15,20 @@
     ITelemetryReadModel      — контракт (interfaces.py)
     TelemetryReadModel       — реализация: snapshot/get/history + ingest
     DEFAULT_TRACKED_SUFFIXES — суффиксы штатных gated-метрик фреймворка (дефолт истории)
+    assemble_leaves / node_from_snapshot — сборка узла из листьев снимка (node_read.py)
 
 Модуль generic: не знает ни имён процессов, ни прикладного набора метрик.
 Потребитель передаёт эти параметры тонкой конфигурацией (``tracked_suffixes``).
 """
 
 from .interfaces import ITelemetryReadModel
+from .node_read import assemble_leaves, node_from_snapshot
 from .telemetry_read_model import DEFAULT_TRACKED_SUFFIXES, TelemetryReadModel
 
 __all__ = [
     "ITelemetryReadModel",
     "TelemetryReadModel",
     "DEFAULT_TRACKED_SUFFIXES",
+    "assemble_leaves",
+    "node_from_snapshot",
 ]

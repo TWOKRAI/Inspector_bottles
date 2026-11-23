@@ -119,3 +119,103 @@
 | # | Дата | Почему | Δ задач | Δ бюджета |
 |---|---|---|---|---|
 | 2 | 2026-11-01 | MODIFIED `tasks/1.5.md` (11→12 файлов: `port_contract.py`, `test_fake_port_hazards.py`, `testing/__init__.py`, `tests/__init__.py`, `pyproject.toml`); `tasks/1.1.md` (+`schema_mixin.py`, `multiprocess_framework/DECISIONS.md`); `tasks/2.1.md`, `2.2.md`, `2.4.md` (+`testing/fake_port.py`); `tasks/3.1.md`, `4.1.md`, `5.2.md` (подкласс `PortContractSuite`); `recording-schema.md` (отклонения `mvcr`) — по стадии 0 и ревью ветки W1b | 0 | 0 |
+
+## 7. W2, стадия 0 Task 2.1 и 2.2 — CHANGES, решения лида (2026-11-15, полоса К)
+
+Оба текста вернулись `CHANGES REQUESTED` (reviewer sonnet, раунд 1 из 2): 2.1 — 4 blocker, 8 major, 3 minor; 2.2 — 6 blocker, 5 major, 4 minor (`docs/reviews/2026-11-15_camera-2.1-2.2-stage0.md`). Решения лида:
+- 2.1: публичный API сеанса `DeviceSession` и таблица переходов записаны в DESIGN; `stop` — не команда с дедлайном (синхронно `stopping`), дедлайн только у `start` с откатом; «ошибка кадра» = `PortError` из `get_frame`, `None` сбрасывает счётчик; опции фейка (`open_delay_s`, `frame_period_s`, `get_frame_hang_s` разовый, `get_frame_errors`) + свои тесты; `impl-only`.
+- 2.2: допуск Р6 разведён по `vtype` (int — `< max(inc or 1, 1)`, прежний пример 41/40 при `inc=1` теперь верен); `inc` — из `describe_param`; `params[поле]` — скаляр, статус — `params_status`; `Step.parent` (1.6) для пропуска потомков; `errors` — за узел; логика профилей в `profiles.py`, `session.py` +≤ 30 строк; `test_rest_neter`: `errors == 1`; сеанс отдаёт замеры через `on_timing` (секунды), `apply_ms` у 2.3b заменён на `apply`.
+
+| # | Дата | Почему | Δ задач | Δ бюджета |
+|---|---|---|---|---|
+| 3 | 2026-11-15 | MODIFIED `tasks/2.1.md`, `tasks/2.2.md` (по стадии 0 W2: API сеанса, переходы, допуск по `vtype`, `profiles.py`, `test_fake_port_options.py`); `tasks/1.6.md` (`Step.parent`); `tasks/2.3b.md` (`params_status`, `apply`, `base.py:596`); `decisions.md` Р6 (int, `inc`, `params_status`) | 0 | 0 |
+
+## 8. Ревью волны W2 — пробел плана и заметки следующим задачам (2026-11-15, полоса К)
+
+Opus-ревью волны W2: код 1.6/1.8/2.1/2.2 рабочий, швы сходятся; найден пробел плана — плагин не передаёт сеансу `run`/`rest` (никакая задача не вписывала `build_plan` в плагин). Решение лида: критерий W2 «run и проверка чтением на фейке» выполнен тестами сеанса, подключение плана плагином — в `tasks/2.3a.md` (ACCEPTANCE +1). В `tasks/2.4.md` и `tasks/2.3b.md` записаны ловушки: очереди команд владельца нет (2.4 строит почтовый ящик), `on_timing("get_frame")` на каждый кадр, логгер сеанса вне файлов framework.
+
+| # | Дата | Почему | Δ задач | Δ бюджета |
+|---|---|---|---|---|
+| 4 | 2026-11-15 | MODIFIED `tasks/2.3a.md` (ACCEPTANCE: плагин строит run/rest), `tasks/2.4.md`, `tasks/2.3b.md` (TRAPS), `wave-protocol.md` (критерий W2) — по ревью волны W2 | 0 | 0 |
+
+## 9. Драйвер `mvcr` и `code_reader_sdk` вне релиза 1.0 (2026-11-16, полоса К, лид)
+
+Решение лида К (в задании полосы: «брать ли `mvcr` в 1.0 — решает лид К с числами»), без возражений координатора; владелец вправе вернуть.
+- **Причина:** ID3013 в 1.0 нет, стенд 1.0 — одна MVS (М2); 3.1 (драйвер `mvcr`), 3.2 (`code_reader_sdk` на ядре), 3.3 (рецепты, ADR-CR-011) и 6.4 (стенд N=2 ID3013) не дают ничего проверяемого в 1.0. Значит `[DEFERRED]`, не удалены (принцип FREEZE).
+- **Зависимость 4.2a от 3.2 снята.** По `tasks/4.2a.md` она была «снимком каталога» (общий файл `catalog_register_fields.txt`), а не логикой; 4.2a правит свои строки снимка независимо. W3/W4 становятся `{2.3a, 4.1} → 2.3b → 2.4 → 4.2a → {4.2b, 4.3, 4.4} → 6.1 → 6.3` (6.1 после 1.8, 2.3b — может идти параллельно с 2.4).
+- **Чем теперь проверяется, что ядро не привязано к одному вендору** (раньше — вторым вендором `mvcr`): (1) `PortContractSuite` на трёх источниках — фейк по умолчанию, `from_recording(mvs_MV-CS020-10GC.json)` и `from_recording(mvcr_ID3013.json)` (дерево узлов реального другого вендора, записано 6.2), плюс подкласс на `mvs` (фейковый `MvCamera`) — пункт ACCEPTANCE в `tasks/4.1.md`; (2) тест слоёв ядра (нет импортов вендоров, AST) и `sentrux check .` (граница `camera_device → вендоры`, ADR-CAM-001); (3) P1: драйвер `opencv` (5.2) и контрактный тест по реестру (5.3) остаются — третий и четвёртый источник. Ограничение, которое остаётся: второй вендор с настоящим SDK и потоком кадров (`mvcr`) не проверит конкурентность сеанса на другом `get_frame`; это проверка после 1.0.
+- **Что не меняется:** `3.1` и `3.2` по плану остаются как были (после 1.5 / после 2.4, 3.1), `5.3` (после 5.2, 3.1, 4.1) возвращается к ним, когда 3.1 вернётся в объём.
+
+| # | Дата | Почему | Δ задач | Δ бюджета |
+|---|---|---|---|---|
+| 5 | 2026-11-16 | MODIFIED `plan.md` (3.1, 3.2, 3.3, 6.4 `[DEFERRED]`, зависимость 4.2a от 3.2 снята), `tasks/4.2a.md` (Dependencies), `tasks/4.1.md` (ACCEPTANCE: контрактный набор на трёх источниках), `wave-protocol.md` (W3) | 0 (задачи не удалены, отложены) | −4 задачи в объёме 1.0 (3.1, 3.2, 3.3, 6.4) |
+
+## 6. Разрез 2.3a по стадии 0 (2026-11-16, лид полосы К)
+
+Стадия 0 (reviewer sonnet, раунд 1) вернула CHANGES REQUESTED: 8 блокеров. Решения лида:
+
+| Что | Было | Стало |
+|---|---|---|
+| Размер 2.3a | register, команды Р7, item, план run/rest (оценка ревьюера 33–40 ходов Sonnet, предел ~30) | 2.3a — register, идентичность прибора (`device_select` по умолчанию `serial`, `device_id` убран), план run/rest при каждом `take_device` (`DeviceSession.set_profiles`), item; **2.3c** (после 2.4) — команды Р7, `commands.py` |
+| Команды, которым нужен порт | вызов порта из потока команды | только через почтовый ящик владельца (2.4); единственное исключение из Р1 — `list_devices` (`acquire/enum/release` без handle), запись в README и ADR-CAM-002 |
+| Поля trigger/exposure/rest | в 2.3a не определены, у вендоров (4.2a) | в базовом register'е (`trigger_*`, `exposure_time`, `rest_*`), `FAKE_BINDINGS` в `testing/fake_port.py`, хук `bindings()` |
+| `readiness(ctx)` | — | работа лида Ф; решение К: нового свойства сеанса не нужно, хватает `state`, `device_held`, `last_error` (чтения без замков, `session.py:149-151,173-184`) |
+| Зависимости | 1.3 и 4.2a от 2.3a | 1.3 от 2.3c; 4.2a от 2.3c и 2.4 |
+
+- ADDED `tasks/2.3c.md` (черновик, стадия 0 после 2.4). MODIFIED `tasks/2.3a.md` (DESIGN, FILES, ACCEPTANCE; +`session.py` (`set_profiles`), `testing/fake_port.py` (`FAKE_BINDINGS`), `test_slice_plugin.py` (конфиг `_Rig`), `recipes/camera_device_demo.yaml`; `Module contract: impl-only`), `tasks/1.3.md`, `tasks/4.2a.md`, `plan.md`, `matrix.md`, `wave-protocol.md`. Δ задач +1, Δ бюджета ≈ 0 (объём тот же, делится на две).
+- Порядок W3: {2.3a, 4.1} → 2.3b → 2.4 → 2.3c. 2.3c — до W4 (4.2a ждёт её).
+
+## 7. Вердикт cto по архитектуре камер (2026-11-16, лид К; снимок main `d859338e0`, план `c78e9b68c`)
+
+Владелец снял ограничение «рецепты не править» и просил проверить, не лучше ли другая архитектура. `cto` (Fable, запуски на фейке): **вариант B (ядро + два вендорских сервиса) остаётся, слои остаются**. Довод «ломает 4 рецепта» решение и раньше не держал (4.3 правит их в К4'); против варианта A — 6 внешних импортёров пакета `hikvision_camera`, замороженные `sdk_app`/`HikvisionCamera` (Р9, Р14), 2–3 дня без новых функций. Правки (до железа, только тексты и код внутри FILES 2.3a/2.4):
+
+| Что | Правка |
+|---|---|
+| Цветной кадр (HIGH, воспроизведено) | `plugin_base.py:136` `reshape(h, w)` ломается на `rgb8` из драйвера 4.1; `frames` растёт при нуле item. В 2.3a: форма по каналам, `frames` после сборки item, битый кадр не бросает из `produce()`; строка приёмки в 2.3a и 4.2a |
+| Цикл сеанса заморожен (MED) | `set_profiles` -> `set_cycle(ident, run, rest)` (Р12 для `device_serial`); `timeout_ms`/`watchdog_s` — перезапуск процесса |
+| 2.4 | один общий ящик `call(fn, timeout)`, не очередь под `apply`; стадия 0 закрывает состояние сеанса при перезахвате; ссылка `plugin_orchestrator.py:800` |
+| 2.3c | `apply_params` пишет через `ctx.registers.set_field_value` (иначе подписчик не проснётся); строка приёмки «`set_param` в журнале» |
+| Отложено на после 1.0 | `sdk` вне контракта `DevicePort` (LOW); `stop()` до `open` не отменяет открытие (LOW, `session.py:418-421`); `trigger_software` через ящик ~2 Гц; реестр строк 5.1 против одного хука `create_port()` |
+
+- Совет cto «без `commands.py`, модели в `plugin_base.py`» НЕ принят лидом: на `commands.py` ссылается `tasks/1.3.md` R-a (`command_contracts`); цена — один маленький файл, слой вызова он не добавляет.
+- Слепой tester 2.3a написан до этих правок: пункты «цвет» и `set_cycle` в его файле не покрыты; их закрывают хазард-тесты автора и reviewer (второй прогон tester на механизм запрещён).
+- ADDED в `docs/claude/OPEN_QUESTIONS.md` (вопрос владельцу): кто дебайерит `bayer_*` на ядре (сейчас кадр идёт серой мозаикой).
+
+## Амендмент 7 (2026-11-16, лид К): разрез 2.4 по стадии 0
+
+Стадия 0 по `tasks/2.4.md` (reviewer opus, раунд 1; `docs/reviews/2026-11-16_plan-camera-device-service_task-2.4-stage0.md`): CHANGES REQUESTED, пять блокеров; оценка размера 38–45 ходов Sonnet (экспертная) при пределе ~30.
+
+| Что | Правка |
+|---|---|
+| Размер | 2.4 -> 2.4a (`session.py`: ящик, `apply`, перезахват; `fake_port.py`; README) и 2.4b (`plugin_base.py`: подписка, политика, `unsubscribe`); порядок 2.3b -> 2.4a -> 2.4b -> 2.3c |
+| Б1 механизм ящика | колбэк не блокируется: зовёт `apply` без срока; `call(fn, timeout)` — для 2.3c; правила конца цикла |
+| Б2 план в `restart` | `apply` заменяет шаги полей в `_run` внутри владельца (`set_cycle` при живом владельце отказывает); `ctx.registers is None` — подписки нет |
+| Б3 строка 2 | конфиг `trigger_managed: true, trigger_mode: On, trigger_source: SelfTrigger`, иначе `access` и зелёная строка при провале записи |
+| Б4/Б5 | «слияние» ловит «ровно один `stop_grabbing`», а не «<= 1 handle»; окно перезахвата проверяется на состояние сеанса, а не на `produce()` |
+| Состояние при перезахвате | внутри `grabbing`, новых состояний нет (прототип: читатель видит только `grabbing`, `device_held=True`); согласовано с лидом Ф |
+| `last_error` | сбрасывается на `start()` (2.4a) |
+
+- Живая проверка подписки (reviewer, настоящий `RegistersManager`): `set_field_value` будит колбэк в потоке вызывающего, прямая запись поля — нет. Дефекта framework нет. Поток живого процесса (`_message_processing_loop`) не проверен — стенд в 2.4b.
+- Зависимости: 2.3c от 2.4a и 2.4b; 4.2a от 2.4a и 2.4b.
+
+## Амендмент 8 (2026-11-16, лид К): разрез 2.3c по стадии 0
+
+Стадия 0 по `tasks/2.3c.md` (reviewer sonnet, раунд 1; `docs/reviews/2026-11-16_plan-camera-device-service_task-2.3c-stage0.md`): CHANGES REQUESTED, блокеры B1–B7, замечания N1–N8; оценка размера 34–42 хода Sonnet (экспертная) при пределе ~30. Решения лида (разрез по механизму: что не требует ни порта, ни ящика — в 2.3c; что требует — в 2.3d):
+
+| Что | Правка |
+|---|---|
+| Размер | 2.3c (A, Middle, ≈ 22–26 ходов): `commands.py`, проводка `timeout_s` в `take_device`/`release_device`, `read_params`, `reset_stats`, `apply_params`. 2.3d (B, Middle+, developer ≈ 24–30): `_ensure_port`, `list_devices`, `describe_params`, `trigger_software`, сторож `call`; документы (README «Команды», ADR-CAM-002, `STATUS.md`, sync/validate) — отдельный шаг `tech-writer` после GREEN (раунд 2 стадии 0: 32–40 ходов вместе с документами). Оценки ходов экспертные |
+| B1 `list_devices` | исключения из Р1 нет: при `grabbing` перечисление исполняет владелец (`session.call`), без сеанса — поток команды через порт из `_ensure_port()`, `opening`/`stopping` — отказ. Прежнее «единственное исключение из Р1» (амендмент 6, строка «Команды, которым нужен порт») СНЯТО. Безопасность `MV_CC_EnumDevices` при открытом handle не измерена (0.5/6.2) — касается только межпроцессного случая `hikvision_dual`, открытое, не блокер |
+| B2 `trigger_software` | хук `software_trigger_binding()`, умолчание `Binding("genicam", "TriggerSoftware", "command")`; capability — у порта (`_ensure_port()`), выполнение через `call` |
+| B3 `apply_params` | единственный путь — `ctx.registers.set_field_value`; `session.apply` из команды запрещён; проверка всех полей до записи (вне `bindings()`, readonly); ответ `applied` + `on_device` |
+| B4 `reset_stats` | сбрасываются `frames` (плагин, register, метрика), `dropped`, `_item_error`, окно fps; не сбрасываются `errors` сеанса и `seq_id`; замок `_stats_lock` |
+| B5 `describe_params` | один `call` по всем `bindings()`, источник — `describe_param` владельцем, не `ProfileRunner._step_of` |
+| B6 срок и сторож | `_CALL_TIMEOUT_S = 2.0`; `call()` ставит в ящик `lambda: self._port_call("call", fn)` (правка `session.py`); команды с `call` блокируют приём команд процесса до срока |
+| B7, N1–N8 | FILES полные; ссылки поправлены (`fake_port.py:321-322`, `README.md:124`, `tasks/4.2a.md:37`); ссылка «имена фиксирует 1.3 R-a» удалена (неверна); `commands.py` — Module contract lite |
+| Зависимости | 2.3c <- 2.4a, 2.4b; 2.3d <- 2.3c, 2.4a, 2.4b; 1.3 <- только 2.3c (имена моделей); 4.2a <- 2.3c и 2.3d. `command_contracts` на класс плагина вешает 1.3, не 2.3c |
+| Порядок W3 | {2.3a, 4.1} → 2.3b → 2.4a → 2.4b → 2.3c → 2.3d (`plugin_base.py` последовательно) |
+| Стадия 0 и слепой tester | у обеих задач (11 и 10 задач в `plan.md`, `wave-protocol.md`); Opus сразу после каждой — по правилу «блокер стадии 0» |
+
+- ADDED `tasks/2.3d.md`. MODIFIED `tasks/2.3c.md` (переписана), `tasks/1.3.md` (Dependencies, R-a, OUT OF SCOPE), `tasks/4.2a.md` (Dependencies), `plan.md` (строки 2.3c, 2.3d, 1.3, 4.2a, счётчики, decisions log), `matrix.md` (строки 2.3c, 2.3d, 1.3, 4.2a), `wave-protocol.md` (список стадии 0, порядок W3, Opus сразу).
+- Δ задач +1 (2.3d). Δ бюджета: +1 запуск исполнителя, +1 стадия 0, +1 слепой tester, +1 ревью Opus сразу; токены не оценивались, порог 14M не пересматривался.
+- Раунд 2 стадии 0 (reviewer, тот же отчёт, раздел «Раунд 2»): 2.3c — CHANGES REQUESTED, 2 блокера; 2.3d — CHANGES REQUESTED, 1 блокер; правки внесены дословно (2026-11-16): пробная запись пакета `apply_params` на копии register'а (`validate_field_value` типы не проверяет); два литерала `seq_id` (6 и 7 с битым кадром); `_dropped`/`_item_error` под `_stats_lock`; детерминированный hazard `reset_stats` (прокси `_reg` с блокирующим сеттером); `applied` на отказе фазы записи; `on_device` по политике поля; выбор пути `list_devices` по `device_held`, а не по `state`; hazard «медленный `close` + `stop(0.05)`»; документы 2.3d — шаг `tech-writer`; break-injection 2.3c выборочно (удвоение `session.apply`, пакет без пробы, `_stats_lock`).

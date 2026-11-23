@@ -21,6 +21,7 @@ PC 1.2 (publisher-gate): ``build_worker_telemetry`` принимает ``allowed
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any, Callable, Iterable, Mapping, Optional
@@ -82,6 +83,13 @@ for _counter in PROCESS_COUNTER_SUMS:
     declare_metric(_counter, owner=__name__)
 del _counter
 
+#: Статусы воркера, которыми его намеренно вывели из работы: ``WorkerStatus.STOPPED`` и
+#: ``WorkerStatus.COMPLETED`` (``worker_module/types/types.py:31,35``). Снимок несёт ``.value``
+#: строкой (``worker_module/core/worker_manager.py:315``), поэтому здесь строки: process_module
+#: не импортирует enum соседнего модуля ради двух литералов. Такой воркер остаётся в реестре
+#: (``stop_worker`` его не удаляет), и его ``1/возраст`` растёт вечно — в пару процесса он не входит.
+_DELIBERATELY_FINAL_STATUSES = frozenset({"stopped", "completed"})
+
 
 def build_worker_telemetry(
     workers: dict,
@@ -97,23 +105,49 @@ def build_worker_telemetry(
 
         path = f"processes.{name}"
         data = {
-            "workers": {wname: {"status", "effective_hz"?, "cycle_duration_ms"?,
-                                "queue_wait_ms"?, "transport_ms"?, "pacer_late"?}, ...},
+            "workers": {wname: {"status", "effective_hz"?, "last_cycle_age_s"?,
+                                "cycle_duration_ms"?, "queue_wait_ms"?, "transport_ms"?,
+                                "pacer_late"?}, ...},
             "state":   {"fps"?, "latency_ms"?},   # агрегат
         }
 
-    Правила (паритет с прежней логикой при ``allowed_metrics=None``):
-      - per-worker: ``status`` — всегда (если не None, вне гейта); ``effective_hz`` —
-        при hz>0 И если метрика разрешена; ``cycle_duration_ms`` — при lat>0 И если
-        разрешена; ``queue_wait_ms`` (EMA ожидания в chain_queue, у PipelineExecutor),
-        ``transport_ms`` (EMA времени транспорта между процессами, у DataReceiver) и
-        ``pacer_late`` (счётчик опоздавших тактов, у SourceProducer/IdleWorker) — при
-        наличии числа, включая 0, если разрешены; воркер без единого поля не попадает
+    Правила (0.8: частота с учётом возраста, пара одного воркера):
+      - воркер «отработал», если в его снимке есть ``last_cycle_age_s`` (число; его даёт
+        ``CycleMetricsRecorder`` после первого цикла). Воркер без рекордера или без единого
+        цикла ``effective_hz``/``last_cycle_age_s`` не публикует и в пару не входит;
+      - per-worker: ``status`` — всегда (если не None, вне гейта); у отработавшего —
+        ``effective_hz`` — по гейту; число (включая 0 — ноль есть показание) либо явный
+        ``None``, если частота неизвестна или не конечна (NaN/inf): merge не трогает
+        отсутствующий ключ и оставил бы под свежей меткой старое число; ``last_cycle_age_s``
+        — возраст последнего цикла, с (не округляется) — ТОЛЬКО вместе с разрешённым
+        ``effective_hz`` (то же условие ``hz_ok``; вне ``include_cycles``): своего правила
+        троттла у ключа нет, а меняется он каждый тик — при выключенном гейте он стоил бы
+        дельту на воркера на тик из ничего, а ручка «выключено» обязана давать цену ноль.
+        Цена при ОТКРЫТОМ гейте — до +1 дельты на воркера на тик (измерено ревью: 2.6 → 5.0
+        дельт за тик на 2 воркерах); ``cycle_duration_ms``
+        — при lat>0 И если разрешена; ``queue_wait_ms`` (EMA ожидания в chain_queue, у
+        PipelineExecutor), ``transport_ms`` (EMA времени транспорта между процессами, у
+        DataReceiver) и ``pacer_late`` (счётчик опоздавших тактов, у SourceProducer/IdleWorker)
+        — при наличии числа, включая 0, если разрешены; воркер без единого поля не попадает
         в payload;
-      - агрегат ``state``: ``fps`` = max(hz) по running-воркерам с hz>0 (если ``fps``
-        разрешён); ``latency_ms`` = max(cycle_duration_ms) среди них (если ``latency_ms``
-        разрешён); нет hz>0 → без агрегата;
-      - округление до 1 знака сохранено (fps/hz/latency);
+      - агрегат ``state`` (пара ОДНОГО воркера): воркер с наименьшей числовой ``effective_hz``
+        среди отработавших, КРОМЕ воркеров с намеренно конечным статусом ``stopped``/``completed``
+        (решение владельца: остановленный оператором воркер не прижимает ``fps`` процесса —
+        его ``1/возраст`` растёт вечно). Зависшая (``running`` с давним возрастом), упавшая
+        (``error``) и завершающаяся (``stopping``) стадии в паре ОСТАЮТСЯ и спадают как
+        1/возраст; ``status`` и листья (``effective_hz``, ``last_cycle_age_s``) самого
+        остановленного воркера публикуются как были. ``fps`` — ``effective_hz`` воркера пары
+        (если ``fps`` разрешён), ``latency_ms`` — его ``cycle_duration_ms`` напрямую, ноль
+        включая (если ``latency_ms`` разрешён). Набор пуст (никто не отработал, у всех частота
+        ``None`` или все отработавшие остановлены намеренно) при включённом агрегате →
+        ``fps`` и ``latency_ms`` публикуются как ``None``:
+        старое число не живёт под свежей меткой. Так же — у процесса, чьи воркеры без
+        ``CycleMetricsRecorder``: листья ``None`` уходят в merge на каждом тике. Это «ведущий
+        темп процесса» = МЕДЛЕННЕЙШАЯ стадия, а не максимум по воркерам: читатели, считающие
+        «ведущий темп» как ``max(effective_hz)`` по воркерам, получают другое число;
+      - округление до 1 знака снято для ``fps``, ``latency_ms``, ``effective_hz``: при
+        ``round(x, 1)`` стадия медленнее ~1 цикла/20 с публиковалась бы как 0.0.
+        ``cycle_duration_ms``/``queue_wait_ms``/``transport_ms`` округляются как раньше;
       - Task 5.6: ``state.<счётчик>`` для имён :data:`PROCESS_COUNTER_SUMS` — сумма по воркерам,
         несущим ключ (включая 0, если разрешён); ни один воркер не несёт → листа нет. Публикуется
         и без агрегата частоты.
@@ -144,7 +178,9 @@ def build_worker_telemetry(
 
     Returns:
         ``(path, data)`` для ``proxy.merge`` — ЛИБО ``None``, если публиковать нечего
-        (пустой снимок / ни одного воркера с полями и без агрегата).
+        (пустой снимок ``workers == {}`` — нет воркеров или упал сбор статусов; либо ни одного
+        воркера с полями, а агрегат ``fps``/``latency_ms`` выключен гейтом). При НЕпустом
+        снимке и включённом агрегате лист ``None`` публикуется всегда, см. выше.
 
     Pre:
         - ``workers`` — mapping; нестандартные значения (не dict) пропускаются.
@@ -167,8 +203,11 @@ def build_worker_telemetry(
     collect_aggregate = fps_ok or plat_ok
 
     workers_payload: dict[str, dict] = {}
-    hz_values: list[float] = []
-    latency_values: list[float] = []
+    # Пара процесса (0.8): воркер с наименьшей числовой ``effective_hz`` среди отработавших, кроме
+    # намеренно остановленных (``_DELIBERATELY_FINAL_STATUSES``) — ``(hz, cycle_duration_ms воркера |
+    # None)``. ``fps`` и ``latency_ms`` процесса — оба от ОДНОГО воркера, а не максимум по каждой
+    # метрике порознь.
+    pair: tuple[float, float | None] | None = None
     # Task 5.6: суммы счётчиков тракта. Ключ появляется, только если хоть один воркер его несёт:
     # у процесса без счётчика (camera, процесс под latest для not_inspected_*) листа нет, а не ноль.
     counter_sums: dict[str, int | float] = {}
@@ -184,13 +223,25 @@ def build_worker_telemetry(
         status = w.get("status")
         hz = w.get("effective_hz")
         lat = w.get("cycle_duration_ms")
+        age = w.get("last_cycle_age_s")
+        # «Отработал» = в снимке есть возраст последнего цикла (его даёт CycleMetricsRecorder
+        # после первого цикла). Воркер без рекордера или без единого цикла частоты не публикует.
+        worked = isinstance(age, (int, float)) and not isinstance(age, bool)
+        # NaN/inf в пару и в лист не идут: ``hz < nan`` всегда False, и NaN первым залипал бы в паре.
+        hz_num = isinstance(hz, (int, float)) and not isinstance(hz, bool) and math.isfinite(hz)
 
         # Per-worker: status — всегда (вне гейта); частоту/цикл — при измерении И если разрешено.
         wp: dict = {}
         if status is not None:
             wp["status"] = status
-        if hz_ok and isinstance(hz, (int, float)) and hz > 0:
-            wp["effective_hz"] = round(hz, 1)
+        if worked and hz_ok:
+            # Возраст последнего цикла идёт ТОЛЬКО вместе с разрешённым ``effective_hz`` (одно условие):
+            # у него нет своего правила троттла, а ключ меняется на каждом тике — при выключенном гейте
+            # он стоил бы дельту на воркера на тик из ничего («ручка выключает — цена ноль»).
+            wp["last_cycle_age_s"] = age
+            # Ноль — показание, а не отсутствие; неизвестная частота — явный None (merge не
+            # трогает отсутствующий ключ и оставил бы под свежей меткой старое число).
+            wp["effective_hz"] = hz if hz_num else None
         if lat_ok and isinstance(lat, (int, float)) and lat > 0:
             wp["cycle_duration_ms"] = round(lat, 1)
         # Task 4.5a: ноль здесь — показание («не ждали» / «не опаздывали»), не отсутствие.
@@ -213,22 +264,29 @@ def build_worker_telemetry(
         if wp:
             workers_payload[wname] = wp
 
-        # Агрегат процесса: только running-воркеры с реальной частотой (и только если
-        # агрегатные метрики вообще нужны — иначе не считаем).
-        if collect_aggregate and status == "running" and isinstance(hz, (int, float)) and hz > 0:
-            hz_values.append(float(hz))
-            if isinstance(lat, (int, float)) and lat > 0:
-                latency_values.append(float(lat))
+        # Агрегат процесса: пара самого медленного из отработавших с числовой частотой (только
+        # если агрегатные метрики вообще нужны — иначе не считаем). Исключены лишь воркеры с намеренно
+        # конечным статусом (``stopped``/``completed``): их 1/возраст растёт вечно и прижимал бы
+        # ``fps`` процесса к нулю. Зависшая (``running`` с давним возрастом), упавшая (``error``) и
+        # завершающаяся (``stopping``) стадии спадают как 1/возраст и обязаны тянуть пару вниз.
+        in_pair = not (isinstance(status, str) and status in _DELIBERATELY_FINAL_STATUSES)
+        if collect_aggregate and worked and hz_num and in_pair and (pair is None or hz < pair[0]):
+            lat_num = isinstance(lat, (int, float)) and not isinstance(lat, bool)
+            pair = (float(hz), float(lat) if lat_num else None)
 
     data: dict = {}
     if workers_payload:
         data["workers"] = workers_payload
     state: dict = {}
-    if hz_values:
+    if collect_aggregate and workers:
+        # Воркеры есть, а набор пуст (никто не отработал / ни у кого нет числовой скорости —
+        # это и есть остановленная стадия) → явный None: старое число не должно жить под
+        # свежей меткой. Пустой снимок (нет воркеров / упал сбор статусов) сюда не попадает:
+        # публиковать нечего, старое значение стареет через механизм свежести, а не затирается.
         if fps_ok:
-            state["fps"] = round(max(hz_values), 1)
-        if plat_ok and latency_values:
-            state["latency_ms"] = round(max(latency_values), 1)
+            state["fps"] = None if pair is None else pair[0]
+        if plat_ok:
+            state["latency_ms"] = None if pair is None else pair[1]
     # Счётчики — не агрегат частоты: публикуются и без running-воркера с hz>0 (накопленное
     # число не перестаёт быть показанием, когда воркер встал). Ноль — показание (Task 4.5a).
     state.update(counter_sums)
@@ -277,6 +335,7 @@ def build_router_shm_telemetry(router: Any) -> dict:
         (публикатор логирует и пропускает тик; опрос отдаёт секцию ``None``).
     """
     narrow = getattr(router, "get_shm_stats", None)
+    rs: dict[str, Any]
     if callable(narrow):
         rs = narrow()
     else:

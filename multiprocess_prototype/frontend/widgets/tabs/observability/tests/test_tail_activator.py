@@ -264,8 +264,11 @@ class TestPanelStopsBeingErrorOnly:
             def __init__(self) -> None:
                 self.pushed: list[dict] = []
 
-            def send_async(self, message: dict, priority: str = "normal") -> None:
+            def send(self, message: dict) -> dict:
+                # Task 0.5c: форвардер судит ответ router.send(), а не бросает в send_async
+                # (ADR-RTR-016) — фейк границы процесса отвечает принятым исходом.
                 self.pushed.append(message)
+                return {"status": "success"}
 
         logger = LoggerManager(
             manager_name="GuiTailProbe",

@@ -1,0 +1,52 @@
+{
+ "_note": "ideal: ids known only to the reference author, full sections; realistic: names from the question text (or the most natural guess), default budget. Written before atlas_ceiling.py was first run.",
+ "A1": {
+  "ideal": [["ref", "multiprocess_framework/modules/recipe/format.py::compute_rev", "--all", "call_sites"]],
+  "realistic": [["ref", "compute_rev"]]
+ },
+ "A2": {
+  "ideal": [["ref", "multiprocess_framework/modules/channel_routing_module/levels.py::severity_of", "--all", "call_sites"]],
+  "realistic": [["ref", "severity_of"]]
+ },
+ "B1": {
+  "ideal": [
+   ["ref", "multiprocess_framework/modules/channel_routing_module/interfaces.py::IChannel", "--all", "subclasses"],
+   ["ref", "multiprocess_framework/modules/logger_module/interfaces.py::ILogChannel", "--all", "subclasses"],
+   ["ref", "multiprocess_framework/modules/logger_module/channels/log_channel.py::LogChannel", "--all", "subclasses"],
+   ["ref", "multiprocess_framework/modules/router_module/interfaces.py::IMessageChannel", "--all", "subclasses"],
+   ["ref", "multiprocess_framework/modules/router_module/channels/base_channel.py::MessageChannel", "--all", "subclasses"]
+  ],
+  "realistic": [["ref", "IChannel"]]
+ },
+ "B2": {
+  "ideal": [["ref", "multiprocess_prototype/domain/protocols/config_store.py::ConfigStore", "--full"]],
+  "realistic": [["ref", "ConfigStore"]]
+ },
+ "C1": {
+  "ideal": [["map", "multiprocess_framework/modules/router_module/middleware/not_inspected_marker.py", "--all", "used_by"]],
+  "realistic": [["map", "router_module"]]
+ },
+ "C2": {
+  "ideal": [["map", "telemetry_readmodel_module", "--all", "used_by"]],
+  "realistic": [["map", "telemetry_readmodel_module"]]
+ },
+ "D1": {
+  "ideal": [["map", "router_module", "--all", "threads"]],
+  "realistic": [["map", "router_module"]]
+ },
+ "D2": {
+  "ideal": [
+   ["map", "multiprocess_framework/modules/logger_module/core/log_paths.py", "--full"],
+   ["ref", "multiprocess_framework/modules/process_module/configs/process_launch_config.py", "--full"]
+  ],
+  "realistic": [["map", "logger_module"]]
+ },
+ "E1": {
+  "ideal": [["ref", "multiprocess_framework/modules/process_manager_module/process/process_manager_process.py::ProcessManagerProcess._pm_stopping", "--all", "call_sites"]],
+  "realistic": [["ref", "ProcessManagerProcess._pm_stopping"]]
+ },
+ "E2": {
+  "ideal": [["ref", "multiprocess_framework/modules/process_manager_module/core/stop_budget.py::stop_budget", "--full"]],
+  "realistic": [["ref", "stop_budget"]]
+ }
+}

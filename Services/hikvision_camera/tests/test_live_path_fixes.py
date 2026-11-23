@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Живой путь `hikvision`: форма кадра (F4), запись рецепта (F10), коды узлов (F3).
+"""Живой путь `hikvision`: форма кадра (F4), коды узлов (F3) на уровне `HikvisionCamera`/`FrameConverter`.
 
 Фейк MvCamera ведёт журнал вызовов; SDK и ctypes-перечисление подменены так же,
-как в test_camera.py. Тесты плагина используют настоящий HikvisionCamera
-(не MagicMock), чтобы цепочка плагин -> камера -> SDK проверялась целиком.
+как в test_camera.py. Плагинные случаи (запись рецепта F10, `get_parameters`) ушли в Task 4.2b:
+плагин работает на ядре `camera_device`, смысл покрыт test_plugin_on_core.py.
 """
 
 from __future__ import annotations
 
 from ctypes import POINTER, c_ubyte, cast
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from Services.hikvision_camera.core.camera import CameraState, HikvisionCamera
 
@@ -184,118 +182,3 @@ def test_отказ_FrameRateEnable_виден():
     fake = FakeMv(rc={("Bool", "AcquisitionFrameRateEnable"): 0x80000007})
     assert _open_camera(cam, fake) is True
     assert cam.param_errors == {"AcquisitionFrameRateEnable": "0x80000007"}
-
-
-# ---------------------------------------------------------------------------
-# F10: рецепт пишется в камеру после open и до StartGrabbing (плагин)
-# ---------------------------------------------------------------------------
-
-
-def _plugin_start(config: dict, fake: FakeMv):
-    """Настроить плагин с настоящей HikvisionCamera и запустить захват."""
-    from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
-
-    ctx = MagicMock()
-    ctx.config = config
-    ctx.registers = None
-    plugin = HikvisionCameraPlugin()
-    plugin.configure(ctx)
-    p1, p2, p3, p4 = _open_patches(fake)
-    with p1, p2, p3, p4:
-        result = plugin.cmd_start_capture({})
-    return plugin, result
-
-
-def test_рецепт_exposure_пишется_после_open():
-    fake = FakeMv()
-    _, result = _plugin_start({"exposure_time": 5000}, fake)
-    assert result == {"status": "ok"}
-    log = fake.log
-    i_open = log.index(("OpenDevice",))
-    i_auto = log.index(("SetEnumValue", "ExposureAuto", 0))
-    i_exp = log.index(("SetFloatValue", "ExposureTime", 5000.0))
-    i_start = log.index(("StartGrabbing",))
-    assert i_open < i_auto < i_exp < i_start
-
-
-def test_без_ключа_рецепта_exposure_не_пишется():
-    fake = FakeMv()
-    _, result = _plugin_start({}, fake)
-    assert result == {"status": "ok"}
-    assert [e for e in fake.log if e[0] == "SetFloatValue"] == []
-    assert ("SetEnumValue", "ExposureAuto", 0) not in fake.log
-    assert ("SetEnumValue", "GainAuto", 0) not in fake.log
-
-
-def test_gain_рецепта_пишется_после_GainAuto():
-    fake = FakeMv()
-    _plugin_start({"gain": 7}, fake)
-    log = fake.log
-    assert (
-        log.index(("OpenDevice",))
-        < log.index(("SetEnumValue", "GainAuto", 0))
-        < log.index(("SetFloatValue", "Gain", 7.0))
-        < log.index(("StartGrabbing",))
-    )
-
-
-def test_fps_рецепта_пишется_как_frame_rate():
-    fake = FakeMv()
-    _plugin_start({"fps": 25}, fake)
-    log = fake.log
-    assert log.index(("SetFloatValue", "AcquisitionFrameRate", 25.0)) < log.index(("StartGrabbing",))
-
-
-def test_frame_rate_приоритетнее_fps():
-    fake = FakeMv()
-    _plugin_start({"fps": 25, "frame_rate": 10}, fake)
-    writes = [e for e in fake.log if e[:2] == ("SetFloatValue", "AcquisitionFrameRate")]
-    assert writes == [("SetFloatValue", "AcquisitionFrameRate", 10.0)]
-
-
-def test_get_parameters_отдаёт_param_errors():
-    fake = FakeMv(rc={("Enum", "TriggerMode"): 0x80000106})
-    plugin, result = _plugin_start({}, fake)
-    assert result == {"status": "ok"}
-    with patch("Services.hikvision_camera.core.parameters.SDK_AVAILABLE", True):
-        answer = plugin.cmd_get_parameters({})
-    assert answer["status"] == "ok"
-    assert answer["param_errors"] == {"TriggerMode": "0x80000106"}
-
-
-def test_get_parameters_ошибка_тоже_несёт_param_errors():
-    fake = FakeMv(rc={("Enum", "TriggerMode"): 0x80000106})
-    plugin, _ = _plugin_start({}, fake)
-    # SDK_AVAILABLE=False в parameters -> get_parameters возвращает None
-    with patch("Services.hikvision_camera.core.parameters.SDK_AVAILABLE", False):
-        answer = plugin.cmd_get_parameters({})
-    assert answer["status"] == "error"
-    assert answer["param_errors"] == {"TriggerMode": "0x80000106"}
-
-
-# ---------------------------------------------------------------------------
-# Правка ревью р.1 (находка 9): нечисловое значение рецепта не роняет запуск
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("key", ["exposure_time", "gain", "frame_rate", "fps"])
-def test_нечисловой_рецепт_даёт_error_без_исключения(key):
-    # configure() с пустым конфигом: валидацию register'а (она тоже отвергла бы
-    # "abc" для exposure_time/gain/frame_rate) обходим — проверяем именно запись
-    # рецепта, которая читает ctx.config на старте захвата.
-    from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
-
-    fake = FakeMv()
-    ctx = MagicMock()
-    ctx.config = {}
-    ctx.registers = None
-    plugin = HikvisionCameraPlugin()
-    plugin.configure(ctx)
-    ctx.config = {key: "abc"}
-    p1, p2, p3, p4 = _open_patches(fake)
-    with p1, p2, p3, p4:
-        result = plugin.cmd_start_capture({})
-    assert result["status"] == "error"
-    assert key in result["error"]
-    assert ("StartGrabbing",) not in fake.log
-    assert [e for e in fake.log if e[0] == "SetFloatValue"] == []

@@ -67,7 +67,7 @@ and glossary. Reduces "blind reading" of the source.
 
 ## Related commands
 
-- `/dev:adr` — create a **global** (cross-module) ADR in `docs/claude/DECISIONS/`
+- `/dev:adr` — create a **global** (cross-module) ADR in `docs/decisions/`
 - `/mcp-sentrux:sentrux-dsm` — view dependencies between modules (visual pendant)
 - skill `module-contract` — when creating a new module, recommends a
   CONTEXT.md if there are Gotchas or Key decisions

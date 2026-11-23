@@ -1,0 +1,24 @@
+name: slowprobe
+description: "Проба 1.1a: один обычный ребёнок и один с медленным shutdown (4 с)"
+
+processes:
+  - process_name: ticker
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: examples.minimal_app.plugins.tick_source.plugin.TickSourcePlugin
+        plugin_name: tick_source
+        category: utility
+        interval_sec: 1.0
+        message: hello
+        target: console_sink
+
+  - process_name: console_sink
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: slowprobe.plugin.SlowConsumerPlugin
+        plugin_name: slow_consumer
+        category: utility
+
+wires: []

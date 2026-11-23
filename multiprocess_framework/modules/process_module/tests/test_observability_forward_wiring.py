@@ -27,6 +27,10 @@ class FakeRouter:
     def send_async(self, message, priority="normal"):
         self.sent.append(message)
 
+    def send(self, message):
+        self.sent.append(message)  # Task 0.5c: форвардер зовёт синхронный send
+        return {"status": "success"}
+
 
 class FakeLoggerCore:
     """Мини-LoggerCore: реестр tap'ов + эмиссия error-записи через них."""

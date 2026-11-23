@@ -19,8 +19,9 @@
 - [Ноль красных](feedback_injection_zero_may_mean_the_guards_were_not_collected.md) — база матрицы без `-k`, collected числом
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — вердикт без вход→выход = совет
 - [Об ОТСУТСТВИИ](feedback_an_absence_assertion_needs_a_reachability_check.md) — с парной проверкой достижимости
-- [rg от корня слеп](feedback_root_ignore_whitelist_blinds_root_search.md) — явный путь или git grep
+- [rg/qex слепы к docs/](feedback_root_ignore_whitelist_blinds_root_search.md) — явный путь или git grep; сгенерированное в docs/ — ссылкой
 - [Сторож «хоть раз» слеп](feedback_a_guard_that_counts_at_least_once_is_blind.md) — судить поимённо, не суммой
+- [Сервер пишет файл в HOME → autouse-изоляция на каталог](feedback_server_file_in_home_needs_dir_autouse_isolation.md) — токен порта; выкл. для живого режима
 - [Дублёр верен форме, не протоколу](feedback_a_faithful_fake_still_lacks_the_protocol.md) — одно имя, две двери
 - [Чужая сессия в том же дереве](feedback_a_peer_session_shares_the_tree.md) — один писатель, стейджить явные пути
 - [commit берёт весь индекс](feedback_commit_takes_the_whole_index.md) — `git add -A` затягивает чужое
@@ -62,6 +63,8 @@
 - [Запуск qt-mcp](reference_qt_mcp_launch.md) — зонд только с env
 - [GUI-стенд боевым входом](project_gui_stand_production_entry_only.md) — `INSPECTOR_GUI_UNATTENDED=1`
 - [Бэкенд через backend_ctl](feedback_backend_ctl_for_agents.md) — не GUI, не qt-mcp
+
+- [macOS: слушатель порта — spawn-потомок](feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it.md) — фейк зелёный, стенд отказал; lsof → ppid
 
 ## 4. Как писать
 Урок = ловушка + замер (вход→выход) + триггер; теги `module:` и `mechanism:` во frontmatter; `/core:memory:remember` (только лид; субагент — блок MEMORY LESSON, project-rules §8).

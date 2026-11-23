@@ -1,0 +1,66 @@
+units 89
+каталогов с прямыми .py: 681 ; с .py на любой глубине (без корня): 701
+каталоги с прямыми .py: ровно paths[0] юнита: 83 ; ровно любой dir-элемент paths: 84 ; внутри юнита (глубже): 564 ; вне юнитов: 33
+число .py в каталогах 'вне юнитов': 98
+none (все):
+   ./ 2
+   .claude/plugins/core/hooks/ 1
+   .claude/plugins/core/hooks/_lib/ 2
+   .claude/plugins/core/scripts/ 12
+   .claude/plugins/core/scripts/aggregate_context/ 6
+   .claude/plugins/core/tests/ 1
+   .claude/plugins/dev/evals/ 2
+   .claude/plugins/knowledge/ 1
+   .claude/plugins/lang-python/templates/scripts/ 5
+   .claude/plugins/lang-python/templates/scripts/changelog_gen/ 1
+   .claude/plugins/lang-python/templates/scripts/claude_md_audit/ 1
+   .claude/plugins/lang-python/templates/scripts/clean_cache/ 1
+   .claude/plugins/lang-python/templates/scripts/code_stats/ 2
+   .claude/plugins/lang-python/templates/scripts/link_check/ 1
+   .claude/plugins/lang-python/templates/scripts/secrets_audit/ 1
+   .claude/plugins/lang-python/templates/scripts/test_ratio/ 1
+   .claude/plugins/lang-python/templates/scripts/todo_inventory/ 1
+   .claude/plugins/lang-python/templates/validate_commit/ 3
+   .claude/plugins/mcp-graphify/scripts/ 1
+   .claude/plugins/mcp-qex/ 4
+   .claude/plugins/observability/tests/ 2
+   .claude/plugins/security/scripts/ 2
+   Plugins/ 1
+   Plugins/tests/ 3
+   Services/ 1
+   Services/tests/ 2
+   docs/audits/2026-10-02_transport-facts/ 2
+   docs/claude/frozen/knowledge-plugin/ 1
+   multiprocess_framework/ 2
+   multiprocess_framework/modules/ 4
+   multiprocess_framework/modules/tests/ 19
+   multiprocess_prototype/ 5
+   workspace/dev/style-bench/ 5
+каталоги-предки юнитов (map <предок> -> несколько юнитов): 5 ['Plugins/', 'Services/', 'multiprocess_framework/', 'multiprocess_framework/modules/', 'multiprocess_prototype/']
+multiprocess_framework/ юнитов внутри: 35
+multiprocess_framework/modules/ юнитов внутри: 35
+Services/ юнитов внутри: 18
+Plugins/ юнитов внутри: 12
+multiprocess_prototype/ юнитов внутри: 11
+scripts/ юнитов внутри: 2
+юнитов, вложенных в другой юнит: 15 пар: 26
+внешние юниты, внутри которых есть другие: 9
+вложенные юниты, id: ['backend_ctl/probes/', 'multiprocess_framework/modules/frontend_module/components/', 'multiprocess_framework/modules/frontend_module/components/_examples/', 'multiprocess_framework/modules/frontend_module/components/base/', 'multiprocess_framework/modules/frontend_module/core/', 'multiprocess_framework/modules/frontend_module/widgets/', 'multiprocess_framework/modules/frontend_module/widgets/chrome/', 'multiprocess_framework/modules/frontend_module/widgets/tabs/', 'multiprocess_framework/modules/process_module/generic/', 'multiprocess_prototype/frontend/widgets/', 'multiprocess_prototype/frontend/widgets/tabs/', 'multiprocess_prototype/frontend/widgets/tabs/pipeline/', 'multiprocess_prototype/frontend/widgets/tabs/services/', 'multiprocess_prototype/frontend/widgets/tabs/settings/', 'scripts/atlas/']
+unit passport path == paths[0]: True
+dir-элементов paths, повторяющихся у разных юнитов: []
+пример id->p0 (15):
+   actions_module -> multiprocess_framework/modules/actions_module/ | purpose: Action-шина с undo/redo и объединением правок для 
+   app_module -> multiprocess_framework/modules/app_module/ | purpose: Шаблон приложения (composition root): общая сборка
+   base_manager -> multiprocess_framework/modules/base_manager/ | purpose: Базовый менеджер: жизненный цикл, адаптеры, наблюд
+   frontend_module/components/_examples -> multiprocess_framework/modules/frontend_module/components/_examples/ | purpose: Учебные схемы и адаптеры к контролам; сюда — смотр
+   frontend_module/components/base -> multiprocess_framework/modules/frontend_module/components/base/ | purpose: Базовый слой контролов: контракты, конфиг, мост к 
+   frontend_module/core -> multiprocess_framework/modules/frontend_module/core/ | purpose: Базовые классы frontend_module без Qt: маршрутизац
+   frontend_module/widgets -> multiprocess_framework/modules/frontend_module/widgets/ | purpose: Составные UI-компоненты: вкладки, таблицы, шапка, 
+   frontend_module/widgets/chrome -> multiprocess_framework/modules/frontend_module/widgets/chrome/ | purpose: Заголовок приложения, боковые панели и оверлеи; сю
+   frontend_module/widgets/tabs -> multiprocess_framework/modules/frontend_module/widgets/tabs/ | purpose: Вкладки: TabWidget, BaseTab, MVP-база, привязка к 
+   process_module/generic -> multiprocess_framework/modules/process_module/generic/ | purpose: GenericProcess: конфиг-драйвен процесс с загрузкой
+   prototype/frontend/widgets -> multiprocess_prototype/frontend/widgets/ | purpose: Виджеты GUI прототипа по доменам: вкладки, дисплеи
+   prototype/frontend/widgets/tabs -> multiprocess_prototype/frontend/widgets/tabs/ | purpose: Вкладки приложения: реестр фабрик вкладок из едино
+   prototype/frontend/widgets/tabs/pipeline -> multiprocess_prototype/frontend/widgets/tabs/pipeline/ | purpose: Вкладка визуального конструктора pipeline: граф, п
+   prototype/frontend/widgets/tabs/services -> multiprocess_prototype/frontend/widgets/tabs/services/ | purpose: Вкладка управления сервисами: секции из реестра, з
+   prototype/frontend/widgets/tabs/settings -> multiprocess_prototype/frontend/widgets/tabs/settings/ | purpose: Пилотная вкладка Settings, сквозной пример таба; с

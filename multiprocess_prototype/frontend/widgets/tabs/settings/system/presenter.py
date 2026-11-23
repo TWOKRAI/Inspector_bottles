@@ -97,9 +97,19 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
                 dict_form[section] = {}
             dict_form[section][field_name] = value
 
+        # База — ПОЛНЫЙ текущий конфиг, редакторы накладываются сверху по полям. Иначе секции без
+        # редакторов (run_gate, shutdown.pre_stop, telemetry, ...) взяли бы умолчания схемы и save()
+        # затёр бы их в боевом system.yaml (Task 2.1, ревью M1).
+        merged: dict[str, Any] = self._cfg.model_dump()
+        for section, fields in dict_form.items():
+            if isinstance(merged.get(section), dict):
+                merged[section].update(fields)
+            else:
+                merged[section] = fields
+
         # Валидация
         try:
-            validated = SystemConfig.model_validate(dict_form)
+            validated = SystemConfig.model_validate(merged)
         except pydantic.ValidationError as exc:
             self._show_validation_errors(exc)
             return False

@@ -34,25 +34,32 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 
 ## Запуск
 
-1. Поднять систему с открытым гейтом. **Два способа** (OR):
+1. Поднять систему с открытым гейтом (порт всегда за токеном, см. ниже). **Два способа** (OR):
 
-   **(a) Через `system.yaml` (основной для dev-прототипа)** —
+   **(a) Через `system.yaml` (для постоянной настройки стенда; в репозитории не коммитить: поставка `enabled: false`, её сторожат `test_shipped_config_disabled` и golden-снимки)** —
    `multiprocess_prototype/backend/config/system.yaml`:
    ```yaml
    backend_ctl:
-     enabled: true      # сокет поднимается всегда при старте
+     enabled: true      # сокет поднимается всегда при старте (в поставке стоит false)
      port: 8765
      host: "127.0.0.1"
    ```
 
-   **(b) Через env (escape-hatch для тестов/CI, без правки yaml):**
+   **(b) Через env (основной dev-старт, тесты, CI; без правки yaml):**
    ```bash
    BACKEND_CTL=1 python run.py            # порт по умолчанию 8765
    BACKEND_CTL=1 BACKEND_CTL_PORT=9001 python run.py
    ```
    Приоритет: гейт открыт если `backend_ctl.enabled` **ИЛИ** `BACKEND_CTL=1`.
    Порт: `BACKEND_CTL_PORT` (env) > `backend_ctl.port` (yaml) > 8765.
-   В проде держать `enabled: false` и не выставлять env.
+   В поставке `enabled: false`, простой старт порт не открывает.
+
+   **Токен.** При открытом порте ПМ генерирует токен и пишет его в
+   `~/.multiprocess_framework/ctl_<порт>.token` (права 0600; путь переопределяет
+   `BACKEND_CTL_TOKEN_FILE`); при остановке ПМ удаляет файл, если он его. Драйвер, MCP-сессия и харнесс
+   читают файл сами на каждом connect — вручную токен не вводят. Ошибки клиента:
+   `token file not found: <путь>` и `token rejected: <путь>`. Сырой TCP без `hello` получает
+   `auth_required` и закрывается ([BCTL-ADR-011](DECISIONS.md), ADR-PMM-052).
 
 2. Подключиться драйвером:
    ```python
@@ -72,6 +79,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command(command)` | system-команда в ProcessManager (`process.command`-обёртка) |
 | `system_shutdown(mode="graceful", deadline_s=1.0, wait=True, wait_timeout=20.0)` | `system.shutdown` (срок запроса 6 с) + ожидание закрытия сокета (опрос `connection_lost` раз в 100 мс). `mode="force"` — срок стопа детей `deadline_s` (ADR-PMM-038). Возврат `{accepted (None — ответ timeout или сокет закрыт раньше ответа), mode, elapsed_s, pm_gone, outcomes=None}`; `pm_gone` — PM закрыл сокет (`BackendUnavailable` до ответа → `pm_gone=True` сразу), процесс PM может быть ещё жив; `accepted=False` (PM отверг аргументы) — возврат без ожидания |
+| `run_status()` / `run_start()` / `run_stop()` / `run_ack()` | Task 2.1: команды run-состояния линии `system.run.{status,start,stop,ack}` в ProcessManager; возврат — конверт ответа как есть. `BackendHarness(run_gate=True)` включает гейт (умолчание `False` — как до гейта, перебивает `system.yaml`), `BackendHarness.start_run(timeout=30)` ждёт `start_allowed`, шлёт START и ждёт `state == "running"`. После `start_run` машина в `running` даже без гейта; `topology.apply` и `recipe.activate` отказаны до `run_stop()` |
 | `introspect_handlers(process)` | ключи `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (пусто = нет worker-side приёмника) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
@@ -84,9 +92,9 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `capabilities()` → `Capabilities` | «контактная книжка»: свод по ВСЕМ процессам (fan-out) — топология, каналы, карточки |
 | `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд. Т.2: `queue_data_loss` (вытеснение data-очереди получателя) и `control_plane_loss` (сорванная гарантия never-drop — строго хуже) — были в `RouterStats`, но не всплывали в `anomalies` |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
-| `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
+| `set_register_verified(process, register, field, value)` | проверенная запись (Ф1.6, Task 0.11): образ ДО → запись → образ ПОСЛЕ, суд `verdict.judge`: `verdict` (`confirmed`/`vacuous`/`failed`/`unverifiable`), `vacuous`, `pre`, `unverifiable` (какой образ не прочитан) + прежние `verified`/`expected`/`actual`. Хост отверг запись при уже равном значении → `failed`, не успех. `verified` = `success` (алиас) и **включает `vacuous`**: принятая хостом запись, не менявшая значение, остаётся `verified` — отличай по `vacuous`. Цена: одно лишнее чтение `introspect.registers` до записи |
 | `set_register(..., confirm_within=N)` | **D.5** commit-confirmed: запись авто-откатится через `N` сек без `register_confirm(commit_id)` (аналог Juniper `commit confirmed`) |
-| `register_snapshot(process=None)` / `register_restore(snapshot)` | **D.5**: снимок регистров (один процесс или все — топология одним запросом PM) → откат. Форма `{processes: {proc: {register: {field: value}}}}`; restore пишет только дрейфнувшие поля + сверяет readback'ом (`written`/`skipped`/`mismatches`) |
+| `register_snapshot(process=None)` / `register_restore(snapshot)` | **D.5**: снимок регистров (один процесс или все — топология одним запросом PM) → откат. Форма `{processes: {proc: {register: {field: value}}}}`; restore пишет только дрейфнувшие поля + сверяет readback'ом, каждое поле судит `verdict.judge` (`written`/`skipped`/`failed`/`vacuous`/`mismatches`; единица счёта — поле). `success` = все поля success; restore, где образ уже равен снимку, ничего не пишет: `written 0`, `success True`, `vacuous` = число таких полей (честный пустой restore, не «подтверждённая запись»). `mismatches` и `verified` считаются тем же сравнением, что и `success` |
 | `register_confirm(commit_id)` | **D.5**: подтвердить commit-confirmed запись — снять таймер авто-отката; для откатившегося отдаёт `rolled_back` |
 | `register_rollback_log(limit=None)` | **D.5**: журнал исходов авто-откатов сессии (`outcome` ok/failed/noop) |
 | `state_subscribe(pattern, subscriber=None)` | подписка на state-дерево (`state.subscribe`); пуши `state.changed` идут в событийный канал |
@@ -406,8 +414,8 @@ with BackendDriver(port=8765) as drv:
 
 ## Безопасность
 
-Dev-инструмент: bind `127.0.0.1`, гейт `BACKEND_CTL=1`, без аутентификации. В проде
-endpoint не поднимается. Остановка — PID-specific (закрытие канала при shutdown PM),
+Dev-инструмент: bind `127.0.0.1`, гейт `BACKEND_CTL=1`, доступ по токену из файла порта
+(см. «Токен» выше). В поставке endpoint не поднимается. Остановка — PID-specific (закрытие канала при shutdown PM),
 без глобального taskkill.
 
 ## Связанное

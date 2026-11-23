@@ -140,6 +140,10 @@ class WordLayoutRegisters(SchemaBase):
     slots_total: Annotated[int, FieldMeta("Слотов всего", readonly=True)] = 0
     slots_filled: Annotated[int, FieldMeta("Заполнено", readonly=True)] = 0
     next_letter: Annotated[str, FieldMeta("Следующая буква", readonly=True)] = ""
+    assembled: Annotated[
+        str,
+        FieldMeta("Собрано", info="маска слова: буква заполненной ячейки, · — пустая", readonly=True),
+    ] = ""
     last_label: Annotated[str, FieldMeta("Последняя буква", readonly=True)] = ""
     last_angle_deg: Annotated[float, FieldMeta("Угол модели (°)", readonly=True)] = 0.0
     last_correction_deg: Annotated[float, FieldMeta("Доворот (°)", readonly=True)] = 0.0

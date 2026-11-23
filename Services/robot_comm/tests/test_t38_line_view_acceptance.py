@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import socket
 import time
@@ -37,6 +38,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 
 from multiprocess_framework.modules.frontend_module.bridge.remote_state_proxy import RemoteStateProxy
+from multiprocess_framework.modules.router_module.channels.socket_auth import file_token_provider
 from multiprocess_framework.modules.router_module.channels.socket_client import SocketClient
 from Plugins.sim.robot_host.tests.host_harness import HOST, free_port, run_with_deadline
 from Services.robot_comm import ROBOT_AVAILABLE
@@ -68,6 +70,17 @@ _STATUS_B = "X=400.0  Y=-100.0  Z=-90.0  RZ=-20.0"
 _STATUS_C = "X=320.0  Y=-180.0  Z=-50.0  RZ=0.0"
 
 _TLM, _RES, _PMIR = 0x1040, 0x1010, 0x3000
+
+
+@pytest.fixture(autouse=True)
+def _tmp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task 0.12a: ``HOME``/``USERPROFILE`` во временный каталог — хост пишет файл токена
+    через ``Path.home()``, клиенты читают его оттуда же; настоящий ``~`` не трогается."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("BACKEND_CTL_TOKEN_FILE", raising=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +297,9 @@ def test_pose_over_socket(mode: str) -> None:
         host.put(snap_a)
         seen_by_second: list[tuple[str, Any]] = []
         if mode == "push":  # как backend_ctl лида: второй подписчик на то же дерево, соединение живёт весь тест
-            second = SocketClient(HOST, host.port, sender="backend_ctl")
+            second = SocketClient(
+                HOST, host.port, sender="backend_ctl", token_provider=file_token_provider(host.port, os.environ)
+            )
             second.connect()
             proxy = RemoteStateProxy(second, dispatch=lambda fn: fn())
             proxy.subscribe(

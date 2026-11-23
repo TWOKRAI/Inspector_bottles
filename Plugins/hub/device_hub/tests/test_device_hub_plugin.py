@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from Plugins.hub.device_hub import plugin as plugin_mod
 from Plugins.hub.device_hub.plugin import DeviceHubPlugin, _resolve_registry_path
 
 
@@ -614,6 +615,20 @@ class TestResolveRegistryPath:
         assert "data" in str(p)
         assert p.is_absolute()
 
+    def test_relative_path_equals_repo_root_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Без INSPECTOR_DATA_DIR путь = <корень репозитория>/data/devices.yaml (корень — литерал parents[3])."""
+        monkeypatch.delenv("INSPECTOR_DATA_DIR", raising=False)
+        repo_root = Path(plugin_mod.__file__).resolve().parents[3]
+        assert _resolve_registry_path("data/devices.yaml") == repo_root / "data" / "devices.yaml"
+
+    def test_relative_path_not_above_repo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Реестр не выше корня репозитория: каталог над корнем — не предок пути."""
+        monkeypatch.delenv("INSPECTOR_DATA_DIR", raising=False)
+        repo_root = Path(plugin_mod.__file__).resolve().parents[3]
+        p = _resolve_registry_path("data/devices.yaml")
+        assert repo_root in p.parents
+        assert p.parent.parent == repo_root
+
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """INSPECTOR_DATA_DIR override."""
         import sys
@@ -622,6 +637,127 @@ class TestResolveRegistryPath:
         monkeypatch.setenv("INSPECTOR_DATA_DIR", custom)
         p = _resolve_registry_path("data/devices.yaml")
         assert "custom" in str(p).lower()
+
+
+# ------------------------------------------------------------------ #
+# Предупреждение о прежнем месте реестра (корень раньше считался на уровень выше)
+# ------------------------------------------------------------------ #
+
+
+class TestLegacyRegistryWarning:
+    """configure предупреждает один раз, если данные остались над корнем проекта; ничего не копирует."""
+
+    @staticmethod
+    def _roots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+        """_PROJECT_ROOT -> <tmp>/repo; вернуть (новый реестр, прежний реестр). Настоящий data/ не трогаем."""
+        monkeypatch.delenv("INSPECTOR_DATA_DIR", raising=False)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(plugin_mod, "_PROJECT_ROOT", repo)
+        return repo / "data" / "devices.yaml", tmp_path / "data" / "devices.yaml"
+
+    @staticmethod
+    def _configure(raw_path: str) -> MagicMock:
+        ctx = make_ctx({"registry_path": raw_path})
+        DeviceHubPlugin().configure(ctx)
+        return ctx
+
+    @staticmethod
+    def _texts(ctx: MagicMock) -> list[str]:
+        return [str(c.args[0]) for c in ctx.log_warning.call_args_list]
+
+    def test_warns_once_when_only_legacy_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+
+        texts = self._texts(self._configure("data/devices.yaml"))
+
+        assert len(texts) == 1, texts
+        assert str(new_reg) in texts[0]
+        assert str(legacy) in texts[0]
+        assert "перенесите вручную" in texts[0]
+
+    def test_warns_when_only_legacy_robot_dir_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        (tmp_path / "data" / "robot").mkdir(parents=True)
+
+        texts = self._texts(self._configure("data/devices.yaml"))
+
+        assert len(texts) == 1, texts
+        assert str(new_reg) in texts[0]
+        assert str(legacy) in texts[0]
+
+    def test_silent_when_new_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        for reg in (new_reg, legacy):
+            reg.parent.mkdir(parents=True)
+            reg.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+
+        assert self._texts(self._configure("data/devices.yaml")) == []
+
+    def test_silent_when_new_robot_dir_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        (new_reg.parent / "robot").mkdir(parents=True)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+
+        assert self._texts(self._configure("data/devices.yaml")) == []
+
+    def test_silent_with_data_dir_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+        monkeypatch.setenv("INSPECTOR_DATA_DIR", str(tmp_path / "envroot" / "data"))
+
+        assert self._texts(self._configure("data/devices.yaml")) == []
+
+    def test_silent_for_absolute_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+
+        assert self._texts(self._configure(str(tmp_path / "abs" / "devices.yaml"))) == []
+
+    def test_never_copies_or_creates_legacy(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+
+        self._configure("data/devices.yaml")
+
+        assert legacy.read_text(encoding="utf-8") == "version: 1\ndevices: []\n"
+        assert not new_reg.exists()
+        assert sorted(p.name for p in legacy.parent.iterdir()) == ["devices.yaml"]
+
+    def test_second_configure_silent(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """После первого сохранения реестр существует -> повторный configure молчит."""
+        new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("version: 1\ndevices: []\n", encoding="utf-8")
+        assert len(self._texts(self._configure("data/devices.yaml"))) == 1
+
+        new_reg.write_text("version: 1\ndevices: []\n", encoding="utf-8")  # как после сохранения реестра
+
+        assert self._texts(self._configure("data/devices.yaml")) == []
+
+    def test_check_failure_does_not_break_configure(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """PermissionError при проверке прежнего места: configure проходит, причина — в одном предупреждении."""
+        _new_reg, legacy = self._roots(monkeypatch, tmp_path)
+        real_is_file = Path.is_file
+
+        def is_file(self: Path) -> bool:
+            if self == legacy:
+                raise PermissionError("denied")
+            return real_is_file(self)
+
+        monkeypatch.setattr(Path, "is_file", is_file)
+
+        texts = self._texts(self._configure("data/devices.yaml"))
+
+        assert len(texts) == 1, texts
+        assert "проверка прежнего места реестра не удалась" in texts[0]
+        assert "PermissionError" in texts[0]
 
 
 # ------------------------------------------------------------------ #

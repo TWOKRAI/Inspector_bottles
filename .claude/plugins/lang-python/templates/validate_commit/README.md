@@ -39,6 +39,8 @@ Exit code: `0` — OK, `1` — errors, `2` — bad CLI usage.
 | `Risk:` starts with low/medium/high | warning |
 | `Reversible:` ∈ {yes, no, migration-needed} | warning |
 | Unknown trailer key | warning |
+| ADR added by the diff without `Decision:` | warning (always) |
+| `Decision:` id not in the index / malformed | warning (error in STRICT) |
 | `Why:` too brief (< 5 chars) | warning |
 
 ## Skipped

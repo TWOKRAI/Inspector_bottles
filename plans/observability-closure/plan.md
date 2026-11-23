@@ -106,6 +106,8 @@ tests`, где снапшоты сборки держат списки кана�
 Ф4 — 1.5–2 недели · Ф5 — 3–4 дня + переприёмка. Все якоря `файл:строка` — по ревью на HEAD `d37735c6`;
 первый шаг каждой задачи — сверить их с кодом.
 
+Преемник: plans/2026-11-21_observability-signal-contracts (вариант A, решение владельца 2026-11-21)
+
 ---
 
 ## Порядок выполнения
@@ -164,51 +166,51 @@ tests`, где снапшоты сборки держат списки кана�
 
 ### Ф4 — масштаб, форма, универсальность
 
-- Task 4.1: Hub уровней как карта последних значений; ёмкость из политики (M10a) [DEFERRED] — до профиля, показавшего очередь или CPU узким местом на реальной топологии; `changed_only` в дереве нет
-- Task 4.2: Индекс подписок по статическому префиксу (M10b) [DEFERRED] — то же условие, что у 4.1; бенч 100 подписок не записан
-- Task 4.3: Протокол readback и распил хендлера (M11), инструмент flare [PENDING] — волна 3; вердикт CTO `verdict-task-4-3-cto.md`, пять стадий; `flare` в дереве нет
-- Task 4.3b: Счётчики форвардера хвоста видны в readback [PENDING] — вердикт CTO 2026-09-23 (`5a6454412`): синхронный `send` и хук `on_evict`; `wired_at` и `observability_evicted_records` в дереве нет; от неё зависит otel 3.4
+- Task 4.1: Hub уровней как карта последних значений; ёмкость из политики (M10a) [SUPERSEDED] — до профиля, показавшего очередь или CPU узким местом на реальной топологии; `changed_only` в дереве нет — снята планом observability-signal-contracts, причина — design.md §5
+- Task 4.2: Индекс подписок по статическому префиксу (M10b) [SUPERSEDED] — то же условие, что у 4.1; бенч 100 подписок не записан — снята планом observability-signal-contracts, причина — design.md §5
+- Task 4.3: Протокол readback и распил хендлера (M11), инструмент flare [SUPERSEDED] — волна 3; вердикт CTO `verdict-task-4-3-cto.md`, пять стадий; `flare` в дереве нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.8, 2.12
+- Task 4.3b: Счётчики форвардера хвоста видны в readback [SUPERSEDED] — вердикт CTO 2026-09-23 (`5a6454412`): синхронный `send` и хук `on_evict`; `wired_at` и `observability_evicted_records` в дереве нет; от неё зависит otel 3.4 — поглощена plans/2026-11-21_observability-signal-contracts, Task 0.5
 - Task 4.4: Точечные подписки переживают рестарт и креш клиента (M5) [DONE 2026-09-23 — `94818d29f`; `61eac1069` RED, `93780a822`, `a05a21ca8`, `70df3305e`, `8df3ab5bb`]
-- Task 4.5: `ServiceContext` — разъём наблюдаемости для авторов сервисов (M13) [PENDING] (после 4.6) — класса `ServiceContext` в дереве нет; коммиты «Task 4.5» 2026-09-30 относятся к плану transport
-- Task 4.6: Нейтральный словарь ядра и литералы в политику (m9, m10, m12, Р-4) [PENDING] (после 4.3b) — `cycle_ms` в фреймворке нет; коммиты «Task 4.6» 2026-09-29 относятся к плану transport (`cv_threads`)
-- Task 4.7: Реестр объявлений как объект процесса (Р-5а) [DEFERRED] — до крупного рефакторинга или до лжи гейта из-за порядка сбора
-- Task 4.8: Живой стенд Ф4 (20 процессов) и ревью фазы [PENDING] (после 4.15) — приёмка фазы после волны 2
-- Task 4.9: Универсальный механизм ручек `KnobManager` [DEFERRED] — уезжает в план `knobs-universal-manager` при ≥ 3 потребителях; плана и класса в дереве нет
-- Task 4.10: Словарь политики ниже обеих плоскостей, кольцо `process_module` и `statistics_module` [DEFERRED] — до крупного рефакторинга; долг с адресом, sentrux кольца не видит
+- Task 4.5: `ServiceContext` — разъём наблюдаемости для авторов сервисов (M13) [SUPERSEDED] (после 4.6) — класса `ServiceContext` в дереве нет; коммиты «Task 4.5» 2026-09-30 относятся к плану transport — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.9
+- Task 4.6: Нейтральный словарь ядра и литералы в политику (m9, m10, m12, Р-4) [SUPERSEDED] (после 4.3b) — `cycle_ms` в фреймворке нет; коммиты «Task 4.6» 2026-09-29 относятся к плану transport (`cv_threads`) — поглощена plans/2026-11-21_observability-signal-contracts, Task 1.2, 1.5, 1.7, 1.8, 2.6, 4.14
+- Task 4.7: Реестр объявлений как объект процесса (Р-5а) [SUPERSEDED] — до крупного рефакторинга или до лжи гейта из-за порядка сбора — снята планом observability-signal-contracts, причина — design.md §5
+- Task 4.8: Живой стенд Ф4 (20 процессов) и ревью фазы [SUPERSEDED] (после 4.15) — приёмка фазы после волны 2 — поглощена plans/2026-11-21_observability-signal-contracts, Task 1.10
+- Task 4.9: Универсальный механизм ручек `KnobManager` [SUPERSEDED] — уезжает в план `knobs-universal-manager` при ≥ 3 потребителях; плана и класса в дереве нет — снята планом observability-signal-contracts, причина — design.md §5
+- Task 4.10: Словарь политики ниже обеих плоскостей, кольцо `process_module` и `statistics_module` [SUPERSEDED] — до крупного рефакторинга; долг с адресом, sentrux кольца не видит — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.2
 - Task 4.11: Голос конфига на стадию «применяю»; адрес `emergency_log` вычищен [DONE 2026-09-08 — `9245c7363`; `8e054dd33`, `01349c0d8`, `1ce1102f2`]
-- Task 4.12: Оптовый путь `telemetry.broadcast` знает такт ребёнка [PENDING] (после 4.3) — волна 3
+- Task 4.12: Оптовый путь `telemetry.broadcast` знает такт ребёнка [SUPERSEDED] (после 4.3) — волна 3 — поглощена plans/2026-11-21_observability-signal-contracts, Task 2.7
 - Task 4.13: Слот окна списывается фактом доставки, а не решения [DONE 2026-09-08 — `7be18734a`; `0e5137871`, закрытие `8645b4a2f`]
-- Task 4.14: Ретенция режет строки, а не байты — свип не трогает FTS-индекс [PENDING] — `optimize` в `observability_store.py` нет; вердикт CTO по гейту (claim через SQLite) записан 2026-09-08
-- Task 4.15: Хоп-лаг пути кадра — ручка и числа потребителя [PENDING] (после 4.5) — ручки `frame_trace` в схеме `observability` нет
-- Task 4.16: Выключенный приёмник не платит эмиссию [PENDING] — волна 3; `off_cost` в дереве нет
-- Task 4.17: Одна дорога к одному писателю журнала, затем один экземпляр писателя [PENDING] — владелец 2026-10-12; слот в очереди решает владелец; источник — lifecycle 1.2b-1 (карта путей логирования, вердикт CTO)
-- Task 4.18: Голос `announce_presentation_absent` пишется в журнал, а не только в stderr [PENDING] (после 4.17) — дефект R-14 (`plans/queue/defects.md`), 2026-10-12: `multiprocess_prototype/backend/launch.py:219-306`; тот же класс, что 4.17 (строка мимо писателя журнала)
+- Task 4.14: Ретенция режет строки, а не байты — свип не трогает FTS-индекс [SUPERSEDED] — `optimize` в `observability_store.py` нет; вердикт CTO по гейту (claim через SQLite) записан 2026-09-08 — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.13
+- Task 4.15: Хоп-лаг пути кадра — ручка и числа потребителя [SUPERSEDED] (после 4.5) — ручки `frame_trace` в схеме `observability` нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 1.6, 1.7
+- Task 4.16: Выключенный приёмник не платит эмиссию [SUPERSEDED] — волна 3; `off_cost` в дереве нет — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.1
+- Task 4.17: Одна дорога к одному писателю журнала, затем один экземпляр писателя [SUPERSEDED] — владелец 2026-10-12; слот в очереди решает владелец; источник — lifecycle 1.2b-1 (карта путей логирования, вердикт CTO) — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.3, 3.4
+- Task 4.18: Голос `announce_presentation_absent` пишется в журнал, а не только в stderr [SUPERSEDED] (после 4.17) — дефект R-14 (`plans/queue/defects.md`), 2026-10-12: `multiprocess_prototype/backend/launch.py:219-306`; тот же класс, что 4.17 (строка мимо писателя журнала) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.5
 
 ### Ф5 — документы, сетка, переприёмка
 
-- Task 5.1: Четыре справочника под HEAD и стражи утверждений (M15, m5, m16) [PENDING]
-- Task 5.2: `link_check` в гейте и мёртвые ссылки (M16, m15) [PENDING] — `scripts/link_check/` есть, `validate.py` его не вызывает
-- Task 5.3: Сетка — независимость от порядка как гейт, дедлайны (m16, CTL-F10) [PENDING]
-- Task 5.4: Переприёмка гейта Ф6 этапа 6 (C4) и закрытие трека [PENDING] (после 4.8, 5.1, 5.2, 5.3)
+- Task 5.1: Четыре справочника под HEAD и стражи утверждений (M15, m5, m16) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.12
+- Task 5.2: `link_check` в гейте и мёртвые ссылки (M16, m15) [SUPERSEDED] — `scripts/link_check/` есть, `validate.py` его не вызывает — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.16
+- Task 5.3: Сетка — независимость от порядка как гейт, дедлайны (m16, CTL-F10) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.17
+- Task 5.4: Переприёмка гейта Ф6 этапа 6 (C4) и закрытие трека [SUPERSEDED] (после 4.8, 5.1, 5.2, 5.3) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.18
 
 ### Ф6 — ничего мимо: консоль, зависания, сводка (владелец 2026-10-13)
 
 > Фаза заведена по запросу владельца «максимальный контроль, ничего не упустить». Карточки — [`phase-6-nothing-bypasses.md`](./phase-6-nothing-bypasses.md) (6.1–6.4) и [`phase-6b-voices-and-digest.md`](./phase-6b-voices-and-digest.md) (6.5–6.14). От 6.1 и 6.2 зависит план [`2026-10-12_stand-recipe-switch`](../2026-10-12_stand-recipe-switch/plan.md) (R-8). Слот в очереди решает владелец.
 
-- Task 6.1: [VERTICAL SLICE] Запись журнала не блокирует вызывающего — у консоли свой поток-писатель (R-8, H1) [PENDING]
-- Task 6.2: Сторож зависшего потока в каждом процессе — дамп стеков в файл и тревога [PENDING] (после 6.1)
-- Task 6.3: Стек живого процесса по требованию и памятка (py-spy, файл-триггер) [PENDING] (после 6.2)
-- Task 6.4: Стенд — консоль каждого окна в файл, QuickEdit выключен [PENDING]
-- Task 6.5: Инвентарь голосов мимо журнала и таблица «куда что» (R-21) [PENDING]
-- Task 6.6: Голоса запуска прототипа — в журнал лаунчера, включая R-14 [PENDING] (после 6.5) — исполняет 4.18
-- Task 6.7: Голоса о самом логировании — в файлы процесса [PENDING] (после 6.1, 6.5)
-- Task 6.8: Каждый процесс сохраняет свою консоль — сырой stderr, нативные библиотеки, ранние traceback [PENDING] (после 6.1, 6.5)
-- Task 6.9: Сводка журналов после прогона — новые шаблоны и скачки (`scripts/log_digest`) [PENDING]
-- Task 6.10: Шум по причине, а не по уровню (R-20) [PENDING]
-- Task 6.11: Ретеншен и занятые файлы лаунчера (R-18) [PENDING]
-- Task 6.12: Запись после рестарта без имени процесса (R-19) [PENDING]
-- Task 6.13: Ловушка поиска — `rg` не видит журналы (`.ignore`) [PENDING]
-- Task 6.14: Живой стенд Ф6 и приёмка фазы [PENDING] (после 6.1–6.13)
+- Task 6.1: [VERTICAL SLICE] Запись журнала не блокирует вызывающего — у консоли свой поток-писатель (R-8, H1) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 3.6
+- Task 6.2: Сторож зависшего потока в каждом процессе — дамп стеков в файл и тревога [SUPERSEDED] (после 6.1) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.1
+- Task 6.3: Стек живого процесса по требованию и памятка (py-spy, файл-триггер) [SUPERSEDED] (после 6.2) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.2
+- Task 6.4: Стенд — консоль каждого окна в файл, QuickEdit выключен [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.3
+- Task 6.5: Инвентарь голосов мимо журнала и таблица «куда что» (R-21) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.4
+- Task 6.6: Голоса запуска прототипа — в журнал лаунчера, включая R-14 [SUPERSEDED] (после 6.5) — исполняет 4.18 — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.5
+- Task 6.7: Голоса о самом логировании — в файлы процесса [SUPERSEDED] (после 6.1, 6.5) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.6
+- Task 6.8: Каждый процесс сохраняет свою консоль — сырой stderr, нативные библиотеки, ранние traceback [SUPERSEDED] (после 6.1, 6.5) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.7
+- Task 6.9: Сводка журналов после прогона — новые шаблоны и скачки (`scripts/log_digest`) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.8
+- Task 6.10: Шум по причине, а не по уровню (R-20) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.9
+- Task 6.11: Ретеншен и занятые файлы лаунчера (R-18) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.10
+- Task 6.12: Запись после рестарта без имени процесса (R-19) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.11
+- Task 6.13: Ловушка поиска — `rg` не видит журналы (`.ignore`) [SUPERSEDED] — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.12
+- Task 6.14: Живой стенд Ф6 и приёмка фазы [SUPERSEDED] (после 6.1–6.13) — поглощена plans/2026-11-21_observability-signal-contracts, Task 4.18
 
 ---
 

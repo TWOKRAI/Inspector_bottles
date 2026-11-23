@@ -163,6 +163,7 @@
 - [ADR-173](#adr-173-бюджет-в-полёте-считает-кадры-а-не-сообщения-ipc-data-очередь-потолок-памяти-а-не-часть-инварианта): Бюджет «в полёте» считает КАДРЫ, а не сообщения; IPC data-очередь — потолок памяти, а не часть инварианта
 - [ADR-174](#adr-174-политика-переполнения-overflow-latestevery-потерянный-кадр-становится-маркером-not_inspected-исход-кадра-принадлежит-решателю): Политика переполнения `overflow: latest|every` — потерянный кадр становится маркером `not_inspected`, исход кадра принадлежит решателю
 - [ADR-175](#adr-175-код-фреймворка-пригоден-для-машинного-разбора-явное-наследование-интерфейса-google-docstring-__all__-одна-атомарная-запись-файла-вводится-храповиком): Код фреймворка пригоден для машинного разбора — явное наследование интерфейса, Google-docstring, `__all__`, одна атомарная запись файла; вводится «храповиком»
+- [ADR-176](#adr-176-класс-ответ-выглядит-здоровым-закрывают-три-контракта-сигнала-i1-исход-i2-свежесть-i3-причинность-проверки-у-каждого-один-параметризованный-контракт-тест-он-пишется-до-экземпляров): Класс «ответ выглядит здоровым» закрывают три контракта сигнала (I1 «исход», I2 «свежесть», I3 «причинность проверки»); у каждого один параметризованный контракт-тест, он пишется до экземпляров
 <!-- ADR-TOC:END -->
 
 ---
@@ -2547,6 +2548,51 @@
 - Связанные ADR: ADR-120 (слои `Plugins`), ADR-ATL-001 (схема Атласа).
 - Refs: [разбор K0](../plans/2026-10-04_atlas/research/K0_gaps_and_ideas.md), [бриф K0 1.1](../plans/2026-10-07_k0-framework-quality/tasks/1.1.md), [бриф K0 1.2](../plans/2026-10-07_k0-framework-quality/tasks/1.2.md)
 
+## ADR-176: Класс «ответ выглядит здоровым» закрывают три контракта сигнала (I1 «исход», I2 «свежесть», I3 «причинность проверки»); у каждого один параметризованный контракт-тест, он пишется до экземпляров
+
+- Дата: 2026-11-21
+- Статус: принято (решение лида плана `observability-signal-contracts`, D1; ответы владельца В-1…В-4)
+- Контекст: ревизия наблюдаемости и `backend_ctl` (51 находка) показала один класс дефекта в разных местах: ответ или
+  показание выглядит здоровым, хотя сигнала нет. Примеры: запись, отвергнутая хостом при уже равном значении, отвечает
+  `success True, verified True` (B-3); ноль у молчащего писателя неотличим от нуля у живого; звено цепи отдаёт
+  «доставлено» поверх отказа нижнего звена. Точечные правки находок чинят экземпляр, а класс остаётся: следующий
+  инструмент или читатель повторит ту же форму.
+- Решение: три инварианта, у каждого один контракт-тест с параметром «экземпляр», написанный ДО экземпляров (RED на
+  существующих, GREEN вместе с их переводом).
+  - **I1 «исход».** Звено отвечает одним из трёх: принял / отказал с причиной / сбой. Звено не улучшает исход
+    нижнего (функция `outcome_of` свойство не вводит: его проверяют приёмки 0.5 и 0.6). Счётчик потерь — одна
+    функция, одна таблица «звено x исход -> ключ». Экземпляр: ADR-CRM-019 (Task 0.1).
+  - **I2 «свежесть».** Показание несёт номер, время источника, воплощение и период публикации; читатель отдаёт возраст и класс
+    {`no_data`, `fresh`, `stale`, `writer_gone`}. Ноль — значение, не класс: «нет данных», «ноль», «устарело»,
+    «писатель ушёл» — разные пары (класс, значение). Экземпляр: ADR-SS-025 (Task 0.2).
+  - **I3 «причинность проверки».** «Проверено» = образ до + подтверждение хоста + образ после. Равный образ до —
+    `vacuous`; отказ ack — `failed` при любом образе. Экземпляр: BCTL-ADR-010 (`backend_ctl/verdict.py`, Task 0.3,
+    подключение инструментов — Task 0.11).
+- Причина: контракт-тест, написанный до экземпляров, красный на всех живых дефектах класса и не может быть зелёным
+  по отсутствию ключа (в тестах проверяется наличие ключа ответа и факт попытки записи перед утверждением «не успех»).
+  Параметризация делает новый экземпляр одной строкой в списке, а не новым тестом. Принцип 5 («каждый компонент
+  тестируем»): проверка формы живёт отдельно от проверки механизма.
+- Последствия:
+  - Каждый новый инструмент проверки, читатель показаний и звено доставки подключается к своему контракту; без строки
+    в параметре контракт-теста экземпляр считается не закрытым.
+  - I3 не единая функция для всех инструментов: `config_reload_verified` (BCTL-ADR-008: `success` про применение, не
+    вердикт) и `process_restart_verified` (успех обратный) читают свои ключи; `judge` применяется к
+    `set_register_verified` и `register_restore`.
+  - Граница известна и записана: расхождение `is_refusal` с `BackendDriver._looks_failed` в обе стороны (таймаут —
+    отказ только в `_looks_failed`; `{"status": "error"}` — отказ только в `is_refusal`) снимает Task 2.6 при
+    переносе суда на хост.
+  - Для 0.11: `is_refusal` смотрит только верхний уровень ответа; вложенный отказ не виден, поэтому вызывающий
+    подаёт в `judge` ack как есть или лист ответа.
+- Отклонённые альтернативы:
+  - **Точечные правки 51 находки** — чинят экземпляр, класс остаётся; следующий инструмент повторит дефект.
+  - **Общий «базовый класс сигнала»** — формы ответа у экземпляров разные (ack записи, конверт показания, исход звена);
+    единая база заставила бы подгонять формы под неё (больше слоёв при том же эффекте, принцип 4).
+- Проверка: три контракт-теста (`channel_routing_module` — I1, Task 0.1; конверт свежести — I2, Task 0.2;
+  `backend_ctl/tests/test_contract_verified.py` — I3, Task 0.3), инъекции лида на каждый, ревью Opus.
+- Связанные ADR: ADR-CRM-019 (I1, Task 0.1), ADR-SS-025 (I2, Task 0.2), BCTL-ADR-010 (I3), BCTL-ADR-008
+  (граница I3), ADR-174 (маркер `not_inspected` — тот же класс «потеря видна, а не молчит»).
+- Refs: [план observability-signal-contracts](../plans/2026-11-21_observability-signal-contracts/plan.md), [design.md](../plans/2026-11-21_observability-signal-contracts/design.md) §9, [бриф 0.3](../plans/2026-11-21_observability-signal-contracts/tasks/0.3.md)
+
 ---
 
 ## Коммуникационная архитектура (ADR-COMM)
@@ -2646,22 +2692,22 @@
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…009 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., Шаблонный `BaseManager.shutdown()` и `BaseManager.scope`) |
 | `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…011 (Удаление `_compat.py`, ..., `FieldMeta.apply` и `FieldMeta.enabled_if` — режим применения и условная активность поля) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…004 (Извлечение ScenarioManager из Dispatcher, ..., Асимметрия дефолта `expects_full_message` (Dispatcher vs RouterManager)) |
-| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…018 (Паттерн CRM (ChannelRoutingManager), ..., `ObservabilityStore` держит `emergency_log` на четырёх миграциях открытия — рекурсия настоящая, не отговорка (Task 4.11, часть B)) |
+| `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…020 (Паттерн CRM (ChannelRoutingManager), ..., закрытый логгер отвечает часовым `REFUSED`, а окно голоса спрашивает `is_closed` отдельно (Task 0.6)) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…012 (Удаление LogDispatcher, ..., Окно голоса — общий механизм с политикой процесса, факт и голос разделены (Ф1.4 / M17)) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-CFG-001…005 (Dict at Boundary для ConfigStore, ..., ConfigFileWatcher владеет отложенным повтором перезагрузки) |
 | `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…010 (Message как value object с опциональной Pydantic-схемой, ..., Единый конверт команд — payload под `data`) |
-| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…015 (RouterManager наследует ChannelRoutingManager, ..., `reply` передаётся только команде с исполнителем (Task 1.9a)) |
-| `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…006 (Удаление ложного ребра worker → dispatch, ..., `ExecutorManager` — сотрудник процесса, который держит именованные исполнители (Task 1.9m)) |
+| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…017 (RouterManager наследует ChannelRoutingManager, ..., рукопожатие `hello` с токеном в `SocketChannel` — первая строка соединения (Task 0.12)) |
+| `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…007 (Удаление ложного ребра worker → dispatch, ..., Честный `start_worker` по таблице A/B/C и запрос остановки, который не теряет авто-рестарт) |
 | `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…044 (Dual Communication API (send_message vs send), ..., одна сборка конфига менеджеров — на рождение И на пересборку (Task 1.2, 2026-08-31)) |
 | `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-CMD-001…007 (CommandManager реализует ICommandManager, ..., `executor=` принимает имя — разрешение при регистрации через реестр исполнителей (Task 1.9m)) |
 | `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…017 (Удалён legacy API v1, ..., Транспорт SHM сохраняет форму кадра — `c = 0` в заголовке значит «без оси каналов») |
-| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…039 (Per-process stop events (2026-04-10), ..., Команды жизненного цикла PM исполняет `KeyedExecutor` вне `message_processor`; ответ — после подтверждённой смерти (Task 1.9b, L-9, 2026-10-25)) |
+| `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…052 (Per-process stop events (2026-04-10), ..., Порт управления закрыт без токена; поставка выключена, dev-старт — `BACKEND_CTL=1` (Task 0.12b observability-signal-contracts, 2026-11-22)) |
 | `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…008 (ErrorManager как наследник LoggerManager (не композиция), ..., Severity-лестница живёт данными, а не ветвлением (Ф8.1)) |
 | `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…015 (StatsManager как прямой наследник ChannelRoutingManager (не LoggerManager), ..., Ф5-добор — исход раздачи чисел различают ПАРОЙ счётчиков, `attach_observation_port` докладывает по ФАКТУ подписки) |
 | `registers_module` | [`modules/registers_module/DECISIONS.md`](modules/registers_module/DECISIONS.md) | Infrastructure / registers | ADR-RM-001…007 (Композиция RegistersContainer вместо дублирования, ..., Копия регистра из описания каталога) |
 | `console_module` | [`modules/console_module/DECISIONS.md`](modules/console_module/DECISIONS.md) | UI / Console | ADR-CM-001…012 (Три уровня использования в едином ConsoleManager, ..., `reg info` показывает FieldMeta и FieldRouting) |
-| `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…023 (IRouter Protocol для инкапсуляции router-зависимости, ..., подтверждение паттерна для coverage-check — строго server-ack-only, не evidence-based) |
-| `recipe` | [`modules/recipe/DECISIONS.md`](modules/recipe/DECISIONS.md) | Resources & Config | ADR-RCP-001…008 (Консолидация управления рецептами в один framework-модуль, ..., `update_yaml_preserving` пишет атомарно (2026-09-27)) |
+| `state_store_module` | [`modules/state_store_module/DECISIONS.md`](modules/state_store_module/DECISIONS.md) | Resources & Config | ADR-SS-001…025 (IRouter Protocol для инкапсуляции router-зависимости, ..., свежесть значения через границу процесса — метка писателя `_fresh`, а не revision, `Delta.timestamp` и время приёма) |
+| `recipe` | [`modules/recipe/DECISIONS.md`](modules/recipe/DECISIONS.md) | Resources & Config | ADR-RCP-001…010 (Консолидация управления рецептами в один framework-модуль, ..., Каноническая форма рецепта — кто под кого подстраивается (2026-10-26)) |
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…009 (Protocol-based decoupling от доменных типов, ..., Пул параллельных бандлов на worker_module (C6e), а не свой ThreadPoolExecutor) |
 | `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…004 (Singleton ServiceRegistry через `__new__` + Lock, ..., Хост сервисов — хаб; `pending` вместо блокировки; ленивый discover) |

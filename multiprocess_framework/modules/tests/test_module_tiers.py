@@ -386,10 +386,32 @@ _RUNNERLESS_BY_DECISION: dict[str, str] = {
 }
 
 
+def _test_file_paths(repo_root: Path) -> list[Path]:
+    """Пути `test_*.py`, которые принадлежат репозиторию: tracked + новые не-игнорируемые.
+
+    Каталоги в `.gitignore` (`_archive/`, `.claude/_backups/`, `data/atlas/checkout/` —
+    локальные копии дерева) — не исходники проекта: их тесты ни один прогонщик и не должен
+    собирать, а на каждой машине такой мусор свой. Нет git → обход файловой системы.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ":(glob)**/test_*.py"],
+            cwd=repo_root,
+            capture_output=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return list(repo_root.rglob("test_*.py"))
+    return [repo_root / p for p in out.decode("utf-8").split("\0") if p]
+
+
 def _dirs_with_test_files(repo_root: Path) -> set[str]:
     """Каталоги репозитория, где физически лежит хотя бы один `test_*.py`."""
     found: set[str] = set()
-    for path in repo_root.rglob("test_*.py"):
+    for path in _test_file_paths(repo_root):
         # Относительные части: абсолютный путь внутри `.claude/worktrees/<имя>` содержал бы
         # `worktrees` и скрывал бы от стража ВСЁ дерево рабочей копии.
         if _INFRA_DIRS & set(path.relative_to(repo_root).parts):

@@ -197,6 +197,8 @@ KIND: 0 LINE (`MovL`, точный стоп) / 1 LINE_PASS (`MovL` + `PASS()`, �
 
 ACTION: 0 NONE / 1 DO_ON (APARAM = канал) / 2 DO_OFF / 3 DELAY_MS (мс) / 4 SPEED_PCT (%) / 5 ACCEL (мм/с²) / 6 ACCUR (0 грубо / 1 точно). Коды 7+ — резерв; первым кандидатом записан WAIT_DI (ожидание входа — для обучаемых программ с датчиками), добавляется как опкод (§5).
 
+Диапазоны APARAM — `delta_v2.yaml` → `scenario.aparam` (T1.4); ПК, sim и прошивка берут их из генератов (`ACT_RANGE`, Lua `ARNG`; прошивка — с Ф4/T4.1).
+
 ### 7.2 Правила исполнения
 
 1. `SC_RUN(count, sc_id, offset, spd_pct, accel, accur)` читает записи `offset .. offset+count-1` целиком в таблицы **до** первого движения. Короткое чтение → NAK `E_BUF_SHORT`.

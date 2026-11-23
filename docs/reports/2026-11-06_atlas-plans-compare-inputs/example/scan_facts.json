@@ -1,0 +1,148 @@
+{
+ "loc": 214,
+ "doc": "ConfigFileWatcher — hot-reload конфигов при изменении файла.",
+ "all": null,
+ "classes": [
+  {
+   "name": "_ConfigReloadHandler",
+   "bases": [
+    "FileSystemEventHandler"
+   ],
+   "line": 38,
+   "methods": [
+    "__init__",
+    "on_modified",
+    "on_moved",
+    "cancel"
+   ],
+   "style": "class"
+  },
+  {
+   "name": "ConfigFileWatcher",
+   "bases": [],
+   "line": 196,
+   "methods": [
+    "__init__",
+    "start",
+    "stop",
+    "is_running"
+   ],
+   "style": "class"
+  }
+ ],
+ "functions": [],
+ "imports": [
+  {
+   "kind": "hard",
+   "line": 23,
+   "level": 0,
+   "module": "__future__",
+   "names": [
+    "annotations"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 25,
+   "level": 0,
+   "module": "sys",
+   "names": [],
+   "is_from": false,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 26,
+   "level": 0,
+   "module": "threading",
+   "names": [],
+   "is_from": false,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 27,
+   "level": 0,
+   "module": "time",
+   "names": [],
+   "is_from": false,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 28,
+   "level": 0,
+   "module": "pathlib",
+   "names": [
+    "Path"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 29,
+   "level": 0,
+   "module": "typing",
+   "names": [
+    "Callable",
+    "Optional",
+    "TYPE_CHECKING"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 31,
+   "level": 0,
+   "module": "watchdog.observers",
+   "names": [
+    "Observer"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "hard",
+   "line": 32,
+   "level": 0,
+   "module": "watchdog.events",
+   "names": [
+    "FileSystemEventHandler",
+    "FileModifiedEvent"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "tc",
+   "line": 35,
+   "level": 0,
+   "module": "multiprocess_framework.modules.config_module.core.config",
+   "names": [
+    "Config"
+   ],
+   "is_from": true,
+   "guarded": false
+  },
+  {
+   "kind": "lazy",
+   "line": 168,
+   "level": 0,
+   "module": "multiprocess_framework.modules.data_schema_module.serialization.converter",
+   "names": [
+    "DataConverter"
+   ],
+   "is_from": true,
+   "guarded": true
+  }
+ ],
+ "commands": [],
+ "threads": [],
+ "tier": null,
+ "contour": null,
+ "error": null
+}

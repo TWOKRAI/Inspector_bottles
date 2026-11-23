@@ -335,6 +335,14 @@ def test_new_act_without_range_is_validation_error(monkeypatch):
     assert "нет диапазона" in str(info.value)
 
 
+def test_action_range_reads_protocol_table(monkeypatch):
+    """Диапазон берётся из `protocol_v2.ACT_RANGE` в момент проверки, своей копии в программах нет (T1.4)."""
+    monkeypatch.setitem(protocol_v2.ACT_RANGE, "SPEED_PCT", (1, 50))
+    with pytest.raises(ValidationError):
+        Action(act="SPEED_PCT", value=51)
+    assert Action(act="SPEED_PCT", value=50).value == 50
+
+
 def test_scenario_length_mismatch_rejected():
     rec = Record(x=1.0, y=2.0, z=3.0, rz=4.0, kind="LINE", action="NONE", aparam=0)
     with pytest.raises(ValidationError):

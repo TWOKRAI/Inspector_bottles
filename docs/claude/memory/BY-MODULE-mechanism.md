@@ -2,7 +2,7 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
-## acceptance (22)
+## acceptance (23)
 
 - [feedback_a_control_can_exist_and_be_dead](feedback_a_control_can_exist_and_be_dead.md)
 - [feedback_a_criterion_that_transforms_observes_the_library](feedback_a_criterion_that_transforms_observes_the_library.md)
@@ -11,6 +11,7 @@
 - [feedback_blind_acceptance_can_pin_a_nonexistent_mechanism](feedback_blind_acceptance_can_pin_a_nonexistent_mechanism.md)
 - [feedback_blind_red_prove_bodies_with_scratch_reference](feedback_blind_red_prove_bodies_with_scratch_reference.md)
 - [feedback_constant_from_domain_physics_not_measured](feedback_constant_from_domain_physics_not_measured.md)
+- [feedback_diff_live_logs_to_find_an_observable](feedback_diff_live_logs_to_find_an_observable.md)
 - [feedback_freeform_brief_without_mode_header](feedback_freeform_brief_without_mode_header.md)
 - [feedback_gate_criterion_can_contradict_an_owner_decision](feedback_gate_criterion_can_contradict_an_owner_decision.md)
 - [feedback_gate_signature_lives_on_a_head](feedback_gate_signature_lives_on_a_head.md)
@@ -59,7 +60,7 @@
 - [project_graphify_mcp_setup](project_graphify_mcp_setup.md)
 - [project_haiku_classifier_failed_memory_tagging](project_haiku_classifier_failed_memory_tagging.md)
 
-## architecture (30)
+## architecture (31)
 
 - [feedback_a_dedup_marker_is_an_assertion_about_someone_else](feedback_a_dedup_marker_is_an_assertion_about_someone_else.md)
 - [feedback_alias_keeps_the_object_alive](feedback_alias_keeps_the_object_alive.md)
@@ -78,6 +79,7 @@
 - [project_camera_settings_feature](project_camera_settings_feature.md)
 - [project_command_engine_audit](project_command_engine_audit.md)
 - [project_config_voice_belongs_to_the_apply_stage](project_config_voice_belongs_to_the_apply_stage.md)
+- [project_control_core_vision](project_control_core_vision.md)
 - [project_crossmodule_move_shim_cycle](project_crossmodule_move_shim_cycle.md)
 - [project_device_hub](project_device_hub.md)
 - [project_f7_g7_num_consumers](project_f7_g7_num_consumers.md)
@@ -92,9 +94,10 @@
 - [project_topology_event_ordering](project_topology_event_ordering.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
 
-## break-injection (42)
+## break-injection (43)
 
 - [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
+- [feedback_a_fix_that_narrows_input_unguards_the_condition_below](feedback_a_fix_that_narrows_input_unguards_the_condition_below.md)
 - [feedback_a_guard_that_counts_at_least_once_is_blind](feedback_a_guard_that_counts_at_least_once_is_blind.md)
 - [feedback_a_test_that_pins_a_hole_is_green_both_ways](feedback_a_test_that_pins_a_hole_is_green_both_ways.md)
 - [feedback_barrier_at_entry_does_not_reproduce_the_race](feedback_barrier_at_entry_does_not_reproduce_the_race.md)
@@ -233,7 +236,7 @@
 - [project_k8_topology_editor_kill](project_k8_topology_editor_kill.md)
 - [project_kind_channels_dead_evict_branch](project_kind_channels_dead_evict_branch.md)
 
-## dev-tooling (17)
+## dev-tooling (18)
 
 - [feedback_a_pass_through_block_is_not_a_fork](feedback_a_pass_through_block_is_not_a_fork.md)
 - [feedback_a_text_command_classifier_must_respect_quotes_and_heredocs](feedback_a_text_command_classifier_must_respect_quotes_and_heredocs.md)
@@ -248,6 +251,7 @@
 - [feedback_root_ignore_whitelist_blinds_root_search](feedback_root_ignore_whitelist_blinds_root_search.md)
 - [feedback_sentrux_depth_opaque](feedback_sentrux_depth_opaque.md)
 - [feedback_sentrux_freetier_3rule_limit](feedback_sentrux_freetier_3rule_limit.md)
+- [feedback_sentrux_html_href_is_an_import_edge](feedback_sentrux_html_href_is_an_import_edge.md)
 - [project_crossmodule_move_shim_cycle](project_crossmodule_move_shim_cycle.md)
 - [project_git_bash_cr_rename_and_cim_quirks_on_windows](project_git_bash_cr_rename_and_cim_quirks_on_windows.md)
 - [project_graphify_mcp_setup](project_graphify_mcp_setup.md)
@@ -306,7 +310,7 @@
 - [project_silent_observability_plane](project_silent_observability_plane.md)
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 
-## fixtures (24)
+## fixtures (25)
 
 - [feedback_a_decision_orphans_what_encoded_the_previous_one](feedback_a_decision_orphans_what_encoded_the_previous_one.md)
 - [feedback_a_handmade_readback_leaves_its_producer_unguarded](feedback_a_handmade_readback_leaves_its_producer_unguarded.md)
@@ -328,6 +332,7 @@
 - [feedback_priority_fallback_eviction_masks_staleness_config](feedback_priority_fallback_eviction_masks_staleness_config.md)
 - [feedback_safeguard_can_be_a_noop_with_green_units](feedback_safeguard_can_be_a_noop_with_green_units.md)
 - [feedback_second_writer_shrinks_the_ring](feedback_second_writer_shrinks_the_ring.md)
+- [feedback_server_file_in_home_needs_dir_autouse_isolation](feedback_server_file_in_home_needs_dir_autouse_isolation.md)
 - [feedback_test_params_hide_defect_window](feedback_test_params_hide_defect_window.md)
 - [feedback_tests_of_process_global_state_run_in_own_process](feedback_tests_of_process_global_state_run_in_own_process.md)
 - [feedback_verify_heuristic_fix_against_golden_recipes](feedback_verify_heuristic_fix_against_golden_recipes.md)
@@ -375,7 +380,7 @@
 - [feedback_worktree_stale_base](feedback_worktree_stale_base.md)
 - [project_shared_tree_provenance_forensics](project_shared_tree_provenance_forensics.md)
 
-## guards (39)
+## guards (40)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
 - [feedback_a_degenerate_value_is_not_zero_it_is_unknown](feedback_a_degenerate_value_is_not_zero_it_is_unknown.md)
@@ -407,6 +412,7 @@
 - [feedback_safeguard_can_be_a_noop_with_green_units](feedback_safeguard_can_be_a_noop_with_green_units.md)
 - [feedback_seed_mirror_vs_host_formatter](feedback_seed_mirror_vs_host_formatter.md)
 - [feedback_sentrux_freetier_3rule_limit](feedback_sentrux_freetier_3rule_limit.md)
+- [feedback_sentrux_html_href_is_an_import_edge](feedback_sentrux_html_href_is_an_import_edge.md)
 - [feedback_signal_placed_in_a_branch_goes_blind](feedback_signal_placed_in_a_branch_goes_blind.md)
 - [feedback_suffix_rename_is_a_blind_injection](feedback_suffix_rename_is_a_blind_injection.md)
 - [feedback_unparsed_is_not_absent](feedback_unparsed_is_not_absent.md)
@@ -460,7 +466,7 @@
 - [project_state_gate_vs_fence_confusion](project_state_gate_vs_fence_confusion.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 
-## lifecycle (23)
+## lifecycle (24)
 
 - [feedback_blocking_first_lifo_entry_steals_segment_budget](feedback_blocking_first_lifo_entry_steals_segment_budget.md)
 - [feedback_born_wrong_then_fixed_looks_like_working](feedback_born_wrong_then_fixed_looks_like_working.md)
@@ -481,12 +487,13 @@
 - [project_graceful_stop_debt](project_graceful_stop_debt.md)
 - [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_otlp_http_timeout_is_not_a_call_ceiling](project_otlp_http_timeout_is_not_a_call_ceiling.md)
+- [project_plugin_paused_is_a_label](project_plugin_paused_is_a_label.md)
 - [project_silent_observability_plane](project_silent_observability_plane.md)
 - [project_switch_delivers_layer](project_switch_delivers_layer.md)
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (37)
+## live-stand (40)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
@@ -498,15 +505,18 @@
 - [feedback_acceptance_criterion_needs_a_live_trigger](feedback_acceptance_criterion_needs_a_live_trigger.md)
 - [feedback_backend_ctl_for_agents](feedback_backend_ctl_for_agents.md)
 - [feedback_backend_driver_needs_connect_before_shutdown](feedback_backend_driver_needs_connect_before_shutdown.md)
+- [feedback_diff_live_logs_to_find_an_observable](feedback_diff_live_logs_to_find_an_observable.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
 - [feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name](feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
+- [feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it](feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it.md)
 - [feedback_probe_liveness_is_not_render](feedback_probe_liveness_is_not_render.md)
 - [feedback_qt_mcp_flag_value_is_compared_verbatim](feedback_qt_mcp_flag_value_is_compared_verbatim.md)
 - [feedback_qt_mcp_smoke_verification](feedback_qt_mcp_smoke_verification.md)
 - [feedback_shared_stand_and_tests_protocol](feedback_shared_stand_and_tests_protocol.md)
 - [feedback_stand_lock_check_must_gate_the_command](feedback_stand_lock_check_must_gate_the_command.md)
+- [feedback_status_snapshot_lags_program_done](feedback_status_snapshot_lags_program_done.md)
 - [feedback_subagent_live_test_monitor_hang](feedback_subagent_live_test_monitor_hang.md)
 - [feedback_the_off_half_of_a_pair_can_be_done_by_a_timer](feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md)
 - [feedback_unblocking_signal_at_the_moment_of_fact](feedback_unblocking_signal_at_the_moment_of_fact.md)
@@ -566,7 +576,7 @@
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
 
-## owner-decision (20)
+## owner-decision (21)
 
 - [feedback_always_latest_models](feedback_always_latest_models.md)
 - [feedback_dialog_conventions](feedback_dialog_conventions.md)
@@ -583,6 +593,7 @@
 - [feedback_tab_order](feedback_tab_order.md)
 - [feedback_three_lenses_three_defect_classes](feedback_three_lenses_three_defect_classes.md)
 - [feedback_unused_paths_are_contracts](feedback_unused_paths_are_contracts.md)
+- [project_control_core_vision](project_control_core_vision.md)
 - [project_gui_constructor_layers_2026_09_26](project_gui_constructor_layers_2026_09_26.md)
 - [project_industrial_standards_packml](project_industrial_standards_packml.md)
 - [project_owner_push_and_tools_decisions](project_owner_push_and_tools_decisions.md)
@@ -609,7 +620,7 @@
 - [project_storage_stack_verdict](project_storage_stack_verdict.md)
 - [project_store_retention_bounds_rows_not_bytes](project_store_retention_bounds_rows_not_bytes.md)
 
-## probes (24)
+## probes (25)
 
 - [feedback_a_measurement_capped_by_its_own_limit_proves_nothing](feedback_a_measurement_capped_by_its_own_limit_proves_nothing.md)
 - [feedback_a_probe_green_on_the_suite_needs_a_live_axis_first](feedback_a_probe_green_on_the_suite_needs_a_live_axis_first.md)
@@ -627,6 +638,7 @@
 - [feedback_one_control_proves_sufficiency_not_exclusivity](feedback_one_control_proves_sufficiency_not_exclusivity.md)
 - [feedback_plausible_is_not_verified](feedback_plausible_is_not_verified.md)
 - [feedback_process_counter_is_not_per_key](feedback_process_counter_is_not_per_key.md)
+- [feedback_status_snapshot_lags_program_done](feedback_status_snapshot_lags_program_done.md)
 - [feedback_the_off_half_of_a_pair_can_be_done_by_a_timer](feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md)
 - [feedback_two_tests_enter_from_both_sides_and_miss_the_connector](feedback_two_tests_enter_from_both_sides_and_miss_the_connector.md)
 - [feedback_unconnected_driver_reads_as_a_clean_zero](feedback_unconnected_driver_reads_as_a_clean_zero.md)
@@ -775,7 +787,7 @@
 - [project_fencing_test_race](project_fencing_test_race.md)
 - [project_seqlock_contention_semantics](project_seqlock_contention_semantics.md)
 
-## test-doubles (16)
+## test-doubles (17)
 
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
 - [feedback_a_faithful_fake_still_lacks_the_protocol](feedback_a_faithful_fake_still_lacks_the_protocol.md)
@@ -786,6 +798,7 @@
 - [feedback_default_path_must_match_publisher](feedback_default_path_must_match_publisher.md)
 - [feedback_emergency_log_reaches_stderr_not_the_log_files](feedback_emergency_log_reaches_stderr_not_the_log_files.md)
 - [feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible](feedback_fakes_feed_config_flat_so_key_address_defects_are_invisible.md)
+- [feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it](feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it.md)
 - [feedback_positional_call_hides_parameter_name_drift](feedback_positional_call_hides_parameter_name_drift.md)
 - [feedback_test_live_telemetry_gate_without_full_boot](feedback_test_live_telemetry_gate_without_full_boot.md)
 - [feedback_test_raising_the_error_itself_guards_the_branch](feedback_test_raising_the_error_itself_guards_the_branch.md)
@@ -794,7 +807,7 @@
 - [project_backend_ctl_fake_fidelity_gap](project_backend_ctl_fake_fidelity_gap.md)
 - [project_orchestrator_stub_contract_s29](project_orchestrator_stub_contract_s29.md)
 
-## test-infra (33)
+## test-infra (34)
 
 - [feedback_a_background_chain_does_not_see_the_coordinator_pause](feedback_a_background_chain_does_not_see_the_coordinator_pause.md)
 - [feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath](feedback_a_plugin_in_addopts_runs_before_conftest_and_needs_pythonpath.md)
@@ -813,6 +826,7 @@
 - [feedback_red_tests_manufacture_the_appearance_of_new_diagnostics](feedback_red_tests_manufacture_the_appearance_of_new_diagnostics.md)
 - [feedback_scripted_patch_needs_a_unique_anchor](feedback_scripted_patch_needs_a_unique_anchor.md)
 - [feedback_second_consumer_reveals_the_defect](feedback_second_consumer_reveals_the_defect.md)
+- [feedback_server_file_in_home_needs_dir_autouse_isolation](feedback_server_file_in_home_needs_dir_autouse_isolation.md)
 - [feedback_snapshot_of_a_sim_record_races_its_ticker](feedback_snapshot_of_a_sim_record_races_its_ticker.md)
 - [feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows](feedback_sys_platform_patch_before_import_breaks_watchdog_on_windows.md)
 - [feedback_test_live_telemetry_gate_without_full_boot](feedback_test_live_telemetry_gate_without_full_boot.md)

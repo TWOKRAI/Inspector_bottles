@@ -3,6 +3,12 @@
 # Этот файл описывает ЗНАЧЕНИЯ по умолчанию для всех плагинов.
 # Плагин в topology может override любое поле — здесь только базовые defaults.
 
+# --- Гейт запуска линии (Task 2.1) ---
+# true — после boot система в «готов» и ждёт system.run.start; false — работа идёт сразу.
+# PM читает ключ один раз при старте: config.reload на него не действует до перезапуска.
+# Значение true: GUI шлёт START (Task 2.3, S5), headless — через run_autostart (Task 2.7).
+run_gate: true
+
 # --- Системные параметры ---
 system:
   stop_timeout: 5.0           # таймаут graceful shutdown (сек)
@@ -31,11 +37,15 @@ storage:
   batch_size: 100
 
 # --- Backend-control сокет (dev-инструмент: BackendDriver / MCP) ---
-# enabled: true → ProcessManager поднимает TCP-endpoint на host:port (localhost).
-# Через него headless-driver шлёт те же router-команды, что GUI (отладка бэкенда
-# без GUI/qt-mcp). В проде ставить false. Env BACKEND_CTL=1 включает независимо.
+# Поставка выключена: enabled: false — простой старт порт не открывает.
+# dev-старт: BACKEND_CTL=1 (включает независимо от этого ключа; стенды и харнесс
+# ставят его сами). Включённый порт слушает host:port (localhost) и требует
+# первой строкой hello с токеном из ~/.multiprocess_framework/ctl_<port>.token
+# (файл пишет ProcessManager). Через порт headless-driver шлёт те же
+# router-команды, что GUI. Правило поставки — ADR process_manager_module
+# (комментарии этого файла стирает сохранение настроек из GUI).
 backend_ctl:
-  enabled: true
+  enabled: false
   port: 8765
   host: "127.0.0.1"
 
@@ -324,3 +334,15 @@ discovery:
   service_paths:
     - "Services"
   auto_discover: true
+
+# --- Закрытие системы (Task 1.4m, ADR-PMM-044) ---
+# pre_stop — шаги, которые ProcessManager выполняет ПЕРЕД событиями стопа при
+# graceful-остановке (force шаги пропускает). Сейчас один шаг: процесс devices
+# выполняет robot_park_all — «домой» перед остановкой, чтобы граф не останавливался
+# с роботом на полпути. timeout_s: 35 — срок хаба 31,5 с при args: {} + запас 3,5 с
+# (число, не строка: строку схема PM отвергнет, шаг пропадёт с ERROR в журнале PM).
+# Отключить шаг: `shutdown: {pre_stop: []}` в user_overrides.yaml (список заменяется
+# целиком); `pre_stop:` без значения (None) тоже значит «пусто».
+shutdown:
+  pre_stop:
+    - {process: devices, command: robot_park_all, args: {}, timeout_s: 35}

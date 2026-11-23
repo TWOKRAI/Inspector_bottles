@@ -118,8 +118,9 @@ def test_pacer_sleeps_not_spins():
 
 
 def test_idle_cycle_duration_measured_with_fine_clock():
-    """``cycle_duration_ms`` при интервале 10 мс лежит в 10 ± 2. Красит: длительность цикла
-    на ``time.monotonic`` (Windows: 0 / 15 / 16 мс)."""
+    """``cycle_duration_ms`` при интервале 10 мс лежит в 10 ± 4. Красит: длительность цикла
+    на ``time.monotonic`` (Windows: 0 / 15 / 16 мс). Допуск ±4, а не ±2: джиттер ``sleep`` на
+    macOS даёт 8.1..12.1 мс; 0 и 15/16 мс окно всё равно отсекает."""
     worker = _StampedIdle([], 10)
     stop, pause = threading.Event(), threading.Event()
     thread = threading.Thread(target=worker.run, args=(stop, pause), daemon=True)
@@ -131,4 +132,4 @@ def test_idle_cycle_duration_measured_with_fine_clock():
     stop.set()
     thread.join(JOIN_DEADLINE_S)
     assert not thread.is_alive()
-    assert all(8.0 <= s <= 12.0 for s in samples[2:]), f"cycle_duration_ms вне 10±2: {samples}"
+    assert all(6.0 <= s <= 14.0 for s in samples[2:]), f"cycle_duration_ms вне 10±4: {samples}"

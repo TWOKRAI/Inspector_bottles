@@ -51,13 +51,13 @@ _CONNECT_S = 60.0
 # Литералы файла приёмки
 # --------------------------------------------------------------------------------------------------
 
-# А1: 73 имени
+# А1: 77 имён (+ ручная robot_park_all, T5.3e.5; + robot_calib_* T5.4)
 _DEVICE_COMMANDS = (
     "device_list device_describe device_upsert device_upsert_many device_sync_set device_remove device_protocols "
     "device_connect device_disconnect device_read device_write"
 ).split()
 _HIK_COMMANDS = "hik_enum hik_open hik_close hik_get_params hik_set_params hik_release".split()
-# 41 команда робота маршрута «драйвер»: 29 прежних + 12 v2
+# 42 команды робота маршрута «драйвер»: 29 прежних + 13 v2
 _ROBOT_V1_COMMANDS = (
     "robot_enqueue_job robot_return_job robot_send_test_job robot_abort robot_set_mode robot_jog robot_jog_abort "
     "robot_set_servo robot_set_robot_config robot_get_robot_config robot_get_telemetry robot_read_echo "
@@ -68,16 +68,22 @@ _ROBOT_V1_COMMANDS = (
 ).split()
 _ROBOT_V2_COMMANDS = (
     "robot_param_set robot_param_apply robot_stop robot_servo robot_do_set robot_jog_step robot_jog_hold "
-    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park"
+    "robot_jog_release robot_point_capture robot_program_run robot_program_abort robot_park robot_calib_belt"
 ).split()
 _ROBOT_DATA_COMMANDS = (
     "robot_param_get_all robot_point_list robot_point_save robot_point_delete robot_frame_list robot_frame_teach "
-    "robot_program_list robot_program_get robot_program_save robot_program_delete"
+    "robot_program_list robot_program_get robot_program_save robot_program_delete robot_calib_frame robot_calib_tools"
 ).split()
 _VFD_COMMANDS = "vfd_run vfd_set_freq vfd_stop vfd_reset_fault vfd_get_status".split()
 _ROBOT_DRIVER_COMMANDS = _ROBOT_V1_COMMANDS + _ROBOT_V2_COMMANDS
 ALL_COMMANDS = (
-    _DEVICE_COMMANDS + _ROBOT_V1_COMMANDS + _ROBOT_DATA_COMMANDS + _ROBOT_V2_COMMANDS[:] + _VFD_COMMANDS + _HIK_COMMANDS
+    _DEVICE_COMMANDS
+    + _ROBOT_V1_COMMANDS
+    + _ROBOT_DATA_COMMANDS
+    + _ROBOT_V2_COMMANDS[:]
+    + _VFD_COMMANDS
+    + _HIK_COMMANDS
+    + ["robot_park_all"]
 )
 
 # А3: 21 описание команд робота v2
@@ -466,15 +472,15 @@ class PlainObjectDriver:
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a1_commands_are_exactly_the_73_names() -> None:
-    """А1: ``set(DeviceHubPlugin.commands)`` == 73 имени из файла приёмки."""
+def test_a1_commands_are_exactly_the_77_names() -> None:
+    """А1: ``set(DeviceHubPlugin.commands)`` == 77 имён из файла приёмки."""
     expected = set(ALL_COMMANDS)
-    assert len(ALL_COMMANDS) == 73 and len(expected) == 73, "литерал теста собран неверно"
+    assert len(ALL_COMMANDS) == 77 and len(expected) == 77, "литерал теста собран неверно"
     assert set(DeviceHubPlugin.commands) == expected
 
 
-def test_a2_all_73_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
-    """А2: после ``_do_configure`` + ``_do_start`` у всех 73 команд есть запись; в логе нет повторов и отказов."""
+def test_a2_all_77_registered_in_real_command_manager_without_noise(rig: Rig) -> None:
+    """А2: после ``_do_configure`` + ``_do_start`` у всех 77 команд есть запись; в логе нет повторов и отказов."""
     missing = [name for name in ALL_COMMANDS if rig.cm.get_command_info(name) is None]
     assert missing == [], missing
     assert rig.lines.matching(None, "already exists") == []
@@ -595,32 +601,35 @@ def _assigned_names(node: ast.AST) -> list[str]:
 
 
 def test_a8_exactly_17_cmd_functions_11_device_and_6_hik() -> None:
-    """А8: в классе ровно 17 ``FunctionDef`` ``cmd_*`` (11 ``cmd_device_*`` + 6 ``cmd_hik_*``)."""
+    """А8: в классе ровно 18 ``FunctionDef`` ``cmd_*`` (11 ``cmd_device_*`` + 6 ``cmd_hik_*`` + ручная
+    ``cmd_robot_park_all``, T5.3e.5)."""
     defs = [n.name for n in ast.walk(_plugin_class()) if isinstance(n, ast.FunctionDef) and n.name.startswith("cmd_")]
-    assert len(defs) == 17, sorted(defs)
+    assert len(defs) == 18, sorted(defs)
     assert len([d for d in defs if d.startswith("cmd_device_")]) == 11, sorted(defs)
     assert len([d for d in defs if d.startswith("cmd_hik_")]) == 6, sorted(defs)
 
 
 def test_a8_no_robot_or_vfd_cmd_nodes_in_class() -> None:
-    """А8: ни одного ``FunctionDef`` / ``Assign`` / ``AnnAssign`` с именем ``cmd_robot_*`` / ``cmd_vfd_*``."""
+    """А8: ни одного ``FunctionDef`` / ``Assign`` / ``AnnAssign`` с именем ``cmd_robot_*`` / ``cmd_vfd_*``, кроме
+    ручной ``cmd_robot_park_all``."""
     forbidden = ("cmd_robot_", "cmd_vfd_")
     cls = _plugin_class()
     names = [n.name for n in ast.walk(cls) if isinstance(n, ast.FunctionDef)]
     for node in ast.walk(cls):
         names += _assigned_names(node)
-    assert [n for n in names if n.startswith(forbidden)] == []
+    assert [n for n in names if n.startswith(forbidden)] == ["cmd_robot_park_all"]
     assert any(n.startswith("cmd_device_") for n in names), "недостижимо: класс разобран пустым"
 
 
 def test_a8_commands_literal_has_no_robot_or_vfd_keys() -> None:
-    """А8: в литерале словаря ``commands`` тела класса нет ключей ``robot_*`` и ``vfd_*``."""
+    """А8: в литерале словаря ``commands`` тела класса нет ключей ``robot_*`` и ``vfd_*``, кроме ручной
+    ``robot_park_all`` (T5.3e.5)."""
     keys: list[str] = []
     for node in _plugin_class().body:
         if "commands" in _assigned_names(node) and isinstance(getattr(node, "value", None), ast.Dict):
             keys += [k.value for k in node.value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
     assert "device_list" in keys, f"литерал commands с device_* не найден в теле класса: {keys}"
-    assert [k for k in keys if k.startswith(("robot_", "vfd_"))] == []
+    assert [k for k in keys if k.startswith(("robot_", "vfd_"))] == ["robot_park_all"]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -644,7 +653,7 @@ class PingDriver(FakeDriver):
 
 
 def test_a9_install_op_commands_extends_subclass_only() -> None:
-    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 73 имени, без метода."""
+    """А9: ``install_op_commands(Sub, ...)`` — ``fake_ping`` в ``Sub.commands``; база прежняя: 77 имён, без метода."""
     plugin_mod = importlib.import_module("Plugins.hub.device_hub.plugin")
 
     class Sub(DeviceHubPlugin):
@@ -714,9 +723,9 @@ def _drive_all(rig: Rig, kind: str, protocol: str, commands: list[str], prefix: 
 
 @pytest.mark.parametrize("protocol", ["delta_v2", "delta_universal3"])
 def test_a19_robot_driver_route_commands_call_driver_with_stripped_op(rig: Rig, protocol: str) -> None:
-    """А19: 41 команда робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
+    """А19: 42 команды робота маршрута «драйвер» → ``call(op без robot_, {"k": 1})`` (протоколы v2 и v1)."""
     bad, checked = _drive_all(rig, "robot", protocol, _ROBOT_DRIVER_COMMANDS, "robot_")
-    assert checked == 41
+    assert checked == 42
     assert bad == [], "\n".join(bad)
 
 

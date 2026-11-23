@@ -1,0 +1,14 @@
+{
+ "G1": {"t1": ["ref ProcessConfig", "ref stop_window_s", "ref stop_window", "ref valid_window", "ref SystemBlueprint", "ref OrchestratorConfig"],
+        "t2": ["ref multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig --full", "ref multiprocess_framework/modules/process_manager_module/topology/blueprint.py::ProcessConfig.stop_window_s", "map multiprocess_framework/modules/process_manager_module/core/stop_budget.py", "ref ProcessLaunchConfig --full", "map multiprocess_framework/modules/process_module/configs/process_launch_config.py"]},
+ "G3": {"t1": ["ref park", "ref ParkMachine", "ref program_loop", "ref _program_loop", "map robot_driver_v2"],
+        "t2": ["map Services/device_hub/drivers/robot_driver_v2/park.py", "map Services/device_hub/drivers/robot_driver_v2/programs.py", "ref ParkMachine --full", "ref ProgramMixin --full"]},
+ "G5": {"t1": ["ref SystemConfig", "ref SystemBuilder", "ref SystemBuilder.build", "ref pre_stop", "ref ShutdownSection"],
+        "t2": ["map multiprocess_prototype/backend/config/schemas.py", "ref SystemConfig --full"]},
+ "G7": {"t1": ["ref BackendDriver.system_shutdown", "ref system_shutdown", "ref _system_shutdown", "ref TOOLS", "ref supervision_status", "ref BackendDriver.supervision_status"],
+        "t2": ["map backend_ctl/mcp_tools.py", "map backend_ctl/driver.py", "ref BackendDriver --full", "ref backend_ctl/mcp_tools.py::TOOLS"]},
+ "G9": {"t1": ["ref ProcessConfig.as_generic_config", "ref as_generic_config", "ref _pick", "ref ProcessConfig.as_generic_config._pick"],
+        "t2": ["map multiprocess_framework/modules/process_manager_module/topology/blueprint.py"]},
+ "G11": {"t1": ["ref TopologySession LayoutController RecipesPresenter", "ref TopologySession.base_rev_for", "ref _CONFLICT_MESSAGE"],
+        "t2": ["ref TopologySession LayoutController RecipesPresenter --full", "map multiprocess_prototype/frontend/widgets/tabs/pipeline/layout_controller.py", "map multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py", "map multiprocess_prototype/domain/topology_session.py"]}
+}

@@ -213,3 +213,11 @@
 
 - `process.create/start/stop/restart`, `topology.apply`, `wire.setup/teardown`, `recipe.activate` исполняет `KeyedExecutor` `pm-lifecycle` (через `ExecutorManager`) вне `message_processor`; ответ приходит после подтверждённой смерти ребёнка; PM отвечает на `supervision.status` весь стоп. Таблица классов — `docs/maps/pm-lifecycle-commands.md`. Изменения ответов (I3): `key_missing`, `system_stopping`, `executor_busy`, прерванный стоп — `success: False`. Статус: реализовано (коммиты `dd10c11a7`, `a561e9b7a`); ревью и числа стенда — за лидом, `plans/lifecycle-stop-ownership/tasks/T1.9b_tests.md`.
 - **Замороженный API (принцип 3):** `RouterManager.pump_inbound`, `ProcessRegistry.stop_wait_idle`, `ChildProcessStop(idle=)`, `ProcessManagerProcess._stop_wait_idle` — не удалять и не менять (ADR-PMM-039; ADR-PMM-037 superseded). Снятие — только решением владельца.
+
+## Последний итог стопа доезжает до опроса (2026-11-11, C-88, ADR-PMM-045)
+
+- После `done` PM до `_STATUS_LINGER_S` (0.5 с) отвечает на `supervision.status`, если статус опрашивают прямо сейчас (метка моложе 0.25 с); без наблюдателя цена нулевая. Hazard-тесты H1-H10: `tests/test_c88_status_linger_hazards.py`; живой стенд и ревью — за лидом.
+
+## PID-реестр: область «приложение И checkout» (2026-11-15, D2, ADR-PMM-046)
+
+- Имя дефолтного реестра — `<app>_<tag>_system_pids.jsonl` (`tag` — отпечаток корня checkout): два checkout одного приложения не реапают друг друга. Прежний неразделённый файл `<app>_system_pids.jsonl` не реапается и не удаляется. Лог реапа: строка на жертву `убит pid=… (имя)`. Границы (легаси не-`inspector` приложений, параллельный запуск того же checkout, SHM/порт/логи вне реестра) — в ADR-PMM-046. Тесты: `tests/test_pid_registry_app_scoped.py`, `tests/test_pid_registry.py`, `tests/test_pid_registry_checkout_acceptance.py`.

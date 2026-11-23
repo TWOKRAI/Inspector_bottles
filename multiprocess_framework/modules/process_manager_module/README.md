@@ -25,8 +25,9 @@ ProcessManagerProcess — оркестратор с композицией Proce
 6. [Поток запуска системы](#поток-запуска-системы)
 7. [Обработка ошибок](#обработка-ошибок)
 8. [Graceful Shutdown](#graceful-shutdown)
-9. [CommandManager — встроенные команды](#commandmanager--встроенные-команды)
-10. [Использование](#использование)
+9. [Работа системы (run-state)](#работа-системы-run-state)
+10. [CommandManager — встроенные команды](#commandmanager--встроенные-команды)
+11. [Использование](#использование)
 
 ---
 
@@ -511,6 +512,49 @@ config = {
 `system_stop_event`, штатному lifecycle даётся 1.5 с, затем `os._exit(75)`. Сам PM (его запускает spawner
 без `parent_pid`) и SRM-режим тестов не сторожатся; Windows — no-op; forkserver не взводится.
 
+### PID-реестр: область «приложение И checkout» (ADR-PMM-046)
+
+Дефолтный реестр процессов системы — `<app>_<tag>_system_pids.jsonl` в temp (`tag` — 8 hex от корня checkout, то есть
+каталога над пакетом `multiprocess_framework`). Два checkout одного приложения на одной машине не делят файл и не реапают
+процессы друг друга. Файл прежнего неразделённого имени `<app>_system_pids.jsonl` не реапается и не удаляется. Реап
+пишет в журнал строку на каждую жертву: `PID-реестр: убит pid=<pid> (<имя процесса>)`.
+
+## Работа системы (run-state)
+
+Машина работы PM: состояния `booting`, `not_ready`, `ready`, `running`, `stopping`, `fault`, `shutting_down`
+(`process/run_state.py`, `RunState`). Команды: `system.run.status`, `system.run.start`, `system.run.stop`,
+`system.run.ack`.
+
+### Ключи конфига (`RunConfig`, ADR-PMM-049)
+
+Модель — `process/run_config.py`: `RunConfig`, `RUN_CONFIG_KEYS`, `run_config_value(key, raw)`. Прототип наследует её
+(`SystemConfig(RunConfig)`), новый ключ — одно поле в этом файле.
+
+| Ключ | Умолчание | Когда читается |
+|---|---|---|
+| `run_gate` | `false` | один раз, в `_create_components()` (при boot PM) |
+| `run_autostart` | `false` | один раз, в `_create_components()` (ADR-PMM-050) |
+| `run_stop_timeout_s` | `10.0` | при каждом использовании: срок ожидания `paused` при STOP |
+| `run_restart_grace_s` | `30.0` | при каждом использовании: окно перезапуска процесса |
+
+`run_gate` и `run_autostart` через `config.reload` до перезапуска PM не действуют. Негодное значение (не `true`/`false`
+для флагов, не число > 0 для сроков, строка вместо числа) — умолчание и WARNING без значения входа.
+
+### Вид состояния `run_view` и листья `system.run.*`
+
+`run_view(...)` (`process/run_state.py`) — единственный построитель вида. Ключи: `state`, `since`, `run_gate`,
+`start_allowed` (`ready`), `stop_allowed` (`running`), `ack_allowed`, `reasons`, `last_fault`. Тот же вид возвращает
+`system.run.status`. В стор публикуются листья `system.run.<ключ>` для каждого из этих восьми ключей: только изменившиеся
+значения, при наличии стора. Нет стора — публикации нет.
+
+### Автостарт (`run_autostart`, ADR-PMM-050)
+
+Действует только при `run_gate: true`; при `run_autostart: true` без гейта PM пишет WARNING и ключ не действует.
+Латч `AutostartLatch` (`process/run_state.py`) решает под замком машины PM, один раз за boot: срабатывает на первый
+переход в `ready` из `booting` или `not_ready` (тактом `settled`/`tick`). Гасится без срабатывания любым принятым или
+отказанным `stop`, `apply`, `ack`, `shutdown` и принятым `start` до первого `ready`. START подаётся на исполнителе
+`pm-lifecycle`. Отказ START повторно не подаётся: `already_running` — INFO, иной код — WARNING с кодом.
+
 ## CommandManager — встроенные команды
 
 `ProcessManagerProcess` регистрирует встроенные команды при инициализации:
@@ -529,7 +573,7 @@ config = {
 | `wire.setup` / `wire.teardown` | параметры wire | L, `pm-lifecycle-submit`, все ключи | Настроить / разобрать wire-канал |
 | `telemetry.broadcast`, `observability.tail.subscribe_all` / `unsubscribe_all` | см. описания | T, `pm-transition-gate`, все ключи | В исполнитель, если идёт операция жизненного цикла, иначе сразу |
 | `supervision.status`, `topology.get`, `topology.diff`, `wire.status` | — | R, сразу | Чтение (снимки словарей без лока, D3) |
-| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}`. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
+| `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}` + `accepted`, `phase`; `force` поверх graceful — `escalated: True`; повтор — `accepted: False, reason: "already_stopping"` (ADR-PMM-044). При шагах `pre_stop` graceful отвечает `phase: "pre_stop"`, события взводит поток шагов после них. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
 | `system.stats` | — | R, сразу | Статистика: monitor + processes |
 
 Класс задаёт **регистрация** команды (`executor=`, `key_from=`, `targets=`), а не отправитель. Ответ на команду
@@ -537,7 +581,33 @@ config = {
 (нет ключа в `data`), `system_stopping` (операция снята из очереди при системном стопе), `executor_busy` (очередь
 исполнителя на потолке); отказы исполнителя ключа `outcome` не несут. `supervision.status` отдаёт на запись процесса
 `stop_outcome` — итог последнего стопа текущего воплощения (`None` у нового инстанса и у не стопавшегося). Значения
-`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
+`outcome` и пути — ADR-PMM-039, дополнение Task 1.10. Верхнее поле `supervision.status` `system_stop` (ADR-PMM-041) —
+ход системного стопа: `None`, пока стоп не начат; иначе `{"phase", "mode", "initiator", "started_at", "deadline_at",
+"pre_stop_step"}` (`phase` — `pre_stop | children | last_wave | done`; время — `time.time()`; `initiator` — отправитель
+`process.command`, `"event"` для стопа без команды, `"unknown"` без отправителя). Те же `phase`, `mode`, `initiator`,
+`started_at` идут в стор ключами `system.stop.*`. На стопе судить по `alive`, а не по `status` (монитор на паузе).
+Волны стопа (Task 1.3, ADR-PMM-043): ключ процесса `stop_wave` (верхний уровень `proc_dict`; `main` по умолчанию или
+`last`, негодное — WARNING без значения и `main`), читатель — `ProcessRegistry.stop_wave(name)`; на записи процесса
+`supervision.status` — поле `stop_wave`. Группа корня сигналит `main` в фазе 1, `last` — когда `main` пуст или в
+`D − last_wave_s` (`LAST_WAVE_S` = 2,0 с); при `last` в топологии `stop_budget(..., has_last=True)` прибавляет к `pm_total_s`/`outer_s`
+по 2,0 с, область `children` длиннее на `last_wave_s`. В момент сигнала `last` фаза — `last_wave`, а
+`system_stop.deadline_at` сдвигается на срок области (не при `force` и не после `done`); `stop_deadline_at` имени `last`
+— `null` до его сигнала, затем сигнал `last` + окно имени.
+Полная таблица — `docs/maps/pm-lifecycle-commands.md`, решение — ADR-PMM-039.
+
+Итог стопа ребёнка (Task 1.2, ADR-PMM-042): единственный источник `stop_outcome` — реестр; запись процесса
+`supervision.status` несёт ещё `stop_wave` и `stop_deadline_at` (срок, после которого ребёнок «завис»; `force` его режет).
+«Остановлен» = `stop_outcome` ∈ {`exited`, `terminated`, `killed`}; `survived` и `handed_over` — ребёнок жив. Между
+смертью и её наблюдением бывает `alive=false, stop_outcome=null` — судить по итогу, не по `alive`; после
+`system_stop.phase == "done"` `null` = «PM не подтвердил». `survived` опросом почти не виден — доезжает логом.
+
+Шаги `pre_stop` (Task 1.4, ADR-PMM-044): ключ `pre_stop` конфига PM (из `orchestrator_config`) — список
+`{process, command, args, timeout_s}` (`0 < timeout_s <= 60`, сумма принятых <= 120 с; схема — `process/pre_stop.py`).
+Негодная запись — ERROR `pre_stop[<i>]: <поле> — <причина>` без значений и пропуск; PM стартует всегда. graceful
+исполняет шаги запросом ребёнку (`request_async`) на исполнителе `pm-pre-stop` ДО взвода событий стопа; сбой шага —
+одна WARNING и следующий шаг; `force` или внешний `system_stop_event` прерывают шаг (≤ 50 мс). В фазе `pre_stop`
+`system_stop.pre_stop_step` = `"<process>.<command>"`, `deadline_at` = `started_at + Σ timeout_s`; команды класса L
+и T-для-цели-в-переходе отвечают `system_stopping`. Переход в `children` перебазирует graceful-срок на `pm_graceful_s`.
 
 Все команды помечены тегом `"system"`.
 

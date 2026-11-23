@@ -1,0 +1,8 @@
+fix(framework): run-state fix-B2 — атомарная запись времени heartbeat с допуском, protected без флага автоперезапуска, тесты матрицы
+
+Время heartbeat пишется внутри _admit_heartbeat под листовым замком, mark_restarting сам сбрасывает время под тем же замком: принятый до решения о рестарте heartbeat не даёт ложного recovered и не снимает сторожа H3 (гард в _check_heartbeats не нужен). _run_auto_restart_flags не включает флаг у protected (супервизор их не поднимает). Исправлен комментарий над блоком recovered, фикстура conftest ждёт поток run-shutdown, добавлен тест обхода отказа исполнителя для graceful shutdown без шагов.
+
+Why: ревью Opus Ф1 раунд 2: N1 (регресс M3: микроокно heartbeat × решение о рестарте), N2 (флаг у protected), N4 (комментарий и фикстура), дыры матрицы инъекций
+Layer: framework
+Refs: plans/2026-10-27_system-run-state/plan.md
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

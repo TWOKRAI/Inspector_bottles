@@ -29,7 +29,7 @@ from pydantic import field_validator, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ...logger_module import get_std_logger
-from ..core.stop_budget import STOP_WINDOW_KEY
+from ..core.stop_budget import STOP_WAVE_KEY, STOP_WINDOW_KEY
 from ...process_module.generic.collector_registry import (
     COLLECTOR_CONFIG_KEY,
     LEGACY_COLLECTOR_CONFIG_KEY,
@@ -189,6 +189,16 @@ class ProcessConfig(SchemaBase):
         ),
     ] = None
 
+    stop_wave: Annotated[
+        Any,
+        FieldMeta(
+            "Stop wave",
+            info="Волна системного стопа (Task 1.3, ADR-PMM-043): 'main' (по умолчанию) или 'last' — процесс "
+            "гасится после всех. Тип Any — значение идёт сырым до реестра PM: опечатка не роняет blueprint, "
+            "негодное значение — WARNING без значения и волна main. Иначе — extras.stop_wave.",
+        ),
+    ] = None
+
     # --- Data Pipeline routing (Phase 5) ---
 
     chain_targets: Annotated[
@@ -345,6 +355,10 @@ class ProcessConfig(SchemaBase):
         stop_window_s = _pick(STOP_WINDOW_KEY, None)
         if stop_window_s is not None:
             base_kwargs[STOP_WINDOW_KEY] = stop_window_s
+        # Task 1.3: волна стопа — typed-поле или extras, сырым (проверка — в реестре PM).
+        stop_wave = _pick(STOP_WAVE_KEY, None)
+        if stop_wave is not None:
+            base_kwargs[STOP_WAVE_KEY] = stop_wave
         chain_targets = _pick("chain_targets", [])
         source_fps = _pick("source_target_fps", 25.0)
         # Легаси-ключ в extras: typed-поле уже канонизировано before-валидатором, но

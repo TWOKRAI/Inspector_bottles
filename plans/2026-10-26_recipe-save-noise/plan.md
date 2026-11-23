@@ -81,7 +81,7 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 **Слепому тестеру запрещено читать** (стадия 1 выполнена): `yaml_io.py`, `manager.py`, стор, `save.py`, `topology.py`, DESIGN/INJECT, `probes/`; читает `design.md` §2, §6, ACCEPTANCE/REDS.
 
 Гейты: `light` — свои тест-файлы; `medium` — каталог тестов модуля; полный набор — лид. Все команды через
-`scripts/machine_gate.sh`, сессия `inspector-bottles-75` (полоса Д; прежняя `-d8` устарела).
+`scripts/machine_gate.sh`, сессия `inspector-bottles-c7` (полоса Д, 2026-11-06; прежние `-75`, `-d8` устарели: `-75` занято другой сессией).
 
 ## Порядок выполнения
 
@@ -128,19 +128,21 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
   - **Module contract:** impl-only
 - Task 1.12: флаг `layout_unsaved` в `TopologySession`: конфликт автосейва раскладки спрашивает пользователя в диалоге закрытия [DONE] (`59c7ce66e`; отчёт `docs/reviews/2026-10-28_task-1.12-developer.md`) (после 1.11; F2 ревью ветки)
   - **Module contract:** impl-only
-- Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [PENDING] (после 1.10)
+- Task 1.4: `recipe.save` хаба и snapshot `RecipeEngine` через движок [DONE] (`b807e6a99`, `5b47821f1`; инъекции 13/13, ревью стадии 5 с правками: `docs/reviews/2026-11-06_task-1.4-1.5-review.md`) (после 1.10)
   - **Module contract:** impl-only
-- Task 1.5: страж — AST R1/R2/R3/R4 с allowlist, `canonicalize_gui_positions` через движок [PENDING] (после 1.4)
+- Task 1.5: страж — AST R1/R2/R3/R4 с allowlist, `canonicalize_gui_positions` через движок [DONE] (`610cc89ce`, `b5e82eda0`; инъекции 14/15 + доп. матрица 38; стадия 0 — два раунда) (после 1.4)
   - **Module contract:** impl-only
-- Task 1.3: ADR-RCP-009 (движок, ревизия и лок, папка, решение №20), ADR-RCP-010 (каноническая форма), правка ADR-RCP-006, README/STATUS, OPEN_QUESTIONS, sync [PENDING] (после 1.5)
+- Task 1.3: ADR-RCP-009 (движок, ревизия и лок, папка, решение №20), ADR-RCP-010 (каноническая форма), правка ADR-RCP-006, README/STATUS, OPEN_QUESTIONS, sync [DONE: текст `287cb8dbe`, express-ревью 2026-11-07 с правками, `f733eae0a`] (после 1.5)
   - **Module contract:** n/a
 
 Срез 1.1a → 1.1b → 1.1h → 1.1e → 1.1f → 1.1g → 1.7 → 1.1c — вертикальный (движок → `RecipeManager` → store → каталог →
 файл); разделён по лимиту REDS ≤ 10 на бриф и одному свойству на тест.
+- Task 1.16: Save не пишет пустой граф при незахваченной базе (D2, входящая `_5`); хвост ревью ветки m1–m3 (входящая `_6`) [DONE] (`62c79dfbe`, `0e6db1c7f`; поправка №13, решение лида 2026-11-07; стадия 0 р1, инъекции 11, ревью стадии 5; `tasks/1.16.md`)
+  - **Module contract:** impl-only
 
 ## Injections
 
-Лид правит код по блоку INJECT и сверяет красные с предсказанными; 101 правка (поправка 2026-11-02: +4 к 1.4).
+Лид правит код по блоку INJECT и сверяет красные с предсказанными; сумма таблицы 174 (поправки: 2026-11-02 +4 к 1.4; 2026-11-06 +5 к 1.5, стадия 0 р1–р2).
 
 | Task | INJECT | файл тестов (предсказанные красные — в блоке INJECT) | observed red |
 |---|---|---|---|
@@ -165,11 +167,33 @@ INJECT задач) → стадия 5 reviewer на задачу → tech-writer
 | 1.14 | 12 | `recipes/tests/test_save_protected_owner.py`, `…_extra.py` | 12/12 совпали (`docs/reviews/2026-11-02_task-1.14-injection.md`) |
 | 1.14b | 5 | `recipes/tests/test_save_protected_owner_extra.py`, `pipeline/tests/test_save_conflict_rev.py`, `frontend/tests/test_app_foundation_names.py` | |
 | 1.4 | 11 | `recipe/tests/test_backend_writers_patch.py` | |
-| 1.5 | 10 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
+| 1.5 | 15 | `recipe/tests/test_single_writer_guard.py`, `recipes/tests/test_canonicalize_gui_positions.py` | |
+| 1.16 | 9 | `recipes/tests/test_save_empty_graph_guard.py`, `camera/tests/test_camera_presenter.py`, `pipeline/tests/test_save_conflict_rev.py` | |
 
 ## Открытые вопросы (владельцу)
 
 Нет. В-П1…В-П3 закрыты ответами ревью раунда 3 (`design.md` §10.2); решения владельца и лида — `design.md` §11.
+
+## Долг на момент слияния в локальный main (2026-11-07, решение владельца: «merge да, push нет»)
+
+Ветка влита в локальный `main` с долгом: Windows и камер у владельца нет, срока нет. Долг — «ожидает стенда/камеры»,
+закрывается при первом окне с железом; до тех пор пункт C-30 «стенд» не считается снятым.
+
+| Замер | Что не снято | Чем подкреплено сейчас | Статус |
+|---|---|---|---|
+| M1 | Save без правок живым GUI: `bridge_synth` из байтов HEAD — первой записью ≤ `5 0`, второй `0 0`, mtime прежний; `webcam_sketch` `0 0`; `capture_foundation` в `run_gui` вызван | **ЗАМЕНА, не стенд:** `frontend/widgets/tabs/pipeline/tests/test_stand_substitute_m1_m2.py` (настоящие `PipelineTab`/`RecipesTab` offscreen, клик «Сохранить», 5 passed). Нет: `run_gui`, ProcessManager, окно, хуки `MainWindow` | ожидает стенда |
+| M2 | внешняя правка файла при открытом GUI → диалог конфликта на экране | та же замена (диалог перехвачен в offscreen, не показан) | ожидает стенда |
+| M3 | Camera Save `fps=30` → `config.fps: 30` под плагином → Pipeline-Save без конфликта; `git status` чист | ничем | ожидает камеры/стенда |
+| M5 | повтор `mjpg` и `register_update` на живой камере, WARNING на `params` | ничем | ожидает камеры/стенда |
+
+Тоже не снято: `backend_ctl` live-тест хаба; `recipe/tests/test_yaml_patch.py` не собирается на Mac (нет `hypothesis`) —
+1.4 и 1.5 им не подтверждены, прогнать там, где пакет есть; POSIX-лок и таймаут лока (`test_file_lock.py`
+пропускается вне Windows); `test_migration_preserves_eol[lf]` проверен только моделью CRLF.
+
+Решения владельца, которых ещё нет: права на кнопку «Сохранить» Камеры; M4 (Camera Save гасит `layout_unsaved` без
+записи позиций, `frontend/app.py:150-151`); брать ли `_4` (галочка дисплея пишет `enabled: true`, 12 из 22 рецептов);
+int-ключ `0:` в `RecipeEngine.save` (дубль `'0'`); `sentrux gate --save`. `origin/fix/recipe-save-noise` занята
+сессией `-48` и расходится с этой веткой — push не делается.
 
 ## Дальше (вне плана)
 

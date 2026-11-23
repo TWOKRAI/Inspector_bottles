@@ -56,10 +56,13 @@ def test_snapshot_prefix_boundary_no_sibling_leak() -> None:
 
 
 def test_snapshot_exact_prefix_match_included() -> None:
-    """Путь, равный самому prefix (без точки-суффикса), попадает в снимок."""
+    """Путь, равный самому prefix (без точки-суффикса), попадает в снимок.
+
+    Закреплял старый инвариант; копия хранит листья (П3).
+    """
     m = TelemetryReadModel(tracked_suffixes=())
     m.ingest("processes.cam", {"nested": 1})
-    assert m.snapshot("processes.cam") == {"processes.cam": {"nested": 1}}
+    assert m.snapshot("processes.cam") == {"processes.cam.nested": 1}
 
 
 def test_empty_prefix_returns_full_snapshot() -> None:

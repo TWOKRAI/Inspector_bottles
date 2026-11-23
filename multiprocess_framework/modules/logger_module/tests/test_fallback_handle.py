@@ -145,6 +145,45 @@ def test_view_is_resolved_only_on_first_write() -> None:
     assert handle._view is not None
 
 
+def test_resolve_returns_the_view_of_the_first_write_and_keeps_it() -> None:
+    """``resolve()`` — публичный резолв без записи: тот же вид, что даёт первая запись.
+
+    Нужен вызывающему, который обязан узнать о частично инициализированном
+    ``logger_module`` ДО того, как выставит свой флаг «сказано»
+    (``data_schema_module/core/metrics.py::_std_logger``, ADR-DS-009).
+    """
+    early = FallbackLogger("проба.resolve.раньше")
+    view = early.resolve()
+    assert view is not None
+    assert early.resolve() is view, "повторный resolve() обязан отдать тот же объект"
+    early.info("запись после resolve")
+    assert early._view is view, "первая запись после resolve() не должна подменять вид"
+
+    late = FallbackLogger("проба.resolve.позже")
+    late.info("первая запись")
+    assert late.resolve() is late._view, "resolve() после записи обязан отдать вид первой записи"
+
+
+def test_resolve_does_not_swallow_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """При кольце импорта ``resolve()`` бросает ``ImportError`` и не кэширует пустоту."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _ring(name: str, *args: object, **kwargs: object) -> object:
+        if "logger_module" in name:
+            raise ImportError("partially initialized module (имитация кольца)")
+        return real_import(name, *args, **kwargs)
+
+    handle = FallbackLogger("проба.resolve.кольцо")
+    monkeypatch.setattr(builtins, "__import__", _ring)
+    with pytest.raises(ImportError, match="имитация кольца"):
+        handle.resolve()
+    monkeypatch.setattr(builtins, "__import__", real_import)
+    assert handle._view is None, "после ImportError вид не должен закэшироваться"
+    assert handle.resolve() is not None, "после снятия кольца resolve() обязан подтянуть вид"
+
+
 # =============================================================================
 # 2-3. Поведение без менеджера
 # =============================================================================

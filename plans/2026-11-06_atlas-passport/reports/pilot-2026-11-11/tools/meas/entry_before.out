@@ -1,0 +1,150 @@
+### ref stop -> exit 2
+  stdout: ['== stop ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref _pick -> exit 2
+  stdout: ['== _pick ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref b._pick -> exit 2
+  stdout: ['== b._pick ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref B.c.deep -> exit 2
+  stdout: ['== B.c.deep ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref ick -> exit 2
+  stdout: ['== ick ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref STOP -> exit 2
+  stdout: ['== STOP ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref driver -> exit 2
+  stdout: ['== driver ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref helper -> exit 2
+  stdout: ['== helper ==', 'ambiguous', 'pkg/b.py::helper', 'pkg/tests/test_b.py::helper']
+  stderr: ['atlas ref: id 1: ambiguous']
+### ref only_test -> exit 0
+  stdout: ['== pkg/tests/test_b.py::only_test ==']
+  stderr: []
+### ref Driver.stop -> exit 2
+  stdout: ['== Driver.stop ==', 'ambiguous', 'pkg/a.py::Driver.stop', 'pkg/tests/test_a.py::Driver.stop']
+  stderr: ['atlas ref: id 1: ambiguous']
+### ref twice -> exit 0
+  stdout: ['== pkg/a.py::twice ==']
+  stderr: []
+### ref LIMIT -> exit 2
+  stdout: ['== LIMIT ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref Schema.KIND -> exit 2
+  stdout: ['== Schema.KIND ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref KIND -> exit 2
+  stdout: ['== KIND ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref MODE -> exit 2
+  stdout: ['== MODE ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref NOTE -> exit 2
+  stdout: ['== NOTE ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref dup -> exit 2
+  stdout: ['== dup ==', 'ambiguous', 'lib/c.py::dup', 'pkg/a.py::dup', 'pkg/b.py::dup', 'pkg/tests/test_a.py::dup']
+  stderr: ['atlas ref: id 1: ambiguous']
+### ref run -> exit 0
+  stdout: ['== lib/c.py::run ==']
+  stderr: []
+### ref setup -> exit 2
+  stdout: ['== setup ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref __init__ -> exit 2
+  stdout: ['== __init__ ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref Driver -> exit 2
+  stdout: ['== Driver ==', 'ambiguous', 'pkg/a.py::Driver', 'pkg/tests/test_a.py::Driver']
+  stderr: ['atlas ref: id 1: ambiguous']
+### ref outer -> exit 0
+  stdout: ['== pkg/a.py::outer ==']
+  stderr: []
+### ref A -> exit 0
+  stdout: ['== pkg/a.py::A ==']
+  stderr: []
+### ref Schema -> exit 0
+  stdout: ['== pkg/a.py::Schema ==']
+  stderr: []
+### ref Holder -> exit 0
+  stdout: ['== lib/c.py::Holder ==']
+  stderr: []
+### ref zf -> exit 0
+  stdout: ['== z/m.py::zf ==']
+  stderr: []
+### ref Schema2 -> exit 0
+  stdout: ['== pkg/a.py::Schema2 ==']
+  stderr: []
+### ref Nope -> exit 2
+  stdout: ['== Nope ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref lib -> exit 2
+  stdout: ['== lib ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref pkg/b.py -> exit 2
+  stdout: ['== pkg/b.py ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref Driverr -> exit 2
+  stdout: ['== Driverr ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref pkg/a.py::Drivr -> exit 2
+  stdout: ['== pkg/a.py::Drivr ==', 'not found']
+  stderr: ['atlas ref: id 1: not found']
+### ref pkg/a.py::Driver Nope -> exit 2
+  stdout: ['== pkg/a.py::Driver ==', '== Nope ==', 'not found']
+  stderr: ['atlas ref: id 2: not found']
+### ref Nope Nada -> exit 2
+  stdout: ['== Nope ==', 'not found', '== Nada ==', 'not found']
+  stderr: ['atlas ref: id 1: not found', 'atlas ref: id 2: not found']
+### ref _pick dup -> exit 2
+  stdout: ['== _pick ==', 'not found', '== dup ==', 'ambiguous', 'lib/c.py::dup', 'pkg/a.py::dup', 'pkg/b.py::dup', 'pkg/tests/test_a.py::dup']
+  stderr: ['atlas ref: id 1: not found', 'atlas ref: id 2: ambiguous']
+### ref _pick Nope -> exit 2
+  stdout: ['== _pick ==', 'not found', '== Nope ==', 'not found']
+  stderr: ['atlas ref: id 1: not found', 'atlas ref: id 2: not found']
+### ref ../x.py::f pkg/a.py::Driver -> exit 2
+  stdout: []
+  stderr: ['atlas: путь выше корня репозитория']
+### map z -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map z/ -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map pkg/ -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map . -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map deep -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map Z -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map z/m -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map pkg/tests -> exit 2
+  stdout: []
+  stderr: ['atlas map: not found']
+### map pkg/a.py -> exit 0
+  stdout: ['== file pkg/a.py ==', 'pkg/a.py; sha 414b63be182808270d3f21625bda0a1b3406687f; scanner 1-d8b9d44d5b0d', 'purpose: —', 'interface: layer pkg', '  all: не искали', '  members:', '    class Driver  :1', '    def outer()  :7']
+  stderr: []
+### map tools/z -> exit 0
+  stdout: ['== unit tools/z ==', 'z/; sha 414b63be182808270d3f21625bda0a1b3406687f; scanner 1-d8b9d44d5b0d', 'purpose: P tools/z.', 'interface: layer tools/z', '  all: —', '  members:', '    z/m.py — —  (zf)', 'links: найдено 0; не видно: динамика, аннотации, упоминания']
+  stderr: []
+### map p2 -> exit 0
+  stdout: ['== unit p2 ==', 'o/; sha 414b63be182808270d3f21625bda0a1b3406687f; scanner 1-d8b9d44d5b0d', 'purpose: P p2.', 'interface: layer p2', '  all: —', '  members:', '    o/x.py — —  (x)', 'links: найдено 0; не видно: динамика, аннотации, упоминания']
+  stderr: []
+### map pkg -> exit 0
+  stdout: ['== unit pkg ==', 'pkg/; sha 414b63be182808270d3f21625bda0a1b3406687f; scanner 1-d8b9d44d5b0d', 'purpose: P pkg.', 'interface: layer pkg', '  all: —', '  members:', '    pkg/a.py — —  (Driver, outer, A, Schema, dup, twice, +1)', '    pkg/b.py — —  (dup, helper)']
+  stderr: []
+### map ../x -> exit 2
+  stdout: []
+  stderr: ['atlas: путь выше корня репозитория']

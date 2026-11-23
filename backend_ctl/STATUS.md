@@ -9,7 +9,7 @@
 Тонкий внешний driver управления живым бэкендом по TCP («GUI по сокету»): подключается
 к `SocketChannel` хоста (ProcessManager), шлёт те же router-сообщения, что GUI, плюс
 reply-поля для request-response. Плюс MCP-сервер (официальный SDK) — контрол-плейн для агента.
-Граница ровно Claude↔driver; гейт на хосте: `BACKEND_CTL=1` + localhost-bind. Кадры/SHM по сокету НЕ гоняются.
+Граница ровно Claude↔driver; гейт на хосте: `BACKEND_CTL=1` + localhost-bind + токен из файла порта (BCTL-ADR-011, ADR-PMM-052). Кадры/SHM по сокету НЕ гоняются.
 
 ## Текущее состояние
 

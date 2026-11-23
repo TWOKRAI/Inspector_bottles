@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from multiprocess_framework.modules.data_schema_module import (
     FieldMeta,
@@ -14,6 +15,7 @@ from multiprocess_framework.modules.data_schema_module import (
     deep_merge,
 )
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_framework.modules.process_manager_module.process.run_config import RUN_CONFIG_KEYS, RunConfig
 from multiprocess_framework.modules.process_module.configs import (
     ObservabilityConfig,
     TelemetryPublishConfig,
@@ -192,8 +194,36 @@ class TelemetrySection(SchemaBase):
     ] = {}
 
 
-class SystemConfig(SchemaBase):
-    """Корневая схема system.yaml."""
+class ShutdownSection(SchemaBase):
+    """Сценарии закрытия системы (Task 1.4m, ADR-PMM-044).
+
+    ``pre_stop`` — манифест шагов, которые ProcessManager выполняет ПЕРЕД событиями
+    стопа (graceful; ``force`` шаги пропускает). Схему шага (``process``/``command``/
+    ``args``/``timeout_s``) секция НЕ дублирует: её проверяет ``parse_pre_stop`` в PM,
+    негодная запись там — ERROR и пропуск шага, а не отказ загрузки конфига. Поэтому
+    тип элемента — ``Any``. ``None`` (строка ``pre_stop:`` без значения) считается
+    пустым списком. ``user_overrides.yaml`` заменяет список целиком.
+    """
+
+    pre_stop: Annotated[
+        list[Any],
+        FieldMeta(
+            "Шаги перед остановкой",
+            info="Команды, которые PM шлёт процессам перед событиями стопа "
+            "(например «домой» робота). Пусто — стоп без шагов. Негодную запись "
+            "проверяет и логирует PM.",
+        ),
+    ] = Field(default_factory=list)
+
+    @field_validator("pre_stop", mode="before")
+    @classmethod
+    def _none_is_empty(cls, value: Any) -> Any:
+        """``pre_stop:`` без значения в yaml не должен ронять загрузку."""
+        return [] if value is None else value
+
+
+class SystemConfig(RunConfig):
+    """Корневая схема system.yaml; плоские ключи работы PM (``run_*``) наследует от ``RunConfig``."""
 
     system: SystemSection = SystemSection()
     camera: CameraDefaults = CameraDefaults()
@@ -204,6 +234,30 @@ class SystemConfig(SchemaBase):
     backend_ctl: BackendCtlSection = BackendCtlSection()
     observability: ObservabilityConfig = ObservabilityConfig()
     telemetry: TelemetrySection = TelemetrySection()
+    shutdown: ShutdownSection = ShutdownSection()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unknown_run_keys(cls, data: Any) -> Any:
+        """Опечатка в плоском ключе работы (``run_autostrat``) не молчит (M2 сквозного обзора 2.7).
+
+        Неизвестный ключ с префиксом ``run_`` — одна WARNING на ключ при каждой валидации с подсказкой ближайшего
+        из ``RUN_CONFIG_KEYS`` (difflib, порог 0.5; ниже порога — без подсказки) и в конфиг не попадает; отказа нет.
+        Имя ключа в тексте обрезано до 40 знаков, значение в текст не попадает. Ключи без префикса ``run_`` — как
+        раньше (лишний ключ схема отбрасывает молча). Одно место для всех путей загрузки: ``load_system_config``
+        (system.yaml + user_overrides.yaml), Save вкладки «Система», хуки оркестратора.
+        """
+        if not isinstance(data, dict):
+            return data
+        unknown = [k for k in data if isinstance(k, str) and k.startswith("run_") and k not in cls.model_fields]
+        if not unknown:
+            return data
+        for key in unknown:
+            shown = key[:40]
+            near = difflib.get_close_matches(key, RUN_CONFIG_KEYS, n=1, cutoff=0.5)
+            hint = f" (возможно {near[0]})" if near else ""
+            logger.warning(f"неизвестный ключ {shown}{hint}")
+        return {k: v for k, v in data.items() if k not in unknown}
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

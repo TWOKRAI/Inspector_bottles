@@ -2,7 +2,7 @@
 name: feedback_a_fix_that_narrows_input_unguards_the_condition_below
 description: "Правка, сужающая вход (filter, early continue), снимает сторожа с условия ниже по коду: тест зелёный за счёт фильтра, мутант условия выживает; после такой правки перепрогнать инъекции соседнего свойства, не верить старой матрице"
 module: [process_manager_module]
-mechanism: [break-injection, tests]
+mechanism: [break-injection]
 metadata:
   node_type: memory
   type: feedback

@@ -1,4 +1,6 @@
-"""modbus — универсальный драйвер Modbus-TCP / RS485 (RTU).
+"""Драйвер Modbus-TCP и RS485 для связи с PLC; сюда — менять обмен по Modbus
+
+modbus — универсальный драйвер Modbus-TCP / RS485 (RTU).
 
 Чистая архитектура (по образцу Services/hikvision_camera):
     sdk/    — тонкая обёртка над pymodbus (graceful import) + datatypes + errors

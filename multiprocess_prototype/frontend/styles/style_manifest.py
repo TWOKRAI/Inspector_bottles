@@ -44,6 +44,7 @@ PRIMITIVE_STYLE_FILES: list[str] = [
     "components/primitives/displays.qss",
     "components/primitives/toggle.qss",
     "components/primitives/error_banner.qss",
+    "components/primitives/run_control.qss",
     "components/primitives/validation.qss",
     "components/primitives/error_border.qss",
     "components/primitives/slot_button.qss",

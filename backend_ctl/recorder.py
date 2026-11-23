@@ -34,6 +34,8 @@ import threading
 import time
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
+from ._node_read import read_node
+
 # --------------------------------------------------------------------------- #
 #  Константы формата                                                          #
 # --------------------------------------------------------------------------- #
@@ -164,10 +166,13 @@ def _safe_section(name: str, fn: Callable[[], Any]) -> Any:
 
 
 def _collect_telemetry(drv: Any) -> Dict[str, Any]:
-    """values (плоский path→value из read-model) + history (export_history, записанные ts)."""
-    snap = drv.telemetry_snapshot()
-    values = {path: entry.get("value") for path, entry in (snap.get("metrics") or {}).items()}
+    """values (плоский path→value из read-model) + history (export_history, записанные ts).
+
+    ``values`` берутся из read-model напрямую, а не из ``telemetry_snapshot``: тот прячет служебные листья
+    ``_fresh.*``, а реплей (``ReplayPlayer._prime``) судит свежесть именно по метке в заголовке.
+    """
     with drv._telemetry_lock:
+        values = drv._telemetry_model.snapshot("")
         history = drv._telemetry_model.export_history()
     history_json = {path: [[ts, val] for ts, val in points] for path, points in history.items()}
     return {"values": values, "history": history_json}
@@ -711,7 +716,7 @@ class ReplayPlayer:
             maxlen = max(1, int(ring_maxlen))
         else:
             maxlen = max(1, min(len(self._events) or 1, DEFAULT_RING_MAXLEN))
-        self.driver = BackendDriver(host, port, event_queue_maxlen=maxlen)
+        self.driver = BackendDriver(host, port, event_queue_maxlen=maxlen, clock=self.now)
         # Подменяем telemetry-model на clock-aware ДО прокрутки: _ingest_state_changed
         # уже подписан из __init__ и читает self._telemetry_model в момент вызова —
         # путь единый, второго ingest не появляется. Detached (нет reader-потока) →
@@ -817,10 +822,10 @@ class ReplayPlayer:
         написавший разбор по живой сессии, на записи получал другую форму и молча читал
         None. Канон — live; реплей подстраивается под него (Task 4.1).
         """
-        with self.driver._telemetry_lock:
-            snap = self.driver._telemetry_model.snapshot(path)
-        if path in snap:
-            return {"status": "ok", "path": path, "value": snap[path], "recorded": True}
+        # Read-model хранит листья (П3): узел собирается обратно в вложенный dict.
+        exists, value = read_node(self.driver, path)
+        if exists:
+            return {"status": "ok", "path": path, "value": value, "recorded": True}
         # «Пути нет» у живого бэкенда — это status:error, а не успех с found:False.
         return {
             "status": "error",

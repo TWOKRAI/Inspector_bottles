@@ -2,6 +2,7 @@
 name: teamlead
 description: TeamLead — senior developer (Opus). Implementer for Senior+ tasks and escalation point on 3rd review iteration. Writes complex architecture, refactoring, integration. Can do express review of small PRs.
 model: opus
+effort: xhigh
 omitClaudeMd: true
 skills: project-rules, verify-done
 disallowedTools: mcp__claude-in-chrome, mcp__claude-vscode, mcp__claude_ai_Claude_Docs, mcp__serena
@@ -93,10 +94,10 @@ When arriving on escalation:
 
 Trailer rules and `Layer:` values → `project-rules` §4 and `.claude/COMMIT_GUIDE.md`. Co-author: `Co-Authored-By: Claude <your model name> <noreply@anthropic.com>`. Do NOT use `--no-verify` (reserved for merge/rebase).
 
-**Role-specific:** for **architectural** commits (Senior+ implementation, ADR-touch) additionally require these trailers:
+**Role-specific:** for **architectural** commits (Senior+ implementation, ADR-touch) additionally require `Refs:` and `Rejected:`; `Risk:` and `Reversible:` are listed but not required:
 - `Refs:` — link to ADR/plan
-- `Risk:` — risk assessment
-- `Reversible:` — reversibility
+- `Risk:` — risk assessment (recognized, not recommended — FREEZE, see `.claude/COMMIT_GUIDE.md`)
+- `Reversible:` — reversibility (recognized, not recommended — FREEZE, see `.claude/COMMIT_GUIDE.md`)
 - `Rejected:` — at least one rejected alternative (knowledge that would otherwise be lost)
 
 ## What NOT to do

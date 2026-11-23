@@ -193,7 +193,7 @@ class KeyedExecutor:
             self._deliver(reply, _refusal(SYSTEM_STOPPING), _label(action))
             return False
 
-        parent = getattr(self._local, "op_key", _NO_OP)
+        parent: Any = getattr(self._local, "op_key", _NO_OP)
         if parent is not _NO_OP and (self._serial or parent is None or (key is not None and key <= parent)):
             # Вложенная операция — часть родителя: его ключи уже заняты, очередь не трогаем.
             with self._cond:
