@@ -186,6 +186,7 @@ def build_hikvision_controls(
         topology=getattr(services, "topology", None),
         command_sender=getattr(runtime, "command_sender", None),
         request_runner=request_runner,
+        registers_manager=getattr(runtime, "registers_manager", None),
     )
     controller = HikvisionWidgetController(widget, presenter)
 

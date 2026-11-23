@@ -46,11 +46,13 @@ class HikvisionSettingsPresenter:
         topology: Any = None,
         command_sender: Any = None,
         request_runner: Any = None,
+        registers_manager: Any = None,
     ) -> None:
         self._bridge = bridge
         self._topology = topology
         self._sender = command_sender
         self._runner = request_runner
+        self._registers_manager = registers_manager
 
     # --- topology ---
 
@@ -110,6 +112,7 @@ class HikvisionSettingsPresenter:
             for field, value in fields:
                 if field in skipped:
                     continue
+                self._set_gui_register(field, float(value))
                 self._sender.send_command(
                     proc, "register_update", {"register": _PLUGIN, "field": field, "value": float(value)}
                 )
@@ -117,6 +120,18 @@ class HikvisionSettingsPresenter:
             logger.warning("Hikvision: register_update провалился: %s", exc)
             return False, []
         return True, skipped
+
+    def _set_gui_register(self, field: str, value: float) -> None:
+        """Обновить GUI-регистр до IPC (иначе рассинхрон GUI-регистра и бэкенда); сбой не блокирует IPC."""
+        if self._registers_manager is None:
+            return
+        try:
+            ok = self._registers_manager.set_value(_PLUGIN, field, value)
+        except Exception as exc:
+            logger.warning("Hikvision: set_value(%s.%s) исключение: %s", _PLUGIN, field, exc)
+            return
+        if ok is False:
+            logger.warning("Hikvision: set_value(%s.%s) вернул False", _PLUGIN, field)
 
     # --- request/response команды (результат в main-thread) ---
 
