@@ -196,6 +196,7 @@ hikvision.frame_rate
 hikvision.frame_rate_enable
 hikvision.frames
 hikvision.gain
+hikvision.gain_auto
 hikvision.packet_delay
 hikvision.packet_managed
 hikvision.packet_size

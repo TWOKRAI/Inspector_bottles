@@ -1,4 +1,5 @@
 """CommandPanel — панель кнопок управления процессами."""
+
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,9 @@ if TYPE_CHECKING:
 
 class CommandPanel(QWidget):
     """Панель с кнопками для отправки команд в процессы.
+
+    FROZEN (4.2d, A1): команды start_capture/stop_capture удалены в 4.2a, живого вызова нет
+    (панель нигде не создаётся). Не удалять — дремлющий путь остаётся контрактом.
 
     Пока: Start/Stop Capture для camera_0.
     В будущем — динамическая генерация из plugin.commands.

@@ -26,12 +26,26 @@ class HikvisionCameraRegisters(CameraDeviceRegisters):
             max=1_000_000.0,
             unit="мкс",
             apply="restart",
+            enabled_if={"exposure_auto": ["Off"]},
         ),
     ] = 10_000.0
 
+    # Родитель раньше потомка: `gain_auto` объявлен перед `gain` (порядок объявления = порядок плана записи).
+    gain_auto: Annotated[
+        Literal["Off", "Once", "Continuous"],
+        FieldMeta(description="Автоусиление", apply="restart"),
+    ] = "Off"
+
     gain: Annotated[
         float,
-        FieldMeta(description="Усиление (дБ)", min=0.0, max=20.0, unit="дБ", apply="restart"),
+        FieldMeta(
+            description="Усиление (дБ)",
+            min=0.0,
+            max=20.0,
+            unit="дБ",
+            apply="restart",
+            enabled_if={"gain_auto": ["Off"]},
+        ),
     ] = 0.0
 
     frame_rate_enable: Annotated[

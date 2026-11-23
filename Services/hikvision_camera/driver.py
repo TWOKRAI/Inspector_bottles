@@ -69,6 +69,7 @@ BINDINGS: dict[str, Binding] = {
     "trigger_source": Binding("genicam", "TriggerSource", "enum"),
     "exposure_time": Binding("genicam", "ExposureTime", "float", eps_abs=1.0),
     "exposure_auto": Binding("genicam", "ExposureAuto", "enum"),
+    "gain_auto": Binding("genicam", "GainAuto", "enum"),
     "gain": Binding("genicam", "Gain", "float", eps_abs=1e-3),
     "frame_rate": Binding("genicam", "AcquisitionFrameRate", "float", eps_abs=1e-3),
     "frame_rate_enable": Binding("genicam", "AcquisitionFrameRateEnable", "bool"),

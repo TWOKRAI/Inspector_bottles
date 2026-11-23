@@ -304,6 +304,7 @@ def test_bindings_набор_ключей():
         "trigger_source": "TriggerSource",
         "exposure_time": "ExposureTime",
         "exposure_auto": "ExposureAuto",
+        "gain_auto": "GainAuto",
         "gain": "Gain",
         "frame_rate": "AcquisitionFrameRate",
         "frame_rate_enable": "AcquisitionFrameRateEnable",
