@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from Services.robot_comm.server.sim_core import RobotSimCore
@@ -113,6 +115,201 @@ def test_rejected_freq_does_not_replace_last(vfd: VfdClient, stub: StubTransport
         vfd.set_freq(500.0)
     vfd.run()
     assert ("w", REG_CMD_FREQ, 2000) in stub.transactions[-1]
+
+
+class ScriptedTransport(StubTransport):
+    """Стаб с режимом ответа: «ok» / «false» (транспорт вернул False) / «raise» (транспорт бросил)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mode = "ok"
+
+    def transaction(self, ops: list[tuple]) -> bool:
+        if self.mode == "raise":
+            raise RuntimeError("обрыв транспорта")
+        if self.mode == "false":
+            return False
+        return super().transaction(ops)
+
+
+def test_fresh_client_run_uses_default_freq(stub: StubTransport) -> None:
+    """Нового клиента памяти нет: пуск без частоты идёт на default_freq_hz (10 Гц -> 1000)."""
+    assert VfdClient(stub).last_freq is None
+    VfdClient(stub).run()
+    assert stub.holding[REG_CMD_FREQ] == 1000
+    assert stub.holding[REG_CMD_RUN] == 1
+
+
+def test_last_freq_constructor_kwarg_seeds_run(stub: StubTransport) -> None:
+    """Начальная память из kwarg: пуск без частоты стартует на 31 Гц (3100), свойство её отдаёт."""
+    vfd = VfdClient(stub, last_freq=31.0)
+    assert vfd.last_freq == 31.0
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 3100
+    assert stub.holding[REG_CMD_RUN] == 1
+
+
+def test_zero_last_freq_kwarg_is_not_remembered(stub: StubTransport) -> None:
+    """Начальная память 0.0 не принимается: свойство None, пуск без частоты идёт на default_freq_hz (1000), не на 0."""
+    vfd = VfdClient(stub, last_freq=0.0)
+    assert vfd.last_freq is None
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 1000
+    assert stub.holding[REG_CMD_RUN] == 1
+
+
+def test_last_freq_property_follows_written_freq(vfd: VfdClient) -> None:
+    vfd.set_freq(20.0)
+    assert vfd.last_freq == 20.0
+    vfd.run(30.0)
+    assert vfd.last_freq == 30.0
+
+
+def test_zero_freq_is_not_remembered_by_set_freq(vfd: VfdClient, stub: StubTransport) -> None:
+    """set_freq(0) уходит на провод, но память не меняет: следующий run() без частоты — на прежних 20 Гц."""
+    vfd.set_freq(20.0)
+    vfd.set_freq(0.0)
+    assert stub.holding[REG_CMD_FREQ] == 0  # ноль на проводе, как и раньше
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 2000
+    assert stub.holding[REG_CMD_RUN] == 1
+
+
+def test_zero_freq_is_not_remembered_by_run(vfd: VfdClient, stub: StubTransport) -> None:
+    """run(0) уходит на провод, память не меняет: run() без частоты — на прежних 20 Гц."""
+    vfd.run(20.0)
+    vfd.run(0.0)
+    assert stub.holding[REG_CMD_FREQ] == 0
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 2000
+
+
+def test_zero_freq_without_memory_falls_back_to_default(vfd: VfdClient, stub: StubTransport) -> None:
+    """Без памяти ноль её не создаёт: остаётся None, run() идёт на default_freq_hz (1000)."""
+    vfd.set_freq(0.0)
+    assert vfd.last_freq is None
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 1000
+
+
+@pytest.mark.parametrize("mode", ["false", "raise"])
+def test_failed_write_does_not_update_last_freq(mode: str) -> None:
+    """Запись не прошла (False или исключение) -> память не меняется: следующий run() — на прежних 20 Гц."""
+    t = ScriptedTransport()
+    vfd = VfdClient(t)
+    vfd.set_freq(20.0)
+    t.mode = mode
+    if mode == "false":
+        assert vfd.set_freq(30.0) is False
+        assert vfd.run(40.0) is False
+    else:
+        with pytest.raises(RuntimeError):
+            vfd.set_freq(30.0)
+        with pytest.raises(RuntimeError):
+            vfd.run(40.0)
+    t.mode = "ok"
+    vfd.run()
+    assert t.holding[REG_CMD_FREQ] == 2000
+
+
+def test_reset_fault_clears_last_freq(vfd: VfdClient, stub: StubTransport) -> None:
+    """После успешного сброса аварии память пуста: run() без частоты идёт на default_freq_hz (1000), не на 20 Гц."""
+    vfd.set_freq(20.0)
+    assert vfd.reset_fault() is True
+    assert vfd.last_freq is None
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 1000
+    assert stub.holding[REG_CMD_RUN] == 1
+
+
+@pytest.mark.parametrize("mode", ["false", "raise"])
+def test_failed_reset_fault_keeps_last_freq(mode: str) -> None:
+    """Сброс аварии не прошёл (False или исключение) -> авария не сброшена, память остаётся: run() — на 20 Гц."""
+    t = ScriptedTransport()
+    vfd = VfdClient(t)
+    vfd.set_freq(20.0)
+    t.mode = mode
+    if mode == "false":
+        assert vfd.reset_fault() is False
+    else:
+        with pytest.raises(RuntimeError):
+            vfd.reset_fault()
+    assert vfd.last_freq == 20.0
+    t.mode = "ok"
+    vfd.run()
+    assert t.holding[REG_CMD_FREQ] == 2000
+
+
+def test_stop_keeps_last_freq(vfd: VfdClient, stub: StubTransport) -> None:
+    """Обычный stop память сохраняет: остановили и пустили на той же скорости (2000)."""
+    vfd.set_freq(20.0)
+    assert vfd.stop() is True
+    vfd.run()
+    assert stub.holding[REG_CMD_FREQ] == 2000
+
+
+def test_concurrent_reset_fault_and_set_freq_keep_last_in_wire_order() -> None:
+    """T1 reset_fault застрял между записью и сбросом памяти, T2 set_freq(30) идёт следом: последней на проводе 30 Гц.
+
+    Без замка T1 после выхода из шлюза затёр бы память уже после записи 30: следующий run() ушёл бы на 1000, не 3000.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+
+    class GatedTransport(StubTransport):
+        def transaction(self, ops: list[tuple]) -> bool:
+            result = super().transaction(ops)
+            if ("w", REG_CMD_RESET, 1) in ops and not entered.is_set():
+                entered.set()
+                release.wait(5.0)
+            return result
+
+    t = GatedTransport()
+    vfd = VfdClient(t)
+    t1 = threading.Thread(target=vfd.reset_fault, daemon=True)
+    t2 = threading.Thread(target=vfd.set_freq, args=(30.0,), daemon=True)
+    t1.start()
+    assert entered.wait(5.0), "T1 не дошёл до шлюза"
+    t2.start()
+    t2.join(0.3)
+    release.set()
+    t1.join(5.0)
+    t2.join(5.0)
+    assert not t1.is_alive() and not t2.is_alive(), "поток завис"
+    vfd.run()
+    assert t.holding[REG_CMD_FREQ] == 3000
+
+
+def test_concurrent_set_freq_and_run_keep_last_in_wire_order() -> None:
+    """T1 set_freq(20) застрял между записью и присваиванием, T2 run(30) идёт следом: последней на проводе 30 Гц.
+
+    Память обязана совпасть с последней командой на проводе: следующий run() без частоты шлёт 3000.
+    """
+    entered = threading.Event()  # T1 уже записал 2000 на провод и стоит в шлюзе
+    release = threading.Event()
+
+    class GatedTransport(StubTransport):
+        def transaction(self, ops: list[tuple]) -> bool:
+            result = super().transaction(ops)
+            if ("w", REG_CMD_FREQ, 2000) in ops and not entered.is_set():
+                entered.set()
+                release.wait(5.0)  # шлюз: после записи, до возврата в клиента
+            return result
+
+    t = GatedTransport()
+    vfd = VfdClient(t)
+    t1 = threading.Thread(target=vfd.set_freq, args=(20.0,), daemon=True)
+    t2 = threading.Thread(target=vfd.run, args=(30.0,), daemon=True)
+    t1.start()
+    assert entered.wait(5.0), "T1 не дошёл до шлюза"
+    t2.start()
+    t2.join(0.3)  # без замка T2 успевает целиком; с замком — ждёт T1 (не ассертим, это детали порядка)
+    release.set()
+    t1.join(5.0)
+    t2.join(5.0)
+    assert not t1.is_alive() and not t2.is_alive(), "поток завис"
+    vfd.run()
+    assert t.holding[REG_CMD_FREQ] == 3000
 
 
 def test_set_freq_on_the_fly(vfd: VfdClient, stub: StubTransport) -> None:

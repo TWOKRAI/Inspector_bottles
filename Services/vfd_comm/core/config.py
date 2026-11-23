@@ -18,7 +18,8 @@ class VfdConfig:
     Attributes:
         freq_min_hz / freq_max_hz: Допустимый диапазон уставки частоты.
             GD20 по умолчанию 0..50 Гц; верх зависит от P00.03 (max frequency).
-        default_freq_hz: Частота по умолчанию для run() без аргумента в UI.
+        default_freq_hz: Стартовая уставка для run() без аргумента, пока ничего не задано: после первой успешной
+            записи частоты > 0 run() без аргумента берёт последнюю заданную (память в VfdClient).
         stale_polls_limit: Сколько подряд poll() без роста heartbeat зеркала
             считать обрывом моста (VfdBridgeStaleError из ensure_alive()).
     """

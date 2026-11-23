@@ -44,11 +44,14 @@ _BELT_ACTIONS = [
     ("Лента пуск", "vfd_run", {"device_id": "vfd_belt"}, ""),
     ("Лента стоп", "vfd_stop", {"device_id": "vfd_belt"}, ""),
 ]
+# Число-контрол скорости ленты (vfd_set_freq): тип number, а не button; пределы и стартовое значение — литералы рецепта.
+_FREQ_LABEL = "Скорость ленты (Гц)"
+_FREQ_ACTION = (_FREQ_LABEL, "vfd_set_freq", {"device_id": "vfd_belt"}, "freq_hz")
 _HOME_SERVO_ACTIONS = [
     ("Домой", "robot_park", {"device_id": "robot_main"}, ""),
     ("Серво ВКЛ", "robot_servo", {"device_id": "robot_main"}, "on"),
 ]
-_ALL_ACTIONS = _BELT_ACTIONS + _HOME_SERVO_ACTIONS
+_ALL_ACTIONS = [*_BELT_ACTIONS, _FREQ_ACTION, *_HOME_SERVO_ACTIONS]
 
 _MONITOR_PATHS = [
     "devices.state.robot_main.conn",
@@ -77,8 +80,10 @@ def _monitors(recipe: str) -> list[dict[str, Any]]:
     return [c for c in _pult_controls_raw(recipe) if c.get("source") == "monitor"]
 
 
-def _assert_action_spec(c: dict[str, Any], command: str, args: dict[str, Any], value_arg: str) -> None:
-    assert c.get("type") == "button", c
+def _assert_action_spec(
+    c: dict[str, Any], command: str, args: dict[str, Any], value_arg: str, control_type: str = "button"
+) -> None:
+    assert c.get("type") == control_type, c
     assert c.get("source") == "action", c
     assert c.get("target_process") == "devices", c
     assert c.get("target_plugin_index") == 0, c
@@ -99,15 +104,15 @@ def _hub_registry() -> Any:
 
 
 def test_belt_home_servo_commands_exist(_hub_registry: Any) -> None:
-    """Б1+Б5: в рецепте sim есть 4 кнопки с нужными командами и аргументами; команды есть у DeviceHubPlugin."""
+    """Б1+Б5: в sim 5 action-контролов с нужными командами и аргументами; команды есть у DeviceHubPlugin."""
     from Plugins.hub.device_hub.plugin import DeviceHubPlugin
 
     actions = _actions_by_label(_SIM)
     assert sorted(actions) == sorted(label for label, *_ in _ALL_ACTIONS), (
-        f"в pult нет ровно 4 action-контролов «Лента пуск/стоп», «Домой», «Серво ВКЛ»: {sorted(actions)}"
+        f"в pult нет ровно 5 action-контролов (лента пуск/стоп, скорость, домой, серво ВКЛ): {sorted(actions)}"
     )
     for label, command, args, value_arg in _ALL_ACTIONS:
-        _assert_action_spec(actions[label], command, args, value_arg)
+        _assert_action_spec(actions[label], command, args, value_arg, "number" if label == _FREQ_LABEL else "button")
         assert command in DeviceHubPlugin.commands, f"{command} нет в DeviceHubPlugin.commands"
 
 
@@ -123,6 +128,7 @@ def test_servo_on_sends_on_true_args() -> None:
     assert by_label["Домой"].action_args(None) == {"device_id": "robot_main"}
     assert by_label["Лента пуск"].action_args(None) == {"device_id": "vfd_belt"}
     assert by_label["Лента стоп"].action_args(None) == {"device_id": "vfd_belt"}
+    assert by_label[_FREQ_LABEL].action_args(25.0) == {"device_id": "vfd_belt", "freq_hz": 25.0}
 
 
 def test_status_monitors_paths() -> None:
@@ -161,14 +167,22 @@ def test_monitors_survive_parse_controls(recipe: str) -> None:
     assert getattr(conn, "value_key", "") == "conn"
 
 
-def test_sim_recipe_has_four_actions_and_five_monitors() -> None:
-    """Б1+Б2+Б4: pult в sim = «Слово» + ровно 4 action + ровно 5 monitor, ничего лишнего."""
+def test_sim_recipe_has_five_actions_and_five_monitors() -> None:
+    """Б1+Б2+Б4: pult в sim = «Слово» + ровно 5 action + ровно 5 monitor, ничего лишнего."""
     raw = _pult_controls_raw(_SIM)
-    assert [c.get("source") for c in raw].count("action") == 4
+    assert [c.get("source") for c in raw].count("action") == 5
     assert [c.get("source") for c in raw].count("monitor") == 5
     labels = [c.get("label") for c in raw]
-    assert len(raw) == 10, f"ожидалось 10 контролов (слово + 4 + 5), найдено {len(raw)}: {labels}"
+    assert len(raw) == 11, f"ожидалось 11 контролов (слово + 5 + 5), найдено {len(raw)}: {labels}"
     assert raw[0].get("id") == "word"
+
+
+@pytest.mark.parametrize("recipe", _RECIPE_NAMES)
+def test_belt_freq_control_literals(recipe: str) -> None:
+    """Контрол скорости ленты: number, vfd_set_freq на vfd_belt, value_arg freq_hz, 1..50 Гц, старт 10 Гц."""
+    c = _actions_by_label(recipe)[_FREQ_LABEL]
+    _assert_action_spec(c, "vfd_set_freq", {"device_id": "vfd_belt"}, "freq_hz", "number")
+    assert (c.get("min"), c.get("max"), c.get("value")) == (1.0, 50.0, 10.0), c
 
 
 def test_beta_has_belt_and_monitors() -> None:
