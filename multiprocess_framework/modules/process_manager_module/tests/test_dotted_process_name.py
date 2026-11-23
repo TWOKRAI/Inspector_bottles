@@ -26,7 +26,8 @@ _ADR = "ADR-PMM-017"
 # tests/<file> -> parents[4] == корень проекта (Inspector_bottles).
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
-RECIPE_COUNT = 23  # литерал; 23-й — camera_device_demo (Task 1.8, 2026-11-15), robot_demo включён
+# литерал; 23-й — camera_device_demo (Task 1.8), 25-й — hikvision_id3013_test (Task 4.2f); robot_demo включён
+RECIPE_COUNT = 25
 
 
 @pytest.fixture
@@ -156,7 +157,7 @@ ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 
 
 def test_a5_recipe_set_has_the_literal_count_and_robot_demo() -> None:
-    """Страж «ноль наблюдений»: параметризация видит ровно 23 рецепта, robot_demo включён."""
+    """Страж «ноль наблюдений»: параметризация видит ровно 25 рецептов, robot_demo включён."""
     assert len(ALL_RECIPES) == RECIPE_COUNT, ALL_RECIPES
     assert "robot_demo" in ALL_RECIPES
 
