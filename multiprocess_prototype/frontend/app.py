@@ -21,6 +21,7 @@ from multiprocess_framework.modules.logger_module import get_std_logger
 from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
+from .frame_intake import latency_sample
 from .windows.main_window import MainWindow
 from .widgets.image_panel import ImagePanelWidget
 from .tab_factory import TabFactory
@@ -1056,6 +1057,18 @@ def run_gui(process: "GuiProcess") -> None:
     app.exec()
 
 
+def _attach_pump_metrics(process: "GuiProcess") -> None:
+    """Привязать счётчики насоса к ``FrameIntake`` (shown, max_frame_age_ms, pump_busy_share).
+
+    ``reset_window=True`` обязателен: ``FrameIntake.get_cycle_metrics`` сливает окно насоса
+    ``window_max_age_ms`` в своё скользящее окно (5 с) при каждом чтении и сбрасывает окно насоса;
+    без сброса ``max_frame_age_ms`` стал бы накопленным максимумом. Читателей несколько
+    (heartbeat, ``get_status``, опрос состояния), чтение идемпотентно по пику: скользящее окно
+    держит ``FrameIntake``. Зовётся из ``_setup_bridge_callbacks`` сразу после создания насоса.
+    """
+    process._frame_intake.attach_pump_stats(lambda: process._frame_pump.stats(reset_window=True))
+
+
 def _setup_bridge_callbacks(
     process: "GuiProcess",
     image_panel: ImagePanelWidget,
@@ -1120,6 +1133,12 @@ def _setup_bridge_callbacks(
     # Оба пути закрытия (перезапуск UI и выход) идут через app.quit() -> aboutToQuit;
     # новый проход GuiProcess.run создаёт новый насос, старый к тому времени остановлен.
     QApplication.instance().aboutToQuit.connect(process._frame_pump.stop)
+    # Метрики насоса (shown, max_frame_age_ms, pump_busy_share) читает FrameIntake: привязка здесь,
+    # рядом с созданием насоса, чтобы её нельзя было забыть при правке run_gui.
+    _attach_pump_metrics(process)
+    # Показано кадров по слотам (накопительно): считает _on_frame_received в момент показа,
+    # строку FPS из него собирает _update_fps (дельта за тик).
+    process._shown_by_slot = {}
 
     def _rebuild_displays() -> None:
         """Пересобрать слоты панели, карту маршрутизации и ключи насоса из активного рецепта."""
@@ -1133,6 +1152,11 @@ def _setup_bridge_callbacks(
         _enabled = [d for d in displays if d.get("id") and d.get("enabled", True)]
         _enabled.sort(key=lambda d: (int(d.get("x", 0)), int(d.get("y", 0))))
         _primary_slot[0] = _enabled[0]["id"] if _enabled else "main"
+        # Счётчики показа слотов, которых нет в новом наборе дисплеев, убираем: иначе строка FPS
+        # перечисляла бы ушедшие слоты с нулём. Без дисплеев кадры идут в слот "main".
+        live_slots = {d["id"] for d in _enabled} or {"main"}
+        for gone in [slot for slot in process._shown_by_slot if slot not in live_slots]:
+            del process._shown_by_slot[gone]
         try:
             image_panel.set_displays(displays)
         except Exception as exc:  # noqa: BLE001 — UI-перестройка не должна валить GUI
@@ -1180,6 +1204,7 @@ def _setup_bridge_callbacks(
             # Маршрутизация по sender → слот дисплея (fallback "main").
             slot_id = resolve_display_id(msg_dict, _routing, default="main")
             image_panel.display_frame(slot_id, frame)
+            process._shown_by_slot[slot_id] = process._shown_by_slot.get(slot_id, 0) + 1
             # FPS/latency считаем ТОЛЬКО по первичному слоту: иначе несколько
             # дисплеев одного прохода (main + mask) дают N-кратный дубль FPS.
             is_primary = slot_id == _primary_slot[0]
@@ -1188,10 +1213,11 @@ def _setup_bridge_callbacks(
             # Сквозная задержка: source штампует data.capture_ts = time.time() при
             # захвате; здесь, на выходе всей цепочки, считаем now - capture_ts.
             # time.time() (wall) — кросс-процессно сравнимо на одной машине.
+            # Кадр с replay: true показывается, но сэмпла задержки не даёт (latency_sample -> None).
             data = msg_dict.get("data")
-            cts = data.get("capture_ts") if isinstance(data, dict) else None
-            if is_primary and isinstance(cts, (int, float)):
-                window.record_chain_latency((time.time() - cts) * 1000.0)
+            sample = latency_sample(msg_dict, time.time())
+            if is_primary and sample is not None:
+                window.record_chain_latency(sample)
 
             # frame-trace: финальный transport-спан (painter→gui) + дамп полного
             # таймлайна каждый 30-й кадр (под флагом INSPECTOR_FRAME_TRACE).
@@ -1312,9 +1338,40 @@ def _setup_timers(
     fps_timer = QTimer()
     fps_timer.setInterval(1000)
 
+    # Состояние дельт за тик: показано по слотам и вытеснено (накопительные счётчики -> «/с»).
+    prev_shown: dict[str, int] = {}
+    # База вытеснения - текущее накопительное значение ящика: ящик живёт между перезапусками UI
+    # (новый проход run_gui создаёт новое замыкание), без этого первый тик показал бы всё
+    # накопленное за прошлые проходы как «вытеснено за секунду».
+    prev_superseded = [process._bridge.frame_mailbox.stats()["superseded"]]
+
     def _update_fps() -> None:
         count = window.reset_frame_count()
-        window.update_status(fps=float(count))
+        # «Показано» по слотам - дельта по КЛЮЧУ, не разность сумм. Отрицательная дельта = слот
+        # был снят и заведён заново (счётчик начат с нуля): его вклад - текущее значение, а не
+        # отрицательное число (10 -> заново 2 даёт 2, а не -8). Ограничение: слот пересоздан и за
+        # один тик показал не меньше прежнего (n >= prev) - дельта недосчитывает (n - prev вместо n);
+        # счётчики слота не несут признака пересоздания.
+        shown_now = dict(process._shown_by_slot)
+        per_slot = {
+            slot: float(n - prev_shown.get(slot, 0) if n >= prev_shown.get(slot, 0) else n)
+            for slot, n in shown_now.items()
+        }
+        prev_shown.clear()
+        prev_shown.update(shown_now)
+        superseded_now = process._bridge.frame_mailbox.stats()["superseded"]
+        superseded_per_s = float(max(0, superseded_now - prev_superseded[0]))
+        prev_superseded[0] = superseded_now
+        # reset_chain_latency() сбрасывает окно - зовём РОВНО один раз; значение идёт в обе
+        # надписи и в system.chain_latency_ms. None = замера нет (надпись «—»).
+        latency = window.reset_chain_latency()
+        window.update_status(
+            fps=float(count),
+            latency_ms=latency,
+            shown=sum(per_slot.values()),
+            superseded=superseded_per_s,
+            per_slot=per_slot,
+        )
         # Сквозной FPS цепочки → health-панель «Все процессы». count = кадров/с,
         # дошедших до дисплея через ВСЕ процессы (выходная пропускная способность
         # пайплайна). Ф5.19: это GUI-ЛОКАЛЬНАЯ метрика (измеряет фронтенд), а НЕ
@@ -1327,7 +1384,6 @@ def _setup_timers(
                 {"data_type": "gui_local_metric", "path": "system.chain_fps", "value": float(count)}
             )
             # Сквозная задержка цепочки (среднее за секунду, мс): capture→display.
-            latency = window.reset_chain_latency()
             if latency is not None:
                 process._bridge.dispatch(
                     {"data_type": "gui_local_metric", "path": "system.chain_latency_ms", "value": latency}

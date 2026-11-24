@@ -100,12 +100,15 @@ def _spin_until(cond: Callable[[], bool], timeout_s: float) -> bool:
 def wiring(qtbot):
     from multiprocess_prototype.frontend.app import _setup_bridge_callbacks
     from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+    from multiprocess_prototype.frontend.frame_intake import FrameIntake
     from multiprocess_prototype.frontend.widgets.image_panel.widget import ImagePanelWidget
 
     bridge = DataReceiverBridge()
     panel = ImagePanelWidget(slots=[{"id": "disp_a", "label": "A"}, {"id": "disp_b", "label": "B"}])
     qtbot.addWidget(panel)
-    process = SimpleNamespace(_bridge=bridge, _log_info=MagicMock(), _log_warning=MagicMock())
+    # дублёр GuiProcess несёт то же, что настоящий: FrameIntake (_setup_bridge_callbacks привязывает к нему насос)
+    intake = FrameIntake(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    process = SimpleNamespace(_bridge=bridge, _frame_intake=intake, _log_info=MagicMock(), _log_warning=MagicMock())
     window = MagicMock(name="window")
     _setup_bridge_callbacks(process, panel, window, recipe_manager=_RecipeManager())
     yield SimpleNamespace(bridge=bridge, panel=panel, pump=process._frame_pump, process=process, window=window)
@@ -243,12 +246,15 @@ def test_recipe_change_rebuilds_pump_keys_live(qtbot) -> None:
     """
     from multiprocess_prototype.frontend.app import _setup_bridge_callbacks
     from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+    from multiprocess_prototype.frontend.frame_intake import FrameIntake
     from multiprocess_prototype.frontend.widgets.image_panel.widget import ImagePanelWidget
 
     bridge = DataReceiverBridge()
     panel = ImagePanelWidget(slots=[{"id": "disp_a", "label": "A"}])
     qtbot.addWidget(panel)
-    process = SimpleNamespace(_bridge=bridge, _log_info=MagicMock(), _log_warning=MagicMock())
+    # дублёр GuiProcess несёт то же, что настоящий: FrameIntake (_setup_bridge_callbacks привязывает к нему насос)
+    intake = FrameIntake(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    process = SimpleNamespace(_bridge=bridge, _frame_intake=intake, _log_info=MagicMock(), _log_warning=MagicMock())
     recipes = _MutableRecipeManager(_single_display_recipe(20.0))
     bus = _EventBus()
     _setup_bridge_callbacks(process, panel, MagicMock(name="window"), recipe_manager=recipes, event_bus=bus)

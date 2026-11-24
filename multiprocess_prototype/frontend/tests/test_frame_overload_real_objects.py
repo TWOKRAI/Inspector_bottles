@@ -219,7 +219,15 @@ class _Wiring:
         self.panel = ImagePanelWidget(slots=[{"id": s, "label": s} for s in _SENDERS])
         qtbot.addWidget(self.panel)
         self.window = MagicMock(name="window_mock")
-        self.process = SimpleNamespace(_bridge=self.bridge, _log_info=MagicMock(), _log_warning=MagicMock())
+        # дублёр GuiProcess несёт то же, что настоящий: FrameIntake (_setup_bridge_callbacks привязывает к нему насос)
+        from multiprocess_prototype.frontend.frame_intake import FrameIntake
+
+        self.process = SimpleNamespace(
+            _bridge=self.bridge,
+            _frame_intake=FrameIntake(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock()),
+            _log_info=MagicMock(),
+            _log_warning=MagicMock(),
+        )
 
     def wire(self, fps_limit: float = _FPS_LIMIT) -> None:
         """Настоящая _setup_bridge_callbacks: предел берётся из рецепта через build_panel_displays."""

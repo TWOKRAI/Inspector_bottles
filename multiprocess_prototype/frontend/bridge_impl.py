@@ -6,11 +6,21 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 from multiprocess_framework.modules.process_module.generic.latest_mailbox import LatestMailbox
+
+
+def is_frame_message(msg_dict: dict) -> bool:
+    """Сообщение-кадр data-канала: ``data_type`` ``frame_ready``/``frame`` либо ключ ``frame``.
+
+    Единственный экземпляр логики: её зовут и ``DataReceiverBridge.dispatch``, и
+    ``FrameIntake`` (две копии разошлись бы при правке).
+    """
+    return msg_dict.get("data_type", "") in ("frame_ready", "frame") or "frame" in msg_dict
 
 
 class DataReceiverBridge(QObject):
@@ -48,6 +58,12 @@ class DataReceiverBridge(QObject):
         # по таймеру с периодом из fps_limit слота. Память тракта = ключи x 1 кадр.
         # Ящик создаётся один раз и живёт между перезапусками UI.
         self.frame_mailbox = LatestMailbox()
+        # Очередь Qt: emitted - сколько сообщений dispatch передал в Qt (пишут разные потоки:
+        # data_receiver, IO-поток дельт состояния, Qt-поток; инкремент под замком), handled -
+        # сколько обработал _on_deliver (пишет только Qt-поток). Разность = qt_pending.
+        self._emit_lock = threading.Lock()
+        self._emitted = 0
+        self._handled = 0
         # AutoConnection: DirectConnection в main thread, QueuedConnection из worker thread
         self._deliver.connect(self._on_deliver, Qt.ConnectionType.AutoConnection)
 
@@ -87,10 +103,21 @@ class DataReceiverBridge(QObject):
         """Ф5.20b: колбэк живого хвоста наблюдаемости (записи Логи/Ошибки/Статистика)."""
         self._observability_cb = cb
 
+    @property
+    def qt_pending(self) -> int:
+        """Сообщений, переданных в Qt и ещё не обработанных (глубина очереди событий Qt).
+
+        Читается из любого потока без замка и без вызовов Qt: сначала ``handled``, затем
+        ``emitted`` (обратный порядок дал бы отрицательную разность при гонке; ``max`` страхует).
+        """
+        handled = self._handled
+        emitted = self._emitted
+        return max(0, emitted - handled)
+
     def dispatch(self, msg_dict: dict) -> None:
         """Из worker thread: кадр — в ящик frame_mailbox, остальное — в main thread через signal."""
         data_type = msg_dict.get("data_type", "")
-        if data_type in ("frame_ready", "frame") or "frame" in msg_dict:
+        if is_frame_message(msg_dict):
             # Без _deliver.emit и без frame_received.emit: события Qt на кадр нет.
             sender = msg_dict.get("sender")
             nbytes = getattr(msg_dict.get("frame"), "nbytes", 0)
@@ -110,11 +137,20 @@ class DataReceiverBridge(QObject):
             kind = "state"
         else:
             kind = "command"
+        with self._emit_lock:
+            self._emitted += 1
         self._deliver.emit((kind, msg_dict))
 
     @Slot(object)
     def _on_deliver(self, payload: tuple) -> None:
         """Slot в main thread — вызвать нужный callback и emit публичный signal."""
+        try:
+            self._handle_payload(payload)
+        finally:
+            # finally: слот, бросивший исключение, не оставляет qt_pending выше нуля
+            self._handled += 1
+
+    def _handle_payload(self, payload: tuple) -> None:
         kind, msg_dict = payload
         if kind == "frame":
             if self._frame_cb:
