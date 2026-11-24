@@ -162,6 +162,10 @@ edge_detection.invert
 edge_detection.method
 edge_detection.threshold
 edge_detection.weights_path
+frame_buffer.buffer_max_mb
+frame_buffer.buffer_seconds
+frame_buffer.jpeg_quality
+frame_buffer.pin_max_mb
 frame_saver.buffer_mode
 frame_saver.buffer_size
 frame_saver.filename_prefix
