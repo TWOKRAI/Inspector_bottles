@@ -42,7 +42,7 @@ class TestDataReceiverBridgeDispatch:
         pass
 
     def test_dispatch_frame_ready(self, qtbot):
-        """data_type='frame_ready' → signal frame_received."""
+        """data_type='frame_ready' -> сообщение в frame_mailbox (ключ "" без sender), без события Qt."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
 
         bridge = DataReceiverBridge()
@@ -52,11 +52,13 @@ class TestDataReceiverBridgeDispatch:
         msg = {"data_type": "frame_ready", "payload": "test"}
         bridge.dispatch(msg)
 
-        assert len(received) == 1
-        assert received[0] == msg
+        taken = bridge.frame_mailbox.take("")
+        assert taken is not None
+        assert taken[0] == msg
+        assert received == []  # frame_received больше не эмитится из dispatch
 
     def test_dispatch_frame(self, qtbot):
-        """data_type='frame' → signal frame_received."""
+        """data_type='frame' -> сообщение в frame_mailbox (ключ "" без sender)."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
 
         bridge = DataReceiverBridge()
@@ -66,7 +68,38 @@ class TestDataReceiverBridgeDispatch:
         msg = {"data_type": "frame"}
         bridge.dispatch(msg)
 
-        assert len(received) == 1
+        taken = bridge.frame_mailbox.take("")
+        assert taken is not None
+        assert taken[0] == msg
+        assert received == []  # frame_received больше не эмитится из dispatch
+
+    def test_dispatch_frame_counts_nbytes(self, qtbot):
+        """Кадр 10x10x3 uint8 учтён в ящике как 300 байт (nbytes берётся из frame.nbytes)."""
+        import numpy as np
+
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+
+        bridge.dispatch({"data_type": "frame", "sender": "cam0", "frame": np.zeros((10, 10, 3), dtype=np.uint8)})
+
+        assert bridge.frame_mailbox.stats()["bytes_held"] == 300
+
+    def test_dispatch_frame_rejected_when_mailbox_full(self, qtbot):
+        """65-й sender при max_keys=64: dispatch не бросает, отказ считается в stats()['rejected']."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        for i in range(64):
+            bridge.dispatch({"data_type": "frame", "sender": f"cam{i}"})
+        assert bridge.frame_mailbox.stats()["rejected"] == 0
+
+        bridge.dispatch({"data_type": "frame", "sender": "cam64"})  # не должен бросить
+
+        stats = bridge.frame_mailbox.stats()
+        assert stats["rejected"] == 1
+        assert stats["put"] == 64
+        assert bridge.frame_mailbox.take("cam64") is None
 
     def test_dispatch_state_changed(self, qtbot):
         """data_type='state_changed' → signal state_updated."""
@@ -285,7 +318,7 @@ class TestGuiProcessInstantiation:
         assert process.name == "gui"
         assert process.is_initialized is False
 
-    def test_bridge_created_in_init_application_threads(self):
+    def test_bridge_created_in_init_application_threads(self, qtbot):
         """_init_application_threads() создаёт DataReceiverBridge."""
         from multiprocess_prototype.frontend.process import GuiProcess
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
@@ -318,6 +351,47 @@ class TestGuiProcessInstantiation:
         # создаёт и свои воркеры (readiness_snapshot, _init_run_state_workers) — это намеренно.
         receiver_calls = [c for c in mock_wm.create_worker.call_args_list if c[0][0] == "data_receiver"]
         assert len(receiver_calls) == 1
+
+        # воркер data_receiver стоит на bound-методе run_loop именно FrameIntake: иначе
+        # WorkerManager.get_worker_status не подмешает get_cycle_metrics в статус воркера
+        target = receiver_calls[0][0][1]
+        assert target.__self__ is process._frame_intake
+        assert target.__func__.__name__ == "run_loop"
+
+        # метрики ящика и очереди Qt привязаны к живым объектам процесса, не к нулям по умолчанию
+        import threading
+
+        from PySide6.QtCore import QCoreApplication
+
+        process._bridge.frame_mailbox.put("cam", {"frame": 1}, 10)
+        process._bridge.frame_mailbox.put("cam", {"frame": 2}, 10)  # вытеснил первый
+        sender = threading.Thread(
+            target=lambda: process._bridge.dispatch({"data_type": "state_delta", "path": "a.b", "value": 1}),
+            daemon=True,
+        )
+        sender.start()
+        sender.join(5.0)
+        metrics = process._frame_intake.get_cycle_metrics()
+        assert metrics["superseded"] == 1
+        assert metrics["pending"] == 1
+        assert metrics["bytes_held"] == 10
+        assert metrics["qt_pending"] == 1  # сообщение передано в Qt из чужого потока и не обработано
+        QCoreApplication.processEvents()
+        assert process._frame_intake.get_cycle_metrics()["qt_pending"] == 0
+
+    def test_data_receiver_loop_delegates_to_frame_intake(self):
+        """GuiProcess._data_receiver_loop (FREEZE) делегирует FrameIntake.run_loop с теми же событиями."""
+        import threading
+
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        process = GuiProcess(name="gui", shared_resources=_make_mock_shared_resources())
+        process._frame_intake = MagicMock()
+        stop_event, pause_event = threading.Event(), threading.Event()
+
+        process._data_receiver_loop(stop_event, pause_event)
+
+        process._frame_intake.run_loop.assert_called_once_with(stop_event, pause_event)
 
 
 # ============================================================================
@@ -447,49 +521,50 @@ class TestProcessClassField:
 
 
 class TestDataReceiverErrorRecovery:
-    """Тесты exponential backoff и error recovery в data_receiver_loop."""
+    """Тесты exponential backoff и error recovery в цикле приёма (настоящий ``FrameIntake``)."""
 
-    def _make_process(self):
-        """Создать mock GuiProcess с нужными атрибутами."""
-        from multiprocess_prototype.frontend.process import GuiProcess
+    def _make_intake(self, receive):
+        """Настоящий FrameIntake с фейковыми колбэками; sleep не передан -> time.sleep модуля frame_intake."""
+        from multiprocess_prototype.frontend.frame_intake import FrameIntake
 
-        process = MagicMock()
-        process.name = "gui_test"
-        process._bridge = MagicMock()
-        process._log_error = MagicMock()
-        process._log_info = MagicMock()
-        process._log_critical = MagicMock()
-        process._track_error = MagicMock()
-        process._record_metric = MagicMock()
-        # Привязываем реальный метод
-        process._data_receiver_loop = GuiProcess._data_receiver_loop.__get__(process)
-        return process
+        callbacks = {
+            "put": MagicMock(name="put"),
+            "log_info": MagicMock(name="log_info"),
+            "log_critical": MagicMock(name="log_critical"),
+            "track_error": MagicMock(name="track_error"),
+            "record_metric": MagicMock(name="record_metric"),
+        }
+        intake = FrameIntake(
+            receive,
+            callbacks["put"],
+            callbacks["log_info"],
+            callbacks["log_critical"],
+            callbacks["track_error"],
+            callbacks["record_metric"],
+        )
+        return intake, callbacks
 
-    def _make_stop_event(self, delay: float = 0.0):
-        """Создать stop_event, который сработает через delay секунд."""
+    def _run_loop(self, intake, stop_event, pause_event) -> None:
+        """Прогнать run_loop в daemon-потоке с join-дедлайном (цикл, что может зависнуть, тест не вешает)."""
         import threading
 
-        stop_event = threading.Event()
-        if delay > 0:
-            threading.Timer(delay, stop_event.set).start()
-        return stop_event
+        thread = threading.Thread(target=intake.run_loop, args=(stop_event, pause_event), daemon=True)
+        thread.start()
+        thread.join(5.0)
+        stop_event.set()
+        assert not thread.is_alive(), "run_loop не вышел за 5 с"
 
     def test_backoff_increases_on_errors(self):
         """Backoff растёт при последовательных ошибках."""
         import threading
-        import time as time_module
 
-        process = self._make_process()
         stop_event = threading.Event()
         pause_event = threading.Event()
-
-        _call_count = [0]
         sleep_calls = []
 
         # Router всегда бросает исключение
-        process.router_manager.receive.side_effect = RuntimeError("сетевая ошибка")
-
-        _original_sleep = time_module.sleep
+        receive = MagicMock(side_effect=RuntimeError("сетевая ошибка"))
+        intake, _ = self._make_intake(receive)
 
         def fake_sleep(seconds):
             sleep_calls.append(seconds)
@@ -497,9 +572,9 @@ class TestDataReceiverErrorRecovery:
             if len(sleep_calls) >= 3:
                 stop_event.set()
 
-        with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+        with patch("multiprocess_prototype.frontend.frame_intake.time") as mock_time:
             mock_time.sleep.side_effect = fake_sleep
-            process._data_receiver_loop(stop_event, pause_event)
+            self._run_loop(intake, stop_event, pause_event)
 
         # Проверяем что backoff растёт: 0.1 → 0.2 → 0.4
         assert len(sleep_calls) >= 2
@@ -509,12 +584,10 @@ class TestDataReceiverErrorRecovery:
         """Counter сбрасывается после успешного получения сообщений."""
         import threading
 
-        process = self._make_process()
         stop_event = threading.Event()
         pause_event = threading.Event()
 
         # Сценарий: ошибка → успех → стоп
-        # После sleep (ошибка) — не останавливаем; останавливаем только после успеха
         step = [0]
 
         def side_effect(**kwargs):
@@ -525,29 +598,27 @@ class TestDataReceiverErrorRecovery:
             stop_event.set()
             return [{"data_type": "frame"}]
 
-        process.router_manager.receive.side_effect = side_effect
+        intake, callbacks = self._make_intake(MagicMock(side_effect=side_effect))
 
-        with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+        with patch("multiprocess_prototype.frontend.frame_intake.time") as mock_time:
             mock_time.sleep.return_value = None  # sleep ничего не делает
-            process._data_receiver_loop(stop_event, pause_event)
+            self._run_loop(intake, stop_event, pause_event)
 
-        # _log_info должен быть вызван с сообщением о восстановлении
-        recovery_calls = [call for call in process._log_info.call_args_list if "восстановление" in str(call)]
+        # log_info должен быть вызван с сообщением о восстановлении
+        recovery_calls = [call for call in callbacks["log_info"].call_args_list if "восстановление" in str(call)]
         assert len(recovery_calls) == 1
 
     def test_critical_after_threshold(self):
-        """_log_critical вызывается ровно при достижении порога 5 ошибок подряд."""
+        """log_critical вызывается ровно при достижении порога 5 ошибок подряд."""
         import threading
 
-        process = self._make_process()
         stop_event = threading.Event()
         pause_event = threading.Event()
-
         error_count = [0]
 
-        process.router_manager.receive.side_effect = RuntimeError("постоянная ошибка")
+        intake, callbacks = self._make_intake(MagicMock(side_effect=RuntimeError("постоянная ошибка")))
 
-        with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+        with patch("multiprocess_prototype.frontend.frame_intake.time") as mock_time:
 
             def fake_sleep(seconds):
                 error_count[0] += 1
@@ -555,24 +626,23 @@ class TestDataReceiverErrorRecovery:
                     stop_event.set()
 
             mock_time.sleep.side_effect = fake_sleep
-            process._data_receiver_loop(stop_event, pause_event)
+            self._run_loop(intake, stop_event, pause_event)
 
-        # _log_critical должен быть вызван ровно 1 раз (при consecutive == 5)
-        assert process._log_critical.call_count == 1
-        call_args = process._log_critical.call_args
+        # log_critical должен быть вызван ровно 1 раз (при consecutive == 5)
+        assert callbacks["log_critical"].call_count == 1
+        call_args = callbacks["log_critical"].call_args
         assert "5" in str(call_args)
 
     def test_track_error_called(self):
-        """_track_error вызывается при каждой ошибке с правильным контекстом."""
+        """track_error вызывается при каждой ошибке с правильным контекстом."""
         import threading
 
-        process = self._make_process()
         stop_event = threading.Event()
         pause_event = threading.Event()
 
-        process.router_manager.receive.side_effect = ValueError("тест")
+        intake, callbacks = self._make_intake(MagicMock(side_effect=ValueError("тест")))
 
-        with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+        with patch("multiprocess_prototype.frontend.frame_intake.time") as mock_time:
             call_cnt = [0]
 
             def fake_sleep(seconds):
@@ -581,13 +651,13 @@ class TestDataReceiverErrorRecovery:
                     stop_event.set()
 
             mock_time.sleep.side_effect = fake_sleep
-            process._data_receiver_loop(stop_event, pause_event)
+            self._run_loop(intake, stop_event, pause_event)
 
-        # _track_error вызван для каждой ошибки
-        assert process._track_error.call_count >= 2
+        # track_error вызван для каждой ошибки
+        assert callbacks["track_error"].call_count >= 2
 
         # Проверяем контекст первого вызова
-        first_call = process._track_error.call_args_list[0]
+        first_call = callbacks["track_error"].call_args_list[0]
         exc_arg = first_call[0][0]
         ctx_arg = first_call[1].get("context") or first_call[0][1]
         assert isinstance(exc_arg, ValueError)
@@ -595,10 +665,9 @@ class TestDataReceiverErrorRecovery:
         assert "consecutive" in ctx_arg
 
     def test_record_metric_on_error_and_success(self):
-        """_record_metric вызывается при ошибках ('data_receiver.errors') и успехе ('data_receiver.success')."""
+        """record_metric вызывается при ошибках ('data_receiver.errors') и успехе ('data_receiver.success')."""
         import threading
 
-        process = self._make_process()
         stop_event = threading.Event()
         pause_event = threading.Event()
 
@@ -612,13 +681,13 @@ class TestDataReceiverErrorRecovery:
             stop_event.set()
             return [{"data_type": "status"}]
 
-        process.router_manager.receive.side_effect = side_effect
+        intake, callbacks = self._make_intake(MagicMock(side_effect=side_effect))
 
-        with patch("multiprocess_prototype.frontend.process.time") as mock_time:
+        with patch("multiprocess_prototype.frontend.frame_intake.time") as mock_time:
             mock_time.sleep.return_value = None  # sleep мгновенный
-            process._data_receiver_loop(stop_event, pause_event)
+            self._run_loop(intake, stop_event, pause_event)
 
-        metric_names = [call[0][0] for call in process._record_metric.call_args_list]
+        metric_names = [call[0][0] for call in callbacks["record_metric"].call_args_list]
         assert "data_receiver.errors" in metric_names
         assert "data_receiver.success" in metric_names
 

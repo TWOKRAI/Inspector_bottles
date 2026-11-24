@@ -20,6 +20,7 @@ from multiprocess_framework.modules.router_module.middleware import FrameShmMidd
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
+from .frame_intake import FrameIntake
 from .state.delta_message import state_delta_message
 from . import app as gui_app
 
@@ -154,11 +155,26 @@ class GuiProcess(ProcessModule):
                     module="gui",
                 )
 
+        # Цикл приёма data-сообщений + метрики тракта кадров. receive разрешает router_manager
+        # при вызове (на момент создания он может быть ещё не готов). Воркер создаётся на
+        # bound-методе run_loop: так WorkerManager.get_worker_status подмешивает
+        # get_cycle_metrics() в статус воркера. Метрики насоса привязывает app.py.
+        self._frame_intake = FrameIntake(
+            lambda **kwargs: self.router_manager.receive(**kwargs),
+            self._bridge.dispatch,
+            self._log_info,
+            self._log_critical,
+            self._track_error,
+            self._record_metric,
+        )
+        self._frame_intake.attach_mailbox_stats(self._bridge.frame_mailbox.stats)
+        self._frame_intake.attach_qt_pending(lambda: self._bridge.qt_pending)
+
         # Создаём worker для получения IPC data-сообщений
         config = ThreadConfig(priority=ThreadPriority.NORMAL)
         self.worker_manager.create_worker(
             "data_receiver",
-            self._data_receiver_loop,
+            self._frame_intake.run_loop,
             config,
             auto_start=True,
         )
@@ -253,58 +269,8 @@ class GuiProcess(ProcessModule):
         )
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
-        """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
-        _consecutive_errors = 0
-        _backoff = 0.1  # начальный backoff (секунды)
-        _MAX_BACKOFF = 5.0
-        _ERROR_THRESHOLD = 5  # порог для вызова _log_critical
-
-        while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.05)
-                continue
-            try:
-                # return_messages=False → получаем сырые dict (после middleware)
-                msgs = self.router_manager.receive(timeout=0.1, channel_types=["data"], return_messages=False)
-                for msg_dict in msgs:
-                    self._bridge.dispatch(msg_dict)
-
-                # При успешном получении — сбрасываем счётчик ошибок
-                if msgs:
-                    if _consecutive_errors > 0:
-                        self._log_info(
-                            f"data_receiver: восстановление после {_consecutive_errors} ошибок подряд",
-                            module="gui",
-                        )
-                    _consecutive_errors = 0
-                    _backoff = 0.1
-                    self._record_metric("data_receiver.success")
-
-            except Exception as exc:
-                _consecutive_errors += 1
-
-                # Трекинг через ErrorManager (единый паттерн)
-                self._track_error(
-                    exc,
-                    context={
-                        "loop": "data_receiver",
-                        "consecutive": _consecutive_errors,
-                    },
-                )
-
-                # Метрика через StatsManager
-                self._record_metric("data_receiver.errors")
-
-                # После порога — critical лог
-                if _consecutive_errors == _ERROR_THRESHOLD:
-                    self._log_critical(
-                        f"data_receiver: {_consecutive_errors} ошибок подряд, последняя: {exc}",
-                        module="gui",
-                    )
-
-                # Exponential backoff
-                time.sleep(min(_backoff, _MAX_BACKOFF))
-                _backoff = min(_backoff * 2, _MAX_BACKOFF)
+        """Делегат на ``FrameIntake.run_loop`` (цикл приёма переехал туда; метод сохранён, FREEZE)."""
+        self._frame_intake.run_loop(stop_event, pause_event)
 
     def run(self) -> None:
         """Запустить базовый ProcessModule (воркеры), затем Qt event loop.
