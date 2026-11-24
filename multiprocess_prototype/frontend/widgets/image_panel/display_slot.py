@@ -1,8 +1,14 @@
 """DisplaySlot — один слот отображения кадра в ImagePanel."""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
+
+# Защитный нижний предел метки слота: и минимум QLabel, и нижняя граница цели уменьшения кадра.
+_MIN_WIDTH = 320
+_MIN_HEIGHT = 240
 
 
 class DisplaySlot(QWidget):
@@ -25,11 +31,14 @@ class DisplaySlot(QWidget):
         # а не из уже уменьшенной копии в QLabel — иначе качество деградирует
         self._source_pixmap: QPixmap | None = None
 
+        # Колбэк перерисовки при ресайзе (задаёт presenter): cb() -> True, если слот уже перерисован
+        self._resize_callback: Callable[[], bool] | None = None
+
         # QLabel — область отображения кадра
         placeholder = label if label else "Нет сигнала"
         self._label = QLabel(placeholder)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setMinimumSize(320, 240)
+        self._label.setMinimumSize(_MIN_WIDTH, _MIN_HEIGHT)
         self._label.setObjectName("DisplaySlotLabel")
 
         layout = QVBoxLayout(self)
@@ -49,6 +58,23 @@ class DisplaySlot(QWidget):
             return
         self._source_pixmap = pixmap
         self._show_scaled()
+
+    def target_size(self) -> tuple[int, int]:
+        """Размер метки (ширина, высота), не ниже защитного предела 320x240 — цель уменьшения кадра."""
+        size = self._label.size()
+        return max(size.width(), _MIN_WIDTH), max(size.height(), _MIN_HEIGHT)
+
+    def set_resize_callback(self, callback: Callable[[], bool] | None) -> None:
+        """Задать перерисовку слота при ресайзе: ``callback() -> bool``.
+
+        True — владелец кадра (presenter) перерисовал слот сам через ``update_pixmap`` из сырого кадра.
+        False или нет колбэка — слот масштабирует свой pixmap (``_show_scaled``); масштабирование
+        слота не пропускается ни на одном пути. Колбэк зовётся, только пока слот показывает изображение.
+
+        Внимание: прямой вызов ``slot.update_pixmap`` мимо presenter-а при заданном колбэке воскресит
+        старый кадр из ``_last_frames`` при следующем ресайзе.
+        """
+        self._resize_callback = callback
 
     def _show_scaled(self) -> None:
         """Показать исходный pixmap, масштабированный под текущий размер QLabel."""
@@ -74,6 +100,9 @@ class DisplaySlot(QWidget):
         self.set_placeholder(placeholder)
 
     def resizeEvent(self, event) -> None:
-        """При изменении размера — перемасштабировать исходный pixmap."""
+        """При изменении размера — перерисовать кадр (колбэк) или перемасштабировать исходный pixmap."""
         super().resizeEvent(event)
+        callback = self._resize_callback
+        if callback is not None and self._source_pixmap is not None and callback():
+            return
         self._show_scaled()
