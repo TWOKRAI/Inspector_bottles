@@ -1,0 +1,272 @@
+# Рецепт hikvision_id3013_view — камера MVS и ДВА считывателя ID3013 (SDK), три дисплея.
+#
+# Назначение: увидеть на экране сразу все три источника кадра стенда.
+#   camera_0 [HikvisionCameraPlugin]  -> gui (дисплей "camera")        — кадр камеры MVS
+#   reader_1 [CodeReaderSdkPlugin] -> draw_1 -> gui (дисплей "reader_1") — кадр прибора .10 с рамкой и кодом
+#   reader_2 [CodeReaderSdkPlugin] -> draw_2 -> gui (дисплей "reader_2") — кадр прибора .11 с рамкой и кодом
+# Камера и считыватели не связаны между собой; у каждого считывателя своя цепочка reader_N -> draw_N.
+# Блоки reader_N / draw_N — дословно из qr_reader_sdk_dual_demo.yaml, блок камеры — из hikvision_id3013_test.yaml.
+# TCP-ноды считывателя здесь нет: порт 5000 не занимается.
+#
+# Сеть стенда:
+#   ПК                 192.168.1.100/24
+#   камера MVS         192.168.1.20   (постоянный IP задан командой ForceIpEx 2026-11-23; сохранится ли
+#                                      после выключения питания — не проверено; IP в рецепт не пишется —
+#                                      камера выбирается по серийнику DA1689923)
+#   считыватель 1      192.168.1.10
+#   считыватель 2      192.168.1.11
+#
+# Приборы (стенд 2026-11-23, docs/claude/OPEN_QUESTIONS.md, раздел «Стенд 2026-11-23»):
+#   .10 — MV-ID3013PM-06M-WBPF-5M-OD, серийный 00DB2156580
+#   .11 — MV-ID3013PM-06M-SENSOTEC,   серийный 02DA9718224
+#
+# Режимы съёмки (в приборы НЕ пишутся, остаются как настроены в IDMVS):
+#   .10 — свободный режим: кадры идут без триггера (замер стенда ≈ 51 кадр/с; рецепт берёт 20 Гц);
+#   .11 — по аппаратному триггеру: кадров без триггера нет, дисплей "reader_2" остаётся пустым.
+#
+# Перед запуском:
+#   - закрыть IDMVS: он держит приборы эксклюзивно, ноды получат busy;
+#   - выключить VPN WireGuard: он прячет приборы от EnumDevices (0 устройств);
+#   - камеру MVS держит один процесс: серийник DA1689923 есть и в других рецептах — одновременно с ними не запускать;
+#   - приборы .10 и .11 эксклюзивны: не запускать одновременно с qr_reader_sdk_dual_demo (он стоит по умолчанию
+#     в app.yaml:45), qr_reader_sdk_dual_selftrigger и qr_reader_sdk_demo (пустой device_ip берёт первый
+#     найденный прибор);
+#   - SDK ищется: env MVCR_SDK_DIR -> каталог плагина установленного IDMVS.
+#
+# Запуск с окном: python multiprocess_prototype/frontend/run.py hikvision_id3013_view --autostart
+#
+# ВНИМАНИЕ: draw_1 на стенде не успевает за потоком (ERROR «исполнитель не успевает», 37 выбросов за 25 с) —
+# известно, не дефект рецепта.
+#
+# Ссылки: qr_reader_sdk_dual_demo.yaml, hikvision_id3013_test.yaml,
+# Services/code_reader/docs/SETUP_GEV_V4.0.2.R.md (настройка прибора в IDMVS).
+name: hikvision_id3013_view
+version: 3
+description: "Камера MVS (DA1689923) и два считывателя ID3013 (SDK): три дисплея — камера, считыватель 1, считыватель 2"
+
+blueprint:
+  name: hikvision_id3013_view
+  description: "camera_0 -> дисплей camera; reader_1 -> draw_1 -> дисплей reader_1; reader_2 -> draw_2 -> дисплей reader_2"
+
+  # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без «Раскладки».
+  metadata:
+    gui_positions:
+      camera_0.hikvision:
+        - 40.0
+        - 40.0
+      reader_1.code_reader_sdk:
+        - 40.0
+        - 200.0
+      draw_1.overlay_draw:
+        - 360.0
+        - 200.0
+      reader_2.code_reader_sdk:
+        - 40.0
+        - 360.0
+      draw_2.overlay_draw:
+        - 360.0
+        - 360.0
+    locked_nodes: []
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    # --- Камера 0 (один процесс на одну камеру) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          plugin_name: hikvision
+          category: source
+          camera_id: 0
+          # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+          device_select: serial
+          device_serial: DA1689923
+          # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
+          # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
+          # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
+          resolution_width: 1440
+          resolution_height: 1080
+          frame_rate_enable: true
+          frame_rate: 25.0
+          # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+          exposure_time: 40000.0
+          # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
+          auto_start: true
+          # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+          # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+          trigger_managed: true
+          trigger_mode: "Off"
+          run_locked_commands: [release_device, take_device]
+
+    # --- Считыватель 1 ---
+    - process_name: reader_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      # 20 Гц: produce() не ждёт кадра (захват в своём потоке), только сливает очередь.
+      source_target_fps: 20
+      chain_targets:
+        - draw_1
+      plugins:
+        - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
+          plugin_name: code_reader_sdk
+          category: source
+          # IP прибора 1 — НЕ пустой и не равен IP прибора 2.
+          device_ip: "192.168.1.10"
+          reader_id: id3013-sdk-1
+          auto_start: true
+          timeout_ms: 500
+          # Надписи — как в qr_reader_sdk_demo; префикс cam1 отличает кадр на дисплее.
+          labels:
+            - per: frame
+              template: "cam1 {status} | ok {ok} / no {no} / bad {bad}"
+              anchor: frame
+              xy: [10, 70]
+              group: status_{state}
+            - per: code
+              template: "{code}"
+              anchor: corner0
+              dx: 0
+              dy: 0
+              group: code_text_{state}
+
+    # Рисовальщик камеры 1: кадр (gray) + overlay из того же item -> кадр BGR с рамкой и текстом.
+    - process_name: draw_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+          default_thickness: 3
+          # Стиль по group (BGR). Кадр 1280x1024: подписи крупные (scale 1.8).
+          color_table:
+            - {group: code_ok, color: [0, 200, 0], thickness: 3}
+            - {group: code_bad, color: [0, 0, 255], thickness: 3}
+            - {group: status_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: status_bad, color: [0, 0, 255], scale: 1.8}
+            - {group: code_text_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: code_text_bad, color: [0, 0, 255], scale: 1.8}
+
+    # --- Считыватель 2 ---
+    - process_name: reader_2
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      source_target_fps: 20
+      chain_targets:
+        - draw_2
+      plugins:
+        - plugin_class: Services.code_reader.plugin.sdk_plugin.CodeReaderSdkPlugin
+          plugin_name: code_reader_sdk
+          category: source
+          # IP прибора 2 — НЕ пустой и не равен IP прибора 1.
+          device_ip: "192.168.1.11"
+          reader_id: id3013-sdk-2
+          auto_start: true
+          timeout_ms: 500
+          labels:
+            - per: frame
+              template: "cam2 {status} | ok {ok} / no {no} / bad {bad}"
+              anchor: frame
+              xy: [10, 70]
+              group: status_{state}
+            - per: code
+              template: "{code}"
+              anchor: corner0
+              dx: 0
+              dy: 0
+              group: code_text_{state}
+
+    - process_name: draw_2
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+          default_thickness: 3
+          color_table:
+            - {group: code_ok, color: [0, 200, 0], thickness: 3}
+            - {group: code_bad, color: [0, 0, 255], thickness: 3}
+            - {group: status_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: status_bad, color: [0, 0, 255], scale: 1.8}
+            - {group: code_text_ok, color: [0, 200, 0], scale: 1.8}
+            - {group: code_text_bad, color: [0, 0, 255], scale: 1.8}
+
+  wires:
+    - source: reader_1.code_reader_sdk.frame
+      target: draw_1.overlay_draw.frame
+    - source: reader_2.code_reader_sdk.frame
+      target: draw_2.overlay_draw.frame
+
+  # Привязка узла к дисплею (node_id = process.plugin.port): кадр камеры и два кадра считывателей (BGR, после draw).
+  displays:
+    - node_id: camera_0.hikvision.frame
+      display_id: camera
+    - node_id: draw_1.overlay_draw.frame
+      display_id: reader_1
+    - node_id: draw_2.overlay_draw.frame
+      display_id: reader_2
+
+# Определения дисплеев (top-level).
+# camera — как main из hikvision_inspect.yaml; reader_1 / reader_2 — как main / second из qr_reader_sdk_dual_demo.yaml.
+displays:
+  - id: camera
+    name: Камера MVS
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: reader_1
+    name: Считыватель 1 (.10)
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1290
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: reader_2
+    name: Считыватель 2 (.11)
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 2580
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
