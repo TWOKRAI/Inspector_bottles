@@ -265,7 +265,7 @@ def test_watchdog_не_больше_таймаута_кадра_отказ_в_co
 
 def test_item_seq_id_растёт_по_кадрам_без_переполнения(make):
     """130 принятых кадров и один `produce()`: `seq_id == 130` (не 9 = 130 % 121), `frame_id == seq_id`, `ts` — wall."""
-    built = make(FAKE_CFG).configure()
+    built = make({**FAKE_CFG, "source_queue_frames": 1}).configure()  # глубина 1: побеждает последний кадр (T13)
     plugin = built.plugin
     for number in range(1, 131):
         plugin._on_frame(RawFrame(bytearray(range(8)), 4, 2, "mono8", number))
@@ -591,7 +591,7 @@ def test_camera_capture_ns_is_of_latest_frame_when_two_frames_before_produce(mak
 
     Убивает: штамп только у первого кадра после `produce()` (залипший), штамп не обновляется на втором кадре.
     """
-    plugin = make(FAKE_CFG).configure().plugin
+    plugin = make({**FAKE_CFG, "source_queue_frames": 1}).configure().plugin  # глубина 1 (T13): побеждает последний
     plugin._on_frame(_mono8_frame(1))
     first_end_ns = time.perf_counter_ns()
     time.sleep(0.02)
