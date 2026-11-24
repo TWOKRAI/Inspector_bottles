@@ -1,7 +1,8 @@
 """bridge — подпакет IPC-мостов для frontend_module.
 
 Phase 1A (Task A1): перенесён из multiprocess_prototype в framework.
-Содержит pure-Python примитивы для IPC-коммуникации GUI ↔ процессы.
+Содержит примитивы для IPC-коммуникации GUI ↔ процессы (Qt-free). Исключение — ``frame_pump``
+(``FramePump``, Qt): здесь не реэкспортируется, импортируется явно из ``bridge.frame_pump``.
 
 Stability: partial (→ contract после Task C1)
 """
