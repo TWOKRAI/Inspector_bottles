@@ -4,7 +4,8 @@
   - main thread: Qt event loop (QApplication.exec())
   - data_receiver worker: получает IPC data-сообщения, emit'ит через DataReceiverBridge
   - _init_system_threads() НЕ переопределён — стандартный framework message_processor
-  - FrameShmMiddleware.on_receive — автоматически извлекает numpy frame из SHM
+  - копия кадра из SHM — в Qt-потоке при показе (DataReceiverBridge.restore_for_show),
+    не в router и не в потоке приёма
 """
 
 from __future__ import annotations
@@ -32,13 +33,17 @@ class GuiProcess(ProcessModule):
     Данные от других процессов поступают через data_receiver worker (отдельный поток),
     который emit'ит Qt signals через DataReceiverBridge (queued connection).
 
-    FrameShmMiddleware.on_receive подключён к router — входящие frame_ready
-    автоматически обогащаются numpy frame из SHM (msg["frame"]).
+    FrameShmMiddleware.on_receive в router НЕ подключён: сообщение со ссылками SHM кладётся в
+    ящик моста как есть, а копию (msg["frame"] и прочие массивы) делает bridge.restore_for_show
+    в Qt-потоке — только для кадра, который насос вынул для показа.
     """
 
     # Task 1.1: True, когда CloseCoordinator уже отправил system.shutdown. Читает
     # _request_system_shutdown после возврата run_gui (Qt-объектов к этому моменту может не быть).
     shutdown_sent: bool = False
+
+    # Читатель SHM gui (copy-out); создаётся в _init_application_threads, если есть router и память.
+    _recv_frame_mw: FrameShmMiddleware | None = None
 
     # _init_system_threads() — НЕ переопределён: стандартный framework message_processor
 
@@ -46,14 +51,14 @@ class GuiProcess(ProcessModule):
         """Создать DataReceiverBridge, SHM middleware и worker data_receiver."""
         super()._init_application_threads()
 
-        # SHM receive middleware: при получении данных — читать кадр из SHM
-        # owner/slot — fallback, реальные координаты берутся из msg["data"]
+        # SHM-читатель gui: копия кадра из SHM делается НЕ в router-цепочке (поток приёма), а в
+        # Qt-потоке при показе (bridge.set_frame_restorer ниже). owner/slot — fallback,
+        # реальные координаты берутся из msg["data"]
         if self.router_manager and self.memory_manager:
             # Ф7 G.5.b: GUI-путь copy-out: ``on_receive`` отдаёт КОПИЮ (Qt держит пиксели дольше
             # любого кадрового окна — в модели/кэше рендера, view в слот небезопасен); view без копии
             # получает только ``restore_frame`` конвейера инспекции (4.7b).
             self._recv_frame_mw = FrameShmMiddleware(self.memory_manager, owner=self.name, slot="output_frames")
-            self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
             # Ф7 G.3-нит: зарегистрировать middleware в агрегации router-stats, чтобы
             # torn/drop/pickle-fallback на ДИСПЛЕЙ-пути были видны в introspect.router_stats
             # (раньше add_receive_middleware цеплял только колбэк on_receive, а объект в
@@ -62,6 +67,9 @@ class GuiProcess(ProcessModule):
 
         # Создаём bridge в main thread — он будет использоваться из worker
         self._bridge = DataReceiverBridge()
+        # T5: on_receive (копия, allow_view=False) зовёт мост в Qt-потоке; в router он не стоит.
+        if self._recv_frame_mw is not None:
+            self._bridge.set_frame_restorer(self._recv_frame_mw.on_receive)
 
         # StateStore-подписчик: live-телеметрия процессов/воркеров.
         # ProcessMonitor публикует processes.X.state.* / processes.X.workers.Y.* →

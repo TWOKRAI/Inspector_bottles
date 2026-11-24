@@ -12,15 +12,28 @@ from typing import Callable
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 from multiprocess_framework.modules.process_module.generic.latest_mailbox import LatestMailbox
+from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import (
+    FRAME_KEY,
+    SHM_REFS_KEY,
+)
 
 
 def is_frame_message(msg_dict: dict) -> bool:
-    """Сообщение-кадр data-канала: ``data_type`` ``frame_ready``/``frame`` либо ключ ``frame``.
+    """Сообщение-кадр data-канала: ``data_type`` ``frame_ready``/``frame``, ключ ``frame``
+    либо ссылка на кадр в SHM (``data["_shm_refs"]["frame"]``).
 
-    Единственный экземпляр логики: её зовут и ``DataReceiverBridge.dispatch``, и
+    Сообщение конвейера после ``strip_data_frame_on_send`` несёт кадр только ссылкой, ключа
+    ``frame`` в нём нет: копия в потоке приёма не делается, поэтому ссылка — постоянный
+    признак кадра. Единственный экземпляр логики: её зовут и ``DataReceiverBridge.dispatch``, и
     ``FrameIntake`` (две копии разошлись бы при правке).
     """
-    return msg_dict.get("data_type", "") in ("frame_ready", "frame") or "frame" in msg_dict
+    if msg_dict.get("data_type", "") in ("frame_ready", "frame") or "frame" in msg_dict:
+        return True
+    data = msg_dict.get("data")
+    if not isinstance(data, dict):
+        return False
+    refs = data.get(SHM_REFS_KEY)
+    return isinstance(refs, dict) and FRAME_KEY in refs
 
 
 class DataReceiverBridge(QObject):
@@ -64,6 +77,13 @@ class DataReceiverBridge(QObject):
         self._emit_lock = threading.Lock()
         self._emitted = 0
         self._handled = 0
+        # Отложенная копия кадра из SHM (T5): dispatch кладёт сообщение со ссылками в ящик как есть,
+        # копию делает restore_for_show в Qt-потоке. restore_dropped - сообщений, потерянных при
+        # копии (ссылка перезаписана/порвана либо нет восстановителя); пишет только Qt-поток, читают
+        # только тесты. Замок - оборонительный, охраны тестом нет (мутант без замка зелёный).
+        self._frame_restorer: Callable[[dict], dict | None] | None = None
+        self._restore_lock = threading.Lock()
+        self._restore_dropped = 0
         # AutoConnection: DirectConnection в main thread, QueuedConnection из worker thread
         self._deliver.connect(self._on_deliver, Qt.ConnectionType.AutoConnection)
 
@@ -71,6 +91,41 @@ class DataReceiverBridge(QObject):
         # Внимание: dispatch этот колбэк больше НЕ вызывает (кадры идут через
         # frame_mailbox -> FramePump). Метод и _on_deliver-ветка кадра сохранены (FREEZE).
         self._frame_cb = cb
+
+    def set_frame_restorer(self, fn: Callable[[dict], dict | None]) -> None:
+        """Восстановитель ссылок SHM в массивы: ``fn(msg) -> dict | None`` (``None`` - сообщение потеряно).
+
+        В gui это ``FrameShmMiddleware.on_receive`` (копия, не view: presenter держит кадр дольше
+        окна кольца). Зовётся только из ``restore_for_show`` в Qt-потоке.
+        """
+        self._frame_restorer = fn
+
+    @property
+    def restore_dropped(self) -> int:
+        """Сообщений, потерянных при копии из SHM (единица - сообщение, не ссылка)."""
+        with self._restore_lock:
+            return self._restore_dropped
+
+    def restore_for_show(self, msg_dict: dict) -> dict | None:
+        """Снять копию всех ссылок SHM сообщения - ОДИН раз, в момент показа/выдачи в Qt.
+
+        ЗОВЁТСЯ ТОЛЬКО В Qt-ПОТОКЕ (sink насоса и ``_handle_payload``); из ``dispatch`` и других
+        потоков - нельзя: SHM-читатель gui один, Qt-поток.
+
+        Сообщение без ссылок (inline ``frame``, state, команда) возвращается без изменений.
+        Ссылки есть, а восстановителя нет - потеря (``restore_dropped``), ``None``: молчаливый
+        непоказ скрыл бы дефект проводки. ``None`` восстановителя (ссылка перезаписана/порвана) -
+        тоже потеря. Исключение восстановителя не перехватывается (его считает насос в ``errors``).
+        """
+        data = msg_dict.get("data")
+        if not isinstance(data, dict) or not data.get(SHM_REFS_KEY):
+            return msg_dict
+        restorer = self._frame_restorer
+        out = restorer(msg_dict) if restorer is not None else None
+        if out is None:
+            with self._restore_lock:
+                self._restore_dropped += 1
+        return out
 
     def set_state_callback(self, cb: Callable) -> None:
         """Основной (первичный) state-callback. Сохранён для обратной совместимости;
@@ -152,6 +207,12 @@ class DataReceiverBridge(QObject):
 
     def _handle_payload(self, payload: tuple) -> None:
         kind, msg_dict = payload
+        if kind != "frame":
+            # Не-кадровое сообщение со ссылками SHM (например, только mask) получает массивы здесь,
+            # в Qt-потоке: прежний router-middleware в gui снят (T5). Без ссылок - как есть.
+            msg_dict = self.restore_for_show(msg_dict)
+            if msg_dict is None:
+                return
         if kind == "frame":
             if self._frame_cb:
                 self._frame_cb(msg_dict)
