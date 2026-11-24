@@ -34,3 +34,14 @@ then ran `UPDATE_BUILD_SNAPSHOTS=1`, then re-ran normally to confirm green, then
 new keys, one insertion per process + one in `orchestrator_config.sys_config.observability`).
 If the diff shows anything you didn't intend to change, STOP — that's a real regression,
 not a snapshot to rubber-stamp.
+
+**Addendum 2026-11-23 (belt_freq, `feat/pult-belt-speed`):** the same trap hits the author who ADDS
+A CONTROL to a recipe, not only a config field. A 5th action control (`belt_freq`) in
+`letter_robot_sim.yaml` / `hikvision_letter_robot.yaml` turned 7 tests red at once: 2 in
+`test_build_characterization.py` (golden) and 5 in
+`frontend/widgets/tabs/services/control_panel/tests/test_recipe_1_0_belt_monitors.py` (pins:
+`len(raw) == 10`, exactly 4 actions, a hard-coded `_ALL_ACTIONS` tuple). The commit message said
+"recipe contracts green" and stage 5 review caught it by running both files. Trigger: before
+committing a recipe edit that adds or removes a control, run BOTH files by path (a directory run
+is reclassified by `machine_gate` and may return 75) and read the golden `git diff` as above.
+Precedent for the fix pattern: `f1865200f` (controls 8 → 10).
