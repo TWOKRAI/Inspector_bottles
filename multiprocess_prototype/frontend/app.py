@@ -1123,12 +1123,23 @@ def _setup_bridge_callbacks(
 
     # Насос кадров: ящик «последний на ключ» (bridge.frame_mailbox, его наполняет
     # dispatch из worker thread) -> таймер на sender с периодом из fps_limit слота ->
-    # _on_frame_received. Создаётся в Qt-потоке ДО первого _rebuild_displays: тот
-    # зовёт process._frame_pump.set_keys(...). sink — замыкание: _on_frame_received
-    # определён ниже и разрешается в момент вызова, а не при создании насоса.
+    # _show_taken -> _on_frame_received. Создаётся в Qt-потоке ДО первого _rebuild_displays: тот
+    # зовёт process._frame_pump.set_keys(...). sink — замыкание: _show_taken (и через него
+    # _on_frame_received) определён ниже и разрешается в момент вызова, а не при создании насоса.
+    def _show_taken(item: dict) -> None:
+        """Кадр, вынутый насосом: копия ссылок SHM (Qt-поток, один раз) и показ.
+
+        ``None`` — ссылка перезаписана/порвана или нет восстановителя: кадр не показан, слот держит
+        прежний, следующий тик берёт новое из ящика (счёт — ``bridge.restore_dropped``).
+        """
+        restored = process._bridge.restore_for_show(item)
+        if restored is None:
+            return
+        _on_frame_received(restored)
+
     process._frame_pump = FramePump(
         mailbox=process._bridge.frame_mailbox,
-        sink=lambda _key, item: _on_frame_received(item),
+        sink=lambda _key, item: _show_taken(item),
     )
     # Оба пути закрытия (перезапуск UI и выход) идут через app.quit() -> aboutToQuit;
     # новый проход GuiProcess.run создаёт новый насос, старый к тому времени остановлен.
