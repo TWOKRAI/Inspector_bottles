@@ -57,6 +57,27 @@ _REQUEST_ID_ECHO_MAX = 128
 _HELLO_ACK = (json.dumps({"type": "hello", "success": True}) + "\n").encode("utf-8")
 
 
+def _set_exclusive_bind(server: socket.socket) -> None:
+    """Запретить второму слушателю занять наш порт (вызывать до ``bind``).
+
+    На Windows ``SO_REUSEADDR`` разрешает ДВА живых слушателя на одном порту: второй
+    ``bind`` проходит молча, ядро раздаёт соединения кому-то из них. Для backend_ctl
+    это значит: второй PM поднимает канал на занятом порту и перезаписывает токен
+    первого. Правильный флаг Windows — ``SO_EXCLUSIVEADDRUSE``: занятый порт даёт
+    ``OSError`` (WSAEADDRINUSE), ``start()`` возвращает False.
+
+    На POSIX ``SO_REUSEADDR`` двойного слушателя не даёт (только переиспользование
+    адреса в TIME_WAIT) и нужен для быстрого перезапуска — там он и остаётся.
+    Тот же приём — в ``Services/code_reader/core/sink.py`` (импорт оттуда запрещён
+    слоями, поэтому функция своя).
+    """
+    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+    if exclusive is not None:
+        server.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+    else:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
 class SocketChannel(MessageChannel):
     """Серверный TCP-эндпоинт как IMessageChannel.
 
@@ -172,7 +193,7 @@ class SocketChannel(MessageChannel):
             return False
         try:
             self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            _set_exclusive_bind(self._server_sock)
             self._server_sock.bind((self._host, self._port))
             # При port=0 ОС выбирает свободный порт — фиксируем фактический.
             self._port = self._server_sock.getsockname()[1]

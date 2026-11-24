@@ -329,9 +329,11 @@ class _Alpha:
         except ValueError:  # незакрытая кавычка в чужой командной строке: запасной разбор по пробелам
             tokens = info.command.split()
         found = None
+        # обе стороны приводятся одним способом: на Windows realpath даёт «\», а литерал скрипта — «/»
+        want_path = os.path.normcase(os.path.normpath(os.path.join(self.tree, script)))
         for tok in tokens:
             path = tok if os.path.isabs(tok) else os.path.join(info.cwd, tok)
-            if os.path.realpath(path) == os.path.join(self.tree, script):
+            if os.path.normcase(os.path.normpath(os.path.realpath(path))) == want_path:
                 found = tok
                 break
         if found is None or (need_recipe and _RECIPE_MARK not in info.command):

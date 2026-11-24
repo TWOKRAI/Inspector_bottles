@@ -255,9 +255,19 @@ def test_sim_with_real_engine_three_frames():
     model_file = models_dir / f"{lb.DEFAULT_MODEL}.onnx"
     if not model_file.is_file() or not (data_root / "line_sim" / "letters_ink").is_dir():
         pytest.skip(f"нет модели/каталога букв сима под {data_root}: задайте LETTERS_BASELINE_DATA_ROOT=<дерево>/data")
+    letters = ["П"]
+    ink_dir = data_root / "line_sim" / "letters_ink"
+    missing = [letter for letter in letters if not (ink_dir / letter).is_dir()]
+    if missing:
+        # Каталог есть, но устарел (ассеты до R1b 5b6ca25f7: А К Р Х) — генератор сима упал бы ValueError.
+        present = sorted(p.name for p in ink_dir.iterdir() if p.is_dir())
+        pytest.skip(
+            f"в {ink_dir} нет букв {missing} (есть: {present}): ассеты сима устарели; "
+            "пересоберите: python Services/line_sim/tools/build_stand_assets.py --force"
+        )
     engine = lb.load_engine(models_dir, lb.DEFAULT_MODEL, "cpu")
     preset = lb.load_sim_preset(REPO_ROOT / lb.DEFAULT_PRESET, data_root)
-    frames = list(lb.iter_sim_frames(preset, ["П"], [0.0, 90.0, 180.0], 1, 0))
+    frames = list(lb.iter_sim_frames(preset, letters, [0.0, 90.0, 180.0], 1, 0))
     assert [f.grid_angle for f in frames] == [0.0, 90.0, 180.0]
     assert all(f.bgr.shape == (128, 128, 3) and f.bgr.dtype == np.uint8 for f in frames)
     assert all(abs(lb.wrap_deg(f.truth_angle - f.grid_angle)) < 1e-6 for f in frames)  # истина = заданный угол

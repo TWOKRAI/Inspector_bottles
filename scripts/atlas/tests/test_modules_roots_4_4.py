@@ -220,10 +220,13 @@ def test_tags_check_expands_units_without_pythonpath(tmp_path: Path) -> None:
             cwd=str(tmp_path),
             env=env,
             capture_output=True,
+            text=True,  # универсальные переводы строк: на Windows ребёнок пишет \r\n
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
             check=False,
         )
-        return proc.returncode, proc.stdout.decode("utf-8", "replace")
+        return proc.returncode, proc.stdout
 
     def lesson(root: Path, name: str, module: str) -> None:
         body = f"---\nname: {name}\ndescription: фикстура fixture\nmodule: {module}\n---\nBody.\n"

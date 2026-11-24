@@ -75,8 +75,13 @@ def _fake_atlas(tmp_path):
     return script
 
 
+def _posix(path) -> str:
+    """Слова команды разбирает shlex в posix-режиме: обратная косая Windows съедается."""
+    return Path(path).as_posix()
+
+
 def _call(script, arg, denied=False, **extra):
-    return {"name": "Bash", "target": f"{sys.executable} {script} ref {arg}", "denied": denied, **extra}
+    return {"name": "Bash", "target": f"{_posix(sys.executable)} {_posix(script)} ref {arg}", "denied": denied, **extra}
 
 
 def test_atlas_texts_classification(pilot, tmp_path):
@@ -86,7 +91,11 @@ def test_atlas_texts_classification(pilot, tmp_path):
             _call(script, "ok"),  # обычный вызов: воспроизведён
             _call(script, "ok", denied=True),  # denied без текста: неизвестный
             _call(script, "ok", denied=True, output="recorded text"),  # denied, но текст в записи: берём его
-            {"name": "Bash", "target": f"{sys.executable} {script} ref ok | head -3", "denied": False},  # оболочка
+            {
+                "name": "Bash",
+                "target": f"{_posix(sys.executable)} {_posix(script)} ref ok | head -3",
+                "denied": False,
+            },  # оболочка
             _call(script, "missing"),  # повтор: код 2 и пустой stdout
             _call(script, "partial"),  # повтор: код 2, но вывод есть - это текст
             {"name": "Bash", "target": "ls -la", "denied": False},  # не atlas: пропущен

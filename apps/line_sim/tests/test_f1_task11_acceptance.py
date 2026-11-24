@@ -42,8 +42,11 @@ from pathlib import Path
 import pytest
 
 from backend_ctl.harness import BackendHarness
+from Services.modbus.core.config import ModbusConfig
+from Services.modbus.core.device import ModbusDevice
 from Services.robot_comm.core.client import RobotClient
 from Services.robot_comm.core.config import RobotConfig
+from Services.robot_comm.core.protocol_v2 import REG
 
 # .../apps/line_sim/tests/<file> -> parents[1] = apps/line_sim.
 _APP_DIR = Path(__file__).resolve().parents[1]
@@ -263,23 +266,50 @@ def test_app_boots_and_modbus_port_accepts(line_sim_backend) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_robot_client_reads_growing_encoder(line_sim_backend) -> None:
-    """Пин: RobotClient.connect() -> True; энкодер строго растёт между двумя чтениями (≥0.5с).
+def test_robot_client_connects(line_sim_backend) -> None:
+    """Пин: RobotClient.connect() -> True — Modbus-сервер хоста отвечает на TCP-соединение.
 
-    Провал сегодня: фикстура падает раньше тела. Провал у сломанной симуляции: connect()
-    вернул не True, ЛИБО encoder не вырос за паузу (лента стоит/тик не идёт).
+    Провал у сломанной реализации: connect() вернул не True (сервер не слушает 5021).
+    Рост энкодера проверяет отдельный тест ниже (он читает регистры v2, не клиентом v1).
     """
     _harness, _drv, _log_dir = line_sim_backend
 
     client = RobotClient(RobotConfig(host=_ROBOT_HOST, port=_MODBUS_PORT, unit_id=_ROBOT_UNIT_ID))
     try:
         assert client.connect() is True, "RobotClient.connect() вернул не True — Modbus-сервер не отвечает"
-        first = client.read_encoder()
-        time.sleep(0.5)
-        second = client.read_encoder()
-        assert second > first, f"энкодер не вырос за 0.5с: first={first}, second={second}"
     finally:
         client.disconnect()
+
+
+def _read_tlm_enc(device: ModbusDevice) -> int:
+    """Энкодер ленты v2: ``TLM_ENC`` — два слова (DW), младшее первым (порядок слов little)."""
+    lo, hi = device.read_registers(REG["TLM_ENC"], 2)
+    return lo | (hi << 16)
+
+
+def test_robot_client_reads_growing_encoder(line_sim_backend) -> None:
+    """Пин: энкодер ``TLM_ENC`` строго растёт между двумя чтениями (≥0.5с), пока лента едет.
+
+    Стенд работает на ``protocol: v2`` (apps/line_sim/pipeline.yaml, с T3.7): энкодер лежит в
+    ``TLM_ENC`` (0x104C), а не в ``REG_ENC`` (0x1112) протокола v1 — регистровое пространство v2
+    плоское, и 0x1112 читается нулём без ошибки Modbus, поэтому ``RobotClient.read_encoder()``
+    (v1) здесь не годится. Читаем ``TLM_ENC`` сырым чтением двух слов через ``ModbusDevice``.
+    Правка лидом (Win-F, C-72): тест принадлежит независимому тестеру Ф1, смысл сохранён.
+
+    Провал у сломанной симуляции: соединение не открылось, ЛИБО энкодер не вырос за паузу
+    (лента стоит/тик не идёт).
+    """
+    _harness, _drv, _log_dir = line_sim_backend
+
+    device = ModbusDevice(ModbusConfig(host=_ROBOT_HOST, port=_MODBUS_PORT, unit_id=_ROBOT_UNIT_ID))
+    try:
+        assert device.connect() is True, "ModbusDevice.connect() вернул не True — Modbus-сервер не отвечает"
+        first = _read_tlm_enc(device)
+        time.sleep(0.5)
+        second = _read_tlm_enc(device)
+        assert second > first, f"энкодер TLM_ENC не вырос за 0.5с: first={first}, second={second}"
+    finally:
+        device.disconnect()
 
 
 # --------------------------------------------------------------------------- #

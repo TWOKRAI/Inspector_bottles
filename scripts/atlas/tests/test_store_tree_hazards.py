@@ -139,16 +139,11 @@ def _commit_bad_path(repo: GitRepo) -> None:
     blob = subprocess.run(
         ["git", "-C", str(repo.path), "hash-object", "-w", "--stdin"], input=b"y = 2\n", capture_output=True, check=True
     ).stdout.strip()
+    # Путь идёт через stdin (`--index-info -z`), а не через argv: на Windows байт 0xFF в argv падает в `os.fsdecode`
+    # ещё до запуска git. Запись в индексе при этом та же, что дал бы `--cacheinfo`.
     subprocess.run(
-        [
-            b"git",
-            b"-C",
-            os.fsencode(repo.path),
-            b"update-index",
-            b"--add",
-            b"--cacheinfo",
-            b"100644," + blob + b",bad\xff.py",
-        ],
+        ["git", "-C", str(repo.path), "update-index", "--add", "-z", "--index-info"],
+        input=b"100644 " + blob + b"\tbad\xff.py\0",
         check=True,
         capture_output=True,
     )

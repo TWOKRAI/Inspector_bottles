@@ -96,7 +96,10 @@ def _recipe_circle_detector_config() -> dict:
 
 
 def _recipe_pixel_to_robot_config() -> dict:
-    recipe = _load_yaml(_RECIPE_PATH)
+    # Калибровку берём из СИМ-рецепта (стенд line_sim, use_linear: true), а не из β-рецепта:
+    # с R4-2 (2a8607155) β-рецепт ушёл на use_linear: false (нелинейная калибровка боевой
+    # установки), и линейная сверка ниже к нему неприменима.
+    recipe = _load_yaml(_SIM_RECIPE_PATH)
     recog = _find_process(recipe["blueprint"]["processes"], "recog")
     return _find_plugin_config(recog, "PixelToRobotPlugin")
 
@@ -159,8 +162,12 @@ def _find_marker_centroid(frame: np.ndarray) -> tuple[float, float]:
 
 def test_sim_disc_centre_maps_to_same_robot_xy_as_prototype():
     """Проверка согласованности §4.1 (главный критерий контракта): центр диска,
-    нарисованного настоящим ``SceneCompositor``, переведённый ``bilinear_px_to_mm``
-    прототипа, совпадает с ``object_robot_xy`` сима не хуже 0.5 мм в >= 3 точках ROI.
+    нарисованного настоящим ``SceneCompositor`` по ``apps/line_sim/pipeline.yaml``,
+    переведённый ``bilinear_px_to_mm`` с линейной калибровкой ``PixelToRobotPlugin`` из
+    СИМ-рецепта ``letter_robot_sim.yaml`` (``use_linear: true``; ROI — из β-рецепта),
+    совпадает с ``object_robot_xy`` сима (``Services.line_sim.core.matching``) не хуже
+    0.5 мм в >= 3 точках ROI. Эталон калибровки — сим-рецепт: β-рецепт с R4-2 держит
+    ``use_linear: false`` и в эту сверку не входит.
     """
     roi = _recipe_roi_crop_config()
     lin = _recipe_pixel_to_robot_config()

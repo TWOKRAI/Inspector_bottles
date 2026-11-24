@@ -188,9 +188,11 @@ class ProcessManagerProcess(ProcessModule):
     #: ``_run_apply``. Уровень класса — выключенный (PM из ``__new__`` без ``_create_components()`` не стартует сам).
     _run_autostart: AutostartLatch = AutostartLatch(False)
     _run_since: float = 0.0
-    #: ``time.monotonic()`` последнего входа в ``running`` (ревью Ф1, m2): такт, чья оценка начата раньше, устарел.
-    #: Наружу не публикуется — ``since`` остаётся ``time.time()``.
-    _run_running_mono: float = 0.0
+    #: Поколение работы (ревью Ф1, m2; Win-C): +1 при каждом входе в ``running``, читается и пишется под ``_run_lock``.
+    #: Такт, чья оценка начата в другом поколении, устарел. Счётчик, а не метка времени: на Windows
+    #: ``time.monotonic()`` — ``GetTickCount64`` с шагом 15,625 мс, начало оценки и START попадают в один квант и
+    #: строгое сравнение меток ложно. Наружу не публикуется — ``since`` остаётся ``time.time()``.
+    _run_generation: int = 0
     _run_ready: bool = True
     #: Значения ``system.run.*``, уже записанные в стор (под ``_run_publish_lock``); ``None`` — ни одной.
     _run_published: dict | None = None
@@ -1075,7 +1077,7 @@ class ProcessManagerProcess(ProcessModule):
         stop_done: bool | None = None,
         reasons: list[dict] | None = None,
         hold_event: bool = False,
-        eval_started: float | None = None,
+        eval_generation: int | None = None,
     ) -> tuple[RunState, str | None, RunState]:
         """Единственная точка записи состояния работы: ``(новое состояние, код отказа, прежнее состояние)``.
 
@@ -1099,12 +1101,13 @@ class ProcessManagerProcess(ProcessModule):
         (идут шаги ``pre_stop``); снимает его последовательность STOP (``_run_stop_clear_event``). Остальные
         вызовы в ``stopping`` событие не трогают; при выходе из ``stopping`` оно доводится по таблице как всегда.
 
-        ``eval_started`` (ревью Ф1, m2) — только для ``tick``: ``time.monotonic()`` начала оценки такта (оценка идёт
-        вне замка). Начата раньше последнего входа в ``running`` — такт устарел: не применяется совсем (ни состояние,
-        ни ``_run_ready``, ни причины, ни публикация), возврат ``(текущее, None, текущее)``.
+        ``eval_generation`` (ревью Ф1, m2; Win-C) — только для ``tick``: ``_run_generation`` на начало оценки такта
+        (оценка идёт вне замка). Со времени начала оценки был вход в ``running`` (поколение сменилось) — такт устарел:
+        не применяется совсем (ни состояние, ни ``_run_ready``, ни причины, ни публикация), возврат
+        ``(текущее, None, текущее)``. Порядок событий — по счётчику, не по меткам грубых часов.
         """
         with self._run_lock:
-            if event == "tick" and eval_started is not None and eval_started < self._run_running_mono:
+            if event == "tick" and eval_generation is not None and eval_generation != self._run_generation:
                 current = self._run_state
                 return current, None, current
             if ready is None:
@@ -1162,7 +1165,7 @@ class ProcessManagerProcess(ProcessModule):
                 self._run_state = new
                 self._run_since = time.time()
                 if new is RunState.running:
-                    self._run_running_mono = time.monotonic()
+                    self._run_generation += 1
         self._publish_run_state()
         if autostart:
             self._submit_run_sequence(self._run_autostart_start, "run-autostart")
@@ -1605,15 +1608,17 @@ class ProcessManagerProcess(ProcessModule):
         if self._pm_stopping() or self._system_stop_snapshot() is not None:
             return
         # Ревью Ф1, m2: оценка идёт вне ``_run_lock``; START между оценкой и применением делает такт устаревшим —
-        # ``_run_apply`` отбросит его по метке начала оценки.
-        eval_started = time.monotonic()
+        # ``_run_apply`` отбросит его по поколению работы на начало оценки (Win-C: счётчик, а не ``time.monotonic()``).
+        # Поколение читается под тем же замком, под которым его увеличивает вход в ``running``.
+        with self._run_lock:
+            eval_generation = self._run_generation
         try:
             ready, reasons = self._evaluate_run_readiness(track_restart=True)
         except Exception as exc:  # noqa: BLE001 — сбой оценки: серия, а не потерянный такт (ниже)
             ready, reasons = self._evaluation_failed(exc)
         else:
             self._eval_fail_since = None  # первый успешный такт сбрасывает серию
-        new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons, eval_started=eval_started)
+        new, _code, prev = self._run_apply("tick", ready=ready, reasons=reasons, eval_generation=eval_generation)
         if new is RunState.fault and prev is not RunState.fault:
             self._start_fault_stop()  # Task 1.4: остановка в аварии идёт не на потоке монитора
         self._publish_readiness_leaves()

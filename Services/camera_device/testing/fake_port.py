@@ -344,7 +344,7 @@ class FakePort:
         self._state = "grabbing"
         self._frame_num = 0
         self._get_frame_calls = 0
-        self._next_frame_at = time.monotonic() + self._frame_period_s
+        self._next_frame_at = time.perf_counter() + self._frame_period_s
 
     def get_frame(self, timeout_ms: int) -> RawFrame | None:
         self._record("get_frame", (timeout_ms,))
@@ -376,13 +376,17 @@ class FakePort:
         """Ждать срока следующего кадра, не дольше `timeout_ms`; `False` — срок не наступил (таймаут).
 
         Сон не прерывается `close`/`stop_grabbing`: так ведёт себя `get_frame` в SDK.
+        Часы — `perf_counter`: `time.monotonic` на Windows грубый (шаг 15,6 мс), сон кончался раньше срока
+        по таким часам и кадр, срок которого наступает внутри таймаута, отдавался как `None`. Поэтому
+        ждём циклом, пока срок не наступит или не выйдет таймаут.
         """
-        wait = min(timeout_ms / 1000.0, max(0.0, self._next_frame_at - time.monotonic()))
-        if wait > 0:
-            time.sleep(wait)
-        now = time.monotonic()
-        if now < self._next_frame_at:
-            return False
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+        now = time.perf_counter()
+        while now < self._next_frame_at:
+            if now >= deadline:
+                return False
+            time.sleep(min(self._next_frame_at, deadline) - now)
+            now = time.perf_counter()
         self._next_frame_at = now + self._frame_period_s
         return True
 

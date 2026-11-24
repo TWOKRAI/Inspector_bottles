@@ -117,7 +117,7 @@ print("LOGGER_FIRST_OK")
 
 def _run_clean(probe: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-I", "-c", probe, str(_REPO_ROOT)],
+        [sys.executable, "-X", "utf8", "-I", "-c", probe, str(_REPO_ROOT)],
         capture_output=True,
         text=True,
         encoding="utf-8",

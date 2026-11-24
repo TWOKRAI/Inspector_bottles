@@ -279,7 +279,7 @@ class World:
         return FakeDriver(self, "proto" if port == 8765 else "sim")
 
     def read_lines(self, path: Path):
-        self.order.append(("read_lines", str(path)))
+        self.order.append(("read_lines", path.as_posix()))
         if str(path) != str(Path(self.log_dir) / "devices" / "robot_exchange.log"):
             return None
         return list(self.file_lines)
@@ -347,6 +347,7 @@ class World:
                     self.regs = dict(data["regs"])
 
             self.sched.append((self.t + 1.0 * (k + 1), arrive))
+
 
 def _state_get_key(args: dict) -> str:
     for v in args.values():
@@ -578,6 +579,33 @@ def test_port_guard_mismatch_sends_nothing() -> None:
     # сторож — до первой фабрики
     first_factory = next(i for i, o in enumerate(ok_world.order) if o[0] == "factory")
     assert {o[1] for o in ok_world.order[:first_factory] if o[0] == "listeners"} == {8765, 8766}
+
+
+def test_listener_problem_compares_paths_across_separators() -> None:
+    """Прямая проверка сравнения путей сторожа: «/» в литерале скрипта и «\\» после realpath на Windows."""
+    import argparse
+
+    RA = _RA()
+
+    def problem(command: str, cwd: str) -> str | None:
+        alpha = RA._Alpha(
+            argparse.Namespace(tree=_TREE, log_dir=None),
+            driver_factory=lambda port: None,
+            listeners=lambda port: RA.ListenerInfo(port, 111, command, cwd),
+            clock=lambda: 0.0,
+            sleep=lambda s: None,
+            out=io.StringIO(),
+            read_lines=lambda path: None,
+        )
+        return alpha._listener_problem(8766, "apps/line_sim/run.py", False)
+
+    # слушатель запущен из дерева с относительным путём через «/» → путь совпал
+    assert problem("python apps/line_sim/run.py", _TREE) is None
+    # тот же скрипт абсолютным путём внутри дерева, с «/» в относительной части → совпал
+    assert problem(f"python {_TREE}/apps/line_sim/run.py", "/elsewhere") is None
+    # контроль: чужой скрипт в том же дереве и тот же скрипт в чужом дереве НЕ совпадают
+    assert problem("python other/run.py", _TREE) is not None
+    assert problem("python apps/line_sim/run.py", "/other/tree") is not None
 
 
 @pytest.mark.parametrize(
