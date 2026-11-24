@@ -420,6 +420,12 @@ ALLOWLIST: dict[tuple[str, str], AllowEntry] = {
         "лаунчер до sys.path-bootstrap (любой python, только stdlib): добой kill() только что порождённого "
         "приостановленного ребёнка при сбое Job Object, не ребёнок PM; ChildProcessStop недоступен (C-76)",
     ),
+    ("R6", "multiprocess_framework/modules/frontend_module/bridge/frame_pump.py"): AllowEntry(
+        2,
+        "FramePump: таймеры ключей — дети насоса (QTimer(self)); stop() и снятие ключа освобождают таймер сразу, "
+        "а не при гибели насоса; у насоса нет scope-владельца для attach_qt (T2 gui-frame-path); перевести на scope — "
+        "отдельная задача",
+    ),
     ("R6", "multiprocess_framework/modules/frontend_module/core/window_registry.py"): AllowEntry(1, "мегаплан GUI"),
     ("R6", "multiprocess_framework/modules/frontend_module/tabs/lazy_tab.py"): AllowEntry(1, "мегаплан GUI"),
     ("R6", "multiprocess_framework/modules/frontend_module/widgets/chrome/side_panels/collapsible.py"): AllowEntry(
