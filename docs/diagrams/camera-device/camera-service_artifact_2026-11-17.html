@@ -1,0 +1,398 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Сервис камеры</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Раскладка: вертикальный рассказ «в двух словах → было → будет → команды → правка на ходу → почему лучше → куда идём и сколько осталось → чего не знаю». Схемы — SVG, цвет только из токенов. */
+:root {
+  --bg: #f6f7f5;
+  --fg: #1d2421;
+  --muted: #5a645f;
+  --panel: #ffffff;
+  --line: #c9d0cb;
+  --old: #a4491f;
+  --old-bg: #f7e6dc;
+  --new: #1d6b57;
+  --new-bg: #dcefe8;
+  --warn: #8a6a00;
+  --warn-bg: #f6edc9;
+  --blue: #2f5d8a;
+  --blue-bg: #dde8f3;
+  --font-head: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141917; --fg: #e5ebe7; --muted: #9aa7a0; --panel: #1c2320; --line: #36403b;
+    --old: #f0a279; --old-bg: #3a2519; --new: #6fd0b0; --new-bg: #17332a;
+    --warn: #e8c76a; --warn-bg: #36300f; --blue: #8db8e6; --blue-bg: #1c2b3b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141917; --fg: #e5ebe7; --muted: #9aa7a0; --panel: #1c2320; --line: #36403b;
+  --old: #f0a279; --old-bg: #3a2519; --new: #6fd0b0; --new-bg: #17332a;
+  --warn: #e8c76a; --warn-bg: #36300f; --blue: #8db8e6; --blue-bg: #1c2b3b;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); line-height: 1.55; font-size: 16px;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+h1, h2 { font-family: var(--font-head); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(30px, 6vw, 44px); letter-spacing: -0.01em; }
+h2 { font-size: clamp(22px, 4vw, 28px); }
+h3 { font-family: var(--font-head); font-size: 17px; margin: 0 0 6px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+.lead { font-size: 18px; color: var(--fg); max-width: 62ch; }
+.muted { color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 14px; }
+.diagram { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.diagram svg { display: block; min-width: 640px; width: 100%; height: auto; }
+svg text { font-family: var(--font-body); fill: var(--fg); font-size: 13px; }
+svg .t-muted { fill: var(--muted); font-size: 12px; }
+svg .t-head { font-family: var(--font-head); font-weight: 700; font-size: 14px; }
+svg .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+svg .old { fill: var(--old-bg); stroke: var(--old); stroke-width: 1.5; }
+svg .new { fill: var(--new-bg); stroke: var(--new); stroke-width: 1.5; }
+svg .blue { fill: var(--blue-bg); stroke: var(--blue); stroke-width: 1.5; }
+svg .warn { fill: var(--warn-bg); stroke: var(--warn); stroke-width: 1.5; }
+svg .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg .ln-old { stroke: var(--old); stroke-width: 1.5; fill: none; }
+svg .ln-new { stroke: var(--new); stroke-width: 2; fill: none; }
+svg .arrow-fill { fill: var(--muted); }
+svg .arrow-new { fill: var(--new); }
+svg .arrow-old { fill: var(--old); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.cols > * { min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.card.old { border-color: var(--old); }
+.card.new { border-color: var(--new); }
+.card.blue { border-color: var(--blue); }
+.card.warn { border-color: var(--warn); }
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 99px; letter-spacing: .03em; }
+.tag.old { background: var(--old-bg); color: var(--old); }
+.tag.new { background: var(--new-bg); color: var(--new); }
+.tag.warn { background: var(--warn-bg); color: var(--warn); }
+.tag.blue { background: var(--blue-bg); color: var(--blue); }
+.tag.plain { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--font-head); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; }
+.status { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.status > * { min-width: 0; }
+.status ul { margin: 8px 0 0; padding-left: 18px; }
+.status li { margin-bottom: 4px; }
+.bar { display: flex; height: 38px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--panel); }
+.bar > span { display: block; min-width: 3px; }
+.bar .s-main { background: var(--new); }
+.bar .s-branch { background: var(--blue); }
+.bar .s-part { background: var(--warn); }
+.bar .s-todo { background: var(--panel); }
+.bar .s-out { background: var(--line); }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.legend > * { min-width: 0; }
+.legend b { font-family: var(--font-head); font-size: 26px; display: block; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.legend small { color: var(--muted); font-size: 13px; }
+.sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; border: 1px solid var(--line); vertical-align: -1px; }
+.sw.s-main { background: var(--new); }
+.sw.s-branch { background: var(--blue); }
+.sw.s-part { background: var(--warn); }
+.sw.s-todo { background: var(--panel); }
+.sw.s-out { background: var(--line); }
+ul.plain { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; max-width: 68ch; }
+footer { color: var(--muted); font-size: 14px; max-width: 68ch; }
+</style>
+
+<main>
+  <header style="display:flex;flex-direction:column;gap:14px">
+    <h1>Сервис камеры</h1>
+    <p class="lead">Раньше всё про камеру жило внутри одного плагина Hikvision. Теперь есть общая основа для любой камеры, а вендору остаётся тонкий драйвер. К камере обращается один поток, поэтому одновременные вызовы больше не могут её сломать. Правка параметра на ходу и девять команд плагина написаны и проверены на тестовой камере. На настоящей MVS это ещё не запускалось.</p>
+  </header>
+
+  <section>
+    <h2>В двух словах</h2>
+    <div class="cols">
+      <div class="card"><h3>Один у телефона</h3><p>У камеры один «диспетчер»: поток-владелец. Только он говорит с ней. Остальные оставляют ему записку и идут дальше, не мешая друг другу.</p></div>
+      <div class="card"><h3>Всё видно в полях</h3><p>Параметры камеры лежат в обычных полях, как у любого прибора в системе. Ничего не пишется «втихую» при открытии. Что записано, видно и проверяется.</p></div>
+      <div class="card"><h3>Новая камера дешевле</h3><p>Кадр, поля, команды, наблюдаемость общие. Для нового производителя пишется только драйвер: как открыть, что записать, как получить кадр.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Как было</h2>
+    <p>Плагин <b>HikvisionCameraPlugin</b> делал всё сам. Камера другого производителя означала бы новый плагин с теми же задачами, написанный заново.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 720 300" role="img" aria-label="Старая схема: один плагин Hikvision делает всё сам и ходит в SDK камеры">
+        <defs>
+          <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="arrow-old"/></marker>
+        </defs>
+        <rect x="20" y="16" width="170" height="46" rx="8" class="box"/>
+        <text x="105" y="44" text-anchor="middle">GUI, рецепт</text>
+        <path d="M105 62 V92" class="ln-old" marker-end="url(#ao)"/>
+        <rect x="20" y="92" width="520" height="150" rx="10" class="old"/>
+        <text x="34" y="116" class="t-head">HikvisionCameraPlugin (всё в одном месте)</text>
+        <rect x="36" y="130" width="154" height="94" rx="8" class="box"/>
+        <text x="113" y="152" text-anchor="middle">Вызовы SDK</text>
+        <text x="113" y="172" text-anchor="middle" class="t-muted">из разных мест</text>
+        <text x="113" y="190" text-anchor="middle" class="t-muted">и разных потоков</text>
+        <rect x="203" y="130" width="154" height="94" rx="8" class="box"/>
+        <text x="280" y="152" text-anchor="middle">Параметры</text>
+        <text x="280" y="172" text-anchor="middle" class="t-muted">пишутся при open,</text>
+        <text x="280" y="190" text-anchor="middle" class="t-muted">скрытые записи</text>
+        <rect x="370" y="130" width="154" height="94" rx="8" class="box"/>
+        <text x="447" y="152" text-anchor="middle">Свои поля</text>
+        <text x="447" y="172" text-anchor="middle" class="t-muted">и свои команды,</text>
+        <text x="447" y="190" text-anchor="middle" class="t-muted">только для Hikvision</text>
+        <path d="M280 242 V272" class="ln-old" marker-end="url(#ao)"/>
+        <rect x="170" y="272" width="220" height="26" rx="6" class="box"/>
+        <text x="280" y="290" text-anchor="middle">Камера (SDK MVS)</text>
+        <rect x="570" y="92" width="130" height="150" rx="10" class="box" stroke-dasharray="6 4"/>
+        <text x="635" y="146" text-anchor="middle">Другая камера</text>
+        <text x="635" y="168" text-anchor="middle" class="t-muted">всё писать</text>
+        <text x="635" y="186" text-anchor="middle" class="t-muted">заново</text>
+      </svg>
+    </div>
+    <div class="cols">
+      <div class="card old"><h3>Вызовы из разных потоков</h3><p>SDK это не любит: зависание или падение процесса.</p></div>
+      <div class="card old"><h3>Скрытые записи</h3><p>Часть параметров записывалась внутри <code>open</code>. Из рецепта или поля это не видно и не проверяется.</p></div>
+      <div class="card old"><h3>Копия на каждого вендора</h3><p>Общего у камер много (поля, команды, кадр, состояние), но оно копировалось, а не жило в одном месте.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Как будет</h2>
+    <p>Общая основа и тонкие драйверы. Слои сверху вниз, у каждого одна задача.</p>
+    <p><span class="tag new">зелёный</span> уже в main · <span class="tag blue">синий</span> написано и проверено, лежит в ветке, ждёт слияния · <span class="tag plain">пунктир</span> ещё не начато</p>
+    <div class="diagram">
+      <svg viewBox="0 0 720 512" role="img" aria-label="Новая схема: GUI, общий плагин камеры с полями и командами, сеанс с потоком-владельцем и ящиком, порт, драйверы">
+        <defs>
+          <marker id="an" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="arrow-new"/></marker>
+        </defs>
+        <rect x="20" y="12" width="520" height="40" rx="8" class="box"/>
+        <text x="280" y="37" text-anchor="middle">GUI, рецепт, backend_ctl</text>
+        <path d="M280 52 V76" class="ln-new" marker-end="url(#an)"/>
+        <text x="292" y="68" class="t-muted">правка поля или команда</text>
+
+        <rect x="20" y="76" width="520" height="140" rx="10" class="new"/>
+        <text x="34" y="98" class="t-head">Общий плагин камеры (одна база для всех)</text>
+        <rect x="34" y="108" width="118" height="52" rx="6" class="box"/>
+        <text x="93" y="130" text-anchor="middle">Поля</text>
+        <text x="93" y="148" text-anchor="middle" class="t-muted">единый register</text>
+        <rect x="162" y="108" width="118" height="52" rx="6" class="box"/>
+        <text x="221" y="130" text-anchor="middle">Кадр</text>
+        <text x="221" y="148" text-anchor="middle" class="t-muted">в общий формат</text>
+        <rect x="290" y="108" width="118" height="52" rx="6" class="box"/>
+        <text x="349" y="130" text-anchor="middle">Наблюдаемость</text>
+        <text x="349" y="148" text-anchor="middle" class="t-muted">уровни, события</text>
+        <rect x="418" y="108" width="108" height="52" rx="6" class="box"/>
+        <text x="472" y="130" text-anchor="middle">Правка на ходу</text>
+        <text x="472" y="148" text-anchor="middle" class="t-muted">подписка на поля</text>
+        <rect x="34" y="168" width="492" height="38" rx="6" class="blue"/>
+        <text x="280" y="184" text-anchor="middle">Девять команд плагина</text>
+        <text x="280" y="200" text-anchor="middle" class="t-muted">применить и прочитать параметры, сбросить счётчики, список камер, описание узлов, триггер</text>
+
+        <path d="M280 216 V240" class="ln-new" marker-end="url(#an)"/>
+        <rect x="20" y="240" width="520" height="104" rx="10" class="new"/>
+        <text x="34" y="262" class="t-head">Сеанс камеры (session.py)</text>
+        <rect x="34" y="274" width="150" height="58" rx="6" class="box"/>
+        <text x="109" y="296" text-anchor="middle">Поток-владелец</text>
+        <text x="109" y="314" text-anchor="middle" class="t-muted">единственный зовёт порт</text>
+        <rect x="194" y="274" width="150" height="58" rx="6" class="box"/>
+        <text x="269" y="296" text-anchor="middle">Сторож</text>
+        <text x="269" y="314" text-anchor="middle" class="t-muted">ловит зависший вызов</text>
+        <rect x="354" y="274" width="172" height="58" rx="6" class="box"/>
+        <text x="440" y="296" text-anchor="middle">Почтовый ящик</text>
+        <text x="440" y="314" text-anchor="middle" class="t-muted">задачи владельцу, срок 2 с</text>
+
+        <path d="M280 344 V368" class="ln-new" marker-end="url(#an)"/>
+        <rect x="20" y="368" width="520" height="44" rx="8" class="box"/>
+        <text x="280" y="388" text-anchor="middle" class="t-head">Порт камеры: один интерфейс для всех</text>
+        <text x="280" y="404" text-anchor="middle" class="t-muted">открыть, закрыть, записать, прочитать, кадр</text>
+
+        <path d="M120 412 V440 M280 412 V440 M440 412 V440" class="ln-new"/>
+        <rect x="40" y="440" width="160" height="54" rx="8" class="new"/>
+        <text x="120" y="462" text-anchor="middle">fake</text>
+        <text x="120" y="480" text-anchor="middle" class="t-muted">для тестов, в main</text>
+        <rect x="200" y="440" width="160" height="54" rx="8" class="new"/>
+        <text x="280" y="462" text-anchor="middle">mvs (Hikvision)</text>
+        <text x="280" y="480" text-anchor="middle" class="t-muted">драйвер в main</text>
+        <rect x="360" y="440" width="160" height="54" rx="8" class="box" stroke-dasharray="6 4"/>
+        <text x="440" y="462" text-anchor="middle">другой вендор</text>
+        <text x="440" y="480" text-anchor="middle" class="t-muted">позже, тонкий драйвер</text>
+
+        <rect x="566" y="240" width="140" height="172" rx="10" class="box" stroke-dasharray="6 4"/>
+        <text x="636" y="264" text-anchor="middle" class="t-head">Правило</text>
+        <text x="636" y="286" text-anchor="middle" class="t-muted">порт и SDK зовёт</text>
+        <text x="636" y="304" text-anchor="middle" class="t-muted">один поток за раз.</text>
+        <text x="636" y="326" text-anchor="middle" class="t-muted">Камера взята:</text>
+        <text x="636" y="344" text-anchor="middle" class="t-muted">это владелец.</text>
+        <text x="636" y="366" text-anchor="middle" class="t-muted">Не взята: поток</text>
+        <text x="636" y="384" text-anchor="middle" class="t-muted">команды, под замком.</text>
+      </svg>
+    </div>
+    <p class="muted">Вторая камера в другом процессе получает свой плагин, свой порт и своего владельца. Друг друга они не видят. Несколько камер в одном процессе возможны по той же схеме, это решение владельца, оно записано в открытых вопросах.</p>
+  </section>
+
+  <section>
+    <h2>Что умеет плагин: девять команд</h2>
+    <p>Команды с пометкой «через владельца» не трогают камеру сами: они кладут задачу в ящик и ждут ответа не дольше 2 секунд. Если владелец не успел, вызывающий получает ответ «срок», а задача позже не исполняется.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Команда</th><th>Что делает</th><th>Как идёт к камере</th></tr></thead>
+        <tbody>
+          <tr><td><code>take_device</code> / <code>release_device</code></td><td>Взять камеру и открыть захват; отпустить</td><td>Запускает и останавливает владельца</td></tr>
+          <tr><td><code>get_status</code></td><td>Состояние, камера, последняя ошибка</td><td>Читает сеанс, камеру не трогает</td></tr>
+          <tr><td><code>read_params</code></td><td>Снимок текущих значений полей</td><td>Читает регистр, камеру не трогает</td></tr>
+          <tr><td><code>apply_params</code></td><td>Применить пакет значений «всё или ничего»: сначала проба на копии, потом запись</td><td>Через подписку 2.4b и владельца</td></tr>
+          <tr><td><code>reset_stats</code></td><td>Обнулить счётчики кадров, потерь и fps</td><td>Только счётчики плагина</td></tr>
+          <tr><td><code>list_devices</code></td><td>Список камер на сети</td><td>Камера взята: через владельца. Не взята: поток команды сам открывает SDK, перечисляет и отпускает</td></tr>
+          <tr><td><code>describe_params</code></td><td>Границы, шаг и доступ каждого узла камеры</td><td>Через владельца, одним обращением</td></tr>
+          <tr><td><code>trigger_software</code></td><td>Программный триггер</td><td>Через владельца</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Правка на ходу: путь одного значения</h2>
+    <p>Оператор меняет выдержку в GUI. Значение проходит такой путь, и камеру при этом трогает только поток-владелец.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 720 400" role="img" aria-label="Последовательность живой правки: GUI, колбэк, ящик, поток-владелец, камера, дерево состояния">
+        <defs>
+          <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="arrow-fill"/></marker>
+        </defs>
+        <g class="t-head">
+          <text x="70" y="22" text-anchor="middle">GUI / register</text>
+          <text x="230" y="22" text-anchor="middle">Колбэк плагина</text>
+          <text x="400" y="22" text-anchor="middle">Ящик</text>
+          <text x="545" y="22" text-anchor="middle">Поток-владелец</text>
+          <text x="670" y="22" text-anchor="middle">Камера</text>
+        </g>
+        <path d="M70 32 V392 M230 32 V392 M400 32 V392 M545 32 V392 M670 32 V392" class="ln" stroke-dasharray="3 5"/>
+        <path d="M70 56 H228" class="ln" marker-end="url(#as)"/>
+        <text x="76" y="50" class="t-muted">1 значение записано</text>
+        <path d="M230 98 H398" class="ln" marker-end="url(#as)"/>
+        <text x="236" y="92" class="t-muted">2 «сними правку» (не ждёт)</text>
+        <path d="M400 140 H543" class="ln" marker-end="url(#as)"/>
+        <text x="406" y="134" class="t-muted">3 владелец забирает</text>
+        <path d="M545 182 H668" class="ln" marker-end="url(#as)"/>
+        <text x="551" y="176" class="t-muted">4 стоп, запись</text>
+        <path d="M668 224 H547" class="ln" marker-end="url(#as)"/>
+        <text x="556" y="218" class="t-muted">5 читаем назад</text>
+        <path d="M545 266 H668" class="ln" marker-end="url(#as)"/>
+        <text x="551" y="260" class="t-muted">6 захват снова</text>
+        <path d="M545 318 H72" class="ln-new" marker-end="url(#an)"/>
+        <text x="90" y="312" class="t-muted">7 значение в дереве состояния</text>
+        <rect x="236" y="338" width="268" height="46" rx="8" class="warn"/>
+        <text x="370" y="358" text-anchor="middle">Две правки подряд склеиваются:</text>
+        <text x="370" y="375" text-anchor="middle" class="t-muted">один перезахват, победит последнее значение</text>
+      </svg>
+    </div>
+    <p><b>Проверено на стенде 16 ноября</b> (тестовая камера): <code>exposure_time = 900</code> дошла до дерева состояния примерно за 21 мс, перезахват на тестовой камере не понадобился.</p>
+    <p class="muted">Для MVS живая правка сейчас значит «закрыть порт, открыть, записать весь план, запустить захват»: у драйвера нет записи на ходу и мягкого перезахвата. На сетевой камере это секунды. Так задумано правилом Р12, это не сбой.</p>
+  </section>
+
+  <section>
+    <h2>Почему так лучше</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Было</th><th>Стало</th><th>Чем проверено</th></tr></thead>
+        <tbody>
+          <tr><td>Вызовы SDK из разных потоков</td><td>Порт зовёт один поток. Исключений нет: даже список камер без захвата делает поток команды под замком, пока владельца нет</td><td>Журнал порта идёт из одного потока; 300 вызовов <code>call</code> с малым сроком: расхождений 0; тесты на гонку «список камер против стопа»</td></tr>
+          <tr><td>Скрытые записи при <code>open</code></td><td><code>open</code> ничего не пишет; параметры идут планом «работа» и «покой» из полей</td><td>Тест драйвера mvs; два плана строятся при каждом запуске</td></tr>
+          <tr><td>Записал и надеюсь</td><td>Каждая запись проверяется чтением назад, расхождение видно в <code>param_errors</code></td><td>Слепые тесты и тесты на тестовой камере</td></tr>
+          <tr><td>Пакет значений мог записаться наполовину</td><td><code>apply_params</code> сначала пробует весь пакет на копии регистра, включая права доступа к полю, и пишет, только если прошёл весь пакет</td><td>Ревью нашло дыру с правами, закрыта тестом; мутации, ломающие пробу, дают красные тесты</td></tr>
+          <tr><td>Команда могла зависнуть вместе с камерой</td><td>Срок 2 секунды; ответ «срок» и задача отменяется; сторож видит зависший вызов</td><td>Тесты срока, замер: ответ «срок» быстрее 0,7 с, задача позже не исполняется</td></tr>
+          <tr><td>Правка на ходу блокирует всё</td><td>Колбэк только кладёт задачу и возвращается; поток кадров не ждёт</td><td class="num">Худший вызов <code>produce()</code> во время перезахвата 0,19 мс (замер ревьюера, тестовая камера, Mac)</td></tr>
+          <tr><td>Ошибка видна только в логе</td><td>Уровни fps, кадры, ошибки; события в дереве состояния; инциденты в health; зависание порта даёт дамп</td><td>Ревью 2.3b: 18 тестов наблюдаемости, нарушения ловятся мутациями</td></tr>
+          <tr><td>Новый вендор = новый плагин</td><td>Тонкий драйвер и таблица «поле → узел камеры»; остальное общее</td><td>Один и тот же набор проверок порта проходит тестовая камера и mvs</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">Как проверяли сами тесты: на каждую заявленную гарантию ломается код, и тест обязан покраснеть. Прогнозы, какие тесты покраснеют, записаны в репозиторий до прогона. По 2.3d из 10 мутаций 8 совпали с прогнозом, в том числе одна заранее названная выжившая (замок счётчика ссылок в тестовой камере, тест её не ловит). В одной мутации прогноз был неполным, ещё одну тест пропустил, и его переписали. Каталог тестов камеры в ветке 2.3d: 371 прошёл, 10 пропущены, три прогона подряд.</p>
+  </section>
+
+  <section>
+    <h2>К чему идём и сколько осталось</h2>
+    <p>Цель версии 1.0: на железе (MVS, ориентир 22 ноября) камера Hikvision работает на новой основе, обе камеры выбираются по серийному номеру, есть рецепты и вкладка в GUI. Весь план: 44 задачи.</p>
+    <div class="bar" role="img" aria-label="44 задачи: 15 в main, 2 в ветках, 1 частично, 22 не начаты, 4 вне версии 1.0">
+      <span class="s-main" style="flex:15"></span>
+      <span class="s-branch" style="flex:2"></span>
+      <span class="s-part" style="flex:1"></span>
+      <span class="s-todo" style="flex:22"></span>
+      <span class="s-out" style="flex:4"></span>
+    </div>
+    <div class="legend">
+      <div><b>15</b><small><span class="sw s-main"></span>в main</small></div>
+      <div><b>2</b><small><span class="sw s-branch"></span>в ветках: 2.3c и 2.3d</small></div>
+      <div><b>1</b><small><span class="sw s-part"></span>частично: 0.5, не хватает кадров с железа</small></div>
+      <div><b>22</b><small><span class="sw s-todo"></span>не начато</small></div>
+      <div><b>4</b><small><span class="sw s-out"></span>вне версии 1.0: ID3013</small></div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Этап</th><th>Что в нём</th><th>Задач</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag blue">сейчас</span></td><td>Влить 2.3c и 2.3d в main. У 2.3c правки по ревью сделаны, ждём подтверждения ревьюера, у 2.3d правки по ревью сделаны, остался второй раунд и слияние через координатора</td><td class="num">2</td></tr>
+          <tr><td><span class="tag warn">к железе, P0</span></td><td>4.2a плагин Hikvision на новой основе; 4.2b чистка старого пути; 4.3 рецепты, в том числе две камеры; 4.4 вкладка GUI; 6.1 скрипт стенда; 6.3 приёмка на железе. Плюс хвост 0.5: набор кадров на железе в день №1</td><td class="num">6 + хвост 0.5</td></tr>
+          <tr><td><span class="tag plain">после 1.0, P1</span></td><td>Хаб-зеркало камер (4.6a–d), реестр драйверов и второй вендор, например веб-камера (5.1–5.3), контракты команд и формы (1.2–1.4), закрытие процессов (1.7), приёмка наблюдаемости (6.5), документы (6.6)</td><td class="num">13</td></tr>
+          <tr><td><span class="tag plain">позже, P2</span></td><td>Копии кадра и замер (3.4), бэкенд camera_service на ядре (4.5), «как добавить вендора» (5.4)</td><td class="num">3</td></tr>
+          <tr><td><span class="tag plain">вне 1.0</span></td><td>Считыватель ID3013: 3.1, 3.2, 3.3, 6.4. ID3013 в первой версии нет</td><td class="num">4</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>До железа по плану остаются <b>8 задач</b>: 2 в ветках и 6 не начатых (хвост 0.5 снимается на самом железе). Четыре из шести ждут 4.2a, а она ещё не начата; скрипт стенда 6.1 от неё не зависит. Остальные 16 не мешают приёмке на железе.</p>
+    <p class="muted">Сроков в днях я не называю. Темп последних двух дней: две задачи влиты в main и две написаны и отревьюены в ветках, при полном конвейере (слепой тест, код, мутации, ревью). Задачи 4.2a–4.4 крупнее, замера их скорости пока нет. Числа по плану собраны по состоянию main, шапки статусов в самом плане отстают и будут обновлены при слиянии.</p>
+  </section>
+
+  <section>
+    <h2>Что готово сегодня</h2>
+    <div class="status">
+      <div class="card new"><span class="tag new">в main</span><ul>
+        <li>Общая основа плагина: поля, кадр, план «работа/покой»</li>
+        <li>Наблюдаемость: уровни, события, инциденты</li>
+        <li>Драйвер mvs для Hikvision</li>
+        <li>Почтовый ящик и правка на ходу, стенд пройден</li>
+      </ul></div>
+      <div class="card blue"><span class="tag blue">в ветках</span><ul>
+        <li>2.3c: применить и прочитать параметры, сбросить счётчики. Два раунда ревью, правки сделаны</li>
+        <li>2.3d: список камер, описание узлов, триггер, срок и сторож для команд. Правки по ревью сделаны, нужен второй раунд</li>
+      </ul></div>
+      <div class="card"><span class="tag plain">дальше</span><ul>
+        <li>Плагин Hikvision на новой основе (4.2a)</li>
+        <li>Рецепты, вкладка GUI</li>
+        <li>Приёмка на настоящей камере</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Чего я не знаю и что решать вам</h2>
+    <p>Решения владельца, без которых не сдвинуться:</p>
+    <ul class="plain">
+      <li>Порядок каналов цветного кадра (RGB или BGR) и дебайер, до задачи 4.2a.</li>
+      <li>Восемь вопросов по первому дню на железе (чек-лист дня №1).</li>
+      <li>Несколько камер в одном процессе: нужно ли это в версии 1.0. Независимые процессы работают по схеме выше.</li>
+    </ul>
+    <p>Не проверено:</p>
+    <ul class="plain">
+      <li>Всё проверено на тестовой камере на Mac. На настоящей MVS не запускалось: время открытия, поведение при зависании SDK и код таймаута кадра станут известны только на железе.</li>
+      <li>Безопасно ли перечислять камеры, пока другой процесс держит камеру открытой, не измерено.</li>
+      <li>Пока команда ждёт владельца, приём других команд процесса может блокироваться до 7 секунд (2 секунды срока и 5 секунд сторожа). Это расчёт по коду, в живом процессе не измерялось.</li>
+      <li>Если <code>open()</code> порта зависнет, состояние останется «открывается». Таймаута перехода в сеансе нет, решение после замера на железе.</li>
+      <li>Ревьюер не смог воспроизвести гонку «запуск владельца против списка камер без захвата» и по чтению кода считает её недостижимой. Замка на этот случай нет.</li>
+      <li>Два теста в старой части (правка на ходу) иногда краснели под нагрузкой. Причину нашли, тесты исправлены, но остальные проверки событий в тех же файлах не переписаны.</li>
+    </ul>
+  </section>
+
+  <footer>Состояние на 17 ноября 2026. Источник: план camera-device-service, ревью задач 2.3a, 2.3b, 2.3c, 2.3d, 2.4. Числа тестов и мутаций взяты из отчётов в docs/reviews.</footer>
+</main>
+
+</body></html>

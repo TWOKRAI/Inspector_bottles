@@ -1,0 +1,142 @@
+# Рецепт hikvision_id3013_test — тестовый стенд «камера MVS + считыватель ID3013».
+#
+# Два независимых процесса, проводов между ними нет:
+#   camera_0 [HikvisionCameraPlugin] → gui (display "main")   — кадр на дисплей
+#   reader   [CodeReaderPlugin]      → TCP-приёмник 0.0.0.0:5000 — код виден в состоянии
+#                                      processes.reader.state.code_reader
+# Потребителя кодов нет: считыватель и камера здесь только проверяются вместе.
+#
+# Сеть стенда:
+#   ПК                 192.168.1.100/24
+#   считыватель ID3013 192.168.1.11   (см. docs/claude/OPEN_QUESTIONS.md)
+#   камера MVS         192.168.1.20   (постоянный IP задан командой ForceIpEx 2026-11-23; сохранится ли
+#                                      после выключения питания — не проверено; IP в рецепт не пишется —
+#                                      камера выбирается по серийнику)
+#
+# Настройка считывателя в IDMVS — Services/code_reader/docs/SETUP_GEV_V4.0.2.R.md
+# (НЕ SETUP.md: тот про другой прибор, прошивка V4.0.2.C):
+#   Communication Settings → TCP Client
+#   TCP Dst Addr = 192.168.1.100, TCP Dst Port = 5000
+#   включить TCP Client Output Barcode Newline Character Enable
+#   Heartbeat Protection на приборе не проверен; при терминаторе \n пакет `;` даст код `;` или склеится
+#   со следующим кодом — выключить
+#
+# Запуск: python multiprocess_prototype/run.py hikvision_id3013_test
+#
+# ВНИМАНИЕ: камеру открывает один процесс — серийник DA1689923 уже есть в пяти других рецептах,
+# одновременно с ними этот рецепт не запускать. Порт 5000 эксклюзивен (его же слушают qr_reader_demo и qr_reader_sdk_demo).
+name: hikvision_id3013_test
+version: 3
+description: "Тестовый стенд: камера MVS (DA1689923) → дисплей и считыватель ID3013 (TCP 5000)"
+
+blueprint:
+  name: hikvision_id3013_test
+  description: "Камера Hikvision → дисплей; считыватель кодов ID3013 (независимо)"
+
+  # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без «Раскладки».
+  metadata:
+    gui_positions:
+      camera_0.hikvision:
+        - 60.0
+        - 205.0
+      main:
+        - 340.0
+        - 120.0
+      reader.code_reader:
+        - 60.0
+        - 360.0
+    locked_nodes: []
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    # --- Камера 0 (один процесс на одну камеру) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          plugin_name: hikvision
+          category: source
+          camera_id: 0
+          # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
+          device_select: serial
+          device_serial: DA1689923
+          # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
+          # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
+          # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
+          resolution_width: 1440
+          resolution_height: 1080
+          frame_rate_enable: true
+          frame_rate: 25.0
+          # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
+          exposure_time: 40000.0
+          # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
+          auto_start: true
+          # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
+          # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
+          trigger_managed: true
+          trigger_mode: "Off"
+          run_locked_commands: [release_device, take_device]
+
+    - process_name: reader
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      # 20 Гц: produce() не ждёт кода (приём асинхронный), опрос очереди дешёвый.
+      source_target_fps: 20
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.code_reader.plugin.plugin.CodeReaderPlugin
+          plugin_name: code_reader
+          category: source
+          host: 0.0.0.0
+          port: 5000
+          reader_id: id3013
+          auto_start: true
+          # Формат снят с нашего экземпляра, не из мануала. Прошивка V4.0.2.R (S/N 00DB2156580):
+          # `;` после кода НЕ приходит (сырой поток 2026-10-15), приходит `\n` при включённом
+          # `TCP Client Output Barcode Newline Character Enable`; текст NoRead на приборе — `NoRead`.
+          # Прошивка V4.0.2.C слала `;` (формат `<code_content>;`) — там терминатор был ";".
+          terminator: "\n"
+          prefix: ""
+          no_code_text: NoRead
+          # Пусто = различение «код есть, но не читается» выключено на приборе.
+          bad_code_text: ""
+
+  # Камера и считыватель не связаны: кадр идёт прямо на дисплей (chain_targets camera_0 → gui).
+  wires: []
+
+  # Привязка узла к дисплею (node_id = process.plugin.port)
+  displays:
+    - node_id: camera_0.hikvision.frame
+      display_id: main
+
+# Определения дисплеев (top-level)
+displays:
+  - id: main
+    name: Камера 0
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
