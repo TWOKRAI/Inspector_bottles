@@ -27,6 +27,7 @@ camera_device.frames
 camera_device.rest_managed
 camera_device.rest_trigger_mode
 camera_device.rest_trigger_source
+camera_device.source_queue_frames
 camera_device.timeout_ms
 camera_device.trigger_managed
 camera_device.trigger_mode
@@ -210,6 +211,7 @@ hikvision.resolution_width
 hikvision.rest_managed
 hikvision.rest_trigger_mode
 hikvision.rest_trigger_source
+hikvision.source_queue_frames
 hikvision.timeout_ms
 hikvision.trigger_managed
 hikvision.trigger_mode
