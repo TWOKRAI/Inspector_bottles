@@ -81,7 +81,12 @@
 ## Формат кадра (item)
 
 Item (`CameraDevicePlugin._build_item`): `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic), `device_id`, `ts` (wall),
-`pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. `pixel_format` — формат массива кадра, `source_format` — формат прибора.
+`capture_ns`, `capture_ts`, `pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. `pixel_format` — формат массива кадра, `source_format` — формат прибора.
+
+Штампы времени (ADR-177): `capture_ns` (`int`, `time.perf_counter_ns()`) и `capture_ts` (`float`, wall, равен `ts`) берутся в колбэке `_on_frame`,
+в одной точке с `seq`, — это момент прихода кадра на хост (после копирования из SDK), а не момент `produce()` и не момент экспозиции.
+Ключ сверки кадров — пара `(capture_ns, seq_id)`. `timestamp` (`time.monotonic()`, шаг 15-16 мс) **не для сверки камер**: поле остаётся, но не удаляется.
+`group_id` камера не назначает.
 
 Преобразование в ядре (`_frame_array`), по `source_format` (= `RawFrame.pixel_format`):
 

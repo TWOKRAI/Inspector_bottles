@@ -521,3 +521,117 @@ def test_потоки_база_не_создаёт_потоков_и_allowlist_G
     # К4' (4.2b) снимает запись R4 старого hikvision-плагина: таблица меняется, но строк `camera_device` в правке нет.
     changed = [ln for ln in diff.stdout.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
     assert not [ln for ln in changed if "camera_device" in ln], changed
+
+
+# ---------------------------------------------------------------------------------------------- #
+# T8c: штамп времени кадра ставится в самой ранней точке (колбэк `_on_frame`), не в `produce()`
+# ---------------------------------------------------------------------------------------------- #
+# Слепые тесты по вырезке критериев приёмки, до кода. Только настоящие `_on_frame` и `produce()`.
+# Часы Windows: шаг `time.time()` бывает 1 мс или 15,6 мс, поэтому для wall-часов только скобка
+# (чтения монотонны) и точное равенство, без допуска; контрольный сон для wall — 100 мс, чтобы
+# разница двух грубых чтений гарантированно превышала 40 мс при любом шаге (100 - 15,6 > 40).
+
+_RAW_SLEEP_NS_S = 0.05  # сон между `_on_frame` и `produce()` для perf_counter (разрешение < 1 мкс)
+_RAW_SLEEP_WALL_S = 0.1  # то же для time.time() (устойчиво к шагу 15,6 мс)
+_MIN_GAP_S = 0.04  # контроль: штамп старше момента `produce()` не менее чем на 40 мс
+
+
+def _mono8_frame(number: int = 1) -> RawFrame:
+    return RawFrame(bytearray(range(8)), 4, 2, "mono8", number)
+
+
+def test_camera_device_item_has_capture_ns_and_capture_ts(make):
+    """Item камеры несёт `capture_ns` (int) и `capture_ts` (float).
+
+    `capture_ts == ts` (точное равенство), `capture_ts` внутри скобки `time.time()` вокруг `_on_frame`,
+    при этом `produce()` через 100 мс: `produce_wall - capture_ts >= 40 мс`. Допуск 5 мс не вводится.
+    Убивает: `capture_ts = time.time()` в `produce()` (разрыв с `ts` и контроль 40 мс), отсутствие поля,
+    `capture_ts` не float, `capture_ns` float.
+    """
+    plugin = make(FAKE_CFG).configure().plugin
+    wall0 = time.time()
+    plugin._on_frame(_mono8_frame())
+    wall1 = time.time()
+    time.sleep(_RAW_SLEEP_WALL_S)
+    items = plugin.produce()
+    produce_wall = time.time()
+
+    assert len(items) == 1
+    item = items[0]
+    assert type(item["capture_ns"]) is int
+    assert type(item["capture_ts"]) is float
+    assert item["capture_ts"] == item["ts"]
+    assert wall0 <= item["capture_ts"] <= wall1
+    assert produce_wall - item["capture_ts"] >= _MIN_GAP_S
+
+
+def test_camera_capture_ns_taken_at_on_frame_not_at_produce(make):
+    """`capture_ns` в скобке `perf_counter_ns()` вокруг `_on_frame`; `produce()` через 50 мс.
+
+    Контроль: `produce_ns - capture_ns >= 40 мс`.
+    Убивает: штамп в `produce()` (был бы около `produce_ns`), `time.time_ns()` вместо `perf_counter_ns()`
+    (другая эпоха, вне скобки), единое значение на весь прогон.
+    """
+    plugin = make(FAKE_CFG).configure().plugin
+    n0 = time.perf_counter_ns()
+    plugin._on_frame(_mono8_frame())
+    n1 = time.perf_counter_ns()
+    time.sleep(_RAW_SLEEP_NS_S)
+    items = plugin.produce()
+    produce_ns = time.perf_counter_ns()
+
+    assert len(items) == 1
+    capture_ns = items[0]["capture_ns"]
+    assert n0 <= capture_ns <= n1
+    assert produce_ns - capture_ns >= 40_000_000
+
+
+def test_camera_capture_ns_is_of_latest_frame_when_two_frames_before_produce(make):
+    """Два кадра подряд до `produce()`: новый вытесняет старый, `capture_ns` и `capture_ts` относятся к новому.
+
+    Убивает: штамп только у первого кадра после `produce()` (залипший), штамп не обновляется на втором кадре.
+    """
+    plugin = make(FAKE_CFG).configure().plugin
+    plugin._on_frame(_mono8_frame(1))
+    first_end_ns = time.perf_counter_ns()
+    time.sleep(0.02)
+    second_start_ns = time.perf_counter_ns()
+    wall0 = time.time()
+    plugin._on_frame(_mono8_frame(2))
+    second_end_ns = time.perf_counter_ns()
+    wall1 = time.time()
+    items = plugin.produce()
+
+    assert len(items) == 1 and items[0]["device_frame_num"] == 2
+    assert first_end_ns < items[0]["capture_ns"]
+    assert second_start_ns <= items[0]["capture_ns"] <= second_end_ns
+    assert wall0 <= items[0]["capture_ts"] <= wall1
+
+
+def test_camera_timestamp_and_ts_still_taken_at_on_frame(make):
+    """`timestamp` (monotonic, float) и `ts` (wall) остаются и берутся в момент прихода, а не в `produce()`.
+
+    Скобки на `time.monotonic()` и `time.time()` вокруг `_on_frame`; `produce()` через 100 мс.
+    Убивает: перенос `timestamp`/`ts` в `produce()` при введении новых штампов; удаление старых полей.
+    """
+    plugin = make(FAKE_CFG).configure().plugin
+    mono0, wall0 = time.monotonic(), time.time()
+    plugin._on_frame(_mono8_frame())
+    mono1, wall1 = time.monotonic(), time.time()
+    time.sleep(_RAW_SLEEP_WALL_S)
+    item = plugin.produce()[0]
+
+    assert type(item["timestamp"]) is float
+    assert type(item["ts"]) is float
+    assert mono0 <= item["timestamp"] <= mono1
+    assert wall0 <= item["ts"] <= wall1
+
+
+def test_camera_does_not_assign_group_id(make):
+    """Камера `group_id` не назначает: в item нет ключа или он `None`.
+
+    Убивает: назначение group_id камерой (счётчик, 0, seq_id).
+    """
+    plugin = make(FAKE_CFG).configure().plugin
+    plugin._on_frame(_mono8_frame())
+    assert plugin.produce()[0].get("group_id") is None

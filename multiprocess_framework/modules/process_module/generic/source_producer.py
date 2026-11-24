@@ -221,10 +221,18 @@ class SourceProducer:
             # produce-спан пишет декоратор frame_trace.traced (авто на produce()).
             # Ф7 G.6: trace_id назначается ЗДЕСЬ — единственное место рождения кадра
             # (звено 1) — до TRACE-лога ниже, чтобы он тоже мог нести trace_id.
+            # T8 (ADR-177): запасной штамп ``capture_ns`` = time.perf_counter_ns() (int,
+            # монотонная шкала, общая у процессов одной машины), ставится НА ITEM поштучно
+            # (не один на пачку, как ``capture_ts``). Штамп плагина-int (включая 0) не
+            # перезаписывается; ``None`` или не-int (float, str, bool) = штамп отсутствует,
+            # продюсер ставит запасной: кадр без валидного штампа потребитель отверг бы.
+            # ``group_id`` не назначается.
             capture_ts = time.time()
             for item in items:
                 if isinstance(item, dict):
                     item.setdefault("capture_ts", capture_ts)
+                    if type(item.get("capture_ns")) is not int:  # точный int: bool не считается штампом
+                        item["capture_ns"] = time.perf_counter_ns()
                     frame_trace.ensure_trace_id(item)
 
             # Отправить каждый item (HP-1: perf-проба этапа "send" — за флагом
