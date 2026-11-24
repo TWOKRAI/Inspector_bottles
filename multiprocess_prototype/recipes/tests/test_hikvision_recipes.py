@@ -23,7 +23,14 @@ _RECIPES_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = _RECIPES_DIR.parents[1]
 
 _SINGLE = ("hikvision_inspect", "hikvision_letter_robot", "camera_robot_calibration", "dataset_circle_capture")
-_ALL = (*_SINGLE, "hikvision_dual", "hikvision_id3013_test", "hikvision_id3013_view", "hikvision_id3013_quad")
+_ALL = (
+    *_SINGLE,
+    "hikvision_dual",
+    "hikvision_id3013_test",
+    "hikvision_id3013_view",
+    "hikvision_id3013_quad",
+    "hikvision_id3013_quad_hw",
+)
 
 _PLUGIN_CLASS = "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin"
 _SERIAL_0 = "DA1689923"  # факт 0.5: MV-CS020-10GC на стенде
