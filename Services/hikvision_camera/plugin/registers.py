@@ -41,7 +41,7 @@ class HikvisionCameraRegisters(CameraDeviceRegisters):
         FieldMeta(
             description="Усиление (дБ)",
             min=0.0,
-            max=20.0,
+            max=24.0,
             unit="дБ",
             apply="restart",
             enabled_if={"gain_auto": ["Off"]},
