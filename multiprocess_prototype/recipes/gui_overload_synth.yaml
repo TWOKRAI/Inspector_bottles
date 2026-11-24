@@ -1,0 +1,160 @@
+# Рецепт gui_overload_synth — ЧЕТЫРЕ больших синтетических потока в окно, без железа.
+#
+# Назначение: стенд перегрузки gui до и после T3 (план plans/2026-11-24_gui-frame-path/plan.md). Четыре
+# SyntheticFrameSourcePlugin идут напрямую в gui, каждый на свой дисплей; камер, считывателей и других
+# устройств нет — железа рецепт не требует.
+#   camera_0 [synthetic_frame_source, 1440x1080, 50 кадр/с] -> gui (дисплей "camera_0", fps_limit 30)
+#   camera_1 [synthetic_frame_source, 1440x1080, 50 кадр/с] -> gui (дисплей "camera_1", fps_limit 30)
+#   camera_2 [synthetic_frame_source, 1280x1024, 50 кадр/с] -> gui (дисплей "camera_2", fps_limit 20)
+#   camera_3 [synthetic_frame_source, 1280x1024, 50 кадр/с] -> gui (дисплей "camera_3", fps_limit 20)
+# Суммарная нагрузка на gui: 4 x 50 = 200 кадр/с — номинал, фактическая частота не измерена.
+#
+# Ограничение реального окна: fps_limit главной панелью до T3 не применяется — gui принимает кадры всех четырёх источников без ограничения.
+#
+# Запуск с окном: python multiprocess_prototype/frontend/run.py gui_overload_synth --autostart
+name: gui_overload_synth
+version: 1
+description: "Четыре синтетических источника (2 x 1440x1080, 2 x 1280x1024, по 50 кадр/с) в gui: стенд перегрузки без железа"
+
+blueprint:
+  name: gui_overload_synth
+  description: "camera_N -> gui, дисплей camera_N: четыре синтетических потока, суммарно 200 кадр/с"
+
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.headless_process.HeadlessGuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    # --- Источник 0: 1440x1080, 50 кадр/с ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 50
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 0
+          resolution_width: 1440
+          resolution_height: 1080
+    # --- Источник 1: 1440x1080, 50 кадр/с ---
+    - process_name: camera_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 50
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 1
+          resolution_width: 1440
+          resolution_height: 1080
+    # --- Источник 2: 1280x1024, 50 кадр/с ---
+    - process_name: camera_2
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 50
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 2
+          resolution_width: 1280
+          resolution_height: 1024
+    # --- Источник 3: 1280x1024, 50 кадр/с ---
+    - process_name: camera_3
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 50
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 3
+          resolution_width: 1280
+          resolution_height: 1024
+
+  # Привязка узла к дисплею (node_id = process.plugin.port): четыре кадра источников.
+  displays:
+    - node_id: camera_0.synthetic_frame_source.frame
+      display_id: camera_0
+    - node_id: camera_1.synthetic_frame_source.frame
+      display_id: camera_1
+    - node_id: camera_2.synthetic_frame_source.frame
+      display_id: camera_2
+    - node_id: camera_3.synthetic_frame_source.frame
+      display_id: camera_3
+
+# Определения дисплеев (top-level): позиции по шагу 1290 по оси x, как в hikvision_id3013_quad.
+displays:
+  - id: camera_0
+    name: Синтетика 0 (1440x1080, 50 Гц)
+    width: 1440
+    height: 1080
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: camera_1
+    name: Синтетика 1 (1440x1080, 50 Гц)
+    width: 1440
+    height: 1080
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1290
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: camera_2
+    name: Синтетика 2 (1280x1024, 50 Гц)
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 2580
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: camera_3
+    name: Синтетика 3 (1280x1024, 50 Гц)
+    width: 1280
+    height: 1024
+    format: BGR
+    fps_limit: 20.0
+    ring_buffer_blocks: 3
+    position:
+      x: 3870
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
