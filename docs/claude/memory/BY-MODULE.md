@@ -4,11 +4,11 @@
 
 | слой | файл | модулей | уроков |
 |---|---|---|---|
-| framework | [BY-MODULE-framework.md](BY-MODULE-framework.md) | 27 | 164 |
+| framework | [BY-MODULE-framework.md](BY-MODULE-framework.md) | 27 | 166 |
 | services | [BY-MODULE-services.md](BY-MODULE-services.md) | 13 | 38 |
 | plugins | [BY-MODULE-plugins.md](BY-MODULE-plugins.md) | 8 | 12 |
 | prototype | [BY-MODULE-prototype.md](BY-MODULE-prototype.md) | 10 | 28 |
-| tools | [BY-MODULE-tools.md](BY-MODULE-tools.md) | 3 | 51 |
-| other | [BY-MODULE-other.md](BY-MODULE-other.md) | 0 | 156 |
+| tools | [BY-MODULE-tools.md](BY-MODULE-tools.md) | 3 | 52 |
+| other | [BY-MODULE-other.md](BY-MODULE-other.md) | 0 | 157 |
 
 По механизму: [BY-MODULE-mechanism.md](BY-MODULE-mechanism.md)

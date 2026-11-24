@@ -7,7 +7,7 @@ metadata:
   type: project
 ---
 
-Стенд обучения: **NVIDIA RTX 3050 Laptop, 4 ГБ VRAM**, драйвер 561.09 (CUDA 12.6), bf16 поддерживается.
+Стенд обучения: **NVIDIA RTX 3050 Laptop, 4 ГБ VRAM**, драйвер 561.09 (CUDA 12.6; на 2026-11-23 `nvidia-smi` показывает 595.95 — проверить `torch.cuda.is_available()` на cu132, см. [[project_py312_torch212_cu132_stack]]), bf16 поддерживается.
 
 GPU есть, но `[ml-train]` ставит torch с дефолтного PyPI → на Windows это всегда `+cpu` (`cuda.is_available()=False`). Лечится переустановкой cu124-колеса:
 

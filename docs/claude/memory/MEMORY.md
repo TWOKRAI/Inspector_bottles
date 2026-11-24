@@ -56,6 +56,7 @@
 ## 3. Окружение (Windows)
 - [venv держит MCP](project_venv_locked_by_mcp.md) — закрыть VS Code перед переустановкой пакетов
 - [CUDA torch cu124](project_cuda_torch_setup.md) — PyPI даёт +cpu
+- [Стек Win+Jetson](project_py312_torch212_cu132_stack.md) — py3.12, torch 2.12.0 cu132, JP 7.2.2; 3.14 отложен
 - [monotonic 15.6 мс](project_monotonic_resolution_windows.md) — разности меньше 100 мс — на сетку
 - [Молчаливый откат прячет сломанный tar](feedback_a_silent_fallback_hides_a_tool_that_always_fails.md) — `tar -x -f -` + `cwd`, откат в stderr
 - [qex runbook](feedback_qex_full_rebuild_runbook.md) — полный реиндекс; [модель по платформам](project_qex_model.md)
