@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from multiprocess_framework.modules.frontend_module.bridge.frame_pump import FramePump
 from multiprocess_framework.modules.frontend_module.core.app_identity import (
     AppIdentity,
     set_app_identity,
@@ -1107,8 +1108,21 @@ def _setup_bridge_callbacks(
             process._log_warning(f"мульти-дисплей: чтение рецепта не удалось: {exc}", module="gui")
             return None
 
+    # Насос кадров: ящик «последний на ключ» (bridge.frame_mailbox, его наполняет
+    # dispatch из worker thread) -> таймер на sender с периодом из fps_limit слота ->
+    # _on_frame_received. Создаётся в Qt-потоке ДО первого _rebuild_displays: тот
+    # зовёт process._frame_pump.set_keys(...). sink — замыкание: _on_frame_received
+    # определён ниже и разрешается в момент вызова, а не при создании насоса.
+    process._frame_pump = FramePump(
+        mailbox=process._bridge.frame_mailbox,
+        sink=lambda _key, item: _on_frame_received(item),
+    )
+    # Оба пути закрытия (перезапуск UI и выход) идут через app.quit() -> aboutToQuit;
+    # новый проход GuiProcess.run создаёт новый насос, старый к тому времени остановлен.
+    QApplication.instance().aboutToQuit.connect(process._frame_pump.stop)
+
     def _rebuild_displays() -> None:
-        """Пересобрать слоты панели и карту маршрутизации из активного рецепта."""
+        """Пересобрать слоты панели, карту маршрутизации и ключи насоса из активного рецепта."""
         recipe = _read_active_recipe()
         displays = build_panel_displays(recipe)
         _routing.clear()
@@ -1123,6 +1137,16 @@ def _setup_bridge_callbacks(
             image_panel.set_displays(displays)
         except Exception as exc:  # noqa: BLE001 — UI-перестройка не должна валить GUI
             process._log_warning(f"мульти-дисплей: set_displays не удалось: {exc}", module="gui")
+        # Ключ насоса = sender (так кладёт dispatch), период = fps_limit дисплея, на который
+        # sender маршрутизируется. Только включённые дисплеи из displays: sender без дисплея
+        # в наборе (нет секции displays, нет привязки, дисплей выключен) насос находит сам —
+        # скан на 30 Гц с задержкой до 100 мс на первый кадр (см. FRAME_DELIVERY.md).
+        fps_by_display = {d["id"]: d["fps_limit"] for d in displays if d.get("id") and d.get("enabled", True)}
+        pump_keys = {sender: fps_by_display[disp] for sender, disp in _routing.items() if disp in fps_by_display}
+        try:
+            process._frame_pump.set_keys(pump_keys)
+        except Exception as exc:  # noqa: BLE001 — настройка насоса не должна валить GUI
+            process._log_warning(f"мульти-дисплей: set_keys насоса не удалось: {exc}", module="gui")
         process._log_info(
             f"мульти-дисплей: слотов={len(displays) or 1}, routing={_routing}",
             module="gui",
@@ -1182,6 +1206,8 @@ def _setup_bridge_callbacks(
                 if _frame_trace_cnt % 30 == 1:
                     process._log_info(f"[FRAME-TRACE] {data.get('trace')}", module="gui")
 
+    # Внимание: dispatch этот колбэк больше не вызывает (кадры идут через frame_mailbox ->
+    # FramePump -> _on_frame_received); строка оставлена как контракт моста (FREEZE).
     process._bridge.set_frame_callback(_on_frame_received)
     # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)
 

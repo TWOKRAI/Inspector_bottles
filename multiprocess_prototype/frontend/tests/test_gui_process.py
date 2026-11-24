@@ -42,7 +42,7 @@ class TestDataReceiverBridgeDispatch:
         pass
 
     def test_dispatch_frame_ready(self, qtbot):
-        """data_type='frame_ready' → signal frame_received."""
+        """data_type='frame_ready' -> сообщение в frame_mailbox (ключ "" без sender), без события Qt."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
 
         bridge = DataReceiverBridge()
@@ -52,11 +52,13 @@ class TestDataReceiverBridgeDispatch:
         msg = {"data_type": "frame_ready", "payload": "test"}
         bridge.dispatch(msg)
 
-        assert len(received) == 1
-        assert received[0] == msg
+        taken = bridge.frame_mailbox.take("")
+        assert taken is not None
+        assert taken[0] == msg
+        assert received == []  # frame_received больше не эмитится из dispatch
 
     def test_dispatch_frame(self, qtbot):
-        """data_type='frame' → signal frame_received."""
+        """data_type='frame' -> сообщение в frame_mailbox (ключ "" без sender)."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
 
         bridge = DataReceiverBridge()
@@ -66,7 +68,38 @@ class TestDataReceiverBridgeDispatch:
         msg = {"data_type": "frame"}
         bridge.dispatch(msg)
 
-        assert len(received) == 1
+        taken = bridge.frame_mailbox.take("")
+        assert taken is not None
+        assert taken[0] == msg
+        assert received == []  # frame_received больше не эмитится из dispatch
+
+    def test_dispatch_frame_counts_nbytes(self, qtbot):
+        """Кадр 10x10x3 uint8 учтён в ящике как 300 байт (nbytes берётся из frame.nbytes)."""
+        import numpy as np
+
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+
+        bridge.dispatch({"data_type": "frame", "sender": "cam0", "frame": np.zeros((10, 10, 3), dtype=np.uint8)})
+
+        assert bridge.frame_mailbox.stats()["bytes_held"] == 300
+
+    def test_dispatch_frame_rejected_when_mailbox_full(self, qtbot):
+        """65-й sender при max_keys=64: dispatch не бросает, отказ считается в stats()['rejected']."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        for i in range(64):
+            bridge.dispatch({"data_type": "frame", "sender": f"cam{i}"})
+        assert bridge.frame_mailbox.stats()["rejected"] == 0
+
+        bridge.dispatch({"data_type": "frame", "sender": "cam64"})  # не должен бросить
+
+        stats = bridge.frame_mailbox.stats()
+        assert stats["rejected"] == 1
+        assert stats["put"] == 64
+        assert bridge.frame_mailbox.take("cam64") is None
 
     def test_dispatch_state_changed(self, qtbot):
         """data_type='state_changed' → signal state_updated."""

@@ -16,10 +16,11 @@ GuiProcess (gui process)
   │        shm_actual_name → SharedMemory(name=..., create=False) → numpy frame
   │        msg["frame"] = frame
   │  → DataReceiverBridge.dispatch(msg_dict)
-  │     → frame_received.emit(msg_dict)  [Qt Signal, cross-thread]
+  │     → frame_mailbox.put(sender, msg_dict, nbytes)  [ящик «последний на ключ», без Qt]
   ▼
 Qt Main Thread
-  │  _on_frame_received(msg_dict)
+  │  FramePump: таймер на ключ (период из fps_limit слота) → take(sender)
+  │  → _on_frame_received(msg_dict)
   │     frame = msg_dict["frame"]  (numpy BGR)
   │     camera_presenter.on_frame(frame)
   │        → BGR→RGB → QImage → QPixmap → CameraView.update_pixmap()
@@ -94,11 +95,57 @@ self._cap = cv2.VideoCapture(self._device_id, cv2.CAP_DSHOW)
 
 ---
 
-### 5. Qt Signal(dict) не передаёт numpy
+### 5. Кадры больше не идут сигналом Qt
 
-**Проблема:** `Signal(dict)` при queued connection (cross-thread) может потерять numpy array.
+**Было:** кадр передавался `Signal(object)` (`frame_received`) на каждый кадр; при потоке
+выше скорости показа очередь событий Qt росла без предела (память и «замерзший» GUI).
 
-**Решение:** Использовать `Signal(object)` — Qt передаёт Python object as-is.
+**Стало:** `dispatch` кладёт кадр в `LatestMailbox` (`bridge.frame_mailbox`), а `ndarray`
+отдаёт насос `FramePump` в Qt-потоке. `Signal(object)` для кадра не используется;
+`frame_received` больше не эмитится из `dispatch` (сигнал и `set_frame_callback`
+сохранены в классе моста, но `dispatch` их не вызывает).
+
+---
+
+## Путь кадра в gui: ящик → насос → слот
+
+```
+data_receiver (worker thread)
+  │  DataReceiverBridge.dispatch(msg_dict)  — ветка кадра
+  │     frame_mailbox.put(key=sender, item=msg_dict, nbytes=frame.nbytes)
+  │     (sender не строка → ключ ""; без _deliver.emit и без frame_received.emit)
+  ▼
+LatestMailbox  — не больше ОДНОГО кадра на ключ; новый put вытесняет старый
+  ▼
+FramePump (Qt main thread)  — QTimer на ключ, период = ceil(1000 / fps_limit) мс
+  │  take(sender) → sink(sender, msg_dict)
+  ▼
+_on_frame_received(msg_dict)
+  │  resolve_display_id(sender → слот по blueprint.displays)
+  ▼
+ImagePanelWidget.display_frame(слот, frame)
+```
+
+- **Ключ ящика и насоса — `sender`** (имя процесса-отправителя), а не id дисплея.
+  Предел частоты насос берёт из слота дисплея, на который sender маршрутизируется
+  (`build_frame_routing` + `build_panel_displays`): `{sender: fps_limit дисплея}`.
+- **`fps_limit` дисплея** (секция `displays` рецепта): число — как есть; нет ключа,
+  `None`, не число, NaN — 30.0; `0` — потолок 60 Гц (его применяет насос).
+  Потолок насоса — 60 Гц, меньше 1 Гц не бывает.
+- **Два sender на один дисплей** получают каждый свой таймер с тем же `fps_limit`
+  (следствие ключа = sender): суммарная частота показа на слот может превышать предел.
+- **Память тракта** = число ключей × 1 кадр при любой частоте входа
+  (`frame_mailbox.stats()["max_bytes_held"]`).
+- **Вытеснение** из ящика не освобождает слот кольца SHM: `gui` — copy-out потребитель
+  (`FrameShmMiddleware` отдаёт копию), вытесненный кадр собирает сборщик мусора.
+- **Время кадра** (`capture_ns`, `capture_ts`) доходит до `_on_frame_received`
+  без изменений; кадр со временем раньше предыдущего показывается (фильтра «время
+  только вперёд» нет).
+- **Кадр до насоса**: кадр, пришедший в `dispatch` до создания насоса и первого
+  `set_keys`, остаётся в ящике и показывается первым тиком.
+- **Рецепт без секции `displays`, sender без привязки к дисплею или дисплей выключен:**
+  ключа в `set_keys` нет, ключ находит скан насоса (раз в 100 мс) и ставит ему скрытые
+  30 Гц — задержка до 100 мс на первый кадр; кадр уходит в слот «main».
 
 ---
 

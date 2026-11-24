@@ -10,6 +10,8 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
+from multiprocess_framework.modules.process_module.generic.latest_mailbox import LatestMailbox
+
 
 class DataReceiverBridge(QObject):
     """Классифицирует IPC-сообщения и вызывает callbacks в Qt main thread.
@@ -41,10 +43,17 @@ class DataReceiverBridge(QObject):
         # теперь явный список слушателей: каждый подписчик регистрируется
         # отдельно через add_state_listener, без перехвата чужого callback.
         self._state_listeners: list[Callable] = []
+        # Кадры не идут событием Qt на кадр: dispatch (worker thread) кладёт кадр в
+        # ящик «последний на ключ» (ключ = sender), а FramePump в Qt-потоке вытягивает
+        # по таймеру с периодом из fps_limit слота. Память тракта = ключи x 1 кадр.
+        # Ящик создаётся один раз и живёт между перезапусками UI.
+        self.frame_mailbox = LatestMailbox()
         # AutoConnection: DirectConnection в main thread, QueuedConnection из worker thread
         self._deliver.connect(self._on_deliver, Qt.ConnectionType.AutoConnection)
 
     def set_frame_callback(self, cb: Callable) -> None:
+        # Внимание: dispatch этот колбэк больше НЕ вызывает (кадры идут через
+        # frame_mailbox -> FramePump). Метод и _on_deliver-ветка кадра сохранены (FREEZE).
         self._frame_cb = cb
 
     def set_state_callback(self, cb: Callable) -> None:
@@ -79,11 +88,20 @@ class DataReceiverBridge(QObject):
         self._observability_cb = cb
 
     def dispatch(self, msg_dict: dict) -> None:
-        """Из worker thread — отправить в main thread через internal signal."""
+        """Из worker thread: кадр — в ящик frame_mailbox, остальное — в main thread через signal."""
         data_type = msg_dict.get("data_type", "")
         if data_type in ("frame_ready", "frame") or "frame" in msg_dict:
-            kind = "frame"
-        elif data_type == "observability_record":
+            # Без _deliver.emit и без frame_received.emit: события Qt на кадр нет.
+            sender = msg_dict.get("sender")
+            nbytes = getattr(msg_dict.get("frame"), "nbytes", 0)
+            # put == False (отказ по max_keys) игнорируется: счёт в frame_mailbox.stats()["rejected"]
+            self.frame_mailbox.put(
+                sender if isinstance(sender, str) else "",
+                msg_dict,
+                nbytes if isinstance(nbytes, int) else 0,
+            )
+            return
+        if data_type == "observability_record":
             # Ф5.20b: живой хвост наблюдаемости — отдельный kind, НЕ state.
             kind = "observability"
         elif data_type in ("status", "state_changed", "fps_update", "state_delta", "gui_local_metric"):
