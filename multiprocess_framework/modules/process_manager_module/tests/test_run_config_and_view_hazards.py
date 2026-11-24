@@ -9,7 +9,11 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
+
+from multiprocess_framework.modules.process_manager_module.process import process_manager_process as _pmp
 
 from .test_run_commands import _Store, make_run_pm
 
@@ -192,8 +196,28 @@ def test_publish_writes_each_leaf_once_and_new_leaves_present() -> None:
     assert store.writes == first  # повтор без изменений ничего не пишет
 
 
-def test_publish_after_start_rewrites_only_changed_leaves() -> None:
+class _AdvancingTime:
+    """Модуль ``time`` для PM: ``time()`` растёт на секунду при каждом чтении, остальное — настоящее.
+
+    Часы Windows грубые (шаг ~15,6 мс): ``boot`` в ``make_run_pm`` и START сразу за ним получают одну и ту же метку
+    ``since``, и лист честно не переписывается. Тест проверяет не разрешение часов, а то, что смена состояния
+    переписывает ``since``, поэтому метки разводятся подменой только в модуле PM (глобальные часы не трогаем).
+    """
+
+    def __init__(self) -> None:
+        self._now = time.time()
+
+    def time(self) -> float:
+        self._now += 1.0
+        return self._now
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
+def test_publish_after_start_rewrites_only_changed_leaves(monkeypatch: pytest.MonkeyPatch) -> None:
     pm = make_run_pm(True)
+    monkeypatch.setattr(_pmp, "time", _AdvancingTime())
     store = _Store()
     pm._state_store_manager = store
     pm._publish_run_state()

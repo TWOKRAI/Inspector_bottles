@@ -282,7 +282,8 @@ def test_a4_current_schema_keeps_data_and_is_silent(tmp_path, capsys):
 
 
 @pytest.mark.skipif(
-    os.geteuid() == 0, reason="root пишет в файл с правами 0o444: сценарий «только чтение» не воспроизвести"
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root пишет в файл с правами 0o444: сценарий «только чтение» не воспроизвести",
 )
 def test_a5_read_only_old_schema_db_returns_working_in_memory_db(tmp_path, capsys):
     path = tmp_path / "atlas.sqlite"
@@ -407,8 +408,10 @@ def _commit_with_index_only_paths(repo: GitRepo, bad_paths: list[bytes]) -> str:
     repo.write("ok.py", "x = 1\n")
     repo.commit("ok")
     blob = _git_bytes(repo.path, b"hash-object", b"-w", b"--stdin", input=b"y = 2\n").strip()
-    for name in bad_paths:
-        _git_bytes(repo.path, b"update-index", b"--add", b"--cacheinfo", b"100644," + blob + b"," + name)
+    # Пути идут через stdin (`--index-info -z`), а не через argv: на Windows CreateProcess принимает строку, и байт 0xFF
+    # в argv падает в `os.fsdecode` ещё до запуска git. Запись в индексе при этом та же, что дал бы `--cacheinfo`.
+    index_info = b"".join(b"100644 " + blob + b"\t" + name + b"\0" for name in bad_paths)
+    _git_bytes(repo.path, b"update-index", b"--add", b"-z", b"--index-info", input=index_info)
     _git_bytes(repo.path, b"commit", b"-q", b"-m", b"bad paths")
     listing = _git_bytes(repo.path, b"ls-tree", b"-r", b"-z", b"HEAD")
     for name in bad_paths:  # страховка setup: запись правда лежит в дереве коммита

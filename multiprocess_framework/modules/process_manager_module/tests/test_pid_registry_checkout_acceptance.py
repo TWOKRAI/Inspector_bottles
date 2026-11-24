@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -53,6 +54,14 @@ import json
 import os
 import sys
 import time
+
+# Первым делом сообщаем СВОЙ pid: в venv на Windows sys.executable — лаунчер, а настоящий
+# интерпретатор (этот процесс) — его потомок, и Popen.pid родителя этот pid не показывает.
+_pid_file = os.environ.get("HARNESS_PID_FILE")
+if _pid_file:
+    with open(_pid_file + ".tmp", "w", encoding="utf-8") as _f:
+        _f.write(str(os.getpid()))
+    os.replace(_pid_file + ".tmp", _pid_file)
 
 cmd = sys.argv[1]
 
@@ -178,17 +187,36 @@ class Harness:
         """Фоновый дочерний процесс; stderr — в файл logs/<n>_<cmd>.err."""
         self._n += 1
         err_path = self.logs / f"{self._n}_{args[0]}.err"
+        pid_path = self.logs / f"{self._n}_{args[0]}.pid"
         with open(err_path, "wb") as err:
             proc = subprocess.Popen(
                 [sys.executable, str(self.helper), *args],
-                env=self.env(checkout, app, **extra),
+                env=self.env(checkout, app, HARNESS_PID_FILE=str(pid_path), **extra),
                 cwd=str(self.root),
                 stdout=subprocess.DEVNULL,
                 stderr=err,
             )
         proc._err_path = err_path  # type: ignore[attr-defined]
         self._procs.append(proc)
+        # Popen.pid — это pid того, что запустил sys.executable (в venv на Windows — лаунчер).
+        # В реестр и в журнал попадает pid настоящего интерпретатора: берём его из файла жертвы.
+        proc.real_pid = self._wait_real_pid(proc, pid_path)  # type: ignore[attr-defined]
         return proc
+
+    @staticmethod
+    def _wait_real_pid(proc: subprocess.Popen, pid_path: Path, timeout: float = 30.0) -> int:
+        """Ждёт, пока хелпер запишет свой os.getpid() (на POSIX он равен proc.pid)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                text = pid_path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                text = ""
+            if text:
+                return int(text)
+            assert proc.poll() is None, f"хелпер умер до записи своего pid, rc={proc.returncode}"
+            time.sleep(0.02)
+        pytest.fail(f"хелпер pid={proc.pid} не записал свой pid в {pid_path} за {timeout} с")
 
     @staticmethod
     def stderr_of(proc: subprocess.Popen) -> str:
@@ -215,10 +243,10 @@ class Harness:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             assert proc.poll() is None, f"жертва умерла до записи в реестр, rc={proc.returncode}"
-            if proc.pid in _lenient_pids(reg):
+            if proc.real_pid in _lenient_pids(reg):  # type: ignore[attr-defined]
                 return
             time.sleep(0.05)
-        pytest.fail(f"жертва pid={proc.pid} не появилась в реестре {reg} за {timeout} с")
+        pytest.fail(f"жертва pid={proc.real_pid} не появилась в реестре {reg} за {timeout} с")
 
     @staticmethod
     def wait_dead(proc: subprocess.Popen, timeout: float = _KILL_TIMEOUT) -> int:
@@ -262,6 +290,14 @@ def procs():
     for p in spawned:
         try:
             if p.poll() is None:
+                # Сначала настоящий интерпретатор (потомок лаунчера venv на Windows), пока лаунчер
+                # жив и pid потомка не мог быть переиспользован; затем сам Popen.
+                real_pid = getattr(p, "real_pid", p.pid)
+                if real_pid != p.pid:
+                    try:
+                        os.kill(real_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+                    except OSError:
+                        pass
                 p.kill()
             p.wait(timeout=15)
         except Exception:  # noqa: BLE001 — уборка не должна маскировать падение теста
@@ -331,7 +367,7 @@ class TestC3NeighbourSurvives:
     def test_reap_from_other_checkout_keeps_victim_and_file(self, h):
         reg_a = h.reg_path("a")
         victim = h.victim("a")
-        assert victim.pid in _pids(reg_a)
+        assert victim.real_pid in _pids(reg_a)  # type: ignore[attr-defined]
         before = reg_a.read_bytes()
 
         h.run("b", "reap")
@@ -344,7 +380,7 @@ class TestC4OwnIsReaped:
     def test_reap_from_same_checkout_kills_victim_and_empties_registry(self, h):
         reg_a = h.reg_path("a")
         victim = h.victim("a")
-        assert victim.pid in _pids(reg_a)
+        assert victim.real_pid in _pids(reg_a)  # type: ignore[attr-defined]
 
         res = h.run("a", "reap")
 
@@ -360,8 +396,8 @@ def _stale_registry(h: Harness, file_name: str) -> tuple[Path, subprocess.Popen,
     """Файл-реестр по имени в temp с записью ЖИВОЙ жертвы (формат register_self: pid + ct)."""
     victim = h.sleeper()
     path = h.tmp / file_name
-    ct = psutil.Process(victim.pid).create_time()
-    path.write_text(json.dumps({"pid": victim.pid, "ct": ct}) + "\n", encoding="utf-8")
+    ct = psutil.Process(victim.real_pid).create_time()  # type: ignore[attr-defined]
+    path.write_text(json.dumps({"pid": victim.real_pid, "ct": ct}) + "\n", encoding="utf-8")  # type: ignore[attr-defined]
     return path, victim, path.read_bytes()
 
 
@@ -409,7 +445,7 @@ class TestC7LogLines:
         with open(reg_a, "a", encoding="utf-8") as f:  # ПОСЛЕДНЯЯ запись — мёртвый pid
             f.write(json.dumps({"pid": dead, "ct": None}) + "\n")
         assert _lenient_pids(reg_a)[-1] == dead
-        names = {v.pid: psutil.Process(v.pid).name() for v in (v1, v2)}  # ДО реапа
+        names = {v.real_pid: psutil.Process(v.real_pid).name() for v in (v1, v2)}  # ДО реапа
         assert all(names.values()), names
 
         res = h.run("a", "reap")
@@ -417,9 +453,9 @@ class TestC7LogLines:
 
         assert res["killed"] == 2
         for v in (v1, v2):
-            mine = [ln for ln in lines if _has_pid(ln, v.pid)]
-            assert len(mine) == 1, f"pid {v.pid}: ожидалась ОДНА строка, получено {len(mine)}: {lines!r}"
-            assert names[v.pid] in mine[0], f"в строке жертвы нет её имени {names[v.pid]!r}: {mine[0]!r}"
+            mine = [ln for ln in lines if _has_pid(ln, v.real_pid)]
+            assert len(mine) == 1, f"pid {v.real_pid}: ожидалась ОДНА строка, получено {len(mine)}: {lines!r}"
+            assert names[v.real_pid] in mine[0], f"в строке жертвы нет её имени {names[v.real_pid]!r}: {mine[0]!r}"
         assert not any(_has_pid(ln, dead) for ln in lines), f"в журнале pid мёртвой записи {dead}: {lines!r}"
         assert any(re.search(r"убито\s+2(?!\d)", ln) for ln in lines), f"нет итоговой строки «убито 2»: {lines!r}"
         h.wait_dead(v1)
@@ -502,8 +538,8 @@ class TestC9SimultaneousStartTwoCheckouts:
             assert racers["b"].poll() is None, f"{ctx}: гонщик B убит"
             # в каждом реестре только pid своего checkout; строки — валидный JSON (_pids строгий)
             assert reg_a != reg_b, f"{ctx}: реестры совпали"
-            assert set(_pids(reg_a)) == {racers["a"].pid}, f"{ctx}: реестр A: {_pids(reg_a)}"
-            assert set(_pids(reg_b)) == {racers["b"].pid}, f"{ctx}: реестр B: {_pids(reg_b)}"
+            assert set(_pids(reg_a)) == {racers["a"].real_pid}, f"{ctx}: реестр A: {_pids(reg_a)}"  # type: ignore[attr-defined]
+            assert set(_pids(reg_b)) == {racers["b"].real_pid}, f"{ctx}: реестр B: {_pids(reg_b)}"  # type: ignore[attr-defined]
 
 
 class TestC10SimultaneousStartOneCheckout:
@@ -527,4 +563,4 @@ class TestC10SimultaneousStartOneCheckout:
             assert "Traceback" not in h.stderr_of(p), f"{n}: Traceback в stderr:\n{h.stderr_of(p)}"
             assert p.poll() in (None, 0, -9), f"{n}: неожиданный код возврата {p.poll()}"
         pids = _pids(reg_a)  # строгий разбор: каждая строка — валидный JSON
-        assert foreign.pid not in pids, "в реестре A оказался pid чужого checkout"
+        assert foreign.real_pid not in pids, "в реестре A оказался pid чужого checkout"  # type: ignore[attr-defined]

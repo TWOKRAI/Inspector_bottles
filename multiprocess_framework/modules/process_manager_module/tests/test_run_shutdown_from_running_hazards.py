@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from .test_run_commands import _reason, beat, make_readiness_pm, tick
-from .test_run_stop import _DEADLINE_S, _bounded, _Rig, _wait
+from .test_run_stop import _DEADLINE_S, _beat, _bounded, _Rig, _wait
 
 _FAILURE = [_reason("failure", "cam.p")]
 
@@ -103,6 +103,31 @@ def test_stale_tick_after_start_does_not_fault() -> None:
     pm, monitor = make_readiness_pm({"cam": {"class": "X"}})
     beat(monitor, "cam")
     tick(pm, monitor)
+    assert pm._run_snapshot()[0].value == "ready"
+
+    beat(monitor, "cam", ready=False, reasons=_FAILURE)
+    replies = _start_inside_tick_evaluation(pm, monitor)
+    _bounded(lambda: tick(pm, monitor), _DEADLINE_S)
+
+    assert replies == [{"success": True, "state": "running"}]
+    assert pm._run_snapshot()[0].value == "running"
+    assert pm._run_event.is_set() is True
+    assert pm._cmd_system_run_status()["last_fault"] is None
+
+
+@pytest.mark.timeout(60)
+def test_stale_tick_after_second_start_does_not_fault() -> None:
+    """m2, второй цикл (Win-C): START -> STOP -> ``ready``, затем оценка такта начата ДО второго START, а START принят
+    внутри неё — устаревший такт отброшен и после повторного входа в ``running``, не только после первого."""
+    pm, monitor = make_readiness_pm({"cam": {"class": "X"}})
+    beat(monitor, "cam")
+    tick(pm, monitor)
+    assert pm._cmd_system_run_start() == {"success": True, "state": "running"}
+
+    assert _bounded(pm._cmd_system_run_stop, _DEADLINE_S) == {"success": True, "accepted": True, "state": "stopping"}
+    # Ребёнок встал на паузу по снятому событию: последовательность STOP дожидается ``paused`` и ставит итог.
+    _beat(monitor, "cam", ready=True, reasons=[], paused=True, age_s=0.0)
+    assert _wait(lambda: pm._run_snapshot()[0].value != "stopping", _DEADLINE_S)
     assert pm._run_snapshot()[0].value == "ready"
 
     beat(monitor, "cam", ready=False, reasons=_FAILURE)

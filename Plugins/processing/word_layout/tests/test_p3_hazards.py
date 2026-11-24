@@ -104,6 +104,7 @@ def test_g1a_place_rz_in_robot_io_payload() -> None:
         "place_y": -330.0,
         "place_z": -132.0,
         "place_rz": 0.0,
+        "_label": "буква 'Е', ячейка 1",
     }
 
 

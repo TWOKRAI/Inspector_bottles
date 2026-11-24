@@ -458,7 +458,7 @@ def test_valid_tiers_still_load(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- 5. CLI index
 
 
-def _run_cli(repo: GitRepo, *argv: str) -> subprocess.CompletedProcess[bytes]:
+def _run_cli(repo: GitRepo, *argv: str) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(_ROOT)
     env["PYTHONUTF8"] = "1"
@@ -467,6 +467,9 @@ def _run_cli(repo: GitRepo, *argv: str) -> subprocess.CompletedProcess[bytes]:
         cwd=str(repo.path),
         env=env,
         capture_output=True,
+        text=True,  # универсальные переводы строк: на Windows ребёнок пишет \r\n
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
         check=False,
     )
@@ -477,7 +480,7 @@ def test_cli_index_syntax_error_in_unit_exits_2_with_exact_stderr(repo: GitRepo)
     _fill(repo.path, _roots_yaml(("u/", "scripts", "u/")), {"u/x/__init__.py": b"SECRET SECRET\n"})
     _commit_all(repo)
     proc = _run_cli(repo, "index", "--ref", "HEAD", "--main-ref", "main")
-    err = proc.stderr.decode("utf-8", "replace")
+    err = proc.stderr
     assert proc.returncode == 2, err
     assert err == "modules.yaml: юнит u/x: __init__.py не разобран\n"
 

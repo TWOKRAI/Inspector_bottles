@@ -110,7 +110,7 @@ def test_definition_of_not_parsed_valid_neighbour_nul_bad_utf8_and_bom(repo_fact
     repo = _new(repo_factory, "r3", [("m", "framework")], {"m/keep.py": VALID})
     _put(repo, "m/bad.py", BROKEN)  # сломанный сосед
     _put(repo, "m/good.py", VALID)  # (а) валидный рядом со сломанным: находки нет
-    _put(repo, "m/nul.py", b"x = 1\0")  # (б) нулевой байт: SyntaxError (Python 3.12), не ValueError
+    _put(repo, "m/nul_.py", b"x = 1\0")  # (б) нулевой байт: SyntaxError (Python 3.12), не ValueError
     _put(repo, "m/latin.py", b"\xff\xfe")  # (в) невалидный utf-8
     _put(repo, "m/bom.py", b"\xef\xbb\xbfx = 1\n")  # (г) валидный файл с BOM: находки нет
     repo.commit("feat: files")
@@ -121,7 +121,7 @@ def test_definition_of_not_parsed_valid_neighbour_nul_bad_utf8_and_bom(repo_fact
     assert lines == [
         "warning FILE_NOT_PARSED file:m/bad.py SyntaxError",
         "warning FILE_NOT_PARSED file:m/latin.py UnicodeDecodeError",
-        "warning FILE_NOT_PARSED file:m/nul.py SyntaxError",
+        "warning FILE_NOT_PARSED file:m/nul_.py SyntaxError",
         "atlas check: 0 new blocking, 3 new warning, 0 new info",
     ]
 
@@ -304,7 +304,8 @@ def test_newline_in_path_does_not_break_the_new_finding(repo_factory, atlas, set
     _put(repo, "m/x.py", BROKEN)  # настоящая находка рядом: тест красный, пока адаптера нет
     repo.git("add", ".")
     nl_oid = _blob_oid(repo, tmp_path, "nl_body", BROKEN.encode("utf-8"))  # сломан: прочти его адаптер, была бы находка
-    repo.git("update-index", "--add", "--cacheinfo", f"100644,{nl_oid},m/a\nb.py")
+    # Git for Windows отвергает управляющие символы в пути («Invalid path»); protectNTFS=false снимает этот отказ
+    repo.git("-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", f"100644,{nl_oid},m/a\nb.py")
     repo.git("commit", "-q", "-m", "feat: newline path")
     assert "m/a\nb.py" in repo.git("ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0")
 

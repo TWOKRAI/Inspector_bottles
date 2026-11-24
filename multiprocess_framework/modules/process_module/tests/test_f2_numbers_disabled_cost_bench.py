@@ -68,12 +68,14 @@ _ENABLED_METRIC = "task210_enabled_metric"
 #: ``write()`` через ``outcome_of`` (быстрый путь ``None → accepted``), то есть
 #: на включённой дороге прибавилось ровно это суждение. Выключенная дорога (139)
 #: не изменилась — гейт стоит до суждения. На ``main`` до слияния число 607.
+#: 616 → **629** (+13) с b19437fdb: на включённой дороге добавился счётчик
+#: metric_kind_conflicts и голос по окну (statistics).
 #:
 #: **Литералы привязаны к CPython 3.12.** Смена минорной версии двигает раскладку
 #: опкодов и покрасит сторожа без регрессии; проверять в порядке «сначала версия
 #: интерпретатора, потом дорога».
 DISABLED_INSTRUCTIONS = 139
-ENABLED_INSTRUCTIONS = 616
+ENABLED_INSTRUCTIONS = 629
 
 
 def _wired_stand() -> tuple[StatsManager, ObservationManager, ObservationPolicy]:

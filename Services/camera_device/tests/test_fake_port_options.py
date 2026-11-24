@@ -88,6 +88,15 @@ def test_frame_period_малый_get_frame_ждёт_следующего_кад�
     assert 0.04 <= seconds < 0.3
 
 
+def test_frame_period_малый_кадр_внутри_timeout_никогда_не_отдаётся_как_None():
+    # Грубые часы Windows (шаг 15,6 мс): сон мог закончиться раньше срока кадра по часам,
+    # и get_frame отдавал None, хотя кадр наступал внутри timeout_ms. Настоящий SDK ждал бы кадр.
+    port = _grabbing(frame_period_s=0.05)
+    frames, _ = _timed(lambda: [port.get_frame(500) for _ in range(30)], deadline=10.0)
+    assert [f is None for f in frames].count(True) == 0
+    assert [f.frame_num for f in frames] == list(range(1, 31))
+
+
 def test_hang_разовый_а_arm_hang_взводит_повторно():
     port = _grabbing(get_frame_hang_s=0.25)
     first, seconds = _timed(lambda: port.get_frame(10))  # timeout_ms игнорируется

@@ -489,7 +489,7 @@ def test_map_text_stale_over_five_paths_shows_rest_count(repo: GitRepo) -> None:
 
 _REG_RUN = _REG_MAIN
 _RUN_FILES = {
-    "u/aux.py": '"""Модуль aux."""\nimport threading\n\n\ndef go():\n    threading.Thread(target=print).start()\n',
+    "u/aux_.py": '"""Модуль aux_."""\nimport threading\n\n\ndef go():\n    threading.Thread(target=print).start()\n',
     "u/svc.py": """\
 import os
 import threading
@@ -519,13 +519,13 @@ def other(a, b):
 
 def test_map_unit_runtime_records_by_path_line_and_dynamic_sum(repo: GitRepo) -> None:
     """`runtime.threads/io/commands` юнита — записи prod-файлов по `(путь, строка)` (не в порядке членов: `svc.py`
-    импортируется, значит идёт в членах раньше `aux.py`); `commands` — только литералы; `status.dynamic` — сумма
+    импортируется, значит идёт в членах раньше `aux_.py`); `commands` — только литералы; `status.dynamic` — сумма
     `command_specs_dynamic` (один нелитеральный `command_specs` в `u/dyn.py`); у файла `u/dyn.py` — `dynamic 1`,
     `commands []`; у `u/svc.py` — две записи `threads` и `io`."""
     _seed(repo, _RUN_FILES)
     unit = _build(repo, "u")
     assert unit["runtime"]["threads"] == [
-        {"pattern": "Thread", "daemon": None, "where": "u/aux.py:6"},
+        {"pattern": "Thread", "daemon": None, "where": "u/aux_.py:6"},
         {"pattern": "Thread", "daemon": True, "where": "u/svc.py:7"},
         {"pattern": "Timer", "daemon": None, "where": "u/svc.py:14"},
     ]
@@ -559,7 +559,7 @@ def test_map_text_threads_io_cut_commands_not_cut(repo: GitRepo) -> None:
     assert any("go" in s and "u/cmd.py:4" in s for s in cut) and any("stop" in s and "u/cmd.py:5" in s for s in cut)
     lifted = _stripped(_render(p, budget=1, show_all=frozenset({"threads", "io"})))
     assert not [s for s in lifted if "--all threads" in s or "--all io" in s]
-    assert sum("u/svc.py:7" in s or "u/svc.py:14" in s or "u/aux.py:6" in s for s in lifted) == 3
+    assert sum("u/svc.py:7" in s or "u/svc.py:14" in s or "u/aux_.py:6" in s for s in lifted) == 3
 
 
 # ---------------------------------------------------------------- exclude, frozen, реестр, имена среза
