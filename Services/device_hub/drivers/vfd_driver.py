@@ -50,6 +50,8 @@ class VfdDriver(BaseDeviceDriver):
         self._resolve_device = resolve_device
         self._injected_transport = transport
         self._vfd_client: Any = None
+        # Последняя заданная частота клиента: переживает его пересоздание в connect() после disconnect/set_degraded.
+        self._last_freq: float | None = None
         self._bridge_alive: bool = False
 
         # Параметры из entry.params.
@@ -111,6 +113,8 @@ class VfdDriver(BaseDeviceDriver):
         kwargs: dict[str, Any] = {}
         if register_map is not None:
             kwargs["register_map"] = register_map
+        # Память последней частоты переживает пересоздание клиента (реконнект).
+        kwargs["last_freq"] = self._last_freq
 
         self._vfd_client = VfdClient(transport, vfd_config, **kwargs)
 
@@ -120,12 +124,14 @@ class VfdDriver(BaseDeviceDriver):
         return connected
 
     def disconnect(self) -> None:
-        """VFD не владеет соединением — просто отпускаем клиента."""
+        """VFD не владеет соединением — просто отпускаем клиента (последняя частота сохраняется в драйвере)."""
+        self._remember_last_freq()
         self._vfd_client = None
         self._last_quality = "bad"
 
     def set_degraded(self) -> bool:
         """Перевести в деградированное состояние (носитель отключился); True — деградация наступила."""
+        self._remember_last_freq()
         self._vfd_client = None
         self._last_quality = "bad"
         self._bridge_alive = False
@@ -293,6 +299,16 @@ class VfdDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
     # Служебное
     # ------------------------------------------------------------------ #
+
+    def _remember_last_freq(self) -> None:
+        """Забрать память частоты у клиента перед тем, как его отпустить.
+
+        Клиент — источник истины, включая ``None`` (после ``reset_fault`` память пуста: устаревшую частоту драйвера
+        не оставляем). Клиента нет (повторный disconnect) — память драйвера не меняется.
+        """
+        if self._vfd_client is None:
+            return
+        self._last_freq = self._vfd_client.last_freq
 
     def _get_transport(self) -> Any:
         """Получить RegisterTransport: инъекция или build_transport (единый путь, н7).

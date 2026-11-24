@@ -34,6 +34,7 @@ _BASE = _ROOT / "Services" / "device_hub" / "drivers" / "base.py"
 _OTHER_DRIVER_TESTS = (
     "test_robot_driver.py",
     "test_vfd_driver.py",
+    "test_vfd_driver_reconnect.py",
     "test_encoder_offset.py",
     "test_reconnect_exhausted_notice.py",
     "test_hikvision_driver.py",

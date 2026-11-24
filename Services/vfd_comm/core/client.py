@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from Services.modbus.core.register_map import RegisterMap
@@ -45,17 +46,30 @@ class VfdClient:
         config: VfdConfig | None = None,
         *,
         register_map: RegisterMap = BRIDGE_MAP,
+        last_freq: float | None = None,
     ) -> None:
         self._t = transport
         self._cfg = config or VfdConfig()
         self._map = register_map
         self._last_heartbeat: int | None = None
         self._stale_polls = 0
+        # Последняя успешно записанная частота > 0: пуск без частоты стартует на ней, а не на default_freq_hz
+        # (иначе «Лента пуск» затирает скорость, заданную оператором). ``last_freq`` — начальное значение
+        # (драйвер переносит память через пересоздание клиента при реконнекте).
+        # Ноль и меньше в начальную память не берём: как и в ``run()``/``set_freq()``, память — только частота > 0.
+        self._last_freq: float | None = last_freq if last_freq is not None and last_freq > 0 else None
+        # Порядок захвата: _freq_lock -> замок транспорта (обратного порядка нет, _write замка клиента не берёт).
+        self._freq_lock = threading.Lock()
 
     @property
     def config(self) -> VfdConfig:
         """Текущий конфиг."""
         return self._cfg
+
+    @property
+    def last_freq(self) -> float | None:
+        """Последняя успешно записанная частота > 0 (None — ещё не задавали)."""
+        return self._last_freq
 
     @property
     def is_connected(self) -> bool:
@@ -67,28 +81,50 @@ class VfdClient:
     # ------------------------------------------------------------------ #
 
     def run(self, freq_hz: float | None = None, reverse: bool = False) -> bool:
-        """Запустить: частота + направление + RUN + маркер одной транзакцией."""
-        freq = self._validate_freq(freq_hz if freq_hz is not None else self._cfg.default_freq_hz)
-        return self._write(
-            {
-                "cmd_freq": freq,
-                "cmd_dir": 1 if reverse else 0,
-                "cmd_run": 1,
-                "flag": 1,  # маркер — последним
-            }
-        )
+        """Запустить: частота + направление + RUN + маркер одной транзакцией.
+
+        Без ``freq_hz`` — последняя заданная частота (``run``/``set_freq``), при её отсутствии — ``default_freq_hz``.
+        """
+        # Запись на провод и запоминание — под одним замком: память совпадает с последней командой на проводе.
+        with self._freq_lock:
+            fallback = self._last_freq if self._last_freq is not None else self._cfg.default_freq_hz
+            freq = self._validate_freq(freq_hz if freq_hz is not None else fallback)
+            ok = self._write(
+                {
+                    "cmd_freq": freq,
+                    "cmd_dir": 1 if reverse else 0,
+                    "cmd_run": 1,
+                    "flag": 1,  # маркер — последним
+                }
+            )
+            if ok and freq > 0:  # ноль на провод уходит, но «последней заданной» не становится
+                self._last_freq = freq
+            return ok
 
     def set_freq(self, freq_hz: float) -> bool:
-        """Сменить частоту на ходу."""
-        return self._write({"cmd_freq": self._validate_freq(freq_hz), "flag": 1})
+        """Сменить частоту на ходу (запоминается для следующего ``run()`` без частоты)."""
+        freq = self._validate_freq(freq_hz)
+        with self._freq_lock:
+            ok = self._write({"cmd_freq": freq, "flag": 1})
+            if ok and freq > 0:
+                self._last_freq = freq
+            return ok
 
     def stop(self) -> bool:
-        """Остановить вращение."""
+        """Остановить вращение (память последней частоты сохраняется: пуск после стопа — на той же скорости)."""
         return self._write({"cmd_run": 0, "flag": 1})
 
     def reset_fault(self) -> bool:
-        """Сбросить аварию (RUN снимается, RESET-импульс)."""
-        return self._write({"cmd_run": 0, "cmd_reset": 1, "flag": 1})
+        """Сбросить аварию (RUN снимается, RESET-импульс).
+
+        После успешной записи память последней частоты сбрасывается: после аварии пуск без частоты идёт на
+        ``default_freq_hz``, а не на чужой «последней». Неудачная запись (False/исключение) память не трогает.
+        """
+        with self._freq_lock:
+            ok = self._write({"cmd_run": 0, "cmd_reset": 1, "flag": 1})
+            if ok:
+                self._last_freq = None
+            return ok
 
     # ------------------------------------------------------------------ #
     # Статус

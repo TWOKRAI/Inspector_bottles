@@ -359,6 +359,22 @@
                     },
                     {
                       "command_args": {
+                        "device_id": "vfd_belt"
+                      },
+                      "id": "belt_freq",
+                      "label": "Скорость ленты (Гц)",
+                      "max": 50.0,
+                      "min": 1.0,
+                      "source": "action",
+                      "target_command": "vfd_set_freq",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": 10.0,
+                      "value_arg": "freq_hz"
+                    },
+                    {
+                      "command_args": {
                         "device_id": "robot_main"
                       },
                       "id": "home",
@@ -4206,6 +4222,22 @@
                   "target_plugin_index": 0,
                   "target_process": "devices",
                   "type": "button"
+                },
+                {
+                  "command_args": {
+                    "device_id": "vfd_belt"
+                  },
+                  "id": "belt_freq",
+                  "label": "Скорость ленты (Гц)",
+                  "max": 50.0,
+                  "min": 1.0,
+                  "source": "action",
+                  "target_command": "vfd_set_freq",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": 10.0,
+                  "value_arg": "freq_hz"
                 },
                 {
                   "command_args": {
