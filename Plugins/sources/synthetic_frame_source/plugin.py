@@ -77,6 +77,9 @@ class SyntheticFrameSourcePlugin(ProcessModulePlugin):
         строке (первые min(frame_count, width) байт первого канала) — узнаваемо
         меняется от кадра к кадру, не требует cv2.putText/np.random.
         """
+        # T8c (ADR-177): штампы времени кадра ставятся первым делом в вызове (рождение кадра).
+        capture_ns = time.perf_counter_ns()
+        capture_ts = time.time()
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
         frame = self._base_frame.copy()
         stamp_len = min(self._frame_count, self._width)
@@ -89,6 +92,8 @@ class SyntheticFrameSourcePlugin(ProcessModulePlugin):
                 "seq_id": self._frame_count,
                 "frame_id": self._frame_count,
                 "timestamp": time.monotonic(),
+                "capture_ns": capture_ns,
+                "capture_ts": capture_ts,
                 "width": self._width,
                 "height": self._height,
                 "channels": 3,

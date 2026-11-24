@@ -63,6 +63,10 @@ PostHook = Callable[["ProcessModulePlugin", str, "list[dict] | None", "list[dict
 _CARRIED_SYSTEM_FIELDS = (
     "trace_id",
     "capture_ts",
+    # T8 (ADR-177): контракт времени кадра. ``capture_ns`` (int, perf_counter_ns) — ключ
+    # сверки; ``group_id`` (int | None) зарезервирован, присваивает отдельный план.
+    "capture_ns",
+    "group_id",
     "frame_hops",
     "count",
     "trace_ids",

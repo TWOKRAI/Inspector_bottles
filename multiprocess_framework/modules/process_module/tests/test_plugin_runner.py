@@ -383,3 +383,72 @@ def test_no_carry_when_input_lacks_system_fields():
     result = runner.call_process(plugin, [{"val": 1}])
     assert result == [{"mask": "x"}]
     assert "trace_id" not in result[0]
+
+
+# ---------------------------------------------------------------------------
+#  T8 (ADR-177) — контракт времени кадра: ``capture_ns`` (int, perf_counter_ns)
+#  и ``group_id`` (int | None) переживают plugin.process() через переносимые
+#  системные поля, даже если плагин строит свежий dict.
+# ---------------------------------------------------------------------------
+
+
+def test_capture_ns_survives_plugin_hop():
+    """Плагин возвращает СВЕЖИЙ dict: ``capture_ns`` донора доезжает до выхода точным значением."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "computed"}])
+    result = runner.call_process(plugin, [{"capture_ns": 123_456_789, "frame": 1}])
+    assert result == [{"mask": "computed", "capture_ns": 123_456_789}]
+
+
+def test_group_id_survives_plugin_hop():
+    """Плагин возвращает СВЕЖИЙ dict: ``group_id`` донора доезжает до выхода точным значением."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "computed"}])
+    result = runner.call_process(plugin, [{"group_id": 7, "frame": 1}])
+    assert result == [{"mask": "computed", "group_id": 7}]
+
+
+def test_group_id_none_is_carried_as_none():
+    """Ключ ``group_id`` есть у донора со значением None: переносится как есть (None), не теряется."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "x"}])
+    result = runner.call_process(plugin, [{"group_id": None}])
+    assert "group_id" in result[0]
+    assert result[0]["group_id"] is None
+
+
+def test_plugin_own_capture_ns_and_group_id_win_not_overwritten():
+    """Плагин сам поставил ``capture_ns``/``group_id`` — движок их не перетирает значениями донора."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"capture_ns": 999, "group_id": 5}])
+    result = runner.call_process(plugin, [{"capture_ns": 111, "group_id": 3}])
+    assert result == [{"capture_ns": 999, "group_id": 5}]
+
+
+def test_capture_ns_positional_one_to_one_each_output_keeps_own_donor():
+    """1:1 батч: каждый выход наследует ``capture_ns`` СВОЕГО входа по позиции, не соседского."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"cropped": True} for _ in items])
+    result = runner.call_process(plugin, [{"capture_ns": 100}, {"capture_ns": 200}])
+    assert [r["capture_ns"] for r in result] == [100, 200]
+
+
+def test_fan_in_capture_ns_and_group_id_taken_from_first_input():
+    """Fan-in N:1: ``capture_ns`` и ``group_id`` берутся от ``inputs[0]``, не от соседа (ADR-177, скрытое решение а)."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"frame": "stitched"}])
+    inputs = [
+        {"capture_ns": 100, "group_id": 1},
+        {"capture_ns": 200, "group_id": 2},
+    ]
+    result = runner.call_process(plugin, inputs)
+    assert result == [{"frame": "stitched", "capture_ns": 100, "group_id": 1}]
+
+
+def test_no_capture_ns_or_group_id_added_when_donor_lacks_them():
+    """Донор без ``capture_ns``/``group_id`` — перенос no-op, пустых ключей не появляется."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "x"}])
+    result = runner.call_process(plugin, [{"val": 1}])
+    assert "capture_ns" not in result[0]
+    assert "group_id" not in result[0]

@@ -194,7 +194,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._ctx = ctx
         self._reg: CameraDeviceRegisters = self._init_register(ctx)
         self._lock = threading.Lock()
-        self._slot: tuple[int, float, float, RawFrame] | None = None  # последний кадр; новый вытесняет старый
+        # Последний кадр `(seq, ts, mono, raw, cap_ns)`; новый вытесняет старый.
+        self._slot: tuple[int, float, float, RawFrame, int] | None = None
         self._seq = 0
         self._frames = 0
         self._port: DevicePort | None = None
@@ -403,7 +404,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         """Колбэк сеанса (поток-владелец): кадр в слот, поток чтения не ждёт `produce()`."""
         with self._lock:
             self._seq += 1
-            self._slot = (self._seq, time.time(), time.monotonic(), raw)
+            # T8c (ADR-177): все штампы времени берутся здесь, в одной точке с `seq`, а не в `produce()`:
+            # `capture_ns` (perf_counter_ns, ключ сверки), `ts` (wall, станет `capture_ts`), `mono` (`timestamp`).
+            self._slot = (self._seq, time.time(), time.monotonic(), raw, time.perf_counter_ns())
 
     def _on_state(self, old: str, new: str) -> None:
         # События приходят из разных потоков и могут опередить друг друга: истина — `session.state`.
@@ -582,7 +585,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 raise ValueError(f"дебайер {raw.pixel_format} не удался: {exc}") from exc
         return frame.copy()
 
-    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame) -> dict:
+    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame, cap_ns: int) -> dict:
         device = self._session.device if self._session is not None else None
         frame = self._frame_array(raw)
         return {
@@ -591,8 +594,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
             "device_id": device.value if device is not None else "",
             "seq_id": seq,
             "frame_id": seq,
-            "timestamp": mono,
+            "timestamp": mono,  # monotonic, шаг 15-16 мс: для сверки камер не годится (FREEZE, не удалять)
             "ts": ts,
+            "capture_ns": cap_ns,  # perf_counter_ns момента прихода кадра: ключ сверки (ADR-177)
+            "capture_ts": ts,  # wall момента прихода (не новый `time.time()` в `produce()`): для подписи
             "pixel_format": "bgr8" if frame.ndim == 3 else raw.pixel_format,  # цветные источники уходят как BGR
             "source_format": raw.pixel_format,
             "width": raw.width,
