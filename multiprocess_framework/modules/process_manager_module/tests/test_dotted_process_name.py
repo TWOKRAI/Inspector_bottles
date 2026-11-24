@@ -28,8 +28,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
 # литерал; 23-й — camera_device_demo (Task 1.8), 25-й — hikvision_id3013_test (Task 4.2f); robot_demo включён
 # 26-й — hikvision_id3013_view (Task 4.2g), 27-й — hikvision_id3013_quad (Task 4.2i),
-# 28-й — hikvision_id3013_quad_hw (Task 4.2j)
-RECIPE_COUNT = 28
+# 28-й — hikvision_id3013_quad_hw (Task 4.2j), 29-й — gui_overload_synth (T7)
+RECIPE_COUNT = 29
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 
 
 def test_a5_recipe_set_has_the_literal_count_and_robot_demo() -> None:
-    """Страж «ноль наблюдений»: параметризация видит ровно 28 рецептов, robot_demo включён."""
+    """Страж «ноль наблюдений»: параметризация видит ровно 29 рецептов, robot_demo включён."""
     assert len(ALL_RECIPES) == RECIPE_COUNT, ALL_RECIPES
     assert "robot_demo" in ALL_RECIPES
 
