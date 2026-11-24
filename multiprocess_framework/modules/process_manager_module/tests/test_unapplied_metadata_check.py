@@ -40,8 +40,9 @@ RECIPES_DIR = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
 APP_YAML = PROJECT_ROOT / "multiprocess_prototype" / "app.yaml"
 
 # Литерал плана (M10): число рецептов репозитория.
-_RECIPE_COUNT = 27  # 23-й — camera_device_demo (Task 1.8, 2026-11-15), 25-й — hikvision_id3013_test (Task 4.2f),
-# 26-й — hikvision_id3013_view (Task 4.2g), 27-й — hikvision_id3013_quad (Task 4.2i)
+_RECIPE_COUNT = 29  # 23-й — camera_device_demo (Task 1.8, 2026-11-15), 25-й — hikvision_id3013_test (Task 4.2f),
+# 26-й — hikvision_id3013_view (Task 4.2g), 27-й — hikvision_id3013_quad (Task 4.2i),
+# 28-й — hikvision_id3013_quad_hw (Task 4.2j), 29-й — gui_overload_synth (T7)
 ALL_RECIPES = sorted(p.stem for p in RECIPES_DIR.glob("*.yaml"))
 
 
@@ -362,7 +363,7 @@ def _offenders(recipe: str) -> list[str]:
 
 
 def test_m10_recipe_set_is_the_known_23() -> None:
-    """Страж «ноль наблюдений»: рецептов ровно 27 и в них есть процессы."""
+    """Страж «ноль наблюдений»: рецептов ровно 29 и в них есть процессы."""
     assert len(ALL_RECIPES) == _RECIPE_COUNT, ALL_RECIPES
     assert "robot_demo" in ALL_RECIPES
     assert sum(len(_recipe_processes(r)) for r in ALL_RECIPES) > 0

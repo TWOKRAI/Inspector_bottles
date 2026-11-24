@@ -2,6 +2,7 @@
 """Register ядра камеры (Task 2.3a): общий для базового плагина с `driver: fake` и вендорских плагинов.
 
 Поля делятся на: идентичность прибора (`device_select` + `device_*`), цикл сеанса (`timeout_ms`, `watchdog_s`),
+очередь кадров источника (`source_queue_frames`),
 профиль run (`trigger_*`, `exposure_time`), профиль rest (`rest_*`) и телеметрию (`device_state`, `frames`).
 План записи строят `params.build_plan` по этим полям и таблице привязки драйвера (`bindings()` плагина).
 `param_errors` здесь нет: писать его некому до Task 2.3b. Пауза перезапуска — `restart_policy.backoff_sec`
@@ -66,6 +67,18 @@ class CameraDeviceRegisters(SchemaBase):
         float,
         FieldMeta("Сторож, с", info="Срок зависания вызова порта; должен быть больше таймаута кадра"),
     ] = 5.0
+
+    source_queue_frames: Annotated[
+        int,
+        FieldMeta(
+            "Очередь кадров источника",
+            info="Сколько кадров источник копит между опросами produce(); полная очередь вытесняет самый старый "
+            "(метрика overwritten); 1 — только последний кадр. Читается при старте процесса",
+            apply="restart",
+            min=1,
+            max=64,
+        ),
+    ] = 4
 
     # --- Профиль run: группа триггера, затем экспозиция (порядок объявления = порядок записи) ---
     trigger_managed: Annotated[

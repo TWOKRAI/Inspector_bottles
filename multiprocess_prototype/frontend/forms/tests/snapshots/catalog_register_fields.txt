@@ -27,6 +27,7 @@ camera_device.frames
 camera_device.rest_managed
 camera_device.rest_trigger_mode
 camera_device.rest_trigger_source
+camera_device.source_queue_frames
 camera_device.timeout_ms
 camera_device.trigger_managed
 camera_device.trigger_mode
@@ -162,6 +163,10 @@ edge_detection.invert
 edge_detection.method
 edge_detection.threshold
 edge_detection.weights_path
+frame_buffer.buffer_max_mb
+frame_buffer.buffer_seconds
+frame_buffer.jpeg_quality
+frame_buffer.pin_max_mb
 frame_saver.buffer_mode
 frame_saver.buffer_size
 frame_saver.filename_prefix
@@ -206,6 +211,7 @@ hikvision.resolution_width
 hikvision.rest_managed
 hikvision.rest_trigger_mode
 hikvision.rest_trigger_source
+hikvision.source_queue_frames
 hikvision.timeout_ms
 hikvision.trigger_managed
 hikvision.trigger_mode

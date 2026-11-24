@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QPoint, QSettings, Qt, QTimer, Signal
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..frame_intake import fps_text
 from ..widgets.chrome.app_header import AppHeaderWidget
 from ..widgets.chrome.error_banner import ErrorBannerWidget
 from ..widgets.chrome.run_control import RunControlWidget
@@ -713,12 +715,30 @@ class MainWindow(QMainWindow):
         self._topology_session = session
         self._save_topology_fn = save_fn
 
-    def update_status(self, fps: float, latency_ms: float = 0.0) -> None:
-        """Обновить StatusBar и header: fps и latency."""
-        self._fps_label.setText(f"FPS: {fps:.1f}")
-        self._latency_label.setText(f"Latency: {latency_ms:.1f} ms")
+    def update_status(
+        self,
+        fps: float,
+        latency_ms: float | None = None,
+        *,
+        shown: float | None = None,
+        superseded: float | None = None,
+        per_slot: Mapping[str, float] | None = None,
+    ) -> None:
+        """Обновить StatusBar и header: fps и latency.
+
+        Со ``shown`` и ``superseded`` строка FPS — «показано/вытеснено» (``fps_text``, разбивка
+        по слотам из ``per_slot``); без них — прежняя ``FPS: <fps>``. ``latency_ms=None`` (замера
+        нет) показывается как «—», а не как 0.0.
+        """
+        if shown is not None and superseded is not None:
+            fps_line = fps_text(shown, superseded, per_slot or {})
+        else:
+            fps_line = f"FPS: {fps:.1f}"
+        latency_value = "—" if latency_ms is None else f"{latency_ms:.1f} ms"
+        self._fps_label.setText(fps_line)
+        self._latency_label.setText(f"Latency: {latency_value}")
         # Дублируем ключевые метрики в header
-        self._header.update_status(f"FPS: {fps:.1f} | Latency: {latency_ms:.1f} ms")
+        self._header.update_status(f"{fps_line} | Latency: {latency_value}")
 
     def increment_frame_count(self) -> None:
         """Инкремент счётчика кадров (вызывается при каждом frame)."""

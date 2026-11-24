@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""CameraDevicePlugin — источник кадров ядра камеры: сеанс `DeviceSession` -> слот кадра -> item -> дерево.
+"""CameraDevicePlugin — источник кадров ядра камеры: сеанс `DeviceSession` -> очередь кадров -> item -> дерево.
 
 Порт одного прибора держит поток-владелец сеанса (Task 2.1): `take_device -> session.start(timeout)`,
-`release_device -> session.stop(timeout)`, `get_status.state <- session.state`. `on_frame` кладёт кадр в слот
-для `produce()` (потеря кадра допустима). Уровни и события в дерево — Task 2.3b (ниже).
+`release_device -> session.stop(timeout)`, `get_status.state <- session.state`. `on_frame` кладёт кадр в очередь
+глубиной `source_queue_frames` для `produce()` (T13: переполнение вытесняет старейший кадр и считается `overwritten`).
+Уровни и события в дерево — Task 2.3b (ниже).
 
 Task 2.3a: база для вендорских плагинов. Хуки: `create_port(self)` (по умолчанию — модульная `create_port(driver)`,
 знает только `"fake"`) и `bindings(self)` (по умолчанию `FAKE_BINDINGS`); порт создаётся один раз в
 `_ensure_session`, SDK берётся как `port.sdk`. Идентичность прибора, таймаут и сторож берутся из register'а.
 
-Task 2.3b: наблюдаемость средствами framework. Уровни (`fps`, `frames`, `errors`, `dropped`, `pending`,
+Task 2.3b: наблюдаемость средствами framework. Уровни (`fps`, `frames`, `errors`, `dropped`, `overwritten`, `pending`,
 `param_errors_count`) — `ctx.declare_metric` + `ctx.publish_metric` (`frames` на учтённый кадр, остальные — окном
 `_TICK_S` из `produce()`). События (`state`, `device`, `device_held`, `profile`, `params`, `params_status`,
 `param_errors`, `last_error`, `capabilities`, `ts`) — один `state_proxy.merge` в `processes.<p>.state.plugins.<name>`
@@ -52,6 +53,7 @@ import logging
 import threading
 import time
 import traceback
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
@@ -194,7 +196,11 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._ctx = ctx
         self._reg: CameraDeviceRegisters = self._init_register(ctx)
         self._lock = threading.Lock()
-        self._slot: tuple[int, float, float, RawFrame] | None = None  # последний кадр; новый вытесняет старый
+        # Очередь кадров `(seq, ts, mono, raw, cap_ns)` глубиной `source_queue_frames` (T13). `_on_frame` (владелец)
+        # и `produce()` (поток процесса) трогают её и `_overwritten` только под `self._lock`.
+        # Границы глубины (1..64) живут в `FieldMeta` поля регистра — валидатор отказывает раньше, чем сюда дойдёт 0.
+        self._queue: deque[tuple[int, float, float, RawFrame, int]] = deque(maxlen=self._reg.source_queue_frames)
+        self._overwritten = 0  # кадры, вытесненные из полной очереди (накопительно; `dropped` — битые кадры, не они)
         self._seq = 0
         self._frames = 0
         self._port: DevicePort | None = None
@@ -207,7 +213,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._seen_state: str | None = None
         self._reported_param_errors: set[str] = set()
         # счётчики `_frames`/`_dropped`/`_item_error`, окно fps и `reg.frames`: `produce()` (поток процесса) и
-        # `reset_stats` (системный поток). Короткий: `publish_metric` и логи — вне замка. `self._lock` слота не годится
+        # `reset_stats` (системный поток). Короткий: `publish_metric` и логи — вне замка. Замок очереди не годится
         self._stats_lock = threading.Lock()
         self._timing_lock = threading.Lock()  # `on_timing("get_frame")` приходит из потока-владельца на каждый кадр
         self._get_frame_n = 0
@@ -222,7 +228,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._identity(warn=True)  # отказ рецепта — здесь, а не в take_device
         if self._reg.watchdog_s <= self._reg.timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
-        for level in ("fps", "frames", "errors", "dropped", "pending", "param_errors_count"):
+        for level in ("fps", "frames", "errors", "dropped", "overwritten", "pending", "param_errors_count"):
             ctx.declare_metric(level)
         self._subscribe_fields()
 
@@ -400,10 +406,31 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _on_frame(self, raw: RawFrame) -> None:
-        """Колбэк сеанса (поток-владелец): кадр в слот, поток чтения не ждёт `produce()`."""
+        """Колбэк сеанса (поток-владелец): кадр в очередь, поток чтения не ждёт `produce()`.
+
+        Полная очередь вытесняет самый старый кадр (`deque(maxlen)`), `overwritten` считает вытесненные; `seq`
+        растёт на каждый принятый кадр, вытеснение его не возвращает.
+        """
         with self._lock:
             self._seq += 1
-            self._slot = (self._seq, time.time(), time.monotonic(), raw)
+            # T8c (ADR-177): все штампы времени берутся здесь, в одной точке с `seq`, а не в `produce()`:
+            # `capture_ns` (perf_counter_ns, ключ сверки), `ts` (wall, станет `capture_ts`), `mono` (`timestamp`).
+            if len(self._queue) == self._queue.maxlen:
+                self._overwritten += 1
+            self._queue.append((self._seq, time.time(), time.monotonic(), raw, time.perf_counter_ns()))
+
+    def _clear_queue(self) -> int:
+        """Выбросить кадры очереди (граница сеанса): `seq` и `overwritten` не трогаются, `dropped` не растёт.
+
+        Returns:
+            Сколько кадров выброшено. Если больше нуля — одна строка в журнал (число, без значений кадров); метрики нет.
+        """
+        with self._lock:
+            cleared = len(self._queue)
+            self._queue.clear()
+        if cleared:  # журнал вне замка очереди
+            self._ctx.log_info(f"CameraDevicePlugin: на границе сеанса сброшено кадров: {cleared}")
+        return cleared
 
     def _on_state(self, old: str, new: str) -> None:
         # События приходят из разных потоков и могут опередить друг друга: истина — `session.state`.
@@ -449,7 +476,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
         ctx.publish_metric("frames", frames)  # и без кадров: уровень виден с нулём, а не отсутствует
         ctx.publish_metric("errors", session.errors if session is not None else 0)
         ctx.publish_metric("dropped", dropped)
-        ctx.publish_metric("pending", 0 if self._slot is None else 1)
+        with self._lock:  # длина очереди и счётчик вытеснения — одним снимком
+            pending, overwritten = len(self._queue), self._overwritten
+        ctx.publish_metric("overwritten", overwritten)  # и 0: уровень виден, а не отсутствует
+        ctx.publish_metric("pending", pending)
         ctx.publish_metric("param_errors_count", len(session.param_errors) if session is not None else 0)
         with self._timing_lock:
             count, total = self._get_frame_n, self._get_frame_sum
@@ -524,28 +554,33 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._published = snapshot
 
     def produce(self) -> list[dict]:
-        """Забрать кадр из слота в item. Пусто — норма. Не блокирует."""
+        """Забрать всю очередь кадров в items по возрастанию `seq`. Пусто — норма. Не блокирует."""
         session = self._session
         # Сеанс при отказе снимает `device_held` без `on_state` (session.py): дереву не ждать окна `_TICK_S`.
         # Проверка — два чтения без замков; `merge` только если снимок действительно изменился (держит diff).
         if session is not None and self._published.get("device_held") is True and not session.device_held:
             self._sync_events()
         self._tick()
-        with self._lock:
-            slot, self._slot = self._slot, None
-        if slot is None:
-            return []
-        try:
-            item = self._build_item(*slot)
-        except ValueError as exc:  # битый кадр отбрасывается: `produce()` не бросает, счётчик кадров не растёт
-            self._drop_frame(str(exc))
-            return []
-        with self._stats_lock:  # пара «инкремент + запись поля»: сброс между ними вернул бы счётчик
-            self._frames += 1
-            self._reg.frames = self._frames
-            frames = self._frames
-        self._ctx.publish_metric("frames", frames)
-        return [item]
+        with self._lock:  # снятие очереди и запись `_on_frame` — под одним замком; очередь добавляется в порядке `seq`
+            slots = list(self._queue)
+            self._queue.clear()
+        items: list[dict] = []
+        for slot in slots:
+            try:
+                item = self._build_item(*slot)
+            except ValueError as exc:  # битый кадр отбрасывается: `produce()` не бросает, счётчик кадров не растёт
+                self._drop_frame(str(exc))
+                continue
+            except Exception as exc:  # noqa: BLE001 — один плохой кадр не отнимает у пачки остальные (K кадров снято)
+                self._drop_frame(f"{type(exc).__name__}: {exc}")  # не молча: счётчик `dropped` и журнал причины
+                continue
+            with self._stats_lock:  # пара «инкремент + запись поля»: сброс между ними вернул бы счётчик
+                self._frames += 1
+                self._reg.frames = self._frames
+                frames = self._frames
+            self._ctx.publish_metric("frames", frames)
+            items.append(item)
+        return items
 
     def _drop_frame(self, error: str) -> None:
         with self._stats_lock:
@@ -582,7 +617,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 raise ValueError(f"дебайер {raw.pixel_format} не удался: {exc}") from exc
         return frame.copy()
 
-    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame) -> dict:
+    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame, cap_ns: int) -> dict:
         device = self._session.device if self._session is not None else None
         frame = self._frame_array(raw)
         return {
@@ -591,8 +626,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
             "device_id": device.value if device is not None else "",
             "seq_id": seq,
             "frame_id": seq,
-            "timestamp": mono,
+            "timestamp": mono,  # monotonic, шаг 15-16 мс: для сверки камер не годится (FREEZE, не удалять)
             "ts": ts,
+            "capture_ns": cap_ns,  # perf_counter_ns момента прихода кадра: ключ сверки (ADR-177)
+            "capture_ts": ts,  # wall момента прихода (не новый `time.time()` в `produce()`): для подписи
             "pixel_format": "bgr8" if frame.ndim == 3 else raw.pixel_format,  # цветные источники уходят как BGR
             "source_format": raw.pixel_format,
             "width": raw.width,
@@ -665,6 +702,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
             run, rest = self._plan()
             # идущий цикл не меняется (повторный take_device при opening/grabbing — по-прежнему ok): результат не нужен
             if session.set_cycle(ident, run, rest):
+                self._clear_queue()  # цикл начинается заново (прибор не держится): кадры прошлого сеанса не отдаём
                 with self._plan_lock:  # из этих значений построен план run цикла: основа сравнения для живой правки
                     values = self._reg.model_dump()
                     self._seen_values = {field: values[field] for field in self.bindings() if field in values}
@@ -697,6 +735,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         if session is None:
             return {"status": "ok", "device_state": self._reg.device_state}
         session.stop(args.timeout_s)
+        self._clear_queue()  # после остановки владельца: поздний кадр сеанса не доживёт до следующего `take_device`
         released = not session.device_held
         result: dict = {"status": "ok" if released else "error", "device_state": session.state}
         if not released:
@@ -708,7 +747,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def cmd_reset_stats(self, data: dict) -> dict:
-        """Обнулить `frames` (счётчик, поле register'а, метрика), `dropped`, причину отброса и окно `fps`.
+        """Обнулить `frames` (счётчик, поле register'а, метрика), `dropped`, `overwritten`, причину отброса, окно `fps`.
 
         НЕ сбрасываются: `errors` сеанса (счётчик жизни сеанса) и `seq_id` (Р10).
         """
@@ -719,7 +758,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._item_error = ""
             self._tick_frames = 0  # иначе следующее окно даст отрицательный `fps`
             self._tick_t0 = time.monotonic()
-        self._ctx.publish_metric("frames", 0)  # дерево не ждёт окна `_TICK_S`
+        with self._lock:  # `overwritten` пишет `_on_frame` под `self._lock`; очередь с кадрами не трогаем
+            self._overwritten = 0
+        # `frames` в дерево сразу; `overwritten` и `dropped` там остаются прежними до окна `_TICK_S` (в плагине уже 0)
+        self._ctx.publish_metric("frames", 0)
         self._ctx.log_info("CameraDevicePlugin: reset_stats")
         return {"success": True}
 

@@ -4,6 +4,7 @@
 - GenericProcess — ProcessModule, загружающий плагины из конфига
 - GenericProcessConfig — ProcessLaunchConfig с plugins[]
 - PluginConfig — SchemaBase-конфиг одного плагина
+- LatestMailbox — ящик «последний элемент на ключ» (без Qt и IPC, ADR-PM-064)
 
 SystemBlueprint/ProcessConfig/Wire (системная топология) переехали в
 ``process_manager_module/topology/blueprint.py`` (C6 c). Из пакета ``generic`` больше НЕ
@@ -19,6 +20,7 @@ from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
+from .latest_mailbox import LatestMailbox
 from .plugin_orchestrator import PluginOrchestrator
 
 # Доменные буферы fan-in/join переехали в Plugins/_shared/fanin (C6 b) — домен не живёт
@@ -32,6 +34,7 @@ __all__ = [
     "FrameShmMiddleware",
     "GenericProcess",
     "GenericProcessConfig",
+    "LatestMailbox",
     "PluginOrchestrator",
     "PipelineExecutor",
     "PluginConfig",

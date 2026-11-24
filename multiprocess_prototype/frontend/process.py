@@ -4,7 +4,8 @@
   - main thread: Qt event loop (QApplication.exec())
   - data_receiver worker: получает IPC data-сообщения, emit'ит через DataReceiverBridge
   - _init_system_threads() НЕ переопределён — стандартный framework message_processor
-  - FrameShmMiddleware.on_receive — автоматически извлекает numpy frame из SHM
+  - копия кадра из SHM — в Qt-потоке при показе (DataReceiverBridge.restore_for_show),
+    не в router и не в потоке приёма
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from multiprocess_framework.modules.router_module.middleware import FrameShmMidd
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
+from .frame_intake import FrameIntake
 from .state.delta_message import state_delta_message
 from . import app as gui_app
 
@@ -31,13 +33,17 @@ class GuiProcess(ProcessModule):
     Данные от других процессов поступают через data_receiver worker (отдельный поток),
     который emit'ит Qt signals через DataReceiverBridge (queued connection).
 
-    FrameShmMiddleware.on_receive подключён к router — входящие frame_ready
-    автоматически обогащаются numpy frame из SHM (msg["frame"]).
+    FrameShmMiddleware.on_receive в router НЕ подключён: сообщение со ссылками SHM кладётся в
+    ящик моста как есть, а копию (msg["frame"] и прочие массивы) делает bridge.restore_for_show
+    в Qt-потоке — только для кадра, который насос вынул для показа.
     """
 
     # Task 1.1: True, когда CloseCoordinator уже отправил system.shutdown. Читает
     # _request_system_shutdown после возврата run_gui (Qt-объектов к этому моменту может не быть).
     shutdown_sent: bool = False
+
+    # Читатель SHM gui (copy-out); создаётся в _init_application_threads, если есть router и память.
+    _recv_frame_mw: FrameShmMiddleware | None = None
 
     # _init_system_threads() — НЕ переопределён: стандартный framework message_processor
 
@@ -45,14 +51,14 @@ class GuiProcess(ProcessModule):
         """Создать DataReceiverBridge, SHM middleware и worker data_receiver."""
         super()._init_application_threads()
 
-        # SHM receive middleware: при получении данных — читать кадр из SHM
-        # owner/slot — fallback, реальные координаты берутся из msg["data"]
+        # SHM-читатель gui: копия кадра из SHM делается НЕ в router-цепочке (поток приёма), а в
+        # Qt-потоке при показе (bridge.set_frame_restorer ниже). owner/slot — fallback,
+        # реальные координаты берутся из msg["data"]
         if self.router_manager and self.memory_manager:
             # Ф7 G.5.b: GUI-путь copy-out: ``on_receive`` отдаёт КОПИЮ (Qt держит пиксели дольше
             # любого кадрового окна — в модели/кэше рендера, view в слот небезопасен); view без копии
             # получает только ``restore_frame`` конвейера инспекции (4.7b).
             self._recv_frame_mw = FrameShmMiddleware(self.memory_manager, owner=self.name, slot="output_frames")
-            self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
             # Ф7 G.3-нит: зарегистрировать middleware в агрегации router-stats, чтобы
             # torn/drop/pickle-fallback на ДИСПЛЕЙ-пути были видны в introspect.router_stats
             # (раньше add_receive_middleware цеплял только колбэк on_receive, а объект в
@@ -61,6 +67,9 @@ class GuiProcess(ProcessModule):
 
         # Создаём bridge в main thread — он будет использоваться из worker
         self._bridge = DataReceiverBridge()
+        # T5: on_receive (копия, allow_view=False) зовёт мост в Qt-потоке; в router он не стоит.
+        if self._recv_frame_mw is not None:
+            self._bridge.set_frame_restorer(self._recv_frame_mw.on_receive)
 
         # StateStore-подписчик: live-телеметрия процессов/воркеров.
         # ProcessMonitor публикует processes.X.state.* / processes.X.workers.Y.* →
@@ -154,11 +163,26 @@ class GuiProcess(ProcessModule):
                     module="gui",
                 )
 
+        # Цикл приёма data-сообщений + метрики тракта кадров. receive разрешает router_manager
+        # при вызове (на момент создания он может быть ещё не готов). Воркер создаётся на
+        # bound-методе run_loop: так WorkerManager.get_worker_status подмешивает
+        # get_cycle_metrics() в статус воркера. Метрики насоса привязывает app.py.
+        self._frame_intake = FrameIntake(
+            lambda **kwargs: self.router_manager.receive(**kwargs),
+            self._bridge.dispatch,
+            self._log_info,
+            self._log_critical,
+            self._track_error,
+            self._record_metric,
+        )
+        self._frame_intake.attach_mailbox_stats(self._bridge.frame_mailbox.stats)
+        self._frame_intake.attach_qt_pending(lambda: self._bridge.qt_pending)
+
         # Создаём worker для получения IPC data-сообщений
         config = ThreadConfig(priority=ThreadPriority.NORMAL)
         self.worker_manager.create_worker(
             "data_receiver",
-            self._data_receiver_loop,
+            self._frame_intake.run_loop,
             config,
             auto_start=True,
         )
@@ -253,58 +277,8 @@ class GuiProcess(ProcessModule):
         )
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
-        """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
-        _consecutive_errors = 0
-        _backoff = 0.1  # начальный backoff (секунды)
-        _MAX_BACKOFF = 5.0
-        _ERROR_THRESHOLD = 5  # порог для вызова _log_critical
-
-        while not stop_event.is_set():
-            if pause_event.is_set():
-                time.sleep(0.05)
-                continue
-            try:
-                # return_messages=False → получаем сырые dict (после middleware)
-                msgs = self.router_manager.receive(timeout=0.1, channel_types=["data"], return_messages=False)
-                for msg_dict in msgs:
-                    self._bridge.dispatch(msg_dict)
-
-                # При успешном получении — сбрасываем счётчик ошибок
-                if msgs:
-                    if _consecutive_errors > 0:
-                        self._log_info(
-                            f"data_receiver: восстановление после {_consecutive_errors} ошибок подряд",
-                            module="gui",
-                        )
-                    _consecutive_errors = 0
-                    _backoff = 0.1
-                    self._record_metric("data_receiver.success")
-
-            except Exception as exc:
-                _consecutive_errors += 1
-
-                # Трекинг через ErrorManager (единый паттерн)
-                self._track_error(
-                    exc,
-                    context={
-                        "loop": "data_receiver",
-                        "consecutive": _consecutive_errors,
-                    },
-                )
-
-                # Метрика через StatsManager
-                self._record_metric("data_receiver.errors")
-
-                # После порога — critical лог
-                if _consecutive_errors == _ERROR_THRESHOLD:
-                    self._log_critical(
-                        f"data_receiver: {_consecutive_errors} ошибок подряд, последняя: {exc}",
-                        module="gui",
-                    )
-
-                # Exponential backoff
-                time.sleep(min(_backoff, _MAX_BACKOFF))
-                _backoff = min(_backoff * 2, _MAX_BACKOFF)
+        """Делегат на ``FrameIntake.run_loop`` (цикл приёма переехал туда; метод сохранён, FREEZE)."""
+        self._frame_intake.run_loop(stop_event, pause_event)
 
     def run(self) -> None:
         """Запустить базовый ProcessModule (воркеры), затем Qt event loop.

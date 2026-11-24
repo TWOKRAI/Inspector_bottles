@@ -8,11 +8,17 @@ resolve_display_id (без Qt).
 
 from __future__ import annotations
 
+import pytest
+
 from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import (
     build_frame_routing,
     build_panel_displays,
     resolve_display_id,
 )
+
+
+#: Маркер «ключа fps_limit в рецепте нет» (None — это уже значение-мусор).
+_ABSENT = object()
 
 
 # ---------------------------------------------------------------------------
@@ -36,8 +42,8 @@ class TestBuildPanelDisplays:
         }
         result = build_panel_displays(recipe)
         assert result == [
-            {"id": "main", "label": "Кадр", "enabled": True, "x": 10, "y": 5},
-            {"id": "mask", "label": "Маска", "enabled": False, "x": 0, "y": 0},
+            {"id": "main", "label": "Кадр", "enabled": True, "x": 10, "y": 5, "fps_limit": 30.0},
+            {"id": "mask", "label": "Маска", "enabled": False, "x": 0, "y": 0, "fps_limit": 30.0},
         ]
 
     def test_enabled_defaults_true_when_absent(self) -> None:
@@ -59,6 +65,27 @@ class TestBuildPanelDisplays:
         recipe = {"displays": [{"id": "d1"}]}
         d = build_panel_displays(recipe)[0]
         assert d["x"] == 0 and d["y"] == 0
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [(20.0, 20.0), (_ABSENT, 30.0), (0, 0.0)],
+        ids=["from_recipe_20", "absent_gives_30", "zero_passes_as_zero"],
+    )
+    def test_fps_limit_read_from_recipe(self, raw: object, expected: float) -> None:
+        """fps_limit слота: из рецепта; нет ключа -> 30.0; 0 проходит как 0.0 (потолок 60 Гц — решение владельца)."""
+        display: dict = {"id": "d1", "name": "D1"}
+        if raw is not _ABSENT:
+            display["fps_limit"] = raw
+        slot = build_panel_displays({"displays": [display]})[0]
+        assert slot["fps_limit"] == expected
+        assert isinstance(slot["fps_limit"], float)
+
+    @pytest.mark.parametrize("raw", [None, "abc", float("nan"), True], ids=["none", "string_abc", "nan", "bool_true"])
+    def test_fps_limit_garbage_falls_back_to_30(self, raw: object) -> None:
+        """Мусор в fps_limit (None, «abc», NaN, True): слот получает 30.0, сборка не падает."""
+        recipe = {"displays": [{"id": "d1", "name": "D1", "fps_limit": raw}]}
+        slot = build_panel_displays(recipe)[0]
+        assert slot["fps_limit"] == 30.0
 
 
 # ---------------------------------------------------------------------------

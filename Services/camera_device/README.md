@@ -78,10 +78,31 @@
 `get_frame_errors` (первые N вызовов `get_frame` — `PortError`), `get_frame_script` (шаги `err` (`PortError`), `none` (тайм-аут), `frame` (кадр); допустимые — `SCRIPT_STEPS`),
 `read_offset` (`{Binding.key: смещение}` — чтение отличается от записи, узел не меняется).
 
+## Очередь кадров источника и метрики (T13)
+
+`_on_frame` (поток-владелец сеанса) кладёт кадр в очередь `collections.deque(maxlen=K)`, `produce()` (поток процесса) забирает ВСЮ очередь и
+возвращает items по возрастанию `seq_id`; запись и снятие — под одним замком. Раньше был один слот «последний кадр»: кадры между опросами терялись молча.
+
+- Регистр `source_queue_frames`: `int`, умолчание 4, границы 1..64 (вне границ — отказ, не зажим), `apply="restart"`: глубина читается при старте процесса.
+  `1` — прежнее поведение: один последний кадр.
+- Полная очередь вытесняет самый старый кадр; `seq_id` растёт на каждый принятый кадр, поэтому вытеснение видно пропуском в `seq_id`.
+- Очередь чистится на границе сеанса: в `take_device`, когда цикл начинается заново (повторный `take_device` при идущем захвате её не трогает), и в
+  `release_device`. `seq_id` при этом продолжается; сброшенные кадры в `overwritten` и `dropped` не входят: выброшенные на границе сеанса кадры пишутся в журнал, счётчика нет; метрика — только если T14 потребует точного равенства «захвачено == записано». Исключение сборки item у одного кадра
+  (не только `ValueError`) считается отброшенным кадром (`dropped`), остальные кадры пачки доходят.
+- Память: очередь держит до K `RawFrame`; при K=64 это до 64 кадров (5 МП mono8 примерно 320 МБ на процесс-источник). Потолок 64 — по соглашению регистров, не по замеру.
+- Метрики (окно `_TICK_S`, путь `ctx.publish_metric`): `overwritten` — вытесненные из полной очереди кадры, накопительно (с начала работы или с `reset_stats`),
+  публикуется всегда, в том числе 0; `dropped` — только битые кадры (в `overwritten` не входят); `pending` — длина очереди; `frames` — отданные items.
+- Кольцо SHM и `frame_ring_depth` (рецепт) — другая точка потери, к очереди источника не относятся.
+
 ## Формат кадра (item)
 
 Item (`CameraDevicePlugin._build_item`): `frame`, `camera_id`, `seq_id`, `frame_id`, `timestamp` (monotonic), `device_id`, `ts` (wall),
-`pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. `pixel_format` — формат массива кадра, `source_format` — формат прибора.
+`capture_ns`, `capture_ts`, `pixel_format`, `source_format`, `width`, `height`, `device_frame_num`. `pixel_format` — формат массива кадра, `source_format` — формат прибора.
+
+Штампы времени (ADR-177): `capture_ns` (`int`, `time.perf_counter_ns()`) и `capture_ts` (`float`, wall, равен `ts`) берутся в колбэке `_on_frame`,
+в одной точке с `seq`, — это момент прихода кадра на хост (после копирования из SDK), а не момент `produce()` и не момент экспозиции.
+Ключ сверки кадров — пара `(capture_ns, seq_id)`. `timestamp` (`time.monotonic()`, шаг 15-16 мс) **не для сверки камер**: поле остаётся, но не удаляется.
+`group_id` камера не назначает.
 
 Преобразование в ядре (`_frame_array`), по `source_format` (= `RawFrame.pixel_format`):
 
@@ -199,8 +220,9 @@ register'а (проба и запись `apply_params`) для значения 
 
 - **`read_params`** — СНИМОК `params` и `param_errors` последнего цикла сеанса, не живое чтение: порт не зовётся. После
   `release_device` вернёт прежние значения (сброс — при следующем `start()`). Сеанса нет -> оба пусты.
-- **`reset_stats`** — сбрасывает `frames` (счётчик плагина, поле register'а `frames`, метрика `frames` сразу в 0), `dropped`,
+- **`reset_stats`** — сбрасывает `frames` (счётчик плагина, поле register'а `frames`, метрика `frames` сразу в 0), `dropped`, `overwritten`,
   причину отброшенного кадра (`last_error` битого кадра) и окно `fps` (иначе следующее окно дало бы отрицательный `fps`).
+  В дерево сразу уходит только `frames=0`; `overwritten` и `dropped` там остаются прежними до окна `_TICK_S` (в плагине они уже 0).
   НЕ сбрасывает: `errors` (счётчик жизни сеанса) и `seq_id` (Р10: номер кадра продолжает счёт; битый кадр тоже получает номер).
   Замок `_stats_lock` охраняет счётчики от гонки `produce()` / сброс; метрики и журнал идут вне замка, поэтому после сброса дерево
   может до одного кадра (порядка 20 мс) или окна `_TICK_S` показывать прежнее число `frames` (`reg.frames`, `get_status` — уже 0).
@@ -214,7 +236,7 @@ register'а (проба и запись `apply_params`) для значения 
     `restart`; для `config`/`None` колбэк на прибор ничего не шлёт. Без захвата значение сохранено в register'е и войдёт в план
     следующего `take_device`. Запись на прибор асинхронна (порядка десятков мс после ответа). `on_device` не обещает записи: шаг, не
     меняющий план (то же значение, закрытый `enabled_if`, как `trigger_mode` при `trigger_managed=False`), прибор не трогает; итог — `read_params`.
-  - Поля вне `bindings()` (`*_managed`, `timeout_ms`, `watchdog_s`, `device_serial`, `driver`, `camera_id`) отвергаются: подписки
+  - Поля вне `bindings()` (`*_managed`, `timeout_ms`, `watchdog_s`, `source_queue_frames`, `device_serial`, `driver`, `camera_id`) отвергаются: подписки
     на прибор у них нет. Флаги групп (`trigger_managed`, `rest_managed`) действуют только со следующего `take_device`, поэтому
     порядок «флаг -> поле» через `register_update` работает лишь для полей, остальное — после `take_device`.
   - Отказ на фазе записи (остаточный случай: значение между пробой и записью изменил другой писатель) -> `{"success": False,
@@ -332,6 +354,6 @@ Stability: contract
 
 ## Решения и план
 
-- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…005 (ADR-CAM-002 уточнён 2026-11-15; ADR-CAM-005 — readiness камеры).
+- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…007 (ADR-CAM-002 уточнён 2026-11-15; ADR-CAM-005 — readiness камеры; ADR-CAM-007 — очередь кадров источника).
 - [`STATUS.md`](STATUS.md) — что есть.
 - План: [`plans/2026-10-18_camera-device-service/plan.md`](../../plans/2026-10-18_camera-device-service/plan.md).

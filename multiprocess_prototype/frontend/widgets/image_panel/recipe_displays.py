@@ -2,7 +2,7 @@
 """recipe_displays.py — извлечение конфигурации мульти-дисплея из рецепта.
 
 Pure Python, без Qt. Превращает raw-dict активного рецепта в:
-  - список слотов главной панели (``build_panel_displays``) — id/label/enabled/x/y;
+  - список слотов главной панели (``build_panel_displays``) — id/label/enabled/x/y/fps_limit;
   - карту маршрутизации кадров ``process_name -> display_id``
     (``build_frame_routing``) для классификации входящих кадров по полю ``sender``.
 
@@ -28,10 +28,26 @@ Pure Python, без Qt. Превращает raw-dict активного рец�
 
 from __future__ import annotations
 
+import math
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 
 logger = get_std_logger(__name__)
+
+#: Предел показа по умолчанию (Гц), если fps_limit в рецепте нет или он не число.
+DEFAULT_FPS_LIMIT = 30.0
+
+
+def _parse_fps_limit(raw: object) -> float:
+    """Терпимый разбор ``fps_limit`` дисплея: число -> ``float``, иначе ``DEFAULT_FPS_LIMIT``.
+
+    Отсутствует, ``None``, не число, NaN, ``bool`` -> 30.0. ``0`` проходит как ``0.0``
+    (потолок 60 Гц применяет FramePump). Исключение конфиг не роняет.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return DEFAULT_FPS_LIMIT
+    value = float(raw)
+    return DEFAULT_FPS_LIMIT if math.isnan(value) else value
 
 
 def build_panel_displays(recipe: dict | None) -> list[dict]:
@@ -42,7 +58,7 @@ def build_panel_displays(recipe: dict | None) -> list[dict]:
                 или None.
 
     Returns:
-        Список словарей ``{"id", "label", "enabled", "x", "y"}`` для каждого
+        Список словарей ``{"id", "label", "enabled", "x", "y", "fps_limit"}`` для каждого
         определения дисплея. Пустой список если рецепта/секции displays нет.
         Фильтрацию по enabled и сортировку делает ImagePanelWidget.set_displays.
     """
@@ -69,6 +85,7 @@ def build_panel_displays(recipe: dict | None) -> list[dict]:
                 "enabled": bool(defn.get("enabled", True)),
                 "x": int(position.get("x", 0)),
                 "y": int(position.get("y", 0)),
+                "fps_limit": _parse_fps_limit(defn.get("fps_limit")),
             }
         )
     return result

@@ -47,9 +47,9 @@ class HikvisionCameraPlugin(CameraDevicePlugin):
 
         return driver.BINDINGS
 
-    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame) -> dict:
+    def _build_item(self, seq: int, ts: float, mono: float, raw: RawFrame, cap_ns: int) -> dict:
         """Item ядра, приведённый к `(resolution_height, resolution_width, 3)`: mono8 -> BGR, затем ресайз."""
-        item = super()._build_item(seq, ts, mono, raw)
+        item = super()._build_item(seq, ts, mono, raw, cap_ns)
         frame = item["frame"]
         try:
             if frame.ndim == 2:
