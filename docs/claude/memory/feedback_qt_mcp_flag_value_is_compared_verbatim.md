@@ -28,6 +28,15 @@ metadata:
 Связано: [[named-mechanism-is-not-a-commitment]], [[swallowed-failure-class]],
 [[gui-stand-production-entry-only]], [[observability-tail-repair]].
 
+## Итог 2026-11-22 (ветка chore/qt-mcp-probe-hook)
+
+Класс «молчаливая опечатка» закрыт в коде, а не памятью: `frontend/qt_mcp_probe.py:install_if_enabled` сверяет флаг
+дословно, а непустое значение, не равное `1` и `0`, даёт одно предупреждение «ожидается 1». Битый `QT_MCP_PORT` — тоже
+предупреждение и `False` без отката на 9142 и без падения окна. Старый блок `if os.environ.get("QT_MCP_PROBE") == "1"`
+в `app.py` удалён: путь один. Строка-признак жизни `qt-mcp probe installed on localhost:<порт>` сохранена (теперь
+WARNING и «открытая дверь»). Доказательство — тест с настоящим `qt_mcp.probe` в подпроцессе (ping -> pong на свободном
+порту, занятый порт -> `False`); проводка в `run_gui` юнит-тестом не доказана, нужна живая проверка окна.
+
 ## Слито из feedback_qt_mcp_always_probe (_archive/feedback_qt_mcp_always_probe.md)
 
 Владелец (2026-06-13): при любом запуске прототипа для smoke/проверки ВСЕГДА выставлять `QT_MCP_PROBE=1` — `QT_MCP_PROBE=1 python multiprocess_prototype/run.py <recipe>` (run.py сам re-exec в .venv). Это поднимает qt-mcp probe на порту 9142, чтобы делать qt_snapshot/qt_screenshot реального GUI.

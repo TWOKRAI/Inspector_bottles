@@ -12,9 +12,23 @@ metadata:
 QT_MCP_PROBE=1 python multiprocess_prototype/run.py
 ```
 
-- probe слушает `localhost:9142`, активируется ТОЛЬКО при `QT_MCP_PROBE=1` (см. `frontend/app.py:59-71`, `from qt_mcp.probe import install`). Обычный запуск `run.py` без переменной → probe OFF → qt-mcp «не к чему подключиться» (выглядит как «qt-mcp не настраивается», хотя всё цело).
+- probe слушает `localhost:9142`, активируется ТОЛЬКО при `QT_MCP_PROBE=1` (ставит `frontend/qt_mcp_probe.py`, один вызов из `frontend/app.py:run_gui`; см. итог 2026-11-22 ниже). Обычный запуск `run.py` без переменной → probe OFF → qt-mcp «не к чему подключиться» (выглядит как «qt-mcp не настраивается», хотя всё цело).
 - Проверка живости: `qt_list_windows` → MainWindow; `qt_find_widget pattern=FPS` → StatusLabel с числом.
 - **Флуд `[SocketChannel:backend_ctl] bad line skipped: Expecting value line 1 column 1`** — НЕ про qt-mcp. Это сокет backend-control на порту **8765** (открывается `BACKEND_CTL=1`; в `system.yaml` поставки `backend_ctl.enabled: false`, `port: 8765`), раньше в него прилетал не-JSON; с токеном (ADR-PMM-052) не-JSON от неаутентифицированного клиента — отказ в `_check_hello` (DEBUG), а не WARNING. Сырой TCP без `hello` с токеном получает `auth_required` и закрывается; клиенты сами читают токен из `~/.multiprocess_framework/ctl_<порт>.token` (ADR-PMM-052).
 - **Очистка процессов:** прототип спавнит ~8-9 реальных процессов; `TaskStop` bash-родителя может оставить осиротевшие multiprocessing-дети. Порты PM: 9142 (probe), 8765 (backend_ctl) — если в `netstat -ano` нет 9142, живого инстанса с probe нет (8765 слушается только при старте с `BACKEND_CTL=1`). Глобальный `taskkill /IM python.exe` ЗАПРЕЩЁН (зацепит ollama/qex/сессию) — см. [[feedback_no_global_taskkill]]; чистить по PID через netstat→PID. Контеншн камеры от сирот виден в старт-логе нового инстанса.
 
 Связано: [[feedback_qt_mcp_smoke_verification]] (smoke должен скриншотить PreviewWindow, не только FPS).
+
+## Итог 2026-11-22: один путь, одна пара ручек, громкий отказ
+
+- Ручки — только `QT_MCP_PROBE=1` (включить) и `QT_MCP_PORT` (порт, умолчание 9142): те же имена читают сам `qt_mcp`
+  (`_auto_hook`, `qt_mcp_probe.pth`) и MCP-сервер, поэтому пара «проба и сервер» совпадает сама. Прежние
+  `INSPECTOR_QT_MCP_*` и `QT_MCP_PROBE_PORT/HOST` (неверные имена в SETUP_GUIDE) убраны.
+- Весь код — `multiprocess_prototype/frontend/qt_mcp_probe.py:install_if_enabled`; в `app.py` ровно один вызов.
+  Опечатка флага (`1:9142`, `true`), битый порт, нет пакета, порт занят / нет `QApplication` (`install` вернул `None`),
+  исключение установки — одно предупреждение (module `startup`) и `False`, окно не падает, отката на 9142 нет.
+- Признак жизни прежний: строка `qt-mcp probe installed on localhost:<порт>`, теперь на уровне WARNING и с текстом
+  «ОТКРЫТАЯ ДВЕРЬ: без аутентификации, читает поля паролей, слушает только 127.0.0.1».
+- Нестандартный порт: `QT_MCP_PORT` нужен и приложению, и серверу (`env` записи сервера), иначе сервер смотрит на 9142.
+- Закреплённый запуск сервера — в версионируемом `.claude/plugins/mcp-qt/.claude-plugin/plugin.json`; `.mcp.json`
+  в `.gitignore` и перегенерируется из манифеста.

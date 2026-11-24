@@ -65,14 +65,41 @@ When qt-mcp is active in a project, prefer it over hand-written Qt introspection
 ## Launcher options
 
 **Default** (used automatically by `claude-kit add qt-mcp`): see `.claude-plugin/plugin.json` → `mcpServers.qt-mcp`.
+In this project the manifest pins the launcher (since 2026-11-22):
 
 ```
 command: uvx
-args: ["qt-mcp"]
+args: ["--from", "git+https://github.com/0xCarbon/qt-mcp@24303a69d498417dfcec0223bfaa95964f788c17", "--with", "mcp<2", "qt-mcp"]
 ```
 
-Zero-install via uvx. Requires a Python with PyQt/PySide installed in your target project's environment.
+Why: `qt-mcp` is not on the package registry, so plain `uvx qt-mcp` fails with "not found in the package registry";
+`mcp<2` is needed because the 0.1.0 server imports `mcp.server.fastmcp`, which `mcp 2.x` removed. The pin lives in the
+versioned `plugin.json`; `.mcp.json` is git-ignored and regenerated from the manifest, so a hand edit of `.mcp.json`
+does not survive a regeneration. Bump the pinned commit deliberately, in `plugin.json`.
+
+**Probe in the app** (the part that makes the window visible to the server): the probe is installed inside the `gui`
+process by `multiprocess_prototype/frontend/qt_mcp_probe.py`, one call from `frontend/app.py:run_gui`. The app's Python
+needs `pip install "qt-mcp @ git+https://github.com/0xCarbon/qt-mcp@24303a69d498417dfcec0223bfaa95964f788c17"`.
+
+One pair of env knobs, the same names the `qt_mcp` package and its MCP server read:
+
+| Variable | Meaning |
+|----------|---------|
+| `QT_MCP_PROBE=1` | install the probe; unset / empty / `0` = off. Any other value (`1:9142`, `true`) is a typo: one warning in the `gui` log, probe not installed |
+| `QT_MCP_PORT` | probe port, default 9142 |
+
+A broken `QT_MCP_PORT` (not an integer in 1..65535) or any other failure (package missing, port busy, no
+`QApplication`) gives one warning in the `gui` log and no probe; the window keeps running. Exception: an integer
+outside 1..65535 while `qt_mcp_probe.pth` is active in the venv: `QApplication()` fails earlier than our code
+(`OverflowError` in `qt_mcp.probe._patched_init`), so never set such a port. On success the log line
+`qt-mcp probe installed on localhost:<port>` is written at WARNING level on purpose (see Security).
+The server reads `QT_MCP_PORT` too: for a non-default port set `QT_MCP_PORT` in the `env` of the server entry in
+`.mcp.json` (or in the manifest) as well, otherwise the server looks at 9142 and finds nothing.
+
+**Security (required reading):** the probe has no authentication, reads password fields and listens on 127.0.0.1 only.
+Do not enable it with foreign OS users on the machine or with an open untrusted browser (any local process can talk to the
+port; a web page reaching it is not excluded, not verified).
 
 **Alternative** (pip-installed): see `templates/mcp-config.json.snippet`.
 
-Switching: edit `.mcp.json` manually (it's not regenerated for non-manifest content).
+Switching: edit `.claude-plugin/plugin.json` (the source of truth); `.mcp.json` is regenerated from it.
