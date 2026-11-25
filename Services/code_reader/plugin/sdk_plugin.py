@@ -189,8 +189,9 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         self._applied_trigger: dict[str, Any] = trigger
         self._want_grab = False  # намерение оператора: удачный `_take` ставит, release / shutdown снимают
         self._closed = False  # после shutdown колбэк правки не делает ничего
-        # Отказы узлов режима последнего сеанса, где захват запустился: неудачный `start()` стирает `param_errors`
-        # читателя, а «отказывал до правки» должно переживать такой отказ. Пишет только `_take`.
+        # Отказы узлов режима последнего ПРИНЯТОГО сеанса (захват запустился, и режим не откатывали): неудачный
+        # `start()` стирает `param_errors` читателя, а «отказывал до правки» должно переживать такой отказ.
+        # Пишут `_take` (кроме пробного) и колбэк правки, принявший пробный сеанс.
         self._session_refusals: dict[str, str] = {}
         # Сериализует take_device / release_device / shutdown и колбэк живой правки триггера: колбэк идёт в потоке
         # системного вызывающего `set_field_value` и держит его на остановку и открытие. Колбэки читателя замок
@@ -451,7 +452,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         Решает НАМЕРЕНИЕ, а не живость потока: захват нужен оператору (`_want_grab`) -> остановка и новый `_take`;
         не нужен -> значение только запоминается в `_applied_trigger` и войдёт в следующий `_take`. После
         `shutdown` колбэк не делает ничего. Откат на прежний режим — если отказал узел изменённого поля или узел,
-        который в прошлом сеансе не отказывал; старый отказ чужого узла правку не блокирует. Поток захвата не
+        который в последнем принятом сеансе не отказывал; старый отказ чужого узла правку не блокирует. Поток захвата не
         вышел в срок -> повторов нет, оператору сказано взять прибор заново. Здоровье снимает только
         `_sync_health`. Колбэк держит поток вызывающего до остановки и открытия; параллельный `take_device`
         ждёт `_trigger_lock`. Значения поля в журнал и `last_error` не попадают.
@@ -484,11 +485,12 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                     self._mark_apply_failed(field, f"{_TRIGGER_ERROR} field={field} {_RETAKE}")
                     return
                 self._applied_trigger = new
-                result = self._take(report=False)
+                result = self._take(report=False, trial=True)
                 if result["status"] == "ok":
                     # `start()` отвечает True и при отказе узла режима: причина живёт в `param_errors`.
                     refused = self._trigger_refusals()
                     if _TRIGGER_FIELD_NODES[field] not in refused and set(refused) <= set(previous):
+                        self._session_refusals = refused  # пробный сеанс принят
                         if refused:
                             self._ctx.log_warning(
                                 f"{head} restarted=True applied=True param_errors={_refusal_text(refused)} "
@@ -611,11 +613,12 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         with self._trigger_lock:
             return self._take()
 
-    def _take(self, *, report: bool = True) -> dict:
+    def _take(self, *, report: bool = True, trial: bool = False) -> dict:
         """Тело `take_device`; зовётся под `_trigger_lock` (команда и колбэк живой правки).
 
         Поток захвата мёртв -> читатель получает `_applied_trigger` ДО `start()` (единственное место). `report` —
         сказать об отказах узлов нового сеанса (ERROR, degraded, `last_error`); колбэк правки говорит сам.
+        `trial` — сеанс с новым режимом ещё могут откатить: его отказы в `_session_refusals` не попадают.
         """
         fresh = not self._reader.stats()["device_held"]
         if fresh:
@@ -630,8 +633,9 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         if ok:
             self._want_grab = True
             self._drop_not_running_tails()
-            self._session_refusals = self._trigger_refusals()
-            refused = self._session_refusals if report and fresh else {}
+            if not trial:
+                self._session_refusals = self._trigger_refusals()
+            refused = self._trigger_refusals() if report and fresh else {}
             if refused:
                 text = _refusal_text(refused)
                 self._ctx.log_error(

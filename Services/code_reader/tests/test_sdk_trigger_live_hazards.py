@@ -558,3 +558,27 @@ def test_applied_with_old_refusals_replaces_applied_false_error(make_rig):
     assert "TriggerSource:" not in last_error
     assert last_error in rig.proxy.seen("last_error"), "замена не дошла до дерева состояния"
     assert _health_status(rig) == "degraded"
+
+
+def test_refusal_of_rolled_back_session_is_not_old(make_rig):
+    api = _RefuseOpenNApi(refuse_open_numbers=(3,))
+    rig = _grabbing_rig(make_rig, api, trigger_mode="On", trigger_source="SelfTrigger", trigger_period_ms=40)
+    assert _health_status(rig) == "ok"
+    api.fail.update(_refused(P, "set_int"))  # период начал отказывать уже после чистой загрузки
+    assert rig.register_update("trigger_source", "Line0")["success"] is True  # открытие 2 удачно, откат отказан
+    assert rig.opens() == 3
+    assert _status(rig)["device_held"] is False
+
+    assert rig.register_update("trigger_mode", "Off")["success"] is True
+
+    assert rig.apply_msgs("WARNING") == [], "отказ из отвергнутого сеанса сочтён старым"
+    errors = rig.apply_msgs("ERROR")
+    assert len(errors) == 2, rig.apply_msgs()
+    assert errors[1].startswith(
+        f"{PREFIX}trigger_mode policy=restart restarted=True applied=False param_errors=TriggerSelfTriggerPeriod: "
+    )
+    assert errors[1].endswith(" fallback=old ok=True")
+    assert rig.opens() == 5
+    assert ("set_enum_str", S, "SelfTrigger") in _nodes_written_after(api, 5)
+    assert _status(rig)["last_error"] == "trigger apply: field=trigger_mode applied=False"
+    assert _health_status(rig) == "degraded"
