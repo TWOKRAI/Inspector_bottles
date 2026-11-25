@@ -8,7 +8,8 @@
 - номера кадров и триггера прошлого цикла — не опора нового: разрыв через `opening` не считается потерей, а
   накопленные счётчики на `opening` не обнуляются;
 - порт без `device_info` (заглушка) даёт строку с прочерками и `identity: None`;
-- `identity` переживает перезахват внутри `grabbing` и становится `None` после `release` и при отказе открытия.
+- `identity` переживает перезахват внутри `grabbing` и становится `None` после `release` и при отказе открытия;
+  следующий цикл, чей порт личности не даёт, не наследует личность прошлого.
 
 Стенд как у `test_identity_stream_contract.py`, но свой: настоящие `CameraDevicePlugin`, `PluginContext` над
 `MockProcessServices`, настоящий `WorkerManager`; подменены `plugin_base.create_port`, `state_proxy` и
@@ -109,6 +110,19 @@ class _NoInfoPort:
     def __getattr__(self, name: str):
         if name == "device_info":
             raise AttributeError(name)
+        return getattr(self._inner, name)
+
+
+class _ForgetfulPort:
+    """Порт, чей `device_info` после `forget = True` отвечает `None`: личность в одном цикле есть, в следующем нет."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.forget = False
+
+    def __getattr__(self, name: str):
+        if name == "device_info" and self.forget:
+            return None
         return getattr(self._inner, name)
 
 
@@ -435,3 +449,20 @@ def test_identity_none_after_refusal(make):
     assert rig.fake.device_info is None
     assert all(value is None for value in rig.proxy.merged("identity"))
     assert rig.log_msgs("INFO", OPENED) == []
+
+
+def test_identity_not_inherited_by_next_grabbing_without_device_info(make):
+    """Охраняет: сброс на `opening` — личность цикла 1 не выдаётся за личность цикла 2, где порт её не даёт."""
+    rig = make(wrap=_ForgetfulPort, enum_entries=(IN_NET,))
+    assert rig.take()["status"] == "ok"
+    assert rig.drive_until(lambda: any(value is not None for value in rig.proxy.merged("identity")))
+    assert rig.proxy.merged("identity")[-1]["serial"] == "DA1689923"
+    assert rig.release()["status"] == "ok"
+    assert rig.drive_until(lambda: rig.state() == "closed" and rig.proxy.merged("identity")[-1] is None)
+
+    rig.port.forget = True  # цикл 2: порт открывается, но личности не даёт
+    assert rig.take()["status"] == "ok"
+    assert rig.drive_until(lambda: rig.state() == "grabbing"), rig.proxy.merged("state")
+    rig.drive(0.3)  # несколько окон тика в `grabbing`: подстановке прошлой личности есть где сработать
+    assert rig.state() == "grabbing"
+    assert rig.proxy.merged("identity")[-1] is None
