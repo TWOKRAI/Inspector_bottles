@@ -279,24 +279,32 @@ class MvsPort:
         rc = cam.MV_CC_CreateHandle(entry.info)
         if rc != 0:
             raise _err(rc, "create_handle")
-        rc = cam.MV_CC_OpenDevice()
-        if rc != 0:
-            cam.MV_CC_DestroyHandle()
-            raise _err(rc, "open")
-        self._cam = cam
-        self._state = "opened"
-        del dev_list  # структуры больше не нужны: handle создан
-        if "exception_cb" in self.capabilities:
-            callback = EXCEPTION_CALLBACK(self._on_exception)
-            rc = cam.MV_CC_RegisterExceptionCallBack(callback, None)
-            if rc == 0:
-                self._exception_cb = callback
+        # Handle создан: любое исключение дальше (не только код возврата: `ctypes` бросает `OSError`) обязано его
+        # освободить, иначе порт остался бы `opened`, и каждое следующее открытие отвечало бы `other` до перезапуска.
+        try:
+            rc = cam.MV_CC_OpenDevice()
+            if rc != 0:
+                raise _err(rc, "open")
+            self._cam = cam
+            self._state = "opened"
+            del dev_list  # структуры больше не нужны: handle создан
+            if "exception_cb" in self.capabilities:
+                callback = EXCEPTION_CALLBACK(self._on_exception)
+                rc = cam.MV_CC_RegisterExceptionCallBack(callback, None)
+                if rc == 0:
+                    self._exception_cb = callback
+                else:
+                    logger.warning(
+                        "RegisterExceptionCallBack rc=0x%08X: события прибора не будут доходить", rc & 0xFFFFFFFF
+                    )
+            pixel_format, width, height = self._read_format()  # один раз на открытие, не в `get_frame`
+            self.device_info = replace(info, pixel_format=pixel_format, width=width, height=height)
+        except BaseException:
+            if self._cam is cam:
+                self.close()  # прибор открыт: `CloseDevice` и `DestroyHandle`, порт снова `closed`
             else:
-                logger.warning(
-                    "RegisterExceptionCallBack rc=0x%08X: события прибора не будут доходить", rc & 0xFFFFFFFF
-                )
-        pixel_format, width, height = self._read_format()  # один раз на открытие, не в `get_frame`
-        self.device_info = replace(info, pixel_format=pixel_format, width=width, height=height)
+                cam.MV_CC_DestroyHandle()  # прибор не открылся: освобождать только handle
+            raise
 
     @staticmethod
     def _select(ident: DeviceIdentity, entries: list[_Entry]) -> tuple[_Entry, DeviceInfo]:

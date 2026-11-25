@@ -62,12 +62,14 @@ def _cam_cls(
     """Класс-фейк с перечислением `infos`; `cls.handled` — `nNetExport` структур, ушедших в `CreateHandle`.
 
     `frame_meta` — `(nLostPacket, nTriggerIndex)` по кадрам; `cls.open_rc` меняется тестом между открытиями.
+    `cls.raise_on` — имя вызова SDK, который бросает `OSError` (вместо кода возврата).
     """
     base = make_fake_cam_cls()
 
     class Cam(base):
         handled: list[int] = []
         open_rc = 0
+        raise_on: str | None = None
 
         def __init__(self) -> None:
             super().__init__()
@@ -89,9 +91,26 @@ def _cam_cls(
             self._journal("MV_CC_CreateHandle", ())
             return 0
 
+        def _maybe_raise(self, name: str) -> None:
+            if Cam.raise_on == name:
+                raise OSError(f"{name}: нарушение доступа")
+
         def MV_CC_OpenDevice(self, nAccessMode=1, nSwitchoverKey=0):
             self._journal("MV_CC_OpenDevice", ())
+            self._maybe_raise("MV_CC_OpenDevice")
             return Cam.open_rc
+
+        def MV_CC_RegisterExceptionCallBack(self, cbException, pUser=None):
+            self._maybe_raise("MV_CC_RegisterExceptionCallBack")
+            return super().MV_CC_RegisterExceptionCallBack(cbException, pUser)
+
+        def MV_CC_GetEnumValue(self, strKey, stEnumValue):
+            self._maybe_raise("MV_CC_GetEnumValue")
+            return super().MV_CC_GetEnumValue(strKey, stEnumValue)
+
+        def MV_CC_GetIntValueEx(self, strKey, stIntValue):
+            self._maybe_raise("MV_CC_GetIntValueEx")
+            return super().MV_CC_GetIntValueEx(strKey, stIntValue)
 
         def MV_CC_GetImageBuffer(self, stFrame, nMsec):
             rc = super().MV_CC_GetImageBuffer(stFrame, nMsec)
@@ -217,3 +236,32 @@ def test_get_frame_passes_lost_packets_and_trigger_index():
     second = port.get_frame(100)
     assert second.lost_packets == 0
     assert second.trigger_index == 7
+
+
+@pytest.mark.parametrize("call", ["MV_CC_RegisterExceptionCallBack", "MV_CC_GetEnumValue", "MV_CC_GetIntValueEx"])
+def test_sdk_exception_after_open_device_closes_and_allows_reopen(call):
+    """Исключение SDK после `OpenDevice`: прибор закрыт, handle уничтожен, следующее открытие проходит."""
+    cam_cls = _cam_cls([_gige(HOST_IN_NET)])
+    port = make_port(cam_cls)
+    cam_cls.raise_on = call
+    with pytest.raises(OSError):
+        port.open(IDENT)
+    assert _names(cam_cls)[-2:] == ["MV_CC_CloseDevice", "MV_CC_DestroyHandle"]
+    assert port.device_info is None
+    cam_cls.raise_on = None
+    port.open(IDENT)  # порт не остался в `opened`: иначе `PortError("other","open")` до перезапуска процесса
+    assert port.device_info.serial == "DA1689923"
+
+
+def test_sdk_exception_in_open_device_destroys_handle():
+    """Исключение самого `OpenDevice`: прибор не открыт, но handle уже создан и должен быть уничтожен."""
+    cam_cls = _cam_cls([_gige(HOST_IN_NET)])
+    port = make_port(cam_cls)
+    cam_cls.raise_on = "MV_CC_OpenDevice"
+    with pytest.raises(OSError):
+        port.open(IDENT)
+    assert _names(cam_cls)[-1] == "MV_CC_DestroyHandle"
+    assert "MV_CC_CloseDevice" not in _names(cam_cls)
+    cam_cls.raise_on = None
+    port.open(IDENT)
+    assert port.device_info.serial == "DA1689923"
