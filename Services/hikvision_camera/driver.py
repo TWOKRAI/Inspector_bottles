@@ -18,16 +18,18 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from Services.camera_device.interface import (
     Binding,
     DeviceIdentity,
+    DeviceInfo,
     ErrorKind,
     ParamInfo,
     PortError,
     RawFrame,
+    select_device,
 )
 from Services.hikvision_camera.sdk import bindings as _bindings
 from Services.hikvision_camera.sdk.bindings import EXCEPTION_CALLBACK, MvCamera
@@ -133,20 +135,40 @@ def _ip_text(n: int) -> str:
     return f"{(n >> 24) & 0xFF}.{(n >> 16) & 0xFF}.{(n >> 8) & 0xFF}.{n & 0xFF}"
 
 
+def _mac_text(high: int, low: int) -> str:
+    """MAC из пары слов SDK: `high` — 2 старших байта, `low` — 4 младших; строчными, через `:`."""
+    value = ((high & 0xFFFF) << 32) | (low & 0xFFFFFFFF)
+    return ":".join(f"{(value >> shift) & 0xFF:02x}" for shift in range(40, -1, -8))
+
+
 @dataclass(frozen=True)
 class _Entry:
-    """Прибор из перечисления: серийный номер, IP (GigE), модель и структура для `CreateHandle`."""
+    """Прибор из перечисления: серийный номер, IP (GigE), модель и структура для `CreateHandle`.
+
+    `mask`, `host_ip` (IP сетевой карты хоста, с которой прибор виден), `mac` есть только у GigE; у USB — `""`.
+    """
 
     serial: str
     ip: str
     model: str
     info: MV_CC_DEVICE_INFO
+    mask: str = ""
+    host_ip: str = ""
+    mac: str = ""
 
 
 def _entry_from_info(info: MV_CC_DEVICE_INFO) -> _Entry:
     if info.nTLayerType == MV_GIGE_DEVICE:
         gi = info.SpecialInfo.stGigEInfo
-        return _Entry(_text(gi.chSerialNumber), _ip_text(gi.nCurrentIp), _text(gi.chModelName), info)
+        return _Entry(
+            _text(gi.chSerialNumber),
+            _ip_text(gi.nCurrentIp),
+            _text(gi.chModelName),
+            info,
+            mask=_ip_text(gi.nCurrentSubNetMask),
+            host_ip=_ip_text(gi.nNetExport),
+            mac=_mac_text(info.nMacAddrHigh, info.nMacAddrLow),
+        )
     if info.nTLayerType == MV_USB_DEVICE:
         ui = info.SpecialInfo.stUsb3VInfo
         return _Entry(_text(ui.chSerialNumber), "", _text(ui.chModelName), info)
@@ -206,6 +228,7 @@ class MvsPort:
         self._cam_cls = cam_cls
         self.sdk = MvsSdk(cam_cls, available)
         self.capabilities: frozenset[str] = CAPABILITIES
+        self.device_info: DeviceInfo | None = None  # личность открытого прибора: ставит `open`, снимает `close`
         self.exceptions: queue.SimpleQueue[int] = queue.SimpleQueue()  # коды `nMsgType` из потока SDK
         self._cam: Any = None
         self._state = "closed"
@@ -229,13 +252,29 @@ class MvsPort:
             raise _err(rc, where)
         return entry.chSymbolic.decode("ascii", errors="replace")
 
+    def _read_format(self) -> tuple[str, int, int]:
+        """Формат и размер открытого прибора; отказ чтения оставляет `""`/0, `open` из-за него не падает."""
+        cam = self._cam
+        pixel_format, width, height = "", 0, 0
+        pixel = MVCC_ENUMVALUE()
+        if cam.MV_CC_GetEnumValue("PixelFormat", pixel) == 0:
+            code = int(pixel.nCurValue)
+            pixel_format = _PIXEL_FORMATS.get(code, (f"pixel_0x{code & 0xFFFFFFFF:08x}", 0))[0]
+        node = MVCC_INTVALUE_EX()
+        if cam.MV_CC_GetIntValueEx("Width", node) == 0:
+            width = int(node.nCurValue)
+        node = MVCC_INTVALUE_EX()
+        if cam.MV_CC_GetIntValueEx("Height", node) == 0:
+            height = int(node.nCurValue)
+        return pixel_format, width, height
+
     # -- DevicePort ----------------------------------------------------------------------------
 
     def open(self, ident: DeviceIdentity) -> None:
         if self._state != "closed":
             raise PortError("other", "open")
         dev_list, entries = _enumerate(self._cam_cls, "open")
-        entry = self._select(ident, entries)
+        entry, info = self._select(ident, entries)  # отказ выбора — до `CreateHandle`
         cam = self._cam_cls()
         rc = cam.MV_CC_CreateHandle(entry.info)
         if rc != 0:
@@ -256,25 +295,17 @@ class MvsPort:
                 logger.warning(
                     "RegisterExceptionCallBack rc=0x%08X: события прибора не будут доходить", rc & 0xFFFFFFFF
                 )
+        pixel_format, width, height = self._read_format()  # один раз на открытие, не в `get_frame`
+        self.device_info = replace(info, pixel_format=pixel_format, width=width, height=height)
 
     @staticmethod
-    def _select(ident: DeviceIdentity, entries: list[_Entry]) -> _Entry:
-        if ident.kind == "serial":
-            found = [e for e in entries if e.serial == ident.value]
-        elif ident.kind == "ip":
-            found = [e for e in entries if e.ip == ident.value]
-        elif ident.kind == "index":
+    def _select(ident: DeviceIdentity, entries: list[_Entry]) -> tuple[_Entry, DeviceInfo]:
+        """Запись перечисления под личность (`select_device`: дубли разводит подсеть камеры) и её `DeviceInfo`."""
+        if ident.kind == "index":
             logger.warning("open по index=%s: порядок перечисления не стабилен, используйте serial или ip", ident.value)
-            try:
-                position = int(ident.value)
-            except ValueError:
-                raise PortError("not_found", "open") from None
-            found = entries[position : position + 1] if position >= 0 else []
-        else:
-            found = []
-        if not found:
-            raise PortError("not_found", "open")
-        return found[0]
+        infos = [DeviceInfo(e.serial, e.model, e.ip, e.mask, e.host_ip, e.mac) for e in entries]
+        index, info = select_device(ident, infos)
+        return entries[index], info
 
     def get_param(self, b: Binding) -> object:
         self._require_opened("get_param")
@@ -402,11 +433,24 @@ class MvsPort:
             # Копия до освобождения буфера; хвост дополнения кадра (frame_len > h*w*bpp) отрезается.
             data = bytearray(ctypes.string_at(out.pBufAddr, size))
             frame_num = int(info.nFrameNum)
+            lost_packets = int(info.nLostPacket)
+            # 0 -> None (ГИПОТЕЗА по поведению MVS, по документации SDK не проверена): без chunk-данных индекс 0 на
+            # каждом кадре; `None` не ставит опору, первый настоящий индекс не даёт ложного разрыва от нуля.
+            trigger_index = int(info.nTriggerIndex) or None
         finally:
             free_rc = cam.MV_CC_FreeImageBuffer(out)
             if free_rc != 0:
                 logger.warning("FreeImageBuffer rc=0x%08X", int(free_rc) & 0xFFFFFFFF)
-        return RawFrame(data=data, width=width, height=height, pixel_format=name, frame_num=frame_num, extras={})
+        return RawFrame(
+            data=data,
+            width=width,
+            height=height,
+            pixel_format=name,
+            frame_num=frame_num,
+            extras={},
+            lost_packets=lost_packets,
+            trigger_index=trigger_index,
+        )
 
     def stop_grabbing(self) -> None:
         if self._state != "grabbing":
@@ -420,6 +464,7 @@ class MvsPort:
         self.stop_grabbing()
         cam, self._cam = self._cam, None
         self._state = "closed"
+        self.device_info = None
         if cam is None:
             return
         rc = cam.MV_CC_CloseDevice()
