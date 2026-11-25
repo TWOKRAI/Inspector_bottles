@@ -7,6 +7,9 @@
 Опции: `neter_after_stop`, `applied_but_error` (`bool | frozenset[str]`), `busy_for_s`, `capabilities`;
 для сеанса (Task 2.1): `open_delay_s`, `frame_period_s`, `get_frame_hang_s` (+ `arm_hang`), `get_frame_errors`,
 `get_frame_script`, `read_offset` (умолчания сохраняют поведение 1.5).
+Личность и поток (W1-a): `device_info` (`None` до `open` и после `close`), `enum_entries` (записи перечисления:
+`enum_devices` отдаёт их, `open` выбирает через `select_device`; `None` — один прибор, `open` не отказывает) и
+`frame_meta` (`(frame_num, lost_packets, trigger_index)` для первых отданных кадров после `start_grabbing`).
 Журнал вызовов `FakePort.calls` — список `(имя, args, threading.get_ident())`; пишется ДО проверок
 состояния, поэтому отказ тоже виден. Фейковый `DeviceSdk` пишет в тот же журнал.
 Счётчики открытых дескрипторов (Task 2.4a): `open_handles` (+1 после успешного `open`, -1 в `close`, если порт
@@ -20,15 +23,17 @@ import json
 import math
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from Services.camera_device.interface import (
     Binding,
     DeviceIdentity,
+    DeviceInfo,
     ParamInfo,
     PortError,
     RawFrame,
+    select_device,
 )
 
 SCHEMA_VERSION = 1
@@ -155,8 +160,9 @@ def _load_nodes(path: str | Path) -> dict[str, _Node]:
 class _FakeSdk:
     """Фейковый `DeviceSdk`: счётчик ссылок, один прибор `FAKE-0001`; пишет в журнал порта."""
 
-    def __init__(self, journal) -> None:
+    def __init__(self, journal, enum_entries: tuple[DeviceInfo, ...] | None = None) -> None:
         self._journal = journal
+        self._enum_entries = enum_entries
         self.refs = 0
         # `acquire`/`release` приходят из потока команды плагина и из потока-владельца: `+= 1` без замка теряет счёт
         self._refs_lock = threading.Lock()
@@ -175,6 +181,8 @@ class _FakeSdk:
 
     def enum_devices(self) -> list[DeviceIdentity]:
         self._journal("enum_devices", ())
+        if self._enum_entries is not None:  # по записи на строку перечисления, порядок записей
+            return [DeviceIdentity("serial", e.serial, e.model) for e in self._enum_entries]
         return [DeviceIdentity("serial", FAKE_SERIAL)]
 
 
@@ -195,14 +203,20 @@ class FakePort:
         get_frame_errors: int = 0,
         get_frame_script: tuple[str, ...] = (),
         read_offset: dict[str, float] | None = None,
+        enum_entries: tuple[DeviceInfo, ...] | None = None,
+        frame_meta: tuple[tuple[int, int, int | None], ...] = (),
     ) -> None:
         script = ("err",) * get_frame_errors + tuple(get_frame_script)
         unknown = sorted(set(script) - SCRIPT_STEPS)
         if unknown:
             raise ValueError(f"неизвестные шаги get_frame_script: {unknown}; допустимы {sorted(SCRIPT_STEPS)}")
         self.capabilities: frozenset[str] = frozenset(capabilities)
+        self.device_info: DeviceInfo | None = None  # ставит `open`, снимает `close`
         self.calls: list[tuple[str, tuple, int]] = []
-        self.sdk = _FakeSdk(self._record)
+        self.sdk = _FakeSdk(self._record, enum_entries)
+        self._enum_entries = enum_entries
+        self._frame_meta = tuple(frame_meta)
+        self._delivered = 0  # кадры, ОТДАННЫЕ с последнего `start_grabbing` (шаги `err`/`none` не в счёт)
         self._nodes = nodes
         self._neter_after_stop = neter_after_stop
         self._applied_but_error = applied_but_error
@@ -284,6 +298,19 @@ class FakePort:
             raise PortError("busy", "open")
         if self._state != "closed":
             raise PortError("other", "open")
+        if self._enum_entries is None:  # один прибор: открывается по любой личности, отказов выбора нет
+            info = DeviceInfo(
+                serial=ident.value if ident.kind == "serial" else FAKE_SERIAL,
+                ip=ident.value if ident.kind == "ip" else "",
+            )
+        else:  # отказ выбора летит наружу, порт остаётся `closed`
+            _, info = select_device(ident, self._enum_entries)
+        self.device_info = replace(
+            info,
+            pixel_format=info.pixel_format or FRAME_PIXEL_FORMAT,
+            width=info.width or FRAME_WIDTH,
+            height=info.height or FRAME_HEIGHT,
+        )
         self._state = "opened"
         with self._handles_lock:
             self.open_handles += 1
@@ -343,6 +370,7 @@ class FakePort:
             return
         self._state = "grabbing"
         self._frame_num = 0
+        self._delivered = 0
         self._get_frame_calls = 0
         self._next_frame_at = time.perf_counter() + self._frame_period_s
 
@@ -362,7 +390,12 @@ class FakePort:
             return None
         if self._frame_period_s > 0 and step is None and not hung and not self._wait_next_frame(timeout_ms):
             return None
-        self._frame_num += 1
+        if self._delivered < len(self._frame_meta):
+            self._frame_num, lost_packets, trigger_index = self._frame_meta[self._delivered]
+        else:  # без сценария (или после него): следующий номер за последним отданным
+            self._frame_num += 1
+            lost_packets, trigger_index = 0, None
+        self._delivered += 1
         return RawFrame(
             data=bytearray(range(8)),
             width=FRAME_WIDTH,
@@ -370,6 +403,8 @@ class FakePort:
             pixel_format=FRAME_PIXEL_FORMAT,
             frame_num=self._frame_num,
             extras={},
+            lost_packets=lost_packets,
+            trigger_index=trigger_index,
         )
 
     def _wait_next_frame(self, timeout_ms: int) -> bool:
@@ -402,6 +437,7 @@ class FakePort:
         self._record("close", ())
         was_open = self._state != "closed"
         self._state = "closed"
+        self.device_info = None
         self._neter_active = False
         if was_open:
             with self._handles_lock:
@@ -420,6 +456,8 @@ def make_port(
     get_frame_errors: int = 0,
     get_frame_script: tuple[str, ...] = (),
     read_offset: dict[str, float] | None = None,
+    enum_entries: tuple[DeviceInfo, ...] | None = None,
+    frame_meta: tuple[tuple[int, int, int | None], ...] = (),
 ) -> FakePort:
     """Фейк с узлами по умолчанию."""
     return FakePort(
@@ -434,6 +472,8 @@ def make_port(
         get_frame_errors=get_frame_errors,
         get_frame_script=get_frame_script,
         read_offset=read_offset,
+        enum_entries=enum_entries,
+        frame_meta=frame_meta,
     )
 
 
@@ -450,6 +490,8 @@ def from_recording(
     get_frame_errors: int = 0,
     get_frame_script: tuple[str, ...] = (),
     read_offset: dict[str, float] | None = None,
+    enum_entries: tuple[DeviceInfo, ...] | None = None,
+    frame_meta: tuple[tuple[int, int, int | None], ...] = (),
 ) -> FakePort:
     """Фейк с узлами из записи (относительный путь читается от cwd; тесты идут из корня репозитория)."""
     return FakePort(
@@ -464,4 +506,6 @@ def from_recording(
         get_frame_errors=get_frame_errors,
         get_frame_script=get_frame_script,
         read_offset=read_offset,
+        enum_entries=enum_entries,
+        frame_meta=frame_meta,
     )
