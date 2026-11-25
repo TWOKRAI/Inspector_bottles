@@ -445,3 +445,42 @@ def test_reopen_without_first_frame_retries_when_silence_off(rig):
     )
     assert session.state == "lost"
     assert session.link()["outages"] == 1
+
+
+# ---------------------------------------------------------------------------------------------- #
+# Ревью стадии 5, раунд 2 (находка 1)
+# ---------------------------------------------------------------------------------------------- #
+
+
+def test_first_frame_bound_is_silence_when_silence_set(rig):
+    """Раунд 2, находка 1: `link_silence_s 10`, первый кадр через 4 с после переоткрытия — связь вернулась.
+
+    Предел 3 с действует только при выключенной тишине; при `0 < link_silence_s` ожидание ограничивает само правило
+    тишины свободного потока (`link_silence_s`).
+    """
+    port, session = rig.make(silence=10.0)
+    rig.grab(session)
+    original_get_frame = port.get_frame
+    original_start = port.start_grabbing
+    quiet_until = {"t": 0.0}
+
+    def late_get_frame(timeout_ms: int) -> Any:
+        if time.monotonic() < quiet_until["t"]:
+            time.sleep(timeout_ms / 1000.0)
+            return None
+        return original_get_frame(timeout_ms)
+
+    def start_late_frames() -> None:
+        original_start()
+        quiet_until["t"] = time.monotonic() + 4.0  # каждый переоткрытый поток молчит 4 с
+
+    port.get_frame = late_get_frame
+    port.start_grabbing = start_late_frames
+    port.emit_link_event("disconnected")
+    _await(lambda: "lost" in rig.states, "переход в lost по событию", seen=lambda: list(rig.states))
+
+    _await(
+        lambda: session.state == "grabbing", "grabbing после первого кадра через 4 с", 9.0, seen=lambda: session.link()
+    )
+    assert session.link()["attempts"] == 1
+    assert session.link()["outages"] == 1

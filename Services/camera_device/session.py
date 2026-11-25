@@ -418,7 +418,7 @@ class DeviceSession:
         """
         return self._enqueue(fn) is not None
 
-    def call(self, fn: Callable[[], Any], timeout: float) -> tuple[bool, Any]:
+    def call(self, fn: Callable[[], Any], timeout: float, *, while_reconnecting: bool = False) -> tuple[bool, Any]:
         """`fn` в потоке-владельце и ожидание ответа: `(True, результат)` либо `(False, текст отказа)`.
 
         По сроку, пока владелец `fn` не взял, команда отменяется (не исполнится и позже), ответ `(False, "срок")`; если
@@ -430,7 +430,9 @@ class DeviceSession:
             return False, "вызов из потока владельца"
         # В ящик идёт обёртка `_port_call("call", fn)`: она выставляет `_current`, и сторож видит зависший `fn`. Именно
         # здесь, а не в `_execute`: вложенный `_port_call` из `_drain` сбросил бы `_current` внешнего вызова.
-        cmd = self._enqueue(lambda: self._port_call("call", fn))
+        # `while_reconnecting` — команда без открытого порта (перечисление): принимается и при переподключении,
+        # владелец исполнит её между попытками; команды порта при переподключении отказываются, как раньше
+        cmd = self._enqueue(lambda: self._port_call("call", fn), while_reconnecting)
         if cmd is None:
             return False, "сеанс не в захвате"
         if cmd.done.wait(timeout):
@@ -463,6 +465,10 @@ class DeviceSession:
             merged = self._reconnecting
             if merged:  # `_replace_in_run` — чистая функция от `self._run` и шагов: под замком из любого потока
                 self._run = self._replace_in_run(steps)
+                # повтор мог уже поставить в `_drain` шаги этих полей со значением снимка: они не перепишут новое
+                for step in steps:
+                    if step.field in self._pending:
+                        self._pending[step.field] = (step, self._pending[step.field][1])
                 accepted = True
             else:
                 accepted = self._state in ("opening", "grabbing") and not self._box.closed
@@ -477,10 +483,10 @@ class DeviceSession:
         elif not accepted:
             logger.info("apply policy=%s: цикл не идёт, правка не принята (значения войдут в план run)", policy)
 
-    def _enqueue(self, fn: Callable[[], Any]) -> _Cmd | None:
-        """Команда в ящик: в `grabbing` и при переподключении (владелец исполняет её и между попытками)."""
+    def _enqueue(self, fn: Callable[[], Any], while_reconnecting: bool = False) -> _Cmd | None:
+        """Команда в ящик: в `grabbing`; с `while_reconnecting` — и при переподключении (исполнится между попытками)."""
         with self._lock:
-            if self._box.closed or not (self._state == "grabbing" or self._reconnecting):
+            if self._box.closed or not (self._state == "grabbing" or (while_reconnecting and self._reconnecting)):
                 return None
             cmd = _Cmd(fn)
             self._box.cmds.append(cmd)
@@ -1039,8 +1045,10 @@ class DeviceSession:
                 reason = "событие прибора disconnected"
             elif self._link_silence_s > 0 and now - last_frame >= self._link_silence_s:
                 reason, last_probe = self._silence(now, now - last_frame, last_probe)
-            elif self._awaiting_frame and now - last_frame >= _FIRST_FRAME_WAIT_S:
-                # правило тишины выключено (0): ожидание первого кадра после переоткрытия всё равно конечно
+            elif self._awaiting_frame and self._link_silence_s <= 0 and now - last_frame >= _FIRST_FRAME_WAIT_S:
+                # правило тишины выключено (0): ожидание первого кадра после переоткрытия всё равно конечно. При
+                # `0 < link_silence_s` его ограничивает ветка выше: ждёт кадра только свободный поток, а у него
+                # тишина `link_silence_s` — потеря сразу (проба не спрашивается)
                 reason = f"нет первого кадра {now - last_frame:.1f} с после переоткрытия"
             if reason is None:
                 self._box_ran = False

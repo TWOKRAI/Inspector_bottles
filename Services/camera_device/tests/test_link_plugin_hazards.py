@@ -277,3 +277,102 @@ def test_take_with_new_identity_restarts_reconnect_cycle(make):
     second = rig.take()
     assert second["status"] == "error"
     assert second["device_state"] == "not_found"
+
+
+# ---------------------------------------------------------------------------------------------- #
+# Ревью стадии 5, раунд 2 (находки 2, 3, 4, 5)
+# ---------------------------------------------------------------------------------------------- #
+
+_NOT_GRABBING = {"success": False, "error": "сеанс не в захвате"}
+
+
+def _errors(rig: _Rig) -> int:
+    return sum(1 for e in list(rig.services.logs) if e["level"] == "ERROR")
+
+
+def test_describe_params_refused_while_reconnecting(make):
+    """Раунд 2, находка 2: при переподключении `describe_params` — прежний отказ, не `success` с `null`."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True)
+    assert rig.take()["status"] == "error"
+
+    assert _call(lambda: rig.plugin.cmd_describe_params({})) == _NOT_GRABBING
+
+
+def test_trigger_software_refused_quietly_while_reconnecting(make):
+    """Раунд 2, находка 4: `trigger_software` при переподключении — тихий отказ, ни одной новой ERROR."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True)
+    assert rig.take()["status"] == "error"
+    before = _errors(rig)
+
+    replies = [_call(lambda: rig.plugin.cmd_trigger_software({})) for _ in range(3)]
+    time.sleep(1.2)  # две паузы между попытками: команда, попавшая в ящик, уже исполнилась бы
+
+    assert replies == [_NOT_GRABBING] * 3
+    assert _errors(rig) == before
+
+
+def test_take_with_new_identity_when_stop_times_out_refuses_explicitly(make):
+    """Раунд 2, находка 3: новая личность, а `stop()` прежнего цикла истёк — явный отказ, лога перезапуска нет."""
+    port = fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01, open_delay_s=2.0)
+    rig = make(port, reconnect=True)
+    assert rig.take()["status"] == "error"
+    entered = threading.Event()
+    original_open = port.open
+
+    def watched_open(ident: Any) -> None:
+        entered.set()
+        original_open(ident)
+
+    port.open = watched_open
+    assert entered.wait(5.0), "повтор open не начался"
+    rig.plugin._reg.device_serial = "OTHER-0009"
+
+    reply = rig.take(timeout_s=0.2)  # владелец ещё ~2 с в open повтора
+
+    assert reply["status"] == "error"
+    assert reply["error"] == "прежний цикл ещё останавливается, повторите take_device"
+    assert rig.lines("INFO", "CameraDevicePlugin: take_device: личность прибора сменилась, цикл перезапускается") == []
+
+
+def test_slow_call_before_drain_keeps_newest_edit(make):
+    """Раунд 2, находка 5: медленный `list_devices` в ящике перед `_drain` повтора и правка в это время —
+    в приборе остаётся НОВОЕ значение, а не значение снимка плана."""
+    from Services.camera_device.params import Step
+    from Services.camera_device.testing.fake_port import FAKE_BINDINGS
+
+    port = fake_port.make_link_event_port(frame_period_s=0.01)
+    rig = make(port, reconnect=True, trigger_managed=True, trigger_mode="Off")  # свободный поток: ждёт кадр
+    assert rig.take()["status"] == "ok"
+    session = rig.plugin._session
+    original_start = port.start_grabbing
+    original_enum = port.sdk.enum_devices
+    slow = {"armed": False}
+    enum_entered = threading.Event()
+    replies: list[dict] = []
+
+    def slow_enum() -> Any:
+        if slow["armed"]:
+            slow["armed"] = False
+            enum_entered.set()
+            time.sleep(0.6)
+        return original_enum()
+
+    def start_with_queued_work() -> None:
+        if not slow["armed"] and not enum_entered.is_set() and not replies:
+            slow["armed"] = True
+            worker = threading.Thread(target=lambda: replies.append(rig.plugin.cmd_list_devices({})), daemon=True)
+            worker.start()
+            time.sleep(0.1)  # `list_devices` уже в ящике
+            session.apply([Step("exposure_time", FAKE_BINDINGS["exposure_time"], 5555.0)], "restart")
+        original_start()
+
+    port.sdk.enum_devices = slow_enum
+    port.start_grabbing = start_with_queued_work
+    port.emit_link_event("disconnected")
+    assert enum_entered.wait(6.0), "медленный list_devices не начался"
+    session.apply([Step("exposure_time", FAKE_BINDINGS["exposure_time"], 7777.0)], "restart")
+
+    _await(lambda: session.state == "grabbing", "возврат в grabbing")
+    time.sleep(0.5)
+    writes = [a[1] for n, a, _t in list(port.calls) if n == "set_param" and a[0] == "ExposureTime"]
+    assert writes[-1] == 7777.0, writes

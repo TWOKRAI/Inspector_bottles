@@ -870,8 +870,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
             run, rest = self._plan()
             if getattr(session, "reconnecting", False) and ident != self._cycle_ident:
                 # переподключение к прежней личности бессмысленно: цикл перезапускается с новой
-                self._ctx.log_info("CameraDevicePlugin: take_device: личность прибора сменилась, цикл перезапускается")
                 session.stop(args.timeout_s)
+                if session.device_held:  # стоп истёк (владелец ещё в вызове порта): перезапуска не было
+                    error = "прежний цикл ещё останавливается, повторите take_device"
+                    self._ctx.log_info(f"CameraDevicePlugin: take_device: личность прибора сменилась, {error}")
+                    return {"status": "error", "device_state": session.state, "error": error, "reconnecting": False}
+                self._ctx.log_info("CameraDevicePlugin: take_device: личность прибора сменилась, цикл перезапускается")
             # идущий цикл не меняется (повторный take_device при opening/grabbing — по-прежнему ok): результат не нужен
             if session.set_cycle(ident, run, rest):
                 self._cycle_ident = ident
@@ -1025,11 +1029,17 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._ctx.log_error(f"CameraDevicePlugin: порт не создан: {text}{detail}")
             return {"success": False, "error": text}
 
-    def _call_owner(self, fn: Callable[[], Any]) -> tuple[bool, Any]:
-        """`fn` в потоке-владельце: `(True, результат)` либо `(False, текст отказа)`. Блокирует до `_CALL_TIMEOUT_S`."""
+    def _call_owner(self, fn: Callable[[], Any], *, while_reconnecting: bool = False) -> tuple[bool, Any]:
+        """`fn` в потоке-владельце: `(True, результат)` либо `(False, текст отказа)`. Блокирует до `_CALL_TIMEOUT_S`.
+
+        `while_reconnecting` — только команды без открытого порта (перечисление): владелец исполнит их между
+        попытками; команды порта при переподключении получают прежний отказ `_NOT_GRABBING`.
+        """
         session = self._session
         if session is None:
             return False, _NOT_GRABBING
+        if while_reconnecting:
+            return session.call(fn, _CALL_TIMEOUT_S, while_reconnecting=True)
         return session.call(fn, _CALL_TIMEOUT_S)
 
     def cmd_list_devices(self, data: dict) -> dict:
@@ -1055,7 +1065,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
             if path == "command":
                 devices = self._enumerate_here(port)
             else:
-                ok, result = self._call_owner(lambda: port.sdk.enum_devices())
+                ok, result = self._call_owner(lambda: port.sdk.enum_devices(), while_reconnecting=True)
                 if not ok:
                     self._ctx.log_info(f"CameraDevicePlugin: list_devices path={path} error={result}")
                     return {"success": False, "error": result}
