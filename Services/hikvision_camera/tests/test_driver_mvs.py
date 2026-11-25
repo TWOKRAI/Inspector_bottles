@@ -108,8 +108,13 @@ def test_open_после_отказа_handle_уничтожен():
 def test_open_не_пишет_узлы():
     port, cam_cls = opened()
     names_after_open = names(cam_cls)[names(cam_cls).index("MV_CC_OpenDevice") + 1 :]
-    # единственное после OpenDevice — колбэк исключений; ни одного Set*/Command (TriggerMode, FrameRateEnable, пакет)
-    assert names_after_open == ["MV_CC_RegisterExceptionCallBack"]
+    # после открытия — колбэк и три чтения (W1-a2); ни одного Set*/Command (TriggerMode, FrameRateEnable, пакет)
+    assert names_after_open == [
+        "MV_CC_RegisterExceptionCallBack",
+        "MV_CC_GetEnumValue",
+        "MV_CC_GetIntValueEx",
+        "MV_CC_GetIntValueEx",
+    ]
 
 
 # --------------------------------------------------------------------------- кадр

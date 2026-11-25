@@ -43,6 +43,12 @@ Task 2.3d: команды Р7 с портом: `list_devices`, `describe_params`
 владелец через `session.call` (срок `_CALL_TIMEOUT_S`), а `list_devices` без владельца — поток команды (`acquire`
 -> `enum_devices` -> `release`). Каждая команда с `call` блокирует приём команд процесса до срока.
 
+W1-a: здоровье потока и личность прибора. Накопительные уровни `incomplete`, `lost_packets` (по `lost_packets` кадра),
+`lost_frames` (разрывы `frame_num`), `trigger_lost` (разрывы `trigger_index`) считает `_on_frame` под `self._lock`;
+`reset_stats` их обнуляет, `opening` — нет. События `identity` (`port.device_info`) и `stream` (формат сырого кадра)
+идут тем же `merge` отличий. Строка "device opened" и предупреждения о дубле перечисления или чужой подсети пишутся раз
+за цикл на событии `grabbing`.
+
 Слой: Services -> framework; плагин не импортирует `multiprocess_prototype` и вендорские драйверы.
 """
 
@@ -68,7 +74,16 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 
 from .commands import ApplyParamsArgs, ReleaseDeviceArgs, TakeDeviceArgs
-from .interface import Binding, DeviceIdentity, DevicePort, PortError, RawFrame
+from .interface import (
+    Binding,
+    DeviceIdentity,
+    DeviceInfo,
+    DevicePort,
+    PortError,
+    RawFrame,
+    entry_text,
+    in_camera_subnet,
+)
 from .params import Step, build_plan
 from .registers_base import CameraDeviceRegisters
 from .session import DeviceSession, describe_error
@@ -132,6 +147,28 @@ def create_port(driver: str) -> DevicePort:
 
         return make_port(frame_period_s=0.02)  # ~50 кадров/с; без периода фейк отдаёт кадры без пауз
     raise ValueError(f"неизвестный драйвер: {driver}")
+
+
+def _dash(value: object) -> str:
+    """Значение для строки лога: пустое (`""`, `0`, `None`) -> `-`."""
+    return "-" if value in ("", 0, None) else str(value)
+
+
+def _identity_dict(info: DeviceInfo) -> dict:
+    """Личность прибора для дерева (Dict at Boundary): только скаляры и список строк."""
+    return {
+        "serial": info.serial,
+        "model": info.model,
+        "ip": info.ip,
+        "mask": info.mask,
+        "host_ip": info.host_ip,
+        "mac": info.mac,
+        "pixel_format": info.pixel_format,
+        "width": info.width,
+        "height": info.height,
+        "enum_matches": info.enum_matches,
+        "enum_list": list(info.enum_list),
+    }
 
 
 def _validation_text(exc: ValidationError) -> str:
@@ -201,6 +238,19 @@ class CameraDevicePlugin(ProcessModulePlugin):
         # Границы глубины (1..64) живут в `FieldMeta` поля регистра — валидатор отказывает раньше, чем сюда дойдёт 0.
         self._queue: deque[tuple[int, float, float, RawFrame, int]] = deque(maxlen=self._reg.source_queue_frames)
         self._overwritten = 0  # кадры, вытесненные из полной очереди (накопительно; `dropped` — битые кадры, не они)
+        # Здоровье потока (W1-a), всё под `self._lock`: `_on_frame` (владелец) пишет, `_tick`/`reset_stats`/`_on_state`
+        # (поток процесса и системные потоки) читают и сбрасывают. Счётчики накопительные и на `opening` не обнуляются.
+        self._incomplete = 0  # кадры с потерянными пакетами
+        self._lost_packets = 0  # потерянные пакеты (сумма по кадрам)
+        self._lost_frames = 0  # разрывы `frame_num`: потери сети и вытеснение кэша буферов SDK не различаются
+        self._trigger_lost = 0  # разрывы `trigger_index`: пропущенные срабатывания триггера
+        # Опорные факты нового цикла: на `opening` сбрасываются, чтобы факты прошлого цикла не прошли за новые.
+        self._last_frame_num: int | None = None
+        self._last_trigger: int | None = None
+        self._stream: tuple[str, int, int] | None = None  # (pixel_format, width, height) СЫРОГО кадра последнего
+        # личность на вход в `grabbing`: перезахват без `restart_regrab` закрывает и открывает порт внутри него
+        self._identity_last: DeviceInfo | None = None
+        self._open_logged = False  # строка "device opened" уже записана в этом цикле (test-and-set под `self._lock`)
         self._seq = 0
         self._frames = 0
         self._port: DevicePort | None = None
@@ -228,7 +278,19 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._identity(warn=True)  # отказ рецепта — здесь, а не в take_device
         if self._reg.watchdog_s <= self._reg.timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
-        for level in ("fps", "frames", "errors", "dropped", "overwritten", "pending", "param_errors_count"):
+        for level in (
+            "fps",
+            "frames",
+            "errors",
+            "dropped",
+            "overwritten",
+            "pending",
+            "param_errors_count",
+            "incomplete",
+            "lost_packets",
+            "lost_frames",
+            "trigger_lost",
+        ):
             ctx.declare_metric(level)
         self._subscribe_fields()
 
@@ -417,6 +479,18 @@ class CameraDevicePlugin(ProcessModulePlugin):
             # `capture_ns` (perf_counter_ns, ключ сверки), `ts` (wall, станет `capture_ts`), `mono` (`timestamp`).
             if len(self._queue) == self._queue.maxlen:
                 self._overwritten += 1
+            if raw.lost_packets > 0:
+                self._incomplete += 1
+                self._lost_packets += raw.lost_packets
+            # разрыв номера — потеря; номер не больше прежнего (перезахват, сброс счётчика прибора) — не потеря
+            if self._last_frame_num is not None and raw.frame_num > self._last_frame_num + 1:
+                self._lost_frames += raw.frame_num - self._last_frame_num - 1
+            self._last_frame_num = raw.frame_num
+            if raw.trigger_index is not None:
+                if self._last_trigger is not None and raw.trigger_index > self._last_trigger + 1:
+                    self._trigger_lost += raw.trigger_index - self._last_trigger - 1
+                self._last_trigger = raw.trigger_index
+            self._stream = (raw.pixel_format, raw.width, raw.height)
             self._queue.append((self._seq, time.time(), time.monotonic(), raw, time.perf_counter_ns()))
 
     def _clear_queue(self) -> int:
@@ -436,7 +510,50 @@ class CameraDevicePlugin(ProcessModulePlugin):
         # События приходят из разных потоков и могут опередить друг друга: истина — `session.state`.
         session = self._session
         self._reg.device_state = session.state if session is not None else new
+        if new == "opening":  # новый цикл: формат и личность прошлого — не факт нового (отказ открытия их не наследует)
+            with self._lock:
+                self._last_frame_num = self._last_trigger = self._stream = self._identity_last = None
+                self._open_logged = False
+        elif new == "grabbing":
+            # триггер — само событие, не `session.state`: стоп мог уже начаться, а вход в захват был
+            self._log_device_opened()
         self._sync_events()
+
+    def _log_device_opened(self) -> None:
+        """Раз за цикл: строка личности открытого прибора и предупреждения о дубле или чужой подсети.
+
+        События приходят из разных потоков: "уже писали" проверяется и ставится под `self._lock`, строки — вне него.
+        Порт без `device_info` (заглушка) даёт ту же строку с прочерками: она отмечает вход в захват.
+        """
+        info: DeviceInfo | None = getattr(self._port, "device_info", None)
+        with self._lock:
+            first = not self._open_logged
+            self._open_logged = True
+            if info is not None:
+                self._identity_last = info
+        if not first:
+            return
+        ctx = self._ctx
+        ctx.log_info(
+            "CameraDevicePlugin: device opened "
+            f"serial={_dash(info and info.serial)} model={_dash(info and info.model)} ip={_dash(info and info.ip)} "
+            f"mask={_dash(info and info.mask)} host_ip={_dash(info and info.host_ip)} mac={_dash(info and info.mac)} "
+            f"pixel_format={_dash(info and info.pixel_format)} width={_dash(info and info.width)} "
+            f"height={_dash(info and info.height)} enum_matches={_dash(info and info.enum_matches)}"
+        )
+        if info is None:
+            return
+        if info.enum_matches > 1:
+            ctx.log_warning(
+                f"CameraDevicePlugin: serial={_dash(info.serial)} перечислен {info.enum_matches} раз; "
+                f"выбрана запись host_ip={_dash(info.host_ip)}; записи: {' | '.join(info.enum_list)}"
+            )
+        elif in_camera_subnet(info) is False or info.mask.split(".") == ["0", "0", "0", "0"]:
+            # при маске 0.0.0.0 подсеть НЕИЗВЕСТНА (чужой хост не доказан), но оператор обязан это увидеть
+            ctx.log_warning(
+                f"CameraDevicePlugin: serial={_dash(info.serial)} единственная запись вне подсети камеры: "
+                f"{entry_text(info)}"
+            )
 
     def _on_stall(self, call: str, seconds: float) -> None:
         """Сторож сеанса: вызов порта завис. Инцидент, затем дамп кольца (запись обязана в него попасть)."""
@@ -476,10 +593,16 @@ class CameraDevicePlugin(ProcessModulePlugin):
         ctx.publish_metric("frames", frames)  # и без кадров: уровень виден с нулём, а не отсутствует
         ctx.publish_metric("errors", session.errors if session is not None else 0)
         ctx.publish_metric("dropped", dropped)
-        with self._lock:  # длина очереди и счётчик вытеснения — одним снимком
+        with self._lock:  # длина очереди, счётчик вытеснения и счётчики потерь — одним снимком
             pending, overwritten = len(self._queue), self._overwritten
+            incomplete, lost_packets = self._incomplete, self._lost_packets
+            lost_frames, trigger_lost = self._lost_frames, self._trigger_lost
         ctx.publish_metric("overwritten", overwritten)  # и 0: уровень виден, а не отсутствует
         ctx.publish_metric("pending", pending)
+        ctx.publish_metric("incomplete", incomplete)  # и 0: "потерь нет" отличимо от "уровня нет"
+        ctx.publish_metric("lost_packets", lost_packets)
+        ctx.publish_metric("lost_frames", lost_frames)
+        ctx.publish_metric("trigger_lost", trigger_lost)
         ctx.publish_metric("param_errors_count", len(session.param_errors) if session is not None else 0)
         with self._timing_lock:
             count, total = self._get_frame_n, self._get_frame_sum
@@ -504,6 +627,12 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 last_error = session.last_error
                 self._report_incidents(state, last_error, param_errors)
                 device = session.device
+                info: DeviceInfo | None = getattr(self._port, "device_info", None)
+                with self._lock:
+                    # перезахват без `restart_regrab` закрывает и открывает порт внутри `grabbing`
+                    if info is None and state == "grabbing":
+                        info = self._identity_last
+                    stream = self._stream
                 snapshot = {
                     "state": state,
                     "device": None
@@ -517,6 +646,10 @@ class CameraDevicePlugin(ProcessModulePlugin):
                     "param_errors": param_errors,
                     "last_error": last_error,
                     "capabilities": sorted(self._port.capabilities) if self._port is not None else [],
+                    "identity": None if info is None else _identity_dict(info),
+                    "stream": None
+                    if stream is None
+                    else {"pixel_format": stream[0], "width": stream[1], "height": stream[2]},
                 }
                 self._publish_events(snapshot)
         except Exception as exc:  # noqa: BLE001 — сбой публикации не должен ронять колбэк сеанса или `produce()`
@@ -747,7 +880,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def cmd_reset_stats(self, data: dict) -> dict:
-        """Обнулить `frames` (счётчик, поле register'а, метрика), `dropped`, `overwritten`, причину отброса, окно `fps`.
+        """Обнулить `frames` (счётчик, поле register'а, метрика), `dropped`, `overwritten`, причину отброса, окно `fps`
+        и счётчики потерь `incomplete`, `lost_packets`, `lost_frames`, `trigger_lost`.
 
         НЕ сбрасываются: `errors` сеанса (счётчик жизни сеанса) и `seq_id` (Р10).
         """
@@ -758,8 +892,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._item_error = ""
             self._tick_frames = 0  # иначе следующее окно даст отрицательный `fps`
             self._tick_t0 = time.monotonic()
-        with self._lock:  # `overwritten` пишет `_on_frame` под `self._lock`; очередь с кадрами не трогаем
+        with self._lock:  # `overwritten` и счётчики потерь пишет `_on_frame` под `self._lock`; очередь не трогаем
             self._overwritten = 0
+            self._incomplete = self._lost_packets = self._lost_frames = self._trigger_lost = 0  # опорные номера целы
         # `frames` в дерево сразу; `overwritten` и `dropped` там остаются прежними до окна `_TICK_S` (в плагине уже 0)
         self._ctx.publish_metric("frames", 0)
         self._ctx.log_info("CameraDevicePlugin: reset_stats")

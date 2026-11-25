@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import ipaddress
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from typing import Literal, Protocol, runtime_checkable
 
 type IdentKind = Literal["serial", "ip", "url", "index"]
@@ -24,6 +26,27 @@ class DeviceIdentity:
     kind: IdentKind
     value: str
     name: str = ""
+
+
+@dataclass(frozen=True)
+class DeviceInfo:
+    """Личность открытого прибора: запись перечисления SDK плюс формат кадра.
+
+    Пустые строки и `0` — «неизвестно» (USB, фейк без сети). `enum_matches` — сколько записей перечисления
+    совпало с `DeviceIdentity` при открытии, `enum_list` — их тексты (`entry_text`) в порядке SDK.
+    """
+
+    serial: str
+    model: str = ""
+    ip: str = ""
+    mask: str = ""
+    host_ip: str = ""
+    mac: str = ""
+    pixel_format: str = ""
+    width: int = 0
+    height: int = 0
+    enum_matches: int = 1
+    enum_list: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -57,6 +80,8 @@ class RawFrame:
     """Кадр, скопированный из буфера SDK.
 
     `data` — `bytearray`, а не `bytes`: потребитель кладёт его в numpy без копии, владелец буфера — вызывающий.
+    `lost_packets` — сколько пакетов потеряно в этом кадре (`0` — кадр цел или драйвер не знает);
+    `trigger_index` — счётчик срабатываний триггера прибора (`None` — драйвер его не даёт).
     """
 
     data: bytearray
@@ -65,6 +90,8 @@ class RawFrame:
     pixel_format: str
     frame_num: int
     extras: dict = field(default_factory=dict)
+    lost_packets: int = 0
+    trigger_index: int | None = None
 
 
 class PortError(Exception):
@@ -79,6 +106,86 @@ class PortError(Exception):
         self.code: int | None = code
         code_text = "" if code is None else f" code=0x{code:08X}"
         super().__init__(f"{where}: {kind}{code_text}")
+
+
+class AmbiguousDeviceError(PortError):
+    """Перечисление дало несколько записей по одной личности, и ни одна не в подсети камеры.
+
+    Для вызывающего это `PortError("not_found", "open")`; `entries` — тексты записей (`entry_text`) в порядке SDK.
+    Адрес прибора в тексте — не записываемое значение узла (рецепт может нести секрет, адрес — нет).
+    """
+
+    def __init__(self, ident: DeviceIdentity, entries: tuple[str, ...]) -> None:
+        PortError.__init__(self, "not_found", "open")
+        self.entries = entries
+        text = (
+            f"open: not_found: неоднозначное перечисление {ident.kind}={ident.value} записей={len(entries)}, "
+            f"ни одна запись не в подсети камеры; записи: {' | '.join(entries)}"
+        )
+        Exception.__init__(self, text)
+
+
+def entry_text(e: DeviceInfo) -> str:
+    """Запись перечисления одной строкой: `ip=... mask=... host_ip=... mac=...` (для лога и `enum_list`)."""
+    return f"ip={e.ip} mask={e.mask} host_ip={e.host_ip} mac={e.mac}"
+
+
+def in_camera_subnet(e: DeviceInfo) -> bool | None:
+    """Лежат ли камера и сетевая карта хоста в одной подсети.
+
+    Returns:
+        `None` — подсеть неизвестна: `ip`, `mask` или `host_ip` не разбирается как IPv4 (USB, фейк без сети) либо
+        маска `0.0.0.0`; иначе `ip & mask == host_ip & mask`.
+    """
+    try:
+        ip = int(ipaddress.IPv4Address(e.ip))
+        mask = int(ipaddress.IPv4Address(e.mask))
+        host_ip = int(ipaddress.IPv4Address(e.host_ip))
+    except ValueError:
+        return None
+    if mask == 0:  # иначе "в подсети" оказался бы любой хост: подсеть неизвестна, а не подтверждена
+        return None
+    return ip & mask == host_ip & mask
+
+
+def select_device(ident: DeviceIdentity, entries: Sequence[DeviceInfo]) -> tuple[int, DeviceInfo]:
+    """Выбрать запись перечисления под личность. Один прибор может быть перечислен несколько раз (по карте на сеть).
+
+    Pre: `entries` — перечисление одного вызова SDK, порядок SDK.
+    Post: возврат — индекс выбранной записи во входном списке и её копия с `enum_matches` (сколько записей
+        совпало) и `enum_list` (их `entry_text`); вход не меняется. Одно совпадение берётся как есть; несколько —
+        из тех, что в подсети камеры, меньший `host_ip` (при равенстве меньший индекс). Нет совпадений —
+        `PortError("not_found", "open")`; несколько, и ни одна не в подсети — `AmbiguousDeviceError`.
+        Совпадение: `serial` -> `serial`, `ip` -> `ip`, `index` -> запись с этим номером, прочие `kind` — пусто.
+    """
+    if ident.kind == "serial":
+        matches = [(i, e) for i, e in enumerate(entries) if e.serial == ident.value]
+    elif ident.kind == "ip":
+        matches = [(i, e) for i, e in enumerate(entries) if e.ip == ident.value]
+    elif ident.kind == "index":
+        try:
+            position = int(ident.value)
+        except ValueError:
+            raise PortError("not_found", "open") from None
+        matches = [(i, e) for i, e in enumerate(entries) if i == position] if position >= 0 else []
+    else:
+        matches = []
+    if not matches:
+        raise PortError("not_found", "open")
+    texts = tuple(entry_text(e) for _, e in matches)
+    if len(matches) == 1:
+        chosen_index, chosen = matches[0]
+    else:
+        in_net = [(i, e) for i, e in matches if in_camera_subnet(e) is True]
+        if not in_net:
+            raise AmbiguousDeviceError(ident, texts)
+
+        # `min` при равном ключе берёт первый (меньший индекс); `host_ip` разобран: `in_camera_subnet` не `None`
+        def host_key(pair: tuple[int, DeviceInfo]) -> int:
+            return int(ipaddress.IPv4Address(pair[1].host_ip))
+
+        chosen_index, chosen = min(in_net, key=host_key)
+    return chosen_index, replace(chosen, enum_matches=len(matches), enum_list=texts)
 
 
 @runtime_checkable
@@ -127,12 +234,15 @@ class DevicePort(Protocol):
     """
 
     capabilities: frozenset[str]
+    # Личность открытого прибора. `None` у созданного порта и после `close`; ставит `open` (до возврата из него).
+    device_info: DeviceInfo | None
 
     def open(self, ident: DeviceIdentity) -> None:
         """Открыть прибор.
 
         Pre: порт в состоянии `closed`.
-        Post: порт в состоянии `opened`; ошибки — `PortError` (`busy`, `not_found`, `network`, `access`, `timeout`).
+        Post: порт в состоянии `opened`, `device_info` поставлен (драйвер, не умеющий отдать личность, оставляет
+            `None`); ошибки — `PortError` (`busy`, `not_found`, `network`, `access`, `timeout`).
         """
         ...
 
