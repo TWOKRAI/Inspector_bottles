@@ -25,6 +25,7 @@ SourceProducer при наличии кадра.
 
 from __future__ import annotations
 
+import functools
 import threading
 import time
 from collections import deque
@@ -53,8 +54,18 @@ _HISTORY_LIMIT = 20
 
 _STILL_HELD = "прибор ещё отпускается"
 
+# Поля режима съёмки и узлы прибора, которым они соответствуют (ключи дублируют `sdk_reader._TRIGGER_NODES`:
+# плагин не лезет в приватное читателя). Живая правка этих полей перезапускает захват (`_on_trigger_update`).
+_TRIGGER_FIELDS = ("trigger_mode", "trigger_source", "trigger_period_ms")
+_TRIGGER_NODES = frozenset({"TriggerMode", "TriggerSource", "TriggerSelfTriggerPeriod"})
+
 # Счётчики ok / no_code / bad_code на момент кадра (с учётом reset_stats) — для строки статуса overlay.
 type _Counters = tuple[int, int, int]
+
+
+def _trigger_from(values: dict[str, Any]) -> dict[str, Any]:
+    """Режим съёмки для читателя: только непустые поля из `_TRIGGER_FIELDS` (пусто / 0 = «не трогать»)."""
+    return {key: value for key in _TRIGGER_FIELDS if (value := values.get(key))}
 
 
 @register_plugin(
@@ -150,11 +161,13 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             "timeout_ms": self._reg.timeout_ms,
         }
         # Режим съёмки: только непустые поля; нет ни одного — читатель создаётся без `trigger`.
-        trigger = {
-            key: value
-            for key in ("trigger_mode", "trigger_source", "trigger_period_ms")
-            if (value := getattr(self._reg, key))
-        }
+        trigger = _trigger_from({key: getattr(self._reg, key) for key in _TRIGGER_FIELDS})
+        # Режим, с которым читатель ЗАПУСТИТСЯ (и откат при отказе живой правки); меняется только под `_trigger_lock`.
+        self._applied_trigger: dict[str, Any] = trigger
+        # Сериализует take_device / release_device / shutdown и колбэк живой правки триггера: колбэк идёт в потоке
+        # системного вызывающего `set_field_value` и держит его на остановку и открытие. Колбэки читателя замок
+        # не берут (проверено: они зовут только `_on_frame` / `_on_error`), замок не реентерабелен.
+        self._trigger_lock = threading.Lock()
         if trigger:
             reader_kwargs["trigger"] = trigger
         self._reader: SdkCodeReader = type(self).reader_factory(self._on_frame, self._on_error, **reader_kwargs)
@@ -162,6 +175,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             f"CodeReaderSdkPlugin[{self._reg.reader_id}]: configured "
             f"(прибор {self._reg.device_ip or 'первый найденный'}, таймаут {self._reg.timeout_ms} мс)"
         )
+        self._subscribe_trigger()
 
     def start(self, ctx: PluginContext) -> None:
         """Взять прибор, если задан автозахват; иначе ждать команды из GUI."""
@@ -171,10 +185,16 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             self._publish_state()
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """Остановить захват и отпустить прибор."""
-        self._reader.stop()
-        self._publish_state()
-        ctx.log_info(f"CodeReaderSdkPlugin[{self._reg.reader_id}]: shutdown")
+        """Остановить захват и отпустить прибор.
+
+        Подписку снимаем первой; идущий колбэк живой правки дорабатывает до конца (остановка ждёт `_trigger_lock`),
+        новый после снятия не придёт, а пришедший раньше увидит остановленный читатель только после своего конца.
+        """
+        self._unsubscribe_trigger()
+        with self._trigger_lock:
+            self._reader.stop()
+            self._publish_state()
+            ctx.log_info(f"CodeReaderSdkPlugin[{self._reg.reader_id}]: shutdown")
 
     # ------------------------------------------------------------------ #
     # Поток данных
@@ -372,11 +392,129 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
             self._ctx.log_error(f"CodeReaderSdkPlugin: публикация состояния не удалась: {exc}")
 
     # ------------------------------------------------------------------ #
+    # Живая правка режима съёмки (W1-b)
+    # ------------------------------------------------------------------ #
+
+    def _subscribe_trigger(self) -> None:
+        """Подписка на поля режима съёмки; прежние подписки плагина снимаются (повторный `configure`)."""
+        self._unsubscribe_trigger()
+        registers = self._ctx.registers
+        if registers is None:
+            self._ctx.log_warning(
+                f"CodeReaderSdkPlugin[{self._reg.reader_id}]: нет RegistersManager, живая правка триггера отключена"
+            )
+            return
+        for field in _TRIGGER_FIELDS:
+            callback = functools.partial(self._on_trigger_update, field)  # свой объект на поле и на configure
+            registers.subscribe(self.name, field, callback)
+            self._trigger_subscriptions.append((registers, field, callback))
+
+    def _unsubscribe_trigger(self) -> None:
+        """Снять подписки `_subscribe_trigger`; повторный вызов — пустая операция."""
+        subscriptions, self._trigger_subscriptions = getattr(self, "_trigger_subscriptions", []), []
+        for registers, field, callback in subscriptions:  # менеджер тот, на котором подписались
+            registers.unsubscribe(self.name, field, callback)
+
+    def _on_trigger_update(self, field: str, value: Any) -> None:
+        """Колбэк подписки (поток вызывающего `set_field_value`): применить правку режима съёмки. Не бросает.
+
+        Узлы режима при идущем захвате закрыты, поэтому правка = остановка, запись режима в читатель, новый
+        `take_device`. Читатель и `_applied_trigger` всегда совпадают: при отказе узла или перезапуска режим
+        возвращается к прежнему (регистр при этом хранит новое значение — расхождение называют ERROR и
+        `last_error`). Колбэк держит поток вызывающего до остановки и открытия; параллельный `take_device`
+        ждёт `_trigger_lock`, затем `start()` на идущем захвате отвечает «ок» без второго открытия.
+        Значения поля в журнал и `last_error` не попадают.
+        """
+        head = f"CodeReaderSdkPlugin[{self._reg.reader_id}]: apply field={field} policy=restart"
+        with self._trigger_lock:
+            held = False
+            try:
+                new = _trigger_from({**{key: getattr(self._reg, key) for key in _TRIGGER_FIELDS}, field: value})
+                if new == self._applied_trigger:
+                    self._ctx.log_info(f"{head} restarted=False: значение не изменило режим")
+                    self._ctx.health.set_status("ok")  # регистр и прибор снова совпали: прежняя деградация снята
+                    return
+                held = bool(self._reader.stats()["device_held"])
+                if not held:
+                    self._reader.set_trigger(new or None)
+                    self._applied_trigger = new
+                    self._ctx.log_info(
+                        f"{head} restarted=False: захват не идёт, значение войдёт в следующий take_device"
+                    )
+                    self._ctx.health.set_status("ok")
+                    self._publish_state()
+                    return
+                self._reader.stop()
+                self._reader.set_trigger(new or None)
+                result = self._take()
+                if result["status"] == "ok":
+                    # `start()` отвечает True и при отказе узла режима: причина живёт в `param_errors`.
+                    refused = {
+                        node: text
+                        for node, text in self._reader.stats()["param_errors"].items()
+                        if node in _TRIGGER_NODES
+                    }
+                    if not refused:
+                        self._applied_trigger = new
+                        self._ctx.log_info(f"{head} restarted=True applied=True")
+                        self._ctx.health.set_status("ok")
+                        return
+                    fallback_ok = self._fall_back_to_applied()
+                    self._ctx.log_error(
+                        f"{head} restarted=True applied=False "
+                        f"param_errors={'; '.join(f'{node}: {text}' for node, text in refused.items())} "
+                        f"fallback=old ok={fallback_ok}"
+                    )
+                    self._mark_apply_failed(field, f"trigger apply: field={field} applied=False")
+                else:
+                    error = result.get("error", "")
+                    fallback_ok = self._fall_back_to_applied()
+                    self._ctx.log_error(f"{head} restarted=False error={error} fallback=old ok={fallback_ok}")
+                    self._mark_apply_failed(
+                        field,
+                        f"trigger apply: field={field} restarted=False; "
+                        f"прежний режим {'идёт' if fallback_ok else 'не запущен'}",
+                    )
+            except Exception as exc:  # noqa: BLE001 — колбэк идёт в системном потоке процесса: наружу не выпускается
+                # `set_trigger` присваивает режим только после разбора, поэтому режим читателя прежний.
+                ok: bool | str = "-"
+                if held:
+                    try:
+                        ok = self._take()["status"] == "ok"
+                    except Exception:  # noqa: BLE001 — возврат захвата не должен скрыть исходный отказ
+                        ok = False
+                self._ctx.log_error(f"{head} отказ: {type(exc).__name__} ok={ok}")
+                self._mark_apply_failed(field, f"trigger apply: field={field} отказ: {type(exc).__name__}")
+
+    def _fall_back_to_applied(self) -> bool:
+        """Остановить захват и вернуть читателю режим `_applied_trigger`. Возврат: захват идёт. Под `_trigger_lock`."""
+        self._reader.stop()
+        self._reader.set_trigger(self._applied_trigger or None)
+        return self._take()["status"] == "ok"
+
+    def _mark_apply_failed(self, field: str, last_error: str) -> None:
+        """Регистр хранит значение, которого нет в приборе: деградация процесса, `last_error`, публикация.
+
+        `last_error` пишется ПОСЛЕ `_take` (он стирает причину). Деградация — заявка этого плагина; её снимает
+        следующая удачная правка (`health.set_status("ok")` в `_on_trigger_update`). Значения поля в тексте нет.
+        Строку ERROR пишет вызывающий: сюда не входит ни один разъём журнала (правило «один разъём на точку»).
+        """
+        self._ctx.health.degraded(f"code_reader: trigger apply field={field}")
+        with self._lock:
+            self._last_error = last_error
+        self._publish_state()
+
+    # ------------------------------------------------------------------ #
     # Команды из GUI
     # ------------------------------------------------------------------ #
 
     def cmd_take_device(self, data: dict) -> dict:
         """Взять прибор и начать захват. Отказ — `status: error` с причиной, не исключение."""
+        with self._trigger_lock:
+            return self._take()
+
+    def _take(self) -> dict:
+        """Тело `take_device`; зовётся под `_trigger_lock` (команда и колбэк живой правки)."""
         # Старую причину стираем ДО start(): поток захвата может сбоить раньше, чем вернётся
         # start(), и его ошибка (через `_on_error`) уже принадлежит новой сессии.
         with self._lock:
@@ -395,6 +533,11 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         Отпускает прибор поток захвата, а не эта команда: при позднем `get_frame` (или
         вызове из колбэка) прибор ещё удерживается, и об этом сказано прямо.
         """
+        with self._trigger_lock:
+            return self._release()
+
+    def _release(self) -> dict:
+        """Тело `release_device`; зовётся под `_trigger_lock`."""
         self._ctx.log_info(f"CodeReaderSdkPlugin[{self._reg.reader_id}]: прибор ОТПУСТИТЬ")
         self._reader.stop()
         held = bool(self._reader.stats()["device_held"])

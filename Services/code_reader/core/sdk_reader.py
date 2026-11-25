@@ -141,6 +141,19 @@ class SdkCodeReader:
             for msg in messages:
                 self._emit(msg)
 
+    def set_trigger(self, trigger: Mapping[str, Any] | None) -> None:
+        """Сменить режим съёмки для СЛЕДУЮЩЕГО ``start()``. Пока поток захвата жив — ``RuntimeError``.
+
+        Узлы при идущем захвате закрыты (``0x80020106``), поэтому режим меняется только между ``stop()`` и ``start()``.
+        Разбор (``ValueError`` на неизвестный ключ) идёт ДО присваивания: отказ оставляет прежний режим целым.
+        """
+        with self._life:
+            thread = self._thread
+            if thread is not None and thread.is_alive():
+                raise RuntimeError("режим съёмки меняется только при остановленном захвате")
+            parsed = self._parse_trigger(trigger)
+            self._trigger = parsed
+
     def stop(self, timeout: float = 2.0) -> None:
         """Остановить захват и отпустить прибор. Идемпотентен; ждёт не дольше ``timeout + timeout_ms``."""
         # Под _life — только снять сессию и поднять событие; ждать поток — ВНЕ замка:
