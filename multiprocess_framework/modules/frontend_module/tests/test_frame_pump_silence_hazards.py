@@ -222,6 +222,32 @@ def test_on_silence_exception_on_number_and_none(make_pump, monkeypatch) -> None
     assert ages[2] is not None
 
 
+@pytest.mark.parametrize("how", ["returns_false", "raises"])
+def test_never_empty_mailbox_unshown_frames_still_report_silence(make_pump, how) -> None:
+    """Ящик всегда полон, ``sink`` кадр не показывает: тишина всё равно сообщается, ``None`` нет."""
+
+    class _AlwaysFull(_Mailbox):
+        def take(self, key: str) -> tuple[Any, float] | None:
+            return {"key": key}, 0.0
+
+    sinks: list[str] = []
+    ages: list[float | None] = []
+
+    def sink(key: str, item: Any) -> bool:  # noqa: ARG001
+        sinks.append(key)
+        if how == "raises":
+            raise ValueError("кадр не показан")
+        return False
+
+    pump = make_pump(_AlwaysFull(), sink, on_silence=lambda key, age: ages.append(age), silence_s=0.3)
+    pump.set_keys({"a": 30})
+    _wait_for(lambda: len(ages) >= 2, "две записи о тишине при полном ящике")
+
+    assert None not in ages, ages
+    assert [int(age) for age in ages] == [0, 1], ages
+    assert len(sinks) >= 10, "предпосылка: кадры действительно шли в sink"
+
+
 def test_dropped_key_forgets_silence(make_pump) -> None:
     """Ключ снят с объявленной тишиной и заведён заново: его первый кадр не даёт ``None``."""
     mailbox = _Mailbox()

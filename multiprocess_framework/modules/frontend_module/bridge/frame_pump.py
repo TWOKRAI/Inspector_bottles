@@ -22,8 +22,9 @@ Public API:
 
 Тишина ключа (включена при ``on_silence is not None and silence_s > 0``): ``on_silence(key,
 age_s)`` — на этот ключ ``age_s`` секунд (не меньше ``silence_s``) не показан кадр; зовётся на
-пустом тике, не чаще раза на целую секунду возраста. Возраст считается от последнего
-ПОКАЗАННОГО кадра ключа, без кадров — от заведения ключа. ``on_silence(key, None)`` — после
+тике без показа (ящик пуст или ``sink`` кадр не показал), не чаще раза на целую секунду возраста.
+Возраст считается от последнего ПОКАЗАННОГО кадра ключа, без кадров — от заведения ключа.
+``on_silence(key, None)`` — после
 ``sink`` первого показанного кадра, пришедшего после сообщённой тишины. Кадр, не показанный
 ``sink`` (``False`` или исключение), тишину не прерывает. Колбэк зовётся в Qt-потоке вне
 замка насоса; при снятии ключа не зовётся. Часы — ``time.perf_counter``; выключенный
@@ -264,7 +265,7 @@ class FramePump(QObject):
                     self._ensure_key(key, _period_ms(_UNCONFIGURED_FPS))
 
     def _tick(self, key: str) -> None:
-        """Один ``take(key)`` и один ``sink(key, item)``; пустой ящик — только проверка тишины."""
+        """Один ``take(key)`` и один ``sink(key, item)``; тик без показа — проверка тишины."""
         if self._stopped:
             return
         taken = self._mailbox.take(key)
@@ -304,13 +305,17 @@ class FramePump(QObject):
         # кадр показан: sink вернулся без исключения и не False. Из sink могли позвать stop()
         # (дальше потребителя не зовём) или снять ключ через set_keys (его состояние не воскрешаем)
         shown = failed is None and result is not False
-        if self._silence_on and shown and not self._stopped and key in self._timers:
-            self._last_shown[key] = finished
-            if self._silent.pop(key, None) is not None:  # 0 — тоже сообщённая тишина
-                self._call_on_silence(key, None)
+        if self._silence_on and not self._stopped and key in self._timers:
+            if shown:
+                self._last_shown[key] = finished
+                if self._silent.pop(key, None) is not None:  # 0 — тоже сообщённая тишина
+                    self._call_on_silence(key, None)
+            else:
+                # источник не медленнее насоса не даёт пустых тиков, а экран так же замер
+                self._check_silence(key)
 
     def _check_silence(self, key: str) -> None:
-        """Пустой тик включённого механизма: сообщить новую целую секунду тишины ключа."""
+        """Тик без показа (ящик пуст или кадр не показан): сообщить новую целую секунду тишины."""
         since = self._last_shown.get(key)
         if since is None:  # ключ уже снят
             return
