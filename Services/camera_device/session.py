@@ -168,6 +168,7 @@ class DeviceSession:
         reconnect: bool = False,
         link_silence_s: float = 0.0,
         reconnect_interval_s: float = 2.0,
+        on_link: Callable[[], None] | None = None,
     ) -> None:
         if watchdog_s <= timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
@@ -226,6 +227,10 @@ class DeviceSession:
         self._lost_since: float | None = None
         # Только владелец: учёт отказа, «правка ящиком исполнена», «повтор ждёт первого кадра», план попытки.
         self._outage: _Outage | None = None
+        # `on_link()` (владелец, вне замка): при переподключении сменился `attempts` или целая секунда `lost_for_s`.
+        # Подписчик не ждёт своего окна (у источника в паузе или при `run fault` `produce()` не зовётся).
+        self._on_link = on_link
+        self._link_key: tuple[int, int | None] | None = None
         self._box_ran = False
         self._awaiting_frame = False
         self._attempt_run: tuple[Step, ...] = ()
@@ -705,6 +710,7 @@ class DeviceSession:
                 self._attempts += 1
                 if self._outage is not None:
                     self._outage.tries += 1
+                self._link_tick()
                 first = False
         finally:
             self._reconnecting = False
@@ -831,11 +837,22 @@ class DeviceSession:
         """Пауза `reconnect_interval_s` срезами `cycle_stop.wait(0.1)`; `False` — стоп во время паузы."""
         end = time.monotonic() + self._reconnect_interval_s
         while not stop_evt():
+            self._link_tick()
             left = end - time.monotonic()
             if left <= 0:
                 return True
             cycle_stop.wait(min(_BACKOFF_SLICE_S, left))
         return False
+
+    def _link_tick(self) -> None:
+        """Владелец при переподключении: `on_link()`, если сменился `attempts` или целая секунда `lost_for_s`."""
+        if self._on_link is None:
+            return
+        since = self._lost_since
+        key = (self._attempts, None if since is None else int(time.monotonic() - since))
+        if key != self._link_key:
+            self._link_key = key
+            self._notify(self._on_link)
 
     @staticmethod
     def _refusal_state(error: Exception | None, hold: _Hold) -> str:
@@ -967,6 +984,8 @@ class DeviceSession:
             else:
                 consecutive = 0  # кадр и таймаут (None) — не ошибки
             now = time.monotonic()
+            if self._awaiting_frame and raw is None:
+                self._link_tick()  # повтор ждёт первого кадра (`lost`): `lost_for_s` идёт и здесь
             if raw is not None:
                 last_frame = now
                 if self._awaiting_frame:  # свободный поток после потери: связь вернулась с первым кадром

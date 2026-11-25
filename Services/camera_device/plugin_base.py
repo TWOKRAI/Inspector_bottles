@@ -834,6 +834,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 reconnect=self._reg.reconnect,
                 link_silence_s=self._reg.link_silence_s,
                 reconnect_interval_s=self._reg.reconnect_interval_s,
+                # блок `link` в дереве идёт за сеансом и без `produce()` (пауза, `run fault`)
+                on_link=self._sync_events,
             )
             self._attach_log_bridge()
             self._session = session  # порт уже в `self._port`; отказ `DeviceSession` сеанса не оставляет
