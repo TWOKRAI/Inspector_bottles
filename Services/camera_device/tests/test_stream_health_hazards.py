@@ -30,7 +30,13 @@ from multiprocess_framework.modules.process_module.plugins.base import PluginCon
 from multiprocess_framework.modules.process_module.plugins.testing import MockProcessServices
 from multiprocess_framework.modules.worker_module import WorkerManager
 from Services.camera_device import plugin_base
-from Services.camera_device.interface import DeviceIdentity, DeviceInfo, RawFrame
+from Services.camera_device.interface import (
+    AmbiguousDeviceError,
+    DeviceIdentity,
+    DeviceInfo,
+    RawFrame,
+    select_device,
+)
 from Services.camera_device.params import Step
 from Services.camera_device.plugin_base import CameraDevicePlugin
 from Services.camera_device.testing import fake_port
@@ -466,3 +472,47 @@ def test_identity_not_inherited_by_next_grabbing_without_device_info(make):
     rig.drive(0.3)  # несколько окон тика в `grabbing`: подстановке прошлой личности есть где сработать
     assert rig.state() == "grabbing"
     assert rig.proxy.merged("identity")[-1] is None
+
+
+# --------------------------------------------------------------------------------------------- #
+# Маска 0.0.0.0: подсеть неизвестна
+# --------------------------------------------------------------------------------------------- #
+
+ZERO_MASK_LINKLOCAL = DeviceInfo(
+    serial=SERIAL,
+    model="MV-CS020-10GC",
+    ip="192.168.1.20",
+    mask="0.0.0.0",
+    host_ip="169.254.49.100",
+    mac="00:11:1c:f6:a2:3b",
+)
+ZERO_MASK_IN_NET = DeviceInfo(
+    serial=SERIAL,
+    model="MV-CS020-10GC",
+    ip="192.168.1.20",
+    mask="0.0.0.0",
+    host_ip="192.168.1.100",
+    mac="00:11:1c:f6:a2:3b",
+)
+ZERO_E_LINKLOCAL = "ip=192.168.1.20 mask=0.0.0.0 host_ip=169.254.49.100 mac=00:11:1c:f6:a2:3b"
+ZERO_E_IN_NET = "ip=192.168.1.20 mask=0.0.0.0 host_ip=192.168.1.100 mac=00:11:1c:f6:a2:3b"
+
+
+def test_zero_mask_duplicates_are_refused_with_list():
+    """Охраняет: маска 0.0.0.0 не делает всякий хост "в подсети" — дубли отклоняются с перечнем записей."""
+    with pytest.raises(AmbiguousDeviceError) as exc_info:
+        select_device(DeviceIdentity("serial", SERIAL), (ZERO_MASK_LINKLOCAL, ZERO_MASK_IN_NET))
+    assert str(exc_info.value).endswith("записи: " + ZERO_E_LINKLOCAL + " | " + ZERO_E_IN_NET)
+
+
+def test_zero_mask_single_entry_opens_with_warning(make):
+    """Охраняет: единственная запись с маской 0.0.0.0 открывается, а оператор видит предупреждение."""
+    rig = make(enum_entries=(ZERO_MASK_LINKLOCAL,))
+    assert rig.take()["status"] == "ok"
+
+    def warned() -> list[str]:
+        return [m for m in rig.log_msgs("WARNING") if "serial=" in m]
+
+    assert rig.drive_until(lambda: rig.state() == "grabbing" and bool(warned())), rig.log_msgs("WARNING")
+    rig.drive(0.2)
+    assert warned() == [f"{PREFIX} serial=DA1689923 единственная запись вне подсети камеры: " + ZERO_E_LINKLOCAL]

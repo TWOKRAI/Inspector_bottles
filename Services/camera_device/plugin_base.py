@@ -548,7 +548,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 f"CameraDevicePlugin: serial={_dash(info.serial)} перечислен {info.enum_matches} раз; "
                 f"выбрана запись host_ip={_dash(info.host_ip)}; записи: {' | '.join(info.enum_list)}"
             )
-        elif in_camera_subnet(info) is False:
+        elif in_camera_subnet(info) is False or info.mask.split(".") == ["0", "0", "0", "0"]:
+            # при маске 0.0.0.0 подсеть НЕИЗВЕСТНА (чужой хост не доказан), но оператор обязан это увидеть
             ctx.log_warning(
                 f"CameraDevicePlugin: serial={_dash(info.serial)} единственная запись вне подсети камеры: "
                 f"{entry_text(info)}"

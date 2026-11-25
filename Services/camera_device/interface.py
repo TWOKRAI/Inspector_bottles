@@ -134,14 +134,16 @@ def in_camera_subnet(e: DeviceInfo) -> bool | None:
     """Лежат ли камера и сетевая карта хоста в одной подсети.
 
     Returns:
-        `None`, если `ip`, `mask` или `host_ip` не разбирается как IPv4 (USB, фейк без сети);
-        иначе `ip & mask == host_ip & mask`.
+        `None` — подсеть неизвестна: `ip`, `mask` или `host_ip` не разбирается как IPv4 (USB, фейк без сети) либо
+        маска `0.0.0.0`; иначе `ip & mask == host_ip & mask`.
     """
     try:
         ip = int(ipaddress.IPv4Address(e.ip))
         mask = int(ipaddress.IPv4Address(e.mask))
         host_ip = int(ipaddress.IPv4Address(e.host_ip))
     except ValueError:
+        return None
+    if mask == 0:  # иначе "в подсети" оказался бы любой хост: подсеть неизвестна, а не подтверждена
         return None
     return ip & mask == host_ip & mask
 
