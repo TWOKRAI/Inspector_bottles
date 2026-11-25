@@ -24,6 +24,9 @@ camera_device.driver
 camera_device.exposure_auto
 camera_device.exposure_time
 camera_device.frames
+camera_device.link_silence_s
+camera_device.reconnect
+camera_device.reconnect_interval_s
 camera_device.rest_managed
 camera_device.rest_trigger_mode
 camera_device.rest_trigger_source
@@ -202,12 +205,15 @@ hikvision.frame_rate_enable
 hikvision.frames
 hikvision.gain
 hikvision.gain_auto
+hikvision.link_silence_s
 hikvision.packet_delay
 hikvision.packet_managed
 hikvision.packet_size
 hikvision.resize_mode
 hikvision.resolution_height
 hikvision.resolution_width
+hikvision.reconnect
+hikvision.reconnect_interval_s
 hikvision.rest_managed
 hikvision.rest_trigger_mode
 hikvision.rest_trigger_source
