@@ -67,6 +67,9 @@ _TRIGGER_NODES = frozenset(_TRIGGER_FIELD_NODES.values())
 _TRIGGER_ERROR = "trigger apply:"
 # Захват после неудачной правки не идёт: литерал для журнала и `last_error`.
 _RETAKE = "захват остановлен, возьмите прибор заново"
+_NOT_RUNNING = "прежний режим не запущен"
+# Части причины о том, что захват не идёт: после удачного `_take` они неверны. Порядок важен: сначала с «;».
+_NOT_RUNNING_TAILS = (f"; {_NOT_RUNNING}", f"; {_RETAKE}", f" {_RETAKE}")
 
 # Счётчики ok / no_code / bad_code на момент кадра (с учётом reset_stats) — для строки статуса overlay.
 type _Counters = tuple[int, int, int]
@@ -186,6 +189,9 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         self._applied_trigger: dict[str, Any] = trigger
         self._want_grab = False  # намерение оператора: удачный `_take` ставит, release / shutdown снимают
         self._closed = False  # после shutdown колбэк правки не делает ничего
+        # Отказы узлов режима последнего сеанса, где захват запустился: неудачный `start()` стирает `param_errors`
+        # читателя, а «отказывал до правки» должно переживать такой отказ. Пишет только `_take`.
+        self._session_refusals: dict[str, str] = {}
         # Сериализует take_device / release_device / shutdown и колбэк живой правки триггера: колбэк идёт в потоке
         # системного вызывающего `set_field_value` и держит его на остановку и открытие. Колбэки читателя замок
         # не берут (проверено: они зовут только `_on_frame` / `_on_error`), замок не реентерабелен.
@@ -469,7 +475,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                     )
                     self._publish_state()
                     return
-                previous = self._trigger_refusals()
+                previous = self._session_refusals
                 restarting = True
                 if not self._stop_grab():
                     # Поздний get_frame: `set_trigger` на живом потоке не зовём, режим войдёт в следующий take_device.
@@ -488,6 +494,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                                 f"{head} restarted=True applied=True param_errors={_refusal_text(refused)} "
                                 "(эти узлы отказывали и до правки)"
                             )
+                            self._replace_mode_error(refused)
                         else:
                             self._ctx.log_info(f"{head} restarted=True applied=True")
                         self._sync_health()
@@ -512,7 +519,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                     self._mark_apply_failed(
                         field,
                         f"{_TRIGGER_ERROR} field={field} restarted=False; "
-                        f"прежний режим {'идёт' if running else 'не запущен'}{tail}",
+                        f"{'прежний режим идёт' if running else _NOT_RUNNING}{tail}",
                     )
             except Exception as exc:  # noqa: BLE001 — колбэк идёт в системном потоке процесса: наружу не выпускается
                 self._applied_trigger = old
@@ -541,6 +548,28 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
                 f"CodeReaderSdkPlugin[{self._reg.reader_id}]: откат режима не удался: {type(exc).__name__}"
             )
             return False
+
+    def _replace_mode_error(self, refused: dict[str, str]) -> None:
+        """Правка применена, остались только старые отказы: прежняя причина режима называет уже применённое поле.
+
+        Меняет только имеющуюся причину режима на список отказавших узлов; деградацию не трогает.
+        """
+        with self._lock:
+            stale = self._last_error.startswith(_TRIGGER_ERROR)
+            if stale:
+                self._last_error = f"{_TRIGGER_ERROR} param_errors={_refusal_text(refused)}"
+        if stale:
+            self._publish_state()
+
+    def _drop_not_running_tails(self) -> None:
+        """Захват пошёл: в причине режима остаётся только факт расхождения (регистр не равен прибору).
+
+        Деградацию не трогает; публикует вызывающий (`_take`).
+        """
+        with self._lock:
+            if self._last_error.startswith(_TRIGGER_ERROR):
+                for tail in _NOT_RUNNING_TAILS:
+                    self._last_error = self._last_error.replace(tail, "")
 
     def _sync_health(self) -> None:
         """Снять деградацию по ФАКТАМ; зовётся под `_trigger_lock` после правки и после `_take`.
@@ -600,7 +629,9 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
         ok = self._reader.start()
         if ok:
             self._want_grab = True
-            refused = self._trigger_refusals() if report and fresh else {}
+            self._drop_not_running_tails()
+            self._session_refusals = self._trigger_refusals()
+            refused = self._session_refusals if report and fresh else {}
             if refused:
                 text = _refusal_text(refused)
                 self._ctx.log_error(

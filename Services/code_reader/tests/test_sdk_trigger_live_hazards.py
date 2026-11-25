@@ -19,6 +19,7 @@ import time
 
 import pytest
 
+from Services.code_reader.plugin import sdk_plugin
 from Services.code_reader.tests.test_sdk_plugin import _bounded, _status
 from Services.code_reader.tests.test_sdk_reader import make_reader  # noqa: F401
 from Services.code_reader.tests.test_sdk_trigger import M, P, S, FakeNodeApi, _refused
@@ -194,13 +195,15 @@ def test_set_trigger_error_reaches_last_error(make_rig, monkeypatch):
 
 @pytest.mark.parametrize(
     ("broken", "expected_tail"),
-    [("set_trigger", " отказ: ValueError ok=True"), ("stats", " отказ: ValueError ok=-")],
+    [("set_trigger", " отказ: ValueError ok=True"), ("_trigger_from", " отказ: ValueError ok=-")],
     ids=["after_stop", "before_stop"],
 )
 def test_callback_never_raises_on_value_error(make_rig, monkeypatch, broken, expected_tail):
     api = FakeNodeApi()
     rig = _grabbing_rig(make_rig, api)
-    _raise_once(monkeypatch, rig.plugin._reader, broken, ValueError("неизвестные ключи trigger"))
+    # `_trigger_from` — разбор режима из регистра, первый шаг колбэка до остановки захвата.
+    target = sdk_plugin if broken == "_trigger_from" else rig.plugin._reader
+    _raise_once(monkeypatch, target, broken, ValueError("неизвестные ключи trigger"))
 
     # Колбэк зовём напрямую: через RegistersManager исключение глушится в WARNING, и «не бросает» не видно.
     _bounded(lambda: rig.plugin._on_trigger_update("trigger_mode", "On"), 10.0)
@@ -476,4 +479,82 @@ def test_new_refusal_of_another_node_rolls_back(make_rig):
     assert len(errors) == 1 and "applied=False param_errors=TriggerSelfTriggerPeriod: " in errors[0], errors
     assert rig.opens() == 3
     assert ("set_enum_str", S, "SelfTrigger") in _nodes_written_after(api, 3)
+    assert _health_status(rig) == "degraded"
+
+
+# --------------------------------------------------------------------------
+# 7. Ревью стадии 5, раунд 2: хвосты last_error после удачного take; отказы прошлого сеанса
+# --------------------------------------------------------------------------
+
+
+def _boot_refused_period_rig(make_rig, api) -> _Rig:
+    """Захват идёт, период собственного триггера отказан узлом с самого старта: процесс `degraded`."""
+    rig = _grabbing_rig(make_rig, api, trigger_mode="On", trigger_source="SelfTrigger", trigger_period_ms=40)
+    assert _health_status(rig) == "degraded"
+    return rig
+
+
+def test_take_after_both_opens_refused_drops_not_running_tails(make_rig):
+    api = _RefuseOpenNApi(refuse_open_numbers=(2, 3))
+    rig = _grabbing_rig(make_rig, api)
+    assert rig.register_update("trigger_mode", "On")["success"] is True
+
+    assert _bounded(lambda: rig.plugin.cmd_take_device({}), 10.0)["status"] == "ok"
+
+    assert _status(rig)["device_state"] == "running"
+    assert _status(rig)["device_held"] is True
+    assert _status(rig)["last_error"] == "trigger apply: field=trigger_mode restarted=False"
+    assert _health_status(rig) == "degraded"  # регистр хранит «On», прибор в прежнем режиме
+
+
+def test_take_after_refusal_and_stop_timeout_drops_retake_tail(make_rig, hang_api):
+    api = hang_api(fail=_refused(M), hang_opens={2})
+    rig = _grabbing_rig(make_rig, api)
+    assert rig.register_update("trigger_mode", "On")["success"] is True
+    _release_hung(rig, api)
+    api.fail.clear()
+
+    assert _bounded(lambda: rig.plugin.cmd_take_device({}), 10.0)["status"] == "ok"
+
+    assert _status(rig)["device_state"] == "running"
+    assert _status(rig)["last_error"] == "trigger apply: field=trigger_mode applied=False"
+    assert _health_status(rig) == "degraded"
+
+
+def test_boot_refusal_stays_old_after_failed_opens(make_rig):
+    api = _RefuseOpenNApi(fail=_refused(P, "set_int"), refuse_open_numbers=(2, 3))
+    rig = _boot_refused_period_rig(make_rig, api)
+    assert rig.register_update("trigger_source", "Line0")["success"] is True
+    assert rig.opens() == 3
+    assert _status(rig)["device_held"] is False
+
+    assert rig.register_update("trigger_mode", "Off")["success"] is True
+
+    warnings = rig.apply_msgs("WARNING")
+    assert len(warnings) == 1, rig.apply_msgs()
+    assert warnings[0].startswith(
+        f"{PREFIX}trigger_mode policy=restart restarted=True applied=True param_errors=TriggerSelfTriggerPeriod: "
+    )
+    assert len(rig.apply_msgs("ERROR")) == 1, rig.apply_msgs()  # только ERROR первой правки
+    assert rig.opens() == 4, "старый отказ периода откатил правку trigger_mode"
+    assert ("set_enum_str", M, "Off") in _nodes_written_after(api, 4)
+    assert _status(rig)["last_error"].startswith("trigger apply: param_errors=TriggerSelfTriggerPeriod: ")
+    assert _health_status(rig) == "degraded"
+
+
+def test_applied_with_old_refusals_replaces_applied_false_error(make_rig):
+    api = FakeNodeApi(fail=_refused(P, "set_int"))
+    rig = _boot_refused_period_rig(make_rig, api)
+    api.fail.update(_refused(S))
+    assert rig.register_update("trigger_source", "Line0")["success"] is True
+    assert _status(rig)["last_error"] == "trigger apply: field=trigger_source applied=False"
+    del api.fail[("set_enum_str", S)]  # источник снова пишется, период по-прежнему отказывает
+
+    assert rig.register_update("trigger_source", "Line0")["success"] is True
+
+    last_error = _status(rig)["last_error"]
+    assert last_error.startswith("trigger apply: param_errors=TriggerSelfTriggerPeriod: "), last_error
+    assert "applied=False" not in last_error
+    assert "TriggerSource:" not in last_error
+    assert last_error in rig.proxy.seen("last_error"), "замена не дошла до дерева состояния"
     assert _health_status(rig) == "degraded"
