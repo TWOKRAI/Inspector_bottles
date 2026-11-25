@@ -60,7 +60,9 @@ _DESELECT_UNRELATED_TIMING_FLAKE = (
     "::TestTheCostOfTheHotPath::test_the_facade_adds_little_over_a_direct_call"
 )
 
-_SUBPROCESS_TIMEOUT_SEC = 300.0
+#: Дедлайн от зависания, не бюджет скорости. 2026-11-25: один process_module/tests шёл 388 с под нагрузкой,
+#: и 300 с делали тест красным до первой проверки (docs/reviews/2026-11-25_redtest-declarations.md).
+_SUBPROCESS_TIMEOUT_SEC = 900.0
 
 _SUMMARY_RE = re.compile(r"(\d+) (passed|failed|error|errors)")
 
