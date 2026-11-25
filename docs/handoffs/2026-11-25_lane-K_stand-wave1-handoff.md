@@ -10,18 +10,18 @@
 - Не `taskkill /IM`. Остановка — `system_shutdown` (backend_ctl).
 
 ## Полный прогон тестов объединённой ветки
-Статус на 13:37: **НЕ ЗАКОНЧЕН. Стенд пока не запускай.** Прогон и стенд делят память машины (а тесты `process_manager` — ещё и порт 8765). Старый чат допишет этот раздел и даст сигнал владельцу.
+Статус на 13:58: **окно под стенд открыто.**
 
-Прогнано на `91193ab39` + коммит передачи:
-- `scripts/run_framework_tests.py` (35 мин): **3 failed, 14676 passed, 47 skipped, 2 xfailed**.
-  - `logger_module/tests/test_std_logger_guard.py::test_no_bare_stdlib_logger_outside_whitelist` — был красным до работы.
-  - `tests/test_declarations_leak_order_independence.py::test_statistics_then_process_module_order_matches_the_reverse_order` — причина проверяется.
-  - `tests/test_gc_policy_guard.py::test_qt_tests_collect_through_policy` — причина проверяется.
-
-Ещё не прогнаны на объединённой ветке: `Services`, `Plugins`, `multiprocess_prototype`, `scripts/validate.py`.
+- `scripts/run_framework_tests.py` на `91193ab39` + передача: 3 failed, 14676 passed, 47 skipped, 2 xfailed.
+  - `logger_module/tests/test_std_logger_guard.py` — красный был до волны 1.
+  - `tests/test_gc_policy_guard.py` — `gc.collect` в двух тестах прототипа (тракт кадров GUI), волна 1 их не меняла.
+  - `tests/test_declarations_leak_order_independence.py` — причина не установлена, разбор после стенда. Это про независимость тестов от порядка, не про поведение на стенде.
+- `Services` на `ea65a3334`: 8405 passed, 28 skipped, 2 xpassed, 0 красных.
+- `scripts/validate.py` на `ea65a3334`: ошибок и предупреждений нет.
+- `Plugins` и `multiprocess_prototype` НЕ прогонялись: после стенда.
 
 ## Дерево стенда
-`D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/mco-stand` — detached `91193ab39` (`integ/multicam-obs`: волна 1 слита). Не включены две правки текстов `last_error` считывателя (`3f6195535` и следующая) — на поведение захвата они не влияют, кроме одного края отката триггера.
+`D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/mco-stand` — detached `ea65a3334` (`integ/multicam-obs`: волна 1 слита целиком, включая две последние правки считывателя).
 
 ## Запуск (Git Bash, в фоне)
 ```bash
