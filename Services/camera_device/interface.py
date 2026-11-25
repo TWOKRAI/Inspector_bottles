@@ -17,6 +17,8 @@ from typing import Literal, Protocol, runtime_checkable
 
 type IdentKind = Literal["serial", "ip", "url", "index"]
 type ErrorKind = Literal["busy", "not_found", "network", "access", "range", "closed", "timeout", "other"]
+# Событие связи прибора (W2-a): `disconnected` — прибор сообщил об обрыве; `other` — прочие события драйвера.
+type LinkEvent = Literal["disconnected", "other"]
 
 
 @dataclass(frozen=True)
@@ -307,5 +309,23 @@ class DevicePort(Protocol):
 
         Pre: нет (в любом состоянии).
         Post: порт `closed`; повторный вызов ничего не делает.
+        """
+        ...
+
+
+@runtime_checkable
+class LinkEventSource(Protocol):
+    """Необязательная способность порта (W2-a): события связи прибора. В `DevicePort` член не входит.
+
+    Сеанс проверяет её через `isinstance(port, LinkEventSource)`; порт без метода — источник событий не даёт.
+    """
+
+    def drain_link_events(self) -> list[LinkEvent]:
+        """Забрать события связи, пришедшие с прошлого вызова.
+
+        Pre: зовёт только поток-владелец сеанса (как и остальные методы порта).
+        Post: не блокирует; возврат — события по порядку прихода (пустой список — событий нет), очередь пуста.
+            Очередь живёт с портом, а не с сеансом прибора: сеанс вычитывает и ОТБРАСЫВАЕТ события перед
+            `start_grabbing` каждой попытки (события прошлого сеанса прибора устарели).
         """
         ...
