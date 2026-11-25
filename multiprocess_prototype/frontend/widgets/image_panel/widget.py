@@ -147,6 +147,10 @@ class ImagePanelWidget(QWidget):
         """Отобразить один BGR-кадр в указанном слоте."""
         self._presenter.on_frame(slot_id, frame)
 
+    def show_no_signal(self, slot_id: str, text: str | None) -> None:
+        """Показать (``text``) или снять (``None``) плашку тишины на слоте."""
+        self._presenter.show_no_signal(slot_id, text)
+
     def display_frames(self, frames: dict) -> None:
         """Отобразить несколько кадров: dict[slot_id, np.ndarray]."""
         self._presenter.on_frames(frames)

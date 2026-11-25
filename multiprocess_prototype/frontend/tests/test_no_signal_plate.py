@@ -1,0 +1,446 @@
+# -*- coding: utf-8 -*-
+"""W2-c2: тёмная плашка с названием и адресом камеры вместо замершего кадра (тесты автора).
+
+Purpose: дисплей, у которого ВСЕ его отправители молчат ``_NO_SIGNAL_AFTER_S``, показывает плашку
+«<шаблон>\\nнет кадров, N с» и сам возвращается к кадру. Настоящие ``_setup_bridge_callbacks``,
+``DataReceiverBridge``, ``FramePump`` и ``ImagePanelWidget``; рецепт — словарь.
+
+Ожидаемые значения — литералы. Ожидание — цикл событий Qt с дедлайном.
+
+Запуск (из корня worktree, PYTHONPATH=корень, PYTHONUTF8=1, Qt offscreen), класс ``light``.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
+from PySide6.QtGui import QColor, QPixmap  # noqa: E402
+
+__all__: list[str] = []
+
+_SILENCE_S = 0.3  # порог тишины в тестах вместо боевых 2.0 с
+_QUIET_S = 1.2  # сколько молчим: заведомо дольше порога и первой целой секунды
+
+
+# ---------------------------------------------------------------------------
+# Помощники
+# ---------------------------------------------------------------------------
+
+
+def _spin_until(cond: Callable[[], bool], timeout_s: float) -> bool:
+    """Крутить цикл событий Qt, пока cond() не станет True или не истечёт timeout_s."""
+    loop = QEventLoop()
+    deadline = time.perf_counter() + timeout_s
+    state = {"ok": False}
+    poll = QTimer()
+    poll.setInterval(5)
+
+    def _check() -> None:
+        if cond():
+            state["ok"] = True
+            loop.quit()
+        elif time.perf_counter() >= deadline:
+            loop.quit()
+
+    poll.timeout.connect(_check)
+    poll.start()
+    _check()
+    if not state["ok"] and time.perf_counter() < deadline:
+        loop.exec()
+    poll.stop()
+    return state["ok"]
+
+
+def _spin(seconds: float) -> None:
+    _spin_until(lambda: False, seconds)
+
+
+def _msg(sender: str) -> dict:
+    return {"sender": sender, "frame": np.full((48, 64, 3), 200, dtype=np.uint8), "data": {}}
+
+
+def _display(display_id: str, name: str, x: int = 0) -> dict:
+    return {"id": display_id, "name": name, "enabled": True, "position": {"x": x, "y": 0}, "fps_limit": 30.0}
+
+
+class _Producer:
+    """Поток, шлющий кадры одного sender каждые 50 мс (идёт и во время заминки цикла Qt)."""
+
+    def __init__(self, bridge: Any, sender: str) -> None:
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(bridge, sender), name=f"{sender}-producer", daemon=True)
+        self._thread.start()
+
+    def _run(self, bridge: Any, sender: str) -> None:
+        while not self._stop.is_set():
+            bridge.dispatch(_msg(sender))
+            self._stop.wait(0.05)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(2.0)
+
+
+@pytest.fixture()
+def wire(qtbot, monkeypatch):
+    """Фабрика проводки: настоящие мост, насос и панель; порог тишины 0.3 с задан ДО настройки."""
+    from multiprocess_prototype.frontend import app as app_module
+    from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+    from multiprocess_prototype.frontend.frame_intake import FrameIntake
+    from multiprocess_prototype.frontend.widgets.image_panel.widget import ImagePanelWidget
+
+    pumps: list = []
+
+    def _make(recipe: dict) -> SimpleNamespace:
+        monkeypatch.setattr(app_module, "_NO_SIGNAL_AFTER_S", _SILENCE_S)
+
+        class _Recipes:
+            def get_active(self) -> str:
+                return "plate"
+
+            def read_recipe(self, _slug: str) -> dict:
+                return recipe
+
+        subscribers: list = []
+        bus = SimpleNamespace(subscribe=lambda _event, callback: subscribers.append(callback))
+        bridge = DataReceiverBridge()
+        panel = ImagePanelWidget()
+        qtbot.addWidget(panel)
+        intake = FrameIntake(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
+        process = SimpleNamespace(_bridge=bridge, _frame_intake=intake, _log_info=MagicMock(), _log_warning=MagicMock())
+        app_module._setup_bridge_callbacks(
+            process, panel, MagicMock(name="window"), recipe_manager=_Recipes(), event_bus=bus
+        )
+        pumps.append(process._frame_pump)
+
+        def fire() -> None:
+            assert subscribers, "подписка на пересборку дисплеев не сделана"
+            subscribers[0](None)  # RecipeActivated
+
+        return SimpleNamespace(bridge=bridge, panel=panel, pump=process._frame_pump, fire=fire)
+
+    yield _make
+    for pump in pumps:
+        pump.stop()
+    QCoreApplication.removePostedEvents(None)
+
+
+def _spy_plate(panel: Any, slot_id: str) -> list[str]:
+    """Обернуть ``show_no_signal`` объекта слота: список текстов всех вызовов."""
+    slot = panel._slots[slot_id]  # noqa: SLF001
+    original = slot.show_no_signal
+    calls: list[str] = []
+
+    def spy(text: str) -> None:
+        calls.append(text)
+        original(text)
+
+    slot.show_no_signal = spy
+    return calls
+
+
+def _label(panel: Any, slot_id: str) -> Any:
+    return panel._slots[slot_id]._label  # noqa: SLF001
+
+
+def _shown(panel: Any, slot_id: str) -> int:
+    return panel.presenter.frame_stats(slot_id)["shown"]
+
+
+# ---------------------------------------------------------------------------
+# recipe_displays: шаблон, статус, поля из рецепта
+# ---------------------------------------------------------------------------
+
+
+def test_plate_text_default_template() -> None:
+    from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import plate_status, plate_text
+
+    fields = {"title": "Камера 1", "number": 0, "address": None}
+
+    assert plate_text("", fields) == "Камера 1 · № 0 · —"
+    assert plate_status("lost", 3.9) == "нет связи, 3 с"
+    assert plate_status(None, 3.9) == "нет кадров, 3 с"
+
+
+def test_plate_text_unknown_and_unsafe_fields_stay_literal(caplog) -> None:
+    from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import plate_text
+
+    assert plate_text("{title} {x} {title.__class__} {title:>9}", {"title": "К"}) == (
+        "К {x} {title.__class__} {title:>9}"
+    )
+
+    fields = {"title": "К", "number": 1, "address": "10.0.0.1"}
+    with caplog.at_level(logging.WARNING):
+        assert plate_text("{title", fields) == "К · № 1 · 10.0.0.1"
+        assert plate_text("{title", fields) == "К · № 1 · 10.0.0.1"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and "{title" in r.getMessage()]
+    assert len(warnings) == 1, f"ожидали одно WARNING на текст шаблона: {warnings}"
+
+
+def test_build_plate_sources_flat_nested_and_override() -> None:
+    from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import build_plate_sources
+
+    recipe = {
+        "displays": [
+            {"id": "d0", "name": "0"},
+            {"id": "d1", "name": "1", "plate_text": "{title}"},
+            {"id": "r1", "name": "R", "plate_source": "reader_1.code_reader_sdk"},
+            {"id": "free", "name": "F"},
+        ],
+        "blueprint": {
+            "displays": [
+                {"node_id": "cam_0.camera_device.frame", "display_id": "d0"},
+                {"node_id": "other.plugin.frame", "display_id": "d0"},
+                {"node_id": "cam_1.hikvision.frame", "display_id": "d1"},
+                {"node_id": "draw_1.overlay_draw.frame", "display_id": "r1"},
+            ],
+            "processes": [
+                {
+                    "process_name": "cam_0",
+                    "plugins": [{"plugin_name": "camera_device", "camera_id": 0, "device_serial": "S1"}],
+                },
+                {
+                    "process_name": "cam_1",
+                    "plugins": [
+                        {
+                            "plugin_name": "hikvision",
+                            "camera_id": 9,
+                            "config": {"camera_id": 1, "device_serial": "DA1"},
+                        }
+                    ],
+                },
+                {
+                    "process_name": "reader_1",
+                    "plugins": [{"plugin_name": "code_reader_sdk", "device_ip": "192.168.1.10", "reader_id": 1}],
+                },
+            ],
+        },
+    }
+
+    sources = build_plate_sources(recipe)
+
+    assert sources["d0"] == {
+        "source": "cam_0.camera_device",
+        "process": "cam_0",
+        "number": 0,
+        "address": None,
+        "serial": "S1",
+        "template": "",
+    }
+    assert sources["d1"] == {
+        "source": "cam_1.hikvision",
+        "process": "cam_1",
+        "number": 1,
+        "address": None,
+        "serial": "DA1",
+        "template": "{title}",
+    }
+    assert sources["r1"] == {
+        "source": "reader_1.code_reader_sdk",
+        "process": "reader_1",
+        "number": 1,
+        "address": "192.168.1.10",
+        "serial": None,
+        "template": "",
+    }
+    assert sources["free"] == {
+        "source": "",
+        "process": "",
+        "number": None,
+        "address": None,
+        "serial": None,
+        "template": "",
+    }
+    assert build_plate_sources({"displays": "x", "blueprint": {"processes": None}}) == {}
+    assert build_plate_sources(None) == {}
+    broken = {
+        "displays": [None, {"id": "d"}],
+        "blueprint": {
+            "displays": [7, {"node_id": "p.q.frame", "display_id": "d"}],
+            "processes": [3, {"process_name": "p", "plugins": [5, {"plugin_name": "q", "config": "x"}]}],
+        },
+    }
+    assert build_plate_sources(broken)["d"]["process"] == "p"
+
+
+# ---------------------------------------------------------------------------
+# DisplaySlot
+# ---------------------------------------------------------------------------
+
+
+def _pixmap() -> QPixmap:
+    pixmap = QPixmap(64, 48)
+    pixmap.fill(QColor("red"))
+    return pixmap
+
+
+@pytest.fixture()
+def slot(qtbot):
+    from multiprocess_prototype.frontend.widgets.image_panel.display_slot import DisplaySlot
+
+    widget = DisplaySlot(slot_id="s", label="Камера 0")
+    qtbot.addWidget(widget)
+    widget.show()
+    QCoreApplication.processEvents()
+    return widget
+
+
+def test_slot_plate_and_resize_keeps_plate(slot) -> None:
+    slot.update_pixmap(_pixmap())
+    slot.show_no_signal("X\nнет кадров, 3 с")
+
+    slot.resize(slot.width() + 200, slot.height() + 150)
+    QCoreApplication.processEvents()
+
+    label = slot._label  # noqa: SLF001
+    assert label.pixmap().isNull()
+    assert label.text() == "X\nнет кадров, 3 с"
+    assert "#202020" in label.styleSheet()
+
+
+def test_frame_then_leave_restores_image(slot) -> None:
+    slot.show_no_signal("X\nнет кадров, 3 с")
+    slot.update_pixmap(_pixmap())
+
+    label = slot._label  # noqa: SLF001
+    assert label.styleSheet() == ""
+    assert not label.pixmap().isNull()
+    before = (label.styleSheet(), label.text(), label.pixmap().cacheKey())
+
+    for _ in range(3):
+        slot.leave_no_signal()
+
+    assert (label.styleSheet(), label.text(), label.pixmap().cacheKey()) == before
+    assert not label.pixmap().isNull()
+
+
+def test_leave_without_frame_removes_plate_text(slot) -> None:
+    slot.show_no_signal("X\nнет кадров, 3 с")
+
+    slot.leave_no_signal()
+
+    label = slot._label  # noqa: SLF001
+    assert label.text() == "Камера 0"
+    assert label.styleSheet() == ""
+
+
+# ---------------------------------------------------------------------------
+# Проводка app: sink насоса, тишина, сбор отправителей
+# ---------------------------------------------------------------------------
+
+
+def test_unshown_frame_returns_false(wire) -> None:
+    w = wire({})
+    w.pump.stop()  # sink зовём сами
+    sink = w.pump._sink  # noqa: SLF001
+
+    assert sink("cam", _msg("cam")) is True
+    assert sink("cam", {"sender": "cam", "data": {}}) is False
+
+    w.bridge.restore_for_show = lambda _item: None  # ссылка SHM порвана
+    assert sink("cam", _msg("cam")) is False
+
+
+def test_two_senders_one_display_no_plate_while_one_alive(wire) -> None:
+    recipe = {
+        "displays": [_display("d", "D")],
+        "blueprint": {
+            "displays": [
+                {"node_id": "a.src.frame", "display_id": "d"},
+                {"node_id": "b.src.frame", "display_id": "d"},
+            ]
+        },
+    }
+    w = wire(recipe)
+    calls = _spy_plate(w.panel, "d")
+    original = w.pump._on_silence  # noqa: SLF001
+    silences: list[tuple[str, float | None]] = []
+
+    def spy_silence(key: str, age_s: float | None) -> None:
+        silences.append((key, age_s))
+        original(key, age_s)
+
+    w.pump._on_silence = spy_silence  # noqa: SLF001
+    producer = _Producer(w.bridge, "b")
+    try:
+        assert _spin_until(lambda: _shown(w.panel, "d") >= 1, 1.0), "кадры b не показаны"
+        shown = _shown(w.panel, "d")
+        _spin(_QUIET_S)
+        assert _shown(w.panel, "d") > shown, "кадры b перестали показываться"
+        assert any(key == "a" and age is not None for key, age in silences), "тишина a не сообщена"
+        assert calls == [], f"плашка при живом b: {calls}"
+    finally:
+        producer.stop()
+
+    _spin(_QUIET_S)
+    assert len(calls) >= 1, "оба молчат, плашки нет"
+
+
+def test_two_unbound_senders_on_main_no_plate_while_one_alive(wire) -> None:
+    w = wire({"displays": [], "blueprint": {"displays": []}})
+    calls = _spy_plate(w.panel, "main")
+    w.bridge.dispatch(_msg("u1"))
+    assert _spin_until(lambda: _shown(w.panel, "main") >= 1, 1.0), "кадр u1 не показан"
+    w.bridge.dispatch(_msg("u2"))
+    assert _spin_until(lambda: _shown(w.panel, "main") >= 2, 1.0), "кадр u2 не показан"
+    producer = _Producer(w.bridge, "u2")
+    try:
+        assert _spin_until(lambda: _shown(w.panel, "main") >= 4, 1.0), "кадры u2 не идут"
+        calls.clear()
+        shown = _shown(w.panel, "main")
+        _spin(_QUIET_S)
+        assert _shown(w.panel, "main") > shown, "кадры u2 перестали показываться"
+        assert calls == [], f"плашка при живом u2: {calls}"
+    finally:
+        producer.stop()
+
+    _spin(_QUIET_S)
+    assert len(calls) >= 1, "оба молчат, плашки нет"
+
+
+def test_scan_found_sender_survives_rebuild(wire) -> None:
+    w = wire({"displays": [], "blueprint": {"displays": []}})
+    w.bridge.dispatch(_msg("u"))
+    assert _spin_until(lambda: w.bridge.frame_mailbox.stats()["pending"] == 0 and _shown(w.panel, "main") >= 1, 1.0), (
+        "кадр не показан до пересборки"
+    )
+
+    w.fire()
+    _spin(_QUIET_S)
+
+    assert _label(w.panel, "main").text().startswith("main · № — · —\nнет кадров, ")
+
+
+def test_app_wiring_silent_sender_draws_plate_on_its_display(wire) -> None:
+    recipe = {
+        "displays": [_display("display_2", "Камера 0"), _display("display_x", "Пустой", 10)],
+        "blueprint": {
+            "displays": [{"node_id": "camera_0.camera_device.frame", "display_id": "display_2"}],
+            "processes": [{"process_name": "camera_0", "plugins": [{"plugin_name": "camera_device", "camera_id": 0}]}],
+        },
+    }
+    w = wire(recipe)
+    w.bridge.dispatch(_msg("camera_0"))
+    assert _spin_until(lambda: _shown(w.panel, "display_2") >= 1, 1.0), "кадр не показан"
+
+    _spin(_QUIET_S)
+
+    assert _label(w.panel, "display_2").text().startswith("Камера 0 · № 0 · —\nнет кадров, ")
+    assert "нет кадров" not in _label(w.panel, "display_x").text()
+    assert _label(w.panel, "display_x").styleSheet() == ""
+
+    w.bridge.dispatch(_msg("camera_0"))
+    assert _spin_until(lambda: not _label(w.panel, "display_2").pixmap().isNull(), 1.0), "картинка не вернулась"
+    assert _label(w.panel, "display_2").styleSheet() == ""

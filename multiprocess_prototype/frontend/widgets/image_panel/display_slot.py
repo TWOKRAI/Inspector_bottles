@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 _MIN_WIDTH = 320
 _MIN_HEIGHT = 240
 
+# Плашка тишины: тёмный фон, светлый текст.
+_PLATE_STYLE = "background-color: #202020; color: #e0e0e0;"
+
 
 class DisplaySlot(QWidget):
     """Один слот отображения: умеет показывать QPixmap или текст-placeholder.
@@ -30,6 +33,9 @@ class DisplaySlot(QWidget):
         # Исходный (не уменьшенный) кадр: ресайз масштабирует из него,
         # а не из уже уменьшенной копии в QLabel — иначе качество деградирует
         self._source_pixmap: QPixmap | None = None
+
+        # Показана ли плашка тишины (на метке стоит _PLATE_STYLE)
+        self._plate_shown = False
 
         # Колбэк перерисовки при ресайзе (задаёт presenter): cb() -> True, если слот уже перерисован
         self._resize_callback: Callable[[], bool] | None = None
@@ -56,6 +62,7 @@ class DisplaySlot(QWidget):
             # Пустой кадр — не «оставить прежний на экране без привязки к исходнику», а «нет сигнала».
             self.clear()
             return
+        self._drop_plate_style()
         self._source_pixmap = pixmap
         self._show_scaled()
 
@@ -90,6 +97,7 @@ class DisplaySlot(QWidget):
 
     def set_placeholder(self, text: str) -> None:
         """Показать текст-placeholder вместо изображения."""
+        self._drop_plate_style()
         self._source_pixmap = None
         self._label.clear()
         self._label.setText(text)
@@ -98,6 +106,28 @@ class DisplaySlot(QWidget):
         """Очистить слот и показать placeholder 'Нет сигнала'."""
         placeholder = self._label_text if self._label_text else "Нет сигнала"
         self.set_placeholder(placeholder)
+
+    def show_no_signal(self, text: str) -> None:
+        """Показать тёмную плашку с текстом вместо кадра; прежний кадр забыт (ресайз его не вернёт)."""
+        self._label.clear()
+        self._source_pixmap = None
+        self._label.setStyleSheet(_PLATE_STYLE)
+        self._label.setText(text)
+        self._plate_shown = True
+
+    def leave_no_signal(self) -> None:
+        """Снять плашку (идемпотентно); без пришедшего после неё кадра — обычный placeholder слота."""
+        if not self._plate_shown:
+            return
+        self._drop_plate_style()
+        if self._source_pixmap is None:
+            self.clear()
+
+    def _drop_plate_style(self) -> None:
+        """Снять стиль плашки; без плашки стиль метки не трогается."""
+        if self._plate_shown:
+            self._label.setStyleSheet("")
+            self._plate_shown = False
 
     def resizeEvent(self, event) -> None:
         """При изменении размера — перерисовать кадр (колбэк) или перемасштабировать исходный pixmap."""
