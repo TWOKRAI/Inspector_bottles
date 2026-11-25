@@ -7,8 +7,11 @@
 процесса (параметр `workers`; `worker_prefix` уникален на сеанс в менеджере).
 
 Состояния: `idle` (до первого `start`), `opening`, `grabbing`, `stopping`, `closed` (покой после остановки),
-`busy`, `not_found`, `error` (отказ; автопереподключения нет, ADR-CR-009). Переходы — только
-compare-and-set под замком состояния; `on_state`, `on_stall`, `on_timing` зовутся вне замка.
+`busy`, `not_found`, `error` (отказ), `lost` (связь с прибором потеряна, идёт переподключение; только при
+`reconnect=True`). Без `reconnect` автопереподключения нет (ADR-CR-009); с ним (W2-a) поток-владелец сам повторяет
+`open -> start_grabbing` каждые `reconnect_interval_s`, пока не будет стопа. Потеря связи: событие прибора
+`disconnected` (`LinkEventSource`) или тишина `link_silence_s` (свободный поток — сразу, триггер — по пробе узла).
+Переходы — только compare-and-set под замком состояния; `on_state`, `on_stall`, `on_timing` зовутся вне замка.
 `on_state` приходит из потока, сменившего состояние (вызывающего или владельца), поэтому из РАЗНЫХ потоков и
 может прийти не по порядку: истина — свойство `state`, потребитель при событии перечитывает его.
 
@@ -37,11 +40,11 @@ import time
 import weakref
 from collections import deque
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from multiprocess_framework.modules.worker_module import ExecutionMode, ThreadConfig, WorkerType
 
-from .interface import DeviceIdentity, DevicePort, DeviceSdk, PortError, RawFrame
+from .interface import DeviceIdentity, DevicePort, DeviceSdk, LinkEventSource, PortError, RawFrame
 from .params import Step
 from .profiles import ProfileRunner, ProfileState
 
@@ -49,6 +52,14 @@ logger = logging.getLogger("camera_device.session")
 
 # Подряд идущих ошибок `get_frame` до перехода в `error`.
 MAX_CONSECUTIVE_ERRORS = 3
+# Виды `PortError` пробы при тишине, означающие «прибора нет»; прочие (`access`, `range`, `other`) — прибор ответил.
+_LINK_DEAD_KINDS = frozenset({"network", "closed", "timeout", "not_found", "busy"})
+# Дроссель WARNING неудачных повторов, с.
+_RETRY_WARN_S = 60.0
+# Срез ожидания между попытками, с: стоп процесса (4,0 с) не ждёт паузу целиком.
+_BACKOFF_SLICE_S = 0.1
+# Предел ожидания первого кадра свободного потока после переоткрытия при выключенной тишине (`link_silence_s 0`), с.
+_FIRST_FRAME_WAIT_S = 3.0
 # Состояния отказа: `device_held` ещё может быть истинным, пока владелец закрывает порт.
 _FAILED = frozenset({"busy", "not_found", "error"})
 # Вызовы порта, для которых зовётся `on_timing` (секунды).
@@ -105,6 +116,19 @@ class _Hold:
         self.acquired = False
         self.opened = False
         self.grabbing = False
+        self.run_applied = False  # план `run` попытки записан: только тогда `rest` при выходе
+        self.up = False  # попытка дошла до `grabbing`: отказ после этого — потеря связи, а не неудачный повтор
+
+
+class _Outage:
+    """Учёт одного отказа в цикле попыток (пишет и читает только владелец)."""
+
+    def __init__(self, ever_grabbed: bool) -> None:
+        self.ever_grabbed = ever_grabbed  # прибор уже брался в этом цикле: отказ — потеря связи (`lost`)
+        self.t0 = time.monotonic()
+        self.tries = 0  # повторы этого отказа (для строк лога; `attempts` в `link()` — за весь цикл)
+        self.next_warn = self.t0 + _RETRY_WARN_S  # первая строка «прибора нет» — не раньше 60 с от начала отказа
+        self.stack_logged = False  # первое не-`PortError` исключение уже записано со стеком
 
 
 class _Call:
@@ -143,6 +167,10 @@ class DeviceSession:
         on_timing: Callable[[str, float], None] | None = None,
         run: Sequence[Step] = (),
         rest: Sequence[Step] = (),
+        reconnect: bool = False,
+        link_silence_s: float = 0.0,
+        reconnect_interval_s: float = 2.0,
+        on_link: Callable[[], None] | None = None,
     ) -> None:
         if watchdog_s <= timeout_ms / 1000.0:
             raise ValueError("watchdog_s должен быть больше timeout_ms/1000")
@@ -187,6 +215,27 @@ class DeviceSession:
         self._hold = _Hold()
         self._stop_now: Callable[[], bool] = lambda: True  # стоп цикла или процесса (ставит владелец)
         self._regrab_failed = False  # перезахват отказал: цикл завершается (пишет и читает только владелец)
+        # Связь и переподключение (W2-a): параметры читаются один раз здесь.
+        self._reconnect = bool(reconnect)
+        self._link_silence_s = float(link_silence_s)  # 0 — правило тишины выключено
+        self._reconnect_interval_s = float(reconnect_interval_s)
+        # `_reconnecting` пишется под `self._lock` (вместе с состоянием), читается голым (`reconnecting`, `apply`).
+        self._reconnecting = False
+        # Голые атрибуты для `link()`; пишет владелец (и `start()` под замком при новом цикле).
+        self._link = "off"  # up | idle | silent | lost | off
+        self._outages = 0
+        self._attempts = 0
+        self._last_outage_s: float | None = None
+        self._lost_since: float | None = None
+        # Только владелец: учёт отказа, «правка ящиком исполнена», «повтор ждёт первого кадра», план попытки.
+        self._outage: _Outage | None = None
+        # `on_link()` (владелец, вне замка): при переподключении сменился `attempts` или целая секунда `lost_for_s`.
+        # Подписчик не ждёт своего окна (у источника в паузе или при `run fault` `produce()` не зовётся).
+        self._on_link = on_link
+        self._link_key: tuple[int, int | None] | None = None
+        self._box_ran = False
+        self._awaiting_frame = False
+        self._attempt_run: tuple[Step, ...] = ()
 
     # ------------------------------------------------------------------ #
     # Свойства
@@ -229,6 +278,31 @@ class DeviceSession:
         """Поток-владелец жив (снимается им при выходе, вместе с финальным состоянием)."""
         return self._held
 
+    @property
+    def reconnecting(self) -> bool:
+        """Цикл попыток ждёт прибор (`lost` или отказ первой попытки при `reconnect`); голый атрибут, без замка."""
+        return self._reconnecting
+
+    def link(self) -> dict:
+        """Связь с прибором (голые атрибуты, без замка, как `state`); только скаляры (Dict at Boundary).
+
+        `state`: `up` (кадры идут), `idle` (тишина, проба ответила), `silent` (тишина, пробовать нечем — план пуст),
+        `lost`, `off` (выводится из состояния `idle`/`stopping`/`closed`, не хранится). `lost_for_s` — целые секунды
+        с потери при переподключении после потери, иначе `None` (целое: state не сливается на каждом такте).
+        """
+        state = self._state
+        reconnecting = self._reconnecting
+        lost_since = self._lost_since
+        lost_for = int(time.monotonic() - lost_since) if reconnecting and lost_since is not None else None
+        return {
+            "state": "off" if state in ("idle", "stopping", "closed") else self._link,
+            "reconnecting": reconnecting,
+            "outages": self._outages,
+            "attempts": self._attempts,
+            "last_outage_s": self._last_outage_s,
+            "lost_for_s": lost_for,
+        }
+
     # ------------------------------------------------------------------ #
     # Команды (потоки вызывающих)
     # ------------------------------------------------------------------ #
@@ -265,7 +339,7 @@ class DeviceSession:
                 return False
             if state == "opening":
                 cmd = self._cmd
-            elif self._held:  # busy/not_found/error/closed при живом владельце: автопереподключения нет
+            elif self._held:  # busy/not_found/error/lost/closed при живом владельце: цикл ещё идёт или закрывается
                 return False
             else:
                 cmd = self._cmd = _StartCmd()
@@ -276,6 +350,12 @@ class DeviceSession:
                 self._pending.clear()
                 self._drain_queued = False
                 self._last_error = None  # успешный захват после неудачного не показывает старую ошибку
+                # счётчики связи — на цикл `start -> stop` (W2-a)
+                self._outages = self._attempts = 0
+                self._last_outage_s = self._lost_since = None
+                self._link = "off"
+                self._link_key = None  # первый `on_link` нового цикла не глушится ключом прошлого
+                self._reconnecting = False
                 self._held = True
                 self._cycle_t0 = time.monotonic()
                 self._set_locked("opening", pending)
@@ -292,7 +372,7 @@ class DeviceSession:
             if not creator:
                 return False  # свой срок joiner'а: чужой цикл не отменяется
             if not cmd.committed:
-                cmd.cancelled = True  # владелец откатит цикл после open / _apply_run
+                cmd.cancelled = True  # владелец откатит цикл после open / _apply_run; повторов не будет
                 return False
         # Владелец уже зовёт `start_grabbing`: ждём итог не дольше `watchdog_s` (дольше — зависание, его ловит сторож).
         if cmd.done.wait(self._watchdog_s):
@@ -304,15 +384,21 @@ class DeviceSession:
             return False
 
     def stop(self, timeout: float = 2.0) -> None:
-        """Остановить захват; не отбрасывается. `timeout` — только срок ожидания вызывающего."""
+        """Остановить захват; не отбрасывается. `timeout` — только срок ожидания вызывающего.
+
+        Из отказа (`busy`/`not_found`/`error`) — сразу `closed` и событие стопа цикла: владелец либо уже закрывает
+        порт, либо (`reconnect`) ждёт повтора и выходит. Из `lost` — прежней веткой `stopping`.
+        """
         pending: list[tuple[str, str]] = []
         with self._lock:
             state = self._state
             if state in ("idle", "closed", "stopping"):
                 return
             exited = self._exited
+            self._reconnecting = False  # после стопа переподключаться нечему (владелец может ещё висеть в `open`)
             if state in _FAILED:
-                self._set_locked("closed", pending)  # порт не зовётся: владелец уже закрывает его сам
+                self._set_locked("closed", pending)  # порт не зовётся: владелец закрывает его сам
+                self._stop_evt.set()  # иначе цикл попыток (W2-a) продолжил бы повторы после стопа
             else:
                 self._set_locked("stopping", pending)
                 self._stop_evt.set()
@@ -332,7 +418,7 @@ class DeviceSession:
         """
         return self._enqueue(fn) is not None
 
-    def call(self, fn: Callable[[], Any], timeout: float) -> tuple[bool, Any]:
+    def call(self, fn: Callable[[], Any], timeout: float, *, while_reconnecting: bool = False) -> tuple[bool, Any]:
         """`fn` в потоке-владельце и ожидание ответа: `(True, результат)` либо `(False, текст отказа)`.
 
         По сроку, пока владелец `fn` не взял, команда отменяется (не исполнится и позже), ответ `(False, "срок")`; если
@@ -344,7 +430,9 @@ class DeviceSession:
             return False, "вызов из потока владельца"
         # В ящик идёт обёртка `_port_call("call", fn)`: она выставляет `_current`, и сторож видит зависший `fn`. Именно
         # здесь, а не в `_execute`: вложенный `_port_call` из `_drain` сбросил бы `_current` внешнего вызова.
-        cmd = self._enqueue(lambda: self._port_call("call", fn))
+        # `while_reconnecting` — команда без открытого порта (перечисление): принимается и при переподключении,
+        # владелец исполнит её между попытками; команды порта при переподключении отказываются, как раньше
+        cmd = self._enqueue(lambda: self._port_call("call", fn), while_reconnecting)
         if cmd is None:
             return False, "сеанс не в захвате"
         if cmd.done.wait(timeout):
@@ -365,27 +453,40 @@ class DeviceSession:
 
         Шаги сливаются в `_pending` по полю (последнее значение побеждает), в ящик ставится ОДНА команда `_drain`;
         порт трогает только владелец. Принимается в `opening` (владелец исполнит `_drain` сразу после входа в
-        `grabbing`, до первого `get_frame`) и в `grabbing`. В `stopping`/`closed`/отказе или при закрытом ящике правка
-        не принимается: значение register'а попадёт в прибор планом `run` следующего цикла.
+        `grabbing`, до первого `get_frame`) и в `grabbing`. При переподключении (`reconnecting`) правка входит в план
+        открытия (`run`) следующей попытки, ящик не трогается. В `stopping`/`closed`/отказе или при закрытом ящике
+        правка не принимается: значение register'а попадёт в прибор планом `run` следующего цикла.
         """
         if policy not in ("live", "restart"):
             raise ValueError("policy должна быть live или restart")
         if not steps:
             return
         with self._lock:
-            accepted = self._state in ("opening", "grabbing") and not self._box.closed
-            if accepted:
+            merged = self._reconnecting
+            if merged:  # `_replace_in_run` — чистая функция от `self._run` и шагов: под замком из любого потока
+                self._run = self._replace_in_run(steps)
+                # повтор мог уже поставить в `_drain` шаги этих полей со значением снимка: они не перепишут новое
+                for step in steps:
+                    if step.field in self._pending:
+                        self._pending[step.field] = (step, self._pending[step.field][1])
+                accepted = True
+            else:
+                accepted = self._state in ("opening", "grabbing") and not self._box.closed
+            if accepted and not merged:
                 for step in steps:
                     self._pending[step.field] = (step, policy)
                 if not self._drain_queued:
                     self._drain_queued = True
                     self._box.cmds.append(_Cmd(self._drain))
-        if not accepted:
+        if merged:
+            logger.info("apply policy=%s: переподключение, правка войдёт в план открытия", policy)
+        elif not accepted:
             logger.info("apply policy=%s: цикл не идёт, правка не принята (значения войдут в план run)", policy)
 
-    def _enqueue(self, fn: Callable[[], Any]) -> _Cmd | None:
+    def _enqueue(self, fn: Callable[[], Any], while_reconnecting: bool = False) -> _Cmd | None:
+        """Команда в ящик: в `grabbing`; с `while_reconnecting` — и при переподключении (исполнится между попытками)."""
         with self._lock:
-            if self._state != "grabbing" or self._box.closed:
+            if self._box.closed or not (self._state == "grabbing" or (while_reconnecting and self._reconnecting)):
                 return None
             cmd = _Cmd(fn)
             self._box.cmds.append(cmd)
@@ -412,6 +513,22 @@ class DeviceSession:
             if self._state not in expected:
                 return False
             self._set_locked(new, pending)
+        self._fire_states(pending)
+        return True
+
+    def _set_loop_state(self, new: str, then: Callable[[], None] | None = None) -> bool:
+        """Запись состояния из цикла попыток (W2-a); `False` — стоп запрошен или `closed`/`stopping`, ничего не тронуто.
+
+        `then` исполняется под тем же захватом `self._lock`, что и запись (флаг `_reconnecting`, слияние правок в
+        план); `on_state` — вне замка.
+        """
+        pending: list[tuple[str, str]] = []
+        with self._lock:
+            if self._stop_now() or self._state in ("closed", "stopping"):
+                return False
+            self._set_locked(new, pending)
+            if then is not None:
+                then()
         self._fire_states(pending)
         return True
 
@@ -534,9 +651,9 @@ class DeviceSession:
         self._fire_states(pending)
         return not abort
 
-    def _apply_run(self) -> None:
-        """Профиль `run` между `open` и `start_grabbing` (владелец)."""
-        self._runner.apply_plan(self._run)  # type: ignore[union-attr]
+    def _apply_run(self, run: Sequence[Step]) -> None:
+        """Профиль `run` между `open` и `start_grabbing` (владелец); `run` — снимок плана, взятый под замком."""
+        self._runner.apply_plan(run)  # type: ignore[union-attr]
 
     def _apply_rest(self, grabbing: bool) -> bool:
         """Профиль `rest` после `stop_grabbing` до `close`; `False` — `open` ветки reopen упал, `close` не зовётся."""
@@ -546,7 +663,12 @@ class DeviceSession:
         return self._runner.run_rest(self._rest, direct)  # type: ignore[union-attr]
 
     def _owner_main(self, worker_stop: threading.Event, pause: threading.Event) -> None:
-        """TASK-воркер на цикл `open -> close`: поток-владелец порта. Стоп процесса (`worker_stop`) = стоп цикла."""
+        """TASK-воркер на цикл `start -> stop`: поток-владелец порта. Стоп процесса (`worker_stop`) = стоп цикла.
+
+        Без `reconnect` — одна попытка (прежнее поведение). С ним — цикл попыток в ЭТОМ потоке: ящик команд и сторож
+        общие на весь цикл, каждая попытка с нуля (`_Hold`, профиль, `ProfileRunner`); между попытками — уборка порта
+        без `rest` и пауза `reconnect_interval_s` срезами 0,1 с.
+        """
         self._owner = threading.current_thread()
         with self._lock:
             cmd, cycle_stop, exited, box = self._cmd, self._stop_evt, self._exited, self._box
@@ -554,44 +676,298 @@ class DeviceSession:
         stop_evt = lambda: cycle_stop.is_set() or worker_stop.is_set()  # noqa: E731
         self._stop_now = stop_evt
         self._start_watchdog()
-        hold = self._hold = _Hold()
-        self._regrab_failed = False
-        run_applied = failed = False
-        self._profile.reset()  # начало run каждого start(): params / params_status / param_errors заново
+        self._outage = None
+        first = True
+        ever_grabbed = False
+        failed = False
         try:
-            self._port_call("acquire", self._sdk.acquire)
-            hold.acquired = True
-            ident = self._resolve_ident()
-            self._port_call("open", self._port.open, ident)
-            hold.opened = True
-            self._device = ident
-            self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing, self._port_call)
-            self._apply_run()
-            run_applied = True
-            if self._commit(cmd, stop_evt):
-                self._port_call("start_grabbing", self._port.start_grabbing)
-                hold.grabbing = True
-                if self._enter_grabbing(cmd, stop_evt):
-                    failed = not self._grab_loop(stop_evt, box)
-        except PortError as exc:
-            failed = True
-            self._fail(_failed_state(exc, opening=not hold.opened), exc)
-        except Exception as exc:  # noqa: BLE001 — любой отказ владельца -> error, порт закрывается ниже
-            failed = True
-            self._fail("error", exc)
+            while True:
+                hold = self._hold = _Hold()
+                self._regrab_failed = False
+                self._awaiting_frame = False
+                self._profile.reset()  # начало run каждой попытки: params / params_status / param_errors заново
+                failed = False
+                error: Exception | None = None
+                try:
+                    outcome = self._attempt(cmd if first else None, stop_evt, box, ever_grabbed)
+                except Exception as exc:  # noqa: BLE001 — любой отказ попытки: решение ниже, порт закрывается уборкой
+                    outcome, error = "failed", exc
+                if outcome == "stopped":
+                    break
+                failed = True
+                if not self._reconnect or (first and cmd.cancelled):
+                    self._end_without_reconnect(outcome, error, hold)  # прежнее поведение: повторов нет
+                    break
+                if first and not hold.up:  # (а) отказ первой попытки: прибор ещё не брался
+                    state = self._refusal_state(error, hold)
+                    self._last_error = describe_error(error) if error is not None else outcome
+                    logger.error("session: %s", self._last_error)  # прежняя строка `_fail`, ровно одна
+                    self._outage = _Outage(ever_grabbed=False)
+                    # состояние, `reconnecting` и слияние правок — ОДИН захват: `apply` из `on_state(busy)` не теряется
+                    entered = self._set_loop_state(state, then=self._enter_reconnect_locked)
+                    cmd.finish(False)  # после `_reconnecting = True`: вызывающий `start()` видит `reconnecting`
+                    if not entered:
+                        break
+                elif hold.up:  # (б) потеря связи из `grabbing`
+                    ever_grabbed = True
+                    if not self._lost_from_grabbing(error):
+                        break
+                elif not self._retry_failed(error, hold, ever_grabbed):  # (в) неудачный повтор
+                    break
+                # (г) уборка без `rest`, пауза, следующая попытка
+                self._cleanup(hold.grabbing, False, hold.opened, hold.acquired)
+                self._hold = _Hold()  # порт убран: финальная уборка его не тронет
+                failed = False
+                if not self._backoff(cycle_stop, stop_evt, box):
+                    break
+                self._attempts += 1
+                if self._outage is not None:
+                    self._outage.tries += 1
+                self._link_tick()
+                first = False
         finally:
+            self._reconnecting = False
             cmd.finish(False)  # no-op, если итог уже `True`
             self._close_box(box)  # до закрытия порта: оставшиеся команды получают ответ раньше, чем вернётся `stop()`
+            hold = self._hold
             # `rest` — только на открытом порту: стоп в окне перезахвата мог оставить порт закрытым
-            self._cleanup(hold.grabbing, run_applied and not failed and hold.opened, hold.opened, hold.acquired)
+            self._cleanup(hold.grabbing, hold.run_applied and not failed and hold.opened, hold.opened, hold.acquired)
             self._stop_watchdog()
             with self._lock:
                 pending: list[tuple[str, str]] = []
+                self._reconnecting = False
                 if self._state not in _FAILED:
                     self._set_locked("closed", pending)
                 self._held = False  # снимается вместе с финальным состоянием
                 exited.set()
             self._fire_states(pending)
+            # финальное состояние уже записано: подписчик видит `device_held False` и `reconnecting False` и тогда,
+            # когда перехода нет (`stop()` из отказа уже поставил `closed`) и `produce()` не зовётся
+            self._notify(self._on_link)
+
+    def _attempt(self, cmd: _StartCmd | None, stop_evt: Callable[[], bool], box: _Box, ever_grabbed: bool) -> str:
+        """Одна попытка: `acquire -> open -> run -> start_grabbing -> захват`; исход `_grab_loop` или `stopped`.
+
+        `cmd` — только у первой попытки: она ведёт ответ `start()` как раньше (`_commit`, `_enter_grabbing`, без
+        промежуточных проверок стопа — их роль играет `_commit`). Повтор (`cmd is None`) проверяет стоп после
+        `acquire`, `open` и записи `run`. Исключение порта летит в `_owner_main`.
+        """
+        hold = self._hold
+        retry = cmd is None
+        self._port_call("acquire", self._sdk.acquire)
+        hold.acquired = True
+        if retry and stop_evt():
+            return "stopped"
+        ident = self._resolve_ident()
+        self._port_call("open", self._port.open, ident)
+        hold.opened = True
+        self._device = ident
+        self._runner = ProfileRunner(self._port, ident, self._profile, logger, self._timing, self._port_call)
+        if retry and stop_evt():
+            return "stopped"
+        with self._lock:  # `apply` при переподключении меняет план из другого потока под этим замком
+            run = self._attempt_run = self._run
+        self._apply_run(run)
+        hold.run_applied = True
+        if retry and stop_evt():
+            return "stopped"
+        self._discard_link_events()
+        if cmd is not None:
+            if not self._commit(cmd, stop_evt):
+                return "stopped"
+            self._port_call("start_grabbing", self._port.start_grabbing)
+            hold.grabbing = True
+            self._link = "up"  # до `on_state(grabbing)`: подписчик сразу видит связь
+            if not self._enter_grabbing(cmd, stop_evt):
+                return "stopped"
+            hold.up = True
+        else:
+            self._port_call("start_grabbing", self._port.start_grabbing)
+            hold.grabbing = True
+            if not self._resume(ever_grabbed):
+                return "stopped"
+        return self._grab_loop(stop_evt, box)
+
+    def _resume(self, ever_grabbed: bool) -> bool:
+        """После `start_grabbing` повтора: состояние и правки, принятые после снимка плана; `False` — стоп.
+
+        Свободный поток после потери остаётся `lost` (и `reconnecting`) до ПЕРВОГО кадра (`_grab_loop`); аппаратный
+        триггер, режим не задан или прибор ещё не брался — сразу `grabbing`.
+        """
+        mode = self._trigger_mode()
+        if ever_grabbed and mode is not None and mode != "On":
+            self._awaiting_frame = True
+            return self._set_loop_state("lost", then=self._queue_run_diff_locked)
+        if not self._set_loop_state("grabbing", then=self._back_up_locked):
+            return False
+        self._recovered()
+        return True
+
+    def _end_without_reconnect(self, outcome: str, error: Exception | None, hold: _Hold) -> None:
+        """Конец цикла без повторов (прежнее поведение): исключение -> `_fail`, потеря связи -> `error`."""
+        if error is not None:
+            if hold.up:
+                self._link = "lost"  # отказ после входа в захват; отказ первого `open` оставляет `off`
+            self._fail(self._refusal_state(error, hold), error)
+        elif outcome == "lost":
+            # тишина/событие прибора без `reconnect`: иначе рецепт с `trigger_managed true` + `Off` молча держал бы
+            # мёртвый поток (решение лида по ревью)
+            logger.error("session: связь с прибором потеряна (%s); переподключение выключено", self._last_error)
+            self._link = "lost"
+            self._cas(("grabbing",), "error")
+
+    def _lost_from_grabbing(self, error: Exception | None) -> bool:
+        """(б) Потеря связи из `grabbing`: учёт, одна WARNING, `lost` + `reconnecting`; `False` — стоп."""
+        if error is not None:
+            self._last_error = describe_error(error)
+        self._link = "lost"
+        self._outages += 1
+        self._lost_since = time.monotonic()
+        self._outage = _Outage(ever_grabbed=True)
+        logger.warning(
+            "session: связь с прибором потеряна (%s); переподключение каждые %s с",
+            self._last_error,
+            f"{self._reconnect_interval_s:g}",
+        )
+        return self._set_loop_state("lost", then=self._enter_reconnect_locked)
+
+    def _retry_failed(self, error: Exception | None, hold: _Hold, ever_grabbed: bool) -> bool:
+        """(в) Неудачный повтор: `_fail` не зовётся, `opening` не ставится, WARNING — дросселем 60 с; `False` — стоп.
+
+        Тишина без первого кадра (исход `lost` без исключения) — тоже неудачный повтор: причина уже в `last_error`.
+        """
+        outage = self._outage
+        if outage is None:  # не бывает: повтору всегда предшествует (а) или (б); учёт заводится на месте
+            outage = self._outage = _Outage(ever_grabbed=ever_grabbed)
+        if error is not None:
+            self._last_error = describe_error(error)
+        now = time.monotonic()
+        if error is not None and not isinstance(error, PortError) and not outage.stack_logged:
+            outage.stack_logged = True  # первое не-`PortError` (например `OSError` из ctypes) — со стеком
+            logger.error("session: повтор открытия: исключение %s", self._last_error, exc_info=error)
+        elif now >= outage.next_warn:
+            outage.next_warn = now + _RETRY_WARN_S
+            logger.warning("session: прибора нет %.0f с, попыток %d", now - outage.t0, outage.tries)
+        state = "lost" if ever_grabbed else self._refusal_state(error, hold)
+        # правки, поставленные повтором в `_drain` и не исполненные, — снова в план: между попытками порт закрыт
+        return self._set_loop_state(state, then=self._enter_reconnect_locked)
+
+    def _backoff(self, cycle_stop: threading.Event, stop_evt: Callable[[], bool], box: _Box) -> bool:
+        """Пауза `reconnect_interval_s` срезами `cycle_stop.wait(0.1)`; `False` — стоп во время паузы.
+
+        Команды ящика (`call`, например перечисление приборов) исполняются и здесь: оператору они нужны как раз при
+        переподключении.
+        """
+        end = time.monotonic() + self._reconnect_interval_s
+        while not stop_evt():
+            self._link_tick()
+            if box.cmds:  # чтение длины без замка: `_poll_box` берёт замок сам
+                self._serve_between_attempts(box, stop_evt)
+            left = end - time.monotonic()
+            if left <= 0:
+                return True
+            cycle_stop.wait(min(_BACKOFF_SLICE_S, left))
+        return False
+
+    def _serve_between_attempts(self, box: _Box, stop_evt: Callable[[], bool]) -> None:
+        """Команды ящика между попытками: SDK берётся на время команд и отпускается; порт закрыт.
+
+        Команда порта ответит своим отказом (`closed`); `_drain` здесь пуст — правки слиты в план при входе в отказ.
+        """
+        acquired = False
+        try:
+            self._port_call("acquire", self._sdk.acquire)
+            acquired = True
+        except Exception:  # noqa: BLE001 — без SDK команды ответят своими отказами
+            logger.exception("session: SDK для команд между попытками не взят")
+        try:
+            self._poll_box(box, stop_evt)
+        finally:
+            if acquired:
+                try:
+                    self._port_call("release", self._sdk.release)
+                except Exception:  # noqa: BLE001 — отказ release не роняет цикл попыток
+                    logger.exception("session: SDK после команд между попытками не отпущен")
+
+    def _link_tick(self) -> None:
+        """Владелец при переподключении: `on_link()`, если сменился `attempts` или целая секунда `lost_for_s`."""
+        if self._on_link is None:
+            return
+        since = self._lost_since
+        key = (self._attempts, None if since is None else int(time.monotonic() - since))
+        if key != self._link_key:
+            self._link_key = key
+            self._notify(self._on_link)
+
+    @staticmethod
+    def _refusal_state(error: Exception | None, hold: _Hold) -> str:
+        """Состояние отказа попытки: `busy`/`not_found` только на открытии; не-`PortError` и прочее — `error`."""
+        if isinstance(error, PortError):
+            return _failed_state(error, opening=not hold.opened)
+        return "error"
+
+    def _enter_reconnect_locked(self) -> None:
+        """Под `self._lock`: вход в переподключение; правки, не дошедшие до `_drain`, сливаются в план открытия.
+
+        Поставленный `_drain` найдёт пустой пакет и выйдет.
+        """
+        self._reconnecting = True
+        if self._pending:
+            self._run = self._replace_in_run([step for step, _policy in self._pending.values()])
+            self._pending.clear()
+
+    def _queue_run_diff_locked(self) -> None:
+        """Под `self._lock`: шаги плана, изменённые после снимка попытки (`apply` при переподключении), — в `_drain`.
+
+        Ящик исполнит их до следующего `get_frame` (перезахватом: политика правки при слиянии в план не хранится).
+        """
+        applied = self._attempt_run
+        if self._run is applied:
+            return
+        before = {step.field: step for step in applied}
+        changed = [step for step in self._run if before.get(step.field) != step]
+        self._attempt_run = self._run
+        if not changed:
+            return
+        for step in changed:
+            self._pending[step.field] = (step, "restart")
+        if not self._drain_queued:
+            self._drain_queued = True
+            self._box.cmds.append(_Cmd(self._drain))
+
+    def _back_up_locked(self) -> None:
+        """Под `self._lock`: возврат в `grabbing` после отказа — правки после снимка в `_drain`, связь `up`."""
+        self._queue_run_diff_locked()
+        self._reconnecting = False
+        self._link = "up"
+        self._last_error = None
+        outage = self._outage
+        if outage is not None and outage.ever_grabbed:
+            self._last_outage_s = round(time.monotonic() - outage.t0, 1)
+
+    def _recovered(self) -> None:
+        """Попытка дошла до `grabbing` (владелец, вне замка): INFO о возврате, учёт отказа закрыт."""
+        self._hold.up = True
+        outage, self._outage = self._outage, None
+        if outage is None:
+            return
+        if outage.ever_grabbed:
+            logger.info(
+                "session: связь восстановлена за %.1f с, попыток %d", time.monotonic() - outage.t0, outage.tries
+            )
+        else:
+            logger.info("session: прибор взят, попыток %d", outage.tries)
+
+    def _trigger_mode(self) -> Any:
+        """Значение шага `trigger_mode` в плане `run` (`None` — шага нет или он пропущен: режим не задан)."""
+        step = next((s for s in self._run if s.field == "trigger_mode"), None)
+        return None if step is None or step.skip is not None else step.value
+
+    def _discard_link_events(self) -> None:
+        """Перед `start_grabbing`: события связи прошлого сеанса прибора устарели — вычитать и отбросить."""
+        if isinstance(self._port, LinkEventSource):
+            stale = self._port.drain_link_events()
+            logger.debug("session: отброшено событий прибора до start_grabbing: %d", len(stale))
 
     def _resolve_ident(self) -> DeviceIdentity:
         found = self._port_call("enum_devices", self._sdk.enum_devices)
@@ -626,14 +1002,18 @@ class DeviceSession:
                 if self._last_error is None:
                     self._last_error = describe_error(exc)
 
-    def _grab_loop(self, stop_evt: Callable[[], bool], box: _Box) -> bool:
-        """Читать кадры до `stop_evt`; `False` — три ошибки подряд или отказ перезахвата (состояние уже `error`).
+    def _grab_loop(self, stop_evt: Callable[[], bool], box: _Box) -> Literal["stopped", "failed", "lost"]:
+        """Читать кадры до `stop_evt`. `failed` — три ошибки подряд или отказ перезахвата; `lost` — потеря связи.
 
-        Ящик опрашивается после КАЖДОГО возврата `get_frame` (кадр, `None`, `PortError`).
+        Без `reconnect` при `failed` состояние уже `error` (`_fail`); с ним `_fail` не зовётся (решает цикл попыток).
+        Исход `lost` всегда пишет причину в `last_error`. После КАЖДОГО возврата `get_frame` (кадр, `None`,
+        `PortError`): событие прибора `disconnected`, затем правило тишины `link_silence_s`, затем ящик команд.
         """
         if not self._poll_box(box, stop_evt):  # правки, принятые в `opening`: до первого `get_frame`
-            return False
+            return "failed"
+        events = isinstance(self._port, LinkEventSource)
         consecutive = 0
+        last_frame = last_probe = time.monotonic()
         while not stop_evt():
             raw = None
             try:
@@ -643,19 +1023,71 @@ class DeviceSession:
                 consecutive += 1
                 self._last_error = describe_error(exc)
                 if consecutive >= MAX_CONSECUTIVE_ERRORS:
-                    self._fail("error", exc)
-                    return False
+                    if not self._reconnect:
+                        self._link = "lost"  # до `_fail`: `on_state(error)` видит связь потерянной
+                        self._fail("error", exc)
+                    return "failed"
             else:
                 consecutive = 0  # кадр и таймаут (None) — не ошибки
-            if not self._poll_box(box, stop_evt):
-                return False
-            if raw is None:
-                continue
-            try:
-                self._on_frame(raw)
-            except Exception:  # noqa: BLE001 — исключение колбэка не ошибка порта, захват не останавливается
-                logger.exception("session: on_frame завершился исключением")
-        return True
+            now = time.monotonic()
+            if self._awaiting_frame and raw is None:
+                self._link_tick()  # повтор ждёт первого кадра (`lost`): `lost_for_s` идёт и здесь
+            if raw is not None:
+                last_frame = now
+                if self._awaiting_frame:  # свободный поток после потери: связь вернулась с первым кадром
+                    self._awaiting_frame = False
+                    if not self._set_loop_state("grabbing", then=self._back_up_locked):
+                        return "stopped"
+                    self._recovered()
+                self._link = "up"
+            reason = None
+            if events and "disconnected" in self._port.drain_link_events():  # type: ignore[attr-defined]
+                reason = "событие прибора disconnected"
+            elif self._link_silence_s > 0 and now - last_frame >= self._link_silence_s:
+                reason, last_probe = self._silence(now, now - last_frame, last_probe)
+            elif self._awaiting_frame and self._link_silence_s <= 0 and now - last_frame >= _FIRST_FRAME_WAIT_S:
+                # правило тишины выключено (0): ожидание первого кадра после переоткрытия всё равно конечно. При
+                # `0 < link_silence_s` его ограничивает ветка выше: ждёт кадра только свободный поток, а у него
+                # тишина `link_silence_s` — потеря сразу (проба не спрашивается)
+                reason = f"нет первого кадра {now - last_frame:.1f} с после переоткрытия"
+            if reason is None:
+                self._box_ran = False
+                if not self._poll_box(box, stop_evt):
+                    return "failed"
+                if self._box_ran:  # перезахват по живой правке — не тишина
+                    last_frame = last_probe = time.monotonic()
+            if raw is not None:
+                try:
+                    self._on_frame(raw)
+                except Exception:  # noqa: BLE001 — исключение колбэка не ошибка порта, захват не останавливается
+                    logger.exception("session: on_frame завершился исключением")
+            if reason is not None:
+                self._last_error = reason
+                return "lost"
+        return "stopped"
+
+    def _silence(self, now: float, silent_s: float, last_probe: float) -> tuple[str | None, float]:
+        """Правило тишины: причина потери (`None` — связь есть) и новый `last_probe`.
+
+        Свободный поток (`trigger_mode` задан и не `On`) — потеря сразу, проба не спрашивается (на стенде прибор
+        отвечал при мёртвом потоке). `On` или режим не задан — проба узла `run[0]` раз в `link_silence_s`.
+        """
+        mode = self._trigger_mode()
+        if mode is not None and mode != "On":
+            return f"тишина {silent_s:.1f} с при trigger_mode={mode}", last_probe
+        if now - last_probe < self._link_silence_s:
+            return None, last_probe
+        run = self._run
+        if not run:
+            self._link = "silent"  # пробовать нечем
+            return None, now
+        try:
+            self._port_call("probe", self._port.get_param, run[0].binding)
+        except PortError as exc:
+            if exc.kind in _LINK_DEAD_KINDS:
+                return f"тишина {silent_s:.1f} с, проба: {describe_error(exc)}", now
+        self._link = "idle"  # прибор ответил (значением или отказом узла): поток просто ждёт триггера
+        return None, now
 
     # ------------------------------------------------------------------ #
     # Ящик: исполнение команд владельцем
@@ -675,6 +1107,8 @@ class DeviceSession:
                     continue  # вызывающий истёк по сроку: не исполняется и позже
                 cmd.committed = True  # с этого момента `call` по сроку отменить команду не может
             self._execute(cmd)
+            if cmd.fn == self._drain:  # живая правка (запись или перезахват) исполнена: окно тишины заново
+                self._box_ran = True
             if self._regrab_failed:
                 return False
         return True
@@ -711,14 +1145,16 @@ class DeviceSession:
         `live` при `live_write` — запись без остановки; остальное (`restart`, `live` без `live_write`) — ОДИН перезахват
         на пакет. Шаги пакета заменяют шаги тех же полей в плане `run` цикла: следующий перезахват их не откатывает.
         """
-        with self._lock:
+        with self._lock:  # план меняет и `apply` при переподключении (другой поток): присваивание — под замком
             batch = list(self._pending.values())
             self._pending.clear()
             self._drain_queued = False
+            if batch:
+                self._run = self._replace_in_run([step for step, _policy in batch])
+            run = self._run
         if not batch:
             return
-        self._run = self._replace_in_run([step for step, _policy in batch])
-        order = {step.field: i for i, step in enumerate(self._run)}  # родитель раньше потомка, как в плане
+        order = {step.field: i for i, step in enumerate(run)}  # родитель раньше потомка, как в плане
         live_write = "live_write" in self._port.capabilities
         live = [step for step, policy in batch if policy == "live" and live_write]
         regrab = [step for step, policy in batch if not (policy == "live" and live_write)]
@@ -742,7 +1178,9 @@ class DeviceSession:
         """Перезахват порта ВНУТРИ `grabbing` (`state`, `on_state` не меняются): `stop_grabbing`, запись, `start`.
 
         С `restart_regrab` пишутся шаги пакета в открытый порт; без неё — `close`, `open` и весь `run` цикла. Стоп
-        запрошен до `start_grabbing` -> он не зовётся (порт закроет `_cleanup`). Отказ -> `_fail("error")`.
+        запрошен до `start_grabbing` -> он не зовётся (порт закроет `_cleanup`). Отказ -> `_fail("error")`; с
+        `reconnect` — только `last_error`: потерю решает цикл попыток (как три ошибки кадра подряд).
+        События связи до `start_grabbing` отбрасываются (как в каждой попытке).
         """
         hold, stop = self._hold, self._stop_now
         t0 = time.perf_counter()
@@ -765,11 +1203,16 @@ class DeviceSession:
                 self._runner.apply_plan(self._run)  # type: ignore[union-attr]
             if stop():
                 return
+            self._discard_link_events()
             self._port_call("start_grabbing", self._port.start_grabbing)
             hold.grabbing = True
         except Exception as exc:  # noqa: BLE001 — любой отказ перезахвата: цикл завершается, `_cleanup` по `hold`
             self._regrab_failed = True
-            self._fail("error", exc)
+            if self._reconnect:
+                self._last_error = describe_error(exc)
+            else:
+                self._link = "lost"  # до `_fail`: `on_state(error)` видит связь потерянной
+                self._fail("error", exc)
         else:
             self._log_apply(steps, "restart", t0)
         finally:

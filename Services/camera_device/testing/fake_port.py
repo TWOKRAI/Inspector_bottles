@@ -15,6 +15,10 @@
 Счётчики открытых дескрипторов (Task 2.4a): `open_handles` (+1 после успешного `open`, -1 в `close`, если порт
 был открыт) и `max_open_handles` (максимум за жизнь фейка); ловят вызов порта мимо потока-владельца. Поведение
 `open`/`close` счётчики не меняют.
+Обрыв связи (W2-a): `disconnect()` — `get_frame` ждёт `timeout_ms` и даёт `None`, `get_param` -> `PortError("network")`,
+`open` -> `PortError("not_found")`; `restore()` — `open` снова работает, но `get_frame` даёт `None`, пока порт не
+закрыт и не открыт заново (прибор бросил сеанс GigE). `LinkEventFakePort` (`make_link_event_port`) добавляет события
+связи `emit_link_event` / `drain_link_events` (`LinkEventSource`); у `FakePort` этого метода нет.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from Services.camera_device.interface import (
     Binding,
     DeviceIdentity,
     DeviceInfo,
+    LinkEvent,
     ParamInfo,
     PortError,
     RawFrame,
@@ -235,10 +240,22 @@ class FakePort:
         self._handles_lock = threading.Lock()
         self.open_handles = 0
         self.max_open_handles = 0
+        # Обрыв связи (W2-a): флаги пишет поток теста, читает владелец; присваивание bool атомарно, замок не нужен.
+        self._link_down = False  # прибора нет: `open`/`get_param` отказывают, кадров нет
+        self._stale_stream = False  # поток кадров умер с обрывом; жив снова только после нового `open`
 
     def arm_hang(self, seconds: float) -> None:
         """Взвести разовое зависание: следующий `get_frame` спит `seconds`, игнорируя `timeout_ms`."""
         self._hang_s = seconds
+
+    def disconnect(self) -> None:
+        """Вынуть кабель: `get_frame` ждёт `timeout_ms` и даёт `None`; `get_param` — `network`, `open` — `not_found`."""
+        self._stale_stream = True
+        self._link_down = True
+
+    def restore(self) -> None:
+        """Вставить кабель: `open` снова работает; кадров нет, пока порт не закрыт и не открыт заново."""
+        self._link_down = False
 
     # -- служебное -----------------------------------------------------------------------------
 
@@ -298,6 +315,9 @@ class FakePort:
             raise PortError("busy", "open")
         if self._state != "closed":
             raise PortError("other", "open")
+        if self._link_down:
+            raise PortError("not_found", "open")
+        self._stale_stream = False  # новый сеанс прибора после `restore()`: поток кадров снова жив
         if self._enum_entries is None:  # один прибор: открывается по любой личности, отказов выбора нет
             info = DeviceInfo(
                 serial=ident.value if ident.kind == "serial" else FAKE_SERIAL,
@@ -319,6 +339,8 @@ class FakePort:
     def get_param(self, b: Binding) -> object:
         self._record("get_param", (b.key,))
         self._require_opened("get_param")
+        if self._link_down:
+            raise PortError("network", "get_param")
         node = self._node(b, "get_param")
         if self._access(node) == "NA":
             raise PortError("access", "get_param", node.closed_code)
@@ -378,6 +400,9 @@ class FakePort:
         self._record("get_frame", (timeout_ms,))
         if self._state != "grabbing":
             raise PortError("closed", "get_frame")
+        if self._link_down or self._stale_stream:
+            time.sleep(timeout_ms / 1000.0)  # кадра нет: SDK ждёт весь срок и отвечает таймаутом
+            return None
         hung = self._hang_s > 0
         if hung:
             seconds, self._hang_s = self._hang_s, 0.0
@@ -442,6 +467,60 @@ class FakePort:
         if was_open:
             with self._handles_lock:
                 self.open_handles -= 1
+
+
+class LinkEventFakePort(FakePort):
+    """Фейк с событиями связи прибора (`LinkEventSource`): тест кладёт событие, владелец сеанса вычитывает."""
+
+    def __init__(self, nodes: dict[str, _Node], **opts) -> None:
+        super().__init__(nodes, **opts)
+        self._events: list[LinkEvent] = []
+        self._events_lock = threading.Lock()  # `emit` — поток теста, `drain` — владелец сеанса
+
+    def emit_link_event(self, kind: LinkEvent) -> None:
+        """Событие прибора (например `disconnected`); забирает его следующий `drain_link_events`."""
+        with self._events_lock:
+            self._events.append(kind)
+
+    def drain_link_events(self) -> list[LinkEvent]:
+        """События с прошлого вызова; не блокирует. Вызов пишется в журнал `calls` (с числом событий)."""
+        with self._events_lock:
+            events, self._events = self._events, []
+        self._record("drain_link_events", (len(events),))
+        return events
+
+
+def make_link_event_port(
+    *,
+    neter_after_stop: bool = False,
+    applied_but_error: bool | frozenset[str] = False,
+    busy_for_s: float = 0.0,
+    capabilities: frozenset[str] = ALL_CAPABILITIES,
+    open_delay_s: float = 0.0,
+    frame_period_s: float = 0.0,
+    get_frame_hang_s: float = 0.0,
+    get_frame_errors: int = 0,
+    get_frame_script: tuple[str, ...] = (),
+    read_offset: dict[str, float] | None = None,
+    enum_entries: tuple[DeviceInfo, ...] | None = None,
+    frame_meta: tuple[tuple[int, int, int | None], ...] = (),
+) -> LinkEventFakePort:
+    """Фейк с узлами по умолчанию и событиями связи; параметры — как у `make_port`."""
+    return LinkEventFakePort(
+        _default_nodes(),
+        neter_after_stop=neter_after_stop,
+        applied_but_error=applied_but_error,
+        busy_for_s=busy_for_s,
+        capabilities=capabilities,
+        open_delay_s=open_delay_s,
+        frame_period_s=frame_period_s,
+        get_frame_hang_s=get_frame_hang_s,
+        get_frame_errors=get_frame_errors,
+        get_frame_script=get_frame_script,
+        read_offset=read_offset,
+        enum_entries=enum_entries,
+        frame_meta=frame_meta,
+    )
 
 
 def make_port(
