@@ -159,7 +159,13 @@ class _Rig:
 
     def log_msgs(self, level: str) -> list[str]:
         """Тексты журнала `MockProcessServices.logs` данного уровня с префиксом плагина."""
-        return [e["msg"] for e in list(self.services.logs) if e["level"] == level and e["msg"].startswith(PREFIX)]
+        # Строка про отсутствие RegistersManager — стенд без реестра, к проверяемым свойствам не относится
+        # (правка лида после отчёта исполнителя: допущение «других WARNING нет» было ошибкой стенда тестера).
+        return [
+            e["msg"]
+            for e in list(self.services.logs)
+            if e["level"] == level and e["msg"].startswith(PREFIX) and "нет RegistersManager" not in e["msg"]
+        ]
 
     def windows(self, start: int = 0) -> list[dict[str, object]]:
         """Опубликованные уровни, разрезанные на окна тика: новое окно — когда имя повторилось."""
@@ -314,11 +320,14 @@ def test_ambiguous_enumeration_gives_not_found_with_list(make):
 
 
 def test_lost_frames_incomplete_lost_packets(make):
-    rig = make(frame_meta=((1, 0, None), (2, 3, None), (5, 0, None)))
+    # enum_entries нужен: серийник из config ищется в перечислении, а перечисление по умолчанию отдаёт FAKE-0001.
+    # Окно берём по lost_frames == 2: пропуск номера виден только после третьего кадра, а lost_packets == 3
+    # уже в окне после второго (правка лида после отчёта исполнителя: тик привязан к configure).
+    rig = make(enum_entries=(_entries()["B"],), frame_meta=((1, 0, None), (2, 3, None), (5, 0, None)))
     assert rig.take()["status"] == "ok"
     names = {"lost_frames", "incomplete", "lost_packets"}
-    assert rig.drive_until(lambda: rig.first_window(lambda w: w.get("lost_packets") == 3) is not None), rig.windows()
-    window = rig.first_window(lambda w: w.get("lost_packets") == 3)
+    assert rig.drive_until(lambda: rig.first_window(lambda w: w.get("lost_frames") == 2) is not None), rig.windows()
+    window = rig.first_window(lambda w: w.get("lost_frames") == 2)
     assert names <= set(window)
     assert window["lost_frames"] == 2
     assert window["incomplete"] == 1
@@ -340,7 +349,7 @@ def test_lost_frames_incomplete_lost_packets(make):
 
 
 def test_trigger_lost_counts_index_gaps(make):
-    rig = make(frame_meta=((1, 0, 10), (2, 0, 11), (3, 0, 14)))
+    rig = make(enum_entries=(_entries()["B"],), frame_meta=((1, 0, 10), (2, 0, 11), (3, 0, 14)))
     assert rig.take()["status"] == "ok"
     assert rig.drive_until(lambda: rig.first_window(lambda w: w.get("trigger_lost") == 2) is not None), rig.windows()
     window = rig.first_window(lambda w: w.get("trigger_lost") == 2)
