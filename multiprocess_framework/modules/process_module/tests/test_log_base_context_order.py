@@ -11,13 +11,17 @@ Purpose: плагины пишут в ``configure``/``start`` внутри ``boo
 появляется на шаге 3, раньше tap поставить нельзя. Запись ищется по тексту ``w1c-step6``, а не как
 ``records[0]``: до хука в tap идут и другие строки.
 
-Три теста:
+Тесты:
   1. строка из главного потока хука несёт ``proc_name``;
   2. строка из потока, созданного и присоединённого внутри хука (дедлайн ``join(2.0)``), тоже несёт
      ``proc_name`` — база общая на процесс, а не на поток;
   3. настоящий ``SharedResourcesManager`` и настоящий рецепт: в записи есть ``incarnation`` и
      ``recipe``. ``_build_resource`` глушит любое исключение (``except Exception: pass`` в трёх
-     ветках), поэтому без этого теста молчаливая потеря поля прошла бы зелёной.
+     ветках), поэтому без этого теста молчаливая потеря поля прошла бы зелёной;
+  4. строка из начала шага 4 (``_init_communication``) несёт ``proc_name`` — сторожит позицию «до
+     шага 4», шаг 6 один этого не видит;
+  5. ``_build_resource`` бросает — ``initialize()`` всё равно успешен и пишет WARNING: сбой украшения
+     записи не вправе уронить подъём процесса и оставить router/console/command без shutdown.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from multiprocess_framework.modules.shared_resources_module.core.shared_resource
 __all__ = []
 
 _MARKER = "w1c-step6"
+_STEP4_MARKER = "w1c-step4"
 _THREAD_JOIN_S = 2.0
 
 
@@ -86,6 +91,31 @@ class _HookProcess(ProcessModule):
 
 class _ThreadHookProcess(_HookProcess):
     log_from_thread = True
+
+
+class _Step4Process(ProcessModule):
+    """``ProcessModule``, который пишет строку в начале шага 4 (``_init_communication``)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.sink = _Sink()
+
+    def _init_communication(self) -> None:
+        self.get_manager("logger").add_tap(self.sink, min_level="DEBUG", name="w1c")
+        self.log_info(_STEP4_MARKER)
+        super()._init_communication()
+
+
+class _BrokenResourceProcess(ProcessModule):
+    """``_build_resource`` бросает; tap ставится здесь же — раньше шага 3a логгера ещё нет."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.sink = _Sink()
+
+    def _build_resource(self) -> dict[str, Any]:
+        self.get_manager("logger").add_tap(self.sink, min_level="DEBUG", name="w1c")
+        raise RuntimeError("w1c-boom")
 
 
 def _only_record(process: _HookProcess) -> dict[str, Any]:
@@ -145,5 +175,33 @@ def test_step6_record_has_incarnation_and_recipe(tmp_path: Path) -> None:
         assert extra["proc_name"] == "w1c_proc", extra
         assert extra["incarnation"] == 5, extra
         assert extra["recipe"] == "w1c_recipe", extra
+    finally:
+        process.shutdown()
+
+
+def test_step4_record_has_proc_name() -> None:
+    """Позиция «до шага 4»: строка, записанная в начале ``_init_communication``, уже несёт имя.
+
+    Тесты шага 6 это не сторожат — блок, уехавший за шаг 4 или 5, оставил бы их зелёными.
+    """
+    process = _Step4Process("w1c_proc")
+    try:
+        assert process.initialize() is True, "initialize() не прошёл на пустом конфиге"
+        hits = process.sink.with_text(_STEP4_MARKER)
+        assert len(hits) == 1, f"записей с {_STEP4_MARKER}: {len(hits)}"
+        extra = hits[0]["extra"]
+        assert extra["proc_name"] == "w1c_proc", extra
+    finally:
+        process.shutdown()
+
+
+def test_broken_resource_does_not_fail_initialize_and_warns() -> None:
+    """Сбой ``_build_resource`` на шаге 3a: ``initialize()`` всё равно успешен, в логе WARNING с причиной."""
+    process = _BrokenResourceProcess("w1c_proc")
+    try:
+        assert process.initialize() is True, "сбой _build_resource не должен проваливать initialize()"
+        warnings = [r for r in process.sink.with_text("w1c-boom") if r["level"] == "WARNING"]
+        assert len(warnings) == 1, process.sink.with_text("w1c-boom")
+        assert "контекст логирования процесса 'w1c_proc' не установлен" in warnings[0]["message"]
     finally:
         process.shutdown()

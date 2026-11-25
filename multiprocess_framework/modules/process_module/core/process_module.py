@@ -288,9 +288,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             #     не доехал — запись потеряла бы имя процесса.
             #     До шага 6: плагины пишут в `configure`/`start` внутри `boot()`,
             #     их строки должны нести имя процесса (W1-c).
-            logger = self.get_manager("logger")
-            if logger and hasattr(logger, "set_base_context"):
-                logger.set_base_context(**self._build_resource())
+            #     Свой try: Resource — украшение записи, а здесь, до шага 4, исключение
+            #     провалило бы initialize() и оставило router/console/command без
+            #     shutdown (ревью W1-c).
+            try:
+                logger = self.get_manager("logger")
+                if logger and hasattr(logger, "set_base_context"):
+                    logger.set_base_context(**self._build_resource())
+            except Exception as exc:  # noqa: BLE001 — контекст лога не стоит провала подъёма
+                self._log_warning(f"контекст логирования процесса '{self.name}' не установлен: {exc!r}")
 
             # 4. Инициализация коммуникации
             self._init_communication()
