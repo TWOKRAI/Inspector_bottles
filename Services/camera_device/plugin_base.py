@@ -262,6 +262,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._open_logged = False  # строка "device opened" уже записана в этом цикле (test-and-set под `self._lock`)
         # личность прошлого входа в `grabbing` этого цикла `take_device` (W2-a1: повтор строки после переподключения)
         self._identity_logged: DeviceInfo | None = None
+        self._cycle_ident: DeviceIdentity | None = None  # личность, с которой сеанс начал идущий цикл `take_device`
         self._seq = 0
         self._frames = 0
         self._port: DevicePort | None = None
@@ -867,8 +868,13 @@ class CameraDevicePlugin(ProcessModulePlugin):
             session = self._ensure_session()
             ident = self._identity()
             run, rest = self._plan()
+            if getattr(session, "reconnecting", False) and ident != self._cycle_ident:
+                # переподключение к прежней личности бессмысленно: цикл перезапускается с новой
+                self._ctx.log_info("CameraDevicePlugin: take_device: личность прибора сменилась, цикл перезапускается")
+                session.stop(args.timeout_s)
             # идущий цикл не меняется (повторный take_device при opening/grabbing — по-прежнему ok): результат не нужен
             if session.set_cycle(ident, run, rest):
+                self._cycle_ident = ident
                 self._clear_queue()  # цикл начинается заново (прибор не держится): кадры прошлого сеанса не отдаём
                 with self._plan_lock:  # из этих значений построен план run цикла: основа сравнения для живой правки
                     values = self._reg.model_dump()
@@ -1033,8 +1039,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
         отказном состоянии ставит `closed` СРАЗУ, пока владелец ещё закрывает порт):
           * владельца нет -> поток команды: `acquire`, затем `enum_devices` и `release` (в `finally`, только после
             успешного `acquire`), без handle и без сеанса;
-          * владелец есть -> `session.call(enum_devices)`; не `grabbing` (`opening`, `stopping`, отказ при живом
-            владельце) `call` отвечает `"сеанс не в захвате"`, порт не вызывается.
+          * владелец есть -> `session.call(enum_devices)`; при переподключении владелец исполняет его и между
+            попытками (SDK берётся на время команды); не `grabbing` и не переподключение (`opening`, `stopping`,
+            отказ без `reconnect`) — `call` отвечает `"сеанс не в захвате"`, порт не вызывается.
         Остаточный риск: между проверкой `device_held` и `acquire` команда не конкурирует с `start()` только пока оба
         идут из системного потока (`cmd_take_device`); `start()` из другого потока не проверялся.
         """

@@ -58,6 +58,8 @@ _LINK_DEAD_KINDS = frozenset({"network", "closed", "timeout", "not_found", "busy
 _RETRY_WARN_S = 60.0
 # Срез ожидания между попытками, с: стоп процесса (4,0 с) не ждёт паузу целиком.
 _BACKOFF_SLICE_S = 0.1
+# Предел ожидания первого кадра свободного потока после переоткрытия при выключенной тишине (`link_silence_s 0`), с.
+_FIRST_FRAME_WAIT_S = 3.0
 # Состояния отказа: `device_held` ещё может быть истинным, пока владелец закрывает порт.
 _FAILED = frozenset({"busy", "not_found", "error"})
 # Вызовы порта, для которых зовётся `on_timing` (секунды).
@@ -352,6 +354,7 @@ class DeviceSession:
                 self._outages = self._attempts = 0
                 self._last_outage_s = self._lost_since = None
                 self._link = "off"
+                self._link_key = None  # первый `on_link` нового цикла не глушится ключом прошлого
                 self._reconnecting = False
                 self._held = True
                 self._cycle_t0 = time.monotonic()
@@ -392,6 +395,7 @@ class DeviceSession:
             if state in ("idle", "closed", "stopping"):
                 return
             exited = self._exited
+            self._reconnecting = False  # после стопа переподключаться нечему (владелец может ещё висеть в `open`)
             if state in _FAILED:
                 self._set_locked("closed", pending)  # порт не зовётся: владелец закрывает его сам
                 self._stop_evt.set()  # иначе цикл попыток (W2-a) продолжил бы повторы после стопа
@@ -474,8 +478,9 @@ class DeviceSession:
             logger.info("apply policy=%s: цикл не идёт, правка не принята (значения войдут в план run)", policy)
 
     def _enqueue(self, fn: Callable[[], Any]) -> _Cmd | None:
+        """Команда в ящик: в `grabbing` и при переподключении (владелец исполняет её и между попытками)."""
         with self._lock:
-            if self._state != "grabbing" or self._box.closed:
+            if self._box.closed or not (self._state == "grabbing" or self._reconnecting):
                 return None
             cmd = _Cmd(fn)
             self._box.cmds.append(cmd)
@@ -689,8 +694,10 @@ class DeviceSession:
                     break
                 if first and not hold.up:  # (а) отказ первой попытки: прибор ещё не брался
                     state = self._refusal_state(error, hold)
-                    self._fail(state, error or RuntimeError(outcome))
+                    self._last_error = describe_error(error) if error is not None else outcome
+                    logger.error("session: %s", self._last_error)  # прежняя строка `_fail`, ровно одна
                     self._outage = _Outage(ever_grabbed=False)
+                    # состояние, `reconnecting` и слияние правок — ОДИН захват: `apply` из `on_state(busy)` не теряется
                     entered = self._set_loop_state(state, then=self._enter_reconnect_locked)
                     cmd.finish(False)  # после `_reconnecting = True`: вызывающий `start()` видит `reconnecting`
                     if not entered:
@@ -705,7 +712,7 @@ class DeviceSession:
                 self._cleanup(hold.grabbing, False, hold.opened, hold.acquired)
                 self._hold = _Hold()  # порт убран: финальная уборка его не тронет
                 failed = False
-                if not self._backoff(cycle_stop, stop_evt):
+                if not self._backoff(cycle_stop, stop_evt, box):
                     break
                 self._attempts += 1
                 if self._outage is not None:
@@ -728,6 +735,9 @@ class DeviceSession:
                 self._held = False  # снимается вместе с финальным состоянием
                 exited.set()
             self._fire_states(pending)
+            # финальное состояние уже записано: подписчик видит `device_held False` и `reconnecting False` и тогда,
+            # когда перехода нет (`stop()` из отказа уже поставил `closed`) и `produce()` не зовётся
+            self._notify(self._on_link)
 
     def _attempt(self, cmd: _StartCmd | None, stop_evt: Callable[[], bool], box: _Box, ever_grabbed: bool) -> str:
         """Одна попытка: `acquire -> open -> run -> start_grabbing -> захват`; исход `_grab_loop` или `stopped`.
@@ -790,6 +800,8 @@ class DeviceSession:
     def _end_without_reconnect(self, outcome: str, error: Exception | None, hold: _Hold) -> None:
         """Конец цикла без повторов (прежнее поведение): исключение -> `_fail`, потеря связи -> `error`."""
         if error is not None:
+            if hold.up:
+                self._link = "lost"  # отказ после входа в захват; отказ первого `open` оставляет `off`
             self._fail(self._refusal_state(error, hold), error)
         elif outcome == "lost":
             # тишина/событие прибора без `reconnect`: иначе рецепт с `trigger_managed true` + `Off` молча держал бы
@@ -831,18 +843,45 @@ class DeviceSession:
             outage.next_warn = now + _RETRY_WARN_S
             logger.warning("session: прибора нет %.0f с, попыток %d", now - outage.t0, outage.tries)
         state = "lost" if ever_grabbed else self._refusal_state(error, hold)
-        return self._set_loop_state(state)
+        # правки, поставленные повтором в `_drain` и не исполненные, — снова в план: между попытками порт закрыт
+        return self._set_loop_state(state, then=self._enter_reconnect_locked)
 
-    def _backoff(self, cycle_stop: threading.Event, stop_evt: Callable[[], bool]) -> bool:
-        """Пауза `reconnect_interval_s` срезами `cycle_stop.wait(0.1)`; `False` — стоп во время паузы."""
+    def _backoff(self, cycle_stop: threading.Event, stop_evt: Callable[[], bool], box: _Box) -> bool:
+        """Пауза `reconnect_interval_s` срезами `cycle_stop.wait(0.1)`; `False` — стоп во время паузы.
+
+        Команды ящика (`call`, например перечисление приборов) исполняются и здесь: оператору они нужны как раз при
+        переподключении.
+        """
         end = time.monotonic() + self._reconnect_interval_s
         while not stop_evt():
             self._link_tick()
+            if box.cmds:  # чтение длины без замка: `_poll_box` берёт замок сам
+                self._serve_between_attempts(box, stop_evt)
             left = end - time.monotonic()
             if left <= 0:
                 return True
             cycle_stop.wait(min(_BACKOFF_SLICE_S, left))
         return False
+
+    def _serve_between_attempts(self, box: _Box, stop_evt: Callable[[], bool]) -> None:
+        """Команды ящика между попытками: SDK берётся на время команд и отпускается; порт закрыт.
+
+        Команда порта ответит своим отказом (`closed`); `_drain` здесь пуст — правки слиты в план при входе в отказ.
+        """
+        acquired = False
+        try:
+            self._port_call("acquire", self._sdk.acquire)
+            acquired = True
+        except Exception:  # noqa: BLE001 — без SDK команды ответят своими отказами
+            logger.exception("session: SDK для команд между попытками не взят")
+        try:
+            self._poll_box(box, stop_evt)
+        finally:
+            if acquired:
+                try:
+                    self._port_call("release", self._sdk.release)
+                except Exception:  # noqa: BLE001 — отказ release не роняет цикл попыток
+                    logger.exception("session: SDK после команд между попытками не отпущен")
 
     def _link_tick(self) -> None:
         """Владелец при переподключении: `on_link()`, если сменился `attempts` или целая секунда `lost_for_s`."""
@@ -979,6 +1018,7 @@ class DeviceSession:
                 self._last_error = describe_error(exc)
                 if consecutive >= MAX_CONSECUTIVE_ERRORS:
                     if not self._reconnect:
+                        self._link = "lost"  # до `_fail`: `on_state(error)` видит связь потерянной
                         self._fail("error", exc)
                     return "failed"
             else:
@@ -999,6 +1039,9 @@ class DeviceSession:
                 reason = "событие прибора disconnected"
             elif self._link_silence_s > 0 and now - last_frame >= self._link_silence_s:
                 reason, last_probe = self._silence(now, now - last_frame, last_probe)
+            elif self._awaiting_frame and now - last_frame >= _FIRST_FRAME_WAIT_S:
+                # правило тишины выключено (0): ожидание первого кадра после переоткрытия всё равно конечно
+                reason = f"нет первого кадра {now - last_frame:.1f} с после переоткрытия"
             if reason is None:
                 self._box_ran = False
                 if not self._poll_box(box, stop_evt):
@@ -1160,6 +1203,7 @@ class DeviceSession:
             if self._reconnect:
                 self._last_error = describe_error(exc)
             else:
+                self._link = "lost"  # до `_fail`: `on_state(error)` видит связь потерянной
                 self._fail("error", exc)
         else:
             self._log_apply(steps, "restart", t0)

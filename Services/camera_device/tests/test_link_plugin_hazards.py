@@ -90,10 +90,19 @@ class _Rig:
         self.plugin = CameraDevicePlugin()
         self.plugin.configure(self.ctx)
 
+    def node(self) -> dict:
+        """Узел плагина в настоящем дереве состояния (что видят оператор и MCP)."""
+        return dict(self.tree.get("processes.cam_link_hz.state.plugins.camera_device", None) or {})
+
     def link(self) -> dict:
-        """Блок `link` в настоящем дереве состояния (что видят оператор и MCP)."""
-        node = self.tree.get("processes.cam_link_hz.state.plugins.camera_device", None) or {}
-        return dict(node.get("link") or {})
+        """Блок `link` в настоящем дереве состояния."""
+        return dict(self.node().get("link") or {})
+
+    def take(self, **data: Any) -> dict:
+        return _call(lambda: self.plugin.cmd_take_device(data))
+
+    def release(self, **data: Any) -> dict:
+        return _call(lambda: self.plugin.cmd_release_device(data))
 
     def lines(self, level: str, prefix: str) -> list[str]:
         return [e["msg"] for e in list(self.services.logs) if e["level"] == level and e["msg"].startswith(prefix)]
@@ -193,3 +202,78 @@ def test_reconnect_does_not_repeat_identity_line(make):
 
     assert len(rig.lines("INFO", _OPENED)) == 1
     assert len(rig.lines("DEBUG", "CameraDevicePlugin: device reopened ")) == 1
+
+
+# ---------------------------------------------------------------------------------------------- #
+# Ревью стадии 5 (находки 2, 4, 5, 7a, 7b); `produce()` не зовётся нигде: источник стоит
+# ---------------------------------------------------------------------------------------------- #
+
+
+def test_release_from_failed_state_clears_tree_without_produce(make):
+    """Находка 2: `release_device` из `busy` при переподключении — дерево сбрасывает `device_held` и `reconnecting`."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True)
+    assert rig.take()["status"] == "error"
+    _await(lambda: rig.link().get("reconnecting") is True, "дерево: reconnecting True")
+
+    assert rig.release()["status"] == "ok"
+    _await(
+        lambda: rig.node().get("device_held") is False and rig.link().get("reconnecting") is False,
+        "дерево: device_held False и reconnecting False после release",
+        3.0,
+    )
+
+
+def test_second_take_on_busy_camera_publishes_reconnecting(make):
+    """Находка 4: take/release/take на занятом приборе — дерево снова показывает `reconnecting True` без окна 30 с."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True, reconnect_interval_s=30.0)
+    assert rig.take()["status"] == "error"
+    _await(lambda: rig.link().get("reconnecting") is True, "дерево: reconnecting True после первого take", 3.0)
+    assert rig.release()["status"] == "ok"
+
+    assert rig.take()["status"] == "error"
+    _await(lambda: rig.link().get("reconnecting") is True, "дерево: reconnecting True после второго take", 3.0)
+
+
+def test_take_after_timed_out_release_is_not_reconnecting(make):
+    """Находка 5: release истёк, пока повтор висит в `open`; следующий take не обещает переподключения."""
+    port = fake_port.make_link_event_port(frame_period_s=0.01, open_delay_s=1.5)
+    rig = make(port, reconnect=True)
+    assert rig.take()["status"] == "ok"
+    entered = threading.Event()
+    original_open = port.open
+
+    def watched_open(ident: Any) -> None:
+        entered.set()
+        original_open(ident)
+
+    port.open = watched_open
+    port.emit_link_event("disconnected")
+    assert entered.wait(5.0), "повтор open не начался"
+
+    assert rig.release(timeout_s=0.2)["status"] == "error"  # владелец ещё в open
+    reply = rig.take()
+    assert reply["status"] == "error"
+    assert reply["device_state"] == "stopping"
+    assert reply["reconnecting"] is False
+
+
+def test_list_devices_answers_while_reconnecting(make):
+    """Находка 7a: во время переподключения `list_devices` отвечает перечислением, а не «сеанс не в захвате»."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True)
+    assert rig.take()["status"] == "error"
+    assert rig.plugin._session.reconnecting is True
+
+    reply = _call(lambda: rig.plugin.cmd_list_devices({}))
+    assert reply == {"success": True, "devices": [{"kind": "serial", "value": "FAKE-0001", "name": ""}]}
+
+
+def test_take_with_new_identity_restarts_reconnect_cycle(make):
+    """Находка 7b: повторный take с другой личностью при переподключении — новый цикл с новой личностью."""
+    rig = make(fake_port.make_port(busy_for_s=60.0, frame_period_s=0.01), reconnect=True)
+    first = rig.take()
+    assert first["device_state"] == "busy" and first["reconnecting"] is True
+
+    rig.plugin._reg.device_serial = "OTHER-0009"  # такого прибора в перечислении фейка нет
+    second = rig.take()
+    assert second["status"] == "error"
+    assert second["device_state"] == "not_found"

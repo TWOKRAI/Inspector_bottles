@@ -365,3 +365,83 @@ def test_regrab_by_apply_is_not_loss(rig):
     assert "lost" not in rig.states, rig.states
     assert session.state == "grabbing"
     assert len(_names(port, "open")) == 2
+
+
+# ---------------------------------------------------------------------------------------------- #
+# Ревью стадии 5 (находки 1, 3, 8)
+# ---------------------------------------------------------------------------------------------- #
+
+
+def test_apply_in_first_refusal_window_reaches_device(rig):
+    """Находка 1: правка из `on_state(busy)` отказа первой попытки (окно до `reconnecting`) доходит до прибора."""
+    port = fake_port.make_link_event_port(frame_period_s=0.01, busy_for_s=0.8)
+    holder: dict[str, Any] = {}
+
+    def on_state(old: str, new: str) -> None:
+        rig.states.append(new)
+        if new == "busy" and "edited" not in holder:
+            holder["edited"] = True
+            holder["session"].apply([_exposure(2222.0)], "restart")
+
+    session = DeviceSession(
+        port,
+        port.sdk,
+        None,
+        timeout_ms=100,
+        watchdog_s=5.0,
+        on_frame=rig.frames.append,
+        on_state=on_state,
+        workers=rig.wm,
+        worker_prefix="camera_device_lh_window",
+        run=_plan(1000.0),
+        reconnect=True,
+        reconnect_interval_s=0.3,
+    )
+    rig.sessions.append(session)
+    holder["session"] = session
+
+    assert _call(lambda: session.start(5.0)) is False
+    _await(lambda: session.state == "grabbing", "grabbing после освобождения", seen=lambda: session.state)
+    assert holder.get("edited") is True
+    assert _exposure_writes(port, 0) == [2222.0]
+
+
+def test_terminal_error_marks_link_lost(rig):
+    """Находка 3: без `reconnect` три ошибки кадра -> `error`, и `link.state` — `lost`, не `up`."""
+    port, session = rig.make(reconnect=False, get_frame_errors=3)
+    _call(lambda: session.start(5.0))
+    _await(lambda: session.state == "error", "error после трёх ошибок кадра", seen=lambda: session.state)
+
+    assert session.link()["state"] == "lost"
+
+
+def test_reopen_without_first_frame_retries_when_silence_off(rig):
+    """Находка 8: `link_silence_s 0`, свободный поток, после переоткрытия кадров нет — повтор через 3 с, а не вечно."""
+    port, session = rig.make(silence=0.0)
+    rig.grab(session)
+    original_get_frame = port.get_frame
+    original_start = port.start_grabbing
+    hush = threading.Event()
+
+    def quiet_get_frame(timeout_ms: int) -> Any:
+        if hush.is_set():
+            time.sleep(timeout_ms / 1000.0)
+            return None
+        return original_get_frame(timeout_ms)
+
+    def start_then_hush() -> None:
+        original_start()
+        hush.set()  # после каждого переоткрытия кадров нет
+
+    port.get_frame = quiet_get_frame
+    port.start_grabbing = start_then_hush
+    port.emit_link_event("disconnected")
+
+    _await(
+        lambda: session.link()["attempts"] >= 2,
+        "второй повтор после 3 с без первого кадра",
+        6.0,
+        seen=lambda: session.link(),
+    )
+    assert session.state == "lost"
+    assert session.link()["outages"] == 1
