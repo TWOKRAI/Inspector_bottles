@@ -18,7 +18,13 @@
   - `tests/test_declarations_leak_order_independence.py` — причина не установлена, разбор после стенда. Это про независимость тестов от порядка, не про поведение на стенде.
 - `Services` на `ea65a3334`: 8405 passed, 28 skipped, 2 xpassed, 0 красных.
 - `scripts/validate.py` на `ea65a3334`: ошибок и предупреждений нет.
-- `Plugins` и `multiprocess_prototype` НЕ прогонялись: после стенда.
+- `Plugins` на `ab615c933` (14:53–15:08): 1 failed, 2812 passed, 4 skipped, 1 xfailed.
+  `test_no_silent_swallows_in_plugins`: 10 мест в `device_hub`, `frame_buffer`, `frame_saver`, `robot_io`,
+  `word_layout`. Красный до волны 1: `git diff main..HEAD -- Plugins` пуст.
+- `multiprocess_prototype` (15:08–15:14): 1 failed, 5344 passed, 14 skipped.
+  `test_catalog_kind_roundtrip`: в эталоне нет `robot_io.forward_ok` и `robot_io.last_dropped_job`
+  (поля добавлены `be4e63783`, до волны 1).
+- Итого не разобран один красный: `test_declarations_leak_order_independence`.
 
 ## Дерево стенда
 `D:/PROJECT_INNOTECH/Inspector_vision/Inspector_bottles/.claude/worktrees/mco-stand` — detached `ea65a3334` (`integ/multicam-obs`: волна 1 слита целиком, включая две последние правки считывателя).
