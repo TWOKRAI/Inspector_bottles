@@ -2,7 +2,7 @@
 
 - **Статус:** [PENDING] · **Level:** Middle · **Assignee:** developer
 - **Module contract:** impl-only (`backend_ctl/overview.py`: два новых вида аномалий в прежнем списке)
-- **Dependencies:** W2-a (блок `link` камеры), W2-b (блок `link` считывателя) — имена ключей; аномалия `run_fault` от них не зависит
+- **Dependencies:** W2-a1 (блок `link` камеры), W2-b1 (блок `link` считывателя) — имена ключей; аномалия `run_fault` от них не зависит
 - **Gate:** `machine_gate.sh light <session>` по файлам TESTS; радиус `backend_ctl/tests` (medium)
 - **Files:** `backend_ctl/overview.py`, `backend_ctl/tests/test_overview_run_and_link.py`
 - **Acceptance:** блок ACCEPTANCE
@@ -37,6 +37,6 @@ ACCEPTANCE (every number with its command):
 TESTS: bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" light <session> <py> -m pytest -q --tb=short backend_ctl/tests/test_overview_run_and_link.py
 
 OUT OF SCOPE: fps по камерам из levels и остальные аномалии T9; `set_register_verified` с `device_verified`.
-TRAPS: если `system.run` в снимке обзора нет и его чтение требует нового запроса к PM — стоп и вопрос лиду (лишний запрос на каждый обзор). Литералы ключей `link` берите из брифов W2-a п.6 и W2-b п.8, не из догадок.
-HANDOFF IN: W2-a, W2-b — имена ключей блока `link`.
+TRAPS: если `system.run` в снимке обзора нет и его чтение требует нового запроса к PM — стоп и вопрос лиду (лишний запрос на каждый обзор). Литералы ключей `link` берите из брифов W2-a п.10 и W2-b1 п.4, не из догадок.
+HANDOFF IN: W2-a1, W2-b1 — имена ключей блока `link`.
 REPORT: STATUS (DONE|BLOCKED), files, команды и вывод по ACCEPTANCE, красные до/после, раздел «Что оставил открытым / ненадёжно».

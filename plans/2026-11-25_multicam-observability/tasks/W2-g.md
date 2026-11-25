@@ -2,7 +2,7 @@
 
 - **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer
 - **Module contract:** impl-only (новое поле регистра `device_host_ip`; путь `device_select ip|index` — существующий контракт)
-- **Dependencies:** W2-a, W2-a2 (те же `session.py`, `plugin_base.py`, `registers_base.py`; та же ветка, после них)
+- **Dependencies:** W2-a, W2-a1, W2-a2 (те же `session.py`, `plugin_base.py`, `registers_base.py`; та же ветка, после них)
 - **Gate:** `machine_gate.sh light <session>` по файлам TESTS; радиус `Services/camera_device/tests` (medium)
 - **Files:** `Services/camera_device/session.py`, `Services/camera_device/plugin_base.py`, `Services/camera_device/registers_base.py`, `Services/camera_device/tests/test_device_select_session.py`
 - **Acceptance:** блок ACCEPTANCE
@@ -41,5 +41,5 @@ TESTS: bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts
 
 OUT OF SCOPE: рецепт (W2-h); драйвер.
 TRAPS: имя поля IP записи и `host_ip` — как в W1-a (`enum_entries` фейка, `DeviceInfo`); не вводить второго имени. Переподключение W2-a идёт через тот же `_resolve_ident` — выбор должен совпадать с первым открытием.
-HANDOFF IN: W2-a, W2-a2 — последние версии `session.py`, `plugin_base.py`.
+HANDOFF IN: W2-a, W2-a1, W2-a2 — последние версии `session.py`, `plugin_base.py`.
 REPORT: STATUS (DONE|BLOCKED), files, команды и вывод по ACCEPTANCE, красные до/после, раздел «Что оставил открытым / ненадёжно».

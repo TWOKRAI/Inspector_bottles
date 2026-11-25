@@ -2,7 +2,7 @@
 
 - **Статус:** [PENDING] · **Level:** Middle · **Assignee:** developer
 - **Module contract:** n/a (рецепт prototype и пин-тест)
-- **Dependencies:** W2-a (поля `reconnect`, `link_silence_s`, `reconnect_interval_s`), W2-b (те же у считывателя), W2-g (`device_host_ip`); строки `readiness` — только после решения Р-W2-1; `packet_*` — только после стенда (лестница, шаг 4)
+- **Dependencies:** W2-a1 (поля `reconnect`, `link_silence_s`, `reconnect_interval_s`; умолчание `reconnect False` — рецепт включает явно), W2-b1 (те же у считывателя), W2-g (`device_host_ip`; п.2 без `device_host_ip` можно внести раньше — для стенда); строки `readiness` — только после решения Р-W2-1; `packet_*` — только после стенда (лестница, шаг 4)
 - **Gate:** `machine_gate.sh light <session>` по файлам TESTS
 - **Files:** `multiprocess_prototype/recipes/hikvision_id3013_quad.yaml`, `multiprocess_prototype/tests/test_recipe_quad_camera_contract.py`
 - **Acceptance:** блок ACCEPTANCE
@@ -17,6 +17,7 @@ CHAIN: lead -> you -> reviewer (стадия 5)
 DESIGN (decided by the lead — you type it, you do not derive it):
   1. Конфиг плагина `camera_0`: `gain_auto: "Off"`, `gain: 0.0`, `exposure_auto: "Off"`; `camera_1`: `gain_auto: "Off"`, `exposure_auto: "Off"` (`gain: 23.0` уже есть). Комментарии `quad.yaml:54,129,162,164` о «не задан» — заменить одной строкой «записывается при каждом открытии».
   2. Обе камеры: `reconnect: true`, `link_silence_s: 3.0`, `reconnect_interval_s: 2.0`, `device_host_ip: "192.168.1.100"` (адрес карты ПК стенда 2026-11-25 после удаления второго IPv4). Считыватели `reader_1`, `reader_2`: `reconnect: true`, `link_silence_s: 3.0`, `reconnect_interval_s: 2.0`.
+  2a. Считыватели объявляют режим явно (решение лида W2-b1 п.3: пустой режим — «неизвестен», тишина не даёт `failure`): `reader_2` уже `trigger_mode "On"` + `"SelfTrigger"`; `reader_1` — значение, прочитанное с прибора на стенде (лестница шаг 2); до замера строка не вносится.
   3. НЕ в этой задаче до решений: `readiness: {hold_s: …}` (Р-W2-1); `packet_managed`/`packet_size`/`packet_delay` (значения прибора не прочитаны: при `packet_managed false` драйвер их не читает).
   4. Пин-тест: грузит рецепт тем же путём, что загрузчик (урок: тест рецепта обязан звать ту же проверку, что launcher — `SystemBlueprint.check`), и сверяет литералы п.1-2 по процессам.
 

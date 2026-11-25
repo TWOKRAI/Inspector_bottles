@@ -147,11 +147,15 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 ## Порядок выполнения (по риску для производства: тихая потеря первой)
 
 ### Фаза W2-I: потеря источника видна и лечится сама
-- Task W2-a: **[VERTICAL SLICE]** камера: потеря связи (событие SDK, тишина + проба) -> `lost`, WARNING, причина готовности, переподключение в потоке-владельце, INFO на возврате [PENDING]
+- Task W2-a: **[VERTICAL SLICE, ч.1]** сеанс камеры: потеря связи (событие SDK; тишина: свободный поток — сразу, аппаратный триггер — проба) -> `lost` до возврата, WARNING, переподключение в потоке-владельце, INFO на возврате [PENDING]
   - **Module contract:** public-api-change
-- Task W2-a2: порт `mvs`: `drain_link_events` (`0x8001` -> `disconnected`), короткий кадр считает потерянные пакеты [PENDING] (после W2-a, та же ветка)
+- Task W2-a1: **[VERTICAL SLICE, ч.2]** плагин камеры: поля `reconnect`/`link_silence_s`/`reconnect_interval_s`, блок `link`, готовность, health [PENDING] (после W2-a, та же ветка; слияние пары одним шагом)
   - **Module contract:** public-api-change
-- Task W2-b: считыватель: поток-владелец — тишина видна, прибор возвращается сам, правка триггера асинхронна [PENDING]
+- Task W2-a2: порт `mvs`: `drain_link_events` (`0x8001` -> `disconnected`), короткий кадр считает потерянные пакеты [PENDING] (после W2-a1, та же ветка)
+  - **Module contract:** public-api-change
+- Task W2-b: считыватель, ч.1: поток-владелец; правка триггера — очередь, одно применение, не держит системный поток [PENDING]
+  - **Module contract:** impl-only
+- Task W2-b1: считыватель, ч.2: тишина видна, прибор возвращается сам, `readiness`, блок `link` [PENDING] (после W2-b, та же ветка; слияние пары одним шагом)
   - **Module contract:** impl-only
 - Task W2-c: `FramePump` сообщает о тишине ключа (framework) [PENDING]
   - **Module contract:** public-api-change
@@ -180,10 +184,12 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 
 ## Граф и параллельность (по непересекающимся FILES)
 
-- W2-a -> W2-a2 -> W2-g -> W2-h: общие `Services/camera_device/{session,plugin_base,registers_base,interface}.py` — строго по порядку, одна ветка.
-- W2-c -> W2-c2. W2-b, W2-e — независимы. W2-d — после W2-a и W2-b (имена ключей). W2-i -> W2-j (оба `process_module/plugins/base.py`). W2-k — только документ в каталоге плана.
-- **Волна писателей 2.1 (до 3):** W2-a (`Services/camera_device/*`), W2-b (`Services/code_reader/*`), W2-c (`frontend_module/bridge/frame_pump.py` + тест). Пути не пересекаются; сторож `Services/camera_device/tests/test_fake_port_hazards.py:159` запрещает импорт `code_reader` из камеры.
-- **Волна 2.2:** W2-a2 (ветка W2-a), W2-c2 (`multiprocess_prototype/frontend/*`), W2-e (`process_manager_module/*`).
+- W2-a -> W2-a1 -> W2-a2 -> W2-g -> W2-h: общие `Services/camera_device/{session,plugin_base,registers_base,interface}.py` — строго по порядку, одна ветка. W2-b -> W2-b1: общий `sdk_plugin.py`, одна ветка.
+- W2-c -> W2-c2. W2-e — независима. W2-d — после W2-a1 и W2-b1 (имена ключей). W2-i -> W2-j (оба `process_module/plugins/base.py`). W2-k — только документ в каталоге плана.
+- Снимок `multiprocess_prototype/frontend/forms/tests/snapshots/catalog_register_fields.txt` меняют W2-a1 и W2-b1: сливается W2-a1 первым, W2-b1 пересобирает снимок на его базе.
+- **Первым на стенд (приоритет владельца):** пары W2-a + W2-a1, W2-b + W2-b1, затем W2-c, W2-c2; рецепт — строки переподключения и `trigger_mode` из W2-h п.2 можно внести сразу после пар, не дожидаясь W2-g.
+- **Волна писателей 2.1 (до 3):** W2-a (`Services/camera_device/*`), W2-b (`Services/code_reader/*`), W2-c (`frontend_module/bridge/frame_pump.py`, `frontend_module/DECISIONS.md`, тест). Пути не пересекаются; сторож `Services/camera_device/tests/test_fake_port_hazards.py:159` запрещает импорт `code_reader` из камеры.
+- **Волна 2.2:** W2-a1 (ветка W2-a), W2-b1 (ветка W2-b), W2-c2 (`multiprocess_prototype/frontend/*`). Затем W2-a2 (ветка W2-a), W2-e (`process_manager_module/*`).
 - **Волна 2.3:** W2-g (ветка W2-a), W2-d (`backend_ctl/overview.py`), затем W2-h (рецепт).
 - **После решений:** W2-i, затем W2-j; W2-k — параллельно любой волне.
 
@@ -193,16 +199,19 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 
 ## Матрица инъекций (имена; предсказания пишет лид)
 
-- W2-a: `none_counts_as_frame_forever`, `probe_skipped` (тишина = потеря без пробы — краснеет `…idle_not_lost`), `events_ignored`, `no_reconnect_loop`, `sleep_instead_of_wait` (краснеет `…stop_during_backoff…`), `second_owner_thread`, `reconnect_ignores_flag`, `info_on_every_attempt`, `stale_plan_after_reopen`, `busy_terminal`.
+- W2-a: `none_counts_as_frame_forever`, `probe_in_free_run` (свободный поток спрашивает пробу — краснеет `…free_run_silence_is_lost…`), `probe_skipped_in_hw_trigger`, `events_ignored`, `stale_events_not_discarded`, `no_reconnect_loop`, `stop_without_stop_evt_in_failed` (краснеет `…stop_after_failed_busy…`), `sleep_instead_of_wait`, `retry_sets_opening`, `lost_overwritten_by_retry_kind`, `apply_refused_while_lost`, `pending_dropped_on_loss`, `second_owner_thread`, `reconnecting_set_after_finish`, `busy_terminal`.
+- W2-a1: `readiness_reads_reconnecting_without_getattr`, `lost_not_in_failed`, `defaults_reconnect_true`, `link_missing_in_state`.
 - W2-a2: `drain_returns_raw_codes`, `lost_read_after_size_check`, `incomplete_not_counted`, `incomplete_not_consecutive`.
-- W2-b: `callback_applies_synchronously`, `pending_keeps_first_value`, `silence_in_hw_trigger_is_lost`, `no_info_on_resume`, `retake_ignores_reconnect_flag`, `readiness_reads_stats`, `owner_not_joined_on_shutdown`, `two_owners_after_reconfigure`.
-- W2-c: `silence_every_tick`, `none_after_sink`, `no_silence_before_first_frame`, `stats_gets_silence_key`, `callback_after_stop`, `exception_stops_pump`.
+- W2-b: `callback_applies_synchronously`, `pending_taken_outside_trigger_lock`, `field_by_field_apply`, `take_overtakes_queue`, `owner_dies_on_exception`, `no_stop_check_before_take`, `owner_not_joined_on_shutdown`, `two_owners_after_reconfigure`, `callback_after_close_queued`.
+- W2-b1: `silence_in_hw_trigger_is_lost`, `empty_mode_is_failure`, `age_from_previous_take`, `retry_once_only` (краснеет `…keeps_trying…`), `retry_after_release`, `retry_without_recheck_under_lock`, `info_on_open_without_frame`, `on_error_logs_during_retry`, `readiness_reads_stats`.
+- W2-c: `silence_every_tick`, `none_before_sink`, `none_before_every_frame`, `once_per_episode`, `age_not_reset_by_frame`, `age_shared_across_keys`, `age_from_zero_never_seen`, `disabled_flag_ignored`, `unshown_frame_resets_age`, `clock_read_when_disabled`, `stats_gets_silence_key`, `callback_after_stop`, `exception_stops_pump`.
 - W2-c2, W2-d, W2-e, W2-g, W2-h, W2-i, W2-j: break-injection исполнителя по REDS брифа.
 
 ## Что проверяется только на железе (окно `stand`, по слову владельца; агенты стенд сами не трогают)
 
 1. Камера, кабель вынут на 10 с и на 80 с: WARNING `связь с прибором потеряна` не позже `link_silence_s` + проба (≈3-4 с); приходит ли событие SDK `0x8001` — записать (НЕ проверено); плашка через 2 с; кабель вставлен — INFO `связь восстановлена за … попыток …`, кадры; время восстановления задаёт `hold_s` и `reconnect_interval_s`.
-2. Считыватель, то же: WARNING `нет кадров`, INFO `кадры возобновились`; вариант «три ошибки -> error -> сам вернулся».
+   Проба узла при выдернутом кабеле — падает ли она (`network`/`timeout`) или прибор «отвечает» из кэша SDK; что отвечает после возврата кабеля до переоткрытия (решение лида W2-a п.3: в свободном потоке проба не спрашивается именно из-за этого сомнения).
+2. Считыватель, то же: WARNING `нет кадров`, INFO `кадры возобновились`; вариант «три ошибки -> error -> сам вернулся»; пауза `reconnect_interval_s`, измеренная на приборе (условие ADR-CR-009); текущий `TriggerMode`/`TriggerSource` `reader_1` (только чтение) — для явного `trigger_mode` в W2-h.
 3. Перезапуск процесса камеры: «прибор занят» после рестарта (quad2) — переподключение по `busy` доводит до кадров без оператора.
 4. Чтение `GevSCPSPacketSize`/`GevSCPD` прибора (только чтение) — значения для W2-h.
 5. A/B 20 мин по инвариантам фазы A (ч.3, 9.5) после W2-c/W2-c2: `pump_busy_share`, `max_frame_age_ms`, доля superseded — не хуже базы.
