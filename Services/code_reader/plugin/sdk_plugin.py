@@ -130,6 +130,12 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
     def configure(self, ctx: PluginContext) -> None:
         """Прочитать register и создать читатель (прибор берётся в start()/take_device)."""
         self._ctx = ctx
+        # Подписки на поля триггера (`_subscribe_trigger`). getattr, а не `[]`: повторный configure обязан увидеть
+        # прежние, иначе `_unsubscribe_trigger` их не снимет и колбэк удвоится. Первой строкой: `shutdown` зовут и
+        # после configure, бросившего на полпути.
+        self._trigger_subscriptions: list[tuple[Any, str, Callable[[Any], None]]] = getattr(
+            self, "_trigger_subscriptions", []
+        )
         self._reg: CodeReaderSdkRegisters = self._init_register(ctx)
         # (seq, ts, кадр, счётчики ok/no/bad на момент этого кадра — для строки статуса overlay).
         self._queue: deque[tuple[int, float, SdkFrame, _Counters]] = deque(maxlen=_QUEUE_LIMIT)
@@ -411,7 +417,7 @@ class CodeReaderSdkPlugin(ProcessModulePlugin):
 
     def _unsubscribe_trigger(self) -> None:
         """Снять подписки `_subscribe_trigger`; повторный вызов — пустая операция."""
-        subscriptions, self._trigger_subscriptions = getattr(self, "_trigger_subscriptions", []), []
+        subscriptions, self._trigger_subscriptions = self._trigger_subscriptions, []
         for registers, field, callback in subscriptions:  # менеджер тот, на котором подписались
             registers.unsubscribe(self.name, field, callback)
 

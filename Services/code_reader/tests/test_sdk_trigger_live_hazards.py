@@ -5,7 +5,8 @@
 Приёмка контракта — слепой `test_sdk_trigger_live_contract.py`; здесь свойства, которые он не держит:
 подписка не удваивается при повторном `configure`; `take_device` / `shutdown` ждут идущий колбэк (замок
 `_trigger_lock`); отказ `set_trigger` доходит до `last_error` и журнала, а колбэк не бросает; отказ правки
-делает процесс `degraded`, удачная правка снимает деградацию.
+делает процесс `degraded`, удачная правка снимает деградацию; отказ разбора в `set_trigger` оставляет прежний
+режим читателя.
 
 Стенд — `_Rig` из контракта (настоящие плагин + RegistersManager + PluginOrchestrator + читатель на `FakeNodeApi`).
 Всё, что может зависнуть, идёт в daemon-потоке с дедлайном (pytest-timeout не установлен).
@@ -19,6 +20,7 @@ import time
 import pytest
 
 from Services.code_reader.tests.test_sdk_plugin import _bounded, _status
+from Services.code_reader.tests.test_sdk_reader import make_reader  # noqa: F401
 from Services.code_reader.tests.test_sdk_trigger import M, FakeNodeApi, _refused
 from Services.code_reader.tests.test_sdk_trigger_live_contract import (  # noqa: F401
     REG,
@@ -238,3 +240,22 @@ def test_failed_apply_degradation_cleared_by_return_to_old_value(make_rig):
 
     _wait(lambda: _health_status(rig) == "ok", "деградация снята возвратом к прежнему значению")
     assert rig.opens() == 3
+
+
+# --------------------------------------------------------------------------
+# 5. set_trigger: отказ разбора не трогает прежний режим читателя
+# --------------------------------------------------------------------------
+
+
+def test_set_trigger_value_error_keeps_previous_mode(make_reader):
+    api = FakeNodeApi()
+    r = make_reader(api, timeout_ms=20)
+    r.reader.set_trigger({"trigger_mode": "On"})
+
+    with pytest.raises(ValueError):
+        r.reader.set_trigger({"trigger_mode": "Off", "bogus_key": 1})
+
+    assert _bounded(r.reader.start, 10.0) is True
+    writes = [c for c in api.calls if c[0].startswith("set_")]
+    assert writes == [("set_enum_str", "TriggerMode", "On")], "после отказа разбора пишется не прежний режим"
+    _bounded(r.reader.stop, 10.0)
