@@ -342,6 +342,7 @@ displays:
     rotate: 0
     flip: none
     plate_mode: silence
+    plate_source: reader_1.code_reader_sdk
   - id: reader_2
     name: Считыватель 2 (.11, самотриггер)
     width: 1280
@@ -357,3 +358,4 @@ displays:
     rotate: 0
     flip: none
     plate_mode: silence
+    plate_source: reader_2.code_reader_sdk
