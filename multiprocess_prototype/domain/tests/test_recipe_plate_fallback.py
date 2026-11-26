@@ -32,7 +32,8 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def _load(caplog: pytest.LogCaptureFixture, *displays: Any) -> Recipe:
-    with caplog.at_level(logging.WARNING):
+    # DEBUG: проверки «значения из файла в логе нет» должны видеть все уровни.
+    with caplog.at_level(logging.DEBUG):
         return Recipe.from_dict(_recipe(*displays))
 
 
@@ -146,6 +147,30 @@ def test_error_without_plate_loc_rejects_recipe(
     with pytest.raises(ValidationError, match="модель"):
         _load(caplog, {"id": "a", "plate_mode": "hold"})
     assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize("key", ["my_plate_x", "platex"])
+def test_key_without_plate_prefix_rejects_recipe(key: str, caplog: pytest.LogCaptureFixture) -> None:
+    """Префикс — ровно ``plate_`` в начале ключа."""
+    with pytest.raises(ValidationError):
+        _load(caplog, {"id": "a", key: 1})
+    assert _warnings(caplog) == []
+
+
+def test_newline_in_unknown_key_stays_on_one_line(caplog: pytest.LogCaptureFixture) -> None:
+    _load(caplog, {"id": "a", "plate_x\n2026-01-01 ERROR forged": 1})
+
+    assert _warnings(caplog) == ["дисплей 'a': неизвестный 'plate_x\\n2026-01-01 ERROR forged' убран"]
+
+
+def test_control_chars_in_id_are_escaped_in_both_lines(caplog: pytest.LogCaptureFixture) -> None:
+    recipe = _load(caplog, {"id": "a\n\x1b[2K\rforged", "plate_mode": "holdd", "plate_mod": 1})
+
+    assert recipe.displays[0].id == "a\n\x1b[2K\rforged"
+    assert sorted(_warnings(caplog)) == [
+        "дисплей ''a\\n\\x1b[2K\\rforged'': негодный plate_mode, взят hold",
+        "дисплей ''a\\n\\x1b[2K\\rforged'': неизвестный plate_mod убран",
+    ]
 
 
 def test_display_definition_stays_strict() -> None:

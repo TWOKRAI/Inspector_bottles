@@ -33,6 +33,11 @@ from .topology import Topology
 logger = get_std_logger(__name__)
 
 
+def _one_line(text: str) -> str:
+    """Строка из файла для лога: непечатаемая (перевод строки, ESC) пишется через ``ascii()``."""
+    return text if text.isprintable() else ascii(text)
+
+
 def _load_display(item: dict[str, Any]) -> DisplayDefinition:
     """Экран из словаря рецепта; негодное ``plate_*`` не отменяет загрузку (H2).
 
@@ -50,12 +55,13 @@ def _load_display(item: dict[str, Any]) -> DisplayDefinition:
         bad = {str(error["loc"][0]): error["type"] for error in errors}
 
     definition = DisplayDefinition.from_dict({key: value for key, value in item.items() if key not in bad})
+    display_id = _one_line(definition.id)
     for key, error_type in bad.items():
         if error_type == "extra_forbidden":
-            logger.warning("дисплей '%s': неизвестный %s убран", definition.id, key)
+            logger.warning("дисплей '%s': неизвестный %s убран", display_id, _one_line(key))
         else:
             default = DisplayDefinition.model_fields[key].default
-            logger.warning("дисплей '%s': негодный %s, взят %s", definition.id, key, default)
+            logger.warning("дисплей '%s': негодный %s, взят %s", display_id, key, default)
     return definition
 
 
