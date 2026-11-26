@@ -21,6 +21,7 @@ from ..communication import ProcessCommunication
 
 # heartbeat грузится при импорте класса процесса, до потоков ребёнка: ленивый импорт пакета
 # из message_processor и run() давал _DeadlockError (C-92)
+from ..health.schema import READINESS_SEVERITIES
 from ..heartbeat.process_heartbeat import ProcessHeartbeat
 
 # Публичные контракты и типы
@@ -1170,6 +1171,34 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 f"Process '{self.name}': внеочередной heartbeat: {type(exc).__name__}: {exc}", module="run_state"
             )
 
+    def _process_readiness_reasons(self) -> list[dict]:
+        """Причины уровня процесса; зовёт поток снимка; исключение ловит вызывающий."""
+        return []
+
+    def _safe_process_reasons(self) -> list[dict]:
+        """Причины хука :meth:`_process_readiness_reasons`, приведённые к ``node, severity, reason, source``.
+
+        Сбой хука или негодный элемент — ``[]`` и одна ERROR на тип исключения: предупреждение не имеет
+        права оставить процесс без свежего снимка (PM судит молчание по ``at``).
+        """
+        try:
+            reasons: list[dict] = []
+            for item in self._process_readiness_reasons():
+                reason = {key: item[key] for key in ("node", "severity", "reason", "source")}
+                if any(type(v) is not str for v in reason.values()) or reason["severity"] not in READINESS_SEVERITIES:
+                    raise ValueError("причина процесса негодна")
+                reasons.append(reason)
+            return reasons
+        except Exception as exc:  # noqa: BLE001 — предупреждение не роняет снимок
+            logged = getattr(self, "_process_reasons_logged", None)
+            if logged is None:
+                logged = self._process_reasons_logged = set()
+            name = type(exc).__name__
+            if name not in logged:
+                logged.add(name)
+                self._log_error(f"Process '{self.name}': причины процесса не посчитаны: {name}", module="run_state")
+            return []
+
     def _refresh_readiness_snapshot(self) -> None:
         """Один расчёт: защёлка «объявил готовность» + снимок оркестратора (или форма процесса без плагинов)."""
         if not self._readiness_announced and self._current_process_status in (
@@ -1179,7 +1208,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._readiness_announced = True
         orchestrator = self._orchestrator
         if orchestrator is not None:
-            snapshot = orchestrator.readiness_snapshot(announced=self._readiness_announced)
+            snapshot = orchestrator.readiness_snapshot(
+                announced=self._readiness_announced, extra_reasons=self._safe_process_reasons()
+            )
         else:
             event = getattr(self, "_run_event", None)
             snapshot = {

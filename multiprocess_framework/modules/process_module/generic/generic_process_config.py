@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..configs.process_launch_config import ProcessLaunchConfig
@@ -199,6 +199,12 @@ class GenericProcessConfig(ProcessLaunchConfig):
         ),
     ] = 0
 
+    inbox_stall_s: Any = Field(
+        default=None,
+        description="Task 2.2e: срок застоя входа и обработки, с (1–600; 0/нет — выключено; "
+        "негодное — выключено с WARNING). В рецепте — extras.inbox_stall_s.",
+    )
+
     overflow: Annotated[
         Literal["latest", "every"],
         FieldMeta(
@@ -311,6 +317,9 @@ class GenericProcessConfig(ProcessLaunchConfig):
         # (и golden-снапшоты build) не меняем; отсутствие = дефолт 2 в runner'е.
         if proc_dict["config"].get("cv_threads") is None:
             proc_dict["config"].pop("cv_threads", None)
+        # Task 2.2e: незаданный inbox_stall_s — тоже вне proc_dict (форма и golden прежние).
+        if proc_dict["config"].get("inbox_stall_s") is None:
+            proc_dict["config"].pop("inbox_stall_s", None)
         # Task 4.7d-1: overflow пишем ТОЛЬКО при "every" — golden-снапшоты build не меняем.
         if proc_dict["config"].get("overflow") != "every":
             proc_dict["config"].pop("overflow", None)
