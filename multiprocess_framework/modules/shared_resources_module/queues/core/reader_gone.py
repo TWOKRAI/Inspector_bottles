@@ -32,6 +32,7 @@ OS pipe, а сосед (читатель) уже вышел. EPIPE не прих
 from __future__ import annotations
 
 import multiprocessing
+import threading
 import time
 from multiprocessing.queues import Queue as _MpQueue
 from multiprocessing.queues import _sentinel  # type: ignore[attr-defined]
@@ -40,6 +41,11 @@ from typing import Iterable, List, Tuple
 # Шаг перепроверки метки, пока feeder писателя ещё держит данные. Это не бюджет
 # ожидания (его нет), а задержка реакции на метку, появившуюся после первого взгляда.
 POLL_INTERVAL_S = 0.02
+
+#: C-36: счётчики отпущенных брошенных очередей этого процесса (``retire_queue``). Отдаются в
+#: ``QueueRegistry.get_stats()``. Общие на процесс: у реестра состояний нет ссылки на реестр очередей.
+RETIRE_STATS = {"queues_retired": 0, "buffered_dropped_at_retire": 0}
+_retire_stats_lock = threading.Lock()
 
 
 class ReaderGoneQueue(_MpQueue):
@@ -92,6 +98,40 @@ def _buffered(q: ReaderGoneQueue) -> int:
     застрявшего в ``send``, теряются без счёта — отсюда их не видно."""
     with q._notempty:  # feeder снимает элементы из буфера под этим же условием
         return sum(1 for item in q._buffer if item is not _sentinel)
+
+
+def retire_queue(q: object) -> int:
+    """Отпустить брошенную очередь: выход этого процесса не ждёт её feeder (C-36, ADR-SRM-016).
+
+    Очередь брошена, когда получателя перезапустили со свежими очередями: читать из неё некому, а
+    ссылку из реестра уже сняли, поэтому ``release_feeders_at_exit`` её не увидит. После вызова
+    ``put`` в эту очередь отказывает (``ValueError``). ``Event``-метку функция не читает и не взводит:
+    её замок может быть осиротевшим.
+
+    Порядок: посчитать буфер, ``close()``, затем под ``q._notempty`` — ``cancel_join_thread()``.
+    Замок нужен против первого ``put``, идущего одновременно: ``_start_thread`` под тем же замком
+    читает ``_joincancelled`` и регистрирует join; без замка отмена может прийти между этими шагами
+    и пропасть (``multiprocessing/queues.py`` 3.12).
+
+    Что теряется без счёта: уже записанное в pipe брошенной очереди и не больше одного сообщения
+    в ``send``. Заблокированный daemon-feeder и дескрипторы pipe живут до выхода процесса.
+
+    Returns:
+        Сколько сообщений было в буфере feeder'а. Не :class:`ReaderGoneQueue` или уже отпущенная — 0.
+    """
+    if not isinstance(q, ReaderGoneQueue) or q._released_at_exit:
+        return 0
+    buffered = _buffered(q)
+    q.close()
+    with q._notempty:
+        q.cancel_join_thread()
+        written = q._thread is not None
+    q._released_at_exit = True
+    if written:  # в очередь, куда этот процесс не писал, отпускать нечего — в счёт не идёт
+        with _retire_stats_lock:
+            RETIRE_STATS["queues_retired"] += 1
+            RETIRE_STATS["buffered_dropped_at_retire"] += buffered
+    return buffered
 
 
 def release_feeders_at_exit(

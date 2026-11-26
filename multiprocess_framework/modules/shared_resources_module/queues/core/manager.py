@@ -18,7 +18,7 @@ from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
 from ...qos import qos_for
 from ...state.process_data import ProcessDataKeys
-from .reader_gone import ReaderGoneQueue, release_feeders_at_exit
+from .reader_gone import RETIRE_STATS, ReaderGoneQueue, release_feeders_at_exit
 
 try:
     from multiprocessing.queues import Empty
@@ -783,6 +783,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                     total += len(pd.queues)
         queue_stats = {
             **self._stats,
+            **RETIRE_STATS,  # C-36: queues_retired, buffered_dropped_at_retire
             "total_queues": total,
             "processes_count": len(process_names),
             "processes": process_names,

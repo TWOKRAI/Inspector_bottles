@@ -182,3 +182,30 @@ def test_probe_failure_does_not_abort_restart() -> None:
     srm.get_process_data = _broken
     assert pm.restart_process("cam") is True
     assert len([line for line in _lines(pm._log_warning) if "psr сломан" in line]) == 2
+
+
+def test_restart_retires_only_queues_that_are_recreated() -> None:
+    """Тип не из конфига ``register_process`` не пересоздаёт: закрыв его, PM перестал бы доставлять в этот тип."""
+    pm, srm = _make_cam_pm()
+    assert srm.queue_registry.create_and_register_queues("cam", {"extra": {"maxsize": 10}})
+    old = _queues(srm)
+
+    assert pm.restart_process("cam") is True
+
+    assert _queues(srm)["extra"] is old["extra"]
+    old["extra"].put_nowait(b"x")  # не отпущена: put проходит
+    assert old["extra"].get(timeout=5.0) == b"x"
+    refused = []
+    for qtype in ("system", "data"):
+        try:
+            old[qtype].put_nowait(b"x")
+        except ValueError:
+            refused.append(qtype)
+    assert refused == ["system", "data"]
+
+
+def test_reuse_true_restart_retires_nothing() -> None:
+    pm, srm = _make_cam_pm(restart_reuse_queues=True)
+    assert pm.restart_process("cam") is True
+    _queues(srm)["data"].put_nowait(b"x")
+    assert _queues(srm)["data"].get(timeout=5.0) == b"x"

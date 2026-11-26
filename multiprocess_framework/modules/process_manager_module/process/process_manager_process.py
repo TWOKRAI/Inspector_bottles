@@ -33,7 +33,7 @@ from ...process_module.health.schema import READINESS_FIELDS, readiness_path
 from ...process_module.progress import ProgressTracker, progress_path
 from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
-from ...shared_resources_module.queues.core.reader_gone import set_reader_gone
+from ...shared_resources_module.queues.core.reader_gone import retire_queue, set_reader_gone
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
 from ..core.stop_budget import (
@@ -5861,6 +5861,15 @@ class ProcessManagerProcess(ProcessModule):
         if not reuse_queues:
             # Брошенные очереди никто не прочтёт: метка ДО замены их в PSR PM.
             self._mark_abandoned_queues_gone(process_name)
+            # C-36: PM сам писал в эти очереди; без отпуска его выход ждал бы их feeder вечно.
+            # Брошенными будут только типы из конфига — их пересоздаст register_process ниже.
+            recreated = config.get("queues") or {}
+            try:
+                for qtype, q in self._process_queues_snapshot(process_name).items():
+                    if qtype in recreated:
+                        retire_queue(q)
+            except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
+                self._log_warning(f"restart '{process_name}': брошенные очереди не отпущены: {exc!r}")
         ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
