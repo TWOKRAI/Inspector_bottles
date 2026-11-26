@@ -1,6 +1,7 @@
 # План: считыватель ID3000 в GUI прототипа — показ в дисплее рецепта + настройки (slug `code-reader-gui`)
 
 > **2026-10-18, связь с [`camera-device-service`](2026-10-18_camera-device-service/plan.md):** Task 2.2b заменена; Task 2.3 ждёт Task 2.3/3.2, Task 3.1 (настройки) — Task 6.4 того плана.
+> **2026-11-26:** тот план закрыт; его 3.2 и 6.4 теперь — задачи 1.1–1.3 и 1.5 единого плана камер [`2026-11-26_device-common-base`](2026-11-26_device-common-base/plan.md) (2.0; таблица `mapping.md`). Ссылки «3.2», «6.4» ниже читать так.
 
 - **Slug:** `code-reader-gui` · **Ветка:** `feat/code-reader-gui` · **Дата:** 2026-10-15 · **Статус:** IN PROGRESS — 2.1, 2.2a сделаны; 2.2b заменена планом [`2026-10-18_camera-device-service`](2026-10-18_camera-device-service/plan.md) (2026-10-18)
 - **Родители:** [`qr-code-reader.md`](qr-code-reader.md) (заменяет его Ф3: Task 3.1–3.4),
