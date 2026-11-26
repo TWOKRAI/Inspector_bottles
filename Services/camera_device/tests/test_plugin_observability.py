@@ -242,10 +242,13 @@ def _unconfirmed_rig(make, **cfg) -> _Rig:
     return rig
 
 
-def test_сверка_без_смен_не_даёт_merge(make):
+def test_сверка_без_смен_не_даёт_merge(make, monkeypatch):
+    # Каждый produce() — тик: ключ `stream` (формат первого кадра) доходит до дерева до `before`, а не на явной сверке.
+    monkeypatch.setattr(plugin_base, "_TICK_S", 0.0)
     rig = make()
     assert rig.take()["status"] == "ok"
     rig.drive(0.1)
+    assert any("stream" in data for _, data in rig.proxy.merges), "первый кадр не дошёл до дерева за 0,1 с"
     before = len(rig.proxy.merges)
     for _ in range(20):
         rig.plugin._sync_events()

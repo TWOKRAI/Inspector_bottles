@@ -27,16 +27,28 @@
 - `ParamInfo(min, max, inc, entries, access)` — описание узла.
 - `RawFrame(data, width, height, pixel_format, frame_num, extras)` — кадр, `data` — `bytearray`-копия.
 - `PortError(kind, where, code=None)` — единственная ошибка порта; текст не содержит записываемого значения.
+- `DeviceInfo(serial, model="", ip="", mask="", host_ip="", mac="", pixel_format="", width=0, height=0, enum_matches=1, enum_list=())` —
+  личность открытого прибора: запись перечисления SDK и формат кадра; пустая строка и `0` — «неизвестно».
+- `DevicePort.device_info: DeviceInfo | None` — личность открытого прибора; `None` до `open` и после `close`; драйвер, который не умеет её отдать, оставляет `None`.
+- `select_device(ident, entries) -> (индекс, DeviceInfo)` — выбор записи перечисления под личность. Несколько совпадений: берётся запись в подсети камеры
+  с меньшим `host_ip`. Нет совпадений — `PortError("not_found", "open")`; ни одна из нескольких не в подсети — `AmbiguousDeviceError`.
+- `AmbiguousDeviceError`, `entry_text(info)`, `in_camera_subnet(info) -> bool | None` — части того же выбора.
+
+Не входит в `__all__`, импорт из [`interface.py`](interface.py):
+
+- `LinkEventSource` — необязательная способность порта: `drain_link_events() -> list[LinkEvent]` (`disconnected`, `other`). В `DevicePort` член не входит;
+  сеанс проверяет её через `isinstance`.
 
 Сеанс и профили — вне `__all__` (импорт по модулю):
 
-- `session.DeviceSession(port, sdk, ident=None, *, timeout_ms=500, watchdog_s=5.0, on_frame, on_stall=None, on_state=None, on_timing=None, run=(), rest=())` —
+- `session.DeviceSession(port, sdk, ident=None, *, timeout_ms=500, watchdog_s=5.0, on_frame, on_stall=None, on_state=None, on_timing=None, run=(), rest=(), reconnect=False, link_silence_s=0.0, reconnect_interval_s=2.0, on_link=None)` —
   сеанс одного прибора; `watchdog_s` должен быть больше `timeout_ms/1000`, иначе `ValueError`. `set_cycle(ident, run, rest) -> bool` (2.3a) заменяет идентичность и план для СЛЕДУЮЩЕГО цикла (`False` при `device_held`, цикл не меняется); `timeout_ms` и `watchdog_s` заморожены при создании сеанса — их правка вступает в силу только после перезапуска процесса. Все вызовы порта и `DeviceSdk` идут из потока-владельца
   (один на цикл `open -> close`, `daemon`); вызывающие потоки только ставят команды.
   - `start(timeout=5.0) -> bool` — `True`, если захват идёт; `stop(timeout=2.0)` — не отбрасывается, `timeout` — срок ожидания вызывающего.
   - Ящик владельца (2.4a): `submit(fn) -> bool`, `call(fn, timeout) -> (ok, результат)`, `apply(steps, policy)` — см. «Живая правка и ящик владельца» ниже.
   - Свойства: `state`, `errors` (ошибки кадров + отказы узлов профилей), `params` (прочитанное, скаляры), `params_status` (`{поле: {"verified", "rc"}}`),
-    `param_errors` (`{поле: текст}`), `last_error`, `device` (`DeviceIdentity | None`), `device_held` (поток-владелец жив).
+    `param_errors` (`{поле: текст}`), `last_error`, `device` (`DeviceIdentity | None`), `device_held` (поток-владелец жив), `reconnecting` (идёт переподключение).
+  - `link() -> dict` — связь с прибором, только скаляры; поля и значения — в разделе «Потеря связи и переподключение».
   - Колбэки: `on_frame(RawFrame)` — из владельца, обязателен; `on_state(old, new)` — из потока, сменившего состояние, порядок не гарантирован (истина — `state`);
     `on_stall(имя_вызова, секунды)` — один раз на вызов порта дольше `watchdog_s`; `on_timing(имя, секунды)` — замеры `open`, `stop_grabbing`, `get_frame`, `apply` (запись шага в прибор), `regrab` (перезахват порта).
     Исключение колбэка логируется и не роняет сеанс.
@@ -53,19 +65,22 @@
   `*_managed`. Группа без флага `<группа>_managed` = `True` не пишется. Нет значения у нужного поля — `ValueError` с именем поля.
 - `params.check_bindings(register_cls, bindings, vendor_fields)` — `ValueError`, если ключи `BINDINGS` не совпадают с полями register'а (кроме флагов `*_managed` и `vendor_fields`).
 
-Состояния сеанса (`state`): `idle`, `opening`, `grabbing`, `stopping`, `closed`, `busy`, `not_found`, `error`. Переходы — compare-and-set под замком сеанса:
+Состояния сеанса (`state`): `idle`, `opening`, `grabbing`, `stopping`, `closed`, `busy`, `not_found`, `error`, `lost` (только при `reconnect`). Переходы — compare-and-set под замком сеанса:
 
 | Из | В | Что вызывает |
 |---|---|---|
 | `idle`, `closed` | `opening` | `start()`: стартует поток-владелец |
 | `opening` | `grabbing` | `open`, профиль `run`, `start_grabbing` прошли |
 | `opening` | `busy` / `not_found` / `error` | `PortError` с `kind` `busy`/`not_found` до успешного `open` (`enum_devices`, `open`); любой другой отказ (в т.ч. профиль `run`, `start_grabbing`) — `error` |
-| `grabbing` | `error` | 3 ошибки `get_frame` подряд (`MAX_CONSECUTIVE_ERRORS`) |
-| `opening`, `grabbing` | `stopping` | `stop()` |
+| `grabbing` | `error` | без `reconnect`: 3 ошибки `get_frame` подряд (`MAX_CONSECUTIVE_ERRORS`) или потеря связи (событие прибора, тишина) |
+| `grabbing` | `lost` | с `reconnect`: те же причины |
+| `lost` | `grabbing` | прибор открыт снова (свободный поток — после первого кадра) |
+| `opening`, `grabbing`, `lost` | `stopping` | `stop()` |
 | `stopping` | `closed` | владелец закрыл прибор (`stop_grabbing`, `rest`, `close`, `release`) |
-| `busy`, `not_found`, `error` | `closed` | `stop()`; сам владелец отказное состояние не меняет |
+| `busy`, `not_found`, `error` | `closed` | `stop()`; без `reconnect` сам владелец отказное состояние не меняет |
+| `busy`, `not_found`, `error` | `grabbing` | с `reconnect`: удачный повтор открытия |
 
-`start()` возвращает `False` сразу из `stopping`, из потока владельца и из отказного состояния при живом владельце (автопереподключения нет).
+`start()` возвращает `False` сразу из `stopping`, из потока владельца и из отказного состояния или `lost` при живом владельце.
 Новый `start()` после выхода владельца — новый поток. Пауза перезапуска — `restart_policy.backoff_sec` процесса в рецепте, не поле плагина.
 
 Плагин-заготовка (Task 1.8): `plugin_base.CameraDevicePlugin` (`plugin.py` — точка обнаружения), `registers_base.CameraDeviceRegisters`; команды `take_device`,
@@ -77,6 +92,87 @@
 `frame_period_s` (период кадров; 0 — без пауз), `get_frame_hang_s` (разовое зависание `get_frame`; повторно взводит `arm_hang(seconds)`),
 `get_frame_errors` (первые N вызовов `get_frame` — `PortError`), `get_frame_script` (шаги `err` (`PortError`), `none` (тайм-аут), `frame` (кадр); допустимые — `SCRIPT_STEPS`),
 `read_offset` (`{Binding.key: смещение}` — чтение отличается от записи, узел не меняется).
+
+## Потеря связи и переподключение (ADR-CAM-008)
+
+Переподключение и правило тишины **выключены по умолчанию**; включает их рецепт, в `config` плагина камеры:
+
+| Поле register'а | Умолчание | Границы | Смысл |
+|---|---|---|---|
+| `reconnect` | `false` | — | `true` — сеанс сам повторяет открытие после потери связи или отказа открытия; `false` — отказ конечен (`error`) |
+| `link_silence_s` | `0.0` (выкл) | 0..60 | сколько секунд без кадров считать потерей связи; `0` — правила тишины нет |
+| `reconnect_interval_s` | `2.0` | 0.5..60 | пауза между попытками открытия |
+
+Все три читаются один раз при постройке сеанса: правка действует после перезапуска процесса.
+
+```yaml
+config:
+  reconnect: true
+  link_silence_s: 3.0
+```
+
+Источники потери связи в захвате:
+
+- событие прибора `disconnected` (порт с `LinkEventSource`) — действует всегда, и при умолчаниях. На 2026-11-26 `drain_link_events` есть только
+  у фейкового порта: у драйверов приборов (в том числе hikvision: колбэк SDK кладёт код в `port.exceptions`, сеанс его не читает) этого источника нет,
+  поэтому рецепт, которому нужно ловить обрыв, задаёт `link_silence_s`;
+- 3 ошибки `get_frame` подряд — действует всегда;
+- тишина `link_silence_s` — только при значении больше 0. Свободный поток (шаг `trigger_mode` в плане `run` есть и не `On`): потеря сразу.
+  Триггер `On` или режим не задан (`trigger_managed: false`): проба первого узла плана `run` раз в `link_silence_s`; потеря — только если проба
+  отвечает «прибора нет» (`network`, `closed`, `timeout`, `not_found`, `busy`).
+
+Без `reconnect` потеря даёт `state error`, связь `lost`; для события и тишины в журнале одна ERROR
+`session: связь с прибором потеряна (<причина>); переподключение выключено`. С `reconnect` — `state lost`, одна WARNING, повторы каждые
+`reconnect_interval_s`. Свободный поток после переоткрытия остаётся `lost` до первого кадра; срок ожидания — `link_silence_s`, а при `0` — 3 с
+(`_FIRST_FRAME_WAIT_S`), потом новая попытка. Свободная камера с периодом кадра больше этого срока из `lost` не выйдет.
+
+Связь `link()` (плагин публикует блок `link` в state): `state`, `reconnecting`, `outages`, `attempts`, `last_outage_s`, `lost_for_s` (целые секунды).
+
+| `link.state` | Значение |
+|---|---|
+| `up` | захват идёт, потеря не объявлена; при `link_silence_s 0` стоит `up` и без кадров |
+| `idle` | тишина, проба узла ответила (только при `link_silence_s > 0`) |
+| `silent` | тишина, пробовать нечем: план `run` пуст |
+| `lost` | связь потеряна |
+| `off` | захвата нет (`idle`, `stopping`, `closed`) или прибор ни разу не открылся |
+
+## Триггер без кадра (W2-t1)
+
+Поля `frame_watch` (`off` — умолчание, `software`, `message`) и `frame_watch_deadline_ms` (500; 1..10000), правка — перезапуск процесса.
+Помощник `frame_watch.FrameWatch` (вне `__all__` пакета, `Stability: lite`) считает импульсы, не получившие кадр за срок.
+Предел: у кадра нет номера импульса, сопоставление FIFO — пропуск виден вовремя, только если задержка кадра < срок < период
+импульсов, иначе следующий кадр его маскирует.
+
+Импульс по источнику:
+
+- `software` — каждый `trigger_software`; пишется в потоке-владельце до `execute`, отказ `execute` импульс отзывает. Отказ по сроку
+  команды импульс не отзывает: `execute` ещё может состояться;
+- `message` — команда `trigger_seen {}` от любого процесса. При другом `frame_watch` — отказ `trigger_seen: frame_watch не message`. Отправитель обязан прислать `trigger_seen` ДО
+  прихода кадра этого импульса: опоздавший импульс остаётся ждать и даёт ложный пропуск.
+
+Блок дерева `processes.<p>.state.plugins.<name>.frame_watch`: `{"source", "deadline_ms", "triggers", "misses", "open_miss",
+"last_miss_ts"}` (`last_miss_ts` — `time.time()` открытия последнего эпизода). `open_miss` — `true` от просроченного импульса до
+следующего кадра; его смена публикуется на ближайшем `produce()`, остальные поля — окном `_TICK_S`. При `off` блок нулевой,
+`source: "off"`. Метрика `trigger_missed` — накопительная (равна `misses`). Журнал: одна WARNING `триггер без кадра: срок <мс> мс` на
+эпизод и INFO `кадр после пропуска триггера, пропущено <k>` при закрытии кадром. `reset_stats` обнуляет `triggers`, `misses`,
+`last_miss_ts`; ждущие импульсы остаются, поэтому после сброса возможно `misses > triggers`.
+
+Импульсы считаются, только пока камера должна работать: от `take_device` (в том числе `auto_start`) до `release_device`, включая
+`error`, `lost` и переподключение. До первого `take_device`, после `release_device` и после отказа `take_device` по аргументам
+`trigger_seen` отвечает success, но не считается.
+
+Ждущие импульсы забываются (эпизод закрывается без INFO) на `pause`, `resume`, новом цикле `take_device` и `release_device`; на паузе
+`trigger_seen` отвечает success, но не считается. Переподключение их не забывает: импульсы во время обрыва — пропуски.
+
+Не покрыто:
+
+- у источника с `run_gated: false` хуков `pause`/`resume` нет: импульсы считаются всегда;
+- пауза воркера источника (`pause_event`) останавливает `produce()` без хуков: ждавшие импульсы всплывут пропусками;
+- без `produce()` пропуски не объявляются;
+- эпизод судится по тактам `produce()`: кадр и новый пропуск между двумя тактами сливаются в один эпизод, и `last_miss_ts`
+  остаётся от начала первого (может быть старым);
+- ящик команд владельца исполняется между `get_frame` и `on_frame` (`session.py`, строки ~1053-1063): уже прочитанный кадр
+  ждёт долгую команду или перезахват по живой правке, поэтому возможен ложный пропуск.
 
 ## Очередь кадров источника и метрики (T13)
 
@@ -213,6 +309,7 @@ register'а (проба и запись `apply_params`) для значения 
 | `list_devices` | нет | `{"success": True, "devices": [{"kind", "value", "name"}]}` или `{"success": False, "error": ...}` |
 | `describe_params` | нет | `{"success": True, "params_meta": {поле: {"min", "max", "inc", "entries", "access"} \| None}}` или `{"success": False, "error": ...}` |
 | `trigger_software` | нет | `{"success": True}` или `{"success": False, "error": ...}` |
+| `trigger_seen` | нет | `{"success": True}` или `{"success": False, "error": "trigger_seen: frame_watch не message"}` |
 
 Лишние ключи `data` у `take_device`/`release_device` игнорируются; ошибка валидации (`timeout_s=3600`) -> ответ той же формы
 (`status: error`), `start`/`stop` не вызываются. `reset_stats`, `read_params`, `apply_params` порт не зовут и ящик владельца не используют. `list_devices`, `describe_params`,
@@ -279,33 +376,35 @@ register'а (проба и запись `apply_params`) для значения 
 
 ## Готовность (readiness)
 
-Хук `CameraDevicePlugin.readiness(ctx)` (`plugin_base.py:360`, Task 2.2c, в `main`) отдаёт причину неготовности по состоянию сеанса.
-Зовёт его поток снимка готовности процесса (`PluginOrchestrator.readiness_snapshot`); хук читает один голый атрибут `session.state`,
-без замков и IO, не создаёт сеанс (`plugin_base.py:361-370`). Текст причины — литерал: без серийного номера, пути и `last_error`.
+Хук `CameraDevicePlugin.readiness(ctx)` (`plugin_base.py:449`, Task 2.2c, в `main`) отдаёт причину неготовности по состоянию сеанса.
+Зовёт его поток снимка готовности процесса (`PluginOrchestrator.readiness_snapshot`); хук читает два голых атрибута, `session.state` и
+`session.reconnecting`, без замков и IO, не создаёт сеанс (`plugin_base.py:450-460`). Текст причины — литерал: без серийного номера, пути и `last_error`.
+Пока сеанс переподключается (`reconnecting`), к причинам `busy`, `not_found`, `error` добавляется суффикс «, переподключение».
 Ответ — пустой список либо один элемент `{"severity", "reason"}`. Блокируют START `failure` и `check_function`
 (`health/schema.py:128`, `READINESS_BLOCKING_SEVERITIES`); `out_of_spec` не блокирует.
 
 | Состояние сеанса | Степень | Причина | Блокирует START | Код / тест |
 |---|---|---|---|---|
-| `grabbing` | — | `[]` | нет | `plugin_base.py:371` |
-| `opening` | `check_function` | «камера открывается» | да, и без `auto_start` | `:373`; `test_real_opening_blocks_even_without_auto_start` |
-| `stopping` | `out_of_spec` | «камера останавливается» | нет | `:375`; `test_readiness.py::_TABLE` (заглушка сеанса) |
-| `busy` | `failure` | «камера занята» | да | `:377` |
-| `not_found` | `failure` | «камера не найдена» | да | `:379` |
-| `error` | `failure` | «ошибка камеры» | да | `:381`; текст `last_error` в `reason` не входит |
-| `idle` / `closed`, `auto_start` истинен | `check_function` | «камера не запущена» | да; в том числе после `release_device` оператора | `:383-385` |
-| `idle` / `closed`, `auto_start` ложен | — | `[]` | нет | `:386` |
-| сеанса нет (`None`) | как `idle` | как `idle` | как `idle` | `:370` |
-| любое другое значение | `failure` | «состояние камеры неизвестно» | да | `:387` |
+| `grabbing` | — | `[]` | нет | `plugin_base.py:462` |
+| `opening` | `check_function` | «камера открывается» | да, и без `auto_start` | `:464`; `test_real_opening_blocks_even_without_auto_start` |
+| `stopping` | `out_of_spec` | «камера останавливается» | нет | `:466`; `test_readiness.py::_TABLE` (заглушка сеанса) |
+| `lost` | `failure` | «связь с камерой потеряна, переподключение» | да | `:468`; только при `reconnect` |
+| `busy` | `failure` | «камера занята» (+ «, переподключение») | да | `:471` |
+| `not_found` | `failure` | «камера не найдена» (+ «, переподключение») | да | `:473` |
+| `error` | `failure` | «ошибка камеры» (+ «, переподключение») | да | `:475`; текст `last_error` в `reason` не входит |
+| `idle` / `closed`, `auto_start` истинен | `check_function` | «камера не запущена» | да; в том числе после `release_device` оператора | `:476-478` |
+| `idle` / `closed`, `auto_start` ложен | — | `[]` | нет | `:479` |
+| сеанса нет (`None`) | как `idle` | как `idle` | как `idle` | `:460` |
+| любое другое значение | `failure` | «состояние камеры неизвестно» | да | `:480` |
 
-`device_held` не читается: пара `closed` + `device_held=True` даёт тот же ответ, что `closed` (`plugin_base.py:366-368`).
+`device_held` не читается: пара `closed` + `device_held=True` даёт тот же ответ, что `closed` (docstring `readiness`).
 Таблица сверена с `Services/camera_device/tests/test_readiness.py` (`_TABLE`; настоящий сеанс — тесты `test_real_*`).
 
 **Политика (рецепт узла).** Степень причин и удержание потери задаёт не плагин, а рецепт узла: ключ `readiness: {hold_s, severity: {<из>: <в>}}`
 в `config` плагина (ADR-PM-061, применяется в `PluginOrchestrator._plugin_reasons`); без ключа причины идут как есть. Ключа `readiness`
 в `camera_device_demo.yaml` нет (на дату записи `git grep readiness -- multiprocess_prototype/recipes/camera_device_demo.yaml` пусто);
 пример ключа на другом узле — `multiprocess_prototype/recipes/hikvision_letter_robot.yaml:269` (`ml_inference`). В коде камеры
-строка `"out_of_spec"` одна (`plugin_base.py:376`), поэтому ключ `severity: {out_of_spec: ...}` затронул бы только `stopping`; это вывод из
+строка `"out_of_spec"` одна (`plugin_base.py:466`), поэтому ключ `severity: {out_of_spec: ...}` затронул бы только `stopping`; это вывод из
 чтения кода, пин-теста у камеры нет (у `ml_inference` он есть — Task 2.9b).
 
 **Известное ограничение (не решено).** При `auto_start` камера в `stopping` даёт `out_of_spec`, и узел остаётся «зелёным»: START не
@@ -354,6 +453,6 @@ Stability: contract
 
 ## Решения и план
 
-- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…007 (ADR-CAM-002 уточнён 2026-11-15; ADR-CAM-005 — readiness камеры; ADR-CAM-007 — очередь кадров источника).
+- [`DECISIONS.md`](DECISIONS.md) — ADR-CAM-001…008 (ADR-CAM-002 уточнён 2026-11-15; ADR-CAM-005 — readiness камеры; ADR-CAM-007 — очередь кадров источника; ADR-CAM-008 — потеря связи и переподключение).
 - [`STATUS.md`](STATUS.md) — что есть.
 - План: [`plans/2026-10-18_camera-device-service/plan.md`](../../plans/2026-10-18_camera-device-service/plan.md).

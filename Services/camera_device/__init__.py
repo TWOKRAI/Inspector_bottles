@@ -5,21 +5,31 @@
 """
 
 from Services.camera_device.interface import (
+    AmbiguousDeviceError,
     Binding,
     DeviceIdentity,
+    DeviceInfo,
     DevicePort,
     DeviceSdk,
     ParamInfo,
     PortError,
     RawFrame,
+    entry_text,
+    in_camera_subnet,
+    select_device,
 )
 
 __all__ = [
+    "AmbiguousDeviceError",
     "Binding",
     "DeviceIdentity",
+    "DeviceInfo",
     "DevicePort",
     "DeviceSdk",
     "ParamInfo",
     "PortError",
     "RawFrame",
+    "entry_text",
+    "in_camera_subnet",
+    "select_device",
 ]

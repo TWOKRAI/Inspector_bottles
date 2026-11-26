@@ -7,7 +7,8 @@ Purpose: тракт кадров gui не накапливает кадры. П�
 память — «ключи x 1 кадр» при любой частоте входа (ADR FE-007).
 
 Public API:
-- FramePump(mailbox, sink, parent=None) — создаётся в Qt-потоке; запускает скан ключей
+- FramePump(mailbox, sink, parent=None, *, on_silence=None, silence_s=0.0) — создаётся в
+  Qt-потоке; запускает скан ключей
 - set_keys({key: fps_limit}) -> None     — настроить ключи (повторный вызов допустим)
 - stop() -> None                         — погасить скан и таймеры (идемпотентно)
 - stats(reset_window=False) -> dict      — счётчики на ключ (потокобезопасно)
@@ -16,14 +17,27 @@ Public API:
 ``pending_keys() -> list[str]`` (``LatestMailbox`` из ``process_module.generic``; импорт
 его сюда не нужен). ``sink(key, item)`` получает ВЕСЬ item без изменений (поля
 ``capture_ns``, ``capture_ts``, ``replay`` насос не читает) и вызывается только в Qt-потоке.
+``sink`` возвращает ``False``, когда кадр не показан (``Callable[[str, Any], object]``);
+любое другое значение, в том числе ``None``, — «показан».
+
+Тишина ключа (включена при ``on_silence is not None and silence_s > 0``): ``on_silence(key,
+age_s)`` — на этот ключ ``age_s`` секунд (не меньше ``silence_s``) не показан кадр; зовётся на
+тике без показа (ящик пуст или ``sink`` кадр не показал), не чаще раза на целую секунду возраста.
+Возраст считается от последнего ПОКАЗАННОГО кадра ключа, без кадров — от заведения ключа.
+``on_silence(key, None)`` — после
+``sink`` первого показанного кадра, пришедшего после сообщённой тишины. Кадр, не показанный
+``sink`` (``False`` или исключение), тишину не прерывает. Колбэк зовётся в Qt-потоке вне
+замка насоса; при снятии ключа не зовётся. Часы — ``time.perf_counter``; выключенный
+механизм их ради тишины не читает.
 
 Stability: lite — сигнатуры и набор счётчиков ``stats()`` менять только через ADR (FE-007).
 Ни одного ``Signal`` с кадром нет и не должно быть: кадр через сигнал — это снова
 неограниченная очередь событий Qt.
 
 Счётчики ``stats()`` на ключ:
-- ``shown`` — успешные вызовы ``sink``;
-- ``errors`` — вызовы ``sink`` с исключением (насос не останавливается);
+- ``shown`` — вызовы ``sink`` без исключения, в том числе вернувшие ``False`` (постоянно
+  падающая копия растит ``shown``, пока стоит плашка тишины);
+- ``errors`` — вызовы ``sink`` и ``on_silence`` с исключением (насос не останавливается);
 - ``max_age_ms`` — максимум возраста снятого кадра (из ``age_s`` ящика) за весь прогон;
 - ``window_max_age_ms`` — то же с последнего ``stats(reset_window=True)``;
 - ``busy_ms_total`` — суммарное время, проведённое в ``sink`` (``time.perf_counter``).
@@ -52,7 +66,8 @@ _MAX_FPS = 60
 _UNCONFIGURED_FPS = 30
 #: Период скана ``pending_keys()`` в мс.
 _SCAN_PERIOD_MS = 100
-#: Не чаще одной строки лога об исключении ``sink`` на ключ за этот срок (иначе строка на тик).
+#: Не чаще одной строки лога об исключении ``sink`` (и отдельно ``on_silence``) на ключ за этот
+#: срок (иначе строка на тик).
 _ERROR_LOG_PERIOD_S = 5.0
 
 
@@ -89,15 +104,21 @@ class FramePump(QObject):
     def __init__(
         self,
         mailbox: _MailboxLike,
-        sink: Callable[[str, Any], None],
+        sink: Callable[[str, Any], object],
         parent: QObject | None = None,
+        *,
+        on_silence: Callable[[str, float | None], None] | None = None,
+        silence_s: float = 0.0,
     ) -> None:
         """Создать насос и запустить скан ключей.
 
         Pre: вызван в Qt-потоке при живом ``QCoreApplication``; ``mailbox`` потокобезопасен
-            (``put`` зовут другие потоки); ``sink`` вызывается только в Qt-потоке.
+            (``put`` зовут другие потоки); ``sink`` вызывается только в Qt-потоке и возвращает
+            ``False``, когда кадр не показан.
         Post: ключей нет, идёт скан ``pending_keys()`` с периодом 100 мс; ни один кадр не
-            снят, пока не настроен ключ или скан его не нашёл.
+            снят, пока не настроен ключ или скан его не нашёл. Тишина ключа сообщается в
+            ``on_silence`` (в Qt-потоке) только при ``on_silence is not None`` и
+            ``silence_s > 0``; иначе колбэк не зовётся и часы ради него не читаются.
         """
         super().__init__(parent)
         self._mailbox = mailbox
@@ -108,6 +129,16 @@ class FramePump(QObject):
         self._timers: dict[str, QTimer] = {}
         self._counters: dict[str, dict[str, float]] = {}
         self._last_error_log: dict[str, float] = {}
+        self._on_silence = on_silence
+        self._silence_s = silence_s
+        self._silence_on = on_silence is not None and silence_s > 0
+        # состояние тишины трогает только Qt-поток, замок не нужен:
+        # время последнего показанного кадра ключа (без кадров — заведения ключа),
+        self._last_shown: dict[str, float] = {}
+        # последняя сообщённая целая секунда тишины ключа,
+        self._silent: dict[str, int] = {}
+        # время последней строки лога об исключении on_silence
+        self._last_silence_error_log: dict[str, float] = {}
         self._stopped = False
         self._scan_timer = QTimer(self)
         self._scan_timer.setInterval(_SCAN_PERIOD_MS)
@@ -142,9 +173,10 @@ class FramePump(QObject):
 
         Pre: вызывается из Qt-потока (таймеры и их удаление принадлежат ему; T3 зовёт из
             ``aboutToQuit``); повторный вызов допустим.
-        Post: после возврата ни один ``sink`` больше не вызывается (закрытие окна не
-            оставляет вызовов в разрушенный виджет); ``set_keys`` ничего не делает; счётчики
-            остаются доступны через ``stats()``.
+        Post: после возврата ни ``sink``, ни ``on_silence`` больше не вызываются (закрытие окна
+            не оставляет вызовов в разрушенный виджет), в том числе если ``stop()`` позван из
+            самого ``sink`` или ``on_silence``; ``set_keys`` ничего не делает; счётчики остаются
+            доступны через ``stats()``.
         """
         with self._lock:
             self._stopped = True
@@ -183,6 +215,8 @@ class FramePump(QObject):
             timer.timeout.connect(self._tick_handler(key))
             self._timers[key] = timer
             self._counters.setdefault(key, _new_counters())
+            if self._silence_on:
+                self._last_shown[key] = time.perf_counter()
             timer.start()
         elif timer.interval() != period_ms:
             timer.setInterval(period_ms)
@@ -205,12 +239,18 @@ class FramePump(QObject):
         return handler
 
     def _drop_key(self, key: str) -> None:
-        """Остановить таймер ключа и снять его счётчики. Замок взят."""
+        """Остановить таймер ключа, снять счётчики и состояние тишины. Замок взят.
+
+        ``on_silence`` здесь не зовётся: плашки снятых ключей убирает потребитель при ``set_keys``.
+        """
         timer = self._timers.pop(key)
         timer.stop()
         timer.deleteLater()
         self._counters.pop(key, None)
         self._last_error_log.pop(key, None)
+        self._last_shown.pop(key, None)
+        self._silent.pop(key, None)
+        self._last_silence_error_log.pop(key, None)
 
     def _scan(self) -> None:
         """Найти ключи с ожидающим кадром без таймера и завести им таймер на 30 Гц."""
@@ -225,17 +265,20 @@ class FramePump(QObject):
                     self._ensure_key(key, _period_ms(_UNCONFIGURED_FPS))
 
     def _tick(self, key: str) -> None:
-        """Один ``take(key)`` и один ``sink(key, item)``; пустой ящик — тик пропущен."""
+        """Один ``take(key)`` и один ``sink(key, item)``; тик без показа — проверка тишины."""
         if self._stopped:
             return
         taken = self._mailbox.take(key)
         if taken is None:
+            if self._silence_on:
+                self._check_silence(key)
             return
         item, age_s = taken
         failed: Exception | None = None
+        result: object = None
         started = time.perf_counter()
         try:
-            self._sink(key, item)
+            result = self._sink(key, item)
         except Exception as exc:  # noqa: BLE001 — сбой sink не должен остановить насос
             failed = exc
         finished = time.perf_counter()
@@ -259,3 +302,49 @@ class FramePump(QObject):
                 _ERROR_LOG_PERIOD_S,
                 exc_info=failed,
             )
+        # кадр показан: sink вернулся без исключения и не False. Из sink могли позвать stop()
+        # (дальше потребителя не зовём) или снять ключ через set_keys (его состояние не воскрешаем)
+        shown = failed is None and result is not False
+        if self._silence_on and not self._stopped and key in self._timers:
+            if shown:
+                self._last_shown[key] = finished
+                if self._silent.pop(key, None) is not None:  # 0 — тоже сообщённая тишина
+                    self._call_on_silence(key, None)
+            else:
+                # источник не медленнее насоса не даёт пустых тиков, а экран так же замер
+                self._check_silence(key)
+
+    def _check_silence(self, key: str) -> None:
+        """Тик без показа (ящик пуст или кадр не показан): сообщить новую целую секунду тишины."""
+        since = self._last_shown.get(key)
+        if since is None:  # ключ уже снят
+            return
+        age_s = time.perf_counter() - since
+        if age_s >= self._silence_s and int(age_s) != self._silent.get(key):
+            # запоминаем ДО вызова: бросивший или крутящий события колбэк не получит повтор
+            self._silent[key] = int(age_s)
+            self._call_on_silence(key, age_s)
+
+    def _call_on_silence(self, key: str, age_s: float | None) -> None:
+        """``on_silence`` вне замка; исключение — в ``errors`` и в лог со своим дросселем.
+
+        Это последний вызов потребителя в тике: после ``stop()`` из колбэка вслед ничего не идёт.
+        """
+        try:
+            self._on_silence(key, age_s)
+        except Exception as exc:  # noqa: BLE001 — сбой колбэка не должен остановить насос
+            now = time.perf_counter()
+            with self._lock:
+                counters = self._counters.get(key)  # колбэк мог снять ключ через set_keys
+                if counters is not None:
+                    counters["errors"] += 1
+                log_error = now - self._last_silence_error_log.get(key, -math.inf) >= _ERROR_LOG_PERIOD_S
+                if log_error and counters is not None:
+                    self._last_silence_error_log[key] = now
+            if log_error:
+                _log.warning(
+                    "FramePump: on_silence(%r) бросил исключение (лог не чаще раза в %.0f с)",
+                    key,
+                    _ERROR_LOG_PERIOD_S,
+                    exc_info=exc,
+                )

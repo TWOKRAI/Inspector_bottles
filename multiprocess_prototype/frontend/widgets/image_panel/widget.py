@@ -132,6 +132,7 @@ class ImagePanelWidget(QWidget):
             else:
                 # Слот существует — гарантировать правильную позицию в layout
                 slot = self._slots[slot_id]
+                slot.set_label(label)  # тот же id в новом рецепте может называться иначе
                 current = self._layout.indexOf(slot)
                 if current != position:
                     self._layout.removeWidget(slot)
@@ -146,6 +147,10 @@ class ImagePanelWidget(QWidget):
     def display_frame(self, slot_id: str, frame) -> None:
         """Отобразить один BGR-кадр в указанном слоте."""
         self._presenter.on_frame(slot_id, frame)
+
+    def show_no_signal(self, slot_id: str, text: str | None) -> None:
+        """Показать (``text``) или снять (``None``) плашку тишины на слоте."""
+        self._presenter.show_no_signal(slot_id, text)
 
     def display_frames(self, frames: dict) -> None:
         """Отобразить несколько кадров: dict[slot_id, np.ndarray]."""

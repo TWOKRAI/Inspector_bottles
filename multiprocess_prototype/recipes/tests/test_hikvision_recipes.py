@@ -84,7 +84,7 @@ def test_camera_fields_set_explicitly(name: str) -> None:
         assert cfg["resolution_width"] == 1440
         assert cfg["resolution_height"] == 1080
         assert cfg["run_locked_commands"] == ["release_device", "take_device"]
-        # packet_size: числа с дня №1 нет, 0 использовать нельзя
+        # 0 в packet_size не задавать: драйвер пишет его как «оптимальный», и чтение вернёт другое число
         assert cfg.get("packet_size", 1500) != 0
 
 

@@ -567,6 +567,7 @@ def test_страж_плагин_и_commands_не_создают_потоков(
 
 def test_страж_набор_команд_плагина_девять_команд_р7():
     # 2.3c: три прежних + reset_stats, read_params, apply_params; 2.3d: list_devices, describe_params, trigger_software
+    # W2-t2: trigger_seen
     expected = {
         "take_device": "cmd_take_device",
         "release_device": "cmd_release_device",
@@ -577,6 +578,7 @@ def test_страж_набор_команд_плагина_девять_кома
         "list_devices": "cmd_list_devices",
         "describe_params": "cmd_describe_params",
         "trigger_software": "cmd_trigger_software",
+        "trigger_seen": "cmd_trigger_seen",
     }
     assert CameraDevicePlugin.commands == expected
     # собственные атрибуты класса: унаследованный от базы `cmd_set_config` в набор плагина не входит

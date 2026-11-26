@@ -280,6 +280,24 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # 3. Инициализация менеджеров через ManagersBundle
             self._init_managers()
 
+            # 3a. Контекст логирования (proc_name в extra для логов).
+            #     Ф0.5: именно БАЗА процесса, а не push_context. proc_name — факт
+            #     про процесс целиком, а этот вызов делается из главного потока,
+            #     тогда как пишут логи потоки-воркеры. После того как контекст
+            #     push_context стал потоковым, proc_name отсюда до воркеров бы
+            #     не доехал — запись потеряла бы имя процесса.
+            #     До шага 6: плагины пишут в `configure`/`start` внутри `boot()`,
+            #     их строки должны нести имя процесса (W1-c).
+            #     Свой try: Resource — украшение записи, а здесь, до шага 4, исключение
+            #     провалило бы initialize() и оставило router/console/command без
+            #     shutdown (ревью W1-c).
+            try:
+                logger = self.get_manager("logger")
+                if logger and hasattr(logger, "set_base_context"):
+                    logger.set_base_context(**self._build_resource())
+            except Exception as exc:  # noqa: BLE001 — контекст лога не стоит провала подъёма
+                self._log_warning(f"контекст логирования процесса '{self.name}' не установлен: {exc!r}")
+
             # 4. Инициализация коммуникации
             self._init_communication()
 
@@ -318,16 +336,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # один вопрос. Правило то же, что у перехода в RUNNING (:857-859).
             self.update_process_state(status=ProcessStatus.READY.value)
             self._current_process_status = ProcessStatus.READY.value
-
-            # 9. Контекст логирования (proc_name в extra для логов).
-            #    Ф0.5: именно БАЗА процесса, а не push_context. proc_name — факт
-            #    про процесс целиком, а этот вызов делается из главного потока,
-            #    тогда как пишут логи потоки-воркеры. После того как контекст
-            #    push_context стал потоковым, proc_name отсюда до воркеров бы
-            #    не доехал — запись потеряла бы имя процесса.
-            logger = self.get_manager("logger")
-            if logger and hasattr(logger, "set_base_context"):
-                logger.set_base_context(**self._build_resource())
 
             # 10. Регистрация state.changed handler (ADR-SS-006) — только в
             #     success-пути. Раньше вызов стоял в finally и при исключении

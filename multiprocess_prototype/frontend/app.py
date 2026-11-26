@@ -29,6 +29,9 @@ from .styles.theme_loader import apply_default_theme
 
 _log = get_std_logger(__name__)
 
+#: Шаг сообщения насоса о тишине ключа (с). Порог плашки у каждого экрана свой: plate_after_s рецепта.
+_PUMP_SILENCE_S = 1.0
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -1070,8 +1073,12 @@ def _setup_bridge_callbacks(
     "main" и все кадры в него (текущее поведение).
     """
     from .widgets.image_panel.recipe_displays import (
+        DEFAULT_FPS_LIMIT,
         build_frame_routing,
         build_panel_displays,
+        build_plate_sources,
+        plate_status,
+        plate_text,
         resolve_display_id,
     )
 
@@ -1083,6 +1090,12 @@ def _setup_bridge_callbacks(
     # дубль. Считаем только кадры первичного дисплея → «за один проход» (список и
     # порядок дисплеев — см. _rebuild_displays). Мутабельный контейнер для замыкания.
     _primary_slot: list[str] = ["main"]
+    # Плашка тишины: отправители, дошедшие до sink (в том числе найденные сканом, без привязки);
+    # возраст тишины молчащих отправителей; поля плашки и названия дисплеев из рецепта.
+    _seen: set[str] = set()
+    _silent_age: dict[str, float] = {}
+    _plate_sources: dict[str, dict] = {}
+    _display_titles: dict[str, str] = {}
 
     def _read_active_recipe() -> dict | None:
         """Прочитать raw-dict активного рецепта (None если недоступен)."""
@@ -1104,22 +1117,61 @@ def _setup_bridge_callbacks(
     # Насос кадров: ящик «последний на ключ» (bridge.frame_mailbox, его наполняет
     # dispatch из worker thread) -> таймер на sender с периодом из fps_limit слота ->
     # _show_taken -> _on_frame_received. Создаётся в Qt-потоке ДО первого _rebuild_displays: тот
-    # зовёт process._frame_pump.set_keys(...). sink — замыкание: _show_taken (и через него
-    # _on_frame_received) определён ниже и разрешается в момент вызова, а не при создании насоса.
-    def _show_taken(item: dict) -> None:
+    # зовёт process._frame_pump.set_keys(...). sink — замыкание: _on_frame_received (зовётся из
+    # _show_taken) определён ниже и разрешается в момент вызова, а не при создании насоса.
+    def _show_taken(key: str, item: dict) -> bool:
         """Кадр, вынутый насосом: копия ссылок SHM (Qt-поток, один раз) и показ.
 
-        ``None`` — ссылка перезаписана/порвана или нет восстановителя: кадр не показан, слот держит
-        прежний, следующий тик берёт новое из ящика (счёт — ``bridge.restore_dropped``).
+        ``False`` — кадр не показан (ссылка перезаписана/порвана, нет восстановителя или в сообщении
+        нет кадра): слот держит прежний, следующий тик берёт новое из ящика (счёт ссылок —
+        ``bridge.restore_dropped``), а насос продолжает отсчитывать тишину ключа.
         """
+        _seen.add(key)
         restored = process._bridge.restore_for_show(item)
         if restored is None:
+            return False
+        return _on_frame_received(restored)
+
+    def _display_of(sender: str) -> str:
+        return resolve_display_id({"sender": sender}, _routing, default="main")
+
+    def _senders_of(display_id: str) -> set[str]:
+        """Отправители дисплея: по привязкам рецепта и уже присылавшие кадры."""
+        bound = {s for s, d in _routing.items() if d == display_id}
+        return bound | {s for s in _seen if _display_of(s) == display_id}
+
+    def _on_silence(key: str, age_s: float | None) -> None:
+        """Тишина ключа насоса: плашка только на экране ``silence``, когда ВСЕ его отправители молчат ``after_s``.
+
+        Экран без записи в рецепте (запасной ``main``) — ``hold``: на нём остаётся последний кадр.
+        """
+        display_id = _display_of(key)
+        if age_s is None:
+            _silent_age.pop(key, None)
+            image_panel.show_no_signal(display_id, None)
             return
-        _on_frame_received(restored)
+        _silent_age[key] = age_s
+        source = _plate_sources.get(display_id, {})
+        if source.get("mode", "hold") != "silence":  # trigger до W2-c3 ведёт себя как hold
+            return
+        senders = _senders_of(display_id) | {key}
+        if not all(s in _silent_age for s in senders):
+            return
+        youngest = min(_silent_age[s] for s in senders)
+        if youngest < source["after_s"]:
+            return
+        fields = {
+            "title": _display_titles.get(display_id, display_id),
+            **{name: source.get(name) for name in ("number", "address", "serial", "process")},
+        }
+        status = plate_status(None, youngest)
+        image_panel.show_no_signal(display_id, plate_text(source.get("template") or "", fields) + "\n" + status)
 
     process._frame_pump = FramePump(
         mailbox=process._bridge.frame_mailbox,
-        sink=lambda _key, item: _show_taken(item),
+        sink=lambda key, item: _show_taken(key, item),
+        on_silence=_on_silence,
+        silence_s=_PUMP_SILENCE_S,
     )
     # Оба пути закрытия (перезапуск UI и выход) идут через app.quit() -> aboutToQuit;
     # новый проход GuiProcess.run создаёт новый насос, старый к тому времени остановлен.
@@ -1137,6 +1189,10 @@ def _setup_bridge_callbacks(
         displays = build_panel_displays(recipe)
         _routing.clear()
         _routing.update(build_frame_routing(recipe))
+        _plate_sources.clear()
+        _plate_sources.update(build_plate_sources(recipe))
+        _display_titles.clear()
+        _display_titles.update({d["id"]: d["label"] for d in displays})
         # Первичный слот = первый включённый дисплей в порядке панели (сортировка по
         # position.x, как в ImagePanelWidget.set_displays). По нему считаем FPS — один
         # раз на проход, без дубля при нескольких дисплеях.
@@ -1158,10 +1214,24 @@ def _setup_bridge_callbacks(
         # скан на 30 Гц с задержкой до 100 мс на первый кадр (см. FRAME_DELIVERY.md).
         fps_by_display = {d["id"]: d["fps_limit"] for d in displays if d.get("id") and d.get("enabled", True)}
         pump_keys = {sender: fps_by_display[disp] for sender, disp in _routing.items() if disp in fps_by_display}
+        # Отправители без привязки, уже присылавшие кадры: set_keys снял бы ключ, найденный сканом,
+        # а молчащему отправителю скан его не вернёт — и плашки у дисплея не будет.
+        for sender in _seen - pump_keys.keys():
+            display_id = _display_of(sender)
+            if display_id in fps_by_display:
+                pump_keys[sender] = fps_by_display[display_id]
+            elif not fps_by_display:  # дисплеев в рецепте нет: панель на запасном "main"
+                pump_keys[sender] = DEFAULT_FPS_LIMIT
         try:
             process._frame_pump.set_keys(pump_keys)
         except Exception as exc:  # noqa: BLE001 — настройка насоса не должна валить GUI
             process._log_warning(f"мульти-дисплей: set_keys насоса не удалось: {exc}", module="gui")
+        # Плашки снимаются все: при снятии ключа насос колбэк не зовёт, а названия и привязки могли
+        # смениться. Оставшиеся молчащие ключи вернут плашку на следующей целой секунде тишины.
+        for sender in [s for s in _silent_age if s not in pump_keys]:
+            del _silent_age[sender]
+        for slot_id in image_panel.slot_ids:
+            image_panel.show_no_signal(slot_id, None)
         process._log_info(
             f"мульти-дисплей: слотов={len(displays) or 1}, routing={_routing}",
             module="gui",
@@ -1185,7 +1255,7 @@ def _setup_bridge_callbacks(
 
     _frame_trace_cnt = 0
 
-    def _on_frame_received(msg_dict: dict) -> None:
+    def _on_frame_received(msg_dict: dict) -> bool:
         nonlocal _frame_trace_cnt
         _frame_trace_cnt += 1
 
@@ -1222,6 +1292,9 @@ def _setup_bridge_callbacks(
                 window.record_trace_branches(data.get("trace_branches"))
                 if _frame_trace_cnt % 30 == 1:
                     process._log_info(f"[FRAME-TRACE] {data.get('trace')}", module="gui")
+
+        # Отвергнутый presenter-ом кадр ("Ошибка кадра") — тоже True: плашка не закрывает ошибку.
+        return frame is not None
 
     # Внимание: dispatch этот колбэк больше не вызывает (кадры идут через frame_mailbox ->
     # FramePump -> _on_frame_received); строка оставлена как контракт моста (FREEZE).

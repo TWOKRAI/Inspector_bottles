@@ -494,7 +494,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (40)
+## live-stand (41)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
@@ -534,10 +534,11 @@
 - [project_overview_blind_to_loss](project_overview_blind_to_loss.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 - [project_vfd_bridge_robot_reboot](project_vfd_bridge_robot_reboot.md)
+- [reference_camera_jumbo_packet_size_black_frame](reference_camera_jumbo_packet_size_black_frame.md)
 - [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
-## measurement (37)
+## measurement (38)
 
 - [feedback_a_budget_belongs_to_a_path_not_to_a_mechanism](feedback_a_budget_belongs_to_a_path_not_to_a_mechanism.md)
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
@@ -576,6 +577,7 @@
 - [project_store_retention_bounds_rows_not_bytes](project_store_retention_bounds_rows_not_bytes.md)
 - [project_strokes_points_perf](project_strokes_points_perf.md)
 - [project_telemetry_gate_off_is_not_zero_ipc](project_telemetry_gate_off_is_not_zero_ipc.md)
+- [reference_camera_jumbo_packet_size_black_frame](reference_camera_jumbo_packet_size_black_frame.md)
 
 ## owner-decision (21)
 

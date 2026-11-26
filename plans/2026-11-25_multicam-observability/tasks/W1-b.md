@@ -1,0 +1,64 @@
+# Task W1-b: живая запись триггера считывателя через перезапуск захвата
+
+- **Статус:** [PENDING] · **Level:** Middle+ · **Assignee:** developer
+- **Module contract:** impl-only (новый публичный метод `SdkCodeReader.set_trigger`; `interface.py` у `code_reader` нет)
+- **Dependencies:** нет
+- **Gate:** `machine_gate.sh light <session>` по файлам TESTS; база красных `Services/code_reader/tests` — снимок лида на `85a7906d1`
+- **Files:** `Services/code_reader/plugin/sdk_registers.py`, `Services/code_reader/plugin/sdk_plugin.py`, `Services/code_reader/core/sdk_reader.py`, `Services/code_reader/tests/test_sdk_trigger_live_hazards.py`
+- **Acceptance:** блок ACCEPTANCE; файл tester-а зелёный
+- **Handoff:** reviewer (стадия 0) -> tester (слепой, RED) -> developer -> лид (инъекции) -> reviewer (стадия 5, sonnet)
+- **ФАЙЛ TESTER-А (developer не правит):** `Services/code_reader/tests/test_sdk_trigger_live_contract.py`
+
+Выбор (лид; отклонение от текста аудита T5 шаг 1 «отказ живой записи» — в `plan.md`). Механизм ядра камеры: `FieldMeta(apply="restart")` + подписка `ctx.registers.subscribe` (как `plugin_base.py:239-255`) + применение перезапуском захвата. Отказ живой записи отвергнут: в framework есть только статическое вето (`readonly`/уровень доступа: `manager.py:202` -> `field_meta.py:371-373,407-408`), динамического вето по политике нет, колбэк подписки зовётся после записи значения; `readonly` скрыл бы поля от правки в инспекторе. Read-back в state — шаг 2.
+
+TASK: W1-b — живая запись триггера считывателя применяется перезапуском захвата   PLAN: plans/2026-11-25_multicam-observability/plan.md
+ROLE: developer
+CHAIN: reviewer (стадия 0) -> tester (слепой RED) -> you -> лид (инъекции) -> reviewer (стадия 5)
+
+DESIGN (decided by the lead — you type it, you do not derive it):
+  1. `sdk_registers.py`: `apply="restart"` у `trigger_mode`, `trigger_source`, `trigger_period_ms`; к `info` каждого — ` Живая правка перезапускает захват.`
+  2. `core/sdk_reader.py`: `set_trigger(self, trigger: Mapping[str, Any] | None) -> None`; под `self._life`: поток жив (`self._thread is not None and self._thread.is_alive()`) -> `raise RuntimeError("режим съёмки меняется только при остановленном захвате")`; иначе `parsed = self._parse_trigger(trigger)`, затем `self._trigger = parsed` (при `ValueError` прежний режим цел).
+  3. `plugin/sdk_plugin.py`, структура: константа `_TRIGGER_FIELDS = ("trigger_mode", "trigger_source", "trigger_period_ms")` и `_TRIGGER_NODES = frozenset({"TriggerMode", "TriggerSource", "TriggerSelfTriggerPeriod"})` (ключи дублируют `sdk_reader._TRIGGER_NODES`: три места — `_TRIGGER_FIELDS`, `_TRIGGER_NODES`, кортеж `configure`, заменяемый на `_TRIGGER_FIELDS`); `_trigger_from(values: dict) -> dict` — только непустые из `_TRIGGER_FIELDS` (логика `sdk_plugin.py:153-157`); `configure` строит триггер через неё и ставит `self._applied_trigger` = этот словарь; `self._trigger_lock = threading.Lock()`. Тела `cmd_take_device`/`cmd_release_device` переносятся в `_take()`/`_release()`; команды = `with self._trigger_lock: return self._take()` (`_release()`). `_subscribe_trigger()` в конце `configure`: снять прежние (`_unsubscribe_trigger()`), `ctx.registers is None` -> `log_warning(f"CodeReaderSdkPlugin[{reader_id}]: нет RegistersManager, живая правка триггера отключена")`; иначе на поле `functools.partial(self._on_trigger_update, field)`, `registers.subscribe(self.name, field, cb)`, тройки в `self._trigger_subscriptions` (`getattr(self, "_trigger_subscriptions", [])`). `shutdown` первой строкой — `_unsubscribe_trigger()`, затем остаток тела (`self._reader.stop()`, публикация) под `with self._trigger_lock:` — порядок остановки (закрыт ли приём `register_update` до `shutdown` плагина) я не проверил, замок делает его неважным: идущий колбэк доработает до конца, новый не придёт.
+  4. `_on_trigger_update(field, value)` целиком под `self._trigger_lock`, никогда не бросает. `new = self._trigger_from({**{f: getattr(self._reg, f) for f in _TRIGGER_FIELDS}, field: value})` (значение сработавшего поля — из аргумента). `new == self._applied_trigger` -> INFO `... restarted=False: значение не изменило режим`, выход. `held = bool(self._reader.stats()["device_held"])`. Не `held`: `set_trigger(new or None)`, `_applied_trigger = new`, INFO `... restarted=False: захват не идёт, значение войдёт в следующий take_device`, `_publish_state()`. `held`: `self._reader.stop()`; `set_trigger(new or None)`; `r = self._take()`. (а) `r["status"] == "ok"`: `bad` = `stats()["param_errors"]`, только ключи из `_TRIGGER_NODES`; пусто -> `_applied_trigger = new`, INFO `... restarted=True applied=True`; не пусто -> откат как в (б): `stop()`, `set_trigger(self._applied_trigger or None)`, `r2 = self._take()`; ERROR `... restarted=True applied=False param_errors=<"; ".join(f"{n}: {t}")> fallback=old ok=<r2["status"] == "ok">`, `_last_error = f"trigger apply: field={field} applied=False"`, `_publish_state()`. Так читатель и `_applied_trigger` всегда совпадают (база сравнения п.4 не расходится с прибором); регистр при этом хранит новое значение. (б) `r` не `ok`: `stop()`, `set_trigger(self._applied_trigger or None)`, `r2 = self._take()`; ERROR `... restarted=False error=<r["error"]> fallback=old ok=<r2["status"] == "ok">`; `_last_error = f"trigger apply: field={field} restarted=False; прежний режим {'идёт' if ок else 'не запущен'}"`; `_publish_state()`. Исключение (например `RuntimeError` из `set_trigger`, поток не успел выйти) -> если `held`, вложенный `try: ok = self._take()["status"] == "ok"` / `except Exception: ok = False` (режим читателя прежний: `set_trigger` присваивает только после разбора); не `held` -> `ok = "-"`; ERROR полной строкой `CodeReaderSdkPlugin[<id>]: apply field=<field> policy=restart отказ: <type(exc).__name__> ok=<ok>`; без `report_error`: правило Р-10 — `log_error` и `report_error` в одном пути запрещены, факт отказа несёт `_last_error` в state (поправка лида 2026-11-25); `_last_error = f"trigger apply: field={field} отказ: {type(exc).__name__}"`; `_publish_state()`. `_last_error` пишется под `self._lock`, как в коде. Текстов значений поля в логах и `last_error` нет.
+  5. Литералы строк — префикс `CodeReaderSdkPlugin[<reader_id>]: apply field=<field> policy=restart`, далее хвост из п.4. Поток: колбэк идёт в потоке `set_field_value` (системный поток процесса, как команды) и держит его до `timeout + timeout_ms` остановки плюс открытие. Параллельный `take_device` из другого потока ждёт `_trigger_lock`, затем `start()` на идущем захвате -> `True` -> ответ `status "ok"`, второго открытия нет.
+
+FILES (complete list — nothing else; need another file -> stop and ask the lead):
+  1. Services/code_reader/plugin/sdk_registers.py — `apply="restart"`, `info`
+  2. Services/code_reader/plugin/sdk_plugin.py — константы, `_trigger_from`, замок, `_take`/`_release`, подписка, `_on_trigger_update`
+  3. Services/code_reader/core/sdk_reader.py — `set_trigger`
+  4. Services/code_reader/tests/test_sdk_trigger_live_hazards.py — новый, тесты REDS 7-10
+
+REDS (predicted red tests; ещё 3 теста tester-а — `test_trigger_fields_declare_apply_restart`, `test_shutdown_unsubscribes`, `test_return_to_old_value_after_node_refusal_keeps_reader_on_old_mode` — в `W1-b.tester.md`):
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_live_write_while_grabbing_restarts_and_reaches_device
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_refused_node_write_is_not_reported_as_applied
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_failed_restart_falls_back_to_old_trigger
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_same_value_does_not_restart
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_live_write_while_stopped_applies_on_next_take
+  - Services/code_reader/tests/test_sdk_trigger_live_contract.py::test_set_trigger_refused_while_running
+  - Services/code_reader/tests/test_sdk_trigger_live_hazards.py::test_reconfigure_does_not_double_subscriptions
+  - Services/code_reader/tests/test_sdk_trigger_live_hazards.py::test_concurrent_take_device_waits_for_callback (единственный, кто убивает мутант `lock_not_held_by_commands`)
+  - Services/code_reader/tests/test_sdk_trigger_live_hazards.py::test_set_trigger_error_reaches_last_error (захват идёт, заглушка `set_trigger` бросает `RuntimeError` -> `get_status.last_error` непустой, `stats()["device_held"] True`, строка ERROR оканчивается ` отказ: RuntimeError ok=True`)
+  - Services/code_reader/tests/test_sdk_trigger_live_hazards.py::test_callback_never_raises_on_value_error (`ValueError` из плагина недостижим — ключи фиксированы — поэтому заглушка `set_trigger`)
+
+ACCEPTANCE (every number with its command):
+  - оба файла зелёные — `<py> -m pytest -q --tb=short Services/code_reader/tests/test_sdk_trigger_live_contract.py Services/code_reader/tests/test_sdk_trigger_live_hazards.py` -> exit 0
+  - прежние зелёные — `<py> -m pytest -q --tb=short Services/code_reader/tests/test_sdk_trigger.py Services/code_reader/tests/test_sdk_trigger_hazards.py Services/code_reader/tests/test_sdk_plugin.py` -> exit 0
+  - `ruff check -q Services/code_reader/plugin/sdk_registers.py Services/code_reader/plugin/sdk_plugin.py Services/code_reader/core/sdk_reader.py Services/code_reader/tests/test_sdk_trigger_live_hazards.py` -> 0
+
+TESTS: bash "$(git rev-parse --path-format=absolute --git-common-dir)/../scripts/machine_gate.sh" light <session> <py> -m pytest -q --tb=short Services/code_reader/tests/test_sdk_trigger_live_contract.py Services/code_reader/tests/test_sdk_trigger_live_hazards.py   (`<py>` — python основного `.venv`, `PYTHONPATH=<корень worktree>`)
+
+OUT OF SCOPE: read-back в state и темпы (шаг 2); TCP-плагин; `RegistersManager`, `PluginOrchestrator`. Не чинится здесь: `set_config`/`send_command` по-прежнему отвечают `ok applied` с прежним прибором — `cmd_set_config` (`base.py:1918-1931`) пишет через `apply_values` и подписчиков не будит (`command_catalog.py:277-283` шлёт его из инспектора); решение Р2. `register_update` отвечает `success True` всегда (значение в регистре); громкий отказ — лог ERROR, health, `last_error`; «verified» в MCP не значит «прибор изменился» до read-back. Известный предел: единственный стойкий след расхождения регистра и прибора — `last_error`, а `cmd_take_device` стирает его безусловно (`sdk_plugin.py:382-383`), даже при уже идущем захвате; лечит read-back (шаг 2).
+TRAPS: `RegistersManager._notify_observers` глушит исключение колбэка до WARNING — колбэк сам пишет ERROR; `_start_locked` возвращает `True` при отказе узла (`sdk_reader.py:243,268-272`) — поэтому проверка `param_errors`; колбэки читателя `cmd_*` не зовут (проверено: `sdk_plugin.py:169` — только `start`), замок не реентерабелен; фейк — `FakeNodeApi` из `test_sdk_trigger.py`.
+HANDOFF IN: none
+REPORT: STATUS (DONE|BLOCKED), files, команды и вывод по ACCEPTANCE, красные до/после, раздел «Что оставил открытым / ненадёжно».
+
+## Ревизия дизайна после стадии 5 (D1–D6, `b2cd5e381`)
+
+Заменяет противоречащие пункты DESIGN выше. Ревью круга 2: APPROVED.
+
+- D1. `_take()` — единственное место, где при мёртвом потоке захвата зовётся `set_trigger(_applied_trigger)`. ERROR с первой причиной пишется до отката.
+- D2. Перезапуск решается по намерению (`_want_grab`, `_closed`), а не по тому, жив ли поток.
+- D3. Поздний поток: без повтора; текст «захват остановлен, возьмите прибор заново»; здоровье `degraded`.
+- D4. Одна функция `_sync_health()`: `degraded` и `last_error` триггера снимаются, только когда захват идёт, отказов узлов триггера нет и режим из регистра равен применённому.
+- D5. Откат — только если отказал узел изменённого поля или отказ новый. Старые отказы других узлов дают `applied=True` и WARNING.
+- D6. `_take` сообщает об отказах узлов.

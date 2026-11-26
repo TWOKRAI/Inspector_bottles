@@ -20,6 +20,10 @@ from multiprocess_framework.modules.process_module.plugins import (
     register_schema,
 )
 
+# Умолчание переподключения у плагина — ОДНО место (выбор планировщика, ответ владельца ждёт; W2-a1).
+# Сеанс (`DeviceSession(reconnect=False)`) своё умолчание не меняет: плагин всегда передаёт значение register'а.
+RECONNECT_DEFAULT = False
+
 
 @register_schema("CameraDeviceRegistersV1")
 class CameraDeviceRegisters(SchemaBase):
@@ -67,6 +71,61 @@ class CameraDeviceRegisters(SchemaBase):
         float,
         FieldMeta("Сторож, с", info="Срок зависания вызова порта; должен быть больше таймаута кадра"),
     ] = 5.0
+
+    # --- Потеря связи и переподключение (W2-a1): читаются при постройке сеанса, без `apply` ---
+    reconnect: Annotated[
+        bool,
+        FieldMeta(
+            "Переподключаться при потере связи",
+            info="Вкл — сеанс сам повторяет открытие прибора после потери связи или отказа открытия; "
+            "выкл — отказ конечен (error). Обрыв без событий прибора и ошибок кадра виден только при "
+            "link_silence_s > 0. Правка — перезапуск процесса.",
+        ),
+    ] = RECONNECT_DEFAULT
+
+    link_silence_s: Annotated[
+        float,
+        FieldMeta(
+            "Тишина до потери связи, с",
+            info="Сколько секунд без кадров считать потерей связи (свободный поток — сразу, триггер — по пробе узла); "
+            "0 — выкл (умолчание), правило включает рецепт. Правка — перезапуск процесса.",
+            min=0,
+            max=60,
+        ),
+    ] = 0.0
+
+    reconnect_interval_s: Annotated[
+        float,
+        FieldMeta(
+            "Пауза между попытками, с",
+            info="Пауза между попытками открыть прибор при переподключении. Правка — перезапуск процесса.",
+            min=0.5,
+            max=60,
+        ),
+    ] = 2.0
+
+    # --- Триггер без кадра (W2-t1, `frame_watch.py`): читаются при старте процесса, без `apply` ---
+    frame_watch: Annotated[
+        Literal["off", "software", "message"],
+        FieldMeta(
+            "Следить за триггером без кадра",
+            info="Источник импульса: off — выкл; software — удачный trigger_software; message — команда "
+            "trigger_seen (отправитель шлёт её ДО прихода кадра этого импульса, иначе ложный пропуск). "
+            "device (событие прибора) — позже (W2-t3). Номера импульса у кадра нет, сопоставление "
+            "FIFO: пропуск виден вовремя, только если задержка кадра < срок < период импульсов, иначе следующий "
+            "кадр его маскирует. Правка — перезапуск процесса.",
+        ),
+    ] = "off"
+
+    frame_watch_deadline_ms: Annotated[
+        int,
+        FieldMeta(
+            "Срок кадра после триггера, мс",
+            info="Сколько ждать кадр после импульса, прежде чем считать пропуск. Правка — перезапуск процесса.",
+            min=1,
+            max=10000,
+        ),
+    ] = 500
 
     source_queue_frames: Annotated[
         int,
@@ -149,7 +208,7 @@ class CameraDeviceRegisters(SchemaBase):
         str,
         FieldMeta(
             "Состояние прибора",
-            info="idle | opening | grabbing | stopping | closed | busy | not_found | error",
+            info="idle | opening | grabbing | stopping | closed | busy | not_found | error | lost",
             readonly=True,
         ),
     ] = "closed"

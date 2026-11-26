@@ -159,6 +159,7 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [draw-universal](2026-11-11_draw-universal/plan.md) | feat/draw-universal | phase 0 | 0/12 | ACTIVE | 2026-11-11 |
 | [dataset-sidecar-truth](2026-11-11_dataset-sidecar-truth/plan.md) | docs/ds-1-sidecar-truth | phase 0 | 0/10 | ACTIVE | 2026-11-11 |
 | [observability-signal-contracts](2026-11-21_observability-signal-contracts/plan.md) | refactor/observability-signal-contracts | phase 0 | 0/78 | DRAFT | 2026-11-21 |
+| [multicam-observability](2026-11-25_multicam-observability/plan.md) | integ/multicam-obs | волна 1 | 0/3 | DRAFT | 2026-11-25 |
 
 ## Архив
 
