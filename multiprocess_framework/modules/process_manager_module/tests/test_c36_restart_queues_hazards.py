@@ -168,20 +168,23 @@ def test_counter_dies_with_the_process_cleanup() -> None:
 
 
 def test_probe_failure_does_not_abort_restart() -> None:
-    """PSR не отдал запись процесса: предупреждение, рестарт проходит."""
+    """PSR не отдал запись процесса пробе и метке: оба называют себя, рестарт проходит."""
     pm, srm = _make_cam_pm()
     real_get = srm.get_process_data
     calls = {"n": 0}
 
     def _broken(name: str):
         calls["n"] += 1
-        if calls["n"] <= 2:  # проба и метка; дальше настоящий ответ
+        if calls["n"] <= 2:  # проба и метка; дальше настоящий ответ (кто именно, проверено текстом ниже)
             raise RuntimeError("psr сломан")
         return real_get(name)
 
     srm.get_process_data = _broken
     assert pm.restart_process("cam") is True
-    assert len([line for line in _lines(pm._log_warning) if "psr сломан" in line]) == 2
+    assert [line for line in _lines(pm._log_warning) if "psr сломан" in line] == [
+        "restart 'cam': проба замков чтения не выполнена: RuntimeError('psr сломан')",
+        "restart 'cam': метка «читатель ушёл» на брошенных очередях не взведена: RuntimeError('psr сломан')",
+    ]
 
 
 def test_restart_retires_only_queues_that_are_recreated() -> None:
