@@ -115,7 +115,7 @@ def test_dev_probe_env_is_not_passed_to_splash():
     try:
         assert _call(lambda: start_splash(True, environ=env, title="t", popen=popen)) is None
         assert child_env  # popen вызван и получил окружение
-        assert "QT_MCP_PROBE" not in child_env
+        assert child_env.get("QT_MCP_PROBE") is None  # не `not in`: pytest печатал бы всё окружение
         assert child_env["QT_MCP_PORT"] == "9142"
         assert env["QT_MCP_PROBE"] == "1"  # окружение запускающего не тронуто
     finally:
