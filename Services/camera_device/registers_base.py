@@ -104,6 +104,28 @@ class CameraDeviceRegisters(SchemaBase):
         ),
     ] = 2.0
 
+    # --- Триггер без кадра (W2-t1, `frame_watch.py`): читаются при старте процесса, без `apply` ---
+    frame_watch: Annotated[
+        Literal["off", "software", "message"],
+        FieldMeta(
+            "Следить за триггером без кадра",
+            info="Источник импульса: off — выкл; software — удачный trigger_software; message — команда "
+            "trigger_seen. device (событие прибора) — позже (W2-t3). Номера импульса у кадра нет, сопоставление "
+            "FIFO: пропуск виден вовремя, только если задержка кадра < срок < период импульсов, иначе следующий "
+            "кадр его маскирует. Правка — перезапуск процесса.",
+        ),
+    ] = "off"
+
+    frame_watch_deadline_ms: Annotated[
+        int,
+        FieldMeta(
+            "Срок кадра после триггера, мс",
+            info="Сколько ждать кадр после импульса, прежде чем считать пропуск. Правка — перезапуск процесса.",
+            min=1,
+            max=10000,
+        ),
+    ] = 500
+
     source_queue_frames: Annotated[
         int,
         FieldMeta(

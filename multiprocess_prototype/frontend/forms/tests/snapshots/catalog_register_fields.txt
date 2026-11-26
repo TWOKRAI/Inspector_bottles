@@ -23,6 +23,8 @@ camera_device.device_url
 camera_device.driver
 camera_device.exposure_auto
 camera_device.exposure_time
+camera_device.frame_watch
+camera_device.frame_watch_deadline_ms
 camera_device.frames
 camera_device.link_silence_s
 camera_device.reconnect
@@ -202,6 +204,8 @@ hikvision.exposure_auto
 hikvision.exposure_time
 hikvision.frame_rate
 hikvision.frame_rate_enable
+hikvision.frame_watch
+hikvision.frame_watch_deadline_ms
 hikvision.frames
 hikvision.gain
 hikvision.gain_auto
