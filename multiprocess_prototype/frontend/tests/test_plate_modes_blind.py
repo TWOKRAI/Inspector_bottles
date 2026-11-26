@@ -485,7 +485,9 @@ def test_plate_wraps_and_every_exit_unwraps(qtbot, exit_name: str) -> None:
     slot.show_no_signal(_LONG_TEXT)
 
     assert label.wordWrap() is True
-    # перенос виден по раскладке: на ширине 320 текст занимает не меньше двух строк
+    # перенос виден по раскладке: на ширине 320 текст занимает не меньше двух строк;
+    # минимум слота 320x240 маскирует высоту, поэтому перед замером он снимается
+    label.setMinimumSize(0, 0)
     assert label.heightForWidth(320) >= 2 * label.fontMetrics().height()
 
     if exit_name == "leave_no_signal":
