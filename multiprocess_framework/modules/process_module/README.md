@@ -1109,3 +1109,15 @@ initialize: configure → start            (IDLE → READY → RUNNING)
 
 Тесты: `tests/test_progress.py`, `tests/test_progress_hazards.py`; `process_manager_module/tests/test_boot_progress.py`,
 `test_boot_progress_hazards.py`.
+
+---
+
+## Предупреждения о застое: `inbox_stall_s` (Task 2.2e, ADR-PM-065)
+
+Ключ процесса в `extras` рецепта: `inbox_stall_s: 15.0` (1–600 с; нет или `0` — выключено; негодный — WARNING).
+`GenericProcess` с processing-плагинами в `running` кладёт в снимок готовности причину `out_of_spec`:
+
+- `<процесс>: кадры не принимаются` (`source: inbox`) — data-очередь не пуста, `cycles` приёмника стоит;
+- `<процесс>: обработка стоит` (`source: pipeline`) — `chain_queue` не пуста, `progress_count` исполнителя стоит.
+
+Обе сразу — отдаётся только вторая. Логика — `generic/inbox_watch.py`.
