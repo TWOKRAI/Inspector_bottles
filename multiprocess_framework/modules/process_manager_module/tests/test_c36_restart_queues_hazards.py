@@ -209,3 +209,35 @@ def test_reuse_true_restart_retires_nothing() -> None:
     assert pm.restart_process("cam") is True
     _queues(srm)["data"].put_nowait(b"x")
     assert _queues(srm)["data"].get(timeout=5.0) == b"x"
+
+
+def test_old_queue_stays_open_until_psr_holds_the_new_one() -> None:
+    """Параллельный relay (класс R) перед ``register_process`` берёт из PSR старую очередь: она открыта."""
+    pm, srm = _make_cam_pm()
+    old = _queues(srm)
+    assert srm.queue_registry.send_to_queue("cam", "data", b"warm") is True
+    seen: list[bool] = []
+    real_register = srm.register_process
+
+    def _spy(*args: Any, **kwargs: Any):
+        seen.append(srm.queue_registry.send_to_queue("cam", "data", b"in-window"))
+        return real_register(*args, **kwargs)
+
+    srm.register_process = _spy
+    assert pm.restart_process("cam") is True
+    assert seen == [True]
+    assert [old["system"]._released_at_exit, old["data"]._released_at_exit] == [True, True]
+
+
+def test_queue_that_failed_to_be_recreated_stays_open() -> None:
+    """Частичный сбой ``create_queues``: невоссозданный тип остаётся в PSR и обязан принимать ``put``."""
+    pm, srm = _make_cam_pm()
+    old = _queues(srm)
+    real_create = srm.queue_registry.create_queues
+    srm.queue_registry.create_queues = lambda cfg: real_create({k: v for k, v in cfg.items() if k != "data"})
+
+    assert pm.restart_process("cam") is True
+
+    assert _queues(srm)["data"] is old["data"]
+    assert srm.queue_registry.send_to_queue("cam", "data", b"x") is True
+    assert old["system"]._released_at_exit is True

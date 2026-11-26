@@ -528,9 +528,10 @@ feeder в `connection._send`.
 **Дополнение (C-36, 2026-11-26, ADR-PMM-054): брошенная очередь отпускается при сбросе ссылки.** Хук выхода
 видит только очереди из реестра, поэтому для очереди, снятой `drop_process_queues`, метка не читалась и писатель ждал
 feeder без срока. `retire_queue(q)` закрывает такую очередь и отменяет join под `q._notempty`, метку не читает.
-Вызовы: `ProcessStateRegistry.drop_process_queues` и рестарт PM со свежими очередями. Это не wall-clock отпуск
+Вызовы: `ProcessStateRegistry.drop_process_queues` и рестарт PM после замены очередей в PSR. Это не wall-clock отпуск
 (ADR-SRM-015): отпускается только очередь, из которой уже никто не будет читать. Теряется без счёта записанное в pipe;
-заблокированный daemon-feeder живёт до выхода процесса. Счётчики: `queues_retired`, `buffered_dropped_at_retire`.
+заблокированный daemon-feeder живёт до выхода процесса. Счётчики: `queues_retired`, `buffered_dropped_at_retire`
+(в `introspect.router_stats` — `queue_retired`, `queue_buffered_dropped_at_retire`).
 
 ## ADR-SRM-017: Транспорт SHM сохраняет форму кадра — `c = 0` в заголовке значит «без оси каналов»
 

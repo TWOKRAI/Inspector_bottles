@@ -763,6 +763,16 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         return self._stats["system_evict_blocked"]
 
     @property
+    def queues_retired(self) -> int:
+        """C-36: брошенные очереди, отпущенные этим процессом (``retire_queue``), общие на процесс."""
+        return RETIRE_STATS["queues_retired"]
+
+    @property
+    def buffered_dropped_at_retire(self) -> int:
+        """C-36: сообщения, лежавшие в буферах feeder'ов отпущенных очередей."""
+        return RETIRE_STATS["buffered_dropped_at_retire"]
+
+    @property
     def never_drop_loss_total(self) -> int:
         """Ф4 Task 4.3: сколько never-drop сообщений потеряно БЕЗВОЗВРАТНО.
 

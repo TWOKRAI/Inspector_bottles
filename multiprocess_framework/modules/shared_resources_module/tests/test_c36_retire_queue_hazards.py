@@ -10,7 +10,7 @@ import multiprocessing
 import threading
 from typing import Any
 
-from ..queues.core.reader_gone import RETIRE_STATS, ReaderGoneQueue, retire_queue
+from ..queues.core.reader_gone import RETIRE_STATS, ReaderGoneQueue, _buffered, retire_queue
 from ..state.process_state_registry import ProcessStateRegistry
 
 _BIG = b"x" * (1024 * 1024)  # заведомо больше буфера pipe: без читателя feeder встаёт
@@ -180,3 +180,31 @@ def test_never_written_queue_is_not_counted() -> None:
     before = dict(RETIRE_STATS)
     assert retire_queue(q) == 0
     assert RETIRE_STATS == before
+
+
+def test_counting_the_buffer_survives_a_feeder_popping_without_the_lock() -> None:
+    """``_feed`` снимает элементы ``popleft`` без ``_notempty``: счёт не должен падать на мутации deque."""
+    q = ReaderGoneQueue()
+    q._buffer.extend([b"x"] * 200_000)
+    stop = threading.Event()
+
+    def _churn() -> None:
+        while not stop.is_set():
+            q._buffer.append(b"x")
+            q._buffer.popleft()
+
+    worker = threading.Thread(target=_churn, daemon=True)
+    worker.start()
+    errors: list[str] = []
+    try:
+        for _ in range(20):
+            try:
+                _buffered(q)
+            except RuntimeError as exc:
+                errors.append(str(exc))
+    finally:
+        stop.set()
+        worker.join(5.0)
+        q._buffer.clear()
+        q.close()
+    assert errors == []

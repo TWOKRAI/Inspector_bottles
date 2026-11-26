@@ -914,7 +914,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         return self.introspect_status(process, **kw)
 
     def introspect_router_stats(self, process: str, **kw: Any) -> Dict[str, Any]:
-        """Счётчики router'а процесса (сырой dict): sent_ok/received/dropped/errors."""
+        """Счётчики router'а процесса (сырой dict): sent_ok/received/dropped/errors.
+
+        Среди ключей ``queue_*``: ``queue_retired`` — брошенные очереди, отпущенные этим процессом после
+        рестарта или снятия получателя; ``queue_buffered_dropped_at_retire`` — сообщения, лежавшие в их
+        буферах (C-36, ADR-PMM-054). Оба накопительные, на процесс.
+        """
         return self.send_command(process, "introspect.router_stats", **kw)
 
     def introspect_queues(self, process: str, **kw: Any) -> Dict[str, Any]:

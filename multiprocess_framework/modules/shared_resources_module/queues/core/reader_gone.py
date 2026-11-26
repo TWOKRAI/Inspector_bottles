@@ -96,8 +96,11 @@ def _buffered(q: ReaderGoneQueue) -> int:
 
     Это НЕ полное число потерь: то, что уже в pipe, и не больше одного сообщения,
     застрявшего в ``send``, теряются без счёта — отсюда их не видно."""
-    with q._notempty:  # feeder снимает элементы из буфера под этим же условием
-        return sum(1 for item in q._buffer if item is not _sentinel)
+    with q._notempty:  # put добавляет под этим же замком
+        # Снимок одним вызовом C: feeder делает popleft БЕЗ замка (``_feed`` 3.12), обход самой deque
+        # падал бы с «deque mutated during iteration».
+        pending = tuple(q._buffer)
+    return sum(1 for item in pending if item is not _sentinel)
 
 
 def retire_queue(q: object) -> int:
@@ -115,6 +118,13 @@ def retire_queue(q: object) -> int:
 
     Что теряется без счёта: уже записанное в pipe брошенной очереди и не больше одного сообщения
     в ``send``. Заблокированный daemon-feeder и дескрипторы pipe живут до выхода процесса.
+
+    Что остаётся гонкой:
+      * ``put``, прошедший проверку ``_closed`` до ``close()``, ложится в буфер уже после sentinel и
+        теряется без счёта; если это был первый ``put``, feeder стартует после отпуска, очередь может
+        не попасть в ``queues_retired``;
+      * проверка ``_released_at_exit`` не атомарна: два одновременных вызова на одной очереди посчитали
+        бы её дважды (такого пути сегодня нет).
 
     Returns:
         Сколько сообщений было в буфере feeder'а. Не :class:`ReaderGoneQueue` или уже отпущенная — 0.

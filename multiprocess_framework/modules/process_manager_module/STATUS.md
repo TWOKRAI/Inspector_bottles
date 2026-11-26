@@ -228,6 +228,6 @@
   выжившие шлют через hub-relay). `true` — откат: очереди переиспользуются.
 - `supervision.status` отдаёт `processes.<имя>.orphaned_read_locks` — накопленное число очередей, чей замок
   чтения на рестарте был занят без читателя. Строка лога с `C-36`: WARNING при `false`, ERROR при `true`.
-- Брошенные очереди отпускаются (`retire_queue`); счётчики реестра очередей `queues_retired`,
-  `buffered_dropped_at_retire`.
+- Брошенные очереди отпускаются (`retire_queue`); `introspect.router_stats` отдаёт `queue_retired`,
+  `queue_buffered_dropped_at_retire`.
 - Не доказано и остаток (записанное в pipe теряется, feeder живёт до выхода, kind-каналы) — ADR-PMM-054.

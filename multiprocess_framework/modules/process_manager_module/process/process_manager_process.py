@@ -5861,15 +5861,12 @@ class ProcessManagerProcess(ProcessModule):
         if not reuse_queues:
             # Брошенные очереди никто не прочтёт: метка ДО замены их в PSR PM.
             self._mark_abandoned_queues_gone(process_name)
-            # C-36: PM сам писал в эти очереди; без отпуска его выход ждал бы их feeder вечно.
-            # Брошенными будут только типы из конфига — их пересоздаст register_process ниже.
-            recreated = config.get("queues") or {}
-            try:
-                for qtype, q in self._process_queues_snapshot(process_name).items():
-                    if qtype in recreated:
-                        retire_queue(q)
-            except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
-                self._log_warning(f"restart '{process_name}': брошенные очереди не отпущены: {exc!r}")
+        # C-36: старые объекты — чтобы после register_process отпустить заменённые (PM сам писал в них).
+        try:
+            old_queues = self._process_queues_snapshot(process_name)
+        except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
+            old_queues = {}
+            self._log_warning(f"restart '{process_name}': брошенные очереди не отпущены: {exc!r}")
         ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
@@ -5881,6 +5878,15 @@ class ProcessManagerProcess(ProcessModule):
             # Дренаж переиспользованных очередей: новый инстанс стартует чистым (свежие — пусты).
             self._drain_process_queues(process_name)
         ids_after = self._process_queue_ids(process_name)
+        # C-36: отпуск ПОСЛЕ замены в PSR. До неё параллельный router.relay берёт из PSR старые объекты, и
+        # закрытая очередь отвечала бы отказом; тип, который не пересоздался, остаётся рабочим. Без отпуска
+        # выход PM ждал бы feeder брошенной очереди без срока.
+        for qtype, q in old_queues.items():
+            if qtype in ids_after and ids_after[qtype] != id(q):
+                try:
+                    retire_queue(q)
+                except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
+                    self._log_warning(f"restart '{process_name}': очередь '{qtype}' не отпущена: {exc!r}")
 
         # Identity очередей сменилась → соседи должны сбросить стейл-ссылки. Bump
         # ДО create_and_register (как в _topology_provision): create_and_register
