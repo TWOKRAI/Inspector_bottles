@@ -600,11 +600,11 @@ def test_plugin_publishes_link_and_degrades_on_loss(make_plugin):
 
 
 def test_plugin_register_defaults():
-    """Поля register'а и их умолчания: `reconnect False`, тишина 3.0 с, пауза попыток 2.0 с."""
+    """Поля register'а и их умолчания: `reconnect False`, тишина 0.0 (выключена), пауза попыток 2.0 с."""
     from Services.camera_device.registers_base import CameraDeviceRegisters
 
     registers = CameraDeviceRegisters()
 
     assert registers.reconnect is False
-    assert registers.link_silence_s == 3.0
+    assert registers.link_silence_s == 0.0
     assert registers.reconnect_interval_s == 2.0

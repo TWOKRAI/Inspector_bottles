@@ -54,6 +54,7 @@
 - [Ядро управления](project_control_core_vision.md) — одно ядро инструментов, фронты CLI/REPL/MCP, уровни доступа, ворота после фундамента
 
 ## 3. Окружение (Windows)
+- [Чёрный кадр = пакет 8164](reference_camera_jumbo_packet_size_black_frame.md) — читать `GevSCPSPacketSize` первым; в рецепте 1500
 - [venv держит MCP](project_venv_locked_by_mcp.md) — закрыть VS Code перед переустановкой пакетов
 - [CUDA torch cu124](project_cuda_torch_setup.md) — PyPI даёт +cpu
 - [Стек Win+Jetson](project_py312_torch212_cu132_stack.md) — py3.12, torch 2.12.0 cu132, JP 7.2.2; 3.14 отложен
