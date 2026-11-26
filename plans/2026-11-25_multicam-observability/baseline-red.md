@@ -8,6 +8,7 @@
 | test id | status | note |
 |---|---|---|
 | multiprocess_framework/modules/logger_module/tests/test_std_logger_guard.py::test_no_bare_stdlib_logger_outside_whitelist | FAILED | logger_module/tests; текст assert не захвачен (--tb=no), перезапуска не было |
+| multiprocess_prototype/frontend/forms/tests/test_catalog_kind_roundtrip.py::test_resolve_kind_stable_across_json_roundtrip_for_all_register_fields | FAILED | C-108: в снимке нет `robot_io.forward_ok`, `robot_io.last_dropped_job`; красный и на `main` `03f63426a` (полный прогон 2026-11-26) |
 
 Исходники в прогоне идентичны `85a7906d1` (различие только в тестах). Агент снимка заявил, что три файла слепых тестеров из `ff2e7e2df` были в прогоне и прошли; это противоречит измерениям тестеров (красных 10 + 9 + 2 в их worktree), поэтому заявление НЕ принято: вероятно, каталоги стартовали до переноса файлов. База ниже = красные существующих тестов; три новых файла в неё не входят и проверяются отдельно (красные до кода).
 camera_device/tests: 499 passed, 0 failed, 0 errors, 10 skipped, wall 75s (0 red)

@@ -2,7 +2,7 @@
 
 - **Slug:** multicam-observability
 - **Дата:** 2026-11-25
-- **Статус:** DRAFT
+- **Статус:** ACTIVE
 - **Ветка:** (заполняет лид; база — `integ/multicam-obs`, `85a7906d1`)
 - **Ревью стадии 0:** итерация 1 — CHANGES REQUESTED по W1-a, W1-b, W1-c; правки внесены (ред. 2)
 - **Основание:** аудит `docs/reviews/2026-11-25_obs-audit-multicam.md` (ч.1), `…-2-control-tasks.md` (ч.2, T0-T11), `…-3-reliability-cto-map.md` (ч.3, инварианты 9.5).
@@ -26,10 +26,10 @@
 
 ## Порядок выполнения
 
-- Task W1-a: контракт личности, выбор по подсети, здоровье потока в ядре камеры и фейке [PENDING]
-- Task W1-a2: порт `mvs` заполняет контракт из полей SDK (после W1-a) [PENDING]
-- Task W1-b: живая запись триггера считывателя через перезапуск захвата [PENDING]
-- Task W1-c: база контекста логгера до загрузки плагинов [PENDING]
+- Task W1-a: контракт личности, выбор по подсети, здоровье потока в ядре камеры и фейке [DONE]
+- Task W1-a2: порт `mvs` заполняет контракт из полей SDK (после W1-a) [DONE]
+- Task W1-b: живая запись триггера считывателя через перезапуск захвата [DONE]
+- Task W1-c: база контекста логгера до загрузки плагинов [DONE]
 
 W1-a2 отделена от W1-a: вместе 8 файлов при пределе брифа 6. Граф: W1-a -> W1-a2; W1-b и W1-c независимы. Волна писателей: W1-a, W1-b, W1-c параллельно (3 worktree); W1-a2 — сразу после W1-a на той же ветке, слияние пары W1-a + W1-a2 — одним шагом.
 
@@ -147,9 +147,9 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 ## Порядок выполнения (по риску для производства: тихая потеря первой)
 
 ### Фаза W2-I: потеря источника видна и лечится сама
-- Task W2-a: **[VERTICAL SLICE, ч.1]** сеанс камеры: потеря связи (событие SDK; тишина: свободный поток — сразу, аппаратный триггер — проба) -> `lost` до возврата, WARNING, переподключение в потоке-владельце, INFO на возврате [PENDING]
+- Task W2-a: **[VERTICAL SLICE, ч.1]** сеанс камеры: потеря связи (событие SDK; тишина: свободный поток — сразу, аппаратный триггер — проба) -> `lost` до возврата, WARNING, переподключение в потоке-владельце, INFO на возврате [DONE]
   - **Module contract:** public-api-change
-- Task W2-a1: **[VERTICAL SLICE, ч.2]** плагин камеры: поля `reconnect`/`link_silence_s`/`reconnect_interval_s`, блок `link`, готовность, health [PENDING] (после W2-a, та же ветка; слияние пары одним шагом)
+- Task W2-a1: **[VERTICAL SLICE, ч.2]** плагин камеры: поля `reconnect`/`link_silence_s`/`reconnect_interval_s`, блок `link`, готовность, health [DONE] (после W2-a, та же ветка; слияние пары одним шагом)
   - **Module contract:** public-api-change
 - Task W2-a2: порт `mvs`: `drain_link_events` (`0x8001` -> `disconnected`), короткий кадр считает потерянные пакеты [PENDING] (после W2-a1, та же ветка)
   - **Module contract:** public-api-change
@@ -158,9 +158,9 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
   - **Module contract:** impl-only
 - Task W2-b1: считыватель, ч.2: тишина видна, прибор возвращается сам, `readiness`, блок `link` [PENDING] (после W2-b, та же ветка; слияние пары одним шагом)
   - **Module contract:** impl-only
-- Task W2-c: `FramePump` сообщает о тишине ключа (framework) [PENDING]
+- Task W2-c: `FramePump` сообщает о тишине ключа (framework) [DONE]
   - **Module contract:** public-api-change
-- Task W2-c2: тёмная плашка «нет связи, N с» вместо кадра на дисплее (prototype) [PENDING] (после W2-c; обязательна, решение владельца 2026-11-25, раздел в конце плана)
+- Task W2-c2: тёмная плашка «нет связи, N с» вместо кадра на дисплее (prototype) [DONE] (после W2-c; обязательна, решение владельца 2026-11-25, раздел в конце плана)
   - **Module contract:** impl-only
 - Task W2-d: `system_overview`: аномалии `run_fault` и `source_lost` [PENDING] (после W2-a, W2-b)
   - **Module contract:** impl-only
@@ -337,13 +337,13 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 
 Источника импульса на линии сегодня нет (владелец 2026-11-26: «пока никак; заложи, тестить будем не скоро»). Решение лида: «триггер без кадра» ищет плагин камеры в бэкенде (блок `frame_watch`, метрика `trigger_missed`, WARNING), GUI только рисует. Причины, контракт и что несёт импульс сегодня — `plate-modes.md`.
 
-- Task W2-c2b: режим плашки на экран (`hold` по умолчанию / `silence` N с / `trigger`), перенос строки [PENDING] (на ветке `dev/w2-c2`)
+- Task W2-c2b: режим плашки на экран (`hold` по умолчанию / `silence` N с / `trigger`), перенос строки [DONE] (на ветке `dev/w2-c2`)
   - **Module contract:** impl-only
-- Task W2-c2c: поля `plate_*` в `DisplayDefinition` и `DisplaySpec`, вкладка Displays их не теряет [PENDING] (в одном дереве — до W2-c2b; параллельно — только из отдельной ветки `dev/w2-c2c` от `20899db90`; W2-c2 в `main` только вместе с обеими)
+- Task W2-c2c: поля `plate_*` в `DisplayDefinition` и `DisplaySpec`, вкладка Displays их не теряет [DONE] (в одном дереве — до W2-c2b; параллельно — только из отдельной ветки `dev/w2-c2c` от `20899db90`; W2-c2 в `main` только вместе с обеими)
   - **Module contract:** public-api-change
-- Task W2-t1: помощник `FrameWatch`, поля `frame_watch`/`frame_watch_deadline_ms` камеры (умолчание `off`) [PENDING]
+- Task W2-t1: помощник `FrameWatch`, поля `frame_watch`/`frame_watch_deadline_ms` камеры (умолчание `off`) [DONE]
   - **Module contract:** new-lite
-- Task W2-t2: плагин камеры: источники `software`/`message` (команда `trigger_seen`), блок `frame_watch` [PENDING] (после W2-t1)
+- Task W2-t2: плагин камеры: источники `software`/`message` (команда `trigger_seen`), блок `frame_watch` [DONE] (после W2-t1)
   - **Module contract:** public-api-change
 - Task W2-c3 — поправка П6: режим `trigger` по `frame_watch.open_miss`; схема ушла в W2-c2b [PENDING] (после W2-c2b)
 - Task W2-t3: источник `device` (событие `Line0`) [FROZEN] (до прибора и слова владельца)
@@ -352,6 +352,8 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 
 ### Остаток ревью ветки перед `main` (не держит слияние)
 
+- Плашка: опечатка в настройке `plate_*` у одного экрана отклоняет рецепт целиком — вкладка Displays пустая, ошибки на экране нет; файл рецепта не меняется. Нужна видимая ошибка или умолчание на одно поле.
+- Переподключение в рецепте букв (`d89637973`) и правка `plate_source` (`989c669e5`) проверены тестами, ревью стадии 5 их не смотрело.
 - Одна неудачная проба (`timeout`) при триггере сразу даёт конечную потерю; `busy` входит в «мёртвые» виды — что MVS отвечает так при живой камере, не проверено.
 - После переподключения плагин не сбрасывает `_last_frame_num`: `lost_frames` может прыгнуть на длину обрыва (железо).
 - Стоп во время повтора: если `open` MVS при вынутом кабеле висит дольше ~3,9 с, стоп выйдет за бюджет 4,0 с (не измерено).
