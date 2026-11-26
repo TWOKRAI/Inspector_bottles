@@ -114,6 +114,7 @@ class PresenceWatchPlugin(ProcessModulePlugin):
         return items
 
     def _observe(self, item: object) -> None:
+        seen_at = _clock()  # момент ДО разбора
         try:
             keys = [k.strip() for k in self._reg.presence_keys.split(",") if k.strip()]
             if not any(_resolve(item, k) is not None for k in keys):
@@ -126,7 +127,7 @@ class PresenceWatchPlugin(ProcessModulePlugin):
         except Exception as exc:  # noqa: BLE001 — негодное предсказание = слабое
             self._log_once("распознавание", exc)
             weak = True
-        self._last_seen = (_clock(), weak)
+        self._last_seen = (seen_at, weak)
 
     def _is_weak(self, item: object) -> bool:
         reg = self._reg

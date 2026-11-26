@@ -1,6 +1,7 @@
 """Task 2.2d: авторские тесты опасностей ``presence_watch``.
 
-1. REDS 9: ``process`` пересёк ``pause``/``resume`` — запись прошлой работы не попадает в новую.
+1. REDS 9: ``process`` пересёк ``pause``/``resume`` — запись прошлой работы не попадает в новую
+   (два окна: на часах и посреди разбора item).
 2. Исключение внутри разбора item: поток не рвётся, одна строка ERROR на (место, тип), значений item нет.
 3. Живая правка регистра действует на следующем вызове.
 """
@@ -68,6 +69,43 @@ def test_process_straddling_pause_resume_does_not_leak(monkeypatch: pytest.Monke
     assert not conveyor.is_alive()
     assert released_in_time == [True]
     assert plugin._last_seen == (1025.0, True)  # запись прошлой работы действительно легла после resume
+    t[0] = 1031.0
+    assert plugin.readiness(None) == []
+
+
+def test_pause_resume_during_item_parsing_does_not_leak(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пауза и возобновление проходят, пока item РАЗБИРАЕТСЯ: часы уже должны быть прочитаны."""
+    started = threading.Event()
+    release = threading.Event()
+    released_in_time: list[bool] = []
+
+    class _SlowTop(dict):
+        """Топ, чей ``get`` в первый раз стоит: конвейер застревает посреди разбора."""
+
+        def get(self, key: Any, default: Any = None) -> Any:
+            if not started.is_set():
+                started.set()
+                released_in_time.append(release.wait(2.0))
+            return super().get(key, default)
+
+    t = _fake_clock(monkeypatch)
+    plugin, _ = _make()
+    plugin.start(None)
+    item = {"predictions": [_SlowTop(label="А", below_threshold=True)], "sidecar": {"track_id": 1}}
+
+    t[0] = 1025.0
+    conveyor = threading.Thread(target=plugin.process, args=([item],), daemon=True)
+    conveyor.start()
+    assert started.wait(2.0), "process() не дошёл до разбора топа"
+    plugin.pause(None)
+    t[0] = 1030.0
+    plugin.resume(None)
+    t[0] = 1030.5  # любые часы, прочитанные после разбора, были бы уже из новой работы
+    release.set()
+    conveyor.join(5.0)
+
+    assert not conveyor.is_alive()
+    assert released_in_time == [True]
     t[0] = 1031.0
     assert plugin.readiness(None) == []
 
