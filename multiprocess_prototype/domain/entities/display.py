@@ -124,6 +124,8 @@ class DisplayDefinition(SchemaBase):
     ``plate_after_s`` — порог тишины, целое 1..600 с, только для ``silence``.
     ``plate_text`` — шаблон надписи, ``plate_source`` — источник кадров экрана
     (``<процесс>.<плагин>``); пустая строка — не задано.
+    Подстановки в ``plate_text``: ``{title}`` (название экрана), ``{number}``, ``{address}``,
+    ``{serial}``, ``{process}``; прочие (например ``{camera_id}``) остаются в тексте как написаны.
 
     Валидация значений (scale 10..1000, rotate enum, и т.д.) добавляется
     в Task 1.2 — здесь только структура + extra="forbid".
@@ -158,7 +160,7 @@ class DisplayDefinition(SchemaBase):
     # --- Плашка (П6): только GUI, на SHM и бэкенд-дисплей не влияет ---
     plate_mode: Annotated[str, FieldMeta("Режим плашки: hold | silence | trigger")] = "hold"
     plate_after_s: Annotated[int, FieldMeta("Порог тишины для режима silence (секунды, 1..600)")] = 2
-    plate_text: Annotated[str, FieldMeta("Шаблон надписи плашки")] = ""
+    plate_text: Annotated[str, FieldMeta("Шаблон надписи плашки: {title} {number} {address} {serial} {process}")] = ""
     plate_source: Annotated[str, FieldMeta("Источник кадров экрана для плашки")] = ""
 
     # ------------------------------------------------------------------

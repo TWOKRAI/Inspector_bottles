@@ -26,7 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
-from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEventLoop, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QPixmap  # noqa: E402
 
 __all__: list[str] = []
@@ -661,3 +661,35 @@ def test_plate_wraps_and_unwraps(slot) -> None:
         leave()
 
         assert label.wordWrap() is False
+
+
+def test_plate_is_plain_text(slot) -> None:
+    """Разметка в шаблоне не интерпретируется: перенос перед статусом остаётся, после плашки — как раньше."""
+    label = slot._label  # noqa: SLF001
+    label.setMinimumSize(0, 0)  # иначе heightForWidth зажат снизу высотой 240
+    slot.show_no_signal("<b>Камера</b>\nнет кадров, 3 с")
+
+    # на широкой метке две строки; при разметке перенос схлопнулся бы в одну
+    assert label.heightForWidth(2000) >= 2 * label.fontMetrics().height()
+
+    slot.leave_no_signal()
+    assert label.textFormat() == Qt.TextFormat.AutoText
+
+
+def test_rebuild_renames_existing_slot(wire) -> None:
+    """Тот же id, новое название, режим hold: старое название не остаётся на слоте."""
+    recipe = {
+        "displays": [_display("d", "Камера А", **_SILENT)],
+        "blueprint": {"displays": [{"node_id": "a.src.frame", "display_id": "d"}]},
+    }
+    w = wire(recipe)
+    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 3.0), "плашки нет"
+
+    recipe["displays"] = [_display("d", "Камера Б")]
+    w.fire()
+    assert _label(w.panel, "d").text() == "Камера Б"
+    assert _label(w.panel, "d").styleSheet() == ""
+
+    recipe["displays"] = [_display("d", "Камера В")]  # плашки не было: меняется сам placeholder
+    w.fire()
+    assert _label(w.panel, "d").text() == "Камера В"

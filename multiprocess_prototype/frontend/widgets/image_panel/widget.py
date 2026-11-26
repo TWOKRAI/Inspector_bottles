@@ -132,6 +132,7 @@ class ImagePanelWidget(QWidget):
             else:
                 # Слот существует — гарантировать правильную позицию в layout
                 slot = self._slots[slot_id]
+                slot.set_label(label)  # тот же id в новом рецепте может называться иначе
                 current = self._layout.indexOf(slot)
                 if current != position:
                     self._layout.removeWidget(slot)

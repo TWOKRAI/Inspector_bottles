@@ -56,6 +56,17 @@ class DisplaySlot(QWidget):
         """Идентификатор слота."""
         return self._slot_id
 
+    def set_label(self, label: str) -> None:
+        """Сменить подпись слота; видимый placeholder с прежней подписью перерисовывается сразу.
+
+        Кадр, плашка и "Ошибка кадра" на экране не трогаются: новая подпись появится после них.
+        """
+        shown_placeholder = self._source_pixmap is None and not self._plate_shown
+        shown_placeholder = shown_placeholder and self._label.text() == (self._label_text or "Нет сигнала")
+        self._label_text = label
+        if shown_placeholder:
+            self.clear()
+
     def update_pixmap(self, pixmap: QPixmap) -> None:
         """Установить pixmap с масштабированием, сохраняя пропорции."""
         if pixmap.isNull():
@@ -113,6 +124,8 @@ class DisplaySlot(QWidget):
         self._source_pixmap = None
         self._label.setStyleSheet(_PLATE_STYLE)
         self._label.setWordWrap(True)  # длинный шаблон не должен уезжать за края слота
+        # шаблон и название — из рецепта: разметку не интерпретировать, переносы строк сохранить
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setText(text)
         self._plate_shown = True
 
@@ -125,10 +138,11 @@ class DisplaySlot(QWidget):
             self.clear()
 
     def _drop_plate_style(self) -> None:
-        """Снять стиль и перенос строк плашки; без плашки метка не трогается."""
+        """Снять стиль, перенос строк и PlainText плашки; без плашки метка не трогается."""
         if self._plate_shown:
             self._label.setStyleSheet("")
             self._label.setWordWrap(False)
+            self._label.setTextFormat(Qt.TextFormat.AutoText)
             self._plate_shown = False
 
     def resizeEvent(self, event) -> None:
