@@ -331,6 +331,11 @@ class DisplaysPresenter:
             rotate=source.rotate,
             flip=source.flip,
             crop=dict(source.crop) if source.crop else None,
+            # Плашка (П6): формы правки нет, дубликат обязан унести настройку.
+            plate_mode=source.plate_mode,
+            plate_after_s=source.plate_after_s,
+            plate_text=source.plate_text,
+            plate_source=source.plate_source,
         )
 
         try:

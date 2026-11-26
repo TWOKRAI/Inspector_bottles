@@ -40,6 +40,8 @@ _VALID_ROTATE = frozenset({0, 90, 180, 270})
 _VALID_FLIP = frozenset({"none", "horizontal", "vertical", "both"})
 _VALID_FIT = frozenset({"contain", "cover", "stretch", "none"})
 _VALID_FORMAT = frozenset({"BGR", "RGB", "GRAY", "RGBA"})
+_VALID_PLATE_MODE = frozenset({"hold", "silence", "trigger"})
+_PLATE_AFTER_S_RANGE = (1, 600)
 
 
 # ======================================================================
@@ -116,6 +118,13 @@ class DisplayDefinition(SchemaBase):
     Render-параметры (position/fit/scale/rotate/flip/crop) влияют только на
     отображение в окне превью GUI — кадр в SHM не трансформируется.
 
+    Плашка (П6): что экран показывает, когда кадра нет. ``plate_mode`` —
+    ``hold`` (держать последний кадр, как раньше), ``silence`` (нет кадров
+    ``plate_after_s`` секунд), ``trigger`` (триггер был, а кадр не пришёл в срок).
+    ``plate_after_s`` — порог тишины, целое 1..600 с, только для ``silence``.
+    ``plate_text`` — шаблон надписи, ``plate_source`` — источник кадров экрана
+    (``<процесс>.<плагин>``); пустая строка — не задано.
+
     Валидация значений (scale 10..1000, rotate enum, и т.д.) добавляется
     в Task 1.2 — здесь только структура + extra="forbid".
     """
@@ -145,6 +154,12 @@ class DisplayDefinition(SchemaBase):
     rotate: Annotated[int, FieldMeta("Поворот preview: 0 | 90 | 180 | 270")] = 0
     flip: Annotated[str, FieldMeta("Отражение: none | horizontal | vertical | both")] = "none"
     crop: Annotated[DisplayCrop | None, FieldMeta("Обрезка {x,y,w,h} или null")] = None
+
+    # --- Плашка (П6): только GUI, на SHM и бэкенд-дисплей не влияет ---
+    plate_mode: Annotated[str, FieldMeta("Режим плашки: hold | silence | trigger")] = "hold"
+    plate_after_s: Annotated[int, FieldMeta("Порог тишины для режима silence (секунды, 1..600)")] = 2
+    plate_text: Annotated[str, FieldMeta("Шаблон надписи плашки")] = ""
+    plate_source: Annotated[str, FieldMeta("Источник кадров экрана для плашки")] = ""
 
     # ------------------------------------------------------------------
     # Валидаторы вложенных моделей (dict → frozen-модель)
@@ -210,6 +225,24 @@ class DisplayDefinition(SchemaBase):
         """Формат пикселей должен быть одним из: BGR, RGB, GRAY, RGBA."""
         if v not in _VALID_FORMAT:
             raise ValueError(f"format должен быть одним из {sorted(_VALID_FORMAT)}, получено: '{v}'")
+        return v
+
+    @field_validator("plate_mode", mode="after")
+    @classmethod
+    def _validate_plate_mode(cls, v: str) -> str:
+        """Режим плашки должен быть одним из: hold, silence, trigger."""
+        if v not in _VALID_PLATE_MODE:
+            # Полученное значение в сообщение не кладём (W2-c2c, приёмка).
+            raise ValueError(f"plate_mode должен быть одним из {sorted(_VALID_PLATE_MODE)}")
+        return v
+
+    @field_validator("plate_after_s", mode="before")
+    @classmethod
+    def _validate_plate_after_s(cls, v: Any) -> int:
+        """Порог тишины — строго int 1..600: до приведения типов, ``True``/``"5"``/``5.0`` не проходят."""
+        low, high = _PLATE_AFTER_S_RANGE
+        if type(v) is not int or not low <= v <= high:
+            raise ValueError(f"plate_after_s должен быть целым числом {low}..{high}, получено: {v!r}")
         return v
 
     # ------------------------------------------------------------------
