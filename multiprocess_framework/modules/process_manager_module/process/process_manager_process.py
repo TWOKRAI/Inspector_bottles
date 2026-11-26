@@ -5887,6 +5887,11 @@ class ProcessManagerProcess(ProcessModule):
                     retire_queue(q)
                 except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
                     self._log_warning(f"restart '{process_name}': очередь '{qtype}' не отпущена: {exc!r}")
+        unknown = sorted(qtype for qtype in old_queues if qtype not in ids_after)
+        if unknown:
+            self._log_warning(
+                f"restart '{process_name}': очереди не отпущены: identity после замены неизвестна; типы: {unknown}"
+            )
 
         # Identity очередей сменилась → соседи должны сбросить стейл-ссылки. Bump
         # ДО create_and_register (как в _topology_provision): create_and_register

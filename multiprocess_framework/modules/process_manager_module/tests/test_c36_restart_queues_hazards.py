@@ -241,3 +241,22 @@ def test_queue_that_failed_to_be_recreated_stays_open() -> None:
     assert _queues(srm)["data"] is old["data"]
     assert srm.queue_registry.send_to_queue("cam", "data", b"x") is True
     assert old["system"]._released_at_exit is True
+
+
+def test_skipped_retire_is_voiced_when_identity_after_replace_is_unknown() -> None:
+    """``_process_queue_ids`` после замены вернул ``{}`` (его путь ошибки): отпуска нет, и об этом есть WARNING."""
+    pm, srm = _make_cam_pm()
+    real_ids = pm._process_queue_ids
+    calls: list[str] = []
+
+    def _ids(name: str):
+        calls.append(name)
+        return real_ids(name) if len(calls) == 1 else {}
+
+    pm._process_queue_ids = _ids
+    assert pm.restart_process("cam") is True
+
+    expected = "очереди не отпущены: identity после замены неизвестна"
+    voiced = [line for line in _lines(pm._log_warning) if expected in line]
+    assert len(voiced) == 1, voiced
+    assert "'cam'" in voiced[0] and "['data', 'system']" in voiced[0], voiced
