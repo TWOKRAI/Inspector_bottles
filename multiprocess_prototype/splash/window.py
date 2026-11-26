@@ -16,6 +16,7 @@ import socket
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 _BOOT_SOCK: socket.socket | None = None
 if __name__ == "__main__":
@@ -28,6 +29,7 @@ from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QVBoxLayout, QWidget  # noqa: E402
 
 from multiprocess_prototype.splash.protocol import (  # noqa: E402
+    SPLASH_ORPHAN_EXIT_S,
     SPLASH_TIMEOUT_S,
     SplashScale,
     decode,
@@ -51,6 +53,8 @@ class SplashWindow(QWidget):
         self._stage = ""
         self._detail = ""
         self._created = time.monotonic()
+        #: Окно закрыли (Alt+F4, ``close()``). Qt у SplashScreen сам цикл событий не завершает.
+        self.on_close: Callable[[], None] | None = None
 
         heading = QLabel(title, self)
         heading.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -69,6 +73,11 @@ class SplashWindow(QWidget):
         for widget in (heading, self._stage_label, self._bar, self._detail_label, self._elapsed_label):
             layout.addWidget(widget)
         self.setFixedWidth(420)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — имя Qt
+        if self.on_close is not None:
+            self.on_close()
+        super().closeEvent(event)
 
     def apply(self, message: dict) -> None:
         """Pre: ``message`` — выход ``decode``. Неизвестный ``id`` меняет только строку подписи."""
@@ -104,6 +113,7 @@ class SplashController:
         self._lock = threading.RLock()
         self._requested: str | None = None
         self._gui_done = False
+        window.on_close = lambda: self.request_close("window_closed")
 
     def request_close(self, reason: str) -> None:
         """Любой поток. Только флаг; первая причина выигрывает."""
@@ -138,14 +148,20 @@ class SplashController:
                 self._gui_done = True
 
 
-def _lifeline(controller: SplashController) -> None:
-    """EOF на stdin = лончер умер. Только ``os.read``: поток в ``sys.stdin.read`` роняет выход интерпретатора."""
+def _lifeline(controller: SplashController, finished: threading.Event) -> None:
+    """EOF на stdin = лончер умер. Только ``os.read``: поток в ``sys.stdin.read`` роняет выход интерпретатора.
+
+    Штатно уходит Qt-поток (по ``request_close``). Не успел за ``SPLASH_ORPHAN_EXIT_S`` — он завис, а
+    гасить осиротевший процесс больше некому.
+    """
     try:
         while os.read(0, 1):
             pass
     except OSError:
         pass  # нет stdin — то же самое, что «родителя нет»
     controller.request_close("parent_gone")
+    if not finished.wait(SPLASH_ORPHAN_EXIT_S):
+        os._exit(0)
 
 
 def _say(text: str) -> None:
@@ -179,11 +195,13 @@ def main(argv: list[str] | None = None, *, sock: socket.socket | None = None) ->
             reasons.append(reason)
             app.quit()
 
+    finished = threading.Event()  # main() дошёл до конца: принудительный выход не нужен
     previous_sigint = None
     if threading.current_thread() is threading.main_thread():
         previous_sigint = signal.signal(signal.SIGINT, lambda *_: controller.request_close("sigint"))
-    threading.Thread(target=_lifeline, args=(controller,), name="splash-lifeline", daemon=True).start()
-    timer = QTimer()
+    lifeline_args = (controller, finished)
+    threading.Thread(target=_lifeline, args=lifeline_args, name="splash-lifeline", daemon=True).start()
+    timer = QTimer(window)
     timer.timeout.connect(_tick)
     try:
         window.show()
@@ -200,6 +218,7 @@ def main(argv: list[str] | None = None, *, sock: socket.socket | None = None) ->
             signal.signal(signal.SIGINT, previous_sigint)
         if own_sock:
             sock.close()
+        finished.set()
     reason = reasons[0] if reasons else "window_closed"
     _say(f"[splash] closed reason={reason} after {time.monotonic() - started:.1f} s percent={window.percent()}")
     return 0

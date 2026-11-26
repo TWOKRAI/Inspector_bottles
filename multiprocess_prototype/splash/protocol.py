@@ -23,6 +23,8 @@ SPLASH_WEIGHTS: dict[str, int] = {"launch": 10, "boot": 50, "gui": 40}
 SPLASH_TIMEOUT_S = 60.0
 #: Сколько (от запуска процесса) лончер ждёт строку порта.
 SPLASH_PORT_WAIT_S = 0.3
+#: Лончер умер, а Qt-поток заставки не отвечает: через столько процесс выходит принудительно.
+SPLASH_ORPHAN_EXIT_S = 3.0
 
 _LABEL_LIMIT = 200
 
@@ -117,5 +119,6 @@ class SplashScale:
             fraction = min(1.0, max(0.0, message["percent"] / 100))
             self._fractions[progress_id] = max(self._fractions[progress_id], fraction)
             total = sum(weight * self._fractions[name] for name, weight in SPLASH_WEIGHTS.items())
-            self._percent = max(self._percent, min(100, round(total)))
+            # Монотонность держит max по доле этапа: веса положительны, сумма и round не убывают.
+            self._percent = min(100, round(total))
         return self._percent

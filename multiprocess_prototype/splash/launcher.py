@@ -28,6 +28,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _WINDOW_MODULE = "multiprocess_prototype.splash.window"
 _EXIT_WAIT_S = 1.0
 _KILL_WAIT_S = 5.0
+#: Ожидания в ветке «заставки не будет»: она на главном потоке лончера, запуск ждать не должен.
+_URGENT_WAIT_S = 0.2
 
 _holder: SplashLink | None = None
 _holder_lock = threading.Lock()
@@ -37,8 +39,19 @@ def _say(text: str) -> None:
     print(f"[run] заставка: {text}", file=sys.stderr)
 
 
-def _shutdown(process: subprocess.Popen, reader: threading.Thread | None) -> None:
+def _exited(process: subprocess.Popen, timeout_s: float) -> bool:
+    try:
+        process.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def _shutdown(process: subprocess.Popen, reader: threading.Thread | None, *, urgent: bool = False) -> None:
     """Закрыть stdin -> ждать -> ``kill`` -> ``wait`` -> и только потом stdout.
+
+    ``urgent`` — заставка не заработала: ``kill`` сразу, без паузы на добровольный выход, и каждое
+    ожидание не дольше ``_URGENT_WAIT_S``.
 
     Порядок обязателен: закрытие трубы, на которой поток заблокирован в ``os.read``, на Windows виснет.
     Поэтому stdout закрывается, лишь когда поток чтения вышел; иначе труба остаётся открытой.
@@ -49,15 +62,13 @@ def _shutdown(process: subprocess.Popen, reader: threading.Thread | None) -> Non
     except OSError:
         pass  # ребёнок уже умер
     try:
-        try:
-            process.wait(timeout=_EXIT_WAIT_S)
-        except subprocess.TimeoutExpired:
+        if urgent or not _exited(process, _EXIT_WAIT_S):
             process.kill()
-            process.wait(timeout=_KILL_WAIT_S)
+            process.wait(timeout=_URGENT_WAIT_S if urgent else _KILL_WAIT_S)
     except Exception as exc:  # noqa: BLE001
         _say(f"процесс не погашен: {exc}")
     if reader is not None and reader.ident is not None:
-        reader.join(timeout=_EXIT_WAIT_S)
+        reader.join(timeout=_URGENT_WAIT_S if urgent else _EXIT_WAIT_S)
         if reader.is_alive():
             return
     try:
@@ -137,7 +148,7 @@ class SplashLink:
             if closed:
                 return False
             if port is None:
-                self.close()
+                self._close(urgent=True)
                 _say("порт не пришёл — без заставки")
                 return False
             environ[SPLASH_PORT_ENV] = str(port)
@@ -148,6 +159,9 @@ class SplashLink:
 
     def close(self) -> None:
         """Погасить заставку и освободить держатель. Идемпотентно."""
+        self._close(urgent=False)
+
+    def _close(self, *, urgent: bool) -> None:
         global _holder
         with self._lock:
             if self._closed:
@@ -156,7 +170,7 @@ class SplashLink:
         with _holder_lock:
             if _holder is self:
                 _holder = None
-        _shutdown(self.process, self._reader)
+        _shutdown(self.process, self._reader, urgent=urgent)
 
 
 def start_splash(
@@ -196,7 +210,7 @@ def start_splash(
     except Exception as exc:  # noqa: BLE001 — заставка не имеет права уронить запуск
         _say(f"не запущена ({type(exc).__name__}: {exc}) — без заставки")
         if process is not None:
-            _shutdown(process, None)
+            _shutdown(process, None, urgent=True)
         return None
 
 

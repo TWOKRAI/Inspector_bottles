@@ -1,7 +1,32 @@
 # splash — заставка загрузки отдельным процессом
 
+**Stability:** experimental — стенд задачи 2.6 ещё не пройден.
+
+## Purpose
+
 Окно со шкалой 0–100 % от запуска до первого окна GUI (задача 2.6, `plans/2026-10-27_system-run-state/tasks/2.6.md`).
 Заставку запускает только лончер, один раз; сбой заставки не роняет и не задерживает приложение.
+
+## Usage
+
+```python
+link = start_splash(builder.presentation_window_expected, environ=os.environ, title=APP_NAME)
+if link is not None:
+    link.report(tracker.advance("recipe"))  # этап launch, свой ProgressTracker
+    ...  # сборка системы
+    link.report(tracker.finish())
+    link.publish_port(os.environ)  # главный поток, до spawn
+```
+
+Узел системы прогресс заставке не шлёт: он пишет лист `system.progress.<id>` в стор, дальше работает
+`ProgressMirror` (в PM — `install_if_enabled(store_manager)` после создания стора).
+
+## Boundaries
+
+- Процесс заставки импортирует только stdlib, PySide6 и `splash.protocol`; `interface.py` — только `typing`.
+- Через границу процессов идут строка порта (stdout), EOF (stdin) и UDP-посылка — ничего другого.
+- Пакет не управляет запуском системы, не читает стор и не рисует в процессе GUI.
+- Не входит: прогресс плагинов, смена рецепта, минимальное время показа.
 
 ## Модули
 
@@ -38,7 +63,8 @@ stdin заставки — «верёвка жизни»: EOF означает, 
 ## Причины закрытия
 
 `gui_done` (лист `gui` с `done`), `timeout` (60 с), `parent_gone` (EOF stdin), `sigint`,
-`window_closed` (окно закрыл пользователь). В stderr две строки: `[splash] shown` и
+`window_closed` (окно закрыл пользователь). Лончер умер, а Qt-поток не отвечает — через 3 с
+(`SPLASH_ORPHAN_EXIT_S`) процесс выходит принудительно, без строки `closed`. В stderr две строки: `[splash] shown` и
 `[splash] closed reason=<r> after <с> s percent=<p>`.
 
 ## Пред- и постусловия
@@ -47,8 +73,9 @@ stdin заставки — «верёвка жизни»: EOF означает, 
   Живой держатель + заставка нужна -> тот же объект, env не тронут; иначе порт из env снят.
 - `SplashLink.report`: не бросает; до прихода порта хранит только последний лист.
 - `SplashLink.publish_port`: звать из главного потока до spawn. `True` -> порт в env; `False` -> env не тронут
-  (порта не дождались -> заставка закрыта).
-- `SplashLink.close`: идемпотентно; stdin -> ждать 1 с -> `kill` -> stdout.
+  (порта не дождались -> заставка убита без паузы на выход; главный поток держится не дольше
+  0,3 с ожидания порта + 0,2 с `wait` + 0,2 с на поток чтения = 0,7 с).
+- `SplashLink.close`: идемпотентно; stdin -> ждать 1 с -> `kill` -> `wait` (до 5 с) -> stdout.
 - `SplashController`: делает сокет неблокирующим; `request_close` — любой поток; `poll` — только Qt-поток.
 - `send_leaf`, `install_if_enabled`, `ProgressMirror.after_set`: не бросают.
 

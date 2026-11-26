@@ -163,7 +163,8 @@ def test_publish_port_without_line_kills_child_and_leaves_env(capsys: pytest.Cap
         link = _call(lambda: launcher.start_splash(True, environ=env, title="t", popen=_popen))
         assert _call(lambda: link.publish_port(env, wait_s=0.1)) is False
         assert "INSPECTOR_SPLASH_PORT" not in env
-        assert spawned[0].poll() is not None
+        assert spawned[0].wait(timeout=5.0) is not None
+        link._reader.join(5.0)
         # Поток чтения вышел -> пишущих концов трубы не осталось, то есть погашен и настоящий интерпретатор.
         assert not link._reader.is_alive()
         assert "[run] заставка: порт не пришёл — без заставки" in capsys.readouterr().err
@@ -201,7 +202,7 @@ def test_request_close_while_main_thread_holds_lock_does_not_deadlock(monkeypatc
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", 0))
     try:
-        controller = SplashController(window=None, sock=sock)
+        controller = SplashController(window=SimpleNamespace(), sock=sock)
 
         def _reenter() -> str | None:
             with controller._lock:
