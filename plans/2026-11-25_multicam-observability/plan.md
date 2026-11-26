@@ -339,7 +339,7 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 
 - Task W2-c2b: режим плашки на экран (`hold` по умолчанию / `silence` N с / `trigger`), перенос строки [PENDING] (на ветке `dev/w2-c2`)
   - **Module contract:** impl-only
-- Task W2-c2c: поля `plate_*` в `DisplayDefinition` и `DisplaySpec`, вкладка Displays их не теряет [PENDING] (та же ветка, параллельно W2-c2b; W2-c2 в `main` только вместе с обеими)
+- Task W2-c2c: поля `plate_*` в `DisplayDefinition` и `DisplaySpec`, вкладка Displays их не теряет [PENDING] (в одном дереве — до W2-c2b; параллельно — только из отдельной ветки `dev/w2-c2c` от `20899db90`; W2-c2 в `main` только вместе с обеими)
   - **Module contract:** public-api-change
 - Task W2-t1: помощник `FrameWatch`, поля `frame_watch`/`frame_watch_deadline_ms` камеры (умолчание `off`) [PENDING]
   - **Module contract:** new-lite
@@ -348,7 +348,7 @@ T0 (замер CPU), T3 (после W1-a), T4 (`port.exceptions`, link, темп
 - Task W2-c3 — поправка П6: режим `trigger` по `frame_watch.open_miss`; схема ушла в W2-c2b [PENDING] (после W2-c2b)
 - Task W2-t3: источник `device` (событие `Line0`) [FROZEN] (до прибора и слова владельца)
 
-Параллельно: W2-c2b ∥ W2-c2c ∥ W2-t1 -> W2-t2; W2-c3 после W2-c2b и W2-c2c. W2-t1, W2-t2, W2-q, W2-g — одна ветка `Services/camera_device` (общий `plugin_base.py`).
+Параллельно: (W2-c2c -> W2-c2b в одном дереве) ∥ W2-t1 -> W2-t2; W2-c3 после W2-c2b и W2-c2c. W2-t1, W2-t2, W2-q, W2-g — одна ветка `Services/camera_device` (общий `plugin_base.py`).
 
 ### Остаток ревью ветки перед `main` (не держит слияние)
 
