@@ -138,7 +138,7 @@ def test_peer_send_after_switch_delivered(switch_backend) -> None:
 
 @pytest.mark.harness_smoke
 def test_peer_send_after_restart_delivered(restart_backend) -> None:
-    """peer→peer send после restart соседа доставлен И relayed_to_hub==0 (acceptance B)."""
+    """peer→peer send после restart соседа доставлен И идёт через hub-relay PM (ADR-PMM-054)."""
     drv = restart_backend
 
     sub = unwrap(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0), leaf=True)
@@ -161,9 +161,9 @@ def test_peer_send_after_restart_delivered(restart_backend) -> None:
     errors, cursor = _wait_health_errors(drv, _PEER, time.time() + 20.0, cursor)
     assert errors and errors >= 1, f"probe {_SENDER}→{_PEER} после restart НЕ доставлен (стейл-очередь): {errors}"
 
-    # Доказательство B: доставка ПРЯМАЯ (переиспользованная очередь), не через relay.
+    # Очереди соседа свежие: выживший сбросил стейл-ссылку и шлёт через relay. Без роста
+    # счётчика доставка шла по прежней (переиспользованной) очереди — дефолт откатился.
     relayed_after = _relayed_to_hub(drv, _SENDER)
-    assert relayed_after == relayed_before, (
-        f"доставка после restart шла через hub-relay (ожидалась прямая): "
-        f"relayed_to_hub {relayed_before}→{relayed_after}"
+    assert relayed_after > relayed_before, (
+        f"доставка после restart не через hub-relay: relayed_to_hub {relayed_before}→{relayed_after}"
     )
