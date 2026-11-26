@@ -108,7 +108,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 2.6: окно начальной загрузки — размороженный `LoadingWindow` + тонкий подписчик `system.progress.**`; в 1.0 шкала загрузки рецепта = `boot`; `recipe_load` при смене — 2.0 (требование владельца 2026-11-12, `amendments.md` §5, §7) [PENDING] (после 1.3b, 2.3; стадия 0 р.1 пройдена, v2)
   - **Module contract:** impl-only
-- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9)
+- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9, 2.8f)
   - **Module contract:** n/a
 - Task 2.5: ADR и карты — PMM, process_module, MODULES_RESPONSIBILITY_MAP [PENDING] (после 2.4)
   - **Module contract:** n/a
@@ -122,6 +122,8 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [DEFERRED 2.0 — владелец 2026-11-26, decisions.md; в 1.0 запасной ход] (после 2.8a)
   - **Module contract:** public-api-change
+- Task 2.8f: запасной ход вместо 2.8 для 1.0 — GUI собирает узел состояния из листовых дельт (маркер конца пачки, `GuiStateBindings`); файл `tasks/2.8f.md` [PENDING] (после 2.8a)
+  - **Module contract:** impl-only
 - Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
 - Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [DONE 7410b16] (после 2.9, 2.2b)
