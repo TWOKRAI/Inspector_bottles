@@ -38,6 +38,7 @@ NEW_COMMANDS = {
     "list_devices",
     "describe_params",
     "trigger_software",
+    "trigger_seen",
 }
 OLD_COMMANDS = (
     "open",
