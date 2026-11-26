@@ -273,6 +273,7 @@ class CameraDevicePlugin(ProcessModulePlugin):
         self._fw_deadline_ms: int = self._reg.frame_watch_deadline_ms
         self._frame_watch = None if self._fw_source == "off" else FrameWatch(self._fw_deadline_ms / 1000)
         self._fw_paused = False
+        self._fw_armed = False  # камера должна работать: от take_device до release_device (в том числе lost)
         self._fw_episode = 0  # пропуски объявленного (WARNING) и ещё не закрытого эпизода; 0 — эпизода нет
         self._fw_last_miss_ts: float | None = None  # `time.time()` открытия последнего эпизода
         self._stream: tuple[str, int, int] | None = None  # (pixel_format, width, height) СЫРОГО кадра последнего
@@ -644,8 +645,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
             self._sync_events()
 
     def _fw_pulse_locked(self) -> bool:
-        """Под `self._lock`: записать импульс. `False` — не записан (помощника нет или пауза)."""
-        if self._frame_watch is None or self._fw_paused:
+        """Под `self._lock`: записать импульс. `False` — не записан: помощника нет, пауза или камера не взята."""
+        if self._frame_watch is None or self._fw_paused or not self._fw_armed:
             return False
         self._frame_watch.on_trigger(time.monotonic())
         return True
@@ -992,6 +993,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
             detail = "" if isinstance(exc, ValueError) else f"\n{traceback.format_exc()}"
             self._ctx.log_error(f"CameraDevicePlugin: take_device отклонён: {text}{detail}")
             return {"status": "error", "device_state": self._reg.device_state, "error": text}
+        with self._lock:  # до start: отказ открытия не отменяет того, что камера должна работать
+            self._fw_armed = True
         t0 = time.monotonic()
         ok = session.start(args.timeout_s)
         ms = int((time.monotonic() - t0) * 1000)
@@ -1012,6 +1015,8 @@ class CameraDevicePlugin(ProcessModulePlugin):
             args = ReleaseDeviceArgs.model_validate(data or {})
         except ValidationError as exc:
             return {"status": "error", "device_state": self._reg.device_state, "error": _validation_text(exc)}
+        with self._lock:
+            self._fw_armed = False
         session = self._session
         if session is not None:
             session.stop(args.timeout_s)

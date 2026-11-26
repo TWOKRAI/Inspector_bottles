@@ -48,7 +48,7 @@ class _Node:
 
 
 class _Rig:
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, port: Any, **cfg: Any) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, port: Any, take: bool = True, **cfg: Any) -> None:
         config = {**_CFG, **cfg}
         self.port = port
         monkeypatch.setattr(plugin_base, "create_port", lambda driver: port)
@@ -58,6 +58,10 @@ class _Rig:
         self.ctx.state_proxy = self.tree = _Node()
         self.plugin = CameraDevicePlugin()
         self.plugin.configure(self.ctx)
+        if take:
+            self.take()
+
+    def take(self) -> None:
         assert self.plugin.cmd_take_device({})["status"] == "ok"
 
     @property
@@ -259,3 +263,39 @@ def test_repeated_misses_one_warning(make):
         rig.miss(total)
     rig.drive(0.3)
     assert len(rig.lines("WARNING", "триггер без кадра")) == 1
+
+
+def test_not_counted_before_first_take(make):
+    rig = make(take=False)
+    rig.seen()  # success, но камера ещё не должна работать
+    rig.drive(0.5)
+    assert rig.lines("WARNING", "триггер без кадра") == []
+    rig.take()
+    rig.drive(1.2)
+    assert (rig.block["triggers"], rig.block["misses"], rig.block["open_miss"]) == (0, 0, False)
+
+
+def test_not_counted_after_release(make):
+    rig = make()
+    assert rig.plugin.cmd_release_device({})["status"] == "ok"
+    rig.seen()
+    rig.drive(1.2)
+    assert (rig.block["triggers"], rig.block["misses"], rig.block["open_miss"]) == (0, 0, False)
+    assert rig.lines("WARNING", "триггер без кадра") == []
+
+
+def test_not_armed_by_rejected_take(make):
+    rig = make()
+    assert rig.plugin.cmd_release_device({})["status"] == "ok"
+    assert rig.plugin.cmd_take_device({"timeout_s": 3600})["status"] == "error"  # отказ по аргументам, до сеанса
+    rig.seen()
+    rig.drive(1.2)
+    assert (rig.block["triggers"], rig.block["misses"]) == (0, 0)
+
+
+def test_counted_while_lost(make):
+    rig = make(**_RECONNECT)
+    rig.unplug()
+    rig.drive(6.0, lambda: rig.tree.data["link"]["state"] == "lost")
+    rig.miss(1)
+    assert (rig.block["triggers"], rig.block["misses"], rig.block["open_miss"]) == (1, 1, True)

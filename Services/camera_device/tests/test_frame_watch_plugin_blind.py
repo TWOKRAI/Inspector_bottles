@@ -549,16 +549,99 @@ def test_release_device_drops_pending_pulse(make):
     assert rig.block()["misses"] == 0
 
 
-def test_new_take_cycle_drops_pending_pulse(make):
-    """Новый цикл (`opening`) забывает ждущий импульс, принятый без прибора в захвате."""
-    rig, _gate = _gated(make, frame_watch_deadline_ms=1000)  # кадров нет и в новом цикле
-    assert _call(lambda: rig.plugin.cmd_release_device({}))["status"] == "ok"
-    rig.seen()
-    rig.take()
-    rig.drive(2.3)
+def test_new_opening_cycle_drops_pending_pulse(make):
+    """Отказ без `reconnect` (`error`), `take_device` без `release_device`: новый `opening` забывает импульс."""
+    rig, gate = _gated(make, frame_watch_deadline_ms=1500, reconnect=False, link_silence_s=0.5)
+    gate.port.disconnect()
+    rig.drive_until(
+        lambda: rig.node().get("state") == "error" and rig.node().get("device_held") is False,
+        "сеанс в error и прибор отпущен",
+        deadline=6.0,
+    )
+    rig.seen()  # камера взята и не отпущена: импульс принят и ждёт кадр
+    gate.port.restore()
+    rig.take()  # новый цикл `opening`; кадров нет и в нём
+    rig.drive(2.8)
 
     assert rig.block().get("triggers") == 1
     assert rig.block()["misses"] == 0
+
+
+# ---------------------------------------------------------------------------------------------- #
+# Импульсы считаются только от `take_device` до `release_device` (вместе с обрывом и переподключением)
+# ---------------------------------------------------------------------------------------------- #
+
+
+def _assert_nothing_counted(rig: _Rig) -> None:
+    assert rig.block().get("triggers") == 0
+    assert rig.block()["misses"] == 0
+    assert rig.block()["open_miss"] is False
+    assert rig.lines("WARNING", _WARN) == []
+
+
+def test_pulse_before_first_take_not_counted(make):
+    gate = _Gate(fake_port.make_port())  # кадров нет: принятый импульс не погасился бы кадром
+    rig = make(gate.port)
+    rig.seen()
+    time.sleep(0.5)  # срок 200 мс прошёл бы
+    rig.produce()
+    assert rig.lines("WARNING", _WARN) == []
+    rig.take()
+    rig.drive(1.3)
+
+    _assert_nothing_counted(rig)
+
+
+def test_pulse_after_release_not_counted(make):
+    rig, _gate = _gated(make)
+    assert _call(lambda: rig.plugin.cmd_release_device({}))["status"] == "ok"
+    rig.seen()
+    time.sleep(0.5)
+    rig.drive(1.3)
+
+    _assert_nothing_counted(rig)
+
+
+def test_pulses_counted_again_after_retake(make):
+    rig, _gate = _gated(make)
+    assert _call(lambda: rig.plugin.cmd_release_device({}))["status"] == "ok"
+    rig.take()
+    rig.seen()
+    rig.wait_misses(1)
+
+    assert rig.block()["triggers"] == 1
+
+
+def test_auto_start_counts_pulses(make):
+    gate = _Gate(fake_port.make_port())
+    rig = make(gate.port, auto_start=True)
+    _call(lambda: rig.plugin.start(rig.ctx))
+    rig.seen()
+    rig.wait_misses(1)
+
+    assert rig.block()["triggers"] == 1
+
+
+def test_pulse_during_lost_is_counted(make):
+    rig = _unplugged(make, **_RECONNECT)
+    rig.drive_until(lambda: rig.link_state() == "lost", "связь потеряна", deadline=6.0)
+    rig.seen()
+    rig.wait_misses(1)
+
+    assert rig.link_state() == "lost"
+    assert rig.block()["triggers"] == 1
+    assert rig.block()["open_miss"] is True
+
+
+def test_pulse_while_reconnecting_after_refused_take_is_counted(make):
+    """Первое открытие отказано (`busy`), сеанс повторяет сам: камера должна работать — импульс считается."""
+    rig = make(fake_port.make_port(busy_for_s=60.0), **_RECONNECT)
+    assert _call(lambda: rig.plugin.cmd_take_device({}))["reconnecting"] is True
+    rig.seen()
+    rig.wait_misses(1)
+
+    assert rig.block()["triggers"] == 1
+    assert rig.block()["open_miss"] is True
 
 
 # ---------------------------------------------------------------------------------------------- #
