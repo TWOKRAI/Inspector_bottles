@@ -399,6 +399,7 @@ NINE = {
     "list_devices",
     "describe_params",
     "trigger_software",
+    "trigger_seen",
 }
 
 
@@ -411,7 +412,7 @@ def test_набор_команд_вместе_с_set_config_и_register_update_�
         "set_config",
         "register_update",
     }
-    assert len(NINE | {"set_config", "register_update"}) == 11
+    assert len(NINE | {"set_config", "register_update"}) == 12
 
 
 def test_каждая_команда_из_набора_указывает_на_существующий_метод():

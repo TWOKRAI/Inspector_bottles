@@ -139,9 +139,31 @@ config:
 ## Триггер без кадра (W2-t1)
 
 Поля `frame_watch` (`off` — умолчание, `software`, `message`) и `frame_watch_deadline_ms` (500; 1..10000), правка — перезапуск процесса.
-Помощник `frame_watch.FrameWatch` (вне `__all__` пакета, `Stability: lite`) считает импульсы, не получившие кадр за срок. Плагин поля и помощник
-пока не использует (это W2-t2). Предел: у кадра нет номера импульса, сопоставление FIFO — пропуск виден вовремя, только если
-задержка кадра < срок < период импульсов, иначе следующий кадр его маскирует.
+Помощник `frame_watch.FrameWatch` (вне `__all__` пакета, `Stability: lite`) считает импульсы, не получившие кадр за срок.
+Предел: у кадра нет номера импульса, сопоставление FIFO — пропуск виден вовремя, только если задержка кадра < срок < период
+импульсов, иначе следующий кадр его маскирует.
+
+Импульс по источнику:
+
+- `software` — каждый `trigger_software`; пишется в потоке-владельце до `execute`, отказ `execute` импульс отзывает. Отказ по сроку
+  команды импульс не отзывает: `execute` ещё может состояться;
+- `message` — команда `trigger_seen {}` от любого процесса. При другом `frame_watch` — отказ `trigger_seen: frame_watch не message`.
+
+Блок дерева `processes.<p>.state.plugins.<name>.frame_watch`: `{"source", "deadline_ms", "triggers", "misses", "open_miss",
+"last_miss_ts"}` (`last_miss_ts` — `time.time()` открытия последнего эпизода). `open_miss` — `true` от просроченного импульса до
+следующего кадра; его смена публикуется на ближайшем `produce()`, остальные поля — окном `_TICK_S`. При `off` блок нулевой,
+`source: "off"`. Метрика `trigger_missed` — накопительная (равна `misses`). Журнал: одна WARNING `триггер без кадра: срок <мс> мс` на
+эпизод и INFO `кадр после пропуска триггера, пропущено <k>` при закрытии кадром. `reset_stats` обнуляет `triggers`, `misses`,
+`last_miss_ts`; ждущие импульсы остаются, поэтому после сброса возможно `misses > triggers`.
+
+Ждущие импульсы забываются (эпизод закрывается без INFO) на `pause`, `resume`, новом цикле `take_device` и `release_device`; на паузе
+`trigger_seen` отвечает success, но не считается. Переподключение их не забывает: импульсы во время обрыва — пропуски.
+
+Не покрыто:
+
+- у источника с `run_gated: false` хуков `pause`/`resume` нет: импульсы считаются всегда;
+- пауза воркера источника (`pause_event`) останавливает `produce()` без хуков: ждавшие импульсы всплывут пропусками;
+- без `produce()` пропуски не объявляются; кадр и новый пропуск между двумя `produce()` сливаются в один эпизод.
 
 ## Очередь кадров источника и метрики (T13)
 
@@ -278,6 +300,7 @@ register'а (проба и запись `apply_params`) для значения 
 | `list_devices` | нет | `{"success": True, "devices": [{"kind", "value", "name"}]}` или `{"success": False, "error": ...}` |
 | `describe_params` | нет | `{"success": True, "params_meta": {поле: {"min", "max", "inc", "entries", "access"} \| None}}` или `{"success": False, "error": ...}` |
 | `trigger_software` | нет | `{"success": True}` или `{"success": False, "error": ...}` |
+| `trigger_seen` | нет | `{"success": True}` или `{"success": False, "error": "trigger_seen: frame_watch не message"}` |
 
 Лишние ключи `data` у `take_device`/`release_device` игнорируются; ошибка валидации (`timeout_s=3600`) -> ответ той же формы
 (`status: error`), `start`/`stop` не вызываются. `reset_stats`, `read_params`, `apply_params` порт не зовут и ящик владельца не используют. `list_devices`, `describe_params`,
