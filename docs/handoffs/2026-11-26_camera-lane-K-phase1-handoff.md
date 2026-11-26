@@ -6,17 +6,10 @@
 
 - Ветка `integ/dcb-phase1`, дерево `.claude/worktrees/k-f1`. В `main` НЕ влита (`main` = `eaaf82a60`).
 - H1 (и H1-fix), H2, H3, H4, H5, H9 — готовы, приняты ревью, влиты. Отчёты: `docs/reports/2026-11-26_device-common-base_*.md`.
-- C6.1 — код и ревью (два раунда) приняты, влиты (`f08c18b01`). Не сделан только живой прогон.
+- C6.1 — готова: два раунда ревью, живой стенд пройден 2026-11-26 (`docs/reports/2026-11-26_device-common-base_C6.1.md`).
 
 ## Осталось
 
-1. Стенд C6.1 в окне `stand` (владелец разрешил 2026-11-26). Из `k-f1`, `PYTHONPATH=<корень k-f1>`, python из основного `.venv`:
-   - бэкенд: `BACKEND_CTL=1 python multiprocess_prototype/run.py camera_device_demo --headless --autostart`
-   - проба: `python -m backend_ctl.probes.camera_stand_probe --port 8765 --processes cam_fake --seconds 60 --interval 5 --out <json>`
-   - ожидается: выход 0, `dropped == 0`, `samples >= 12`, `failures` пуст.
-   - отрицательные (все должны дать выход 1): `--plugins nope` (`plugin_not_found:nope`); `--processes nope`
-     (`no_camera_plugin:nope`); прогон остановлен (`system.run.stop`) -> `frames_stalled`; бэкенд выключен.
-   - после прогона: статус C6.1 -> DONE, отчёт `docs/reports/2026-11-26_device-common-base_C6.1.md`.
 2. Перед слиянием, в своём окне (раньше гейт это пропускал): `multiprocess_prototype/domain/tests`,
    `Services/hikvision_camera/tests`, `Services/camera_device/tests`, `scripts/memory` (новый урок в каноне);
    затем rebase, `validate.py`, `multiprocess_prototype/backend/tests`, прогон фреймворка. Каждый красный назвать по

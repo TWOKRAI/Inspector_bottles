@@ -35,7 +35,7 @@
 ## Порядок выполнения
 
 ### Фаза 1: сейчас, без приборов
-- Task C6.1: скрипт стенда через `backend_ctl`: таблица по камерам, `link`, потери, выход 1 при сбое [IN PROGRESS] (код и ревью — `f08c18b01`; ждёт живого прогона на стенде)
+- Task C6.1: скрипт стенда через `backend_ctl`: таблица по камерам, `link`, потери, выход 1 при сбое [DONE] (`f08c18b01`, стенд 2026-11-26, ветка `integ/dcb-phase1`)
 - Task H1: ревью стадии 5 коммитов `d89637973` (reconnect в рецепте букв) и `989c669e5` (`plate_source`) [DONE] (`4b59dcfb5`; H1-fix `6bf7e1140`, ветка `integ/dcb-phase1`)
 - Task H2: опечатка в `plate_*` одного экрана не отклоняет весь рецепт [DONE] (`3e2194b4c`, ветка `integ/dcb-phase1`)
 - Task H3: слепой тест `test_plate_wraps_and_every_exit_unwraps`: пустая проверка `heightForWidth` [DONE] (`a41fd1868`, ветка `integ/dcb-phase1`)
