@@ -2,8 +2,9 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
-## services/camera_device (1)
+## services/camera_device (2)
 
+- [feedback_a_fake_that_restarts_counters_hides_a_post_reconnect_baseline](feedback_a_fake_that_restarts_counters_hides_a_post_reconnect_baseline.md) — A fake port that restarts frame numbers on start_grabbing keeps a post-reconnec…
 - [reference_camera_jumbo_packet_size_black_frame](reference_camera_jumbo_packet_size_black_frame.md) — Чёрный кадр камеры / ~248 потерянных пакетов на кадр = GevSCPSPacketSize 8164; …
 
 ## services/code_reader (8)
