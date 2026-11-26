@@ -225,62 +225,87 @@ ol.dups code { font-size: 12.5px; overflow-wrap: anywhere; }
 </section>
 
 <section>
-<h2>Как будет <span class="prop">(предложение)</span></h2>
-<p>Один сервис изображений <code>Services/imaging</code> (имя — ваше решение В1). В нём две части: <code>layers</code> — слои и обработка, <code>draw</code> — рисование.
-Внутри <code>layers</code> — общий генератор: одна функция на операцию. Сим, обучение и редактор — тонкие переходники сверху; они зовут один генератор.
-Показ зовёт только <code>draw</code>. Подробно — <code>plans/layer-render/design-unified.md</code>.</p>
-<div class="scroll"><svg class="dia" viewBox="0 0 1200 672" role="img" aria-label="Схема: как будет"><defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs>
+<h2>Как будет <span class="prop">(предложение, идёт к CTO)</span></h2>
+<p>Один сервис изображений <code>Services/imaging</code>. В нём две части: <code>layers</code> — слои и обработка, <code>draw</code> — рисование.
+Внутри <code>layers</code> — общий генератор: одна функция на операцию. Сим, обучение и редактор — тонкие переходники; они зовут один генератор.
+Все настройки — схемы <code>data_schema</code>: форма редактора строится из них. Редактор — на Qt, веб заморожен. Подробно — <code>plans/layer-render/design-unified.md</code>.</p>
+<div class="scroll"><svg class="dia" viewBox="0 0 1200 748" role="img" aria-label="Схема: как будет"><defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs>
 <text class="ch" x="20" y="16">Потребители</text>
 <g><rect class="b st-same" x="20" y="28" width="270" height="60" rx="8"/><text class="tag tag-same" x="282" y="42" text-anchor="end">без изменений</text><text class="t" x="30" y="60">Камера сима и линия</text><text class="s" x="30" y="77">кадр → ml_inference, center_crop</text></g>
-<g><rect class="b st-same" x="320" y="28" width="270" height="60" rx="8"/><text class="tag tag-same" x="582" y="42" text-anchor="end">без изменений</text><text class="t" x="330" y="60">ml_train — обучение сети</text><text class="s" x="330" y="77">папка exported или генератор на лету</text></g>
-<g><rect class="b st-new" x="620" y="28" width="270" height="60" rx="8"/><text class="tag tag-new" x="882" y="42" text-anchor="end">новое: потом Qt ЛР-17</text><text class="t" x="630" y="60">pult_web — редактор слоёв</text><text class="s" x="630" y="77">панели фона и эффектов: ЛР-10, ЛР-11</text></g>
+<g><rect class="b st-new" x="320" y="28" width="270" height="60" rx="8"/><text class="tag tag-new" x="582" y="42" text-anchor="end">новое: ЛР-32</text><text class="t" x="330" y="60">ml_train — обучение сети</text><text class="s" x="330" y="77">source: layered — после замера</text></g>
+<g><rect class="b st-new" x="620" y="28" width="270" height="60" rx="8"/><text class="tag tag-new" x="882" y="42" text-anchor="end">новое: ЛР-17</text><text class="t" x="630" y="60">Редактор на Qt</text><text class="s" x="630" y="77">веб pult_web — заморожен</text></g>
 <g><rect class="b st-new" x="920" y="28" width="270" height="60" rx="8"/><text class="tag tag-new" x="1182" y="42" text-anchor="end">новое</text><text class="t" x="930" y="60">Показ: GUI, mjpeg, видео</text><text class="s" x="930" y="77">подпись распознавания — draw 3.1</text></g>
 <path class="ar" d="M155,88 V128" marker-end="url(#ah2)"/><text class="al" x="163" y="112">кадры</text>
 <path class="ar" d="M455,88 V128" marker-end="url(#ah2)"/><text class="al" x="463" y="112">набор или на лету</text>
-<path class="ar" d="M755,88 V128" marker-end="url(#ah2)"/><text class="al" x="763" y="112">команды</text>
+<path class="ar" d="M755,88 V128" marker-end="url(#ah2)"/><text class="al" x="763" y="112">команды, модель правки</text>
 <path class="ar" d="M1055,88 V128" marker-end="url(#ah2)"/><text class="al" x="1063" y="112">кадр с рисунком</text>
 <g><rect class="b st-new" x="20" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="282" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="30" y="152">Симулятор</text><text class="s mono" x="30" y="169">Plugins/sim/scene_source</text><text class="s mono" x="30" y="185">Services/line_sim</text><text class="s" x="30" y="201">лента и время; эффекты: ЛР-06</text></g>
-<g><rect class="b st-new" x="320" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="582" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="330" y="152">Обучение</text><text class="s mono" x="330" y="169">Services/dataset_gen</text><text class="s" x="330" y="185">запись набора, torch, CLI</text><text class="s" x="330" y="201">DatasetEngine заморожен (ЛР-27)</text></g>
-<g><rect class="b st-new" x="620" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="882" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="630" y="152">Редактор</text><text class="s mono" x="630" y="169">Plugins/sim/layer_preview</text><text class="s" x="630" y="185">команды, ограда путей, пределы</text><text class="s" x="630" y="201">кадр с эффектами: ЛР-09</text></g>
+<g><rect class="b st-new" x="320" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="582" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="330" y="152">Обучение</text><text class="s mono" x="330" y="169">Services/dataset_gen</text><text class="s" x="330" y="185">запись набора, torch, CLI</text><text class="s" x="330" y="201">конвертер старых пресетов: ЛР-30</text></g>
+<g><rect class="b st-new" x="620" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="882" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="630" y="152">Редактор</text><text class="s mono" x="630" y="169">Plugins/sim/layer_preview</text><text class="s" x="630" y="185">превью, раскладка, ограда путей</text><text class="s" x="630" y="201">кадр с эффектами: ЛР-09</text></g>
 <g><rect class="b st-new" x="920" y="130" width="270" height="92" rx="8"/><text class="tag tag-new" x="1182" y="144" text-anchor="end">тонкий переходник</text><text class="t" x="930" y="152">Показ</text><text class="s mono" x="930" y="169">Plugins/render/overlay_draw</text><text class="s" x="930" y="185">что рисовать: правила mapping</text><text class="s" x="930" y="201">circle/contour_draw — заморозить</text></g>
 <path class="ar" d="M155,222 V274" marker-end="url(#ah2)"/><text class="al" x="163" y="246">объект и кадр</text>
 <path class="ar" d="M455,222 V274" marker-end="url(#ah2)"/><text class="al" x="463" y="246">генератор обучения</text>
 <path class="ar" d="M755,222 V274" marker-end="url(#ah2)"/><text class="al" x="763" y="246">превью и кадр</text>
 <path class="ar" d="M1055,222 V274" marker-end="url(#ah2)"/><text class="al" x="1063" y="246">фигуры, текст</text>
 <rect class="b st-new" x="20" y="262" width="1170" height="398" rx="12"/>
-<rect class="b st-move" x="34" y="276" width="800" height="336" rx="10"/><text class="t" x="46" y="298">layers — слои и обработка (бывш. layer_render)</text><text class="tag tag-move" x="822" y="294" text-anchor="end">переезд с реэкспортом: ЛР-28</text>
+<rect class="b st-move" x="34" y="276" width="800" height="336" rx="10"/><text class="t" x="46" y="298">layers — слои и обработка (бывш. layer_render)</text><text class="tag tag-move" x="822" y="294" text-anchor="end">переезд: ЛР-28</text>
 <rect class="grp st-new" x="46" y="312" width="776" height="134" rx="10"/><text class="t" x="58" y="332">Общий генератор: объект из слоёв → кадр → вырез</text><text class="tag tag-new" x="810" y="328" text-anchor="end">его зовут сим, обучение и редактор</text>
 <g><rect class="b p st-same" x="58" y="344" width="240" height="44" rx="6"/><text class="pn" x="66" y="361">спрайт из каталога</text><text class="tag tag-same" x="66" y="378">без изменений · get_sprite</text></g>
 <g><rect class="b p st-same" x="314" y="344" width="240" height="44" rx="6"/><text class="pn" x="322" y="361">объект из слоёв, брак</text><text class="tag tag-same" x="322" y="378">без изменений · ObjectFactory.render</text></g>
-<g><rect class="b p st-new" x="570" y="344" width="240" height="44" rx="6"/><text class="pn" x="578" y="361">фон: заливка, тайл, фото</text><text class="tag tag-new" x="578" y="378">фото — новое: ЛР-06</text></g>
-<g><rect class="b p st-new" x="58" y="396" width="240" height="44" rx="6"/><text class="pn" x="66" y="413">эффекты: один список</text><text class="tag tag-new" x="66" y="430">одна схема, в симе тоже: ЛР-06</text></g>
-<g><rect class="b p st-new" x="314" y="396" width="240" height="44" rx="6"/><text class="pn mono" x="322" y="413">render_scene</text><text class="tag tag-new" x="322" y="430">+ тень: ЛР-06; старый путь: ЛР-27</text></g>
+<g><rect class="b p st-new" x="570" y="344" width="240" height="44" rx="6"/><text class="pn" x="578" y="361">фон: 4 вида</text><text class="tag tag-new" x="578" y="378">фото и процедурный — из DE: ЛР-06</text></g>
+<g><rect class="b p st-new" x="58" y="396" width="240" height="44" rx="6"/><text class="pn" x="66" y="413">эффекты кадра и слоя</text><text class="tag tag-new" x="66" y="430">одна схема; слой — ЛР-33</text></g>
+<g><rect class="b p st-new" x="314" y="396" width="240" height="44" rx="6"/><text class="pn mono" x="322" y="413">render_scene</text><text class="tag tag-new" x="322" y="430">+ тень из DatasetEngine: ЛР-06</text></g>
 <g><rect class="b p st-same" x="570" y="396" width="240" height="44" rx="6"/><text class="pn" x="578" y="413">вырез вокруг объекта</text><text class="tag tag-same" x="578" y="430">без изменений · square_crop</text></g>
-<g><rect class="b p st-move" x="46" y="462" width="370" height="44" rx="6"/><text class="pn mono" x="54" y="479">LayerSceneGenerator</text><text class="tag tag-move" x="54" y="496">генератор обучения, имя прежнее · переезд ЛР-28</text></g>
-<g><rect class="b p st-move" x="428" y="462" width="194" height="44" rx="6"/><text class="pn" x="436" y="479">метка и симметрия</text><text class="tag tag-move" x="436" y="496">из dataset_gen · ЛР-28</text></g>
-<g><rect class="b p st-new" x="634" y="462" width="188" height="44" rx="6"/><text class="pn" x="642" y="479">пресет v2</text><text class="tag tag-new" x="642" y="496">фон, эффекты, train: ЛР-06</text></g>
+<g><rect class="b p st-new" x="46" y="462" width="370" height="44" rx="6"/><text class="pn mono" x="54" y="479">LayerSceneGenerator</text><text class="tag tag-new" x="54" y="496">единый: + умения DatasetEngine, ЛР-31</text></g>
+<g><rect class="b p st-move" x="428" y="462" width="194" height="44" rx="6"/><text class="pn" x="436" y="479">метка, симметрия</text><text class="tag tag-move" x="436" y="496">+ classes.json: ЛР-31</text></g>
+<g><rect class="b p st-new" x="634" y="462" width="188" height="44" rx="6"/><text class="pn" x="642" y="479">пресет v2 — один</text><text class="tag tag-new" x="642" y="496">схема data_schema: ЛР-06</text></g>
 <g><rect class="b p st-new" x="46" y="518" width="370" height="44" rx="6"/><text class="pn" x="54" y="535">общие помощники</text><text class="tag tag-new" x="54" y="552">тайл, смещение, метка: ЛР-26</text></g>
-<g><rect class="b p st-new" x="428" y="518" width="194" height="44" rx="6"/><text class="pn" x="436" y="535">превью: одна сетка</text><text class="tag tag-new" x="436" y="552">ЛР-29</text></g>
-<g><rect class="b p st-same" x="634" y="518" width="188" height="44" rx="6"/><text class="pn" x="642" y="535">файлы, каталог, мета</text><text class="tag tag-same" x="642" y="552">без изменений</text></g>
+<g><rect class="b p st-new" x="428" y="518" width="194" height="44" rx="6"/><text class="pn" x="436" y="535">превью: одна сетка</text><text class="tag tag-new" x="436" y="552">ЛР-29 (решение Р14)</text></g>
+<g><rect class="b p st-new" x="634" y="518" width="188" height="44" rx="6"/><text class="pn" x="642" y="535">модель правки</text><text class="tag tag-new" x="642" y="552">без UI, для Qt: ЛР-35</text></g>
 <path class="ar" d="M231,462 V448" marker-end="url(#ah2)"/>
-<text class="s" x="46" y="586">Генерация — здесь, а не в draw: пресеты, каталог и pydantic тяжелы для показа.</text>
+<text class="s" x="46" y="586">Все настройки — схемы data_schema с FieldMeta: форма Qt строится из них (ЛР-38 … ЛР-41).</text>
 <text class="s" x="46" y="602">DatasetEngine не здесь: заморожен в dataset_gen, его умения — в общем генераторе.</text>
 <rect class="b st-new" x="850" y="276" width="326" height="336" rx="10"/><text class="t" x="862" y="298">draw — рисование</text><text class="tag tag-new" x="1166" y="294" text-anchor="end">новое: draw-universal</text>
 <g><rect class="b p st-new" x="862" y="312" width="302" height="44" rx="6"/><text class="pn" x="870" y="329">смесь по альфе — одна</text><text class="tag tag-new" x="870" y="346">из compose, фона и превью: ЛР-24</text></g>
 <g><rect class="b p st-new" x="862" y="364" width="302" height="44" rx="6"/><text class="pn" x="870" y="381">фигуры и сцена</text><text class="tag tag-new" x="870" y="398">draw 1.1, 1.3</text></g>
 <g><rect class="b p st-new" x="862" y="416" width="302" height="44" rx="6"/><text class="pn" x="870" y="433">шрифты и текст</text><text class="tag tag-new" x="870" y="450">draw 1.2: 4 списка шрифтов → 1</text></g>
 <g><rect class="b p st-new" x="862" y="468" width="302" height="44" rx="6"/><text class="pn" x="870" y="485">экспорт YOLO/COCO</text><text class="tag tag-new" x="870" y="502">следующий план draw (5c)</text></g>
-<text class="s" x="862" y="536">Грузит numpy, cv2, PIL — и всё.</text>
+<text class="s" x="862" y="536">Стили и правила — схемы data_schema.</text>
 <text class="s" x="862" y="552">Не импортирует layers:</text>
 <text class="s" x="862" y="568">стрелка только layers → draw.</text>
-<text class="s" x="862" y="584">import draw не грузит layers</text>
-<text class="s" x="862" y="600">и pydantic (тест ЛР-25).</text>
+<text class="s" x="862" y="584">Это правило sentrux, не замер:</text>
+<text class="s" x="862" y="600">вес импорта не довод (+0,03 с).</text>
 <path class="ar" d="M822,378 H848" marker-end="url(#ah2)"/>
-<text class="t" x="34" y="638">Services/imaging — один сервис изображений</text><text class="tag tag-new" x="1176" y="634" text-anchor="end">новое · __init__ пустой · имя — решение В1</text>
+<text class="t" x="34" y="638">Services/imaging — один сервис изображений</text><text class="tag tag-new" x="1176" y="634" text-anchor="end">новое · __init__ пустой · имя imaging</text>
+<rect class="b st-frz" x="20" y="676" width="1170" height="60" rx="10"/><text class="tag tag-frz" x="1180" y="690" text-anchor="end">заморожено, не удалено</text>
+<text class="s" x="34" y="702">DatasetEngine, GeneratorConfig, AugmentConfig — байт в байт (эталон m4); старые пути Services.layer_render.* — без живых вызовов.</text>
+<text class="s" x="34" y="722">Веб-редактор pult_web — после паритета Qt; circle_draw, contour_draw — по draw-universal; три старых инструмента глифов.</text>
 </svg></div>
-<p class="muted">Что не меняется: пиксели сима и нового обучения на шагах ЛР-24 … ЛР-27 (эталоны sha). Исключение — сетка превью редактора: она сдвигается на 1 уровень (В5). Боевые пресеты <code>ml_train</code> остаются на замороженном <code>DatasetEngine</code> до вашего решения В3.
-Снаружи сервиса: лента, энкодер, сверка с правдой (<code>line_sim</code>) и обучение сети (<code>ml_train</code>) — это не картинка.
-Из 10 дублей три (№6, №7, №9) остаются, пока жив замороженный <code>DatasetEngine</code>.</p>
+<p class="muted">Что не меняется: пиксели сима, редактора и нового обучения на шагах ЛР-24 … ЛР-26 (эталоны sha). Боевые пресеты <code>ml_train</code> остаются на замороженном <code>DatasetEngine</code>, пока замер ЛР-32 не покажет «не хуже» (порог — ваше решение Р13).
+Снаружи сервиса: лента, энкодер, сверка с роботом (<code>line_sim</code>) и обучение (<code>ml_train</code>) — это не картинка.</p>
+</section>
+
+<section>
+<h2>Что откуда берём</h2>
+<div class="tbl"><table>
+<thead><tr><th>Что</th><th>Берём у</th><th>Почему у него</th><th>Куда в новой системе</th></tr></thead>
+<tbody>
+<tr><td>фон-фото и процедурный фон</td><td><code>DatasetEngine</code></td><td>фон разнообразнее</td><td>модуль фона, ещё два вида (ЛР-06)</td></tr>
+<tr><td>тень под объектом</td><td><code>DatasetEngine</code></td><td>есть только у него</td><td>поле тени у объекта в кадре (ЛР-06)</td></tr>
+<tr><td>размер объекта долей кадра</td><td><code>DatasetEngine</code></td><td>так обучена боевая модель</td><td>режим <code>fraction</code> генератора (ЛР-31)</td></tr>
+<tr><td>реестр классов <code>classes.json</code></td><td><code>DatasetEngine</code></td><td>у нового пути его нет</td><td>генератор (ЛР-31)</td></tr>
+<tr><td>объект из слоёв: диск, буква, брак</td><td><code>layer_render</code></td><td>один код для сима и обучения</td><td>без изменений</td></tr>
+<tr><td>вырез вокруг объекта по радиусу</td><td><code>LayerSceneGenerator</code> и линия</td><td>так режет линия</td><td>без изменений</td></tr>
+<tr><td>эффекты до выреза, в пикселях камеры</td><td><code>LayerSceneGenerator</code></td><td>как на линии</td><td>генератор; геометрия кадра — ЛР-34</td></tr>
+<tr><td>фон-стек и прокрутка тайла</td><td>симулятор</td><td>тот же фон, что на ленте</td><td>модуль фона; источник — пресет (ЛР-05)</td></tr>
+<tr><td>12 эффектов</td><td><code>layer_render</code> (пришли из <code>DatasetEngine</code>)</td><td>один код уже сейчас</td><td>без изменений; схема одна (ЛР-06)</td></tr>
+<tr><td>опечатка в настройке — ошибка</td><td><code>LayerSceneGenerator</code></td><td>у старых — молча</td><td>все схемы (ЛР-38, ЛР-05)</td></tr>
+<tr><td>буквы из шрифта: цвет, зерно, обводка, край</td><td><code>make_font_letters</code> (<code>line_sim</code>)</td><td>больше всего настроек</td><td>один инструмент глифов (ЛР-14)</td></tr>
+<tr><td>запись <code>train/val</code>, метки, torch</td><td><code>dataset_gen</code></td><td>уже общий</td><td>без изменений</td></tr>
+<tr><td>смесь по альфе целыми числами</td><td>фон-тайл <code>background._over</code></td><td>точна для любого бэкенда</td><td><code>draw.blend</code> (ЛР-24)</td></tr>
+<tr><td>описание полей для форм</td><td>регистры плагинов (<code>data_schema</code>)</td><td>уже работает в GUI</td><td>все настройки картинки (ЛР-38)</td></tr>
+<tr><td>сдвиг слоя мышью, привязка, отмена, ревизия</td><td>веб-редактор (JS)</td><td>есть только там</td><td>модель правки без UI для Qt (ЛР-35)</td></tr>
+</tbody></table></div>
 </section>
 
 <section>
@@ -288,17 +313,15 @@ ol.dups code { font-size: 12.5px; overflow-wrap: anywhere; }
 <div class="tbl"><table>
 <thead><tr><th>Было</th><th>Станет</th><th>Старое имя</th></tr></thead>
 <tbody>
-<tr><td><code>Services/layer_render</code></td><td><code>Services/imaging/layers</code></td><td><span class="badge b-frz">реэкспорт</span> заморожен</td></tr>
+<tr><td><code>Services/layer_render</code></td><td><code>Services/imaging/layers</code></td><td><span class="badge b-frz">заморожен</span> без живых вызовов</td></tr>
 <tr><td><code>Services/draw</code> (только в плане)</td><td><code>Services/imaging/draw</code></td><td>пакета ещё нет</td></tr>
-<tr><td><code>LayerSceneGenerator</code> в <code>dataset_gen</code></td><td>то же имя, файл <code>imaging/layers/samples.py</code></td><td><span class="badge b-frz">реэкспорт</span></td></tr>
-<tr><td><code>dataset_gen/core/labels.py</code>, <code>symmetry.py</code></td><td><code>imaging/layers/labels.py</code>, <code>symmetry.py</code></td><td><span class="badge b-frz">реэкспорт</span></td></tr>
-<tr><td><code>DatasetEngine</code>, <code>GeneratorConfig</code>, <code>AugmentConfig</code></td><td>без переименования</td><td><span class="badge b-frz">заморожены</span> с тестами</td></tr>
-<tr><td>смесь в <code>composite</code>, <code>background._over</code>, <code>preview._fit_tile</code></td><td><code>draw.blend.alpha_over</code></td><td>функции те же, тело зовёт общую</td></tr>
-<tr><td><code>scene_source._load_layer_image</code>, <code>layer_scene.load_image</code></td><td><code>layers.io.load_tile_rgb</code></td><td>плагин — обёртка с логом</td></tr>
-<tr><td>смещение в <code>spawner.py</code> и <code>layer_scene.py</code></td><td><code>layers.scene.signed_offset</code></td><td>—</td></tr>
-<tr><td><code>render_preview_grid</code>, <code>save_preview_grid</code></td><td><code>layers.preview.tile_grid</code></td><td>обе обёртки остаются</td></tr>
-<tr><td><code>train.augment</code>; <code>apply_photometric</code></td><td><code>effects:</code> пресета v2; <code>apply_effects</code></td><td>мост и обёртка остаются</td></tr>
-<tr><td><code>scene_source</code>, <code>layer_preview</code>, <code>SceneCompositor</code>, <code>ObjectFactory</code>, <code>render_scene</code></td><td>без изменений</td><td><span class="badge b-same">как есть</span> имена уже нейтральные</td></tr>
+<tr><td><code>LayerSceneGenerator</code></td><td>то же имя, единый генератор в <code>imaging/layers/samples.py</code></td><td>старый модуль заморожен</td></tr>
+<tr><td><code>DatasetEngine</code>, <code>GeneratorConfig</code>, <code>AugmentConfig</code></td><td>без переименования</td><td><span class="badge b-frz">заморожены</span> байт в байт</td></tr>
+<tr><td>смесь в <code>composite</code>, фоне и превью</td><td><code>draw.blend.alpha_over</code></td><td>функции те же, тело зовёт общую</td></tr>
+<tr><td><code>train.augment</code></td><td><code>effects:</code> пресета v2</td><td>отвергается после перевода пресетов</td></tr>
+<tr><td><code>source: synthetic</code> в <code>ml_train</code></td><td>+ <code>source: layered</code></td><td><span class="badge b-same">остаётся</span> для старого пути</td></tr>
+<tr><td>логика правки в JS <code>pult_web</code></td><td><code>imaging/layers/editing.py</code></td><td><span class="badge b-frz">веб заморожен</span></td></tr>
+<tr><td>38 классов настроек на <code>BaseModel</code></td><td>схемы <code>data_schema</code> с <code>FieldMeta</code></td><td>замороженные остаются как есть</td></tr>
 </tbody></table></div>
 </section>
 
@@ -307,61 +330,47 @@ ol.dups code { font-size: 12.5px; overflow-wrap: anywhere; }
 <div class="tbl"><table>
 <thead><tr><th>План</th><th>Состояние</th><th>Куда идёт</th></tr></thead>
 <tbody>
-<tr><td><code>layer-render</code> (Ф1–Ф9)</td><td>22 задачи, 15 закрыто по git; запуском: 13 работают, 2.2 и 5.3 частично</td><td><span class="badge b-new">новый план</span> открытое — ЛР-01 … ЛР-24 в <code>plans/layer-render/plan.md</code>; дизайн добавляет ЛР-25 … ЛР-29 и меняет ЛР-06, ЛР-14, ЛР-16, ЛР-24</td></tr>
-<tr><td><code>line-sim-layer-editor</code></td><td>12 задач, 8 закрыто; 1.2b, 1.3 (Qt) ждут И3; 1.1 отложена; 2.1 необязательна</td><td><span class="badge b-move">поглощается</span> 1.2b + 1.3 → ЛР-17, 1.1 → ЛР-19, 2.1 → ЛР-20</td></tr>
-<tr><td><code>line-sim</code> Task 4.3 (фотометрия сцены)</td><td>не начата</td><td><span class="badge b-move">переезжает</span> → ЛР-06. Остальное в <code>line-sim</code> (4.1, 4.2, 5.5, 6.3, 6.4) остаётся там</td></tr>
-<tr><td><code>2026-11-11_draw-universal</code></td><td>APPROVED, 0 из 12</td><td><span class="badge b-same">отдельно</span> нижняя часть зонтика. До 1.1 поправить: путь <code>Services/imaging/draw</code>; §3 — ядро смеси в <code>draw</code>; Task 1.1 + <code>blend.py</code> и тест веса импорта</td></tr>
-<tr><td><code>2026-11-11_dataset-sidecar-truth</code> (DS-1)</td><td>в <code>main</code> 1.1a, 1.1b, 2.1; отчёт 0.1; 1.1c — только спека; 4 отложены</td><td><span class="badge b-same">отдельно</span> пары «кадр + истина сима»</td></tr>
-<tr><td><code>dataset-annotation</code></td><td>DRAFT, 0 из 17</td><td><span class="badge b-same">отдельно</span> Ф2 (свой редактор разметки) ждёт решения Р4</td></tr>
-<tr><td><code>letters-retrain</code></td><td>0.1 заменена, 0.2 и 0.3 закрыты, 0.4 — только на симе; Ф1 без задач</td><td><span class="badge b-same">отдельно</span> потребитель; его замер нужен для сравнения путей обучения (ЛР-16, В3)</td></tr>
-<tr><td><code>gui-constructor</code></td><td>отложен в 2.0 (ORDER строка 33)</td><td><span class="badge b-same">зависимость</span> шаг И3 открывает Qt-редактор ЛР-17</td></tr>
-<tr><td><code>circle_draw</code>, <code>contour_draw</code></td><td>работают</td><td><span class="badge b-frz">заморозить</span> по draw-universal 2.2–2.3: рецепты переходят на <code>overlay_draw</code>, код и тесты остаются</td></tr>
+<tr><td><code>layer-render</code></td><td>22 задачи прежней нарезки; 13 работают, 2 частично</td><td><span class="badge b-new">переделан</span> ЛР-01 … ЛР-41 в <code>plans/layer-render/plan.md</code>; сняты ЛР-04, ЛР-12, ЛР-16, ЛР-27</td></tr>
+<tr><td><code>line-sim-layer-editor</code></td><td>8 из 12 закрыто; Qt-задачи ждали И3</td><td><span class="badge b-move">поглощается</span> 1.2b + 1.3 → ЛР-17 (до И3 — по Р15), 1.1 → ЛР-19, 2.1 → ЛР-20</td></tr>
+<tr><td><code>line-sim</code> Task 4.3</td><td>не начата</td><td><span class="badge b-move">переезжает</span> → ЛР-06</td></tr>
+<tr><td><code>2026-11-11_draw-universal</code></td><td>APPROVED, 0 из 12</td><td><span class="badge b-same">отдельно</span> часть <code>draw</code>. До 1.1: путь <code>Services/imaging/draw</code>, <code>blend.py</code>, стили на схемах</td></tr>
+<tr><td><code>data_schema_module</code> (фреймворк)</td><td>версий схем и реестра видов нет</td><td><span class="badge b-new">правка вперёд</span> ЛР-39, ЛР-40</td></tr>
+<tr><td><code>pult_web</code> (редактор слоёв)</td><td>работает</td><td><span class="badge b-frz">заморозить</span> без новых функций; не удалять</td></tr>
+<tr><td><code>letters-retrain</code>, DS-1, <code>dataset-annotation</code>, <code>gui-constructor</code></td><td>свои планы</td><td><span class="badge b-same">отдельно</span> мерка ЛР-32; <code>object_truth</code>; Р4; оболочка для ЛР-17</td></tr>
 </tbody></table></div>
 </section>
 
 <section>
 <h2>Порядок <span class="prop">(предложение)</span></h2>
-<p>План отложен владельцем в 2.0 (ORDER строка 40). Старт — только по вашему слову. Шаги 2–5 не меняют ни одного байта сима и обучения.</p>
+<p>План отложен владельцем в 2.0 (ORDER строка 40). Старт — только по вашему слову.</p>
 <ol class="steps">
-<li class="out"><div class="step-h">0. Ваши решения В1–В6 и поправка draw-universal (путь, смесь в draw)</div><div class="after">кода нет. Поправка — до draw 1.1.</div></li>
-<li class="fast"><div class="step-h">1. Честная картинка обучения: ЛР-02, ЛР-01, ЛР-03, ЛР-21</div><div class="after">как в плане; не ждёт остального.</div></li>
-<li><div class="step-h">2. Зонтик: ЛР-25 + draw 1.1 в <code>Services/imaging/draw</code></div><div class="after">проверка: тест «import draw не грузит layers и pydantic»; <code>sentrux check .</code>.</div></li>
-<li><div class="step-h">3. Одна смесь по альфе: ЛР-24</div><div class="after">эталоны A7, m4, 6.3.0, 2.1 без правки; сетка превью меняется до 1 уровня: 10 тестов 2.4b краснеют, литералы правятся (В5).</div></li>
-<li><div class="step-h">4. Три мелких общих помощника: ЛР-26</div><div class="after">чтение тайла, смещение, метка. Эталоны сима и обучения без правки.</div></li>
-<li><div class="step-h">5. Пресет v2: ЛР-06 → ЛР-05, ЛР-07; затем ЛР-27 (старый путь через <code>render_scene</code>)</div><div class="after">после draw 1.2. Ключа нет — кадр прежний; m4 без правки.</div></li>
-<li><div class="step-h">6. Переезд в папку зонтика: ЛР-28</div><div class="after">по решению В2; нужно окно heavy; старые пути — реэкспорт.</div></li>
-<li><div class="step-h">7. Двойники пресетов <code>ml_train</code> и сравнение обучением: ЛР-16</div><div class="after">картинки обучения меняются только по решению В3.</div></li>
-<li><div class="step-h">8. Одна сетка превью: ЛР-29; шрифты из draw: ЛР-14</div><div class="after">после draw 1.2.</div></li>
-<li class="out"><div class="step-h">Дальше как в плане: ЛР-08 … ЛР-12, ЛР-13, ЛР-15, ЛР-17 … ЛР-23</div><div class="after">редактор, источники, Qt, разметка, по желанию.</div></li>
+<li class="fast"><div class="step-h">Ф-А. Честная картинка обучения: ЛР-02, ЛР-01, ЛР-03, ЛР-21</div><div class="after">сразу и параллельно; первой поднимается в 1.0, если строка 27 провалится.</div></li>
+<li><div class="step-h">Ф-Б. Основа: ЛР-25, ЛР-24, ЛР-26 (+ draw 1.1 с поправкой)</div><div class="after">пиксели прежние; одна смесь, один дом.</div></li>
+<li><div class="step-h">Ф-В. Один пресет на схемах: ЛР-39, ЛР-40 → ЛР-06, ЛР-38, ЛР-05, ЛР-07, ЛР-30</div><div class="after">фон и эффекты в одном файле, эффекты в симе, старые пресеты переведены.</div></li>
+<li><div class="step-h">Ф-Г. Один генератор обучения: ЛР-31, ЛР-28, ЛР-32</div><div class="after">замер «новый против старого»; ml_train переходит по вашему слову.</div></li>
+<li><div class="step-h">Ф-Д. Лучше прежних: ЛР-33, ЛР-34, ЛР-29</div><div class="after">эффекты слоя, эффекты по кадру камеры, одна сетка превью.</div></li>
+<li><div class="step-h">Ф-Е. Редактор на Qt: ЛР-35, ЛР-41 → ЛР-08, ЛР-09 → ЛР-17 → ЛР-10, ЛР-11</div><div class="after">по решению Р15; веб заморожен.</div></li>
+<li><div class="step-h">Ф-Ж. Источники и инструменты каталога: ЛР-13 → ЛР-14, ЛР-15</div><div class="after">после draw 1.2.</div></li>
+<li class="out"><div class="step-h">Дальше: переезд вкладки в оболочку при И3; разметка ЛР-18; по желанию ЛР-19, ЛР-20, ЛР-22, ЛР-23</div><div class="after">бутылка, налив, поворот без среза, бюджет кадра.</div></li>
 </ol>
 </section>
 
 <section>
 <h2>Ваши решения, которые ещё открыты</h2>
-<p class="muted">Новые вопросы этого дизайна:</p>
-<ul class="dec">
-<li><b>В1.</b> Имя сервиса. Рекомендация — <code>imaging</code> («делает и рисует картинки; не снимает камерой, не распознаёт»).</li>
-<li><b>В2.</b> Переносить ли <code>layer_render</code> в папку зонтика: сейчас, позже (ЛР-28) или никогда. Рекомендация — <code>draw</code> сразу в зонтике, переезд позже.</li>
-<li><b>В3.</b> Боевые пресеты остаются на <code>DatasetEngine</code>, пока сравнение не покажет, что новый путь не хуже. Рекомендация — да.</li>
-<li><b>В4.</b> Генератор обучения — внутри сервиса (с ЛР-28) или в <code>dataset_gen</code>. Рекомендация — внутри.</li>
-<li><b>В5.</b> Превью редактора меняется на 1 уровень яркости (общая смесь); краснеют 10 тестов сетки превью, их эталоны правятся. Рекомендация — принять.</li>
-<li><b>В6.</b> Короткий вердикт CTO до ЛР-25: дизайн пересматривает три его решения. Рекомендация — да.</li>
-</ul>
-<p class="muted">Прежние вопросы плана:</p>
 <ul class="dec">
 <li><b>Р1.</b> Порог для сети на реальных кадрах (β7) и что делать в зоне 55–85 %.</li>
-<li><b>Р2.</b> Подтвердить: пресет v2 (ЛР-06) ждёт draw 1.1 и 1.2.</li>
 <li><b>Р3.</b> Какие эффекты и какой силы нужны обучению букв.</li>
-<li><b>Р4.</b> Разметка — один редактор или ещё отдельный из <code>dataset-annotation</code>.</li>
-<li><b>Р5.</b> Принять предложения по соседним планам (таблица выше).</li>
+<li><b>Р4.</b> Разметка — тот же Qt-редактор или ещё отдельный из <code>dataset-annotation</code>.</li>
+<li><b>Р5.</b> Принять предложения по соседним планам, включая поправку draw-universal.</li>
 <li><b>Р6.</b> Чинить ли срез края при повороте — меняет пиксели данных.</li>
 <li><b>Р7.</b> Нужен ли бюджет времени кадра.</li>
 <li><b>Р8.</b> Картинки бутылки; нужен ли налив.</li>
-<li><b>Р9.</b> Что первым на странице <code>pult_web</code>: line-sim 6.4 или ЛР-10, ЛР-11.</li>
-<li><b>Р10.</b> Перенести склейку в <code>Services/draw</code>. Дизайн отвечает: ядро смеси — в <code>imaging/draw</code>, логика слоёв — в <code>layers</code>. Закрывается, если примете дизайн.</li>
-<li><b>Р11.</b> Строка 40 очереди: указывать на letters-retrain Ф1 вместо Task 3.1.</li>
+<li><b>Р11.</b> Строка 40 очереди: указывать на letters-retrain Ф1 и ЛР-01, ЛР-02, ЛР-30 … ЛР-32.</li>
 <li><b>Р12.</b> Тестов <code>layer_render</code> с импортом <code>line_sim</code> шесть, разрешено три.</li>
+<li><b>Р13.</b> Что значит «новый генератор не хуже»: метрика и допуск против <code>DatasetEngine</code>.</li>
+<li><b>Р14.</b> Превью редактора через общую смесь меняется на 1 уровень (литерал PNG, 10 тестов из 659). «Да» — дублей в живом пути 0.</li>
+<li><b>Р15.</b> Редактор до И3: <b>А</b> — Qt-вкладка в нынешнем фронте сейчас (рекомендую); <b>Б</b> — ждать 2.0; <b>В</b> — пока веб (двойная работа).</li>
 </ul>
-<p class="muted">Подробности: <code>plans/layer-render/design-unified.md</code> (дизайн), <code>design-unified-duplicates.md</code> (карта дублей с path:line), <code>design-unified-migration.md</code> (шаги); план — <code>plans/layer-render/plan.md</code>; отчёт проверки — <code>docs/reports/2026-11-26_layer-render_status-audit.md</code>.</p>
+<p class="muted">Решены и сняты: Р2, Р9, Р10 и вопросы В1, В2, В4, В6 — вашими словами 2026-11-26. Подробности: <code>plans/layer-render/design-unified.md</code>, <code>design-unified-matrix.md</code> (матрица, 111 строк), <code>design-unified-schema-qt.md</code> (схемы и Qt), <code>plan.md</code>.</p>
 </section>
 </main>

@@ -2,6 +2,10 @@
 
 Родитель: [design-unified.md](design-unified.md). Код дерева `docs/layer-render-status` (от `main` 53efe24b9), прочитан 2026-11-26.
 
+> **Раунд 1, сохранён как есть.** Раунд 2 заменил его целевую часть: полная матрица возможностей —
+> [design-unified-matrix.md](design-unified-matrix.md) и [-2](design-unified-matrix-2.md). Карта дублей и замеры ниже
+> остаются в силе; ссылки на ЛР-27 и «двойники как решение В3» устарели (ЛР-27 снята, В3 → Р13 в [plan.md](plan.md)).
+
 ## 2. Карта дублей (проверено по коду)
 
 Четыре пути: **сим** (`scene_source` → `line_sim.SceneCompositor`), **редактор** (`layer_preview` → `layer_render/preview.py`),
