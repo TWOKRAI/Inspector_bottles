@@ -1,0 +1,361 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>layer-render: сейчас и дальше</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f6f7f5; --surface: #ffffff; --fg: #1c2320; --muted: #5d6a65; --line: #c9d1cd;
+  --accent: #1f8a76; --ok: #2f7d3a; --part: #b06a12; --no: #b3261e; --gap: #b3261e; --gap-soft: #fbe9e7;
+  --frz: #6b7280; --new: #1f6fb2; --move: #7a4fb0; --same: #8a958f; --plan-soft: #e8f1fa;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141917; --surface: #1c2320; --fg: #e3e9e6; --muted: #9aa7a2; --line: #34403a;
+    --accent: #5cc8b3; --ok: #8fcf86; --part: #e0a35a; --no: #f08a80; --gap: #f08a80; --gap-soft: #3a1f1c;
+    --frz: #9ca3af; --new: #7ab8ee; --move: #c3a2ec; --same: #7f8c86; --plan-soft: #1a2a3a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141917; --surface: #1c2320; --fg: #e3e9e6; --muted: #9aa7a2; --line: #34403a;
+  --accent: #5cc8b3; --ok: #8fcf86; --part: #e0a35a; --no: #f08a80; --gap: #f08a80; --gap-soft: #3a1f1c;
+  --frz: #9ca3af; --new: #7ab8ee; --move: #c3a2ec; --same: #7f8c86; --plan-soft: #1a2a3a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: 28px; padding-bottom: 56px; }
+main { max-width: 1240px; margin: 0 auto; display: grid; gap: 40px; }
+h1 { font-size: clamp(24px, 4vw, 34px); line-height: 1.2; margin: 0 0 8px; }
+h2 { font-size: 21px; margin: 0 0 10px; }
+p { margin: 0 0 8px; max-width: 75ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--f-mono); font-size: 13.5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 14px; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend svg { flex: none; }
+.lg { fill: var(--surface); stroke-width: 2; }
+.lg-gap { fill: var(--gap-soft); stroke: var(--gap); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+svg.dia { display: block; min-width: 1100px; width: 100%; height: auto; }
+.dia text { fill: var(--fg); font-family: var(--f-body); }
+.dia .mono { font-family: var(--f-mono); }
+.dia .t { font-size: 13px; font-weight: 600; }
+.dia .s { font-size: 12px; fill: var(--muted); }
+.dia .s.strong { fill: var(--fg); font-weight: 600; }
+.dia .pn { font-size: 12px; font-weight: 600; }
+.dia .tag { font-size: 10.5px; font-weight: 500; }
+.dia .ch { font-size: 12px; font-weight: 600; fill: var(--accent); letter-spacing: .04em; }
+.dia .al { font-size: 11px; fill: var(--muted); }
+.dia .gaptext { fill: var(--gap); font-weight: 600; }
+.dia .b { fill: var(--surface); stroke-width: 2; }
+.dia .grp { fill: none; stroke-width: 1.5; }
+.dia .ar { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.dia .ahp { fill: var(--muted); }
+.st-ok { stroke: var(--ok); }
+.st-part { stroke: var(--part); stroke-dasharray: 7 4; }
+.st-no { stroke: var(--no); stroke-dasharray: 2 4; }
+.st-frz { stroke: var(--frz); stroke-dasharray: 12 4 2 4; }
+.st-new { stroke: var(--new); stroke-width: 3 !important; }
+.st-move { stroke: var(--move); stroke-dasharray: 14 6; }
+.st-same { stroke: var(--same); stroke-width: 1 !important; }
+.dia .tag-ok { fill: var(--ok); } .dia .tag-part { fill: var(--part); } .dia .tag-no { fill: var(--no); }
+.dia .tag-frz { fill: var(--frz); } .dia .tag-new { fill: var(--new); } .dia .tag-move { fill: var(--move); }
+.dia .tag-same { fill: var(--same); }
+.dia .note-gap { fill: var(--gap-soft); stroke: var(--gap); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.dia .note-plan { fill: var(--plan-soft); stroke: var(--new); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14.5px; background: var(--surface); }
+th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+th { background: var(--bg); }
+.badge { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1.5px solid currentColor; white-space: nowrap; }
+.b-new { color: var(--new); } .b-move { color: var(--move); } .b-same { color: var(--same); } .b-frz { color: var(--frz); }
+.b-ok { color: var(--ok); } .b-part { color: var(--part); } .b-no { color: var(--no); }
+ol.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+ol.steps li { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--new); border-radius: 10px; padding: 10px 14px; }
+ol.steps li.out { border-left-color: var(--same); }
+ol.steps li.fast { border-left-color: var(--part); }
+.step-h { font-weight: 600; }
+.after { color: var(--muted); font-size: 14px; }
+ul.dec { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.prop { font-weight: 600; color: var(--move); }
+</style>
+<main>
+<header>
+<h1>Генератор изображений объектов: как сейчас и как будет</h1>
+<p>Система собирает картинку объекта из слоёв, накладывает эффекты и даёт её симулятору ленты и обучению сети.</p>
+<p class="muted">Состояние на 2026-11-26, <code>main</code> 53efe24b9. «Работает» — проверено запуском тестов и команд 2026-11-26; живой стенд и браузер не поднимались.
+Стрелка — «кто кого зовёт или чей выход читает». Всё в схеме «Как будет» — <span class="prop">предложение</span>, владелец его не утверждал.</p>
+<ul class="legend" aria-label="Легенда: сейчас">
+<li><svg width="38" height="20"><rect class="lg st-ok" x="2" y="2" width="34" height="16" rx="4"/></svg>работает — сплошная рамка</li>
+<li><svg width="38" height="20"><rect class="lg st-part" x="2" y="2" width="34" height="16" rx="4"/></svg>частично — штрих</li>
+<li><svg width="38" height="20"><rect class="lg st-no" x="2" y="2" width="34" height="16" rx="4"/></svg>нет — точки</li>
+<li><svg width="38" height="20"><rect class="lg st-frz" x="2" y="2" width="34" height="16" rx="4"/></svg>заморозить — штрих-точка</li>
+<li><svg width="38" height="20"><rect class="lg-gap" x="2" y="2" width="34" height="16" rx="4"/></svg>«!» — дубль или дыра</li>
+</ul>
+<ul class="legend" aria-label="Легенда: как будет">
+<li><svg width="38" height="20"><rect class="lg st-new" x="2" y="2" width="34" height="16" rx="4"/></svg>новое — толстая рамка</li>
+<li><svg width="38" height="20"><rect class="lg st-move" x="2" y="2" width="34" height="16" rx="4"/></svg>переезжает — длинный штрих</li>
+<li><svg width="38" height="20"><rect class="lg st-same" x="2" y="2" width="34" height="16" rx="4"/></svg>без изменений — тонкая рамка</li>
+</ul>
+<p class="muted">У каждого блока статус написан словом в правом верхнем углу — цвет не обязателен для чтения.</p>
+</header>
+
+<section>
+<h2>Сейчас</h2>
+<p>Снизу — основа, сверху — то, что видит пользователь. Красные пометки «!» — дубли и дыры.</p>
+<div class="scroll"><svg class="dia" viewBox="0 0 1200 640" role="img" aria-label="Схема: как сейчас"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs><text class="ch" x="20" y="16">Симулятор</text><text class="ch" x="420" y="16">Обучение сети</text><text class="ch" x="820" y="16">Линия и показ</text><g><rect class="b st-part" x="20" y="30" width="380" height="64" rx="8"/>
+<text class="tag tag-part" x="392" y="44" text-anchor="end">частично: 5.3 без браузера</text>
+<text class="t" x="30" y="62">pult_web — веб-редактор слоёв</text>
+<text class="s" x="30" y="78">форма, превью, канва мышью, свои PNG</text>
+</g>
+<g><rect class="b st-ok" x="420" y="30" width="380" height="64" rx="8"/>
+<text class="tag tag-ok" x="792" y="44" text-anchor="end">работает</text>
+<text class="t" x="430" y="62">ml_train — обучение сети</text>
+<text class="s" x="430" y="78">4 пресета: source: synthetic; папка exported</text>
+</g>
+<g><rect class="b st-ok" x="820" y="30" width="360" height="64" rx="8"/>
+<text class="tag tag-ok" x="1172" y="44" text-anchor="end">работает</text>
+<text class="t" x="830" y="62">ml_inference на линии</text>
+<text class="s mono" x="830" y="78">mobilenet_v3_large_20260616_050828</text>
+</g>
+<g><rect class="b st-ok" x="20" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-ok" x="197" y="144" text-anchor="end">работает</text>
+<text class="t mono" x="30" y="162">scene_source</text>
+<text class="s" x="30" y="178">кадры сима</text>
+<text class="s" x="30" y="193">preset.commit живьём</text>
+</g>
+<g><rect class="b st-ok" x="215" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-ok" x="392" y="144" text-anchor="end">работает</text>
+<text class="t mono" x="225" y="162">layer_preview</text>
+<text class="s" x="225" y="178">процесс layers:</text>
+<text class="s" x="225" y="193">превью, раскладка</text>
+</g>
+<g><rect class="b st-ok" x="420" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-ok" x="597" y="144" text-anchor="end">работает</text>
+<text class="t mono" x="430" y="162">DatasetEngine</text>
+<text class="s" x="430" y="178">старый путь</text>
+<text class="s" x="430" y="193">с эффектами</text>
+</g>
+<g><rect class="b st-part" x="615" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-part" x="792" y="144" text-anchor="end">частично</text>
+<text class="t mono" x="625" y="162">LayerSceneGenerator</text>
+<text class="s" x="625" y="178">+ export_sim_crops</text>
+<text class="s gaptext" x="625" y="193">без эффектов</text>
+</g>
+<rect class="grp st-part" x="820" y="118" width="360" height="146" rx="10"/><text class="t" x="830" y="136">Рисование показа: 5 мест</text>
+<g><rect class="b p st-ok" x="830" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="838" y="163">overlay_draw</text><text class="tag tag-ok" x="838" y="180">свой код</text></g>
+<g><rect class="b p st-ok" x="945" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="953" y="163">circle_draw</text><text class="tag tag-ok" x="953" y="180">свой код</text></g>
+<g><rect class="b p st-ok" x="1060" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="1068" y="163">contour_draw</text><text class="tag tag-ok" x="1068" y="180">свой код</text></g>
+<g><rect class="b p st-ok" x="830" y="188" width="165" height="34" rx="6"/><text class="pn mono" x="838" y="205">render_overlay</text><text class="tag tag-ok" x="838" y="222">свой код</text></g>
+<g><rect class="b p st-ok" x="1005" y="188" width="165" height="34" rx="6"/><text class="pn" x="1013" y="205">текст ml_inference</text><text class="tag tag-ok" x="1013" y="222">свой код</text></g>
+<text class="s gaptext" x="830" y="242">! у каждого свой код и своя копия кадра</text>
+<g><rect class="b st-ok" x="20" y="240" width="380" height="70" rx="8"/>
+<text class="tag tag-ok" x="392" y="254" text-anchor="end">работает</text>
+<text class="t" x="30" y="272">line_sim — лента, спавн, SceneCompositor</text>
+<text class="s gaptext" x="30" y="288">! эффекты не подключены: пустой список</text>
+<text class="s mono" x="30" y="303">scene_compositor.py:145</text>
+</g>
+<g><rect class="note-gap" x="488" y="238" width="264" height="60" rx="8"/>
+<text class="s strong" x="498" y="256">! Два пути обучения.</text>
+<text class="s" x="498" y="271">Рабочая модель — со старого пути.</text>
+<text class="s" x="498" y="286">Новый из слоёв — без эффектов.</text>
+</g>
+<g><rect class="note-gap" x="488" y="306" width="264" height="60" rx="8"/>
+<text class="s strong" x="498" y="324">! Фон задан дважды:</text>
+<text class="s mono" x="498" y="339">apps/line_sim/pipeline.yaml</text>
+<text class="s" x="498" y="354">и пресет обучения, сверка руками.</text>
+</g>
+<g><rect class="b st-ok" x="820" y="290" width="320" height="60" rx="8"/>
+<text class="tag tag-ok" x="1132" y="304" text-anchor="end">работает</text>
+<text class="t" x="830" y="322">center_crop — вырез диска</text>
+<text class="s" x="830" y="338">та же функция выреза (6.1)</text>
+</g>
+<rect class="b st-ok" x="20" y="372" width="780" height="136" rx="10"/><text class="t" x="32" y="394">Services/layer_render — сервис слоёв</text><text class="tag tag-ok" x="790" y="388" text-anchor="end">работает</text>
+<g><rect class="b p st-ok" x="32" y="404" width="144" height="44" rx="6"/><text class="pn" x="40" y="421">фон слоями</text><text class="tag tag-ok" x="40" y="438">работает</text></g>
+<g><rect class="b p st-ok" x="184" y="404" width="144" height="44" rx="6"/><text class="pn" x="192" y="421">склейка</text><text class="tag tag-ok" x="192" y="438">работает</text></g>
+<g><rect class="b p st-part" x="336" y="404" width="144" height="44" rx="6"/><text class="pn" x="344" y="421">эффекты, 12</text><text class="tag tag-part" x="344" y="438">частично: не в симе</text></g>
+<g><rect class="b p st-ok" x="488" y="404" width="144" height="44" rx="6"/><text class="pn" x="496" y="421">слои</text><text class="tag tag-ok" x="496" y="438">работает</text></g>
+<g><rect class="b p st-ok" x="640" y="404" width="144" height="44" rx="6"/><text class="pn" x="648" y="421">вырез</text><text class="tag tag-ok" x="648" y="438">работает</text></g>
+<g><rect class="b p st-ok" x="32" y="456" width="183" height="44" rx="6"/><text class="pn" x="40" y="473">пресет и каталог</text><text class="tag tag-ok" x="40" y="490">работает</text></g>
+<g><rect class="b p st-ok" x="223" y="456" width="183" height="44" rx="6"/><text class="pn" x="231" y="473">фабрика объекта</text><text class="tag tag-ok" x="231" y="490">работает</text></g>
+<g><rect class="b p st-ok" x="414" y="456" width="183" height="44" rx="6"/><text class="pn mono" x="422" y="473">render_scene</text><text class="tag tag-ok" x="422" y="490">одна функция кадра</text></g>
+<g><rect class="b p st-ok" x="605" y="456" width="183" height="44" rx="6"/><text class="pn" x="613" y="473">превью</text><text class="tag tag-ok" x="613" y="490">работает</text></g>
+<g><rect class="b st-no" x="20" y="540" width="1160" height="84" rx="8"/>
+<text class="tag tag-no" x="1172" y="554" text-anchor="end">нет</text>
+<text class="t" x="30" y="572">Services/draw — нет</text>
+<text class="s gaptext" x="30" y="588">! Общей базы рисования нет. Склейка — в layer_render, рисование показа — в 5 местах.</text>
+</g>
+<path class="ar" d="M110,94 V128" marker-end="url(#ah)"/><text class="al" x="118" y="116" text-anchor="start">preset.commit</text>
+<path class="ar" d="M300,94 V128" marker-end="url(#ah)"/><text class="al" x="308" y="116" text-anchor="start">preview, layout</text>
+<path class="ar" d="M110,200 V238" marker-end="url(#ah)"/>
+<path class="ar" d="M300,200 V238" marker-end="url(#ah)"/>
+<path class="ar" d="M210,310 V370" marker-end="url(#ah)"/><text class="al" x="218" y="345" text-anchor="start">render_scene</text>
+<path class="ar" d="M512,94 V128" marker-end="url(#ah)"/><text class="al" x="520" y="116" text-anchor="start">synthetic</text>
+<path class="ar" d="M707,94 V128" marker-end="url(#ah)"/><text class="al" x="715" y="116" text-anchor="start">exported (папка)</text>
+<path class="ar" d="M455,200 V370" marker-end="url(#ah)"/><text class="al" x="462" y="222" text-anchor="start">эффекты</text>
+<path class="ar" d="M770,200 V370" marker-end="url(#ah)"/><text class="al" x="762" y="222" text-anchor="end">слои, кадр</text>
+<path class="ar" d="M800,62 H818" marker-end="url(#ah)"/><text class="al" x="809" y="24" text-anchor="middle">модель</text>
+<path class="ar" d="M900,350 V440 H802" marker-end="url(#ah)"/><text class="al" x="812" y="432" text-anchor="start">вырез</text></svg></div>
+</section>
+
+<section>
+<h2>Как будет <span class="prop">(предложение)</span></h2>
+<p>Те же места на схеме, чтобы сравнить на глаз. Внизу появляется общая база рисования <code>Services/draw</code>: так требует ваше решение 2026-11-26 —
+«механизм рисования должен быть на одной базе как в layer-render так и draw_universal». Перенос склейки в <code>draw</code> ждёт вашего решения Р10.</p>
+<div class="scroll"><svg class="dia" viewBox="0 0 1200 640" role="img" aria-label="Схема: как будет"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs><text class="ch" x="20" y="16">Симулятор</text><text class="ch" x="420" y="16">Обучение сети</text><text class="ch" x="820" y="16">Линия и показ</text><g><rect class="b st-new" x="20" y="30" width="380" height="64" rx="8"/>
+<text class="tag tag-new" x="392" y="44" text-anchor="end">новое: потом Qt ЛР-17, разметка ЛР-18</text>
+<text class="t" x="30" y="62">pult_web — веб-редактор слоёв</text>
+<text class="s" x="30" y="78">панели фона и эффектов: ЛР-10, ЛР-11, ЛР-12</text>
+</g>
+<g><rect class="b st-same" x="420" y="30" width="380" height="64" rx="8"/>
+<text class="tag tag-same" x="792" y="44" text-anchor="end">без изменений</text>
+<text class="t" x="430" y="62">ml_train — обучение сети</text>
+<text class="s" x="430" y="78">читает те же два входа</text>
+</g>
+<g><rect class="b st-new" x="820" y="30" width="360" height="64" rx="8"/>
+<text class="tag tag-new" x="1172" y="44" text-anchor="end">новое</text>
+<text class="t" x="830" y="62">ml_inference на линии</text>
+<text class="s" x="830" y="78">только данные, подпись не рисует (draw 3.1)</text>
+</g>
+<g><rect class="b st-new" x="20" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-new" x="197" y="144" text-anchor="end">новое</text>
+<text class="t mono" x="30" y="162">scene_source</text>
+<text class="s" x="30" y="178">эффекты из пресета</text>
+<text class="s" x="30" y="193">ЛР-06</text>
+</g>
+<g><rect class="b st-new" x="215" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-new" x="392" y="144" text-anchor="end">новое</text>
+<text class="t mono" x="225" y="162">layer_preview</text>
+<text class="s" x="225" y="178">схема, эффекты, кадр</text>
+<text class="s" x="225" y="193">ЛР-08, ЛР-09</text>
+</g>
+<g><rect class="b st-new" x="420" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-new" x="597" y="144" text-anchor="end">новое</text>
+<text class="t mono" x="430" y="162">DatasetEngine</text>
+<text class="s" x="430" y="178">через пресет слоёв</text>
+<text class="s" x="430" y="193">ЛР-16</text>
+</g>
+<g><rect class="b st-new" x="615" y="130" width="185" height="70" rx="8"/>
+<text class="tag tag-new" x="792" y="144" text-anchor="end">новое</text>
+<text class="t mono" x="625" y="162">LayerSceneGenerator</text>
+<text class="s" x="625" y="178">+ export_sim_crops</text>
+<text class="s" x="625" y="193">с эффектами: ЛР-01, 02</text>
+</g>
+<rect class="grp st-new" x="820" y="118" width="360" height="146" rx="10"/><text class="t" x="830" y="136">Рисование показа: одно место</text>
+<g><rect class="b p st-new" x="830" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="838" y="163">overlay_draw</text><text class="tag tag-new" x="838" y="180">новое</text></g>
+<g><rect class="b p st-frz" x="945" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="953" y="163">circle_draw</text><text class="tag tag-frz" x="953" y="180">заморозить</text></g>
+<g><rect class="b p st-frz" x="1060" y="146" width="110" height="34" rx="6"/><text class="pn mono" x="1068" y="163">contour_draw</text><text class="tag tag-frz" x="1068" y="180">заморозить</text></g>
+<g><rect class="b p st-frz" x="830" y="188" width="165" height="34" rx="6"/><text class="pn mono" x="838" y="205">render_overlay</text><text class="tag tag-frz" x="838" y="222">замена: draw 4.x</text></g>
+<g><rect class="b p st-move" x="1005" y="188" width="165" height="34" rx="6"/><text class="pn" x="1013" y="205">текст ml_inference</text><text class="tag tag-move" x="1013" y="222">recog_draw, 3.1</text></g>
+<text class="s" x="830" y="242">overlay_draw рисует через Services/draw</text>
+<g><rect class="b st-new" x="20" y="240" width="380" height="70" rx="8"/>
+<text class="tag tag-new" x="392" y="254" text-anchor="end">новое</text>
+<text class="t" x="30" y="272">line_sim — лента, спавн, SceneCompositor</text>
+<text class="s" x="30" y="288">эффекты сцены из пресета v2: ЛР-06</text>
+<text class="s" x="30" y="303">фон только из пресета: ЛР-05</text>
+</g>
+<g><rect class="note-plan" x="488" y="238" width="264" height="60" rx="8"/>
+<text class="s strong" x="498" y="256">Один путь сборки картинки:</text>
+<text class="s" x="498" y="271">DatasetEngine через пресет, ЛР-16.</text>
+<text class="s" x="498" y="286">Предложение.</text>
+</g>
+<g><rect class="note-plan" x="488" y="306" width="264" height="60" rx="8"/>
+<text class="s strong" x="498" y="324">Фон в одном месте — в пресете:</text>
+<text class="s" x="498" y="339">ЛР-05, ЛР-06.</text>
+<text class="s" x="498" y="354">Предложение.</text>
+</g>
+<g><rect class="b st-same" x="820" y="290" width="320" height="60" rx="8"/>
+<text class="tag tag-same" x="1132" y="304" text-anchor="end">без изменений</text>
+<text class="t" x="830" y="322">center_crop — вырез диска</text>
+<text class="s" x="830" y="338">без изменений</text>
+</g>
+<rect class="b st-new" x="20" y="372" width="780" height="136" rx="10"/><text class="t" x="32" y="394">Services/layer_render — сервис слоёв</text><text class="tag tag-new" x="790" y="388" text-anchor="end">основа та же, части новые</text>
+<g><rect class="b p st-same" x="32" y="404" width="144" height="44" rx="6"/><text class="pn" x="40" y="421">фон слоями</text><text class="tag tag-same" x="40" y="438">без изменений</text></g>
+<g><rect class="b p st-move" x="184" y="404" width="144" height="44" rx="6"/><text class="pn" x="192" y="421">склейка</text><text class="tag tag-move" x="192" y="438">в draw, решение Р10</text></g>
+<g><rect class="b p st-new" x="336" y="404" width="144" height="44" rx="6"/><text class="pn" x="344" y="421">эффекты, 12</text><text class="tag tag-new" x="344" y="438">в симе: ЛР-06</text></g>
+<g><rect class="b p st-new" x="488" y="404" width="144" height="44" rx="6"/><text class="pn" x="496" y="421">слои + вид kind</text><text class="tag tag-new" x="496" y="438">новое: ЛР-06</text></g>
+<g><rect class="b p st-same" x="640" y="404" width="144" height="44" rx="6"/><text class="pn" x="648" y="421">вырез</text><text class="tag tag-same" x="648" y="438">без изменений</text></g>
+<g><rect class="b p st-new" x="32" y="456" width="183" height="44" rx="6"/><text class="pn" x="40" y="473">пресет v2 + хранилище</text><text class="tag tag-new" x="40" y="490">новое: ЛР-06, ЛР-07</text></g>
+<g><rect class="b p st-new" x="223" y="456" width="183" height="44" rx="6"/><text class="pn" x="231" y="473">фабрика + источники</text><text class="tag tag-new" x="231" y="490">новое: ЛР-13 … ЛР-15</text></g>
+<g><rect class="b p st-same" x="414" y="456" width="183" height="44" rx="6"/><text class="pn mono" x="422" y="473">render_scene</text><text class="tag tag-same" x="422" y="490">без изменений</text></g>
+<g><rect class="b p st-same" x="605" y="456" width="183" height="44" rx="6"/><text class="pn" x="613" y="473">превью</text><text class="tag tag-same" x="613" y="490">без изменений</text></g>
+<rect class="b st-new" x="20" y="540" width="1160" height="84" rx="10"/><text class="t" x="32" y="560">Services/draw — общая база рисования (план draw-universal)</text><text class="tag tag-new" x="1170" y="554" text-anchor="end">новое</text>
+<g><rect class="b p st-move" x="32" y="572" width="278" height="44" rx="6"/><text class="pn" x="40" y="589">склейка по альфе и маске</text><text class="tag tag-move" x="40" y="606">переезжает · ждёт вашего решения Р10</text></g>
+<g><rect class="b p st-new" x="318" y="572" width="278" height="44" rx="6"/><text class="pn" x="326" y="589">фигуры</text><text class="tag tag-new" x="326" y="606">новое: draw 1.1, 1.3</text></g>
+<g><rect class="b p st-new" x="604" y="572" width="278" height="44" rx="6"/><text class="pn" x="612" y="589">шрифты и текст</text><text class="tag tag-new" x="612" y="606">новое: draw 1.2</text></g>
+<g><rect class="b p st-new" x="890" y="572" width="278" height="44" rx="6"/><text class="pn" x="898" y="589">экспорт YOLO/COCO</text><text class="tag tag-new" x="898" y="606">новое: следующий план draw (5c)</text></g>
+<path class="ar" d="M110,94 V128" marker-end="url(#ah)"/><text class="al" x="118" y="116" text-anchor="start">preset.commit</text>
+<path class="ar" d="M300,94 V128" marker-end="url(#ah)"/><text class="al" x="308" y="116" text-anchor="start">preview, layout</text>
+<path class="ar" d="M110,200 V238" marker-end="url(#ah)"/>
+<path class="ar" d="M300,200 V238" marker-end="url(#ah)"/>
+<path class="ar" d="M210,310 V370" marker-end="url(#ah)"/><text class="al" x="218" y="345" text-anchor="start">render_scene</text>
+<path class="ar" d="M512,94 V128" marker-end="url(#ah)"/><text class="al" x="520" y="116" text-anchor="start">synthetic</text>
+<path class="ar" d="M707,94 V128" marker-end="url(#ah)"/><text class="al" x="715" y="116" text-anchor="start">exported (папка)</text>
+<path class="ar" d="M455,200 V370" marker-end="url(#ah)"/><text class="al" x="462" y="222" text-anchor="start">эффекты</text>
+<path class="ar" d="M770,200 V370" marker-end="url(#ah)"/><text class="al" x="762" y="222" text-anchor="end">слои, кадр</text>
+<path class="ar" d="M800,62 H818" marker-end="url(#ah)"/><text class="al" x="809" y="24" text-anchor="middle">модель</text>
+<path class="ar" d="M900,350 V440 H802" marker-end="url(#ah)"/><text class="al" x="812" y="432" text-anchor="start">вырез</text>
+<path class="ar" d="M600,508 V540" marker-end="url(#ah)"/><text class="al" x="608" y="528" text-anchor="start">только layer_render → draw</text>
+<path class="ar" d="M1160,264 V570" marker-end="url(#ah)"/><text class="al" x="1152" y="420" text-anchor="end">рисует через draw</text></svg></div>
+<p class="muted">Чем отличается от старой страницы <code>docs/diagrams/layer-render/editor-system.html</code> (2026-10-03): там нет <code>Services/draw</code>,
+склейка остаётся в <code>layer_render</code>; нет второго пути обучения <code>DatasetEngine</code> и задачи свести его к пресету; не показано рисование на линии.
+Совпадает: веб и Qt — клиенты одних команд, хранилище пресета с ревизией, процесс <code>layers</code> со схемой полей и каталогом эффектов, режим разметки на той же канве.</p>
+</section>
+
+<section>
+<h2>Старые планы → новый план</h2>
+<div class="tbl"><table>
+<thead><tr><th>План</th><th>Состояние</th><th>Куда идёт</th></tr></thead>
+<tbody>
+<tr><td><code>layer-render</code> (Ф1–Ф9)</td><td>22 задачи, 15 закрыто по git; запуском: 13 работают, 2.2 и 5.3 частично</td><td><span class="badge b-new">новый план</span> открытое — ЛР-01 … ЛР-24 в <code>plans/layer-render/plan.md</code></td></tr>
+<tr><td><code>line-sim-layer-editor</code></td><td>12 задач, 8 закрыто; 1.2b, 1.3 (Qt) ждут И3; 1.1 отложена; 2.1 необязательна</td><td><span class="badge b-move">поглощается</span> 1.2b + 1.3 → ЛР-17, 1.1 → ЛР-19, 2.1 → ЛР-20</td></tr>
+<tr><td><code>line-sim</code> Task 4.3 (фотометрия сцены)</td><td>не начата</td><td><span class="badge b-move">переезжает</span> → ЛР-06. Остальное в <code>line-sim</code> (4.1, 4.2, 5.5, 6.3, 6.4) остаётся там</td></tr>
+<tr><td><code>2026-11-11_draw-universal</code></td><td>APPROVED, 0 из 12</td><td><span class="badge b-same">отдельно</span> нижний слой; 0.1 → 1.1 → 1.2 идут до ЛР-06; поправка design §3 и Task 1.1 — по Р10</td></tr>
+<tr><td><code>2026-11-11_dataset-sidecar-truth</code> (DS-1)</td><td>в <code>main</code> 1.1a, 1.1b, 2.1; отчёт 0.1; 1.1c — только спека; 4 отложены</td><td><span class="badge b-same">отдельно</span> пары «кадр + истина сима»</td></tr>
+<tr><td><code>dataset-annotation</code></td><td>DRAFT, 0 из 17</td><td><span class="badge b-same">отдельно</span> Ф2 (свой редактор разметки) ждёт решения Р4</td></tr>
+<tr><td><code>letters-retrain</code></td><td>0.1 заменена, 0.2 и 0.3 закрыты, 0.4 — только на симе; Ф1 без задач</td><td><span class="badge b-same">отдельно</span> потребитель; 0.4 на реальных кадрах решает, поднимать ли работу в 1.0</td></tr>
+<tr><td><code>gui-constructor</code></td><td>отложен в 2.0 (ORDER строка 33)</td><td><span class="badge b-same">зависимость</span> шаг И3 открывает Qt-редактор ЛР-17</td></tr>
+<tr><td><code>circle_draw</code>, <code>contour_draw</code></td><td>работают</td><td><span class="badge b-frz">заморозить</span> по draw-universal 2.2–2.3: рецепты переходят на <code>overlay_draw</code>, код и тесты остаются</td></tr>
+</tbody></table></div>
+</section>
+
+<section>
+<h2>Порядок <span class="prop">(предложение)</span></h2>
+<p>План отложен владельцем в 2.0 (ORDER строка 40). Старт — только по вашему слову.</p>
+<ol class="steps">
+<li class="out"><div class="step-h">0. Вне плана: draw-universal 0.1 → 1.1 → 1.2</div><div class="after">замеры, словарь фигур и общая склейка, текст. Нужны до ЛР-06.</div></li>
+<li class="fast"><div class="step-h">Ф-А. Честная картинка обучения: ЛР-02, ЛР-01, ЛР-03, ЛР-21</div><div class="after">идёт параллельно шагу 0. Первой поднимается в 1.0, если строка 27 провалится и решено учить новым путём.</div></li>
+<li><div class="step-h">Ф-Б. Пресет v2 и бэкенд редактора: ЛР-24 → ЛР-06 → ЛР-05, ЛР-07 → ЛР-08 → ЛР-09; ЛР-16 после ЛР-06</div><div class="after">после draw 1.1 и 1.2.</div></li>
+<li><div class="step-h">Ф-В. Веб-редактор: ЛР-10 → ЛР-11; ЛР-12 в любой момент</div><div class="after">после ЛР-08, ЛР-09. Страницу <code>pult_web</code> правит одна задача за раз (там же line-sim 6.4).</div></li>
+<li><div class="step-h">Ф-Г. Источники картинки: ЛР-13 → ЛР-14, ЛР-15</div><div class="after">после ЛР-06; ЛР-14 — после draw 1.2.</div></li>
+<li><div class="step-h">Ф-Д. Qt-редактор: ЛР-17</div><div class="after">после шага И3 gui-constructor.</div></li>
+<li><div class="step-h">Ф-Е. Разметка регионов тем же редактором: ЛР-18</div><div class="after">после Ф-В и решения Р4; экспорт YOLO/COCO — из <code>Services/draw</code>.</div></li>
+<li class="out"><div class="step-h">По желанию: ЛР-19, ЛР-20, ЛР-22, ЛР-23</div><div class="after">бутылка, налив, поворот без среза края, бюджет кадра.</div></li>
+</ol>
+</section>
+
+<section>
+<h2>Ваши решения, которые ещё открыты</h2>
+<ul class="dec">
+<li><b>Р1.</b> Порог для сети на реальных кадрах (β7) и что делать в зоне 55–85 %.</li>
+<li><b>Р2.</b> Подтвердить: пресет v2 (ЛР-06) ждёт draw 1.1 и 1.2.</li>
+<li><b>Р3.</b> Какие эффекты и какой силы нужны обучению букв.</li>
+<li><b>Р4.</b> Разметка — один редактор или ещё отдельный из <code>dataset-annotation</code>.</li>
+<li><b>Р5.</b> Принять предложения по соседним планам (таблица выше).</li>
+<li><b>Р6.</b> Чинить ли срез края при повороте — меняет пиксели данных.</li>
+<li><b>Р7.</b> Нужен ли бюджет времени кадра.</li>
+<li><b>Р8.</b> Картинки бутылки; нужен ли налив.</li>
+<li><b>Р9.</b> Что первым на странице <code>pult_web</code>: line-sim 6.4 или ЛР-10, ЛР-11.</li>
+<li><b>Р10.</b> Перенести склейку слоёв в <code>Services/draw</code>. Рекомендация — «да»; это пересматривает вердикт CTO 2026-11-11 (оставить склейку в <code>layer_render</code>).</li>
+<li><b>Р11.</b> Строка 40 очереди: указывать на letters-retrain Ф1 вместо Task 3.1.</li>
+<li><b>Р12.</b> Тестов <code>layer_render</code> с импортом <code>line_sim</code> шесть, разрешено три.</li>
+</ul>
+<p class="muted">Подробности, источники и номера старых задач — <code>plans/layer-render/plan.md</code>; отчёт проверки — <code>docs/reports/2026-11-26_layer-render_status-audit.md</code>.</p>
+</section>
+</main>
