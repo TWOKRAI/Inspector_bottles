@@ -87,7 +87,10 @@ blueprint:
             frame_rate: 25.0
             # 40000 мкс — экспозиция сцены со стенда 0.5 (умолчание register'а 10000 мкс в 4 раза темнее).
             exposure_time: 40000.0
-            # packet_managed/packet_size не заданы: выставить на дне №1 по GevSCPSPacketSize.
+            # Пакет GigE задан явно: после подачи питания камера бывает с 8164, и битые кадры приходят чёрными.
+            packet_managed: true
+            packet_size: 1500
+            packet_delay: 400
             auto_start: true
             # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
             # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
