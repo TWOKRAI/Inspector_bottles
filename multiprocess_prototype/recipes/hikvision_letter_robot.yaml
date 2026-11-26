@@ -133,6 +133,9 @@ blueprint:
             packet_managed: true
             packet_size: 1500
             packet_delay: 400
+            # Обрыв связи (решение владельца 2026-11-26): 3 с без кадров = камера потеряна, прибор открывается заново сам.
+            reconnect: true
+            link_silence_s: 3.0
             auto_start: true
             # Старый HikvisionCamera.open писал TriggerMode=Off при каждом open; новый путь по умолчанию не пишет.
             # Кавычки обязательны: голое Off в YAML 1.1 — это bool False.
