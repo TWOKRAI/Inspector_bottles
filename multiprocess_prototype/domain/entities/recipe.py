@@ -21,13 +21,42 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from .display import DisplayDefinition, DisplayInstance
 from .topology import Topology
+
+logger = get_std_logger(__name__)
+
+
+def _load_display(item: dict[str, Any]) -> DisplayDefinition:
+    """Экран из словаря рецепта; негодное ``plate_*`` не отменяет загрузку (H2).
+
+    Все ошибки по ключам ``plate_*`` -> эти ключи убираются из копии ``item`` (поле берёт
+    умолчание), на каждый ключ один WARNING без значения из файла. Хоть одна ошибка не по
+    ``plate_*`` (в том числе проверка всей модели с пустым ``loc``) -> отказ без изменений.
+    ``item`` не изменяется.
+    """
+    try:
+        return DisplayDefinition.from_dict(item)
+    except ValidationError as exc:
+        errors = exc.errors()
+        if not all(error["loc"] and str(error["loc"][0]).startswith("plate_") for error in errors):
+            raise
+        bad = {str(error["loc"][0]): error["type"] for error in errors}
+
+    definition = DisplayDefinition.from_dict({key: value for key, value in item.items() if key not in bad})
+    for key, error_type in bad.items():
+        if error_type == "extra_forbidden":
+            logger.warning("дисплей '%s': неизвестный %s убран", definition.id, key)
+        else:
+            default = DisplayDefinition.model_fields[key].default
+            logger.warning("дисплей '%s': негодный %s, взят %s", definition.id, key, default)
+    return definition
 
 
 class RecipeMeta(SchemaBase):
@@ -124,7 +153,7 @@ class Recipe(SchemaBase):
             items: list[DisplayDefinition] = []
             for item in v:
                 if isinstance(item, dict):
-                    items.append(DisplayDefinition.from_dict(item))
+                    items.append(_load_display(item))
                 elif isinstance(item, DisplayDefinition):
                     items.append(item)
                 else:
