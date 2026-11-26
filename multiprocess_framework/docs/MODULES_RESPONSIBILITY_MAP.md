@@ -6,7 +6,8 @@
 - Статусы/LOC/тесты — [`../MODULES_STATUS.md`](../MODULES_STATUS.md).
 - Детали одного модуля — `modules/<имя>/README.md`.
 
-**Обновлено:** 2026-07-26 — Ф8 H.1: счётчик 25 → **27**, добавлены зоны `app_module` и `telemetry_readmodel_module` (существовали в коде, но не в карте). Ярусы `core`/`optional`/`frozen` — отдельным документом [`MODULE_TIERS.md`](MODULE_TIERS.md).
+**Обновлено:** 2026-11-26 — состояние работы системы закреплено за `process_manager_module` (Task 2.5 system-run-state).
+**Ранее** 2026-07-26 — Ф8 H.1: счётчик 25 → **27**, добавлены зоны `app_module` и `telemetry_readmodel_module` (существовали в коде, но не в карте). Ярусы `core`/`optional`/`frozen` — отдельным документом [`MODULE_TIERS.md`](MODULE_TIERS.md).
 **Ранее** 2026-07-12 — C8 docs-sync (constructor-master Ф5-добор): `recipe` — yaml_io/реестр миграций владеет модуль (C2/C3, ADR-RCP-003/005), assembler/planner явно НЕ в модуле; `process_manager_module` — топология (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) и структурный вывод join/inspector (ADR-PMM-017) добавлены в зону ответственности.
 **Ранее** 2026-07-08 — первичная сверка с фактическим кодом (25 модулей; `sql_module` в `Services/sql`).
 
@@ -39,8 +40,8 @@
 | `app_module` | **композиционная крыша** приложения («рыба», Ф5.11): манифест + дискавери, сборка proc-dicts, bootstrap состояния, `run_app`/`build_app` | внутренностями конкретных подсистем; внутри framework его **не импортирует никто** |
 | `worker_module` | потоки внутри процесса (LOOP/TASK, lifecycle); `KeyedExecutor` (порядок по ключу, ADR-WRK-005) и `ExecutorManager` — **именованные исполнители процесса**: создаёт из `config["executors"]`/кода, владеет созданными, отдаёт `CommandManager` по имени, `introspect.executors` (Task 1.9m, ADR-WRK-006) | процессами, DAG-пайплайнами; командами и маршрутизацией (это `command_module`/`router_module`) |
 | `chain_module` | DAG/Chain/Parallel **исполнение** пайплайна + worker-pool | сетевым IPC, потоками общего назначения |
-| `process_module` | база дочернего процесса (собирает подсистемы) | оркестрацией нескольких процессов |
-| `process_manager_module` | оркестратор системы (spawn/monitor/registry) + топология (`SystemBlueprint`/`ProcessConfig`/`Wire` в `topology/`, ADR-PMM-016; структурный вывод `join`/`inspector` из wires, ADR-PMM-017) | внутренней логикой конкретного процесса |
+| `process_module` | база дочернего процесса (собирает подсистемы); самоотчёт готовности и хуки `pause/resume` по `run_event` (ADR-PM-065) | оркестрацией нескольких процессов; состоянием работы системы (это PM, ADR-PMM-053) |
+| `process_manager_module` | оркестратор системы (spawn/monitor/registry) + топология (`SystemBlueprint`/`ProcessConfig`/`Wire` в `topology/`, ADR-PMM-016; структурный вывод `join`/`inspector` из wires, ADR-PMM-017); **состояние работы системы — PM** (машина `booting … fault`, команды `system.run.*`, флаг `run_event`, агрегат готовности, ADR-PMM-053) | внутренней логикой конкретного процесса |
 | `console_module` | терминальный I/O процесса (passive/active/God) | бизнес-командами (только транспорт stdin→CommandManager) |
 | `service_module` | реестр **сервисов** с lifecycle (камеры, БД, auth) | реестром регистров/дисплеев/плагинов |
 | `display_module` | реестр **SHM-каналов кадров** (blueprint + YAML) | созданием SHM (это SRM), vision-семантикой |
