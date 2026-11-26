@@ -35,13 +35,13 @@
 ## Порядок выполнения
 
 ### Фаза 1: сейчас, без приборов
-- Task C6.1: скрипт стенда через `backend_ctl`: таблица по камерам, `link`, потери, выход 1 при сбое [PENDING]
-- Task H1: ревью стадии 5 коммитов `d89637973` (reconnect в рецепте букв) и `989c669e5` (`plate_source`) [PENDING]
-- Task H2: опечатка в `plate_*` одного экрана не отклоняет весь рецепт [PENDING]
-- Task H3: слепой тест `test_plate_wraps_and_every_exit_unwraps`: пустая проверка `heightForWidth` [PENDING]
-- Task H4: после переподключения `lost_frames` не прыгает на длину обрыва [PENDING]
-- Task H5: `mvcr_probe.py` записывает случай `get_frame -> None` [PENDING]
-- Task H9: регистр камеры MVS не называет себя `driver: fake` (F5 стенда волны 1) [PENDING]
+- Task C6.1: скрипт стенда через `backend_ctl`: таблица по камерам, `link`, потери, выход 1 при сбое [IN PROGRESS] (код и ревью — `f08c18b01`; ждёт живого прогона на стенде)
+- Task H1: ревью стадии 5 коммитов `d89637973` (reconnect в рецепте букв) и `989c669e5` (`plate_source`) [DONE] (`4b59dcfb5`; H1-fix `6bf7e1140`, ветка `integ/dcb-phase1`)
+- Task H2: опечатка в `plate_*` одного экрана не отклоняет весь рецепт [DONE] (`3e2194b4c`, ветка `integ/dcb-phase1`)
+- Task H3: слепой тест `test_plate_wraps_and_every_exit_unwraps`: пустая проверка `heightForWidth` [DONE] (`a41fd1868`, ветка `integ/dcb-phase1`)
+- Task H4: после переподключения `lost_frames` не прыгает на длину обрыва [DONE] (`dc573ec4d`, ветка `integ/dcb-phase1`)
+- Task H5: `mvcr_probe.py` записывает случай `get_frame -> None` [DONE] (`1b61ca8c6`, ветка `integ/dcb-phase1`)
+- Task H9: регистр камеры MVS не называет себя `driver: fake` (F5 стенда волны 1) [DONE] (`b00b00a34`, ветка `integ/dcb-phase1`)
 
 ### Фаза 2: день с железом 1.0 (одна MVS, рецепт букв)
 - Task C0.5: набор реальных кадров дисков (остаток М1) [IN PROGRESS] (стенд и дерево узлов — `15e3687a6`)
