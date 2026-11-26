@@ -62,6 +62,7 @@ class _Api:
         self.journal.append("start_grabbing")
         if self.start_exc is not None:
             raise self.start_exc
+        self.now += 5.0  # сам запуск захвата длится: t_s считается ОТ его конца, не от точки до вызова
 
     def stop_grabbing(self, h: Any) -> None:
         self.journal.append("stop_grabbing")

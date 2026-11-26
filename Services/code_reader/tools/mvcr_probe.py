@@ -332,8 +332,8 @@ def run_session(api: Any, sets: list[NodeSet], seconds: float, out: Path | None,
             if rc == 0:
                 grabbing = True  # до вызова: если он начал захват и бросил, stop_grabbing всё равно нужен
                 api.start_grabbing(h)
+                t0 = time.perf_counter()  # до баннера: Ctrl+C в его печати тоже должен дать summary
                 print(f">>> ЖДУ {seconds:.0f} c — жми кнопку", flush=True)
-                t0 = time.perf_counter()
                 end = t0 + seconds
                 while time.perf_counter() < end:
                     try:
