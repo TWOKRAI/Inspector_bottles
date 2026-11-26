@@ -221,3 +221,11 @@
 ## PID-реестр: область «приложение И checkout» (2026-11-15, D2, ADR-PMM-046)
 
 - Имя дефолтного реестра — `<app>_<tag>_system_pids.jsonl` (`tag` — отпечаток корня checkout): два checkout одного приложения не реапают друг друга. Прежний неразделённый файл `<app>_system_pids.jsonl` не реапается и не удаляется. Лог реапа: строка на жертву `убит pid=… (имя)`. Границы (легаси не-`inspector` приложений, параллельный запуск того же checkout, SHM/порт/логи вне реестра) — в ADR-PMM-046. Тесты: `tests/test_pid_registry_app_scoped.py`, `tests/test_pid_registry.py`, `tests/test_pid_registry_checkout_acceptance.py`.
+
+## Свежие очереди на рестарте и проба замка чтения (2026-11-26, C-36, ADR-PMM-054)
+
+- Ключ конфига оркестратора `restart_reuse_queues`, умолчание `false` (свежие очереди, incarnation растёт,
+  выжившие шлют через hub-relay). `true` — откат: очереди переиспользуются.
+- `supervision.status` отдаёт `processes.<имя>.orphaned_read_locks` — накопленное число очередей, чей замок
+  чтения на рестарте был занят без читателя. Строка лога с `C-36`: WARNING при `false`, ERROR при `true`.
+- Не доказано и риски (в том числе зависание выхода выжившего и kind-каналы) — ADR-PMM-054.

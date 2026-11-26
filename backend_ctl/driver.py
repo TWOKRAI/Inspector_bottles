@@ -1270,12 +1270,14 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``process`` фильтрует один процесс.
 
         Сырой dict (Dict at Boundary). Маркер «до/после рестарта» — пара
-        ``pid`` + ``instance_restarts`` (видит замену инстанса всегда, включая
-        дефолтный reuse-очередей). ``instance_restarts`` считает ЛЮБУЮ замену
+        ``pid`` + ``instance_restarts`` (видит замену инстанса всегда, в обоих режимах
+        ``restart_reuse_queues``). ``instance_restarts`` считает ЛЮБУЮ замену
         через ``process.restart`` — и ручную, и авто-рестарт supervision (монитор
-        перезапускает упавшего той же командой). ``incarnation`` растёт только при
-        смене identity очередей (reuse=off) — это fencing-token и курсорная
-        плоскость B.1, а не ответ на вопрос «был ли рестарт». ``restart_count`` —
+        перезапускает упавшего той же командой). ``incarnation`` растёт при смене
+        identity очередей (по умолчанию — на каждом рестарте) — это fencing-token и
+        курсорная плоскость B.1, а не ответ на вопрос «был ли рестарт».
+        ``orphaned_read_locks`` — накопленные находки замка чтения, занятого без
+        читателя (C-36, ADR-PMM-054). ``restart_count`` —
         краш-рестарты в окне истории монитора.
         """
         args = {"process": process} if process else {}
