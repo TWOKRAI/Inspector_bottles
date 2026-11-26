@@ -22,6 +22,7 @@ from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
 from .frame_intake import latency_sample
+from .startup_progress import GuiStartupProgress
 from .windows.main_window import MainWindow
 from .widgets.image_panel import ImagePanelWidget
 from .tab_factory import TabFactory
@@ -204,6 +205,10 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Шкала загрузки (system.progress.gui, Task 2.6): по ней уходит заставка. Новый run_gui — новая шкала.
+    startup = GuiStartupProgress.for_process(process)
+    startup.step("qt")
+
     # Политика памяти GUI (T1): сборкой gc владеет главный поток — автосборка выключена,
     # сборка по тику QTimer. Сразу после QApplication: финализаторы Qt-обёрток не должны
     # исполняться на рабочих потоках. INSPECTOR_GUI_GC_POLICY=0 — выключить (A/B на стенде).
@@ -303,6 +308,7 @@ def run_gui(process: "GuiProcess") -> None:
         PluginRegistry.discover(*_app_plugin_paths)
     except Exception as e:
         process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
+    startup.step("plugins")
 
     # 2a. Создать PluginManager singleton (Phase 2.4)
     from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
@@ -456,6 +462,7 @@ def run_gui(process: "GuiProcess") -> None:
         ensure_subscription=(_gui_proxy.ensure_subscription if _gui_proxy is not None else None),
         release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
+    startup.step("state")
 
     # VM регистрируется вторым потребителем ПОСЛЕ bindings (порядок §11.15:
     # сначала bindings _state_cb, затем listener).
@@ -694,6 +701,7 @@ def run_gui(process: "GuiProcess") -> None:
             "Запустите перед запуском приложения:\n"
             "    python -m Services.auth.bootstrap"
         )
+        startup.done("ожидание пользователя")  # первое окно GUI: заставка уходит
         _dlg.exec()
         sys.exit(1)
 
@@ -705,6 +713,7 @@ def run_gui(process: "GuiProcess") -> None:
         from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
 
         _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
+        startup.done("ожидание пользователя")
         _dlg.exec()
         sys.exit(1)
 
@@ -755,6 +764,7 @@ def run_gui(process: "GuiProcess") -> None:
         from .widgets.dialogs.login_dialog import LoginDialog
 
         _login_dlg = LoginDialog(_auth_manager, _auth_state)
+        startup.done("ожидание пользователя")
         if _login_dlg.exec() != LoginDialog.DialogCode.Accepted:
             process._log_warning(
                 "auth.startup_login.cancelled: пользователь закрыл LoginDialog без входа — все табы будут скрыты",
@@ -1036,7 +1046,9 @@ def run_gui(process: "GuiProcess") -> None:
     # его выставил при сборке, и синхронизирует индикаторы (оба скрыты на старте).
     topology_session.reset()
 
+    startup.step("window")
     window.show()
+    startup.done()  # пустой вызов, если шкалу уже закрыл стартовый диалог
     app.exec()
 
 
