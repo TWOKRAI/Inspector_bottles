@@ -444,3 +444,74 @@ def test_app_wiring_silent_sender_draws_plate_on_its_display(wire) -> None:
     w.bridge.dispatch(_msg("camera_0"))
     assert _spin_until(lambda: not _label(w.panel, "display_2").pixmap().isNull(), 1.0), "картинка не вернулась"
     assert _label(w.panel, "display_2").styleSheet() == ""
+
+
+# ---------------------------------------------------------------------------
+# Пересборка дисплеев и отправители из привязок
+# ---------------------------------------------------------------------------
+
+
+def _two_bound_to_d() -> dict:
+    """Дисплей ``d`` с отправителями ``a`` и ``b``; ``e`` держит набор дисплеев непустым при выключенном ``d``."""
+    return {
+        "displays": [_display("d", "D"), _display("e", "E", 10)],
+        "blueprint": {
+            "displays": [
+                {"node_id": "a.src.frame", "display_id": "d"},
+                {"node_id": "b.src.frame", "display_id": "d"},
+            ]
+        },
+    }
+
+
+def test_rebuild_forgets_silence_of_dropped_keys(wire) -> None:
+    """Выключили и включили дисплей: прежняя тишина ``a`` не должна давать плашку поверх живой камеры."""
+    recipe = _two_bound_to_d()
+    w = wire(recipe)
+    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 2.0), "оба молчат, плашки нет"
+
+    recipe["displays"][0]["enabled"] = False
+    w.fire()
+    recipe["displays"][0]["enabled"] = True
+    w.fire()
+    calls = _spy_plate(w.panel, "d")  # слот пересоздан, шпион ставится на новый объект
+    producer = _Producer(w.bridge, "a")
+    try:
+        assert _spin_until(lambda: _shown(w.panel, "d") >= 1, 1.0), "кадры a не показаны"
+        calls.clear()
+        shown = _shown(w.panel, "d")
+        _spin(2.5)  # b молчит
+        assert _shown(w.panel, "d") > shown, "кадры a перестали показываться"
+        assert calls == [], f"плашка поверх живой камеры a: {calls}"
+    finally:
+        producer.stop()
+
+
+def test_rebuild_removes_plate_of_unbound_display(wire) -> None:
+    """Новый рецепт без привязки к ``d``: старая плашка снята, на слоте обычный placeholder."""
+    recipe = {
+        "displays": [_display("d", "D")],
+        "blueprint": {"displays": [{"node_id": "a.src.frame", "display_id": "d"}]},
+    }
+    w = wire(recipe)
+    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 2.0), "плашки нет"
+
+    recipe["blueprint"] = {"displays": []}
+    w.fire()
+    _spin(_QUIET_S)
+
+    assert _label(w.panel, "d").text() == "D"
+    assert _label(w.panel, "d").styleSheet() == ""
+
+
+def test_bound_sender_without_frames_holds_the_plate(wire) -> None:
+    """Привязанный отправитель, ещё не объявленный молчащим, не даёт поставить плашку по молчанию соседа."""
+    w = wire(_two_bound_to_d())
+    w.pump.stop()  # тишину сообщаем сами, в заданном порядке
+    calls = _spy_plate(w.panel, "d")
+
+    w.pump._on_silence("b", 1.0)  # noqa: SLF001
+    assert calls == [], f"плашка по молчанию одного b: {calls}"
+
+    w.pump._on_silence("a", 1.0)  # noqa: SLF001
+    assert calls == ["D · № — · —\nнет кадров, 1 с"]
