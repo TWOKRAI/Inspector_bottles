@@ -2,6 +2,10 @@
 
 Сгенерировано: `python scripts/memory/search.py --by-module --write`; не править вручную. Хаб: [BY-MODULE.md](BY-MODULE.md)
 
+## services/camera_device (1)
+
+- [reference_camera_jumbo_packet_size_black_frame](reference_camera_jumbo_packet_size_black_frame.md) — Чёрный кадр камеры / ~248 потерянных пакетов на кадр = GevSCPSPacketSize 8164; …
+
 ## services/code_reader (8)
 
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md) — Тест рецепта звал validate_recipe_blueprint и был зелёным, а загрузчик (SystemB…
@@ -28,9 +32,10 @@
 - [feedback_status_snapshot_lags_program_done](feedback_status_snapshot_lags_program_done.md) — devices.state.<id>.status идёт раз в такт хаба, .program — сразу; после done по…
 - [project_device_hub](project_device_hub.md) — device-hub — always-on процесс устройств, реестр, YAML-протоколы; статус и след…
 
-## services/hikvision_camera (1)
+## services/hikvision_camera (2)
 
 - [project_hikvision_aspect_ratio](project_hikvision_aspect_ratio.md) — Hikvision plugin resizes native frame anamorphically; set resolution to sensor …
+- [reference_camera_jumbo_packet_size_black_frame](reference_camera_jumbo_packet_size_black_frame.md) — Чёрный кадр камеры / ~248 потерянных пакетов на кадр = GevSCPSPacketSize 8164; …
 
 ## services/layer_render (2)
 

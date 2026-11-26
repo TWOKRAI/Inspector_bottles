@@ -1,8 +1,8 @@
 ---
 name: camera-jumbo-packet-size-black-frame
 description: "Чёрный кадр камеры / ~248 потерянных пакетов на кадр = GevSCPSPacketSize 8164; в рецепте 1500 (black frame, jumbo packet size, GigE packet loss, health stays ok)"
-mechanism: [stand, hardware]
-module: [hikvision_camera, camera_device]
+mechanism: [live-stand, measurement]
+module: [services/hikvision_camera, services/camera_device]
 metadata:
   type: reference
 ---
