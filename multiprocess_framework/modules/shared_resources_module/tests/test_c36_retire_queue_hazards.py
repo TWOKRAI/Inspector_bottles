@@ -173,3 +173,10 @@ def test_plain_queue_objects_are_left_alone() -> None:
         assert q.get(timeout=5.0) == b"x"
     finally:
         q.close()
+
+
+def test_never_written_queue_is_not_counted() -> None:
+    q = ReaderGoneQueue()
+    before = dict(RETIRE_STATS)
+    assert retire_queue(q) == 0
+    assert RETIRE_STATS == before
