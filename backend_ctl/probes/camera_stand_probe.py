@@ -228,7 +228,7 @@ def _print_table(report: dict) -> None:
 
 
 def _names(text: str) -> list[str]:
-    names = list(dict.fromkeys(part.strip() for part in text.split(",") if part.strip()))
+    names = [part.strip() for part in text.split(",") if part.strip()]
     if not names:
         raise argparse.ArgumentTypeError("пустой список")
     return names
@@ -244,12 +244,18 @@ def _seconds(text: str) -> float:
 def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="camera_stand_probe", description="Приёмка стенда камер через backend_ctl.")
     parser.add_argument("--port", type=int, default=None, help="порт backend_ctl (по умолчанию env или 8765)")
-    parser.add_argument("--processes", type=_names, required=True, help="процессы через запятую")
-    parser.add_argument("--plugins", type=_names, default=None, help="плагины через запятую (иначе все камерные)")
+    parser.add_argument("--processes", type=_names, action="extend", required=True, help="процессы через запятую")
+    parser.add_argument(
+        "--plugins", type=_names, action="extend", default=None, help="плагины через запятую (иначе все камерные)"
+    )
     parser.add_argument("--seconds", type=_seconds, default=60.0)
     parser.add_argument("--interval", type=_seconds, default=5.0)
     parser.add_argument("--out", type=Path, required=True, help="файл JSON-отчёта")
     args = parser.parse_args(argv)
+    # Повтор флага складывается (extend); дубль имени опросил бы его дважды за такт — ложный frames_stalled.
+    args.processes = list(dict.fromkeys(args.processes))
+    if args.plugins is not None:
+        args.plugins = list(dict.fromkeys(args.plugins))
     if args.interval <= 0:
         parser.error("--interval должен быть > 0")
     return args

@@ -133,7 +133,7 @@ class FakeDriver(BackendDriver):
             reply = self.fallback
         else:
             reply = TIMEOUT if key.startswith("telemetry:") else state_error(key)
-        if isinstance(reply, Exception):
+        if isinstance(reply, BaseException):
             raise reply
         return copy.deepcopy(reply)
 
@@ -417,3 +417,75 @@ def test_failed_final_detection_is_not_green(monkeypatch, tmp_path):
 
     assert code == 1
     assert report["errors"] == ["detect_failed:camera_0"]
+
+
+# --- повтор флага и прерванный прогон --------------------------------------
+
+
+def test_repeated_processes_flag_checks_every_process(monkeypatch, tmp_path):
+    fake = stand([tick(100), tick(220)])
+
+    code, report = run(monkeypatch, tmp_path, fake, 2, "--processes", "camera_0", processes="nope")
+
+    assert code == 1
+    assert "no_camera_plugin:nope" in report["errors"]
+    assert row(report)["failures"] == []
+
+
+def test_repeated_plugins_flag_checks_every_plugin(monkeypatch, tmp_path):
+    found = state_ok({"camera_device": block(), "hikvision": block(state="error")})
+    levels = [telemetry({"camera_device": metrics(n), "hikvision": metrics(n)}) for n in (100, 220)]
+    fake = FakeDriver(
+        {
+            _DETECT: [found, found],
+            _PLUGIN: [state_ok(block())] * 2,
+            f"{_DETECT}.hikvision": [state_ok(block(state="error"))] * 2,
+            "telemetry:camera_0": levels,
+        }
+    )
+
+    code, report = run(monkeypatch, tmp_path, fake, 2, "--plugins", "hikvision", "--plugins", "camera_device")
+
+    assert code == 1
+    assert row(report, "hikvision")["failures"] == ["state_not_grabbing"]
+    assert row(report)["failures"] == []
+
+
+@pytest.mark.parametrize(
+    "processes, extra",
+    [
+        ("camera_0,camera_0", ()),
+        ("camera_0", ("--processes", "camera_0")),
+        ("camera_0", ("--plugins", "camera_device", "--plugins", "camera_device")),
+    ],
+    ids=["comma_process", "repeated_process", "repeated_plugin"],
+)
+def test_duplicate_name_is_polled_once_per_tick(monkeypatch, tmp_path, processes, extra):
+    # Живой стенд на повторный вопрос в том же такте отвечает тем же уровнем: 100, 220, 220, 220.
+    # Опроси скрипт дубль дважды — последние два числа равны, то есть ложный frames_stalled.
+    found = state_ok({"camera_device": block()})
+    fake = FakeDriver(
+        {
+            _DETECT: [found] * 4,
+            _PLUGIN: [state_ok(block())] * 4,
+            "telemetry:camera_0": [tick(n)[1] for n in (100, 220, 220, 220)],
+        }
+    )
+
+    code, report = run(monkeypatch, tmp_path, fake, 2, *extra, processes=processes)
+
+    assert row(report)["failures"] == []
+    assert code == 0
+    assert fake.asked.count(_PLUGIN) == 2
+    assert fake.asked.count("telemetry:camera_0") == 2
+
+
+def test_interrupted_run_leaves_no_previous_report(monkeypatch, tmp_path):
+    out = tmp_path / "stand.json"
+    out.write_text('{"exit_code": 0}', encoding="utf-8")
+    fake = FakeDriver({}, fallback=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        run(monkeypatch, tmp_path, fake, 2)
+
+    assert not out.exists()
