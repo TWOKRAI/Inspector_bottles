@@ -129,6 +129,45 @@ Qt-виджеты не запускались: проба зовёт метод�
   `display_catalog_recipe.py:136-140` пишет его в лог.
 - На экране пользователь не видит, что поле заменено умолчанием (вне задачи).
 
+## Правки по ревью (APPROVED с замечаниями)
+
+Этот раздел новее разделов выше: тестов в новом файле стало 20 (было 16).
+
+1. `id` и неизвестный ключ в WARNING: если строка не `isprintable()`, пишется `ascii(строка)` (`_one_line`).
+   У `id` в такой строке двойные кавычки: `дисплей ''a\n...''`.
+2. Добавлены тесты: `my_plate_x` и `platex` отклоняют рецепт; перевод строки в ключе; перевод строки и ESC в `id`.
+   `_load` пишет лог с уровня DEBUG, поэтому утечка значения через `info` или `debug` видна.
+
+| Прогон (light) | Предсказание | Факт |
+|---|---|---|
+| новые тесты на коде без правки | 2 красных | `2 failed, 18 passed` |
+| код с правкой | зелёный | `20 passed` |
+| мутант `"plate_" in key` | `[my_plate_x]` | `1 failed, 19 passed` |
+| мутант `startswith("plate")` | `[platex]` | `1 failed, 19 passed` |
+| значение уходит в `logger.info` | 3 красных | `3 failed, 17 passed` |
+| ключ без экранирования | 1 | `1 failed, 19 passed` |
+| `id` без экранирования | 1 | `1 failed, 19 passed` |
+| `all` -> `any` | 1 | `1 failed, 19 passed` |
+| нет охраны пустого `loc` | 1 | `1 failed, 19 passed` |
+| изменение входного словаря | 1 | `1 failed, 19 passed` |
+
+Мутанты подменяли `_load_display` в памяти (pytest-плагин `h2_mut_plugin.py` в scratchpad). `sha1sum` исходника не изменился.
+Радиус правки: `501 passed, 7 skipped`. `ruff check`, `format --check` чисто; pyright `0 errors, 0 warnings`.
+Весь `domain/tests`: снова exit 75 (STAND WINDOW), не прогонялся.
+
+## Отклонённые команды и красный хук
+
+1. **Коммит правок по ревью не сделан.** `protect-branch.sh` отклонил `git commit`:
+   `refusing 'git commit' on protected branch 'main'`. Дерево стоит на `fix/dcb-h2-plate-fallback`
+   (`git branch --show-current`). Команду в другой форме я не повторял. Изменения лежат в дереве незакоммиченными.
+   Причина по тексту хука: строка 42 перехватывает команду, только когда какая-то её строка начинается с `git commit`;
+   строка 47 берёт ветку из текущего каталога хука, а не из каталога команды. Вывод по этому второму пункту:
+   хук видел основную копию (`main`). Это вывод из сообщения хука, отдельно не проверялся.
+2. Следствие: коммиты `7b9f32841` и `00fbb223a` шли формой `git add ... && git commit` в одной строке, и этот хук
+   их не проверял. Они легли на ветку задачи (`git log` в дереве).
+3. `pre_report_gate` красный: `pytest: cannot be imported` и совет `uv sync --extra dev` в дереве. Совет не выполнен:
+   правило проекта запрещает `uv sync` в worktree (заменяет CUDA-сборку torch).
+
 memory hits: `search.py recipe display plate validation fallback warning` -> 8 уроков; по описаниям близок
 `feedback_a_silent_fallback_hides_a_tool_that_always_fails.md` (откат логировать).
 
