@@ -17,3 +17,5 @@
 ## Находка в чужом коде (не чинил)
 
 Аудит действий пользователей в приложении не пишется: `multiprocess_prototype/frontend/app.py:721` задаёт `audit=None`, `AuditWriter(` вне тестов не создаётся (`git grep` на `53efe24b9`). Разбор: `docs/reports/2026-11-26_journal-design.md` на ветке `docs/robot-device-architecture`.
+
+- Общий потолок строк `ObservabilityStore.purge` стирает ошибки объёмом статистики: 3 строки `error` и 1000 строк `stats`, `purge(max_rows=500)` → `error` 0. Вкладка «Ошибки» теряет записи тем же путём. Адресат: полоса `refactor/observability-signal-contracts`. Прогон CTO 2026-11-26 на `53efe24b9`.
