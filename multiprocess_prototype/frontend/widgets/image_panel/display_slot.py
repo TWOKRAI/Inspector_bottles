@@ -112,6 +112,7 @@ class DisplaySlot(QWidget):
         self._label.clear()
         self._source_pixmap = None
         self._label.setStyleSheet(_PLATE_STYLE)
+        self._label.setWordWrap(True)  # длинный шаблон не должен уезжать за края слота
         self._label.setText(text)
         self._plate_shown = True
 
@@ -124,9 +125,10 @@ class DisplaySlot(QWidget):
             self.clear()
 
     def _drop_plate_style(self) -> None:
-        """Снять стиль плашки; без плашки стиль метки не трогается."""
+        """Снять стиль и перенос строк плашки; без плашки метка не трогается."""
         if self._plate_shown:
             self._label.setStyleSheet("")
+            self._label.setWordWrap(False)
             self._plate_shown = False
 
     def resizeEvent(self, event) -> None:

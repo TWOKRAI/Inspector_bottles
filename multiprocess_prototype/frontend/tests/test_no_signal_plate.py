@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """W2-c2: тёмная плашка с названием и адресом камеры вместо замершего кадра (тесты автора).
 
-Purpose: дисплей, у которого ВСЕ его отправители молчат ``_NO_SIGNAL_AFTER_S``, показывает плашку
-«<шаблон>\\nнет кадров, N с» и сам возвращается к кадру. Настоящие ``_setup_bridge_callbacks``,
+Purpose: дисплей в режиме ``silence``, у которого ВСЕ его отправители молчат ``plate_after_s``,
+показывает плашку «<шаблон>\\nнет кадров, N с» и сам возвращается к кадру; ``hold`` и ``trigger``
+плашку по тишине не ставят. Настоящие ``_setup_bridge_callbacks``,
 ``DataReceiverBridge``, ``FramePump`` и ``ImagePanelWidget``; рецепт — словарь.
 
 Ожидаемые значения — литералы. Ожидание — цикл событий Qt с дедлайном.
@@ -30,8 +31,8 @@ from PySide6.QtGui import QColor, QPixmap  # noqa: E402
 
 __all__: list[str] = []
 
-_SILENCE_S = 0.3  # порог тишины в тестах вместо боевых 2.0 с
-_QUIET_S = 1.2  # сколько молчим: заведомо дольше порога и первой целой секунды
+_QUIET_S = 2.5  # сколько молчим: дольше порога 1 с и умолчания 2 с
+_SILENT = {"plate_mode": "silence", "plate_after_s": 1}  # экран, где ждут плашку
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +72,9 @@ def _msg(sender: str) -> dict:
     return {"sender": sender, "frame": np.full((48, 64, 3), 200, dtype=np.uint8), "data": {}}
 
 
-def _display(display_id: str, name: str, x: int = 0) -> dict:
-    return {"id": display_id, "name": name, "enabled": True, "position": {"x": x, "y": 0}, "fps_limit": 30.0}
+def _display(display_id: str, name: str, x: int = 0, **plate: Any) -> dict:
+    position = {"x": x, "y": 0}
+    return {"id": display_id, "name": name, "enabled": True, "position": position, "fps_limit": 30.0, **plate}
 
 
 class _Producer:
@@ -94,8 +96,8 @@ class _Producer:
 
 
 @pytest.fixture()
-def wire(qtbot, monkeypatch):
-    """Фабрика проводки: настоящие мост, насос и панель; порог тишины 0.3 с задан ДО настройки."""
+def wire(qtbot):
+    """Фабрика проводки: настоящие мост, насос и панель; режим и порог плашки берутся из рецепта."""
     from multiprocess_prototype.frontend import app as app_module
     from multiprocess_prototype.frontend.bridge import DataReceiverBridge
     from multiprocess_prototype.frontend.frame_intake import FrameIntake
@@ -104,8 +106,6 @@ def wire(qtbot, monkeypatch):
     pumps: list = []
 
     def _make(recipe: dict) -> SimpleNamespace:
-        monkeypatch.setattr(app_module, "_NO_SIGNAL_AFTER_S", _SILENCE_S)
-
         class _Recipes:
             def get_active(self) -> str:
                 return "plate"
@@ -238,6 +238,8 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "address": None,
         "serial": "S1",
         "template": "",
+        "mode": "hold",
+        "after_s": 2,
     }
     assert sources["d1"] == {
         "source": "cam_1.hikvision",
@@ -246,6 +248,8 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "address": None,
         "serial": "DA1",
         "template": "{title}",
+        "mode": "hold",
+        "after_s": 2,
     }
     assert sources["r1"] == {
         "source": "reader_1.code_reader_sdk",
@@ -254,6 +258,8 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "address": "192.168.1.10",
         "serial": None,
         "template": "",
+        "mode": "hold",
+        "after_s": 2,
     }
     assert sources["free"] == {
         "source": "",
@@ -262,6 +268,8 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "address": None,
         "serial": None,
         "template": "",
+        "mode": "hold",
+        "after_s": 2,
     }
     assert build_plate_sources({"displays": "x", "blueprint": {"processes": None}}) == {}
     assert build_plate_sources(None) == {}
@@ -355,7 +363,7 @@ def test_unshown_frame_returns_false(wire) -> None:
 
 def test_two_senders_one_display_no_plate_while_one_alive(wire) -> None:
     recipe = {
-        "displays": [_display("d", "D")],
+        "displays": [_display("d", "D", **_SILENT)],
         "blueprint": {
             "displays": [
                 {"node_id": "a.src.frame", "display_id": "d"},
@@ -389,7 +397,7 @@ def test_two_senders_one_display_no_plate_while_one_alive(wire) -> None:
 
 
 def test_two_unbound_senders_on_main_no_plate_while_one_alive(wire) -> None:
-    w = wire({"displays": [], "blueprint": {"displays": []}})
+    w = wire({"displays": [_display("main", "main", **_SILENT)], "blueprint": {"displays": []}})
     calls = _spy_plate(w.panel, "main")
     w.bridge.dispatch(_msg("u1"))
     assert _spin_until(lambda: _shown(w.panel, "main") >= 1, 1.0), "кадр u1 не показан"
@@ -411,7 +419,7 @@ def test_two_unbound_senders_on_main_no_plate_while_one_alive(wire) -> None:
 
 
 def test_scan_found_sender_survives_rebuild(wire) -> None:
-    w = wire({"displays": [], "blueprint": {"displays": []}})
+    w = wire({"displays": [_display("main", "main", **_SILENT)], "blueprint": {"displays": []}})
     w.bridge.dispatch(_msg("u"))
     assert _spin_until(lambda: w.bridge.frame_mailbox.stats()["pending"] == 0 and _shown(w.panel, "main") >= 1, 1.0), (
         "кадр не показан до пересборки"
@@ -425,7 +433,7 @@ def test_scan_found_sender_survives_rebuild(wire) -> None:
 
 def test_app_wiring_silent_sender_draws_plate_on_its_display(wire) -> None:
     recipe = {
-        "displays": [_display("display_2", "Камера 0"), _display("display_x", "Пустой", 10)],
+        "displays": [_display("display_2", "Камера 0", **_SILENT), _display("display_x", "Пустой", 10, **_SILENT)],
         "blueprint": {
             "displays": [{"node_id": "camera_0.camera_device.frame", "display_id": "display_2"}],
             "processes": [{"process_name": "camera_0", "plugins": [{"plugin_name": "camera_device", "camera_id": 0}]}],
@@ -454,7 +462,7 @@ def test_app_wiring_silent_sender_draws_plate_on_its_display(wire) -> None:
 def _two_bound_to_d() -> dict:
     """Дисплей ``d`` с отправителями ``a`` и ``b``; ``e`` держит набор дисплеев непустым при выключенном ``d``."""
     return {
-        "displays": [_display("d", "D"), _display("e", "E", 10)],
+        "displays": [_display("d", "D", **_SILENT), _display("e", "E", 10, **_SILENT)],
         "blueprint": {
             "displays": [
                 {"node_id": "a.src.frame", "display_id": "d"},
@@ -468,7 +476,7 @@ def test_rebuild_forgets_silence_of_dropped_keys(wire) -> None:
     """Выключили и включили дисплей: прежняя тишина ``a`` не должна давать плашку поверх живой камеры."""
     recipe = _two_bound_to_d()
     w = wire(recipe)
-    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 2.0), "оба молчат, плашки нет"
+    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 3.0), "оба молчат, плашки нет"
 
     recipe["displays"][0]["enabled"] = False
     w.fire()
@@ -490,11 +498,11 @@ def test_rebuild_forgets_silence_of_dropped_keys(wire) -> None:
 def test_rebuild_removes_plate_of_unbound_display(wire) -> None:
     """Новый рецепт без привязки к ``d``: старая плашка снята, на слоте обычный placeholder."""
     recipe = {
-        "displays": [_display("d", "D")],
+        "displays": [_display("d", "D", **_SILENT)],
         "blueprint": {"displays": [{"node_id": "a.src.frame", "display_id": "d"}]},
     }
     w = wire(recipe)
-    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 2.0), "плашки нет"
+    assert _spin_until(lambda: "нет кадров" in _label(w.panel, "d").text(), 3.0), "плашки нет"
 
     recipe["blueprint"] = {"displays": []}
     w.fire()
@@ -515,3 +523,141 @@ def test_bound_sender_without_frames_holds_the_plate(wire) -> None:
 
     w.pump._on_silence("a", 1.0)  # noqa: SLF001
     assert calls == ["D · № — · —\nнет кадров, 1 с"]
+
+
+# ---------------------------------------------------------------------------
+# Режим плашки на каждом экране, порог, перенос строки (W2-c2b)
+# ---------------------------------------------------------------------------
+
+
+def _spy_silence(pump: Any) -> list[tuple[str, float | None]]:
+    """Что насос сообщил приложению: список (ключ, возраст тишины)."""
+    original = pump._on_silence  # noqa: SLF001
+    seen: list[tuple[str, float | None]] = []
+
+    def spy(key: str, age_s: float | None) -> None:
+        seen.append((key, age_s))
+        original(key, age_s)
+
+    pump._on_silence = spy  # noqa: SLF001
+    return seen
+
+
+def _quiet_calls(wire, plate: dict) -> tuple[list[str], list[str]]:
+    """Экран ``d`` с настройками ``plate`` и контроль ``c`` (silence/1), оба молчат: вызовы плашки."""
+    w = wire(
+        {
+            "displays": [_display("d", "Экран", **plate), _display("c", "Контроль", 10, **_SILENT)],
+            "blueprint": {
+                "displays": [
+                    {"node_id": "sd.src.frame", "display_id": "d"},
+                    {"node_id": "sc.src.frame", "display_id": "c"},
+                ]
+            },
+        }
+    )
+    calls = _spy_plate(w.panel, "d")
+    control = _spy_plate(w.panel, "c")
+    _spin(_QUIET_S)
+    return calls, control
+
+
+def test_hold_mode_by_default_no_plate(wire) -> None:
+    calls, control = _quiet_calls(wire, {})
+
+    assert control and control[0] == "Контроль · № — · —\nнет кадров, 1 с"
+    assert calls == []
+
+
+def test_trigger_mode_no_plate_on_silence(wire) -> None:
+    calls, control = _quiet_calls(wire, {"plate_mode": "trigger", "plate_after_s": 1})
+
+    assert control and control[0] == "Контроль · № — · —\nнет кадров, 1 с"
+    assert calls == []
+
+
+def test_no_displays_section_no_plate(wire) -> None:
+    w = wire({"displays": [], "blueprint": {"displays": []}})
+    calls = _spy_plate(w.panel, "main")
+    silences = _spy_silence(w.pump)
+    w.bridge.dispatch(_msg("lonely"))
+    assert _spin_until(lambda: _shown(w.panel, "main") >= 1, 1.0), "кадр не показан"
+
+    _spin(_QUIET_S)
+
+    assert any(key == "lonely" and age is not None and age >= 2.0 for key, age in silences), silences
+    assert calls == []
+
+
+def test_silence_threshold_per_display(wire) -> None:
+    w = wire(
+        {
+            "displays": [
+                _display("d1", "Один", plate_mode="silence", plate_after_s=1),
+                _display("d2", "Три", 10, plate_mode="silence", plate_after_s=3),
+            ],
+            "blueprint": {
+                "displays": [
+                    {"node_id": "s1.src.frame", "display_id": "d1"},
+                    {"node_id": "s2.src.frame", "display_id": "d2"},
+                ]
+            },
+        }
+    )
+    started = time.perf_counter()
+    first = _spy_plate(w.panel, "d1")
+    second = _spy_plate(w.panel, "d2")
+
+    _spin(2.2 - (time.perf_counter() - started))
+    assert first, "к 2,2 с плашки на d1 нет"
+    assert second == [], f"плашка на d2 раньше 3 с: {second}"
+
+    _spin(3.3 - (time.perf_counter() - started))
+    assert second and second[0] == "Три · № — · —\nнет кадров, 3 с"
+    assert "нет кадров" in _label(w.panel, "d1").text()
+
+
+def _plate_entry(**keys: Any) -> dict:
+    from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import build_plate_sources
+
+    return build_plate_sources({"displays": [{"id": "fallback_d", **keys}]})["fallback_d"]
+
+
+def test_bad_mode_and_after_fall_back() -> None:
+    assert _plate_entry(plate_mode="silence")["mode"] == "silence"
+    assert _plate_entry(plate_mode="trigger")["mode"] == "trigger"
+    assert _plate_entry(plate_mode="blink")["mode"] == "hold"
+    assert _plate_entry(plate_after_s=1)["after_s"] == 1
+    assert _plate_entry(plate_after_s=600)["after_s"] == 600
+    for bad in (0, 601, True, "5", 5.0):
+        result = _plate_entry(plate_after_s=bad)["after_s"]
+        assert result == 2 and type(result) is int, (bad, result)
+    assert _plate_entry()["mode"] == "hold"
+    assert _plate_entry()["after_s"] == 2
+
+
+def test_bad_values_warn_once_without_value(caplog) -> None:
+    from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import build_plate_sources
+
+    recipe = {"displays": [{"id": "warn_d", "plate_mode": "blink_once"}]}
+    with caplog.at_level(logging.WARNING):
+        build_plate_sources(recipe)
+        build_plate_sources(recipe)
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(messages) == 1, messages
+    assert "warn_d" in messages[0] and "plate_mode" in messages[0]
+    assert "blink_once" not in messages[0]
+
+
+def test_plate_wraps_and_unwraps(slot) -> None:
+    long_text = "длинная строка плашки " * 5 + "конец наяву"
+    label = slot._label  # noqa: SLF001
+    exits = (slot.leave_no_signal, lambda: slot.update_pixmap(_pixmap()), lambda: slot.set_placeholder("Ошибка кадра"))
+    for leave in exits:
+        slot.show_no_signal(long_text)
+        assert label.wordWrap() is True
+
+        leave()
+
+        assert label.wordWrap() is False

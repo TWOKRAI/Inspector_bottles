@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 import string
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 
@@ -47,6 +47,14 @@ _PLATE_FIELDS = frozenset({"title", "number", "address", "serial", "process"})
 
 # Тексты неразбираемых шаблонов, о которых WARNING уже сказан.
 _warned_templates: set[str] = set()
+
+#: Порог тишины режима ``silence`` (с), если у дисплея нет годного ``plate_after_s``.
+DEFAULT_PLATE_AFTER_S = 2
+
+_PLATE_MODES = ("hold", "silence", "trigger")
+
+# Негодные plate_mode/plate_after_s, о которых WARNING уже сказан: (display_id, ключ, repr значения).
+_warned_values: set[tuple] = set()
 
 
 def _parse_fps_limit(raw: object) -> float:
@@ -188,6 +196,32 @@ def _plugin_config(processes: list, process_name: str, plugin_name: str) -> dict
     return {}
 
 
+def _plate_setting(defn: dict, display_id: object, key: str, default: object, valid: Callable[[object], bool]):
+    """Значение ``plate_*`` определения: ключа нет или оно негодное -> ``default``.
+
+    О негодном — один WARNING на (дисплей, ключ, значение); само значение в лог не пишется.
+    """
+    if key not in defn:
+        return default
+    value = defn[key]
+    if valid(value):
+        return value
+    seen = (display_id, key, repr(value))
+    if seen not in _warned_values:
+        _warned_values.add(seen)
+        logger.warning("дисплей '%s': негодный %s, взят %s", display_id, key, default)
+    return default
+
+
+def _is_plate_mode(value: object) -> bool:
+    return value in _PLATE_MODES
+
+
+def _is_plate_after_s(value: object) -> bool:
+    # то же правило, что валидатор DisplayDefinition: только int (не bool, не строка) 1..600
+    return type(value) is int and 1 <= value <= 600
+
+
 def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
     """Поля плашки тишины по каждому дисплею рецепта.
 
@@ -198,8 +232,10 @@ def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
         recipe: raw-dict активного рецепта или None. Кривые куски пропускаются без исключения.
 
     Returns:
-        ``{display_id: {"source", "process", "number", "address", "serial", "template"}}``;
-        чего в рецепте нет — ``None`` (``source``/``process``/``template`` — пустая строка).
+        ``{display_id: {"source", "process", "number", "address", "serial", "template", "mode",
+        "after_s"}}``; чего в рецепте нет — ``None`` (``source``/``process``/``template`` — пустая
+        строка). ``mode`` — ``hold`` | ``silence`` | ``trigger`` (умолчание ``hold``), ``after_s`` —
+        целое 1..600 (умолчание 2).
     """
     if not isinstance(recipe, dict):
         return {}
@@ -232,6 +268,8 @@ def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
             "address": config.get("device_ip"),
             "serial": config.get("device_serial"),
             "template": str(defn.get("plate_text") or ""),
+            "mode": _plate_setting(defn, display_id, "plate_mode", "hold", _is_plate_mode),
+            "after_s": _plate_setting(defn, display_id, "plate_after_s", DEFAULT_PLATE_AFTER_S, _is_plate_after_s),
         }
     return result
 

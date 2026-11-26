@@ -29,8 +29,8 @@ from .styles.theme_loader import apply_default_theme
 
 _log = get_std_logger(__name__)
 
-#: Сколько секунд все отправители дисплея молчат, прежде чем на нём появится плашка.
-_NO_SIGNAL_AFTER_S = 2.0
+#: Шаг сообщения насоса о тишине ключа (с). Порог плашки у каждого экрана свой: plate_after_s рецепта.
+_PUMP_SILENCE_S = 1.0
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1141,29 +1141,37 @@ def _setup_bridge_callbacks(
         return bound | {s for s in _seen if _display_of(s) == display_id}
 
     def _on_silence(key: str, age_s: float | None) -> None:
-        """Тишина ключа насоса: плашка, только когда молчат ВСЕ отправители его дисплея."""
+        """Тишина ключа насоса: плашка только на экране ``silence``, когда ВСЕ его отправители молчат ``after_s``.
+
+        Экран без записи в рецепте (запасной ``main``) — ``hold``: на нём остаётся последний кадр.
+        """
         display_id = _display_of(key)
         if age_s is None:
             _silent_age.pop(key, None)
             image_panel.show_no_signal(display_id, None)
             return
         _silent_age[key] = age_s
+        source = _plate_sources.get(display_id, {})
+        if source.get("mode", "hold") != "silence":  # trigger до W2-c3 ведёт себя как hold
+            return
         senders = _senders_of(display_id) | {key}
         if not all(s in _silent_age for s in senders):
             return
-        source = _plate_sources.get(display_id, {})
+        youngest = min(_silent_age[s] for s in senders)
+        if youngest < source["after_s"]:
+            return
         fields = {
             "title": _display_titles.get(display_id, display_id),
             **{name: source.get(name) for name in ("number", "address", "serial", "process")},
         }
-        status = plate_status(None, min(_silent_age[s] for s in senders))
+        status = plate_status(None, youngest)
         image_panel.show_no_signal(display_id, plate_text(source.get("template") or "", fields) + "\n" + status)
 
     process._frame_pump = FramePump(
         mailbox=process._bridge.frame_mailbox,
         sink=lambda key, item: _show_taken(key, item),
         on_silence=_on_silence,
-        silence_s=_NO_SIGNAL_AFTER_S,
+        silence_s=_PUMP_SILENCE_S,
     )
     # Оба пути закрытия (перезапуск UI и выход) идут через app.quit() -> aboutToQuit;
     # новый проход GuiProcess.run создаёт новый насос, старый к тому времени остановлен.
