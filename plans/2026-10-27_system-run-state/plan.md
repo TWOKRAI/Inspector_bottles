@@ -120,7 +120,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public-api-change
 - Task 2.8a: копия клиента хранит листья (read-model, `_cache_put`, `telemetry_sink`, `backend_ctl`), проекция при привязке (П3); файл `tasks/2.8a.md` [DONE a267360]
   - **Module contract:** impl-only
-- Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [PENDING] (после 2.8a)
+- Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [DEFERRED 2.0 — владелец 2026-11-26, decisions.md; в 1.0 запасной ход] (после 2.8a)
   - **Module contract:** public-api-change
 - Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
