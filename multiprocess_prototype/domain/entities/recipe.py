@@ -39,18 +39,22 @@ def _one_line(text: str) -> str:
 
 
 def _load_display(item: dict[str, Any]) -> DisplayDefinition:
-    """Экран из словаря рецепта; негодное ``plate_*`` не отменяет загрузку (H2).
+    """Экран из словаря рецепта; негодное ``plate_*`` и ``run_view`` не отменяет загрузку (H2).
 
-    Все ошибки по ключам ``plate_*`` -> эти ключи убираются из копии ``item`` (поле берёт
-    умолчание), на каждый ключ один WARNING без значения из файла. Хоть одна ошибка не по
-    ``plate_*`` (в том числе проверка всей модели с пустым ``loc``) -> отказ без изменений.
+    Все ошибки по ключам ``plate_*``/``run_view`` -> эти ключи убираются из копии ``item`` (поле берёт
+    умолчание), на каждый ключ один WARNING без значения из файла. Хоть одна ошибка по другому
+    ключу (в том числе проверка всей модели с пустым ``loc``) -> отказ без изменений.
     ``item`` не изменяется.
     """
     try:
         return DisplayDefinition.from_dict(item)
     except ValidationError as exc:
         errors = exc.errors()
-        if not all(error["loc"] and str(error["loc"][0]).startswith("plate_") for error in errors):
+        forgiven = (
+            error["loc"] and (str(error["loc"][0]).startswith("plate_") or error["loc"][0] == "run_view")
+            for error in errors
+        )
+        if not all(forgiven):
             raise
         bad = {str(error["loc"][0]): error["type"] for error in errors}
 
