@@ -29,6 +29,8 @@ Pure Python, без Qt. Превращает raw-dict активного рец�
 from __future__ import annotations
 
 import math
+import string
+from collections.abc import Callable, Hashable
 
 from multiprocess_framework.modules.logger_module import get_std_logger
 
@@ -36,6 +38,23 @@ logger = get_std_logger(__name__)
 
 #: Предел показа по умолчанию (Гц), если fps_limit в рецепте нет или он не число.
 DEFAULT_FPS_LIMIT = 30.0
+
+#: Шаблон плашки тишины, если у дисплея нет ``plate_text``.
+DEFAULT_PLATE_TEXT = "{title} · № {number} · {address}"
+
+# Единственные имена, которые подставляет plate_text (шаблон — конфиг оператора, атрибуты не читаем).
+_PLATE_FIELDS = frozenset({"title", "number", "address", "serial", "process"})
+
+# Тексты неразбираемых шаблонов, о которых WARNING уже сказан.
+_warned_templates: set[str] = set()
+
+#: Порог тишины режима ``silence`` (с), если у дисплея нет годного ``plate_after_s``.
+DEFAULT_PLATE_AFTER_S = 2
+
+_PLATE_MODES = ("hold", "silence", "trigger")
+
+# Негодные plate_mode/plate_after_s, о которых WARNING уже сказан: (display_id, ключ, repr значения).
+_warned_values: set[tuple] = set()
 
 
 def _parse_fps_limit(raw: object) -> float:
@@ -160,8 +179,144 @@ def resolve_display_id(
     return default
 
 
+def _as_list(value: object) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _plugin_config(processes: list, process_name: str, plugin_name: str) -> dict:
+    """Параметры плагина из ``blueprint.processes``: плоские ключи, поверх них ``config``; нет плагина -> {}."""
+    for process in processes:
+        if not isinstance(process, dict) or process.get("process_name") != process_name:
+            continue
+        for entry in _as_list(process.get("plugins")):
+            if not isinstance(entry, dict) or entry.get("plugin_name") != plugin_name:
+                continue
+            config = entry.get("config")
+            return {**entry, **(config if isinstance(config, dict) else {})}
+    return {}
+
+
+def _plate_setting(defn: dict, display_id: object, key: str, default: object, valid: Callable[[object], bool]):
+    """Значение ``plate_*`` определения: ключа нет или оно негодное -> ``default``.
+
+    О негодном — один WARNING на (дисплей, ключ, значение); само значение в лог не пишется.
+    """
+    if key not in defn:
+        return default
+    value = defn[key]
+    if valid(value):
+        return value
+    seen = (display_id, key, repr(value))
+    if seen not in _warned_values:
+        _warned_values.add(seen)
+        logger.warning("дисплей '%s': негодный %s, взят %s", display_id, key, default)
+    return default
+
+
+def _is_plate_mode(value: object) -> bool:
+    return value in _PLATE_MODES
+
+
+def _is_plate_after_s(value: object) -> bool:
+    # то же правило, что валидатор DisplayDefinition: только int (не bool, не строка) 1..600
+    return type(value) is int and 1 <= value <= 600
+
+
+def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
+    """Поля плашки тишины по каждому дисплею рецепта.
+
+    Источник дисплея — ``plate_source`` определения, иначе ``process.plugin`` ПЕРВОЙ привязки
+    этого ``display_id`` в ``blueprint.displays``.
+
+    Args:
+        recipe: raw-dict активного рецепта или None. Кривые куски пропускаются без исключения.
+
+    Returns:
+        ``{display_id: {"source", "process", "number", "address", "serial", "template", "mode",
+        "after_s"}}``; чего в рецепте нет — ``None`` (``source``/``process``/``template`` — пустая
+        строка). ``mode`` — ``hold`` | ``silence`` | ``trigger`` (умолчание ``hold``), ``after_s`` —
+        целое 1..600 (умолчание 2).
+    """
+    if not isinstance(recipe, dict):
+        return {}
+    blueprint = recipe.get("blueprint")
+    if not isinstance(blueprint, dict):
+        blueprint = {}
+    bindings = _as_list(blueprint.get("displays"))
+    processes = _as_list(blueprint.get("processes"))
+
+    result: dict[str, dict] = {}
+    for defn in _as_list(recipe.get("displays")):
+        if not isinstance(defn, dict):
+            continue
+        display_id = defn.get("id")
+        if not display_id or not isinstance(display_id, Hashable):
+            continue
+        source = str(defn.get("plate_source") or "")
+        if not source:
+            for binding in bindings:
+                if isinstance(binding, dict) and binding.get("display_id") == display_id and binding.get("node_id"):
+                    source = ".".join(str(binding["node_id"]).split(".")[:2])
+                    break
+        process_name, _, plugin_name = source.partition(".")
+        config = _plugin_config(processes, process_name, plugin_name) if source else {}
+        number = config.get("camera_id")
+        result[display_id] = {
+            "source": source,
+            "process": process_name,
+            "number": number if number is not None else config.get("reader_id"),
+            "address": config.get("device_ip"),
+            "serial": config.get("device_serial"),
+            "template": str(defn.get("plate_text") or ""),
+            "mode": _plate_setting(defn, display_id, "plate_mode", "hold", _is_plate_mode),
+            "after_s": _plate_setting(defn, display_id, "plate_after_s", DEFAULT_PLATE_AFTER_S, _is_plate_after_s),
+        }
+    return result
+
+
+def plate_text(template: str, fields: dict) -> str:
+    """Подставить поля в шаблон плашки.
+
+    Подставляются только ``title``/``number``/``address``/``serial``/``process`` без спецификатора и
+    конверсии; всё прочее остаётся в тексте как написано. ``None`` и ``""`` -> ``—``. Пустой или
+    неразбираемый шаблон -> ``DEFAULT_PLATE_TEXT`` (о неразбираемом один WARNING на его текст).
+    """
+    template = template or DEFAULT_PLATE_TEXT
+    try:
+        parts = list(string.Formatter().parse(template))
+    except ValueError:
+        if template not in _warned_templates:
+            _warned_templates.add(template)
+            logger.warning("plate_text: шаблон плашки %r не разбирается, взят шаблон по умолчанию", template)
+        parts = list(string.Formatter().parse(DEFAULT_PLATE_TEXT))
+
+    out: list[str] = []
+    for literal, name, spec, conversion in parts:
+        out.append(literal)
+        if name is None:
+            continue
+        if name in _PLATE_FIELDS and not spec and not conversion:
+            value = fields.get(name)
+            out.append("—" if value is None or value == "" else str(value))
+        else:
+            bang = f"!{conversion}" if conversion else ""
+            colon = f":{spec}" if spec else ""
+            out.append("{" + name + bang + colon + "}")
+    return "".join(out)
+
+
+def plate_status(link_state: str | None, age_s: float) -> str:
+    """Вторая строка плашки: ``нет связи`` только при ``link_state == "lost"``, иначе ``нет кадров``."""
+    word = "нет связи" if link_state == "lost" else "нет кадров"
+    return f"{word}, {int(age_s)} с"
+
+
 __all__ = [
     "build_panel_displays",
     "build_frame_routing",
     "resolve_display_id",
+    "build_plate_sources",
+    "DEFAULT_PLATE_TEXT",
+    "plate_text",
+    "plate_status",
 ]

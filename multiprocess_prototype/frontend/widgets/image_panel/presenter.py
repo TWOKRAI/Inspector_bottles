@@ -189,6 +189,20 @@ class ImagePanelPresenter:
             logger.error("Ошибка конвертации кадра для слота '%s': %s", slot_id, exc)
             slot.set_placeholder("Ошибка кадра")
 
+    def show_no_signal(self, slot_id: str, text: str | None) -> None:
+        """Плашка тишины слота: ``text`` — показать, ``None`` — снять.
+
+        Незарегистрированный слот — молча (кадр для него уже логирует on_frame). Счётчики
+        frame_stats и последний кадр (снимок grab_frame) не трогаются.
+        """
+        slot = self._slots.get(slot_id)
+        if slot is None:
+            return
+        if text is None:
+            slot.leave_no_signal()
+        else:
+            slot.show_no_signal(text)
+
     def _rerender(self, slot_id: str) -> bool:
         """Перерисовать слот из сырого кадра для его текущей метки (вызов из resizeEvent слота).
 

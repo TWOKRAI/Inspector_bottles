@@ -282,3 +282,27 @@ def test_gui_positions_and_locked_nodes(raw: dict[str, Any]) -> None:
         "draw_2.overlay_draw": [360.0, 360.0],
     }
     assert metadata["locked_nodes"] == []
+
+
+def test_displays_show_plate_on_silence(raw: dict[str, Any]) -> None:
+    """Свободный ход: все четыре экрана — плашка по тишине (порог по умолчанию), и это проходит ``Recipe``."""
+    from multiprocess_prototype.domain.entities.recipe import Recipe
+
+    assert [d.get("plate_mode") for d in raw["displays"]] == ["silence", "silence", "silence", "silence"]
+    assert [d for d in raw["displays"] if "plate_after_s" in d] == []
+
+    displays = Recipe.from_dict(raw).displays
+    assert [(d.id, d.plate_mode, d.plate_after_s) for d in displays] == [
+        ("camera_0", "silence", 2),
+        ("camera_1", "silence", 2),
+        ("reader_1", "silence", 2),
+        ("reader_2", "silence", 2),
+    ]
+
+
+def test_hardware_trigger_recipe_has_no_plate_mode() -> None:
+    """``quad_hw``: между триггерами кадров нет, ``silence`` мигал бы плашкой."""
+    hw = yaml.safe_load((_RECIPES_DIR / "hikvision_id3013_quad_hw.yaml").read_text(encoding="utf-8"))
+
+    assert len(hw["displays"]) == 4
+    assert [d for d in hw["displays"] if "plate_mode" in d] == []

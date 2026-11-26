@@ -55,6 +55,12 @@ class DisplaySpec:
 
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    # --- Плашка (П6, зеркало DisplayDefinition) ---
+    plate_mode: str = "hold"
+    plate_after_s: int = 2
+    plate_text: str = ""
+    plate_source: str = ""
+
 
 class DisplayCatalog(Protocol):
     """Контракт read+write store для реестра дисплеев.
@@ -132,6 +138,10 @@ def definition_to_spec(defn: Any) -> DisplaySpec:
         rotate=defn.rotate,
         flip=defn.flip,
         crop=crop_dict,
+        plate_mode=defn.plate_mode,
+        plate_after_s=defn.plate_after_s,
+        plate_text=defn.plate_text,
+        plate_source=defn.plate_source,
     )
 
 
@@ -161,6 +171,10 @@ def spec_to_definition_dict(spec: DisplaySpec) -> dict[str, Any]:
         "rotate": spec.rotate,
         "flip": spec.flip,
         "crop": dict(spec.crop) if spec.crop else None,
+        "plate_mode": spec.plate_mode,
+        "plate_after_s": spec.plate_after_s,
+        "plate_text": spec.plate_text,
+        "plate_source": spec.plate_source,
     }
     return result
 
