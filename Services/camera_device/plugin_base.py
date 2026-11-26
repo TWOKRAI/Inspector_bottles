@@ -45,9 +45,10 @@ Task 2.3d: команды Р7 с портом: `list_devices`, `describe_params`
 
 W1-a: здоровье потока и личность прибора. Накопительные уровни `incomplete`, `lost_packets` (по `lost_packets` кадра),
 `lost_frames` (разрывы `frame_num`), `trigger_lost` (разрывы `trigger_index`) считает `_on_frame` под `self._lock`;
-`reset_stats` их обнуляет, `opening` — нет. События `identity` (`port.device_info`) и `stream` (формат сырого кадра)
-идут тем же `merge` отличий. Строка "device opened" и предупреждения о дубле перечисления или чужой подсети пишутся раз
-за цикл на событии `grabbing`.
+`reset_stats` их обнуляет, `opening` — нет. Опорные номера кадра и триггера сбрасываются на входе в `opening` и на
+возврате `lost` -> `grabbing`: разрыв номеров за обрыв не потеря (обрывы считает `link.outages`).
+События `identity` (`port.device_info`) и `stream` (формат сырого кадра) идут тем же `merge` отличий. Строка
+"device opened" и предупреждения о дубле перечисления или чужой подсети пишутся раз за цикл на событии `grabbing`.
 
 W2-t2: «триггер без кадра». При `frame_watch != "off"` импульсы (`software` — свой `trigger_software`, `message` —
 команда `trigger_seen`) и кадры идут в `FrameWatch` под `self._lock`; `poll` — на каждый `produce()`. Итог — блок
@@ -556,6 +557,9 @@ class CameraDevicePlugin(ProcessModulePlugin):
                 self._identity_logged = None
                 self._fw_drop_locked()  # импульсы до нового цикла своего кадра уже не получат
         elif new == "grabbing":
+            if old == "lost":  # возврат после обрыва: первый кадр — новая опора, разрыв номеров не потеря
+                with self._lock:  # накопленные счётчики не трогаются (их сбрасывает `reset_stats`)
+                    self._last_frame_num = self._last_trigger = None
             # триггер — само событие, не `session.state`: стоп мог уже начаться, а вход в захват был
             self._log_device_opened()
         self._sync_events()
