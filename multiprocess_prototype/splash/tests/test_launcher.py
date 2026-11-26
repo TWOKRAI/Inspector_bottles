@@ -98,6 +98,30 @@ def test_starts_nothing_and_never_raises():
         _call(stop_splash)
 
 
+def test_dev_probe_env_is_not_passed_to_splash():
+    """Проба qt-mcp включается переменной: заставка её не получает, GUI (``environ`` вызывающего) получает."""
+    from multiprocess_prototype.splash.launcher import start_splash, stop_splash
+
+    env = _base_env()
+    env["QT_MCP_PROBE"] = "1"
+    env["QT_MCP_PORT"] = "9142"
+    child_env: dict = {}
+
+    def popen(*args, **kwargs):
+        child_env.update(kwargs["env"])
+        raise OSError("дальше запуска не идём")
+
+    _call(stop_splash)
+    try:
+        assert _call(lambda: start_splash(True, environ=env, title="t", popen=popen)) is None
+        assert child_env  # popen вызван и получил окружение
+        assert "QT_MCP_PROBE" not in child_env
+        assert child_env["QT_MCP_PORT"] == "9142"
+        assert env["QT_MCP_PROBE"] == "1"  # окружение запускающего не тронуто
+    finally:
+        _call(stop_splash)
+
+
 def test_real_process_port_and_gui_done():
     from multiprocess_prototype.splash.launcher import start_splash, stop_splash
     from multiprocess_prototype.splash.protocol import send_leaf

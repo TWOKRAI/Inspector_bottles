@@ -30,6 +30,9 @@ _EXIT_WAIT_S = 1.0
 _KILL_WAIT_S = 5.0
 #: Ожидания в ветке «заставки не будет»: она на главном потоке лончера, запуск ждать не должен.
 _URGENT_WAIT_S = 0.2
+#: Переменные инструментов разработки, которые заставке не передаются. ``QT_MCP_PROBE`` через ``.pth`` ставит пробу
+#: в любой Python-процесс с Qt: заставка заняла бы порт, и проба не досталась бы GUI.
+_DEV_ONLY_ENV = ("QT_MCP_PROBE",)
 
 _holder: SplashLink | None = None
 _holder_lock = threading.Lock()
@@ -201,7 +204,7 @@ def start_splash(
                 cwd=str(_PROJECT_ROOT),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                env=dict(environ),
+                env={name: value for name, value in environ.items() if name not in _DEV_ONLY_ENV},
             )
             link = SplashLink(process, started)
             link.start_reader()
