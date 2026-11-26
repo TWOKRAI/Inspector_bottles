@@ -462,3 +462,14 @@ def test_presence_is_not_none_and_missing_confidence_is_one(monkeypatch: pytest.
     assert plugin.readiness(None) == []
     t[0] = 1003.0
     assert plugin.readiness(None) == NO_B
+
+
+def test_top_prediction_is_the_first_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``predictions_key``: топ — элемент ``[0]``; остальные элементы списка не решают."""
+    t = _fake_clock(monkeypatch)
+    good = {"label": "А", "confidence": 0.90, "below_threshold": False}
+    bad = {"label": "Б", "confidence": 0.30, "below_threshold": True}
+    cfg = {"min_confidence": 0.5}
+
+    assert _poll_after(t, cfg, {"predictions": [good, bad]}) == []
+    assert _poll_after(t, cfg, {"predictions": [bad, good]}) == WEAK_DEF
