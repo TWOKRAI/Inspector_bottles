@@ -116,3 +116,7 @@ A/B (`reports/1.7b.ab.stand.md`): повторный fault после ack+START 
 ## 12. Task 1.10 — `run_event` — `RunFlag`, не `mp.Event` (F3 свежего ревью Ф1, 2026-11-15)
 
 Формулировки «`mp.Event`» для `run_event` устарели: `design.md:138`, `plan.md:31`, `tasks/1.1.md:44` (`self._run_event = multiprocessing.Event()`). С Task 1.10 `run_event` — `RunFlag` (байт `RawValue(c_bool)` в разделяемой памяти, без межпроцессного замка; ADR-PMM-047): смерть ребёнка внутри `is_set()` больше не вешает PM под `_run_lock`. Имя атрибута, проводка (ADR-PMM-034: наследование при spawn), семантика `is_set/set/clear` и порядок «событие ДО записи состояния» не изменились. `stop_event`, `system_ready_event` остаются `mp.Event` (`pause_event` — не межпроцессный: `threading.Event` воркера, `worker_lifecycle.py:72`); цепочка «ребёнок умер внутри своего `stop_event.is_set()` -> `stop_event.set()` виснет на потоке L-исполнителя -> очередь стоит, STOP не выполняется» этим ADR не закрыта — Task 2.5 (ADR-PMM-047, «Известная цена»). Источник: `reports/phase1.review-opus-fresh.md` F3/С3.
+
+## 13. Task 2.6 — отдельная заставка вместо `LoadingWindow` в GUI (2026-11-26)
+
+Решение §5 о размороженном `LoadingWindow` для окна загрузки 1.0 заменено: по замеру `reports/2.6.timing.md` окно внутри `run_gui` не появляется раньше 13–15 с. Действует `tasks/2.6.md` v3 (отдельный процесс, `decisions.md` 2026-11-26). Модель процента §5/§7 (`system.progress.*`, `ProgressTracker`) не меняется; `recipe_load` при смене рецепта — по-прежнему 2.0.
