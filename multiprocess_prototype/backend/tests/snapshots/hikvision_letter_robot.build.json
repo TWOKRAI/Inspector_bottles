@@ -29,11 +29,16 @@
                   "exposure_time": 40000.0,
                   "frame_rate": 25.0,
                   "frame_rate_enable": true,
+                  "link_silence_s": 3.0,
+                  "packet_delay": 400,
+                  "packet_managed": true,
+                  "packet_size": 1500,
                   "readiness": {
                     "severity": {
                       "out_of_spec": "check_function"
                     }
                   },
+                  "reconnect": true,
                   "resolution_height": 1080,
                   "resolution_width": 1440,
                   "run_locked_commands": [
@@ -1046,11 +1051,16 @@
               "exposure_time": 40000.0,
               "frame_rate": 25.0,
               "frame_rate_enable": true,
+              "link_silence_s": 3.0,
+              "packet_delay": 400,
+              "packet_managed": true,
+              "packet_size": 1500,
               "readiness": {
                 "severity": {
                   "out_of_spec": "check_function"
                 }
               },
+              "reconnect": true,
               "resolution_height": 1080,
               "resolution_width": 1440,
               "run_locked_commands": [
