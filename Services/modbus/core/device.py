@@ -22,7 +22,7 @@ from typing import Any
 from Services.modbus.core.config import ModbusConfig
 from Services.modbus.core.status import ConnectionState, ModbusStatus
 from Services.modbus.sdk.client import ModbusSdkClient
-from Services.modbus.sdk.errors import ModbusDriverError
+from Services.modbus.sdk.errors import ModbusConnectionError, ModbusDriverError
 
 StatusCallback = Callable[[dict[str, Any]], None]
 ErrorCallback = Callable[[str], None]
@@ -60,6 +60,8 @@ class ModbusDevice:
         self._clock = clock
         self._lock = threading.RLock()
         self._status = ModbusStatus()
+        #: Номер сеанса связи (см. ``session``); меняется только под ``self._lock``.
+        self._session = 0
 
     # ------------------------------------------------------------------ #
     # Свойства
@@ -80,6 +82,17 @@ class ModbusDevice:
         """True, если соединение установлено."""
         return self._status.is_connected
 
+    @property
+    def session(self) -> int:
+        """Номер сеанса связи: растёт при каждой ошибке и при каждом удачном ``connect()``.
+
+        Вызывающий берёт значение в момент допуска операции и передаёт его в
+        запись как ``expected_session``: запись из прежнего сеанса не уйдёт по
+        новому соединению. Читается без замка намеренно — допуск не должен ждать,
+        пока чужой обмен держит замок.
+        """
+        return self._session
+
     def get_status(self) -> dict[str, Any]:
         """Снимок статуса/счётчиков в dict (API наружу)."""
         with self._lock:
@@ -98,6 +111,8 @@ class ModbusDevice:
             except ModbusDriverError as exc:
                 self._fail(str(exc))
                 return False
+            # До колбэков: они уже видят новый сеанс, а их исключение его не отменит.
+            self._session += 1
             self._status.connected_since = self._clock()
             self._status.last_error = ""
             self._set_state(ConnectionState.CONNECTED)
@@ -138,19 +153,19 @@ class ModbusDevice:
     # Операции записи (с телеметрией)
     # ------------------------------------------------------------------ #
 
-    def write_register(self, address: int, value: int) -> bool:
-        """Записать один holding-регистр (FC=06)."""
-        return self._write("write_register", address, value)
+    def write_register(self, address: int, value: int, *, expected_session: int | None = None) -> bool:
+        """Записать один holding-регистр (FC=06). ``expected_session`` — см. ``transaction``."""
+        return self._write("write_register", address, value, expected_session)
 
-    def write_registers(self, address: int, values: list[int]) -> bool:
-        """Записать несколько holding-регистров (FC=16)."""
-        return self._write("write_registers", address, values)
+    def write_registers(self, address: int, values: list[int], *, expected_session: int | None = None) -> bool:
+        """Записать несколько holding-регистров (FC=16). ``expected_session`` — см. ``transaction``."""
+        return self._write("write_registers", address, values, expected_session)
 
-    def write_coil(self, address: int, value: bool) -> bool:
-        """Записать один coil (FC=05)."""
-        return self._write("write_coil", address, value)
+    def write_coil(self, address: int, value: bool, *, expected_session: int | None = None) -> bool:
+        """Записать один coil (FC=05). ``expected_session`` — см. ``transaction``."""
+        return self._write("write_coil", address, value, expected_session)
 
-    def transaction(self, ops: list[tuple]) -> bool:
+    def transaction(self, ops: list[tuple], *, expected_session: int | None = None) -> bool:
         """Серия записей под ОДНИМ Lock — данные первыми, маркер-флаг последним.
 
         Атомарный примитив mailbox-протоколов (CVT-робот, ПЧ и т.п.): данные и
@@ -161,11 +176,16 @@ class ModbusDevice:
             ops: операции по порядку:
                 ``("w", addr, value)``   — один регистр (FC=06);
                 ``("wm", addr, [vals])`` — блок регистров (FC=16).
+            expected_session: значение ``session``, снятое при допуске операции.
+                None — сеанс не проверяется. Не равно текущему (проверка под
+                замком, до первого кадра) — серия не отправляется вовсе.
 
         Returns:
             True — все операции выполнены.
 
         Raises:
+            ModbusConnectionError: сеанс сменился — на провод ничего не ушло,
+                счётчики и ``on_error`` не тронуты.
             ModbusDriverError: на ПЕРВОЙ неудавшейся операции — оставшиеся
                 (включая маркер) НЕ выполняются. Инвариант: маркер идёт
                 последней операцией, поэтому частично записанные данные без
@@ -174,6 +194,7 @@ class ModbusDevice:
             ValueError: неизвестный вид операции.
         """
         with self._lock:
+            self._check_session("transaction", expected_session)
             for kind, address, value in ops:
                 if kind == "w":
                     method = "write_register"
@@ -209,8 +230,9 @@ class ModbusDevice:
             self._emit_data({"op": method, "kind": kind, "address": address, "values": result})
             return result
 
-    def _write(self, method: str, address: int, value: Any) -> bool:
+    def _write(self, method: str, address: int, value: Any, expected_session: int | None) -> bool:
         with self._lock:
+            self._check_session(method, expected_session)
             try:
                 getattr(self._client, method)(address, value)
             except ModbusDriverError as exc:
@@ -222,13 +244,27 @@ class ModbusDevice:
             self._emit_data({"op": method, "address": address, "value": value})
             return True
 
+    def _check_session(self, operation: str, expected_session: int | None) -> None:
+        """Отказать записи из прежнего сеанса. Вызывать только под ``self._lock``.
+
+        Отказ — не обрыв связи: на провод ничего не идёт, счётчики, ``_fail`` и
+        ``on_error`` не трогаются.
+        """
+        if expected_session is not None and expected_session != self._session:
+            raise ModbusConnectionError(
+                f"{operation}: сеанс связи сменился (был {expected_session}, сейчас {self._session}), "
+                "запись не отправлена"
+            )
+
     def _set_state(self, state: ConnectionState) -> None:
         """Сменить состояние и уведомить подписчиков (on_status)."""
         self._status.state = state
         self._emit_status()
 
     def _fail(self, message: str) -> None:
-        """Зафиксировать ошибку: state=ERROR, last_error, callbacks."""
+        """Зафиксировать ошибку: новый сеанс, state=ERROR, last_error, callbacks."""
+        # Первым: колбэк с записью прежнего сеанса получит отказ, а не уйдёт на провод.
+        self._session += 1
         self._status.last_error = message
         self._status.state = ConnectionState.ERROR
         if self._on_error is not None:
