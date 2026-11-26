@@ -91,24 +91,32 @@ def test_first_put_in_flight_during_retire_does_not_leave_a_join_registered() ->
 
 
 def test_unforced_first_put_against_retire_200_repeats_never_leaves_a_join() -> None:
-    """Без подстроенного порядка. Инъекцию «отмена вне ``_notempty``» этот тест может и не ловить."""
+    """Без пауз внутри ``put``. Инъекцию «отмена вне ``_notempty``» этот тест может и не ловить.
+
+    Порядок старта потоков чередуется: за барьером первым идёт пришедший к нему последним, и при одном порядке
+    старта отпуск выигрывал все 200 раз — ``put`` отказывал, а проверка join проходила впустую.
+    """
     left: list[int] = []
+    accepted: list[int] = []  # повторы, где ``put`` прошёл проверку ``_closed`` раньше ``close()``
     for i in range(200):
         q = ReaderGoneQueue()
         barrier = threading.Barrier(2, timeout=5.0)
 
-        def _put(queue: Any = q, gate: threading.Barrier = barrier) -> None:
+        def _put(queue: Any = q, gate: threading.Barrier = barrier, repeat: int = i) -> None:
             gate.wait()
             try:
                 queue.put(b"x")
             except ValueError:  # отпуск успел раньше — отказ законен
-                pass
+                return
+            accepted.append(repeat)
 
         def _retire(queue: Any = q, gate: threading.Barrier = barrier) -> None:
             gate.wait()
             retire_queue(queue)
 
         threads = [threading.Thread(target=_put, daemon=True), threading.Thread(target=_retire, daemon=True)]
+        if i % 2:
+            threads.reverse()
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -116,7 +124,8 @@ def test_unforced_first_put_against_retire_200_repeats_never_leaves_a_join() -> 
         assert not any(thread.is_alive() for thread in threads), f"повтор {i} завис"
         if q._jointhread is not None and q._jointhread.still_active():
             left.append(i)
-    assert left == []
+    assert len(accepted) >= 50, f"put раньше close только {len(accepted)} раз из 200: проверять нечего"
+    assert left == [], f"join остался зарегистрированным в {len(left)} повторах из {len(accepted)}"
 
 
 def test_retire_does_not_touch_the_reader_gone_event() -> None:
