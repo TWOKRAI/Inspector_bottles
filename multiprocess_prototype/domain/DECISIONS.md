@@ -1,5 +1,19 @@
 # multiprocess_prototype/domain — Архитектурные решения
 
+## DOM-003: поля плашки `plate_*` в определении дисплея
+
+**Дата:** 2026-11-26
+**Статус:** принято
+**Refs:** plans/2026-11-25_multicam-observability/plan.md (П6), задача W2-c2c
+
+Поля плашки в `DisplayDefinition` (П6, 2026-11-26): `plate_mode` (`hold` | `silence` |
+`trigger`, умолчание `hold`), `plate_after_s` (2), `plate_text` (`""`), `plate_source`
+(`""`). `extra="forbid"` остаётся; `DisplaySpec` зеркалит все четыре поля.
+
+- Умолчания `minimize` не пишет: старые рецепты не меняются.
+- Правило `plate_after_s` (строго `int`, 1..600) одно для домена и GUI.
+- Формы правки на вкладке Displays нет; переключение `enabled` и дубликат поля сохраняют.
+
 ## DOM-002: мульти-дисплей в главной области — поле `enabled` + маршрутизация по `sender`
 
 **Дата:** 2026-06-13
