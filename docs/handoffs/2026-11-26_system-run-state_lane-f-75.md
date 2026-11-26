@@ -75,3 +75,48 @@ rebase; `python scripts/validate.py`; `multiprocess_prototype/backend/tests` и 
   `test_lifecycle_static` красные и на `main` (счётчики allowlist); 2.6 добавляет одну запись — при правке теста учесть.
 - **В10** — по коду различимо: нет `track_id` и предсказаний = нет диска; диск есть, уверенного предсказания нет = слабое.
   Задача (readiness `word_layout`) ещё не написана; владение файлом спрошено у `inspector-bottles-ad`.
+
+## Обновление 26.11 ~19:10 (сессия теперь inspector-bottles-dc). Этот раздел новее всего выше
+| Задача | Ветка (дерево) | Состояние |
+|---|---|---|
+| 2.2d presence_watch | `feat/run-state-2-2d` `5999d5eb9` (`lane-f-22d-dev`) | готова: инъекции 20/20, ревью APPROVED, стенд (к) пройден. Осталось слияние |
+| 2.8f | `feat/run-state-2-8f` `f9f7fd5f6` | ждёт стенд Б(2) → слияние |
+| 2.6 | `feat/run-state-2-6` `fbdf32a13` | ревью раунд 2 APPROVED; стенд не закончен: нужно ≥3 чистых повтора и (в)–(ж); вопрос о сроке 60 с — после них. `fbdf32a13` ревью не видел |
+| C-36 | `fix/c36-fresh-queues` `94220c074` (`lane-f-c36-dev`) | Opus раунд 1 CHANGES REQUESTED → правки закоммичены; матрица инъекций идёт по `d39edd8c1` |
+| 2.2e | спец `tasks/2.2e.md` (`9d553c311`) | стадия 0, раунд 2 идёт; затем слепой tester |
+| 2.5 | `docs/run-state-2-5` `571bf3c9d` | CHANGES REQUESTED, править одним проходом после слияния C-36 и 2.2d |
+| стенд 2.4 | `integ/run-state-ui` `19547fed0` (`lane-f-integ`) | Б(1), (к) пройдены; третий агент идёт |
+
+C-36 дальше: вердикт матрицы против `reports/c36.injection-predictions.md`; патч на порядок «отпуск после
+register_process» и перепрогон задетых; Opus раунд 2; живые тесты (`--backend-live`); стенд по условиям
+`reports/c36.cto-verdict.md`; замер 2× fps и каскада из 3 рестартов (красный → значение по умолчанию остаётся `True`);
+строка C-36 в `defects.md`.
+
+Не доделано: отчёты `docs/reports/<дата>_system-run-state_<task>.md`, журнал `docs/sessions/2026-11-26.md`, уроки в память.
+
+| Роль (после ~16:10) | agentId |
+|---|---|
+| C-36 шаг 0 / слепой tester / developer | `a025ade75ecc6295f` / `abe82641135003a30` / `affe4fc067b665f79` |
+| C-36 tester retire / инъекции / Opus reviewer | `ad31abb0eaf287b3d` / `abbeedb74842c2f78` / `a20f3b5b94a59c5a6` |
+| 2.2d teamlead / стадия 0 / tester | `a68fe33e4003832a4` (~392k) / `a62def5e00c10e125` / `a97ae80bdf4de9af1` |
+| 2.2d developer / инъекции / reviewer | `a7cf2c844951cb91d` / `a2b51ed7906d86176` / `a5b2f8253cfe146cf` |
+| 2.2e teamlead / reviewer стадии 0 | `ab039783e51857922` / `a0d3a6afddb4d69ab` |
+| 2.2e слепой tester (дерево `lane-f-22e-tester`, `test/inbox-watch-blind`) | `adcf7bf0488023dd7` |
+| 2.2e developer (дерево `lane-f-22e-dev`, `feat/run-state-2-2e`, тесты `28a6bae3c`) | `a0012759224f2a17a` |
+
+~21:05: C-36 head `caab8abd6` (пустой тест на гонку исправлен). Opus раунд 2 придержан до конца стенда 3. Повтор инъекций
+v2 (H3, I1, I5, I6, R1, R8, R10, R11) — тоже после стенда.
+
+Соседи: полоса Р2 теперь `inspector-bottles-8d` (была `d1`), ей обещан sha 2.2d после слияния. Р2 меняет
+`Services/modbus/sdk/client.py` (`fix/modbus-link-drop`): обрыв станет `ModbusIOError` -> по чтению `device_hub.readiness`
+даст `failure` -> `fault` линии там, где сегодня связь чинится молча. Ответил им это 26.11 ~21:10.
+Дальше (~21:40): они добавят `device_hub` `readiness: {hold_s: 5.0}` в оба рецепта букв ПОСЛЕ нашего слияния — **после
+слияния 2.2d / 2.2e в main написать `inspector-bottles-8d` sha**.
+
+2.2e: developer закончил (`78bc7539f`, `e4ed7376c`, 20 тестов зелёные). После стенда: golden (diff только
+`inbox_stall_s` у 4 процессов), широкий радиус, инъекции по таблице спеки, ревью opus, стенд.
+
+2.9 (окна вне `running`, решение в `decisions.md`): разведка `a3f909a4acbbfd448`, спецификацию `tasks/2.9.md` пишет
+teamlead `a38a8021a04e95a64`; база реализации — `integ/run-state-ui` (после 2.6, `app.py` один писатель).
+| 2.5 reviewer | `a6ca51dd4d697c278` |
+| стенд 1 / 2 / 3 (идёт) | `aa5c019f15e8235c0` / `af95653c98d40f810` / `aaa5e6a5149af589d` |
