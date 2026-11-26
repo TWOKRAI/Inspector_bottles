@@ -5,6 +5,8 @@
 срабатываний (кнопка), на каждое — строка JSON с полями результата и ``len_ok``
 по каждому коду (``nLen`` совпал с длиной текста до нуля — проверка раскладки
 ``BCR_INFO_EX2`` на живом приборе). С ``--out DIR`` — ещё PNG с обведённым кодом.
+Когда SDK не дал кадр — строка ``{"event": "no_frame", "kind": "none"|"sdk_error"}``, в конце
+захвата — ``{"event": "summary"}``; ``t_s`` — секунды от ``start_grabbing``.
 
 Запуск:
     python Services/code_reader/tools/mvcr_probe.py [секунд] [--out DIR] [--sdk-dir DIR]
@@ -289,6 +291,19 @@ def run_session(api: Any, sets: list[NodeSet], seconds: float, out: Path | None,
     if h is None:
         return 1
     frames = with_code = read = noread = 0
+    none_count = sdk_error_count = 0
+    first_no_frame_s: float | None = None
+    last_no_frame_s: float | None = None
+    t0: float | None = None  # момент start_grabbing; None — захват не начался, summary не печатается
+
+    def report_no_frame(kind: str, **extra: str) -> None:
+        nonlocal first_no_frame_s, last_no_frame_s
+        t_s = round(time.perf_counter() - t0, 3)
+        if first_no_frame_s is None:
+            first_no_frame_s = t_s
+        last_no_frame_s = t_s
+        print(json.dumps({"event": "no_frame", "t_s": t_s, "kind": kind, **extra}, ensure_ascii=False), flush=True)
+
     try:
         originals: list[tuple[str, str, Any]] = []
         for name, typ, _ in sets:
@@ -318,15 +333,19 @@ def run_session(api: Any, sets: list[NodeSet], seconds: float, out: Path | None,
                 grabbing = True  # до вызова: если он начал захват и бросил, stop_grabbing всё равно нужен
                 api.start_grabbing(h)
                 print(f">>> ЖДУ {seconds:.0f} c — жми кнопку", flush=True)
-                end = time.perf_counter() + seconds
+                t0 = time.perf_counter()
+                end = t0 + seconds
                 while time.perf_counter() < end:
                     try:
                         fr = api.get_frame(h, 1000)
                     except SdkError as exc:
-                        print(exc, flush=True)
+                        sdk_error_count += 1
+                        report_no_frame("sdk_error", error=str(exc))
                         time.sleep(min(0.2, seconds / 4))
                         continue
                     if fr is None:
+                        none_count += 1
+                        report_no_frame("none")
                         continue
                     frames += 1
                     if fr.codes:
@@ -341,13 +360,25 @@ def run_session(api: Any, sets: list[NodeSet], seconds: float, out: Path | None,
                     print(json.dumps(rec, ensure_ascii=False), flush=True)
         finally:
             try:
-                if grabbing:
-                    try:
-                        api.stop_grabbing(h)
-                    except SdkError as exc:
-                        print(exc, flush=True)
-                    except Exception as exc:  # noqa: BLE001 — восстановление узлов важнее причины отказа stop
-                        print(f"stop_grabbing: {type(exc).__name__}: {exc}", flush=True)
+                try:
+                    if t0 is not None:
+                        summary = {
+                            "event": "summary",
+                            "frames": frames,
+                            "none_count": none_count,
+                            "sdk_error_count": sdk_error_count,
+                            "first_no_frame_s": first_no_frame_s,
+                            "last_no_frame_s": last_no_frame_s,
+                        }
+                        print(json.dumps(summary, ensure_ascii=False), flush=True)
+                finally:  # отказ печати сводки не оставляет захват включённым
+                    if grabbing:
+                        try:
+                            api.stop_grabbing(h)
+                        except SdkError as exc:
+                            print(exc, flush=True)
+                        except Exception as exc:  # noqa: BLE001 — восстановление узлов важнее причины отказа stop
+                            print(f"stop_grabbing: {type(exc).__name__}: {exc}", flush=True)
             finally:
                 restore_rc = _restore(api, h, attempted)
         return restore_rc or rc
