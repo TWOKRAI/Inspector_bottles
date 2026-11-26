@@ -119,6 +119,9 @@ blueprint:
           plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
           category: source
           config:
+            # Решение владельца 2026-11-26: камера не паузится вместе с линией — display превью показывает
+            # живой кадр и вне running; остальные display помечены run_view: running.
+            run_gated: false
             camera_id: 0
             # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
             device_select: serial
@@ -588,6 +591,7 @@ displays:
   - id: recog
     name: Распознанный диск (буква + угол)
     enabled: true
+    run_view: running
     width: 512
     height: 512
     format: BGR
@@ -604,6 +608,7 @@ displays:
   - id: mask
     name: Маска белого (hsv_mask)
     enabled: true
+    run_view: running
     width: 1280
     height: 720
     format: BGR
@@ -620,6 +625,7 @@ displays:
   - id: phone
     name: Фото с телефона
     enabled: false
+    run_view: running
     width: 640
     height: 480
     format: BGR

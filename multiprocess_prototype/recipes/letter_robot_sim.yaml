@@ -136,6 +136,9 @@ blueprint:
           plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
           category: source
           config:
+            # Решение владельца 2026-11-26: камера не паузится вместе с линией — display превью показывает
+            # живой кадр и вне running; остальные display помечены run_view: running.
+            run_gated: false
             camera_type: stream
             stream_url: http://127.0.0.1:8091/
             auto_start: true
@@ -621,6 +624,7 @@ displays:
   - id: recog
     name: Распознанный диск (буква + угол)
     enabled: true
+    run_view: running
     width: 512
     height: 512
     format: BGR
@@ -637,6 +641,7 @@ displays:
   - id: mask
     name: Маска белого (hsv_mask)
     enabled: true
+    run_view: running
     width: 1280
     height: 720
     format: BGR
@@ -653,6 +658,7 @@ displays:
   - id: phone
     name: Фото с телефона
     enabled: false
+    run_view: running
     width: 640
     height: 480
     format: BGR
