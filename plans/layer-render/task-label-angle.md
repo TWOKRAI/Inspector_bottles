@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int
 | Backspace | предыдущий кадр |
 | Esc | закрыть |
 
+«ы» распознаётся по `event.text().lower() == "ы"`. «ы» и автоповтор тест шлёт как
+`QApplication.sendEvent(окно, QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier, text, autorep))`,
+для «ы» `key=0x042B, text="ы"`; обработчик принимает такие события.
+
 Enter/Return с `isAutoRepeat()` игнорируется. При `current is None` Backspace открывает последний кадр,
 Enter и S ничего не делают. Backspace на первом кадре остаётся на нём.
 
