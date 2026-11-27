@@ -316,7 +316,8 @@ def compose_layers(
       - `forced_defects` включает эти defect-слои без розыгрыша; неизвестное имя — ValueError
       - входные слои и спрайты не мутируются; callable-провайдер зовётся ровно раз на слой
     Порядок проверок: `forced_defects` строкой (`TypeError`) → пустой список → спрайты → дубли имён →
-    неизвестный дефект → розыгрыш → полностью прозрачный итог.
+    неизвестный дефект → розыгрыш → нечего рисовать (все слои `defect`, ни один не выпал) →
+    полностью прозрачный итог.
     """
     # 0. Форма аргумента — до любых проверок содержимого: `str` тоже Iterable[str], и `list("scratch")`
     #    дал бы отдельные символы (а слой с односимвольным именем молча включился бы).
@@ -378,6 +379,12 @@ def compose_layers(
                 layer.offset_px[0] + dx,
                 layer.offset_px[1] + dy,
             )
+        )
+
+    if not placed:
+        raise ValueError(
+            f"LayeredObject '{label}': нечего рисовать — все слои mode='defect' и ни один не выпал; "
+            "нужен хотя бы один слой mode='static' или mode='augmented'"
         )
 
     rgba = _compose_canvas(placed, object_angle_deg)

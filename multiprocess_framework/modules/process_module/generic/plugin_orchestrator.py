@@ -343,13 +343,14 @@ class PluginOrchestrator:
 
     # --- Готовность и событие работы (Task 1.2 плана system-run-state) ---
 
-    def readiness_snapshot(self, announced: bool | None = None) -> dict:
+    def readiness_snapshot(self, announced: bool | None = None, extra_reasons: list[dict] | None = None) -> dict:
         """Снимок готовности процесса: ``{"ready", "reasons", "paused", "at"}``.
 
         Считает отдельный поток-снимок процесса (≤ 2 Гц); heartbeat только читает
         готовый результат. ``announced`` — защёлка «процесс объявил готовность»
         (держит вызывающий); ``None`` → читаем статус процесса сами:
-        ``_current_process_status in ("running", "paused")``.
+        ``_current_process_status in ("running", "paused")``. ``extra_reasons`` — причины уровня
+        процесса, первыми; ``None`` — прежнее поведение.
 
         * ``reasons`` — по плагину: причины его ``readiness()`` (под собственным ``try``),
           «плагин не поднят (<состояние>)» для плагина вне ``RUNNING/PAUSED``
@@ -371,7 +372,9 @@ class PluginOrchestrator:
         plugins = list(self._plugins)
         contexts = list(self._contexts)
 
-        reasons: list[dict] = []
+        reasons: list[dict] = [
+            self._reason(r["node"], r["severity"], r["reason"], r["source"]) for r in (extra_reasons or ())
+        ]
         for plugin, ctx in zip(plugins, contexts):
             node = f"{process_name}.{plugin.name}"
             state = plugin.state

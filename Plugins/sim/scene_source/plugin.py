@@ -1136,8 +1136,8 @@ class SceneSourcePlugin(ProcessModulePlugin):
         `_BACKGROUND_BGR` (repro: `_BACKGROUND_BGR=(200,10,30)` → движок даёт
         `[200,10,30]`, fallback без этого фикса давал `[30,10,200]`; на дефолтном
         сером `(60,60,60)` разница незаметна, отсюда и не была поймана раньше).
-        Тот же приём переворота каналов, что `SceneCompositor.render()` — см. его
-        докстринг."""
+        Ту же перестановку (B, G, R) → RGB для `background_bgr` делает
+        `SceneCompositor.__init__`."""
         frame = np.empty((self._height, self._width, 3), dtype=np.uint8)
         b, g, r = _BACKGROUND_BGR
         frame[:, :, 0], frame[:, :, 1], frame[:, :, 2] = r, g, b

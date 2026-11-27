@@ -7,7 +7,7 @@
 
 ### Task 6.1 — одна функция выреза для `center_crop`, `holdout_eval` и генератора (бывш. 2.1)
 
-- **Статус:** [PENDING] волна 3 · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer (dev-crop) → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `f9ef5c45`] волна 3 · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer (dev-crop) → инъекции лида → reviewer
 - **Module contract:** public-api-change (`layer_render.crop`: `side_from_radius`, `square_crop`, `resize_square`)
 - **CHAIN:** `tester`(RED: литералы старого поведения на коде до задачи) → `developer`(GREEN) → инъекции лида → `reviewer`
 - **Dependencies:** Ф1 (DONE). Параллельно 2.2: общие только `layer_render/__init__.py`, `README.md` — разные строки, сводит лид при слиянии
@@ -68,7 +68,7 @@
 
 ### Task 6.4 — `holdout_eval` режет кадр по формуле конвейера (решение О-1, бывш. 2.4)
 
-- **Статус:** [PENDING] волна 4 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → прогон и инъекции лида → reviewer
+- **Статус:** [DONE — `e18d22d44`] волна 4 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → прогон и инъекции лида → reviewer
 - **Module contract:** public-api-change (`evaluate_holdout`: аргумент `margin` заменён на `radius_scale`/`margin_px`/`output_size`/
   `pad_color_bgr`; CLI `eval` — четыре новых флага). Внешних вызовов `evaluate_holdout(..., margin=...)` — 0 (grep вне
   `.claude/worktrees`, ревью спеки), поэтому `margin` удаляется без алиаса.

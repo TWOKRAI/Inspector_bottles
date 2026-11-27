@@ -223,7 +223,9 @@ blueprint:
       category:
       restart_policy: {}
       metadata: {}
-      extras: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: line
       plugins:
         - plugin_name: line_filter
@@ -250,7 +252,9 @@ blueprint:
       category:
       restart_policy: {}
       metadata: {}
-      extras: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: recog
       plugins:
         - plugin_name: center_crop
@@ -316,7 +320,9 @@ blueprint:
       restart_policy: {}
       collector:
         timeout_sec: 0.25
-      extras: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: layout
       plugins:
         - plugin_name: word_layout
@@ -361,7 +367,9 @@ blueprint:
       category:
       restart_policy: {}
       metadata: {}
-      extras: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: draw
       plugins:
         - plugin_name: circle_draw

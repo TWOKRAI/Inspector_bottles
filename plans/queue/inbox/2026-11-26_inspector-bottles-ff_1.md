@@ -1,0 +1,2 @@
+registry: defects.md
+| C-NN | **layer-render: слой брака, который не выпал, роняет рендер непонятной ошибкой** — вход: пресет с одним defect-слоем, который не сработал; выход: `ValueError: max() iterable argument is empty` при отрисовке, пресет при этом принят (`Services/layer_render/layers.py`, `canvas_size`) | разбор layer-render 2026-11-26, `docs/reports/2026-11-26_layer-render_status-audit.md` (запуском, сессия inspector-bottles-ff) | открыт |
