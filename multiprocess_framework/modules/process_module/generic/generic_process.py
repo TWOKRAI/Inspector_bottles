@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import queue
 
+from ...base_manager.types import ProcessStatus
 from ..commands.builtin_commands import BuiltinCommands
 from ..core.process_module import ProcessModule
 from ..plugins.base import PluginState
 from .data_receiver import DataReceiver
+from .inbox_watch import INBOX_STALL_KEY, InboxWatch, parse_stall_s
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .collector_registry import build_collector
 from .pipeline_executor import PipelineExecutor
@@ -64,6 +66,10 @@ class GenericProcess(ProcessModule):
     из message-handler: на приёмном потоке роутера это ``RouterReentrantRequestError``
     (контракт StateProxy, не глотать).
     """
+
+    #: Task 2.2e: сторожа застоя входа и обработки; ``None`` — выключено (ключ ``inbox_stall_s``).
+    _inbox_watch: InboxWatch | None = None
+    _pipeline_watch: InboxWatch | None = None
 
     def _init_custom_managers(self) -> None:
         """Завести StateProxy ДО super(): оркестратор кладёт ``_state_proxy`` в PluginContext.
@@ -136,6 +142,29 @@ class GenericProcess(ProcessModule):
         """Глубина собственной IPC data-очереди процесса (Task 4.7c, C3); None — узнать нельзя."""
         q = (self.queues or {}).get("data")
         return None if q is None else BuiltinCommands._queue_size(q)
+
+    def _process_readiness_reasons(self) -> list[dict]:
+        """Task 2.2e: «кадры не принимаются» / «обработка стоит»; зовёт поток снимка готовности."""
+        inbox, pipe = self._inbox_watch, self._pipeline_watch
+        if inbox is None and pipe is None:
+            return []  # выключено: ни qsize, ни метрик
+        event = getattr(self, "_run_event", None)
+        running = (
+            bool(self._readiness_announced)
+            and self._current_process_status != ProcessStatus.PAUSED.value  # пауза оператора — молчим
+            and (event is None or event.is_set())
+        )
+        got_in: list[dict] = []
+        got_pipe: list[dict] = []
+        receiver = getattr(self, "_data_receiver", None)
+        if inbox is not None and receiver is not None:
+            cycles = receiver.get_cycle_metrics().get("cycles")
+            got_in = inbox.observe(running, cycles if type(cycles) is int else None, self._data_queue_depth())
+        executor = getattr(self, "_pipeline_executor", None)
+        if pipe is not None and executor is not None:
+            got_pipe = pipe.observe(running, executor.progress_count, self._chain_queue.qsize())
+        # одна причина: при lag=0 приём стоит из-за обработки (Q6); при lag>0 отказы независимы
+        return got_pipe or got_in
 
     def _init_data_pipeline(self) -> None:
         """Bootstrap data pipeline: DataReceiver, PipelineExecutor, SourceProducer."""
@@ -307,6 +336,20 @@ class GenericProcess(ProcessModule):
                 plugin_runner=self._plugin_runner,
                 overflow=overflow,
             )
+
+            # Task 2.2e: сторожа застоя — opt-in ключом процесса (умолчание framework — выключено).
+            stall_s, problem = parse_stall_s(app_cfg.get(INBOX_STALL_KEY))
+            if problem:
+                self._log_warning(f"Process '{self.name}': {problem}")
+            elif stall_s is not None and self._data_queue_depth() is None:
+                self._log_warning(
+                    f"Process '{self.name}': {INBOX_STALL_KEY}: глубина data-очереди недоступна — "
+                    "предупреждение выключено"
+                )
+            elif stall_s is not None:
+                self._inbox_watch = InboxWatch(self.name, f"{self.name}: кадры не принимаются", "inbox", stall_s)
+                if getattr(self, "_pipeline_executor", None) is not None:
+                    self._pipeline_watch = InboxWatch(self.name, f"{self.name}: обработка стоит", "pipeline", stall_s)
 
             # Запуск workers через WorkerManager
             if self.worker_manager:

@@ -4,6 +4,7 @@
 
 ✅ **Production Ready** — модуль готов к использованию
 
+- **2026-11-26 (Task 2.2e, ADR-PM-065):** предупреждения «кадры не принимаются» / «обработка стоит» (`generic/inbox_watch.py`, ключ `inbox_stall_s`). Готово: код и тесты. Открыто: срок 15 с на железе; `qsize` на Linux/Orin; статус после `worker.stop`; порядок причин между процессами; груз, не дошедший до очереди получателя; плохой ключ у процесса без processing-плагинов WARNING не даёт
 - **2026-11-02 (C-66, ADR-PM-058):** `HealthState` считает статус из заявок владельцев: закрытие breaker и `ok` плагина снимают только свою заявку, `failed` не понижается; публикуется прежняя одна строка `degraded_reason`.
 - **2026-10-13 (Task 1.2b-2, Р4, ADR-PM-054):** `IProcessModule` получил `close_root()`/`attach_stop_budget()`; раннер — `isinstance(…, IProcessModule)`; `ProcessModule.shutdown` → `_on_shutdown`; `_open_root` ставит `_ON_SHUTDOWN_WAIT_S` экземпляра (`work_s + infra_s`).
 - **2026-10-12 (Task 1.2b-1, ADR-BM-009):** менеджеры корня (`BaseManager` с записью `_attr_call(…, "shutdown")`) получают область `<attr>-scope` в своём сегменте; LIFO закрывает её раньше `shutdown()` менеджера.
