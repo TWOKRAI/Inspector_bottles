@@ -33,6 +33,7 @@ from ...process_module.health.schema import READINESS_FIELDS, readiness_path
 from ...process_module.progress import ProgressTracker, progress_path
 from ...shared_resources_module import QueueRegistry
 from ...shared_resources_module.qos import DEFAULT_FRAME_RING_DEPTH
+from ...shared_resources_module.queues.core.reader_gone import retire_queue, set_reader_gone
 from ..core.process_priority import ProcessPriority
 from ..core.process_registry import ProcessRegistry
 from ..core.stop_budget import (
@@ -270,8 +271,8 @@ class ProcessManagerProcess(ProcessModule):
         self.__dict__["_run_lock_obj"] = threading.Lock()
         self.__dict__["_run_publish_lock_obj"] = threading.Lock()
         # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
-        # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
-        # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
+        # incarnation. При откате ``restart_reuse_queues: true`` incarnation осознанно
+        # не растёт (ADR-PMM-014, ADR-PMM-054), поэтому маркер «до/после рестарта» — пара
         # pid + instance_restarts: pid берётся из ОС в момент запроса,
         # instance_restarts инкрементируется на КАЖДЫЙ успешный restart_process.
         # Имя честное: сюда попадают И ручные рестарты, И авто-рестарты
@@ -282,6 +283,8 @@ class ProcessManagerProcess(ProcessModule):
         # инстанса, выполненные оркестратором.
         self._instance_restarts: dict[str, int] = {}
         self._instance_started_at: dict[str, float] = {}
+        # C-36 (ADR-PMM-054): сколько замков чтения найдено осиротевшими на рестартах процесса.
+        self._orphaned_read_locks: dict[str, int] = {}
         self._create_components()
 
     def _create_components(self) -> None:
@@ -1737,7 +1740,8 @@ class ProcessManagerProcess(ProcessModule):
             "supervision.status": (
                 self._cmd_supervision_status,
                 "Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/"
-                "status/pid/started_at/instance_restarts/stop_outcome. Маркер замены инстанса = pid+instance_restarts "
+                "status/pid/started_at/instance_restarts/orphaned_read_locks/stop_outcome. "
+                "Маркер замены инстанса = pid+instance_restarts "
                 "(считает и ручные, и авто-рестарты supervision — они идут той же process.restart). "
                 "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора; "
                 "stop_outcome — как умер ребёнок при последнем стопе текущего воплощения "
@@ -2410,9 +2414,12 @@ class ProcessManagerProcess(ProcessModule):
           - ``pid`` (истина ОС, читается из реестра в момент запроса) и
             ``instance_restarts`` (счётчик выполненных ``restart_process`` —
             и ручных, и авто-рестартов supervision) видят замену инстанса
-            ВСЕГДА, включая дефолтный reuse-очередей;
-          - ``incarnation`` растёт только когда сменилась identity очередей
-            (reuse=off) — это fence-семантика, а не «был ли рестарт»;
+            ВСЕГДА, в обоих режимах ``restart_reuse_queues``;
+          - ``incarnation`` растёт, когда сменилась identity очередей: по умолчанию
+            (свежие очереди, ADR-PMM-054) — на каждом рестарте; при откате
+            ``restart_reuse_queues: true`` — только если проба заставила их пересоздать;
+          - ``orphaned_read_locks`` — накопленное число очередей процесса, чей замок
+            чтения на рестарте был занят без живого читателя (C-36);
           - ``restart_count`` — краш-рестарты в окне истории монитора; ручной
             рестарт в него не попадает (пересечение с instance_restarts —
             только по авто-рестартам).
@@ -2425,6 +2432,7 @@ class ProcessManagerProcess(ProcessModule):
         snap = mon.get_supervision_snapshot() if mon is not None else {}
         # D3: снимки без лока — писатели класса L мутируют словари на потоке исполнителя.
         instance_restarts = dict(getattr(self, "_instance_restarts", None) or {})
+        orphaned_read_locks = dict(getattr(self, "_orphaned_read_locks", None) or {})
         started_at = dict(getattr(self, "_instance_started_at", None) or {})
         registry = getattr(self, "_process_registry", None)
         target = data.get("process") if isinstance(data, dict) else None
@@ -2471,6 +2479,7 @@ class ProcessManagerProcess(ProcessModule):
                 "alive": alive_val,
                 "started_at": started_at.get(name),
                 "instance_restarts": instance_restarts.get(name, 0),
+                "orphaned_read_locks": orphaned_read_locks.get(name, 0),
                 # Task 1.10: как умер ребёнок при последнем стопе текущего воплощения (D1); None — не стопался.
                 "stop_outcome": registry.stop_outcome(name) if registry is not None else None,
                 # Task 1.2 (ADR-PMM-042): волна стопа имени и срок, после которого ребёнок «завис».
@@ -2946,7 +2955,7 @@ class ProcessManagerProcess(ProcessModule):
     #      `_wire_middlewares` → провод B висит на мёртвом инстансе. Это и есть баг.
     #
     # SHM-регион owner-scoped и переживает рестарт (restart_process зовёт
-    # register_process(reuse_queues), а НЕ unregister_process — SHM не освобождается),
+    # register_process, а НЕ unregister_process — SHM не освобождается),
     # поэтому re-issue = переслать wire.configure ТОЛЬКО в перезапущенный инстанс
     # (пересоздать его middleware); партнёр не трогаем — он читает per-message
     # shm_actual_name и остаётся валиден. Переаллокация SHM не требуется.
@@ -3211,7 +3220,7 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:
                 self._log_warning(f"cleanup_process_resources: SRM unregister '{name}' не удался: {exc}")
 
-        for tail in ("_instance_restarts", "_instance_started_at"):
+        for tail in ("_instance_restarts", "_instance_started_at", "_orphaned_read_locks"):
             store = getattr(self, tail, None)
             if isinstance(store, dict):
                 store.pop(name, None)
@@ -4891,10 +4900,11 @@ class ProcessManagerProcess(ProcessModule):
     def _drain_process_queues(self, name: str) -> None:
         """Дренаж мусора прошлой жизни из очередей процесса (get_nowait до Empty).
 
-        Осознанно НЕ ``clear_queue`` (тот спит ~0.2с/очередь на macOS). Перед
-        рестартом с reuse_queues=True переиспользуемые очереди могут держать
+        Осознанно НЕ ``clear_queue`` (тот спит ~0.2с/очередь на macOS). Нужен при
+        откате ``restart_reuse_queues: true``: переиспользуемые очереди могут держать
         недочитанные билеты убитого процесса — сливаем их, чтобы новый инстанс
-        стартовал с чистыми очередями. Best-effort, за guard'ами.
+        стартовал с чистыми очередями. На свежих очередях (умолчание, ADR-PMM-054)
+        сливать нечего. Best-effort, за guard'ами.
         """
         sr = getattr(self, "shared_resources", None)
         if sr is None:
@@ -4914,6 +4924,118 @@ class ProcessManagerProcess(ProcessModule):
                         break
         except Exception:  # noqa: BLE001 — дренаж не критичен
             pass
+
+    #: C-36: сколько раз пробовать замок чтения и пауза между пробами. Живой писатель,
+    #: вытесняющий старейший элемент (``QueueRegistry.remove_old_if_full`` → ``get_nowait``),
+    #: держит замок микросекунды; 5 × 10 мс отличают его от замка убитого читателя.
+    _RLOCK_PROBE_ATTEMPTS = 5
+    _RLOCK_PROBE_PAUSE_S = 0.01
+    #: C-36: общий срок на метку брошенных очередей (все типы вместе).
+    _MARK_GONE_DEADLINE_S = 2.0
+
+    def _process_queues_snapshot(self, name: str) -> dict[str, Any]:
+        """Копия ``{qtype: queue}`` процесса из PSR (``{}`` — нет SRM или записи)."""
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return {}
+        pd = sr.get_process_data(name)
+        return dict(getattr(pd, "queues", None) or {}) if pd is not None else {}
+
+    def _probe_orphaned_read_locks(self, name: str, reuse_queues: bool) -> list[str]:
+        """Найти очереди процесса с замком чтения, занятым без живого читателя (C-36).
+
+        Зовётся из рестарта ПОСЛЕ подтверждённой смерти воплощения и ДО ``register_process``:
+        в PSR ещё очереди убитого. Читатель ``mp.Queue`` держит межпроцессный ``_rlock`` всё
+        время ``get(timeout)``; убитый внутри, он оставляет замок занятым навсегда (ядро
+        семафор не освобождает). Каждая такая очередь — +1 к ``orphaned_read_locks``
+        (``supervision.status``) и строка лога; уровень и текст зависят от режима: свежие
+        очереди (``reuse_queues=False``) вреда не несут — WARNING; переиспользование
+        оставило бы воплощение глухим — ERROR.
+
+        Returns:
+            Отсортированные типы очередей с занятым замком.
+        """
+        try:
+            queues = self._process_queues_snapshot(name)
+        except Exception as exc:  # noqa: BLE001 — проба не роняет рестарт
+            self._log_warning(f"restart '{name}': проба замков чтения не выполнена: {exc!r}")
+            return []
+        stuck: list[str] = []
+        for qtype, q in sorted(queues.items()):
+            lock = getattr(q, "_rlock", None)
+            if lock is None:  # не mp.Queue (двойник, queue.Queue) — проверять нечего
+                continue
+            if not self._read_lock_free(lock):
+                stuck.append(qtype)
+        if not stuck:
+            return stuck
+        counters = getattr(self, "_orphaned_read_locks", None)
+        if counters is None:
+            counters = self._orphaned_read_locks = {}
+        for qtype in stuck:
+            counters[name] = counters.get(name, 0) + 1
+            head = f"C-36: очередь '{qtype}' процесса '{name}': "
+            tail = f"; orphaned_read_locks[{name}]={counters[name]}"
+            if reuse_queues:
+                self._log_error(
+                    head + "замок чтения занят без живого читателя (воплощение убито внутри get) — "
+                    "на этой очереди новое воплощение было бы глухо" + tail
+                )
+            else:
+                self._log_warning(head + "замок чтения осиротел, очередь брошена и пересоздаётся" + tail)
+        return stuck
+
+    def _read_lock_free(self, lock: Any) -> bool:
+        """Свободен ли замок: ``acquire(False)`` с повтором (см. ``_RLOCK_PROBE_ATTEMPTS``)."""
+        for attempt in range(self._RLOCK_PROBE_ATTEMPTS):
+            try:
+                if lock.acquire(False):
+                    lock.release()
+                    return True
+            except Exception:  # noqa: BLE001 — сломанный семафор = не свободен
+                return False
+            if attempt + 1 < self._RLOCK_PROBE_ATTEMPTS:
+                time.sleep(self._RLOCK_PROBE_PAUSE_S)
+        return False
+
+    def _mark_abandoned_queues_gone(self, name: str) -> None:
+        """Взвести метку «читатель ушёл» на очередях, которые рестарт бросает (ADR-PMM-054).
+
+        Метка — ``mp.Event``; ``set()`` берёт его межпроцессный замок. Читатель, убитый внутри
+        ``is_set()``, оставляет замок занятым, и ``set()`` не возвращается никогда. Поэтому
+        каждая очередь метится своим daemon-потоком, а срок ``_MARK_GONE_DEADLINE_S`` общий:
+        зависшая метка одной очереди не оставляет без метки остальные и не держит рестарт.
+        Зависший поток остаётся жить до выхода PM (отменить ``acquire`` нечем).
+        """
+        try:
+            queues = self._process_queues_snapshot(name)
+        except Exception as exc:  # noqa: BLE001 — метка вторична, рестарт продолжается
+            self._log_warning(f"restart '{name}': метка «читатель ушёл» на брошенных очередях не взведена: {exc!r}")
+            return
+        failures: dict[str, str] = {}
+
+        def _mark(qtype: str, q: Any) -> None:
+            try:
+                set_reader_gone([q], True)
+            except Exception as exc:  # noqa: BLE001 — переносим в поток рестарта
+                failures[qtype] = repr(exc)
+
+        threads: dict[str, threading.Thread] = {}
+        for qtype, q in queues.items():
+            threads[qtype] = threading.Thread(target=_mark, args=(qtype, q), name=f"c36-mark-{qtype}", daemon=True)
+            threads[qtype].start()
+        deadline = time.monotonic() + self._MARK_GONE_DEADLINE_S
+        for qtype, thread in threads.items():
+            thread.join(max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                self._log_error(
+                    f"restart '{name}': метка «читатель ушёл» на брошенной очереди '{qtype}' не взведена за "
+                    f"{self._MARK_GONE_DEADLINE_S} с — замок Event занят убитым процессом; рестарт продолжается"
+                )
+            elif qtype in failures:
+                self._log_warning(
+                    f"restart '{name}': метка «читатель ушёл» на очереди '{qtype}' не взведена: {failures[qtype]}"
+                )
 
     def _process_queue_ids(self, name: str) -> dict[str, int]:
         """id() очередей процесса из PSR — для сверки identity до/после рестарта."""
@@ -5675,13 +5797,13 @@ class ProcessManagerProcess(ProcessModule):
         return True
 
     def restart_process(self, process_name: str) -> bool:
-        """Перезапустить процесс: stop → снять с реестра → (reuse-очереди) → create → start.
+        """Перезапустить процесс: stop → снять с реестра → очереди → create → start.
 
-        Ф3.1 (routing-epoch, дорога B): очереди процесса ПЕРЕИСПОЛЬЗУЮТСЯ
-        (``reuse_queues=True``, конфиг-откат ``restart_reuse_queues: false``) —
-        identity сохраняется, стейл-ссылки выживших соседей остаются валидными,
-        hot-path не деградирует. Мусор прошлой жизни дренируется. Если identity
-        всё же сменилась (reuse выключен) — соседям поднимается incarnation.
+        C-36 (ADR-PMM-054): новое воплощение получает СВЕЖИЕ очереди, соседям поднимается
+        incarnation; выжившие сбрасывают стейл-ссылку и шлют через hub-relay PM.
+        Откат — конфиг ``restart_reuse_queues: true``: очереди переиспользуются и
+        дренируются; если замок чтения хотя бы одной занят без читателя, пересоздаются
+        все очереди процесса. Что лежало в брошенных очередях, теряется.
         В конце — bump epoch + broadcast refresh (декларативная сверка снимка).
         """
         if self._spawn_refused_after_system_stop("restart_process", process_name):
@@ -5710,7 +5832,8 @@ class ProcessManagerProcess(ProcessModule):
 
     def _restart_process_replace(self, process_name: str, config: dict[str, Any]) -> bool:
         """Замена воплощения после пометки ``mark_restarting``: stop -> снять с реестра -> create -> start -> ready."""
-        # ADR-PMM-030: метку НЕ ставить — очереди переиспользуются новым воплощением.
+        # ADR-PMM-030: на стопе метку НЕ ставить — режим очередей решается ниже; при свежих
+        # очередях брошенные метит ``_mark_abandoned_queues_gone`` (ADR-PMM-054).
         if not self.stop_process(process_name, mark_reader_gone=False):
             return False
         self._process_registry.remove_process(process_name)
@@ -5721,8 +5844,29 @@ class ProcessManagerProcess(ProcessModule):
         if self._wire_reissue_enabled():
             self._mark_wires_broken_for(process_name)
 
+        # C-36 (ADR-PMM-054): дефолт False — очереди убитого воплощения не переиспользуются.
+        # ``restart_reuse_queues: true`` — откат к поведению Ф3.1.
         reuse_cfg = self.get_config("restart_reuse_queues")
-        reuse_queues = True if reuse_cfg is None else bool(reuse_cfg)  # дефолт True
+        reuse_queues = False if reuse_cfg is None else bool(reuse_cfg)
+        # Проба ДО register_process: в PSR ещё очереди убитого. Идёт в обоих режимах.
+        stuck = self._probe_orphaned_read_locks(process_name, reuse_queues)
+        if stuck and reuse_queues:
+            # Переиспользованная очередь с занятым замком глуха навсегда. Incarnation одна на
+            # процесс, поэтому свежими становятся ВСЕ его очереди.
+            self._log_error(
+                f"restart '{process_name}': restart_reuse_queues=true, но замок чтения {stuck} занят — "
+                "очереди всего процесса пересоздаются (C-36)"
+            )
+            reuse_queues = False
+        if not reuse_queues:
+            # Брошенные очереди никто не прочтёт: метка ДО замены их в PSR PM.
+            self._mark_abandoned_queues_gone(process_name)
+        # C-36: старые объекты — чтобы после register_process отпустить заменённые (PM сам писал в них).
+        try:
+            old_queues = self._process_queues_snapshot(process_name)
+        except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
+            old_queues = {}
+            self._log_warning(f"restart '{process_name}': брошенные очереди не отпущены: {exc!r}")
         ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
             self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
@@ -5731,9 +5875,23 @@ class ProcessManagerProcess(ProcessModule):
             # ``register_process`` существующей записи статус не трогает — без сброса воплощение наследует
             # ``crashed`` / ``unresponsive`` / ``stopped`` прежнего и супервизор пропускает его следующий сбой.
             self.shared_resources.process_state_registry.update_state(process_name, status="initializing")
-            # Дренаж переиспользованных очередей: новый инстанс стартует чистым.
+            # Дренаж переиспользованных очередей: новый инстанс стартует чистым (свежие — пусты).
             self._drain_process_queues(process_name)
         ids_after = self._process_queue_ids(process_name)
+        # C-36: отпуск ПОСЛЕ замены в PSR. До неё параллельный router.relay берёт из PSR старые объекты, и
+        # закрытая очередь отвечала бы отказом; тип, который не пересоздался, остаётся рабочим. Без отпуска
+        # выход PM ждал бы feeder брошенной очереди без срока.
+        for qtype, q in old_queues.items():
+            if qtype in ids_after and ids_after[qtype] != id(q):
+                try:
+                    retire_queue(q)
+                except Exception as exc:  # noqa: BLE001 — отпуск не роняет рестарт
+                    self._log_warning(f"restart '{process_name}': очередь '{qtype}' не отпущена: {exc!r}")
+        unknown = sorted(qtype for qtype in old_queues if qtype not in ids_after)
+        if unknown:
+            self._log_warning(
+                f"restart '{process_name}': очереди не отпущены: identity после замены неизвестна; типы: {unknown}"
+            )
 
         # Identity очередей сменилась → соседи должны сбросить стейл-ссылки. Bump
         # ДО create_and_register (как в _topology_provision): create_and_register
@@ -5752,8 +5910,8 @@ class ProcessManagerProcess(ProcessModule):
         process.start()
         self._mark_instance_started(process_name)
         # Ф2 Task 2.1: инкремент БЕЗУСЛОВНЫЙ — в отличие от _bump_incarnation выше,
-        # который срабатывает только при смене identity очередей (reuse=off).
-        # Именно этот счётчик + новый pid делают reuse-рестарт видимым в supervision.
+        # который срабатывает только при смене identity очередей.
+        # Именно этот счётчик + новый pid делают reuse-рестарт (откат) видимым в supervision.
         # Считает ЛЮБУЮ замену инстанса через restart_process, включая авто-рестарт
         # монитора (он приходит той же командой process.restart) — см. __init__.
         restarts = getattr(self, "_instance_restarts", None)
@@ -5776,8 +5934,8 @@ class ProcessManagerProcess(ProcessModule):
         # data-path) самовосстанавливается через refresh ниже.
         if self._wire_reissue_enabled():
             self._reissue_wires_for(process_name)
-        # Обновить epoch и разослать refresh (при reuse incarnation не менялась →
-        # выжившие соседи оставят валидную переиспользованную очередь).
+        # Обновить epoch и разослать refresh: incarnation выросла → выжившие сбросят стейл-
+        # ссылку и пойдут через hub-relay; при reuse не менялась → оставят прежнюю очередь.
         self._bump_routing_epoch()
         self._broadcast_routing_refresh("process.restart")
         # RS-2: пересозданный инстанс имеет НОВЫЙ pid — обновить identity в state,

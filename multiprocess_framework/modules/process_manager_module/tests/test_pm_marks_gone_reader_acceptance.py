@@ -392,7 +392,11 @@ class TestCreateAndRegisterClearsMark:
 
 class TestRestartProcessDoesNotMark:
     def test_restart_process_does_not_mark_and_new_incarnation_reads_intact(self) -> None:
-        """Полный реальный restart_process тянет за собой ~10 несвязанных внутренностей
+        """Режим отката ``restart_reuse_queues: true`` (ADR-PMM-054): стоп внутри рестарта
+        метку не ставит. Свежие очереди и метку на брошенных проверяет
+        ``test_c36_restart_queues_acceptance.py``.
+
+        Полный реальный restart_process тянет за собой ~10 несвязанных внутренностей
         PM (wire reissue, routing epoch, telemetry replay) — построение их всех не
         относится к контракту Task 1.2. Пин — на КОНТРАКТ вызова: ``restart_process``
         обязан звать ``stop_process(name, mark_reader_gone=False)`` (иначе отпущенный
@@ -411,7 +415,7 @@ class TestRestartProcessDoesNotMark:
             pmp._process_queue_ids = lambda name: {}
             pmp._bump_incarnation = MagicMock()
             pmp._priority = MagicMock()
-            pmp.get_config = lambda k: None
+            pmp.get_config = lambda k: True if k == "restart_reuse_queues" else None
             pmp._mark_instance_started = MagicMock()
             pmp._wait_processes_ready = MagicMock()
             pmp._bump_routing_epoch = MagicMock()

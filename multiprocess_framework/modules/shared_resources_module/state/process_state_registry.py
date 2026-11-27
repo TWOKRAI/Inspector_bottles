@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from multiprocessing import Queue, Event
 
 from .process_data import ProcessData
+from ..queues.core.reader_gone import retire_queue
 from ..types import ProcessStatus, ProcessDataDict
 from .interfaces import IProcessStateRegistry
 
@@ -62,6 +63,7 @@ class ProcessStateRegistry(IProcessStateRegistry):
             return
         try:
             from ..types import EventType
+
             event_type = getattr(EventType, event_type_name, None)
             if event_type is not None:
                 self.event_manager.emit_event(event_type, **kwargs)
@@ -85,10 +87,7 @@ class ProcessStateRegistry(IProcessStateRegistry):
                     if initial_state:
                         if "status" in initial_state:
                             raw = initial_state["status"]
-                            process_data.status = (
-                                raw if isinstance(raw, ProcessStatus)
-                                else ProcessStatus(raw)
-                            )
+                            process_data.status = raw if isinstance(raw, ProcessStatus) else ProcessStatus(raw)
                             process_data.update_timestamp()
                         if "metadata" in initial_state:
                             process_data.metadata.update(initial_state["metadata"])
@@ -99,12 +98,10 @@ class ProcessStateRegistry(IProcessStateRegistry):
                 else:
                     raw_status = (
                         initial_state.get("status", ProcessStatus.INITIALIZING)
-                        if initial_state else ProcessStatus.INITIALIZING
+                        if initial_state
+                        else ProcessStatus.INITIALIZING
                     )
-                    status = (
-                        raw_status if isinstance(raw_status, ProcessStatus)
-                        else ProcessStatus(raw_status)
-                    )
+                    status = raw_status if isinstance(raw_status, ProcessStatus) else ProcessStatus(raw_status)
                     process_data = ProcessData(
                         name=process_name,
                         status=status,
@@ -132,6 +129,10 @@ class ProcessStateRegistry(IProcessStateRegistry):
         сохраняются), но словарь очередей очищается — следующий send по этому
         имени не найдёт очередь и штатно уйдёт в hub-relay.
 
+        C-36: снятые объекты очередей отпускаются (``retire_queue``) — иначе процесс,
+        писавший в такую очередь, на выходе ждёт её feeder вечно: хук выхода видит только
+        очереди из реестра. ``put`` по удержанной где-то ещё ссылке после этого отказывает.
+
         Идемпотентно: повторный вызов на уже пустом процессе снова вернёт True
         (запись есть — очереди очищены). Возвращает False только если процесса
         нет в реестре.
@@ -147,8 +148,15 @@ class ProcessStateRegistry(IProcessStateRegistry):
             pd = self.states.get(process_name)
             if pd is None:
                 return False
+            abandoned = list(pd.queues.values())
             pd.clear_queues()
-            return True
+        # Вне замка реестра: retire берёт ``q._notempty``.
+        for q in abandoned:
+            try:
+                retire_queue(q)
+            except Exception as e:  # noqa: BLE001 — сброс очередей не роняет routing.refresh
+                self._log("warning", f"PSR.drop_process_queues('{process_name}'): очередь не отпущена: {e!r}")
+        return True
 
     def unregister_process(self, process_name: str) -> bool:
         with self._lock:
@@ -186,20 +194,20 @@ class ProcessStateRegistry(IProcessStateRegistry):
         with self._lock:
             try:
                 if process_name not in self.states:
-                    self.register_process(process_name, {
-                        "status": status or ProcessStatus.INITIALIZING,
-                        "metadata": metadata or {},
-                        "custom": custom or {},
-                    })
+                    self.register_process(
+                        process_name,
+                        {
+                            "status": status or ProcessStatus.INITIALIZING,
+                            "metadata": metadata or {},
+                            "custom": custom or {},
+                        },
+                    )
 
                 process_data = self.states[process_name]
                 old_status = process_data.status
 
                 if status is not None:
-                    new_status = (
-                        status if isinstance(status, ProcessStatus)
-                        else ProcessStatus(status)
-                    )
+                    new_status = status if isinstance(status, ProcessStatus) else ProcessStatus(status)
                     if old_status != new_status:
                         process_data.status = new_status
                         process_data.update_timestamp()
