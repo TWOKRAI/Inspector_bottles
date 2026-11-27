@@ -4577,6 +4577,6 @@ Free-threaded Python — пересмотреть.
 
 **Последствия.** Поле пересекает границу процессов в `msg["data"]` и попадает в наблюдение и io-debug. Плагин, оставшийся в `PAUSED` при `running`, помечает всё, что через него идёт. `setdefault` меняет входной dict на месте: плагин, хранящий ссылку на item и выпускающий его повторно, выпустит его с меткой. Перенос пишет метку и в выходной объект: плагин, держащий свой выходной dict и выпускающий его повторно, сохранит её навсегда.
 
-**Не покрыто.** Bypass circuit breaker (`PipelineExecutor`) метку не ставит; путь выпуска item мимо `process()` переноса не имеет. При исключении плагина (`PluginOperationStep`) входные items идут дальше с `inspection_status="not_inspected"` и без `paused_by`.
+**Не покрыто.** Bypass circuit breaker (`PipelineExecutor`) метку не ставит; путь выпуска item мимо `process()` переноса не имеет. При исключении плагина (`PluginOperationStep`) входные items идут дальше с `inspection_status="not_inspected"`: этот путь метку не добавляет; уже стоящая сохраняется.
 
 **Refs:** `plans/2026-10-27_system-run-state/plan.md`, `process_module/tests/test_paused_by_blind.py`, `process_module/tests/test_paused_by_hazards.py`.
