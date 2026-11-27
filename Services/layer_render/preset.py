@@ -32,7 +32,9 @@ class ScenePreset(BaseModel):
     """Пресет сцены: каталог классов и/или дополнительные слои объекта.
 
     Pre (from_dict): хотя бы одно из `catalog_dir`/`layers` задано (иначе нечего
-    рисовать); в `layers` `sprite_source` — строка-id; `angle_range_deg`: lo <= hi.
+    рисовать); без `catalog_dir` хотя бы один слой — `mode` `static` или `augmented`
+    (при любых `defect_probability`); в `layers` `sprite_source` — строка-id;
+    `angle_range_deg`: lo <= hi.
     Post: `from_dict(p.to_dict()) == p`; `from_yaml(to_yaml(p, f))` с `f` в каталоге `p.base_dir` равен `p`;
     при `f` в другом каталоге равенства нет (пути пересчитаны), но грузятся те же картинки.
 
@@ -107,6 +109,14 @@ class ScenePreset(BaseModel):
                 raise ValueError(f"слой '{layer.name}': sprite_source='class://' требует catalog_dir")
             if layer.mode == "defect":
                 raise ValueError(f"слой '{layer.name}': sprite_source='class://' несовместим с mode='defect'")
+        # ЛР-03: без каталога нет базы, а слой брака рисуется не всегда — при невыпадении
+        # объект пуст. defect_probability не смотрим: объекта без брака в таком пресете нет.
+        if self.catalog_dir is None and all(layer.mode == "defect" for layer in self.layers):
+            names = [layer.name for layer in self.layers]
+            raise ValueError(
+                f"слои {names}: у всех mode='defect', а catalog_dir не задан — объекта без брака нет; "
+                "нужен хотя бы один слой mode='static' или mode='augmented' (либо задайте catalog_dir)"
+            )
         return self
 
     @classmethod
