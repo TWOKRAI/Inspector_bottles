@@ -131,6 +131,8 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 2.13: во время рисования ПЧ не принимает пуск и смену частоты, пределы из рецепта (C-125); файл `tasks/2.13.md` [PENDING]
   - **Module contract:** impl-only
+- Task 2.14: заставка не уходит по таймауту, пока шкала загрузки растёт (C-130); файл `tasks/2.14.md` [PENDING]
+  - **Module contract:** impl-only
 - Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
 - Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [DONE 7410b16] (после 2.9, 2.2b)
