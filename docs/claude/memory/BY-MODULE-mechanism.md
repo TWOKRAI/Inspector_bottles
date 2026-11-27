@@ -223,11 +223,12 @@
 - [project_telemetry_publisher_gate](project_telemetry_publisher_gate.md)
 - [reference_idmvs_gev_reader_needs_encryption_key](reference_idmvs_gev_reader_needs_encryption_key.md)
 
-## dead-code (11)
+## dead-code (12)
 
 - [feedback_alias_keeps_the_object_alive](feedback_alias_keeps_the_object_alive.md)
 - [feedback_defect_fixed_on_one_path_only](feedback_defect_fixed_on_one_path_only.md)
 - [feedback_extract_state_owner_backcompat_props](feedback_extract_state_owner_backcompat_props.md)
+- [feedback_fixing_a_dead_path_activates_what_was_behind_it](feedback_fixing_a_dead_path_activates_what_was_behind_it.md)
 - [feedback_flags_must_not_become_crutches](feedback_flags_must_not_become_crutches.md)
 - [feedback_getattr_default_hides_a_phantom_attribute](feedback_getattr_default_hides_a_phantom_attribute.md)
 - [feedback_removal_leaves_a_tail_in_the_neighbour](feedback_removal_leaves_a_tail_in_the_neighbour.md)
@@ -494,7 +495,7 @@
 - [project_switch_routing_stale](project_switch_routing_stale.md)
 - [project_universal_lifecycle_decision](project_universal_lifecycle_decision.md)
 
-## live-stand (41)
+## live-stand (43)
 
 - [feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin](feedback_a_pixel_threshold_needs_the_speed_from_config_and_a_margin.md)
 - [feedback_a_recipe_test_must_run_the_same_check_as_the_launcher](feedback_a_recipe_test_must_run_the_same_check_as_the_launcher.md)
@@ -509,6 +510,7 @@
 - [feedback_diff_live_logs_to_find_an_observable](feedback_diff_live_logs_to_find_an_observable.md)
 - [feedback_display_rescale_must_not_degrade_the_frame](feedback_display_rescale_must_not_degrade_the_frame.md)
 - [feedback_elements_from_point_misses_pseudo_elements](feedback_elements_from_point_misses_pseudo_elements.md)
+- [feedback_gate_window_outlives_a_restarted_session](feedback_gate_window_outlives_a_restarted_session.md)
 - [feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name](feedback_gui_stand_in_worktree_needs_user_and_recipe_by_name.md)
 - [feedback_live_harness_tests](feedback_live_harness_tests.md)
 - [feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it](feedback_macos_port_listener_is_a_spawn_child_fakes_hide_it.md)
@@ -521,6 +523,7 @@
 - [feedback_subagent_live_test_monitor_hang](feedback_subagent_live_test_monitor_hang.md)
 - [feedback_the_off_half_of_a_pair_can_be_done_by_a_timer](feedback_the_off_half_of_a_pair_can_be_done_by_a_timer.md)
 - [feedback_unblocking_signal_at_the_moment_of_fact](feedback_unblocking_signal_at_the_moment_of_fact.md)
+- [feedback_worktree_lacks_untracked_stand_assets](feedback_worktree_lacks_untracked_stand_assets.md)
 - [project_backend_ctl_fake_fidelity_gap](project_backend_ctl_fake_fidelity_gap.md)
 - [project_backend_ctl_socket_bypasses_mw](project_backend_ctl_socket_bypasses_mw.md)
 - [project_code_reader_focus_calibration_streams_frames](project_code_reader_focus_calibration_streams_frames.md)
@@ -670,7 +673,7 @@
 - [project_robot_view_as_display_service](project_robot_view_as_display_service.md)
 - [reference_qt_mcp_launch](reference_qt_mcp_launch.md)
 
-## review-verdicts (22)
+## review-verdicts (23)
 
 - [feedback_a_control_reproduces_the_defect_it_was_built_to_catch](feedback_a_control_reproduces_the_defect_it_was_built_to_catch.md)
 - [feedback_a_diagnostic_answer_must_be_computed_last](feedback_a_diagnostic_answer_must_be_computed_last.md)
@@ -678,6 +681,7 @@
 - [feedback_absence_of_news_is_not_evidence](feedback_absence_of_news_is_not_evidence.md)
 - [feedback_drop_oldest_reports_success](feedback_drop_oldest_reports_success.md)
 - [feedback_false_alarm_traded_for_silent_loss](feedback_false_alarm_traded_for_silent_loss.md)
+- [feedback_fixing_a_dead_path_activates_what_was_behind_it](feedback_fixing_a_dead_path_activates_what_was_behind_it.md)
 - [feedback_gate_signature_lives_on_a_head](feedback_gate_signature_lives_on_a_head.md)
 - [feedback_one_control_proves_sufficiency_not_exclusivity](feedback_one_control_proves_sufficiency_not_exclusivity.md)
 - [feedback_platform_noop_counts_the_opposite](feedback_platform_noop_counts_the_opposite.md)
@@ -850,7 +854,7 @@
 - [project_state_store_lazy_prune_flake](project_state_store_lazy_prune_flake.md)
 - [project_switch_live_survivor](project_switch_live_survivor.md)
 
-## windows-env (27)
+## windows-env (28)
 
 - [feedback_a_failed_alloc_console_must_not_arm_free_console](feedback_a_failed_alloc_console_must_not_arm_free_console.md)
 - [feedback_a_hook_dead_on_windows_by_a_trailing_cr](feedback_a_hook_dead_on_windows_by_a_trailing_cr.md)
@@ -860,6 +864,7 @@
 - [feedback_bash_from_python_is_wsl_on_windows](feedback_bash_from_python_is_wsl_on_windows.md)
 - [feedback_bash_tool_unbalanced_quote_breaks_command](feedback_bash_tool_unbalanced_quote_breaks_command.md)
 - [feedback_ctrl_c_does_not_wake_thread_join_on_windows](feedback_ctrl_c_does_not_wake_thread_join_on_windows.md)
+- [feedback_gate_window_outlives_a_restarted_session](feedback_gate_window_outlives_a_restarted_session.md)
 - [feedback_grep_i_misses_cyrillic_case](feedback_grep_i_misses_cyrillic_case.md)
 - [feedback_no_global_taskkill](feedback_no_global_taskkill.md)
 - [feedback_platform_noop_counts_the_opposite](feedback_platform_noop_counts_the_opposite.md)
