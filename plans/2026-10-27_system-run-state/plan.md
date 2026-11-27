@@ -127,6 +127,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
 - Task 2.2e: предупреждения «кадры не принимаются» и «обработка стоит» (ADR-PM-065); файл `tasks/2.2e.md` [DONE ecdca7f18]
 - Task 2.10: вне `running` кадр только на display превью, остальные — плашка; файл `tasks/2.10.md` [DONE 889491c80]
 - Task 2.11: метка `paused_by` у кадра, прошедшего мимо обработки (ADR-PM-066); файл `tasks/2.11.md` [DONE 889491c80] (после 2.10)
+- Task 2.12: вкладки устройств разворачивают конверт ответа; «Изменить» не теряет настройки (C-117); файл `tasks/2.12.md` [PENDING]
   - **Module contract:** impl-only
 - Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
