@@ -146,6 +146,11 @@ class PipelineExecutor:
         """Политика переполнения latest|every (Task 4.7d-1: пока только хранится, поведения нет)."""
         return self._overflow
 
+    @property
+    def progress_count(self) -> int:
+        """Task 2.2e: взятые и отработанные коллекции: кадры (``cycles``) плюс маркеры (``_not_inspected_handled``)."""
+        return int(self._cycle_metrics.get_cycle_metrics()["cycles"]) + int(self._not_inspected_handled)
+
     def bind_queue(self, chain_queue: queue.Queue) -> None:
         """Привязать входную очередь для bound-метода run() (worker target)."""
         self._chain_queue = chain_queue

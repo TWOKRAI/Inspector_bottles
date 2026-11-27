@@ -1,0 +1,3 @@
+registry: defects.md
+
+| C-NN | **`scripts/letters_baseline.py`: `sim` на Windows-машине не запускается с её `data/`, а неверный `--crop` даёт нули без ошибки** — в `data/line_sim/letters_ink` 4 буквы (А К Р Х), код 2 «буква П нет в каталоге»; `--data-root` требует пресет внутри дерева скрипта (`ValueError ... not in the subpath`); `--crop none` на полных кадрах и `--crop pipeline` на вырезах → 0 % и код 0; `-I` из чек-листа даёт нечитаемый русский вывод `day1_capture_check.py`. База 0.4 с Mac не воспроизведена: ПЕРМИ 146/160 против 142/160, алфавит 794/1056 против 823/1056 | прогоны 2026-11-27, отчёт `docs/reports/2026-11-27_lr-before-1.0_report.md` | открыто; режим `dir` (нужный для 1.0) работает |

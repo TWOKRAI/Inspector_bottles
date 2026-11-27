@@ -60,7 +60,8 @@ def test_recipe_has_hikvision_camera(name: str) -> None:
 def test_camera_keys_are_register_fields(name: str) -> None:
     fields = set(HikvisionCameraRegisters.model_fields)
     # ключи самого плагина (имя, класс, категория), run_locked_commands и readiness читает плагин, не register
-    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands", "readiness"}
+    # run_gated читает PluginOrchestrator, не register
+    allowed = fields | {"plugin_name", "plugin_class", "category", "run_locked_commands", "readiness", "run_gated"}
     for proc, cfg in _camera_nodes(name).values():
         unknown = set(cfg) - allowed
         assert not unknown, f"{name}: ключи вне register'а: {sorted(unknown)}"

@@ -153,13 +153,14 @@ python3 scripts/plans_ledger.py close <plan>      # archive-on-done (git mv + с
 | [word-layout](word-layout.md) | feat/word-layout | — | 0/0 | DRAFT | 2026-09-20 |
 | [gui-service](2026-09-22_gui-service/plan.md) | feat/gui-service | — | 0/0 | APPROVED ред. 2 | 2026-09-22 |
 | [memory-rules-delivery](2026-10-11_memory-rules-delivery/plan.md) | docs/memory-rules-delivery | phase 0 | 0/9 | DRAFT | 2026-10-11 |
-| [camera-device-service](2026-10-18_camera-device-service/plan.md) | feat/camera-device-service | — | 0/42 | ACTIVE | 2026-10-18 |
 | [release-1.0](release-1.0/plan.md) | docs/release-1.0-plan | phase 1 | 0/5 | DRAFT | 2026-10-25 |
 | [recipe-save-noise](2026-10-26_recipe-save-noise/plan.md) | fix/recipe-save-noise | phase 1 | 0/16 | ACTIVE | 2026-10-26 |
 | [draw-universal](2026-11-11_draw-universal/plan.md) | feat/draw-universal | phase 0 | 0/12 | ACTIVE | 2026-11-11 |
 | [dataset-sidecar-truth](2026-11-11_dataset-sidecar-truth/plan.md) | docs/ds-1-sidecar-truth | phase 0 | 0/10 | ACTIVE | 2026-11-11 |
 | [observability-signal-contracts](2026-11-21_observability-signal-contracts/plan.md) | refactor/observability-signal-contracts | phase 0 | 0/78 | DRAFT | 2026-11-21 |
-| [multicam-observability](2026-11-25_multicam-observability/plan.md) | integ/multicam-obs | волна 1 | 0/3 | DRAFT | 2026-11-25 |
+| [camera-device-service](2026-10-18_camera-device-service/plan.md) | feat/camera-device-service | — | 19/47 | SUPERSEDED -> device-common-base | 2026-11-26 |
+| [multicam-observability](2026-11-25_multicam-observability/plan.md) | integ/multicam-obs | — | 8/18 | SUPERSEDED -> device-common-base | 2026-11-26 |
+| [device-common-base](2026-11-26_device-common-base/plan.md) | docs/camera-plan-merge | phase 1 | 0/58 | DRAFT | 2026-11-26 |
 
 ## Архив
 

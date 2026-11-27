@@ -119,6 +119,9 @@ blueprint:
           plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
           category: source
           config:
+            # Решение владельца 2026-11-26: камера не паузится вместе с линией — display превью показывает
+            # живой кадр и вне running; остальные display помечены run_view: running.
+            run_gated: false
             camera_id: 0
             # Камера выбирается по серийнику (факт 0.5: MV-CS020-10GC), не по индексу enum_devices.
             device_select: serial
@@ -220,6 +223,9 @@ blueprint:
       protected: false
       category:
       metadata: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: line
       plugins:
         - plugin_name: line_filter
@@ -245,6 +251,9 @@ blueprint:
       protected: false
       category:
       metadata: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: recog
       plugins:
         - plugin_name: center_crop
@@ -296,6 +305,15 @@ blueprint:
             readiness:
               severity:
                 out_of_spec: check_function
+        # Task 2.2d: индикатор в работе; min_confidence = layout.word_layout.min_confidence (test_recipes_pin.py).
+        - plugin_name: presence_watch
+          plugin_class: Plugins.processing.presence_watch.plugin.PresenceWatchPlugin
+          category: processing
+          config:
+            absent_after_s: 10.0
+            text_absent: нет диска
+            text_weak: слабое распознавание
+            min_confidence: 0.5
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
@@ -308,6 +326,9 @@ blueprint:
       category:
       collector:
         timeout_sec: 0.25
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: layout
       plugins:
         - plugin_name: word_layout
@@ -352,6 +373,9 @@ blueprint:
       protected: false
       category:
       metadata: {}
+      # Task 2.2e: «кадры не принимаются» / «обработка стоит» (out_of_spec) через 15 с застоя.
+      extras:
+        inbox_stall_s: 15.0
     - process_name: draw
       plugins:
         - plugin_name: circle_draw
@@ -579,6 +603,7 @@ displays:
   - id: recog
     name: Распознанный диск (буква + угол)
     enabled: true
+    run_view: running
     width: 512
     height: 512
     format: BGR
@@ -595,6 +620,7 @@ displays:
   - id: mask
     name: Маска белого (hsv_mask)
     enabled: true
+    run_view: running
     width: 1280
     height: 720
     format: BGR
@@ -611,6 +637,7 @@ displays:
   - id: phone
     name: Фото с телефона
     enabled: false
+    run_view: running
     width: 640
     height: 480
     format: BGR

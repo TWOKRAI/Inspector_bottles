@@ -41,6 +41,7 @@
                   "reconnect": true,
                   "resolution_height": 1080,
                   "resolution_width": 1440,
+                  "run_gated": false,
                   "run_locked_commands": [
                     "release_device",
                     "take_device"
@@ -524,6 +525,18 @@
                 },
                 "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
                 "plugin_name": "ml_inference",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "absent_after_s": 10.0,
+                  "min_confidence": 0.5,
+                  "text_absent": "нет диска",
+                  "text_weak": "слабое распознавание"
+                },
+                "plugin_class": "Plugins.processing.presence_watch.plugin.PresenceWatchPlugin",
+                "plugin_name": "presence_watch",
                 "worker_pool_size": 0
               }
             ],
@@ -1063,6 +1076,7 @@
               "reconnect": true,
               "resolution_height": 1080,
               "resolution_width": 1440,
+              "run_gated": false,
               "run_locked_commands": [
                 "release_device",
                 "take_device"
@@ -2543,6 +2557,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inbox_stall_s": 15.0,
         "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -2951,6 +2966,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inbox_stall_s": 15.0,
         "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -4614,6 +4630,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inbox_stall_s": 15.0,
         "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -4761,6 +4778,18 @@
             "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
             "plugin_name": "ml_inference",
             "top_k": 5,
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "absent_after_s": 10.0,
+              "min_confidence": 0.5,
+              "text_absent": "нет диска",
+              "text_weak": "слабое распознавание"
+            },
+            "plugin_class": "Plugins.processing.presence_watch.plugin.PresenceWatchPlugin",
+            "plugin_name": "presence_watch",
             "worker_pool_size": 0
           }
         ],
@@ -5046,6 +5075,7 @@
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
         "frame_ring_depth": 0,
+        "inbox_stall_s": 15.0,
         "inflight_budget": 6,
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,

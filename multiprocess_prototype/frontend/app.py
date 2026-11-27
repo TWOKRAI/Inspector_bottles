@@ -22,6 +22,7 @@ from . import unattended
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
 from .frame_intake import latency_sample
+from .startup_progress import GuiStartupProgress
 from .windows.main_window import MainWindow
 from .widgets.image_panel import ImagePanelWidget
 from .tab_factory import TabFactory
@@ -204,6 +205,10 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Шкала загрузки (system.progress.gui, Task 2.6): по ней уходит заставка. Новый run_gui — новая шкала.
+    startup = GuiStartupProgress.for_process(process)
+    startup.step("qt")
+
     # Политика памяти GUI (T1): сборкой gc владеет главный поток — автосборка выключена,
     # сборка по тику QTimer. Сразу после QApplication: финализаторы Qt-обёрток не должны
     # исполняться на рабочих потоках. INSPECTOR_GUI_GC_POLICY=0 — выключить (A/B на стенде).
@@ -303,6 +308,7 @@ def run_gui(process: "GuiProcess") -> None:
         PluginRegistry.discover(*_app_plugin_paths)
     except Exception as e:
         process._log_warning(f"Не удалось обнаружить плагины: {e}", module="startup")
+    startup.step("plugins")
 
     # 2a. Создать PluginManager singleton (Phase 2.4)
     from multiprocess_framework.modules.process_module.plugins.manager import PluginManager
@@ -456,6 +462,7 @@ def run_gui(process: "GuiProcess") -> None:
         ensure_subscription=(_gui_proxy.ensure_subscription if _gui_proxy is not None else None),
         release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
+    startup.step("state")
 
     # VM регистрируется вторым потребителем ПОСЛЕ bindings (порядок §11.15:
     # сначала bindings _state_cb, затем listener).
@@ -694,6 +701,7 @@ def run_gui(process: "GuiProcess") -> None:
             "Запустите перед запуском приложения:\n"
             "    python -m Services.auth.bootstrap"
         )
+        startup.done("ожидание пользователя")  # первое окно GUI: заставка уходит
         _dlg.exec()
         sys.exit(1)
 
@@ -705,6 +713,7 @@ def run_gui(process: "GuiProcess") -> None:
         from multiprocess_prototype.frontend.widgets.dialogs import StartupBlockingDialog
 
         _dlg = StartupBlockingDialog(f"Ошибка инициализации Auth:\n\n{exc}")
+        startup.done("ожидание пользователя")
         _dlg.exec()
         sys.exit(1)
 
@@ -755,6 +764,7 @@ def run_gui(process: "GuiProcess") -> None:
         from .widgets.dialogs.login_dialog import LoginDialog
 
         _login_dlg = LoginDialog(_auth_manager, _auth_state)
+        startup.done("ожидание пользователя")
         if _login_dlg.exec() != LoginDialog.DialogCode.Accepted:
             process._log_warning(
                 "auth.startup_login.cancelled: пользователь закрыл LoginDialog без входа — все табы будут скрыты",
@@ -1022,6 +1032,7 @@ def run_gui(process: "GuiProcess") -> None:
         window,
         recipe_manager=_recipe_manager,
         event_bus=event_bus,
+        bindings=bindings,
     )
 
     # 7. Запустить таймеры (fps, safety)
@@ -1036,7 +1047,9 @@ def run_gui(process: "GuiProcess") -> None:
     # его выставил при сборке, и синхронизирует индикаторы (оба скрыты на старте).
     topology_session.reset()
 
+    startup.step("window")
     window.show()
+    startup.done()  # пустой вызов, если шкалу уже закрыл стартовый диалог
     app.exec()
 
 
@@ -1059,6 +1072,7 @@ def _setup_bridge_callbacks(
     *,
     recipe_manager: object | None = None,
     event_bus: object | None = None,
+    bindings: object | None = None,
 ) -> None:
     """Подключить bridge signals к виджетам.
 
@@ -1071,15 +1085,22 @@ def _setup_bridge_callbacks(
 
     Бэк-совместимость: рецепт без секции displays / без привязок → один слот
     "main" и все кадры в него (текущее поведение).
+
+    Экран с ``run_view: running`` (решение владельца 2026-11-26): по листьям ``system.run.*`` из
+    ``bindings`` вне ``running`` вместо кадра плашка, в ``running`` кадр, снятый до входа в
+    ``running``, не показывается. ``bindings is None`` — этого правила нет.
     """
+    from .state.bindings import DELETED
     from .widgets.image_panel.recipe_displays import (
         DEFAULT_FPS_LIMIT,
+        PLATE_WAIT,
         build_frame_routing,
         build_panel_displays,
         build_plate_sources,
         plate_status,
         plate_text,
         resolve_display_id,
+        run_plate_text,
     )
 
     # Карта маршрутизации process_name -> display_id (мутабельна: обновляется
@@ -1096,6 +1117,67 @@ def _setup_bridge_callbacks(
     _silent_age: dict[str, float] = {}
     _plate_sources: dict[str, dict] = {}
     _display_titles: dict[str, str] = {}
+    # Правило run_view: последние листья system.run (mark — time.time() входа в running; лист since
+    # не берём), экраны с показанным после входа кадром и экраны, на которых стоит плашка правила.
+    _run: dict[str, Any] = {"state": None, "run_gate": None, "mark": 0.0}
+    _fresh: dict[str, float] = {}
+    _run_plate: set[str] = set()
+
+    def _run_view_of(display_id: str) -> str:
+        return _plate_sources.get(display_id, {}).get("run_view", "always")
+
+    def _apply_run_view() -> None:
+        """Поставить или снять плашки правила run_view; чужие плашки (тишины) не трогаются."""
+        if bindings is None:
+            return
+        for slot_id in image_panel.slot_ids:
+            title = _display_titles.get(slot_id, slot_id)
+            run_view = _run_view_of(slot_id)
+            text = run_plate_text(_run["state"], _run["run_gate"], run_view, title)
+            waiting = _run["state"] == "running" and _run["run_gate"] is not False and run_view == "running"
+            if text is None and waiting and slot_id not in _fresh:
+                text = PLATE_WAIT.format(title=title)
+            if text is not None:
+                image_panel.show_no_signal(slot_id, text)
+                _run_plate.add(slot_id)
+            elif slot_id in _run_plate:
+                image_panel.show_no_signal(slot_id, None)
+                _run_plate.discard(slot_id)
+
+    def _on_run_leaf(path: str, value: Any) -> None:
+        """Лист ``system.run.state`` / ``system.run.run_gate``; прочие листья узла не интересны."""
+        name = {"system.run.state": "state", "system.run.run_gate": "run_gate"}.get(path)
+        if name is None:
+            return
+        if value is DELETED:
+            value = None
+        if _run[name] == value:
+            return
+        _run[name] = value
+        if name == "state" and value == "running":
+            _run["mark"] = time.time()
+            _fresh.clear()
+        _apply_run_view()
+
+    def _run_view_drops(key: str, item: dict) -> bool:
+        """Кадр ключа не показывается: экран вне running, кадр прошёл приостановленный плагин
+        (``data.paused_by``, ADR-PM-066) либо снят до входа в running."""
+        if bindings is None:
+            return False
+        run_view = _run_view_of(_display_of(key))
+        if run_plate_text(_run["state"], _run["run_gate"], run_view, "") is not None:
+            return True
+        if run_view != "running" or _run["run_gate"] is False:
+            return False
+        data = item.get("data")
+        paused_by = data.get("paused_by") if isinstance(data, dict) else None
+        if isinstance(paused_by, str) and paused_by:
+            return True
+        # Метки нет, а кадр старше входа в running — обработанный кадр прошлого прогона.
+        capture_ts = data.get("capture_ts") if isinstance(data, dict) else None
+        if isinstance(capture_ts, bool) or not isinstance(capture_ts, (int, float)):
+            return False
+        return capture_ts < _run["mark"]
 
     def _read_active_recipe() -> dict | None:
         """Прочитать raw-dict активного рецепта (None если недоступен)."""
@@ -1127,6 +1209,8 @@ def _setup_bridge_callbacks(
         ``bridge.restore_dropped``), а насос продолжает отсчитывать тишину ключа.
         """
         _seen.add(key)
+        if _run_view_drops(key, item):
+            return False
         restored = process._bridge.restore_for_show(item)
         if restored is None:
             return False
@@ -1148,9 +1232,12 @@ def _setup_bridge_callbacks(
         display_id = _display_of(key)
         if age_s is None:
             _silent_age.pop(key, None)
-            image_panel.show_no_signal(display_id, None)
+            if display_id not in _run_plate:
+                image_panel.show_no_signal(display_id, None)
             return
         _silent_age[key] = age_s
+        if display_id in _run_plate:  # плашка правила run_view важнее плашки тишины
+            return
         source = _plate_sources.get(display_id, {})
         if source.get("mode", "hold") != "silence":  # trigger до W2-c3 ведёт себя как hold
             return
@@ -1232,6 +1319,7 @@ def _setup_bridge_callbacks(
             del _silent_age[sender]
         for slot_id in image_panel.slot_ids:
             image_panel.show_no_signal(slot_id, None)
+        _apply_run_view()
         process._log_info(
             f"мульти-дисплей: слотов={len(displays) or 1}, routing={_routing}",
             module="gui",
@@ -1239,6 +1327,9 @@ def _setup_bridge_callbacks(
 
     # Первичная сборка слотов под активный рецепт (до прихода кадров).
     _rebuild_displays()
+    # Подписка после первой сборки: replay из read-model сразу ставит плашки на готовые слоты.
+    if bindings is not None:
+        bindings.bind_fanout("system.run.*", _on_run_leaf, owner=image_panel)
 
     # Пересборка при смене рецепта (RecipeActivated) и при правке дисплеев во
     # вкладке Displays (DisplaysChanged — toggle enabled / create / delete).
@@ -1265,6 +1356,8 @@ def _setup_bridge_callbacks(
             # Маршрутизация по sender → слот дисплея (fallback "main").
             slot_id = resolve_display_id(msg_dict, _routing, default="main")
             image_panel.display_frame(slot_id, frame)
+            _fresh[slot_id] = time.time()
+            _run_plate.discard(slot_id)
             process._shown_by_slot[slot_id] = process._shown_by_slot.get(slot_id, 0) + 1
             # FPS/latency считаем ТОЛЬКО по первичному слоту: иначе несколько
             # дисплеев одного прохода (main + mask) дают N-кратный дубль FPS.

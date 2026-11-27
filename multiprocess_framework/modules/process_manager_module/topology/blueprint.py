@@ -388,6 +388,8 @@ class ProcessConfig(SchemaBase):
         # Проверено отказом: положенный в `metadata` ключ не доехал вовсе — `metadata`
         # читается только ради легаси-коллектора, а _pick смотрит в extras.
         chain_max_lag_items = _pick("chain_max_lag_items", 0)
+        # Task 2.2e: срок застоя входа — СЫРЫМ (разбор и WARNING — в GenericProcess; float() уронил бы сборку).
+        inbox_stall_s = _pick("inbox_stall_s", None)
         # Task 4.7c: явный размер data-очереди (0 = авто из топологии, см. build_configs).
         data_queue_maxsize = _pick("data_queue_maxsize", 0)
         # Task 4.7d-1: политика переполнения latest|every. Только extras, как chain_max_lag_items.
@@ -403,6 +405,8 @@ class ProcessConfig(SchemaBase):
             base_kwargs["copy_out_targets"] = list(copy_out_targets)
         if chain_max_lag_items:
             base_kwargs["chain_max_lag_items"] = int(chain_max_lag_items)
+        if inbox_stall_s is not None:
+            base_kwargs["inbox_stall_s"] = inbox_stall_s
         if data_queue_maxsize:
             base_kwargs["data_queue_maxsize"] = int(data_queue_maxsize)
         # Task 4.6: число потоков OpenCV процесса. Тот же путь, что у ключей выше:

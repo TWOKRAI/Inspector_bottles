@@ -16,7 +16,7 @@ teamlead (Opus 5.5)** → **break-injection лида** (по одной на з�
 
 ### Task 1.1 — [VERTICAL SLICE] стек фона `background_layers` от конфига до кадра сима
 
-- **Статус:** [PENDING] · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-01 — `564e6a41`] · **Level:** Senior (Opus 5.5) · **Assignee:** tester → teamlead → инъекции лида → reviewer
 - **Module contract:** new-full (`Services/layer_render/` — пакет: `__init__.py`, `interfaces.py`, `background.py`)
 - **CHAIN:** `tester`(RED) → `teamlead`(GREEN) → `reviewer`
 - **Dependencies:** нет
@@ -90,7 +90,7 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 
 ### Task 1.2 — опция `--gap-alpha` у `make_seamless_texture`: просветы прозрачные
 
-- **Статус:** [PENDING] · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-01 — `712b0c7a`] · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** impl-only (CLI-инструмент, новая необязательная опция)
 - **CHAIN:** `tester`(RED) → `developer`(GREEN) → `reviewer`
 - **Dependencies:** нет; `Services/line_sim/README.md` правит и 2.2 (разные разделы — лид сводит при слиянии)
@@ -132,7 +132,7 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 
 ### Task 1.3 — стенд на `[чёрный, плитка]` + границы sentrux + удаление ветки `background_tile`
 
-- **Статус:** [IN PROGRESS] волна 2 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → живой стенд лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `c989be29` (+ниты `96516ae3`)] волна 2 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → живой стенд лида → reviewer
 - **Module contract:** public-api-change (удаляются kwarg `SceneCompositor(background_tile=)` и ключ конфига `background_texture`)
 - **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → стенд лида → `reviewer`
 - **Dependencies:** 1.1, 1.2
@@ -181,7 +181,7 @@ RGB, `tile` — RGB/RGBA-картинка, прокручивается с ле�
 
 ### Task 1.4 — фильтр площади в `gap_alpha_mask`: убрать «перец» плитки
 
-- **Статус:** [PENDING] волна 3 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (dev-effects после 2.2) → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `3ea586c0`] волна 3 · **Level:** Middle (Sonnet 5.5) · **Assignee:** tester → developer (dev-effects после 2.2) → инъекции лида → reviewer
 - **Module contract:** public-api-change (новый keyword `min_area` у `gap_alpha_mask`, флаг CLI `--gap-min-area`)
 - **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → `reviewer`
 - **Dependencies:** 1.2 (DONE)

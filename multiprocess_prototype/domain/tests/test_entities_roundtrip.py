@@ -433,6 +433,11 @@ class TestExtrasShorthandDriftGuard:
             "`overflow: every` у процесса свернулся бы в metadata и стал нем — проверено "
             "прогоном ревьюера"
         ),
+        "inbox_stall_s": (
+            "срок застоя входа и обработки (Task 2.2e): extras-only, как "
+            "chain_max_lag_items. Форма в рецепте — `extras: {inbox_stall_s: 15.0}`; плоский "
+            "ключ свернулся бы в metadata и не дошёл до процесса"
+        ),
     }
 
     @staticmethod
@@ -544,6 +549,7 @@ class TestExtrasShorthandDriftGuard:
             "cv_threads",
             "data_queue_maxsize",
             "overflow",
+            "inbox_stall_s",
         }, (
             f"состав extras-only ключей framework изменился: {sorted(extras_only)}. "
             "Такой ключ живёт только в extras (typed-поля не плодим, рычаг C6 №1) — "

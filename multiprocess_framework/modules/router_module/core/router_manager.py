@@ -1890,9 +1890,10 @@ class RouterManager(ChannelRoutingManager):
     def get_shm_stats(self) -> Dict[str, int]:
         """УЗКИЙ снимок счётчиков кадрового транспорта и потерь в очередях.
 
-        Двадцать чисел (тринадцать прежних + байты SHM записи/копии/view и сбои восстановления, 4.5c,
+        Двадцать два числа (тринадцать прежних + ``queue_retired`` и ``queue_buffered_dropped_at_retire``,
+        C-36, + байты SHM записи/копии/view и сбои восстановления, 4.5c,
         + ``door_drops``, 4.7d-3, + ``deferred_closes`` и ``errors_delivery_failed``, 5.6; при
-        ``overflow: every`` двадцать первое — ``not_inspected_door``),
+        ``overflow: every`` двадцать третье — ``not_inspected_door``),
         что телеметрия публикует в ``processes.<name>.state.shm``,
         но БЕЗ цены :meth:`get_stats`: не собираются ``channel_routes`` /
         ``message_handler_list`` / ``channels`` (обходы реестров каналов, хендлеров и
@@ -1947,6 +1948,9 @@ class RouterManager(ChannelRoutingManager):
             "shm_bytes_mapped": _mw("bytes_mapped"),
             "frame_restore_failures": _mw("frame_restore_failures"),
             "queue_data_evicted": _q("data_evicted"),
+            # C-36: брошенные очереди, отпущенные после рестарта получателя, и выброшенное из их буферов.
+            "queue_retired": _q("queues_retired"),
+            "queue_buffered_dropped_at_retire": _q("buffered_dropped_at_retire"),
             "queue_system_evict_blocked": _q("system_evict_blocked"),
             "queue_observability_evicted": _q("observability_evicted"),
             "queue_observability_send_failed": _q("observability_send_failed"),

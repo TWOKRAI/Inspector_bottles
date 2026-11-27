@@ -53,7 +53,18 @@ DEFAULT_PLATE_AFTER_S = 2
 
 _PLATE_MODES = ("hold", "silence", "trigger")
 
-# Негодные plate_mode/plate_after_s, о которых WARNING уже сказан: (display_id, ключ, repr значения).
+_RUN_VIEWS = ("always", "running")
+
+#: Плашки экрана с ``run_view: running`` (``{title}`` — название экрана).
+PLATE_IDLE = "{title}\nЛиния не запущена: обработанный кадр появится после ЗАПУСТИТЬ"
+PLATE_WAIT = "{title}\nРаботает: ждём первый обработанный кадр"
+PLATE_FAULT = "{title}\nАвария: обработка остановлена"
+PLATE_NO_STATE = "{title}\nНет данных о состоянии линии"
+
+# Состояния системы, в которых обработки ещё или уже нет.
+_IDLE_STATES = ("booting", "not_ready", "ready", "stopping", "shutting_down")
+
+# Негодные plate_mode/plate_after_s/run_view, о которых WARNING уже сказан: (display_id, ключ, repr значения).
 _warned_values: set[tuple] = set()
 
 
@@ -197,7 +208,7 @@ def _plugin_config(processes: list, process_name: str, plugin_name: str) -> dict
 
 
 def _plate_setting(defn: dict, display_id: object, key: str, default: object, valid: Callable[[object], bool]):
-    """Значение ``plate_*`` определения: ключа нет или оно негодное -> ``default``.
+    """Значение ``plate_*``/``run_view`` определения: ключа нет или оно негодное -> ``default``.
 
     О негодном — один WARNING на (дисплей, ключ, значение); само значение в лог не пишется.
     """
@@ -222,6 +233,32 @@ def _is_plate_after_s(value: object) -> bool:
     return type(value) is int and 1 <= value <= 600
 
 
+def _is_run_view(value: object) -> bool:
+    return value in _RUN_VIEWS
+
+
+def run_plate_text(state: object, run_gate: object, run_view: str, title: str) -> str | None:
+    """Плашка вместо кадра по состоянию линии; ``None`` — кадр показывать.
+
+    Args:
+        state: значение ``system.run.state`` (``None`` — листа нет).
+        run_gate: значение ``system.run.run_gate``; ``False`` отключает правило.
+        run_view: ``run_view`` экрана; ``always`` отключает правило.
+        title: название экрана (подставляется в текст как есть).
+    """
+    if run_gate is False or run_view == "always":
+        return None
+    if state == "running":
+        return None
+    if state == "fault":
+        template = PLATE_FAULT
+    elif state in _IDLE_STATES:
+        template = PLATE_IDLE
+    else:
+        template = PLATE_NO_STATE
+    return template.format(title=title)
+
+
 def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
     """Поля плашки тишины по каждому дисплею рецепта.
 
@@ -233,9 +270,9 @@ def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
 
     Returns:
         ``{display_id: {"source", "process", "number", "address", "serial", "template", "mode",
-        "after_s"}}``; чего в рецепте нет — ``None`` (``source``/``process``/``template`` — пустая
+        "after_s", "run_view"}}``; чего в рецепте нет — ``None`` (``source``/``process``/``template`` — пустая
         строка). ``mode`` — ``hold`` | ``silence`` | ``trigger`` (умолчание ``hold``), ``after_s`` —
-        целое 1..600 (умолчание 2).
+        целое 1..600 (умолчание 2), ``run_view`` — ``always`` | ``running`` (умолчание ``always``).
     """
     if not isinstance(recipe, dict):
         return {}
@@ -270,6 +307,7 @@ def build_plate_sources(recipe: dict | None) -> dict[str, dict]:
             "template": str(defn.get("plate_text") or ""),
             "mode": _plate_setting(defn, display_id, "plate_mode", "hold", _is_plate_mode),
             "after_s": _plate_setting(defn, display_id, "plate_after_s", DEFAULT_PLATE_AFTER_S, _is_plate_after_s),
+            "run_view": _plate_setting(defn, display_id, "run_view", "always", _is_run_view),
         }
     return result
 
@@ -319,4 +357,9 @@ __all__ = [
     "DEFAULT_PLATE_TEXT",
     "plate_text",
     "plate_status",
+    "run_plate_text",
+    "PLATE_IDLE",
+    "PLATE_WAIT",
+    "PLATE_FAULT",
+    "PLATE_NO_STATE",
 ]

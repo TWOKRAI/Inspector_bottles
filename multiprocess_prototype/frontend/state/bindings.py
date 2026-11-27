@@ -4,6 +4,10 @@ GuiStateBindings регистрирует обратные вызовы чере
 При поступлении сообщения {'data_type': 'state_delta', 'path': '...', 'value': ...}
 находит все подписки с matching pattern и вызывает setter соответствующего виджета.
 
+Fan-out подписка на УЗЕЛ (шаблон без ``**``) получает изменения и тогда, когда писатель
+шлёт листовые дельты (``merge``): узел помечается грязным, а на маркере конца пачки
+(``state_batch_end``) читается из read-model и отдаётся одним вызовом (Task 2.8f).
+
 Хранение виджетов — через weakref.ref для автоматической уборки при удалении.
 Авто-уборка также через сигнал widget.destroyed.
 """
@@ -12,7 +16,11 @@ from __future__ import annotations
 
 
 from multiprocess_framework.modules.logger_module import get_std_logger
-from multiprocess_framework.modules.state_store_module.core import static_prefix
+from multiprocess_framework.modules.state_store_module.core import (
+    match_pattern,
+    split_pattern,
+    static_prefix,
+)
 from multiprocess_framework.modules.state_store_module.core.leaf_copy import project_leaves
 import weakref
 from dataclasses import dataclass
@@ -20,6 +28,7 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING, runtime_checkable
 
 from PySide6.QtWidgets import QWidget
 
+from .delta_message import STATE_BATCH_END, STATE_DELTA
 from .glob_match import match_glob
 
 if TYPE_CHECKING:
@@ -32,13 +41,16 @@ _logger = get_std_logger(__name__)
 
 @runtime_checkable
 class _ReadModelLike(Protocol):
-    """Минимальный контракт read-model для replay (duck-typed, для тестов-фейков).
+    """Минимальный контракт read-model для replay и сборки узла (duck-typed, для тестов-фейков).
 
     Совместим с ``TelemetryViewModel`` (frontend_module.state): даёт снимок
-    поддерева по префиксу (``snapshot("")`` — полный снимок ``{path: value}``).
+    поддерева по префиксу (``snapshot("")`` — полный снимок ``{path: value}``) и
+    значение узла (``get_node``: dict из листьев, лист или ``default``).
     """
 
     def snapshot(self, prefix: str) -> dict[str, Any]: ...
+
+    def get_node(self, path: str, default: Any = None) -> Any: ...
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +134,8 @@ class FanoutHandle:
 
     Attributes:
         pattern: glob-паттерн пути StateStore.
-        callback: вызывается как callback(path, value) на каждую matching дельту.
+        callback: вызывается как callback(path, value) на каждую matching дельту
+            и на собранный узел по маркеру конца пачки (см. ``bind_fanout``).
         owner_ref: weakref на виджет-владелец; None — подписка без владельца.
     """
 
@@ -184,6 +197,9 @@ class GuiStateBindings:
         # подписчику динамически создавать виджеты по обнаруженным ключам
         # (например строки рантайм-воркеров processes.X.workers.*).
         self._fanouts: list[FanoutHandle] = []
+        # Грязные узлы (Task 2.8f): пара (подписка, путь узла) ждёт маркера конца пачки.
+        # dict, а не set: порядок вызовов — порядок первой пометки, повтор не дублирует.
+        self._dirty_nodes: dict[tuple[FanoutHandle, str], None] = {}
         # Единый read-model — источник late-binding-снимка (public: секции могут
         # читать актуальное сами, напр. io_debug при выборе плагин-ноды).
         self.read_model = read_model
@@ -296,6 +312,13 @@ class GuiStateBindings:
 
         Сразу проигрывает закэшированные значения (replay) — как ``bind``, чтобы
         ленивые панели увидели уже опубликованные ключи.
+
+        Узел из листьев (Task 2.8f): дельта ГЛУБЖЕ шаблона без ``**``, префикс которой
+        матчит шаблон, не вызывает callback сразу. На маркере конца пачки приходит один
+        ``callback(путь_узла, read_model.get_node(путь_узла, DELETED))``. Нужен
+        read_model. Read-model хранит только листья: узел без листьев приходит как
+        ``DELETED`` (на сервере он ``{}``), пустой вложенный dict из узла пропадает.
+        Узел содержит лишь то, что read-model успел получить.
 
         ВНИМАНИЕ: дедупа нет — повторный bind_fanout с теми же аргументами
         создаёт ВТОРУЮ подписку. Владелец жизненного цикла обязан снять старую
@@ -422,13 +445,18 @@ class GuiStateBindings:
         панели «Все процессы». Это НЕ IPC state-дельта (в топологию/стор не течёт),
         но питает те же path-биндинги — раньше маскировалось под фейковый state_delta.
 
+        Маркер ``state_batch_end`` (Task 2.8f) отдаёт накопленные грязные узлы.
         Сообщения с другим data_type или без ключей path/value — игнорируются.
 
         Args:
             msg_dict: словарь сообщения.
         """
+        data_type = msg_dict.get("data_type")
+        if data_type == STATE_BATCH_END:
+            self._flush_dirty_nodes()
+            return
         # Проверяем обязательные поля
-        if msg_dict.get("data_type") not in ("state_delta", "gui_local_metric"):
+        if data_type not in (STATE_DELTA, "gui_local_metric"):
             return
         path = msg_dict.get("path")
         if path is None or "value" not in msg_dict:
@@ -481,12 +509,45 @@ class GuiStateBindings:
         # `if not isinstance(value, dict): return`, DELETED (не dict) пропускают —
         # обратная совместимость.
         fanout_value = DELETED if deleted else value
+        segs = tuple(path.strip(".").split("."))
+        # Узел собирается только из IPC-дельт: за ними идёт маркер, за gui_local_metric — нет.
+        assemble = data_type == STATE_DELTA and self.read_model is not None
         for fanout in list(self._fanouts):
             if match_glob(fanout.pattern, path):
+                # Точный путь отдаётся сейчас и снимает ожидающий вызов того же узла. Снимаем
+                # ДО callback: дельта, поданная из него, обязана пометить узел заново.
+                self._dirty_nodes.pop((fanout, ".".join(segs)), None)
                 try:
                     fanout.callback(path, fanout_value)
                 except Exception as exc:
                     _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc)
+            elif assemble:
+                self._mark_dirty(fanout, segs)
+
+    def _mark_dirty(self, fanout: FanoutHandle, segs: tuple[str, ...]) -> None:
+        """Пометить узел подписки грязным, если дельта ``segs`` лежит под ним (шаблон без ``**``)."""
+        pattern_segs = split_pattern(fanout.pattern.strip("."))
+        depth = len(pattern_segs)
+        if len(segs) <= depth or "**" in pattern_segs:
+            return
+        if match_pattern(pattern_segs, segs[:depth]):
+            self._dirty_nodes[(fanout, ".".join(segs[:depth]))] = None
+
+    def _flush_dirty_nodes(self) -> None:
+        """Маркер конца пачки: по одному вызову на грязную пару с узлом из read-model.
+
+        Узел читается ЗДЕСЬ, а не при дельте: read-model получает дельту после bindings.
+        Набор забирается до вызовов — дельты из callback ждут следующего маркера.
+        """
+        dirty, self._dirty_nodes = self._dirty_nodes, {}
+        for fanout, node in dirty:
+            # Проверка на каждом шаге: подписку мог снять callback предыдущей пары.
+            if fanout not in self._fanouts:
+                continue
+            try:
+                fanout.callback(node, self.read_model.get_node(node, DELETED))
+            except Exception as exc:
+                _logger.debug("bindings: node callback failed on %s (pattern %s): %s", node, fanout.pattern, exc)
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
         """Применить значение к виджету подписки через setter.

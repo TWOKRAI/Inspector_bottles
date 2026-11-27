@@ -55,6 +55,8 @@ NARROW_KEYS = (
     "shm_bytes_mapped",
     "frame_restore_failures",
     "queue_data_evicted",
+    "queue_retired",  # C-36: отпущенные брошенные очереди
+    "queue_buffered_dropped_at_retire",
     "queue_system_evict_blocked",
     "queue_observability_evicted",
     "queue_observability_send_failed",
@@ -192,3 +194,23 @@ class TestCollectorPrefersTheNarrowPath:
         r._channel_registry.get_info = _boom
 
         assert set(r.get_shm_stats()) == set(NARROW_KEYS)
+
+
+class TestRetiredQueueCounters:
+    def test_retiring_a_written_queue_shows_in_router_stats(self) -> None:
+        """C-36: ``introspect.router_stats`` видит отпуск брошенной очереди."""
+        from multiprocess_framework.modules.shared_resources_module import QueueRegistry
+        from multiprocess_framework.modules.shared_resources_module.queues.core.reader_gone import (
+            ReaderGoneQueue,
+            retire_queue,
+        )
+
+        r = RouterManager(manager_name="retire_stats_router", queue_registry=QueueRegistry())
+        before = r.get_stats()["router"]
+        q = ReaderGoneQueue()
+        q.put(b"x")
+        retire_queue(q)
+        after = r.get_stats()["router"]
+
+        assert after["queue_retired"] - before["queue_retired"] == 1
+        assert after["queue_buffered_dropped_at_retire"] - before["queue_buffered_dropped_at_retire"] in (0, 1)
