@@ -333,6 +333,8 @@ class RobotClientV2:
         self._probe_lock = threading.Lock()
 
         self._probed = False  # прошивка v2 подтверждена, и последний probe не провалился
+        # R2-S1d: прошивка v2 этим клиентом подтверждена хотя бы раз; снимает только WrongFirmware (не начало probe)
+        self._firmware_confirmed = False
         self._stale = False  # связь рвалась или транспорт дал ошибку после probe: базы устарели
         self._probed_link: object = None  # connected_since на момент probe
         self._inflight: _Inflight | None = None  # ответ на этот seq не дождались (только cmd()/probe())
@@ -384,6 +386,15 @@ class RobotClientV2:
         """Последний ``probe()`` прошёл; такой клиент пишет ``STOP_REQ`` без оглядки на ``is_connected``."""
         return self._probed
 
+    @property
+    def firmware_confirmed(self) -> bool:
+        """Прошивка v2 этим клиентом подтверждена удачным ``probe()`` (R2-S1d, ADR-DH-016).
+
+        В отличие от ``probed`` в начале ``probe()`` и при неудаче пробы на вводе-выводе не снимается; снимает только
+        ``WrongFirmware``. Новый клиент начинает с False. Такой клиент пишет ``STOP_REQ`` без проверки прошивки и связи.
+        """
+        return self._firmware_confirmed
+
     # ------------------------------------------------------------------ #
     # probe
     # ------------------------------------------------------------------ #
@@ -409,6 +420,8 @@ class RobotClientV2:
         block = self._rd(_RES_BASE, _BLOCK_COUNT)
         proto = int(block[_off("TLM_PROTO_VER")])
         if proto == 0 or (proto >> 8) != _PROTO_MAJOR:
+            with self._state_lock:
+                self._firmware_confirmed = False  # чужая прошивка по этому адресу: стоп ей не пишется
             raise WrongFirmware(proto)
         wdg_raw = self._read_param_slot("P_WDG_TIMEOUT_MS")
         jog_raw = self._read_param_slot("P_JOG_LEASE_MS")
@@ -441,6 +454,7 @@ class RobotClientV2:
             if self._inflight is not None and not self._inflight.done_seq:
                 self._inflight = None  # метку done_seq снимает только cmd() после сверки О5
             self._probed = True
+            self._firmware_confirmed = True
             self._stale = False
             self._probed_link = link
 
@@ -793,8 +807,10 @@ class RobotClientV2:
         """
         if not isinstance(level, int) or isinstance(level, bool) or level not in STOP_LEVEL.values():
             raise ValueError("level стопа вне 1..3")
-        if not self._probed:
-            self._ensure_probed()  # только непроверенный клиент: проверенный пишет стоп без оглядки на is_connected
+        if not self._firmware_confirmed:
+            # только клиент без подтверждённой прошивки (R2-S1d): подтверждённый пишет стоп без оглядки на
+            # is_connected и на идущую или упавшую на вводе-выводе пробу
+            self._ensure_probed()
         with self._stop_lock:
             value, _written_level = self._issue_stop_locked(level)
         return value
