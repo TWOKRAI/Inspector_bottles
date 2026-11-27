@@ -29,6 +29,7 @@ from multiprocess_prototype.backend.orchestrator_hooks import (
     apply_topology_with_display_reload,
     configure_topology_engine,
 )
+from multiprocess_prototype.splash.mirror import install_if_enabled as install_progress_mirror
 
 
 class ProcessManagerProcessApp(GenericProcessManagerApp):
@@ -46,6 +47,11 @@ class ProcessManagerProcessApp(GenericProcessManagerApp):
     def _configure_runtime(self) -> None:
         """Runtime-хук: сконфигурировать прототипный topology-engine (после base-init)."""
         configure_topology_engine(self)
+
+    def _setup_state_store(self) -> None:
+        """Стор базы + зеркало прогресса в заставку загрузки (Task 2.6; без порта в env — ничего)."""
+        super()._setup_state_store()
+        install_progress_mirror(getattr(self, "_state_store_manager", None))
 
     def apply_topology(self, blueprint: dict | None) -> dict:
         """Runtime-хук: reload DisplayRegistry вокруг generic apply_topology."""
