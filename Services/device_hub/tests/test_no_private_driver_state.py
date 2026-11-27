@@ -103,6 +103,8 @@ _SEAMS = {
     "_park": 3,  # S4b2: там же — ``_park.step`` подменяется на экземпляре
     # T5.5: ``plugin._client`` — мост ПЛАГИНА robot_draw/robot_io в хаб (не поле драйвера; имя совпало с ``base.py``)
     "_client": 2,
+    # R2-S1a: ``_force_order`` (test_r2s1a_hazards) задаёт порядок «запись STOP / ``_link_lost`` тика» после обрыва
+    "_link_lost": 1,
     # C-101: ``plugin_mod._clock`` — часы МОДУЛЯ плагина хаба (test_readiness_pause_v2), не поле драйвера;
     # имя совпало с ``base.py``
     "_clock": 1,

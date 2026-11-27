@@ -368,14 +368,14 @@ def _install_cvt_barrier(device: Any, barrier: _CvtBarrier) -> None:
     взводит ``entered``, ждёт ``release`` (не дольше 5 с) и только потом идёт дальше."""
     original = device.transaction
 
-    def transaction(ops: list[tuple]) -> bool:
+    def transaction(ops: list[tuple], **kwargs) -> bool:
         for op in ops:
             kind, address, value = op
             if kind == "wm" and address == REG["CMD_SEQ"] and len(value) > 1 and value[1] == OP["CVT_JOB"]:
                 barrier.entered.set()
                 barrier.release.wait(5.0)
                 break
-        return original(ops)
+        return original(ops, **kwargs)
 
     device.transaction = transaction
 

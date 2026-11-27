@@ -886,13 +886,13 @@ def test_tick_does_not_take_job_while_jog_is_starting() -> None:
         device = drv.transport
         original = device.transaction
 
-        def transaction(ops: list[tuple]) -> bool:
+        def transaction(ops: list[tuple], **kwargs) -> bool:
             for kind, address, value in ops:
                 if kind == "wm" and address == _REG["CMD_SEQ"] and len(value) > 1 and value[1] == OP["JOG_CONT"]:
                     entered.set()
                     release.wait(5.0)
                     break
-            return original(ops)
+            return original(ops, **kwargs)
 
         device.transaction = transaction
         assert _call(drv, "enqueue_job", _PICK)["queue_len"] == 1

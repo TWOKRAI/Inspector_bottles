@@ -43,6 +43,14 @@ Stability: lite
 ``wait_done`` до исхода задания; пульс ``HB_PC`` в это время — ``on_poll``. ``connect`` при задании не идёт. Новых
 потоков нет: возврат идёт программой на потоке исполнителя.
 
+Сеанс допуска (R2-S1a). ``call()`` берёт ``transport.session`` до обработчика и держит его контекстом клиента: записи
+команды, буфера программы и аренды jog после обрыва не уходят по новому соединению. Потоки программы и поводка берут
+значение один раз при запуске; ``enqueue_job`` / ``return_job`` хранят его в записи очереди; park — до своих шагов в
+тике; действия при подключении — сеанс этого подключения. ``STOP_REQ`` и ``HB_PC`` сеанс не проверяют. STOP при
+обрыве: простому роботу он пишется, пока клиент проверен, даже без связи. После законченного ``disconnect()``
+``request_stop`` и повторный ``disconnect`` не пишут и ничего не сообщают; связь, потерянную тиком, это не касается
+(попытка и «стоп не подтверждён роботом»).
+
 Остановка (T5.3a, круг 2). ``request_stop(deadline)`` — фаза 1 остановки плагина: защёлка ``_shutdown`` и ОДНА запись
 стопа на сильнейшем нужном уровне (задание / программа — HARD, jog — SOFT), без ожидания эха и потоков. Защёлка стопа
 (на робота) помнит сильнейший записанный уровень и «последняя запись упала»: стоп процесса не пишется, если уровень не
@@ -58,7 +66,8 @@ Stability: lite
 (нет эха — ``last_error`` «стоп не подтверждён роботом»; нет времени на чтение, срок меньше бюджета записи, —
 «эхо не читалось (нет окна)»), ожидание потоков, закрытие транспорта. Обычный ``disconnect()`` (без остановки
 плагина): задание (HARD), jog и программа — стоп с ожиданием эха; простой подключённый робот — только запись SOFT,
-без чтения эха и без ``last_error`` (T5.3c c3); защёлку ``_shutdown`` он не ставит.
+без чтения эха и без ``last_error`` (T5.3c c3); защёлку ``_shutdown`` он не ставит. Упавшая запись любого стопа этого
+``disconnect()`` повторяется ровно один раз; обе упали — ``stop_unconfirmed`` и «стоп не подтверждён роботом».
 Потоки поводка и исполнителя живут в области (``spawn``): имя ``<entry.id>-lease-<k>`` / ``<entry.id>-prog-<k>``,
 ``k`` — счётчик модуля ``texts.py``.
 """
@@ -67,6 +76,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from multiprocess_framework.modules.base_manager.interfaces import IHandle, ScopeClosedError
@@ -169,6 +179,10 @@ class _RobotDriverCore(BaseDeviceDriver):
         self._hub_poll_s = float(params.get("poll_interval_s", _HUB_POLL_DEFAULT_S))
 
         self._last_resync = 0.0
+        # R2-S1a: сеанс допуска идущего park (шаги выполняет тик) и признак «связь закрыта намеренно»: конец
+        # disconnect() ставит, подъём транспорта в connect снимает; _link_lost и закрытие старого сокета не трогают
+        self._park_session: int | None = None
+        self._closed_by_disconnect = False
 
         # Замок перехода jog: client.jog_cont и стоп jog; с замком состояния — только снаружи (он листовой)
         self._jog_tx_lock = threading.Lock()
@@ -359,6 +373,7 @@ class _RobotDriverCore(BaseDeviceDriver):
                 client = self._client
                 if not self._transport.is_connected and not self._transport.connect():
                     raise ConnectionError("транспорт не подключился")
+                self._closed_by_disconnect = False  # транспорт снова подключён: STOP пишется и при обрыве (Д6)
                 if not self._state.connect_link_up():
                     return False  # остановка пришла до подъёма связи: пробы и записей нет
                 client.probe()
@@ -368,8 +383,9 @@ class _RobotDriverCore(BaseDeviceDriver):
                     if not self._state.connect_restore(was_ready):
                         return False
                     return self.is_connected
-                if not self._run_on_connect(client):
-                    return False
+                with self._admitted_as(self._session_now()):  # SERVO / DO — только по этому соединению
+                    if not self._run_on_connect(client):
+                        return False
             except _StoreIOError:  # диск хранилища: полный текст уже в логе, в last_error — константа без пути
                 self._record_err()
                 self._last_quality = "bad"
@@ -470,6 +486,7 @@ class _RobotDriverCore(BaseDeviceDriver):
                     logger.warning(
                         f"робот {self.entry.id!r}: транспорт при отключении не закрыт: {type(exc).__name__}: {exc}"
                     )
+            self._closed_by_disconnect = True  # после попытки стопа и закрытия: повторный стоп молчит (Д6)
             self._last_quality = "bad"
         finally:
             # C-29 (В1, В6): конец отключения — счётчик -1, очереди заданий и возвратов сняты, число — в журнал и статус
@@ -620,7 +637,8 @@ class _RobotDriverCore(BaseDeviceDriver):
         """
         if self._state.is_shutdown():
             return False
-        self._client.servo(False)
+        with self._admitted_as(self._park_session):  # сеанс допуска park, не текущий
+            self._client.servo(False)
         return True
 
     def _close_after_disconnect(self) -> None:
@@ -634,6 +652,7 @@ class _RobotDriverCore(BaseDeviceDriver):
         except Exception as exc:
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: сокет после отключения не закрыт: {type(exc).__name__}: {exc}")
+        self._closed_by_disconnect = True  # это хвост disconnect(): закрыто намеренно
 
     def _publish_error(self, text: str) -> None:
         self._pub(f"devices.state.{self.entry.id}.last_error", text)
@@ -647,10 +666,29 @@ class _RobotDriverCore(BaseDeviceDriver):
         if handler is None:
             return {"status": "error", "message": f"Неизвестная операция робота: {op!r}"}
         try:
-            return handler(self, args)
+            # Д4: допуск — вызов операции; сеанс берётся здесь, до проверки связи и до первого обмена обработчика
+            with self._admitted_as(self._session_now()):
+                return handler(self, args)
         except Exception as exc:
             self._record_err()
             return {"status": "error", "message": str(exc)}
+
+    # --- сеанс допуска (R2-S1a) ---
+
+    def _session_now(self) -> int | None:
+        """Сеанс транспорта сейчас; None — транспорта или счётчика нет."""
+        return getattr(self._transport, "session", None)
+
+    def _admission(self) -> int | None:
+        """Сеанс допуска этого потока — чтобы унести его в другой поток или в очередь."""
+        # Транспорт без счётчика — клиента не спрашиваем (Д7): дублёры клиента отвечают на любое имя
+        read = getattr(self._client, "admission", None) if self._session_now() is not None else None
+        return None if read is None else read()
+
+    def _admitted_as(self, session: int | None) -> AbstractContextManager[None]:
+        """Записи движения клиента в блоке — только по сеансу ``session``; клиент-дублёр без метода — как раньше."""
+        enter = getattr(self._client, "admitted", None) if session is not None else None
+        return nullcontext() if enter is None else enter(session)
 
     def park_current_seq(self) -> int:
         """Номер последнего park этого робота (идущего или закрытого) — для присоединения (T5.3e.5a).

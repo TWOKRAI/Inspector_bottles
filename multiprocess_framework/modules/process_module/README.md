@@ -1069,6 +1069,29 @@ initialize: configure → start            (IDLE → READY → RUNNING)
 Тесты: `tests/test_plugin_stop_request_acceptance.py` (слепая приёмка R1–R5), `tests/test_plugin_stop_request_hazards.py`
 (автор, H1–H7, H2b).
 
+## Хуки работы системы: `readiness()`, `pause()` / `resume()` (ADR-PM-067)
+
+Public API плагина для работы системы (машина состояний — у PM, ADR-PMM-053). Все хуки необязательные.
+
+| Хук | Умолчание | Кто зовёт |
+|---|---|---|
+| `readiness(ctx) -> list[dict]` | `[]` — готов | поток `readiness_snapshot`, не чаще 2 раз в секунду |
+| `pause(ctx)` | пусто | `run_event` снят (`RUNNING -> PAUSED`): первый раз поток инициализации в `boot()`, дальше `run_watch` |
+| `resume(ctx)` | пусто | `run_event` взведён (`PAUSED -> RUNNING`): `run_watch`; `release_paused`, если `run_watch` не создан |
+
+Источник с `run_gated: false` не паузится.
+
+* Элемент причины: `{"severity": "failure" | "check_function" | "out_of_spec" | "maintenance", "reason": str}`.
+  Первые две блокируют готовность. Текст — без значений входа, длиннее 200 символов обрезается.
+* `readiness()`: быстро, без IO и замков. Исключение или неверная форма — причина `failure`.
+* `pause()/resume()` идут **параллельно** `process()`/`produce()`: потокобезопасность на плагине, идемпотентность
+  обязательна. Исключение оставляет состояние прежним, повтор не чаще раза в 1 с.
+* В `PAUSED` `process()` не вызывается, вход идёт насквозь с меткой `paused_by` (ADR-PM-066). `produce()` источника
+  гейтит `SourceProducer`; ключ источника `run_gated: false` оставляет его работать без START (превью).
+* Плагин, пропущенный по `REQUIRES`, даёт в снимке причину `failure` «REQUIRES не удовлетворены: …».
+* Удержание и степень узла задаёт рецепт: `readiness: {hold_s, severity}` (ADR-PM-061). Запрет команд плагина в
+  `running` — `run_locked_commands` (ADR-PM-062).
+
 ## Прогресс загрузки: лист `system.progress.<id>` (Task 1.3b)
 
 Любой узел сообщает прогресс одним вызовом: пишет в стор dict по пути `system.progress.<id>` (`progress_path(id)`,

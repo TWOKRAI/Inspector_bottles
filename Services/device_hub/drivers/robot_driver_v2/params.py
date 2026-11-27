@@ -39,7 +39,7 @@ from Services.device_hub.drivers.robot_driver_v2.tlm import _w
 from Services.device_hub.robot_data_ops import TEXT_BAD_ARGS, TEXT_STORE_ERROR
 from Services.robot_comm.calibration import CalibrationError, belt_from_marks
 from Services.robot_comm.calibration.belt import TEXT_BELT_FACTOR_RANGE
-from Services.robot_comm.core.client_v2 import RobotClientV2, SyncCancelled
+from Services.robot_comm.core.client_v2 import RobotClientV2, SessionChanged, SyncCancelled
 from Services.robot_comm.core.params_v2 import PARAM_ID, to_eng, to_raw
 from Services.robot_comm.errors import RevisionConflict, RobotNak
 from Services.robot_comm.robot_data import load_params, param_bounds, save_params
@@ -201,8 +201,8 @@ class ParamMixin:
         old_raw = old_values[name]
         try:
             client.param_set(name, raw)
-        except RobotNak:
-            raise  # робот ответил отказом: значение не принято, файл не тронут
+        except (RobotNak, SessionChanged):
+            raise  # робот отказал или запись не ушла (сеанс сменился): значение не принято, откатывать нечего
         except Exception as exc:
             # Исход записи неизвестен (таймаут, обрыв: робот мог применить, ответ потерян) — как сбой метки: значение
             # файла возвращается роботу, метка и файл не тронуты
@@ -335,8 +335,8 @@ class ParamMixin:
             old_raw = self._values[name]
             try:
                 reply = self._param_set_locked(store, name, raw, rev)
-            except RobotNak:
-                self._calib_roll_back(store, done, rev)  # робот отказал: значение не принято
+            except (RobotNak, SessionChanged):
+                self._calib_roll_back(store, done, rev)  # отказ или запись не ушла: текущий шаг не принят
                 raise
             except _STORE_ERRORS as exc:
                 if not done:
