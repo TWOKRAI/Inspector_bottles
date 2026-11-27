@@ -38,9 +38,10 @@ def test_real_allowlist_table_shape() -> None:
         per_rule_violations[rule] += entry.count
 
     # К4' (4.2b): запись R4 старого `hikvision/plugin/plugin.py` (Popen/terminate `sdk_app`) снята вместе с кодом.
-    assert len(tables.ALLOWLIST) == 71
-    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 12, "R6": 20}
-    assert per_rule_violations == {"R1": 17, "R2": 9, "R3": 18, "R4": 17, "R6": 22}
+    # +1 R6 (FramePump, count 2) из 743641727; +1 R4 (заставка, count 1) из задачи 2.6 run-state.
+    assert len(tables.ALLOWLIST) == 73
+    assert per_rule_entries == {"R1": 14, "R2": 8, "R3": 17, "R4": 13, "R6": 21}
+    assert per_rule_violations == {"R1": 17, "R2": 9, "R3": 18, "R4": 18, "R6": 24}
     assert all(len(e.reason.strip()) >= 10 for e in tables.ALLOWLIST.values())
     assert all("\\" not in path for _, path in tables.ALLOWLIST)
 
@@ -89,7 +90,9 @@ def test_real_tree_changed_allowlist_count_turns_g6_red() -> None:
 def test_real_tree_empty_allowlist_turns_g6_red() -> None:
     findings = check_g6(REPO_ROOT, {})
 
-    assert len(findings) == 83  # 17 + 9 + 18 + 17 + 22 нарушений после 1.2a, T5.1 и К4' (4.2b), ни одного разрешённого
+    assert (
+        len(findings) == 86
+    )  # 17 + 9 + 18 + 18 + 24 нарушений: FramePump (+2 R6) и заставка (+1 R4), ни одного разрешённого
 
 
 def test_shim_marker_outside_real_table_turns_g10_red(tmp_path: Path) -> None:
@@ -253,4 +256,4 @@ def test_r8_single_dot_interfaces_is_a_finding_double_dot_is_clean(tmp_path: Pat
 def test_real_summary_line_literal() -> None:
     line = summary_line(run_all(REPO_ROOT), REPO_ROOT)
 
-    assert line.endswith("G2 pending: 41; allowlist: 71 entries")
+    assert line.endswith("G2 pending: 41; allowlist: 73 entries")

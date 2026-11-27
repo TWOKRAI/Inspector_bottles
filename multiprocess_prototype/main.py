@@ -101,8 +101,38 @@ def bootstrap(topology_path: Path | str | None = None, *, run_gate: bool | None 
     return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path, run_gate=run_gate).build()
 
 
+def _build_with_splash(app: "AppManifest", pipeline_override: str | None, *, headless: bool, autostart: bool | None):
+    """Сборка с заставкой загрузки (Task 2.6): та же дорога ``SystemBuilder``, плюс этапы ``launch``.
+
+    Заставка стартует после того, как известно, будет ли окно (``presentation_window_expected``); порт
+    заставки попадает в env здесь же, до ``launcher.run()``, чтобы его унаследовали PM и GUI.
+    """
+    from multiprocess_framework.modules.process_module.progress import ProgressTracker
+
+    from multiprocess_prototype.backend.launch import APP_NAME, SystemBuilder
+    from multiprocess_prototype.splash.launcher import start_splash
+
+    builder = SystemBuilder.from_manifest(
+        app, pipeline_override, include_presentation=not headless, run_autostart=autostart
+    )
+    link = start_splash(builder.presentation_window_expected, environ=os.environ, title=APP_NAME)
+    if link is None:
+        return builder.build()
+    tracker = ProgressTracker([("recipe", 50), ("built", 50)])
+    link.report(tracker.advance("recipe"))
+    launcher = builder.build()
+    link.report(tracker.finish())
+    link.publish_port(os.environ)
+    return launcher
+
+
 def _prototype_launcher_factory(
-    manifest, pipeline_override: str | None, *, headless: bool = False, autostart: bool | None = None
+    manifest,
+    pipeline_override: str | None,
+    *,
+    headless: bool = False,
+    autostart: bool | None = None,
+    splash: bool = False,
 ):
     """``launcher_factory`` для ``app_module.run_app`` (factory-шов Ф5.11).
 
@@ -117,6 +147,9 @@ def _prototype_launcher_factory(
     ``factory(manifest, pipeline_override)`` (framework, не расширяем). Дефолт
     ``False`` сохраняет back-compat для прямых вызовов (тесты вызывают фабрику без
     partial — presentation включена, как было до Ф2).
+
+    ``splash`` (Task 2.6) — ``main()`` ставит ``True`` только при запуске не headless и не выключенной
+    заставке; ``False`` — сборка через ``build_launcher``, без единого следа заставки.
     """
     from multiprocess_prototype.backend.config.manifest import load_manifest
 
@@ -132,6 +165,8 @@ def _prototype_launcher_factory(
             f"[run] pipeline: {app.pipeline} (источник: состояние {state_path_for(manifest.source)})",
             file=sys.stderr,
         )
+    if splash:
+        return _build_with_splash(app, pipeline_override, headless=headless, autostart=autostart)
     return build_launcher(app, pipeline_override, include_presentation=not headless, run_autostart=autostart)
 
 
@@ -157,6 +192,8 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None, 
 
     from multiprocess_framework.modules.app_module import AppSpec, apply_env_aliases, run_app, state_path_for
 
+    from multiprocess_prototype.splash.protocol import SPLASH_PORT_ENV, splash_enabled
+
     # Env-алиасы ПЕРВЫМ делом (до resolve_manifest_path/persist): resolve_manifest_path
     # читает только INSPECTOR_MANIFEST, а persist пишет по нему же — при заданном лишь
     # MULTIPROCESS_MANIFEST без раннего алиаса backend собрал бы дефолтный app.yaml, а
@@ -181,10 +218,17 @@ def main(pipeline_override: str | None = None, *, headless: bool | None = None, 
                 file=sys.stderr,
             )
 
+    # Task 2.6: порт заставки действителен только тот, что опубликует свой же запуск (``publish_port``);
+    # унаследованный из окружения снимается всегда, и при выключенной заставке тоже.
+    os.environ.pop(SPLASH_PORT_ENV, None)
+    factory_options: dict = {"headless": is_headless, "autostart": autostart}
+    if not is_headless and splash_enabled(os.environ):
+        factory_options["splash"] = True
+
     spec = AppSpec(
         manifest_path=manifest_path,
         pipeline_override=effective_override,
-        launcher_factory=partial(_prototype_launcher_factory, headless=is_headless, autostart=autostart),
+        launcher_factory=partial(_prototype_launcher_factory, **factory_options),
     )
     return run_app(spec)
 

@@ -302,6 +302,15 @@ blueprint:
             readiness:
               severity:
                 out_of_spec: check_function
+        # Task 2.2d: индикатор в работе; min_confidence = layout.word_layout.min_confidence (test_recipes_pin.py).
+        - plugin_name: presence_watch
+          plugin_class: Plugins.processing.presence_watch.plugin.PresenceWatchPlugin
+          category: processing
+          config:
+            absent_after_s: 10.0
+            text_absent: нет диска
+            text_weak: слабое распознавание
+            min_confidence: 0.5
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal

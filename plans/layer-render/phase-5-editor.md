@@ -8,7 +8,7 @@
 
 ### Task 5.3 — канва редактора: сетка/привязка, мультивыбор, горячие клавиши, вписать, видимость/замок
 
-- **Статус:** [IN PROGRESS] волна 2 · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
+- **Статус:** [DONE 2026-10-02 — `958c5a6d`; проверка 2026-11-26: в настоящем браузере не проверено — `plan.md` ЛР-12] волна 2 · **Level:** Middle+ (Sonnet 5.5) · **Assignee:** tester → developer → инъекции лида → reviewer
 - **Module contract:** n/a (клиентский JS страницы; команды бэкенда не меняются)
 - **CHAIN:** `tester`(RED, worktree до кода) → `developer`(GREEN) → инъекции лида → `reviewer`
 - **Dependencies:** нет (чисто клиентская; идёт сразу после Ф1)
