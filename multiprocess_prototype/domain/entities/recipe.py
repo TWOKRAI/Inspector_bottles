@@ -21,13 +21,52 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationError, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+from multiprocess_framework.modules.logger_module import get_std_logger
 
 from .display import DisplayDefinition, DisplayInstance
 from .topology import Topology
+
+logger = get_std_logger(__name__)
+
+
+def _one_line(text: str) -> str:
+    """Строка из файла для лога: непечатаемая (перевод строки, ESC) пишется через ``ascii()``."""
+    return text if text.isprintable() else ascii(text)
+
+
+def _load_display(item: dict[str, Any]) -> DisplayDefinition:
+    """Экран из словаря рецепта; негодное ``plate_*`` и ``run_view`` не отменяет загрузку (H2).
+
+    Все ошибки по ключам ``plate_*``/``run_view`` -> эти ключи убираются из копии ``item`` (поле берёт
+    умолчание), на каждый ключ один WARNING без значения из файла. Хоть одна ошибка по другому
+    ключу (в том числе проверка всей модели с пустым ``loc``) -> отказ без изменений.
+    ``item`` не изменяется.
+    """
+    try:
+        return DisplayDefinition.from_dict(item)
+    except ValidationError as exc:
+        errors = exc.errors()
+        forgiven = (
+            error["loc"] and (str(error["loc"][0]).startswith("plate_") or error["loc"][0] == "run_view")
+            for error in errors
+        )
+        if not all(forgiven):
+            raise
+        bad = {str(error["loc"][0]): error["type"] for error in errors}
+
+    definition = DisplayDefinition.from_dict({key: value for key, value in item.items() if key not in bad})
+    display_id = _one_line(definition.id)
+    for key, error_type in bad.items():
+        if error_type == "extra_forbidden":
+            logger.warning("дисплей '%s': неизвестный %s убран", display_id, _one_line(key))
+        else:
+            default = DisplayDefinition.model_fields[key].default
+            logger.warning("дисплей '%s': негодный %s, взят %s", display_id, key, default)
+    return definition
 
 
 class RecipeMeta(SchemaBase):
@@ -124,7 +163,7 @@ class Recipe(SchemaBase):
             items: list[DisplayDefinition] = []
             for item in v:
                 if isinstance(item, dict):
-                    items.append(DisplayDefinition.from_dict(item))
+                    items.append(_load_display(item))
                 elif isinstance(item, DisplayDefinition):
                     items.append(item)
                 else:

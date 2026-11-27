@@ -920,7 +920,9 @@ class TestStateDeltasToBridge:
         ]
         GuiProcess._on_state_deltas_to_bridge(fake, deltas)
 
-        assert len(states) == 2
+        # Маркер конца пачки (Task 2.8f) — часть контракта: ровно один и последним
+        assert [s["data_type"] for s in states] == ["state_delta", "state_delta", "state_batch_end"]
+        assert states[2] == {"data_type": "state_batch_end"}
         assert states[0]["data_type"] == "state_delta"
         assert states[0]["path"] == "processes.cam.workers.w1.status"
         assert states[0]["value"] == "running"
@@ -956,7 +958,8 @@ class TestStateDeltasToBridge:
         )
         GuiProcess._on_state_deltas_to_bridge(SimpleNamespace(_bridge=bridge), [delta])
 
-        assert len(states) == 1
+        assert [s["data_type"] for s in states] == ["state_delta", "state_batch_end"]
+        assert states[1] == {"data_type": "state_batch_end"}
         assert states[0]["deleted"] is True
         assert states[0]["value"] is None  # sentinel MISSING не протекает в GUI
         assert states[0]["old_value"] == "running"

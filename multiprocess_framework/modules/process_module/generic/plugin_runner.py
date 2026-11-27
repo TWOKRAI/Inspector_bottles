@@ -97,6 +97,9 @@ def _carry_system_fields(inputs: "list[dict] | None", outputs: "list[dict]") -> 
 
     ``call_produce`` (нет входа) сюда не попадает — trace_id уже назначается в
     ``SourceProducer`` явно (``frame_trace.ensure_trace_id``), донора для produce нет.
+
+    ``paused_by`` в ``_CARRIED_SYSTEM_FIELDS`` не входит: у него другой выбор донора —
+    см. ``_carry_paused_by`` (ADR-PM-066).
     """
     if not inputs or not outputs:
         return
@@ -111,6 +114,40 @@ def _carry_system_fields(inputs: "list[dict] | None", outputs: "list[dict]") -> 
         for key in _CARRIED_SYSTEM_FIELDS:
             if key not in output and key in donor:
                 output[key] = donor[key]
+
+
+def _paused_by_of(item: object) -> "str | None":
+    """Метка ``paused_by`` item: только непустая строка, иначе ``None``."""
+    value = item.get("paused_by") if isinstance(item, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _carry_paused_by(inputs: "list[dict] | None", outputs: "list[dict]") -> None:
+    """Перенести метку ``paused_by`` из входа в выходы (ADR-PM-066). Стоящий ключ не трогается.
+
+    - 1:1 — донор позиционный (``inputs[i]`` для ``outputs[i]``); выход, являющийся любым из
+      входных объектов, не трогается (это сам вход, в том числе после перестановки).
+    - Не 1:1 (fan-in, fan-out) — каждый выход без ключа, в том числе тот же объект, что один из
+      входов, получает метку ПЕРВОГО помеченного входа: лучше скрыть кадр, чем показать сырой.
+
+    Маркер разрыва метку не получает.
+    """
+    if not inputs or not outputs:
+        return
+    if len(inputs) == len(outputs):
+        for donor, output in zip(inputs, outputs):
+            value = _paused_by_of(donor)
+            if value is None or not isinstance(output, dict) or is_marker(output):
+                continue
+            if not any(output is item for item in inputs):
+                output.setdefault("paused_by", value)
+        return
+    value = next((v for v in map(_paused_by_of, inputs) if v is not None), None)
+    if value is None:
+        return
+    for output in outputs:
+        if isinstance(output, dict) and not is_marker(output):
+            output.setdefault("paused_by", value)
 
 
 class PluginRunner:
@@ -168,13 +205,21 @@ class PluginRunner:
         читается через getattr — двойники без ``state`` идут как раньше. ``call_produce`` не
         меняется: источник гейтится ``run_event`` в SourceProducer.
 
+        Метка ``paused_by`` (ADR-PM-066): плагин в ``PAUSED`` (при любом ``enabled``) пишет своё
+        имя в каждый пропущенный dict-item, кроме маркера, через ``setdefault`` — остаётся имя
+        первого. ``enabled=False`` в другом состоянии — выбор оператора, метки нет. Дальше метка
+        переносится ``_carry_paused_by`` и работающими плагинами не снимается.
+
         F2 (ревью 2026-07-13): после получения outputs системные поля кадра
         (trace_id/capture_ts/frame_hops) переносятся из items в каждый output, если
         плагин их не поставил сам — см. модульную ``_carry_system_fields``. Плагины
         НЕ трогаем по одному — перенос в этом единственном месте покрывает всех.
         """
         self._run_pre(plugin, "process", items)
-        if getattr(plugin, "enabled", True) and getattr(plugin, "state", None) != PluginState.PAUSED:
+        # state читается ОДИН раз: pause/resume идут с другого потока, и второе чтение после resume дало бы
+        # пропущенный process() без метки (сырой кадр уходит как обработанный).
+        paused = getattr(plugin, "state", None) == PluginState.PAUSED
+        if getattr(plugin, "enabled", True) and not paused:
             # 4.7d-2b: маркер не несёт кадра/детекций — порты на нём не проверяются. Фильтр — по ITEM, а не
             # по коллекции: маркерный вход не должен пропускать невалидный НЕмаркерный выход (и наоборот).
             if self._validate_ports:
@@ -186,7 +231,12 @@ class PluginRunner:
                 self._validate_non_markers(plugin, "output", outputs)
         else:
             outputs = items  # bypass (enabled=False или PAUSED): кадр без обработки, порты не проверяем
+            if paused:
+                for item in items:
+                    if isinstance(item, dict) and not is_marker(item):
+                        item.setdefault("paused_by", plugin.name)
         _carry_system_fields(items, outputs)
+        _carry_paused_by(items, outputs)
         self._run_post(plugin, "process", items, outputs)
         return outputs
 

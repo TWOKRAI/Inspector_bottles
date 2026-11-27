@@ -291,7 +291,11 @@ def test_restart_never_exposes_mark_on_reused_queue() -> None:
     pm._process_registry = registry
     pm._wire_reissue_enabled = lambda: False
     pm._process_queue_ids = lambda name: {}
-    pm.get_config = lambda k: {"stop_process_timeout": 3.0, "start_ready_timeout_s": 0}.get(k)
+    pm.get_config = lambda k: {
+        "stop_process_timeout": 3.0,
+        "start_ready_timeout_s": 0,
+        "restart_reuse_queues": True,  # откат ADR-PMM-054: только здесь очередь переиспользуется
+    }.get(k)
     for attr in (
         "_bump_incarnation",
         "_priority",

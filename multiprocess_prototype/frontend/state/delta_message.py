@@ -20,6 +20,10 @@ envelope собирался инлайном в `process.py` и терял ча�
 `value` при удалении — None (а не sentinel MISSING): потребитель отличает
 удаление по флагу `deleted`, а не по значению. None-как-значение и удаление
 различимы (`deleted=False, value=None` ≠ `deleted=True, value=None`).
+
+Маркер конца пачки (Task 2.8f) — отдельный envelope без пути: ``{"data_type": "state_batch_end"}``.
+Производитель шлёт его после всех state_delta одной пачки, ``GuiStateBindings`` по нему отдаёт
+собранные узлы; прочие потребители state-сообщений отсеивают его по ``data_type``.
 """
 
 from __future__ import annotations
@@ -29,6 +33,12 @@ from typing import Any
 from multiprocess_framework.modules.state_store_module.core.delta import Delta
 
 STATE_DELTA = "state_delta"
+STATE_BATCH_END = "state_batch_end"
+
+
+def state_batch_end_message() -> dict[str, Any]:
+    """Собрать маркер конца пачки дельт (новый dict на каждый вызов)."""
+    return {"data_type": STATE_BATCH_END}
 
 
 def state_delta_message(delta: Delta) -> dict[str, Any]:

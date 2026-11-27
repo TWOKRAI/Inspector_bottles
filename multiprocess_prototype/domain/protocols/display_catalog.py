@@ -61,6 +61,9 @@ class DisplaySpec:
     plate_text: str = ""
     plate_source: str = ""
 
+    # --- Показ по состоянию линии (зеркало DisplayDefinition) ---
+    run_view: str = "always"
+
 
 class DisplayCatalog(Protocol):
     """Контракт read+write store для реестра дисплеев.
@@ -142,6 +145,7 @@ def definition_to_spec(defn: Any) -> DisplaySpec:
         plate_after_s=defn.plate_after_s,
         plate_text=defn.plate_text,
         plate_source=defn.plate_source,
+        run_view=defn.run_view,
     )
 
 
@@ -175,6 +179,7 @@ def spec_to_definition_dict(spec: DisplaySpec) -> dict[str, Any]:
         "plate_after_s": spec.plate_after_s,
         "plate_text": spec.plate_text,
         "plate_source": spec.plate_source,
+        "run_view": spec.run_view,
     }
     return result
 

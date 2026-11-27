@@ -2,7 +2,7 @@
 
 - **Slug:** multicam-observability
 - **Дата:** 2026-11-25
-- **Статус:** ACTIVE
+- **Статус:** SUPERSEDED 2026-11-26 — заменён единым планом камер [`2026-11-26_device-common-base`](../2026-11-26_device-common-base/plan.md); куда ушла каждая задача — [`mapping.md`](../2026-11-26_device-common-base/mapping.md). Было: ACTIVE
 - **Ветка:** (заполняет лид; база — `integ/multicam-obs`, `85a7906d1`)
 - **Ревью стадии 0:** итерация 1 — CHANGES REQUESTED по W1-a, W1-b, W1-c; правки внесены (ред. 2)
 - **Основание:** аудит `docs/reviews/2026-11-25_obs-audit-multicam.md` (ч.1), `…-2-control-tasks.md` (ч.2, T0-T11), `…-3-reliability-cto-map.md` (ч.3, инварианты 9.5).

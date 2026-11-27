@@ -794,10 +794,11 @@
 - [project_fencing_test_race](project_fencing_test_race.md)
 - [project_seqlock_contention_semantics](project_seqlock_contention_semantics.md)
 
-## test-doubles (17)
+## test-doubles (18)
 
 - [feedback_a_delta_benchmark_hides_what_sits_on_both_sides](feedback_a_delta_benchmark_hides_what_sits_on_both_sides.md)
 - [feedback_a_faithful_fake_still_lacks_the_protocol](feedback_a_faithful_fake_still_lacks_the_protocol.md)
+- [feedback_a_fake_that_restarts_counters_hides_a_post_reconnect_baseline](feedback_a_fake_that_restarts_counters_hides_a_post_reconnect_baseline.md)
 - [feedback_a_stand_with_a_verdict_is_also_a_harness](feedback_a_stand_with_a_verdict_is_also_a_harness.md)
 - [feedback_absent_receiver_lets_a_test_pin_an_impossible_input](feedback_absent_receiver_lets_a_test_pin_an_impossible_input.md)
 - [feedback_addressing_fake_needs_general_dot_notation](feedback_addressing_fake_needs_general_dot_notation.md)

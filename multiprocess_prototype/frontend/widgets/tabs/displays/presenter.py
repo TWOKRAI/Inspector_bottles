@@ -336,6 +336,7 @@ class DisplaysPresenter:
             plate_after_s=source.plate_after_s,
             plate_text=source.plate_text,
             plate_source=source.plate_source,
+            run_view=source.run_view,
         )
 
         try:
