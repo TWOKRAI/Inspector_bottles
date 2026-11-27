@@ -4626,7 +4626,7 @@ Free-threaded Python — пересмотреть.
 
 **Статус:** принято, реализовано: 1.2 `95a911c97`, 1.9 `e1ee37278` (обе в слиянии `506eea281`); внеочередная отправка —
 `3f4dc1b49`, `762a11210`. **Слой:** framework (`process_module`). Машина работы PM — ADR-PMM-053. Факты сверены чтением
-кода `eaaf82a60`, тесты при написании не запускались.
+кода `ee9663f51`, тесты при написании не запускались.
 
 **Контекст.** PM гейтит работу одним флагом `run_event` (ADR-PMM-047) и ждёт от узлов самоотчёт. Хуки
 `pause()/resume()` и состояние `PAUSED` в контракте плагина уже были, но живых вызовов не имели; `PAUSED` поток
@@ -4645,17 +4645,20 @@ Free-threaded Python — пересмотреть.
    `{severity, reason}`; `node` и `source` добавляет оркестратор. `PluginOrchestrator.readiness_snapshot`
    (`generic/plugin_orchestrator.py:346`) строит `{ready, reasons, paused, at}`: причины хуков, «плагин не поднят»,
    упавший `pause/resume`, пропущенные по `REQUIRES`. Политика узла — ADR-PM-061, запрет команд — ADR-PM-062.
-2. **Первый живой вызывающий `pause/resume`** — `reconcile_run_event` (`plugin_orchestrator.py:405`): флаг снят —
+2. **Первый живой вызывающий `pause/resume`** — `reconcile_run_event` (`plugin_orchestrator.py:408`): флаг снят —
    `_do_pause` для `RUNNING`, взведён — `_do_resume` для `PAUSED`. Сверка по уровню, а не по фронту. Источник с
-   `run_gated: false` не паузится. Первая пауза процесса, рождённого при снятом флаге, — в `boot()` оркестратора, до
-   старта воркеров. Воркер `run_watch` создать не удалось — `release_paused()` возвращает плагины из паузы.
-3. **`PAUSED` режет поток:** `PluginRunner.call_process` (`generic/plugin_runner.py:177`) не зовёт `process()` и
-   отдаёт вход дальше, как при `enabled == False`. Источник режется отдельно, в `SourceProducer.run_loop`
-   (`generic/source_producer.py:156`).
+   `run_gated: false` не паузится (`:481`). Первую паузу процесса, рождённого при снятом флаге, делает `boot()`
+   оркестратора на потоке инициализации: по плагину сразу после его `start()` (`:269`), до воркеров источника и
+   конвейера; воркеры из `config["workers"]` к этому моменту уже созданы (`core/process_module.py:1063-1070`).
+   Воркер `run_watch` создать не удалось — `release_paused()` зовёт `resume()` и возвращает плагины из паузы.
+3. **`PAUSED` режет поток:** `PluginRunner.call_process` (`generic/plugin_runner.py:221`) не зовёт `process()` и
+   отдаёт вход дальше, как при `enabled == False`, и помечает item полем `paused_by` (ADR-PM-066). Источник режется
+   отдельно, в `SourceProducer.run_loop` (`generic/source_producer.py:157`).
 4. **Транспорт отчёта** — поле `readiness` heartbeat-сообщения (`heartbeat/process_heartbeat.py:497-504`), не
    state-plane. Heartbeat только копирует готовый снимок. Внеочередная отправка — ADR-PMM-048.
 
 **Контракт потоков.**
+- Первую `pause()` зовёт поток инициализации (`boot()`), `resume()` — `run_watch` и `release_paused()`.
 - `run_watch` (такт 0,05 с, создаётся в `core/process_module.py:1092`) зовёт `pause()/resume()` ПАРАЛЛЕЛЬНО
   `process()` и `produce()`. Потокобезопасность — обязанность плагина. Хуки идемпотентны.
 - `produce()` источника может начаться раньше `resume()` и закончиться позже `pause()`.

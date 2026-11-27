@@ -540,6 +540,22 @@ config = {
 `topology.apply` в `running`, `stopping`, `fault`, `shutting_down` отказывает:
 `{"success": false, "error": "running" | "stopping" | "fault_unacknowledged" | "shutting_down", "message"}`.
 
+### STOP и авария: зависят от `run_gate`
+
+При `run_gate: true`: STOP — шаги `pre_stop`, снятие `run_event`, ожидание `paused` до `run_stop_timeout_s`; авария —
+то же без `pre_stop`, затем `fault` до `ack`. При `run_gate: false` событие не снимается, `pre_stop` не
+выполняется и `paused` никто не ждёт: STOP сразу даёт итог, в аварии `ack` разрешён сразу.
+
+### Причины готовности и автоперезапуск
+
+* Причины приходят из `readiness()` плагинов; плагин вне `RUNNING`/`PAUSED` — `failure` «плагин не поднят (…)»;
+  плагин, пропущенный по `REQUIRES`, — `failure` «REQUIRES не удовлетворены: …».
+* PM сам добавляет: процесс не жив, нет свежего отчёта, перезапускается супервизором, не подтвердил остановку.
+* `run_auto_restart: true` в политике рестарта процесса: действует только вместе с `enabled: true` и не для
+  `protected`. Тогда перезапуск в `running` — `out_of_spec`, а не авария, пока не прошло `run_restart_grace_s` и
+  супервизор не отказался. Флаг без `enabled: true` — причина `failure`, `source: config`.
+* Кадры после перезапуска идут к процессу через relay PM (C-36, ADR-PMM-054). Доставку входа гейт не проверяет.
+
 ### Ключи конфига (`RunConfig`, ADR-PMM-049)
 
 Модель — `process/run_config.py`: `RunConfig`, `RUN_CONFIG_KEYS`, `run_config_value(key, raw)`. Прототип наследует её
