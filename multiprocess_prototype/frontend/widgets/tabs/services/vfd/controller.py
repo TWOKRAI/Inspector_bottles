@@ -10,9 +10,11 @@ comm_errors — с дельтой за период (перенесено из r
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import QTimer
+
+from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.reply import unwrap_reply
 
 from .presenter import VfdPresenter
 from .widget import VfdControlWidget
@@ -21,6 +23,9 @@ from .widget import VfdControlWidget
 # Если time.time() - ts > _STALE_THRESHOLD_S, данные считаются stale
 # независимо от quality-поля (hub мог упасть и quality «замёрз»).
 _STALE_THRESHOLD_S = 3.0
+
+# Отказ команды без текста от обработчика (таймаут, ошибка транспорта).
+_REFUSAL_DEFAULT = "ПЧ: команда отклонена"
 
 
 class VfdWidgetController:
@@ -71,6 +76,8 @@ class VfdWidgetController:
     def set_device(self, device_id: str | None) -> None:
         """Переключить на другое устройство: перепривязать bindings, обновить meta."""
         self._unbind_state()
+        if device_id != self._device_id:
+            self._widget.set_refusal("")
         self._device_id = device_id
         self._last_comm_errors = None
         self._last_status_ts = None
@@ -231,11 +238,11 @@ class VfdWidgetController:
         if not data:
             self._widget.set_controls_enabled(True, "")
             return
-        # Лимиты из protocol_meta
-        meta = data.get("protocol_meta") or {}
-        cmd_freq_meta = meta.get("cmd_freq") or {}
-        freq_min = float(cmd_freq_meta.get("min", 0))
-        freq_max = float(cmd_freq_meta.get("max", 50))
+        # Лимиты, каждая граница отдельно: protocol_meta.cmd_freq -> entry.params рецепта -> 0 / 50
+        cmd_freq_meta = (data.get("protocol_meta") or {}).get("cmd_freq") or {}
+        params = (data.get("entry") or {}).get("params") or {}
+        freq_min = float(cmd_freq_meta.get("min", params.get("freq_min_hz", 0)))
+        freq_max = float(cmd_freq_meta.get("max", params.get("freq_max_hz", 50)))
         if freq_max > 0:
             self._widget.set_freq_range(freq_min, freq_max)
 
@@ -260,25 +267,55 @@ class VfdWidgetController:
             return
         direction = "реверс" if reverse else "вперёд"
         self._widget.set_status(f"ПЧ: пуск {direction} {freq:.2f} Гц…")
-        self._presenter.vfd_run(self._device_id, freq, reverse)
+        self._widget.set_refusal("")
+        self._presenter.vfd_run(self._device_id, freq, reverse, on_result=self._reply_handler())
 
     def _on_set_freq(self, freq: float) -> None:
         if not self._device_id:
             return
         self._widget.set_status(f"ПЧ: смена частоты {freq:.2f} Гц…")
-        self._presenter.vfd_set_freq(self._device_id, freq)
+        self._widget.set_refusal("")
+        self._presenter.vfd_set_freq(self._device_id, freq, on_result=self._reply_handler())
 
     def _on_stop(self) -> None:
         if not self._device_id:
             return
         self._widget.set_status("ПЧ: стоп…")
-        self._presenter.vfd_stop(self._device_id)
+        self._widget.set_refusal("")
+        self._presenter.vfd_stop(self._device_id, on_result=self._reply_handler())
 
     def _on_reset(self) -> None:
         if not self._device_id:
             return
         self._widget.set_status("ПЧ: сброс аварии…")
+        self._widget.set_refusal("")
         self._presenter.vfd_reset_fault(self._device_id)
+
+    def _reply_handler(self) -> Callable[[Any], None]:
+        """Колбэк ответа команды, привязанный к устройству, выбранному при отправке."""
+        device_id = self._device_id
+
+        def handle(response: Any) -> None:
+            if device_id == self._device_id:
+                self._show_reply(response)
+
+        return handle
+
+    def _show_reply(self, response: Any) -> None:
+        """Отказ и отложенный «Стоп» — в метку отказа. Успех и ``{}`` (нет sender) метку не трогают:
+        она очищена при нажатии, а поздний успех прежней команды не должен стереть текст следующей.
+        """
+        envelope = response if isinstance(response, dict) else {}
+        reply = unwrap_reply(envelope)
+        refused = (
+            envelope.get("success") is False
+            or reply.get("success") is False
+            or ("status" in reply and reply["status"] != "ok")
+        )
+        if refused:
+            self._widget.set_refusal(str(reply.get("message") or _REFUSAL_DEFAULT))
+        elif reply.get("deferred"):
+            self._widget.set_refusal(str(reply.get("message") or ""))
 
     def _on_refresh(self) -> None:
         if not self._device_id:
