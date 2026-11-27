@@ -12,9 +12,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QSlider, QStyle, QStyleOptionSlider
 
 from scripts import label_angle as la
 
@@ -112,6 +113,91 @@ def test_crop_failure_does_not_leave_previous_picture(qtbot, tmp_path, monkeypat
     assert window.current.index == "000002"
     assert _view(window).pixelColor(la.VIEW_SIZE // 2 + 20, la.VIEW_SIZE // 2 + 20).red() == 200
     assert any("плагин упал" in w.text() for w in window.findChildren(QLabel))
+
+
+def _two_frames(tmp_path: Path) -> tuple[Path, Path]:
+    raw, out = tmp_path / "raw", tmp_path / "out"
+    _frame(raw / "П" / "a000_000001.png")
+    _frame(raw / "П" / "a000_000002.png", value=120)
+    return raw, out
+
+
+def _all_text(window) -> str:
+    return "\n".join(w.text() for w in window.findChildren(QLabel))
+
+
+def test_recorded_state_is_visible(qtbot, tmp_path):
+    raw, out = _two_frames(tmp_path)
+    window = la.LabelWindow(raw, out)
+    qtbot.addWidget(window)
+    assert "Ещё не записан" in _all_text(window)
+    window.set_turn(-45)
+    QTest.keyClick(window, Qt.Key.Key_Return)
+    QTest.keyClick(window, Qt.Key.Key_Backspace)
+    window.set_turn(10)  # крутим дальше, а записанный угол остаётся прежним, пока не нажат Enter
+    assert "Уже записан: 45°" in _all_text(window)
+    QTest.keyClick(window, Qt.Key.Key_S)
+    QTest.keyClick(window, Qt.Key.Key_S)
+    assert window.current is None
+    assert "Без записи: 1. Закройте и запустите снова — откроется первый такой кадр" in _all_text(window)
+    QTest.keyClick(window, Qt.Key.Key_Backspace)
+    QTest.keyClick(window, Qt.Key.Key_Return)
+    assert "Все кадры пройдены" in _all_text(window)
+    assert "Без записи" not in _all_text(window)
+
+
+def test_slider_moves_the_same_way_as_arrows(qtbot, tmp_path):
+    """→ крутит картинку по часовой, и ручка ползунка тоже едет вправо."""
+    raw, out = tmp_path / "raw", tmp_path / "out"
+    image = np.full((400, 400, 3), 40, dtype=np.uint8)
+    image[40:80, 180:220] = 255  # метка у верхнего края
+    (raw / "П").mkdir(parents=True)
+    cv2.imencode(".png", image)[1].tofile(str(raw / "П" / "a000_000001.png"))
+    window = la.LabelWindow(raw, out)
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.processEvents()
+    slider = window.findChild(QSlider)
+
+    def handle_x() -> int:
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        style = slider.style()
+        return style.subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider
+        ).x()
+
+    def marker_x() -> float:
+        view = _view(window)
+        xs = [
+            x
+            for x in range(0, la.VIEW_SIZE, 4)
+            for y in range(0, la.VIEW_SIZE, 4)
+            if view.pixelColor(x, y).green() > 200
+        ]
+        return sum(xs) / len(xs)
+
+    handle, marker = handle_x(), marker_x()
+    for _ in range(30):
+        QTest.keyClick(window, Qt.Key.Key_Right)
+    assert window.turn_deg == -30
+    assert handle_x() > handle + 20
+    assert marker_x() > marker + 20  # метка сверху ушла вправо — это по часовой
+
+
+@pytest.mark.parametrize("target", ["window", "slider"])
+def test_ctrl_s_does_not_skip(qtbot, tmp_path, target):
+    raw, out = _two_frames(tmp_path)
+    window = la.LabelWindow(raw, out)
+    qtbot.addWidget(window)
+    widget = window if target == "window" else window.findChild(QSlider)
+    ctrl = Qt.KeyboardModifier.ControlModifier
+    QTest.keyClick(widget, Qt.Key.Key_S, ctrl)
+    QApplication.sendEvent(widget, QKeyEvent(QEvent.Type.KeyPress, 0x042B, ctrl, "ы"))  # русская раскладка
+    assert window.current.index == "000001"
+    assert not out.exists()
+    QTest.keyClick(widget, Qt.Key.Key_S)  # без Ctrl пропуск работает
+    assert window.current.index == "000002"
 
 
 @pytest.mark.parametrize("case", ["two-letter-folder", "nfd-folder-in-out", "out-is-a-file", "swapped-folders"])

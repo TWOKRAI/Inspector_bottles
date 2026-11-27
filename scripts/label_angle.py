@@ -261,6 +261,8 @@ class LabelWindow(QWidget):
         self._angles = label()
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setRange(-180, 180)
+        # Плюс — против часовой: без этого ручка ехала бы навстречу стрелкам (→ крутит по часовой, это минус)
+        self._slider.setInvertedAppearance(True)
         self._slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(self._slider)
         self._message = label()
@@ -339,13 +341,20 @@ class LabelWindow(QWidget):
         done = sum(1 for f in self.frames if f.angle is not None)
         if frame is None:
             self._title.setText(f"Все кадры пройдены: кадров {total}, размечено {done}")
-            self._angles.setText("")
+            self._angles.setText(
+                f"Без записи: {total - done}. Закройте и запустите снова — откроется первый такой кадр"
+                if done < total
+                else ""
+            )
             return
         self._title.setText(
             f"Буква {frame.letter}, номер {frame.index} — кадр {self._position + 1} из {total}, размечено {done}"
         )
         side = "" if self._turn in (0, 180) else (" против часовой" if self._turn > 0 else " по часовой")
-        self._angles.setText(f"Доворот: {abs(self._turn)}°{side}.   Запишется угол: {truth_angle(self._turn)}°")
+        recorded = "Ещё не записан" if frame.angle is None else f"Уже записан: {frame.angle}°"
+        self._angles.setText(
+            f"Доворот: {abs(self._turn)}°{side}.   Запишется угол: {truth_angle(self._turn)}°\n{recorded}"
+        )
 
     def _save(self) -> None:
         frame = self.current
@@ -370,7 +379,8 @@ class LabelWindow(QWidget):
             if not event.isAutoRepeat():  # зажатый Enter не должен размечать кадры не глядя
                 self._save()
         elif key == Qt.Key.Key_S or event.text().lower() == "ы":
-            if self.current is not None:
+            # Ctrl+S жмут, желая «сохранить»: пропускать кадр без записи по нему нельзя
+            if self.current is not None and not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self._go(self._position + 1)
         elif key == Qt.Key.Key_Backspace:
             if self._position > 0:
