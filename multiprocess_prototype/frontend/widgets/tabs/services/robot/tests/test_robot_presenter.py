@@ -171,6 +171,24 @@ def test_request_without_sender_returns_empty() -> None:
     assert results == [{}]
 
 
+def test_router_envelope_delivers_result_fields() -> None:
+    """Настоящий конверт роутера (RouterManager.reply_to_request) → вкладка получает поля result."""
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {
+        "type": "response",
+        "command": "command.response",
+        "sender": "devices",
+        "targets": ["gui"],
+        "queue_type": "system",
+        "request_id": "r1",
+        "success": True,
+        "result": {"status": "ok", "telemetry": {"x_mm": 1.0}, "free": True},
+    }
+    results: list[dict] = []
+    presenter.get_telemetry("robot_main", results.append)
+    assert results == [{"status": "ok", "telemetry": {"x_mm": 1.0}, "free": True}]
+
+
 # --- _unwrap ---
 
 

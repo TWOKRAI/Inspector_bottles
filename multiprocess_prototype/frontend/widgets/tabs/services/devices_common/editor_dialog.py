@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QVBoxLayout, QWidget
 
 from .device_form import DeviceFormWidget
 
@@ -51,6 +51,14 @@ class DeviceEditorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def accept(self) -> None:
+        """OK: при нечитаемых params предупредить и оставить диалог открытым."""
+        error = self._form.params_error()
+        if error:
+            QMessageBox.warning(self, "Устройства", error)
+            return
+        super().accept()
 
     def get_entry(self) -> dict[str, Any]:
         """Собрать entry dict для device_upsert."""

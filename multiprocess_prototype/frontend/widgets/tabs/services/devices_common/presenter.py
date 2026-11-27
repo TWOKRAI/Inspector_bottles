@@ -12,6 +12,7 @@ from __future__ import annotations
 
 
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.reply import unwrap_reply as _extract_top
 from typing import Any, Callable
 
 logger = get_std_logger(__name__)
@@ -77,7 +78,7 @@ class DevicesPresenter:
         self._request(
             "device_upsert",
             entry,
-            on_result or (lambda _: None),
+            (lambda r: on_result(_extract_top(r))) if on_result else (lambda _: None),
         )
 
     def device_remove(
@@ -89,7 +90,7 @@ class DevicesPresenter:
         self._request(
             "device_remove",
             {"device_id": device_id},
-            on_result or (lambda _: None),
+            (lambda r: on_result(_extract_top(r))) if on_result else (lambda _: None),
         )
 
     def device_protocols(
@@ -160,13 +161,3 @@ def _extract(response: Any, key: str) -> Any:
     if isinstance(inner, dict) and key in inner:
         return inner[key]
     return None
-
-
-def _extract_top(response: Any) -> dict:
-    """Развернуть ответ: {...} или {"result": {...}}."""
-    if not isinstance(response, dict):
-        return {}
-    inner = response.get("result")
-    if isinstance(inner, dict) and set(response) <= {"result", "status", "request_id", "command"}:
-        return inner
-    return response

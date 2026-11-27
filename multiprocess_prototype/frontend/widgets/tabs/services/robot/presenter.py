@@ -17,6 +17,7 @@ from __future__ import annotations
 
 
 from multiprocess_framework.modules.logger_module import get_std_logger
+from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.reply import unwrap_reply as _unwrap
 from typing import Any, Callable
 
 logger = get_std_logger(__name__)
@@ -224,15 +225,3 @@ class RobotPresenter:
             lambda: self._sender.request_command(_TARGET, command, args),
             on_result=cb,
         )
-
-
-def _unwrap(response: Any) -> dict:
-    """Развернуть ответ request_command: {...} или {"result": {...}}."""
-    if not isinstance(response, dict):
-        return {}
-    inner = response.get("result")
-    if isinstance(inner, dict) and "status" not in response:
-        return inner
-    if isinstance(inner, dict) and set(response) <= {"result", "status", "request_id", "command"}:
-        return inner
-    return response
