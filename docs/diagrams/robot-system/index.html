@@ -1,0 +1,176 @@
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Система робота</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Слои сверху вниз: задача → общее для приборов → робот → провод → контроллер. Цвет = насколько часть универсальна. */
+:root{--bg:#f4f5f3;--card:#fff;--fg:#1b2125;--mute:#58646a;--line:#d5dbd7;
+--any:#1f6f43;--anybg:#e3f1e8;--dev:#1f5c8f;--devbg:#e2eef8;--rob:#8a5300;--robbg:#fbefd8;--app:#7a3d7a;--appbg:#f4e7f4;
+--ok:#1f6f43;--wait:#8a5300;--no:#b3261e;--code:#eceeeb;
+--disp:'Space Grotesk',system-ui,sans-serif;--text:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13171a;--card:#1b2023;--fg:#e4e8e6;--mute:#9ba6ac;--line:#30383c;
+--any:#7fd9a5;--anybg:#16301f;--dev:#8cc4f2;--devbg:#152a3b;--rob:#f0bd5c;--robbg:#33280f;--app:#dca6dc;--appbg:#2e1c2e;
+--ok:#7fd9a5;--wait:#f0bd5c;--no:#ff8a80;--code:#252b2f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#13171a;--card:#1b2023;--fg:#e4e8e6;--mute:#9ba6ac;--line:#30383c;
+--any:#7fd9a5;--anybg:#16301f;--dev:#8cc4f2;--devbg:#152a3b;--rob:#f0bd5c;--robbg:#33280f;--app:#dca6dc;--appbg:#2e1c2e;
+--ok:#7fd9a5;--wait:#f0bd5c;--no:#ff8a80;--code:#252b2f;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--text);margin:0}
+main{max-width:980px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font:700 28px/1.2 var(--disp);margin:0 0 6px;text-wrap:balance}
+h2{font:700 20px/1.3 var(--disp);margin:40px 0 12px;padding-top:16px;border-top:2px solid var(--line);text-wrap:balance}
+p,li{max-width:70ch}
+.meta{color:var(--mute);font-size:13px;margin:0}
+code{font:12.5px var(--mono);background:var(--code);padding:1px 4px;border-radius:3px;overflow-wrap:anywhere}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.legend span{padding:4px 10px;border:1.5px solid;border-radius:4px;font-size:13px}
+.any{color:var(--any);background:var(--anybg)}.dev{color:var(--dev);background:var(--devbg)}.rob{color:var(--rob);background:var(--robbg)}.app{color:var(--app);background:var(--appbg)}
+.layer{border:1.5px solid;border-radius:8px;padding:10px 12px 12px}
+.layer h3{font:700 14px/1.3 var(--disp);margin:0 0 8px}
+.boxes{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.box{flex:1 1 150px;min-width:0;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:7px 10px;font-size:13px}
+.box b{display:block;font-size:13.5px}
+.down{text-align:center;color:var(--mute);font:500 13px var(--mono);padding:5px 0}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font:500 12px var(--disp);text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
+.st{display:inline-block;white-space:nowrap;font-size:12px;font-weight:600;border:1.5px solid;border-radius:20px;padding:0 8px}
+.ok{color:var(--ok)}.wait{color:var(--wait)}.no{color:var(--no)}
+.note{background:var(--card);border:2px solid var(--no);border-radius:6px;padding:4px 16px 8px;margin:16px 0}
+ol.chain li{margin-bottom:6px}
+</style>
+<main>
+<h1>Система робота: как устроена и что в ней настраивается</h1>
+<p class="meta">27.11.2026 · <code>main</code> 6aa7d0dad и ветки полосы Р2 · настоящий робот с протоколом v2 не проверялся</p>
+
+<div class="note"><p><b>Главное.</b> Большая часть защит, о которых мы говорили в эти дни, <b>ещё не в <code>main</code></b>. Сегодня в <code>main</code> серво включается само при подключении, а обрыв связи программа может не заметить.</p></div>
+
+<h2>1. Из чего состоит</h2>
+<div class="legend">
+<span class="any">общее для любых программ</span>
+<span class="dev">общее для любых приборов</span>
+<span class="rob">только этот прибор</span>
+<span class="app">только задача «буквы»</span>
+</div>
+
+<div class="layer app">
+<h3>Задача «буквы»: что и куда класть</h3>
+<div class="boxes">
+<div class="box"><b>Камера и распознавание</b>какой диск и где лежит</div>
+<div class="box"><b>word_layout</b>какую букву в какую ячейку</div>
+<div class="box"><b>robot_io</b>передаёт задание «взять тут, положить там»</div>
+</div>
+</div>
+<div class="down">▼ задание · команды с Пульта идут сюда же ▼</div>
+
+<div class="layer dev">
+<h3>Хаб устройств (процесс <code>devices</code>): общий для робота, ПЧ и будущих приборов</h3>
+<div class="boxes">
+<div class="box"><b>Реестр</b>список приборов берётся из рецепта</div>
+<div class="box"><b>Допуск команд</b>прибор не готов → отказ</div>
+<div class="box"><b>Связь</b>подключить, отключить, переподключить</div>
+<div class="box"><b>Состояние</b>что видит экран: <code>devices.state.&lt;id&gt;</code></div>
+</div>
+</div>
+<div class="down">▼ у каждого прибора свой драйвер ▼</div>
+
+<div class="boxes">
+<div class="layer rob" style="flex:2 1 300px;min-width:0">
+<h3>Драйвер робота Delta v2</h3>
+<div class="boxes">
+<div class="box"><b>Движение</b>серво, «Домой», jog, СТОП</div>
+<div class="box"><b>Работа</b>задания конвейера, программы, рисование</div>
+<div class="box"><b>Данные</b>58 параметров, точки, системы координат</div>
+</div>
+</div>
+<div class="layer rob" style="flex:1 1 200px;min-width:0">
+<h3>Драйвер ПЧ (лента)</h3>
+<div class="box"><b>Частота и пуск</b>идёт «мостом» через регистры робота</div>
+</div>
+</div>
+<div class="down">▼ запись и чтение регистров ▼</div>
+
+<div class="layer any">
+<h3>Связь по Modbus (<code>Services/modbus</code>): годится любому Modbus-прибору</h3>
+<div class="boxes">
+<div class="box"><b>TCP или RTU</b>адрес, порт, таймаут</div>
+<div class="box"><b>Обрыв</b>заметить и не пустить старые команды <span class="st wait">в ветке</span></div>
+</div>
+</div>
+<div class="down">▼ сеть ▼</div>
+
+<div class="layer rob">
+<h3>Контроллер робота</h3>
+<div class="boxes">
+<div class="box"><b>Прошивка v2</b>свой сторож связи 3 с, свои пределы <span class="st no">не написана</span></div>
+<div class="box"><b>Симулятор v2</b>на нём всё и проверяется <span class="st ok">есть</span></div>
+</div>
+</div>
+<p>Под всем этим лежит framework (<span class="st ok">общий</span>): процессы, сообщения между ними, дерево состояния, логи, ошибки, счётчики.</p>
+
+<h2>2. Механизмы простыми словами</h2>
+<p><span class="st ok">в main</span> работает · <span class="st wait">в ветке</span> написано, но не слито · <span class="st no">нет</span> не сделано</p>
+<div class="scroll"><table>
+<tr><th>Механизм</th><th>Что делает</th><th>Для кого</th><th>Где сейчас</th></tr>
+<tr><td>Переподключение</td><td>После обрыва пробует снова, не чаще раза в 2 с. Число попыток настраивается.</td><td>все приборы хаба</td><td><span class="st ok">в main</span></td></tr>
+<tr><td>Заметить обрыв</td><td>Связь пропала → прибор сразу «не подключён». Команда движения, принятая до обрыва, не уходит после восстановления.</td><td>Modbus</td><td><span class="st wait">в ветке R2-S1a</span><br>идёт стенд</td></tr>
+<tr><td>СТОП при мёртвой связи</td><td>Один повтор, потом сообщение «стоп не подтверждён роботом».</td><td>робот</td><td><span class="st wait">в ветках R2-S1a, S1d</span></td></tr>
+<tr><td>СТОП мимо «не готов»</td><td>СТОП оператора уходит, даже когда остальные команды отклоняются.</td><td>робот</td><td><span class="st wait">в ветке R2-S1d</span></td></tr>
+<tr><td>Серво после подключения</td><td>Выключено, включает только оператор. Нажатое «выкл» переподключение не отменяет.</td><td>робот v2</td><td><span class="st wait">в ветке R2-S1</span><br>в main включается само</td></tr>
+<tr><td>«Домой»</td><td>Робот едет домой и после этого выключает серво.</td><td>робот</td><td><span class="st ok">в main</span></td></tr>
+<tr><td>Выход из программы</td><td>Программа сама отправляет всех роботов домой, ждёт до 35 с.</td><td>роботы</td><td><span class="st ok">в main</span></td></tr>
+<tr><td>Сторож на роботе</td><td>ПК молчит 3 с → робот сам останавливает ленту и движение. Серво остаётся включённым.</td><td>прошивка</td><td><span class="st no">на роботе нет</span><br>есть в симуляторе и описании</td></tr>
+<tr><td>Короткий обрыв</td><td>Обрыв до 5 с прощается.</td><td>буквы</td><td><span class="st no">нет</span> (R2-S1b)</td></tr>
+<tr><td>Режим ручной / авто</td><td>В авто jog не работает. Стартует в ручном, переключает оператор.</td><td>робот</td><td><span class="st no">нет</span> (C-39)<br>список команд ещё согласуем</td></tr>
+<tr><td>Итог задания до укладки</td><td>Буква не положена → слово не считается собранным.</td><td>буквы</td><td><span class="st no">не доделано</span> (C-104)<br>в main отказ виден только в <code>robot_io</code></td></tr>
+<tr><td>Журнал обмена</td><td>Что писали и читали по проводу.</td><td>робот v2</td><td><span class="st ok">в main</span></td></tr>
+<tr><td>Журнал команд</td><td>Кто что просил, почему отказано, чем кончилось.</td><td>все приборы</td><td><span class="st no">нет</span><br>отдельный чат</td></tr>
+<tr><td>«Отключить» навсегда</td><td>Отключённый вручную прибор сам не подключается после перезапуска.</td><td>все приборы</td><td><span class="st no">нет</span></td></tr>
+</table></div>
+
+<h2>3. Что вы можете настроить</h2>
+<p>Почти всё живёт в рецепте, в блоке <code>devices</code>.</p>
+<div class="scroll"><table>
+<tr><th>Что</th><th>Где</th><th>Значения</th></tr>
+<tr><td>Адрес робота</td><td><code>transport</code></td><td><code>host</code>, <code>port</code>, <code>unit_id</code>, <code>timeout_sec</code> (1 с)</td></tr>
+<tr><td>Какой протокол</td><td><code>protocol</code></td><td><code>delta_v2</code>; любое другое имя включает старый драйвер v1</td></tr>
+<tr><td>Сколько раз переподключаться</td><td><code>params.max_reconnect_attempts</code></td><td>по умолчанию 3; в рецептах 0 = без конца</td></tr>
+<tr><td>Серво и выходы при подключении</td><td><code>params.on_connect</code></td><td><code>servo</code>, <code>do</code>. В main без этой строки серво <b>включается</b></td></tr>
+<tr><td>Как часто опрашивать</td><td><code>params</code></td><td><code>telemetry_interval_s</code> 0,5; <code>feed_poll_s</code> 0,05</td></tr>
+<tr><td>Срок «Домой»</td><td><code>params.park_timeout_s</code></td><td>30 с, можно 1–60</td></tr>
+<tr><td>Параметры робота (скорости, зоны, точки дома, сторож)</td><td><code>params.robot_params</code> или файл <code>data/robot/&lt;id&gt;/params.yaml</code></td><td>58 штук, у каждого свои пределы. Список в <code>delta_v2.yaml</code></td></tr>
+<tr><td>Точки и системы координат</td><td>файлы <code>data/robot/&lt;id&gt;/</code></td><td>задаёт оператор</td></tr>
+<tr><td>Журнал обмена</td><td><code>params.exchange_log</code></td><td><code>enabled</code>, <code>periodic</code></td></tr>
+<tr><td>Лента (ПЧ)</td><td>вторая запись в <code>devices</code></td><td>частота, предел, опрос; карта регистров в <code>gd20_*.yaml</code></td></tr>
+<tr><td>Укладка слова</td><td>плагин <code>word_layout</code>, часть из Пульта</td><td>слово, первая ячейка, шаг, угол строки, высоты Z</td></tr>
+<tr><td>Кнопки Пульта</td><td>процесс <code>pult</code> в рецепте</td><td>любая кнопка → команда хаба с аргументами</td></tr>
+</table></div>
+
+<h2>4. Что зашито в код, а не в настройки</h2>
+<ul>
+<li>Пауза между попытками переподключения 2 с.</li>
+<li>«Домой» заканчивается выключением серво.</li>
+<li>СТОП повторяется один раз <span class="st wait">в ветке</span>.</li>
+<li>Старая команда движения после обрыва не повторяется <span class="st wait">в ветке</span>.</li>
+<li>Новый вид прибора или новый робот другой фирмы: нужен новый драйвер и строка в таблице видов (<code>kinds.py</code>). Одним рецептом это не сделать.</li>
+</ul>
+
+<h2>5. Ловушки при настройке</h2>
+<ul>
+<li><b>Файл <code>params.yaml</code> главнее рецепта.</b> Если он есть, <code>robot_params</code> из рецепта не применяются.</li>
+<li><b>Параметры доходят до робота только при новой метке <code>config_epoch</code>.</b> Изменили число, а метку нет: робот работает по-старому.</li>
+<li><b>Смена рецепта на ходу не пересоздаёт драйвер.</b> Новые настройки прибора действуют после перезапуска программы.</li>
+<li><b>Вкладка «Робот» говорит на старом языке v1.</b> С v2 двигайте только с Пульта.</li>
+<li><b>Внешняя граница зоны забора по умолчанию 500 мм</b> (<code>P_ZONE_MAX</code>), а расчётные точки забора 532–596 мм. Нужно измерить на роботе.</li>
+</ul>
+
+<h2>6. Что осталось до дня с роботом</h2>
+<ol class="chain">
+<li><b>R2-S1a</b> — заметить обрыв, не слать старое. Идёт стенд.</li>
+<li><b>R2-S1d</b> — СТОП проходит всегда. Ревью пройдено, мелкие правки и проверки впереди.</li>
+<li><b>R2-S1c</b> — переподключение для остальных Modbus-приборов. Не начата.</li>
+<li><b>R2-S1</b> — серво включает только оператор. Черновик есть.</li>
+<li><b>R2-DAY</b> — ручной рецепт и «серво выкл» в рецепте букв. Готова, ждёт пунктов выше.</li>
+</ol>
+<p>Позже: короткий обрыв, режим ручной / авто, итог задания, гонка «Отключить» с переподключением, кнопка «ОСТАНОВИТЬ», СТОП вне очереди команд. Прошивка v2 и проверки на настоящем роботе в эту полосу не входят.</p>
+</main>
