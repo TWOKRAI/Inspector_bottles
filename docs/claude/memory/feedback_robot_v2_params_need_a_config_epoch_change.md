@@ -12,3 +12,5 @@ Robot protocol v2: changed parameters are not written to the controller unless `
 **Why:** an edited recipe looks applied while the robot keeps the old values (relevant for `P_ZONE_MAX` and speeds).
 
 **How to apply:** before claiming a value reaches the real robot, check the stored params file and the epoch. Source: reading during R2 analysis (2026-11-26); verify on the sim before relying on it.
+
+**Test rigs (2026-11-27).** A rig that builds `RobotDriverV2(store=...)` without `param_source` reloads the parameter epoch from the default on reconnect, so a parameter assert after reconnect checks the wrong values. Pass `param_source` too.
