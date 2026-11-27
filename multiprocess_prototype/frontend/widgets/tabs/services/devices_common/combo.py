@@ -145,6 +145,9 @@ class DeviceComboController:
         # path = "devices.registry.<id>", value = entry dict
         if not isinstance(value, dict):
             return
+        # Узел собран из листьев read-model (Task 2.8f): без "kind" запись неполна — ничего не меняем.
+        if "kind" not in value:
+            return
         dev_id = value.get("id") or ""
         if not dev_id:
             # Извлекаем id из пути

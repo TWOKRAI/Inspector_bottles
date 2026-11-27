@@ -22,7 +22,7 @@ from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPri
 
 from .bridge import DataReceiverBridge
 from .frame_intake import FrameIntake
-from .state.delta_message import state_delta_message
+from .state.delta_message import state_batch_end_message, state_delta_message
 from . import app as gui_app
 
 
@@ -202,9 +202,14 @@ class GuiProcess(ProcessModule):
         DataReceiverBridge, что доставляет кадры — bridge.dispatch внутри делает
         _deliver.emit (AutoConnection), что надёжно пересекает поток в Qt main
         thread, где GuiStateBindings обновляют виджеты карточек/воркеров.
+
+        После непустой пачки уходит один маркер конца пачки (Task 2.8f): он идёт той
+        же очередью Qt, поэтому приходит после всех дельт пачки.
         """
         for d in deltas:
             self._bridge.dispatch(state_delta_message(d))
+        if deltas:
+            self._bridge.dispatch(state_batch_end_message())
 
     def _on_observability_record(self, message) -> None:
         """Handler command="observability.record" (Ф5.20b): живой хвост hub→GUI.

@@ -173,3 +173,33 @@ def test_refresh_button_calls_get_status(qtbot) -> None:
     controller._device_id = "vfd_belt"
     widget._btn_refresh.click()
     presenter.vfd_get_status.assert_called_once()
+
+
+def test_partial_status_node_shows_unknown_not_stop(qtbot) -> None:
+    """Task 2.8f: отсутствующее поле узла — «?»/«—», а не STOP, ноль или «нет аварии»."""
+    widget, controller, _presenter = make_controller(qtbot)
+    controller._on_status_push("devices.state.vfd_belt.status", {"current_a": 1.4, "heartbeat": 7})
+    assert widget._lbl_status.text() == "[?] f=— Гц  I=1.4 А  Udc=— В  hb=7  rsErr=—  авария=—"
+    assert widget._lbl_quality.text() == ""
+
+
+def test_partial_status_node_keeps_comm_errors_base(qtbot) -> None:
+    """Узел без comm_errors не обнуляет базу дельты; известные нули показываются как нули."""
+    widget, controller, _presenter = make_controller(qtbot)
+    full = {
+        "running": False,
+        "out_freq_hz": 0,
+        "current_a": 0,
+        "dcbus_v": 0,
+        "heartbeat": 1,
+        "fault": 0,
+        "comm_errors": 10,
+    }
+    controller._apply_vfd_status(full)
+    assert widget._lbl_status.text() == "[STOP] f=0.00 Гц  I=0.0 А  Udc=0.0 В  hb=1  rsErr=10"
+
+    controller._apply_vfd_status({"running": True, "heartbeat": None})
+    assert widget._lbl_status.text() == "[RUN] f=— Гц  I=— А  Udc=— В  hb=—  rsErr=—  авария=—"
+
+    controller._apply_vfd_status({**full, "comm_errors": 17, "fault": 5})
+    assert widget._lbl_status.text() == "[STOP] f=0.00 Гц  I=0.0 А  Udc=0.0 В  hb=1  rsErr=17 (+7)  АВАРИЯ=0x0005"
