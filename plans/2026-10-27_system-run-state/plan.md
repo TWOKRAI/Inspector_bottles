@@ -100,15 +100,15 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public-api-change
 
 ### Ф2 — прототип
-- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [IN PROGRESS: коммит A ecf2914 в main; коммит B (run_gate: true) не влит — ждёт стенда] (после 1.3, 1.5)
+- Task 2.1: прототип включает `run_gate: true`; стенды и e2e шлют `system.run.start` [DONE f328121: коммит A ecf2914, коммит B (run_gate: true) f328121; хвосты входов без --autostart — OPEN_QUESTIONS 2026-11-21] (после 1.3, 1.5)
   - **Module contract:** n/a
 - Task 2.2: `readiness()`/`pause()` у устройств, камеры, модели, ленты [DONE 8ff4fd1] (после 1.2, T5.3e)
   - **Module contract:** impl-only
 - Task 2.3: GUI — ЗАПУСТИТЬ/ОСТАНОВИТЬ/Квитировать, состояние, причины, индикаторы [DONE 4a73cdc] (после 1.3, 1.7)
   - **Module contract:** impl-only
-- Task 2.6: окно начальной загрузки — размороженный `LoadingWindow` + тонкий подписчик `system.progress.**`; в 1.0 шкала загрузки рецепта = `boot`; `recipe_load` при смене — 2.0 (требование владельца 2026-11-12, `amendments.md` §5, §7) [PENDING] (после 1.3b, 2.3; стадия 0 р.1 пройдена, v2)
+- Task 2.6: окно начальной загрузки — отдельный процесс-заставка с самого запуска, проект v3 (`tasks/2.6.md`, `amendments.md` §13); в 1.0 шкала загрузки рецепта = `boot`; `recipe_load` при смене — 2.0 (требование владельца 2026-11-12, `amendments.md` §5, §7) [PENDING] (после 1.3b, 2.3; v3 — стадия 0 впереди)
   - **Module contract:** impl-only
-- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9)
+- Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9, 2.8f)
   - **Module contract:** n/a
 - Task 2.5: ADR и карты — PMM, process_module, MODULES_RESPONSIBILITY_MAP [PENDING] (после 2.4)
   - **Module contract:** n/a
@@ -120,8 +120,10 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** public-api-change
 - Task 2.8a: копия клиента хранит листья (read-model, `_cache_put`, `telemetry_sink`, `backend_ctl`), проекция при привязке (П3); файл `tasks/2.8a.md` [DONE a267360]
   - **Module contract:** impl-only
-- Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [PENDING] (после 2.8a)
+- Task 2.8: проекция состояния на шаблон в сторе — replay и живая подписка узла (S1 + П2); файл `tasks/2.8.md`; правило отката CTO: четыре условия до конца 2026-11-19 [DEFERRED 2.0 — владелец 2026-11-26, decisions.md; в 1.0 запасной ход] (после 2.8a)
   - **Module contract:** public-api-change
+- Task 2.8f: запасной ход вместо 2.8 для 1.0 — GUI собирает узел состояния из листовых дельт (маркер конца пачки, `GuiStateBindings`); файл `tasks/2.8f.md` [PENDING] (после 2.8a)
+  - **Module contract:** impl-only
 - Task 2.9: политика готовности узла `readiness: {hold_s, severity}` (S2, коммит A); файл `tasks/2.9.md` [DONE 85a0521] (после 1.2)
   - **Module contract:** public-api-change
 - Task 2.9b: боевой рецепт — «модель не загружена» блокирует СТАРТ (YAML, литерал сим-теста, golden); файл `tasks/2.9b.md` [DONE 7410b16] (после 2.9, 2.2b)
@@ -137,11 +139,11 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Правило до старта 3.2:** новую логику PM пишут отдельным файлом рядом (как `process/run_state.py`), а не в класс `ProcessManagerProcess`; комментарии в самом PM-файле не чистят — их чистит 3.2 одним проходом.
 
 ### Ф1+ — правки свежего ревью Opus (владелец 2026-11-15: «сделай как лучше и как полагается»)
-- Task 1.10: флаг работы без межпроцессного замка вместо `mp.Event` (F3/С3 свежего ревью; текст — `tasks/1.10.md`; стадия 0 прошла, CHANGES REQUESTED применено; далее слепой tester → реализация → инъекции → стенд `kill -9` в окне машины → ревью) [IN PROGRESS: код в main (b5cd6d8); приёмка F3 не воспроизведена] (до слияния в main)
+- Task 1.10: флаг работы без межпроцессного замка вместо `mp.Event` (F3/С3 свежего ревью; текст — `tasks/1.10.md`; стадия 0 прошла, CHANGES REQUESTED применено; далее слепой tester → реализация → инъекции → стенд `kill -9` в окне машины → ревью) [DONE b5cd6d8: F3 доказан тестами и инъекциями, не стендом — decisions.md 2026-11-26] (до слияния в main)
   - **Module contract:** public API (`RunFlag`)
 - Сделано в ветке `fix/run-state-phase1-review`: F1 (С2 форма листа на входе), F2 (С1 итог `settled` гарантирован), F4 (С4 снятие пометки рестарта), N3 (С7), регресс N2 — отчёты `docs/reviews/2026-11-15_fix-{A3,B3}.md`.
 
-- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — ВЛИТ (`b74783413`); Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [IN PROGRESS: Q1 b74783413 и Q2/Q3/A6 d859338 в main; A1–A5 — в 3.7] (после слияния; Q1 влит; задача — `tasks/1.11.md`)
+- Task 1.11: остатки итоговой проверки teamlead (`reports/phase1.review-teamlead-final.md`): Q1 (поток `run-fault-stop` не стартовал — итог ставится только для STOP, `ack` в `fault_stopping` навсегда) — ВЛИТ (`b74783413`); Q2 (`_run_ready` обновляет только такт: START сразу после `settled` + один сбойный такт → `fault`), Q3 (START и `ack` при исключении оценки бросают вместо отказа), A6 (`_run_stale_s()` внутри `_evaluation_failed` теряет такт) [DONE d859338: Q1 b74783413, Q2/Q3/A6 d859338; A1–A5 — в 3.7] (после слияния; Q1 влит; задача — `tasks/1.11.md`)
   - **Module contract:** impl-only
 - Советы A1–A5 итоговой проверки (мёртвый фильтр в `run_state.evaluate:94`, причина «оценка не удалась» строится в двух местах с разным `source`, докстринг `readiness_reason_is_valid`, негодный лист не пишется в журнал PM, `_eval_fail_since` не объявлен на классе) — вместе с 3.7 [PENDING]
 

@@ -221,6 +221,19 @@ _PRESENTATION_PROCESS = "gui"
 PRESENTATION_PROCESS_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
 
 
+def presentation_window_expected(topology: dict) -> bool:
+    """Даст ли топология окно: процесс ``gui`` объявлен Qt-классом презентации (одно правило на всех)."""
+    declared = next(
+        (
+            proc
+            for proc in topology.get("processes") or []
+            if isinstance(proc, dict) and proc.get("process_name") == _PRESENTATION_PROCESS
+        ),
+        None,
+    )
+    return declared is not None and str(declared.get("process_class") or "") == PRESENTATION_PROCESS_CLASS
+
+
 def announce_presentation_absent(
     topology: dict,
     *,
@@ -270,7 +283,7 @@ def announce_presentation_absent(
         None,
     )
     declared_class = str((declared or {}).get("process_class") or "")
-    window_anyway = declared is not None and declared_class == PRESENTATION_PROCESS_CLASS
+    window_anyway = presentation_window_expected(topology)
 
     if overlay_declared and headless_flag:
         head = (
@@ -633,6 +646,11 @@ class SystemBuilder:
             topology_path=topology_path,
             system_path=system_path,
         )
+
+    @property
+    def presentation_window_expected(self) -> bool:
+        """Будет ли окно у собранной топологии (после overlay презентации); решает, нужна ли заставка."""
+        return presentation_window_expected(self._blueprint)
 
     # --- Сборка ---
 

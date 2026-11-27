@@ -39,6 +39,7 @@ class VfdWidgetController:
         self._device_id: str | None = None
         self._last_comm_errors: int | None = None
         self._status_handles: list[Any] = []
+        self._fanout_handles: list[Any] = []  # bind_fanout снимается только через unbind_fanout
 
         # н5 ревью Fable: QTimer для периодической проверки устаревания
         # данных. Если hub упал — пуши прекращаются, но индикатор
@@ -113,7 +114,13 @@ class VfdWidgetController:
                     self._bindings.unbind(h)
                 except Exception:
                     pass
+            for fh in self._fanout_handles:
+                try:
+                    self._bindings.unbind_fanout(fh)
+                except Exception:
+                    pass
         self._status_handles.clear()
+        self._fanout_handles.clear()
 
     def _bind_state(self, device_id: str) -> None:
         """Привязать виджет к devices.state.<id>.{status,conn,last_error}."""
@@ -124,10 +131,12 @@ class VfdWidgetController:
 
         # Статус ПЧ (push) — вызываем _on_status_push
         if hasattr(self._bindings, "bind_fanout"):
-            self._bindings.bind_fanout(
-                f"{base}.status",
-                self._on_status_push,
-                owner=self._widget,
+            self._fanout_handles.append(
+                self._bindings.bind_fanout(
+                    f"{base}.status",
+                    self._on_status_push,
+                    owner=self._widget,
+                )
             )
 
         # Conn
@@ -157,23 +166,37 @@ class VfdWidgetController:
         self._apply_vfd_status(value)
 
     def _apply_vfd_status(self, vfd: dict) -> None:
-        """Обновить виджет по snapshot статуса ПЧ."""
-        comm = int(vfd.get("comm_errors") or 0)
-        delta = ""
-        if self._last_comm_errors is not None:
-            delta = f" (+{max(0, comm - self._last_comm_errors)})"
-        self._last_comm_errors = comm
+        """Обновить виджет по snapshot статуса ПЧ.
 
-        running = "RUN" if vfd.get("running") else "STOP"
-        fault = vfd.get("fault") or 0
-        fault_text = f"  АВАРИЯ=0x{int(fault):04X}" if fault else ""
-        hb = vfd.get("heartbeat", "?")
+        Узел из read-model может быть неполным (Task 2.8f: стартовый replay потерян,
+        ``merge`` шлёт только изменившиеся листья). Отсутствующее поле (или None —
+        прямое подключение без моста) показывается как неизвестное: «?» для RUN/STOP,
+        «—» для чисел и кода аварии. STOP, ноль и «нет аварии» не подставляются.
+        """
+        comm_raw = vfd.get("comm_errors")
+        comm_text = "—"
+        if comm_raw is not None:
+            comm = int(comm_raw)
+            comm_text = str(comm)
+            if self._last_comm_errors is not None:
+                comm_text += f" (+{max(0, comm - self._last_comm_errors)})"
+            self._last_comm_errors = comm  # без значения прежняя база дельты сохраняется
+
+        running_raw = vfd.get("running")
+        running = "?" if running_raw is None else ("RUN" if running_raw else "STOP")
+        fault = vfd.get("fault")
+        if fault is None:
+            fault_text = "  авария=—"
+        else:
+            fault_text = f"  АВАРИЯ=0x{int(fault):04X}" if fault else ""
+        hb = vfd.get("heartbeat")
+        hb_text = "—" if hb is None else str(hb)
 
         self._widget.set_status(
-            f"[{running}] f={float(vfd.get('out_freq_hz', 0)):.2f} Гц  "
-            f"I={float(vfd.get('current_a', 0)):.1f} А  "
-            f"Udc={float(vfd.get('dcbus_v', 0)):.1f} В  "
-            f"hb={hb}  rsErr={comm}{delta}{fault_text}"
+            f"[{running}] f={_num(vfd.get('out_freq_hz'), '.2f')} Гц  "
+            f"I={_num(vfd.get('current_a'), '.1f')} А  "
+            f"Udc={_num(vfd.get('dcbus_v'), '.1f')} В  "
+            f"hb={hb_text}  rsErr={comm_text}{fault_text}"
         )
 
         # Quality + проверка возраста ts (н5/ADR-PH-001)
@@ -270,6 +293,11 @@ class VfdWidgetController:
             self._apply_vfd_status(vfd)
         else:
             self._widget.set_status("ПЧ: нет данных.")
+
+
+def _num(value: Any, spec: str) -> str:
+    """Число статуса в формате ``spec``; нет значения — «—», а не ноль."""
+    return "—" if value is None else format(float(value), spec)
 
 
 def _conn_text(value: Any) -> str:
