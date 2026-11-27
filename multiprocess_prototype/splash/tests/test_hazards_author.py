@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from multiprocess_prototype.splash import launcher
-from multiprocess_prototype.splash.protocol import decode, send_leaf
+from multiprocess_prototype.splash.protocol import SplashScale, decode, send_leaf
 
 _ROOT = Path(__file__).resolve().parents[3]
 _APP_YAML = _ROOT / "multiprocess_prototype" / "app.yaml"
@@ -212,6 +212,63 @@ def test_request_close_while_main_thread_holds_lock_does_not_deadlock(monkeypatc
         assert _call(_reenter, timeout=5.0) == "sigint"
     finally:
         sock.close()
+
+
+def _window_module(monkeypatch: pytest.MonkeyPatch, now: list):
+    """``splash.window`` с подменными часами: показание — ``now[0]``."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from multiprocess_prototype.splash import window
+
+    monkeypatch.setattr(window, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    return window
+
+
+def test_controller_init_does_not_read_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    window_module = _window_module(monkeypatch, [0.0])
+    reads: list = []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        window_module.SplashController(SimpleNamespace(percent=lambda: reads.append("percent") or 0), sock)
+        assert reads == []
+    finally:
+        sock.close()
+
+
+def test_requested_reason_beats_expired_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [0.0]
+    window_module = _window_module(monkeypatch, now)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+    try:
+        controller = window_module.SplashController(SimpleNamespace(), sock, timeout_s=10.0)
+        now[0] = 100.0
+        controller.request_close("parent_gone")
+        assert controller.poll() == "parent_gone"
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize(("garbage", "expected"), [(255, None), (256, "timeout")], ids=["growth-256th", "growth-257th"])
+def test_growth_is_seen_only_within_drain_limit(
+    monkeypatch: pytest.MonkeyPatch, garbage: int, expected: str | None
+) -> None:
+    """Рост 256-й датаграммой спасает от таймаута, 257-й — нет: один ``poll`` не вычитывает поток без конца."""
+    now = [0.0]
+    window_module = _window_module(monkeypatch, now)
+    queue = [b"x"] * garbage + [b'{"id": "boot", "percent": 20}']
+
+    def _recv(_size: int) -> bytes:
+        if not queue:
+            raise BlockingIOError
+        return queue.pop(0)
+
+    scale = SplashScale()
+    window = SimpleNamespace(apply=scale.feed, percent=lambda: scale.percent)
+    sock = SimpleNamespace(setblocking=lambda flag: None, recv=_recv)
+    controller = window_module.SplashController(window, sock, timeout_s=10.0)
+    now[0] = 100.0
+
+    assert _call(controller.poll, timeout=5.0) == expected
 
 
 def test_live_holder_keeps_env_and_refusals_keep_holder() -> None:
