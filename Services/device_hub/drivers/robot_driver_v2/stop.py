@@ -27,7 +27,8 @@ class StopMixin:
     """Миксин ``RobotDriverV2``: остановка плагина и процесса, защёлка стопа, проверка эха.
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
-    Поля и атрибуты базы: ``_cfg``, ``_client``, ``_jog_tx_lock``, ``_state``, ``_transport``, ``entry``.
+    Поля и атрибуты базы: ``_cfg``, ``_client``, ``_closed_by_disconnect``, ``_jog_tx_lock``, ``_state``,
+    ``_transport``, ``entry``.
     Методы соседей: ``_publish_error``, ``_record_err``, ``_stop_jog``, ``is_connected``.
     """
 
@@ -86,11 +87,21 @@ class StopMixin:
         """Транспорт подключён сейчас (без ``_ready``); замков не берёт — зовётся под замком состояния."""
         return self._transport is not None and bool(self._transport.is_connected)
 
+    def _stop_reachable(self) -> bool:
+        """Писать ли STOP простому роботу (Д6): связь есть — или клиент проверен и связь не закрыта намеренно.
+
+        Без связи запись открывает новое соединение (pymodbus) или падает — тогда «стоп не подтверждён» верно. После
+        законченного ``disconnect()`` — False: стопа и сообщений нет. Замков не берёт (зовётся под замком состояния).
+        """
+        if self.is_connected:
+            return True
+        return getattr(self._client, "probed", False) is True and not self._closed_by_disconnect
+
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
-        # is_connected зовётся под замком состояния, в той же ветке, что и раньше (простой робот)
+        # _stop_reachable зовётся под замком состояния, в той же ветке, что и раньше (простой робот)
         level, run, stop_jog = self._state.process_stop_plan(
-            lambda: self.is_connected,
+            self._stop_reachable,
             link_up=self._transport_up,
         )
         if not level or self._client is None:
@@ -207,7 +218,7 @@ class StopMixin:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
         if not (job_active or stop_jog or prog_alive) and self._state.disconnect_soft_plan(
-            lambda: self.is_connected, self._transport_up
+            self._stop_reachable, self._transport_up
         ):
             # Решение владельца 2026-10-19: отключаемый подключённый робот получает стоп и в покое (SOFT);
             # решение владельца 2026-10-21: и робот посреди connect, чья связь была поднята к стоп-секции (снимок

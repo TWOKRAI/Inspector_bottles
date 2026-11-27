@@ -20,7 +20,7 @@ from Services.device_hub.drivers.robot_driver_v2.texts import (
     _NOT_CONNECTED,
 )
 from Services.device_hub.drivers.robot_driver_v2.tlm import _parse_tlm
-from Services.robot_comm.core.client_v2 import RobotClientV2
+from Services.robot_comm.core.client_v2 import RobotClientV2, SessionChanged
 from Services.robot_comm.core.params_v2 import to_eng
 from Services.robot_comm.core.protocol_v2 import ERR, STOP_LEVEL
 from Services.robot_comm.errors import RobotCommandError, RobotNak, RobotTimeout
@@ -39,8 +39,9 @@ class JobMixin:
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
     Поля и атрибуты базы: ``_pick_lead_mm``, ``_state``, ``_values``, ``entry``, ``jobs_done``, ``jobs_failed``,
         ``jobs_sent``.
-    Методы соседей: ``_link_lost``, ``_publish_error``, ``_read_tlm``, ``_record_err``, ``_record_ok``,
-        ``_spawn_fn``, ``_stop_and_wait``, ``_stop_latched``, ``is_connected``, ``start_return``.
+    Методы соседей: ``_admission``, ``_admitted_as``, ``_link_lost``, ``_publish_error``, ``_read_tlm``,
+        ``_record_err``, ``_record_ok``, ``_spawn_fn``, ``_stop_and_wait``, ``_stop_latched``, ``is_connected``,
+        ``start_return``.
     """
 
     def _dispatch(self, client: RobotClientV2, free: bool, stop_event: Any) -> None:
@@ -59,7 +60,8 @@ class JobMixin:
 
     def _run_next_job(self, client: RobotClientV2, job: _Job, stop_event: Any) -> None:
         """CVT_JOB + ожидание завершения в потоке тика (R1); пульс — ``on_poll``. Исключения из тика не выходят."""
-        x, y, z, ecap, place = job
+        x, y, z, ecap, place, *admitted = job
+        session = admitted[0] if admitted else None  # сеанс допуска enqueue_job (R2-S1a)
 
         def on_poll(_tlm: Any) -> None:
             if stop_event is not None and stop_event.is_set():
@@ -74,7 +76,8 @@ class JobMixin:
             else:
                 px = py = pz = prz = 0.0
             try:
-                res = client.cvt_job(ecap & 0xFFFFFFFF, x, y, z, flags, px, py, pz, prz)
+                with self._admitted_as(session):  # принятое до обрыва по новому соединению не уходит
+                    res = client.cvt_job(ecap & 0xFFFFFFFF, x, y, z, flags, px, py, pz, prz)
             except RobotNak as exc:
                 if exc.errno != ERR["E_BUSY"]:
                     raise
@@ -104,6 +107,13 @@ class JobMixin:
         except ValueError as exc:
             self.jobs_failed += 1  # R8: аргумент вне провода — не обрыв связи
             self._publish_error(f"задание не отправлено: {exc}")
+        except SessionChanged as exc:
+            # Сеанс сменился после допуска: на провод ничего не ушло. _link_lost не зовём — он закрыл бы уже новое
+            # соединение
+            self.jobs_failed += 1
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: задание принято до обрыва связи: {exc}")
+            self._publish_error(f"задание не отправлено: {exc}")
         except Exception as exc:
             self.jobs_failed += 1
             self._record_err()
@@ -114,7 +124,8 @@ class JobMixin:
 
     def _start_next_return(self, item: tuple[float, float, float]) -> None:
         """Возврат, взятый тиком из очереди, — программой ``return_slot`` на потоке исполнителя (R2, DESIGN п.6)."""
-        x, y, z = item
+        x, y, z, *admitted = item
+        session = admitted[0] if admitted else None  # сеанс допуска return_job (R2-S1a)
         v = self._values
         slot = Point(
             name="return_slot",
@@ -125,7 +136,8 @@ class JobMixin:
             hand=int(v["P_HAND"]),
         )
         try:
-            res = self.start_return(slot)
+            with self._admitted_as(session):  # поток программы возьмёт это значение в _launch
+                res = self.start_return(slot)
         except Exception as exc:  # H2: возврат не теряется молча — отказ считается и виден
             res = {"status": "error", "message": str(exc)}
         if res.get("status") == "ok":
@@ -161,7 +173,8 @@ class JobMixin:
         if self._pick_lead_mm != 0.0:
             # R4: ход ленты на импульс — P_BELT_FACTOR × 1e-5 мм/имп (не константа v1)
             ecap -= round(self._pick_lead_mm / (self._values["P_BELT_FACTOR"] * 1e-5))
-        n = self._state.enqueue_job((x, y, z, ecap, place))  # maxlen: старейшее вытесняется (паритет v1)
+        # maxlen: старейшее вытесняется (паритет v1); шестое поле — сеанс допуска, requeue его сохраняет
+        n = self._state.enqueue_job((x, y, z, ecap, place, self._admission()))
         return {"status": "ok", "queue_len": n}
 
     def _op_return_job(self, args: dict) -> dict:
@@ -183,5 +196,5 @@ class JobMixin:
             return {**refusal, "return_queue_len": self._state.return_queue_len()}
         if not self.is_connected:
             return {**_NOT_CONNECTED, "return_queue_len": self._state.return_queue_len()}
-        n = self._state.enqueue_return(item)
+        n = self._state.enqueue_return((*item, self._admission()))  # четвёртое поле — сеанс допуска
         return {"status": "ok", "return_queue_len": n}

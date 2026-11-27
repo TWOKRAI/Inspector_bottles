@@ -68,3 +68,100 @@ FILES части 2: `Services/robot_comm/core/client_v2.py`; `Services/device_hu
 - Читать `session` ДО проверки `is_connected`, не после.
 - Счётчик живёт в объекте. Драйвер v2 транспорт не пересоздаёт: присваивания только `driver.py:217` (обёртка) и `355-356` (если None) — по чтению и grep.
 - Без `expected_session` pymodbus сам открывает новый TCP на следующем вызове.
+
+---
+
+## Передача 2 (второй разработчик, тот же день): снова мягкий бюджет контекста
+
+**Сделано:** прочитаны все файлы части 2, дизайн сверен с кодом чтением. **Исходники не менялись, прогонов не было** (ни базы слепого файла, ни замера STOP), окно гейта не запрашивал. HEAD `4599cd497`, в дереве изменён только этот файл.
+
+Следующему: не перечитывать план и отчёт тестера. Открыть только 7 исходников из FILES и применить список правок ниже. Базу и замер STOP (механика) можно отдать `test-runner` или haiku до запуска разработчика.
+
+### СНАЧАЛА решение лида: два теста вне FILES покраснеют (по чтению, не прогнано)
+
+- `Services/device_hub/tests/test_robot_driver_v2.py:886-897`: `device = drv.transport` (это обёртка `ExchangeLogTransport`), `device.transaction = transaction`, у подмены сигнатура `(ops)`.
+- `Services/device_hub/tests/test_robot_driver_v2_jobs_acceptance.py:366-380` (`_install_cvt_barrier`): то же. Это слепая приёмка прежней задачи.
+- Обе подмены ловят `JOG_CONT` / `CVT_JOB`, то есть путь `cmd()`. Клиент, зовущий `transaction(ops, expected_session=s)`, получит `TypeError`.
+
+Варианты:
+- (а) лид разрешает в обеих подменах принять `**kw` и передать в `original` (рекомендую: по две строки, смысл тестов тот же);
+- (б) клиент смотрит сигнатуру и зовёт по-старому: тихий обход проверки в пути движения, не рекомендую;
+- (в) отдельный метод транспорта вместо аргумента: подмены не сработают, барьеры не взведутся, тесты тоже покраснеют.
+
+`test_t56_exchange_log_acceptance.py:608` (`lambda ops`): проверить прогоном.
+
+### Уточнения дизайна по коду
+
+1. `issue_stop` (`client_v2.py:730-731`) у проверенного клиента уже пишет без оглядки на `is_connected`. Для Д6 в клиенте нужно только свойство `probed`.
+2. `probe()` сбрасывает `_probed` на входе (`client_v2.py:357`). Неудачная перепроба = «не проверен», STOP не пишется. Это остаток из задачи.
+3. `ModbusIOError` и `ModbusConnectionError` — соседи (`Services/modbus/sdk/errors.py:24,28`): `except ModbusConnectionError` ошибку провода не поймает.
+4. Следствие Д6 (по чтению `state.py:461-496, 528-538`), **сообщить лиду**: после штатного `disconnect()` и после «тик заметил обрыв» запись STOP будет пытаться и падать. Было: уровень 0, тишина. Станет: до двух попыток, `stop_unconfirmed=True`, `last_error` «стоп не подтверждён роботом» (виден в health, в том числе у робота, отключённого оператором, при выключении процесса). Ограничить через `desired_connected` нельзя: `request_disconnect` снимает его ДО `disconnect()`, и Д6 на пути «Отключить» пропадёт.
+5. Дублёры клиента (`client_factory`, `_fake_driver`) могут не иметь `admission` / `admitted` / `probed`: миксины идут только через помощники драйвера.
+6. Форма очереди v2: по grep тесты v2 берут только длину (`test_robot_v2_ops.py:679`) или работают с `RobotState` напрямую; распаковка 5 полей в `test_encoder_offset.py` — это v1. 6 и 4 поля безопасны.
+
+### Список правок (номера строк на `4599cd497`)
+
+**`client_v2.py`**
+- Импорт `ModbusConnectionError` из `Services.modbus.sdk.errors`, `contextmanager`.
+- `class SessionChanged(RobotNotConnectedError)` рядом с `SyncCancelled` (:230).
+- `__init__`: `self._admission = threading.local()`.
+- `admitted(session)` (контекст: прежнее значение восстановить в `finally`), `admission() -> int | None`, свойство `probed` (`return self._probed`).
+- `_wr_admitted(ops)` рядом с `_wr` (:413): `s = self.admission()`; если `s is None` или `getattr(self._t, "session", None) is None` -> `return self._wr(ops)`; иначе `self._t.transaction(ops, expected_session=s)`; `except ModbusConnectionError` -> `_mark_stale()`, `raise SessionChanged(...) from exc`; прочее -> `_mark_stale()`, `raise`.
+- Только три вызова: `jog_lease` (:482), `cmd` (:513), `_upload` (:986). В `cmd` вокруг него `except SessionChanged: self._inflight = None; raise`.
+
+**`driver.py`**
+- `from contextlib import nullcontext`; в `__init__` поле `self._park_session: int | None = None`.
+- Помощники: `_session_now()` = `getattr(self._transport, "session", None)`; `_admission()` = `client.admission()` если метод есть, иначе None; `_admitted_as(s)` = `client.admitted(s)` если есть, иначе `nullcontext()`.
+- `call()` (:649-653): `with self._admitted_as(self._session_now()): return handler(self, args)` внутри `try`.
+- `_park_servo_off` (:623): `with self._admitted_as(self._park_session)`.
+- `_run_on_connect` (:400): всё тело под `_admitted_as(self._session_now())`.
+
+**`ops.py`** `_op_park`: `self._park_session = self._admission()` перед `self._park.accept(...)` (:162).
+
+**`programs.py`**
+- `_launch`: `session = self._admission()`; `if session is None: session = self._session_now()` — до `admit_launch` (:90; 0 — годное значение, проверять `is None`).
+- `_program_loop(..., session)`: `run_chunks` (:162) под `_admitted_as(session)`.
+- `start_park_home`: `_launch` под `_admitted_as(self._park_session)`. `_launch` читает `_admission()` внутри этого контекста.
+
+**`jog.py`** `_op_jog_hold`: `session = self._admission()`; `spawn(lambda ev: self._lease_loop(run, ev, session))`; в `_lease_loop` весь `try` под `_admitted_as(session)` (`threading.local` в новый поток не переходит).
+
+**`jobs.py`**
+- `_op_enqueue_job`: 6-е поле записи = `self._admission()`; `_run_next_job` распаковывает 6, `requeue_job(job)` сохраняет всё.
+- `_op_return_job`: 4-е поле; `_start_next_return`: распаковать 4, `start_return` под `_admitted_as(session)`.
+- `cvt_job` под `_admitted_as(session)`; ветка `except SessionChanged` ДО общей `except Exception`: `jobs_failed += 1`, `_publish_error(...)`, `_link_lost()` НЕ звать.
+
+**`exchange_log.py`** `transaction(self, ops, *, expected_session=None)` (:442): `kw = {} if expected_session is None else {"expected_session": expected_session}`, передать в оба вызова `self._inner.transaction`.
+
+**`stop.py`**: метод `_stop_reachable()` = `client is not None and (self.is_connected or getattr(client, "probed", False))`; передать вместо `lambda: self.is_connected` в `process_stop_plan` (:93) и `disconnect_soft_plan` (:210). `_transport_up` не менять.
+
+### Замер STOP после тика (сначала на неизменённом коде; скрипт не прогонялся)
+
+Положить в scratchpad, запускать с `PYTHONPATH=<корень дерева>` через гейт в окне:
+
+```python
+import time
+from Services.device_hub.tests import test_r2s1a_link_drop_acceptance as t
+
+for how in ("request_stop", "disconnect"):
+    for kind in ("fin", "rst"):
+        for prep in ("idle", "jog_step"):
+            for point in ("heartbeat", "tlm"):
+                with t._v2() as rig:
+                    if prep == "jog_step":
+                        assert rig.call("jog_step", t._JOG_STEP)["status"] == "ok"
+                        rig.wait_robot_idle()
+                    pred = (lambda f: True) if point == "heartbeat" else (lambda f: f.fc == 3)
+                    rule = rig.srv.on_next(pred, kind)
+                    t.run(lambda: rig.drv.tick(None), 30.0)
+                    link = (rig.drv.is_connected, rig.drv.transport.is_connected)
+                    mark = rig.srv.mark()
+                    if how == "request_stop":
+                        t.run(lambda: rig.drv.request_stop(time.monotonic() + 20.0), 30.0)
+                    else:
+                        t.run(rig.drv.disconnect, 30.0)
+                    time.sleep(0.5)
+                    n = len(t._writes_at(rig.srv.frames(mark), t._STOP_REQ))
+                    print(how, kind, prep, point, "dropped", rule.entered.is_set(), "link", link, "STOP_REQ", n)
+```
+
+Прогноз по чтению: 0 кадров во всех случаях и до, и после (`_link_lost` закрыл клиента). Меньше после — стоп и лиду.
