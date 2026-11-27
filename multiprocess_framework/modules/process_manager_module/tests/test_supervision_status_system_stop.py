@@ -58,6 +58,7 @@ _PROCESS_KEYS = {
     "alive",
     "started_at",
     "instance_restarts",
+    "orphaned_read_locks",  # C-36: сколько очередей процесса осталось с занятым замком чтения
     "stop_outcome",
     "stop_wave",
     "stop_deadline_at",

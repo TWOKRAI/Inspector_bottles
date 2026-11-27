@@ -30,9 +30,9 @@ AGENTS.md «Чего драйвером проверить НЕЛЬЗЯ»), а �
 (inbound через system-очередь хоста): тогда стейл-билет можно инъектировать детерминированно
 и снова проверять сам факт дропа, а не только bump. См. «Что сознательно НЕ входит» в плане.
 
-**Почему restart-no-reuse.** Дефолтный restart переиспользует очереди (incarnation НЕ
-меняется). Замена инстанса = пересоздание очередей (``restart_reuse_queues=false``) → новый
-incarnation. ``routing_epoch`` растёт на КАЖДЫЙ restart (безусловный ``_bump_routing_epoch``).
+**Конфиг не подменяется.** Дефолтный restart пересоздаёт очереди (ADR-PMM-054) → новый
+incarnation; откат дефолта к переиспользованию роняет этот тест. ``routing_epoch`` растёт
+на КАЖДЫЙ restart (безусловный ``_bump_routing_epoch``).
 
 Собственный порт ≥8790 (изоляция от общих фикстур: ловушка «двух бэкендов»).
 """
@@ -44,7 +44,6 @@ from typing import Any
 
 import pytest
 
-import backend_ctl.harness as _harness_mod
 from backend_ctl.harness import BackendHarness
 
 _PORT = 8790
@@ -52,19 +51,8 @@ _PEER = "preprocessor"  # non-protected → restart пересоздаёт оч�
 
 
 @contextmanager
-def _backend(port: int, *, monkeypatch):
-    """Headless-бэкенд с ``restart_reuse_queues=false`` (замена → bump incarnation)."""
-    # Внедрить restart_reuse_queues=false в конфиг оркестратора (мутабельный dict,
-    # читается при start()) — так restart пересоздаёт очереди и бампит incarnation.
-    orig_build = _harness_mod.build_headless_launcher
-
-    def _build_no_reuse(**kw):
-        launcher = orig_build(**kw)
-        launcher._orchestrator_config["restart_reuse_queues"] = False
-        return launcher
-
-    monkeypatch.setattr(_harness_mod, "build_headless_launcher", _build_no_reuse)
-
+def _backend(port: int):
+    """Headless-бэкенд с конфигом по умолчанию."""
     harness = BackendHarness(with_base=True, port=port)
     try:
         yield harness.start()
@@ -94,15 +82,15 @@ def _restart_peer(drv) -> None:
 
 
 @pytest.mark.harness_smoke
-def test_incarnation_and_epoch_bump_on_instance_replace(monkeypatch) -> None:
+def test_incarnation_and_epoch_bump_on_instance_replace() -> None:
     """Плечо 1: замена инстанса соседа строго поднимает его incarnation и epoch топологии.
 
-    Детерминированно (без гонки): читаем supervision.status ДО и ПОСЛЕ restart-no-reuse
+    Детерминированно (без гонки): читаем supervision.status ДО и ПОСЛЕ restart
     и сравниваем счётчики. Это тот bump, на котором стоит весь fencing-token — если он
     не растёт, штамп несёт стейл incarnation и приёмный фильтр не сможет отличить старый
     инстанс от нового (плечи 2-3 проверяют сам фильтр/проводку на unit).
     """
-    with _backend(_PORT, monkeypatch=monkeypatch) as drv:
+    with _backend(_PORT) as drv:
         before = _supervision(drv, _PEER)
         assert isinstance(before["incarnation"], int), f"нет incarnation до restart: {before}"
         assert isinstance(before["epoch"], int), f"нет epoch до restart: {before}"

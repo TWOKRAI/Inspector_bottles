@@ -169,9 +169,9 @@ class _SendOneHundredMessagesThenWaitForStop:
 
 
 class _ReadsOneMessageAndReportsToResults:
-    """Новая ИНКАРНАЦИЯ читателя на ТОЙ ЖЕ очереди (модель ``restart_reuse_queues``,
-    ``process_manager_process.py`` ~L3561: рестарт по умолчанию переиспользует
-    очереди прежней инкарнации). Читает ОДНО сообщение из своей 'data' и
+    """Новая ИНКАРНАЦИЯ читателя на ТОЙ ЖЕ очереди (модель ``restart_reuse_queues: true``,
+    откат ADR-PMM-054: рестарт переиспользует очереди прежней инкарнации; по умолчанию
+    очереди свежие). Читает ОДНО сообщение из своей 'data' и
     репортит длину payload'а в 'results', затем выходит СРАЗУ (без stop_event —
     ``should_stop()`` истинен, как только чтение завершилось)."""
 
@@ -499,7 +499,7 @@ class TestSlowLiveReaderGetsAll100AfterWriterExit:
 
 
 class TestIndividualStopReaderThenQueueReusedByNewIncarnationGetsMessageIntact:
-    """restart_reuse_queues (``process_manager_process.py`` ~L3561) по умолчанию
+    """``restart_reuse_queues: true`` (откат ADR-PMM-054; по умолчанию очереди свежие)
     отдаёт ТУ ЖЕ очередь новой инкарнации процесса. Если бы писатель освобождался
     по одному лишь индивидуальному stop_event читателя (не по системному), в трубу
     новой инкарнации попал бы недописанный кадр старой. Guard: читатель уходит по

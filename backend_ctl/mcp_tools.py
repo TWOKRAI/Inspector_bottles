@@ -792,9 +792,10 @@ TOOLS: List[ToolSpec] = [
         "supervision_status",
         "Supervision-снимок (D.1b): epoch топологии + per-process incarnation, restart_count, "
         "last_exit, status, pid, started_at, instance_restarts. Маркер «до/после рестарта» — "
-        "пара pid+instance_restarts (видит замену инстанса и при reuse-очередей, дефолт; "
+        "пара pid+instance_restarts (видит замену инстанса в обоих режимах restart_reuse_queues; "
         "считает и ручные, и авто-рестарты supervision — та же команда process.restart). "
-        "incarnation растёт только при смене identity очередей (fencing/курсоры B.1), "
+        "incarnation растёт при смене identity очередей (по умолчанию — на каждом рестарте), "
+        "orphaned_read_locks — замки чтения, найденные осиротевшими на рестартах (C-36), "
         "restart_count — краш-рестарты монитора. process — сузить до одного. Read-only.",
         _obj(
             {
@@ -871,7 +872,8 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "run_status",
         "Состояние линии (system.run.status): result = {state (booting | not_ready | ready | running | "
-        "stopping | fault | shutting_down), since, run_gate, start_allowed, stop_allowed, ack_allowed, reasons (узлы-причины "
+        "stopping | fault | shutting_down), since, run_gate, start_allowed, stop_allowed, ack_allowed, "
+        "reasons (узлы-причины "
         "not_ready/fault), last_fault}. Только чтение. Ответ — конверт process.command.response как есть.",
         _obj({"timeout": _TIMEOUT}, []),
         _run_status,
