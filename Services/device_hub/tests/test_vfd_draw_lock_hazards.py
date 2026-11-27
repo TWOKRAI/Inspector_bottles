@@ -88,6 +88,21 @@ def test_refusal_text_is_constant(op: str, args: dict) -> None:
 
 
 @pytest.mark.parametrize("op", ["run", "set_freq"])
+def test_drawing_flag_is_read_per_command_not_at_connect(op: str) -> None:
+    """ПЧ подключён до рисования; потом рисование идёт при режиме, уведённом из ``draw``, и заканчивается."""
+    carrier = _Carrier("cvt", drawing=False)
+    driver, fake = _make_vfd(carrier)
+
+    carrier.drawing, carrier.mode = True, "manual"
+    assert driver.call(op, {"freq_hz": 10.0})["status"] == "error"
+    assert fake.writes == []
+
+    carrier.drawing = False
+    assert driver.call(op, {"freq_hz": 10.0})["status"] == "ok"
+    assert len(fake.writes) == 1
+
+
+@pytest.mark.parametrize("op", ["run", "set_freq"])
 def test_unreadable_carrier_does_not_let_run_through(op: str) -> None:
     driver, fake = _make_vfd(_BrokenCarrier())
 
