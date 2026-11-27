@@ -9,6 +9,7 @@ Stability: lite
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 
 from Services.device_hub.drivers.base import logger
 from Services.device_hub.drivers.robot_driver_v2.state import _JogRun
@@ -142,9 +143,34 @@ class StopMixin:
         self._state.stop_written(value, run)
         return value
 
-    def _stop_and_wait(self, level: int, run: _JogRun | None = None) -> None:
-        """Стоп с эхом (пути оператора и обычный disconnect): запись через защёлку + эхо по таймауту клиента."""
-        value = self._write_stop(level, run)
+    def _write_stop_twice(self, level: int, run: _JogRun | None, reported: list[str]) -> int:
+        """Запись стопа обычного ``disconnect``: упала — ровно ещё одна (решение владельца 2026-11-27).
+
+        Обе упали — ``stop_unconfirmed`` и ``TEXT_STOP_UNCONFIRMED``; в ``last_error`` он идёт один раз за отключение
+        (``reported``). Исключение второй записи — наружу.
+        """
+        try:
+            return self._write_stop(level, run)
+        except Exception as exc:
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: стоп не записан, повтор: {type(exc).__name__}: {exc}")
+        try:
+            return self._write_stop(level, run)
+        except Exception:
+            self._state.mark_unconfirmed(TEXT_STOP_UNCONFIRMED)
+            if not reported:
+                reported.append(TEXT_STOP_UNCONFIRMED)
+                self._publish_error(TEXT_STOP_UNCONFIRMED)
+            raise
+
+    def _stop_and_wait(
+        self, level: int, run: _JogRun | None = None, write: Callable[[int, _JogRun | None], int] | None = None
+    ) -> None:
+        """Стоп с эхом (пути оператора и обычный disconnect): запись через защёлку + эхо по таймауту клиента.
+
+        ``write`` — чем писать; None — одна запись ``_write_stop``.
+        """
+        value = (write or self._write_stop)(level, run)
         written = value & 3
         timeout = self._cfg.soft_echo_timeout_s if written == STOP_LEVEL["SOFT"] else self._cfg.stop_echo_timeout_s
         self._client.await_stop_echo(value, written, deadline=time.monotonic() + timeout)
@@ -193,27 +219,34 @@ class StopMixin:
             run, stop_jog, prog_alive, job_active = self._state.disconnect_stop_plan(
                 program_level, link_up=self._transport_up
             )
-        # _stop_jog снова берёт _jog_tx_lock (не реентерабельный) — замки отпущены
+        # стоп jog ниже снова берёт _jog_tx_lock (не реентерабельный) — замки отпущены
         client = self._client
         if client is None:
             return
+        reported: list[str] = []  # «стоп не подтверждён» — один раз за отключение, сколько бы стопов ни упало
+
+        def write(level: int, jog: _JogRun | None = None) -> int:
+            return self._write_stop_twice(level, jog, reported)
+
         if job_active:
             # HARD обрывает ход CVT сразу; SOFT на CVT откладывается до точки захвата (R9). Тик, ждущий wait_done,
             # получает RobotAborted или ошибку транспорта и считает задание неудачным.
             try:
-                self._stop_and_wait(STOP_LEVEL["HARD"])
+                self._stop_and_wait(STOP_LEVEL["HARD"], write=write)
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп задания не доставлен: {type(exc).__name__}: {exc}")
         if stop_jog and run is not None:
             try:
-                self._stop_jog(run)
+                with self._jog_tx_lock:  # то же, что _stop_jog, но с повтором записи
+                    if not run.stop_sent:
+                        self._stop_and_wait(STOP_LEVEL["SOFT"], run, write=write)
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп jog не доставлен: {type(exc).__name__}: {exc}")
         if prog_alive:
             try:
-                self._stop_and_wait(program_level)
+                self._stop_and_wait(program_level, write=write)
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп программы не доставлен: {type(exc).__name__}: {exc}")
@@ -224,9 +257,9 @@ class StopMixin:
             # решение владельца 2026-10-21: и робот посреди connect, чья связь была поднята к стоп-секции (снимок
             # _stop_linked, транспорт жив). Защёлка гасит вторую запись в том же выключении (внутри перехода).
             # Только запись SOFT: эхо простого робота не читается (supervisor не ждёт soft_echo_timeout_s),
-            # last_error нет (T5.3c c3)
+            # last_error только когда не прошли обе записи (повтор — решение владельца 2026-11-27)
             try:
-                self._write_stop(STOP_LEVEL["SOFT"])
+                write(STOP_LEVEL["SOFT"])
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп простого робота не записан: {type(exc).__name__}: {exc}")
