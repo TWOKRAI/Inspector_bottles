@@ -1,0 +1,2 @@
+registry: backlog.md
+- **2026-11-26, владелец: рисование `layer-render` и `draw-universal` стоит на одной базе.** До старта `draw-universal` 1.1 поправить его `design.md` §3 и задачи 1.1/1.2 (склейка по маске — один раз). Перенос склейки из `layer_render` владелец ещё не подтвердил, и он пересматривает вердикт CTO r2 §2.2. Там же в `design.md` §3 ссылки на строки `plans/layer-render/plan.md:123-136` и `:128` после сведения указывают на другой текст. Источник: `plans/layer-render/plan.md` (ветка `docs/layer-render-status`), сессия inspector-bottles-ff.

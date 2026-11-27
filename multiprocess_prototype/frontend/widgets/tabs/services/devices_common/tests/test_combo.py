@@ -175,3 +175,25 @@ def test_on_device_changed_fires(qtbot) -> None:
     assert combo.current_device_id() == "r2"
     # callback вызван хотя бы раз с "r2"
     assert "r2" in changes
+
+
+def test_partial_registry_node_keeps_known_device(qtbot) -> None:
+    """Task 2.8f: узел без kind (неполный read-model) не убирает и не меняет известное устройство."""
+    combo, _sender, changes, bindings = make_combo(qtbot, with_bindings=True)
+    registry_cb = next(cb for pattern, cb in bindings._fanout_cbs if "registry" in pattern)
+    registry_cb("devices.registry.r1", {"id": "r1", "kind": "robot", "name": "Робот 1"})
+    changes.clear()
+
+    registry_cb("devices.registry.r1", {"enabled": False})
+    registry_cb("devices.registry.r1", {"name": "Другое имя"})
+
+    assert combo._combo.count() == 1
+    assert combo.current_device_id() == "r1"
+    assert combo._combo.currentText() == "Робот 1 (r1) [?]"
+    assert combo._registry == {"r1": {"id": "r1", "kind": "robot", "name": "Робот 1"}}
+    assert changes == []
+
+    # Полный узел другого kind убирает устройство, как и раньше.
+    registry_cb("devices.registry.r1", {"id": "r1", "kind": "vfd", "name": "Робот 1"})
+    assert combo._combo.count() == 0
+    assert changes == [None]

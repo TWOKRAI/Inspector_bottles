@@ -22,6 +22,8 @@ from typing import Any
 import pytest
 import yaml
 
+from multiprocess_prototype.frontend.widgets.image_panel.recipe_displays import build_plate_sources
+
 _RECIPES_DIR = Path(__file__).resolve().parents[1]
 _RECIPE = "hikvision_id3013_quad"
 
@@ -306,3 +308,16 @@ def test_hardware_trigger_recipe_has_no_plate_mode() -> None:
 
     assert len(hw["displays"]) == 4
     assert [d for d in hw["displays"] if "plate_mode" in d] == []
+
+
+def test_reader_plates_name_the_reader_not_the_drawer(raw: dict[str, Any]) -> None:
+    """Плашка экрана считывателя берёт номер и адрес прибора, а не отрисовщика draw_N."""
+    sources = build_plate_sources(raw)
+
+    assert [
+        (d, sources[d]["source"], sources[d]["process"], sources[d]["number"], sources[d]["address"])
+        for d in ("reader_1", "reader_2")
+    ] == [
+        ("reader_1", "reader_1.code_reader_sdk", "reader_1", "id3013-sdk-1", "192.168.1.10"),
+        ("reader_2", "reader_2.code_reader_sdk", "reader_2", "id3013-sdk-2", "192.168.1.11"),
+    ]

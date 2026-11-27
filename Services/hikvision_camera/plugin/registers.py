@@ -17,6 +17,12 @@ from Services.camera_device.registers_base import CameraDeviceRegisters
 class HikvisionCameraRegisters(CameraDeviceRegisters):
     """Параметры камеры Hikvision (MVS SDK) поверх общего register'а ядра."""
 
+    # Переобъявление базового поля ради имени в интроспекции: порт плагин берёт в `create_port` и это поле не читает.
+    driver: Annotated[
+        str,
+        FieldMeta(description="Драйвер", info="Имя драйвера порта; плагин hikvision всегда работает через mvs"),
+    ] = "mvs"
+
     # Переобъявление базового поля: позиция в плане остаётся базовой (после `exposure_auto`), меняется только политика.
     exposure_time: Annotated[
         float,

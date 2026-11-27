@@ -1,5 +1,8 @@
 # План: Hikrobot MV-ID3013PM-06M — автономная работа с ПЛК + внедрение в систему (slug `qr-code-reader`)
 
+> **2026-11-26:** камерная часть (2.4, 3.1–3.4, 4.1, 4.2, 5.1) сведена в единый план камер
+> [`2026-11-26_device-common-base`](2026-11-26_device-common-base/plan.md) (таблица `mapping.md`); здесь остаётся ПЛК: 0.1 (Modbus, FTP), 1.1–1.5.
+
 ## Контекст
 
 Появилось железо — **Hikrobot MV-ID3013PM-06M-Sensotec** (серия ID3000; «Sensotec» —
@@ -43,23 +46,23 @@
 - Task 2.1: [RED] Независимые приёмочные тесты backends [SUPERSEDED] — backends (`sim`/`tcp`/фабрика) отменены ADR-CR-001, предмета тестов нет; долг остаётся: независимый `tester` по Ф2 не запускался, тесты (51 + 6) писал автор
 - Task 2.2: Backends: Protocol, `sim`, `tcp`, фабрика, sim-сервер [SUPERSEDED] — заменена сервисом `Services/code_reader/` (`core/sink.py` приём по TCP, `tools/reader_sim.py` симулятор), ADR-CR-001, `3ed160965`
 - Task 2.3: Плагин-наблюдатель [DONE 2026-09-28 — `3ed160965`; правки ревью `5d863c122`, `2d8b593a5`] — `Services/code_reader/plugin/plugin.py`; без команды `trigger` (боевой триггер аппаратный), команды `start_sink/stop_sink/get_status/reset_stats`
-- Task 2.4: Ревью Ф2 [IN PROGRESS] — `reviewer` прогнал 2 итерации (13 + 12 находок), по `STATUS.md` итог итерации 2 `CHANGES REQUESTED`, закрыто 11 из 12, третьего прохода и файла ревью в `docs/reviews/` нет
+- Task 2.4: Ревью Ф2 [SUPERSEDED — заморожена 2026-11-26: путь-наблюдатель заменён SDK-путём; `2026-11-26_device-common-base/mapping.md`] — `reviewer` прогнал 2 итерации (13 + 12 находок), по `STATUS.md` итог итерации 2 `CHANGES REQUESTED`, закрыто 11 из 12, третьего прохода и файла ревью в `docs/reviews/` нет
 
 ### Фаза 3 — рецепт-стенд «вижу, что прочиталось»
 
-- Task 3.1: Плагин отображения кода `code_view` [PENDING] — `Plugins/render/code_view/` нет
-- Task 3.2: Рецепт `qr_scan_demo` [PENDING] (после 3.1) — `qr_scan_demo.yaml` нет; есть `qr_reader_demo.yaml` (`3ed160965`) без дисплея и `qr_reader_sdk_demo.yaml`, оба с пустыми `wires`/`displays`
-- Task 3.3: Живой прогон на симуляторе [IN PROGRESS] — 20 срабатываний симулятора → `total_reads=16`, `no_reads=4`, `dropped=0`, переподключение проверено (`STATUS.md`); не снято: задержка «триггер → код на экране» (экрана нет)
-- Task 3.4: Ревью Ф3 [PENDING] (после 3.2)
+- Task 3.1: Плагин отображения кода `code_view` [SUPERSEDED — 2026-11-26: рецепты считывателя с дисплеями 4.2f, 4.2g, 4.2i; `2026-11-26_device-common-base/mapping.md`] — `Plugins/render/code_view/` нет
+- Task 3.2: Рецепт `qr_scan_demo` [SUPERSEDED — 2026-11-26: рецепт `hikvision_id3013_test` (4.2f, `8e0eedcf5`); `2026-11-26_device-common-base/mapping.md`] (после 3.1) — `qr_scan_demo.yaml` нет; есть `qr_reader_demo.yaml` (`3ed160965`) без дисплея и `qr_reader_sdk_demo.yaml`, оба с пустыми `wires`/`displays`
+- Task 3.3: Живой прогон на симуляторе [SUPERSEDED — заморожена 2026-11-26: путь TCP-симулятора, продуктовый путь — SDK; `2026-11-26_device-common-base/mapping.md`] — 20 срабатываний симулятора → `total_reads=16`, `no_reads=4`, `dropped=0`, переподключение проверено (`STATUS.md`); не снято: задержка «триггер → код на экране» (экрана нет)
+- Task 3.4: Ревью Ф3 [SUPERSEDED — заморожена 2026-11-26 вместе с 3.1–3.3; `2026-11-26_device-common-base/mapping.md`] (после 3.2)
 
 ### Фаза 4 — живая камера в системе
 
-- Task 4.1: ID3013 через канал наблюдения [IN PROGRESS] — 12 аппаратных срабатываний → `total_reads=12`, потерь 0 (`4556b49d1`); обрыв кабеля у ПК: связь вернулась через 7 с (`b65b6d0da`); не снято: 20 сканов с числами задержки, независимость от боевого канала на ПЛК (ПЛК нет)
-- Task 4.2: Ревью Ф4 + ADR [IN PROGRESS] — ADR-CR-001…009 в `Services/code_reader/DECISIONS.md` есть; ревью Ф4 не проводилось
+- Task 4.1: ID3013 через канал наблюдения [SUPERSEDED — 2026-11-26: заменена задачей 1.5 плана `2026-11-26_device-common-base`] — 12 аппаратных срабатываний → `total_reads=12`, потерь 0 (`4556b49d1`); обрыв кабеля у ПК: связь вернулась через 7 с (`b65b6d0da`); не снято: 20 сканов с числами задержки, независимость от боевого канала на ПЛК (ПЛК нет)
+- Task 4.2: Ревью Ф4 + ADR [SUPERSEDED — 2026-11-26: заменена задачей 1.4b (ADR-CR-011) плана `2026-11-26_device-common-base`] — ADR-CR-001…009 в `Services/code_reader/DECISIONS.md` есть; ревью Ф4 не проводилось
 
 ### Фаза 5 — опциональные расширения
 
-- Task 5.1: Кадр по триггеру через FTP [PENDING] — FTP-выгрузка не проверялась; кадр теперь даёт SDK-канал (5.2), владельцу решать, нужна ли FTP-ветка вообще
+- Task 5.1: Кадр по триггеру через FTP [DEFERRED — заморожена 2026-11-26: кадр даёт SDK (5.2); FTP — только по слову владельца] — FTP-выгрузка не проверялась; кадр теперь даёт SDK-канал (5.2), владельцу решать, нужна ли FTP-ветка вообще
 - Task 5.2: Биндинги `MvCodeReader` [DONE 2026-09-29 — `b13b49e3f`, плагин `f99835753`] — сделаны как Ф6 плана `code-reader-sdk` (`Services/code_reader/sdk/`, `core/sdk_*`, плагин `code_reader_sdk`); условие плана («после 0 и 5.1») обойдено — кадра в GigE-поток нет
 
 ---
