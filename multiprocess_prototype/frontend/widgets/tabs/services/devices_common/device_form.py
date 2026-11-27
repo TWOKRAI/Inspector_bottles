@@ -179,7 +179,8 @@ class DeviceFormWidget(QWidget):
         self._rtu_serial = QLineEdit("COM1")
         self._rtu_serial.setEnabled(False)
         self._rtu_baud = QSpinBox()
-        self._rtu_baud.setRange(1200, 115200)
+        # Широкий диапазон: поле заблокировано, а узкий молча обрезал бы скорость из записи.
+        self._rtu_baud.setRange(1, 4_000_000)
         self._rtu_baud.setValue(9600)
         self._rtu_baud.setEnabled(False)
         rtu_form.addRow("Порт:", self._rtu_serial)
@@ -195,6 +196,8 @@ class DeviceFormWidget(QWidget):
         if kind == "vfd" and not self._is_edit:
             self._combo_transport.setCurrentText("bridge")
 
+        # Транспорт редактируемой записи: ключи без полей в форме берутся отсюда.
+        self._loaded_transport: dict[str, Any] = {}
         if existing:
             self._load_existing(existing)
 
@@ -235,27 +238,50 @@ class DeviceFormWidget(QWidget):
             "kind": self._kind,
             "protocol": self._combo_protocol.currentText(),
             "transport": self._build_transport(),
-            "params": self._parse_params(),
+            "params": self._parse_params() or {},
         }
+
+    def params_error(self) -> str | None:
+        """Причина, по которой форму нельзя сохранять: params не разбираются в dict."""
+        if self._parse_params() is None:
+            return "Параметры не разбираются: нужен словарь YAML/JSON."
+        return None
 
     # ------------------------------------------------------------------ #
 
     def _load_existing(self, existing: dict) -> None:
         transport = existing.get("transport", {})
-        ttype = transport.get("type", "tcp")
+        self._loaded_transport = dict(transport)
+        ttype = transport.get("type") or "tcp"  # пустая строка — тип не задан
         idx = self._combo_transport.findText(ttype)
         if idx >= 0:
             self._combo_transport.setCurrentIndex(idx)
         if ttype == "tcp":
             self._tcp_host.setText(transport.get("host", "192.168.1.7"))
             self._tcp_port.setValue(int(transport.get("port", 502)))
-            self._tcp_unit.setValue(int(transport.get("unit_id", 1)))
+            # Без unit_id остаётся умолчание формы по виду (то же, что при создании).
+            self._tcp_unit.setValue(int(transport.get("unit_id", self._tcp_unit.value())))
         elif ttype == "bridge":
-            bidx = self._bridge_combo.findData(transport.get("bridge", ""))
+            carrier = transport.get("bridge", "")
+            bidx = self._bridge_combo.findData(carrier)
+            if bidx < 0 and carrier:
+                # Носителя нет в списке роботов — добавить, а не подменить первым.
+                self._bridge_combo.addItem(f"{carrier} (нет в реестре)", carrier)
+                bidx = self._bridge_combo.count() - 1
             if bidx >= 0:
                 self._bridge_combo.setCurrentIndex(bidx)
+        elif ttype == "rtu":
+            self._rtu_serial.setText(str(transport.get("serial", self._rtu_serial.text())))
+            self._rtu_baud.setValue(int(transport.get("baudrate", self._rtu_baud.value())))
 
     def _build_transport(self) -> dict[str, Any]:
+        """Транспорт из полей формы; при неизменном типе — поверх ключей редактируемой записи."""
+        fields = self._transport_fields()
+        if (self._loaded_transport.get("type") or "tcp") == fields["type"]:
+            return {**self._loaded_transport, **fields}
+        return fields
+
+    def _transport_fields(self) -> dict[str, Any]:
         ttype = self._combo_transport.currentText()
         if ttype == "tcp":
             return {
@@ -268,7 +294,8 @@ class DeviceFormWidget(QWidget):
             return {"type": "bridge", "bridge": self._bridge_combo.currentData() or ""}
         return {"type": "rtu", "serial": self._rtu_serial.text().strip(), "baudrate": self._rtu_baud.value()}
 
-    def _parse_params(self) -> dict[str, Any]:
+    def _parse_params(self) -> dict[str, Any] | None:
+        """Пустое поле -> ``{}``; непустой текст, не дающий dict, -> ``None``."""
         text = self._params_edit.toPlainText().strip()
         if not text:
             return {}
@@ -287,8 +314,8 @@ class DeviceFormWidget(QWidget):
             if isinstance(result, dict):
                 return result
         except Exception:
-            pass
-        return {}
+            pass  # причину пользователь увидит через params_error()
+        return None
 
 
 __all__ = ["DeviceFormWidget"]

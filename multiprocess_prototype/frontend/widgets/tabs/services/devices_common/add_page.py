@@ -137,6 +137,10 @@ class AddDevicePage(QWidget):
     def _on_check(self) -> None:
         if self._form is None:
             return
+        error = self._form.params_error()
+        if error:
+            self._set_status(error, "error")
+            return
         entry = self._form.get_entry()
         dev_id = entry.get("id")
         if not dev_id:
@@ -166,6 +170,10 @@ class AddDevicePage(QWidget):
 
     def _on_commit(self) -> None:
         if self._form is None:
+            return
+        params_error = self._form.params_error()
+        if params_error:
+            self._set_status(params_error, "error")
             return
         entry = self._form.get_entry()
         if not entry.get("id"):
