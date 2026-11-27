@@ -24,6 +24,15 @@ from Services.robot_comm.core.protocol_v2 import STOP_LEVEL
 __all__ = ["StopMixin"]
 
 
+def _dead_socket(exc: BaseException) -> bool:
+    """Ошибка записи — мгновенный отказ мёртвого сокета: ``__cause__`` — встроенный ``ConnectionError`` (R2-S1d).
+
+    ``ModbusIOError`` SDK хранит причину через ``from exc``. Причины из pymodbus (таймаут, ``ConnectionException``)
+    встроенным ``ConnectionError`` не являются.
+    """
+    return isinstance(exc.__cause__, ConnectionError)
+
+
 class StopMixin:
     """Миксин ``RobotDriverV2``: остановка плагина и процесса, защёлка стопа, проверка эха.
 
@@ -89,14 +98,16 @@ class StopMixin:
         return self._transport is not None and bool(self._transport.is_connected)
 
     def _stop_reachable(self) -> bool:
-        """Писать ли STOP простому роботу (Д6): связь есть — или клиент проверен и связь не закрыта намеренно.
+        """Писать ли STOP (Д6, ADR-DH-016): связь есть — или прошивка v2 этим клиентом подтверждена и связь не закрыта
+        законченным намеренным ``disconnect()``.
 
+        Готовность, идущая или упавшая проба и неудачный connect не запирают (``firmware_confirmed``, не ``probed``).
         Без связи запись открывает новое соединение (pymodbus) или падает — тогда «стоп не подтверждён» верно. После
         законченного ``disconnect()`` — False: стопа и сообщений нет. Замков не берёт (зовётся под замком состояния).
         """
         if self.is_connected:
             return True
-        return getattr(self._client, "probed", False) is True and not self._closed_by_disconnect
+        return getattr(self._client, "firmware_confirmed", False) is True and not self._closed_by_disconnect
 
     def _process_stop(self, deadline: float) -> None:
         """Тело ``request_stop`` (замок перехода jog взят или не взят по сроку): пометки, защёлка, запись."""
@@ -163,6 +174,31 @@ class StopMixin:
                 self._publish_error(TEXT_STOP_UNCONFIRMED)
             raise
 
+    def _write_operator_stop(self, level: int) -> int:
+        """Запись стопа оператора (``stop`` / ``abort``, R2-S1d): повтор ровно один и только на мёртвом сокете.
+
+        Повтор — только когда причина первой ошибки (``__cause__``) — встроенный ``ConnectionError`` (10053, 10054,
+        ``BrokenPipeError``): отказ мгновенный, сокет уже закрыт, повтор откроет новый TCP неявным connect pymodbus.
+        Без повтора: таймаут и прочие причины из pymodbus, ``ModbusIOError`` без причины, ``ModbusConnectionError``,
+        всё прочее (вторая запись по таймауту удвоила бы бюджет нажатия). Итоговая неудача — ``stop_unconfirmed`` и
+        ``TEXT_STOP_UNCONFIRMED`` один раз на вызов; исключение — наружу.
+        """
+        try:
+            try:
+                return self._write_stop(level)
+            except Exception as exc:
+                if not _dead_socket(exc):
+                    raise
+                self._record_err()
+                logger.warning(
+                    f"робот {self.entry.id!r}: стоп оператора не записан, повтор: {type(exc).__name__}: {exc}"
+                )
+            return self._write_stop(level)
+        except Exception:
+            self._state.mark_unconfirmed(TEXT_STOP_UNCONFIRMED)
+            self._publish_error(TEXT_STOP_UNCONFIRMED)
+            raise
+
     def _stop_and_wait(
         self, level: int, run: _JogRun | None = None, write: Callable[[int, _JogRun | None], int] | None = None
     ) -> None:
@@ -221,7 +257,8 @@ class StopMixin:
             )
         # стоп jog ниже снова берёт _jog_tx_lock (не реентерабельный) — замки отпущены
         client = self._client
-        if client is None:
+        if client is None or self._closed_by_disconnect:
+            # R2-S1d (ADR-DH-016): связь закрыта законченным намеренным disconnect — повторный стоп молчит
             return
         reported: list[str] = []  # «стоп не подтверждён» — один раз за отключение, сколько бы стопов ни упало
 
@@ -238,9 +275,7 @@ class StopMixin:
                 logger.warning(f"робот {self.entry.id!r}: стоп задания не доставлен: {type(exc).__name__}: {exc}")
         if stop_jog and run is not None:
             try:
-                with self._jog_tx_lock:  # то же, что _stop_jog, но с повтором записи
-                    if not run.stop_sent:
-                        self._stop_and_wait(STOP_LEVEL["SOFT"], run, write=write)
+                self._stop_jog(run, write=write)  # с повтором записи
             except Exception as exc:
                 self._record_err()
                 logger.warning(f"робот {self.entry.id!r}: стоп jog не доставлен: {type(exc).__name__}: {exc}")

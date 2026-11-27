@@ -158,6 +158,7 @@ _ABORT = OpSpec(  # v2 ops.py:73-78 (_operator_stop); v1 robot_driver.py:603-606
     description="Стоп робота: {device_id, mode: 1|2|3}.",
     args_schema=("mode?",),
     immediate=True,
+    needs_link=False,  # R2-S1d (ADR-DH-016): готовность СТОП не запирает; связь проверяет драйвер
 )
 _ENQUEUE_JOB = OpSpec(
     name="enqueue_job",
@@ -207,6 +208,7 @@ ROBOT_V2_OPS: tuple[OpSpec, ...] = (
         description="Робот v2: стоп {device_id, level: SOFT|HARD|HALT}",
         args_schema=("level",),
         immediate=True,
+        needs_link=False,  # R2-S1d (ADR-DH-016): готовность СТОП не запирает; связь проверяет драйвер
     ),
     OpSpec(name="servo", description="Робот v2: серво {device_id, on: bool}", args_schema=("on",)),
     OpSpec(

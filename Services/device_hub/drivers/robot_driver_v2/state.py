@@ -183,7 +183,8 @@ class RobotState:
         self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._echo_checked: int | None = None  # значение, эхо которого уже проверено
-        self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
+        # стоп не подтверждён роботом (health через плагин); сброс — удачный connect() (R2-S1d) и connect_reset()
+        self._stop_unconfirmed = False
         # Готовность и вехи connect (T5.3g): последний connect() прошёл целиком; connect идёт; связь поднята;
         # снимок «связь была поднята» на первом request_stop этого выключения
         self._ready = False
@@ -302,12 +303,13 @@ class RobotState:
         """``connect``: снять останов, уровень 0, сброс защёлки, снять «стоп не подтверждён» (текст остаётся)."""
         with self._lock:
             self._connect_reset_locked()
+            self._stop_unconfirmed = False  # явный сброс; путь connect снимает флаг только в удачном connect_finish
 
     def _connect_reset_locked(self) -> None:
+        # R2-S1d: «стоп не подтверждён» здесь не снимается — он переживает неудачный connect (connect_finish)
         self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
         self._stop_level = 0
         self._latch_reset_locked()
-        self._stop_unconfirmed = False
 
     # --- готовность и вехи connect (T5.3g): connect и request_stop линеаризуются секциями замка состояния ---
 
@@ -359,11 +361,12 @@ class RobotState:
             return True
 
     def connect_finish(self) -> bool:
-        """``connect``: всё прошло -> готов. False — остановка пришла: драйвер не готов."""
+        """``connect``: всё прошло -> готов, «стоп не подтверждён» снят (R2-S1d). False — остановка пришла: не готов."""
         with self._lock:
             if self._stopping or self._shutdown:
                 return False
             self._ready = True
+            self._stop_unconfirmed = False
             return True
 
     def connect_end(self) -> None:

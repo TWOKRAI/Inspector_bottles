@@ -333,7 +333,7 @@ def _force_order(
 def test_stop_during_job_after_drop(monkeypatch: pytest.MonkeyPatch, order: str, how: str, kind: str) -> None:
     """Обрыв пойман чтением самого тика, пока он ждёт задание; порядок на замке устройства задан параметром.
 
-    ``tick_first`` — остаток R2-S1a (задача R2-S1d): транспорт закрыт раньше записи, STOP не уходит, и это видно.
+    ``tick_first`` — R2-S1d (ADR-DH-016): ``_link_lost`` не выбрасывает клиента SDK, STOP уходит и в этом порядке.
     """
     with _v2() as rig:
         assert rig.call("enqueue_job", _JOB)["status"] == "ok"
@@ -345,7 +345,6 @@ def test_stop_during_job_after_drop(monkeypatch: pytest.MonkeyPatch, order: str,
             assert held.entered.wait(10.0), "тик не читает"
             stop_reached, link_done, waits = _force_order(monkeypatch, rig.drv, order)
             mark = rig.srv.mark()
-            published = len(rig.rec._items)
             stopping = Call(lambda: _stop(rig, how))
             assert stop_reached.wait(_ORDER_WAIT_S), "стоп не дошёл до записи STOP_REQ"
             time.sleep(0.4)  # stop_first: запись STOP уже стоит в очереди на замок устройства
@@ -354,12 +353,8 @@ def test_stop_during_job_after_drop(monkeypatch: pytest.MonkeyPatch, order: str,
             assert link_done.wait(_ORDER_WAIT_S), "тик не дошёл до _link_lost"
             time.sleep(0.5)
             assert waits == [True]  # порядок навязан, а не вышел по сроку
-            if order == "stop_first":
-                assert _stop_levels(rig, mark) == [_HARD]
-            else:
-                assert _stop_levels(rig, mark) == []
-                assert rig.drv.stop_unconfirmed is True
-                assert _errors_since(rig, published).count(_TEXT_UNCONFIRMED) == 1
+            # R2-S1d: оба порядка — STOP на проводе (tick_first был [] до R2-S1d)
+            assert _stop_levels(rig, mark) == [_HARD]
         finally:
             ticker.close()
 
@@ -407,17 +402,24 @@ def test_operator_disconnect_button_still_writes_stop(dropped_before: bool) -> N
         assert _stop_levels(rig, mark) == [_SOFT]
 
 
-def test_link_lost_by_tick_keeps_stop_attempt_and_says_unconfirmed() -> None:
+def test_link_lost_by_tick_stop_is_on_the_wire() -> None:
+    """R2-S1d (ADR-DH-016): связь, потерянную тиком, клиент SDK переживает — STOP уходит новым TCP, эхо есть.
+
+    До R2-S1d здесь было «попытка без кадра и «стоп не подтверждён роботом»» (транспорт закрыт с обнулением клиента).
+    """
     with _v2() as rig:
         rig.srv.on_next(lambda f: True, "fin")
         run(lambda: rig.drv.tick(None), 30.0)
         assert rig.drv.is_connected is False
         assert rig.drv.transport.is_connected is False
-        published = len(rig.rec._items)
+        mark, accepted, published = rig.srv.mark(), rig.srv.accepted, len(rig.rec._items)
         run(lambda: rig.drv.request_stop(time.monotonic() + 20.0), 30.0)
-        assert rig.drv.stop_unconfirmed is True
+        time.sleep(0.3)
+        assert _stop_levels(rig, mark) == [_SOFT]
+        assert rig.srv.accepted == accepted + 1
+        assert rig.drv.stop_unconfirmed is False
         errors = [p for path, p in list(rig.rec._items)[published:] if path.endswith(".last_error")]
-        assert errors == [_TEXT_UNCONFIRMED]
+        assert _TEXT_UNCONFIRMED not in errors
 
 
 @pytest.mark.parametrize("kind", ["fin", "rst"])

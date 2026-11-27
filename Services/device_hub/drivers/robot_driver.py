@@ -23,7 +23,7 @@ import threading
 from collections import deque
 from typing import Any
 
-from Services.device_hub.drivers.base import BaseDeviceDriver
+from Services.device_hub.drivers.base import BaseDeviceDriver, logger
 from Services.device_hub.spi import ROBOT_V1_OPS
 
 # Минимальный интервал между попытками переподключения, сек
@@ -607,7 +607,25 @@ class RobotDriver(BaseDeviceDriver):
         return {"status": "ok" if ok else "error", "queue_len": len(self._job_queue)}
 
     def _op_abort(self, args: dict) -> dict:
+        """Стоп робота {mode}. Мимо затвора менеджера (``needs_link=False``, общая с v2; R2-S1d, ADR-DH-016).
+
+        Связь есть — запись как раньше. Связи нет — ровно одна попытка записи без повтора (неявный connect pymodbus;
+        решение лида 2026-11-27, вариант c'): прошла — ``ok``; не прошла или драйвер ни разу не подключался —
+        отказ прежнего текста затвора «Устройство '<id>' не подключено», причина — в ``error``. После намеренного
+        ``disconnect()`` клиент SDK обнулён: попытка падает без кадра и без нового TCP.
+        """
         mode = int(args.get("mode", 1))
+        if not self.is_connected:
+            msg = f"Устройство {self.entry.id!r} не подключено"
+            if self._client is None:
+                return {"status": "error", "message": msg, "error": msg}
+            try:
+                self._client.stop(mode)
+            except Exception as exc:
+                self._record_err()
+                logger.warning(f"робот {self.entry.id!r}: стоп без связи не записан: {type(exc).__name__}: {exc}")
+                return {"status": "error", "message": msg, "error": f"{msg}: {type(exc).__name__}: {exc}"}
+            return {"status": "ok", "mode": mode}
         self._client.stop(mode)
         return {"status": "ok", "mode": mode}
 

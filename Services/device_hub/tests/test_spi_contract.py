@@ -195,7 +195,8 @@ def test_command_table_routes_and_links() -> None:
     data = {name for name, (source, _spec) in table.items() if source.route == "data"}
     assert len(data) == 12
     no_link = {name for name, (_source, spec) in table.items() if spec.needs_link is False}
-    assert no_link == data | {"robot_exchange_log_get", "robot_exchange_log_set"}
+    # R2-S1d: СТОП оператора (robot_stop v2, robot_abort v1/v2) — мимо затвора готовности
+    assert no_link == data | {"robot_exchange_log_get", "robot_exchange_log_set", "robot_stop", "robot_abort"}
 
 
 def test_command_table_shared_robot_ops_one_row_one_object() -> None:
