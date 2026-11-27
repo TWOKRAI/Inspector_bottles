@@ -110,7 +110,7 @@ preroll ADR-PMM-034 ≤ 10 с). Есть только барьер готовн�
   - **Module contract:** impl-only
 - Task 2.4: живая приёмка на стенде с числами + матрица инъекций лида [PENDING] (после 1.4–1.8, 2.1–2.3, 2.7–2.9, 2.8f)
   - **Module contract:** n/a
-- Task 2.5: ADR и карты — PMM, process_module, MODULES_RESPONSIBILITY_MAP [PENDING] (после 2.4)
+- Task 2.5: ADR и карты — PMM, process_module, MODULES_RESPONSIBILITY_MAP [DONE 555a72724] (в ADR после закрытия 2.4 и C-125 дописать две фразы)
   - **Module contract:** n/a
 
 ### Ф2 — правки до железа (решение владельца 2026-11-16, срок 2026-11-22; тексты — `tasks/`)
