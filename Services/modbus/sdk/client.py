@@ -274,6 +274,18 @@ class ModbusSdkClient:
             return f"; сокет не закрыт: {exc!r}"
         return ""
 
+    def drop_socket(self) -> None:
+        """Закрыть сокет pymodbus, НЕ обнуляя обёртку (``ModbusDevice.drop_link``, R2-S1d). Идемпотентно.
+
+        В отличие от ``close()`` объект pymodbus остаётся: следующая запись откроет новый TCP неявным ``connect()``
+        pymodbus, а не упадёт ``ModbusConnectionError("Клиент не подключён")``. Сбой закрытия — в лог, не наружу.
+        """
+        if self._client is None:
+            return
+        note = self._drop_socket()
+        if note:
+            logger.warning(f"[MODBUS] drop_socket {self._cfg.describe()}{note}")
+
     @property
     def connected(self) -> bool:
         """Состояние соединения по данным pymodbus."""

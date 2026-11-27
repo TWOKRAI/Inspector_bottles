@@ -13,6 +13,12 @@
 | Тесты | 8/10 | 82 unit-теста без pymodbus/железа (fake-клиент) + real round-trip |
 | Документация | 8/10 | README + STATUS |
 
+## R2-S1d (2026-11-27): `ModbusDevice.drop_link()`
+
+План: `plans/robot-protocol-v2/tasks/R2-S1d.md` · ADR-DH-016 (`Services/device_hub`) · разрешение владельца
+2026-11-27. Связь снята под замком устройства, клиент SDK не обнулён (`ModbusSdkClient.drop_socket()`), `session` +1;
+следующая запись открывает новый TCP. `disconnect()` без изменений. Тесты: `tests/test_r2s1d_drop_link.py` (7).
+
 ## R2-S1a, часть 1 (2026-11-26): обрыв виден вызывающему
 
 План: `plans/robot-protocol-v2/tasks/R2-S1a.md` · ADR-MB-003 · контракт: README,
