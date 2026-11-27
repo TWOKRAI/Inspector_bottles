@@ -1160,7 +1160,8 @@ def _setup_bridge_callbacks(
         _apply_run_view()
 
     def _run_view_drops(key: str, item: dict) -> bool:
-        """Кадр ключа не показывается: экран вне running либо кадр снят до входа в running."""
+        """Кадр ключа не показывается: экран вне running, кадр прошёл приостановленный плагин
+        (``data.paused_by``, ADR-PM-066) либо снят до входа в running."""
         if bindings is None:
             return False
         run_view = _run_view_of(_display_of(key))
@@ -1169,6 +1170,10 @@ def _setup_bridge_callbacks(
         if run_view != "running" or _run["run_gate"] is False:
             return False
         data = item.get("data")
+        paused_by = data.get("paused_by") if isinstance(data, dict) else None
+        if isinstance(paused_by, str) and paused_by:
+            return True
+        # Метки нет, а кадр старше входа в running — обработанный кадр прошлого прогона.
         capture_ts = data.get("capture_ts") if isinstance(data, dict) else None
         if isinstance(capture_ts, bool) or not isinstance(capture_ts, (int, float)):
             return False
