@@ -523,7 +523,39 @@ config = {
 
 Машина работы PM: состояния `booting`, `not_ready`, `ready`, `running`, `stopping`, `fault`, `shutting_down`
 (`process/run_state.py`, `RunState`). Команды: `system.run.status`, `system.run.start`, `system.run.stop`,
-`system.run.ack`.
+`system.run.ack`. Решение целиком — ADR-PMM-053. Программный STOP не является аварийным остановом (e-stop).
+
+### Public API: команды `system.run.*`
+
+Все четыре команды зарегистрированы без исполнителя — класс R (отвечают на приёмном потоке, без ожиданий).
+Пока идёт системный стоп, `start`, `stop`, `ack` отказывают кодом `shutting_down`.
+
+| Команда | Класс | Ответ |
+|---|---|---|
+| `system.run.status` | R | вид `run_view` (ниже) |
+| `system.run.start` | R | `{"success", "state"}`; отказ добавляет `"error"` (`not_ready`, `already_running`, `stopping`, `fault_unacknowledged`, `shutting_down`) и `"reasons"` |
+| `system.run.stop` | R; последовательность STOP идёт на исполнителе жизненного цикла | `{"success", "accepted", "state"}`; вне `running` — `accepted: false`; при системном стопе — `{"success": false, "state", "error": "shutting_down"}` |
+| `system.run.ack` | R | `{"success", "state", "error"}`; `error`: `None`, `no_fault`, `fault_stopping`, `shutting_down` |
+
+`topology.apply` в `running`, `stopping`, `fault`, `shutting_down` отказывает:
+`{"success": false, "error": "running" | "stopping" | "fault_unacknowledged" | "shutting_down", "message"}`.
+
+### STOP и авария: зависят от `run_gate`
+
+При `run_gate: true`: STOP — шаги `pre_stop`, снятие `run_event`, ожидание `paused` до `run_stop_timeout_s`; авария —
+то же без `pre_stop`, затем `fault` до `ack`. При `run_gate: false` событие не снимается, `pre_stop` не
+выполняется и `paused` никто не ждёт: STOP сразу даёт итог, в аварии `ack` разрешён сразу.
+
+### Причины готовности и автоперезапуск
+
+* Причины приходят из `readiness()` плагинов; плагин вне `RUNNING`/`PAUSED` — `failure` «плагин не поднят (…)»;
+  плагин, пропущенный по `REQUIRES`, — `failure` «REQUIRES не удовлетворены: …».
+* PM сам добавляет: процесс не жив, нет свежего отчёта, перезапускается супервизором, не подтвердил остановку.
+* `run_auto_restart: true` в политике рестарта процесса: действует только вместе с `enabled: true` и не для
+  `protected`. Тогда перезапуск в `running` — `out_of_spec`, а не авария, пока не прошло `run_restart_grace_s` и
+  супервизор не отказался. Флаг без `enabled: true` — причина `failure`, `source: config`.
+* При `restart_reuse_queues: false` (умолчание) кадры выживших идут к перезапущенному через relay PM (C-36,
+  ADR-PMM-054); отправленное во время рестарта теряется без счётчика. Доставку входа гейт не проверяет.
 
 ### Ключи конфига (`RunConfig`, ADR-PMM-049)
 
@@ -575,6 +607,7 @@ config = {
 | `supervision.status`, `topology.get`, `topology.diff`, `wire.status` | — | R, сразу | Чтение (снимки словарей без лока, D3) |
 | `system.shutdown` | `mode` (`graceful` по умолчанию \| `force`), `deadline_s` (только `force`: 0.1..5.0 с, по умолчанию 1.0) | S, никогда исполнитель | Завершить систему (`system_stop_event` + `stop_event`). `force` — срок стопа детей `deadline_s` от команды, не уложившихся добивает фаза 3 области (ADR-PMM-038); ответ `{"success", "message", "mode", "deadline_s"}` + `accepted`, `phase`; `force` поверх graceful — `escalated: True`; повтор — `accepted: False, reason: "already_stopping"` (ADR-PMM-044). При шагах `pre_stop` graceful отвечает `phase: "pre_stop"`, события взводит поток шагов после них. Ошибка аргументов → `{"error": ...}`, стоп не начинается |
 | `system.stats` | — | R, сразу | Статистика: monitor + processes |
+| `system.run.status` / `start` / `stop` / `ack` | — | R, сразу | Состояние работы системы — раздел «Работа системы (run-state)» |
 
 Класс задаёт **регистрация** команды (`executor=`, `key_from=`, `targets=`), а не отправитель. Ответ на команду
 класса L приходит **после** выполнения (отложенный ответ, `DEFERRED`); новые формы отказа (I3): `key_missing`
