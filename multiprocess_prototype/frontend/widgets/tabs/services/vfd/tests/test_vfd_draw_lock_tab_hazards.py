@@ -22,6 +22,8 @@ from Services.robot_comm.testing.fake_transport import FakeRobotTransport
 
 _REFUSAL = "ПЧ: отказ"
 _REJECTED_DEFAULT = "ПЧ: команда отклонена"
+_NO_REPLY = "ПЧ: нет ответа — команда могла дойти, проверьте ленту"
+_SEND_FAILED = {"success": False, "error": "send failed"}  # отказ без message, не таймаут
 _DEFERRED = "ПЧ: стоп может исполниться только после рисования"
 
 
@@ -73,7 +75,17 @@ def tab(qtbot):
         pytest.param(
             {"success": False, "result": {"status": "error", "message": _REFUSAL}}, _REFUSAL, id="stop-refused"
         ),
-        pytest.param({"success": False, "error": "timeout"}, _REJECTED_DEFAULT, id="stop-timeout"),
+        pytest.param({"success": False, "error": "timeout"}, _NO_REPLY, id="stop-timeout"),
+        pytest.param(
+            {"success": False, "error": "timeout", "reason": "no_receive_pump"}, _NO_REPLY, id="no-receive-pump"
+        ),
+        pytest.param({"success": False, "error": "empty response"}, _NO_REPLY, id="empty-response"),
+        pytest.param(_SEND_FAILED, _REJECTED_DEFAULT, id="send-failed"),
+        pytest.param(
+            {"success": False, "result": {"status": "error", "error": "timeout"}},
+            _REJECTED_DEFAULT,
+            id="handler-answered-timeout",
+        ),
         pytest.param({"success": False, "result": None}, _REJECTED_DEFAULT, id="no-result"),
         pytest.param({"success": True, "result": {"success": False}}, _REJECTED_DEFAULT, id="inner-success-false"),
         pytest.param(
@@ -92,6 +104,16 @@ def test_stop_reply_classification(tab, reply: dict, expected: str) -> None:
     assert widget._lbl_refusal.text() == expected
 
 
+@pytest.mark.parametrize("button", ["_btn_run", "_btn_set_freq", "_btn_stop"])
+def test_refusal_without_message_is_not_reported_as_missing_reply(tab, button: str) -> None:
+    widget, _controller, sender, _runner = tab
+    sender.reply = _SEND_FAILED
+
+    getattr(widget, button).click()
+
+    assert widget._lbl_refusal.text() == _REJECTED_DEFAULT
+
+
 def test_without_sender_nothing_is_reported(qtbot) -> None:
     widget = VfdControlWidget()
     qtbot.addWidget(widget)
@@ -107,7 +129,7 @@ def test_without_sender_nothing_is_reported(qtbot) -> None:
 @pytest.mark.parametrize("button", ["_btn_run", "_btn_run_rev", "_btn_set_freq", "_btn_stop", "_btn_reset"])
 def test_label_is_cleared_on_press_before_the_reply(tab, button: str) -> None:
     widget, _controller, sender, runner = tab
-    sender.reply = {"success": False, "error": "timeout"}
+    sender.reply = _SEND_FAILED
     widget._btn_run.click()
     assert widget._lbl_refusal.text() == _REJECTED_DEFAULT
 
@@ -132,7 +154,7 @@ def test_late_success_of_earlier_command_keeps_deferred_stop_text(tab) -> None:
 
 def test_reselecting_the_same_device_keeps_the_refusal(tab) -> None:
     widget, controller, sender, _runner = tab
-    sender.reply = {"success": False, "error": "timeout"}
+    sender.reply = _SEND_FAILED
     widget._btn_run.click()
 
     controller.set_device("vfd_belt")
@@ -147,7 +169,7 @@ def test_reply_is_applied_in_the_gui_thread(qtbot) -> None:
     widget = VfdControlWidget()
     qtbot.addWidget(widget)
     sender = _Sender()
-    sender.reply = {"success": False, "error": "timeout"}
+    sender.reply = _SEND_FAILED
     runner = RequestRunner()
     controller = VfdWidgetController(widget, VfdPresenter(command_sender=sender, request_runner=runner))
     threads: list[threading.Thread] = []

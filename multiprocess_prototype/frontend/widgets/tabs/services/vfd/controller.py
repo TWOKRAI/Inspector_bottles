@@ -24,8 +24,13 @@ from .widget import VfdControlWidget
 # независимо от quality-поля (hub мог упасть и quality «замёрз»).
 _STALE_THRESHOLD_S = 3.0
 
-# Отказ команды без текста от обработчика (таймаут, ошибка транспорта).
+# Отказ команды без текста от обработчика (например, сбой отправки).
 _REFUSAL_DEFAULT = "ПЧ: команда отклонена"
+
+# Ответа нет, а команда уже отправлена: это не отказ, она могла дойти. Формы ``RouterManager.request`` без
+# ``result``: таймаут (в том числе с ``reason="no_receive_pump"``) и пустой ответ.
+_NO_REPLY_ERRORS = ("timeout", "empty response")
+_NO_REPLY_TEXT = "ПЧ: нет ответа — команда могла дойти, проверьте ленту"
 
 
 class VfdWidgetController:
@@ -302,10 +307,13 @@ class VfdWidgetController:
         return handle
 
     def _show_reply(self, response: Any) -> None:
-        """Отказ и отложенный «Стоп» — в метку отказа. Успех и ``{}`` (нет sender) метку не трогают:
-        она очищена при нажатии, а поздний успех прежней команды не должен стереть текст следующей.
+        """Отказ, отсутствие ответа и отложенный «Стоп» — в метку отказа. Успех и ``{}`` (нет sender) метку
+        не трогают: она очищена при нажатии, а поздний успех прежней команды не должен стереть текст следующей.
         """
         envelope = response if isinstance(response, dict) else {}
+        if "result" not in envelope and envelope.get("error") in _NO_REPLY_ERRORS:
+            self._widget.set_refusal(_NO_REPLY_TEXT)
+            return
         reply = unwrap_reply(envelope)
         refused = (
             envelope.get("success") is False

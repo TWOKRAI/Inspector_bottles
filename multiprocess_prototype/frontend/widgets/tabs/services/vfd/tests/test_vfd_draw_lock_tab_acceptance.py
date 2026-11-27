@@ -165,7 +165,7 @@ def test_r8_timeout_shows_default_text(open_tab, button: str, command: str) -> N
     tab.press(button, {"success": False, "error": "timeout"})
 
     assert tab.sender.commands[-1] == command
-    assert tab.refusal() == _REJECTED_DEFAULT
+    assert tab.refusal() == "ПЧ: нет ответа — команда могла дойти, проверьте ленту"
 
 
 @pytest.mark.parametrize(("button", "command"), _COMMAND_BUTTONS)
