@@ -240,6 +240,7 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "template": "",
         "mode": "hold",
         "after_s": 2,
+        "run_view": "always",
     }
     assert sources["d1"] == {
         "source": "cam_1.hikvision",
@@ -250,6 +251,7 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "template": "{title}",
         "mode": "hold",
         "after_s": 2,
+        "run_view": "always",
     }
     assert sources["r1"] == {
         "source": "reader_1.code_reader_sdk",
@@ -260,6 +262,7 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "template": "",
         "mode": "hold",
         "after_s": 2,
+        "run_view": "always",
     }
     assert sources["free"] == {
         "source": "",
@@ -270,6 +273,7 @@ def test_build_plate_sources_flat_nested_and_override() -> None:
         "template": "",
         "mode": "hold",
         "after_s": 2,
+        "run_view": "always",
     }
     assert build_plate_sources({"displays": "x", "blueprint": {"processes": None}}) == {}
     assert build_plate_sources(None) == {}

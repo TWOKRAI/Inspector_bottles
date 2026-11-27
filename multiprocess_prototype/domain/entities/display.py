@@ -42,6 +42,7 @@ _VALID_FIT = frozenset({"contain", "cover", "stretch", "none"})
 _VALID_FORMAT = frozenset({"BGR", "RGB", "GRAY", "RGBA"})
 _VALID_PLATE_MODE = frozenset({"hold", "silence", "trigger"})
 _PLATE_AFTER_S_RANGE = (1, 600)
+_VALID_RUN_VIEW = frozenset({"always", "running"})
 
 
 # ======================================================================
@@ -127,6 +128,9 @@ class DisplayDefinition(SchemaBase):
     Подстановки в ``plate_text``: ``{title}`` (название экрана), ``{number}``, ``{address}``,
     ``{serial}``, ``{process}``; прочие (например ``{camera_id}``) остаются в тексте как написаны.
 
+    Показ по состоянию линии: ``run_view`` — ``always`` (кадр показывается всегда, как раньше)
+    или ``running`` (вне ``system.run.state == running`` вместо кадра плашка).
+
     Валидация значений (scale 10..1000, rotate enum, и т.д.) добавляется
     в Task 1.2 — здесь только структура + extra="forbid".
     """
@@ -162,6 +166,9 @@ class DisplayDefinition(SchemaBase):
     plate_after_s: Annotated[int, FieldMeta("Порог тишины для режима silence (секунды, 1..600)")] = 2
     plate_text: Annotated[str, FieldMeta("Шаблон надписи плашки: {title} {number} {address} {serial} {process}")] = ""
     plate_source: Annotated[str, FieldMeta("Источник кадров экрана для плашки")] = ""
+
+    # --- Показ по состоянию линии: только GUI ---
+    run_view: Annotated[str, FieldMeta("Когда показывать кадр: always | running")] = "always"
 
     # ------------------------------------------------------------------
     # Валидаторы вложенных моделей (dict → frozen-модель)
@@ -236,6 +243,15 @@ class DisplayDefinition(SchemaBase):
         if v not in _VALID_PLATE_MODE:
             # Полученное значение в сообщение не кладём (W2-c2c, приёмка).
             raise ValueError(f"plate_mode должен быть одним из {sorted(_VALID_PLATE_MODE)}")
+        return v
+
+    @field_validator("run_view", mode="after")
+    @classmethod
+    def _validate_run_view(cls, v: str) -> str:
+        """Режим показа должен быть одним из: always, running."""
+        if v not in _VALID_RUN_VIEW:
+            # Как у plate_mode: полученное значение в сообщение не кладём.
+            raise ValueError(f"run_view должен быть одним из {sorted(_VALID_RUN_VIEW)}")
         return v
 
     @field_validator("plate_after_s", mode="before")

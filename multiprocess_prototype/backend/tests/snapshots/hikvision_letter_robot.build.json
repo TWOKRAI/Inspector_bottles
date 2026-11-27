@@ -41,6 +41,7 @@
                   "reconnect": true,
                   "resolution_height": 1080,
                   "resolution_width": 1440,
+                  "run_gated": false,
                   "run_locked_commands": [
                     "release_device",
                     "take_device"
@@ -1075,6 +1076,7 @@
               "reconnect": true,
               "resolution_height": 1080,
               "resolution_width": 1440,
+              "run_gated": false,
               "run_locked_commands": [
                 "release_device",
                 "take_device"
