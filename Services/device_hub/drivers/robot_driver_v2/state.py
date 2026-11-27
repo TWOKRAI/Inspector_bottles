@@ -183,6 +183,8 @@ class RobotState:
         self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._echo_checked: int | None = None  # значение, эхо которого уже проверено
+        # R2-S1d: «стоп не подтверждён» о НЕ прошедшей записи стопа процесса уже объявлен в этом выключении
+        self._unwritten_reported = False
         # стоп не подтверждён роботом (health через плагин); сброс — удачный connect() (R2-S1d) и connect_reset()
         self._stop_unconfirmed = False
         # Готовность и вехи connect (T5.3g): последний connect() прошёл целиком; connect идёт; связь поднята;
@@ -446,6 +448,7 @@ class RobotState:
                 # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
                 # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
                 self._latch_reset_locked()
+                self._unwritten_reported = False  # поколение выключения: «запись не прошла» ещё не объявлено
                 # Точка линеаризации connect и request_stop (T5.3g): была ли связь поднята к первому стопу.
                 # Снимок монотонен в одном выключении (T5.3h): снимок обычного disconnect не обнуляется
                 self._stop_linked = (self._stopping and self._stop_linked) or (
@@ -535,8 +538,12 @@ class RobotState:
             attempted = self._latch_attempts > 0
             if value is not None and value == self._echo_checked:
                 return False, value
-            if value is None and (not attempted or self._stop_unconfirmed):
-                return False, value
+            if value is None:
+                # R2-S1d (ревью, находка 1): запись не прошла — «не подтверждён» один раз на выключение. Не по
+                # _stop_unconfirmed: его мог поставить упавший СТОП оператора, и он переживает неудачный connect
+                if not attempted or self._unwritten_reported:
+                    return False, value
+                self._unwritten_reported = True
             self._echo_checked = value
             return True, value
 

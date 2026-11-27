@@ -407,3 +407,63 @@ def test_v1_abort_on_dead_host_one_attempt_measured(monkeypatch: pytest.MonkeyPa
         assert reply["message"] == _TEXT_NOT_CONNECTED_RV1
         assert reply["error"] != reply["message"], "в error нет причины"
         assert tried == [3]  # ровно одна попытка, без повтора
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью R2-S1d, находка 1: «не подтверждён» стопа процесса — один раз на выключение, флаг его не гасит
+# --------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("operator_first", [True, False], ids=["after_operator_stop", "control"])
+def test_process_stop_after_failed_operator_stop_says_unconfirmed_once(operator_first: bool) -> None:
+    with _fast_rig(timeout_s=1.0) as rig:
+        rig.srv.close()  # мёртвая связь: и СТОП оператора, и стоп процесса не доходят
+        if operator_first:
+            reply, _ = _stop(rig)
+            assert reply["status"] == "error", reply
+            assert rig.drv.stop_unconfirmed is True
+        assert run(rig.drv.connect, 30.0) is False  # неудачный connect флаг не снимает
+        published = len(rig.rec._items)
+        run(lambda: rig.drv.request_stop(time.monotonic() + 5.0), 30.0)
+        assert _errors_since(rig, published).count(_TEXT_UNCONFIRMED) == 1
+        run(lambda: rig.drv.request_stop(time.monotonic() + 5.0), 30.0)  # повторный вызов того же выключения
+        assert _errors_since(rig, published).count(_TEXT_UNCONFIRMED) == 1
+        assert rig.drv.stop_unconfirmed is True
+
+
+# --------------------------------------------------------------------------------------------------
+# Ревью R2-S1d, находка 4: эхо после удачной записи — ok/echo False только на ошибке транспорта
+# --------------------------------------------------------------------------------------------------
+
+
+def _echo_error(kind: str) -> Exception:
+    return {
+        "modbus_io": ModbusIOError("read_holding -> ошибка обмена"),
+        "modbus_conn": ModbusConnectionError("Клиент не подключён"),
+        "oserror": ConnectionResetError(10054, "удалённый хост разорвал соединение"),
+        "program_error": TypeError("ошибка программы"),
+    }[kind]
+
+
+@pytest.mark.parametrize(
+    ("kind", "reply_expected"),
+    [
+        ("modbus_io", {"status": "ok", "level": "HARD", "echo": False}),
+        ("modbus_conn", {"status": "ok", "level": "HARD", "echo": False}),
+        ("oserror", {"status": "ok", "level": "HARD", "echo": False}),
+        ("program_error", {"status": "error", "message": "ошибка программы"}),
+    ],
+)
+def test_operator_stop_echo_failure_only_transport_errors_are_ok(
+    monkeypatch: pytest.MonkeyPatch, kind: str, reply_expected: dict
+) -> None:
+    with _v2() as rig:
+
+        def echo_fails(_client: RobotClientV2, *_args: Any, **_kwargs: Any) -> Any:
+            raise _echo_error(kind)
+
+        monkeypatch.setattr(RobotClientV2, "await_stop_echo", echo_fails)
+        mark = rig.srv.mark()
+        reply, _ = _stop(rig)
+        assert reply == reply_expected
+        assert _stop_levels(rig, mark) == [_HARD]  # запись прошла в обоих случаях
