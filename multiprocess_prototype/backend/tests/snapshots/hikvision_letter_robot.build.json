@@ -525,6 +525,18 @@
                 "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
                 "plugin_name": "ml_inference",
                 "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "absent_after_s": 10.0,
+                  "min_confidence": 0.5,
+                  "text_absent": "нет диска",
+                  "text_weak": "слабое распознавание"
+                },
+                "plugin_class": "Plugins.processing.presence_watch.plugin.PresenceWatchPlugin",
+                "plugin_name": "presence_watch",
+                "worker_pool_size": 0
               }
             ],
             "priority": "normal"
@@ -4761,6 +4773,18 @@
             "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
             "plugin_name": "ml_inference",
             "top_k": 5,
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "absent_after_s": 10.0,
+              "min_confidence": 0.5,
+              "text_absent": "нет диска",
+              "text_weak": "слабое распознавание"
+            },
+            "plugin_class": "Plugins.processing.presence_watch.plugin.PresenceWatchPlugin",
+            "plugin_name": "presence_watch",
             "worker_pool_size": 0
           }
         ],
