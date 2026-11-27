@@ -95,6 +95,36 @@ def test_non_dict_items_pass_the_paused_bypass() -> None:
     assert out[1]["paused_by"] == "p1"
 
 
+class _ResumedBetweenReads:
+    """``state`` отдаёт PAUSED один раз, дальше RUNNING: resume с потока наблюдателя посреди вызова."""
+
+    name = "p1"
+    enabled = True
+
+    def __init__(self) -> None:
+        self.reads = 0
+        self.process_calls = 0
+
+    @property
+    def state(self) -> PluginState:
+        self.reads += 1
+        return PluginState.PAUSED if self.reads == 1 else PluginState.RUNNING
+
+    def process(self, items: list[dict]) -> list[dict]:
+        self.process_calls += 1
+        return items
+
+
+def test_resume_between_bypass_and_mark_still_marks_the_item() -> None:
+    plugin = _ResumedBetweenReads()
+
+    out = _call(plugin, [{"frame": 1}])
+
+    assert out[0].get("paused_by") == "p1"
+    assert plugin.reads == 1
+    assert plugin.process_calls == 0
+
+
 def test_h4_thousand_items_through_paused() -> None:
     """Время идёт в отчёт (``-s``); порог — только защита от квадратичной ошибки переноса."""
     plugin = _Plugin("p1", PluginState.PAUSED)

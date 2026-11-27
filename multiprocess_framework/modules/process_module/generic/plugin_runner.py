@@ -216,7 +216,10 @@ class PluginRunner:
         НЕ трогаем по одному — перенос в этом единственном месте покрывает всех.
         """
         self._run_pre(plugin, "process", items)
-        if getattr(plugin, "enabled", True) and getattr(plugin, "state", None) != PluginState.PAUSED:
+        # state читается ОДИН раз: pause/resume идут с другого потока, и второе чтение после resume дало бы
+        # пропущенный process() без метки (сырой кадр уходит как обработанный).
+        paused = getattr(plugin, "state", None) == PluginState.PAUSED
+        if getattr(plugin, "enabled", True) and not paused:
             # 4.7d-2b: маркер не несёт кадра/детекций — порты на нём не проверяются. Фильтр — по ITEM, а не
             # по коллекции: маркерный вход не должен пропускать невалидный НЕмаркерный выход (и наоборот).
             if self._validate_ports:
@@ -228,7 +231,7 @@ class PluginRunner:
                 self._validate_non_markers(plugin, "output", outputs)
         else:
             outputs = items  # bypass (enabled=False или PAUSED): кадр без обработки, порты не проверяем
-            if getattr(plugin, "state", None) == PluginState.PAUSED:
+            if paused:
                 for item in items:
                     if isinstance(item, dict) and not is_marker(item):
                         item.setdefault("paused_by", plugin.name)
