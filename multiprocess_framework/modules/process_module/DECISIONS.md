@@ -4560,3 +4560,23 @@ Free-threaded Python — пересмотреть.
 
 **Reversible:** да (класс новый, живых вызывающих нет до T2/T3).
 **Refs:** `plans/2026-11-24_gui-frame-path/tasks/T1.md`, `process_module/tests/test_latest_mailbox.py`, `process_module/tests/test_latest_mailbox_hazards.py`.
+
+### ADR-PM-066 — Системное поле конверта `paused_by`: item прошёл приостановленный плагин (2026-11-27, Task 2.11 system-run-state)
+
+**Статус:** принято.
+
+**Контекст.** Пауза run-state режет поток bypass-ом (`PluginRunner.call_process`): item идёт дальше без обработки и на вид не отличается от обработанного. Получатель, показывающий только обработанное, отличал его по `capture_ts` относительно входа в `running`; на стенде кадр, снятый уже после входа, проходил ещё спящий плагин и показывался сырым (`capture_ts - mark` = +0,01…+0,03 с).
+
+**Решение.**
+1. Поле `paused_by: str` — имя первого плагина, который был в `PAUSED` и пропустил item без обработки. Ставится `setdefault` каждому dict-item, кроме маркера разрыва; `outputs is items` сохраняется.
+2. Решает только `state == PAUSED`: `enabled=False` в `RUNNING` — выбор оператора, метки нет.
+3. Перенос — `_carry_paused_by`, отдельно от `_carry_system_fields`: при не 1:1 донор — ПЕРВЫЙ ПОМЕЧЕННЫЙ вход, а не `inputs[0]`, иначе метка второй ветки fan-in теряется. При 1:1 донор позиционный. Метка — только непустая строка.
+4. Метка липкая: работающий плагин её не снимает. Свой ключ в новом выходе плагина не перетирается.
+
+**Отвергнуто.** Порог по времени у получателя (не ловит кадр, снятый после входа в `running`); добавить поле в `_CARRIED_SYSTEM_FIELDS` (теряет метку второго входа).
+
+**Последствия.** Поле пересекает границу процессов в `msg["data"]` и попадает в наблюдение и io-debug. Плагин, оставшийся в `PAUSED` при `running`, помечает всё, что через него идёт. `setdefault` меняет входной dict на месте: плагин, хранящий ссылку на item и выпускающий его повторно, выпустит его с меткой.
+
+**Не покрыто.** Bypass circuit breaker (`PipelineExecutor`) метку не ставит; путь выпуска item мимо `process()` переноса не имеет.
+
+**Refs:** `plans/2026-10-27_system-run-state/plan.md`, `process_module/tests/test_paused_by_blind.py`, `process_module/tests/test_paused_by_hazards.py`.
