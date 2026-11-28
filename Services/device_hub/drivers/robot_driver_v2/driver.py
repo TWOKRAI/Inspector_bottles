@@ -362,7 +362,9 @@ class _RobotDriverCore(BaseDeviceDriver):
         try:
             try:
                 if self._transport is not None and self._transport.is_connected and not was_ready:
-                    self._transport.disconnect()  # сокет после сбоя мог остаться «подключённым» (см. _link_lost)
+                    # сокет после сбоя мог остаться «подключённым» (см. _link_lost); клиент SDK не выбрасывается:
+                    # СТОП в окне до открытия ниже уходит неявным connect pymodbus (R2-S1d, ADR-DH-016)
+                    self._drop_link()
                 if self._transport is None:
                     from Services.device_hub.transports import build_transport
 
@@ -619,15 +621,32 @@ class _RobotDriverCore(BaseDeviceDriver):
         (WinError 10053 после рестарта контроллера) оставляет ``is_connected == True`` навсегда — без этого сброса
         драйвер писал бы в мёртвый сокет каждый тик и не переподключался. Сокет закрывается, только пока нет живого
         потока поводка или исполнителя: их запись сама упадёт на том же сокете, тик закроет его после их выхода.
+
+        R2-S1d (ADR-DH-016): транспорт, который уже не подключён (``ModbusDevice`` сам снял связь на ошибке обмена),
+        не трогается; подключённый снимается ``_drop_link`` — клиент SDK остаётся, ждущий СТОП уходит неявным
+        connect pymodbus. Клиента SDK обнуляет только намеренное отключение.
         """
         self._ready = False
-        if self._activity_alive() or self._transport is None:
+        transport = self._transport
+        if self._activity_alive() or transport is None or not transport.is_connected:
             return
         try:
-            self._transport.disconnect()
+            self._drop_link()
         except Exception as exc:
             self._record_err()
             logger.warning(f"робот {self.entry.id!r}: сокет после обрыва не закрыт: {type(exc).__name__}: {exc}")
+
+    def _drop_link(self) -> None:
+        """Снять связь после сбоя, не обнуляя клиента SDK: ``drop_link`` транспорта; без него — ``disconnect()``.
+
+        Дублёры транспорта без ``drop_link`` закрываются как раньше. Исключение — наружу.
+        """
+        transport = self._transport
+        drop = getattr(transport, "drop_link", None)
+        if drop is None:
+            transport.disconnect()
+        else:
+            drop()
 
     def _park_servo_off(self) -> bool:
         """Шаг ``servo`` park: выключение -> False без записи; иначе SERVO 0 -> True.

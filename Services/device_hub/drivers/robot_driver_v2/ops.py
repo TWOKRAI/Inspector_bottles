@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from Services.device_hub.drivers.base import logger
 from Services.device_hub.drivers.exchange_log import TEXT_BAD_GET_ARGS, TEXT_BAD_KNOBS
 from Services.device_hub.drivers.robot_driver_v2.args import (
     _STORE_ERRORS,
@@ -56,12 +57,18 @@ if TYPE_CHECKING:
 __all__ = ["OPS", "OpsMixin", "_EXCHANGE_OPS", "_op_exchange_log_get", "_op_exchange_log_set"]
 
 
+def _stop_refusal(message: str) -> dict:
+    """Отказ стопа оператора (R2-S1d): ключи ``message`` и ``error`` (CommandManager читает ``error``)."""
+    return {"status": "error", "message": message, "error": message}
+
+
 class OpsMixin:
     """Миксин ``RobotDriverV2``: операции оператора (телеметрия, стоп, servo, DO, jog_step, точка).
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
     Поля и атрибуты базы: ``_client``, ``_park_session``, ``_state``, ``_store``, ``entry``.
-    Методы соседей: ``_admission``, ``_read_tlm``, ``_store_call``, ``_write_stop``, ``is_connected``.
+    Методы соседей: ``_admission``, ``_read_tlm``, ``_record_err``, ``_stop_reachable``, ``_store_call``,
+    ``_write_operator_stop``, ``_write_stop``, ``is_connected``.
     """
 
     def _op_get_telemetry(self, _args: dict) -> dict:
@@ -87,7 +94,11 @@ class OpsMixin:
         """Общее тело ``stop`` и ``abort`` (T5.3d DESIGN 3): запись ``STOP_REQ`` через ``_write_stop`` (мимо защёлки
         стопа процесса, но с её учётом), затем опрос эха до ``t0 + 0,8 с``. Замков драйвера не берёт, ``_stopping`` не
         ставит. Итог: ``{"status": "ok", "level": <int>, "echo": bool}``; нет эха к сроку — ``echo: False`` без ошибки
-        (отложенный SOFT до цели хода — норма протокола). Плохой уровень — ``TEXT_BAD_STOP_LEVEL``, робот не тронут."""
+        (отложенный SOFT до цели хода — норма протокола). Плохой уровень — ``TEXT_BAD_STOP_LEVEL``, робот не тронут.
+        R2-S1d: готовность не запирает; отказ без записи — когда не ``_stop_reachable``. Запись —
+        ``_write_operator_stop`` (повтор только на мёртвом сокете); её неудача и отказ — ответ с ``message`` и
+        ``error``. Запись прошла, эхо не прочитано ошибкой транспорта (``ModbusDriverError``, ``OSError``) —
+        ``echo: False`` без ошибки; прочие исключения чтения эха (ошибка программы) — наружу."""
         t0 = time.monotonic()
         if isinstance(raw_level, str) and raw_level.upper() in STOP_LEVEL:
             level = STOP_LEVEL[raw_level.upper()]
@@ -96,14 +107,31 @@ class OpsMixin:
         else:
             return {"status": "error", "message": TEXT_BAD_STOP_LEVEL}
         client = self._client
-        if client is None:
-            return dict(_NOT_CONNECTED)
-        value = self._write_stop(level)  # ошибка записи — наружу: стоп не доставлен
+        # R2-S1d (ADR-DH-016): готовность драйвера стоп не запирает — только подтверждённая прошивка и связь, не
+        # закрытая законченным намеренным disconnect
+        if client is None or not self._stop_reachable():
+            return _stop_refusal(_NOT_CONNECTED["message"])
+        try:
+            value = self._write_operator_stop(level)  # один повтор — только на мёртвом сокете
+        except Exception as exc:
+            self._record_err()
+            return _stop_refusal(f"стоп не доставлен: {type(exc).__name__}: {exc}")
         # T5.3e: удачный стоп оператора любого уровня отменяет идущий park (итог ставит тик)
         self._state.park_cancel(TEXT_PARK_CANCELLED)
+        # Локально, как в client_v2._wr_admitted: импорт модуля драйвера не тянет Services.modbus и pymodbus
+        from Services.modbus.sdk.errors import ModbusDriverError
+
         try:
             client.await_stop_echo(value, value & 3, deadline=t0 + _OPERATOR_ECHO_BUDGET_S)
         except RobotTimeout:
+            return {"status": "ok", "level": level, "echo": False}
+        except (ModbusDriverError, OSError) as exc:
+            # Запись прошла, чтение эха упало транспортом: стоп доставлен, эха нет. Ошибки транспорта:
+            # ModbusDevice — ModbusDriverError (ModbusIOError из SDK _call на ModbusException / OSError и isError,
+            # ModbusConnectionError без клиента SDK; Services/modbus/sdk/client.py::_call, README «Ошибки обмена»);
+            # сырой OSError — транспорт не ModbusDevice (driver.py::_link_lost). Ошибка программы — наружу (call()).
+            self._record_err()
+            logger.warning(f"робот {self.entry.id!r}: эхо стопа оператора не прочитано: {type(exc).__name__}: {exc}")
             return {"status": "ok", "level": level, "echo": False}
         return {"status": "ok", "level": level, "echo": True}
 

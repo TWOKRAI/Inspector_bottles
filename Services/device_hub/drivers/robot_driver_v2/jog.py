@@ -9,6 +9,7 @@ Stability: lite
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 from Services.device_hub.drivers.base import logger
 from Services.device_hub.drivers.robot_driver_v2.args import _BadArgs, _int_in
@@ -123,15 +124,18 @@ class JogMixin:
             self._state.jog_release_done()
         return {"status": "ok"}
 
-    def _stop_jog(self, run: _JogRun) -> None:
+    def _stop_jog(self, run: _JogRun, write: Callable[[int, _JogRun | None], int] | None = None) -> None:
+        """Стоп своего jog под ``_jog_tx_lock``, если он ещё не записан. ``write`` — чем писать (None — одна запись;
+        обычный ``disconnect`` передаёт запись с повтором, R2-S1d)."""
         with self._jog_tx_lock:
             if not run.stop_sent:
-                self._stop_jog_locked(run)
+                self._stop_jog_locked(run, write)
 
-    def _stop_jog_locked(self, run: _JogRun) -> None:
+    def _stop_jog_locked(self, run: _JogRun, write: Callable[[int, _JogRun | None], int] | None = None) -> None:
         """Под ``_jog_tx_lock``: стоп SOFT своего jog с ожиданием эха. Seq — в множество своих стопов ДО записи (Д1),
         ``stop_sent`` — сразу после записи (П4: флаг отражает запись, эхо его не держит)."""
-        self._stop_and_wait(STOP_LEVEL["SOFT"], run)  # ошибка транспорта / RobotTimeout — наружу, не глушится
+        # ошибка транспорта / RobotTimeout — наружу, не глушится
+        self._stop_and_wait(STOP_LEVEL["SOFT"], run, write=write)
 
     def _lease_loop(self, run: _JogRun, ev: threading.Event, session: int | None = None) -> None:
         """Поток поводка: пока окно удержания не истекло, нет release и область открыта — ``jog_lease()`` раз в период.

@@ -125,6 +125,21 @@ class ModbusDevice:
             self._status.connected_since = None
             self._set_state(ConnectionState.DISCONNECTED)
 
+    def drop_link(self) -> None:
+        """Снять связь, не выбрасывая клиента SDK (R2-S1d, ADR-DH-016 device_hub).
+
+        Под замком устройства: сокет закрыт, ``is_connected`` False, ``session`` +1 (запись прежнего сеанса с
+        ``expected_session`` получит отказ). Клиент SDK не обнуляется: следующая запись без ``expected_session``
+        (STOP) откроет новый TCP неявным connect pymodbus. ``disconnect()`` — намеренное отключение: после него запись
+        падает ``ModbusConnectionError`` без кадра. ``on_error`` и счётчики не трогаются; ``on_status`` — как у
+        ``disconnect()``. Идемпотентно.
+        """
+        with self._lock:
+            self._client.drop_socket()
+            self._session += 1
+            self._status.connected_since = None
+            self._set_state(ConnectionState.DISCONNECTED)
+
     # ------------------------------------------------------------------ #
     # Операции чтения (с телеметрией)
     # ------------------------------------------------------------------ #

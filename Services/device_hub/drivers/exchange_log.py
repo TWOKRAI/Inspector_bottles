@@ -404,7 +404,8 @@ class ExchangeLog:
 class ExchangeLogTransport:
     """Обёртка ``RegisterTransport``: каждый обмен — в ``ExchangeLog``, результат и исключения — как у внутреннего.
 
-    Явно: ``is_connected``, ``read_registers``, ``transaction`` (с ``expected_session``), ``connect``, ``disconnect``.
+    Явно: ``is_connected``, ``read_registers``, ``transaction`` (с ``expected_session``), ``connect``, ``disconnect``,
+    ``drop_link`` (R2-S1d; у внутреннего без него — ``disconnect``).
     Чтение прочих атрибутов (``get_status``, ``state``, ``config``, ``session``) уходит внутреннему транспорту.
     ``write_register(s)`` и
     ``read_holding`` идут мимо журнала. ``__slots__`` и ``__setattr__`` нет: тесты подменяют ``transaction``
@@ -482,6 +483,27 @@ class ExchangeLogTransport:
         start = clock()
         try:
             self._inner.disconnect()
+        except BaseException as exc:
+            log._record(None, (clock() - start) * 1000.0, True, _link_entries, "disconnect", "disconnect", exc)
+            raise
+        log._record(None, (clock() - start) * 1000.0, False, _link_entries, "disconnect", "", None)
+
+    def drop_link(self) -> None:
+        """Снять связь без выброса клиента SDK (R2-S1d): ``drop_link()`` внутреннего транспорта.
+
+        У внутреннего без ``drop_link`` (дублёры тестов) — ``disconnect()``, как раньше. В журнал — строкой
+        ``disconnect``, как закрытие.
+        """
+        inner_drop = getattr(self._inner, "drop_link", None)
+        call = self._inner.disconnect if inner_drop is None else inner_drop
+        log = self._log
+        if not log._enabled:
+            call()
+            return
+        clock = log._clock
+        start = clock()
+        try:
+            call()
         except BaseException as exc:
             log._record(None, (clock() - start) * 1000.0, True, _link_entries, "disconnect", "disconnect", exc)
             raise

@@ -183,7 +183,10 @@ class RobotState:
         self._latch_value: int | None = None  # значение последней удачной записи (проверка эха в фазе 4)
         self._latch_attempts = 0  # попытки записи стопа процесса в этом поколении (не больше двух)
         self._echo_checked: int | None = None  # значение, эхо которого уже проверено
-        self._stop_unconfirmed = False  # стоп процесса не подтверждён роботом (health через плагин); сброс — connect()
+        # R2-S1d: «стоп не подтверждён» о НЕ прошедшей записи стопа процесса уже объявлен в этом выключении
+        self._unwritten_reported = False
+        # стоп не подтверждён роботом (health через плагин); сброс — удачный connect() (R2-S1d) и connect_reset()
+        self._stop_unconfirmed = False
         # Готовность и вехи connect (T5.3g): последний connect() прошёл целиком; connect идёт; связь поднята;
         # снимок «связь была поднята» на первом request_stop этого выключения
         self._ready = False
@@ -302,12 +305,13 @@ class RobotState:
         """``connect``: снять останов, уровень 0, сброс защёлки, снять «стоп не подтверждён» (текст остаётся)."""
         with self._lock:
             self._connect_reset_locked()
+            self._stop_unconfirmed = False  # явный сброс; путь connect снимает флаг только в удачном connect_finish
 
     def _connect_reset_locked(self) -> None:
+        # R2-S1d: «стоп не подтверждён» здесь не снимается — он переживает неудачный connect (connect_finish)
         self._stopping = False  # ручное «Подключить» после обычного disconnect снова разрешает jog и программы
         self._stop_level = 0
         self._latch_reset_locked()
-        self._stop_unconfirmed = False
 
     # --- готовность и вехи connect (T5.3g): connect и request_stop линеаризуются секциями замка состояния ---
 
@@ -359,11 +363,12 @@ class RobotState:
             return True
 
     def connect_finish(self) -> bool:
-        """``connect``: всё прошло -> готов. False — остановка пришла: драйвер не готов."""
+        """``connect``: всё прошло -> готов, «стоп не подтверждён» снят (R2-S1d). False — остановка пришла: не готов."""
         with self._lock:
             if self._stopping or self._shutdown:
                 return False
             self._ready = True
+            self._stop_unconfirmed = False
             return True
 
     def connect_end(self) -> None:
@@ -443,6 +448,7 @@ class RobotState:
                 # Первый запрос выключения открывает новое поколение защёлки: стопы до него (оператор, отпускание
                 # jog) стоп выключения не покрывают; повторные вызовы в этом выключении поколение не сбрасывают
                 self._latch_reset_locked()
+                self._unwritten_reported = False  # поколение выключения: «запись не прошла» ещё не объявлено
                 # Точка линеаризации connect и request_stop (T5.3g): была ли связь поднята к первому стопу.
                 # Снимок монотонен в одном выключении (T5.3h): снимок обычного disconnect не обнуляется
                 self._stop_linked = (self._stopping and self._stop_linked) or (
@@ -532,8 +538,12 @@ class RobotState:
             attempted = self._latch_attempts > 0
             if value is not None and value == self._echo_checked:
                 return False, value
-            if value is None and (not attempted or self._stop_unconfirmed):
-                return False, value
+            if value is None:
+                # R2-S1d (ревью, находка 1): запись не прошла — «не подтверждён» один раз на выключение. Не по
+                # _stop_unconfirmed: его мог поставить упавший СТОП оператора, и он переживает неудачный connect
+                if not attempted or self._unwritten_reported:
+                    return False, value
+                self._unwritten_reported = True
             self._echo_checked = value
             return True, value
 

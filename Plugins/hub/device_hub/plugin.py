@@ -906,7 +906,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return {"status": "error", "message": str(exc), "error": str(exc)}
 
     def _driver_call(self, data: dict, expected_kind: str, op: str) -> dict:
-        """Как ``_kind_call``, но в обход ``manager.call``: операция журнала нужна и при неподключённом роботе."""
+        """Как ``_kind_call``, но в обход ``manager.call``: операция без связи (журнал; СТОП оператора — R2-S1d)."""
         dev_id = data.get("device_id", "")
         if not dev_id:
             return {"status": "error", "message": "device_id обязателен"}
@@ -921,7 +921,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
             }
         driver = self._manager.get_driver(dev_id)
         if driver is None:
-            return {"status": "error", "message": "журнала нет: драйвер не создан"}
+            if op in ("exchange_log_get", "exchange_log_set"):
+                return {"status": "error", "message": "журнала нет: драйвер не создан"}
+            # R2-S1d: прочие операции без связи (СТОП) — прежний текст затвора менеджера, с error= для CommandManager
+            msg = f"Устройство {dev_id!r} не подключено"
+            return {"status": "error", "message": msg, "error": msg}
         args = {k: v for k, v in data.items() if k != "device_id"}
         return self._safe_call(driver.call, op, args)
 
