@@ -1,0 +1,75 @@
+"""K1 probe (Windows): real SharedResourcesManager + ProcessRegistry + GenericProcess consumer (real DataReceiver,
+RouterManager, QueueChannel, ReaderGoneQueue, DEFAULT_QUEUES). Kill = Process.kill() (TerminateProcess), as psutil on
+the stand. Restart order mirrors ProcessManagerProcess._restart_process_replace: remove -> register(reuse) -> drain."""
+import json, multiprocessing as mp, random, sys, time
+from multiprocess_framework.modules.process_manager_module.core.process_registry import ProcessRegistry
+from multiprocess_framework.modules.process_module.configs.process_launch_config import DEFAULT_QUEUES
+from multiprocess_framework.modules.shared_resources_module import SharedResourcesManager
+
+GP = "multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess"
+NAME = "k1cons"
+
+def lock_free(lock):
+    if lock is None:
+        return None
+    ok = lock.acquire(False)
+    if ok:
+        lock.release()
+    return ok
+
+def deaf(q, qtype, n=3, wait=0.8):
+    for i in range(n):
+        if qtype == "system":
+            q.put({"type": "command", "command": "k1.probe", "sender": "k1driver", "data": {"i": i}})
+        else:
+            q.put({"type": "data", "sender": "k1driver", "data": {"i": i}})
+    time.sleep(wait)
+    return bool(q._reader.poll(0))  # True = bytes still in pipe = nobody read
+
+def drain_like_pm(qs):
+    n = 0
+    for q in qs.values():
+        for _ in range(10_000):
+            try:
+                q.get_nowait(); n += 1
+            except Exception:
+                break
+    return n
+
+def main():
+    kills = int(sys.argv[1]); reuse = int(sys.argv[2])
+    sys_stop, sys_ready, run_ev = mp.Event(), mp.Event(), mp.Event()
+    sys_ready.set(); run_ev.set()
+    srm = SharedResourcesManager()
+    cfg = {"queues": {k: dict(v) for k, v in DEFAULT_QUEUES.items()},
+           "config": {"plugins": [{"plugin_class": "c36_plugins.C36Proc", "plugin_name": "c36_proc"}], "chain_targets": []}}
+    srm.register_process(NAME, cfg)
+    reg = ProcessRegistry(queue_registry=srm.queue_registry, shared_resources=srm, system_stop_event=sys_stop,
+                          system_ready_event=sys_ready, run_event=run_ev)
+    t0 = time.monotonic()
+    for i in range(kills + 1):
+        p = reg.create_and_register(NAME, GP, cfg); p.start()
+        ready = reg.get_ready_event(NAME).wait(30)
+        qs = dict(srm.queue_registry.get_process_queues(NAME))
+        rec = {"i": i, "t": round(time.monotonic() - t0, 1), "pid": p.pid, "ready": bool(ready),
+               "ids": {k: id(q) for k, q in qs.items()}, "data_maxsize": qs["data"]._maxsize}
+        if ready:
+            time.sleep(0.3)
+            rec["deaf"] = {"system": deaf(qs["system"], "system"), "data": deaf(qs["data"], "data")}
+        if i == kills:
+            print("K1", json.dumps(rec), flush=True)
+            p.kill(); p.join(5); break
+        time.sleep(random.uniform(0.15, 0.9))
+        p.kill(); p.join(5)
+        rec["exitcode"] = p.exitcode
+        rec["rlock_free_after_kill"] = {k: lock_free(q._rlock) for k, q in qs.items()}
+        reg.remove_process(NAME)
+        srm.register_process(NAME, cfg, reuse_queues=bool(reuse))
+        qs2 = dict(srm.queue_registry.get_process_queues(NAME))
+        rec["same_queue_objects"] = {k: qs2[k] is qs[k] for k in qs}
+        rec["drained_by_pm_mirror"] = drain_like_pm(qs2)
+        print("K1", json.dumps(rec), flush=True)
+    sys_stop.set()
+
+if __name__ == "__main__":
+    main()
