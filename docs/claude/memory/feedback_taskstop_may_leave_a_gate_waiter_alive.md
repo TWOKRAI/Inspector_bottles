@@ -18,3 +18,5 @@ metadata:
 - After TaskStop, verify by effect (ports free, no new files), not by the "stopped" reply.
 
 **Trigger.** Replacing or stopping a background script that waits for a window or starts servers.
+
+**Seen again (2026-11-28).** TaskStop of a pre-merge runner killed the bash script but not the running `pytest` child: its log kept growing and ended with `585 passed` at 15:44:39, seconds after the window was released by hand to the next lane. The directory with the open log could not be renamed (`Permission denied`) until then. After TaskStop, wait until the log stops changing, then release the window.
