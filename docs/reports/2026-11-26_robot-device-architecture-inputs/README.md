@@ -4,7 +4,7 @@
 
 ## Воспроизведения
 
-Скрипты лежат в этом каталоге. Это материалы разбора, не тесты проекта. Запуск из корня дерева (`PYTHONPATH=<корень>`, `PYTHONUTF8=1`):
+Скрипты лежат в этом каталоге с расширением `.py.txt`, чтобы не считаться кодом проекта: это материалы разбора, не тесты. Перед запуском скопировать без `.txt`. Запуск из корня дерева (`PYTHONPATH=<корень>`, `PYTHONUTF8=1`):
 
 ```bash
 bash scripts/machine_gate.sh light <сессия> .venv/Scripts/python.exe docs/reports/2026-11-26_robot-device-architecture-inputs/repro_c104.py

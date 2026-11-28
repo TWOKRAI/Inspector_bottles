@@ -8,7 +8,7 @@ GOAL: привод включается только по команде опе�
 неактивна и есть уведомление, либо «Запустить» сама включает серво (настройка рецепта).
 
 **R2-S1d слита в `main`: `e2288ef81`** (не запушено). Начинай от свежего `main`: она меняла те же файлы драйвера,
-что и R2-S1. Передача полосы Р2: `docs/handoffs/2026-11-28_lane-R2-handoff.md` (эта же ветка).
+что и R2-S1. Передача полосы Р2: `docs/handoffs/2026-11-28_lane-R2-handoff.md`.
 
 ## Решения владельца
 
@@ -119,6 +119,5 @@ REPORT: по-русски, числами, раздел «что оставил 
 - TaskStop не убивает дочерний pytest: дождаться, пока журнал перестанет расти, потом отпускать окно.
 - После последней правки теста прогнать весь каталог: есть сторожа на весь каталог
   (`test_no_private_driver_state.py`).
-- Уроки и разбор архитектуры: ветка `docs/robot-device-architecture` (не влита), дерево
-  `.claude/worktrees/r2-device-arch` (`docs/sessions/2026-11-26_r2.md`, `docs/claude/memory/`,
-  `docs/reports/2026-11-26_robot-device-architecture.md`).
+- Уроки и разбор архитектуры в `main`: `docs/sessions/2026-11-26_r2.md`, `docs/claude/memory/`,
+  `docs/reports/2026-11-26_robot-device-architecture.md`.
