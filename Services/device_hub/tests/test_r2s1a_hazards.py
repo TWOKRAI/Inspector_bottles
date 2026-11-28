@@ -34,6 +34,7 @@ from Services.device_hub.tests.test_r2s1a_link_drop_acceptance import (
 )
 from Services.modbus.core.device import ModbusDevice
 from Services.modbus.tests.test_r2s1a_transport_acceptance import Call, run
+from Services.robot_comm.core.client_v2 import RobotClientV2
 from Services.robot_comm.robot_data import load_params
 from Services.robot_comm.store import RobotDataStore
 
@@ -270,7 +271,7 @@ def test_stop_during_program_after_drop(
         reply = rig.call("draw_polyline", {**_DRAW, "points": points})
         assert reply["status"] == "ok", reply
         _wait(lambda: _op_writes(rig, 0, _OP_SC_RUN) >= 1, 20.0, "первый SC_RUN")
-        monkeypatch.setattr(rig.drv._client, "stop", lambda _level: None)
+        monkeypatch.setattr(RobotClientV2, "stop", lambda _client, _level: None)  # путь выключения пишет issue_stop
         mark = rig.srv.mark()
         _drop(rig, kind)
         _stop(rig, how)
