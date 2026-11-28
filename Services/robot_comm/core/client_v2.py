@@ -9,8 +9,15 @@ Purpose:
 
 Public API:
     ``RobotClientV2``, ``ClientV2Config``, ``CmdResult``, ``ErrorEvent``, ``StopResult``,
-    ``SyncReport``. Ошибки — ``Services.robot_comm.errors`` (``WrongFirmware``, ``RobotNak``,
+    ``SyncReport``, ``SessionChanged``. Ошибки — ``Services.robot_comm.errors`` (``WrongFirmware``, ``RobotNak``,
     ``RobotCommandError``, ``RobotAborted``, ``RobotTimeout``, ``RobotSyncError``).
+
+Сеанс допуска (R2-S1a). Транспорт со счётчиком ``session`` (``ModbusDevice``) принимает ``expected_session``. Вызывающий
+допускает операцию контекстом ``admitted(session)``; тогда записи команды (``cmd``), буфера программы (``_upload``) и
+аренды jog (``jog_lease``) идут с этим значением и после обрыва не уходят по новому соединению (``SessionChanged``,
+подкласс ``RobotNotConnectedError``: на провод ничего не ушло, метка «в полёте» снята). Значение — своё у каждого
+потока: поток программы и поводка берёт его явно. ``STOP_REQ`` и ``HB_PC`` пишутся без проверки всегда. Вне контекста
+и на транспорте без счётчика всё как раньше. ``probed`` — прошивка подтверждена последним ``probe()``.
 
 Stability: lite
 
@@ -50,7 +57,8 @@ import random
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -92,6 +100,7 @@ __all__ = [
     "ErrorEvent",
     "RobotClientV2",
     "RunReport",
+    "SessionChanged",
     "StopResult",
     "SyncCancelled",
     "SyncReport",
@@ -231,6 +240,10 @@ class SyncCancelled(RobotCommError):
     """``sync_params`` прерван предикатом ``cancelled`` перед очередной записью: метка не записана."""
 
 
+class SessionChanged(RobotNotConnectedError):
+    """Сеанс связи сменился после допуска операции: запись не отправлена, на провод ничего не ушло."""
+
+
 @dataclass(frozen=True, slots=True)
 class SyncReport:
     """Итог ``sync_params``: ``sent`` — число отправленных ``PARAM_SET`` значений (без метки);
@@ -341,6 +354,35 @@ class RobotClientV2:
         self._wdg_raw: int | None = None
         self._jog_raw: int | None = None
         self._sc_active = False  # идёт run_chunks (под _state_lock): второй прогон на клиенте — RuntimeError
+        self._admission_local = threading.local()  # сеанс допуска операции этого потока (R2-S1a)
+
+    # ------------------------------------------------------------------ #
+    # сеанс допуска
+    # ------------------------------------------------------------------ #
+
+    @contextmanager
+    def admitted(self, session: int | None) -> Iterator[None]:
+        """Записи движения этого потока внутри блока идут только по сеансу ``session``.
+
+        Pre: ``session`` — значение ``transport.session``, снятое при допуске операции; None — без проверки.
+        Post: на выходе (любой исход) действует прежнее значение. Другие потоки не затронуты.
+        """
+        local = self._admission_local
+        previous = getattr(local, "session", None)
+        local.session = session
+        try:
+            yield
+        finally:
+            local.session = previous
+
+    def admission(self) -> int | None:
+        """Сеанс допуска этого потока; None — вне ``admitted``. Для передачи в другой поток."""
+        return getattr(self._admission_local, "session", None)
+
+    @property
+    def probed(self) -> bool:
+        """Последний ``probe()`` прошёл; такой клиент пишет ``STOP_REQ`` без оглядки на ``is_connected``."""
+        return self._probed
 
     # ------------------------------------------------------------------ #
     # probe
@@ -418,6 +460,26 @@ class RobotClientV2:
             self._mark_stale()
             raise
 
+    def _wr_admitted(self, ops: list[tuple]) -> bool:
+        """Запись движения: при сеансе допуска и транспорте со счётчиком — только в этом сеансе.
+
+        Raises: ``SessionChanged`` — сеанс сменился, на провод ничего не ушло; прочее — как ``_wr``.
+        """
+        session = self.admission()
+        if session is None or getattr(self._t, "session", None) is None:
+            return self._wr(ops)  # вне допуска или транспорт без счётчика
+        # Локально: импорт модуля клиента не тянет Services.modbus и pymodbus
+        from Services.modbus.sdk.errors import ModbusConnectionError
+
+        try:
+            return self._t.transaction(ops, expected_session=session)
+        except ModbusConnectionError as exc:
+            self._mark_stale()
+            raise SessionChanged(str(exc)) from exc
+        except Exception:
+            self._mark_stale()
+            raise
+
     def _mark_stale(self) -> None:
         with self._state_lock:
             self._stale = True
@@ -479,7 +541,7 @@ class RobotClientV2:
         with self._jog_lock:
             self._jog_gen += 1
             self._jog_value = (self._jog_value + 1) & 0xFFFF
-            self._wr([("w", REG["JOG_LEASE"], self._jog_value)])
+            self._wr_admitted([("w", REG["JOG_LEASE"], self._jog_value)])
 
     # ------------------------------------------------------------------ #
     # mailbox
@@ -510,12 +572,16 @@ class RobotClientV2:
             seq = self._issue_seq(base)
             # Метка — ДО записи: сбой транспорта на записи оставляет её, и следующий cmd() сначала досмотрит seq.
             self._inflight = _Inflight(seq, generation, spec["result"] == "done_seq")
-            self._wr(
-                [
-                    ("wm", REG["CMD_SEQ"], [seq, OP[op], len(words), *words]),
-                    ("w", REG["CMD_FLAG"], 1),
-                ]
-            )
+            try:
+                self._wr_admitted(
+                    [
+                        ("wm", REG["CMD_SEQ"], [seq, OP[op], len(words), *words]),
+                        ("w", REG["CMD_FLAG"], 1),
+                    ]
+                )
+            except SessionChanged:
+                self._inflight = None  # на провод ничего не ушло: досматривать нечего
+                raise
             self._wait_res(seq)
             result = self._read_result(seq, generation, spec["result"] == "done_seq")
             if spec["result"] != "done_seq":
@@ -983,7 +1049,7 @@ class RobotClientV2:
         for pos in range(0, len(flat), chunk):
             if abort():
                 return False
-            self._wr([("wm", base + pos, flat[pos : pos + chunk])])
+            self._wr_admitted([("wm", base + pos, flat[pos : pos + chunk])])
         return True
 
     def run_chunks(

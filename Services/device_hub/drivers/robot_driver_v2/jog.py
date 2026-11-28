@@ -32,8 +32,8 @@ class JogMixin:
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
     Поля и атрибуты базы: ``_client``, ``_jog_tx_lock``, ``_state``, ``entry``.
-    Методы соседей: ``_close_thread``, ``_publish_error``, ``_record_err``, ``_spawn_failed``, ``_spawn_fn``,
-        ``_stop_and_wait``, ``_write_stop``, ``is_connected``.
+    Методы соседей: ``_admission``, ``_admitted_as``, ``_close_thread``, ``_publish_error``, ``_record_err``,
+        ``_spawn_failed``, ``_spawn_fn``, ``_stop_and_wait``, ``_write_stop``, ``is_connected``.
     """
 
     def _op_jog_hold(self, args: dict) -> dict:
@@ -86,7 +86,8 @@ class JogMixin:
                     return {"status": "error", "message": TEXT_STOPPING}
                 thread_name = f"{self.entry.id}-lease-{_next_thread_k()}"
                 try:
-                    run.handle = spawn(lambda ev: self._lease_loop(run, ev), name=thread_name)
+                    session = self._admission()  # R2-S1a: поток поводка пишет аренду только в сеансе этого JOG_CONT
+                    run.handle = spawn(lambda ev: self._lease_loop(run, ev, session), name=thread_name)
                 except Exception as exc:
                     # JOG_CONT уже подтверждён: без поводка робот остался бы в JOG_CONT, а его E_ABORTED ушёл бы в
                     # last_error как чужая ошибка — стоп шлём сами (seq — в _own_stops), затем откат (К5)
@@ -132,7 +133,7 @@ class JogMixin:
         ``stop_sent`` — сразу после записи (П4: флаг отражает запись, эхо его не держит)."""
         self._stop_and_wait(STOP_LEVEL["SOFT"], run)  # ошибка транспорта / RobotTimeout — наружу, не глушится
 
-    def _lease_loop(self, run: _JogRun, ev: threading.Event) -> None:
+    def _lease_loop(self, run: _JogRun, ev: threading.Event, session: int | None = None) -> None:
         """Поток поводка: пока окно удержания не истекло, нет release и область открыта — ``jog_lease()`` раз в период.
 
         Окно истекло или область закрывается (``ev``) -> стоп шлёт сам поток (без close своей записи).
@@ -157,7 +158,8 @@ class JogMixin:
                         suffix = " после начала остановки" if late else ""
                         logger.info(f"робот {self.entry.id!r}: jog остановлен поводком{suffix}: {reason}")
                     return
-                client.jog_lease()
+                with self._admitted_as(session):  # после обрыва аренда не уходит по новому соединению
+                    client.jog_lease()
                 run.wake.wait(period)
         except Exception as exc:
             self._record_err()

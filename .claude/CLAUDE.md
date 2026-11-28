@@ -92,6 +92,27 @@ the background** — for a verdict this project's rules will accept, drive `revi
   classes (skill `coordinator` §3): `light` < ~2 min and `medium` ~2–5 min (one module's tests dir) need no window; `heavy` > ~5 min and a timed `medium` (`scripts/machine_gate_timed.txt`) — only in your window; exit 75 = skipped; with `machine.lock` a hook blocks bare pytest / make gate / run_sim_all and other classified commands.
 - No `machine.lock` → the gate falls back to `stand.lock`; `scripts/stand_gate` in live mode always takes `stand.lock` itself.
 
+## Tests before a merge into `main` — scoped by the diff (owner, 2026-11-27)
+
+Rebase on `main` first. Pick the row by `git diff --name-only main...<branch>`; two rows match → the lower one; unsure → the last one.
+
+| The diff changes | Run |
+|---|---|
+| only `*.md` | `scripts/validate.py`; plus any test that reads a changed file (`git grep <file name>` in `test_*.py`) |
+| code outside the framework (`Services/`, `Plugins/`, `multiprocess_prototype/`, `apps/`, `scripts/`, `backend_ctl/`) | `validate.py`; the tests of every changed package and of every package that imports a changed module; `multiprocess_prototype/backend/tests`; the outward-looking framework tests (below) |
+| any non-`.md` file in `multiprocess_framework/`, or `pyproject.toml`, `uv.lock`, any `conftest.py`, `scripts/validate.py`, `scripts/run_framework_tests.py` | all of the row above, with the full framework suite in place of the outward-looking set |
+
+Outward-looking framework tests import the upper layers or walk the repo, so a change outside the framework can turn them red. Compute the list, do not keep one by hand (run it through the gate; it is `heavy`):
+
+```bash
+cd multiprocess_framework/modules && python ../../scripts/run_framework_tests.py $({ git grep -lE '^\s*(from|import) (Services|Plugins|multiprocess_prototype)\b|parents\[[2-9]\]|REPO_ROOT|PROJECT_ROOT|repo_root|_REPO\b' -- '*/test_*.py'; git ls-files 'tests/test_*.py'; } | sort -u)
+```
+
+- Every red is named against `plans/queue/defects.md`; a red not in the registry blocks the merge until the coordinator registers it.
+- The run is valid for the tree it ran on: compare `git merge-tree --write-tree main <branch>` with the tested tree.
+- The merge message says which row was used and the numbers.
+- Safety net for what the scope misses: one full framework run on `main` on every day that had merges, when the machine is idle. The coordinator names the lane; no coordinator → the lane that made the last merge. A red goes to the registry.
+
 ## ponytail — when the laziness ladder applies
 
 Run `Skill: ponytail` before new code, a new dependency or a speculative "make it generic" ask; skip it for mechanism work, debugging, behaviour-keeping refactors, docs, plans. Project rules always win over ponytail. On demand: `ponytail-review`, `ponytail-audit`, `ponytail-debt`. Boundary: `docs/claude/LEAD_RULES.md` → «ponytail».

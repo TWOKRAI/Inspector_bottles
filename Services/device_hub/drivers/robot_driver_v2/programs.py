@@ -63,9 +63,9 @@ class ProgramMixin:
     """Миксин ``RobotDriverV2``: запуск программ, возврата и смены инструмента, поток исполнителя.
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
-    Поля и атрибуты базы: ``_client``, ``_pub``, ``_state``, ``_store``, ``entry``.
-    Методы соседей: ``_home_point``, ``_record_err``, ``_spawn_failed``, ``_spawn_fn``, ``_store_call``,
-        ``_write_stop``, ``_ws_params``, ``is_connected``.
+    Поля и атрибуты базы: ``_client``, ``_park_session``, ``_pub``, ``_state``, ``_store``, ``entry``.
+    Методы соседей: ``_admission``, ``_admitted_as``, ``_home_point``, ``_record_err``, ``_session_now``,
+        ``_spawn_failed``, ``_spawn_fn``, ``_store_call``, ``_write_stop``, ``_ws_params``, ``is_connected``.
     """
 
     def start_program(self, program: Any, points: Mapping[str, Point], frames: Any = None, *, name: str) -> dict:
@@ -86,6 +86,11 @@ class ProgramMixin:
         «toolchange», «park») уходит в счётчики возвратов ``_program_loop`` (T3.7 DESIGN п.7) и в допуск park
         (T5.3e). Без ``spawn`` — ``RuntimeError`` до захвата."""
         spawn = self._spawn_fn()
+        # R2-S1a: сеанс допуска — один на весь прогон, значит и следующие куски после обрыва отклоняются. Берётся до
+        # проверки связи; вне call() (прямой start_program) — текущий. 0 — годное значение
+        session = self._admission()
+        if session is None:
+            session = self._session_now()
         # is_connected зовётся под замком состояния последней проверкой, как раньше
         refusal = self._state.admit_launch(lambda: self.is_connected, kind=kind, park_seq=park_seq)
         if refusal is not None:
@@ -98,7 +103,7 @@ class ProgramMixin:
             return {"status": "error", "message": str(exc)}
         thread_name = f"{self.entry.id}-prog-{_next_thread_k()}"
         try:
-            handle = spawn(lambda ev: self._program_loop(scenario, name, total, kind), name=thread_name)
+            handle = spawn(lambda ev: self._program_loop(scenario, name, total, kind, session), name=thread_name)
         except Exception as exc:
             self._state.launch_failed()
             return self._spawn_failed(thread_name, exc)
@@ -125,9 +130,14 @@ class ProgramMixin:
         """Ход домой основной остановки ``seq`` (T5.3e): программа ``park_home`` из одного хода JOINT в дом из
         параметров; допуск — только своему живому park (``admit_launch(kind="park")``)."""
         program = Program(name="park_home", steps=(Move(point="home", kind="JOINT"),))
-        return self._launch(program, {"home": self._home_point()}, None, name="park_home", kind="park", park_seq=seq)
+        with self._admitted_as(self._park_session):  # сеанс допуска park, не тика
+            return self._launch(
+                program, {"home": self._home_point()}, None, name="park_home", kind="park", park_seq=seq
+            )
 
-    def _program_loop(self, scenario: Any, name: str, total: int, kind: str = "program") -> None:
+    def _program_loop(
+        self, scenario: Any, name: str, total: int, kind: str = "program", session: int | None = None
+    ) -> None:
         path = f"devices.state.{self.entry.id}.program"
         state = {"name": name, "state": "running", "done": 0, "total": total, "error": None}
         resent = [False]  # повтор стопа в on_progress — один раз на прогон
@@ -159,7 +169,8 @@ class ProgramMixin:
             if stopping:
                 state["state"] = "aborted"  # стоп пришёл до первого хода: run_chunks не зовём
             else:
-                self._client.run_chunks(scenario, params=self._ws_params(), on_progress=on_progress)
+                with self._admitted_as(session):  # свой поток: значение передано из _launch
+                    self._client.run_chunks(scenario, params=self._ws_params(), on_progress=on_progress)
                 state["state"], state["done"] = "done", state["total"]
         except RobotAborted:
             state["state"] = "aborted"

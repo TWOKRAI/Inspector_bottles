@@ -60,8 +60,8 @@ class OpsMixin:
     """Миксин ``RobotDriverV2``: операции оператора (телеметрия, стоп, servo, DO, jog_step, точка).
 
     Без ``__init__`` и полей: читает атрибуты драйвера ``RobotDriverV2``.
-    Поля и атрибуты базы: ``_client``, ``_state``, ``_store``, ``entry``.
-    Методы соседей: ``_read_tlm``, ``_store_call``, ``_write_stop``, ``is_connected``.
+    Поля и атрибуты базы: ``_client``, ``_park_session``, ``_state``, ``_store``, ``entry``.
+    Методы соседей: ``_admission``, ``_read_tlm``, ``_store_call``, ``_write_stop``, ``is_connected``.
     """
 
     def _op_get_telemetry(self, _args: dict) -> dict:
@@ -159,6 +159,7 @@ class OpsMixin:
                     self._state.jog_release_done()
             if begin.prog_soft:
                 self._write_stop(STOP_LEVEL["SOFT"])
+            self._park_session = self._admission()  # до accept: тик выполнит дом и серво этим сеансом
             self._park.accept(begin.seq, timeout_s)
         except Exception as exc:
             self._record_err()
