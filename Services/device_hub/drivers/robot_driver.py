@@ -169,6 +169,11 @@ class RobotDriver(BaseDeviceDriver):
         return self._mode
 
     @property
+    def drawing(self) -> bool:
+        """Идёт задание рисования (режим при этом могут увести из ``draw``). Читает замок ПЧ."""
+        return self._draw_busy
+
+    @property
     def busy(self) -> bool:
         """Робот занят полезной работой: есть задания / идёт доставка / рисование.
 

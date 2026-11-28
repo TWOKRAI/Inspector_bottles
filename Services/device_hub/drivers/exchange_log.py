@@ -404,8 +404,9 @@ class ExchangeLog:
 class ExchangeLogTransport:
     """Обёртка ``RegisterTransport``: каждый обмен — в ``ExchangeLog``, результат и исключения — как у внутреннего.
 
-    Явно: ``is_connected``, ``read_registers``, ``transaction``, ``connect``, ``disconnect``. Чтение прочих
-    атрибутов (``get_status``, ``state``, ``config``) уходит внутреннему транспорту. ``write_register(s)`` и
+    Явно: ``is_connected``, ``read_registers``, ``transaction`` (с ``expected_session``), ``connect``, ``disconnect``.
+    Чтение прочих атрибутов (``get_status``, ``state``, ``config``, ``session``) уходит внутреннему транспорту.
+    ``write_register(s)`` и
     ``read_holding`` идут мимо журнала. ``__slots__`` и ``__setattr__`` нет: тесты подменяют ``transaction``
     атрибутом экземпляра.
     """
@@ -439,14 +440,16 @@ class ExchangeLogTransport:
         log._record(op, (clock() - start) * 1000.0, False, _read_entries, address, count, values, None, False)
         return values
 
-    def transaction(self, ops: list[tuple]) -> bool:
+    def transaction(self, ops: list[tuple], *, expected_session: int | None = None) -> bool:
+        # Аргумент сеанса уходит внутрь, только когда задан: транспорт без счётчика зовётся как раньше (Д7)
+        kw = {} if expected_session is None else {"expected_session": expected_session}
         log = self._log
         if not log._enabled:
-            return self._inner.transaction(ops)
+            return self._inner.transaction(ops, **kw)
         clock = log._clock
         start = clock()
         try:
-            ok = self._inner.transaction(ops)
+            ok = self._inner.transaction(ops, **kw)
         except BaseException as exc:
             log._record(_tx_op_name(ops), (clock() - start) * 1000.0, True, _tx_entries, ops, True, exc)
             raise

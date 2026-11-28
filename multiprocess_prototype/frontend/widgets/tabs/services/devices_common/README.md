@@ -79,6 +79,7 @@ master-detail:
 | `editor_dialog.py` | DeviceEditorDialog — модальный диалог (Изменить) |
 | `crud_actions.py` | DeviceCrudActions — CRUD-поток рецепт→hub |
 | `presenter.py` | DevicesPresenter — IPC к процессу `devices` |
+| `reply.py` | `unwrap_reply` — разбор конверта ответа команды, общий для вкладок робота, ПЧ и реестра |
 | `combo.py` | DeviceComboController — legacy комбо (только hikvision, до миграции) |
 
 Refs: `plans/device-tree-recipe.md`

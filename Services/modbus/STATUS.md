@@ -13,6 +13,28 @@
 | Тесты | 8/10 | 82 unit-теста без pymodbus/железа (fake-клиент) + real round-trip |
 | Документация | 8/10 | README + STATUS |
 
+## R2-S1a, часть 1 (2026-11-26): обрыв виден вызывающему
+
+План: `plans/robot-protocol-v2/tasks/R2-S1a.md` · ADR-MB-003 · контракт: README,
+разделы «Ошибки обмена» и «Сеанс связи».
+
+- Исключение вызова pymodbus (`ModbusException`, `OSError`) переводится в
+  `ModbusIOError`, сокет закрывается, `ModbusDevice` уходит в `ERROR`.
+- Счётчик `ModbusDevice.session` и необязательный `expected_session` у записей.
+  Сами потребители значение пока не передают (робот v2 — часть 2).
+- Тесты: `tests/test_r2s1a_transport_acceptance.py` (настоящий pymodbus и
+  loopback TCP), `tests/test_transport_errors.py`.
+
+### Известный регресс до R2-S1c
+
+`GenericModbusDriver` (`Services/device_hub`) и плагин `Services/modbus` после
+обрыва **сами не переподключаются**. Их циклы опроса пропускают работу, пока
+`is_connected` ложно, и `connect()` не зовут. Раньше исключение вызова проходило
+сырым, состояние оставалось `CONNECTED`, и после FIN pymodbus молча открывал
+новый TCP (после RST опрос и раньше не восстанавливался). Вернуть связь сейчас —
+команда подключения вручную. По постановке (поиск 2026-11-26) ни один рецепт и
+`data/devices.yaml` этих двух потребителей не используют. Закрывает R2-S1c.
+
 ## Структура файлов
 
 | Путь | Назначение |

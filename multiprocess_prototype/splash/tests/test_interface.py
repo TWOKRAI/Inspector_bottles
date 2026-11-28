@@ -115,7 +115,7 @@ def test_public_names_literals():
     assert protocol.SPLASH_ENV == "INSPECTOR_SPLASH"
     assert protocol.SPLASH_PORT_ENV == "INSPECTOR_SPLASH_PORT"
     assert protocol.SPLASH_WEIGHTS == {"launch": 10, "boot": 50, "gui": 40}
-    assert protocol.SPLASH_TIMEOUT_S == 60.0
+    assert protocol.SPLASH_TIMEOUT_S == 180.0
     assert protocol.SPLASH_PORT_WAIT_S == 0.3
 
     for name in ("SplashLinkProtocol", "SplashControllerProtocol", "LeafSender"):

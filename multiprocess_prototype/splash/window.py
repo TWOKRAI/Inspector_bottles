@@ -101,14 +101,18 @@ class SplashWindow(QWidget):
 
 
 class SplashController:
-    """Владелец причины закрытия: запрошенная, затем ``gui_done``, затем ``timeout``."""
+    """Владелец причины закрытия: запрошенная, затем ``gui_done``, затем ``timeout``.
+
+    ``timeout`` — общая шкала не росла ``timeout_s`` секунд; пока роста не было, отсчёт идёт от создания.
+    """
 
     def __init__(self, window: SplashWindow, sock: socket.socket, timeout_s: float = SPLASH_TIMEOUT_S) -> None:
         sock.setblocking(False)
         self._window = window
         self._sock = sock
         self._timeout_s = timeout_s
-        self._started = time.monotonic()
+        #: Точка отсчёта таймаута: создание контроллера, далее последний рост шкалы. Окно здесь не читается.
+        self._last_growth = time.monotonic()
         # RLock: обработчик SIGINT исполняется в главном потоке и может прийти, пока тот держит замок.
         self._lock = threading.RLock()
         self._requested: str | None = None
@@ -130,7 +134,7 @@ class SplashController:
         self._drain()
         if self._gui_done:
             return "gui_done"
-        if time.monotonic() - self._started >= self._timeout_s:
+        if time.monotonic() - self._last_growth >= self._timeout_s:
             return "timeout"
         return None
 
@@ -143,7 +147,11 @@ class SplashController:
             message = decode(data)
             if message is None:
                 continue
+            before = self._window.percent()
             self._window.apply(message)
+            # Только строгий рост сдвигает отсчёт: повторы и чужие id не держат заставку вечно.
+            if self._window.percent() > before:
+                self._last_growth = time.monotonic()
             if is_close_signal(message):
                 self._gui_done = True
 

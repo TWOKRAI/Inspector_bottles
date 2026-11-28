@@ -256,6 +256,24 @@ class ModbusSdkClient:
             finally:
                 self._client = None
 
+    def _drop_socket(self) -> str:
+        """Закрыть сокет pymodbus после исключения вызова; обёртка не обнуляется.
+
+        После RST и разрыва простоя pymodbus держит мёртвый сокет, а его
+        ``connect()`` отвечает True без нового TCP. Закрытый сокет даёт новый TCP
+        на следующем ``connect()``. Объект pymodbus остаётся (``close()`` обёртки
+        не зовём): вызовы без переподключения ведут себя как раньше.
+
+        Returns:
+            Пустая строка; при сбое закрытия — пометка для строки лога. Сбой
+            закрытия не подменяет причину ошибки обмена.
+        """
+        try:
+            self._client.close()
+        except Exception as exc:  # noqa: BLE001 — причина вызова важнее сбоя уборки
+            return f"; сокет не закрыт: {exc!r}"
+        return ""
+
     @property
     def connected(self) -> bool:
         """Состояние соединения по данным pymodbus."""
@@ -271,6 +289,13 @@ class ModbusSdkClient:
         Wire-логирование (что отправилось / что принялось) — для диагностики
         связи. Уровень INFO, тег ``[MODBUS host#uN]``; ошибки — WARNING с unit
         (типичная причина «нет ответа» — неверный unit_id: робот Delta = 2).
+
+        Ошибки наружу — ``ModbusIOError`` в двух случаях: ответ устройства с
+        ``isError()`` (сокет остаётся открыт) и исключение самого вызова
+        ``ModbusException`` / ``OSError`` в любой ветке (``device_id=`` или
+        ``slave=``): обрыв или таймаут, сокет pymodbus закрывается. Прочие
+        исключения (``TypeError``, ``ValueError``, ``struct.error``) — ошибки
+        вызывающего, проходят как есть.
         """
         if self._client is None:
             raise ModbusConnectionError("Клиент не подключён")
@@ -288,10 +313,15 @@ class ModbusSdkClient:
                 payload = args[1] if len(args) > 1 else kwargs.get("values", kwargs.get("value"))
                 logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} = {payload}")
         try:
-            result = method(*args, device_id=unit, **kwargs)
-        except TypeError:
-            # Старые версии pymodbus: device_id отсутствует -> slave
-            result = method(*args, slave=unit, **kwargs)
+            try:
+                result = method(*args, device_id=unit, **kwargs)
+            except TypeError:
+                # Старые версии pymodbus: device_id отсутствует -> slave
+                result = method(*args, slave=unit, **kwargs)
+        except (ModbusException, OSError) as exc:
+            note = self._drop_socket()
+            logger.warning(f"[MODBUS {tag}] ERR {method_name} @{addr} unit={unit} → {exc!r}{note}")
+            raise ModbusIOError(f"{method_name} -> ошибка обмена: {type(exc).__name__}: {exc}") from exc
         if result is None or result.isError():
             logger.warning(f"[MODBUS {tag}] ERR {method_name} @{addr} unit={unit} → {result!r}")
             raise ModbusIOError(f"{method_name} -> ошибка устройства: {result}")

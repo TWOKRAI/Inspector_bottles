@@ -30,6 +30,11 @@ from .recipe_devices import RecipeDevicesError
 logger = get_std_logger(__name__)
 
 
+def _is_refusal(result: dict) -> bool:
+    """Отказ hub: ``status`` не ``ok`` либо конверт с ``success=False`` (статуса в нём нет)."""
+    return bool(result) and (result.get("status") not in ("ok", None) or result.get("success") is False)
+
+
 class DeviceCrudActions:
     """CRUD-хелпер устройств одной секции (рецепт-first).
 
@@ -132,6 +137,11 @@ class DeviceCrudActions:
     # ------------------------------------------------------------------ #
 
     def _on_describe_for_edit(self, device_id: str, info: dict) -> None:
+        # Отказ или пустой ответ: диалог на словаре ошибки открывать нечего.
+        if _is_refusal(info) or not info:
+            logger.warning("DeviceCrudActions: describe %s вернул: %s", device_id, info)
+            self._warn(f"Не удалось прочитать устройство «{device_id}»: {info.get('message', info)}")
+            return
         self._presenter.device_protocols(
             self._kind,
             lambda protocols: self._open_edit_dialog(protocols, device_id, info),
@@ -188,7 +198,7 @@ class DeviceCrudActions:
         self._refresh()
 
     def _after_hub(self, action: str, result: dict) -> None:
-        if result.get("status") not in ("ok", None) and result:
+        if _is_refusal(result):
             logger.warning("DeviceCrudActions: hub %s вернул: %s", action, result)
             self._warn(f"Рецепт обновлён, но процесс устройств вернул ошибку: {result.get('message', result)}")
         self._refresh()

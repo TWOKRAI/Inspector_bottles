@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 from multiprocess_prototype.frontend.widgets.tabs.services.vfd.controller import (
     VfdWidgetController,
@@ -37,7 +37,7 @@ def test_run_button_calls_presenter(qtbot) -> None:
     controller.set_device("vfd_belt")
     widget._spin_freq.setValue(25.0)
     widget._btn_run.click()
-    presenter.vfd_run.assert_called_once_with("vfd_belt", 25.0, False)
+    presenter.vfd_run.assert_called_once_with("vfd_belt", 25.0, False, on_result=ANY)
 
 
 def test_run_reverse_button(qtbot) -> None:
@@ -45,14 +45,14 @@ def test_run_reverse_button(qtbot) -> None:
     controller.set_device("vfd_belt")
     widget._spin_freq.setValue(15.0)
     widget._btn_run_rev.click()
-    presenter.vfd_run.assert_called_once_with("vfd_belt", 15.0, True)
+    presenter.vfd_run.assert_called_once_with("vfd_belt", 15.0, True, on_result=ANY)
 
 
 def test_stop_button(qtbot) -> None:
     widget, controller, presenter = make_controller(qtbot)
     controller.set_device("vfd_belt")
     widget._btn_stop.click()
-    presenter.vfd_stop.assert_called_once_with("vfd_belt")
+    presenter.vfd_stop.assert_called_once_with("vfd_belt", on_result=ANY)
 
 
 def test_set_freq_button(qtbot) -> None:
@@ -60,7 +60,7 @@ def test_set_freq_button(qtbot) -> None:
     controller.set_device("vfd_belt")
     widget._spin_freq.setValue(33.3)
     widget._btn_set_freq.click()
-    presenter.vfd_set_freq.assert_called_once_with("vfd_belt", 33.3)
+    presenter.vfd_set_freq.assert_called_once_with("vfd_belt", 33.3, on_result=ANY)
 
 
 def test_reset_fault_button(qtbot) -> None:
