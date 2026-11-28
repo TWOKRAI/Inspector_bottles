@@ -6,18 +6,29 @@ DRAW-gating (У4): если носитель-робот (bridge) в режиме
 VFD_FLAG -> heartbeat замёрзнет -> ложный VfdBridgeStaleError. Вместо poll
 возвращаем snapshot quality=stale, reason="carrier busy".
 
-Для tcp-транспорта (будущий прямой RTU) carrier'а нет — poll всегда.
+Замок на время рисования (C-125): пока носитель в режиме DRAW или идёт рисование,
+``run`` / ``set_freq`` не пишутся в ПЧ и отвечают отказом; ``stop`` пишется всегда,
+ответ помечен ``deferred`` (прошивка исполнит его после рисования).
+
+Для tcp-транспорта (будущий прямой RTU) carrier'а нет — poll всегда, замка нет.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from multiprocess_framework.modules.logger_module import get_std_logger
 from Services.device_hub.drivers.base import BaseDeviceDriver
 from Services.device_hub.spi import VFD_OPS
 
+logger = get_std_logger(__name__)
+
 # Минимальный интервал между попытками (ре)подключения VFD, сек
 _VFD_RECONNECT_THROTTLE_SEC = 3.0
+
+# Тексты замка. Постоянные (без значения частоты): уходят в лог CommandManager и на вкладку ПЧ.
+_TEXT_DRAW_REFUSAL = "ПЧ: робот в режиме DRAW (идёт рисование), команда не отправлена"
+_TEXT_DRAW_STOP_DEFERRED = "ПЧ: стоп записан, но может исполниться только после рисования"
 
 
 class VfdDriver(BaseDeviceDriver):
@@ -213,6 +224,8 @@ class VfdDriver(BaseDeviceDriver):
             return {"status": "error", "message": str(exc)}
 
     def _op_run(self, args: dict) -> dict:
+        if self._is_draw_locked():
+            return _draw_refusal()
         # Контракт плагина (cmd_vfd_run) и GUI-presenter шлют freq_hz/direction;
         # старые тесты драйвера — freq/reverse. Принимаем оба (freq_hz приоритет).
         freq = args.get("freq_hz", args.get("freq"))
@@ -225,6 +238,8 @@ class VfdDriver(BaseDeviceDriver):
         return {"status": "ok", "freq_hz": freq, "reverse": reverse}
 
     def _op_set_freq(self, args: dict) -> dict:
+        if self._is_draw_locked():
+            return _draw_refusal()
         # GUI-presenter шлёт freq_hz (контракт cmd_vfd_set_freq); старые тесты — hz.
         raw = args.get("freq_hz", args.get("hz"))
         if raw is None:
@@ -235,8 +250,17 @@ class VfdDriver(BaseDeviceDriver):
         return {"status": "ok", "hz": hz}
 
     def _op_stop(self, _args: dict) -> dict:
+        # Сначала запись: «Стоп» проходит всегда, состояние носителя влияет только на ответ.
         self._vfd_client.stop()
         self._record_ok()
+        try:
+            locked = self._is_draw_locked()
+        except Exception as exc:
+            # Стоп уже записан — в ошибку его не превращаем. Состояние носителя неизвестно: предупреждаем.
+            logger.warning("ПЧ %s: не прочитано состояние носителя после стопа: %s", self.entry.id, exc)
+            locked = True
+        if locked:
+            return {"status": "ok", "deferred": True, "message": _TEXT_DRAW_STOP_DEFERRED}
         return {"status": "ok"}
 
     def _op_reset_fault(self, _args: dict) -> dict:
@@ -330,24 +354,41 @@ class VfdDriver(BaseDeviceDriver):
             # Пробрасываем как есть — caller (connect) обработает и вернёт quality=bad
             raise
 
+    def _carrier(self) -> Any:
+        """Робот-носитель моста; ``None`` — транспорт не bridge или носитель не найден."""
+        if self.entry.transport.get("type", "") != "bridge":
+            return None
+        bridge_id = self.entry.transport.get("bridge", "")
+        if not bridge_id or self._resolve_device is None:
+            return None
+        return self._resolve_device(bridge_id)
+
+    def _is_draw_locked(self) -> bool:
+        """Замок команд: носитель в режиме DRAW или идёт рисование (режим могли увести из ``draw``).
+
+        Читается при каждой команде. ``busy`` (движение, доставка задания) не блокирует.
+        ``getattr``: у носителя без режимов (``RobotDriverV2``) этих атрибутов нет.
+        """
+        carrier = self._carrier()
+        if carrier is None:
+            return False
+        return getattr(carrier, "mode", None) == "draw" or bool(getattr(carrier, "drawing", False))
+
     def _is_carrier_busy(self) -> bool:
         """Занят ли носитель-робот: режим DRAW либо движение/доставка задания.
 
         Пока носитель busy, фоновый poll ПЧ пропускается (приоритет робота).
         Для tcp/rtu (прямое подключение без моста) — носителя нет, poll всегда.
         """
-        t_type = self.entry.transport.get("type", "")
-        if t_type != "bridge":
-            return False  # tcp/rtu — poll всегда
-
-        bridge_id = self.entry.transport.get("bridge", "")
-        if not bridge_id or self._resolve_device is None:
-            return False
-
-        carrier = self._resolve_device(bridge_id)
+        carrier = self._carrier()
         if carrier is None:
-            return False
+            return False  # tcp/rtu или носителя нет — poll всегда
 
         if getattr(carrier, "mode", "cvt") == "draw":
             return True
         return bool(getattr(carrier, "busy", False))
+
+
+def _draw_refusal() -> dict:
+    """Отказ замка: ``error`` дублирует ``message`` — CommandManager пишет в лог ``reason`` / ``error``."""
+    return {"status": "error", "message": _TEXT_DRAW_REFUSAL, "error": _TEXT_DRAW_REFUSAL}

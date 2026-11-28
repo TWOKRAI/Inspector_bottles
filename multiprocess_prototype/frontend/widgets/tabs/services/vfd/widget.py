@@ -6,7 +6,9 @@
 VfdWidgetController.
 
 UX-ограничения (выставляются контроллером через сеттеры):
-- кнопки disabled в DRAW-режиме робота-носителя (Lua не обслуживает VFD_FLAG).
+- кнопки disabled в DRAW-режиме робота-носителя (Lua не обслуживает VFD_FLAG);
+  «Стоп» доступен всегда;
+- отказ команды и отложенный «Стоп» — отдельная метка, push статуса её не переписывает.
 """
 
 from __future__ import annotations
@@ -84,6 +86,10 @@ class VfdControlWidget(QWidget):
         ):
             grid.addWidget(btn, 0, col)
 
+        self._lbl_refusal = QLabel("")
+        self._lbl_refusal.setWordWrap(True)
+        grid.addWidget(self._lbl_refusal, 1, 0, 1, 7)
+
         return group
 
     def _build_status_group(self) -> QGroupBox:
@@ -141,8 +147,12 @@ class VfdControlWidget(QWidget):
         """Последняя ошибка."""
         self._lbl_error.setText(text)
 
+    def set_refusal(self, text: str) -> None:
+        """Причина отказа команды или оговорка к «Стоп»; пустая строка очищает."""
+        self._lbl_refusal.setText(text)
+
     def set_controls_enabled(self, enabled: bool, hint: str = "") -> None:
-        """Включить/выключить кнопки управления (gating DRAW/conn)."""
-        for btn in (self._btn_run, self._btn_run_rev, self._btn_set_freq, self._btn_stop, self._btn_reset):
+        """Включить/выключить кнопки управления (gating DRAW/conn). «Стоп» не гаснет."""
+        for btn in (self._btn_run, self._btn_run_rev, self._btn_set_freq, self._btn_reset):
             btn.setEnabled(enabled)
         self._lbl_hint.setText(hint)
