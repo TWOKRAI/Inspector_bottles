@@ -119,5 +119,5 @@ REPORT: по-русски, числами, раздел «что оставил 
 - TaskStop не убивает дочерний pytest: дождаться, пока журнал перестанет расти, потом отпускать окно.
 - После последней правки теста прогнать весь каталог: есть сторожа на весь каталог
   (`test_no_private_driver_state.py`).
-- Уроки и разбор архитектуры в `main`: `docs/sessions/2026-11-26_r2.md`, `docs/claude/memory/`,
+- Уроки и разбор архитектуры в `main`: `docs/sessions/2026-11-26_r2.md`, `docs/reports/2026-11-28_lane-R2-lessons/`,
   `docs/reports/2026-11-26_robot-device-architecture.md`.
