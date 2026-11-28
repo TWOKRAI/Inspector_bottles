@@ -258,8 +258,10 @@ def test_park_servo_step_uses_session_of_admission() -> None:
 
 
 @pytest.mark.parametrize("kind", ["fin", "rst"])
-@pytest.mark.parametrize(("how", "level"), [("request_stop", _HARD), ("disconnect", _SOFT)])
-def test_stop_during_program_after_drop(tmp_path: Path, how: str, level: int, kind: str) -> None:
+@pytest.mark.parametrize(("how", "first"), [("request_stop", (_HARD,)), ("disconnect", (_SOFT, _HARD))])
+def test_stop_during_program_after_drop(tmp_path: Path, how: str, first: tuple[int, ...], kind: str) -> None:
+    # Писателей STOP два: сама программа после ошибки обмена пишет HARD, «Отключить» — SOFT; порядок не задан.
+    # Поэтому при «Отключить» тест доказывает только «первый STOP дошёл», а не кто из двух его записал.
     points = [{"x_mm": 250.0 + 2.0 * i, "y_mm": 10.0 * (i % 2)} for i in range(60)]
     with _v2(tmp_path) as rig:
         reply = rig.call("draw_polyline", {**_DRAW, "points": points})
@@ -269,7 +271,8 @@ def test_stop_during_program_after_drop(tmp_path: Path, how: str, level: int, ki
         _drop(rig, kind)
         _stop(rig, how)
         time.sleep(0.5)
-        assert _stop_levels(rig, mark)[:1] == [level]
+        levels = _stop_levels(rig, mark)
+        assert levels != [] and levels[0] in first, levels
 
 
 @pytest.mark.parametrize("kind", ["fin", "rst"])
